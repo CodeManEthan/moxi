@@ -1,0 +1,38 @@
+[project]
+name = "moxi-sessions"
+version = "0.1.0"
+description = "Read a harness's own session records: find a session, read its transcript back."
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
+dependencies = ["moxi>=0.1,<0.2"]
+
+[project.urls]
+Homepage = "https://github.com/moxihq/sessions"
+Repository = "https://github.com/moxihq/sessions"
+Issues = "https://github.com/moxihq/sessions/issues"
+
+# Every Moxi distribution declares the umbrella, so a plain install puts `moxi` on PATH.
+[project.scripts]
+moxi = "moxi.cli:main"
+
+# The module's one announcement, read by moxi.modules.
+[project.entry-points."moxi.modules"]
+sessions = "moxi_sessions.module"
+
+[dependency-groups]
+dev = ["pytest"]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/moxi_sessions"]
+
+[tool.hatch.build.targets.sdist]
+# Paths that are never published stay out of a source distribution built from any branch.
+exclude = ["/CLAUDE.md", "/.public-paths", "/.residue-allow"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
