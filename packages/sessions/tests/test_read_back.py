@@ -1,10 +1,9 @@
 """`read_back`: lines newest first, the unterminated flag, line 1, and how the read ended.
 
-The cases the two readers it replaces tell apart each have a test here: a limit hit with
-no qualifying line, a read to the start, an unterminated last line that parses and one
-that does not, and Codex's line 1. No live record reaches the limit, so these are where
-those endings are shown. The parity tests at the end run `read_back` beside reference
-copies of both readers (`reference_readers.py`) over generated files.
+Each case a caller tells apart has a test here: a limit hit with no qualifying line, a
+read to the start, an unterminated last line that parses and one that does not, and
+Codex's line 1. The parity tests at the end run `read_back` beside two independent
+reference readers (`reference_readers.py`) over generated files.
 """
 
 from __future__ import annotations
@@ -30,7 +29,7 @@ def write(tmp_path, body: bytes, name: str = "record.jsonl"):
 
 
 def qualifies(raw: bytes) -> bool:
-    """A stand-in for a caller's rule (the Claude clock's line), judged by the caller."""
+    """A stand-in for a caller's rule (an assistant line), judged by the caller."""
     entry = claude.parse_line(raw)
     return bool(entry) and entry.get("type") == "assistant"
 
@@ -78,7 +77,7 @@ def test_a_block_under_one_or_a_negative_limit_is_refused(tmp_path, block, limit
 
 
 def test_block_and_limit_have_no_default(tmp_path):
-    """The limit is the caller's policy (the clock's 64 MB); sessions sets none."""
+    """The limit is the caller's policy; sessions sets none."""
     path = write(tmp_path, b"{}\n")
     with pytest.raises(TypeError):
         read_back(path)  # type: ignore[call-arg]
@@ -189,7 +188,7 @@ def test_a_terminated_file_flags_no_line(tmp_path):
 
 
 def test_an_unterminated_last_line_that_parses_comes_with_its_flag(tmp_path):
-    """The Claude clock judges it like any other line; the flag lets a caller tell."""
+    """A caller may judge it like any other line; the flag lets it tell."""
     path = write(tmp_path, (user_line() + "\n" + assistant_line()).encode())
     with read_back(path, block=BLOCK, limit=LIMIT_BYTES) as reader:
         got = list(reader)
@@ -199,8 +198,8 @@ def test_an_unterminated_last_line_that_parses_comes_with_its_flag(tmp_path):
 
 
 def test_an_unterminated_last_line_that_does_not_parse_is_still_yielded(tmp_path):
-    """A harness writing its last line as the read runs: the caller decides (Codex skips
-    it; the Claude clock counts it as a line that would not parse)."""
+    """A harness writing its last line as the read runs: the caller decides (it may skip
+    the line, or count it as a line that would not parse)."""
     partial = assistant_line()[:40].encode()
     path = write(tmp_path, (user_line() + "\n").encode() + partial)
     with read_back(path, block=BLOCK, limit=LIMIT_BYTES) as reader:
@@ -283,7 +282,7 @@ def test_an_unterminated_line_after_line_1_carries_the_flag(tmp_path):
         assert list(reader) == [(b'{"n": 3', True), (b'{"n": 2}', False)]
 
 
-# --- parity with the two readers it replaces ------------------------------------------
+# --- parity with the reference readers ------------------------------------------------
 
 def _random_body(rng: random.Random, *, head_line: bool) -> bytes:
     lines = []
@@ -308,7 +307,7 @@ def _random_body(rng: random.Random, *, head_line: bool) -> bytes:
 
 
 @pytest.mark.parametrize("seed", range(40))
-def test_parity_with_the_claude_clocks_walk(tmp_path, seed):
+def test_parity_with_the_walk_to_line_1(tmp_path, seed):
     rng = random.Random(seed)
     for case in range(25):
         body = _random_body(rng, head_line=False)
@@ -324,7 +323,7 @@ def test_parity_with_the_claude_clocks_walk(tmp_path, seed):
 
 
 @pytest.mark.parametrize("seed", range(40))
-def test_parity_with_the_codex_readers_walk(tmp_path, seed):
+def test_parity_with_the_walk_that_reads_line_1_first(tmp_path, seed):
     rng = random.Random(1000 + seed)
     for case in range(25):
         body = _random_body(rng, head_line=True)

@@ -3,8 +3,8 @@
 The decoder and stream tests carry the decoder's contract: the same bytes give the same
 entries whole-file or streamed, a line that will not decode is yielded rather than
 dropped, and a resumed stream keeps absolute line numbers. The finder tests carry
-search-never-derive and the probe outcomes, with the clock's own finder rules folded in:
-the id check, the newest file when two projects hold the id, and the per-process memo.
+search-never-derive and the probe outcomes, and the finder's own rules: the id check,
+the newest file when two projects hold the id, and the per-process memo.
 """
 
 from __future__ import annotations

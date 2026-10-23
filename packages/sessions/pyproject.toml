@@ -1,7 +1,8 @@
 [project]
 name = "moxi-sessions"
-version = "0.1.0"
+version = "0.1.1"
 description = "Read a harness's own session records: find a session, read its transcript back."
+readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
@@ -31,8 +32,9 @@ build-backend = "hatchling.build"
 packages = ["src/moxi_sessions"]
 
 [tool.hatch.build.targets.sdist]
-# Paths that are never published stay out of a source distribution built from any branch.
-exclude = ["/CLAUDE.md", "/.public-paths", "/.residue-allow"]
+# A source distribution built from any branch holds only these paths; hatchling adds
+# pyproject.toml and .gitignore itself.
+only-include = ["LICENSE", "README.md", "src/moxi_sessions", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

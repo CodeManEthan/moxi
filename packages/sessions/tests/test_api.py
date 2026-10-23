@@ -34,7 +34,7 @@ def test_interface_1_holds_its_names():
     assert CODEX_NAMES <= set(dir(api.codex))
 
 
-def test_the_signatures_are_the_designs():
+def test_the_interface_signatures_hold_their_parameters():
     sig = inspect.signature(api.read_back)
     assert list(sig.parameters) == ["path", "block", "limit", "head"]
     assert sig.parameters["block"].kind is inspect.Parameter.KEYWORD_ONLY

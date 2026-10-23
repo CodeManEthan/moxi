@@ -1,11 +1,12 @@
-"""Reference copies of the two backward readers `read_back` replaces, reduced to the lines
-they hand their judges. The parity tests run them beside `read_back` over the same bytes.
+"""Two backward readers written apart from `read_back`, kept simple so they are easy to
+check by eye. The parity tests run them beside `read_back` over the same bytes and compare
+what each hands back.
 
-* `claude_walk` is the Claude clock's walk: from the end in blocks to line 1, the limit
-  checked before each block. It returns the lines newest first and how it stopped.
-* `codex_walk` is the Codex reader's: line 1 first, then from the end back to line 2,
-  each line with whether it is the unterminated last one. It returns line 1, the pairs,
-  and its two flags (`reached_start`, `hit_limit`).
+* `claude_walk` reads from the end in blocks to line 1, the limit checked before each
+  block. It returns the non-blank lines newest first and how it stopped.
+* `codex_walk` reads line 1 first, then from the end back to line 2, each line with
+  whether it is the unterminated last one. It returns line 1, the pairs, and its two flags
+  (`reached_start`, `hit_limit`).
 """
 
 from __future__ import annotations
