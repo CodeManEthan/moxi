@@ -418,6 +418,18 @@ def test_an_owned_refusal_names_the_row_and_a_posture_one_names_its_option():
     assert "--sandbox" in posture.value.hint
 
 
+@pytest.mark.parametrize("argv", [["--", "--permissions", "dev"], ["--permissions=dev"]])
+def test_a_flag_without_a_row_that_sets_a_posture_rows_value_is_refused(argv):
+    with pytest.raises(catalog.PostureFlag) as raised:
+        catalog.parse(argv, "codex", available=everything)
+    assert raised.value.row == "sandbox" and raised.value.exit_code == 3
+    assert raised.value.token == "--permissions" and raised.value.code == "owned"
+    assert "permission profile needs a catalog row" in raised.value.hint
+    # Every flag it names stands in for a posture row of its harness.
+    for harness, flags in catalog.POSTURE_FLAGS.items():
+        assert all(catalog.row(harness, row).posture for row in flags.values())
+
+
 def test_an_unknown_flag_before_the_tail_is_held_to_the_same_refusal():
     with pytest.raises(Owned):
         catalog.parse(["--session-id", "x"], "claude", available=everything)

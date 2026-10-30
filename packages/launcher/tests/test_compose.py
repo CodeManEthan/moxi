@@ -283,30 +283,35 @@ def test_every_codex_row_composed_at_once_in_each_mode():
         "--image", "/i.png"]
 
 
-def test_a_codex_launch_under_the_host_passes_extra_flags_and_permissions_unchanged():
-    got = codex.compose(codex_values(extra_flags=["--permissions", "dev", "--no-window"]),
+def test_a_codex_launch_under_the_host_passes_extra_flags_unchanged():
+    got = codex.compose(codex_values(extra_flags=["--no-window", "--option", "x=1"]),
                         ctx(session_id=None, modules=frozenset({"turns"}), host=HOST))
-    assert list(got.argv) == [HOST, *HOST_HEAD, *UPDATE_OPTION,
-                              "--permissions", "dev", "--no-window"]
-    # The host takes --sandbox or --permissions: the sandbox default steps aside.
-    assert "sandbox" in got.not_applied and "--sandbox" not in got.argv
-    assert got.warnings == ("sandbox is left out: --permissions sets the host's sandbox",)
-    with pytest.raises(catalog.Refused, match="sandbox and --permissions"):
-        codex.compose(codex_values(sandbox="read-only", extra_flags=["--permissions=dev"]),
-                      ctx(session_id=None, modules=frozenset({"turns"}), host=HOST,
-                          chosen=frozenset({"sandbox"})))
+    assert list(got.argv) == [HOST, *HOST_HEAD, "--sandbox", "workspace-write",
+                              *UPDATE_OPTION, "--no-window", "--option", "x=1"]
+
+
+@pytest.mark.parametrize("tail", [["--permissions", "dev"], ["--permissions=dev"]])
+@pytest.mark.parametrize("links, host", [(frozenset({"turns"}), HOST), (frozenset(), None)])
+def test_a_permissions_profile_passed_on_is_refused_like_the_sandbox_row(tail, links, host):
+    # The host's --permissions sets the sandbox, as the posture row does; with no row of
+    # its own the posture check can't see it, so it is refused in every mode.
+    with pytest.raises(catalog.PostureFlag) as raised:
+        codex.compose(codex_values(extra_flags=tail),
+                      ctx(session_id=None, modules=links, host=host))
+    assert raised.value.row == "sandbox" and raised.value.exit_code == 3
+    assert "needs a catalog row" in raised.value.hint
 
 
 def test_the_codex_host_with_comms_takes_the_hosts_flags_without_its_directory():
     values = codex_values(identity="coder", scope="moxi", director=["lead"],
-                          model="gpt-5", add_dir=["/a"], extra_flags=["--permissions", "p"],
+                          model="gpt-5", add_dir=["/a"], extra_flags=["--no-window"],
                           sandbox="")
     got = codex.compose(values, ctx(session_id=None, modules=frozenset({"turns", "comms"}),
                                     host=HOST, comms_codex=True, brief="b"))
     assert list(got.argv) == [
         "moxi", "comms", "codex", "--name", "coder", "--scope", "moxi",
         "--director", "lead", "--model", "gpt-5", *UPDATE_OPTION,
-        "--option", 'sandbox_workspace_write.writable_roots=["/a"]', "--permissions", "p"]
+        "--option", 'sandbox_workspace_write.writable_roots=["/a"]', "--no-window"]
     assert got.mode == "host" and got.first is not None
 
 
