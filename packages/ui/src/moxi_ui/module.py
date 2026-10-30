@@ -19,6 +19,9 @@ DAEMONS = {"shell": {"command": "moxi-ui-serve", "doc": "the UI shell",
                      "platforms": ["linux", "darwin", "win32"],
                      "socket": {"setting": "port", "addresses": ["127.0.0.1", "::1"]}}}
 HEALTH = {"shell": "moxi_ui.health:check"}
+#: The shell and each page server it started; the shell's budget is compared there, on its
+#: own pid, so the module declares no `BUDGETS` (the core would count its page servers).
+DOCTOR = "moxi_ui.doctor:rows"
 #: The shell's own page, which it serves in process; no page server runs for it.
 PAGE = "moxi_ui.page:PAGE"
 #: The modules view: the ui panel and its home block.

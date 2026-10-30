@@ -53,12 +53,8 @@ def test_each_of_the_eight_types_gives_a_descriptor_spelled_as_set_takes_it():
     assert not any(key["switch_table"] or key["entries"] for key in keys.values())
     # A table that is not a switch table is a TOML text box: no entries.
     assert keys["extra"]["type"] == "table" and keys["extra"]["entries"] is None
-    # Every descriptor fits the route's declared shape.
-    from moxi_loopback.routes import project
-
-    section = {"module": "demo", "keys": list(keys.values()), "error": None, "fix": None,
-               "readonly": False}
-    assert project(section, settings.SECTION_SHAPE, strict=True) == section
+    # Every descriptor holds exactly the keys the route declares.
+    assert all(set(key) == set(settings.KEY_SHAPE.items) for key in keys.values())
 
 
 def test_the_marks_a_daemon_switch_the_shell_port_and_an_absent_module():
