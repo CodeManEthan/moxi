@@ -21,8 +21,8 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from conftest import (no_cold_at, queued, send_turn, wait_for_queue, wait_until,
-                      write_transcript)
+from conftest import (no_cold_at, queued, send_turn, wait_for_payload, wait_for_queue,
+                      wait_until, write_transcript)
 
 from moxi_comms import attribution, cli, constants, cursors, directory, glossary
 from moxi_comms import machine_line
@@ -366,7 +366,10 @@ def test_the_asker_itself_and_other_recipients_are_not_bound_to_each_other(rig, 
     for a recipient binds that recipient only once a release point hands it over."""
     rig.shim(**CRITIC)
     ask = open_ask(rig, to="reviewer,critic")
-    assert indexed(rig, ask.id)["open"] == {R, C}
+    # The ask's entry is made at its first recipient's routing and each recipient joins
+    # `open` as the daemon routes to it, so the entry can name one before the other.
+    assert wait_until(lambda: indexed(rig, ask.id)["open"] == {R, C}), \
+        indexed(rig, ask.id)["open"]
     code, out = rig.cli(["send", "--posture", "none", "reviewer", "more context"], **PLANNER)
     assert code == 0, out
     code, out = rig.cli(["send", "--posture", "none", "planner", "answer?"], **CRITIC)
@@ -779,7 +782,7 @@ def test_new_posts_on_an_open_ask_with_nothing_added(rig, pair):
     assert code == 0, out
     msg = last(rig)
     assert no_cold_at(msg.content) == "::to planner [no reply]\na different subject"
-    payload = next(p for p in wait_for_queue(planner, 1) if p["message_id"] == msg.id)
+    payload = wait_for_payload(planner, msg.id)
     assert (payload["posture"], payload["reply_to"]) == ("none", None)
     assert "speaker" not in payload
     assert "new" not in payload
@@ -828,7 +831,7 @@ def test_the_payload_carries_the_posture_on_release_at_bind(rig):
     rig.shim(**PLANNER)
     ask = open_ask(rig)
     reviewer = rig.shim(**REVIEWER)
-    p = next(p for p in wait_for_queue(reviewer, 1) if p["message_id"] == ask.id)
+    p = wait_for_payload(reviewer, ask.id)
     assert (p["posture"], p.get("held")) == ("once", True)
 
 
