@@ -783,12 +783,13 @@ def _key(name, spec, source) -> Key:
 def set(module: str, key: str, value, *, by: str) -> list:
     """Set `key` of module `module`'s config file to `value`, coerced to the key's type.
 
-    A switch table's entry is set by its name, `<table key>.<entry>`, to a bool. Returns
-    the units applied after a change of a daemon's switch, which this version never
-    applies, so the list is empty. Raises `ConfigError`.
+    A switch table's entry is set by its name, `<table key>.<entry>`, to a bool. When
+    `key` is a daemon's switch, the units of the daemons it switches are then planned and
+    applied (`apply_units`), and their results returned; otherwise the list is empty.
+    Raises `ConfigError`.
     """
     _change(module, key, "set", value, by=by)
-    return []
+    return apply_units(module, key)
 
 
 def unset(module: str, key: str, *, by: str) -> list:
@@ -797,7 +798,23 @@ def unset(module: str, key: str, *, by: str) -> list:
     file does not hold changes nothing: no file is made or written and no history line is
     added, though the file is still checked as it is (a missing one as the empty text)."""
     _change(module, key, "unset", None, by=by)
-    return []
+    return apply_units(module, key)
+
+
+def apply_units(module: str, key: str, *, say=print) -> list:
+    """After a `set` or `unset` of `key`: when it is the switch of one or more of the
+    module's daemons (a `DAEMONS` entry, or one `UNITS_FROM` returns), plan and apply
+    those daemons' units and nothing else of the module, under the core lock, and return
+    the `moxi.units.Applied` list. A key that is a switch table counts as each of its
+    entries. Called after the config file's lock is let go, so that lock is never held
+    while the core lock is awaited. The core's own settings switch no daemon."""
+    from . import names
+
+    if module == names.HARNESS:
+        return []
+    from . import units
+
+    return units.apply_switch(module, key, say=say)
 
 
 def add_item(module: str, key: str, item, *, by: str) -> None:

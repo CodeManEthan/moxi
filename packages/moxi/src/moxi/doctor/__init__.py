@@ -10,9 +10,14 @@ code that can't print to a person when it finds it (a git hook, a timer). Each r
 shows as a `fail` row until `clear(module, key)` or `moxi doctor --clear` removes it. A
 newer record with the same key replaces the older.
 
+`health(module, daemon)` runs one daemon's `HEALTH` check through the doctor's runner, in
+a worker thread with five seconds, and returns the row `moxi doctor` would show for it.
+`floor_ms()` is the median start time of `python -I -c pass`, the floor a `BUDGETS`
+`hook_ms` is a multiple of, measured once per process.
+
 This package is standard library only and imports in a few milliseconds, so a git hook
-can call `record`. The doctor's runner and checks live elsewhere and are imported by the
-`moxi doctor` command.
+can call `record`. The doctor's runner and checks live in `moxi.doctor._run`, which the
+`moxi doctor` command imports, and which `health` and `floor_ms` import inside the call.
 """
 
 from __future__ import annotations
@@ -71,6 +76,28 @@ def clear(module: str, key: str) -> None:
     _change(module, drop)
 
 
+def health(module: str, daemon: str) -> Row:
+    """Run daemon `daemon`'s `HEALTH` target of `module` and return its row.
+
+    The target runs in a worker thread with five seconds; one that overruns, raises or
+    returns something other than a `Row` gives a `fail` row naming it. A daemon with no
+    `HEALTH` entry gives `ok`, "no health check declared". Raises `ValueError` when
+    `daemon` is not a declared daemon of `module` (its `DAEMONS` and `UNITS_FROM`), or the
+    module is not present.
+    """
+    from . import _run
+
+    return _run.health(module, daemon)
+
+
+def floor_ms() -> float:
+    """The median of five starts of `python -I -c pass`, in milliseconds, measured once
+    per process."""
+    from . import _run
+
+    return _run.floor_ms()
+
+
 def _check(module: str, key: str) -> None:
     from .. import names
 
@@ -108,4 +135,4 @@ def _change(module: str, fn) -> None:
     files.update(_path(module), edit)
 
 
-__all__ = ["STATES", "RECORDS_FILE", "Row", "record", "clear"]
+__all__ = ["STATES", "RECORDS_FILE", "Row", "record", "clear", "health", "floor_ms"]

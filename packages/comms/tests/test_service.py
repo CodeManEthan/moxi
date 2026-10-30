@@ -198,3 +198,21 @@ def test_a_missing_daemon_is_reinstalled_into_the_moxi_tool(box, monkeypatch, tm
     assert code == service.EXIT_REFUSED
     assert "uv tool upgrade moxi --reinstall-package moxi-comms" in out
     assert "uv tool install moxi-comms" not in out
+
+
+def test_the_writer_and_the_old_verb_name_the_same_unit():
+    """The announcement's daemon is the one this verb installs: the same console script,
+    and the writer's unit name, moxi-comms-<name>.service, is this verb's file. So a unit
+    either one wrote is the file the other finds, and the writer refuses this verb's
+    unmarked text until `moxi install comms --replace`."""
+    from moxi import units
+
+    from moxi_comms import module
+
+    assert module.DAEMONS == {"daemon": {"command": "moxi-comms-daemon",
+                                         "doc": "the delivery daemon"}}
+    decl = units.declarations("comms")
+    assert decl.rejected == {} and decl.timers == {}
+    [(name, entry)] = decl.daemons.items()
+    assert entry["command"] == service.DAEMON_SCRIPT
+    assert f"moxi-comms-{name}.service" == release.UNIT

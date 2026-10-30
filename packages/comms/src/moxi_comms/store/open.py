@@ -113,6 +113,21 @@ def _log_report(lines: list[str]) -> None:
         log.info("%s", line)
 
 
+
+def _make_missing_dirs(directory: Path) -> None:
+    """Make each missing directory down to `directory`, outermost first, private to its
+    owner. One already there, such as a shared directory a configured record names, or a
+    link to one, is left as it is. The gate's lock would make them otherwise, at the
+    default mode."""
+    missing = []
+    while not directory.is_dir():
+        missing.append(directory)
+        if directory.parent == directory:
+            break
+        directory = directory.parent
+    for each in reversed(missing):
+        _files.private_dir(each)
+
 def open_write(target=None, *, env=None, timeout: float = 5.0,
                check_same_thread: bool = False, report=None) -> sqlite3.Connection:
     """Open comms.db for writing, through the gate, with its schema brought up to date.
@@ -129,6 +144,7 @@ def open_write(target=None, *, env=None, timeout: float = 5.0,
     """
     target = Path(target) if target is not None else path(env)
     report = report if report is not None else _log_report
+    _make_missing_dirs(target.parent)
     with _gate, _files.lock(target.parent / MIGRATE_LOCK, timeout=LOCK_WAIT):
         found = zero_two_files(env)
         if found:

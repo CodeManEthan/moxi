@@ -170,25 +170,11 @@ def percentile(values: list[float], p: float) -> float:
 
 
 def floor_ms() -> float:
-    """The floor: the core's `moxi.doctor.floor_ms()` where this core has it, else the
-    same measure taken here, the median of five `python -I -c pass` starts."""
+    """The floor: the core's `moxi.doctor.floor_ms()`, the median of five
+    `python -I -c pass` starts, measured once per process."""
     from moxi import doctor
 
-    core = getattr(doctor, "floor_ms", None)
-    if callable(core):
-        return float(core())
-    import statistics
-    import subprocess
-    import sys
-
-    times = []
-    for _ in range(5):
-        t0 = time.perf_counter()
-        subprocess.run([sys.executable, "-I", "-c", "pass"], check=False,
-                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL)
-        times.append((time.perf_counter() - t0) * 1000)
-    return statistics.median(times)
+    return float(doctor.floor_ms())
 
 
 def rows(samples: Iterable[Sample], *, budget: float,

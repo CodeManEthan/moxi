@@ -1,9 +1,9 @@
-"""Processes: a process's ancestry, read from `/proc`, for `find(pid=…)`, the
-parent-death signal a host's children carry, and a child's stdin.
+"""Processes: a process's ancestry, for `find(pid=…)`, the parent-death signal a
+host's children carry, and a child's stdin.
 
 A command run inside a session finds its own endpoint by walking up from its own pid to
-the harness process the endpoint names. `ProcView` is the one reader of `/proc`; a test
-hands in its own. Where `/proc` does not exist the walk is the pid alone.
+the harness process the endpoint names. `ProcView` reads each parent through
+`moxi.proc.parent`, on every platform the core reads one; a test hands in its own.
 """
 
 from __future__ import annotations
@@ -67,25 +67,14 @@ def with_stdin(path, argv: Sequence[str], env: Mapping[str, str] | None = None) 
 
 
 class ProcView:
-    """Reads a process's parent from `/proc/<pid>/stat`."""
-
-    def __init__(self, root: str = "/proc"):
-        self.root = root
+    """Reads a process's parent through `moxi.proc.parent`."""
 
     def parent(self, pid: int) -> int | None:
-        """The parent pid of `pid`, or None when there is no such process to read."""
-        try:
-            with open(f"{self.root}/{int(pid)}/stat", "rb") as f:
-                raw = f.read().decode("utf-8", "replace")
-        except (OSError, ValueError):
-            return None
-        # The command name sits in parentheses and may itself hold spaces or parens;
-        # everything after the last `)` is space-separated, starting at field 3.
-        tail = raw[raw.rfind(")") + 1:].split()
-        try:
-            return int(tail[1])
-        except (IndexError, ValueError):
-            return None
+        """The parent pid of `pid`: 0 when no parent is visible, None when there is no
+        such process to read."""
+        from moxi import proc
+
+        return proc.parent(pid)
 
     def ancestry(self, pid: int, limit: int = 4096) -> Iterator[int]:
         """`pid` itself, then each ancestor up to (not including) pid 0."""

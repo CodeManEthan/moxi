@@ -100,8 +100,8 @@ class Client:
 
     `call` sends a request and waits for its answer; `notify` sends a notification;
     `notifications()` yields what the server pushes and is read by one thread. `hello`
-    agrees a version, and `agreed` then holds it. Use it as a context manager, or
-    `close()` it.
+    agrees a version, and `agreed` then holds it. `closed` says whether the connection
+    can still carry calls. Use it as a context manager, or `close()` it.
     """
 
     def __init__(self, sock: socket.socket, address: str, *, timeout: float = 5.0,
@@ -187,6 +187,24 @@ class Client:
                 self._notes.put(_END)  # so a later reader ends too
                 return
             yield item
+
+    @property
+    def closed(self) -> bool:
+        """True once this client can carry no more calls, and from then on always True.
+
+        The client keeps one failure, the first, and once it is set every `call` and
+        `notify` raises it at once; `closed` is True exactly when it is set. It is set by
+        `close()`; by the reader thread's end (the server closed the connection, a read
+        failed, an answer line was over `max_line`, or a line was not JSON-RPC); by a
+        write that failed; and by a request its call's timeout cut off partway, which
+        ends the connection. A call that timed out before writing anything, or whose
+        answer was only late, leaves it False.
+
+        Safe to read from any thread with no lock: it reads one reference, set once and
+        never cleared. False doesn't promise the next call succeeds: a server that has
+        just gone is seen only once the reader thread reads the end of the connection.
+        """
+        return self._failure is not None
 
     def close(self) -> None:
         """Close the connection. A call still waiting raises `IpcError`."""

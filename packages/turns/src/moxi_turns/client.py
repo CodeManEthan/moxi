@@ -179,9 +179,8 @@ class _Unanswered(Exception):
 
 
 def _is_open(client: ipc.Client) -> bool:
-    """Whether `client` can still carry a call: it has not closed or failed. `moxi.ipc`'s
-    client keeps its one failure, which every later call raises before writing."""
-    return getattr(client, "_failure", None) is None
+    """Whether `client` can still carry a call: it has not closed or failed."""
+    return not client.closed
 
 
 def runtime_dir() -> Path:
