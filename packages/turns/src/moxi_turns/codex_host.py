@@ -24,9 +24,10 @@ as one JSON object; flags beside it replace its keys, and `--sandbox` or
 thread that names a sandbox has its load answers checked by
 `turns.codex.verify_options`. A key turns owns is refused before anything starts.
 
-The host never reads its stdin. It ends on a lifeline only when it was given one: with
-`MOXI_LIFELINE_FD` set (a Moxi parent spawned it with `lifeline="fd"`), the end of that
-pipe ends it. It also ends when its window's `codex --remote` exits, when its endpoint
+The host ends on a lifeline only when it was given one, which it learns from
+`moxi.proc.lifeline_kind()`: a Moxi parent that spawned it with `lifeline="fd"` ends it
+by closing that pipe, and one that spawned it with `lifeline="stdin"` by closing its
+stdin. Given no lifeline, the host never reads its stdin. It also ends when its window's `codex --remote` exits, when its endpoint
 is gone, and on SIGTERM, SIGINT or SIGHUP (CTRL_BREAK on Windows). Its environment
 passes through unchanged to the app-server, and so to the agent's shell.
 
@@ -42,7 +43,6 @@ import argparse
 import importlib.util
 import json
 import logging
-import os
 import signal
 import sys
 import tomllib
@@ -57,9 +57,6 @@ SANDBOX_CONFIG_KEY = "sandbox_mode"
 LOG_FILE = "codex-host.log"
 # How often the host looks whether its endpoint has ended, in seconds.
 _POLL = 0.5
-# The core's lifeline variable (`moxi.proc.LIFELINE_ENV`): set only when a Moxi parent
-# spawned the host with `lifeline="fd"`.
-_LIFELINE_ENV = "MOXI_LIFELINE_FD"
 #: The import the `codex` extra adds, which the host needs to start.
 EXTRA_IMPORT = "websockets"
 
@@ -320,7 +317,8 @@ def main(argv: list[str] | None = None) -> int:
         # job control (Ctrl-Z) works whatever the host's parent set.
         for sig in JOB_CONTROL_SIGNALS:
             signal.signal(sig, signal.SIG_DFL)
-    if os.environ.get(_LIFELINE_ENV):
+    if moxi_proc.lifeline_kind() is not None:
+        # A pipe or stdin, whichever the parent gave; `lifeline()` holds that one.
         moxi_proc.lifeline(on_close=life.on_lifeline)
 
     from . import codex

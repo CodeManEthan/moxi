@@ -346,8 +346,8 @@ def test_the_entry_is_declared_and_gated_by_the_codex_extra():
     found = {e.name: e.value for e in entry_points(group="console_scripts")}
     assert found["moxi-turns-codex-host"] == "moxi_turns.codex_host:main"
     assert module.GATED["moxi-turns-codex-host"] == "codex"
-    # The host reads the core's lifeline variable by its own name for it.
-    assert codex_host._LIFELINE_ENV == moxi_proc.LIFELINE_ENV in module.INTERNAL_ENV
+    # The host asks the core which lifeline it holds; only the core reads the variable.
+    assert moxi_proc.LIFELINE_ENV not in module.INTERNAL_ENV
     assert codex_module.launch_args is launch_args
 
 
@@ -386,6 +386,8 @@ class Rig:
         self.logs.mkdir()
         binary = install(tmp_path / "bin")
         self.env = dict(os.environ)
+        # A lifeline is the test's to give: none inherited from whatever runs the tests.
+        self.env.pop(moxi_proc.LIFELINE_ENV, None)
         self.env.update({"PATH": f"{binary.parent}{os.pathsep}{self.env.get('PATH', '')}",
                          "FAKE_CODEX_DIR": str(self.records)})
         self.procs: list[subprocess.Popen] = []
@@ -488,6 +490,20 @@ def test_a_host_spawned_with_a_lifeline_is_found_by_pid_and_ends_with_the_pipe(r
     assert "the Codex host was stopped (its lifeline closed)" in host.out.read_text()
     assert _gone(server["pid"]) and events(rig.records, "app-server-exit")
     assert turns_client.find(pid=host.pid) is None
+
+
+@LINUX
+def test_a_host_spawned_with_a_stdin_lifeline_ends_when_its_stdin_closes(rig):
+    host = rig.spawn("--no-window", lifeline="stdin")
+    session = turns_client.wait_ready(pid=host.pid, timeout=WAIT)
+    server = rig.app_server()
+    session.close()
+    time.sleep(0.5)
+    assert host.poll() is None              # held open, the stdin lifeline keeps it
+    host.lifeline.close()
+    assert _exit(host) == 0
+    assert "the Codex host was stopped (its lifeline closed)" in host.out.read_text()
+    assert _until(lambda: _gone(server["pid"]))
 
 
 @LINUX
