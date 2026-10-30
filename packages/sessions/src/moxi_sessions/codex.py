@@ -1033,16 +1033,21 @@ class Spawns:
     unread_spelling: str | None = None
 
 
-def _unread_spelling(data: bytes) -> str | None:
+def _unread_spelling(data: bytes, own_from: int | None = None) -> str | None:
     """What line `data` is when it marks a spawn without a spawn item: a `spawn_agent`
     call or a `sub_agent_activity` event. Decodes only a line holding one of the two
-    names in quotes."""
+    names in quotes. A line whose `ordinal` is below `own_from` is history the rollout
+    carries from the thread it was forked from, and marks no spawn of this thread."""
     call = SPAWN_CALL_BYTES in data
     if not call and SPAWN_EVENT_BYTES not in data:
         return None
     entry = parse_line(data)
     payload = entry.get("payload") if entry is not None else None
     if not isinstance(payload, dict):
+        return None
+    ordinal = entry.get("ordinal")
+    if (own_from is not None and isinstance(ordinal, int) and not isinstance(ordinal, bool)
+            and ordinal < own_from):
         return None
     if call and entry.get("type") == "response_item" and payload.get("name") == SPAWN_CALL:
         return f"a `{SPAWN_CALL}` call"
@@ -1063,7 +1068,8 @@ def read_spawns(path: str | Path, *, thread_id: str | None = None,
     and is not this thread's spawn. A last line still being written does not decode and
     is skipped. A `spawn_agent` call or a `sub_agent_activity` event is noted in
     `unread_spelling`, so a rollout that spawned in a spelling not read here is not
-    taken for one that spawned nothing.
+    taken for one that spawned nothing; one carried from the thread a spawned thread was
+    forked from (an `ordinal` below line 1's `subagent_history_start_ordinal`) is not.
 
     Raises OSError when the file cannot be read, and ValueError for a compressed rollout,
     which this does not read.
@@ -1076,6 +1082,7 @@ def read_spawns(path: str | Path, *, thread_id: str | None = None,
     calls: dict[str, Any] = {}
     kinds: dict[str, list[str]] = {}
     unread: str | None = None
+    own_from: int | None = None
     with open(path, "rb") as handle:
         size = os.fstat(handle.fileno()).st_size
         if end is not None:
@@ -1095,10 +1102,13 @@ def read_spawns(path: str | Path, *, thread_id: str | None = None,
                     meta = payload if isinstance(payload, dict) else None
                     if thread_id is None and meta is not None:
                         thread_id = _str(meta.get("id"))
+                    start = meta.get("subagent_history_start_ordinal") if meta else None
+                    if isinstance(start, int) and not isinstance(start, bool):
+                        own_from = start
                 continue
             if SPAWN_ITEM_BYTES not in data:
                 if unread is None:
-                    unread = _unread_spelling(data)
+                    unread = _unread_spelling(data, own_from)
                 continue
             entry = parse_line(data)
             payload = entry.get("payload") if entry is not None else None

@@ -17,6 +17,7 @@ from moxi_sessions.shape import UNKNOWN
 from moxi_sessions.source import Source, file_header, unpack
 from moxi_sessions.testing import (ClaudeTranscript, CodexRollout, OpenCodeDb,
                                    write_imports)
+from moxi_sessions.testing.codex import spawn_meta
 
 SESSION = "0190b000-0000-7000-8000-00000000c1a0"
 OTHER = "0190b000-0000-7000-8000-00000000c1a1"
@@ -604,6 +605,26 @@ def test_codex_a_spawn_in_a_spelling_not_read_is_unreadable_not_none(rollouts):
     r.write()
     listing = subagents(Source("codex", str(r.path), THREAD_B))
     assert listing.state == UNREADABLE and "`sub_agent_activity` event" in listing.reason
+
+
+def test_codex_a_spawn_call_carried_from_the_forked_thread_is_not_a_spawn(rollouts):
+    # A spawned thread forked with its parent's turns carries the parent's lines below
+    # `subagent_history_start_ordinal`; a `spawn_agent` call among them is the parent's.
+    r = CodexRollout(rollouts, thread_id=THREAD_B,
+                     meta_fields={**spawn_meta(THREAD), "subagent_history_start_ordinal": 5})
+    r.item("function_call", id="fc_call_x", name="spawn_agent", namespace="collaboration",
+           call_id="call_x", arguments="{}")
+    r.turn()
+    r.request()
+    r.write()
+    assert subagents(Source("codex", str(r.path), THREAD_B)).state == NONE
+    # The same call at or past the start is the thread's own.
+    r = CodexRollout(rollouts, thread_id=CHILD,
+                     meta_fields={**spawn_meta(THREAD), "subagent_history_start_ordinal": 1})
+    r.item("function_call", id="fc_call_y", name="spawn_agent", namespace="collaboration",
+           call_id="call_y", arguments="{}")
+    r.write()
+    assert subagents(Source("codex", str(r.path), CHILD)).state == UNREADABLE
 
 
 def test_codex_a_spawn_name_in_text_is_not_a_spawn(rollouts):
