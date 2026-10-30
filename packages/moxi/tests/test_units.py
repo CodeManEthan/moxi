@@ -466,7 +466,7 @@ def test_a_socket_takes_its_port_from_the_setting_and_a_new_port_is_a_change(w):
     assert "listen = 127.0.0.1:8470" in plan[("shell", "socket")].text
     w.apply(plan.values())
     assert w.sup.calls.index(("enable", "--now", "moxi-demo-shell.socket")) < \
-        w.sup.calls.index(("enable", "--now", "moxi-demo-shell.service"))
+        w.sup.calls.index(("start", "moxi-demo-shell.service"))
     config.set("demo", "port", 8471, by="test")
     plan = w.plan()
     assert plan[("shell", "socket")].action == "change"

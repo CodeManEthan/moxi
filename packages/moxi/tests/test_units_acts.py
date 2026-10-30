@@ -145,10 +145,12 @@ def test_a_daemons_socket_goes_first_with_it(w):
     units.stop("demo", ["relay"])
     units.disable("demo", ["relay"])
     units.enable("demo", ["relay"])
+    # The service has no install section: the socket carries the enable, and the
+    # service is only stopped and started.
     assert w.sup.calls == [
         ("stop", "moxi-demo-relay.socket", "moxi-demo-relay.service"),
-        ("disable", "--now", "moxi-demo-relay.socket", "moxi-demo-relay.service"),
-        ("enable", "--now", "moxi-demo-relay.socket", "moxi-demo-relay.service")]
+        ("disable", "--now", "moxi-demo-relay.socket"), ("stop", "moxi-demo-relay.service"),
+        ("enable", "--now", "moxi-demo-relay.socket"), ("start", "moxi-demo-relay.service")]
 
 
 def test_a_timers_start_and_stop_act_on_its_service_and_enable_on_its_timer(w):
