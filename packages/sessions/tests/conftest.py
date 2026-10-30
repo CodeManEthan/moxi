@@ -1,8 +1,9 @@
 """Synthetic fixtures for sessions' suite, built from the shapes Claude Code and Codex
 write. No line here is cut from a real record.
 
-Every test runs with sessions' config root pointed at a directory of its own, so no test
-reads the config file of the user running it.
+Every test runs inside the kit's fence (the package's root `conftest.py`), whose module
+homes and XDG homes are the test's own, so no test reads the config file of the user
+running it. A test that sets a key asks for `own_config`.
 """
 
 from __future__ import annotations
@@ -13,10 +14,10 @@ from pathlib import Path
 import pytest
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def own_config(tmp_path, monkeypatch) -> Path:
-    """sessions' config root, empty, for every test. Write `config.toml` into
-    `<own_config>/sessions/` to set a key."""
+    """sessions' config root, empty, for a test that sets a key: write `config.toml` into
+    `<own_config>/sessions/` (see `write_config`)."""
     root = tmp_path / "config-home"
     root.mkdir()
     monkeypatch.setenv("MOXI_SESSIONS_CONFIG_HOME", str(root))
