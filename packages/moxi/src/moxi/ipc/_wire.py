@@ -40,14 +40,20 @@ SHOWN = 200
 
 
 # -- errors -----------------------------------------------------------------------------
+# The public ones say they are `moxi.ipc`'s, where they are imported from, so a traceback
+# names them as callers write them.
 
 class IpcError(Exception):
     """Every failure `moxi.ipc` raises derives from this."""
+
+    __module__ = "moxi.ipc"
 
 
 class RpcError(IpcError):
     """A JSON-RPC error object: raised by a handler to answer with it, and raised by the
     client when the server answers with one."""
+
+    __module__ = "moxi.ipc"
 
     def __init__(self, code: int, message: str, data: object = None):
         if isinstance(code, bool) or not isinstance(code, int):
@@ -72,6 +78,8 @@ class NotRpc(IpcError):
     """The other end sent a line that is not a JSON-RPC message (an old daemon, say).
     `line` holds its first 200 bytes."""
 
+    __module__ = "moxi.ipc"
+
     def __init__(self, line: bytes, reason: str | None = None):
         self.line = bytes(line[:SHOWN])
         self.reason = reason
@@ -82,6 +90,8 @@ class NotRpc(IpcError):
 class NotServing(IpcError):
     """Nothing listens at the address: the daemon is cold. A command that stops on this
     exits `exit_code` (try again later)."""
+
+    __module__ = "moxi.ipc"
 
     exit_code = _exit.TEMPFAIL
 
@@ -96,6 +106,8 @@ class AlreadyServing(IpcError):
     """Another server holds the address's lock. `holder` is its pid when the lock file
     names one."""
 
+    __module__ = "moxi.ipc"
+
     def __init__(self, address: str, holder: int | None = None):
         self.address = address
         self.holder = holder
@@ -105,6 +117,8 @@ class AlreadyServing(IpcError):
 
 class Timeout(IpcError, TimeoutError):
     """No answer, or no connection, in the time given."""
+
+    __module__ = "moxi.ipc"
 
 
 class LineTooLong(IpcError):

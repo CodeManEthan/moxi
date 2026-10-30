@@ -55,6 +55,17 @@ def test_every_error_derives_from_ipc_error():
     assert issubclass(ipc.Timeout, TimeoutError)
 
 
+def test_the_public_errors_are_named_as_moxi_ipc_s():
+    import traceback
+
+    for cls in (ipc.IpcError, ipc.RpcError, ipc.NotRpc, ipc.NotServing,
+                ipc.AlreadyServing, ipc.Timeout):
+        assert cls.__module__ == "moxi.ipc"
+        assert getattr(ipc, cls.__name__) is cls
+    shown = traceback.format_exception_only(ipc.AlreadyServing("/x.sock", 7))
+    assert shown[-1].startswith("moxi.ipc.AlreadyServing: pid 7 ")
+
+
 def test_rpc_error_carries_code_message_and_data():
     exc = ipc.RpcError(1001, "no such session", {"session": "x"})
     assert (exc.code, exc.message, exc.data) == (1001, "no such session", {"session": "x"})
