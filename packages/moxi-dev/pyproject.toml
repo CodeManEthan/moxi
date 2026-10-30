@@ -40,7 +40,10 @@ packages = ["src/moxi_dev"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "src/moxi_dev", "tests"]
+only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_dev", "tests"]
 
+# A plain `pytest` runs the units and contract seams; the tiers are deselected here and
+# run by `moxi-dev check --full` (a live test also needs MOXI_TEST_LIVE=1).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not browser and not slow and not build and not live'"
