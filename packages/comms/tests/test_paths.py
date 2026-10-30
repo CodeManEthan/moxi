@@ -25,13 +25,13 @@ def test_comms_locations(monkeypatch, tmp_path):
     # Cards are DATA and device-agnostic -- who someone IS does not depend on which box
     # is asking.
     assert p.cards_dir() == tmp_path / "data" / "comms" / "cards"
-    assert p.cursors_dir() == tmp_path / "state" / "testbox" / "comms" / "cursors"
+    assert p.cursors_dir() == tmp_path / "state" / "comms" / "cursors"
     # the local backend's record: STATE and per box, because DATA is the sync surface
     # and a live DB is never continuous-file-synced
-    assert p.record_db() == tmp_path / "state" / "testbox" / "comms" / "record.db"
-    assert p.tokens_dir() == tmp_path / "state" / "testbox" / "comms" / "tokens"
+    assert p.record_db() == tmp_path / "state" / "comms" / "record.db"
+    assert p.tokens_dir() == tmp_path / "state" / "comms" / "tokens"
     # comms writes only under its own five directories, so its logs are in STATE/comms
-    assert p.log_dir() == tmp_path / "state" / "testbox" / "comms" / "logs"
+    assert p.log_dir() == tmp_path / "state" / "comms" / "logs"
     # and its sockets in RUNTIME/comms
     assert p.daemon_socket() == tmp_path / "runtime" / "comms" / "moxi-comms-daemon.sock"
     assert not hasattr(p, "codex_socket"), "turns' host owns the app-server's socket"
@@ -41,7 +41,7 @@ def test_comms_locations(monkeypatch, tmp_path):
 
 def test_every_location_reads_a_given_environment(tmp_path):
     env = {"MOXI_COMMS_HOME": str(tmp_path), "MOXI_COMMS_DEVICE": "box2"}
-    assert paths.record_db(env) == tmp_path / "state" / "box2" / "comms" / "record.db"
+    assert paths.record_db(env) == tmp_path / "state" / "comms" / "record.db"
     assert paths.daemon_socket(env) == tmp_path / "runtime" / "comms" / "moxi-comms-daemon.sock"
 
 

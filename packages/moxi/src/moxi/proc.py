@@ -253,8 +253,10 @@ def _spawn_watched(argv: Argv, *, env, cwd, stdout, stderr) -> subprocess.Popen:
         # process's terminal group (Ctrl-C) never reaches it: only its stdin ends it.
         # -P: the watchdog's directory is not put on its path, so no file there can
         # stand in for moxi.
+        from .paths import python
+
         watchdog = subprocess.Popen(
-            [sys.executable, "-P", "-m", "moxi._watch", str(proc.pid)],
+            [str(python()), "-P", "-m", "moxi._watch", str(proc.pid)],
             stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             cwd="/", start_new_session=True)
     except BaseException:
