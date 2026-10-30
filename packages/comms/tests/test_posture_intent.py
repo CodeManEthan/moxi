@@ -20,8 +20,8 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from conftest import (no_cold_at, queued, wait_for_queue, wait_until, write_config,
-                      write_transcript)
+from conftest import (no_cold_at, queued, wait_for_payload, wait_for_queue, wait_until,
+                      write_config, write_transcript)
 
 from moxi_comms import cli, config, constants, context, glossary, machine_line, owed
 from moxi_comms.adapters import claude_shim, codex, opencode, shim_roster
@@ -742,7 +742,8 @@ def test_a_once_ask_in_a_closed_thread_stays_answerable(rig, pair, whole_clock, 
     root, ask = (cap_closed_with_ask(rig) if how == "cap" else
                  none_closed_with_ask(rig) if how == "none" else
                  idle_closed_with_ask(rig, whole_clock))
-    wait_until(lambda: ask.id in rig.daemon.asks)
+    # `awaiting` reads the sent index, which the daemon fills apart from `asks`.
+    assert wait_until(lambda: ask.id in rig.daemon.sent_by_id)
     assert R in awaiting(rig, P)
     code, out = reply(rig, REVIEWER, ask.id, "on main", "--posture", "open",
                       clock=whole_clock)
@@ -1077,7 +1078,8 @@ def test_the_payload_carries_the_marks_live_and_the_hand_over_is_recorded(rig, p
     (p,) = [p for p in wait_for_queue(reviewer, 1) if p["message_id"] == root.id]
     assert (p["posture"], p["open_mark"], "thread_mark" in p) == ("open", True, False)
     assert "speaker" not in p
-    assert (R, root.id) in rig.daemon.handed_at
+    # Taken after the send: the shim can hold the payload before the time is in.
+    delivered(rig, R, root.id)
     first, _ = posts(rig, REVIEWER, ["reply", root.id, "one"])
     planner = rig.shims[0]
     (q,) = [q for q in wait_for_queue(planner, 1) if q["message_id"] == first.id]
@@ -1097,9 +1099,10 @@ def test_the_payload_on_release_at_bind_and_the_hand_over_time(rig):
     # register would fix its boundary above the root and replay would hand it, unheld.
     assert wait_until(lambda: root.id in queued(rig.daemon, R))
     reviewer = rig.shim(**REVIEWER)
-    p = next(p for p in wait_for_queue(reviewer, 1) if p["message_id"] == root.id)
+    p = wait_for_payload(reviewer, root.id)
     assert (p["open_mark"], p.get("held")) == (True, True)
-    assert (R, root.id) in rig.daemon.handed_at
+    # Taken after the send: the shim can hold the payload before the time is in.
+    delivered(rig, R, root.id)
 
 
 def test_the_payload_on_rescan_and_the_hand_over_time(rig, pair, whole_clock):

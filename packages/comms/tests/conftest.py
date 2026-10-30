@@ -567,7 +567,15 @@ def write_transcript(session_id: str, age: float | None = 0, *, root: Path | Non
     return path
 
 
-def wait_until(predicate, timeout: float = 3.0, interval: float = 0.01):
+#: How long a wait gives a daemon, shim or launcher thread to act. The suite runs with
+#: 16 workers, and often beside other 16-worker runs, so a thread can go seconds
+#: without the CPU; a wait returns as soon as its condition holds, so the deadline
+#: costs time only when a test is failing. A wait that expects nothing to happen passes
+#: its own short timeout.
+WAIT = 10.0
+
+
+def wait_until(predicate, timeout: float = WAIT, interval: float = 0.01):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         value = predicate()
@@ -577,9 +585,21 @@ def wait_until(predicate, timeout: float = 3.0, interval: float = 0.01):
     return predicate()
 
 
-def wait_for_queue(shim, count: int, timeout: float = 3.0):
+def wait_for_queue(shim, count: int, timeout: float = WAIT):
     wait_until(lambda: len(shim.queue) >= count, timeout)
     return shim.queue
+
+
+def wait_for_payload(shim, message_id: str, timeout: float = WAIT) -> dict:
+    """The payload of `message_id` in the shim's queue, once it is there. Other mail
+    (a replay, an earlier send) can reach the queue first, so a count says nothing
+    about which payload has arrived."""
+    def found():
+        return next((p for p in list(shim.queue) if p["message_id"] == message_id), None)
+
+    payload = wait_until(found, timeout)
+    assert payload is not None, (message_id, [p["message_id"] for p in shim.queue])
+    return payload
 
 
 def cursor_of(qualified: str):

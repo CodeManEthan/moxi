@@ -177,7 +177,10 @@ def test_an_owing_turn_end_with_no_work_posts_the_reminder_as_the_adapters_line(
     assert wait_until(lambda: reminders(fake)), texts(fake)
     debt = opencode.reply_ledger.debts[msg.id]
     assert reminders(fake) == [owed.reminder_text([debt], rig.clock())]
-    assert opencode.blocked and opencode.turn_blocks == 1 and debt.pending
+    # The adapter marks itself blocked once the reminder's post returns, a moment
+    # after the stub has the reminder.
+    assert wait_until(lambda: opencode.blocked)
+    assert opencode.turn_blocks == 1 and debt.pending
     assert frame_kinds(frames, "turn")[-1]["handled"] == [msg.id]
     assert wait_until(lambda: opencode.busy)
     assert opencode.pending == {}
