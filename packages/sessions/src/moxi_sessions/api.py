@@ -36,13 +36,14 @@ Writing records for tests:
   (`ClaudeTranscript`, `CodexRollout`, `OpenCodeDb`; see `moxi_sessions.testing`). A test
   reaches them through this module, as it reaches every other name sessions offers.
 
-Kept from interface 1, which cache reads:
+Each harness's mapping, and the line reads under the records:
 
 * `claude`: `parse_line`, `iter_entries`, `stream_entries`, `parse_timestamp` and
-  `MALFORMED` (the one decoder); `probe_root`, `find_for_session`, `search_roots` and
-  `RootProbe` (finding a session's transcript).
-* `codex`: `find_rollout` (every rollout file of a thread) and `stream_rollout` (one
-  rollout's entries, forward, through the same decoder), with `NAME_RE`.
+  `MALFORMED` (the one decoder); `SAFE_ID_RE`, the session ids a search accepts, and
+  `MISS`, a probe's outcome when a root holds no such session.
+* `codex`: the lists a rollout is recognised by (`TOP_KINDS`, `EVENT_KINDS`,
+  `RESPONSE_KINDS`, `META_KEYS`, `HISTORY_MODES`) and the versions the mapping was checked
+  against (`CHECKED_VERSIONS`).
 * `opencode`: OpenCode's database reader.
 * `read_back(path, *, block, limit, head=False)`: a record read backwards, its lines
   newest first with the unterminated flag, line 1 when asked, and how the read ended.

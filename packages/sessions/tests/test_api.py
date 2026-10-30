@@ -15,8 +15,9 @@ from moxi.config import Schema
 from moxi_sessions import api, module
 
 CLAUDE_NAMES = {"parse_line", "iter_entries", "stream_entries", "parse_timestamp",
-                "find_for_session", "probe_root", "search_roots", "MALFORMED", "RootProbe"}
-CODEX_NAMES = {"find_rollout", "stream_rollout", "NAME_RE"}
+                "MALFORMED", "SAFE_ID_RE", "MISS"}
+CODEX_NAMES = {"TOP_KINDS", "EVENT_KINDS", "RESPONSE_KINDS", "META_KEYS", "HISTORY_MODES",
+               "CHECKED_VERSIONS"}
 
 
 def test_the_announcement_offers_interface_2():
@@ -53,6 +54,7 @@ def test_interface_2_keeps_what_cache_reads():
     assert {"claude", "codex", "read_back", "projects_root"} <= set(api.__all__)
     assert CLAUDE_NAMES <= set(dir(api.claude))
     assert CODEX_NAMES <= set(dir(api.codex))
+    assert "MissingSession" in dir(api.opencode)
 
 
 def test_the_interface_signatures_hold_their_parameters():
@@ -63,8 +65,6 @@ def test_the_interface_signatures_hold_their_parameters():
     assert sig.parameters["limit"].default is inspect.Parameter.empty
     assert sig.parameters["head"].default is False
     assert list(inspect.signature(api.projects_root).parameters) == ["environ"]
-    assert list(inspect.signature(api.codex.find_rollout).parameters) == [
-        "sessions_root", "thread_id"]
 
 
 def test_interface_2_finds_and_lists():
