@@ -199,6 +199,17 @@ def test_the_terminal_writes_its_pid_and_started_before_it_execs(work, harness, 
     assert result.state == "started" and result.exit_code == exits.OK
 
 
+def test_the_warnings_are_given_before_the_session_starts(work, harness, no_exec,
+                                                          monkeypatch):
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "comms" and real(name))
+    said = []
+    result = api.launch(request(work, brief=BRIEF, identity="planner"),
+                        warn=lambda line: said.append((line, len(no_exec))))
+    assert said == [("identity planner is ignored: comms is not installed", 0)]
+    assert result.warnings == ("identity planner is ignored: comms is not installed",)
+
+
 def test_the_deliverer_starts_after_started_and_before_exec(work, harness, no_exec,
                                                             deliverers, turns):
     api.launch(request(work, brief=BRIEF))

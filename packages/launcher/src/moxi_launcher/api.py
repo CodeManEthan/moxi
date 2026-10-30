@@ -32,9 +32,10 @@ harness. On Windows it returns when the harness exits, with the harness's exit c
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -45,6 +46,8 @@ from moxi import modules as moxi_modules
 
 from . import catalog, compose, first, handoffs, presets, store, targets
 from .compose import Composition, common
+
+log = logging.getLogger("moxi.launcher.api")
 
 #: A refusal: what `check` lists and `launch` raises, with `code`, `problem`, `hint` and
 #: `exit_code`.
@@ -117,9 +120,13 @@ class LaunchResult:
     outcome: first.Outcome | None = None
 
 
-def launch(request, *, environ: Mapping[str, str] | None = None) -> LaunchResult:
+def launch(request, *, environ: Mapping[str, str] | None = None,
+           warn: Callable[[str], None] | None = None) -> LaunchResult:
     """Launch what `request` asks for. Raises a refusal, with nothing written, before the
-    row; returns the row's outcome after it. See the module's text for the order."""
+    row; returns the row's outcome after it. See the module's text for the order.
+
+    `warn` is called with each warning line just before the session starts, the last
+    moment a launch in this terminal can show one; the result carries them too."""
     caller = dict(os.environ if environ is None else environ)
     resolved = _resolve(request, environ)
     refusals = _check(resolved, caller)
@@ -162,8 +169,10 @@ def launch(request, *, environ: Mapping[str, str] | None = None) -> LaunchResult
             return _result(composition, rid, session_id, failed, warnings)
         try:
             targets.sweep(conn, env=environ)
-        except Exception:  # noqa: BLE001  (the sweep never stops a launch)
-            pass
+        except Exception as error:  # noqa: BLE001  (the sweep never stops a launch)
+            log.warning("the run-file sweep stopped: %s", error)
+        for line in warnings if warn is not None else ():
+            warn(line)
         started = target.start(targets.Launch(
             conn=conn, request_id=rid, composition=composition, argv=composition.argv,
             command=command, env=env, cwd=str(values["cwd"]), deliverer_env=caller))
