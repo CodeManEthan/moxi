@@ -159,10 +159,15 @@ meets.
 | `moxi comms explain <name> [id]` | why a message did or didn't land |
 | `moxi comms doctor` | what this machine resolved, and whether the daemon answers |
 | `moxi comms service install\|uninstall\|status` | the daemon as a user service |
-| `moxi comms claude` | launch a named Claude Code session (also `moxi-comms-claude`) |
-| `moxi-comms-opencode` | launch an OpenCode session for a roster identity (experimental) |
+| `moxi comms claude` | launch a named Claude Code session (also `"$(uv tool dir)/moxi/bin/moxi-comms-claude"`) |
+| `"$(uv tool dir)/moxi/bin/moxi-comms-opencode"` | launch an OpenCode session for a roster identity (experimental) |
 | `"$(uv tool dir)/moxi/bin/moxi-comms-daemon"` | the daemon, in the foreground |
-| `moxi-comms-provision` | provision standing identities |
+| `"$(uv tool dir)/moxi/bin/moxi-comms-provision"` | provision standing identities |
+
+comms' own scripts (`moxi-comms-daemon`, `moxi-comms-claude`, `moxi-comms-codex`,
+`moxi-comms-opencode`, `moxi-comms-provision`) are in the `moxi` tool's environment,
+which `moxi install comms` adds comms to, and uv puts none of them on PATH. Run one by
+its path: `"$(uv tool dir)/moxi/bin/<script>"`.
 
 `explain`, `doctor`, `moxi comms cache` (how cold each agent's prompt cache is, for the
 callers `[policy] cache_callers` names) and `moxi comms owner <session-id>` (which
@@ -211,14 +216,14 @@ on one of Zen's free models is reached at any age, and so is one on a model the 
 has no row for, which comms has no clock for. [docs/adapters.md](docs/adapters.md) has
 the detail.
 
-- **Codex**: `moxi-comms-codex <name>` launches one identity's thread through Moxi
+- **Codex**: `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <name>` launches one identity's thread through Moxi
   turns' Codex host, which runs the `codex app-server` and its hooks, and steers comms
   mail into the thread; a digest settles when its turn ends. Mail goes to the thread this launch
   started: /clear, /new, /fork and /resume in the window start or open another thread,
   which comms does not follow. To start fresh, end the launch and launch again. Install
   the extra: `moxi install comms --with codex`. Identities are listed in the
   config file's `[codex]` table, `~/.config/moxi/comms/config.toml`.
-- **OpenCode**: `moxi-comms-opencode <name>` runs an OpenCode server for one identity and
+- **OpenCode**: `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <name>` runs an OpenCode server for one identity and
   opens its session in your terminal; mail goes to the server as its own prompts, never
   through your input box. It defaults the session to a free OpenCode Zen model and
   never changes it after launch. Each launch opens a new OpenCode session, as a new

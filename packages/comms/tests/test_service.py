@@ -176,3 +176,25 @@ def test_status_reads_the_file_and_asks_systemd(box):
     assert "is-enabled  enabled" in out and "is-active   active" in out
     assert box.calls() == [f"--user is-enabled {release.UNIT}",
                            f"--user is-active {release.UNIT}"]
+
+
+def test_a_refusal_names_the_daemon_by_its_path(box, monkeypatch, tmp_path):
+    """The daemon's script is not on PATH after `moxi install comms`, so a refusal that
+    sends the person to the foreground gives the path to run."""
+    out = []
+    service.run("install", env=box.env, say=out.append, platform="darwin")
+    daemon = service.daemon_binary(box.env)
+    assert daemon is not None and f"in the foreground meanwhile: {daemon}" in out[0]
+
+    monkeypatch.setattr(sysconfig, "get_path", lambda name: str(tmp_path / "none"))
+    out = []
+    service.run("install", env=box.env, say=out.append, platform="darwin")
+    assert out[0].endswith(': "$(uv tool dir)/moxi/bin/moxi-comms-daemon"')
+
+
+def test_a_missing_daemon_is_reinstalled_into_the_moxi_tool(box, monkeypatch, tmp_path):
+    monkeypatch.setattr(sysconfig, "get_path", lambda name: str(tmp_path / "none"))
+    code, out = comms(box, "install")
+    assert code == service.EXIT_REFUSED
+    assert "uv tool upgrade moxi --reinstall-package moxi-comms" in out
+    assert "uv tool install moxi-comms" not in out

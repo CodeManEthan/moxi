@@ -3,7 +3,8 @@
 Every setting, environment variable and file location Moxi comms reads, in one place.
 The commands run as `moxi comms <verb>`; the internal entry points are
 `moxi-comms-daemon`, `moxi-comms-claude` and the like; the Python package is
-`moxi_comms`.
+`moxi_comms`. `moxi install comms` puts the entry points in the `moxi` tool's environment,
+and uv puts none of them on PATH, so run one by its path: `"$(uv tool dir)/moxi/bin/<script>"`.
 
 Most installs set nothing at all. With no config file and no variables, comms runs on
 the `local` backend, and the daemon provisions itself on its first start.
