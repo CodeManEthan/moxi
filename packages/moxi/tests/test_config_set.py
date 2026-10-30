@@ -530,12 +530,14 @@ def test_importing_moxi_config_loads_nothing_heavy(tmp_path):
         at_import = [m for m in ("dataclasses", "typing", "re", "tomllib", "pathlib",
                                  "threading", "copy", "moxi.paths", "moxi.names")
                      if m in sys.modules]
+        import pathlib, tomllib  # what the reader needs, and what they load themselves
+        before = set(sys.modules)
         schema = moxi.config.Schema.parse('[block]\\ntype = "bool"\\ndefault = false\\n'
                                           'doc = "d"\\nread = "use"\\n')
         moxi.config.load("demo", schema, path={str(small)!r})
         at_load = [m for m in ("dataclasses", "typing", "difflib", "json", "tomlkit",
                                "moxi._vendor.tomlkit", "moxi.files", "moxi.modules")
-                   if m in sys.modules]
+                   if m in sys.modules and m not in before]
         print(at_import, at_load)
     """)
     done = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True,
