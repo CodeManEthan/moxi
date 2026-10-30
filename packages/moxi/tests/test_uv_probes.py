@@ -58,8 +58,8 @@ class Uv:
 
 
 @pytest.fixture
-def uv(tmp_path, uv_env, wheels):
-    return Uv(tmp_path, uv_env, wheels)
+def uv(tmp_path, offline_uv_env, wheels):
+    return Uv(tmp_path, offline_uv_env, wheels)
 
 
 def test_a_plain_module_install_puts_moxi_on_path(uv):

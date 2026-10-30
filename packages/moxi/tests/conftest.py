@@ -177,8 +177,12 @@ def core_wheel(out: Path, version: str = "0.1.0") -> Path:
 
 
 @pytest.fixture
-def uv_env(tmp_path):
-    """Environment variables for an offline uv that touches nothing outside `tmp_path`."""
+def offline_uv_env(tmp_path):
+    """Environment variables for an offline uv that touches nothing outside `tmp_path`.
+
+    Its cache is a new one in tmp, so the tests that ask for it see only the wheels they
+    build. The kit's `uv_env` is the other kind: the real cache, for a child that needs
+    what is installed."""
     import os
     import shutil
 
