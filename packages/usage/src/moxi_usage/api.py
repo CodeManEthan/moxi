@@ -11,6 +11,16 @@ Model facts (`moxi_usage.models`):
   one, else the table's, else `UNKNOWN`.
 * `table()`: the table in effect (`Table`), for a caller that looks up many models.
 
+Limits (`moxi_usage.limits`):
+
+* `limits(*, harness=None, now=None, pull=True)`: one `Row` per plan window of Claude
+  and Codex, or of one `harness`, at `now` (epoch seconds; None is the clock): its
+  state (`fresh`, `reset` or `unavailable`, with a reason), percent used, reset time,
+  the age of its reading and, when the window is filling, `full_at`, the time it
+  reaches 100% at the recent rate. With `pull`, a Codex reading older than
+  `limits.codex_pull_after` is refreshed through turns when turns is installed. Returns
+  `Limits`, whose `pull` says what the pull did.
+
 `UNKNOWN` is sessions' sentinel: a fact the table does not know. It is neither None nor
 0, and refuses to be read as true or false, so an unknown price never turns into $0.
 Every result has `as_dict()` for JSON, where an unknown fact is left out and named in the
@@ -28,6 +38,7 @@ from typing import Any
 _HOMES: dict[str, str] = {
     **dict.fromkeys(("model_facts", "models", "context_window", "table", "ModelFacts",
                      "Provenance", "Table", "STEPS"), "models"),
+    **dict.fromkeys(("limits", "Limits", "Row", "Pull"), "limits"),
 }
 
 __all__ = [*_HOMES, "UNKNOWN"]

@@ -73,10 +73,36 @@ filled that way.
 A session's context window is the one the harness reported for the request when it gave
 one, else the table's, else unknown.
 
+## Limits
+
+Every limits reading usage sees is kept for `limits.history_days` (8) in
+`STATE/usage/readings.db`, so `moxi usage limits` answers with no session running:
+
+- **Codex** readings come from its rollouts (the newest rollout is read on each call,
+  and the token index's pass reads the rest) and, with turns installed, from Codex's
+  app-server as turns hears it. When the newest Codex reading is older than
+  `limits.codex_pull_after` seconds (600), `limits` asks Codex for a new one through
+  turns; when it can't, it keeps the stored reading and says why.
+- **Claude** readings come from Claude Code's own session report, which turns hands
+  usage after each turn. Without turns there are none, and Claude's rows say so.
+
+A window is known by its duration, whatever slot the harness puts it in: `5h`, `7d`, or
+its minutes. A per-model weekly cap is its own row (`7d opus`). Each row is `fresh`,
+`reset` or `unavailable` with the reason. Claude's row takes the reading with the latest
+future reset time (on a tie the highest percent), so an idle session's old number never
+passes for fresh; Codex's takes the newest reading. When a window has three or more
+readings of its current period in the last `limits.projection_minutes` (60), a straight
+line through them says when it reaches 100%, given only when that comes before the reset.
+
 ## Commands
 
+    moxi usage limits [--harness claude|codex] [--no-pull] [--json]
     moxi usage prices [MODEL] [--provider P] [--json]
     moxi usage prices update [--dry-run] [--revert] [--json]
+
+`limits` prints one line per harness: each window's percent used (used, not left), when
+it resets, when it fills at the recent rate, and the age of the oldest reading on the line.
+`--no-pull` never asks Codex for a new reading.
 
 `prices` with a model prints its facts and where each came from; without one, it prints
 the layers in effect. `prices update` is the only thing in usage that reaches the network,
@@ -96,6 +122,10 @@ facts.input, facts.cache_read, facts.window   # numbers, or api.UNKNOWN
 facts.provenance.as_dict()
 api.context_window("claude-opus-5-5[1m]", reported=None)
 api.models()                                   # every row, with provenance
+
+now = api.limits()                             # api.limits(harness="codex", pull=False)
+for row in now.rows:
+    row.label, row.state, row.used_percent, row.resets_at, row.full_at
 ```
 
 Every result has `as_dict()` for JSON: an unknown fact is left out and named in the

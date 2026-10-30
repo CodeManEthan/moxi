@@ -2,12 +2,17 @@
 
     moxi usage prices [MODEL] [--provider P] [--json]
     moxi usage prices update [--dry-run] [--revert] [--json]
+    moxi usage limits [--harness H] [--no-pull] [--json]
 
 `prices MODEL` prints the model's facts and where each came from, and exits 1 when the
 table does not know the model; `prices` alone prints the layers in effect. `prices update`
 fetches LiteLLM's price file and writes the snapshot layer (`moxi_usage.prices`); a fetch
 that fails exits 75, a result usage will not use exits 3. With `--json`, each prints one
 JSON object.
+
+`limits` prints one line per harness: each window's percent used, when it resets and,
+when it is filling, when it reaches 100% at the recent rate, then the age of the oldest
+reading on the line. A window it cannot state says why. It exits 0 whatever the states.
 """
 
 from __future__ import annotations
@@ -41,8 +46,20 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi usage") -> int:
     prices.add_argument("model", nargs="?", metavar="MODEL", help="a model id")
     prices.add_argument("--provider", help="the request's provider, for the lookup")
     prices.add_argument("--json", action="store_true", help="print one JSON object")
+    limits = verbs.add_parser("limits", help="print how much of each plan window is used",
+                              description="Print each plan window's percent used, when "
+                              "it resets and when it fills at the recent rate, from the "
+                              "readings kept in the last days.")
+    limits.add_argument("--harness", choices=("claude", "codex"),
+                        help="only this harness's windows")
+    limits.add_argument("--no-pull", dest="pull", action="store_false",
+                        help="never ask Codex for a new reading, even when the newest is "
+                             "stale")
+    limits.add_argument("--json", action="store_true", help="print one JSON object")
     parsed = parser.parse_args(args)
     try:
+        if parsed.verb == "limits":
+            return _limits(parsed, prog)
         return _prices(parsed)
     except ConfigError as exc:
         print(f"{prog}: {exc}", file=sys.stderr)
@@ -163,6 +180,92 @@ def _print_facts(facts: Any) -> None:
         print(f"  period          {json.dumps(provenance['period'])}")
     if data.get("unknown"):
         print(f"  unknown         {', '.join(data['unknown'])}")
+
+
+# --- limits ---------------------------------------------------------------------------
+
+def _limits(args: argparse.Namespace, prog: str, *, now: float | None = None) -> int:
+    from moxi.store import StoreTooNew
+
+    from . import limits
+
+    try:
+        result = limits.limits(harness=args.harness, now=now, pull=args.pull)
+    except StoreTooNew as exc:
+        print(f"{prog} limits: {exc}", file=sys.stderr)
+        return exc.exit_code
+    if args.json:
+        print(json.dumps(result.as_dict(), indent=2))
+        return codes.OK
+    for line in limits_lines(result):
+        print(line)
+    return codes.OK
+
+
+def limits_lines(result: Any) -> list[str]:
+    """The text of `moxi usage limits`: per harness one line of cells, the oldest age on
+    it, then any note under it."""
+    lines = []
+    harnesses = list(dict.fromkeys(row.harness for row in result.rows))
+    for harness in harnesses:
+        rows = result.of(harness)
+        cells = [f"{harness:<7}"] + [_cell(row, result.now) for row in rows]
+        line = "   ".join(cells)
+        ages = [row.age_seconds for row in rows if row.age_seconds is not None]
+        if ages:
+            line += f"   as of {format_age(max(ages))} ago"
+        lines.append(line)
+        for note in dict.fromkeys(row.note for row in rows if row.note):
+            lines.append(f"{'':<7}   {note}")
+    for note in result.notes:
+        lines.append(f"note: {note}")
+    return lines
+
+
+def _cell(row: Any, now: float) -> str:
+    # The percent is the percent USED, and the word says so: the harnesses' own apps
+    # show what is left, and a bare number reads as that.
+    extra = ""
+    if row.extra:
+        extra = " (" + ", ".join(f"{k} {v}" for k, v in sorted(row.extra.items())) + ")"
+    if row.state == "fresh":
+        text = (f"{row.label} {row.used_percent:.0f}% used, resets "
+                f"{format_reset(row.resets_at, now)}")
+        if row.full_at is not None:
+            text += f", full by {format_reset(row.full_at, now)}"
+        return text + extra
+    if row.state == "reset":
+        return f"{row.label} reset since the last reading{extra}"
+    return f"{row.label} unavailable ({row.reason}){extra}"
+
+
+def format_age(seconds: float) -> str:
+    """`40s`, `4m05s`, `1h04m`, `3d04h`, rounded down so a reading never looks fresher
+    than it is."""
+    seconds = max(int(seconds), 0)
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m{seconds % 60:02d}s"
+    if seconds < 86400:
+        return f"{seconds // 3600}h{(seconds % 3600) // 60:02d}m"
+    return f"{seconds // 86400}d{(seconds % 86400) // 3600:02d}h"
+
+
+def format_reset(epoch: float | None, now: float) -> str:
+    """Local wall time, as coarse as the distance allows: `18:20` today, `Fri 09:00`
+    within the week, `Nov 06 09:00` beyond it."""
+    from datetime import datetime
+
+    if epoch is None:
+        return "unknown"
+    when = datetime.fromtimestamp(epoch)
+    today = datetime.fromtimestamp(now)
+    if when.date() == today.date():
+        return when.strftime("%H:%M")
+    if abs((when - today).days) < 7:
+        return when.strftime("%a %H:%M")
+    return when.strftime("%b %d %H:%M")
 
 
 # --- prices update ----------------------------------------------------------------------
