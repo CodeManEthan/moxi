@@ -1,0 +1,241 @@
+"""The blocking client of `moxi.ipc`, safe to share between threads.
+
+One lock serialises the frames written. One reader thread reads every line the server
+sends, hands each answer to the call waiting on its id and queues each notification, so
+the server's answers and its pushed notifications share the one connection in any order.
+A call waits on its own event; one that runs out of time raises `Timeout`, and its late
+answer is dropped.
+"""
+
+from __future__ import annotations
+
+import errno
+import itertools
+import queue
+import socket
+import sys
+import threading
+from collections.abc import Iterable, Iterator
+
+from . import _wire
+from ._wire import Agreed, Hello, IpcError, NotServing, Timeout
+
+#: How much the reader thread asks of the socket at a time.
+_CHUNK = 64 * 1024
+#: The errors that mean nothing listens at the address: the daemon is cold.
+_COLD = (errno.ENOENT, errno.ECONNREFUSED)
+_END = object()
+
+
+def connect(address: str, *, timeout: float = 5.0) -> Client:
+    """A connection to the server at `address`. Raises `NotServing` when nothing listens
+    there and `Timeout` when the connect takes longer than `timeout` seconds. `timeout`
+    is also the client's wait for `hello()`."""
+    if sys.platform == "win32":
+        raise NotImplementedError("moxi.ipc.connect is not built for Windows yet: the "
+                                  "named pipe client comes later")
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    try:
+        sock.connect(address)
+    except TimeoutError:
+        sock.close()
+        raise Timeout(f"no connection to {address} in {timeout} s") from None
+    except OSError as exc:
+        sock.close()
+        if exc.errno in _COLD:
+            raise NotServing(address, exc.strerror) from None
+        raise
+    sock.settimeout(None)
+    return Client(sock, address, timeout=timeout)
+
+
+class _Call:
+    __slots__ = ("done", "result", "error")
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.result: object = None
+        self.error: BaseException | None = None
+
+
+class Client:
+    """A blocking, thread-safe connection to a `moxi.ipc` server, made by `connect`.
+
+    `call` sends a request and waits for its answer; `notify` sends a notification;
+    `notifications()` yields what the server pushes and is read by one thread. `hello`
+    agrees a version, and `agreed` then holds it. Use it as a context manager, or
+    `close()` it.
+    """
+
+    def __init__(self, sock: socket.socket, address: str, *, timeout: float = 5.0,
+                 max_line: int = _wire.MAX_LINE):
+        self.address = address
+        self.agreed: Agreed | None = None
+        self._sock = sock
+        self._timeout = timeout
+        self._lines = _wire.Lines(max_line)
+        self._write_lock = threading.Lock()
+        self._lock = threading.Lock()
+        self._ids = itertools.count(1)
+        self._calls: dict[int, _Call] = {}
+        self._failure: BaseException | None = None
+        self._notes: queue.SimpleQueue = queue.SimpleQueue()
+        self._reader = threading.Thread(target=self._read, name="moxi.ipc reader",
+                                        daemon=True)
+        self._reader.start()
+
+    def __repr__(self) -> str:
+        return f"<moxi.ipc.Client {self.address}>"
+
+    def __enter__(self) -> Client:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    # -- what callers use ---------------------------------------------------------------
+
+    def hello(self, versions: tuple[int, int], capabilities: Iterable[str] = ()) -> Agreed:
+        """Offer `versions` (lo, hi) and `capabilities`, and return what the server
+        agreed. Raises `RpcError` -32001 when no version is common, and `NotRpc` when
+        the server doesn't speak JSON-RPC."""
+        ours = Hello(versions, capabilities)
+        answer = self.call(_wire.HELLO, _wire.hello_params(ours), timeout=self._timeout)
+        self.agreed = _wire.agreed_from(answer, ours)
+        return self.agreed
+
+    def call(self, method: str, params: object = None, *,
+             timeout: float | None = None) -> object:
+        """Send request `method` and return its result. Raises `RpcError` when the
+        server answers with an error, `Timeout` past `timeout` seconds (None waits with
+        no limit), `NotRpc` when the server sends a line that isn't JSON-RPC, and
+        `IpcError` when the connection ends first."""
+        call = _Call()
+        with self._lock:
+            if self._failure is not None:
+                raise self._failure
+            id = next(self._ids)
+            self._calls[id] = call
+        try:
+            self._send(_wire.request(id, method, params))
+            if not call.done.wait(timeout):
+                raise Timeout(f"no answer to {method} in {timeout} s")
+        finally:
+            with self._lock:
+                self._calls.pop(id, None)
+        if call.error is not None:
+            raise call.error
+        return call.result
+
+    def notify(self, method: str, params: object = None) -> None:
+        """Send notification `method`; nothing comes back."""
+        with self._lock:
+            if self._failure is not None:
+                raise self._failure
+        self._send(_wire.notification(method, params))
+
+    def notifications(self) -> Iterator[tuple[str, object]]:
+        """The server's notifications as `(method, params)`, as they arrive, waiting
+        for each. It ends when the connection does. Read it from one thread."""
+        while True:
+            item = self._notes.get()
+            if item is _END:
+                self._notes.put(_END)  # so a later reader ends too
+                return
+            yield item
+
+    def close(self) -> None:
+        """Close the connection. A call still waiting raises `IpcError`."""
+        self._fail(IpcError(f"the connection to {self.address} is closed"))
+        try:
+            self._sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        if threading.current_thread() is not self._reader:
+            self._reader.join(5.0)
+        self._sock.close()
+
+    # -- the wire -----------------------------------------------------------------------
+
+    def _send(self, message: dict) -> None:
+        frame = _wire.encode(message)
+        with self._write_lock:
+            try:
+                self._sock.sendall(frame)
+            except OSError as exc:
+                failure = self._fail(IpcError(f"the connection to {self.address} "
+                                              f"broke: {exc}"))
+                raise failure from None
+
+    def _read(self) -> None:
+        failure: BaseException = IpcError(
+            f"the server at {self.address} closed the connection")
+        try:
+            while True:
+                try:
+                    data = self._sock.recv(_CHUNK)
+                except OSError:
+                    break
+                if not data:
+                    break
+                try:
+                    lines = self._lines.feed(data)
+                except _wire.LineTooLong as exc:
+                    for line in exc.lines:
+                        self._take(line)
+                    failure = IpcError(f"the server at {self.address} sent {exc}")
+                    break
+                for line in lines:
+                    self._take(line)
+        except _wire.NotRpc as exc:
+            failure = exc
+        finally:
+            self._fail(failure)
+            self._notes.put(_END)
+            try:
+                self._sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def _take(self, line: bytes) -> None:
+        """Sort one line: an answer to its call, a notification to the queue."""
+        got = _wire.read_answer(line)
+        if got is None:
+            return
+        if isinstance(got, _wire.Note):
+            self._notes.put((got.method, got.params))
+            return
+        if got.id is None:
+            if got.error is None:
+                return  # a result for no call: nothing waits on it
+            # The server couldn't read a line it was sent, so it can't say whose it
+            # was: every waiting call gets the error.
+            with self._lock:
+                calls = list(self._calls.values())
+                self._calls.clear()
+            for call in calls:
+                call.error = got.error
+                call.done.set()
+            return
+        with self._lock:
+            call = self._calls.pop(got.id, None)
+        if call is None:
+            return  # a late answer to a call that gave up
+        call.result, call.error = got.result, got.error
+        call.done.set()
+
+    def _fail(self, failure: BaseException) -> BaseException:
+        """End every waiting call with `failure`, and every later one; the first
+        failure stands."""
+        with self._lock:
+            if self._failure is None:
+                self._failure = failure
+            failure = self._failure
+            calls = list(self._calls.values())
+            self._calls.clear()
+        for call in calls:
+            if not call.done.is_set():
+                call.error = failure
+                call.done.set()
+        return failure
