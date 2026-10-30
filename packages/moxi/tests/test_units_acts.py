@@ -373,6 +373,24 @@ def test_a_stop_that_fails_is_recorded_first_and_resumed(w):
                            ("start", "moxi-demo-other.service")]
 
 
+def test_a_stop_that_raises_leaves_its_entry_recorded_for_resume(w, monkeypatch):
+    w.installed(DAEMONS=DAEMON)
+
+    def runner(cmd, **kw):
+        if cmd[2:] == ["stop", "--", "moxi-demo-relay.service"]:
+            raise RuntimeError("the runner broke")
+        return w.sup(cmd, **kw)
+
+    monkeypatch.setattr(w.backend, "runner", runner)
+    record: list = []
+    with pytest.raises(RuntimeError, match="the runner broke"):
+        units.stop("demo", record=record)
+    assert [s.unit for s in record] == ["moxi-demo-relay.service"]
+    monkeypatch.setattr(w.backend, "runner", w.sup)
+    [started] = units.resume(record)
+    assert started.ok
+
+
 def test_a_refused_start_is_reported_never_retried_and_the_next_is_started(w):
     w.installed(DAEMONS="{'relay': {'command': 'moxi-demo-relay'}, "
                         "'other': {'command': 'moxi-demo-relay'}}")

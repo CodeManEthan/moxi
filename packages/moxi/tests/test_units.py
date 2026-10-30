@@ -356,6 +356,51 @@ def test_config_set_of_a_daemon_switch_plans_only_that_daemon(w, capsys):
     assert config.set("demo", "snapshot.enabled", True, by="test") == []
 
 
+def test_config_set_plans_and_applies_a_daemon_switch_under_one_hold(w, monkeypatch):
+    import contextlib
+
+    from moxi import files
+
+    events: list[str] = []
+    real_lock, real_plan, real_apply = files.lock, units.plan, units.apply
+
+    @contextlib.contextmanager
+    def lock(path, **kw):
+        with real_lock(path, **kw):
+            events.append("in")
+            try:
+                yield
+            finally:
+                events.append("out")
+
+    def plan(*a, **k):
+        events.append("plan")
+        return real_plan(*a, **k)
+
+    def apply(*a, **k):
+        events.append("apply")
+        return real_apply(*a, **k)
+
+    monkeypatch.setattr(files, "lock", lock)
+    monkeypatch.setattr(units, "plan", plan)
+    monkeypatch.setattr(units, "apply", apply)
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'switch': 'relay.enabled'}}")
+    applied = config.set("demo", "relay.enabled", True, by="test")
+    assert [a.change.action for a in applied] == ["add"]
+    depth, hold, held_at = 0, 0, {}
+    for event in events:
+        if event == "in":
+            depth += 1
+            hold += depth == 1
+        elif event == "out":
+            depth -= 1
+        elif depth:
+            held_at[event] = hold
+    assert held_at.keys() == {"plan", "apply"}, events
+    assert held_at["plan"] == held_at["apply"], events
+
+
 def test_config_set_with_a_failing_units_from_says_the_key_was_not_checked(w, capsys):
     w.module(units_from="def units():\n    raise OSError('rows missing')\n")
     assert config.set("demo", "relay.enabled", True, by="test") == []

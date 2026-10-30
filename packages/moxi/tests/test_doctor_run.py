@@ -341,6 +341,27 @@ def test_an_off_platform_unit_and_no_supervisor_are_off(d, monkeypatch):
     assert row.state == "off" and "no supervisor" in row.detail
 
 
+def test_health_runs_only_for_an_active_daemon(d, monkeypatch):
+    d.installed(DAEMONS=DAEMON, HEALTH="{'relay': 'moxi_demo.health:counted'}",
+                files_={"health.py": """\
+                    import os
+                    from moxi.doctor import Row
+                    def counted():
+                        with open(os.environ["HEALTH_CALLS"], "a") as handle:
+                            handle.write("called\\n")
+                        return Row("demo", "x", "ok", "fine")
+                    """})
+    calls = d.tmp / "health-calls"
+    monkeypatch.setenv("HEALTH_CALLS", str(calls))
+    assert d.rows("demo")[("demo", "daemon relay health")].detail == "fine"
+    assert calls.read_text() == "called\n"
+    d.sup.state("moxi-demo-relay.service")["active"] = False
+    got = d.rows("demo")
+    assert got[("demo", "daemon relay")].detail.startswith("up to date; inactive")
+    assert ("demo", "daemon relay health") not in got
+    assert calls.read_text() == "called\n"
+
+
 def test_a_failing_units_from_and_a_bad_health_key_are_reported(d):
     d.installed(DAEMONS=DAEMON, HEALTH="{'relay': 'moxi_demo.health:ok', 'typo': 'x.y:z'}",
                 UNITS_FROM="'moxi_demo.runtime:units'",
