@@ -16,7 +16,7 @@ from __future__ import annotations
 import contextlib
 
 import pytest
-from conftest import raw_connection, settle, wait_for_queue, wait_until
+from conftest import projects_root, raw_connection, settle, wait_for_queue, wait_until, warm_session
 
 from moxi_comms.client import DaemonClient
 from moxi_comms.paths import daemon_socket
@@ -50,6 +50,23 @@ def raw():
         yield lambda: stack.enter_context(raw_connection())
 
 
+@pytest.fixture
+def opened(rig, bind):
+    """A reviewer bound on a bare connection with a warm session: `opened(n)` posts `n`
+    messages to it, opens one digest for each, and returns the raw connection (whose
+    notifications carry the seq a test gives them, or none) and the digests as
+    `{digest id: its message id}`, oldest first."""
+    def _opened(n):
+        c = bind(name="reviewer", scope="proj-a", session_id=warm_session(),
+                 projects_root=str(projects_root()))
+        b = rig.daemon.bindings[IDENTITY]
+        ids = [rig.post_as("agent-6", [IDENTITY], f"m{i}").id for i in range(n)]
+        assert wait_until(lambda: set(ids) <= b.delivered)
+        digests = {c.call("open_digest", {"ids": [mid]})["digest"]: mid for mid in ids}
+        return c._client, digests
+    return _opened
+
+
 def deliver_one(rig, shim, text="for the reviewer"):
     rig.post_as("agent-6", [IDENTITY], text)
     wait_for_queue(shim, 1)
@@ -72,7 +89,7 @@ def test_the_two_ordered_pings_share_one_strictly_increasing_count():
     sent = recording(client)
 
     client.notify("activity", {"identity": IDENTITY})
-    client.notify("injected", {"identity": IDENTITY, "through": "7", "text": "hi"})
+    client.notify("injected", {"identity": IDENTITY, "digest": 7, "text": "hi"})
     client.notify("activity", {"identity": IDENTITY})
 
     assert [f["seq"] for f in sent.frames] == [1, 2, 3], (
@@ -122,49 +139,52 @@ def test_a_stale_activity_ping_is_dropped(rig):
         client.close()
 
 
-def test_a_stale_injected_ping_does_not_overwrite_what_was_shown(rig, raw):
-    conn = raw()
-    conn.notify("injected", {"identity": IDENTITY, "through": "20",
+def test_a_stale_injected_ping_does_not_overwrite_what_was_shown(rig, opened):
+    conn, digests = opened(3)
+    (old, _), (real, real_id), (nxt, next_id) = digests.items()
+    conn.notify("injected", {"identity": IDENTITY, "digest": real,
                "seq": 5, "text": "the real digest"})
     settle(conn)
-    assert rig.daemon.injected_through[IDENTITY] == "20"
+    assert rig.daemon.injected_through[IDENTITY] == real_id
 
-    conn.notify("injected", {"identity": IDENTITY, "through": "9",
+    conn.notify("injected", {"identity": IDENTITY, "digest": old,
                "seq": 4, "text": "a replayed digest"})
     settle(conn)
-    assert rig.daemon.injected_through[IDENTITY] == "20"
+    assert rig.daemon.injected_through[IDENTITY] == real_id
     assert rig.daemon.injected_digest[IDENTITY] == "the real digest"
 
-    conn.notify("injected", {"identity": IDENTITY, "through": "31",
+    conn.notify("injected", {"identity": IDENTITY, "digest": nxt,
                "seq": 6, "text": "the next digest"})
     settle(conn)
-    assert rig.daemon.injected_through[IDENTITY] == "31"
+    assert rig.daemon.injected_through[IDENTITY] == next_id
     assert rig.daemon.injected_digest[IDENTITY] == "the next digest"
 
 
-def test_a_ping_with_no_seq_is_accepted_and_leaves_the_counter_alone(rig, raw):
+def test_a_ping_with_no_seq_is_accepted_and_leaves_the_counter_alone(rig, opened):
     """These are hints. A sender that numbers nothing is not a sender to go deaf to."""
-    conn = raw()
-    conn.notify("injected", {"identity": IDENTITY, "through": "5", "seq": 3})
-    conn.notify("injected", {"identity": IDENTITY, "through": "6"})    # no seq
+    conn, digests = opened(4)
+    (d5, _), (d6, id6), (d7, _), (d8, id8) = digests.items()
+    conn.notify("injected", {"identity": IDENTITY, "digest": d5, "seq": 3})
+    conn.notify("injected", {"identity": IDENTITY, "digest": d6})    # no seq
     settle(conn)
-    assert rig.daemon.injected_through[IDENTITY] == "6"
+    assert rig.daemon.injected_through[IDENTITY] == id6
 
-    conn.notify("injected", {"identity": IDENTITY, "through": "7", "seq": 3})
+    conn.notify("injected", {"identity": IDENTITY, "digest": d7, "seq": 3})
     settle(conn)
-    assert rig.daemon.injected_through[IDENTITY] == "6", (
+    assert rig.daemon.injected_through[IDENTITY] == id6, (
         "the unnumbered frame must not have moved the counter past 3")
 
-    conn.notify("injected", {"identity": IDENTITY, "through": "8", "seq": 4})
+    conn.notify("injected", {"identity": IDENTITY, "digest": d8, "seq": 4})
     settle(conn)
-    assert rig.daemon.injected_through[IDENTITY] == "8"
+    assert rig.daemon.injected_through[IDENTITY] == id8
 
 
-def test_an_unreadable_seq_is_treated_as_unnumbered_not_as_a_bad_frame(rig, raw):
-    conn = raw()
-    conn.notify("injected", {"identity": IDENTITY, "through": "3", "seq": "later"})
+def test_an_unreadable_seq_is_treated_as_unnumbered_not_as_a_bad_frame(rig, opened):
+    conn, digests = opened(1)
+    ((digest, mid),) = digests.items()
+    conn.notify("injected", {"identity": IDENTITY, "digest": digest, "seq": "later"})
     settle(conn)
-    assert rig.daemon.injected_through[IDENTITY] == "3"
+    assert rig.daemon.injected_through[IDENTITY] == mid
 
 
 def test_the_count_is_per_source_so_one_connection_cannot_starve_another(rig, raw):
@@ -185,11 +205,11 @@ def test_the_count_is_per_source_so_one_connection_cannot_starve_another(rig, ra
 
 def test_two_identities_on_one_connection_are_counted_apart(rig, raw):
     conn = raw()
-    conn.notify("injected", {"identity": "planner@proj-a", "through": "10", "seq": 9})
-    conn.notify("injected", {"identity": IDENTITY, "through": "11", "seq": 1})
+    conn.notify("activity", {"identity": "planner@proj-a", "seq": 9})
+    conn.notify("activity", {"identity": IDENTITY, "seq": 1})
     settle(conn)
-    assert rig.daemon.injected_through["planner@proj-a"] == "10"
-    assert rig.daemon.injected_through[IDENTITY] == "11"
+    assert rig.daemon.activity.get("planner@proj-a")
+    assert rig.daemon.activity.get(IDENTITY), "seq 1 is not measured against 9"
 
 
 def test_the_count_dies_with_the_connection_that_fed_it(rig, raw):
@@ -278,11 +298,14 @@ def test_the_digest_dies_with_the_binding(rig):
     assert answer["bound"] is False and answer["digest"] is None
 
 
-def test_the_digest_is_not_what_routing_runs_on(rig, raw):
-    """A ping may carry no digest at all; that must not disturb `injected_through`,
-    which is the field the watchdog actually reads."""
-    conn = raw()
-    conn.notify("injected", {"identity": IDENTITY, "through": "42", "seq": 1})
+def test_the_digest_is_not_what_routing_runs_on(rig, opened):
+    """A ping may carry no digest text at all; that must not disturb
+    `injected_through`, which is the field the watchdog actually reads."""
+    conn, digests = opened(1)
+    ((digest, mid),) = digests.items()
+    conn.notify("injected", {"identity": IDENTITY, "digest": digest, "seq": 1})
     settle(conn)
-    assert rig.daemon.injected_through[IDENTITY] == "42"
+    assert rig.daemon.injected_through[IDENTITY] == mid
     assert IDENTITY not in rig.daemon.injected_digest
+
+

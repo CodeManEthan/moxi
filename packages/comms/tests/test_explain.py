@@ -1,9 +1,9 @@
 """`moxi comms explain`, and the named reasons under it.
 
-Two halves. The first gives every quiet path in `cursors.py` a name and a
-sentence, so a deliberate default stops reading as an accident. The second is the verb
-that prints them next to the binding, the adapter kind, the cursor and the last
-delivery -- every live fact behind a delivery, in one command.
+Two halves. The first gives every reason the cursor in comms.db's books stands where it
+does a name and a sentence. The second is the verb that prints them next to the
+binding, the adapter kind, the cursor and the last delivery -- every live fact behind a
+delivery, in one command.
 
 Nothing here is allowed to write anything down. The whole point of the command is that
 it reads live facts, so every test that asserts on an answer first arranges the fact
@@ -12,24 +12,22 @@ it is asking about.
 
 from __future__ import annotations
 
-import json
-
 import pytest
-from conftest import wait_for_queue, wait_until
+from conftest import cursor_of, put_cursor, wait_for_queue, wait_until
 
-from moxi_comms import cursors
+from moxi_comms.store import books
 from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import (CASE_HANDLED, CASE_IGNORED, CASE_NOT_ADDRESSABLE,
                                CASE_REASONS, CASE_TURN_INCOMPLETE, CASE_WAITING)
-from moxi_comms.paths import cursors_dir, daemon_socket
+from moxi_comms.paths import daemon_socket
 
 IDENTITY = "reviewer@proj-a"
 
 
 @pytest.fixture(autouse=True)
 def on_the_mock(monkeypatch):
-    """This suite's rig is the mock, and the bare cursors directory is the mock's, so the
-    process names the mock rather than fall through to the profile's default."""
+    """This suite's rig is the mock, so the process names the mock rather than fall
+    through to the profile's default."""
     monkeypatch.setenv("MOXI_COMMS_BACKEND", "mock")
 
 
@@ -52,126 +50,27 @@ def deliver_one(rig, shim, text="for the reviewer"):
     return message_id
 
 
-def cursor_file(qualified=IDENTITY):
-    return cursors_dir() / f"{qualified}.json"
-
-
-def write_cursor(value, qualified=IDENTITY):
-    p = cursor_file(qualified)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"cursor": value, "updated_at": "2026-09-23T00:00:00+00:00"}))
-    return p
-
-
 # ------------------------------------------------------- half one: the named reasons
 
 def test_every_named_reason_has_a_sentence():
     """A name with no sentence is a second thing to look up, which is the problem the
     card is about."""
-    names = {v for k, v in vars(cursors).items()
-             if k.isupper() and isinstance(v, str) and k != "REASONS"}
-    assert names == set(cursors.REASONS), "every name is in the table, and only names are"
-    for name, sentence in cursors.REASONS.items():
+    names = {books.NO_CURSOR_YET, books.ALREADY_PAST, books.BEHIND, books.WAITING}
+    assert names == set(books.REASONS), "every name is in the table, and only names are"
+    for name, sentence in books.REASONS.items():
         assert sentence.endswith(".") and len(sentence) > 60, name
         assert name not in sentence, "the sentence explains the name, it does not repeat it"
 
 
-def test_the_quiet_paths_each_name_themselves_in_the_log(rig, caplog):
-    """The three that reported differently, and the one the backend split added. Before
-    this you could not grep for any of them, because none of them said a word you could
-    search for."""
-    import logging
-    caplog.set_level(logging.DEBUG, logger="comms.cursors")
-
-    cursors.advance(IDENTITY, "not-an-id")
-    cursors.advance(IDENTITY, "50")
-    cursors.advance(IDENTITY, "40")                 # already past: silent until now
-    write_cursor("not-a-message-id")
-    cursors.advance(IDENTITY, "60")                 # the guard skip
-
-    logged = "\n".join(r.getMessage() for r in caplog.records)
-    for name in (cursors.TARGET_NOT_A_MESSAGE_ID, cursors.ALREADY_PAST,
-                 cursors.CURSOR_NOT_A_MESSAGE_ID):
-        assert f"[{name}]" in logged, name
-
-
-def test_an_unresolvable_backend_names_itself(monkeypatch, caplog):
-    import logging
-    caplog.set_level(logging.WARNING, logger="comms.cursors")
-    monkeypatch.setenv("MOXI_COMMS_BACKEND", "no-such-backend")
-
-    info = cursors.explain(IDENTITY)
-    assert info["backend"] is None
-    assert info["backend_reason"] == cursors.BACKEND_UNRESOLVED
-    assert f"[{cursors.BACKEND_UNRESOLVED}]" in "\n".join(r.getMessage()
-                                                          for r in caplog.records)
-
-
-def test_a_corrupt_cursor_file_stops_being_silent(caplog):
-    """The worst of the seven: a corrupt cursor and a brand-new agent both answered
-    None, both replay everything, and nothing anywhere said which one you had."""
-    import logging
-    caplog.set_level(logging.WARNING, logger="comms.cursors")
-
-    assert cursors.explain(IDENTITY)["reason"] == cursors.NO_CURSOR_YET
-    assert cursors.read(IDENTITY) is None
-    assert caplog.records == [], "the absent file is where every identity starts"
-
-    p = cursor_file()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("{not json")
-    assert cursors.read(IDENTITY) is None, "still degrades toward replay, never a raise"
-    assert cursors.explain(IDENTITY)["reason"] == cursors.CURSOR_UNREADABLE
-    assert f"[{cursors.CURSOR_UNREADABLE}]" in "\n".join(r.getMessage()
-                                                         for r in caplog.records)
-
-
-def test_a_cursor_of_the_wrong_shape_is_unreadable_not_a_position():
-    """`["cursor"]` and `{"cursor": null}` are valid JSON and are not cursors. `read`
-    has always answered None to both; now the reason says which."""
-    for bad in ('["cursor"]', '{"cursor": null}', '{"cursor": {"id": 1}}', '42'):
-        p = cursor_file()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(bad)
-        assert cursors.read(IDENTITY) is None
-        assert cursors.explain(IDENTITY)["reason"] == cursors.CURSOR_UNREADABLE, bad
-
-
-def test_explain_compares_against_the_message_it_is_asked_about():
-    write_cursor("100")
-    assert cursors.explain(IDENTITY, "100")["reason"] == cursors.ALREADY_PAST
-    assert cursors.explain(IDENTITY, "99")["reason"] == cursors.ALREADY_PAST
-    assert cursors.explain(IDENTITY, "101")["reason"] == cursors.BEHIND
-    assert cursors.explain(IDENTITY)["reason"] is None, "no message, nothing to compare"
-    assert cursors.explain(IDENTITY)["cursor"] == "100"
-
-
-def test_a_cursor_that_is_not_a_message_id_is_its_own_reason():
-    write_cursor("not-a-message-id")
-    info = cursors.explain(IDENTITY, "100")
-    assert info["reason"] == cursors.CURSOR_NOT_A_MESSAGE_ID
-    assert info["cursor"] == cursors.read(IDENTITY), (
-        "the command and the daemon's classify must never see two different values")
-
-
-def test_the_write_side_reasons_are_never_answers():
-    """They happen inside the adapter process at the moment of the write and leave
-    nothing behind. Naming them and saying where to look is the honest thing; inventing
-    a ledger to hold them is what the contract forbids."""
-    write_cursor("100")
-    for message_id in (None, "50", "500"):
-        assert cursors.explain(IDENTITY, message_id)["reason"] not in \
-            cursors.WRITE_SIDE_REASONS
-
-
-def test_explain_reads_and_writes_the_same_path_the_rest_of_the_module_does(monkeypatch):
-    monkeypatch.setenv("MOXI_COMMS_BACKEND", "local")
-    cursors.advance(IDENTITY, "100")
-    info = cursors.explain(IDENTITY, "100")
-    assert info["backend"] == "local"
-    assert info["path"] == info["read_path"] == str(cursors_dir() / "local"
-                                                    / f"{IDENTITY}.json")
-    assert info["updated_at"]
+def test_explain_compares_against_the_message_it_is_asked_about(rig):
+    put_cursor(IDENTITY, "100")
+    row = books.read_cursor(IDENTITY)
+    assert books.explain_cursor(row, "100")["reason"] == books.ALREADY_PAST
+    assert books.explain_cursor(row, "99")["reason"] == books.ALREADY_PAST
+    assert books.explain_cursor(row, "101")["reason"] == books.BEHIND
+    assert books.explain_cursor(row)["reason"] is None, "no message, nothing to compare"
+    assert books.explain_cursor(row)["cursor"] == "100"
+    assert books.explain_cursor(None)["reason"] == books.NO_CURSOR_YET
 
 
 # ------------------------------------------------------------- half two: the command
@@ -233,7 +132,7 @@ def test_delivered_but_the_turn_never_completed(rig):
     assert info["binding"]["tier"] == "chosen"
     assert info["delivery"]["message_id"] == message_id
     assert info["injected_through"] == message_id
-    assert info["cursor"]["reason"] == cursors.NO_CURSOR_YET
+    assert info["cursor"]["reason"] == books.NO_CURSOR_YET
     assert "for the reviewer" in info["digest"], "the input, not only the verdict"
 
 
@@ -246,7 +145,7 @@ def test_handled_says_so_and_names_the_cursor_reason(rig):
     info = ask()
     assert info["case"] == CASE_HANDLED
     assert info["cursor"]["cursor"] == message_id
-    assert info["cursor"]["reason"] == cursors.ALREADY_PAST
+    assert info["cursor"]["reason"] == books.ALREADY_PAST
 
 
 def test_delivered_and_ignored(rig):
@@ -270,7 +169,7 @@ def test_an_unbound_name_is_still_explainable(rig):
 
     info = ask()
     assert info["case"] == CASE_WAITING
-    assert info["cursor"]["reason"] == cursors.WAITING
+    assert info["cursor"]["reason"] == books.WAITING
     assert info["bound"] is False and info["binding"] is None
     assert info["delivery"]["message_id"] == message_id
     assert info["digest"] is None, "the digest dies with the binding"
@@ -301,7 +200,7 @@ def test_a_name_nothing_has_ever_happened_to_answers_rather_than_refusing(rig):
     assert info["bound"] is False
     assert info["delivery"] is None
     assert info["case"] is None
-    assert info["cursor"]["reason"] == cursors.NO_CURSOR_YET
+    assert info["cursor"]["reason"] == books.NO_CURSOR_YET
 
 
 def test_the_newest_delivery_is_the_default_and_any_id_can_be_asked_for(rig):
@@ -317,19 +216,6 @@ def test_the_newest_delivery_is_the_default_and_any_id_can_be_asked_for(rig):
     asked = ask(message_id=first)
     assert asked["delivery"]["message_id"] == first
     assert asked["delivery"]["asked_for"] is True
-
-
-def test_an_unclassifiable_cursor_answers_instead_of_raising(rig):
-    """A cursor that is not a message id reaches `classify`'s int() and raises. The
-    command says so and falls back on the cursor's own named reason."""
-    reviewer = rig.shim(name="reviewer", scope="proj-a")
-    deliver_one(rig, reviewer)
-    write_cursor("not-a-message-id")
-
-    info = ask()
-    assert info["case"] is None
-    assert info["case_error"] and "ValueError" in info["case_error"]
-    assert info["cursor"]["reason"] == cursors.CURSOR_NOT_A_MESSAGE_ID
 
 
 def test_asking_records_nothing(rig):
@@ -361,28 +247,9 @@ def test_the_verb_prints_the_facts_the_card_asked_for(rig):
     assert "claude-shim" in out                                # the adapter kind
     assert message_id in out                                   # the last delivery
     assert "chosen" in out                                     # the binding
-    assert cursors.NO_CURSOR_YET in out                        # the named reason
+    assert books.NO_CURSOR_YET in out                        # the named reason
     assert "the cursor moves on the adapter's turn boundary" in out.lower()
     assert "the diff needs a second pair of eyes" in out       # the input
-
-
-def test_the_verb_names_the_two_reasons_it_can_never_answer(rig):
-    """And only where they are a live hypothesis. A cursor that moved was not declined,
-    so in the handled case this block is noise and stays off the page."""
-    reviewer = rig.shim(name="reviewer", scope="proj-a")
-    deliver_one(rig, reviewer)
-
-    code, out = rig.cli(["explain", IDENTITY],  name="planner", scope="proj-a")
-    assert code == 0
-    for name in cursors.WRITE_SIDE_REASONS:
-        assert name in out, "named, with where to look, rather than quietly missing"
-
-    reviewer.on_turn_boundary()
-    reviewer.on_turn_boundary()                 # the cursor advances past it
-    code, out = rig.cli(["explain", IDENTITY],  name="planner", scope="proj-a")
-    assert code == 0 and CASE_HANDLED in out
-    for name in cursors.WRITE_SIDE_REASONS:
-        assert name not in out
 
 
 def test_a_long_digest_is_cut_and_says_how_much_it_cut(rig):
@@ -400,9 +267,9 @@ def test_a_long_digest_is_cut_and_says_how_much_it_cut(rig):
 
 
 def test_explain_with_the_daemon_down_still_prints_the_cursor(rig):
-    """The cursor is a file and the one durable fact. A blank where a binding
+    """The cursor is in comms.db and the one durable fact. A blank where a binding
     would be is not an answer; saying which half is unknowable is."""
-    cursors.advance(IDENTITY, "1500000000000009252")
+    put_cursor(IDENTITY, "1500000000000009252")
     rig.daemon.stop()
 
     code, out = rig.cli(["explain", IDENTITY],  name="planner", scope="proj-a")
@@ -421,7 +288,7 @@ def test_explain_reaches_no_credential_and_writes_nothing(rig):
     code, _ = rig.cli(["explain", IDENTITY],  name="planner", scope="proj-a")
     assert code == 0
     assert rig.record.history(rig.names_channel) == before
-    assert cursors.read(IDENTITY) is None, "explaining a cursor never moves it"
+    assert cursor_of(IDENTITY) is None, "explaining a cursor never moves it"
 
 
 def test_explaining_a_retired_ephemeral_says_so(rig):

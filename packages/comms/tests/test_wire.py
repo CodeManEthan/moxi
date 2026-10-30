@@ -482,14 +482,17 @@ def test_an_adapter_method_on_a_connection_with_no_binding_is_not_bound(rig, lin
 def test_injected_and_activity_on_the_bindings_own_connection(rig, lines):
     line = lines()
     bound(line)
+    mid = rig.post_as("main@proj-a", [PLANNER], "for the planner").id
+    assert wait_until(lambda: mid in rig.daemon.bindings[PLANNER].delivered)
+    opened = result(line.call("open_digest", {"ids": [mid]}))["digest"]
     other = warm_session()
     line.notify("activity", {"identity": PLANNER, "session_id": other, "seq": line.seq()})
-    line.notify("injected", {"identity": PLANNER, "through": "5", "text": "the digest",
+    line.notify("injected", {"identity": PLANNER, "digest": opened, "text": "the digest",
                              "seq": line.seq()})
     result(line.call("max_id"))
     assert rig.daemon.bindings[PLANNER].session_id == other
     digest = result(lines().call("last_digest", {"identity": PLANNER}))
-    assert digest == {"identity": PLANNER, "bound": True, "through": "5",
+    assert digest == {"identity": PLANNER, "bound": True, "through": mid,
                       "digest": "the digest"}
 
 
@@ -672,13 +675,15 @@ def test_the_connection_past_the_cap_is_busy_at_its_first_method(rig, lines):
 
 def take(line: Line, taken: list[str]) -> list[str]:
     """What has arrived since `taken`, after a round trip; then those ids are put in a
-    digest (`injected` through the last), which frees the window for the next."""
+    digest (`open_digest`, then `injected` naming it), which frees the window for the
+    next."""
     result(line.call("max_id"))
     arrived = line.delivered()
     assert arrived[:len(taken)] == taken
     fresh = arrived[len(taken):]
     if fresh:
-        line.notify("injected", {"identity": MAIN, "through": fresh[-1], "text": "digest",
+        digest = result(line.call("open_digest", {"ids": fresh}))["digest"]
+        line.notify("injected", {"identity": MAIN, "digest": digest, "text": "digest",
                                  "seq": line.seq()})
     return fresh
 

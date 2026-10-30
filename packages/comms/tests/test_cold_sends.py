@@ -31,12 +31,12 @@ import threading
 import time
 
 import pytest
-from conftest import (cursor_of, projects_root, raw_connection, record_rows, send_ready, send_turn, settle,
+from conftest import (cursor_of, projects_root, put_cursor, raw_connection, record_rows, send_ready, send_turn, settle,
                       wait_for_queue, wait_until, write_config, write_transcript)
 
 from moxi import exit as moxi_exit
 from moxi_comms.store import books as books_mod
-from moxi_comms import cache, cli, constants, cursors, machine_line
+from moxi_comms import cache, cli, constants, machine_line
 from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.claimhold import ClaimServer
 from moxi_comms.client import DaemonClient
@@ -624,17 +624,17 @@ def test_a_newer_message_goes_alone_and_the_row_waits(rig):
     assert held_of(rig) == {held}
 
 
-def test_a_cursor_past_a_held_id_leaves_its_row(rig):
-    """Rows do not need the cursor: live mail past a queued id moves the
-    cursor past it, and the row stays until a `turn` names it handled."""
+def test_live_mail_acked_above_a_held_id_leaves_its_row_and_the_cursor_below_it(rig):
+    """Live mail above a queued id is acked; the cursor stops below the row, and the
+    row stays until a turn end names it handled."""
     reviewer = rig.shim(**REVIEWER)
     held = next_turn(rig)
     for i in range(3):
         send(rig, REVIEWER_Q, f"plain {i}")
     wait_for_queue(reviewer, 3)
     reviewer.on_turn_boundary(idle=True)     # the idle tick injects the live mail
-    reviewer.on_turn_boundary()              # its Stop: cursor written, then `turn`
-    assert int(cursor_of(REVIEWER_Q)) > int(held)
+    reviewer.on_turn_boundary()              # its Stop: `turn_ended`, the ack
+    assert int(cursor_of(REVIEWER_Q)) == int(held) - 1
     assert held_of(rig) == {held}
     # First digest only: the Stop's warm release (`handled=[]`) may land before its flush.
     assert held not in reviewer.injected[0]
@@ -722,8 +722,7 @@ def test_a_daemon_restart_rebuilds_held_and_the_reconnect_releases_nothing(rig, 
     assert reviewer.queue == [] and held_of(rig) == {mid}
 
 
-def test_a_reconnect_whose_replay_finds_only_holding_duplicates_releases_nothing(
-        rig, reboot):
+def test_a_reconnect_after_a_restart_gets_its_unflagged_row_once(rig, reboot):
     reviewer = rig.shim(**REVIEWER, autoreconnect=True, backoff=fast_backoff())
     code, out = send(rig, REVIEWER_Q, "queued, not yet shown")
     plain = sent_id(out)
@@ -733,10 +732,10 @@ def test_a_reconnect_whose_replay_finds_only_holding_duplicates_releases_nothing
     wait_until(lambda: REVIEWER_Q in daemon.bindings and not reviewer.offline)
     time.sleep(0.3)
     assert queued_ids(reviewer) == [plain]
-    # The boot rescan found plain to an unbound name: a row, which the reconnect's
-    # `holding` claims, so no release hands it again; it waits for `handled`.
+    # The boot fence made plain's handed row wait; the reconnect held nothing, and its
+    # bind released plain once. The flagged row waits for a real boundary.
     assert held_of(rig) == {held, plain}
-    assert plain in daemon.bindings[REVIEWER_Q].delivered, "claimed from `holding`"
+    assert plain in daemon.bindings[REVIEWER_Q].delivered, "released at the bind"
 
 
 def test_the_boot_read_finds_held_mail_past_the_rescan_limit(rig, reboot):
@@ -839,7 +838,7 @@ def test_the_trim_waits_for_the_queue_load(rig, monkeypatch, reboot):
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(rig.clock() - 200 * 86400))
     rig.age_message(mid, stamp)
     rig.age_message(ancient.id, stamp)
-    cursors.advance("main@proj-b", ancient.id)     # handled: the boot rescan gives no row
+    put_cursor("main@proj-b", ancient.id)          # handled: the boot rescan gives no row
     unloaded = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     assert unloaded._queue_loaded is False
     unloaded.trim_record()
@@ -965,10 +964,10 @@ def test_comms_agents_and_comms_explain_name_queued_mail(rig):
     assert f"  {'reviewer@proj-a':<24} 1 message(s), oldest waiting 2d 3h" in out
     assert "pending" not in out
     code, out = rig.cli(["explain", REVIEWER_Q, mid], **PLANNER)
-    assert code == 0 and out.splitlines()[0].startswith(f"{REVIEWER_Q}   {cursors.WAITING}")
-    assert "This message waits in the queue for the name's next release point" in \
+    assert code == 0 and out.splitlines()[0].startswith(f"{REVIEWER_Q}   {books_mod.WAITING}")
+    assert "This message waits in the name's rows for its next release point" in \
         out.replace("\n  ", " ")
-    assert cursors.BEHIND not in out
+    assert books_mod.BEHIND not in out
 
 
 def test_held_is_accepted_for_archivist_and_ignored_for_the_operator(rig, bind):

@@ -29,7 +29,8 @@ from conftest import (record_rows, send_ready, send_turn, wait_for_queue, wait_u
                       write_transcript)
 
 from moxi import exit as moxi_exit
-from moxi_comms import cache, cli, constants, cursors, machine_line
+from moxi_comms import cache, cli, constants, machine_line
+from moxi_comms.store import books as books_mod
 from moxi_comms.client import DaemonClient, DaemonError
 from moxi_comms.daemon import TIER_EPHEMERAL
 from moxi_comms.paths import daemon_socket
@@ -162,7 +163,7 @@ def test_a_plain_send_to_a_cold_shim_is_posted_and_held(rig):
     code, roster = rig.cli(["agents", "--seats"], **PLANNER)
     assert f"  {REVIEWER_Q:<24} 1 message(s), oldest waiting " in roster
     code, why = rig.cli(["explain", REVIEWER_Q, msg.id], **PLANNER)
-    assert code == 0 and why.splitlines()[0].startswith(f"{REVIEWER_Q}   {cursors.WAITING}")
+    assert code == 0 and why.splitlines()[0].startswith(f"{REVIEWER_Q}   {books_mod.WAITING}")
     assert f"1 in the queue for its next release point: {msg.id}" in " ".join(why.split())
     assert "ACCOUNT-LIMITS-SECRET" not in out
 

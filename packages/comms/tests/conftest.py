@@ -632,6 +632,21 @@ def cursor_of(qualified: str):
     return None if row is None else row["cursor"]
 
 
+def put_cursor(qualified: str, message_id) -> None:
+    """Put a name's cursor in comms.db's books by hand, as an earlier ack would have."""
+    from moxi_comms.store import books
+    held = books.Books()
+    held.open()
+    try:
+        with held._lock, held._write() as conn:
+            conn.execute("INSERT INTO cursors(name, message_id, updated_at) VALUES "
+                         "(?, ?, ?) ON CONFLICT(name) DO UPDATE SET "
+                         "message_id = excluded.message_id", (qualified, int(message_id),
+                                                             "2026-01-01T00:00:00Z"))
+    finally:
+        held.close()
+
+
 @pytest.fixture
 def bind_answered():
     """Bindings held by bare DaemonClients: `bind_answered(**register_fields)` registers

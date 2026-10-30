@@ -389,17 +389,23 @@ def test_mail_claimed_but_not_injected_is_undelivered_and_injection_clears_it(ri
     assert wait_until(lambda: query_owed(R)["undelivered"] is False)
 
 
-def test_a_reconnect_after_a_daemon_restart_whose_holding_ids_do_not_read_undelivered(
+def test_a_digest_open_across_a_daemon_restart_is_handed_again_and_reads_undelivered(
         rig, reboot):
+    """The restart's fence ends the open digest and its row waits; the reconnect holds
+    nothing, so the bind hands the message again and it reads undelivered until the
+    shim injects it again."""
     reviewer = rig.shim(**REVIEWER, autoreconnect=True, backoff=iter([0.05] * 200))
-    send(rig, "reviewer", "task")
+    sent = send(rig, "reviewer", "task")
     wait_for_queue(reviewer, 1)
     reviewer.on_turn_boundary()          # injected, turn not yet complete: held_ids
     assert reviewer.held_ids
     daemon = reboot(rig)
     assert wait_until(lambda: R in daemon.bindings, timeout=5)
-    assert daemon.bindings[R].handed_max == "0"
-    assert query_owed(R)["undelivered"] is False
+    assert wait_until(lambda: daemon.bindings[R].handed_max == sent.id)
+    assert wait_until(lambda: [p["message_id"] for p in reviewer.queue] == [sent.id])
+    assert query_owed(R)["undelivered"] is True
+    reviewer.on_turn_boundary()
+    assert wait_until(lambda: query_owed(R)["undelivered"] is False)
 
 
 # --------------------------------------------------------------- presence
@@ -619,16 +625,37 @@ class Answers:
                 "floor": self.floor}
 
 
+class DigestsOnly:
+    """The one daemon a unit shim talks to: `open_digest` keeps every id, in a digest
+    of its own; turn ends and notifications go nowhere."""
+
+    connected = True
+
+    def __init__(self):
+        self.digests = 0
+
+    def call(self, method, params=None, **kw):
+        if method == "open_digest":
+            self.digests += 1
+            return {"digest": self.digests, "ids": list(params["ids"]), "dropped": []}
+        return {}
+
+    def notify(self, method, params=None):
+        return None
+
+
 @pytest.fixture
 def unit():
-    """A shim with no daemon: the `owed` query answered by `Answers`, a clock 5 minutes
-    past T0, reviewer declaring lead its director, registration high-water 100."""
+    """A shim with no daemon but one that opens digests: the `owed` query answered by
+    `Answers`, a clock 5 minutes past T0, reviewer declaring lead its director,
+    registration high-water 100."""
     from moxi_comms.adapters.claude_shim import ClaudeShim
     answers = Answers()
     clock = lambda: T0 + 300                                     # noqa: E731
     shim = ClaudeShim(injector=lambda text: None, directors=(LEAD_Q,), clock=clock,
                       owed_query=answers, session_id="sess-a")
     shim.identity = R
+    shim._client = DigestsOnly()
     shim.ledger.hwm = "100"
     shim.answers = answers
     yield shim

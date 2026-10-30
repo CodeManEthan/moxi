@@ -836,8 +836,9 @@ def test_the_payload_carries_the_posture_on_release_at_bind(rig):
 
 
 def test_the_payload_carries_the_posture_on_rescan(rig, pair):
-    """The rescan routes through `_deliver` like live routing and replay. The shim drops
-    an id it already holds, so the push is read off the daemon's side of the socket."""
+    """The rescan routes through `_deliver` like live routing. The shim drops an id it
+    already holds, so the push is read off the daemon's side of the socket; the rescan
+    reads no routed mark, as on a home that has none yet, so it routes the ask again."""
     _, reviewer = pair
     ask = open_ask(rig)
     wait_until(lambda: any(p["message_id"] == ask.id for p in reviewer.queue))
@@ -851,6 +852,7 @@ def test_the_payload_carries_the_posture_on_rescan(rig, pair):
     binding.conn.notify_threadsafe = record
     with rig.daemon._lock:
         binding.delivered.clear()
+    rig.daemon.books.routed_through = lambda: None     # no mark: route it again
     rig.daemon.rescan()
     (again,) = [f["payload"] for f in sent
                 if f.get("op") == "deliver" and f["payload"]["message_id"] == ask.id]

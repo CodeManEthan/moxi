@@ -19,7 +19,7 @@ from types import SimpleNamespace
 import pytest
 from conftest import no_cold_at, queued, wait_for_payload, wait_for_queue, wait_until
 
-from moxi_comms import constants, cursors, machine_line
+from moxi_comms import constants, machine_line
 from moxi_comms.client import DaemonOffline
 from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.daemon import AUDIENCE_INDEX_SLACK, AUDIENCE_INDEX_UNKNOWN, Daemon
@@ -288,23 +288,6 @@ def test_a_reply_to_an_indexed_ask_with_no_audience_carries_none(rig):
     assert delivered(planner, reply.id) == (None, None)
 
 
-def test_register_replay_feeds_the_index_before_it_delivers(rig):
-    """Register replays the record past the cursor, then releases the queue;
-    both call `_deliver`, so the walk must index what it parses first. The reply
-    to the unbound planner is a queue row, handed by the register's release.
-    The index is emptied here to prove the ask was learned from the register's own walk."""
-    original = ask(rig, audience="operator")
-    reply = reply_to_planner(rig, original.id)
-    wait_until(lambda: reply.id in rig.daemon.audiences)
-    assert wait_until(lambda: reply.id in queued(rig.daemon, "planner@proj-a"))
-    with rig.daemon._lock:
-        rig.daemon.audiences.clear()
-    planner = rig.shim(**PLANNER)
-    payload = wait_for_payload(planner, reply.id)
-    assert payload["backlog"] is False and payload["held"] is True, "released, not replayed"
-    assert (payload["audience"], payload["audience_source"]) == ("operator", "inherited")
-
-
 def test_the_boot_rescan_rebuilds_the_index(rig, reboot):
     original = ask(rig, audience="operator")
     reply = reply_to_planner(rig, original.id)
@@ -372,9 +355,8 @@ def test_a_live_reply_racing_the_boot_rescan_delivers_as_unknown(rig, monkeypatc
     is dropped. Once the rescan has passed the referent, the next reply inherits."""
     original = ask(rig, audience="operator")
     rig.daemon.stop()
-    # planner has handled everything up to the ask, so its own catch-up walks nothing
-    # and cannot index the ask for it: only the rescan can.
-    cursors.advance("planner@proj-a", original.id)
+    # A bind's catch-up is the name's rows and walks no record, so it cannot index the
+    # ask: only the rescan can.
 
     gate = threading.Event()
     daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
@@ -446,8 +428,6 @@ def test_the_second_hop_of_a_referent_older_than_the_window_stays_unknown(rig, r
     original = ask(rig, audience="operator")
     first = reply_to_planner(rig, original.id)
     rig.daemon.stop()
-    cursors.advance("planner@proj-a", first.id)
-    cursors.advance("reviewer@proj-a", first.id)
     old = constants.RESCAN_LIMIT
     constants.RESCAN_LIMIT = 1                      # the window holds the reply only
     try:
@@ -467,8 +447,6 @@ def _boot_racing_the_rescan(rig, monkeypatch, *, snapshot_first):
     the reply lands, so the rescan never re-parses it."""
     original = ask(rig, audience="operator")
     rig.daemon.stop()
-    cursors.advance("planner@proj-a", original.id)
-    cursors.advance("reviewer@proj-a", original.id)
     daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     gate, snap = threading.Event(), {}
     real_rescan, real_history = daemon.rescan, rig.record.history
@@ -568,19 +546,16 @@ def test_a_rescan_does_not_overwrite_a_known_inherited_value_once_the_ask_aged_o
     assert delivered(reviewer, follow.id) == ("operator", "inherited")
 
 
-def test_register_replay_does_not_overwrite_a_known_inherited_value(rig):
-    """On its frequent path: a register whose cursor sits between the ask and the
-    reply re-parses the reply without the ask, and must keep what the index holds."""
-    original, reply = _inherited_pair_whose_ask_aged_out(rig)
-    cursors.advance("reviewer@proj-a", original.id)
+def test_a_register_keeps_a_known_inherited_value(rig):
+    """A register after the ask aged out of the index releases its rows and keeps what
+    the index holds for the reply."""
+    _, reply = _inherited_pair_whose_ask_aged_out(rig)
     marker = ask(rig, text="after the reply")       # a queue row for reviewer
     assert wait_until(lambda: marker.id in queued(rig.daemon, "reviewer@proj-a"))
     reviewer = rig.shim(**REVIEWER)
     payload = wait_for_payload(reviewer, marker.id)
-    # Register replays past the cursor first, then releases the row: the marker's
-    # release says the replay already walked past the reply
     assert payload["backlog"] is False and payload["held"] is True, \
-        "the register released the row after its replay walked past the reply"
+        "the register released the row"
     assert rig.daemon.audiences[reply.id] == "operator"
     follow = ask_re(rig, reply.id)
     assert delivered(reviewer, follow.id) == ("operator", "inherited")
@@ -606,7 +581,7 @@ def test_a_reconnect_without_resume_feeds_the_index(rig):
 def test_a_reconnect_without_resume_keeps_a_known_value_once_the_ask_aged_out(rig):
     """The non-RESUME READY path again, with the ask gone from the index and outside the
     window: the rescan re-parses the reply and keeps its inherited value. Reviewer is
-    bound first, so no register replay puts the ask back into the index."""
+    bound first."""
     reviewer = rig.shim(**REVIEWER)
     _, reply = _inherited_pair_whose_ask_aged_out(rig)
     wait_for_queue(reviewer, 1)

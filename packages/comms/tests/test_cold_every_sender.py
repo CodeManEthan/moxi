@@ -39,13 +39,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from conftest import (assistant_line, cache_absent, cache_api, projects_root, raw_connection,
+from conftest import (assistant_line, cache_absent, cache_api, projects_root, put_cursor,
+                      raw_connection,
                       record_rows, send_turn, settle, store_rows, synced, wait_for_queue,
                       wait_until, write_transcript)
 
 from moxi import exit as moxi_exit
 from moxi_comms.store import books as books_mod
-from moxi_comms import cache, cli, cursors, machine_line, paths
+from moxi_comms import cache, cli, machine_line, paths
 from moxi_comms.adapters.claude_shim import ACTIVITY_METHODS, ClaudeShim
 from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import Daemon
@@ -190,10 +191,19 @@ def raw_activity(pushes, q, **fields):
 
 
 def raw_turn(pushes, q, handled=(), unhandled=()):
-    """`activity kind=turn` with `handled` and `unhandled`, as the adapters send
-    it at every turn end."""
-    raw_activity(pushes, q, kind="turn", turned=True, handled=[str(i) for i in handled],
-                 unhandled=[str(i) for i in unhandled])
+    """A turn end on a bare binding's own connection, as the adapters send it: one
+    digest opened for the `handled` message ids and one for the `unhandled` ones, then
+    `turn_ended` naming them."""
+    def opened(ids) -> list:
+        ids = [str(i) for i in ids]
+        if not ids:
+            return []
+        return [pushes.client.call("open_digest", {"ids": ids}, timeout=5.0)["digest"]]
+
+    handled_d, unhandled_d = opened(handled), opened(unhandled)
+    return pushes.client.call("turn_ended", {"identity": q, "turned": True,
+                                             "handled": handled_d,
+                                             "unhandled": unhandled_d}, timeout=5.0)
 
 
 def raw_ready(pushes, q, source):
@@ -781,8 +791,8 @@ def test_held_mail_at_a_bare_binding_bind(rig, adapters, anchor, released):
         assert helper.ids() == [] and held_of(rig, HELPER_Q) == {held.id}
 
 
-def test_replays_cursor_never_passes_a_cold_held_id(rig):
-    cursors.advance(REVIEWER_Q, "1")
+def test_the_binds_cursor_never_passes_a_cold_held_id(rig):
+    put_cursor(REVIEWER_Q, "1")
     before = post(rig, [REVIEWER_Q], "while unbound")
     assert wait_until(lambda: before.id in held_of(rig))
     write_transcript(SESS_A, 3 * HOUR)
@@ -794,7 +804,7 @@ def test_replays_cursor_never_passes_a_cold_held_id(rig):
         wait_until(lambda: any(f.get("op") == "replay_complete" for f in pushes.frames))
         (done,) = [f for f in pushes.frames if f.get("op") == "replay_complete"]
         assert pushes.delivered() == []
-        assert done["cursor"] in (None, "1") and int(done["cursor"]) < int(before.id)
+        assert done["cursor"] == "1" and int(done["cursor"]) < int(before.id)
         assert held_of(rig) == {before.id}
     finally:
         c.close()
@@ -891,7 +901,7 @@ def test_a_cursor_past_a_cold_held_id_leaves_its_row(rig):
     shim(rig, SESS_A, age=2 * HOUR)
     msg = post(rig, [REVIEWER_Q])
     wait_until(lambda: msg.id in held_of(rig))
-    cursors.advance(REVIEWER_Q, msg.id)
+    put_cursor(REVIEWER_Q, msg.id)
     rig.daemon.rescan()
     assert held_of(rig) == {msg.id}
     assert wait_until(lambda: record_rows(rig.record, REVIEWER_Q) == {msg.id})
@@ -963,8 +973,8 @@ def test_comms_explain_names_a_cold_shims_and_a_cold_bare_bindings_mail_waiting(
     wait_until(lambda: held.id in held_of(rig) and other.id in held_of(rig, HELPER_Q))
     for name, q, mid in ((REVIEWER_Q, REVIEWER_Q, held.id), (HELPER_Q, HELPER_Q, other.id)):
         code, out = rig.cli(["explain", name, mid], **PLANNER)
-        assert code == 0 and out.splitlines()[0].startswith(f"{q}   {cursors.WAITING}"), out
-        assert ("This message waits in the queue for the name's next release point"
+        assert code == 0 and out.splitlines()[0].startswith(f"{q}   {books_mod.WAITING}"), out
+        assert ("This message waits in the name's rows for its next release point"
                 in out.replace("\n  ", " "))
 
 

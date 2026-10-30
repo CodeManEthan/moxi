@@ -685,7 +685,7 @@ def test_an_operator_turn_sends_activity_at_busy_and_one_turn_at_its_idle(
     assert "kind" not in ours[0], "busy: a no-kind activity first"
     turns = turn_frames(ours)
     assert len(turns) == 1, "one turn frame per idle"
-    assert turns[0]["handled"] == [] and turns[0]["unhandled"] == []
+    assert turns[0]["handled_ids"] == [] and turns[0]["unhandled_ids"] == []
     assert turns[0]["session_id"] == adapter.session_id
     assert cursor_of(IDENTITY) is None
 
@@ -697,7 +697,7 @@ def test_a_digests_turn_is_handled_on_the_frame_after_the_cursor_write(
     assert wait_until(lambda: turn_frames(frames) and cursor_of(IDENTITY), 5.0)
     high = max(int(m.id) for m in rig.record.history(rig.names_channel))
     turn = turn_frames(frames)[-1]
-    assert turn["handled"] == [str(high)] and turn["unhandled"] == []
+    assert turn["handled_ids"] == [str(high)] and turn["unhandled_ids"] == []
     assert turn["cursor_then"] == str(high), "the cursor is written before the frame"
     assert not adapter.held_ids
 
@@ -712,7 +712,7 @@ def test_a_digests_turn_that_errs_is_unhandled_and_moves_no_cursor(
     fake.error(adapter.session_id)
     assert wait_until(lambda: turn_frames(frames), 5.0)
     turn = turn_frames(frames)[-1]
-    assert turn["handled"] == [] and set(turn["unhandled"]) == held
+    assert turn["handled_ids"] == [] and set(turn["unhandled_ids"]) == held
     assert cursor_of(IDENTITY) is None
     assert wait_until(lambda: not adapter.held_ids, 2.0), "let go once the frame is sent"
 
@@ -735,7 +735,7 @@ def test_an_aborted_turn_sends_no_turn_and_its_ids_go_unhandled_on_the_next(
     fake.control("type", {"session": adapter.session_id, "text": "next"})
     fake.finish(adapter.session_id)
     assert wait_until(lambda: turn_frames(frames), 5.0)
-    assert set(turn_frames(frames)[0]["unhandled"]) == held
+    assert set(turn_frames(frames)[0]["unhandled_ids"]) == held
     assert wait_until(lambda: not adapter.held_ids, 2.0)
     assert cursor_of(IDENTITY) is None
 
@@ -813,7 +813,7 @@ def test_a_post_pending_at_the_follow_goes_again_into_the_new_session(
     assert adapter.queue == [], "a re-push of a held id is dropped"
     fake.finish(adapter.session_id)
     assert wait_until(lambda: cursor_of(IDENTITY) == max(held, key=int), 5.0)
-    assert set(turn_frames(frames)[-1]["handled"]) == held
+    assert set(turn_frames(frames)[-1]["handled_ids"]) == held
 
 
 def test_a_compaction_while_the_daemon_is_away_is_reported_after_the_register(

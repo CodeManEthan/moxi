@@ -7,7 +7,8 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from conftest import cursor_of, queued, raw_connection, settle, wait_for_queue, wait_until, write_config
+from conftest import (cursor_of, put_cursor, queued, raw_connection, send_turn, settle,
+                      wait_for_queue, wait_until, write_config)
 
 from moxi_comms import constants, cursors, daemon as daemon_mod
 from moxi_comms.daemon import Daemon
@@ -132,7 +133,7 @@ def test_rescan_does_not_re_pend_what_an_unbound_name_already_handled(rig):
     the rescan reads it."""
     rig.record.disconnect()
     msg = rig.post_as("agent-6", ["curator@proj-a"], "handled before unbinding")
-    cursors.advance("curator@proj-a", msg.id)
+    put_cursor("curator@proj-a", msg.id)
 
     rig.daemon.rescan()
     assert queued(rig.daemon, "curator@proj-a") == set()
@@ -153,7 +154,7 @@ def test_rescan_still_pends_for_a_message_past_the_cursor(rig):
     rig.record.disconnect()
     first = rig.post_as("agent-6", ["curator@proj-a"], "handled")
     second = rig.post_as("agent-6", ["curator@proj-a"], "arrived after the cursor")
-    cursors.advance("curator@proj-a", first.id)
+    put_cursor("curator@proj-a", first.id)
 
     rig.daemon.rescan()
     assert queued(rig.daemon, "curator@proj-a") == {second.id}
@@ -211,17 +212,6 @@ def test_a_corrupt_cursor_file_does_not_raise_out_of_the_STOP_HOOK(rig, body):
     curator.on_turn_boundary()                   # inject
     curator.on_turn_boundary()                   # complete: this is where it used to die
     assert cursor_of("curator@proj-a") == delivered
-
-
-def test_advance_never_writes_a_cursor_that_is_not_a_message_id():
-    """The other direction: a caller bug must not be written down. A cursor holding junk
-    would claim mail was handled that never was -- the one thing a cursor must never do --
-    so
-    nothing is written, nothing is raised, and the batch replays."""
-    assert cursors.advance("curator@proj-a", "1400000000009") == "1400000000009"
-    assert cursors.advance("curator@proj-a", "not-an-id") is None
-    assert cursors.advance("curator@proj-a", None) is None
-    assert cursor_of("curator@proj-a") == "1400000000009", "the good one is untouched"
 
 
 def test_a_cursor_that_cannot_be_written_degrades_to_replay_not_to_a_raise(monkeypatch):
@@ -438,23 +428,25 @@ def test_mail_handed_to_a_session_that_unbinds_before_its_cursor_moves_is_pendin
 
 
 def test_mail_a_session_handled_before_unbinding_stays_handled(rig):
-    """The other half: the cursor passed it, so it is not pending after the unbind."""
+    """The other half: its turn acked it, so it is not pending after the unbind."""
     b = rig.shim(name="reviewer", scope="proj-a")
     msg = rig.post_as("agent-6", ["reviewer@proj-a"], "handled")
-    assert wait_until(lambda: msg.id in rig.daemon.bindings["reviewer@proj-a"].delivered)
-    cursors.advance("reviewer@proj-a", msg.id)         # the turn boundary's act
+    wait_for_queue(b, 1)
+    b.on_turn_boundary()                               # inject
+    b.on_turn_boundary()                               # complete: the ack
+    assert cursor_of("reviewer@proj-a") == msg.id
 
     b.stop()
     assert wait_until(lambda: "reviewer@proj-a" not in rig.daemon.bindings)
     assert queued(rig.daemon, "reviewer@proj-a") == set()
 
 
-def test_a_partial_cursor_re_pends_only_what_it_has_not_passed(rig):
+def test_a_partial_ack_re_pends_only_what_it_did_not_handle(rig):
     b = rig.shim(name="reviewer", scope="proj-a")
     first = rig.post_as("agent-6", ["reviewer@proj-a"], "handled")
     second = rig.post_as("agent-6", ["reviewer@proj-a"], "handed only")
     assert wait_until(lambda: second.id in rig.daemon.bindings["reviewer@proj-a"].delivered)
-    cursors.advance("reviewer@proj-a", first.id)
+    send_turn(b, handled=[first.id])
 
     b.stop()
     assert wait_until(lambda: "reviewer@proj-a" not in rig.daemon.bindings)

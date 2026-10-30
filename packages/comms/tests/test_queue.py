@@ -22,8 +22,8 @@ import time
 import uuid
 
 import pytest
-from conftest import (cursor_of, as_frames, digest_ids, projects_root, queued, record_rows,
-                      store_rows, synced, wait_until, write_config)
+from conftest import (cursor_of, as_frames, digest_ids, projects_root, put_cursor, queued,
+                      record_rows, store_rows, synced, wait_until, write_config)
 
 from moxi_comms import cache, constants, machine_line
 from moxi_comms.adapters.claude_shim import ACTIVITY_METHODS
@@ -526,7 +526,7 @@ def test_a_rescan_writes_no_row_at_or_below_the_cursor(rig, reads, peers, blocke
     with blocked:
         at = post(rig, [REVIEWER_Q], "handled before it unbound")
         above = post(rig, [REVIEWER_Q], "not yet")
-    set_cursor(rig, REVIEWER_Q, at)
+    put_cursor(REVIEWER_Q, at)
     rig.daemon.rescan()
     assert rows(rig, REVIEWER_Q) == {above}
     reads[CODER_Q] = cache.WARM
@@ -534,7 +534,7 @@ def test_a_rescan_writes_no_row_at_or_below_the_cursor(rig, reads, peers, blocke
     with blocked:
         below = post(rig, [CODER_Q], "handled")
         flagged_below = post(rig, [CODER_Q], "handled too", held=True)
-    set_cursor(rig, CODER_Q, flagged_below)
+    put_cursor(CODER_Q, flagged_below)
     rig.daemon.rescan()
     peer.sync()
     assert below not in peer.handed()
@@ -542,15 +542,6 @@ def test_a_rescan_writes_no_row_at_or_below_the_cursor(rig, reads, peers, blocke
 
 
 # ============================================================ (f) failed hand-off
-
-def set_cursor(rig, q, mid) -> None:
-    """Put the name's cursor at `mid` in the books by hand, as an earlier ack would
-    have."""
-    with rig.daemon.books._lock, rig.daemon.books._write() as conn:
-        conn.execute("INSERT INTO cursors(name, message_id, updated_at) VALUES (?, ?, ?) "
-                     "ON CONFLICT(name) DO UPDATE SET message_id = excluded.message_id",
-                     (q, int(mid), "2026-01-01T00:00:00Z"))
-
 
 def closing(monkeypatch, conn) -> None:
     """`conn` reads as closing from now on, as when its peer went away between the
