@@ -144,8 +144,6 @@ class Then:
     is written first; `after` runs next on the pool, and the connection's next message
     waits for it. A bind answers with its token, then hands the name its catch-up."""
 
-    __slots__ = ("answer", "after")
-
     def __init__(self, answer: object, after: Callable[[], object]):
         self.answer = answer
         self.after = after
