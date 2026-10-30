@@ -67,6 +67,10 @@ def test_the_worked_cases(eng):
     # A match inside a longer reported one comes back once, as the longer one.
     assert texts_of("hi alexa quill", hits("hi alexa quill", ["alexa", "alexa quill"],
                                            eng=eng)) == ["alexa quill"]
+    # The search restarts one character after a match's start, so a match refused for
+    # its neighbour does not hide one it overlaps, and overlapping matches all count.
+    assert hits("xab ab ab", ["ab ab"], eng=eng) == [(4, 9)]
+    assert hits("aaa", anywhere=["aa"], eng=eng) == [(0, 2), (1, 3)]
 
 
 @pytest.mark.parametrize("eng", [RE2, PY], ids=["re2", "re"])
