@@ -7,6 +7,7 @@ real thing once.
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -14,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from moxi_dev import check
+from moxi_dev import check, testing
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -439,6 +440,8 @@ LINE = re.compile(
     r"packages: (?P<packages>[^|]+) \| lock (pass|fail|not run) \| "
     r"tags (pass|fail|not run) \| sync (pass|fail|skipped|not run) \| "
     r"lint (?P<lint>pass|none|not run|fail \([^)]+\)) \| (?P<suites>[^|]+) \| "
+    r"(?P<durations>durations none|durations \d+\.\d+s, slowest 5% \d+%, delta "
+    r"(none|[+-]\d+\.\d+s vs [0-9a-f]{12}( \([^)]+\))?)) \| "
     r"total \d+\.\d+s \| exit (?P<code>\d)$")
 
 
@@ -504,3 +507,207 @@ def test_main_outside_a_checkout_still_prints_a_line(tmp_path, monkeypatch, caps
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
     assert check.main([]) == 2
     assert capsys.readouterr().out.strip().endswith("exit 2")
+
+
+# --- what the suites run: the kit's selection ----------------------------------------------
+
+def suite_envs(runs):
+    return {cwd.name: env for cmd, cwd, env in runs.calls if "pytest" in cmd}
+
+
+def test_a_picked_run_hands_the_suites_the_changed_paths(repo):
+    commit_file(repo, "packages/sessions/x.py")
+    (repo / "packages/cache/new file.py").write_text("x\n")
+    runs = Runs()
+    environ = {"PATH": "/usr/bin", testing.TIERS_ENV: "all", testing.FINDING_ENV: "L1",
+               testing.CHANGED_ENV: "/elsewhere", testing.DURATIONS_ENV: "/elsewhere"}
+    run_check(repo, runs, environ=environ)
+    envs = suite_envs(runs)
+    assert list(envs) == ["sessions", "cache", "comms"]
+    for name, env in envs.items():
+        assert testing.TIERS_ENV not in env and testing.FINDING_ENV not in env
+        listed = Path(env[testing.CHANGED_ENV]).read_text()
+        assert listed == "packages/cache/new file.py\0packages/sessions/x.py\0"
+        assert env[testing.DURATIONS_ENV] == str(
+            repo / ".moxi-dev" / "run" / f"{name}.durations.json")
+
+
+def test_full_hands_the_suites_every_tier(repo):
+    runs = Runs()
+    run_check(repo, runs, full=True)
+    envs = suite_envs(runs)
+    assert list(envs) == list(LAYOUT)
+    for env in envs.values():
+        assert env[testing.TIERS_ENV] == "all" and testing.CHANGED_ENV not in env
+
+
+# --- durations -----------------------------------------------------------------------------
+
+class Timed(Runs):
+    """A step runner whose suites write the kit's durations file: `seconds` maps a
+    package to its tests' call seconds."""
+
+    def __init__(self, seconds, codes=None, write=True):
+        super().__init__(codes)
+        self.seconds = seconds
+        self.write = write
+
+    def __call__(self, cmd, cwd, env):
+        code = super().__call__(cmd, cwd, env)
+        if "pytest" in cmd and self.write and Path(cwd).name in self.seconds:
+            tests = {f"tests/test_it.py::test_{i}": {"setup": 0.0, "call": secs,
+                                                    "teardown": 0.0, "outcome": "passed"}
+                     for i, secs in enumerate(self.seconds[Path(cwd).name])}
+            Path(env[testing.DURATIONS_ENV]).write_text(json.dumps({"tests": tests}))
+        return code
+
+
+@pytest.fixture
+def ignoring(repo):
+    """The repo, with the check's own directory ignored, as the real one has it."""
+    (repo / ".git" / "info" / "exclude").write_text(".moxi-dev/\n")
+    return repo
+
+
+def records(repo):
+    return repo / ".git" / "moxi-dev" / "durations"
+
+
+def head(repo):
+    return git(repo, "rev-parse", "HEAD").strip()
+
+
+def test_the_line_gives_the_tests_seconds_and_the_slowest_share(ignoring):
+    commit_file(ignoring, "packages/cache/x.py")
+    # 20 tests: one of 10 s, nineteen of 0.5 s. The slowest 5 % is the one.
+    runs = Timed({"cache": [10.0] + [0.5] * 9, "comms": [0.5] * 10})
+    result = run_check(ignoring, runs)
+    assert "| durations 19.5s, slowest 5% 51%, delta none |" in result.line()
+    assert LINE.match(result.line()), result.line()
+
+
+def test_a_clean_run_keeps_the_commit_s_record_of_the_suites_that_passed(ignoring):
+    commit_file(ignoring, "packages/cache/x.py")
+    runs = Timed({"cache": [1.0], "comms": [2.0]},
+                 {lambda cmd, cwd: "pytest" in cmd and cwd.name == "comms": 1})
+    result = run_check(ignoring, runs)
+    path = records(ignoring) / f"{head(ignoring)}.json"
+    assert result.kept == path
+    data = json.loads(path.read_text())
+    assert data["commit"] == head(ignoring)
+    assert list(data["packages"]) == ["cache"]
+    assert data["packages"]["cache"]["tiers"] == "plain"
+    assert data["packages"]["cache"]["tests"]["tests/test_it.py::test_0"]["call"] == 1.0
+
+
+def test_a_later_run_at_the_commit_replaces_only_its_packages(ignoring):
+    commit_file(ignoring, "packages/cache/x.py")
+    run_check(ignoring, Timed({"cache": [1.0], "comms": [2.0]}))
+    run_check(ignoring, Timed({"moxi": [3.0], "cache": [4.0]}), full=True)
+    data = json.loads((records(ignoring) / f"{head(ignoring)}.json").read_text())
+    assert {name: entry["tiers"] for name, entry in data["packages"].items()} == {
+        "cache": "all", "comms": "plain", "moxi": "all"}
+
+
+def test_a_dirty_tree_or_a_finding_keeps_no_record(ignoring):
+    commit_file(ignoring, "packages/cache/x.py")
+    (ignoring / "packages/cache/y.py").write_text("y\n")
+    assert run_check(ignoring, Timed({"cache": [1.0]})).kept is None
+    git(ignoring, "add", "-A")
+    git(ignoring, "commit", "-q", "-m", "y")
+    result = run_check(ignoring, Timed({"cache": [1.0]}), finding=["L3"])
+    assert result.kept is None and not records(ignoring).exists()
+
+
+def on_main(repo, rel, seconds, full=True):
+    """Commit `rel` on main and keep a record for it there."""
+    git(repo, "switch", "-q", "main")
+    commit_file(repo, rel)
+    result = run_check(repo, Timed(seconds), full=full)
+    assert result.kept is not None
+    git(repo, "switch", "-q", "work")
+    git(repo, "rebase", "-q", "main")
+    return git(repo, "rev-parse", "main").strip()
+
+
+def test_the_delta_is_against_the_newest_ancestor_record_on_main(ignoring):
+    first = on_main(ignoring, "packages/moxi/a.py", {"cache": [5.0], "comms": [5.0]})
+    second = on_main(ignoring, "packages/moxi/b.py", {"cache": [3.0], "comms": [4.0]})
+    # a record on a branch HEAD does not descend from is no ancestor
+    git(ignoring, "switch", "-q", "-c", "side", "main")
+    commit_file(ignoring, "packages/moxi/side.py")
+    run_check(ignoring, Timed({"cache": [100.0], "comms": [100.0]}), full=True)
+    git(ignoring, "switch", "-q", "work")
+    commit_file(ignoring, "packages/cache/x.py")
+    result = run_check(ignoring, Timed({"cache": [4.5], "comms": [4.0]}), full=True)
+    assert first != second
+    assert result.delta.commit == second and result.delta.whole
+    assert result.delta.seconds == pytest.approx(1.5)
+    assert f", delta +1.5s vs {second[:12]} |" in result.line()
+
+
+def test_the_delta_compares_only_packages_run_the_same_way(ignoring):
+    first = on_main(ignoring, "packages/moxi/a.py", {"cache": [5.0], "comms": [5.0]})
+    commit_file(ignoring, "packages/cache/x.py")
+    # a picked run (not --full) has no package to compare with a --full record
+    assert run_check(ignoring, Timed({"cache": [1.0], "comms": [1.0]})).delta is None
+    result = run_check(ignoring, Timed({"cache": [4.0], "comms": [1.0], "moxi": [1.0]}),
+                       full=True)
+    assert result.delta.commit == first and not result.delta.whole
+    assert result.delta.packages == ("cache", "comms")
+    assert f", delta -5.0s vs {first[:12]} (cache, comms) |" in result.line()
+
+
+def test_head_s_own_record_is_not_its_ancestor(ignoring):
+    git(ignoring, "switch", "-q", "main")
+    commit_file(ignoring, "packages/moxi/a.py")
+    run_check(ignoring, Timed({"moxi": [1.0]}), full=True)
+    result = run_check(ignoring, Timed({"moxi": [1.0]}), full=True)
+    assert result.kept is not None and result.delta is None
+
+
+# --- --finding ------------------------------------------------------------------------------
+
+def test_a_finding_runs_only_its_tests_and_a_package_without_one_is_none(ignoring):
+    commit_file(ignoring, "packages/sessions/x.py")
+    runs = Timed({"sessions": [1.0], "cache": [], "comms": []},
+                 {lambda cmd, cwd: "pytest" in cmd and cwd.name != "sessions": 5})
+    result = run_check(ignoring, runs, finding=["L50", "L51", "L50"])
+    assert result.code == 0
+    for env in suite_envs(runs).values():
+        assert env[testing.FINDING_ENV] == "L50,L51"
+    assert re.search(r"sessions pass \S+, cache none \S+, comms none \S+ \|",
+                     result.line()), result.line()
+
+
+def test_a_finding_no_test_carries_fails_the_check(ignoring, capsys):
+    commit_file(ignoring, "packages/sessions/x.py")
+    runs = Timed({"sessions": [], "cache": [], "comms": []},
+                 {lambda cmd, cwd: "pytest" in cmd: 5})
+    result = run_check(ignoring, runs, finding=["L50"])
+    assert result.code == 1
+    assert "no test in sessions, cache, comms carries L50" in capsys.readouterr().out
+
+
+def test_a_finding_in_a_package_without_the_kit_fails_it(ignoring, capsys):
+    commit_file(ignoring, "packages/sessions/x.py")
+    result = run_check(ignoring, Timed({}, write=False), finding=["L50"])
+    assert result.code == 1
+    assert all(ok is False for _, ok, _ in result.suites)
+    assert "sessions: its tests don't load moxi_dev.testing" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("name", ["50", "l50", "L-50", "L5x", ""])
+def test_a_bad_finding_stops_the_check(repo, capsys, name):
+    runs = Runs()
+    result = run_check(repo, runs, full=True, finding=[name])
+    assert result.code == 2 and runs.calls == []
+    assert "--finding takes a finding as L<n>" in capsys.readouterr().err
+
+
+def test_main_reads_the_finding(repo, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(check, "check", lambda root, **kw: seen.update(kw) or check.Result())
+    monkeypatch.chdir(repo)
+    check.main(["--finding", "L4", "--finding", "L9"])
+    assert seen["finding"] == ["L4", "L9"]

@@ -1,6 +1,7 @@
 """`moxi-dev check`: the checks a change must pass before it merges.
 
-Run from the repository's root as `uv run --locked moxi-dev check [--full] [--base REV]`.
+Run from the repository's root as
+`uv run --locked moxi-dev check [--full] [--base REV] [--finding L<n>]`.
 It first reads the workspace, the worker count and the changed paths; a bad workspace,
 worker count or base stops it there, before any step runs. Then, in order:
 
@@ -30,17 +31,28 @@ worker count or base stops it there, before any step runs. Then, in order:
    can turn `-n auto` into a serial run) and the caller's `PYTEST_ADDOPTS` are dropped
    from the suites' environment, and an option that would undo the workers (`--pdb`)
    makes pytest refuse the run.
-7. Print one summary line, the last line of the output: the commit, the packages, the
-   lock, tag, sync and lint results, each package's tests and seconds, the total and the
-   exit code.
+
+   What runs is the package's plain `pytest` (its `-m` deselects the `browser`, `slow`,
+   `build` and `live` tiers), and besides it, through the test kit's variables
+   (`moxi_dev.testing`): a tier test marked `touches` whose glob matches a changed path;
+   with `--full`, every tier but `live`; with `--finding L<n>`, only the tests marked
+   with that finding, whatever their tier but `live`. Under `--finding` a package where
+   no test carries it counts as `none`, not as a failure, but a check where no package
+   has one fails. A `live` test never runs here.
+7. Read each suite's durations (the kit writes them), keep the commit's record and find
+   the newest record on `main` to compare with (`moxi_dev.durations`).
+8. Print one summary line, the last line of the output: the commit, the packages, the
+   lock, tag, sync and lint results, each package's tests and seconds, the tests' own
+   seconds with the slowest 5 %'s share of them and the delta against main, the total
+   and the exit code.
 
 The tags, each package's lint and each package's tests all run even when one before them
 failed, so one run shows every failure.
 
 The exit code is 0 only when every step passed, 1 when one failed, and 2 when the check
 could not start or a step could not be run (not in a workspace, a member with no readable
-`pyproject.toml` or no project name, no merge base, a bad `MOXI_TEST_WORKERS`, `uv` not on
-PATH). The summary line is printed in every case.
+`pyproject.toml` or no project name, no merge base, a bad `MOXI_TEST_WORKERS` or
+`--finding`, `uv` not on PATH). The summary line is printed in every case.
 """
 
 from __future__ import annotations
@@ -56,11 +68,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
-from . import lint, tags
+from . import durations, lint, tags
+from .testing import CHANGED_ENV, DURATIONS_ENV, FINDING_ENV, FINDING_NAME, TIERS_ENV
 
 PYTHON = "3.12"
 ENV_DIR = Path(".moxi-dev") / f"env-{PYTHON}"
 LINT_DIR = Path(".moxi-dev") / "lint"
+RUN_DIR = Path(".moxi-dev") / "run"       # this run's changed paths and suites' durations
 WORKERS_VAR = "MOXI_TEST_WORKERS"
 
 # A step's command, run from `cwd` with `env`; returns the exit code. Tests replace it.
@@ -214,8 +228,13 @@ def _base_env(environ: Mapping[str, str]) -> dict[str, str]:
 
 
 #: Dropped from the suites' environment: either can make the run serial, or run less
-#: than the package's own configuration says.
-SUITE_DROPPED_ENV = ("PYTEST_XDIST_AUTO_NUM_WORKERS", "PYTEST_ADDOPTS")
+#: than the package's own configuration says; the kit's selection and durations
+#: variables are the check's own to set.
+SUITE_DROPPED_ENV = ("PYTEST_XDIST_AUTO_NUM_WORKERS", "PYTEST_ADDOPTS", TIERS_ENV,
+                     CHANGED_ENV, FINDING_ENV, DURATIONS_ENV)
+
+#: pytest's exit code when it ran no test.
+NO_TESTS = 5
 
 
 @dataclass
@@ -226,13 +245,31 @@ class Result:
     tags: str = "not run"
     sync: str = "not run"
     lint: list[tuple[str, bool]] | None = None
-    suites: list[tuple[str, bool, float]] = field(default_factory=list)
+    #: (package, passed, seconds); passed is None under --finding when no test there
+    #: carries the finding.
+    suites: list[tuple[str, bool | None, float]] = field(default_factory=list)
+    durations: durations.Summary | None = None
+    delta: durations.Delta | None = None
+    kept: Path | None = None             # the commit's durations record, when kept
     seconds: float = 0.0
     code: int = 0
 
+    def timing(self) -> str:
+        if self.durations is None:
+            return "durations none"
+        summary = self.durations
+        text = (f"durations {summary.total:.1f}s, slowest 5% "
+                f"{round(summary.slowest_share * 100)}%")
+        delta = self.delta
+        if delta is None:
+            return text + ", delta none"
+        text += f", delta {delta.seconds:+.1f}s vs {delta.commit[:12]}"
+        return text if delta.whole else text + f" ({', '.join(delta.packages)})"
+
     def line(self) -> str:
         names = "unknown" if self.packages is None else ", ".join(self.packages) or "none"
-        suites = ", ".join(f"{name} {'pass' if ok else 'fail'} {secs:.1f}s"
+        word = {True: "pass", False: "fail", None: "none"}
+        suites = ", ".join(f"{name} {word[ok]} {secs:.1f}s"
                            for name, ok, secs in self.suites) or "no suites run"
         if self.lint is None:
             linted = "not run"
@@ -243,7 +280,8 @@ class Result:
             linted = f"fail ({', '.join(failed)})" if failed else "pass"
         return (f"moxi-dev check: commit {self.commit} | packages: {names} | "
                 f"lock {self.lock} | tags {self.tags} | sync {self.sync} | "
-                f"lint {linted} | {suites} | total {self.seconds:.1f}s | exit {self.code}")
+                f"lint {linted} | {suites} | {self.timing()} | total {self.seconds:.1f}s | "
+                f"exit {self.code}")
 
 
 def _commit(root: Path) -> str:
@@ -252,9 +290,18 @@ def _commit(root: Path) -> str:
     return commit + ("+dirty" if dirty else "")
 
 
+def check_findings(findings: Sequence[str]) -> list[str]:
+    """The findings `--finding` names, each `L<n>`; CheckError for any other."""
+    bad = [name for name in findings if not FINDING_NAME.fullmatch(name)]
+    if bad:
+        raise CheckError(f"--finding takes a finding as L<n>; {', '.join(map(repr, bad))} "
+                         f"is not one")
+    return list(dict.fromkeys(findings))
+
+
 def check(root: Path, *, full: bool = False, base: str | None = None,
-          environ: Mapping[str, str] | None = None, run: Run | None = None,
-          plan: Plan | None = None) -> Result:
+          finding: Sequence[str] = (), environ: Mapping[str, str] | None = None,
+          run: Run | None = None, plan: Plan | None = None) -> Result:
     """Run the check's steps on the workspace at `root`; the result holds the exit code."""
     environ = os.environ if environ is None else environ
     run = run or _run
@@ -262,12 +309,15 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
     started = time.monotonic()
     result = Result()
     try:
+        findings = check_findings(finding)
         result.commit = _commit(root)
         packages = load_workspace(root)
         workers = worker_args(environ)
-        chosen = list(packages) if full else pick(packages, changed_paths(root, base or "main"))
+        changed = None if full else changed_paths(root, base or "main")
+        chosen = list(packages) if changed is None else pick(packages, changed)
         result.packages = [package.dir for package in chosen]
-        steps = _Steps(root, packages, workers, environ, run, plan, result)
+        steps = _Steps(root, packages, workers, environ, run, plan, result,
+                       changed=changed, findings=findings, base=base or "main")
         result.code = 0 if steps.all(chosen) else 1
     except CheckError as exc:
         print(f"moxi-dev check: {exc}", file=sys.stderr, flush=True)
@@ -285,6 +335,9 @@ class _Steps:
     run: Run
     plan: Plan
     result: Result
+    changed: Sequence[str] | None = None      # None: --full
+    findings: Sequence[str] = ()
+    base: str = "main"
 
     def all(self, chosen: Sequence[Package]) -> bool:
         """The lock, the tags, the sync, the lint and the suites, recorded in the result;
@@ -314,13 +367,76 @@ class _Steps:
         result.lint = []
         for package in chosen:
             ok = self.lint(package, venv, suite_env) and ok
+        return self.suites(chosen, venv, suite_env) and ok
+
+    def selection_env(self, work: Path) -> dict[str, str]:
+        """The kit's variables for what the suites run besides the plain run."""
+        env = {}
+        if self.changed is None:
+            env[TIERS_ENV] = "all"
+        else:
+            listed = work / "changed-paths"
+            listed.write_text("".join(path + "\0" for path in self.changed),
+                              encoding="utf-8")
+            env[CHANGED_ENV] = str(listed)
+        if self.findings:
+            env[FINDING_ENV] = ",".join(self.findings)
+        return env
+
+    def suites(self, chosen: Sequence[Package], venv: Path,
+               suite_env: Mapping[str, str]) -> bool:
+        """Each picked package's tests, then the durations; True when every suite passed
+        (and, under --finding, some package had a test that carries it)."""
+        run, result = self.run, self.result
+        work = self.root / RUN_DIR
+        work.mkdir(parents=True, exist_ok=True)
+        env = {**suite_env, **self.selection_env(work)}
+        ok, ran, timed = True, False, {}
         for package in chosen:
+            where = work / f"{package.dir}.durations.json"
+            where.unlink(missing_ok=True)
             began = time.monotonic()
-            passed = run([str(venv / "bin" / "python"), "-m", "pytest", *self.workers],
-                         package.path, suite_env) == 0
+            code = run([str(venv / "bin" / "python"), "-m", "pytest", *self.workers],
+                       package.path, {**env, DURATIONS_ENV: str(where)})
+            tests = durations.load_run(where)
+            passed: bool | None = code == 0
+            if self.findings and tests is None and code in (0, NO_TESTS):
+                print(f"moxi-dev check: {package.dir}: its tests don't load "
+                      f"moxi_dev.testing, so --finding can't choose them", flush=True)
+                passed = False
+            elif self.findings and code == NO_TESTS:
+                passed = None
             result.suites.append((package.dir, passed, time.monotonic() - began))
-            ok = ok and passed
+            ok = ok and passed is not False
+            ran = ran or passed is True
+            if tests is not None:
+                timed[package.dir] = (passed, durations.PackageRun(
+                    tiers="all" if self.changed is None else "plain", tests=tests))
+        if self.findings and not ran and ok:
+            print(f"moxi-dev check: no test in {', '.join(p.dir for p in chosen)} carries "
+                  f"{', '.join(self.findings)}", flush=True)
+            ok = False
+        self.timings({name: one for name, (_, one) in timed.items()},
+                     {name: one for name, (passed, one) in timed.items() if passed})
         return ok
+
+    def timings(self, every: Mapping[str, durations.PackageRun],
+                  passed: Mapping[str, durations.PackageRun]) -> None:
+        """The summary of every suite's durations, the commit's record of those that
+        passed, and the delta against main (`moxi_dev.durations`)."""
+        result = self.result
+        if not every:
+            return
+        result.durations = durations.summarize(every)
+        directory = durations.records_dir(self.root)
+        if directory is None:
+            return
+        clean = not result.commit.endswith("+dirty")
+        if passed and clean and not self.findings:
+            head = _git(self.root, "rev-parse", "HEAD").strip()
+            result.kept = durations.keep(directory, head, passed)
+        if not self.findings:
+            result.delta = durations.against_main(self.root, directory, passed, self.base)
 
     def tags(self) -> bool:
         try:
@@ -364,9 +480,14 @@ def _parser() -> argparse.ArgumentParser:
                     "the change touches and of every package that depends on one, in an "
                     "environment of the check's own. Run it from the repository's root.")
     parser.add_argument("--full", action="store_true",
-                        help="check every package, whatever changed")
+                        help="check every package, whatever changed, and run every "
+                             "test tier but live")
     parser.add_argument("--base", metavar="REV",
-                        help="count the changes since HEAD left REV (default: main)")
+                        help="count the changes since HEAD left REV, and compare the "
+                             "durations with REV's records (default: main)")
+    parser.add_argument("--finding", metavar="L<n>", action="append", default=[],
+                        help="run only the tests marked with this finding; may be given "
+                             "more than once")
     return parser
 
 
@@ -379,6 +500,6 @@ def main(argv: list[str]) -> int:
         result = Result(code=2)
         print(result.line(), flush=True)
         return result.code
-    result = check(root, full=args.full, base=args.base)
+    result = check(root, full=args.full, base=args.base, finding=args.finding)
     print(result.line(), flush=True)
     return result.code
