@@ -367,6 +367,33 @@ def test_a_message_handed_before_a_restart_keeps_its_row_and_goes_once_after(rig
     assert REVIEWER_Q in out and "message(s)" not in out, out
 
 
+def test_a_digest_open_at_a_restart_is_handed_again_and_acked_once_end_to_end(rig):
+    """The digest is injected and its turn hasn't ended when the daemon restarts. The
+    boot fence ends the digest and its row waits; the shim rebinds holding nothing, the
+    bind hands the message again, and the next turn injects and acks it. A second
+    restart hands nothing."""
+    shim = rig.shim(**REVIEWER, autoreconnect=True, backoff=itertools.repeat(0.1))
+    msg = rig.post_as("agent-6", [REVIEWER_Q], "in a digest when the daemon stops")
+    wait_for_queue(shim, 1)
+    assert shim.on_turn_boundary(), "injected: the digest is open"
+    assert shim.held_ids
+
+    daemon = _reboot(rig)
+    assert _queue(rig, REVIEWER_Q) == {msg.id}, "the fence put its row back"
+    assert wait_until(lambda: REVIEWER_Q in daemon.bindings and not shim.offline, timeout=5)
+    assert wait_until(lambda: [p["message_id"] for p in shim.queue] == [msg.id], timeout=5)
+    assert "in a digest when the daemon stops" in shim.on_turn_boundary()
+    shim.on_turn_boundary()                          # that turn ends answered
+    assert wait_until(lambda: cursor_of(REVIEWER_Q) == msg.id, timeout=5)
+    assert _queue(rig, REVIEWER_Q) == set() and _waiting(rig, REVIEWER_Q) == 0
+
+    daemon = _reboot(rig)
+    assert wait_until(lambda: REVIEWER_Q in daemon.bindings and not shim.offline, timeout=5)
+    assert wait_until(lambda: shim.replaying is False, timeout=5)
+    time.sleep(0.2)
+    assert shim.queue == [] and shim.on_turn_boundary() is None
+
+
 def test_a_reader_racing_the_hand_over_writes_no_row_and_hands_nothing_twice(rig):
     """A reader that finds an id this binding was already handed writes no row for it
     (handled mail is never queued again), and a release or a rescan that reads it

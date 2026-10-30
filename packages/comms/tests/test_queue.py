@@ -288,6 +288,34 @@ def test_a_held_id_below_an_acked_one_survives_a_restart_and_goes_at_the_next_tu
     assert record_rows(rig.record, REVIEWER_Q) == set()
 
 
+@pytest.mark.parametrize("how", ["rebind", "restart"])
+def test_a_message_acked_above_a_held_one_is_never_delivered_again(
+        rig, reads, peers, reboot, how):
+    """A live id acked while a lower held id still has a row: the cursor waits below the
+    held one and the live one has no row. After a rebind, or a daemon restart and a
+    rebind, the held id goes and the live one never does; once the held id is acked the
+    cursor reaches the live one, the highest acked."""
+    reads[REVIEWER_Q] = cache.WARM
+    peer = peers()
+    held = post(rig, [REVIEWER_Q], "later", held=True)
+    row_for(rig, REVIEWER_Q, held)
+    live = post(rig, [REVIEWER_Q], "now")
+    assert wait_until(lambda: live in peer.handed())
+    peer.turn(handled=[live])
+    assert int(cursor_of(REVIEWER_Q)) == int(held) - 1
+    peer.close()
+    if how == "restart":
+        reboot()
+    again = peers()
+    again.turn()
+    assert again.handed() == [held], "the held id goes, the acked one never"
+    again.turn(handled=[held])
+    assert cursor_of(REVIEWER_Q) == live
+    rig.daemon.rescan()
+    again.sync()
+    assert again.handed() == [held] and rows(rig, REVIEWER_Q) == set()
+
+
 def test_only_a_turn_naming_the_id_handled_deletes_its_row(rig, reads, peers, reboot):
     """The held id is handed by the release at a turn end. A turn end
     with `handled` empty, the binding's exit and a daemon restart each leave the row; only

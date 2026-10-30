@@ -12,6 +12,7 @@ import time
 import pytest
 from conftest import clock_reads_warm, cursor_of, frame_kinds, wait_until
 
+from moxi_comms import paths
 from moxi_comms.adapters import opencode as oc
 from moxi_comms.adapters import opencode_roster
 from moxi_comms.adapters.opencode import OpenCodeAdapter
@@ -706,6 +707,7 @@ def test_a_digests_turn_is_handled_and_the_daemons_ack_moves_the_cursor(
     assert turn["handled_ids"] == [str(high)] and turn["unhandled_ids"] == []
     assert str(turn["answer"]["cursor"]) == str(high), "the ack moved the cursor"
     assert not adapter.held_ids
+    assert not paths.cursors_dir().exists(), "the adapter writes no cursor file"
 
 
 def test_a_digests_turn_that_errs_is_unhandled_and_moves_no_cursor(

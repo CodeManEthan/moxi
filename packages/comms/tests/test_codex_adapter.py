@@ -13,7 +13,7 @@ import itertools
 import pytest
 
 from conftest import clock_reads_warm, cursor_of, wait_until
-from moxi_comms import codex_threads, owed
+from moxi_comms import codex_threads, owed, paths
 from moxi_comms.adapters.codex import CodexAdapter, layer_one_hash, scrub_own_environ
 from moxi_comms.adapters.codex_roster import CodexAgent
 from moxi_comms.adapters.session import INHERITED_COMMS_ENV
@@ -204,6 +204,7 @@ def test_a_message_goes_in_steer_first_and_settles_handled_at_its_turns_end(rig,
     adapter.fake.end_turn("answer")
     assert wait_until(lambda: not adapter.held_ids)
     assert wait_until(lambda: cursor_of(IDENTITY) is not None)
+    assert not paths.cursors_dir().exists(), "the adapter writes no cursor file"
 
 
 def test_a_digest_into_a_running_turn_is_steered_into_it(rig, launch):

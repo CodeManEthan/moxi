@@ -403,3 +403,36 @@ def test_a_partial_ack_re_pends_only_what_it_did_not_handle(rig):
     assert wait_until(lambda: "reviewer@proj-a" not in rig.daemon.bindings)
     assert queued(rig.daemon, "reviewer@proj-a") == {second.id}
 
+
+# ------------------------------------------------------- no cursor files are written
+
+def test_a_full_delivery_writes_nothing_under_the_cursor_folder(rig):
+    """Delivery, ack, rescan, rebind and restart: the daemon keeps the cursor in its
+    books, and nothing makes `STATE/comms/cursors/`."""
+    curator = rig.shim(name="curator", scope="proj-a", autoreconnect=True,
+                       backoff=itertools.repeat(0.1))
+    msg = rig.post_as("agent-6", ["curator@proj-a"], "delivered and acked")
+    wait_for_queue(curator, 1)
+    curator.on_turn_boundary()
+    curator.on_turn_boundary()
+    assert wait_until(lambda: cursor_of("curator@proj-a") == msg.id)
+    rig.daemon.rescan()
+    rig.daemon.stop()
+    rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
+    assert wait_until(lambda: "curator@proj-a" in rig.daemon.bindings and not curator.offline)
+    assert not cursors_dir().exists()
+
+
+def test_no_comms_source_names_the_cursor_folder_but_the_move():
+    """Only the gate and the move of comms 0.2's files name the cursor folder, which
+    they look for, read and rename. No adapter or daemon code writes there."""
+    import re
+
+    import moxi_comms
+    src = Path(moxi_comms.__file__).parent
+    naming = set()
+    for f in src.rglob("*.py"):
+        text = f.read_text()
+        if "cursors_dir" in text or re.search(r"""/\s*["']cursors["']""", text):
+            naming.add(f.relative_to(src).as_posix())
+    assert naming == {"paths.py", "store/open.py", "store/upgrade_0_2.py"}
