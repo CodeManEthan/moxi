@@ -46,7 +46,6 @@ from __future__ import annotations
 
 import atexit
 import contextlib
-import importlib.util
 import logging
 import os
 import random
@@ -1303,10 +1302,12 @@ def launch_args(argv) -> dict:
 def rows() -> list[moxi_doctor.Row]:
     """The Codex host's doctor rows. The host is optional: a missing extra or binary is
     `off`; a missing hook command in an installed turns is a fault."""
-    installed = importlib.util.find_spec("websockets") is not None
+    from .codex_host import EXTRA_IMPORT, codex_host_available
+
+    installed = codex_host_available()
     output = [moxi_doctor.Row(
         MODULE, "Codex extra", "ok" if installed else "off",
-        "websockets is installed" if installed else "the Codex host is not installed",
+        f"{EXTRA_IMPORT} is installed" if installed else "the Codex host is not installed",
         None if installed else "moxi install turns --with codex")]
     binary = shutil.which(BINARY)
     output.append(moxi_doctor.Row(MODULE, "Codex binary", "ok" if binary else "off",
