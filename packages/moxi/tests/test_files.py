@@ -622,6 +622,15 @@ def test_private_dir_refuses_a_symbolic_link_and_leaves_its_target(tmp_path):
     assert mode_of(target) == 0o755
 
 
+@POSIX
+def test_private_dir_refuses_a_dangling_symbolic_link_and_makes_nothing(tmp_path):
+    link = tmp_path / "link"
+    link.symlink_to(tmp_path / "nowhere")
+    with pytest.raises(PermissionError, match="symbolic link"):
+        files.private_dir(link)
+    assert link.is_symlink() and not (tmp_path / "nowhere").exists()
+
+
 @WINDOWS
 def test_private_dir_on_windows_grants_only_this_user(tmp_path):
     made = files.private_dir(tmp_path / "d")
