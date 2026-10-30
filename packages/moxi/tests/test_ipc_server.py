@@ -91,11 +91,72 @@ def test_serve_makes_a_private_directory_and_a_0600_socket(serving, sock_dir):
     assert raw.json()["result"] == {"method": "go", "params": None}
 
 
-def test_serve_tightens_an_open_directory(serving, sock_dir):
-    (sock_dir / "s").mkdir(mode=0o755)
+def mode(path) -> int:
+    return stat.S_IMODE(os.lstat(path).st_mode)
+
+
+def test_serve_refuses_an_open_directory_of_the_users_and_leaves_it(serving, sock_dir):
+    (sock_dir / "s").mkdir()
+    os.chmod(sock_dir / "s", 0o775)
+    with pytest.raises(OSError, match=str(sock_dir / "s")):
+        serving(echo)
+    assert mode(sock_dir / "s") == 0o775
+    assert os.listdir(sock_dir / "s") == []
+
+
+def test_serve_uses_a_closed_directory_of_the_users_as_it_is(serving, sock_dir):
+    (sock_dir / "s").mkdir()
     os.chmod(sock_dir / "s", 0o755)
-    serving(echo)
-    assert stat.S_IMODE(os.stat(sock_dir / "s").st_mode) == 0o700
+    srv = serving(echo)
+    assert mode(sock_dir / "s") == 0o755
+    raw = Raw(srv.address)
+    raw.send(req(1, "go"))
+    assert raw.json()["result"] == {"method": "go", "params": None}
+
+
+def test_serve_refuses_a_linked_directory_and_leaves_it(serving, sock_dir):
+    (sock_dir / "real").mkdir(mode=0o700)
+    os.symlink(sock_dir / "real", sock_dir / "s")
+    with pytest.raises(OSError, match="symbolic link"):
+        serving(echo)
+    assert os.listdir(sock_dir / "real") == []
+
+
+def test_serve_refuses_a_directory_another_user_owns(serving):
+    if os.lstat("/").st_uid == os.getuid():
+        pytest.skip("the root directory is this user's")
+    with pytest.raises(OSError, match="not this user"):
+        serving(echo, address="/x.sock")
+
+
+def test_serve_makes_a_modules_runtime_directory_private(serving, sock_dir, monkeypatch):
+    from moxi import paths
+
+    monkeypatch.setenv("MOXI_DEMO_RUNTIME_DIR", str(sock_dir / "rt"))
+    runtime = paths.Layout("demo").runtime_dir()
+    runtime.mkdir(parents=True)
+    os.chmod(runtime, 0o755)
+    serving(echo, address=str(runtime / "a.sock"))
+    assert mode(runtime) == 0o700
+
+
+def test_serve_makes_the_short_hashed_directory_private(serving, sock_dir, monkeypatch):
+    from moxi import paths
+
+    monkeypatch.setattr(paths, "_SHORT_ROOT", str(sock_dir))
+    short = sock_dir / f"moxi-{os.getuid()}"
+    short.mkdir()
+    os.chmod(short, 0o755)
+    serving(echo, address=str(short / "0123456789abcdef.sock"))
+    assert mode(short) == 0o700
+
+
+def test_a_directory_named_like_a_module_is_not_its_runtime_directory(serving, sock_dir):
+    (sock_dir / "demo").mkdir()
+    os.chmod(sock_dir / "demo", 0o775)
+    with pytest.raises(OSError):
+        serving(echo, address=str(sock_dir / "demo" / "a.sock"))
+    assert mode(sock_dir / "demo") == 0o775
 
 
 def test_close_removes_the_socket_before_it_lets_the_lock_go(serving):
