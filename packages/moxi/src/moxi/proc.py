@@ -197,7 +197,8 @@ def spawn(argv: Argv, *, lifeline: str | None = None,
     any death. `lifeline` (default `"stdin"`) is how:
 
     - `"stdin"`: the child's stdin is a pipe this process keeps open; a child that stops
-      at EOF on stdin stops when the pipe closes.
+      at EOF on stdin stops when the pipe closes. `MOXI_LIFELINE_FD` is set to `0`, so
+      the child can tell it holds a lifeline without reading stdin (`lifeline_kind`).
     - `"fd"`: an extra pipe whose read end the child inherits, named in
       `MOXI_LIFELINE_FD`, so its stdin stays free. The child calls `moxi.proc.lifeline()`.
     - `"watch"`: for a program that knows nothing of lifelines and may keep the terminal.
@@ -225,8 +226,12 @@ def spawn(argv: Argv, *, lifeline: str | None = None,
     its `Popen` is kept in this process, so `status(pid)` can read how it ended.
     A lifeline, `stdout` or `stderr` with `detached=True` raises `ValueError`.
 
-    `env` is the child's whole environment, used as given (None: this process's); the
-    `"fd"` lifeline adds its one variable to it.
+    `env` is the child's whole environment, used as given (None: this process's), with
+    one variable the core owns: the `"stdin"` and `"fd"` lifelines set `MOXI_LIFELINE_FD`
+    in it, and `"watch"` and `detached=True` take it out, whether it came from this
+    process's environment or from `env`. A watched or detached child holds no lifeline it
+    could read, so it must not see a value meant for its parent: its `lifeline_kind()`
+    answers None, as a child of a parent outside Moxi does.
     """
     if detached:
         if lifeline is not None:
@@ -239,7 +244,7 @@ def spawn(argv: Argv, *, lifeline: str | None = None,
     kind = "stdin" if lifeline is None else lifeline
     if kind == "stdin":
         proc = subprocess.Popen(_argv(argv), stdin=subprocess.PIPE, stdout=stdout,
-                                stderr=stderr, env=_env(env), cwd=cwd)
+                                stderr=stderr, env=_lifeline_env(env, "0"), cwd=cwd)
         proc.lifeline = proc.stdin
         return proc
     if kind == "fd":
@@ -252,19 +257,18 @@ def spawn(argv: Argv, *, lifeline: str | None = None,
 def _spawn_fd(argv: Argv, *, env, cwd, stdout, stderr) -> subprocess.Popen:
     read_end, write_end = os.pipe()
     try:
-        child_env = dict(os.environ if env is None else env)
         options: dict = {}
         if _WINDOWS:
             import msvcrt
 
             handle = msvcrt.get_osfhandle(read_end)
             os.set_handle_inheritable(handle, True)
-            child_env[LIFELINE_ENV] = str(handle)
+            child_env = _lifeline_env(env, str(handle))
             info = subprocess.STARTUPINFO()
             info.lpAttributeList = {"handle_list": [handle]}
             options["startupinfo"] = info
         else:
-            child_env[LIFELINE_ENV] = str(read_end)
+            child_env = _lifeline_env(env, str(read_end))
             options["pass_fds"] = (read_end,)
         proc = subprocess.Popen(_argv(argv), stdout=stdout, stderr=stderr, env=child_env,
                                 cwd=cwd, **options)
@@ -281,8 +285,8 @@ def _spawn_watched(argv: Argv, *, env, cwd, stdout, stderr) -> subprocess.Popen:
     if _WINDOWS:
         from . import _win
 
-        proc = subprocess.Popen(_argv(argv), stdout=stdout, stderr=stderr, env=_env(env),
-                                cwd=cwd)
+        proc = subprocess.Popen(_argv(argv), stdout=stdout, stderr=stderr,
+                                env=_lifeline_env(env, None), cwd=cwd)
         job = _win.Job(kill_on_close=True)
         try:
             job.assign(proc.pid)
@@ -296,8 +300,8 @@ def _spawn_watched(argv: Argv, *, env, cwd, stdout, stderr) -> subprocess.Popen:
     # The child stays in this process's group and session, as a plain child does, so
     # the terminal treats the two alike: a stop, Ctrl-C, a resize or a background read
     # reaches both. Nothing here moves the terminal's foreground group.
-    proc = subprocess.Popen(_argv(argv), stdout=stdout, stderr=stderr, env=_env(env),
-                            cwd=cwd)
+    proc = subprocess.Popen(_argv(argv), stdout=stdout, stderr=stderr,
+                            env=_lifeline_env(env, None), cwd=cwd)
     try:
         watchdog = _start_watchdog(proc)
     except BaseException:
@@ -431,8 +435,8 @@ def _spawn_detached(argv: Argv, *, env, cwd, output) -> int:
         out = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND
                       | getattr(os, "O_BINARY", 0), 0o600)
     try:
-        common = dict(stdin=subprocess.DEVNULL, stdout=out, stderr=out, env=_env(env),
-                      cwd=cwd)
+        common = dict(stdin=subprocess.DEVNULL, stdout=out, stderr=out,
+                      env=_lifeline_env(env, None), cwd=cwd)
         if not _WINDOWS:
             proc = subprocess.Popen(_argv(argv), start_new_session=True, **common)
         else:
@@ -543,6 +547,21 @@ def _argv(argv: Argv) -> list[str]:
 
 def _env(env: Mapping[str, str] | None) -> dict[str, str] | None:
     return None if env is None else dict(env)
+
+
+def _lifeline_env(env: Mapping[str, str] | None, value: str | None) -> dict[str, str]:
+    """A child's whole environment: `env` (None: this process's) with `MOXI_LIFELINE_FD`
+    set to `value`, or taken out when `value` is None. On Windows, where names are the
+    same whatever their case, every spelling of the name is taken out first."""
+    child = dict(os.environ if env is None else env)
+    if _WINDOWS:
+        for name in [name for name in child if name.upper() == LIFELINE_ENV]:
+            del child[name]
+    else:
+        child.pop(LIFELINE_ENV, None)
+    if value is not None:
+        child[LIFELINE_ENV] = value
+    return child
 
 
 # -- in a child --------------------------------------------------------------------------
