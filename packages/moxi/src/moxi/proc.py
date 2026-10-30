@@ -53,7 +53,8 @@ def run(argv: Argv, *, timeout: float, input: bytes | str | None = None,
     environment, used as given (None: this process's). The exit status is not checked.
 
     POSIX: the child starts in a new session, so it and everything it starts form one
-    process group; on timeout the group gets SIGTERM and, two seconds later, SIGKILL.
+    process group; on timeout the group gets SIGTERM and, two seconds later, SIGKILL
+    for any member still running, whether or not the first child has ended by then.
     Windows: the child starts in a new process group and is put in a Job Object as soon
     as it starts; on timeout the job is terminated, which ends the whole tree.
 
@@ -94,16 +95,32 @@ def run(argv: Argv, *, timeout: float, input: bytes | str | None = None,
 
 
 def _end_tree(proc: subprocess.Popen, job) -> tuple:
-    """Kill a timed-out child's whole tree and collect what it wrote."""
+    """Kill a timed-out child's whole tree and collect what it wrote.
+
+    POSIX: SIGTERM to the group, then up to `KILL_GRACE` seconds for the group to empty,
+    then SIGKILL to whatever of it is left. The first child may end and close its pipes
+    well before then while another member, one that ignores SIGTERM and holds no pipe,
+    keeps running; the group, not the first child, decides when the grace is over.
+    """
     if job is not None:
         job.terminate()
-    else:
-        _signal_group(proc.pid, _sig("SIGTERM"))
-        try:
-            return proc.communicate(timeout=KILL_GRACE)
-        except subprocess.TimeoutExpired:
-            _signal_group(proc.pid, _sig("SIGKILL"))
-    return _drain(proc)
+        return _drain(proc)
+    import time
+
+    _signal_group(proc.pid, _sig("SIGTERM"))
+    deadline = time.monotonic() + KILL_GRACE
+    try:
+        out, err = proc.communicate(timeout=KILL_GRACE)
+    except subprocess.TimeoutExpired:
+        _signal_group(proc.pid, _sig("SIGKILL"))
+        return _drain(proc)
+    # The first child is reaped and its pipes are closed. The kernel gives no new process
+    # a pid that still names a group, so the group id stays ours while any member lives.
+    while _group_alive(proc.pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    if _group_alive(proc.pid):
+        _signal_group(proc.pid, _sig("SIGKILL"))
+    return out, err
 
 
 def _kill_now(proc: subprocess.Popen, job) -> None:
@@ -130,6 +147,16 @@ def _drain(proc: subprocess.Popen) -> tuple:
                 except OSError:
                     pass
         return None, None
+
+
+def _group_alive(pgid: int) -> bool:
+    """Whether process group `pgid` has a member (one that ended but is not yet reaped
+    counts)."""
+    try:
+        os.killpg(pgid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
 
 
 def _signal_group(pgid: int, signum: int) -> None:

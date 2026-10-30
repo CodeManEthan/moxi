@@ -136,6 +136,62 @@ def test_a_child_that_ignores_sigterm_is_killed_after_the_grace(tmp_path, monkey
     assert 2.4 <= took < 10
 
 
+STUBBORN_GRANDCHILD = """
+    import os, signal, sys, time
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    with open(sys.argv[1] + ".tmp", "w") as f:
+        f.write(str(os.getpid()))
+    os.replace(sys.argv[1] + ".tmp", sys.argv[1])
+    time.sleep(60)
+"""
+
+STARTS_A_STUBBORN_GRANDCHILD = """
+    import os, subprocess, sys, time
+    grandchild, marker = sys.argv[1:]
+    subprocess.Popen([sys.executable, grandchild, marker], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    while not os.path.exists(marker):
+        time.sleep(0.02)
+    print("ready", flush=True)
+    time.sleep(60)
+"""
+
+
+@POSIX
+@pytest.mark.parametrize("capture", [True, False])
+def test_a_grandchild_that_ignores_sigterm_and_holds_no_pipe_is_killed(
+        tmp_path, monkeypatch, capture):
+    """The first child ends on SIGTERM and closes its pipes at once; the grandchild
+    ignores SIGTERM and holds none of them, and still gets SIGKILL after the grace."""
+    monkeypatch.setattr(proc, "KILL_GRACE", 0.5)
+    marker = tmp_path / "grandchild.pid"
+    start = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        proc.run([PY, script(tmp_path, "tree.py", STARTS_A_STUBBORN_GRANDCHILD),
+                  script(tmp_path, "grandchild.py", STUBBORN_GRANDCHILD), str(marker)],
+                 timeout=2, capture=capture)
+    took = time.monotonic() - start
+    grandchild = int(marker.read_text())
+    try:
+        assert caught.value.output == (b"ready\n" if capture else None)
+        ident = proc.identity(grandchild)
+        assert ident is None or gone(ident, 3), "the grandchild outlived the run"
+        assert took >= 2.4                  # it had the grace before SIGKILL
+    finally:
+        try:
+            os.kill(grandchild, 9)
+        except ProcessLookupError:
+            pass
+
+
+def test_a_tree_that_ends_on_sigterm_does_not_wait_out_the_grace(tmp_path, monkeypatch):
+    monkeypatch.setattr(proc, "KILL_GRACE", 5)
+    start = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        proc.run([PY, script(tmp_path, "tree.py", TREE)], timeout=1)
+    assert time.monotonic() - start < 4
+
+
 # -- spawn with a lifeline -----------------------------------------------------------------
 
 def test_a_stdin_child_sees_eof_when_the_lifeline_closes(tmp_path):
