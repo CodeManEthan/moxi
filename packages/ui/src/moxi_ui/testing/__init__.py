@@ -17,8 +17,9 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     The `ui_shell`'s options, `{}` by default. Override it in a test module or a
     `conftest.py` to give `site` (directories put on the shell's `PYTHONPATH`, holding
     distributions a test installs), `child_args` (for every page server the shell starts,
-    such as `["--idle-s", "0.5"]`) or `leave_out` (installed modules the shell's snapshot
-    leaves out, such as `["cache"]`). No setting or variable reaches these.
+    such as `["--idle-s", "0.5"]`), `leave_out` (installed modules the shell's snapshot
+    leaves out, such as `["cache"]`) or `port` (the port it binds, 0 for one the system
+    picks). No setting or variable reaches these.
 `ui_shells` (module scope)
     `ui_shells(**options)` starts one more test shell with those options; each is stopped
     when the test module ends.

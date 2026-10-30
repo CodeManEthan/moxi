@@ -5,12 +5,15 @@ a page server. A test controls the server through files there too:
 
 - `fail-start`: while it exists, this module refuses to import, so a page server exits 3
   at its start;
-- `acts`: one line per act the server ran.
+- `acts`: one line per act the server ran;
+- `hold`: while it exists, a read of `/api/wait` doesn't answer (for up to 20 s), so a
+  test can keep a request open; each such read first appends its pid to `waiting`.
 """
 
 import json
 import os
 import threading
+import time
 
 from moxi.paths import Layout
 from moxi_loopback.api import Topics
@@ -62,6 +65,16 @@ def add(call):
         _write(values)
     _publish(values)
     return {"count": values["count"]}
+
+
+def wait(call):
+    STATE.mkdir(parents=True, exist_ok=True)
+    with open(STATE / "waiting", "a", encoding="utf-8") as out:
+        out.write(f"{os.getpid()}\n")
+    deadline = time.monotonic() + 20
+    while (STATE / "hold").exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    return {"pid": os.getpid()}
 
 
 def events(call):

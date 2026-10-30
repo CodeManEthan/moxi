@@ -43,6 +43,24 @@ def fail_start(shell, on: bool = True) -> None:
         flag.unlink(missing_ok=True)
 
 
+def hold(shell, on: bool = True) -> None:
+    """While on, a read of the fixture's `/api/wait` stays open."""
+    flag = shell.state_dir("fixture") / "hold"
+    if on:
+        flag.parent.mkdir(parents=True, exist_ok=True)
+        flag.write_text("")
+    else:
+        flag.unlink(missing_ok=True)
+
+
+def waiting(shell) -> int:
+    """How many reads of `/api/wait` the fixture's page servers have begun."""
+    try:
+        return len((shell.state_dir("fixture") / "waiting").read_text().splitlines())
+    except FileNotFoundError:
+        return 0
+
+
 def acts(shell) -> int:
     """How many acts the fixture's page servers have run."""
     try:
