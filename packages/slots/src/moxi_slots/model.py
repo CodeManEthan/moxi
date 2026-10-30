@@ -283,6 +283,79 @@ class Ended:
         return asdict(self)
 
 
+#: What `answer_screen` ends in. `gone` and `ended` are the verify step's success for a
+#: screen's `then`; `not-ended` is a pane still live 15 s after Enter on an `ended`
+#: screen; `mismatch` is no Enter sent (or a screen that stayed after it), `why` saying
+#: what differed and, for a spent settle bound, starting with `not-settled`;
+#: `ended-without-screen` is a pane found dead, no key sent; `no-pane` a slot with no
+#: run pane.
+ANSWER_OUTCOMES = ("gone", "ended", "not-ended", "mismatch", "ended-without-screen",
+                   "no-pane")
+#: The one `Answer.why` prefix a caller may match: a key sent whose effect never settled.
+NOT_SETTLED = "not-settled"
+
+
+@dataclass(frozen=True)
+class Seen:
+    """One read of a slot's run pane against the screens asked about.
+
+    `screen` is the first of them whose phrases are in its region (the `Screen`), or
+    None; `full` whether it fully matches; `why` why not (or why no screen is there);
+    `rows` the region read; `dead` whether the pane has ended (a dead pane's last frame
+    never fully matches); `pane_id` the run pane read, None when the slot has none."""
+
+    screen: object | None
+    full: bool
+    why: str
+    rows: tuple[str, ...] = ()
+    dead: bool = False
+    pane_id: str | None = None
+
+    def to_json(self) -> dict:
+        return {"screen": None if self.screen is None else self.screen.name,
+                "full": self.full, "why": self.why, "rows": list(self.rows),
+                "dead": self.dead, "pane_id": self.pane_id}
+
+
+@dataclass(frozen=True)
+class Answer:
+    """What `answer_screen` did: `outcome` (a word of `ANSWER_OUTCOMES`), the `screen`
+    asked for, `why` (prose, empty on success), the last read `seen`, and `capture`, the
+    saved region's path on a `mismatch` (None otherwise, or when it could not be
+    saved). `keys` lists the keys sent, in order."""
+
+    outcome: str
+    screen: object
+    why: str = ""
+    seen: Seen | None = None
+    capture: str | None = None
+    keys: tuple[str, ...] = ()
+
+    def to_json(self) -> dict:
+        return {"outcome": self.outcome, "screen": self.screen.name, "why": self.why,
+                "seen": None if self.seen is None else self.seen.to_json(),
+                "capture": self.capture, "keys": list(self.keys)}
+
+
+@dataclass(frozen=True)
+class PaneUse:
+    """Whether a person may be at a slot's run pane: `pane_in_mode` (copy mode or another
+    tmux mode), `attached` (clients on the slot's session), `client_activity` (the
+    latest activity of those clients, epoch seconds, None with none attached) and
+    `pane_activity` (the run window's last output or input; the run window has the one
+    pane). `pane_id` is None, and the rest empty, when the slot has no run pane."""
+
+    slot: int
+    pane_id: str | None
+    pane_in_mode: bool = False
+    attached: int = 0
+    client_activity: float | None = None
+    pane_activity: float | None = None
+
+    def to_json(self) -> dict:
+        return asdict(self)
+
+
 #: A job name: letters, digits, `.`, `_`, `:` and `-`, 1-128 characters.
 JOB_NAME_MAX = 128
 _JOB_NAME = re.compile(r"[A-Za-z0-9._:-]+")
@@ -307,4 +380,5 @@ __all__ = ["LOWEST", "HIGHEST", "SESSION_PREFIX", "HOME_MARK", "RUN_MARK", "MISS
            "number_of", "check_number", "check_name", "check_label", "check_holder",
            "check_meta", "check_job_name", "Hold", "Last", "Slot", "Drift", "Listing",
            "Removed", "STARTED", "FAILED", "UNCONFIRMED", "EXEC_OUTCOMES", "Placed", "Job",
-           "Ended", "JOB_NAME_MAX", "launchable"]
+           "Ended", "ANSWER_OUTCOMES", "NOT_SETTLED", "Seen", "Answer", "PaneUse",
+           "JOB_NAME_MAX", "launchable"]

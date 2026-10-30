@@ -324,11 +324,37 @@ def _run_jobs(args) -> int:
     return codes.OK
 
 
+def _add_screen(verbs) -> None:
+    p = verbs.add_parser("screen", help="which known screen a slot's run pane shows, and "
+                                        "why; sends nothing")
+    p.add_argument("slot", metavar="N|NAME")
+    p.add_argument("--json", action="store_true", help="print the read as JSON")
+
+
+def _run_screen(args) -> int:
+    from .answer import read_screen
+    from .screens import SCREENS
+
+    seen = read_screen(_number(args.slot), SCREENS)
+    if args.json:
+        _json(seen.to_json())
+        return codes.OK
+    if seen.screen is None:
+        print(f"no known screen: {seen.why}")
+    elif seen.full:
+        print(f"{seen.screen.name}: full match")
+    else:
+        print(f"{seen.screen.name}: not a full match: {seen.why}")
+    if seen.dead:
+        print("the run pane has ended")
+    return codes.OK
+
+
 VERBS.update({"list": (_add_list, _run_list), "show": (_add_show, _run_show),
               "create": (_add_create, _run_create), "remove": (_add_remove, _run_remove),
               "rename": (_add_rename, _run_rename), "attach": (_add_attach, _run_attach),
               "hold": (_add_hold, _run_hold), "release": (_add_release, _run_release),
-              "jobs": (_add_jobs, _run_jobs)})
+              "jobs": (_add_jobs, _run_jobs), "screen": (_add_screen, _run_screen)})
 
 
 __all__ = ["VERBS", "parser", "refused", "main"]

@@ -1,0 +1,48 @@
+  ⎿  Allowed by auto mode classifier
+
+● started.
+
+✻ Sautéed for 2s · done 11:53 PM · 1 shell, 1 monitor still running
+
+› Prompt from the trigger plugin
+❯ The trigger plugin sent a message:
+  Use the Monitor tool to watch the output of the shell command sleep 600; echo done (a monitor that keeps running), then reply with the single word: started.
+
+  This is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.
+
+● Monitor(Output of sleep 600 then done marker)
+  ⎿  Monitor started · task bz2yoov8w · timeout 900s
+  ⎿  Allowed by auto mode classifier
+
+● started.
+
+✻ Crunched for 2s · done 11:53 PM · 1 shell, 1 monitor still running
+
+❯ /exit
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Background work is running
+  The following will stop when you exit:
+
+  shell · sleep 600
+  monitor · Output of sleep 600 then done marker
+
+  ❯ 1. Exit and stop tasks
+    2. Move to background and exit
+    3. Stay
+
+  Enter to confirm · Esc to cancel
+
+
+
+
+
+
+
+
+
+
+
+
+
+
