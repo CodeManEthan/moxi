@@ -1,0 +1,3 @@
+packages/comms/tests/test_hygiene.py	(R5)	data: the reference check's own test feeds this string to the pattern it tests, and its comment names the shape
+packages/comms/tests/test_hygiene.py	[R7]	data: the comment above the reference check names the shape the pattern refuses
+packages/comms/tests/test_hygiene.py	[S8]	data: the reference check's own test feeds this comment to the pattern it tests

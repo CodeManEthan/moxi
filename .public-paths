@@ -1,0 +1,5 @@
+# Which tracked paths are public. Each line is `public <path>` or `private <path>`, and
+# every tracked path falls under exactly one line. A new top-level path needs a line.
+public packages
+private .public-paths
+private .residue-allow
