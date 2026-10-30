@@ -119,8 +119,10 @@ def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     """Run the block in one transaction that holds the store's write lock from its start.
 
     `BEGIN IMMEDIATE` on entry; `COMMIT` when the block ends, or `ROLLBACK` and the
-    exception raised again when it raises. The connection must be one `connect` opened (no
-    implicit transactions) and must not be in a transaction already.
+    exception raised again when it raises. A `COMMIT` that fails (the store busy past the
+    timeout) is rolled back too and its error raised, so the connection is left out of a
+    transaction and the block's changes are not kept. The connection must be one `connect`
+    opened (no implicit transactions) and must not be in a transaction already.
     """
     conn.execute("BEGIN IMMEDIATE")
     try:
@@ -131,7 +133,12 @@ def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
         raise
     if not conn.in_transaction:
         raise StoreError("the transaction was ended inside its block")
-    conn.execute("COMMIT")
+    try:
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
 
 
 def migrate(conn: sqlite3.Connection,

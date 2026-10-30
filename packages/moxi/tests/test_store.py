@@ -178,6 +178,30 @@ def test_a_block_that_ends_its_own_transaction_is_an_error(tmp_path):
     conn.close()
 
 
+def test_a_commit_that_fails_rolls_back_and_leaves_the_connection_usable(tmp_path):
+    path = tmp_path / "s.db"
+    conn = store.connect(path, timeout=0.05)
+    conn.execute("PRAGMA journal_mode = DELETE")
+    conn.execute("CREATE TABLE t (x)")
+    # A reader in a transaction keeps its shared lock, so a delete-journal COMMIT, which
+    # needs the exclusive lock, is busy past the timeout.
+    reader = sqlite3.connect(path, isolation_level=None)
+    reader.execute("BEGIN")
+    reader.execute("SELECT count(*) FROM t").fetchone()
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            with store.transaction(conn):
+                conn.execute("INSERT INTO t VALUES (1)")
+        assert not conn.in_transaction
+    finally:
+        reader.execute("ROLLBACK")
+        reader.close()
+    with store.transaction(conn):
+        conn.execute("INSERT INTO t VALUES (2)")
+    assert conn.execute("SELECT x FROM t").fetchall() == [(2,)]
+    conn.close()
+
+
 # -- migrate -----------------------------------------------------------------------------
 
 STEPS = [
