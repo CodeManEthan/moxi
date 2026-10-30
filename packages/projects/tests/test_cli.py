@@ -175,27 +175,42 @@ def test_remove_lists_every_refusal(capsys, site, golden_copy):
 
 def test_remove_asks_the_contributions_outside_any_write(site, golden_copy, monkeypatch):
     site.contribution("svc", '''
+import sqlite3
+
+from moxi_projects import api
+
 INTERFACE = 1
 SEEN = []
 
 def refuse_remove(project):
-    SEEN.append(project.key)
+    # Take the store's write lock on a second connection without waiting: it is free
+    # unless the remove asks this inside its write.
+    conn = sqlite3.connect(api._store_path(), timeout=0, isolation_level=None)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("ROLLBACK")
+        SEEN.append(("asked, lock free", project.key))
+    except sqlite3.OperationalError:
+        SEEN.append(("asked, lock held", project.key))
+    finally:
+        conn.close()
     return None
 ''')
-    calls = []
-    write = store.write
-
-    def watched(fn, where=None):
-        calls.append("write")
-        return write(fn, where)
-
-    monkeypatch.setattr(store, "write", watched)
     from moxi_projects import acts, contributions
 
     found = contributions.load()
     seen = found.loaded[0].refuse_remove.__globals__["SEEN"]
+    write = store.write
+
+    def watched(fn, where=None):
+        seen.append("write")
+        return write(fn, where)
+
+    monkeypatch.setattr(store, "write", watched)
     acts.remove("gamma", contributions=found)
-    assert seen == ["gamma"] and calls == ["write"]
+    assert seen == [("asked, lock free", "gamma"), "write"]
+    with pytest.raises(api.NotFound):
+        api.get("gamma")
 
 
 def test_remove_past_an_entry_that_wont_load_is_exit_1(capsys, site, golden_copy):
