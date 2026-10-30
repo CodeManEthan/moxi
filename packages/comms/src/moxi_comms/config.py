@@ -37,8 +37,9 @@ line of doc and, for a few, the one variable that overrides it for one process:
     [opencode.agents."planner@proj-a"]      # the OpenCode roster
 
 `check_text(text)` is the same whole read over one config text alone, with no path, no
-environment and no cache; it is the announcement's `CONFIG_CHECK`, which `moxi config set`,
-`unset` and `check` run before they write or pass a file.
+environment and no cache, and it runs the roster parsers' row checks too; it is the
+announcement's `CONFIG_CHECK`, which `moxi config set`, `unset` and `check` run before they
+write or pass a file.
 
 `load(env=None)` returns a `CommsConfig`: the typed tables comms reads, with the
 rosters' `codex` and `opencode` tables as raw dicts for their own parsers. A test points
@@ -259,8 +260,9 @@ def _read(path: Path, environ) -> CommsConfig:
 
 def check_text(text: str) -> None:
     """comms' whole read over config text `text` alone: the token refusal, the schema's
-    checks and comms' own, as `load` makes them, but with no path, no environment
-    overrides and no cache. Raises `ConfigError`, naming no file."""
+    checks and comms' own, as `load` makes them, then the codex and opencode roster
+    parsers' checks of their rows, as a launcher makes them, but with no path, no
+    environment overrides and no cache. Raises `ConfigError`, naming no file."""
     try:
         raw = tomllib.loads(text)
     except tomllib.TOMLDecodeError as e:
@@ -273,7 +275,27 @@ def check_text(text: str) -> None:
         raise
     except _moxi_config.ConfigError as e:
         raise ConfigError(e.file, e.key, e.problem, e.fix) from None
-    _typed(_text_settings(raw), None)
+    typed = _typed(_text_settings(raw), None)
+    _check_rosters(typed)
+
+
+#: The source the roster parsers' refusals name when they check a config text.
+_TEXT = "the config text"
+
+
+def _check_rosters(typed: CommsConfig) -> None:
+    """The roster parsers over the text's `[codex]` and `[opencode]` tables, each refusal
+    raised as a `ConfigError` naming no file."""
+    from .adapters import codex_roster, opencode_roster
+
+    try:
+        codex_roster.from_table(typed.codex, _TEXT)
+        opencode_roster.from_table(typed.opencode, _TEXT)
+    except ConfigError as e:
+        if e.file is not None or e.key is not None:
+            raise
+        raise ConfigError(None, None, e.problem.removeprefix(f"{_TEXT}: "),
+                          "correct the roster table or row it names") from None
 
 
 def _text_settings(raw: dict) -> _moxi_config.Settings:

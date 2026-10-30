@@ -57,6 +57,9 @@ tool's environment, so run one by its path there, for example comms' daemon:
 "$(uv tool dir)/moxi/bin/moxi-comms-daemon"
 ```
 
+On Windows the script is `Scripts\moxi-comms-daemon.exe` in the same tool directory; in
+PowerShell, `& "$(uv tool dir)\moxi\Scripts\moxi-comms-daemon.exe"`.
+
 ### Before the modules are on PyPI
 
 Install the core from git, then give `moxi install` one `--from` for each Moxi
@@ -95,7 +98,8 @@ moxi install <module>
 
 **A module's own command is not found.** `moxi install` adds a module to the `moxi` tool,
 and uv puts none of a module's scripts on PATH. Run the script by its path:
-`"$(uv tool dir)/moxi/bin/<script>"`.
+`"$(uv tool dir)/moxi/bin/<script>"`. On Windows the script is `Scripts\<script>.exe` in
+the same tool directory; in PowerShell, `& "$(uv tool dir)\moxi\Scripts\<script>.exe"`.
 
 **`moxi` says a module is installed outside this moxi.** That copy is in another
 environment, where this `moxi` can't see it. Run the two commands the line names: `moxi

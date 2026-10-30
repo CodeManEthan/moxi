@@ -473,7 +473,12 @@ def private_dir(path: str | os.PathLike) -> Path:
     import errno
     import stat
 
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except FileExistsError:
+        if not os.path.islink(path):
+            raise
+        # A link whose target does not exist: refused as any link at `path` is.
     if os.path.islink(path):
         raise PermissionError(f"{path} is a symbolic link; a private directory must not be")
     # The checks and the chmod go through a descriptor opened without following a link,

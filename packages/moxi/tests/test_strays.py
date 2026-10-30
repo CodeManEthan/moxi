@@ -213,6 +213,34 @@ def test_each_environment_tells_a_stray_once(box, monkeypatch, tmp_path):
     assert told == [1, 0, 0, 0, 0]
 
 
+def test_two_environments_telling_at_once_keep_both_records(box, monkeypatch, tmp_path):
+    """One environment records what it told between another's read of the record and
+    that other's write: both records stay."""
+    first, second = tmp_path / "first", tmp_path / "second"
+    env_with(first)
+    env_with(second)
+    env_with(box.tools / "moxi-cache", "moxi_cache-0.1.0")
+    real = strays._write
+    raced = []
+
+    def write(path, **fields):
+        if not raced and sys.prefix == str(first) and "strays" not in fields:
+            raced.append(True)
+            monkeypatch.setattr(sys, "prefix", str(second))
+            assert len(strays.tell(io.StringIO(), box.env)) == 1
+            monkeypatch.setattr(sys, "prefix", str(first))
+        real(path, **fields)
+
+    monkeypatch.setattr(strays, "_write", write)
+    monkeypatch.setattr(sys, "prefix", str(first))
+    assert len(strays.tell(io.StringIO(), box.env)) == 1
+    assert raced
+    for prefix in (first, second):
+        monkeypatch.setattr(sys, "prefix", str(prefix))
+        out = io.StringIO()
+        assert strays.tell(out, box.env) == [] and out.getvalue() == ""
+
+
 def test_a_moxi_distribution_that_is_no_module_is_no_stray(box):
     site = env_with(box.tools / "moxi-dev")
     info = site / "moxi_dev-0.1.0.dist-info"

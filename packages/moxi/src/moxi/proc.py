@@ -297,6 +297,10 @@ def _spawn_watched(argv: Argv, *, env, cwd, stdout, stderr) -> subprocess.Popen:
         raise
     proc.lifeline = watchdog.stdin
     proc.watchdog = watchdog
+    # The watchdog is reaped as soon as it exits, so a long-running parent keeps no
+    # ended watchdog for each child it watched. `wait` and `poll` still answer.
+    threading.Thread(target=watchdog.wait, name=f"moxi-watchdog-{watchdog.pid}",
+                     daemon=True).start()
     return proc
 
 
@@ -308,7 +312,7 @@ def _start_watchdog(proc: subprocess.Popen) -> subprocess.Popen:
     watchdog's directory is not put on its path, so no file there can stand in for moxi.
     Raises `OSError` when it can't be started or exits without saying it is ready.
     """
-    import select
+    import selectors
     import time
 
     from . import _watch
@@ -321,38 +325,58 @@ def _start_watchdog(proc: subprocess.Popen) -> subprocess.Popen:
         started = 0.0  # it has ended already: a start time no process has
     else:
         started = ident.started
+    # stderr has a pipe of its own: an interpreter may write to it before the ready
+    # line (a warning, an import-time profile), and that must not hide the line.
     watchdog = subprocess.Popen(
         [str(python()), "-P", "-m", "moxi._watch", str(proc.pid), repr(started)],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         cwd="/", start_new_session=True)
     said = b""
+    err = b""
     late = False
+    # A selector, not select.select: a descriptor numbered past 1024, in a process that
+    # holds many, is out of select's range.
+    waiting = None
     try:
         deadline = time.monotonic() + WATCH_START
-        fd = watchdog.stdout.fileno()
+        out = watchdog.stdout.fileno()
+        waiting = selectors.DefaultSelector()
+        waiting.register(out, selectors.EVENT_READ)
+        waiting.register(watchdog.stderr.fileno(), selectors.EVENT_READ)
         # Read until the ready line, or to the end of what a failing watchdog writes
         # (a traceback's last line says why).
-        while not said.startswith(_watch.READY) and len(said) < 65536:
+        while (waiting.get_map() and not said.startswith(_watch.READY)
+               and len(said) < 65536):
             left = deadline - time.monotonic()
             if left <= 0:
                 late = True
                 break
-            ready, _, _ = select.select([fd], [], [], left)
-            if not ready:
-                continue
-            part = os.read(fd, 4096)
-            if not part:
-                break
-            said += part
+            for key, _ in waiting.select(left):
+                part = os.read(key.fd, 4096)
+                if not part:
+                    waiting.unregister(key.fd)
+                elif key.fd == out:
+                    said += part
+                else:
+                    err = (err + part)[-65536:]
         if said.startswith(_watch.READY):
             return watchdog
+    except Exception as exc:
+        _end_watchdog(watchdog)
+        if isinstance(exc, OSError):
+            raise
+        raise OSError(f"the watchdog for process {proc.pid} did not start: {exc}") from exc
     except BaseException:
         _end_watchdog(watchdog)
         raise
     finally:
+        if waiting is not None:
+            waiting.close()
         watchdog.stdout.close()
+        watchdog.stderr.close()
     _end_watchdog(watchdog)
-    lines = said.decode(errors="replace").strip().splitlines()
+    lines = (err.decode(errors="replace").strip().splitlines()
+             or said.decode(errors="replace").strip().splitlines())
     if lines:
         why = lines[-1]
     elif late:

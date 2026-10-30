@@ -18,7 +18,9 @@ one name. It registers with the daemon as one of the daemon's adapter **kinds**:
 | `send-only` | | a module's own process holding a name that sends and receives nothing (see [Send-only identities](#send-only-identities)) |
 
 `moxi install comms` puts the launchers in the `moxi` tool's environment, and uv puts none
-of them on PATH, so run one by its path: `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <identity>`. The
+of them on PATH, so run one by its path: `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <identity>`. On
+Windows the script is `Scripts\moxi-comms-codex.exe` in the same tool directory; in PowerShell,
+`& "$(uv tool dir)\moxi\Scripts\moxi-comms-codex.exe" <identity>`. The
 Claude launcher also runs as `moxi comms claude`.
 
 A kind decides two things. One is the **wire**: how the adapter talks to its CLI, and so

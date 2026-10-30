@@ -88,11 +88,11 @@ hours = 2
 sandbox = "workspace-write"
 
 [codex.agents."planner@proj-a"]
-slot = 3
+model = "gpt-x"
 cwd = "/src/proj-a"
 
 [opencode.agents.reviewer]
-slot = 4
+model = "acme/coder"
 cwd = "/src/x"
 """
 
@@ -111,8 +111,9 @@ def test_the_file_sets_every_table():
     assert cfg.provision.operator == "alice"
     assert (cfg.replay.messages, cfg.replay.seconds) == (10, 7200)
     assert cfg.codex["defaults"] == {"sandbox": "workspace-write"}
-    assert cfg.codex["agents"]["planner@proj-a"] == {"slot": 3, "cwd": "/src/proj-a"}
-    assert cfg.opencode["agents"]["reviewer"]["slot"] == 4
+    assert cfg.codex["agents"]["planner@proj-a"] == {"model": "gpt-x",
+                                                     "cwd": "/src/proj-a"}
+    assert cfg.opencode["agents"]["reviewer"]["model"] == "acme/coder"
     assert cfg.sources["backend"] == "file" and cfg.sources["block"] == "file"
 
 
@@ -364,6 +365,42 @@ def test_the_text_entry_refuses_every_file_the_loader_refuses(text, key):
     assert (loaded.value.key, loaded.value.problem) == (key, caught.value.problem)
 
 
+#: Files the schema passes and a roster parser refuses, with the words of the refusal.
+BAD_ROWS = [
+    ('[codex.agents."p@x"]\nslot = 1\ncwd = "/src"\n', "slot is retired"),
+    ('[codex.agents."p@x"]\ncwd = "/src"\ncolour = "red"\n', "unknown key(s) colour"),
+    ('[codex.agents."Bad Name"]\ncwd = "/src"\n', "is not a valid name"),
+    ('[codex.agents."agent-3@x"]\ncwd = "/src"\n', "agent-N namespace is reserved"),
+    ('[codex.agents."p@x"]\ncwd = "/src"\nsandbox = "open"\n', "is not one of"),
+    ('[codex.agents."p@x"]\ncwd = "/src"\nsandbox = "read-only"\npermissions = "a"\n',
+     "cannot be combined"),
+    ('[codex.agents."p@x"]\ncwd = "/src"\ndirectors = "main"\n',
+     "directors must be a list"),
+    ('[codex.defaults]\nslot = 1\n', "slot is retired"),
+    ('[opencode.agents."p@x"]\nslot = 1\ncwd = "/src"\n', "slot is retired"),
+    ('[opencode.agents."p@x"]\ncwd = "/src"\nmodel = "nomodel"\n',
+     "must be a \"provider/model\" id"),
+    ('[opencode.agents."p@x"]\ncwd = "/src"\ndirectors = ["bad name"]\n', None),
+]
+
+
+@pytest.mark.parametrize("text, words", BAD_ROWS)
+def test_the_text_entry_refuses_every_row_its_roster_refuses(text, words):
+    from moxi_comms.adapters import codex_roster, opencode_roster
+
+    with pytest.raises(config.ConfigError) as caught:
+        config.check_text(text)
+    assert caught.value.file is None and caught.value.fix
+    if words is not None:
+        assert words in caught.value.problem
+    write_config(None, text)
+    config.load()
+    roster = codex_roster if text.startswith("[codex") else opencode_roster
+    with pytest.raises(config.ConfigError) as loaded:
+        roster.load()
+    assert loaded.value.problem.endswith(caught.value.problem)
+
+
 def test_the_text_entry_reads_no_environment(monkeypatch):
     write_config(None, 'backend = "local"\n')
     monkeypatch.setenv("MOXI_COMMS_GATEWAY", "bogus")
@@ -416,6 +453,18 @@ def test_config_set_refuses_what_comms_refuses(core_state, capsys, argv, value, 
             moxi_config.set("comms", argv[0], value, by="ui")
     assert caught.value.file == str(path) and caught.value.key == key
     assert path.read_text() == "block = true\n"
+
+
+@pytest.mark.parametrize("key", ["codex.agents", "opencode.agents"])
+def test_config_set_refuses_a_row_its_roster_refuses(core_state, capsys, key):
+    from moxi import cli
+
+    path = write_config(None, "block = true\n")
+    assert cli.main(["config", "set", "comms", key, '{"p@x" = {slot = 1}}']) == 2
+    out, err = capsys.readouterr()
+    assert out == "" and f"{path}: " in err and "slot is retired" in err
+    assert path.read_text() == "block = true\n"
+    assert moxi_config.history("comms") == []
 
 
 def test_config_set_and_check_pass_a_good_file_under_a_bad_variable(core_state, capsys,

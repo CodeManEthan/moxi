@@ -305,7 +305,10 @@ def find(environ=None, *, write: bool = True) -> list[Stray]:
     return strays
 
 
-def _write(path, *, key=None, strays=None, told=None) -> None:
+def _write(path, *, key=None, strays=None, here=None, told=None) -> None:
+    """Write the cache (`key` and `strays`) or environment `here`'s told record (`told`,
+    the keys told there) into the file at `path`, under its lock. The told record of
+    every other environment is kept as the file holds it then."""
     import json
 
     from . import files
@@ -320,8 +323,9 @@ def _write(path, *, key=None, strays=None, told=None) -> None:
         if key is not None:
             data["key"] = key
             data["strays"] = [s.as_json() for s in strays]
-        if told is not None:
-            data["told"] = {env: sorted(keys) for env, keys in sorted(told.items())
+        if here is not None:
+            record = {**_told(data), here: told}
+            data["told"] = {env: sorted(keys) for env, keys in sorted(record.items())
                             if keys}
         return (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
@@ -350,7 +354,7 @@ def tell(stream=None, environ=None) -> list[Stray]:
     for stray in new:
         print(stray.line(), file=stream)
     if new or (told_before - now):
-        _write(path, told={**told, here: (told_before & now) | {s.key for s in new}})
+        _write(path, here=here, told=(told_before & now) | {s.key for s in new})
     return new
 
 

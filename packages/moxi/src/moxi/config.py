@@ -1144,8 +1144,12 @@ def _check_file(module, schema, check, text, path, key) -> None:
     """The two checks of a config file's text, each given the text alone: `check_text`'s
     reader, then the module's `CONFIG_CHECK` target `check` when it names one. Raises
     `ConfigError` naming `path`, the module's config file; `key` is the key being changed
-    (None when the file is checked as it is)."""
-    _read_text(module, schema, text, path)
+    (None when the file is checked as it is). A schema the reader refuses is the module's
+    own fault and exits 3, as a schema that cannot be read does."""
+    try:
+        _read_text(module, schema, text, path)
+    except SchemaError as exc:
+        raise _refused(exc.file, exc.problem, exc.fix, 3, exc.key) from None
     if check is None:
         return
     import importlib

@@ -537,6 +537,85 @@ def test_a_watchdog_that_never_says_ready_is_killed_and_spawn_raises(
     assert children() <= before
 
 
+def test_a_watchdog_that_writes_to_stderr_before_ready_still_starts(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "python", lambda: fake_python(tmp_path, f"""
+        echo "a line from the interpreter's startup" >&2
+        exec {PY} "$@"
+    """))
+    child = proc.spawn([PY, "-c", "import time; time.sleep(60)"], lifeline="watch")
+    child.lifeline.close()
+    assert child.wait(timeout=30) == -signal.SIGTERM
+    assert child.watchdog.wait(timeout=30) == 0
+
+
+@pytest.mark.parametrize("variable, value", [("PYTHONWARNINGS", "bogus"),
+                                             ("PYTHONPROFILEIMPORTTIME", "1")])
+def test_a_watchdog_whose_interpreter_warns_at_startup_still_starts(monkeypatch,
+                                                                    variable, value):
+    monkeypatch.setenv(variable, value)
+    child = proc.spawn([PY, "-c", "import time; time.sleep(60)"], lifeline="watch")
+    child.lifeline.close()
+    assert child.wait(timeout=30) == -signal.SIGTERM
+    assert child.watchdog.wait(timeout=30) == 0
+
+
+def test_a_watchdog_that_exits_is_reaped_without_a_wait():
+    child = proc.spawn([PY, "-c", "pass"], lifeline="watch")
+    assert child.wait(timeout=30) == 0
+    # Nothing here waits on or polls the watchdog: only a reap sets its returncode.
+    assert wait_for(lambda: child.watchdog.returncode is not None)
+    assert child.watchdog.returncode == 0
+    assert child.watchdog.pid not in children()
+    child.lifeline.close()
+
+
+def test_a_process_holding_more_than_1024_descriptors_starts_a_watched_child():
+    import resource
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    want = 1200
+    if hard != resource.RLIM_INFINITY and hard < want:
+        pytest.skip(f"the descriptor limit is {hard}, under {want}")
+    resource.setrlimit(resource.RLIMIT_NOFILE, (max(soft, want), hard))
+    held = []
+    try:
+        while not held or held[-1] < 1100:
+            held.append(os.open(os.devnull, os.O_RDONLY))
+        child = proc.spawn([PY, "-c", "import time; time.sleep(60)"], lifeline="watch")
+        child.lifeline.close()
+        assert child.wait(timeout=30) == -signal.SIGTERM
+        assert child.watchdog.wait(timeout=30) == 0
+    finally:
+        for fd in held:
+            os.close(fd)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
+
+
+def test_a_failure_while_waiting_for_the_watchdog_is_an_oserror(monkeypatch):
+    import selectors
+
+    class Broken(selectors.DefaultSelector):
+        def select(self, timeout=None):
+            raise ValueError("no way to wait")
+
+    monkeypatch.setattr(selectors, "DefaultSelector", Broken)
+    before = children()
+    with pytest.raises(OSError, match="did not start: no way to wait"):
+        proc.spawn([PY, "-c", "import time; time.sleep(60)"], lifeline="watch")
+    assert children() <= before
+
+
+def test_a_failing_watchdog_is_named_by_its_last_stderr_line(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "python", lambda: fake_python(tmp_path, """
+        echo "something on stdout"
+        echo "the reason it stopped" >&2
+        exit 1
+    """))
+    with pytest.raises(OSError, match="did not start: the reason it stopped"):
+        proc.spawn([PY, "-c", "import time; time.sleep(60)"], lifeline="watch")
+
+
 def children() -> set[int]:
     """This process's live children (a zombie, not yet reaped, counts)."""
     return {p.pid for p in psutil.Process().children()}
