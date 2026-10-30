@@ -1,4 +1,4 @@
-"""The optional link to the projects module, for `moxi repo`'s command line only.
+"""The optional link to the projects module, for `moxi repo`'s command line and the doctor.
 
 repo keys everything by path. With projects installed, a project key works where a
 command takes PATH, and listings show each repo's key. repo reaches projects only through
@@ -48,6 +48,21 @@ def api():
     if not found.ok or found.api is None:
         return None
     return found.api
+
+
+def why_off() -> str | None:
+    """Why project keys are off (projects absent, broken or not offering interface 1),
+    or None when they work."""
+    from moxi import modules
+
+    if not modules.available(MODULE):
+        return "projects isn't installed"
+    found = modules.load(MODULE, interface=INTERFACE)
+    if not found.ok:
+        return getattr(found, "reason", None) or "projects can't be loaded"
+    if found.api is None:
+        return f"projects offers no read API for interface {INTERFACE}"
+    return None
 
 
 def looks_like_key(arg: str) -> bool:
@@ -113,4 +128,4 @@ def _unavailable(found, exc: Exception, arg: str) -> Unavailable:
 
 
 __all__ = ["INSTALL", "Unavailable", "api", "installed", "key_for", "looks_like_key",
-           "project_roots", "resolve"]
+           "project_roots", "resolve", "why_off"]

@@ -10,7 +10,9 @@ every committer on that repo:
   returned, so a failed push is retried by the first pass after `push_backoff`;
 - the record part: the repo's state file, then the doctor records, then the sweep.
 
-Only a `busy` pass, which never took the lock, skips the push and record parts.
+Only a `busy` pass, which never took the lock, skips the push and record parts. A failure
+in the commit part ends it `error` (unstaging what it staged), and a failure in the push
+part is a `push_error`; either way the record part runs.
 
 Every path the committer hands git is literal by its own form (`:(literal)<path>`). A list
 of changed paths goes on stdin (`--pathspec-from-file=- --pathspec-file-nul`); the only
@@ -28,10 +30,14 @@ The git calls of a pass:
 | dirty | `status --porcelain -z --untracked-files=all --no-renames -- <spec paths>` |
 | staged before | `rev-parse -q --verify HEAD^{commit}`; `diff-index --cached --raw -z --no-renames <HEAD or the empty tree> -- <spec paths>` (on an unborn branch, `hash-object -t tree --stdin` first) |
 | stage | `add --all --pathspec-from-file=- --pathspec-file-nul` |
-| ours | the same `diff-index` with `-M` in place of `--no-renames` |
+| ours | the same `diff-index` with `-M` in place of `--no-renames`; a path staged and not read back as ours is unstaged as below |
 | drop, unstage | `reset -q --pathspec-from-file=- --pathspec-file-nul`, then the `diff-index` again to verify |
-| commit | `commit -q -F <file> [--trailer k=v]... --pathspec-from-file=- --pathspec-file-nul`; `rev-parse -q --verify HEAD^{commit}`; `diff-tree -r -z --no-renames --raw --root --no-commit-id <new commit>` |
-| push | `symbolic-ref -q HEAD`; `remote`; per branch `rev-parse -q --verify refs/heads/<b>`, `rev-list --count refs/remotes/<r>/<b>..refs/heads/<b>`, `push -q <r> refs/heads/<b>:refs/heads/<b>` |
+| commit | `rev-parse -q --verify HEAD^{commit}`; `commit -q -F <file> [--trailer k=v]... --pathspec-from-file=- --pathspec-file-nul`; `rev-list -1 --parents HEAD` (when `HEAD`'s parent isn't the `HEAD` read before, `rev-list --reverse --parents --basic-regexp --author=<anchored> HEAD ^<old HEAD>`); `diff-tree -r -z --no-renames --raw --root --no-commit-id <new commit>` |
+| push | `symbolic-ref -q HEAD`; `remote`; per branch `rev-parse -q --verify refs/heads/<b>`, `rev-list --count refs/remotes/<r>/<b>..refs/heads/<b>`, `push -q <r> refs/heads/<b>:refs/heads/<b>` (before it, `config --get core.sshCommand`) |
+
+The push part keeps, per branch, the sha its last successful push sent. A branch whose
+remote-tracking ref is missing (a push-only remote) reads as not ahead while
+`refs/heads/<b>` is still that sha, so it is pushed once per new commit, not every pass.
 """
 
 from __future__ import annotations
@@ -62,7 +68,9 @@ SPEC_PREFIX = "moxi-repo.spec."
 
 STATUSES = ("committed", "clean", "throttled", "busy", "index-busy", "refused", "error")
 #: A pass that saw something it can judge: its record part writes or clears the commit
-#: record. `throttled`, `busy` and `index-busy` passes leave it as it was.
+#: record. `throttled`, `busy` and `index-busy` passes leave it as it was, except that
+#: one whose push printed lines writes them into it, and git's index lock held for
+#: `STALE_INDEX_PASSES` passes in a row is written there too.
 CONCLUSIVE = ("committed", "clean", "refused", "error")
 #: This many `index-busy` passes in a row, and git's `index.lock` is reported as stale.
 STALE_INDEX_PASSES = 5
@@ -283,8 +291,10 @@ class _Where:
         return self.cgd / OWN_DIR
 
 
-def _where(root) -> _Where:
-    """The work tree's top, its common git dir and its git dir; raises SpecError."""
+def _where(root, *, exact: bool = True) -> _Where:
+    """The work tree's top, its common git dir and its git dir; raises SpecError. With
+    `exact` (a spec's root), `root` must be the work tree's top; without it, any path
+    inside the work tree will do."""
     root = Path(root)
     if not root.is_dir():
         raise SpecError(f"{root} is not a directory")
@@ -293,10 +303,10 @@ def _where(root) -> _Where:
     lines = done.stdout.splitlines()
     if done.returncode != 0 or len(lines) != 3:
         raise SpecError(f"{root} is not in a git work tree")
-    cgd, top, git_dir = (Path(x) for x in lines)
-    if os.path.realpath(top) != os.path.realpath(root):
-        raise SpecError(f"root {root} is not the top of its work tree ({top})")
-    return _Where(top, cgd, git_dir)
+    cgd, found, git_dir = (Path(x) for x in lines)
+    if exact and os.path.realpath(found) != os.path.realpath(root):
+        raise SpecError(f"root {root} is not the top of its work tree ({found})")
+    return _Where(found, cgd, git_dir)
 
 
 # This thread's passes: the common git dirs whose committer lock it holds.
@@ -309,6 +319,47 @@ def _held_here() -> set[str]:
     return _held.dirs
 
 
+# One gate per lock file, so this process's threads queue for the committer's lock (the
+# lock file itself refuses a second thread of the same process at once).
+_gates: dict[str, threading.Lock] = {}
+_gates_guard = threading.Lock()
+
+
+@contextlib.contextmanager
+def _take(where: _Where, wait: float | None):
+    """Hold the committer's lock for the block, waiting up to `wait` seconds (None: as
+    long as it takes; 0: try once) behind other processes and this process's other
+    threads alike. Raises `moxi.files.LockTimeout` when the wait runs out, and
+    `RuntimeError` when this thread already holds it."""
+    from moxi import files
+
+    path = where.own / LOCK
+    key = _records.key_of(where.cgd)
+    if key in _held_here():
+        raise RuntimeError(f"{path} is already held by this thread")
+    with _gates_guard:
+        gate = _gates.setdefault(os.path.abspath(path), threading.Lock())
+    deadline = None if wait is None else time.monotonic() + wait
+    if wait is None:
+        got = gate.acquire()
+    elif wait > 0:
+        got = gate.acquire(timeout=wait)
+    else:
+        got = gate.acquire(blocking=False)
+    if not got:
+        raise files.LockTimeout(path, os.getpid())
+    try:
+        left = None if deadline is None else max(0.0, deadline - time.monotonic())
+        with files.lock(path, timeout=left):
+            _held_here().add(key)
+            try:
+                yield
+            finally:
+                _held_here().discard(key)
+    finally:
+        gate.release()
+
+
 @contextlib.contextmanager
 def _locked(where: _Where, wait: float | None):
     """Hold the committer's lock for the block; yields False, holding nothing, when another
@@ -317,16 +368,11 @@ def _locked(where: _Where, wait: float | None):
 
     with contextlib.ExitStack() as stack:
         try:
-            stack.enter_context(files.lock(where.own / LOCK, timeout=wait))
+            stack.enter_context(_take(where, wait))
         except (files.LockTimeout, RuntimeError):
             yield False
             return
-        key = _records.key_of(where.cgd)
-        _held_here().add(key)
-        try:
-            yield True
-        finally:
-            _held_here().discard(key)
+        yield True
 
 
 # -- the state file -----------------------------------------------------------------------
@@ -460,8 +506,6 @@ def save_spec(spec: Spec, *, wait: float = 30) -> None:
     it is. Raises SpecError for a spec that can't be saved, and `moxi.files.LockTimeout`
     when a pass holds the committer's lock past `wait` seconds.
     """
-    from moxi import files
-
     problem = spec_problem(spec)
     if problem:
         raise SpecError(problem)
@@ -471,26 +515,43 @@ def save_spec(spec: Spec, *, wait: float = 30) -> None:
             raise SpecError(f"{label} is a callable; a saved spec takes a 'pkg.mod:fn' "
                             "string" + (" (or a summary line)" if label == "message" else ""))
     where = _where(spec.root)
-    with files.lock(where.own / LOCK, timeout=wait):
+    with _take(where, wait):
         section = f"{SPEC_PREFIX}{spec.name}"
-        git(where.top, "config", "--local", "--remove-section", section)
+        if spec.name in _config_specs(where.cgd):
+            done = _config_write(where.top, "--remove-section", section)
+            if done.returncode != 0:
+                raise SpecError(f"git config could not replace the saved spec: "
+                                f"{done.stderr.strip()}")
         for var, value in _fields(spec):
-            done = git(where.top, "config", "--local", "--add", f"{section}.{var}", value)
+            done = _config_write(where.top, "--add", f"{section}.{var}", value)
             if done.returncode != 0:
                 raise SpecError(f"git config could not save {var}: {done.stderr.strip()}")
     _index(where)
 
 
+def _config_write(top: Path, *args: str):
+    """One `git config --local` write; while another git holds the config lock, it is
+    tried twice more, 20 ms and 50 ms later."""
+    for delay in (0, 0.02, 0.05):
+        if delay:
+            time.sleep(delay)
+        done = git(top, "config", "--local", *args)
+        if done.returncode == 0:
+            break
+    return done
+
+
 def remove_spec(root, name: str, *, wait: float = 30) -> list[str]:
     """Forget a spec, saved or not: its saved section, its state-file entry and its doctor
     records. Returns a line for each thing removed (none when there was nothing)."""
-    from moxi import files
-
     where = _where(root)
     lines: list[str] = []
-    with files.lock(where.own / LOCK, timeout=wait):
+    with _take(where, wait):
         if name in _config_specs(where.cgd):
-            git(where.top, "config", "--local", "--remove-section", f"{SPEC_PREFIX}{name}")
+            done = _config_write(where.top, "--remove-section", f"{SPEC_PREFIX}{name}")
+            if done.returncode != 0:
+                raise SpecError(f"git config could not remove the saved spec {name}: "
+                                f"{done.stderr.strip()}")
             lines.append(f"removed the saved spec {name} from {where.top}")
         if name in read_state(where.cgd)["specs"]:
             _change_state(where.cgd, lambda specs: specs.pop(name, None))
@@ -532,6 +593,12 @@ class _Pass:
         self.push_state: dict[str, dict | None] = {}
         #: paths this pass staged and could not unstage: path -> staged blob
         self.stranded: dict[str, str | None] = {}
+        #: the lines of the push part's successful pushes (also in `hook_lines`)
+        self.push_lines: list[str] = []
+        #: branch -> the sha a push of it sent, or None to forget it
+        self.pushed_sha: dict[str, str | None] = {}
+        #: True once git commit has made the commit
+        self.landed = False
 
     def end(self, status: str, detail: str = "") -> None:
         self.status, self.detail = status, detail
@@ -608,10 +675,13 @@ def _run(name: str, where: _Where, wait: float, load: Callable[[], Spec | None]
         else:
             try:
                 _commit_part(spec, p, state)
-            except (GitFailed, OSError, SpecError) as exc:
+            except Exception as exc:  # noqa: BLE001 - the push and record parts still run
                 p.end("error", str(exc) if isinstance(exc, SpecError) else _describe(exc))
         if _pushable(spec):
-            _push_part(spec, p, state)
+            try:
+                _push_part(spec, p, state)
+            except Exception as exc:  # noqa: BLE001 - the record part still runs
+                p.push_errors.append(f"the push part failed: {_describe(exc)}")
         _record_part(p, spec, state)
     return p.result()
 
@@ -693,7 +763,7 @@ def _unstage(p: _Pass, spec: Spec, paths: list[str], judged: dict) -> bool:
         if not _index_locked(p):
             break
     for x in left:
-        p.stranded[x] = judged.get(x)
+        p.stranded[x] = judged.get(x, still.get(x))
     return False
 
 
@@ -737,18 +807,59 @@ def _commit_part(spec: Spec, p: _Pass, state: dict) -> None:
         if attempt == 2:
             p.end("error", "git add failed twice: " + _last_line(done.stderr))
             return
-    ours = []
-    for c in _staged(p, spec.paths, renames=True):
-        if c.path in before:
+    try:
+        _after_staging(spec, p, before, stage, since)
+    except Exception as exc:  # noqa: BLE001 - a failure after staging unstages our paths
+        p.end("error", str(exc) if isinstance(exc, SpecError) else _describe(exc))
+        if not p.landed:
+            _undo_staging(p, spec, stage)
+
+
+def _ours(staged_now: list[Change], before: dict) -> list[Change]:
+    """Our staged changes: what is staged now minus what was staged before the pass. When
+    git pairs one of our paths with someone else's as a rename, our side stays ours, as
+    the plain add or deletion it is."""
+    out = []
+    for c in staged_now:
+        if c.old_path is None:
+            if c.path not in before:
+                out.append(c)
             continue
-        if c.old_path is not None and c.old_path in before:
-            c = Change("A", c.path, None, c.blob)
-        ours.append(c)
+        new_ours, old_ours = c.path not in before, c.old_path not in before
+        if new_ours and old_ours:
+            out.append(c)
+        elif new_ours:
+            out.append(Change("A", c.path, None, c.blob))
+        elif old_ours:
+            out.append(Change("D", c.old_path, None, None))
+    return out
+
+
+def _sides(ours: list[Change]) -> list[str]:
+    return [x for c in ours for x in ((c.path, c.old_path) if c.old_path else (c.path,))]
+
+
+def _undo_staging(p: _Pass, spec: Spec, stage: list[str]) -> None:
+    """After a failure, unstage what step 5 staged; what can't be is kept as stranded."""
+    try:
+        _unstage(p, spec, stage, {})
+    except Exception as exc:  # noqa: BLE001
+        p.detail += f"; its paths could not be unstaged: {_describe(exc)}"
+
+
+def _after_staging(spec: Spec, p: _Pass, before: dict, stage: list[str],
+                   since: float | None) -> None:
+    """Steps 6-10: ours, prepare, commit. Any path step 5 staged that isn't ours is
+    unstaged first, so nothing the pass staged is left in the index."""
+    ours = _ours(_staged(p, spec.paths, renames=True), before)
     judged = _blobs(ours)
+    every = _sides(ours)
+    stray = sorted(set(stage) - set(every))
+    if stray:
+        _unstage(p, spec, stray, {})
     if not ours:
         p.end("clean")
         return
-    every = [x for c in ours for x in ((c.path, c.old_path) if c.old_path else (c.path,))]
 
     # Prepare: what to drop, then unstage it and verify.
     if spec.prepare is not None:
@@ -769,7 +880,7 @@ def _commit_part(spec: Spec, p: _Pass, state: dict) -> None:
         if ours is None:
             return
         judged = _blobs(ours)
-        every = [x for c in ours for x in ((c.path, c.old_path) if c.old_path else (c.path,))]
+        every = _sides(ours)
         if not ours:
             p.end("clean")
             return
@@ -789,6 +900,7 @@ def _commit_part(spec: Spec, p: _Pass, state: dict) -> None:
     for key, value in trailers:
         args += ["--trailer", f"{key}={value}"]
     args += ["--pathspec-from-file=-", "--pathspec-file-nul"]
+    old_head = head_commit(p.where.top)
     try:
         done = _g(p, *args, input=_stdin(every), author=tuple(spec.author),
                   extra_env={COMMITTER_ENV: spec.name}, timeout=COMMIT_TIMEOUT)
@@ -809,15 +921,38 @@ def _commit_part(spec: Spec, p: _Pass, state: dict) -> None:
         else:
             p.end("refused", p.hook_lines[0] if p.hook_lines else f"git commit exited {code}")
         return
-    sha = head_commit(p.where.top)
+    p.landed = True
+    sha = _our_commit(p, spec, old_head)
+    if sha is None:
+        p.end("committed", "HEAD moved before the commit could be read back")
+        return
     tree = _g(p, "diff-tree", "-r", "-z", "--no-renames", "--raw", "--root", "--no-commit-id",
-              sha or "HEAD", binary=True)
+              sha, binary=True)
     committed = _blobs(parse_raw(tree.stdout)) if tree.returncode == 0 else {}
     p.sha = sha
     p.files = sorted(committed)
     p.unjudged = sorted(x for x, blob in committed.items()
                         if x not in judged or judged[x] != blob)
     p.end("committed")
+
+
+def _our_commit(p: _Pass, spec: Spec, old_head: str | None) -> str | None:
+    """The commit this pass made: `HEAD` when its parent is `old_head`, the `HEAD` just
+    before the commit. When another git committed right after, the commit by the spec's
+    author whose parent is `old_head`; None when there is none to be sure of."""
+    want = [old_head] if old_head else []
+    done = _g(p, "rev-list", "-1", "--parents", "HEAD")
+    fields = done.stdout.split()
+    if done.returncode == 0 and fields and fields[1:] == want:
+        return fields[0]
+    who = f"^{_bre(spec.author[0])} <{_bre(spec.author[1])}>$"
+    done = _g(p, "rev-list", "--reverse", "--parents", "--basic-regexp", f"--author={who}",
+              "HEAD", *([f"^{old_head}"] if old_head else []))
+    for line in done.stdout.splitlines() if done.returncode == 0 else ():
+        fields = line.split()
+        if fields[1:] == want:
+            return fields[0]
+    return None
 
 
 def _size(path: Path) -> int:
@@ -856,6 +991,8 @@ def _drop(p: _Pass, spec: Spec, ours: list[Change], drops: dict[str, str],
     added = False
     for c in ours:
         why = drops.get(c.path)
+        if why is None and c.old_path is not None:
+            why = drops.get(c.old_path)
         if why is None:
             kept.append(c)
             continue
@@ -885,8 +1022,7 @@ def _drop(p: _Pass, spec: Spec, ours: list[Change], drops: dict[str, str],
             still = _blobs(_staged(p, spec.paths, renames=False))
             stuck = [x for x in gone if x in still]
             p.end("error", "a dropped path is still staged: " + _named(stuck))
-        every = [x for c in kept for x in ((c.path, c.old_path) if c.old_path else (c.path,))]
-        _unstage(p, spec, every, judged)
+        _unstage(p, spec, _sides(kept), judged)
         return None
     return kept
 
@@ -943,13 +1079,20 @@ def _push_part(spec: Spec, p: _Pass, state: dict) -> None:
         p.detached = True
     branches = ([current] if current else []) + [b for b in open_branches if b != current]
     remotes: list[str] | None = None
+    pushed_sha = state.get("pushed_sha") or {}
     for b in branches:
         if spec.push is None:
             _push_clear(p, b, state)
+            if b in pushed_sha:
+                p.pushed_sha[b] = None
             continue
-        if _g(p, "rev-parse", "-q", "--verify", f"refs/heads/{b}").returncode != 0:
+        tip = _g(p, "rev-parse", "-q", "--verify", f"refs/heads/{b}")
+        if tip.returncode != 0:
             _push_clear(p, b, state)
+            if b in pushed_sha:
+                p.pushed_sha[b] = None
             continue
+        tip_sha = tip.stdout.strip()
         if remotes is None:
             remotes = _g(p, "remote").stdout.split()
         r = spec.push
@@ -965,10 +1108,14 @@ def _push_part(spec: Spec, p: _Pass, state: dict) -> None:
         if count.returncode == 0 and count.stdout.strip() == "0":
             _push_clear(p, b, state)
             continue
+        if count.returncode != 0 and tip_sha and pushed_sha.get(b) == tip_sha:
+            # No tracking ref (a push-only remote): the last push sent this very commit.
+            _push_clear(p, b, state)
+            continue
         failed_at = ((state.get("push") or {}).get(b) or {}).get("failed_at")
         if failed_at is not None and _now() - failed_at < spec.push_backoff:
             continue
-        _push_one(spec, p, r, b)
+        _push_one(spec, p, r, b, tip_sha)
 
 
 def _pushable(spec: Spec) -> bool:
@@ -986,7 +1133,7 @@ def _push_clear(p: _Pass, branch: str, state: dict) -> None:
     p.push_records[branch] = None
 
 
-def _push_one(spec: Spec, p: _Pass, remote: str, branch: str) -> None:
+def _push_one(spec: Spec, p: _Pass, remote: str, branch: str, tip: str) -> None:
     try:
         done = _g(p, "push", "-q", remote, f"refs/heads/{branch}:refs/heads/{branch}",
                   timeout=PUSH_TIMEOUT)
@@ -998,7 +1145,11 @@ def _push_one(spec: Spec, p: _Pass, remote: str, branch: str) -> None:
         p.pushed.append(branch)
         p.push_state[branch] = None
         p.push_records[branch] = None
-        p.hook_lines += [x for x in lines if not x.startswith("remote:")]
+        if tip:
+            p.pushed_sha[branch] = tip
+        said = [x for x in lines if not x.startswith("remote:")]
+        p.hook_lines += said
+        p.push_lines += said
         return
     error = (f"{remote} did not answer within {int(PUSH_TIMEOUT)} s" if code is None
              else _push_reason(lines, code))
@@ -1058,6 +1209,16 @@ def _record_part(p: _Pass, spec: Spec | None, old: dict) -> None:
                 value = {**push[branch], **value}
             push[branch] = value
     entry["push"] = push
+    pushed_sha = dict(entry.get("pushed_sha") or {})
+    for branch, sha in p.pushed_sha.items():
+        if sha is None:
+            pushed_sha.pop(branch, None)
+        else:
+            pushed_sha[branch] = sha
+    if pushed_sha:
+        entry["pushed_sha"] = pushed_sha
+    else:
+        entry.pop("pushed_sha", None)
     stranded = {} if conclusive else dict(entry.get("stranded") or {})
     stranded.update(p.stranded)
     if stranded:
@@ -1070,7 +1231,8 @@ def _record_part(p: _Pass, spec: Spec | None, old: dict) -> None:
     key = _records.commit_key(p.where.cgd, p.name)
     stale = (status == "index-busy"
              and int(entry.get("index_busy_passes") or 0) >= STALE_INDEX_PASSES)
-    if conclusive or stale:
+    # A pass that saw nothing conclusive still writes the lines its pushes printed.
+    if conclusive or stale or p.push_lines:
         text = _commit_text(p, entry, stale)
         if text:
             _records.open_record(key, cgd=p.where.cgd, kind="commit",

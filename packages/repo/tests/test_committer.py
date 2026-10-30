@@ -670,3 +670,224 @@ def test_moxi_repo_commit_runs_saved_specs_and_gives_exit_codes(demo, capsys):
     assert cli.main(["commit", str(repo), "--spec", "demo/snap"]) == 3
     err = capsys.readouterr().err
     assert "refused" in err and "gate says no" in err
+
+
+# -- what a pass leaves staged when git pairs paths or a call fails part way -----------------
+
+PAIRED = "the same text, long enough to pair as a rename\n" * 3
+
+
+def test_our_deletion_paired_with_someone_elses_staged_add_is_still_ours(demo):
+    repo = demo.repo()
+    write(repo, "notes/a.md", PAIRED)
+    assert moxi_repo.commit(spec(repo)).status == "committed"
+    write(repo, "notes/b.md", PAIRED)
+    git(repo, "add", "notes/b.md")
+    (repo / "notes/a.md").unlink()
+    result = moxi_repo.commit(spec(repo))
+    assert result.status == "committed" and result.files == ("notes/a.md",)
+    assert result.left == (("notes/b.md", "staged by someone else"),)
+    assert staged(repo) == ["notes/b.md"] and "notes/a.md" not in in_head(repo)
+
+
+def test_a_path_staged_by_the_pass_but_not_read_back_as_ours_is_unstaged(demo, monkeypatch):
+    repo = demo.repo()
+    write(repo, "notes/a.md")
+    real = committer._staged
+
+    def blind(p, paths, *, renames):
+        return [] if renames else real(p, paths, renames=renames)
+
+    monkeypatch.setattr(committer, "_staged", blind)
+    result = moxi_repo.commit(spec(repo))
+    assert result.status == "clean"
+    assert staged(repo) == []
+
+
+def test_a_drop_naming_a_renames_old_side_drops_the_rename_whole(demo):
+    repo = demo.repo()
+    write(repo, "notes/old.md", PAIRED)
+    moxi_repo.commit(spec(repo))
+    (repo / "notes/old.md").rename(repo / "notes/new.md")
+    result = moxi_repo.commit(spec(repo, prepare=lambda ctx: moxi_repo.Prepared(
+        drop=[("notes/old.md", "no")])))
+    assert result.status == "clean"
+    assert dict(result.left) == {"notes/new.md": "dropped: no",
+                                 "notes/old.md": "dropped with its rename to notes/new.md: no"}
+    assert staged(repo) == [] and "notes/old.md" in in_head(repo)
+
+
+def test_a_timeout_in_the_commit_part_still_pushes_and_records(demo, monkeypatch):
+    repo = demo.repo()
+    bare = make_remote(demo, repo)
+    write(repo, "notes/a.md")
+    git(repo, "add", "notes/a.md")
+    git(repo, "commit", "-q", "-m", "by hand")
+
+    def slow(p, paths):
+        raise subprocess.TimeoutExpired(["git", "status"], 30)
+
+    monkeypatch.setattr(committer, "_dirty", slow)
+    result = moxi_repo.commit(spec(repo, push="origin"))
+    assert result.status == "error" and "TimeoutExpired" in result.detail
+    assert result.pushed == ("main",) and remote_head(bare) == head(repo)
+    entry = committer.read_state(repo / ".git")["specs"]["demo/snap"]
+    assert entry["last"]["status"] == "error"
+
+
+@pytest.mark.parametrize("failure", [
+    subprocess.TimeoutExpired(["git", "diff-index"], 30),
+    gitrun.GitFailed(("diff-index",), 128, "fatal: broken"),
+    OSError("no git"),
+])
+def test_a_failure_after_staging_unstages_our_paths(demo, monkeypatch, failure):
+    repo = demo.repo()
+    write(repo, "notes/a.md")
+    write(repo, "notes/other.md")
+    git(repo, "add", "notes/other.md")
+    real = committer._staged
+
+    def breaks(p, paths, *, renames):
+        if renames:
+            raise failure
+        return real(p, paths, renames=renames)
+
+    monkeypatch.setattr(committer, "_staged", breaks)
+    result = moxi_repo.commit(spec(repo))
+    assert result.status == "error", result
+    assert staged(repo) == ["notes/other.md"]
+    entry = committer.read_state(repo / ".git")["specs"]["demo/snap"]
+    assert "stranded" not in entry
+
+
+def test_a_failure_in_the_push_part_is_a_push_error_and_the_pass_is_recorded(demo, monkeypatch):
+    repo = demo.repo()
+    make_remote(demo, repo)
+    write(repo, "notes/a.md")
+    real = committer._g
+
+    def rev_list_hangs(p, *args, **kw):
+        if args[0] == "rev-list" and "--count" in args:
+            raise subprocess.TimeoutExpired(["git", *args], 30)
+        return real(p, *args, **kw)
+
+    monkeypatch.setattr(committer, "_g", rev_list_hangs)
+    result = moxi_repo.commit(spec(repo, push="origin"))
+    assert result.status == "committed" and result.sha == head(repo)
+    assert result.push_error and "TimeoutExpired" in result.push_error
+    entry = committer.read_state(repo / ".git")["specs"]["demo/snap"]
+    assert entry["last"]["sha"] == head(repo)
+
+
+def test_the_sha_is_our_commit_even_when_head_moves_right_after(demo, monkeypatch):
+    repo = demo.repo()
+    write(repo, "notes/a.md")
+    real = committer._g
+
+    def another_commit_lands(p, *args, **kw):
+        done = real(p, *args, **kw)
+        if args[0] == "commit" and done.returncode == 0:
+            write(repo, "elsewhere.md")
+            git(repo, "add", "elsewhere.md")
+            git(repo, "commit", "-q", "-m", "someone else")
+        return done
+
+    monkeypatch.setattr(committer, "_g", another_commit_lands)
+    result = moxi_repo.commit(spec(repo))
+    ours = git(repo, "rev-parse", "HEAD^").stdout.strip()
+    assert result.status == "committed" and result.sha == ours
+    assert result.files == ("notes/a.md",) and result.unjudged == ()
+
+
+
+# -- ssh, and the lock across threads ------------------------------------------------------
+
+def _ssh_script(path: Path, marker: Path) -> Path:
+    path.write_text(f"#!/bin/sh\necho \"$@\" > '{marker}'\nexit 1\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+@pytest.mark.parametrize("how", ["core.sshCommand", "GIT_SSH", "none"])
+def test_git_keeps_the_users_own_ssh_and_else_runs_ssh_in_batch_mode(demo, tmp_path,
+                                                                    monkeypatch, how):
+    repo = demo.repo()
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    default = tmp_path / "default-ssh-ran"
+    _ssh_script(fake_bin / "ssh", default)
+    monkeypatch.setenv("PATH", f"{fake_bin}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.delenv("GIT_SSH_COMMAND", raising=False)
+    monkeypatch.delenv("GIT_SSH", raising=False)
+    mine = tmp_path / "mine-ran"
+    user_ssh = _ssh_script(tmp_path / "user-ssh", mine)
+    if how == "core.sshCommand":
+        git(repo, "config", "core.sshCommand", str(user_ssh))
+    elif how == "GIT_SSH":
+        monkeypatch.setenv("GIT_SSH", str(user_ssh))
+    moxi_repo.git(repo, "ls-remote", "ssh://example.invalid/x.git")
+    if how == "none":
+        assert not mine.exists() and "BatchMode=yes" in default.read_text()
+    else:
+        assert mine.exists() and not default.exists()
+
+
+def test_wait_queues_behind_another_thread_of_this_process(demo):
+    import threading
+
+    repo = demo.repo()
+    write(repo, "notes/a.md")
+    where = committer._where(repo)
+    taken, release = threading.Event(), threading.Event()
+
+    def hold():
+        with committer._locked(where, 0) as held:
+            assert held
+            taken.set()
+            release.wait(10)
+
+    thread = threading.Thread(target=hold)
+    thread.start()
+    try:
+        assert taken.wait(10)
+        assert moxi_repo.commit(spec(repo)).status == "busy"
+        threading.Timer(0.3, release.set).start()
+        assert moxi_repo.commit(spec(repo), wait=10).status == "committed"
+    finally:
+        release.set()
+        thread.join(10)
+    taken.clear()
+    release.clear()
+    thread = threading.Thread(target=hold)
+    thread.start()
+    try:
+        assert taken.wait(10)
+        with pytest.raises(files.LockTimeout):
+            moxi_repo.save_spec(spec(repo), wait=0.2)
+        threading.Timer(0.3, release.set).start()
+        moxi_repo.save_spec(spec(repo), wait=10)
+    finally:
+        release.set()
+        thread.join(10)
+    assert committer.saved_names(repo / ".git") == ["demo/snap"]
+
+
+def test_save_spec_tries_again_while_another_git_holds_the_config_lock(demo, monkeypatch):
+    repo = demo.repo()
+    moxi_repo.save_spec(spec(repo, paths=("notes",)))
+    real = committer.git
+    failed = []
+
+    def flaky(root, *args, **kw):
+        verb = next((a for a in args if a in ("--remove-section", "--add")), None)
+        if verb and verb not in failed:
+            failed.append(verb)
+            return subprocess.CompletedProcess(args, 255, "",
+                                               "error: could not lock config file")
+        return real(root, *args, **kw)
+
+    monkeypatch.setattr(committer, "git", flaky)
+    moxi_repo.save_spec(spec(repo, paths=("other",)))
+    assert failed == ["--remove-section", "--add"]
+    monkeypatch.setattr(committer, "git", real)
+    assert committer.saved_spec(repo, "demo/snap").paths == ("other",)

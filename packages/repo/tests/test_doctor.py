@@ -210,6 +210,16 @@ def test_uncovered_files_are_named_with_their_count(demo):
     assert rows_named(f"uncovered {repo}") == []
 
 
+@pytest.mark.parametrize("path", ["./notes", "notes//", "notes/./", "./"])
+def test_a_spec_path_git_reads_the_same_covers_the_same_files(demo, path):
+    repo = demo.repo()
+    moxi_repo.save_spec(spec(repo, paths=(path,)))
+    write(repo, "notes/b.md")
+    assert rows_named(f"uncovered {repo}") == []
+    assert checks._covers(path, "notes/b.md")
+    assert not checks._covers(path, "notesx/b.md") or path == "./"
+
+
 def test_paths_left_out_over_an_hour_are_shown_and_gone_once_committed(demo, clock):
     repo = demo.repo()
     moxi_repo.save_spec(spec(repo))

@@ -31,10 +31,49 @@ def test_a_clean_message_passes():
 
 
 def test_prose_in_the_trailer_block_is_refused():
-    out = problems("Fix it\n\nSigned-off-by: a\nand then some prose\n")
+    out = problems("Fix it\n\nAcked-by: a\nand then some prose\n")
     assert out == ["trailer shape: line 4 is prose in the trailer block (the last paragraph); "
                    "a trailer block holds only 'Key: value' lines, so put a blank line "
                    "before the trailers"]
+
+
+def test_trailers_under_prose_are_refused_when_their_key_is_known():
+    out = problems("Fix it\n\nThe old code broke.\nCo-Authored-By: a <a@example.invalid>\n")
+    assert out == ["trailer shape: line 3 is prose in the trailer block (the last paragraph); "
+                   "a trailer block holds only 'Key: value' lines, so put a blank line "
+                   "before the trailers"]
+    # A key set in the repo's trailer config is known too, hyphenated or not.
+    prose = "Fix it\n\nOne.\nTwo.\nThree.\nFour.\nFixes: 12\n"
+    assert problems(prose) == []
+    assert len(problems(prose, configured=["fixes"])) == 4
+    assert len(problems("Fix it\n\nThe old code broke.\nRound: x\n",
+                        refused=["round"])) == 2
+
+
+def test_a_word_and_colon_under_prose_is_prose():
+    assert problems("Fix it\n\nThe old code broke.\nNote: check length first.\n") == []
+
+
+def test_a_url_line_is_never_a_trailer():
+    assert problems("Bump X\n\nUpstream changelog:\nhttps://example.invalid/changelog\n") == []
+    assert problems("Bump X\n\nhttps://example.invalid/changelog\n") == []
+    assert problems("Fix it\n\nSee https://example.invalid TAG-1\n") == [
+        'no tags: line 3 has "TAG-1"; say it in plain words']
+    # Not a trailer, so a URL under trailers is prose in the block.
+    assert problems("Fix it\n\nAcked-by: a\nhttps://example.invalid\n") == [
+        "trailer shape: line 4 is prose in the trailer block (the last paragraph); a "
+        "trailer block holds only 'Key: value' lines, so put a blank line before the "
+        "trailers"]
+
+
+def test_prose_that_git_still_reads_as_a_trailer_block_passes():
+    # git reads a last paragraph with a Signed-off-by (or a key set in its trailer
+    # config) as trailers when at least a quarter of its lines are trailers.
+    assert problems("Fix it\n\nSigned-off-by: a\nand then some prose\n") == []
+    assert problems("Fix it\n\nThe old code broke.\nCloses: 12\n",
+                    configured=["closes"]) == []
+    four = "Fix it\n\nThe old code broke.\nCloses: 12\nProse a.\nProse b.\nProse c.\n"
+    assert len(problems(four, configured=["closes"])) == 4
 
 
 def test_a_last_paragraph_with_no_trailer_is_body():
@@ -96,6 +135,15 @@ def test_no_tag_pattern_means_no_tag_check():
     assert problems("Fix TAG-12\n", patterns=[""]) == []
 
 
+@pytest.mark.parametrize("pattern", ["(TAG-[0-9]+)?", "x*", "^", "(?:)"])
+def test_a_pattern_that_matches_the_empty_string_is_refused(pattern):
+    why = commit_rules.pattern_problem(pattern)
+    assert why is not None and "matches the empty string" in why
+    [line] = problems("Fix the thing TAG-12\n", patterns=[pattern], root="/r")
+    assert "matches the empty string" in line and line.startswith("tag-pattern ")
+    assert api.SETTING_CHECKS[PIECE]("tag-pattern", [pattern]) is not None
+
+
 def test_a_bad_pattern_is_named_with_its_fix():
     [line] = problems("Fix it\n", patterns=["[unclosed"], root="/r")
     assert line.startswith("tag-pattern '[unclosed' is not a regular expression")
@@ -107,8 +155,48 @@ def test_a_cherry_pick_line_may_sit_among_trailers():
     assert problems("Fix it\n\nSigned-off-by: a\n(cherry picked from commit abc)\n") == []
 
 
+GIT_READS = [
+    "Fix\n\nThe old code broke.\nNote: check length first.\n",
+    "Fix\n\nThe old code broke.\nCo-Authored-By: a <a@example.invalid>\n",
+    "Fix\n\nThe old code broke.\nSigned-off-by: a <a@example.invalid>\n",
+    "Fix\n\nSigned-off-by: a\nOne.\nTwo.\nThree.\n",
+    "Fix\n\nSigned-off-by: a\nOne.\nTwo.\nThree.\nFour.\n",
+    "Fix\n\nNote: check length first.\n",
+    "Fix\n\nKey:x//y\n",
+    "Fix\n\nKey :v\nKey-a b: v\n",
+    "Fix\n\nKey: one\n  continued\nOther: two\n",
+    "Fix\n\n  leading\nKey: v\n",
+    "Fix\n\nThe old code broke.\nCloses: 12\n",
+    "Fix\n\nThe old code broke.\nClo: 12\n",
+    "Fix\n\nOne.\nTwo.\nThree.\nFour.\nCloses: 12\n",
+    "Fix\n\nprose\n(cherry picked from commit abc)\nKey: v\n",
+    "Fix\n\nOne.\nTwo.\nThree.\nFour.\n(cherry picked from commit abc)\nKey: v\n",
+    "Fix: the parser\nNote: more\n",
+]
+
+
+@pytest.mark.parametrize("text", GIT_READS)
+def test_the_trailer_block_is_the_one_git_reads(text, tmp_path, monkeypatch):
+    """Against the git on PATH: the piece reads a last paragraph as trailers exactly when
+    `git interpret-trailers --parse` finds trailers in it. (git 2.39 also reads a line
+    like `https://...` as a trailer and newer git doesn't; the piece follows the newer, so
+    those cases are tested above, not here.)"""
+    import subprocess
+
+    from moxi_repo.commit_rules import _paragraphs, _read_by_git, _Shape, _kept_lines
+
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    done = subprocess.run(["git", "-c", "trailer.closes.key=Closes", "interpret-trailers",
+                           "--parse"], input=text, capture_output=True, text=True,
+                          cwd=tmp_path, check=True, timeout=30)
+    paragraphs = _paragraphs(_kept_lines(text, "#"))
+    ours = len(paragraphs) > 1 and _read_by_git(paragraphs[-1], _Shape(":", {"closes"}))
+    assert ours == bool(done.stdout.strip()), done.stdout
+
+
 def test_line_numbers_count_crlf_messages_as_written():
-    assert problems("Fix it\r\n\r\nSigned-off-by: a\r\nprose\r\n") == [
+    assert problems("Fix it\r\n\r\nAcked-by: a\r\nprose\r\n") == [
         "trailer shape: line 4 is prose in the trailer block (the last paragraph); a "
         "trailer block holds only 'Key: value' lines, so put a blank line before the "
         "trailers"]

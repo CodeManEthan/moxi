@@ -307,7 +307,7 @@ def _commit(args) -> int:
     from moxi_repo import committer
 
     try:
-        where = committer._where(args.path)
+        where = committer._where(args.path, exact=False)
     except committer.SpecError as exc:
         raise api.Usage(str(exc)) from None
     saved = committer.saved_names(where.cgd)

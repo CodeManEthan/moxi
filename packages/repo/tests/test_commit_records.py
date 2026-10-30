@@ -300,6 +300,56 @@ def test_a_detached_head_is_not_an_ending(demo, clock):
     assert retried.push_error and is_open(push_key(repo)) == OPEN
 
 
+
+def test_a_remote_with_no_tracking_ref_is_pushed_once_per_new_commit(demo, clock):
+    repo = demo.repo()
+    bare = demo.tmp / "push-only.git"
+    git(demo.tmp, "init", "-q", "--bare", str(bare))
+    # A push-only remote: a url and no fetch refspec, so no remote-tracking ref is kept.
+    git(repo, "config", "remote.backup.url", str(bare))
+    write(repo, "notes/a.md")
+    s = spec(repo, push="backup", min_interval=3600)
+    first = moxi_repo.commit(s)
+    assert first.status == "committed" and first.pushed == ("main",)
+    assert state(repo)["pushed_sha"] == {"main": first.sha}
+    clock[0] += 10
+    again = moxi_repo.commit(s)
+    assert again.status == "throttled" and again.pushed == ()
+    write(repo, "notes/b.md")
+    git(repo, "add", "notes/b.md")
+    git(repo, "commit", "-q", "-m", "by hand")
+    clock[0] += 10
+    moved = moxi_repo.commit(s)
+    assert moved.status == "throttled" and moved.pushed == ("main",)
+    tip = git(repo, "rev-parse", "HEAD").stdout.strip()
+    assert git(bare, "rev-parse", "main").stdout.strip() == tip
+    assert state(repo)["pushed_sha"] == {"main": tip}
+
+
+def test_lines_a_push_prints_on_a_throttled_pass_reach_the_commit_record(demo, clock):
+    repo = demo.repo()
+    bare = make_remote(demo, repo)
+    api.add(repo, ["demo/push-check"])
+    demo.act(push_check="print")
+    deny(bare, True)
+    write(repo, "notes/a.md")
+    s = spec(repo, push="origin", min_interval=3600)
+    assert moxi_repo.commit(s).push_error
+    key = commit_key(repo)
+    assert is_open(key) == set()
+    deny(bare, False)
+    clock[0] += 400
+    late = moxi_repo.commit(s)
+    assert late.status == "throttled" and late.pushed == ("main",)
+    assert "push-check printed this" in late.hook_lines
+    assert is_open(key) == OPEN and "push-check printed this" in text(key)
+    # A quiet throttled pass leaves it; the next quiet conclusive pass clears it.
+    clock[0] += 10
+    assert moxi_repo.commit(s).status == "throttled" and is_open(key) == OPEN
+    assert moxi_repo.commit(spec(repo, push="origin")).status == "clean"
+    assert is_open(key) == set()
+
+
 # -- the sweep's spec rows ---------------------------------------------------------------------
 
 def test_the_sweep_clears_an_unsaved_specs_keys_once_its_state_file_is_gone(demo):
