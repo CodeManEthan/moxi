@@ -124,6 +124,33 @@ def test_client_js_is_the_contract_and_imports_nothing():
         assert f"export declare function {name}(" in decl
     assert "export declare const CONTRACT: number;" in decl
     assert "\nimport " not in decl and "declare module" not in decl
+    # The form renderer is the client's, with its descriptor and event types.
+    for name in ("FieldDescriptor", "FieldEntry", "FormChange", "FormSubmit", "FormElement"):
+        assert f"export interface {name} " in decl
+    assert '"moxi-ui-form": FormElement;' in decl
+    assert '"moxi-ui-form"' in text
+    # client.js holds no Lit; each component bundles its own.
+    assert "lit-html" not in text and "LitElement" not in text
+
+
+def test_the_shells_own_components_are_placed_from_its_build():
+    from moxi_ui import module
+    from moxi_ui.snapshot import check_components
+
+    assets = export(page.PAGE)["assets"]
+    placed, refused = check_components("ui", module.COMPONENTS, page=True, assets=assets)
+    assert refused == []
+    assert {item["name"]: item["element"] for item in placed} == {
+        "page": "moxi-ui-page", "servers": "moxi-ui-servers"}
+    for item in placed:
+        text = _built(item["script"])
+        # Each imports only the shared client, by its absolute URL, and defines its
+        # element once.
+        assert re.findall(r'from"([^"]+)"', text) == ["/m/ui/client.js"]
+        assert re.search(r"\bimport\s*\(", text) is None
+        assert f'"{item["element"]}"' in text and "customElements.get(" in text
+        # Its own Lit, with Lit's licence kept at the end.
+        assert "lit-html" in text and "SPDX-License-Identifier: BSD-3-Clause" in text
 
 
 # --- the client's Node tests ------------------------------------------------------------
