@@ -42,8 +42,11 @@ class Site:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(textwrap.dedent(text))
         top = relpath.split("/")[0].removesuffix(".py")
-        if not top.endswith(".dist-info"):
+        if not top.endswith(".dist-info") and top not in self.packages:
             self.packages.add(top)
+            # An earlier test may have imported the real package of this name; the site's
+            # own must be the one a later import finds.
+            drop_modules({top})
         return path
 
     def distribution(self, name: str, version: str = "0.1.0", *,
@@ -140,7 +143,10 @@ def site(tmp_path, monkeypatch):
 
     While it is active, `importlib.metadata` finds only the site's distributions and `moxi`
     itself: every other real distribution in the environment is hidden, so a test that uses
-    this fixture cannot look one up by name, entry point or listing.
+    this fixture cannot look one up by name, entry point or listing. Each package the site
+    takes is dropped from `sys.modules` when it is first written and again at teardown, so
+    a real package an earlier test imported can't stand in for the fake, and the fake can't
+    outlive the test.
     """
     root = tmp_path / "site"
     root.mkdir()
@@ -150,8 +156,13 @@ def site(tmp_path, monkeypatch):
     s = Site(root)
     yield s
     moxi.modules.reset()
+    drop_modules(s.packages)
+
+
+def drop_modules(packages: set[str]) -> None:
+    """Forget every imported module under `packages`, so the next import reads it anew."""
     for mod in list(sys.modules):
-        if mod.split(".")[0] in s.packages:
+        if mod.split(".")[0] in packages:
             del sys.modules[mod]
 
 
