@@ -286,6 +286,7 @@ source = { editable = "packages/ui" }
 dependencies = [
     { name = "moxi" },
     { name = "moxi-loopback" },
+    { name = "psutil" },
 ]
 
 [package.dev-dependencies]
@@ -298,6 +299,7 @@ dev = [
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-loopback", editable = "packages/loopback" },
+    { name = "psutil", specifier = ">=5.9" },
 ]
 
 [package.metadata.requires-dev]
