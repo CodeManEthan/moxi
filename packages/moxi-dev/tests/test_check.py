@@ -217,7 +217,7 @@ def test_the_real_workspace_picks_by_the_same_rule():
 
     assert {"moxi", "sessions", "turns", "cache", "comms", "moxi-dev"} <= set(dirs)
     assert set(of("packages/sessions/src/moxi_sessions/__init__.py")) == {
-        "sessions", "cache", "comms"}
+        "sessions", "cache", "comms", "usage"}
     assert of("packages/moxi/src/moxi/__init__.py") == dirs
     assert of("uv.lock") == dirs
 
