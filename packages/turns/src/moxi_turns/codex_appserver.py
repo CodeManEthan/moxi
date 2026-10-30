@@ -1,4 +1,10 @@
-"""Spawn and supervise one ``codex app-server`` child."""
+"""Spawn and supervise one ``codex app-server`` child.
+
+The child is a foreign binary, so it holds no lifeline of its own: it runs under
+``moxi.proc.spawn(lifeline="watch")``, whose watchdog ends it and its descendants when
+the host goes, by any death. It stays in the host's process group and session. Its
+stdin is ``/dev/null``: the terminal, when the host has one, belongs to the window.
+"""
 
 from __future__ import annotations
 
@@ -11,8 +17,10 @@ import subprocess
 import time
 from pathlib import Path
 
+from moxi import proc as moxi_proc
+
 from .codex_protocol import AppServerOffline
-from .codex_window import TERM_GRACE, die_with_parent
+from .procs import TERM_GRACE, with_stdin
 
 log = logging.getLogger("moxi.turns.codex.appserver")
 
@@ -69,16 +77,14 @@ class AppServer:
                 )
             with contextlib.suppress(OSError):
                 self.socket_path.unlink()
+        argv = with_stdin(os.devnull, self.argv, self.env)
         stderr = subprocess.DEVNULL
         if self.log_path:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
             self._log = self.log_path.open("ab")
             stderr = self._log
-        self.process = subprocess.Popen(
-            self.argv, cwd=self.cwd, env=self.env, stdin=subprocess.DEVNULL,
-            stdout=stderr, stderr=stderr, start_new_session=True,
-            preexec_fn=die_with_parent(os.getpid()),
-        )
+        self.process = moxi_proc.spawn(argv, lifeline="watch", cwd=self.cwd,
+                                       env=self.env, stdout=stderr, stderr=stderr)
         self.starts += 1
         log.info("spawned app-server pid=%s socket=%s", self.process.pid,
                  self.socket_path)
@@ -103,15 +109,26 @@ class AppServer:
         return socket_answers(self.socket_path)
 
     def stop(self, grace: float = TERM_GRACE) -> None:
+        """SIGTERM to the child, up to `grace` seconds for it to end, then its lifeline
+        closed: the watchdog ends whatever of the child and its descendants is left
+        (SIGTERM, then SIGKILL). Only the child's own pid is signalled here; it shares
+        the host's process group."""
         proc, self.process = self.process, None
-        if proc is not None and proc.poll() is None:
-            with contextlib.suppress(OSError, ProcessLookupError):
-                os.killpg(proc.pid, signal.SIGTERM)
+        if proc is not None:
+            if proc.poll() is None:
+                with contextlib.suppress(OSError):
+                    proc.send_signal(signal.SIGTERM)
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    proc.wait(timeout=grace)
+            lifeline = getattr(proc, "lifeline", None)
+            if lifeline is not None:
+                with contextlib.suppress(OSError):
+                    lifeline.close()
             try:
-                proc.wait(timeout=grace)
+                proc.wait(timeout=grace + moxi_proc.KILL_GRACE)
             except subprocess.TimeoutExpired:
-                with contextlib.suppress(OSError, ProcessLookupError):
-                    os.killpg(proc.pid, signal.SIGKILL)
+                with contextlib.suppress(OSError):
+                    proc.kill()
                 with contextlib.suppress(subprocess.TimeoutExpired):
                     proc.wait(timeout=grace)
         if self._log is not None:

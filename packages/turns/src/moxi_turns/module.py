@@ -11,10 +11,12 @@ CLI = None
 SUMMARY = ("Drive a coding-agent session's turns: deliver, steer, compact and read a turn "
            "on any harness.")
 OPTIONAL = {"codex": "launch Codex sessions through a supervised app-server host"}
-GATED = {"moxi-turns-ping": "codex"}
+GATED = {"moxi-turns-ping": "codex", "moxi-turns-codex-host": "codex"}
 INTERNAL_ENV = {
     "MOXI_TURNS_COMMANDS": "a launcher's grant of session commands (clear, exit, compact) "
                            "to the one launch it stamps",
+    "MOXI_LIFELINE_FD": "the core's lifeline pipe: the Codex host entry ends on it only "
+                        "when a Moxi parent gave it one, and never reads its stdin",
 }
 SETTINGS = "settings.toml"
 SETUP = "moxi_turns.claude_setup:setup"

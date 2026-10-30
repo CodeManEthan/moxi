@@ -35,7 +35,10 @@ out of the harness. This package is turns' whole public API, the announcement's
                               # launch about to start adds; modules contribute through the
                               # group moxi.turns.additions (a Contribution each)
     s = turns.codex.launch(cwd, *, instructions=None, env=None, window=True, options=None,
-                           verify=None, additions=None)          # a Codex host
+                           verify=None, additions=None, resume=None)   # a Codex host
+    kw = turns.codex.launch_args(argv)   # moxi-turns-codex-host's flags as launch()'s
+                                         # keywords; that entry runs the host as a
+                                         # process of its own: wait_ready(pid=its pid)
     s = turns.opencode.launch(cwd, *, instructions=None, env=None, options=None,
                               additions=None)   # an OpenCode host, experimental
 

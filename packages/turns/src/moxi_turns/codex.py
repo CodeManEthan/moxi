@@ -93,6 +93,45 @@ PRIMING_TEXT = "The hosted session is ready. Wait for the next instruction."
 OWNED_OPTIONS = frozenset({
     "cwd", "developerInstructions", "threadId", "excludeTurns", "approvalPolicy",
 })
+#: The sandbox modes a thread may ask for, and the policy type a load answer reports
+#: for each.
+SANDBOX_POLICY_TYPES = {"read-only": "readOnly", "workspace-write": "workspaceWrite",
+                        "danger-full-access": "dangerFullAccess"}
+
+
+def verify_options(options: Mapping, answer: Mapping | None, cwd) -> str | None:
+    """Why a load's answer does not report the sandbox `options` asked for, or None.
+
+    `options` are the thread parameters the load sent, `answer` is the `thread/start`
+    or `thread/resume` result, and `cwd` the thread's working directory. Only a
+    top-level `sandbox` is checked: its policy type, and for `workspace-write` the
+    network access and writable roots under `config["sandbox_workspace_write"]`. A
+    `permissions` profile, or an answer that reports no sandbox, is not checked. The
+    app-server leaves the working directory out of the writable roots, since
+    workspace-write grants it, so the answer's cwd and `cwd` both count as granted.
+    """
+    mode = options.get("sandbox")
+    reported = (answer or {}).get("sandbox")
+    if not mode or not isinstance(reported, Mapping):
+        return None
+    want = SANDBOX_POLICY_TYPES.get(mode)
+    if want and reported.get("type") != want:
+        return f"sandbox is {reported.get('type')!r}, not {want!r}"
+    if want != "workspaceWrite":
+        return None
+    settings = (options.get("config") or {}).get("sandbox_workspace_write") or {}
+    if bool(reported.get("networkAccess")) != bool(settings.get("network_access")):
+        return (f"network access is {'on' if reported.get('networkAccess') else 'off'}, "
+                f"not {'on' if settings.get('network_access') else 'off'}")
+    have = {os.path.realpath(str(root)) for root in reported.get("writableRoots") or []}
+    for granted in ((answer or {}).get("cwd"), cwd):
+        if granted:
+            have.add(os.path.realpath(str(granted)))
+    missing = [str(root) for root in settings.get("writable_roots") or []
+               if os.path.realpath(str(root)) not in have]
+    if missing:
+        return f"writable roots lack {', '.join(missing)}"
+    return None
 
 
 def _backoff_delays(rng=random):
@@ -142,9 +181,12 @@ class CodexHarness(Harness):
                  window: bool = True, options=None, verify=None,
                  binary: str = BINARY, ping=None, client_factory=None,
                  app_server_factory=None, window_factory=None,
-                 verify_wait: float = VERIFY_WAIT, backoff_factory=None):
+                 verify_wait: float = VERIFY_WAIT, backoff_factory=None,
+                 resume: str | None = None):
         if options is not None and not isinstance(options, Mapping):
             raise TypeError("options must be a mapping")
+        if resume is not None and (not isinstance(resume, str) or not resume.strip()):
+            raise ValueError("resume names a Codex thread id")
         conflicts = OWNED_OPTIONS.intersection(options or ())
         if conflicts:
             names = ", ".join(sorted(conflicts))
@@ -152,6 +194,10 @@ class CodexHarness(Harness):
         self.cwd = str(Path(cwd).resolve())
         self.instructions = instructions
         self.options = dict(options or {})
+        if verify is None and self.options.get("sandbox"):
+            # The default check reads the very options each load sends.
+            sent, where = self.options, self.cwd
+            verify = lambda answer: verify_options(sent, answer, where)  # noqa: E731
         self.verify = verify
         self.verify_wait = verify_wait
         self.env = dict(os.environ)
@@ -166,7 +212,9 @@ class CodexHarness(Harness):
         self._backoff_factory = backoff_factory or _backoff_delays
 
         self.pid = os.getpid()
-        self.session_id: str | None = None
+        #: The thread: None until a fresh thread is started; a resume names it from
+        #: the start, so the first load is a `thread/resume`.
+        self.session_id: str | None = resume
         self.active_turn_id: str | None = None
         self.thread_active = False
         self.ws = None
@@ -1193,7 +1241,8 @@ _HOSTS_LOCK = threading.Lock()
 
 
 def launch(cwd, *, instructions: str | None = None, env=None,
-           window: bool = True, options=None, verify=None, additions=None):
+           window: bool = True, options=None, verify=None, additions=None,
+           resume: str | None = None):
     """Launch a hosted Codex thread and return its live turns ``Session``.
 
     ``options`` are the thread parameters each load sends: top-level ``sandbox`` or
@@ -1201,8 +1250,24 @@ def launch(cwd, *, instructions: str | None = None, env=None,
     ``additions`` is the launch's ``LaunchAdditions`` for ``codex``; without it the host
     asks ``launch_additions`` once itself, and with it asks nothing. Its variables go
     over ``env`` and its options under ``options``. A key turns owns in either is refused
-    with ``ValueError``.
+    with ``ValueError``. ``resume`` names a thread to resume instead of starting one.
+
+    ``verify(answer) -> str | None`` checks each load's answer; a reason fails a resume
+    (the app-server is stopped and the load retried) and is logged for a new thread.
+    Without it, options that name a ``sandbox`` are checked by ``verify_options``.
+
+    The host runs inside the calling process until that process ends. The entry
+    ``moxi-turns-codex-host`` runs it as a process of its own; ``launch_args`` turns
+    that entry's flags into this call's keywords.
     """
+    return _launch(cwd, instructions=instructions, env=env, window=window,
+                   options=options, verify=verify, additions=additions,
+                   resume=resume)[0]
+
+
+def _launch(cwd, *, instructions=None, env=None, window=True, options=None, verify=None,
+            additions=None, resume=None):
+    """`launch`, returning the endpoint beside the session, for the host entry."""
     from .additions import for_host
 
     path = Path(cwd).resolve()
@@ -1210,7 +1275,7 @@ def launch(cwd, *, instructions: str | None = None, env=None,
         raise FileNotFoundError(f"Codex working directory does not exist: {path}")
     env, options = for_host("codex", additions, cwd=path, env=env, options=options)
     harness = CodexHarness(path, instructions=instructions, env=env, window=window,
-                           options=options, verify=verify)
+                           options=options, verify=verify, resume=resume)
     endpoint = Endpoint(harness, env=harness.env).open()
     try:
         harness.start()
@@ -1223,7 +1288,16 @@ def launch(cwd, *, instructions: str | None = None, env=None,
         raise
     with _HOSTS_LOCK:
         _HOSTS.append((endpoint, harness))
-    return session
+    return session, endpoint
+
+
+def launch_args(argv) -> dict:
+    """The keywords of `launch` (``cwd``, ``options``, ``instructions``, ``resume``,
+    ``window``) from the flags of ``moxi-turns-codex-host``. A bad flag raises
+    ``moxi_turns.codex_host.UsageError``, a ``ValueError``."""
+    from .codex_host import launch_args as parse
+
+    return parse(argv)
 
 
 def rows() -> list[moxi_doctor.Row]:
@@ -1256,4 +1330,5 @@ def _close_hosts() -> None:
 
 atexit.register(_close_hosts)
 
-__all__ = ["launch"]
+__all__ = ["OWNED_OPTIONS", "SANDBOX_POLICY_TYPES", "launch", "launch_args",
+           "verify_options"]
