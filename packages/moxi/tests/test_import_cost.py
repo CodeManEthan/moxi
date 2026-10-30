@@ -12,9 +12,31 @@ side. Each share of it is held by its own test. The core's two shares are held h
 - `import moxi.config` with one `load()` of a small file under 7 ms.
 
 One more test runs both in one process and holds them under the 15 ms ceiling together.
-A module's own imports are held by that module's test. The timed tests (tier `slow`) take
-the median of seven `python -I` runs minus the median of seven `python -I -c pass`. The
-hook path's own `sys.modules` check is in test_hook_path.py.
+A module's own imports are held by that module's test. The hook path's own `sys.modules`
+check is in test_hook_path.py.
+
+How the timed tests (tier `slow`) measure: 51 pairs, each a `python -I -c pass` start (the
+floor) followed at once by a `python -I` run of the code. Each pair gives the code's run
+minus the floor's, and the test takes the lower quartile of those 51 differences.
+
+- Pairs, not two separate batches: the two runs of a pair are a few milliseconds apart, so
+  a slow patch on the machine falls on both. Seven floor runs and then seven code runs saw
+  different moments, and their medians wandered by about 1.5 ms between test runs, with
+  only about 1 ms between the measured cost and the bound.
+- Disturbance only ever adds time. A pair whose code run was slowed reads high; a pair
+  whose floor run was slowed reads low. Most pairs have neither.
+- Not the minimum difference: it is nearly always a pair whose floor run was slowed, so
+  it reads well under the real cost and moves by several milliseconds from one test run
+  to the next.
+- Not the median: the pairs whose code run was slowed pull it up, and those pairs are the
+  more common kind, because the code run is the longer one.
+- The lower quartile sits among the undisturbed pairs, above the few low ones and below
+  the high ones. At an ordinary load it reads about a millisecond under the median of the
+  differences.
+
+A machine under sustained CPU load runs every start slower, the floor and the code alike,
+so every measure of the difference reads higher too; that is real cost, not noise, and
+the bounds stay where they are.
 """
 
 from __future__ import annotations
@@ -38,7 +60,8 @@ HOOK_CEILING_MS = 15.0
 HOOK_PATH_MS = 9.0
 #: The core's share of it for `import moxi.config` with one `load()`.
 CONFIG_MS = 7.0
-RUNS = 7
+#: Floor-then-code pairs per timed test.
+PAIRS = 51
 
 
 @pytest.mark.parametrize("module", LIGHT)
@@ -63,18 +86,22 @@ def test_importing_the_store_pulls_no_typing_and_no_sqlite():
     assert done.stdout.strip() == "", f"moxi.store imports {done.stdout.strip()}"
 
 
-def _median_ms(argv: list[str], env: dict | None = None) -> float:
-    times = []
-    for _ in range(RUNS):
-        start = time.perf_counter()
-        subprocess.run(argv, check=True, env=env, stdout=subprocess.DEVNULL)
-        times.append((time.perf_counter() - start) * 1000)
-    return statistics.median(times)
+def _run_ms(argv: list[str]) -> float:
+    start = time.perf_counter()
+    subprocess.run(argv, check=True, stdout=subprocess.DEVNULL)
+    return (time.perf_counter() - start) * 1000
 
 
-def _over_floor(code: str, env: dict | None = None) -> float:
-    floor = _median_ms([sys.executable, "-I", "-c", "pass"], env)
-    return _median_ms([sys.executable, "-I", "-c", code], env) - floor
+def _over_floor(code: str) -> float:
+    """The lower quartile of `PAIRS` differences, each a run of `code` minus the floor run
+    just before it (the module docstring says why)."""
+    floor = [sys.executable, "-I", "-c", "pass"]
+    subject = [sys.executable, "-I", "-c", code]
+    differences = []
+    for _ in range(PAIRS):
+        before = _run_ms(floor)
+        differences.append(_run_ms(subject) - before)
+    return statistics.quantiles(differences, n=4, method="inclusive")[0]
 
 
 @pytest.fixture
