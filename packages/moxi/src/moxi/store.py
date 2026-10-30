@@ -18,12 +18,13 @@ import os
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar
 
+TYPE_CHECKING = False
 if TYPE_CHECKING:
     import sqlite3
+    from typing import TypeVar
 
-T = TypeVar("T")
+    T = TypeVar("T")
 
 _BINARY = getattr(os, "O_BINARY", 0)
 
