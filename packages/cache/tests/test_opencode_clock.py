@@ -16,6 +16,7 @@ import time
 import pytest
 
 from moxi_cache import api, opencode, table
+from moxi_sessions.api import opencode as reader
 from moxi_sessions.api import testing
 
 NOW = 1_791_300_000.0                    # a fixed "now" for the pure reads
@@ -36,7 +37,7 @@ def oc_db(tmp_path, *steps, wal=True, totals=None, **session):
     `totals` sets every token and cost total of the session row to that number."""
     db = OpenCodeDb(tmp_path / "opencode", wal=wal)
     if totals is not None:
-        session["totals"] = dict.fromkeys(opencode.TOTALS, totals)
+        session["totals"] = dict.fromkeys(reader.TOTALS, totals)
     return add(db.session(**session), *steps)
 
 

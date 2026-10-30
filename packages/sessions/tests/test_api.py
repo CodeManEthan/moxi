@@ -54,7 +54,8 @@ def test_interface_2_keeps_what_cache_reads():
     assert {"claude", "codex", "read_back", "projects_root"} <= set(api.__all__)
     assert CLAUDE_NAMES <= set(dir(api.claude))
     assert CODEX_NAMES <= set(dir(api.codex))
-    assert "MissingSession" in dir(api.opencode)
+    assert {"MissingSession", "UnknownSchema", "QueryFailed", "CHECKED_VERSIONS",
+            "TOTALS"} <= set(dir(api.opencode))
 
 
 def test_the_interface_signatures_hold_their_parameters():

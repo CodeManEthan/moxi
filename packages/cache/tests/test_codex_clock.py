@@ -18,6 +18,7 @@ import pytest
 from moxi_cache import api, codex, drift, opencode, table
 from moxi_cache import clock as _clock
 from moxi_sessions.api import codex as rollouts
+from moxi_sessions.api import opencode as oc_reader
 from conftest import CodexRollout, token_usage
 
 NOW = 1_791_300_000.0                    # a fixed "now" for the pure reads
@@ -441,9 +442,10 @@ def test_a_last_line_being_written_is_skipped_but_a_whole_one_is_judged(tmp_path
 
 
 def test_the_lists_are_pinned():
-    """The lists the evidence rule reads by live in sessions' Codex mapping; cache's
-    verdicts rest on them, so a change to any of them fails here too. OpenCode's versions
-    that read as `fresh` are cache's own."""
+    """The lists the evidence rule reads by live in sessions' Codex mapping, and the
+    OpenCode versions and session-row totals the `fresh` check reads live in sessions'
+    OpenCode reader; cache's verdicts rest on them, so a change to any of them fails here
+    too."""
     assert rollouts.TOP_KINDS == ("session_meta", "turn_context", "world_state",
                                   "token_usage_record", "compacted", "event_msg",
                                   "response_item")
@@ -465,7 +467,10 @@ def test_the_lists_are_pinned():
         "multi_agent_version", "context_window", "git"}
     assert rollouts.HISTORY_MODES == ("legacy", "paginated")
     assert rollouts.CHECKED_VERSIONS == ("0.153.0",)
-    assert opencode.CHECKED_VERSIONS == ("1.18.34",)
+    assert oc_reader.CHECKED_VERSIONS == ("1.18.34",)
+    assert oc_reader.TOTALS == ("tokens_input", "tokens_output", "tokens_reasoning",
+                                "tokens_cache_read", "tokens_cache_write", "cost")
+    assert not hasattr(opencode, "CHECKED_VERSIONS") and not hasattr(opencode, "TOTALS")
 
 
 def test_no_rollout_file(tmp_path):

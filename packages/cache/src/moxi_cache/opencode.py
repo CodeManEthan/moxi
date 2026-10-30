@@ -29,12 +29,15 @@ found no session, until its first turn ends (`turned` false), whose rows are all
 fresh whitelist (user messages with text parts only), made by an OpenCode version the
 reader was checked against, with zero token and cost totals on its session row; or, with
 no session id at all, on the caller's word that its attempt creates one (`new_session`).
+The versions and the totals are sessions' (its OpenCode reader's `CHECKED_VERSIONS` and
+`TOTALS`): they are facts of OpenCode's database, so they have one home.
 """
 
 from __future__ import annotations
 
 from moxi_sessions.api import Source, Unreadable, known, records
 from moxi_sessions.api import claude as transcripts
+from moxi_sessions.api import opencode as reader
 
 from . import clock as _clock
 from . import table as _table
@@ -42,13 +45,6 @@ from .clock import (COLD, FRESH, MISSING, NO_CACHE, WARM, Clock, bad_id, free_re
                     future_stamp, no_row, pair_text, unknown)
 
 HARNESS = "opencode"
-
-#: The OpenCode versions whose new sessions read as `fresh`.
-CHECKED_VERSIONS = ("1.18.34",)
-
-#: The session row's token and cost totals, all zero on a session that made no request.
-TOTALS = ("tokens_input", "tokens_output", "tokens_reasoning", "tokens_cache_read",
-          "tokens_cache_write", "cost")
 
 #: The record kinds the clock reads. Tool calls and results are left out: a message
 #: names the kinds of its parts, so a tool part still keeps a session from `fresh`.
@@ -93,7 +89,6 @@ def _unread(error: Unreadable, session_id, path) -> Unread:
     `unrecognised` (the sign of an OpenCode upgrade), one that opened but could not be
     read (locked, or not a database) is `unreadable`, and one missing or that cannot be
     opened is `source-unreadable`."""
-    from moxi_sessions.api import opencode as reader
     if isinstance(error, reader.MissingSession):
         return Unread(f"no session {session_id} in {path}", _clock.NO_RECORD)
     if isinstance(error, reader.UnknownSchema):
@@ -330,13 +325,13 @@ def _no_request(row, session_records, turned) -> Clock:
     """No assistant message: `fresh` only on every witness of a new session."""
     if turned:
         return unknown(_clock.NO_REQUEST, NO_REQUEST)
-    if row.version not in CHECKED_VERSIONS:
+    if row.version not in reader.CHECKED_VERSIONS:
         return unknown(_clock.NO_REQUEST, NO_REQUEST)
-    if any(getattr(row, k) not in (0, 0.0) for k in TOTALS):
+    if any(getattr(row, k) not in (0, 0.0) for k in reader.TOTALS):
         return unknown(_clock.NO_REQUEST, NO_REQUEST)
     if not all(_fresh_record(r) for r in session_records):
         return unknown(_clock.NO_REQUEST, NO_REQUEST)
     return Clock(FRESH)
 
 
-__all__ = ["HARNESS", "CHECKED_VERSIONS", "read", "next_pair", "Unread"]
+__all__ = ["HARNESS", "read", "next_pair", "Unread"]
