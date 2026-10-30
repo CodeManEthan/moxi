@@ -1,13 +1,15 @@
 """Writing a module's files safely: whole-file writes, locks, and append-only records.
 
-Every helper here is standard library only and imports nothing heavy at module level, so
-a hook can import `moxi.files` cheaply.
+Every helper here is standard library only, but for `edit_toml`'s vendored tomlkit, and
+imports nothing heavy at module level, so a hook can import `moxi.files` cheaply.
 
 - `atomic_write` replaces a file in one step: a reader sees the old text or the new,
   never half of either.
 - `lock` holds an exclusive lock on a lock file for the length of a `with` block. The
   lock dies with its process, so a crashed holder frees it at once.
 - `update` reads a file, changes it and writes it back under that file's lock.
+- `edit_toml` does the same for a TOML file, keeping its comments and order (it imports
+  the core's vendored tomlkit inside the call).
 - `append_record` and `read_records` keep a log of JSON lines that rolls to one older
   generation at a size cap.
 - `private_dir` makes a directory only its owner can enter.
@@ -256,6 +258,41 @@ def update(path: str | os.PathLike, fn: Callable[[bytes | None], bytes], *,
     return new
 
 
+@contextmanager
+def edit_toml(path: str | os.PathLike, *, timeout: float | None = 10.0) -> Iterator:
+    """Edit the TOML file `path` in a `with` block, keeping its comments and order.
+
+    Under the file's lock, `<path>.lock` (waiting `timeout` as `lock` does), the file is
+    read and parsed with the core's vendored tomlkit, and the block gets the document
+    (an empty one when the file is missing). When the block ends cleanly the document's
+    text is written with `atomic_write`, keeping an existing file's permission bits; a new
+    file is 0600. When the block raises, nothing is written and the exception goes on. A
+    file that is not valid TOML raises `ValueError` (tomlkit's `ParseError`) before the
+    block runs. When `path` is a symbolic link, the file it points to is written and the
+    link is kept.
+
+    This is the one TOML editor: `moxi config set` edits a module's config file through
+    it, and a module that edits a TOML file of its own uses it rather than a TOML library
+    of its own.
+    """
+    from ._vendor import tomlkit
+
+    path = Path(path)
+    with lock(_lock_path(path), timeout=timeout):
+        target = Path(os.path.realpath(path))
+        try:
+            text = target.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            text = None
+        if text is None:
+            document, mode = tomlkit.document(), 0o600
+        else:
+            document = tomlkit.parse(text)
+            mode = os.stat(target).st_mode & 0o7777
+        yield document
+        atomic_write(target, tomlkit.dumps(document), mode=mode)
+
+
 # -- records -----------------------------------------------------------------------------
 
 def append_record(path: str | os.PathLike, record: dict, *,
@@ -417,5 +454,5 @@ def _owner(uid: int) -> str:
         return f"uid {uid}"
 
 
-__all__ = ["LockTimeout", "atomic_write", "lock", "update", "append_record", "read_records",
-           "private_dir"]
+__all__ = ["LockTimeout", "atomic_write", "lock", "update", "edit_toml", "append_record",
+           "read_records", "private_dir"]

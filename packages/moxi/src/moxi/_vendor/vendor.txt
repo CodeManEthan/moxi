@@ -1,0 +1,4 @@
+# The libraries the core carries a copy of, one name==version per line.
+# packages/moxi/tools/vendor.py copies each from its released wheel; run it after a change.
+tomlkit==0.15.2
+packaging==26.3
