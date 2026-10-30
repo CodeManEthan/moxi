@@ -672,3 +672,93 @@ def test_a_changed_socket_restarts_a_keep_daemon_on_this_boxs_user_manager(
             print("\n" + "\n".join(f"  {line}" for line in report))
             print(f"  unit directory unchanged: {after == before}")
     assert after == before
+
+
+def test_a_failed_read_after_a_home_move_starts_the_sockets_then_the_service(
+        site, tmp_path, monkeypatch, capsys):
+    """After a home move stopped the socket unit and the service, the unit step's read of
+    whether the service runs fails (patched to raise, as a lost bus would), so the
+    service is counted running: `stop`, the socket unit's `start`, then `start`, never a
+    `restart`. `resume`'s starts are then no-ops the manager refuses none of. The row also
+    records whether this manager starts a stopped socket unit by itself when only the
+    service is started (its `Sockets=` pulls them in with `Wants=`)."""
+    from moxi import units
+    from moxi.units import _backend
+    from moxi.units._backend import ReadError
+    from moxi.units._fence import Ran
+
+    row = SocketModule(site, tmp_path, monkeypatch)
+    row.script("relay", "#!/bin/sh\nexec sleep 300\n")
+    row.script("relay-next", "#!/bin/sh\nexec sleep 300\n")
+    stem = row.stem("relay")
+    service, sock = f"{stem}.service", f"{stem}.socket"
+    before = _listing(row.dir)
+    report: list[str] = []
+    calls: list[tuple[str, ...]] = []
+
+    def declare(command):
+        # Only the command changes, so the service's text changes and the socket's not.
+        row.declare({"relay": {"command": f"moxi-{row.module}-{command}",
+                               "doc": "a throwaway daemon for the start rule",
+                               "socket": {"setting": "port", "addresses": ["127.0.0.1"]}}})
+
+    def lost_bus(self, ids, fence):
+        raise ReadError(Ran(False, 1, "", "Failed to connect to bus",
+                            ("systemctl", "--user", "show"), None))
+
+    try:
+        with _backend.use(SystemdBackend()):
+            declare("relay")
+            assert all(a.ok for a in row.apply()), row.lines
+            assert row.show(service, "ActiveState")["ActiveState"] == "active"
+
+            stops: list = []
+            assert all(a.ok for a in units.stop(row.module, ["relay"], record=stops))
+            assert [e.unit for e in stops] == [sock, service]
+            down = (row.show(sock, "ActiveState"), row.show(service, "ActiveState"))
+            declare("relay-next")
+            assert {(c.kind, c.action) for c in row.plan()} == {("daemon", "change"),
+                                                                 ("socket", "keep")}
+            real_run, real_running = Fence.run, SystemdBackend.running
+
+            def watched(self, verb, *args, **kw):
+                calls.append((verb, *args))
+                return real_run(self, verb, *args, **kw)
+
+            monkeypatch.setattr(SystemdBackend, "running", lost_bus)
+            monkeypatch.setattr(Fence, "run", watched)
+            try:
+                done = row.apply()
+            finally:
+                monkeypatch.setattr(Fence, "run", real_run)
+                monkeypatch.setattr(SystemdBackend, "running", real_running)
+            steps = [c for c in calls if c[0] in ("stop", "start", "restart")]
+            after_apply = (row.show(sock, "ActiveState"), row.show(service, "ActiveState"))
+            resumed = units.resume(stops)
+            report.append(f"after the move: {down}; apply under a failed read: "
+                          f"ok={all(a.ok for a in done)} steps={steps} {row.lines}; "
+                          f"then {after_apply}; resume "
+                          f"{[(a.ok, a.lines) for a in resumed]}")
+            assert all(a.ok for a in done), row.lines
+            assert steps == [("stop", service), ("start", sock), ("start", service)]
+            assert after_apply == ({"ActiveState": "active"}, {"ActiveState": "active"})
+            assert all(a.ok for a in resumed), [a.lines for a in resumed]
+            with socket.create_connection(("127.0.0.1", row.port), timeout=5):
+                pass
+
+            # A fact, recorded and not asserted: does starting the service alone start
+            # its stopped socket unit?
+            row.fence.run("stop", sock)
+            row.fence.run("stop", service)
+            ran = row.fence.run("start", service)
+            report.append(f"start of the service alone, socket stopped: ok={ran.ok} "
+                          f"{ran.stderr.strip()!r}; socket then "
+                          f"{row.show(sock, 'ActiveState')['ActiveState']}")
+            assert all(a.ok for a in row.remove())
+    finally:
+        _scrub(row.dir, [row.stem("")[:-1]], row.fence)
+        after = _listing(row.dir)
+        with capsys.disabled():
+            print("\n" + "\n".join(f"  {line}" for line in report))
+            print(f"  unit directory unchanged: {after == before}")
+    assert after == before

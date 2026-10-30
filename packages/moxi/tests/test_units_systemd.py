@@ -632,15 +632,20 @@ def test_a_changed_socket_of_a_running_keep_daemon_ends_with_it_running(w, servi
         assert line == f"{SERVICE} rewritten and restarted, since its socket changed"
 
 
-def test_a_keep_daemon_rewritten_under_an_unchanged_socket_is_left_running(w):
+@pytest.mark.parametrize("running", [True, False])
+def test_a_keep_daemon_rewritten_under_an_unchanged_socket_is_left_as_it_is(w, running):
+    """`apply` starts nothing for it and reads nothing: a running service keeps its old
+    code, and one that is down stays down until its next connection."""
     w.script("moxi-demo-relay")
     w.module(DAEMONS=KEEP_SOCKET)
     w.apply(units.plan("demo"))
+    w.sup.units[SERVICE]["active"] = running
     service = w.root / SERVICE
     service.write_text(service.read_text() + "# an older text\n")
     w.sup.calls.clear()
     done = w.apply(units.plan("demo"))
-    assert w.sup.calls == [RUNNING, ("daemon-reload",)]
+    assert w.sup.calls == [("daemon-reload",)]
+    assert w.sup.units[SERVICE]["active"] is running
     [line] = [line for a in done for line in a.lines]
     assert line == f"{SERVICE} rewritten; the new code runs from its next start"
 
@@ -667,7 +672,8 @@ def test_a_third_address_writes_its_unit_and_changes_the_service_under_one_stop(
     w.sup.calls.clear()
     assert all(a.ok for a in w.apply(units.plan("demo")))
     assert w.sup.calls == [RUNNING, ("daemon-reload",), ("stop", SERVICE),
-                           ("enable", "--now", SOCK_2), ("start", SERVICE)]
+                           ("enable", "--now", SOCK_2), ("start", SOCK), ("start", SOCK_1),
+                           ("start", SERVICE)]
     assert f"Sockets={SOCK} {SOCK_1} {SOCK_2}\n" in (w.root / SERVICE).read_text()
 
 
@@ -681,7 +687,7 @@ def test_an_address_taken_out_is_disabled_with_the_removes_and_deleted(w, v6):
     w.sup.calls.clear()
     assert all(a.ok for a in w.apply(units.plan("demo")))
     assert w.sup.calls == [("disable", "--now", SOCK_1), RUNNING, ("daemon-reload",),
-                           ("stop", SERVICE), ("start", SERVICE)]
+                           ("stop", SERVICE), ("start", SOCK), ("start", SERVICE)]
     assert not (w.root / SOCK_1).exists() and (w.root / SOCK).exists()
     assert {(c.kind, c.action) for c in units.plan("demo")} == {("daemon", "keep"),
                                                                  ("socket", "keep")}
@@ -763,6 +769,174 @@ def test_after_a_home_move_a_changed_daemon_starts_its_sockets_so_resume_can(w, 
     # What resume would have met had the sockets not started first.
     w.sup.units[SOCK_1]["active"] = False
     assert "already active, refusing" in w.sup(["systemctl", "--user", "start", SOCK_1]).stderr
+
+
+# The start rule, in each order of the home move's stop, the unit step's apply and resume.
+
+NO_BUS = "Failed to connect to bus: No such file or directory"
+
+
+def _moved(w):
+    """The home move's stop of the relay: every socket unit, then the service."""
+    record: list = []
+    assert all(a.ok for a in units.stop("demo", ["relay"], record=record, runner=w.sup))
+    assert record[-1].unit == SERVICE and all(e.unit.endswith(".socket")
+                                              for e in record[:-1])
+    assert not any(w.sup.units[e.unit]["active"] for e in record)
+    return record
+
+
+def _resumed(w, record):
+    """`resume` of the record: every start ok, none refused."""
+    resumed = units.resume(record, runner=w.sup)
+    assert [a.ok for a in resumed] == [True] * len(record), [a.lines for a in resumed]
+    return resumed
+
+
+def _rewrite_service(w):
+    service = w.root / SERVICE
+    service.write_text(service.read_text() + "# an older text\n")
+
+
+def test_after_a_home_move_a_keep_daemon_with_its_set_unchanged_is_left_to_resume(w, v6):
+    """`apply` starts nothing for it and reads nothing; `resume` then starts the socket
+    units while the service is still down, then the service."""
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1", more=", 'upgrade': 'keep'"))
+    w.apply(units.plan("demo"))
+    record = _moved(w)
+    _rewrite_service(w)
+    w.sup.calls.clear()
+    done = w.apply(units.plan("demo"))
+    assert all(a.ok for a in done)
+    assert w.sup.calls == [("daemon-reload",)]
+    assert not any(w.sup.units[u]["active"] for u in (SOCK, SOCK_1, SERVICE))
+    w.sup.calls.clear()
+    _resumed(w, record)
+    assert w.sup.calls == [("start", SOCK), ("start", SOCK_1), ("start", SERVICE)]
+    assert all(w.sup.units[u]["active"] for u in (SOCK, SOCK_1, SERVICE))
+
+
+def test_without_a_move_an_idle_daemon_is_started_with_its_units_left_listening(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    w.sup.units[SERVICE]["active"] = False          # idle under its listening units
+    ids = (w.sup.invocations[SOCK], w.sup.invocations[SOCK_1])
+    _rewrite_service(w)
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("start", SOCK), ("start", SOCK_1),
+                           ("start", SERVICE)]
+    assert (w.sup.invocations[SOCK], w.sup.invocations[SOCK_1]) == ids
+    assert w.sup.units[SERVICE]["active"]
+
+
+def test_a_failed_read_after_a_move_stops_starts_the_units_then_the_service(w, v6):
+    """The read fails, so the service is counted running: `stop` (which does nothing, the
+    move stopped it), `start` of each socket unit, then `start`, never a `restart`; and
+    `resume`'s starts of the same ids are no-ops the supervisor refuses none of."""
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    record = _moved(w)
+    _rewrite_service(w)
+    w.sup.fail[("show", None)] = NO_BUS
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("stop", SERVICE), ("start", SOCK),
+                           ("start", SOCK_1), ("start", SERVICE)]
+    assert not any(c[0] == "restart" for c in w.sup.calls)
+    resumed = _resumed(w, record)
+    assert [a.lines for a in resumed] == [(f"{u} started",) for u in (SOCK, SOCK_1, SERVICE)]
+
+
+def test_a_failed_read_before_a_changed_set_starts_its_unchanged_unit_too(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1"))
+    w.apply(units.plan("demo"))
+    record = _moved(w)
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.sup.fail[("show", None)] = NO_BUS
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("stop", SERVICE),
+                           ("enable", "--now", SOCK_1), ("start", SOCK), ("start", SERVICE)]
+    _resumed(w, record)
+    assert all(w.sup.units[u]["active"] for u in (SOCK, SOCK_1, SERVICE))
+
+
+@pytest.mark.parametrize("read", ["running", "down", "failed"])
+def test_restart_after_an_upgrade_meets_a_socket_daemon_by_the_start_rule(w, v6, read):
+    """An unchanged `upgrade = "restart"` daemon: `restart` alone when the read finds it
+    running, nothing when it finds it down, and under a failed read `stop`, its units'
+    starts and `start`."""
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    if read == "down":
+        w.sup.units[SERVICE]["active"] = False
+    if read == "failed":
+        w.sup.fail[("show", None)] = NO_BUS
+    w.sup.calls.clear()
+    done = w.apply(units.plan("demo"), restart=True)
+    assert all(a.ok for a in done)
+    assert w.sup.calls == {
+        "running": [RUNNING, ("restart", SERVICE)],
+        "down": [RUNNING],
+        "failed": [RUNNING, ("stop", SERVICE), ("start", SOCK), ("start", SOCK_1),
+                   ("start", SERVICE)]}[read]
+
+
+def test_a_failed_read_leaves_a_keep_daemon_with_its_set_unchanged_alone(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1", more=", 'upgrade': 'keep'"))
+    w.apply(units.plan("demo"))
+    record = _moved(w)
+    _rewrite_service(w)
+    w.sup.fail[("show", None)] = NO_BUS
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo"), restart=True))
+    assert w.sup.calls == [("daemon-reload",)]
+    del w.sup.fail[("show", None)]
+    w.sup.calls.clear()
+    _resumed(w, record)
+    assert w.sup.calls == [("start", SOCK), ("start", SOCK_1), ("start", SERVICE)]
+
+
+def test_a_stop_that_fails_starts_nothing_more_of_that_daemon(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    from moxi import config
+
+    config.set("demo", "port", "9000", by="test")
+    w.sup.fail[("stop", SERVICE)] = "Access denied"
+    w.sup.calls.clear()
+    done = {a.change.kind: a for a in w.apply(units.plan("demo"))}
+    assert not done["socket"].ok
+    assert done["socket"].lines[0] == (f"`systemctl --user stop -- {SERVICE}` failed: "
+                                       "Access denied")
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("stop", SERVICE),
+                           ("enable", SOCK), ("enable", SOCK_1)]
+    assert w.sup.units[SERVICE]["active"]
+
+
+def test_a_unit_start_that_fails_is_a_failed_step_and_the_service_still_starts(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    _moved(w)
+    _rewrite_service(w)
+    w.sup.fail[("start", SOCK_1)] = "Address already in use"
+    w.sup.calls.clear()
+    done = {a.change.kind: a for a in w.apply(units.plan("demo"))}
+    assert not done["daemon"].ok
+    assert done["daemon"].lines[0] == (f"`systemctl --user start -- {SOCK_1}` failed: "
+                                       "Address already in use")
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("start", SOCK), ("start", SOCK_1),
+                           ("start", SERVICE)]
+    assert w.sup.units[SOCK]["active"] and w.sup.units[SERVICE]["active"]
 
 
 def test_a_socket_set_declared_disabled_is_written_and_never_started(w, tmp_path, v6):

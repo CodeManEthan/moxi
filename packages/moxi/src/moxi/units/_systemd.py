@@ -15,8 +15,8 @@ start the service at the first connection, never a login. Such a service reads `
 so it is never enabled or disabled; it is started and stopped. `moxi install` starts it
 all the same: a new or changed daemon's service is started after its sockets, so the
 first `status` after an install shows it `active` even before any connection, and a
-socket set that changes under a running service stops it and starts it again. A set
-that changes under an idle service leaves it idle.
+socket set that changes under a running service stops it and starts it again. An
+`upgrade = "keep"` daemon whose socket set is unchanged is left as it is.
 
 Every supervisor call goes through the systemd fence (`systemctl --user`, always), so the
 verbs here are the fence's closed set. A wrap of a foreign timer is the one file this
@@ -366,44 +366,32 @@ class SystemdBackend:
         """systemd's order: each remove disabled with `--now` (socket units before their
         service), and with them each unit a socket set drops; removed and dropped files
         deleted, foreign files moved aside, new and changed files written; one
-        `daemon-reload`; then each written unit enabled and started, socket units before
-        their service; with `restart=True`, running unchanged daemons whose entry says
-        `upgrade = "restart"` restarted. After the first new daemon, the lingering
-        advice when lingering is off.
+        `daemon-reload`; then each written unit enabled and started; with `restart=True`,
+        running unchanged daemons whose entry says `upgrade = "restart"` restarted. After
+        the first new daemon, the lingering advice when lingering is off.
 
         A daemon with a socket: its service has no install section, so it is started,
         restarted and stopped, never enabled or disabled; a service that had one before
         it gained a socket is disabled with the removes, so its old login link goes. Its
-        socket units go first, in unit order: a new one `enable --now`, a changed one
-        `enable` then `restart`. systemd refuses to start a socket unit while its service
-        runs, so a set that changes under a running service is applied between one `stop`
-        and one `start` of it, whatever `upgrade` says, its unchanged units left as they
-        are; and before a service that was down is started, the set's units this apply
-        did not start are started (after a home move stopped them, `resume` could not
-        start them once the service runs). A new or changed daemon's service is started
-        even when it was idle under its socket; a set that changes under an idle service
-        leaves it idle."""
+        socket units are started before its service, and none while it runs, which
+        systemd refuses (`SocketStarts` holds the rule): a new or changed daemon's
+        service is started after its sockets even when it was idle, and an `upgrade =
+        "keep"` daemon whose socket set is unchanged is left as it is."""
         fence = io.fence
         removes = sorted((c for c in changes if c.action == "remove"),
                          key=lambda c: c.kind != "socket")
         writes = [c for c in changes if c.action in ("add", "change")]
         keeps = [c for c in changes if c.action == "keep"]
-        sets = {(c.module, c.name): c for c in changes if c.kind == "socket"
-                and c.action in ("add", "change", "keep")}
         gone = [change for change in removes if self._remove(io, change)]
         dropped = {id(change): self._drop(io, change) for change in writes
                    if change.dropped}
         for change in writes:
             if _socketed(change):
                 self._unlink_login(io, change)
-        # How each socket unit stands to its file, read before the files are written.
-        news = {}
-        for change in writes:
-            if change.kind == "socket":
-                for path, text in zip(change.paths, change.texts):
-                    news[path] = ("new" if change.enabled_before is False
-                                  else _differs(path, text))
-        running = self._running_services(writes, fence)
+        # Read before the files are written: how each socket unit stands to its file, and
+        # which socket daemons' services run.
+        starts = SocketStarts(self, writes, keeps, restart=restart, socketed=_socketed)
+        starts.read(fence)
         for change in gone:
             io.delete(change)
         for change in writes:
@@ -419,30 +407,20 @@ class SystemdBackend:
                     io.fail(change, ran, "the unit files are deleted; run `systemctl "
                                          "--user daemon-reload` once the cause is fixed")
                 return
-        stopped: dict[tuple[str, str], UnitChange] = {}
-        for change in writes:
-            if change.kind == "socket":
-                self._apply_socket(io, change, news, running, stopped)
         lingered = False
         for change in writes:
-            key = (change.module, change.name)
-            if change.kind == "socket":
-                continue
-            if _socketed(change):
-                started = self._start_socketed(io, change, self._set_of(change, sets),
-                                               news, running, stopped)
-                stopped.pop(key, None)
+            if starts.owns(change):
+                started = starts.start(io, change)
             else:
                 started = self._start(io, change)
             if started and change.kind == "daemon" and change.action == "add" \
                     and change.enabled and not lingered:
                 lingered = True
                 self._linger(io, change)
-        for key, change in stopped.items():
-            # A set that changed under a running service whose own text did not.
-            self._run(io, change, "start", f"{self._stem(*key)}.service")
+        starts.restart_kept(io)
         if restart:
             daemons = [c for c in keeps if c.kind == "daemon" and c.enabled
+                       and not starts.owns(c)
                        and c.entry.get("upgrade", "restart") == "restart"]
             try:
                 running = self.running([self._id(c) for c in daemons], fence)
@@ -500,98 +478,6 @@ class SystemdBackend:
         text made goes and a login no longer starts it."""
         if change.paths and _installs(change.paths[0]):
             self._run(io, change, "disable", self._id(change))
-
-    def _running_services(self, writes, fence) -> frozenset[str]:
-        """The services of the daemons with a socket among `writes` that run now, in one
-        read. A daemon new to this plan runs nothing yet and is not read. When the read
-        fails every one is taken as running, so its set is still applied around a stop,
-        and the service is started after."""
-        ids = []
-        new = {(c.module, c.name) for c in writes
-               if c.kind == "daemon" and c.action == "add"}
-        for change in writes:
-            key = (change.module, change.name)
-            if (change.kind != "socket" and not _socketed(change)) or key in new \
-                    or not change.enabled:
-                continue
-            service = f"{self._stem(*key)}.service"
-            if service not in ids:
-                ids.append(service)
-        if not ids:
-            return frozenset()
-        try:
-            return self.running(ids, fence)
-        except ReadError:
-            return frozenset(ids)
-
-    def _apply_socket(self, io: ApplyIO, change: UnitChange, news: Mapping,
-                      running: frozenset[str], stopped: dict) -> None:
-        """A written socket set's own steps: its service stopped first when it runs, then
-        each new unit `enable --now` and each changed one `enable` then `restart`, an
-        unchanged one left as it is. A set whose `enabled` went false is disabled now,
-        every unit with `--now`."""
-        key = (change.module, change.name)
-        service = f"{self._stem(*key)}.service"
-        if not change.enabled:
-            if change.action == "change" and change.enabled_before:
-                for path in change.paths:
-                    self._run(io, change, "disable", "--now", path.name)
-            return
-        if service in running:
-            # systemd won't start a socket unit while its service runs.
-            ran = io.fence.run("stop", service)
-            if not ran.ok and not _not_loaded(ran):
-                io.fail(change, ran)
-            else:
-                stopped[key] = change
-        for path in change.paths:
-            if news.get(path) == "new":
-                self._run(io, change, "enable", "--now", path.name)
-            elif news.get(path) == "changed" and self._run(io, change, "enable", path.name):
-                self._run(io, change, "restart", path.name)
-
-    def _set_of(self, change: UnitChange, sets: Mapping) -> tuple[Path, ...]:
-        """The socket units of a written daemon's set: its socket change's, or, when the
-        set is unchanged (and so not in the apply), the marked ones on disk."""
-        key = (change.module, change.name)
-        if key in sets:
-            return sets[key].paths
-        for ref in self.marked(change.module):
-            if ref.kind == "socket" and ref.name == change.name:
-                return ref.paths
-        return ()
-
-    def _start_socketed(self, io: ApplyIO, change: UnitChange, sockets: tuple[Path, ...],
-                        news: Mapping, running: frozenset[str], stopped: dict) -> bool:
-        """A written daemon with a socket: its service started, or restarted when it ran
-        and its set left it running, never enabled; with `upgrade = "keep"` a running
-        service is left to its next start, unless its set stopped it. A declaration whose
-        `enabled` went false stops it. True when every step it ran passed."""
-        key = (change.module, change.name)
-        unit = self._id(change)
-        if not change.enabled:
-            if change.action == "change" and change.enabled_before:
-                return self._run(io, change, "stop", unit)
-            return True
-        down = unit not in running or key in stopped
-        if _keeps(change) and not down:
-            io.say(change, f"{unit} rewritten; the new code runs from its next start")
-            return True
-        if unit not in running:
-            self._listen(io, change, sockets, news)
-        ok = self._run(io, change, "start" if down else "restart", unit)
-        if ok and _keeps(change) and key in stopped:
-            io.say(change, f"{unit} rewritten and restarted, since its socket changed")
-        return ok
-
-    def _listen(self, io: ApplyIO, change: UnitChange, sockets: tuple[Path, ...],
-                news: Mapping) -> None:
-        """Start each unit of a socket set that this apply did not just start, before its
-        service starts. One a home move stopped listens again: systemd won't start it once
-        the service runs, so `resume` could not. Starting one that listens does nothing."""
-        for path in sockets:
-            if news.get(path, "same") == "same":
-                self._run(io, change, "start", path.name)
 
     def _start(self, io: ApplyIO, change: UnitChange) -> bool:
         """Enable and start a written daemon or timer as its change asks. True when every
@@ -1006,6 +892,206 @@ def _read_wrap(path: Path) -> tuple[str, str, str, str] | None:
     if not sep or not match or not match["switch"].startswith(module + "."):
         return None
     return module, match["ref"], match["switch"][len(module) + 1:], name
+
+
+class SocketStarts:
+    """The start rule for the daemons with a socket in one `apply`, on systemd and on the
+    fake backend that stands in for it.
+
+    systemd refuses to start a socket unit while its service runs, and a `start` of a
+    unit that is already active does nothing. So no step here starts a socket unit while
+    its service runs, and every start of a service comes after each unit of its set.
+
+    The service of a daemon with a socket is started or restarted only for a new daemon,
+    a changed daemon with `upgrade = "restart"`, a changed socket set (whatever `upgrade`
+    says), a flip of `enabled` to true, and, with `restart=True`, an unchanged daemon with
+    `upgrade = "restart"` that runs. Every other one is left as it is: an `upgrade =
+    "keep"` daemon whose set is unchanged keeps its old code if it runs, and stays down
+    if it is down until its next connection, or until `resume` starts it after its
+    sockets once a home move is done.
+
+    `read` asks, in one `show` before the files are written, whether those services run
+    (a new daemon has none yet and is not read). A read that fails counts every service
+    it covers running. Then `start`, for each one:
+
+    - found down: the set's own steps (a new unit `enable --now`, a changed one `enable`
+      then `restart`), a `start` of each unit of the set it has not just started, so a
+      set the home move stopped listens again, then `start` of the service;
+    - found running, its set unchanged: `restart` of the service alone, as its units
+      listen;
+    - found running with its set changed, or counted running: `stop` of the service
+      first, then the same as found down. Under a failed read every start and restart is
+      therefore `stop`, the units' starts, then `start`; a `stop` of a service that is
+      down does nothing.
+
+    A `stop` that fails starts nothing more of that daemon: its new and changed units
+    are only enabled, so no socket start meets a service that may still run. A unit
+    start that fails is a failed step, and the service is still started after the other
+    units: it serves on the addresses that bound.
+
+    A unit the set drops was disabled and stopped with the removes, so it is never
+    started here. A flip of `enabled` to false disables each unit now and stops the
+    service."""
+
+    def __init__(self, backend, writes: Sequence[UnitChange], keeps: Sequence[UnitChange],
+                 *, restart: bool, socketed):
+        self._backend = backend
+        self._restart = restart
+        #: (module, name) -> [daemon change or None, socket change or None]
+        self._daemons: dict[tuple[str, str], list] = {}
+        for change in writes:
+            if change.kind == "socket":
+                self._of(change)[1] = change
+            elif socketed(change):
+                self._of(change)[0] = change
+        if restart:
+            for change in keeps:
+                key = (change.module, change.name)
+                if change.kind == "daemon" and socketed(change) and (
+                        key not in self._daemons or self._daemons[key][0] is None):
+                    self._of(change)[0] = change
+        #: How each written socket unit stands to its file, read before it is written.
+        self._news: dict[Path, str] = {}
+        for change in writes:
+            if change.kind == "socket":
+                for path, text in zip(change.paths, change.texts):
+                    self._news[path] = ("new" if change.enabled_before is False
+                                        else _differs(path, text))
+        self._running: frozenset[str] = frozenset()
+        self._counted = False
+        self._done: set[tuple[str, str]] = set()
+        self._ok = True
+
+    def _of(self, change: UnitChange) -> list:
+        return self._daemons.setdefault((change.module, change.name), [None, None])
+
+    def owns(self, change: UnitChange) -> bool:
+        """Whether `change` is a daemon with a socket, or its set, that `start` takes."""
+        return (change.module, change.name) in self._daemons and change.kind in (
+            "daemon", "socket")
+
+    def _service(self, key: tuple[str, str]) -> str:
+        return f"{self._backend._stem(*key)}.service"
+
+    def _enabled(self, key) -> bool:
+        daemon, sockets = self._daemons[key]
+        return (daemon or sockets).enabled
+
+    def _new(self, key) -> bool:
+        daemon, _ = self._daemons[key]
+        return daemon is not None and daemon.action == "add"
+
+    def _acted(self, key) -> bool:
+        """Whether `apply` starts or restarts this daemon's service (given it runs, for
+        `restart=True`'s unchanged daemon)."""
+        daemon, sockets = self._daemons[key]
+        if not self._enabled(key):
+            return False
+        if sockets is not None or daemon is None:
+            return sockets is not None
+        if daemon.action == "add":
+            return True
+        if daemon.action == "change":
+            return not _keeps(daemon) or daemon.enabled_before is False
+        return self._restart and daemon.entry.get("upgrade", "restart") == "restart"
+
+    def read(self, fence: Fence) -> None:
+        """Read whether the services `apply` would start or restart run, in one `show`; a
+        read that fails counts each of them running."""
+        ids = [self._service(key) for key in self._daemons
+               if self._acted(key) and not self._new(key)]
+        if not ids:
+            return
+        try:
+            self._running = self._backend.running(ids, fence)
+        except ReadError:
+            self._running = frozenset(ids)
+            self._counted = True
+
+    def start(self, io: ApplyIO, change: UnitChange) -> bool:
+        """Carry out the rule for the daemon `change` belongs to, once per daemon. True
+        when every step it ran passed."""
+        key = (change.module, change.name)
+        if key in self._done:
+            return True
+        self._done.add(key)
+        self._ok = True
+        self._start(io, key)
+        return self._ok
+
+    def restart_kept(self, io: ApplyIO) -> None:
+        """`restart=True`'s unchanged daemons with a socket, once the written ones are
+        done."""
+        for key in self._daemons:
+            if key not in self._done:
+                self._done.add(key)
+                self._start(io, key)
+
+    def _start(self, io: ApplyIO, key: tuple[str, str]) -> None:
+        daemon, sockets = self._daemons[key]
+        owner = daemon or sockets
+        service = self._service(key)
+        if not self._enabled(key):
+            if sockets is not None and sockets.action == "change" and sockets.enabled_before:
+                for path in sockets.paths:
+                    self._run(io, sockets, "disable", "--now", path.name)
+            if daemon is not None and daemon.action == "change" and daemon.enabled_before:
+                self._run(io, daemon, "stop", service)
+            return
+        if not self._acted(key):
+            if daemon is not None and daemon.action == "change":
+                io.say(daemon, f"{service} rewritten; the new code runs from its next start")
+            return
+        found = "down" if self._new(key) else (
+            "counted" if self._counted
+            else "running" if service in self._running else "down")
+        if daemon is not None and daemon.action == "keep" and sockets is None \
+                and found == "down":
+            return  # `restart=True` restarts only a service that runs
+        if found == "running" and sockets is None:
+            self._run(io, owner, "restart", service)
+            return
+        if found != "down":
+            ran = io.fence.run("stop", service)
+            if not ran.ok and not _not_loaded(ran):
+                self._ok = False
+                io.fail(owner, ran)
+                if sockets is not None:
+                    for path in sockets.paths:
+                        if self._news.get(path) in ("new", "changed"):
+                            self._run(io, sockets, "enable", path.name)
+                return
+        if sockets is not None:
+            for path in sockets.paths:
+                if self._news.get(path) == "new":
+                    self._run(io, sockets, "enable", "--now", path.name)
+                elif self._news.get(path) == "changed" and self._run(
+                        io, sockets, "enable", path.name):
+                    self._run(io, sockets, "restart", path.name)
+        for path in self._units(key):
+            if self._news.get(path, "same") == "same":
+                self._run(io, owner, "start", path.name)
+        if self._run(io, owner, "start", service) and daemon is not None \
+                and _keeps(daemon) and sockets is not None and found != "down":
+            io.say(daemon, f"{service} rewritten and restarted, since its socket changed")
+
+    def _units(self, key) -> tuple[Path, ...]:
+        """The daemon's socket units: its written set's, or, when the set is unchanged
+        (and so not in the apply), the marked ones on disk."""
+        _, sockets = self._daemons[key]
+        if sockets is not None:
+            return sockets.paths
+        for ref in self._backend.marked(key[0]):
+            if ref.kind == "socket" and ref.name == key[1]:
+                return ref.paths
+        return ()
+
+    def _run(self, io: ApplyIO, change: UnitChange, verb: str, *args: str) -> bool:
+        ran = io.fence.run(verb, *args)
+        if not ran.ok:
+            self._ok = False
+            io.fail(change, ran)
+        return ran.ok
 
 
 def _socketed(change: UnitChange) -> bool:

@@ -1,12 +1,20 @@
 """What importing the core costs: the light-import rule, and the timed hook path.
 
 The deterministic test holds the core modules a hook or a command imports first free of
-the dependencies and the heavy standard modules. The timed tests (tier `slow`) take the
-median of seven `python -I` runs minus the median of seven `python -I -c pass`, and hold
-each under 10 ms: the hook path (`import moxi.paths`, `available()` and `load()`) for an
-absent module and for a module whose announcement is one line, and `import moxi.config`
-with one `load()` of a small file. The hook path's own `sys.modules` check is in
-test_hook_path.py.
+the dependencies and the heavy standard modules.
+
+A hook may cost at most 15 ms per hook process: what Moxi imports and does in it, over a
+bare `python -I` start. The ceiling is per hook, since the hooks of one event run side by
+side. Each share of it is held by its own test. The core's two shares are held here:
+
+- the hook path (`import moxi.paths`, `available()` and `load()`) under 9 ms, for an
+  absent module and for a module whose announcement is one line;
+- `import moxi.config` with one `load()` of a small file under 7 ms.
+
+One more test runs both in one process and holds them under the 15 ms ceiling together.
+A module's own imports are held by that module's test. The timed tests (tier `slow`) take
+the median of seven `python -I` runs minus the median of seven `python -I -c pass`. The
+hook path's own `sys.modules` check is in test_hook_path.py.
 """
 
 from __future__ import annotations
@@ -24,7 +32,12 @@ LIGHT = ("moxi.cli", "moxi.paths", "moxi.config", "moxi.modules", "moxi.files",
          "moxi.log", "moxi.exit", "moxi.doctor")
 HEAVY = ("psutil", "tomlkit", "moxi._vendor.tomlkit", "packaging", "moxi._vendor.packaging",
          "platformdirs", "asyncio", "sqlite3", "_sqlite3")
-BUDGET_MS = 10.0
+#: A hook's ceiling, per hook process, over a bare `python -I` start.
+HOOK_CEILING_MS = 15.0
+#: The core's share of it for the hook path.
+HOOK_PATH_MS = 9.0
+#: The core's share of it for `import moxi.config` with one `load()`.
+CONFIG_MS = 7.0
 RUNS = 7
 
 
@@ -94,7 +107,7 @@ def test_the_hook_path_for_an_absent_module(tmp_path):
     ms = _over_floor(HOOK.format(root=str(tmp_path), name="nosuchmodule", there=False,
                                  state="absent"))
     _record("hook path, absent module", ms)
-    assert ms < BUDGET_MS
+    assert ms < HOOK_PATH_MS
 
 
 @pytest.mark.slow
@@ -102,16 +115,35 @@ def test_the_hook_path_for_a_one_line_module(one_line_module):
     ms = _over_floor(HOOK.format(root=str(one_line_module), name="hookcost", there=True,
                                  state="present"))
     _record("hook path, one-line module", ms)
-    assert ms < BUDGET_MS
+    assert ms < HOOK_PATH_MS
+
+
+SCHEMA = '[mode]\ntype = "string"\ndefault = "a"\ndoc = "A mode."\nread = "use"\n'
+CONFIG = ("import moxi.config as c; s = c.Schema.parse({schema!r}); "
+          "assert c.load('demo', s, path={path!r})['mode'] == 'b'")
+
+
+@pytest.fixture
+def config_file(tmp_path):
+    conf = tmp_path / "config.toml"
+    conf.write_text('mode = "b"\n')
+    return conf
 
 
 @pytest.mark.slow
-def test_config_import_and_one_load(tmp_path):
-    schema = ('[mode]\ntype = "string"\ndefault = "a"\ndoc = "A mode."\nread = "use"\n')
-    conf = tmp_path / "config.toml"
-    conf.write_text('mode = "b"\n')
-    code = (f"import moxi.config as c; s = c.Schema.parse({schema!r}); "
-            f"assert c.load('demo', s, path={str(conf)!r})['mode'] == 'b'")
-    ms = _over_floor(code)
+def test_config_import_and_one_load(config_file):
+    ms = _over_floor(CONFIG.format(schema=SCHEMA, path=str(config_file)))
     _record("import moxi.config + one load()", ms)
-    assert ms < BUDGET_MS
+    assert ms < CONFIG_MS
+
+
+@pytest.mark.slow
+def test_the_hook_path_and_config_together_stay_under_a_hooks_ceiling(one_line_module,
+                                                                      config_file):
+    code = "; ".join([
+        HOOK.format(root=str(one_line_module), name="hookcost", there=True,
+                    state="present"),
+        CONFIG.format(schema=SCHEMA, path=str(config_file))])
+    ms = _over_floor(code)
+    _record("hook path, one-line module + import moxi.config + one load()", ms)
+    assert ms < HOOK_CEILING_MS
