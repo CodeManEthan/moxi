@@ -59,7 +59,8 @@ def test_claude_plugin_validate_passes(folder):
 
 @needs_claude
 @pytest.mark.slow
-@pytest.mark.touches("packages/turns/src/moxi_turns/claude/**")
+@pytest.mark.touches("packages/turns/src/moxi_turns/claude/**",
+                     "packages/turns/tests/test_claude_plugins.py")
 @pytest.mark.parametrize("name", PLUGINS)
 def test_claude_plugin_test_passes(name):
     out = _claude("test", str(CLAUDE_DIR / name), timeout=420)

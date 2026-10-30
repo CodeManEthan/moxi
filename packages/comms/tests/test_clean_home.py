@@ -63,7 +63,13 @@ REPO = TESTS.parent
 CORE = REPO.parent / "moxi"
 UV = shutil.which("uv")
 
+#: A change to what the wheels are built from (comms' and the core's pyproject: their
+#: build backend, entry points and scripts) or to this test puts it back in
+#: moxi-dev check.
 pytestmark = [pytest.mark.build,
+              pytest.mark.touches("packages/comms/pyproject.toml",
+                                  "packages/moxi/pyproject.toml",
+                                  "packages/comms/tests/test_clean_home.py"),
               pytest.mark.skipif(UV is None, reason="the clean-home test needs uv")]
 
 AUDIT_HOOK = r'''
