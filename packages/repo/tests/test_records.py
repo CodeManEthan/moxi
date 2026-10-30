@@ -146,7 +146,7 @@ def test_a_flag_write_that_meets_a_held_config_lock(demo):
     took = time.monotonic() - started
     assert done.returncode == 0, done.stderr
     # Three tries, 20 ms and 50 ms apart, then the ledger key and the record anyway.
-    assert took >= sum(run.FLAG_RETRY)
+    assert took >= 0.07
     assert left(repo, "demo/watch") == {"record", "ledger"}
     [found] = _records.judge()
     assert (found.action, found.reason) == ("flag", "its piece has no recorded flag")
@@ -166,6 +166,21 @@ def test_a_flag_write_that_meets_a_held_config_lock(demo):
     change(repo, text="2\n")
     commit(repo)
     assert left(repo, "demo/watch") == set()
+
+
+def test_a_flag_write_is_tried_three_times_20_then_50_ms_apart(monkeypatch):
+    import subprocess
+
+    tries, waits = [], []
+
+    def refused(argv, **kwargs):
+        tries.append(argv)
+        return subprocess.CompletedProcess(argv, 255, b"", b"could not lock config file")
+
+    monkeypatch.setattr(run.subprocess, "run", refused)
+    monkeypatch.setattr(time, "sleep", waits.append)
+    assert run._flag("demo/watch", True) is False
+    assert len(tries) == 3 and waits == [0.02, 0.05]
 
 
 def test_a_cleared_record_then_a_good_run_leaves_nothing(demo):

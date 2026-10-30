@@ -28,10 +28,24 @@ def existing_hook(repo: Path, event: str, log: Path) -> None:
 def test_pieces_run_in_order_then_the_existing_git_hook(demo, mode):
     repo = demo.repo()
     existing_hook(repo, "pre-commit", demo.log)
-    api.add(repo, ["demo/lint", "demo/gate", "demo/first"], mode=mode)
+    api.add(repo, ["demo/lint", "demo/gate", "demo/first", "demo/zz-early"], mode=mode)
     change(repo)
     assert commit(repo).returncode == 0
-    assert demo.ids() == ["demo/first", "demo/gate", "demo/lint", "existing"]
+    # By order (5, 10, 20, 60), not by id.
+    assert demo.ids() == ["demo/zz-early", "demo/first", "demo/gate", "demo/lint", "existing"]
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_an_existing_git_hook_that_refuses_refuses_after_the_pieces_ran(demo, mode):
+    repo = demo.repo()
+    existing_hook(repo, "pre-commit", demo.log)
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text(hook.read_text() + "exit 1\n")
+    api.add(repo, "demo/gate", mode=mode)
+    change(repo)
+    before = head(repo)
+    assert commit(repo).returncode != 0 and head(repo) == before
+    assert demo.ids() == ["demo/gate", "existing"]
 
 
 @pytest.mark.parametrize("mode", MODES)
@@ -153,6 +167,24 @@ def test_fail_policy_closed_open_and_post_events(demo):
     assert "recorded" not in state.pieces["demo/lint"]
     api.disable(repo, "demo/watch")
     assert _records.piece_key(cgd, "demo/watch") not in _records.ledger()
+
+
+def test_an_outcome_of_the_wrong_kind_is_a_broken_piece(demo):
+    repo = demo.repo()
+    api.add(repo, "demo/gate", "demo/watch")
+    demo.act(gate="notice")
+    change(repo)
+    done = commit(repo)
+    assert done.returncode != 0
+    assert ("repo: pre-commit refused: demo/gate broke (returned notice, which only post-* "
+            "git hooks take)") in done.stderr
+    demo.act(gate="ok", watch="refuse")
+    done = commit(repo)
+    assert done.returncode == 0, done.stderr
+    assert ("repo: post-commit: demo/watch broke (returned refuse, which only pre-* and "
+            "commit-msg git hooks take); the doctor keeps a record") in done.stderr
+    cgd = gitconf.resolve(repo).common_dir
+    assert _records.piece_key(cgd, "demo/watch") in _records.ledger()
 
 
 def test_a_closed_piece_whose_target_cant_import_refuses(demo):
@@ -348,7 +380,7 @@ def test_exports_are_not_module_names_and_resolve_after_every_import():
         assert callable(moxi_repo.git)
 
 
-def test_chain_lines_are_the_designs():
+def test_chain_lines_name_no_path():
     from moxi_repo import shim
     assert shim.chain_line("pre-commit", False) == (
         'h="$(git rev-parse --path-format=absolute --git-common-dir)/moxi-repo/hook"; '

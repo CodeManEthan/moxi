@@ -48,6 +48,8 @@ GATE = dict(_piece("pre-commit", "closed", 20, "A closed gate.",
             target="demo_pieces.hooks:gate")
 LINT = dict(_piece("pre-commit", "open", 60, "An open check."),
             target="demo_pieces.hooks:lint")
+ZZ_EARLY = dict(_piece("pre-commit", "open", 5, "Sorts last by id, runs first by order."),
+                target="demo_pieces.hooks:zz_early")
 MSG = dict(_piece("commit-msg", "closed", 50, "Reads the message."),
            target="demo_pieces.hooks:msg")
 WATCH = dict(_piece("post-commit", "open", 50, "Watches commits."),
@@ -115,6 +117,7 @@ def _run(name, ctx):
 def first(ctx): return _run("first", ctx)
 def gate(ctx): return _run("gate", ctx)
 def lint(ctx): return _run("lint", ctx)
+def zz_early(ctx): return _run("zz-early", ctx)
 def msg(ctx): return _run("msg", ctx)
 def watch(ctx): return _run("watch", ctx)
 def after_merge(ctx): return _run("after-merge", ctx)
@@ -170,6 +173,7 @@ DEMO_ENTRIES = {
     "demo.first": "demo_pieces:FIRST",
     "demo.gate": "demo_pieces:GATE",
     "demo.lint": "demo_pieces:LINT",
+    "demo.zz-early": "demo_pieces:ZZ_EARLY",
     "demo.msg": "demo_pieces:MSG",
     "demo.watch": "demo_pieces:WATCH",
     "demo.after-merge": "demo_pieces:AFTER_MERGE",
