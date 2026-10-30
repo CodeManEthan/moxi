@@ -691,6 +691,93 @@ def test_a_daemon_that_gains_a_socket_is_booted_out_and_loads_idle(mac):
     assert body["Sockets"]["Listeners"]["SockServiceName"] == "8470"
 
 
+def keep_shell(*addresses, more=""):
+    """The relay with a socket on `addresses` and `upgrade = "keep"`."""
+    return ("{'relay': {'command': 'moxi-demo-relay', 'upgrade': 'keep', "
+            f"'socket': {{'setting': 'port', 'addresses': {list(addresses)!r}}}{more}}}}}")
+
+
+RELOAD = ["bootout", "enable", "bootstrap"]
+
+
+def _loaded_keep_shell(mac, *addresses):
+    mac.script("moxi-demo-relay")
+    mac.module(DAEMONS=keep_shell(*addresses))
+    assert all(a.ok for a in mac.apply(units.plan("demo")))
+    assert RELAY in mac.ctl.loaded
+    mac.ctl.calls.clear()
+
+
+def test_a_loaded_keep_socket_daemon_whose_port_changed_is_reloaded(mac):
+    """launchd takes the sockets only at a load, so a changed port is booted out and
+    bootstrapped at once whatever `upgrade` says; the next plan reads `keep`."""
+    _loaded_keep_shell(mac, "127.0.0.1")
+    from moxi import config
+
+    config.set("demo", "port", "9000", by="test")
+    [done] = mac.apply(units.plan("demo"))
+    assert done.ok and done.lines == ()
+    assert [c[0] for c in mac.ctl.verbs()] == RELOAD
+    assert mac.plist(RELAY)["Sockets"] == {"Listeners": listener("127.0.0.1", "9000")}
+    assert RELAY in mac.ctl.loaded and mac.ctl.loaded[RELAY][0] is None
+    assert [c.action for c in units.plan("demo")] == ["keep"]
+
+
+def test_a_keep_socket_daemon_with_its_sockets_unchanged_is_only_rewritten(mac):
+    _loaded_keep_shell(mac, "127.0.0.1")
+    mac.module(DAEMONS=keep_shell("127.0.0.1", more=", 'args': ['-v']"))
+    [done] = mac.apply(units.plan("demo"))
+    assert done.ok and mac.ctl.calls == [("print", DOMAIN)]
+    assert done.lines == (f"{RELAY} rewritten; the new code runs from its next start",)
+    assert mac.plist(RELAY)["ProgramArguments"][1:] == ["-v"]
+
+
+def test_a_listener_the_ipv6_leave_out_adds_back_reloads_a_keep_daemon(mac, monkeypatch):
+    monkeypatch.setattr(_plan, "ipv6_loopback", lambda: False)
+    _loaded_keep_shell(mac, "127.0.0.1", "::1")
+    assert list(mac.plist(RELAY)["Sockets"]) == ["Listeners"]
+    monkeypatch.setattr(_plan, "ipv6_loopback", lambda: True)
+    [done] = mac.apply(units.plan("demo"))
+    assert done.ok and [c[0] for c in mac.ctl.verbs()] == RELOAD
+    assert list(mac.plist(RELAY)["Sockets"]) == ["Listeners", "Listeners-1"]
+
+
+def test_an_old_plist_that_does_not_parse_reloads_a_keep_daemon(mac):
+    """The mark is there, so the plan reads a `change`; the rest is cut short, so the old
+    sockets can't be shown equal to the new ones."""
+    _loaded_keep_shell(mac, "127.0.0.1")
+    path = mac.agents / f"{RELAY}.plist"
+    text = path.read_text()
+    path.write_text(text[:text.index("<key>Sockets</key>")])
+    [change] = units.plan("demo")
+    assert change.action == "change"
+    [done] = mac.apply([change])
+    assert done.ok and [c[0] for c in mac.ctl.verbs()] == RELOAD
+    assert mac.plist(RELAY)["Sockets"] == {"Listeners": listener("127.0.0.1")}
+
+
+def test_a_keep_daemon_that_drops_its_socket_is_reloaded_and_starts_at_once(mac):
+    _loaded_keep_shell(mac, "127.0.0.1")
+    mac.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'upgrade': 'keep'}}")
+    [done] = mac.apply(units.plan("demo"))
+    assert done.ok and [c[0] for c in mac.ctl.verbs()] == RELOAD
+    body = mac.plist(RELAY)
+    assert "Sockets" not in body and body["RunAtLoad"] is True and body["KeepAlive"]
+    assert mac.ctl.loaded[RELAY][0]                    # RunAtLoad started it
+
+
+def test_a_keep_daemon_that_gains_a_socket_is_reloaded_and_loads_idle(mac):
+    mac.script("moxi-demo-relay")
+    mac.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'upgrade': 'keep'}}")
+    mac.apply(units.plan("demo"))
+    assert mac.ctl.loaded[RELAY][0]
+    mac.module(DAEMONS=keep_shell("127.0.0.1"))
+    mac.ctl.calls.clear()
+    [done] = mac.apply(units.plan("demo"))
+    assert done.ok and [c[0] for c in mac.ctl.verbs()] == RELOAD
+    assert mac.ctl.loaded[RELAY] == [None, None]
+
+
 def test_remove_of_a_module_takes_its_plists_and_wraps_nothing(mac):
     mac.script("moxi-demo-relay")
     mac.module(DAEMONS=DAEMON)

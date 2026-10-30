@@ -42,7 +42,8 @@ launchctl's is relied on.
 The shapes of `launchctl print gui/<uid>` this reads, a `services = {` block of
 `<pid> <last exit status> <label>` lines and a `disabled services = {` block of
 `"<label>" => disabled` lines, are tested here against recorded text; their proof on a
-real Mac is owed, and so is that of the socket keys and the socket read.
+real Mac is owed, and so is that of the socket keys, the socket read and the reload of a
+job whose sockets changed.
 """
 
 from __future__ import annotations
@@ -206,11 +207,23 @@ class LaunchdBackend:
         change is booted out first; the plist is written; then `enable` and `bootstrap`,
         or, for a unit declared `enabled = false`, `disable` only. A changed daemon with
         `upgrade = "keep"` whose job is loaded is only rewritten. With `restart=True`, an
-        unchanged daemon that has a pid and `upgrade = "restart"` is `kickstart -k`ed."""
+        unchanged daemon that has a pid and `upgrade = "restart"` is `kickstart -k`ed.
+
+        launchd takes a job's sockets only when it loads the plist, so a changed daemon
+        whose old and new plists differ in `Sockets` (a key added, dropped or changed, or
+        the whole dict gained or lost, compared as parsed values) is booted out, written,
+        enabled and bootstrapped whatever `upgrade` says: a changed socket set reaches
+        launchd at once. An old plist that can't be parsed counts as differing, since the
+        two can't be shown equal. With `upgrade = "keep"`, only a change outside
+        `Sockets` waits for the job's next load."""
         fence = io.fence
         removes = [c for c in changes if c.action == "remove"]
         writes = [c for c in changes if c.action in ("add", "change")]
-        kept = [c for c in writes if c.action == "change" and _keeps(c)]
+        # Read before the plists are replaced.
+        kept = [c for c in writes if c.action == "change" and _keeps(c)
+                and not _sockets_differ(c)]
+        reloads = {id(c) for c in writes if c.action == "change" and _keeps(c)} - {
+            id(c) for c in kept}
         restarts = [c for c in changes if restart and c.action == "keep"
                     and c.kind == "daemon" and c.enabled
                     and c.entry.get("upgrade", "restart") == "restart"]
@@ -222,7 +235,7 @@ class LaunchdBackend:
                              f"`moxi install {change.module}` again"):
                 io.delete(change)
         for change in writes:
-            self._write(change, io, read)
+            self._write(change, io, read, reload=id(change) in reloads)
         for change in restarts:
             label = self._label_of(change)
             if isinstance(read, Ran):
@@ -232,10 +245,10 @@ class LaunchdBackend:
             if read.get(label, (None, None))[0]:
                 self._run(io, change, "kickstart", self.target(label))
 
-    def _write(self, change: UnitChange, io: ApplyIO, read) -> None:
+    def _write(self, change: UnitChange, io: ApplyIO, read, *, reload: bool) -> None:
         fence = io.fence
         label = self._label_of(change)
-        if change.action == "change" and _keeps(change) and (
+        if change.action == "change" and _keeps(change) and not reload and (
                 isinstance(read, Ran) or label in read):
             io.write(change)
             io.say(change, f"{label} rewritten; the new code runs from its next start")
@@ -588,15 +601,33 @@ def _prologue(text: str) -> str:
 
 
 def _load(path: Path) -> dict | None:
-    """A plist file's top-level dict (XML or binary), or None."""
+    """A plist file's top-level dict (XML or binary), or None, also for XML that doesn't
+    parse."""
     import plistlib
+    from xml.parsers.expat import ExpatError
 
     try:
         with open(path, "rb") as handle:
             body = plistlib.load(handle)
-    except (OSError, ValueError, plistlib.InvalidFileException):
+    except (OSError, ValueError, ExpatError):
         return None
     return body if isinstance(body, dict) else None
+
+
+def _sockets_differ(change: UnitChange) -> bool:
+    """Whether a changed daemon's plist on disk and its new text differ in `Sockets`, as
+    parsed values; True when the old plist (or the new text) can't be parsed."""
+    import plistlib
+    from xml.parsers.expat import ExpatError
+
+    old = _load(change.paths[0]) if change.paths else None
+    if old is None:
+        return True
+    try:
+        new = plistlib.loads((change.text or "").encode("utf-8"))
+    except (ValueError, ExpatError):
+        return True
+    return not isinstance(new, dict) or old.get("Sockets") != new.get("Sockets")
 
 
 def _log(body: dict | None) -> str | None:
