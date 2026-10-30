@@ -27,12 +27,14 @@ when slots says it is not launchable; one that names none takes the lowest launc
 or a new one. slots claims the slot and opens the window in one step (`start`), with the
 launch's environment on that command only. The row records the slot, the pane and the
 pane's pid (the harness's, since slots' trampoline execs it), and `started` once slots says
-the command started (or could not confirm it either way), or `failed` with slots' exec line.
-A slot taken since `check` ends the row `failed` with slots' reason, naming the holder
-(exit 3); slots' lock held too long ends it `try-again` (exit 75). Nothing retries. The
-launch then watches for the startup screens it is set to answer (`startup`), and sends the
-first turn itself before it returns. Native Windows, and an install without slots, are
-refused with a hint naming the other two targets.
+the command started, or `started` with reason `unconfirmed` when slots could not confirm it
+either way (the ready wait decides), or `failed` with slots' exec line. A slot taken since
+`check` ends the row `failed` with slots' reason, naming the holder (exit 3); slots' lock
+held too long ends it `try-again` (exit 75); any other slots error (its registry
+unreadable, tmux failing) ends it `spawn-failed` with slots' words (exit 1). Nothing
+retries. The launch then watches for the startup screens it is set to answer (`startup`),
+and sends the first turn itself before it returns. Native Windows, and an install without
+slots, are refused with a hint naming the other two targets.
 
 **The sweep.** A launch's run files (its run log and its system prompt file) are kept for
 `runs.keep_days` and then removed, and a run log past `LOG_CAP` is cut from the front to
@@ -82,6 +84,10 @@ FAILED_ERRORS = frozenset({SPAWN_FAILED, NO_DELIVERER, first.NO_READY,
                            first.HANDOFF_UNREADABLE, first.NO_TURNS, startup.EXITED,
                            startup.SCREEN_MISMATCH})
 TRY_AGAIN = "try-again"
+#: slots' exec verdicts that start the row: the command started, or slots could not say
+#: (the row's reason then); `failed` is the third.
+STARTED = "started"
+UNCONFIRMED = "unconfirmed"
 
 WINDOWS = sys.platform == "win32"
 
@@ -324,8 +330,12 @@ class Slot(Target):
         except api.TryAgain as error:
             return [SlotsBusy("slot", f"slots did not answer about slot {named}: {error}",
                               "try again in a moment")]
-        except api.TmuxError as error:
-            return [SlotsFailed("slot", f"slots could not show slot {named}: {error}",
+        except api.UsageError as error:
+            return [catalog.BadValue("slot", f"slots does not take slot {named!r}: {error}",
+                                     "name a slot by its number (1-999) or its name")]
+        except api.SlotsError as error:
+            return [SlotsFailed("slot", f"slots could not show slot {named}: "
+                                        f"{_error_words(error)}",
                                 "moxi slots list shows the slots")]
         if found is None:
             return [SlotTaken(named, f"there is no slot {named}",
@@ -333,14 +343,18 @@ class Slot(Target):
                               "take the lowest free one")]
         if found.launchable:
             return []
-        state = found.state or "not launchable"
-        holder = _slot_holder(found)
-        by = f" by {holder}" if holder else ""
-        if state == "missing":
+        if found.state == "missing":
             return [SlotTaken(named, f"slot {named} is missing: its tmux session is gone",
                               f"recreate it with moxi slots create {named}")]
-        if found.hold is not None:
-            state = "held"
+        # As slots' own refusal at start: an occupied slot names its last launch, even when
+        # it is held too; a held one names the hold.
+        if found.state == "occupied":
+            state, holder = "occupied", _last_words(found.last)
+        elif found.hold is not None:
+            state, holder = "held", _hold_words(found.hold.holder, found.hold.until)
+        else:
+            state, holder = found.state or "not launchable", None
+        by = f" by {holder}" if holder else ""
         return [SlotTaken(named, f"slot {named} is {state}{by}",
                           "name another slot, or leave out the slot to take the lowest "
                           "free one", holder)]
@@ -371,14 +385,17 @@ class Slot(Target):
             return fail(conn, rid, refused.reason, words)
         except api.TryAgain as error:
             return fail(conn, rid, TRY_AGAIN, f"slots' lock was not had in time: {error}")
-        except api.TmuxError as error:
+        except api.SlotsError as error:
+            # Its registry unreadable or unwritable, tmux failing, or an argument slots
+            # does not take: the launch fails with slots' words.
             return fail(conn, rid, SPAWN_FAILED,
-                        f"{launch.argv[0]} could not be started in a slot: {error}")
+                        f"{launch.argv[0]} could not be started in a slot: "
+                        f"{_error_words(error)}")
 
         slot, pane_id = placed.slot, placed.pane_id
         where = {"slot": str(slot), "pane_id": pane_id}
         verdict = placed.exec
-        if verdict not in ("started", "unconfirmed"):
+        if verdict not in (STARTED, UNCONFIRMED):
             line = placed.exec_line or verdict or "no verdict"
             status = placed.dead_status
             store.set_facts(conn, rid, **where)
@@ -387,11 +404,13 @@ class Slot(Target):
                         + (f" (pane status {status})" if status is not None else ""))
         pid = _pane_pid(api, slot)
         ident = proc.identity(pid) if pid else None
-        store.set_state(conn, rid, "started", leaving=("spawning",), pid=pid,
+        reason = UNCONFIRMED if verdict == UNCONFIRMED else None
+        store.set_state(conn, rid, "started", reason=reason, leaving=("spawning",), pid=pid,
                         pid_started=ident.started if ident is not None else None, **where)
         here = f"launch {rid} started in slot {slot}"
-        if verdict == "unconfirmed":
-            here += " (slots could not confirm that the command started)"
+        if verdict == UNCONFIRMED:
+            here += (" (slots could not confirm that the command started: "
+                     f"{placed.exec_line or 'no verdict'})")
 
         turns = first.turns_api(quiet=True)
         try:
@@ -411,8 +430,8 @@ class Slot(Target):
                                str(slot), done.line + capture)
 
         if not launch.first_owed:
-            return Started("started", exits.OK, pid=pid, pane_id=pane_id, slot=str(slot),
-                           line=here)
+            return Started("started", exits.OK, reason, pid=pid, pane_id=pane_id,
+                           slot=str(slot), line=here)
         outcome = first.send(conn, rid, pid=pid, turns=turns)
         line = f"{here}; {outcome.line()}"
         if outcome.outcome == "no-ready" and launch.composition.harness == "codex":
@@ -503,53 +522,55 @@ def named_slot(values: Mapping[str, object]) -> int | str | None:
     return int(text) if text.isdigit() else text
 
 
-def _slot_holder(found: Any) -> str | None:
-    """Who has a slot that `show` read: the hold's holder and until, else the last
-    launch's label and meta."""
-    if found.hold is not None:
-        return _hold_words(found.hold)
-    return _last_words(found.last)
-
-
 def _refused_holder(reason: str, holder: Any) -> str | None:
-    """Who has the slot a `start` was refused, in a few words: slots names the hold for
-    `held` and the last launch for `occupied`, and nobody for its other refusals."""
-    if holder is None:
+    """Who has the slot a `start` was refused, in a few words. slots' `Refused.holder` is
+    a mapping: the hold's `holder` and `until` for `held`, and the last launch's `label`
+    and `meta` for `occupied` (also when the slot is held too). Other refusals name
+    nobody."""
+    if not isinstance(holder, Mapping):
         return None
     if reason == "held":
-        return _hold_words(holder)
+        return _hold_words(holder.get("holder"), holder.get("until"))
     if reason == "occupied":
         return _last_words(holder)
     return None
 
 
-def _hold_words(hold: Any) -> str | None:
-    """A hold (`holder`, `until` in epoch seconds) in a few words."""
-    if hold is None or not hold.holder:
+def _hold_words(holder: Any, until: Any) -> str | None:
+    """A hold (its `holder` word, `until` in epoch seconds) in a few words."""
+    if not holder:
         return None
-    until = hold.until
     when = (f" until {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(until))}"
-            if isinstance(until, (int, float)) else "")
-    return f"{hold.holder}{when}"
+            if isinstance(until, (int, float)) and not isinstance(until, bool) else "")
+    return f"{holder}{when}"
 
 
 def _last_words(last: Any) -> str | None:
-    """A last launch (`label`, and the launcher's own `meta`) in a few words."""
+    """A last launch (`label`, and the launcher's own `meta`) in a few words: slots'
+    `Last`, or the mapping a refusal carries."""
     if last is None:
         return None
-    words = str(last.label or "")
-    meta = last.meta
+    if isinstance(last, Mapping):
+        label, meta = last.get("label"), last.get("meta")
+    else:
+        label, meta = last.label, last.meta
+    words = str(label or "")
     if isinstance(meta, Mapping) and meta:
         facts = ", ".join(f"{k} {v}" for k, v in meta.items() if v is not None)
         words = f"{words} ({facts})" if words else facts
     return words or None
 
 
+def _error_words(error: BaseException) -> str:
+    """A slots error as words: its class (`RegistryError`, `TmuxError`, ...) and message."""
+    return f"{type(error).__name__}: {error}".rstrip(": ")
+
+
 def _pane_pid(api: Any, slot: Any) -> int | None:
     """The pid of slot `slot`'s run pane, as slots shows it, or None."""
     try:
         found = api.show(slot)
-    except (api.TryAgain, api.TmuxError):  # the pid is a fact the row can do without
+    except api.SlotsError:  # the pid is a fact the row can do without
         return None
     pid: int | None = found.pane_pid if found is not None else None
     return pid if pid and pid > 0 else None
@@ -667,6 +688,7 @@ def _cut(path: Path, size: int, cap: int) -> None:
 __all__ = ["CUT_LINE", "FAILED_ERRORS", "LOG_CAP", "NO_DELIVERER", "OTHER_TARGETS", "RUNS",
            "RUN_FILES", "SPAWN_FAILED", "TARGETS", "TRY_AGAIN", "Headless", "Launch",
            "NoCommand", "NoSlots", "Slot", "SlotTaken", "SlotsBusy",
-           "SlotsFailed", "SlotsUnsupported", "Started", "Swept", "Target", "Terminal",
+           "STARTED", "SlotsFailed", "SlotsUnsupported", "Started", "Swept", "Target",
+           "Terminal", "UNCONFIRMED",
            "exit_of", "fail", "failed_exit", "find", "get", "named_slot",
            "run_log", "runs_dir", "sweep"]

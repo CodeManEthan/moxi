@@ -29,11 +29,17 @@ covers the whole call, keys and settling included, and records the outcome as a
   `screen-mismatch` at once, with slots' capture of the screen, and nothing more is sent
   to the session.
 - `ended`, `ended-without-screen` or `no-pane`: the pane died or is gone, and the launch
-  fails `exited`. So does a dead pane at any read.
+  fails `exited`. So does a dead pane at any read, and a `mismatch` whose last read
+  (`Answer.seen`) found the pane dead: a session that died after Enter on the screen
+  exited, it did not show another screen.
 
-No answer is started with less than `MIN_ANSWER_S` left. slots' `why` is words for a
-person, recorded beside the outcome; its leading `not-settled` is the one word the loop
-reads in it.
+No answer is started with less than `MIN_ANSWER_S` left. An answer may run up to 5 s past
+the wait it is given (slots waits that long for a screen to leave after Enter), so the time
+left is read from the clock after each one, and a watch may end up to 5 s past its bound. slots' `why` is words for a
+person, recorded beside the outcome with the keys slots sent; its leading `not-settled` is
+the one word the loop reads in it. Any slots error from a read or an answer (its server
+not answering, tmux failing, the slot gone from its registry) stops the watch, and the
+ready wait decides.
 
 No Codex screen is declared yet, so a Codex slot launch answers none: a folder Codex has
 not trusted may show Codex's own trust prompt, which waits for a person who attaches, and a
@@ -78,7 +84,8 @@ GO_ON = frozenset({"gone", "not-ended"})
 #: slots' answer when it could not answer a screen in its bound.
 MISMATCH = "mismatch"
 #: The word a `mismatch`'s `why` starts with when slots' settle bound ran out: the screen
-#: had not settled. It is also the outcome the loop records for that answer.
+#: had not settled. It is also the outcome the loop records for that answer. slots' API
+#: module does not export it, so the launcher keeps its own.
 NOT_SETTLED = "not-settled"
 #: slots' answers that mean the pane died or is gone.
 PANE_ENDED = frozenset({"ended", "ended-without-screen", "no-pane"})
@@ -154,7 +161,7 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
     shown = [screen for _, screen in enabled]
     answered: list[tuple[str, str]] = []
     deadline = clock() + wait_s
-    failures = (api.TryAgain, api.TmuxError)
+    failures = api.SlotsError
 
     def done(ended: str, **more: Any) -> Watched:
         return Watched(ended, answered=tuple(answered), **more)
@@ -174,6 +181,10 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
             if left < MIN_ANSWER_S:
                 return done("bound")
             wait = min(ANSWER_WAIT_S, left)
+            # slots may take up to 5 s past `wait` on a screen that must leave after
+            # Enter, so the loop never counts on the call ending within it: what remains
+            # is read from the clock again after it. A watch can so run up to 5 s past
+            # `startup.wait_s`, which is accepted.
             try:
                 answer = api.answer_screen(slot, screen, wait=wait)
             except failures as error:
@@ -184,11 +195,11 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
             recorded = NOT_SETTLED if unsettled else outcome
             answered.append((name, recorded))
             detail = {"screen": name, "outcome": recorded, "why": why, "wait": wait,
-                      "capture": capture}
+                      "capture": capture, "keys": list(answer.keys)}
             if unsettled:
                 detail["answer"] = outcome
             store.add_event(conn, EVENT, detail, request_id=request_id)
-            if outcome in PANE_ENDED:
+            if outcome in PANE_ENDED or (outcome == MISMATCH and _dead(answer.seen)):
                 return done("failed", reason=EXITED, why=_exited(api, slot))
             if outcome in GO_ON:
                 continue
@@ -222,6 +233,11 @@ def _not_settled(why: str) -> bool:
     return not rest or not (rest[0].isalnum() or rest[0] in "-_")
 
 
+def _dead(seen: Any) -> bool:
+    """Whether slots' last read of the pane (`Answer.seen`) found it dead."""
+    return seen is not None and bool(seen.dead)
+
+
 def _named(shown: Any, enabled: Sequence[tuple[str, Any]]) -> tuple[str | None, Any]:
     """The enabled screen that slots' read matched, by the name the launcher knows it
     under, or `(None, None)`."""
@@ -238,7 +254,7 @@ def _exited(api: Any, slot: Any) -> str:
     can show it."""
     try:
         found = api.show(slot)
-    except (api.TryAgain, api.TmuxError):
+    except api.SlotsError:
         found = None
     status = found.dead_status if found is not None else None
     if status is None:

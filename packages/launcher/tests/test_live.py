@@ -107,7 +107,10 @@ def own_slots(live_env, monkeypatch):
     `MOXI_HOME` points into a short temp dir, in this process (where the launcher calls
     slots) and in the launch's environment, and every `MOXI_SLOTS_*` locator is dropped, so
     slots' socket follows `MOXI_HOME` there. `TMUX` and `TMUX_PANE` are dropped, and
-    `TMUX_TMPDIR` points into the dir too. The server is stopped after the test."""
+    `TMUX_TMPDIR` points into the dir too. On an editable install slots' server is not
+    started on demand, so the fixture starts `moxi-slots-server` as the supervisor would
+    (tmux's absolute path recorded, `tmux_conf` /dev/null), as slots' own server fixture
+    does, and after the test kills the server, its process group and its socket."""
     needs_slots()
     with short_dir("mxs-") as home:
         for name in [n for n in os.environ if n.startswith("MOXI_SLOTS_")] + [
@@ -140,12 +143,18 @@ def own_slots(live_env, monkeypatch):
         finally:
             subprocess.run([tmux, "-S", socket, "kill-server"], capture_output=True,
                            env=dict(os.environ), timeout=10)
-            server.terminate()
-            try:
-                server.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                server.kill()
-                server.wait()
+            if server.poll() is None:
+                try:
+                    os.killpg(server.pid, signal.SIGTERM)
+                except OSError:
+                    pass
+                try:
+                    server.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(server.pid, signal.SIGKILL)
+                    server.wait(timeout=10)
+            if os.path.exists(socket):
+                os.remove(socket)
             log.close()
 
 

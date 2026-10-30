@@ -22,6 +22,8 @@ from moxi import modules
 log = logging.getLogger("moxi.launcher.slots")
 
 MODULE = "slots"
+#: The interface of slots' API the launcher is written against.
+INTERFACE = 1
 #: A test seam: the import name of a module that stands in for slots' API.
 SEAM = "MOXI_LAUNCHER_SLOTS"
 
@@ -38,7 +40,7 @@ def api() -> Any | None:
         return importlib.import_module(seam)
     if not modules.available(MODULE):
         return None
-    found = modules.load(MODULE)
+    found = modules.load(MODULE, interface=INTERFACE)
     if not found.ok or found.api is None:
         log.warning("slots is installed but can't be loaded: %s", found.reason)
         return None
@@ -51,4 +53,4 @@ def links(name: str) -> bool:
     return available() if name == MODULE else modules.available(name)
 
 
-__all__ = ["MODULE", "SEAM", "api", "available", "links"]
+__all__ = ["INTERFACE", "MODULE", "SEAM", "api", "available", "links"]

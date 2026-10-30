@@ -20,7 +20,8 @@ from moxi.paths import Layout
 import launcher_fake_slots as fake
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
-from moxi_launcher import api, compose, first, module, slots, startup, store, targets
+from moxi_launcher import (api, catalog, compose, first, module, slots, startup, store,
+                           targets)
 from moxi_launcher.api import LaunchRequest
 
 TESTS = Path(__file__).resolve().parent
@@ -194,10 +195,52 @@ def test_the_harness_runs_in_the_slot_with_the_launch_env(work, harness, rig):
 
 
 def test_an_unconfirmed_start_is_started_and_says_so(work, harness, rig):
-    rig.plan(exec="unconfirmed")
+    rig.plan(exec="unconfirmed", exec_line="taken")
     got = api.launch(request(work))
-    assert got.state == "started" and got.exit_code == 0
+    assert (got.state, got.exit_code, got.reason) == ("started", 0, targets.UNCONFIRMED)
+    assert "could not confirm" in got.line and "taken" in got.line
+    assert (row().state, row().reason) == ("started", targets.UNCONFIRMED)
+    assert events(kind="start-failed") == []
+
+
+def test_an_unconfirmed_start_waits_for_ready_and_sends_the_first_turn(work, harness, rig,
+                                                                      turns):
+    """`unconfirmed` is never `spawn-failed`: the ready wait decides, as for `started`."""
+    rig.plan(exec="unconfirmed", exec_line="taken")
+    got = api.launch(request(work, brief=BRIEF))
+    assert [c["session_id"] for c in turns.calls("wait_ready")] == [SID]
+    assert len(turns.calls("deliver")) == 1
+    assert (got.state, got.exit_code) == ("first-sent", 0)
     assert "could not confirm" in got.line
+
+
+def test_an_unconfirmed_start_whose_session_never_gets_ready_ends_no_ready(work, harness,
+                                                                          rig, turns):
+    rig.plan(exec="unconfirmed", exec_line="taken")
+    turns.plan(ready="timeout")
+    got = api.launch(request(work, brief=BRIEF))
+    assert (got.state, got.reason) == ("failed", first.NO_READY)
+
+
+def test_a_scratch_launch_gives_slots_an_absolute_cwd(harness, rig, tmp_path,
+                                                      monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    got = api.launch(LaunchRequest(typed={"target": "slot", "scratch": True},
+                                   request_id="r1", session_id=SID, actor="ann"))
+    [call] = rig.calls("start")
+    assert os.path.isabs(call["cwd"])
+    assert call["cwd"] == str(compose.common.scratch_dir("r1"))
+    assert got.state == "started"
+
+
+def test_a_relative_temp_folder_still_gives_an_absolute_scratch_dir(tmp_path,
+                                                                   monkeypatch):
+    import tempfile
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: ".")
+    path = compose.common.scratch_dir("r9")
+    assert path.is_absolute() and path == tmp_path / "moxi-scratch" / "r9"
 
 
 def test_a_command_that_did_not_start_fails_the_row_with_slots_exec_line(work, harness,
@@ -251,13 +294,16 @@ def test_where_slots_is_not_supported_a_slot_launch_is_refused(work, harness, ri
 HELD = {"state": "free", "launchable": False,
         "hold": {"holder": "relaunch-77", "until": 1900000000}}
 OCCUPIED = {"state": "occupied", "launchable": False, "label": "launcher:r0",
-            "last": {"at": "2026-10-30T10:00:00Z", "label": "launcher:r0",
+            "last": {"at": 1890000000.0, "label": "launcher:r0",
                      "meta": {"request_id": "r0", "session_id": "s-0"}}}
+OCCUPIED_AND_HELD = {**OCCUPIED, "hold": {"holder": "relaunch-77", "until": 1900000000}}
 
 
 @pytest.mark.parametrize("entry, words", [
     (HELD, ["slot 3 is held by relaunch-77 until"]),
     (OCCUPIED, ["slot 3 is occupied by launcher:r0", "request_id r0", "session_id s-0"]),
+    # As slots' own refusal at start: occupied wins, naming the last launch, not the hold.
+    (OCCUPIED_AND_HELD, ["slot 3 is occupied by launcher:r0", "request_id r0"]),
     ({"state": "missing", "launchable": False}, ["slot 3 is missing"]),
     (None, ["there is no slot 3"]),
 ])
@@ -270,21 +316,28 @@ def test_a_named_slot_that_is_not_launchable_is_refused_naming_its_holder(
     assert api.exit_code(refused) == exits.REFUSED
     for word in words:
         assert word in refused.problem
+    if entry is OCCUPIED_AND_HELD:
+        assert "relaunch-77" not in refused.problem
     assert refused.hint
     assert nothing_written() and rig.calls("start") == []
     [listed] = api.check(request(work, slot="3"))
     assert type(listed) is targets.SlotTaken
 
 
-@pytest.mark.parametrize("how, kind, code", [
-    ("try-again", targets.SlotsBusy, exits.TEMPFAIL),
-    ("error", targets.SlotsFailed, exits.ERROR)])
+@pytest.mark.parametrize("how, kind, code, words", [
+    ("try-again", targets.SlotsBusy, exits.TEMPFAIL, "not answering"),
+    ("error", targets.SlotsFailed, exits.ERROR, "TmuxError: tmux list-panes failed"),
+    ("registry", targets.SlotsFailed, exits.ERROR, "RegistryError: the slots registry"),
+    ("usage", catalog.BadValue, exits.USAGE, "lower-case letters")])
 def test_slots_that_cant_show_the_named_slot_refuse_the_launch(work, harness, rig, how,
-                                                               kind, code):
+                                                               kind, code, words):
     rig.plan(show=how)
     with pytest.raises(kind) as raised:
         api.launch(request(work, slot="3"))
     assert api.exit_code(raised.value) == code and nothing_written()
+    assert words in raised.value.problem
+    [listed] = api.check(request(work, slot="3"))
+    assert type(listed) is kind
 
 
 def test_a_harness_missing_from_path_is_refused_before_the_row(work, rig, monkeypatch):
@@ -310,6 +363,19 @@ def test_a_slot_taken_since_check_ends_the_row_failed_naming_the_holder(work, ha
     again = api.launch(request(work))
     assert again.duplicate and again.exit_code == exits.REFUSED
     assert len(rig.calls("start")) == 1
+
+
+def test_an_occupied_slot_that_is_also_held_names_the_last_launch(work, harness, rig):
+    """slots refuses it `occupied`, and its holder is the last launch's label and meta."""
+    rig.plan(start="refused", refused={
+        "reason": "occupied", "words": "slot 1 runs a launch (launcher:r0); it ends "
+                                       "through its own session",
+        "holder": {"label": "launcher:r0", "meta": {"request_id": "r0",
+                                                    "session_id": "s-0"}}})
+    got = api.launch(request(work))
+    assert (got.reason, got.exit_code) == ("occupied", exits.REFUSED)
+    assert "slot 1 runs a launch" in got.line
+    assert "(occupied by launcher:r0 (request_id r0, session_id s-0))" in got.line
 
 
 def test_a_held_slot_at_start_names_the_hold(work, harness, rig):
@@ -339,10 +405,19 @@ def test_slots_lock_held_too_long_ends_the_row_try_again(work, harness, rig):
     assert len(rig.calls("start")) == 1  # nothing retries
 
 
-def test_a_tmux_failure_at_start_ends_the_row_spawn_failed(work, harness, rig):
-    rig.plan(start="error")
+@pytest.mark.parametrize("how, words", [
+    ("error", "TmuxError: tmux new-window failed"),
+    ("registry", "RegistryError: the slots registry can't be read")])
+def test_a_slots_failure_at_start_ends_the_row_spawn_failed_with_slots_words(
+        work, harness, rig, how, words):
+    rig.plan(start=how)
     got = api.launch(request(work))
-    assert (got.reason, got.exit_code) == (targets.SPAWN_FAILED, exits.ERROR)
+    assert (got.state, got.reason, got.exit_code) == ("failed", targets.SPAWN_FAILED,
+                                                      exits.ERROR)
+    assert words in got.line
+    [failed] = events(kind="start-failed")
+    assert words in failed.detail["why"]
+    assert (row().state, row().reason) == ("failed", targets.SPAWN_FAILED)
 
 
 # -- the first turn -----------------------------------------------------------------------
@@ -528,6 +603,26 @@ def test_a_screen_not_settled_then_an_ended_pane_fails_exited(work, harness, rig
     assert turns.calls("deliver") == []
 
 
+@pytest.mark.parametrize("why", ["the screen was still there 5 s after Enter",
+                                 "not-settled: the marker did not move"])
+def test_a_mismatch_whose_pane_died_fails_exited(work, harness, rig, turns, why):
+    """A session that died after Enter on the trust screen comes back `mismatch` with
+    the last read dead: it exited, it did not show another screen."""
+    screens_on(3)
+    turns.plan(ready="timeout")
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}], dead_status=1,
+             answers=[{"outcome": "mismatch", "why": why, "dead": True,
+                       "keys": ["Down", "Enter"]}])
+    got = api.launch(request(work, brief=BRIEF))
+    assert (got.state, got.reason, got.exit_code) == ("failed", startup.EXITED,
+                                                      exits.ERROR)
+    assert "pane status 1" in got.line
+    assert len(rig.calls("answer_screen")) == 1
+    [seen] = events(kind=startup.EVENT)
+    assert seen.detail["keys"] == ["Down", "Enter"]
+    assert turns.calls("deliver") == []
+
+
 def test_a_pane_that_died_at_startup_fails_exited(work, harness, rig, turns):
     screens_on(2)
     turns.plan(ready="timeout")
@@ -564,10 +659,12 @@ class Clock:
 
 
 def loop_api(clock: Clock, frames: list, answers: list, *, answer_takes: float = 0.0,
-             fail_read: Exception | None = None, status: int | None = None):
+             fail_read: Exception | None = None, status: int | None = None,
+             overrun: float = 0.0):
     """slots' screen calls on `clock`: each read gives the next of `frames` (`screen`, a
     screen constant's name or None, and `dead`), each answer the next of `answers`, and
-    `show` the pane's exit `status`."""
+    `show` the pane's exit `status`. An answer takes `answer_takes` seconds, at most its
+    `wait`, plus `overrun` (slots' wait for a screen to leave after Enter)."""
     seen = SimpleNamespace(reads=[], answers=[])
 
     def read_screen(slot, screens):
@@ -576,21 +673,26 @@ def loop_api(clock: Clock, frames: list, answers: list, *, answer_takes: float =
         seen.reads.append(clock.now)
         frame = frames[min(len(seen.reads) - 1, len(frames) - 1)]
         name = frame.get("screen")
-        return fake.Seen(fake.SCREENS[name] if name else None,
-                         dead=frame.get("dead", False))
+        return fake.Seen(fake.SCREENS[name] if name else None, True, "",
+                         dead=frame.get("dead", False), pane_id="%7")
 
     def answer_screen(slot, screen, wait=5):
         seen.answers.append(wait)
         answer = answers[min(len(seen.answers) - 1, len(answers) - 1)]
-        clock.now += min(answer_takes, wait)
-        return fake.Answer(answer["outcome"], screen, answer.get("why", ""), None,
-                           answer.get("capture"))
+        clock.now += min(answer_takes, wait) + overrun
+        last = fake.Seen(screen, False, answer.get("why", ""),
+                         dead=answer.get("dead", False), pane_id="%7")
+        return fake.Answer(answer["outcome"], screen, answer.get("why", ""), last,
+                           answer.get("capture"), tuple(answer.get("keys", ())))
 
     def show(slot):
-        return fake.Slot(slot, None, "occupied", False, dead_status=status)
+        return fake.make_slot(slot, "occupied", dead_status=status)
 
-    seen.api = SimpleNamespace(read_screen=read_screen, answer_screen=answer_screen,
-                               show=show, TryAgain=fake.TryAgain, TmuxError=fake.TmuxError)
+    seen.api = SimpleNamespace(
+        read_screen=read_screen, answer_screen=answer_screen, show=show,
+        SlotsError=fake.SlotsError, Refused=fake.Refused, TryAgain=fake.TryAgain,
+        TmuxError=fake.TmuxError, RegistryError=fake.RegistryError,
+        UsageError=fake.UsageError)
     return seen
 
 
@@ -649,6 +751,17 @@ def test_each_answer_gets_what_remains_of_the_bound_at_most_5_s(conn):
     assert seen.answers == [5.0, 5.0, 4.0]
     assert got.ended == "bound"
     assert [a for _, a in got.answered] == ["gone", "gone", "gone"]
+
+
+def test_an_answer_that_runs_past_its_wait_is_measured_on_the_clock(conn):
+    clock = Clock()
+    seen = loop_api(clock, [SHOWING], [{"outcome": "gone"}], answer_takes=5.0,
+                    overrun=5.0)
+    got = watch(conn, clock, seen, wait_s=12)
+    # Asked at 0 (wait 5), back at 10 with 2 s left: asked again (wait 2), back at 17,
+    # 5 s past the bound, and nothing more is asked.
+    assert seen.answers == [5.0, 2.0] and got.ended == "bound"
+    assert clock.now == pytest.approx(17.0)
 
 
 def test_no_answer_is_started_with_less_than_a_second_left(conn):
@@ -776,6 +889,9 @@ def test_an_answer_word_the_loop_does_not_know_stops_the_watch(conn):
     ([SHOWING], [{"outcome": "ended-without-screen"}], 1, "pane status 1"),
     ([SHOWING], [{"outcome": "no-pane"}], None, "exited before it was ready"),
     ([SHOWING, {"screen": None, "dead": True}], [NOT_SETTLED], 0, "pane status 0"),
+    ([SHOWING], [{"outcome": "mismatch", "why": "the screen was still there", "dead": True}],
+     1, "pane status 1"),
+    ([SHOWING], [{**NOT_SETTLED, "dead": True}], None, "exited before it was ready"),
 ])
 def test_a_dead_or_gone_pane_fails_exited(conn, frames, answers, status, why):
     clock = Clock()
@@ -803,7 +919,9 @@ def test_a_read_matches_the_screen_object_slots_gives(conn):
 
 
 @pytest.mark.parametrize("error", [fake.TmuxError("tmux capture-pane failed"),
-                                   fake.TryAgain("the server is not answering yet")])
+                                   fake.TryAgain("the server is not answering yet"),
+                                   fake.RegistryError("the slots registry can't be read"),
+                                   fake.Refused("no-slot", "there is no slot 1")])
 def test_slots_that_cant_be_read_stop_the_loop_without_failing(conn, error):
     clock = Clock()
     seen = loop_api(clock, [], [], fail_read=error)
@@ -811,6 +929,28 @@ def test_slots_that_cant_be_read_stop_the_loop_without_failing(conn, error):
     assert got.ended == "stopped" and not got.failed and str(error) in got.why
     [event] = store.events(conn, "r1")
     assert event.kind == startup.EVENT and event.detail["outcome"] == "stopped"
+
+
+@pytest.mark.parametrize("error", [fake.TmuxError("tmux send-keys failed"),
+                                   fake.RegistryError("the slots registry can't be read")])
+def test_slots_that_cant_answer_stop_the_loop_without_failing(conn, error):
+    clock = Clock()
+    seen = loop_api(clock, [SHOWING], [])
+
+    def answer_screen(slot, screen, wait=5):
+        raise error
+
+    seen.api.answer_screen = answer_screen
+    got = watch(conn, clock, seen, wait_s=20)
+    assert got.ended == "stopped" and not got.failed and str(error) in got.why
+
+
+def test_the_keys_slots_sent_are_recorded(conn):
+    clock = Clock()
+    seen = loop_api(clock, [SHOWING, NONE], [{"outcome": "gone", "keys": ["Down", "Enter"]}])
+    watch(conn, clock, seen, wait_s=2)
+    [event] = store.events(conn, "r1")
+    assert event.detail["keys"] == ["Down", "Enter"]
 
 
 def test_the_enabled_screens_follow_the_settings():
@@ -897,3 +1037,96 @@ def test_the_core_runs_setup_in_a_process_of_its_own(rig, tmp_path):
         env={**os.environ, "PYTHONPATH": str(TESTS)})
     assert done.returncode == 0, done.stderr
     assert "moxi config set launcher startup.trust_dialog true" in done.stdout
+
+
+# -- the fake against slots as built ----------------------------------------------------------
+
+#: Every name the launcher reads from slots' API module.
+USED = ("supported", "show", "start", "read_screen", "answer_screen", "SlotsError",
+        "Refused", "TryAgain", "TmuxError", "RegistryError", "UsageError",
+        "CLAUDE_TRUST_FOLDER", "CLAUDE_DEV_CHANNELS")
+#: The shapes the launcher reads, as the fake gives them.
+SHAPES = ("Support", "Hold", "Last", "Slot", "Placed", "Screen", "Seen", "Answer")
+
+
+@pytest.fixture
+def real_slots(monkeypatch):
+    """slots' own API module; skips when slots is not installed."""
+    monkeypatch.delenv(slots.SEAM, raising=False)
+    if not modules.available("slots"):
+        pytest.skip("slots is not installed")
+    found = slots.api()
+    assert found is not None, "slots is installed but its API did not load"
+    return found
+
+
+def _model(api_module):
+    """The module slots' API takes its shapes and words from, reached through the API
+    (the launcher declares no dependency on slots)."""
+    return sys.modules[api_module.Answer.__module__]
+
+
+def _fields(cls) -> list[tuple[str, object]]:
+    import dataclasses
+
+    return [(f.name, f.default) for f in dataclasses.fields(cls)]
+
+
+def test_the_launcher_reads_only_names_slots_api_has(real_slots):
+    assert real_slots.__name__ == "moxi_slots.api"
+    missing = [name for name in USED if not hasattr(real_slots, name)]
+    assert missing == []
+    assert startup.screens("claude", real_slots, {"startup.trust_dialog": True,
+                                                  "startup.dev_channels_dialog": True}) == [
+        ("CLAUDE_TRUST_FOLDER", real_slots.CLAUDE_TRUST_FOLDER),
+        ("CLAUDE_DEV_CHANNELS", real_slots.CLAUDE_DEV_CHANNELS)]
+
+
+def test_the_fakes_shapes_are_slots_own(real_slots):
+    for name in SHAPES:
+        assert _fields(getattr(fake, name)) == _fields(getattr(real_slots, name)), name
+    assert _fields(fake.Items) == _fields(type(real_slots.CLAUDE_EXIT_DIALOG.items))
+    assert fake.REASONS == real_slots.REASONS
+
+
+def test_the_fakes_errors_are_slots_own(real_slots):
+    for name in ("Refused", "TryAgain", "TmuxError", "RegistryError", "UsageError"):
+        assert issubclass(getattr(real_slots, name), real_slots.SlotsError), name
+        assert issubclass(getattr(fake, name), fake.SlotsError), name
+    assert issubclass(real_slots.UsageError, ValueError)
+    assert issubclass(fake.UsageError, ValueError)
+    refused = real_slots.Refused("held", "slot 2 is held", {"holder": "x", "until": 1.0})
+    assert (refused.reason, refused.words, refused.holder) == (
+        "held", "slot 2 is held", {"holder": "x", "until": 1.0})
+
+
+def test_the_fakes_calls_take_slots_own_arguments(real_slots):
+    import inspect
+
+    for name in ("supported", "show", "start", "read_screen", "answer_screen"):
+        mine = inspect.signature(getattr(fake, name)).parameters
+        theirs = inspect.signature(getattr(real_slots, name)).parameters
+        assert [(p.name, p.kind, p.default) for p in mine.values()] == [
+            (p.name, p.kind, p.default) for p in theirs.values()], name
+
+
+def test_the_fakes_screens_are_slots_own(real_slots):
+    for name in fake.SCREENS:
+        mine, theirs = getattr(fake, name), getattr(real_slots, name)
+        assert mine.name == theirs.name == name
+        assert (mine.phrases, mine.option, mine.move, mine.then, mine.marker) == (
+            theirs.phrases, theirs.option, theirs.move, theirs.then, theirs.marker)
+        assert (mine.items is None) == (theirs.items is None)
+        if mine.items is not None:
+            assert (mine.items.after, mine.items.kinds) == (theirs.items.after,
+                                                            theirs.items.kinds)
+
+
+def test_not_settled_is_slots_word(real_slots):
+    model = _model(real_slots)
+    assert model.NOT_SETTLED == startup.NOT_SETTLED
+    assert not hasattr(real_slots, "NOT_SETTLED") or (
+        real_slots.NOT_SETTLED == startup.NOT_SETTLED)
+    assert startup.GO_ON | startup.PANE_ENDED | {startup.MISMATCH} == set(
+        model.ANSWER_OUTCOMES)
+    assert {targets.STARTED, targets.UNCONFIRMED} < set(model.EXEC_OUTCOMES)

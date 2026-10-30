@@ -19,7 +19,7 @@ from moxi import store as core_store
 from moxi.config import ConfigError
 
 from launcher_fake_harness import Harness
-from moxi_launcher import api, catalog, cli, first, handoffs, presets, store, targets
+from moxi_launcher import api, catalog, cli, first, handoffs, presets, slots, store, targets
 from moxi_launcher.compose import common
 
 BRIEF = "Read the design and start the build."
@@ -46,6 +46,14 @@ def no_projects(monkeypatch):
     """projects not installed, whatever this environment holds."""
     real = modules.available
     monkeypatch.setattr(modules, "available", lambda name: name != "projects" and real(name))
+
+
+@pytest.fixture
+def no_slots(monkeypatch):
+    """slots not installed, whatever this environment holds."""
+    monkeypatch.delenv(slots.SEAM, raising=False)
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "slots" and real(name))
 
 
 def write_presets(text: str) -> None:
@@ -277,17 +285,15 @@ def test_run_whose_start_fails_exits_1_and_the_row_says_why(work, harness, monke
     (["run", "--project", "moxi"], codes.REFUSED, "needs-module"),
     (["run", "--harness", "codex", "--", "--permissions", "p"], codes.REFUSED, "owned"),
 ])
-def test_run_refuses_before_the_row_and_writes_nothing(work, harness, no_projects, argv,
-                                                       code, short, capsys):
+def test_run_refuses_before_the_row_and_writes_nothing(work, harness, no_projects, no_slots,
+                                                       argv, code, short, capsys):
     status, out, err = run(argv, capsys)
     assert status == code, err
     assert err.splitlines()[0].endswith(f"[{short}]") and err.splitlines()[1]
     assert out == "" and rows() == [] and harness.runs() == []
 
 
-def test_run_into_a_named_slot_needs_slots(work, harness, capsys):
-    if modules.available("slots"):
-        pytest.skip("slots is installed")
+def test_run_into_a_named_slot_needs_slots(work, harness, no_slots, capsys):
     status, _, err = run(["run", "--slot", "2"], capsys)
     assert status == codes.REFUSED and "slot needs slots" in err
     assert rows() == []
@@ -515,9 +521,8 @@ def test_presets_check_of_a_good_file(capsys):
     ('[seat.planner]\neffort = "lots"\n', codes.USAGE, "bad-value"),
     ('[seat.planner]\nslot = "2"\n', codes.REFUSED, "needs-module"),
 ])
-def test_presets_check_exits_with_its_first_errors_code(text, code, short, capsys):
-    if short == "needs-module" and modules.available("slots"):
-        pytest.skip("slots is installed")
+def test_presets_check_exits_with_its_first_errors_code(text, code, short, no_slots,
+                                                         capsys):
     write_presets(text)
     status, out, _ = run(["presets", "check"], capsys)
     assert status == code

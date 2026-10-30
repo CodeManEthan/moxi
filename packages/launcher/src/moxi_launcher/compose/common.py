@@ -273,8 +273,9 @@ def first_turn(actor: str, *, brief: str | None = None, handoff: str | None = No
 
 def scratch_dir(request_id: str) -> Path:
     """Where a scratch launch works: a folder named by its request id under the system's
-    temporary folder. Only the path: the launch makes the folder."""
-    return Path(tempfile.gettempdir()) / "moxi-scratch" / request_id
+    temporary folder, always as an absolute path (a slot launch is refused a relative
+    one). Only the path: the launch makes the folder."""
+    return Path(os.path.abspath(tempfile.gettempdir())) / "moxi-scratch" / request_id
 
 
 # -- the child's environment ------------------------------------------------------------
