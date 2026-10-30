@@ -8,6 +8,7 @@
     moxi config <module> ...     a module's settings and its config file
     moxi config set ...          changes one of them (`moxi config unset` removes one)
     moxi paths <module> [--json] where a module keeps its files
+    moxi doctor [<module>...]    checks every module, its units, stores and records
     moxi check [PATH]            the module contract check
     moxi help [<verb>|<module>]  help
     moxi version                 versions
@@ -45,6 +46,9 @@ commands:
   config set|unset <module> <key> ...
                                      change one of a module's settings
   paths <module> [--json]            where a module keeps its files, and its stores
+  doctor [<module>...] [--json] [--costs]
+                                     check the modules, their settings, units and stores
+  doctor --clear <module> <key>      remove a record a program left for the doctor
   check [--staged] [PATH]            check a module repo against the module contract
   help [<command>|<module>]          this help, or a command's or a module's
   version                            the versions of moxi and its modules
@@ -1160,6 +1164,12 @@ def _size_text(size: int) -> str:
     return f"{size:.1f} {unit}"
 
 
+def _doctor(argv: list[str]) -> int:
+    from .doctor import _run
+
+    return _run.main(argv)
+
+
 def _install(argv: list[str]) -> int:
     from . import install
 
@@ -1210,6 +1220,7 @@ _VERBS = {
     "shortcut": _shortcut,
     "config": _config,
     "paths": _paths,
+    "doctor": _doctor,
     "check": _check,
     "help": _help,
     "version": _version,
