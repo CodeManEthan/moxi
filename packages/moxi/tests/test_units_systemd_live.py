@@ -10,6 +10,13 @@ its arguments to a file there.
 
 The rows that run the gate's wrap forms (`moxi run --condition` and `--result`) need the
 gate; on a tree without it they are skipped with that reason.
+
+The socket row writes a throwaway daemon with a socket through the core's own `plan` and
+`apply`: module `moxitest`, unit `socket-<8 hex>`, so the files are
+`moxi-moxitest-socket-<8 hex>.socket` and `.service`, listening on a free port of
+127.0.0.1, with a command that only sleeps. At its end it disables and stops both, deletes
+them, removes any `.wants` link left, and reloads, and it fails if the unit directory
+listing changed.
 """
 
 from __future__ import annotations
@@ -19,6 +26,7 @@ import json
 import os
 import shlex
 import shutil
+import socket
 import subprocess
 from pathlib import Path
 
@@ -29,6 +37,8 @@ from moxi.units import _systemd
 from moxi.units._fence import REAL_SUPERVISOR, Fence
 from moxi.units._systemd import SystemdBackend, command_line, quote
 from moxi.units._types import Wrapped
+
+from conftest import drop_modules
 
 MODULE, KEY, NAME = "wraptest", "backup.enabled", "backup"
 
@@ -60,6 +70,12 @@ def _listing(root: Path) -> dict[str, tuple]:
             st = path.stat()
             out[rel] = ("file", st.st_size, st.st_mtime_ns)
     return out
+
+
+def _show(fence: Fence, unit: str, *props: str) -> dict[str, str]:
+    ran = fence.run("show", "--property=" + ",".join(props), unit)
+    assert ran.ok, ran.failure()
+    return dict(line.partition("=")[::2] for line in ran.stdout.splitlines() if line)
 
 
 class Row:
@@ -102,9 +118,7 @@ class Row:
         return self.fence.run("start", self.service)
 
     def show(self, *props: str) -> dict[str, str]:
-        ran = self.fence.run("show", "--property=" + ",".join(props), self.service)
-        assert ran.ok, ran.failure()
-        return dict(line.partition("=")[::2] for line in ran.stdout.splitlines() if line)
+        return _show(self.fence, self.service, *props)
 
     def lines(self) -> list[dict]:
         if not self.runs.exists():
@@ -225,3 +239,142 @@ def test_wrap_on_this_boxs_user_manager(tmp_path, monkeypatch, capsys):
     if not _gate():
         pytest.skip("the gate's wrap forms (moxi run --condition, --result) are not in "
                     "this tree; the drop-in, status and unwrap rows passed")
+
+
+# -- a changed socket restarts its daemon ----------------------------------------------------
+
+SOCKET_MODULE = "moxitest"
+SOCKET_SETTINGS = """
+[port]
+type = "int"
+default = {port}
+doc = "The throwaway socket's port."
+read = "start"
+"""
+
+
+def _free_ports(count: int) -> list[int]:
+    """`count` distinct ports of 127.0.0.1 that were free a moment ago."""
+    held = [socket.socket() for _ in range(count)]
+    try:
+        for s in held:
+            s.bind(("127.0.0.1", 0))
+        return [s.getsockname()[1] for s in held]
+    finally:
+        for s in held:
+            s.close()
+
+
+class SocketRow:
+    """The throwaway daemon with a socket, declared by a fake module, and its cleanup."""
+
+    def __init__(self, site, tmp: Path, monkeypatch):
+        self.site = site
+        self.name = f"socket-{os.urandom(4).hex()}"
+        stem = f"moxi-{SOCKET_MODULE}-{self.name}"
+        self.service, self.socket = f"{stem}.service", f"{stem}.socket"
+        self.dir = _systemd.unit_dir()
+        self.fence = Fence("systemd")
+        self.lines: list[str] = []
+        scripts = tmp / "bin"
+        scripts.mkdir()
+        relay = scripts / "moxi-moxitest-relay"
+        relay.write_text("#!/bin/sh\nexec sleep 300\n")
+        relay.chmod(0o755)
+        monkeypatch.setattr(moxi.paths, "_scripts", lambda: scripts)
+        self.old, self.new = _free_ports(2)
+        site.write(f"moxi_{SOCKET_MODULE}/settings.toml", SOCKET_SETTINGS.format(port=self.old))
+
+    def declare(self, doc: str) -> None:
+        daemons = {self.name: {"command": "moxi-moxitest-relay", "doc": doc,
+                               "upgrade": "keep",
+                               "socket": {"setting": "port", "addresses": ["127.0.0.1"]}}}
+        # A second declaration is read anew, not from the first one's import.
+        drop_modules({f"moxi_{SOCKET_MODULE}"})
+        self.site.module(SOCKET_MODULE, SETTINGS="'settings.toml'", DAEMONS=repr(daemons))
+        moxi.modules.reset()
+
+    def apply(self):
+        from moxi import units
+
+        done = units.apply(units.plan(SOCKET_MODULE), say=self.lines.append)
+        assert all(a.ok for a in done), self.lines
+        return done
+
+    def plan(self) -> set[tuple[str, str]]:
+        from moxi import units
+
+        return {(c.kind, c.action) for c in units.plan(SOCKET_MODULE)}
+
+    def daemon(self) -> dict[str, str]:
+        return _show(self.fence, self.service, "ActiveState", "SubState", "MainPID")
+
+    def listens(self) -> str:
+        return _show(self.fence, self.socket, "ActiveState", "Listen")
+
+    def clean(self) -> None:
+        for unit in (self.socket, self.service):
+            self.fence.run("disable", "--now", unit)
+        for path in (self.dir / self.socket, self.dir / self.service,
+                     self.dir / "sockets.target.wants" / self.socket,
+                     self.dir / "default.target.wants" / self.service):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+        # Cleanup only: forget a failed run of the throwaway units.
+        subprocess.run(["systemctl", "--user", "reset-failed", self.socket, self.service],
+                       capture_output=True, timeout=30)
+        self.fence.run("daemon-reload")
+
+
+@pytest.mark.parametrize("service_too", [False, True],
+                         ids=["socket only", "socket and service"])
+def test_a_changed_socket_restarts_a_keep_daemon_on_this_boxs_user_manager(
+        site, tmp_path, monkeypatch, capsys, service_too):
+    """A changed `.socket` restarts its daemon whatever `upgrade` says: a running
+    `upgrade = "keep"` daemon whose port changed ends running, as a new process, behind a
+    socket on the new port, with or without a change to its own `.service`."""
+    from moxi import config
+    from moxi.units import _backend
+
+    row = SocketRow(site, tmp_path, monkeypatch)
+    before = _listing(row.dir)
+    assert not any(Path(k).name.startswith(f"moxi-{SOCKET_MODULE}-") for k in before)
+    report: list[str] = []
+    try:
+        with _backend.use(SystemdBackend()):
+            row.declare("a throwaway daemon for the socket proof")
+            row.apply()
+            first = row.daemon()
+            report.append(f"first apply: {first} {row.listens()}")
+            assert first["ActiveState"] == "active" and first["MainPID"] not in ("", "0")
+            assert row.listens()["Listen"] == f"127.0.0.1:{row.old} (Stream)"
+
+            config.set(SOCKET_MODULE, "port", str(row.new), by="test")
+            if service_too:
+                row.declare("a throwaway daemon for the socket proof, rewritten")
+            assert row.plan() == {("daemon", "change" if service_too else "keep"),
+                                  ("socket", "change")}
+            row.lines.clear()
+            row.apply()
+            then = row.daemon()
+            listens = row.listens()
+            report.append(f"port {row.old} -> {row.new}: {then} {listens} "
+                          f"lines={row.lines}")
+            assert then["ActiveState"] == "active", (then, row.lines)
+            assert then["MainPID"] not in ("", "0", first["MainPID"])
+            assert listens == {"ActiveState": "active",
+                               "Listen": f"127.0.0.1:{row.new} (Stream)"}
+            if service_too:
+                assert (f"{row.service} rewritten and restarted, since its socket changed"
+                        in row.lines)
+            with socket.create_connection(("127.0.0.1", row.new), timeout=5):
+                pass
+    finally:
+        row.clean()
+        after = _listing(row.dir)
+        with capsys.disabled():
+            print("\n" + "\n".join(f"  {line}" for line in report))
+            print(f"  unit directory unchanged: {after == before}")
+    assert after == before
