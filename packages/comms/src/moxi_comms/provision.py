@@ -307,7 +307,7 @@ def add_standing(record, conn, name: str, scope: str = GLOBAL, *, rooms=None,
             f"{name}@{scope} is already provisioned as a standing row of kind "
             f"{directory.kind_of(found)!r}, not {kind!r}; nothing was changed")
     if daemon_client is not None:
-        for b in daemon_client.query("agents")["bindings"]:
+        for b in daemon_client.call("agents")["bindings"]:
             if b["name"] == name and b["scope"] == scope and b["tier"] == "chosen":
                 raise ProvisionError(
                     f"{name}@{scope} is currently live as a chosen binding "

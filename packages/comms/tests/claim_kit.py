@@ -18,7 +18,7 @@ import threading
 import time
 
 from moxi_comms import claimfile
-from moxi_comms.claimhold import ClaimHolder, _Conn
+from moxi_comms.claimhold import ClaimHolder
 from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import Daemon
 from moxi_comms.membership import TREE, ProcView, Root
@@ -85,7 +85,7 @@ class Session:
         client = DaemonClient(daemon_socket(), on_close=self._closed)
         client.connect()
         try:
-            resp = client.register(name=claim["name"], scope=claim["scope"],
+            resp = client.bind(name=claim["name"], scope=claim["scope"],
                                    project=claim["scope"], adapter="codex")
         except BaseException:
             client.close()
@@ -138,12 +138,12 @@ class Session:
 class DirectConn:
     def __init__(self, holder, pid):
         self.holder = holder
-        self.ctx = _Conn(pid)
+        self.pid = pid
 
-    def call(self, op, **fields):
-        if self.holder._server is None:
+    def call(self, op):
+        if self.holder._host is None:
             raise OSError("connection refused")
-        return self.holder.dispatch({"op": op, **fields}, self.ctx)
+        return self.holder.dispatch(op, self.pid)
 
     def close(self):
         pass
@@ -173,8 +173,8 @@ class World:
             s.bind()
         return s
 
-    def call(self, target: Session, caller_pid, op, **fields):
-        return DirectConn(target.holder, caller_pid).call(op, **fields)
+    def call(self, target: Session, caller_pid, op):
+        return DirectConn(target.holder, caller_pid).call(op)
 
     def stop(self):
         for s in self.sessions:
@@ -238,18 +238,18 @@ class RegisterDrop:
                         self.closed.set()
                 self.on_close = on_close
 
-            def register(self, **kw):
+            def bind(self, **kw):
                 point, drop.point = drop.point, None
                 if point is None:
-                    return super().register(**kw)
+                    return super().bind(**kw)
                 if point == "before_answer":
                     try:
                         self.close()
-                        return super().register(**kw)
+                        return super().bind(**kw)
                     finally:
                         drop.fired.set()
                 try:
-                    resp = super().register(**kw)
+                    resp = super().bind(**kw)
                 except BaseException as e:
                     # Not answered (under load a fresh connection can be closed before
                     # its register goes out): that is the before-the-answer case, which

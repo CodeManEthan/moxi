@@ -11,7 +11,7 @@ from moxi_comms import constants, machine_line
 
 def test_send_to_an_unbound_ephemeral_is_an_honest_error(rig):
     code, out = rig.cli(["send", "--posture", "none", "agent-9", "hello?"],  name="planner", scope="proj-a")
-    assert code == 2
+    assert code == 3
     assert "no such ephemeral identity" in out
     assert "never reused" in out
     assert rig.record.history(rig.names_channel) == [], "nothing was posted"
@@ -32,7 +32,7 @@ def test_send_without_an_identity_is_refused(rig):
     the agent reading it cannot stamp one, and slots are the operator's inventory."""
     rig.shim(name="reviewer", scope="proj-a")
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "hi"])
-    assert code == 2
+    assert code == 3
     assert out.strip() == NO_CLAIM
     assert "slot" not in out.lower() and "seat" not in out.lower()
     assert rig.record.history(rig.names_channel) == [], "nothing was posted"
@@ -51,7 +51,7 @@ def test_a_slot_stamp_without_a_name_is_no_claim_at_all(rig):
     reachable from `moxi-comms-claude --comm-slot 3`. A slot is a webhook bundle, never a name."""
     rig.shim(name="reviewer", scope="proj-a")
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "hi"])
-    assert code == 2
+    assert code == 3
     assert out.strip() == NO_CLAIM
     assert "slot" not in out.lower() and "seat" not in out.lower()
     assert rig.record.history(rig.names_channel) == [], "nothing was posted"
@@ -60,7 +60,7 @@ def test_a_slot_stamp_without_a_name_is_no_claim_at_all(rig):
 def test_send_when_the_daemon_is_down_says_comms_offline(rig):
     rig.daemon.stop()
     code, out = rig.cli(["send", "--posture", "none", "reviewer", "hi"],  name="planner", scope="proj-a")
-    assert code == 4 and "comms offline" in out
+    assert code == 75 and "comms offline" in out
 
 
 def test_agents_lists_the_names_you_can_message(rig):
@@ -97,7 +97,7 @@ def test_agents_seats_is_the_operators_view(rig):
 def test_agents_when_the_daemon_is_down(rig):
     rig.daemon.stop()
     code, out = rig.cli(["agents"])
-    assert code == 4 and "Nothing is addressable" in out
+    assert code == 75 and "Nothing is addressable" in out
 
 
 def test_reply_obeys_the_send_boundary_and_threads(rig):
@@ -154,7 +154,7 @@ def test_history_reads_the_referent_out_of_the_record(rig):
 def test_reply_to_a_missing_message(rig):
     code, out = rig.cli(["reply", "1400000009999", "hi"],  name="planner",
                         scope="proj-a")
-    assert code == 2 and "nothing to reply to" in out
+    assert code == 3 and "nothing to reply to" in out
 
 
 def _old_conference_room(rig):
@@ -228,7 +228,7 @@ def test_history_needs_the_daemon_only_for_agent_n(rig):
     code, out = rig.cli(["history", "curator@proj-a"])
     assert code == 0 and "still readable" in out
     code, out = rig.cli(["history", "agent-1"])
-    assert code == 4 and "rather than guessing" in out
+    assert code == 75 and "rather than guessing" in out
 
 
 def test_history_is_empty_honestly(rig):
@@ -268,7 +268,7 @@ def test_standing_declaration_works_unbound_too(rig):
 def test_standing_declaration_refuses_a_name_with_no_row(rig):
     code, out = rig.cli(["send", "--posture", "none", "ops@proj-a", "are you there", "--standing"],
                          name="planner", scope="proj-a")
-    assert code == 2
+    assert code == 3
     assert "declared standing" in out
     assert "'ops@proj-a' has no standing row" in out
     assert "treated as a chosen name" in out
@@ -280,7 +280,7 @@ def test_standing_declaration_refuses_a_live_chosen_binding(rig):
     reviewer = rig.shim(name="reviewer", scope="proj-a")
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "hi", "--standing"],
                          name="planner", scope="proj-a")
-    assert code == 2
+    assert code == 3
     assert "'reviewer@proj-a' has no standing row" in out
     assert "currently bound" in out
     assert rig.record.history(rig.names_channel) == []
@@ -291,7 +291,7 @@ def test_standing_declaration_refuses_an_ephemeral(rig):
     ghost = rig.shim()
     code, out = rig.cli(["send", "--posture", "none", ghost.identity, "hi", "--standing"],
                          name="planner", scope="proj-a")
-    assert code == 2 and "has no standing row" in out
+    assert code == 3 and "has no standing row" in out
     assert rig.record.history(rig.names_channel) == []
 
 
@@ -302,13 +302,13 @@ def test_standing_declaration_is_scoped(rig):
     assert code == 0
     code, out = rig.cli(["send", "--posture", "none", "main@proj-c", "nope", "--standing"],  name="planner",
                         scope="proj-c")
-    assert code == 2 and "'main@proj-c' has no standing row" in out
+    assert code == 3 and "'main@proj-c' has no standing row" in out
 
 
 def test_standing_declaration_refuses_the_whole_multicast(rig):
     code, out = rig.cli(["send", "--posture", "none", "main@proj-a,ops@proj-a", "standup", "--standing"],
                          name="planner", scope="proj-a")
-    assert code == 2 and "'ops@proj-a' has no standing row" in out
+    assert code == 3 and "'ops@proj-a' has no standing row" in out
     assert rig.record.history(rig.names_channel) == [], "one post, so all or nothing"
 
 
@@ -331,7 +331,7 @@ def test_reply_standing_declaration_applies_to_the_derived_target(rig):
     posted = len(rig.record.history(rig.names_channel))
     code, out = rig.cli(["reply", chosen_msg, "acknowledged", "--standing"],
                          name="reviewer", scope="proj-a")
-    assert code == 2
+    assert code == 3
     assert "'ghost@proj-a' has no standing row" in out
     assert len(rig.record.history(rig.names_channel)) == posted
 
@@ -454,7 +454,7 @@ def test_a_bare_name_known_only_in_another_scope_is_the_global_name(rig):
     # --new-name: proj-b's binding says nothing about it
     code, out = rig.cli(["send", "--posture", "none", "reviewer", "meant for proj-b's reviewer"],
                          name="planner", scope="proj-a")
-    assert code == 2, out
+    assert code == 3, out
     assert out.startswith("reviewer: comms has never seen reviewer bound")
     assert len(rig.record.history(rig.names_channel)) == before
 
@@ -563,7 +563,7 @@ def test_a_config_that_does_not_load_refuses_the_verb(rig):
     write_config(None, "[policy]\nwhoever = 1\n")
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "hi"],
                          name="planner", scope="proj-a", env=dict(os.environ))
-    assert code == 2 and "whoever" in out, out
+    assert code == 3 and "whoever" in out, out
 
 
 def test_a_message_over_the_one_cap_is_refused_with_the_pointer_text(rig):
@@ -584,7 +584,7 @@ def test_a_message_over_the_one_cap_is_refused_with_the_pointer_text(rig):
     for argv in (["send", "--posture", "none", "reviewer@proj-a", over],
                  ["send", "--check", "--posture", "none", "reviewer@proj-a", over]):
         code, out = rig.cli(argv,  name="planner", scope="proj-a")
-        assert (code, out.strip()) == (2, want)
+        assert (code, out.strip()) == (3, want)
     assert rig.record.history(rig.names_channel) == []
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", fits],
                         name="planner", scope="proj-a")

@@ -80,7 +80,7 @@ def test_the_verb_reports_the_loud_failure(rig, monkeypatch):
 
     monkeypatch.setattr(rig.record, "post_as_identity", fail)
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "hi"],  name="planner", scope="proj-a")
-    assert code == 5
+    assert code == 75, "nothing was posted, so it may be tried again"
     assert "SEND FAILED" in out and "was NOT posted" in out
     assert rig.record.history(rig.names_channel) == []
 

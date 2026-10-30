@@ -174,7 +174,7 @@ def test_an_unnamed_resume_states_no_id_and_its_send_fails_closed(rig, bare_adap
     assert binding(rig).session_id is None
     assert rig.daemon._read(binding(rig)).kind == "unknown"
     code, out = send(rig, "to an unnamed resume")
-    assert code == 6 and "no session id reported yet" in out, out
+    assert code == 75 and "no session id reported yet" in out, out
 
 
 def test_a_bound_name_with_its_endpoint_reads_live(rig, adapter, endpoints):

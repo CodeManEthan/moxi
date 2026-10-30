@@ -26,6 +26,7 @@ from conftest import projects_root, wait_for_queue, wait_until, write_config
 
 from moxi_comms import cli, constants, machine_line, scoping
 from moxi_comms.adapters.claude_shim import frame_line
+from moxi_comms import wire
 from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import Daemon
 from moxi_comms.paths import daemon_socket
@@ -61,8 +62,7 @@ def line_zero(msg):
 def query_owed(identity, authors=None, referents=()):
     client = DaemonClient(daemon_socket()).connect()
     try:
-        return client.query("owed", identity=identity, authors=authors or {},
-                            referents=list(referents))
+        return client.call("owed", {"identity": identity, "authors": authors or {}, "referents": list(referents)})
     finally:
         client.close()
 
@@ -302,13 +302,13 @@ def test_owed_referents_say_whose_message_and_its_posture(rig):
 
 
 def test_an_unknown_read_is_what_an_old_daemon_answers(rig):
-    """A read the daemon does not have is the wire's method-not-found, a refusal."""
+    """A read the daemon does not have is the wire's method-not-found."""
     client = DaemonClient(daemon_socket()).connect()
     try:
         from moxi_comms.client import DaemonError
         with pytest.raises(DaemonError, match="method not found: nope") as refused:
-            client.query("nope")
-        assert refused.value.response["refused"] is True
+            client.call("nope")
+        assert refused.value.code == wire.METHOD_NOT_FOUND
     finally:
         client.close()
 
@@ -475,8 +475,10 @@ def test_the_delta_announces_the_operator_joining_and_leaving(rig, bind, tmp_pat
 # ------------------------------------------------- the unanswered record
 
 def note_unanswered(shim, message_id, author, at=None):
-    shim._client.notify("unanswered", identity=shim.identity, message_id=message_id,
-                        author=author, **({"at": at} if at is not None else {}))
+    params = {"identity": shim.identity, "message_id": message_id, "author": author}
+    if at is not None:
+        params["at"] = at
+    shim._client.notify("unanswered", params)
 
 
 def unanswered(rig):
@@ -497,8 +499,8 @@ def test_a_forged_notify_from_another_connection_is_dropped(rig):
     task = send(rig, "reviewer", "build it")
     forger = DaemonClient(daemon_socket()).connect()
     try:
-        forger.notify("unanswered", identity=R, message_id=task.id, author=P)
-        forger.query("agents")                  # a round trip: the notify has landed
+        forger.notify("unanswered", {"identity": R, "message_id": task.id, "author": P})
+        forger.call("agents")                  # a round trip: the notify has landed
     finally:
         forger.close()
     assert unanswered(rig) == {}
@@ -521,7 +523,7 @@ def test_a_payment_already_in_the_index_records_nothing(rig):
     paid = reply(rig, task.id, "done", who=REVIEWER)
     indexed(rig, paid.id)
     note_unanswered(reviewer, task.id, P)
-    reviewer._client.query("agents")
+    reviewer._client.call("agents")
     assert unanswered(rig) == {}
 
 
@@ -1165,7 +1167,7 @@ def test_the_first_table_every_exchange_the_rule_creates_ends(rig, pair):
     assert line_zero(m4).posture == "none"
     assert settle(rig, rev, m4.id) == [] and m4.id in rev.ledger.payments   # 4: pays 1
     code, out = rig.cli(["reply", m4.id, "good"], **LEAD)            # 5: takes no reply
-    assert code == 2 and "is marked [no reply]" in out
+    assert code == 3 and "is marked [no reply]" in out
 
 
 def test_the_second_table_an_unprompted_report(rig, pair):

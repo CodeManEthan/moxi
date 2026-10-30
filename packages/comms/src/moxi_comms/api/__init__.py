@@ -147,7 +147,7 @@ def session(identity: str, *, deadline: float = READ_DEADLINE) -> dict:
     answers `bound` False. Raises `DaemonOffline` or `DaemonError`."""
     client = _daemon(deadline)
     try:
-        answer = client.query("session", identity=str(identity))
+        answer = client.call("session", {"identity": str(identity)})
     finally:
         client.close()
     return {k: v for k, v in answer.items() if k not in ("id", "ok")}
@@ -212,7 +212,7 @@ def roster(*, deadline: float = READ_DEADLINE) -> Roster:
     the directory. Raises `DaemonOffline` or `DaemonError`."""
     client = _daemon(deadline)
     try:
-        answer = client.query("agents")
+        answer = client.call("agents")
     finally:
         client.close()
     directors = _declared_directors()
@@ -236,7 +236,7 @@ def owner(session_id: str, *, deadline: float = READ_DEADLINE) -> Owner:
     awaits. Raises `DaemonOffline`, or `DaemonError` (an empty id among them)."""
     client = _daemon(deadline)
     try:
-        answer = client.query("owner", session_id=str(session_id))
+        answer = client.call("owner", {"session_id": str(session_id)})
     finally:
         client.close()
     identity = answer.get("owner")

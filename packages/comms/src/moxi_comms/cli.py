@@ -109,7 +109,7 @@ first, one `held:` line per held recipient with when its cache went cold, and th
 line says when each held recipient reads it.
 Recipients that pass get the message now. An agent comms has no clock for, a model with
 no lifetime row included, reads `no-cache` and gets its mail live. A read comms cannot
-make refuses the whole post -- nothing posted, exit 6 (`EXIT_COLD`) -- and the refusal
+make refuses the whole post -- nothing posted, exit 75 (`TEMPFAIL`, outcome `cache-unread`) -- and the refusal
 opens with "Nothing was sent:" and each refused recipient's reason, and closes with
 "Nothing was sent.": a bound recipient whose read is `unknown` (no session id yet, a
 transcript comms cannot read), a failed `session` query, and a name that unbound while
@@ -140,9 +140,11 @@ import sys
 import textwrap
 import time
 
+from moxi import exit as moxi_exit
+
 from . import (attribution, cache, cards, claimfile, claimhold, config, cursors,
                directory, glossary, machine_line, policy, sending)
-from .client import DaemonClient, DaemonError, DaemonOffline, DaemonTimeout
+from .client import DaemonClient, DaemonError, DaemonOffline, DaemonTimeout, VersionMismatch
 from .record import RecordError
 from .provision import NAMES
 from .roster_view import render_agents
@@ -150,15 +152,14 @@ from .scoping import identity_of, is_auto_name, project_key
 from .sender import MalformedStamp, OperatorRefused, operator_from_env, sender_from_env
 # The send path lives in `sending`, the library under this verb and under
 # `moxi_comms.api.send`. These names stay readable as `cli.<name>`: callers and rigs
-# read the exit codes, the verb's words and `_bodies` here.
+# read the verb's words and `_bodies` here. Every verb exits with `moxi.exit`'s codes.
 from .sending import (  # noqa: F401
-    ASK_CHECK_NO_ANSWER, CLOSED_BY_CAP, CLOSED_BY_IDLE, CLOSED_BY_NONE, EXIT_BLOCKED,
-    EXIT_COLD, EXIT_FAILED, EXIT_OFFLINE, EXIT_OK, EXIT_REFUSED, HELD_IGNORED_OPERATOR,
+    ASK_CHECK_NO_ANSWER, CLOSED_BY_CAP, CLOSED_BY_IDLE, CLOSED_BY_NONE, HELD_IGNORED_OPERATOR,
     HELD_NOTE, HELD_NOTE_SESSION_ONLY, NO_REPLY_REFUSED, NOT_BOUND_NOTE, ONCE_ASK,
     ONCE_NOT_OPEN, ONE_LEFT_SENT, OPERATOR, POSTURE_REQUIRED, THREAD_NOTE_MISSING,
     TIER_EPHEMERAL, TIER_STANDING, WOULD_SEND, Context, SendPlan,
-    VerbProtocolMismatch, _ago, _bodies, _claim_sender, _cure_flags, _hold_text,
-    _nudge_daemon, _open_asks, _refusal_reason, _refused_tag, _reply_checks,
+    _ago, _bodies, _claim_sender, _cure_flags, _hold_text,
+    _open_asks, _refusal_reason, _refused_tag, _reply_checks,
     _reply_targets, _say_notes, _say_would_send, _send, _send_checks, _send_resolved,
     _tag_matches, open_for, send_only_refusal)
 
@@ -170,6 +171,13 @@ PROG = "moxi comms"
 
 
 # --------------------------------------------------------------------------- verbs
+
+def _offline(e: DaemonOffline) -> int:
+    """A verb's exit when it could not ask the daemon: `TEMPFAIL` for a daemon that
+    didn't answer, and `ERROR` for one whose wire this comms doesn't speak, which trying
+    again won't cure until one side is restarted or updated."""
+    return moxi_exit.ERROR if isinstance(e, VersionMismatch) else moxi_exit.TEMPFAIL
+
 
 def cmd_send(args, ctx: Context) -> int:
     """`moxi comms send`: the library's send, rendered. It decides nothing of its own."""
@@ -194,13 +202,13 @@ def cmd_agents(args, ctx: Context) -> int:
         client = ctx.daemon()
     except DaemonOffline as e:
         ctx.say(f"{e}\nNothing is addressable while the daemon is down.")
-        return EXIT_OFFLINE
+        return _offline(e)
     try:
-        info = client.query("agents")
+        info = client.call("agents")
     finally:
         client.close()
     ctx.say(render_agents(info, seats=getattr(args, "seats", False), now=ctx.clock()))
-    return EXIT_OK
+    return moxi_exit.OK
 
 
 def cmd_history(args, ctx: Context) -> int:
@@ -213,17 +221,17 @@ def cmd_history(args, ctx: Context) -> int:
         try:
             client = ctx.daemon()
             try:
-                window = client.query("binding_window", name=identity)["window"]
+                window = client.call("binding_window", {"name": identity})["window"]
             finally:
                 client.close()
         except (DaemonOffline, DaemonError):
             ctx.say("comms offline: agent-N history is time-scoped to its binding and "
                     "the daemon holds that window. Showing nothing rather than guessing.")
-            return EXIT_OFFLINE
+            return moxi_exit.TEMPFAIL
         if window is None:
             ctx.say(f"{identity}: no binding this daemon has seen. agent-N names are "
                     "never reused, so there is no history to show.")
-            return EXIT_OK
+            return moxi_exit.OK
     with ctx.db() as db:
         room = directory.room_by_name(db, NAMES)
         msgs = ctx.record.history(room["room_id"], limit=args.limit)
@@ -265,7 +273,7 @@ def cmd_history(args, ctx: Context) -> int:
     if window is not None:
         ctx.say(f"(time-scoped to the {identity} binding: {window[0]} .. "
                 f"{window[1] if window[1] is not None else 'now'})")
-    return EXIT_OK
+    return moxi_exit.OK
 
 
 def _history_marks(ml) -> str:
@@ -302,14 +310,15 @@ def cmd_help(args, ctx: Context) -> int:
     term = getattr(args, "term", None)
     if term is None:
         ctx.say(glossary.render_terms())
-        return EXIT_OK
+        return moxi_exit.OK
     entry = glossary.lookup(term)
     if entry is None:
-        # EXIT_REFUSED, not a failure code: the verb worked, the word did not exist.
+        # USAGE, not a failure code: the verb worked, the word it was given does not
+        # exist.
         ctx.say(glossary.render_unknown(term))
-        return EXIT_REFUSED
+        return moxi_exit.USAGE
     ctx.say(glossary.render_entry(entry))
-    return EXIT_OK
+    return moxi_exit.OK
 
 
 def cmd_whois(args, ctx: Context) -> int:
@@ -321,16 +330,16 @@ def cmd_whois(args, ctx: Context) -> int:
     function touches `ctx.daemon()`, `ctx.record` and `ctx.db()` exactly as much as
     `cmd_help` does, which is not at all, and `EXIT_OFFLINE` is unreachable from here.
 
-    Absence answers EXIT_OK, deliberately diverging from `help`'s exit-2 miss: a glossary
+    Absence answers moxi_exit.OK, deliberately diverging from `help`'s exit-2 miss: a glossary
     miss is a typo against a closed table, while a missing card is the DEFAULT
     state of the world for most identities and a permanent one for parked holders.
-    EXIT_REFUSED is kept for a request comms will not answer at all (a malformed name, an
-    ephemeral); EXIT_FAILED for a card that is there and cannot be read.
+    moxi_exit.REFUSED is kept for a request comms will not answer at all (a malformed name, an
+    ephemeral); moxi_exit.ERROR for a card that is there and cannot be read.
     """
     result = cards.answer(args.name, claimhold.claim_overlay(ctx.env))
     ctx.say(result.text)
-    return {cards.OK: EXIT_OK, cards.MISS: EXIT_OK,
-            cards.REFUSED: EXIT_REFUSED, cards.UNREADABLE: EXIT_FAILED}[result.status]
+    return {cards.OK: moxi_exit.OK, cards.MISS: moxi_exit.OK,
+            cards.REFUSED: moxi_exit.REFUSED, cards.UNREADABLE: moxi_exit.ERROR}[result.status]
 
 
 def cmd_explain(args, ctx: Context) -> int:
@@ -361,23 +370,24 @@ def cmd_explain(args, ctx: Context) -> int:
             "file and survives, so here is that much.", 76)))
         ctx.say("")
         ctx.say(_render_cursor(cursors.explain(identity_of(identity))))
-        return EXIT_OFFLINE
+        return _offline(e)
     try:
         try:
-            qualified = client.query("resolve", name=identity)["qualified"]
+            qualified = client.call("resolve", {"name": identity})["qualified"]
         except DaemonError as e:
             # The daemon refuses a retired identity (an agent-N whose binding ended, or
             # an `x@S` retired in the directory) by name, and that refusal is already the
             # whole answer to "why did my message not land". Print it as it came.
             ctx.say(_refused_tag(identity, e))
-            return EXIT_REFUSED
-        info = client.query("explain", identity=qualified, message_id=args.message_id)
+            return moxi_exit.REFUSED
+        info = client.call("explain", {"identity": qualified,
+                                       "message_id": args.message_id})
     finally:
         client.close()
     ctx.say(_render_explain(info))
     for line in _wrapper_status(qualified, ctx.env):
         ctx.say(line)
-    return EXIT_OK
+    return moxi_exit.OK
 
 
 def cmd_owner(args, ctx: Context) -> int:
@@ -407,19 +417,19 @@ def cmd_owner(args, ctx: Context) -> int:
         return code
 
     if not sid:
-        return fail(EXIT_REFUSED, "refused", "a session id is required")
+        return fail(moxi_exit.USAGE, "refused", "a session id is required")
     try:
         client = ctx.daemon()
     except DaemonOffline as e:
-        return fail(EXIT_OFFLINE, "offline", str(e))
+        return fail(_offline(e), "offline", str(e))
     try:
-        answer = client.query("owner", session_id=sid)
+        answer = client.call("owner", {"session_id": sid})
     except DaemonOffline as e:
-        return fail(EXIT_OFFLINE, "offline", str(e))
+        return fail(moxi_exit.TEMPFAIL, "offline", str(e))
     except DaemonTimeout as e:
-        return fail(EXIT_FAILED, "timeout", str(e))
+        return fail(moxi_exit.ERROR, "timeout", str(e))
     except DaemonError as e:
-        return fail(EXIT_FAILED, "failed", str(e))
+        return fail(moxi_exit.ERROR, "failed", str(e))
     finally:
         client.close()
     out = {"ok": True, "session_id": answer.get("session_id", sid),
@@ -432,7 +442,7 @@ def cmd_owner(args, ctx: Context) -> int:
     else:
         waits = ", ".join(out["awaiting"]) or "nobody"
         ctx.say(f"{sid}: owned by {out['owner']} ({out['adapter']}); awaiting {waits}.")
-    return EXIT_OK
+    return moxi_exit.OK
 
 
 #: How many of a wrapper's newest status lines `moxi comms explain` prints.
@@ -511,7 +521,7 @@ def cmd_cache(args, ctx: Context) -> int:
     caller = _cache_caller(ctx)
     if caller is None:
         ctx.say(_cache_refused(ctx))
-        return EXIT_REFUSED
+        return moxi_exit.REFUSED
     try:
         client = ctx.daemon()
     except DaemonOffline as e:
@@ -519,25 +529,25 @@ def cmd_cache(args, ctx: Context) -> int:
                 "down, only a raw session id can be read.")
         ids = [a for a in args.targets if cache.SESSION_ID_RE.match(a)]
         if not ids:
-            return EXIT_OFFLINE
+            return _offline(e)
         for i in ids:
             ctx.say(cache.spoken_line(cache.kind_of(cache.target_for_session_id(i))))
-        return EXIT_OFFLINE
+        return _offline(e)
     targets = []
-    refused = False         # a name resolution refused (retired): exit 2
+    refused = False         # a name resolution refused (retired): exit 3
     try:
         wanted = list(args.targets)
         if not wanted:
-            wanted = [b["qualified"] for b in client.query("agents").get("bindings", [])]
+            wanted = [b["qualified"] for b in client.call("agents").get("bindings", [])]
             if not wanted:
                 ctx.say("no live bindings; there is no agent to read.")
-                return EXIT_OK
+                return moxi_exit.OK
         for arg in wanted:
             if cache.SESSION_ID_RE.match(arg):
                 targets.append(cache.target_for_session_id(arg))
                 continue
             try:
-                qualified = client.query("resolve", name=arg)["qualified"]
+                qualified = client.call("resolve", {"name": arg})["qualified"]
             except DaemonError as e:
                 targets.append(cache.target_for_name(arg, error=str(e)))
                 refused = True
@@ -547,7 +557,7 @@ def cmd_cache(args, ctx: Context) -> int:
         client.close()
     for target in targets:
         ctx.say(cache.spoken_line(cache.kind_of(target)))
-    return EXIT_REFUSED if refused else EXIT_OK
+    return moxi_exit.REFUSED if refused else moxi_exit.OK
 
 
 
@@ -636,11 +646,8 @@ def cmd_doctor(args, ctx: Context) -> int:
 
     socket_path = ctx.socket_path or daemon_socket()
     try:
-        client = DaemonClient(socket_path, timeout=2.0).connect()
-        try:
-            client.request("ping")
-        finally:
-            client.close()
+        # The hello is the whole question: the daemon answers, and speaks this wire.
+        DaemonClient(socket_path, timeout=2.0).connect().close()
         daemon_up, detail = True, f"answers at {socket_path}"
     except (DaemonOffline, DaemonError, OSError) as e:
         daemon_up, detail = False, f"not answering at {socket_path} ({e})"
@@ -655,8 +662,8 @@ def cmd_doctor(args, ctx: Context) -> int:
     for found in _turns_rows():
         row("turns", found)
     if configured and not daemon_up:
-        return EXIT_OFFLINE
-    return EXIT_OK
+        return moxi_exit.TEMPFAIL
+    return moxi_exit.OK
 
 
 def cmd_migrate(args, ctx: Context) -> int:
@@ -710,7 +717,7 @@ def _waiting_rows(socket_path) -> list[str]:
     try:
         client = DaemonClient(socket_path, timeout=2.0).connect()
         try:
-            bindings = client.query("agents").get("bindings") or []
+            bindings = client.call("agents").get("bindings") or []
         finally:
             client.close()
     except (DaemonOffline, DaemonError, OSError) as e:
@@ -1069,7 +1076,7 @@ def main(argv=None, ctx: Context | None = None, *, prog: str = PROG) -> int:
     except config.ConfigError as e:
         # A config file that does not load refuses the verb, naming the key and the fix.
         ctx.say(str(e))
-        return EXIT_REFUSED
+        return moxi_exit.REFUSED
 
 
 

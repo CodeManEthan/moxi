@@ -809,7 +809,7 @@ def test_a_post_pending_at_the_follow_goes_again_into_the_new_session(
     assert posts(fake)[1][0] == f"/session/{created}/prompt_async"
     assert "carry me" in posts(fake)[1][1]["parts"][0]["text"]
     assert adapter.held_ids == held, "still held across the follow"
-    adapter._on_push({"op": "deliver", "payload": {"message_id": mid, "text": "again"}})
+    adapter._on_push("deliver", {"payload": {"message_id": mid, "text": "again"}})
     assert adapter.queue == [], "a re-push of a held id is dropped"
     fake.finish(adapter.session_id)
     assert wait_until(lambda: cursor_of(IDENTITY) == max(held, key=int), 5.0)

@@ -398,11 +398,10 @@ READS = [
      {"identity", "bound", "binding", "delivery", "deliveries", "waiting",
       "injected_through", "digest", "activity_for", "cursor", "case", "case_error"}),
     ("binding_window", {"name": "agent-1"}, {"window"}),
-    ("attributed_message", {"message_id": "1"},
-     {"message_id", "found", "room", "author", "recipients", "resolved", "text",
-      "timestamp"}),
+    ("attributed_message", {"message_id": None},
+     {"message_id", "room", "author", "recipients", "resolved", "text", "timestamp"}),
     ("rooms", {}, {"rooms"}),
-    ("message", {"message_id": "1"}, {"message"}),
+    ("message", {"message_id": None}, {"message"}),
     ("history", {}, {"messages"}),
     ("max_id", {}, {"message_id"}),
     ("last_digest", {"identity": PLANNER}, {"identity", "bound", "through", "digest"}),
@@ -411,7 +410,10 @@ READS = [
 
 @pytest.mark.parametrize("method, params, keys", READS, ids=[r[0] for r in READS])
 def test_each_read_answers_on_any_connection(rig, lines, method, params, keys):
-    """Every read is its own method, answered on a connection that holds no binding."""
+    """Every read is its own method, answered on a connection that holds no binding.
+    A read of one message asks for one the record holds."""
+    if "message_id" in params and params["message_id"] is None:
+        params = {"message_id": post(rig, PLANNER, "one message")[0]}
     answer = result(lines().call(method, params))
     assert isinstance(answer, dict)
     if keys is not None:
@@ -428,7 +430,7 @@ def test_the_reads_answer_what_the_daemon_holds(rig, lines):
     assert result(reader.call("message", {"message_id": mid}))["message"]["id"] == mid
     assert mid in [m["id"] for m in result(reader.call("history"))["messages"]]
     attributed = result(reader.call("attributed_message", {"message_id": mid}))
-    assert attributed["found"] is True and attributed["recipients"] == [PLANNER]
+    assert "found" not in attributed and attributed["recipients"] == [PLANNER]
     assert result(reader.call("session", {"identity": PLANNER}))["bound"] is True
     assert result(reader.call("resolve", {"name": PLANNER}))["bound"] is True
     assert [b["qualified"] for b in result(reader.call("agents"))["bindings"]] == [PLANNER]
@@ -449,12 +451,21 @@ def test_read_refusals(rig, lines, method, params, code):
         assert refused["data"]["name"] == params["name"]
 
 
-def test_a_message_the_record_does_not_hold_is_answered_as_not_found(rig, lines):
-    """Not `unknown-message`: these reads answer as they did before the wire changed."""
+@pytest.mark.parametrize("method", ["message", "attributed_message"])
+def test_a_message_the_record_does_not_hold_is_refused_as_unknown_message(rig, lines,
+                                                                          method):
+    """An id the record doesn't hold is `unknown-message`, naming the id, and the
+    connection stays open."""
     line = lines()
-    assert result(line.call("message", {"message_id": "999999"})) == {"message": None}
-    assert result(line.call("attributed_message",
-                            {"message_id": "999999"}))["found"] is False
+    refused = error(line.call(method, {"message_id": "999999"}))
+    assert refused["code"] == wire.UNKNOWN_MESSAGE and wire.is_refusal(refused["code"])
+    assert refused["data"]["message_id"] == "999999" and refused["data"]["reason"]
+    assert result(line.call("max_id"))
+
+
+def test_the_client_reads_an_unknown_message_as_none(rig):
+    from moxi_comms import client
+    assert client.attributed_message("999999", socket_path=daemon_socket()) is None
 
 
 # =============================================================== the adapter's methods
@@ -560,13 +571,14 @@ def test_the_daemon_never_binds_removes_or_connects_to_the_0_2_path(rig, zero_tw
     {"op": "post", "identity": PLANNER, "token": "t", "content": "hi"},
     {"op": "ping", "protocol": 3},
 ], ids=["register", "post", "ping"])
-def test_a_0_2_frame_at_the_new_socket_is_a_json_rpc_error_and_does_nothing(rig, lines,
+def test_a_0_2_frame_at_the_new_socket_is_an_error_that_closes_and_does_nothing(rig, lines,
                                                                             frame):
     line = lines(hello=False)
     before = rig.record.max_message_id(rig.names_channel)
     line.write(json.dumps(frame).encode() + b"\n")
     refused = error(line.read())
     assert refused["code"] == -32600 and "ok" not in refused
+    assert line.ends(), "the daemon closes the connection after the error"
     assert not rig.daemon.bindings
     assert rig.record.max_message_id(rig.names_channel) == before
 

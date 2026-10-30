@@ -44,14 +44,14 @@ def test_nothing_is_delivered_while_catch_up_is_still_arriving():
     port = RecordingPort()
     port.identity = IDENTITY
     port.replaying = True
-    port._on_push({"op": "deliver", "payload": payload(7)})
-    port._on_push({"op": "deliver", "payload": payload(5)})
+    port._on_push("deliver", {"payload": payload(7)})
+    port._on_push("deliver", {"payload": payload(5)})
 
     assert port.flush() is None
     assert port.delivered_batches == []
     assert [p["message_id"] for p in port.queue] == ["7", "5"]
 
-    port._on_push({"op": "replay_complete", "identity": IDENTITY, "cursor": "4"})
+    port._on_push("replay_complete", {"identity": IDENTITY, "cursor": "4"})
     assert port.replaying is False
     assert port.flush() is not None
     assert port.delivered_batches == [(7, 2)]
@@ -92,7 +92,7 @@ class TurnPort(RecordingPort):
 
 def push(port, *mids):
     for mid in mids:
-        port._on_push({"op": "deliver", "payload": payload(mid)})
+        port._on_push("deliver", {"payload": payload(mid)})
 
 
 def queued(port):
@@ -106,7 +106,7 @@ def held(port):
 def online_port(cls=TurnPort):
     port = cls()
     port.identity = IDENTITY
-    port._on_push({"op": "replay_complete", "identity": IDENTITY, "cursor": None})
+    port._on_push("replay_complete", {"identity": IDENTITY, "cursor": None})
     return port
 
 
@@ -137,7 +137,7 @@ def test_the_register_lists_the_held_ids_as_holding(monkeypatch):
         def connect(self):
             pass
 
-        def register(self, **fields):
+        def bind(self, **fields):
             registered.append(fields)
             raise Refused
 
@@ -231,9 +231,15 @@ class FakeDaemon:
         self.connected = connected
         self.frames: list = []
 
-    def notify(self, op, **kw):
+    def notify(self, method, params=None):
+        """Kept as an `activity` frame, a kind sent as its own method named as `kind`."""
         from moxi_comms import cursors
-        self.frames.append(dict(kw, op=op, cursor_then=cursors.read(IDENTITY)))
+        from moxi_comms.adapters.claude_shim import ACTIVITY_METHODS
+        kinds = {m: k for k, m in ACTIVITY_METHODS.items()}
+        frame = dict(params or {}, op=method, cursor_then=cursors.read(IDENTITY))
+        if method in kinds:
+            frame.update(op="activity", kind=kinds[method])
+        self.frames.append(frame)
 
 
 def bound_port(connected=True):

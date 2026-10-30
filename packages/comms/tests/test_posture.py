@@ -89,7 +89,7 @@ def force_nomination(monkeypatch, rig, *ids):
 
 
 def refused(code, out):
-    return code == 2 and "Nothing was sent" in out and "still open" in out
+    return code == 3 and "Nothing was sent" in out and "still open" in out
 
 
 class ReadFails:
@@ -386,14 +386,14 @@ def test_a_daemon_that_does_not_answer_the_query_lets_the_send_through(rig, pair
     """A timeout, and a connection closed between the
     resolve and the query: both are a daemon that did not answer."""
     open_ask(rig)
-    real = DaemonClient.query
+    real = DaemonClient.call
 
-    def query(self, kind, **kwargs):
+    def query(self, kind, params=None, **kwargs):
         if kind == "asks":
             raise error
-        return real(self, kind, **kwargs)
+        return real(self, kind, params, **kwargs)
 
-    monkeypatch.setattr(DaemonClient, "query", query)
+    monkeypatch.setattr(DaemonClient, "call", query)
     code, out = rig.cli(["send", "--posture", "none", "planner", "hi"], **REVIEWER)
     assert code == 0, out
     assert cli.ASK_CHECK_NO_ANSWER in out

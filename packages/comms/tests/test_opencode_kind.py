@@ -13,6 +13,7 @@ from pathlib import Path
 
 from conftest import wait_until
 
+from moxi import exit as moxi_exit
 from moxi_comms import cache, cli, machine_line
 from moxi_comms.daemon import ADAPTER_KINDS
 
@@ -90,7 +91,7 @@ def test_a_send_to_an_opencode_name_with_no_session_id_is_refused(rig, bind):
     bind(**CODER)
     for flags in ([], ["--held"]):
         code, out = rig.cli(["send", "--posture", "none", "coder@proj-a", "hello", *flags], **PLANNER)
-        assert code == cli.EXIT_COLD, out
+        assert code == moxi_exit.TEMPFAIL, out
         assert out.splitlines() == [
             "Nothing was sent: comms could not read coder@proj-a's cache (no session id "
             "reported yet).",

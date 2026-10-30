@@ -34,6 +34,7 @@ import pytest
 from conftest import (projects_root, raw_connection, send_ready, send_turn, settle,
                       wait_for_queue, wait_until, write_config, write_transcript)
 
+from moxi import exit as moxi_exit
 from moxi_comms import cache, cli, constants, cursors, machine_line
 from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.claimhold import ClaimServer
@@ -195,8 +196,8 @@ def test_the_shim_starts_from_its_spawn_environment(rig, monkeypatch):
 def test_the_session_query_answers_bound_and_unbound(rig):
     reviewer_with_session(rig)
     with _client() as c:
-        bound = c.query("session", identity=REVIEWER_Q)
-        unbound = c.query("session", identity="nobody@proj-a")
+        bound = c.call("session", {"identity": REVIEWER_Q})
+        unbound = c.call("session", {"identity": "nobody@proj-a"})
     assert bound["bound"] is True and bound["adapter"] == "claude-shim"
     assert bound["session_id"] == SESS_REVIEWER and bound["bound_at"] is not None
     assert bound["bound_for"] >= 0
@@ -347,7 +348,7 @@ def test_a_failed_read_refuses_the_post(rig):
         code, out = send(rig, REVIEWER_Q)
     finally:
         path.chmod(0o600)
-    assert code == cli.EXIT_COLD and posted(rig) == [], out
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == [], out
     lines = out.splitlines()
     assert lines[0].startswith("Nothing was sent: comms could not read reviewer@proj-a's "
                                "cache (the transcript could not be read")
@@ -362,7 +363,7 @@ def test_no_session_id_refuses_the_post_young_or_old(rig):
     rig.shim(**REVIEWER, session_id=None)
     for _ in range(2):
         code, out = send(rig, REVIEWER_Q)
-        assert code == cli.EXIT_COLD and posted(rig) == [], out
+        assert code == moxi_exit.TEMPFAIL and posted(rig) == [], out
         assert out.splitlines()[0] == ("Nothing was sent: comms could not read "
                                        "reviewer@proj-a's cache (no session id reported "
                                        "yet).")
@@ -380,7 +381,7 @@ def test_a_failed_session_query_refuses_the_post(rig, monkeypatch):
 
     monkeypatch.setattr(rig.daemon, "_session_query", refuse)
     code, out = send(rig, REVIEWER_Q)
-    assert code == cli.EXIT_COLD and posted(rig) == []
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == []
     assert out.splitlines()[0] == ("Nothing was sent: comms could not ask the daemon about "
                                    "reviewer@proj-a (the session query failed (unknown "
                                    "query kind 'session')).")
@@ -402,7 +403,7 @@ def test_no_rerun_line_beside_archivist_the_operator_or_codex(rig, bind):
         assert "--held" not in out, other
         assert out.splitlines()[-1] == HELD_LAST, other
     code, out = send(rig, "reviewer@proj-a,coder@proj-a")
-    assert code == cli.EXIT_COLD and "--held" not in out
+    assert code == moxi_exit.TEMPFAIL and "--held" not in out
     lines = out.splitlines()
     assert lines[0].startswith("Nothing was sent: comms could not read coder@proj-a's "
                                "cache (")
@@ -423,7 +424,7 @@ def test_no_sender_is_exempt(rig, bind):
     if rig.backend == "local":
         assert code == 0 and out.splitlines()[-1].startswith(HELD_LAST), out
     else:   # the mock keeps no operator credential: the post fails after the check
-        assert code == cli.EXIT_FAILED and "posting credential" in out, out
+        assert code == moxi_exit.ERROR and "posting credential" in out, out
     bind_archivist(bind, session_id="")
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "from archivist"], name="archivist",
                         env={"MOXI_COMMS_GLOBAL": "1"})
@@ -557,7 +558,7 @@ def test_comms_cache_refuses_any_other_caller_and_reads_nothing(rig, who):
     reviewer_with_session(rig)
     write_transcript(SESS_REVIEWER, 60)
     code, out = cache_cli(rig, "reviewer@proj-a", SESS_OTHER, **who)
-    assert code == 2
+    assert code == 3
     assert out.strip().endswith("nothing was read."), out
 
 
@@ -653,7 +654,7 @@ def test_a_ready_with_no_source_releases_nothing_and_a_clear_releases(rig):
 def test_an_activity_with_no_kind_releases_nothing(rig):
     reviewer = rig.shim(**REVIEWER)
     mid = next_turn(rig)
-    reviewer._client.notify("activity", identity=REVIEWER_Q)      # an older shim's frame
+    reviewer._client.notify("activity", {"identity": REVIEWER_Q})      # an older shim's frame
     time.sleep(0.2)
     assert reviewer.queue == [] and held_of(rig) == {mid}
 
@@ -808,7 +809,7 @@ def test_the_queue_load_runs_before_any_method_is_answered(rig, monkeypatch):
         early = DaemonClient(daemon_socket(), timeout=0.5).connect()
         try:
             with pytest.raises(DaemonTimeout):
-                early.request("ping")                     # waits for the queue
+                early.call("max_id")                     # waits for the queue
         finally:
             early.close()
         live = rig.post_as("planner@proj-a", [REVIEWER_Q], "live, inside the boot window")
@@ -889,7 +890,7 @@ def test_held_to_a_shim_with_no_session_id_is_refused(rig):
     rig.shim(**REVIEWER, session_id=None)      # like a shim built before this comms
     rig.clock.advance(constants.SESSION_ID_GRACE + 1)
     code, out = send(rig, REVIEWER_Q, "later", "--held")
-    assert code == cli.EXIT_COLD and posted(rig) == [], out
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == [], out
     assert out.splitlines()[0] == ("Nothing was sent: comms could not read "
                                    "reviewer@proj-a's cache (no session id reported yet).")
 
@@ -900,8 +901,8 @@ class Pushes:
     def __init__(self):
         self.frames = []
 
-    def __call__(self, frame):
-        self.frames.append(frame)
+    def __call__(self, method, params):
+        self.frames.append({"op": method, **params})
 
     def delivered(self):
         return [f["payload"] for f in self.frames if f.get("op") == "deliver"]
@@ -928,13 +929,13 @@ def test_flagged_mail_waits_at_every_adapters_bind_but_the_operators(
     pushes = Pushes()
     c = DaemonClient(daemon_socket(), on_push=pushes).connect()
     try:
-        c.register(**kw)
+        c.bind(**kw)
         if at_register:
             assert wait_until(lambda: pushes.delivered())
         else:
             time.sleep(0.2)
             assert pushes.delivered() == []
-            c.notify("activity", identity=q, kind="ready", source="startup")
+            c.notify("ready", {"identity": q, "source": "startup"})
             assert wait_until(lambda: pushes.delivered())
         (payload,) = pushes.delivered()
         assert payload["message_id"] == held.id and payload["held"] is True
@@ -953,7 +954,7 @@ def test_comms_agents_and_comms_explain_name_queued_mail(rig):
     rig.clock.advance(2 * 86400 + 3 * HOUR)
     c = DaemonClient(daemon_socket()).connect()
     try:
-        view = c.query("agents")
+        view = c.call("agents")
     finally:
         c.close()
     assert view["pending"] == {} and "held" not in view
@@ -1019,7 +1020,7 @@ def test_comms_cache_answers_the_operator_alone_by_default(rig):
     reviewer_with_session(rig)
     write_transcript(SESS_REVIEWER, 60)
     code, out = cache_cli(rig, "reviewer@proj-a", **AS_ARCHIVIST)
-    assert code == 2 and out.strip().endswith("nothing was read."), out
+    assert code == 3 and out.strip().endswith("nothing was read."), out
     code, out = cache_cli(rig, "reviewer@proj-a", **AS_OPERATOR)
     assert code == 0 and out.startswith("reviewer@proj-a: cache warm"), out
 

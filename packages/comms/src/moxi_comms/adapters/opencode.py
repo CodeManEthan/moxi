@@ -396,7 +396,7 @@ def fetch_roster(socket_path=None, timeout: float = 2.0):
     try:
         client = DaemonClient(socket_path, timeout=timeout).connect()
         try:
-            return client.query("agents")
+            return client.call("agents")
         finally:
             client.close()
     except Exception as e:                                  # noqa: BLE001

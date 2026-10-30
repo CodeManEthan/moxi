@@ -14,7 +14,7 @@ import pytest
 from conftest import queued, wait_for_queue, wait_until
 
 from moxi_comms import client as client_mod
-from moxi_comms import cursors, machine_line, provision
+from moxi_comms import cursors, machine_line, provision, wire
 from moxi_comms.claimhold import ClaimServer
 from moxi_comms.client import (ATTRIBUTED_FIELDS, DaemonClient, DaemonError,
                                DaemonOffline, attributed_message)
@@ -27,15 +27,12 @@ P, R = "planner@proj-a", "reviewer@proj-a"
 
 
 def raw(message_id):
-    """The daemon's answer as it comes off the socket, `id` and `ok` taken off."""
+    """The daemon's `attributed_message` result as it comes off the socket."""
     c = DaemonClient(daemon_socket()).connect()
     try:
-        answer = c.query("attributed_message", message_id=str(message_id))
+        return c.call("attributed_message", {"message_id": str(message_id)})
     finally:
         c.close()
-    answer.pop("id", None)
-    assert answer.pop("ok") is True
-    return answer
 
 
 def send(rig, to, text, who=PLANNER):
@@ -146,11 +143,13 @@ def test_a_message_in_another_room_names_its_room(rig):
 # --------------------------------------------------------------------------- not found
 
 def test_an_id_the_record_does_not_hold_is_not_found(rig):
+    """The daemon refuses it as `unknown-message`, naming the id; the client reads that
+    as None."""
     assert attributed_message("4611686018427399999") is None
-    assert raw("4611686018427399999") == {
-        "message_id": "4611686018427399999", "found": False, "room": None,
-        "author": None, "recipients": [], "resolved": [], "text": None,
-        "timestamp": None}
+    with pytest.raises(DaemonError) as refused:
+        raw("4611686018427399999")
+    assert refused.value.code == wire.UNKNOWN_MESSAGE
+    assert refused.value.data["message_id"] == "4611686018427399999"
 
 
 @pytest.mark.parametrize("bad", ["", "  ", "abc", "12x", "-5"])
@@ -229,7 +228,7 @@ def test_the_read_answers_no_more_than_history_already_shows(rig):
     msg = send(rig, R, "just the facts")
     wait_for_queue(reviewer, 1)
     answer = raw(msg.id)
-    assert set(answer) == {"found", *ATTRIBUTED_FIELDS}
+    assert set(answer) == set(ATTRIBUTED_FIELDS)
     assert set(answer["author"]) == {"name", "tier", "attribution"}
     code, out = rig.cli(["history", R], **REVIEWER)
     assert code == 0

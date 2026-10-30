@@ -15,9 +15,13 @@ refusals 1101-1149 and try-again 1150-1199. A client branches on the range, and 
 code only where it cares which refusal. An error's `data` carries `reason` (the text a
 verb prints) and, where a refusal names something, that thing.
 
-`Host` serves the daemon socket: an asyncio loop on a thread of its own runs
-`moxi.ipc.serve`, and each comms method runs on a bounded pool of threads, so the
-daemon's routing core and its locks run as they did under one thread per connection.
+`Host` serves a comms socket, the daemon's and each adapter's claim socket: an asyncio
+loop on a thread of its own runs `moxi.ipc.serve`, and each comms method runs on a
+bounded pool of threads, so the daemon's routing core and its locks run as they did under
+one thread per connection.
+
+Nothing of comms 0.2's wire is served. A connection whose first line isn't JSON-RPC 2.0
+(a 0.2 frame, say) is answered the core's error for it and closed.
 """
 
 from __future__ import annotations
@@ -149,6 +153,12 @@ class Then:
         self.after = after
 
 
+def _old_wire(line: bytes) -> None:
+    """A connection's first line that isn't JSON-RPC 2.0: answered with the core's own
+    error for it, and the connection closed. Nothing of the old wire is served."""
+    return None
+
+
 class Host:
     """Serves one address with `moxi.ipc.serve` on a loop of its own thread.
 
@@ -161,13 +171,16 @@ class Host:
 
     def __init__(self, address: str, call: Callable[[ipc.Connection, str, object], object],
                  closed: Callable[[ipc.Connection], object], *,
-                 max_connections: int = MAX_CONNECTIONS, workers: int = WORKERS):
+                 capabilities=CAPABILITIES, max_connections: int = MAX_CONNECTIONS,
+                 workers: int = WORKERS, name: str = "comms-daemon"):
         self.address = address
+        self.capabilities = frozenset(capabilities)
+        self.name = name
         self._call = call
         self._closed_cb = closed
         self.max_connections = max_connections
         self._pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=workers, thread_name_prefix="comms-wire")
+            max_workers=workers, thread_name_prefix=f"{name}-wire")
         self._loop: asyncio.AbstractEventLoop | None = None
         self._server = None
         self._gate: asyncio.Event | None = None
@@ -190,7 +203,7 @@ class Host:
         it, and `OSError` when it can't be served."""
         ready: concurrent.futures.Future = concurrent.futures.Future()
         self._thread = threading.Thread(target=self._run, args=(ready,), daemon=True,
-                                        name="comms-daemon-loop")
+                                        name=f"{self.name}-loop")
         self._thread.start()
         try:
             ready.result(timeout=START_WAIT)
@@ -243,8 +256,10 @@ class Host:
             self._gate = asyncio.Event()
             try:
                 server = await ipc.serve(
-                    self.address, self._handle, hello=ipc.Hello(VERSIONS, CAPABILITIES),
-                    write_deadline=WRITE_DEADLINE, queue=QUEUE, on_close=self._on_close)
+                    self.address, self._handle,
+                    hello=ipc.Hello(VERSIONS, self.capabilities),
+                    write_deadline=WRITE_DEADLINE, queue=QUEUE, legacy=_old_wire,
+                    on_close=self._on_close)
             except BaseException as exc:
                 ready.set_exception(exc)
                 return
@@ -259,7 +274,7 @@ class Host:
             if not ready.done():
                 ready.set_exception(exc)
             else:
-                log.exception("the daemon socket's loop failed")
+                log.exception("the loop serving %s failed", self.address)
 
     # -- one connection -----------------------------------------------------------------
 
@@ -272,8 +287,8 @@ class Host:
                             conn.peer.pid, len(self._counted))
                 # After this answer is queued: closing first would drop it.
                 asyncio.get_running_loop().call_soon(conn.close)
-                raise error(BUSY, f"the comms daemon has {self.max_connections} connections "
-                                  "open; try again in a moment")
+                raise error(BUSY, f"{self.max_connections} connections are open; try "
+                                  "again in a moment")
             self._counted.add(conn)
         await self._settle_tail(conn)
         answer = await asyncio.wrap_future(self._pool.submit(self._call, conn, method,

@@ -58,7 +58,7 @@ def test_a_claimed_session_is_never_the_operator(rig):
     code, out = rig.cli(["send", "reviewer@proj-a", "ship it"],
                         env=operator_env(MOXI_COMMS_NAME="planner"))
 
-    assert code == 2, out
+    assert code == 3, out
     assert "nothing was sent" in out
     assert "claimed session is never the operator" in out
     # No seat vocabulary and no variable names on an agent-facing surface.
@@ -76,7 +76,7 @@ def test_a_bad_operator_token_is_refused_by_the_record(rig):
     code, out = rig.cli(["send", "--new-name", "reviewer@proj-a", "ship it"],
                         env=operator_env())
 
-    assert code == 5, out
+    assert code == 1, out
     assert "bad operator token" in out
     assert rig.record.history(rig.names_channel) == []
 
@@ -89,7 +89,7 @@ def test_no_operator_credential_on_the_box_is_a_loud_refusal(rig):
     code, out = rig.cli(["send", "--new-name", "reviewer@proj-a", "ship it"],
                         env=operator_env())
 
-    assert code == 5, out
+    assert code == 1, out
     assert "cannot resolve the posting credential comms/operator/token" in out
     assert "the environment (MOXI_COMMS_SECRET_COMMS_OPERATOR_TOKEN)" in out
     assert "the holder's token store" in out
@@ -128,7 +128,7 @@ def test_the_operator_obeys_the_same_cap(rig):
 
     code, out = rig.cli(["send", "--new-name", "reviewer@proj-a", long_text], env=operator_env())
 
-    assert code == 2, out
+    assert code == 3, out
     assert "-character cap on one message. Nothing was sent." in out
     assert rig.record.history(rig.names_channel) == []
 
@@ -138,6 +138,6 @@ def test_an_unstamped_terminal_is_not_the_operator(rig):
     claim, and the no-identity refusal is unchanged."""
     code, out = rig.cli(["send", "reviewer@proj-a", "ship it"])
 
-    assert code == 2, out
+    assert code == 3, out
     assert "comms has no identity for this process" in out
     assert rig.record.history(rig.names_channel) == []

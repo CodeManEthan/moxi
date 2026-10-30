@@ -442,13 +442,12 @@ def test_the_fields_come_from_the_bindings_own_connection(rig, adapters, tmp_pat
     coder = codex_bind(adapters, None)               # no root: unknown
     forger = DaemonClient(daemon_socket()).connect()
     try:
-        forger.notify("activity", identity=CODER_Q, cache_source=str(root),
-                      session_id=TID, turned=True)
+        forger.notify("activity", {"identity": CODER_Q, "cache_source": str(root), "session_id": TID, "turned": True})
         time.sleep(0.2)
         assert rig.daemon.bindings[CODER_Q].cache_source is None
     finally:
         forger.close()
-    coder.client.notify("activity", identity=CODER_Q, kind="ready", cache_source=str(root))
+    coder.client.notify("ready", {"identity": CODER_Q, "cache_source": str(root)})
     wait_until(lambda: rig.daemon.bindings[CODER_Q].cache_source == str(root))
     msg = post(rig, [CODER_Q])
     assert delivered(coder, msg)
@@ -465,8 +464,8 @@ def test_the_session_answer_carries_the_lifetime_and_the_key(rig, adapters, tmp_
     codex_bind(adapters, root)
     c = DaemonClient(daemon_socket()).connect()
     try:
-        answer = c.query("session", identity=CODER_Q)
-        unbound = c.query("session", identity="nobody@proj-a")
+        answer = c.call("session", {"identity": CODER_Q})
+        unbound = c.call("session", {"identity": "nobody@proj-a"})
     finally:
         c.close()
     assert answer["cache_kind"] == "warm" and answer["cache_ttl"] == 1800
@@ -620,7 +619,7 @@ def test_a_lowering_is_written_logged_shown_and_survives_a_restart(
     codex_bind(adapters, root)
     c = DaemonClient(daemon_socket()).connect()
     try:
-        answer = c.query("session", identity=CODER_Q)
+        answer = c.call("session", {"identity": CODER_Q})
     finally:
         c.close()
     lowered = lower_to(gap)
@@ -640,7 +639,7 @@ def test_a_lowering_is_written_logged_shown_and_survives_a_restart(
     # A read that lowers nothing logs nothing more.
     c = DaemonClient(daemon_socket()).connect()
     try:
-        c.query("session", identity=CODER_Q)
+        c.call("session", {"identity": CODER_Q})
     finally:
         c.close()
     time.sleep(0.1)
@@ -650,7 +649,7 @@ def test_a_lowering_is_written_logged_shown_and_survives_a_restart(
     codex_bind(adapters, root)                        # bound again on the new daemon
     c = DaemonClient(daemon_socket()).connect()
     try:
-        assert c.query("session", identity=CODER_Q)["cache_ttl"] == lowered
+        assert c.call("session", {"identity": CODER_Q})["cache_ttl"] == lowered
     finally:
         c.close()
 
@@ -1071,15 +1070,14 @@ def test_new_session_comes_from_register_only_and_clears_with_an_id(rig, adapter
                                                                       tmp_path):
     root = sessions_root(tmp_path)
     coder = codex_bind(adapters, root, tid=None, new_session=False)
-    coder.client.notify("activity", identity=CODER_Q, kind="ready", new_session=True)
+    coder.client.notify("ready", {"identity": CODER_Q, "new_session": True})
     time.sleep(0.2)
     assert rig.daemon.bindings[CODER_Q].new_session is False, "an activity cannot set it"
     coder.client.close()
     wait_until(lambda: CODER_Q not in rig.daemon.bindings)
     coder = codex_bind(adapters, root, tid=None, new_session=True)
     assert rig.daemon.bindings[CODER_Q].new_session is True
-    coder.client.notify("activity", identity=CODER_Q, kind="ready", session_id=TID,
-                        turned=False)
+    coder.client.notify("ready", {"identity": CODER_Q, "session_id": TID, "turned": False})
     wait_until(lambda: rig.daemon.bindings[CODER_Q].session_id == TID)
     assert rig.daemon.bindings[CODER_Q].new_session is False
     coder.client.close()
@@ -1092,11 +1090,11 @@ def test_a_null_agent_model_withdraws_the_report(rig, adapters, tmp_path):
     db = free_db(tmp_path)
     oc = oc_bind(adapters, db, agent_model=FREE_AGENT)
     assert rig.daemon.bindings[CODER_Q].agent_model == FREE_AGENT
-    oc.client.notify("activity", identity=CODER_Q, kind="ready")
+    oc.client.notify("ready", {"identity": CODER_Q})
     time.sleep(0.2)
     assert rig.daemon.bindings[CODER_Q].agent_model == FREE_AGENT, \
         "a frame without it keeps it"
-    oc.client.notify("activity", identity=CODER_Q, kind="ready", agent_model=None)
+    oc.client.notify("ready", {"identity": CODER_Q, "agent_model": None})
     wait_until(lambda: rig.daemon.bindings[CODER_Q].agent_model is cache.MISSING)
     msg = post(rig, [CODER_Q])
     assert queued(rig, msg), "with no agent model the next pair is unknown"

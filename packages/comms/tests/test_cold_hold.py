@@ -28,6 +28,7 @@ import pytest
 from conftest import (record_rows, send_ready, send_turn, wait_for_queue, wait_until,
                       write_transcript)
 
+from moxi import exit as moxi_exit
 from moxi_comms import cache, cli, constants, cursors, machine_line
 from moxi_comms.client import DaemonClient, DaemonError
 from moxi_comms.daemon import TIER_EPHEMERAL
@@ -123,15 +124,14 @@ def stop_shim(rig, s, q=REVIEWER_Q):
 def agents_view():
     c = DaemonClient(daemon_socket()).connect()
     try:
-        return c.query("agents")
+        return c.call("agents")
     finally:
         c.close()
 
 
 def bare_turn(pushes, q, handled=()):
     """`activity kind=turn` with `handled` from a bare binding's own connection."""
-    pushes.client.notify("activity", identity=q, kind="turn", turned=True,
-                         handled=[str(i) for i in handled], unhandled=[])
+    pushes.client.notify("turn_ended", {"identity": q, "turned": True, "handled": [str(i) for i in handled], "unhandled": []})
 
 
 # ================================================================ the held send
@@ -196,10 +196,10 @@ def test_the_shims_stop_on_a_warm_read_releases_the_row(rig, monkeypatch):
     # fall; so the payloads are read as they arrive, not from the queue.
     pushed, on_push = [], s._on_push
 
-    def record(frame):
-        if frame.get("op") == "deliver":
-            pushed.append(frame["payload"])
-        on_push(frame)
+    def record(method, params):
+        if method == "deliver":
+            pushed.append(params["payload"])
+        on_push(method, params)
 
     monkeypatch.setattr(s, "_on_push", record)
     s.start()
@@ -351,13 +351,13 @@ def test_the_verb_reads_cold_and_the_cache_warms_before_routing(rig, monkeypatch
     """A known read at the daemon decides alone. The sender was told held, its
     cold-at is past, and the gate, reading warm, delivers live."""
     s = cold_shim(rig)
-    real = DaemonClient.post
+    real = DaemonClient.send
 
     def warmed(*a, **kw):
         write_transcript(SESS_A, 5)               # its own turn lands in between
         return real(*a, **kw)
 
-    monkeypatch.setattr(DaemonClient, "post", warmed)
+    monkeypatch.setattr(DaemonClient, "send", warmed)
     code, out = send(rig, REVIEWER_Q, "just in time")
     assert code == 0 and out.splitlines()[-1] == LAST_CHOSEN
     (mid,) = sent_ids(out)
@@ -491,7 +491,7 @@ def test_a_held_send_to_an_agent_n_says_it_is_session_only(rig):
 
 def assert_refused(rig, code, out, reason):
     lines = out.splitlines()
-    assert code == cli.EXIT_COLD == 6, out
+    assert code == moxi_exit.TEMPFAIL, out
     assert lines[0].startswith("Nothing was sent: ") and reason in lines[0], lines[0]
     assert lines[-1] == "Nothing was sent.", out
     assert posted(rig) == []
@@ -573,14 +573,14 @@ def test_a_session_answer_with_no_verdict_refuses(rig, monkeypatch):
 
 def test_a_failed_session_query_refuses(rig, monkeypatch):
     cold_shim(rig)
-    real = DaemonClient.query
+    real = DaemonClient.call
 
-    def broken(self, kind, **kw):
+    def broken(self, kind, params=None, **kw):
         if kind == "session":
             raise DaemonError("the daemon fell over")
-        return real(self, kind, **kw)
+        return real(self, kind, params, **kw)
 
-    monkeypatch.setattr(DaemonClient, "query", broken)
+    monkeypatch.setattr(DaemonClient, "call", broken)
     code, out = send(rig, REVIEWER_Q)
     assert_refused(rig, code, out, f"comms could not ask the daemon about {REVIEWER_Q} "
                                    "(the session query failed (the daemon fell over))")

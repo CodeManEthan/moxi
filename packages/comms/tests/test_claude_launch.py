@@ -337,14 +337,14 @@ def test_the_doctor_says_none_are_waiting(rig):
 def test_a_register_carries_the_endpoint_state(rig, monkeypatch):
     from moxi_comms.client import DaemonClient
     seen = []
-    real = DaemonClient.request
+    real = DaemonClient.call
 
-    def request(self, op, **kw):
-        if op == "register":
-            seen.append(kw)
-        return real(self, op, **kw)
+    def call(self, method, params=None, **kw):
+        if method == "bind":
+            seen.append(dict(params or {}))
+        return real(self, method, params, **kw)
 
-    monkeypatch.setattr(DaemonClient, "request", request)
+    monkeypatch.setattr(DaemonClient, "call", call)
     shim = rig.shim(name="reviewer", scope="proj-a", start=False)
     shim.endpoint = False
     shim.start()

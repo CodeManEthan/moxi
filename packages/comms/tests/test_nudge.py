@@ -1,14 +1,13 @@
-"""Fanout layer 2: the nudge.
+"""Fanout without a nudge: every post is written by the daemon.
 
 Layer 1 is in-process and layer 3 is the slow poll; both live in `local_record.py` and
-are tested there. This is the middle one for the operator lane: its CLI process writes
-the record itself, so the daemon learns of the row from a fire-and-forget
-`nudge` notification. Agent posts go through the daemon and its record fans them out
-in-process without a nudge.
+are tested there. The middle layer was a `nudge` notification from a CLI process that
+wrote the record itself. The operator now posts through the daemon's `send` as agents
+do, so the daemon's own record fans every post out in-process, and `nudge` is no longer
+a method.
 
-Every test that measures the nudge posts through a SECOND `LocalRecord` on the same
-file (`cli_record`), because that is what a CLI process is. Posting through the rig's
-own instance would fan out in-process and the nudge would be measuring layer 1.
+The CLI here still runs on a SECOND `LocalRecord` on the same file (`cli_record`),
+because that is what a CLI process is: a post it wrote itself would wait for the poll.
 """
 
 from __future__ import annotations
@@ -21,8 +20,6 @@ from conftest import wait_for_queue, wait_until
 from moxi import ipc
 from moxi_comms import cli, wire
 from moxi_comms.local_record import LocalRecord
-
-POLL = 0.5              # the default `poll_interval`, and slow on purpose here
 
 
 @pytest.fixture
@@ -40,13 +37,14 @@ def cli_record(rig):
 
 @pytest.fixture
 def notified(monkeypatch):
-    """Every op the CLI hands to `DaemonClient.notify`, in order, delivered as usual."""
+    """Every method the CLI hands to `DaemonClient.notify`, in order, delivered as
+    usual."""
     ops: list = []
     real = cli.DaemonClient.notify
 
-    def spy(self, op, **kwargs):
-        ops.append(op)
-        return real(self, op, **kwargs)
+    def spy(self, method, params=None):
+        ops.append(method)
+        return real(self, method, params)
 
     monkeypatch.setattr(cli.DaemonClient, "notify", spy)
     return ops
@@ -55,9 +53,9 @@ def notified(monkeypatch):
 def quiet_pump(record, interval: float = 5.0) -> None:
     """Put the rig's 20 ms pump on a long wait, and start that wait NOW.
 
-    The nudge sets the pump's wake event, so nudging once here makes it fan out, clear
+    `nudge()` sets the pump's wake event, so waking it once here makes it fan out, clear
     the event and re-enter the wait at the new interval. Without the realignment a pump
-    pass could land inside the measurement by luck rather than by nudge.
+    pass could land inside the measurement by luck.
     """
     record.poll_interval = interval
     record.nudge()
@@ -69,15 +67,16 @@ def a_pair(rig):
         rig.shim(name="reviewer", scope="proj-a")
 
 
-# --------------------------------------------------------------------------- the nudge
+# ------------------------------------------------------------------- fanout at once
 
 @pytest.mark.parametrize("backend", ["local"], indirect=True)
-def test_an_agent_post_delivers_within_50ms_without_a_nudge(rig, cli_record, notified):
+def test_an_agent_post_delivers_within_50ms(rig, cli_record, notified):
     """The daemon writes and fans out an agent post on the same call."""
     planner, reviewer = a_pair(rig)
     quiet_pump(rig.record)
 
-    code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "the nudge carries this"],
+    code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a",
+                         "the daemon carries this"],
                         name="planner", scope="proj-a",
                         env={"MOXI_COMMS_BACKEND": "local"}, record=cli_record)
     t0 = time.monotonic()
@@ -87,51 +86,36 @@ def test_an_agent_post_delivers_within_50ms_without_a_nudge(rig, cli_record, not
     assert wait_until(lambda: len(reviewer.queue) >= 1, timeout=0.05), \
         "the daemon's own record committed and fanned out the row"
     assert time.monotonic() - t0 < 0.05
-    assert reviewer.queue[0]["text"] == "the nudge carries this"
+    assert reviewer.queue[0]["text"] == "the daemon carries this"
 
 
 @pytest.mark.parametrize("backend", ["local"], indirect=True)
-def test_a_lost_nudge_is_delivered_by_the_poll(rig, cli_record, monkeypatch):
-    """A lost nudge still delivers within `poll_interval`. The frame never reaches the
-    socket (an old daemon, a CLI naming the fallback socket); the pump is the net and the
-    message is late, never lost."""
-    real = cli.DaemonClient.notify
-    monkeypatch.setattr(cli.DaemonClient, "notify",
-                        lambda self, op, **kw: None if op == "nudge"
-                        else real(self, op, **kw))
+def test_an_operator_post_goes_through_the_daemon_and_delivers_without_the_poll(
+        rig, cli_record, notified):
+    """The operator's post is the daemon's `send`, not a row the CLI writes: it is
+    delivered long before the pump's next pass, and the CLI notifies nothing."""
     _planner, reviewer = a_pair(rig)
-    quiet_pump(rig.record, POLL)
+    quiet_pump(rig.record)
 
-    code, _ = rig.cli(["send", "reviewer@proj-a", "the poll carries this"],
-                      env={"MOXI_COMMS_BACKEND": "local",
-                           "MOXI_COMMS_OPERATOR": rig.prov.operator_user_id},
-                      record=cli_record)
+    code, out = rig.cli(["send", "reviewer@proj-a", "the operator's post"],
+                        env={"MOXI_COMMS_BACKEND": "local",
+                             "MOXI_COMMS_OPERATOR": rig.prov.operator_user_id},
+                        record=cli_record)
     t0 = time.monotonic()
-    assert code == 0
-    assert not wait_until(lambda: len(reviewer.queue) >= 1, timeout=0.05), \
-        "with the nudge lost there is nothing to deliver it inside the nudge's window"
-
-    assert wait_until(lambda: len(reviewer.queue) >= 1, timeout=3.0)
-    assert time.monotonic() - t0 < 2 * POLL, "one poll interval, plus room for a loaded box"
-    assert reviewer.queue[0]["text"] == "the poll carries this"
-
-
-@pytest.mark.parametrize("backend", ["local"], indirect=True)
-def test_the_op_wakes_the_local_record(rig, monkeypatch):
-    """The method's whole body: `self.record.nudge()` when the record has one."""
-    woken: list = []
-    monkeypatch.setattr(rig.record, "nudge", lambda: woken.append(1))
-    assert rig.daemon._call(None, "nudge", {}) is None
-    assert woken == [1]
+    assert code == 0, out
+    assert notified == []
+    assert wait_until(lambda: len(reviewer.queue) >= 1, timeout=2.0)
+    assert time.monotonic() - t0 < 1.0, "the daemon fanned it out, not the 5 s pump"
+    assert reviewer.queue[0]["text"] == "the operator's post"
 
 
 # ------------------------------------------------------------------- an unknown method
 
-def test_nudge_is_a_no_op_on_a_record_without_one_and_answers_nothing(rig):
-    """The mock has no `nudge` (nor does Discord): the method is taken and does
-    nothing."""
-    assert rig.daemon._call(None, "nudge", {}) is None
-    assert rig.daemon._call(None, "nudge", None) is None
+def test_nudge_is_no_longer_a_method(rig):
+    """Asked as a request, `nudge` is the ordinary method-not-found."""
+    with pytest.raises(ipc.RpcError) as refused:
+        rig.daemon._call(None, "nudge", {})
+    assert refused.value.code == wire.METHOD_NOT_FOUND
 
 
 def test_an_unknown_method_is_refused_and_the_connection_lives_on(rig):
@@ -144,20 +128,20 @@ def test_an_unknown_method_is_refused_and_the_connection_lives_on(rig):
     client = cli.DaemonClient(rig.daemon.socket_path).connect()
     try:
         client.notify("nudge-the-daemon")
-        assert client.request("ping")["ok"] is True
+        assert "message_id" in client.call("max_id")
     finally:
         client.close()
 
 
-# --------------------------------------------------------------------- the other two
+# -------------------------------------------------------------------- the mock backend
 
 def test_the_cli_on_the_mock_backend_sends_no_nudge(rig, notified):
-    """The mock fans out in-process, so the frame would buy nothing. The backend is the
-    seam's answer here, not the record object's: this rig hands the CLI a record, and
-    the selection chain answers mock because the environment names it (the default
-    would be local)."""
+    """The mock fans out in-process. The backend is the seam's answer here, not the
+    record object's: this rig hands the CLI a record, and the selection chain answers
+    mock because the environment names it (the default would be local)."""
     planner, reviewer = a_pair(rig)
-    code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "no nudge for the mock"],
+    code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a",
+                         "no nudge for the mock"],
                         name="planner", scope="proj-a",
                         env={"MOXI_COMMS_BACKEND": "mock"})
     assert code == 0 and "sent" in out

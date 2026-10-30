@@ -20,6 +20,7 @@ import pytest
 from conftest import wait_for_queue, write_config
 
 from moxi import modules
+from moxi import exit as moxi_exit
 from moxi_comms import adapter, api, cli, module, sending
 from moxi_comms.api import tokens as api_tokens
 from moxi_comms.claimhold import ClaimServer
@@ -82,14 +83,16 @@ def test_the_send_and_check_signatures():
 
 def test_the_outcomes_deliveries_and_exit_codes():
     assert api.OUTCOMES == ("sent", "would-send", "refused", "cache-unread", "blocked",
-                            "offline", "failed")
-    assert api.EXIT_CODES == {"sent": 0, "would-send": 0, "refused": 2, "blocked": 3,
-                              "offline": 4, "failed": 5, "cache-unread": 6}
-    assert api.EXIT_CODES["cache-unread"] == cli.EXIT_COLD
+                            "offline", "failed", "unknown")
+    assert api.EXIT_CODES == {"sent": 0, "would-send": 0, "refused": 3, "blocked": 3,
+                              "offline": 75, "failed": 1, "cache-unread": 75,
+                              "unknown": 1}
+    assert api.EXIT_CODES["cache-unread"] == moxi_exit.TEMPFAIL
+    assert api.EXIT_CODES["unknown"] == moxi_exit.ERROR, "never try-again: it may be sent"
     assert api.DELIVERIES == ("live", "held-cold", "held-flag", "waiting", "unbound",
                               "operator")
     assert [f.name for f in api.SendResult.__dataclass_fields__.values()] == [
-        "outcome", "message_id", "recipients", "refusal", "notes", "said"]
+        "outcome", "message_id", "recipients", "refusal", "notes", "said", "code"]
     assert list(api.Recipient.__dataclass_fields__) == ["qualified", "delivery",
                                                         "cold_at", "reason"]
     assert list(api.Refusal.__dataclass_fields__) == ["code", "text"]
@@ -347,7 +350,7 @@ def test_no_identity_and_the_offline_daemon_are_refusals(rig):
     with rig.session_holding(_sender(rig, "planner")) as path:
         rig.daemon.stop()
         got = api.send(api.Sender.socket(path), "reviewer", "x", posture="none")
-    assert (got.outcome, got.exit_code, got.refusal.code) == ("offline", 4, "offline")
+    assert (got.outcome, got.exit_code, got.refusal.code) == ("offline", 75, "offline")
 
 
 def test_the_operator_lane(rig):

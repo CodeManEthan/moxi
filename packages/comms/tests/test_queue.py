@@ -22,9 +22,11 @@ import time
 import uuid
 
 import pytest
-from conftest import projects_root, queued, record_rows, wait_until, write_config
+from conftest import (as_frames, projects_root, queued, record_rows, synced, wait_until,
+                      write_config)
 
 from moxi_comms import cache, constants, cursors, machine_line
+from moxi_comms.adapters.claude_shim import ACTIVITY_METHODS
 from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import Daemon
 from moxi_comms.paths import daemon_socket
@@ -84,7 +86,7 @@ class Peer:
                  adapter="claude-shim", holding=None):
         self.rig = rig
         self.frames: list = []
-        self.client = DaemonClient(daemon_socket(), on_push=self.frames.append).connect()
+        self.client = DaemonClient(daemon_socket(), on_push=as_frames(self.frames)).connect()
         kw = dict(name=name, adapter=adapter, holding=holding)
         if global_:
             kw["global_"] = True
@@ -95,12 +97,12 @@ class Peer:
                       turned=True)
         elif adapter in ("codex", "opencode"):
             kw["report"] = {"session_id": f"thread-{uuid.uuid4()}", "turned": True}
-        answer = self.client.register(**kw)
+        answer = self.client.bind(**kw)
         self.q = answer["identity"]["qualified"]
         self.sync()
 
     def sync(self) -> None:
-        self.client.request("ping")
+        synced(self.client)
 
     def payloads(self) -> list:
         return [f["payload"] for f in self.frames if f.get("op") == "deliver"]
@@ -112,7 +114,9 @@ class Peer:
         return [p["message_id"] for p in self.payloads() if p.get("held") is True]
 
     def activity(self, **fields) -> None:
-        self.client.notify("activity", identity=self.q, **fields)
+        kind = fields.pop("kind", None)
+        self.client.notify(ACTIVITY_METHODS.get(kind, "activity"),
+                           {"identity": self.q, **fields})
         self.sync()
 
     def turn(self, handled=(), unhandled=()) -> None:
@@ -679,7 +683,7 @@ def test_a_ready_before_the_register_goes_after_it_once(rig, frames):
     shim.notify_ready("startup")
     shim.start()
     assert wait_until(lambda: [p["message_id"] for p in shim.queue] == [held])
-    shim._client.request("ping")
+    shim._client.call("max_id")
     assert len(frames.of(REVIEWER_Q, kind="ready")) == 1
     assert frames.of(REVIEWER_Q, kind="ready")[0]["source"] == "startup"
     assert all(p.get("held") is True for p in shim.queue)

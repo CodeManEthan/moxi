@@ -1,6 +1,6 @@
 """The one send path: `moxi comms send` and `reply` and `moxi_comms.api.send` run it.
 
-Every check a send makes, the machine line, the post and the nudge are here, and none of
+Every check a send makes, the machine line and the post are here, and none of
 it prints. `run` hands back a `SendResult`: the outcome, the message id, one `Recipient`
 per resolved name, the refusal when nothing was posted, the NOTEs, and `lines()`, the
 verb's text. The CLI renders `lines()` and returns `exit_code`; a library caller branches
@@ -17,31 +17,32 @@ import sys
 import time
 from dataclasses import dataclass, field
 
+from moxi import exit as moxi_exit
+
 from . import (attribution, cache, claimfile, claimhold, config, constants, directory,
                machine_line, policy)
 from .membership import sessions_of
-from .claimhold import CLAIM_PROTOCOL, ProtocolError
+from .claimhold import AdapterMismatch, ClaimUnreachable
 from .client import (DaemonClient, DaemonError, DaemonNoAnswer, DaemonOffline,
                      DaemonTimeout, VersionMismatch)
-from .record import LOCAL, RecordError
+from .record import RecordError
 from .paths import OutsideRuntime, comms_db
 from .provision import NAMES
 from .scoping import (GLOBAL, identity_of, project_key, qualify, tag_matches)
 from .sender import (MalformedStamp, OperatorRefused, SendFailed, SenderIdentity,
-                     operator_credential, operator_from_env, post_as_operator,
-                     sender_from_env)
+                     operator_credential, operator_from_env, sender_from_env)
 
 log = logging.getLogger("comms.send")
 
 
-EXIT_OK, EXIT_REFUSED, EXIT_BLOCKED, EXIT_OFFLINE, EXIT_FAILED = 0, 2, 3, 4, 5
-#: Refused for the cache: comms could not read a recipient's cache (an `unknown` read, a
-#: name that unbound mid-check, a failed `session` query), so nothing was sent and the
-#: sender may send again in a moment. A cold recipient is posted and held instead,
-#: exit 0. Kept apart from EXIT_REFUSED so a caller can branch on it without reading
-#: text: callers read it by number, and as `getattr(moxi_comms.cli, "EXIT_COLD", 6)`.
-#: Do not renumber.
-EXIT_COLD = 6
+#: What one step of a send came to, before it is a `SendResult`. These are not exit
+#: codes: `_result` turns each into its outcome word and its `moxi.exit` code.
+#: `_UNKNOWN` is a `send` that left this process and got no answer, so the message may
+#: have been sent; `_AGAIN` is a daemon that answered "try again" and committed nothing;
+#: `_COLD` is a recipient's cache comms could not read (an `unknown` read, a name that
+#: unbound mid-check, a failed `session` query), so nothing was sent and the sender may
+#: send again in a moment. A cold recipient is posted and held instead.
+_OK, _REFUSED, _BLOCKED, _OFFLINE, _FAILED, _COLD, _USAGE, _UNKNOWN, _AGAIN = range(9)
 
 #: An `agent-N` name's tier: its held mail ends with its binding.
 TIER_EPHEMERAL = attribution.TIER_EPHEMERAL
@@ -83,28 +84,35 @@ HELD_IGNORED_OPERATOR = ("NOTE: --held was ignored for operator: the operator ha
                          "session to hold it for, so it went to him as an ordinary "
                          "message.")
 
-#: The daemon refused this comms' wire version at the hello: a `DaemonOffline`, so every
-#: verb exits 4 for now, said in the words that name the older side.
-VerbProtocolMismatch = VersionMismatch
-
 
 # --------------------------------------------------------------------------- the result
 
-#: What a send came to. `cache-unread` is exit 6: a recipient's cache comms could not
-#: read, so nothing was posted.
+#: What a send came to. The word is the reason, in `--json` and in `SendResult.outcome`;
+#: the exit code says only what a script may do next, so a caller that needs the reason
+#: reads the word, not the number. `unknown` is a send whose answer never came after it
+#: was written: the message may have been sent.
 OUTCOME_SENT, OUTCOME_WOULD_SEND, OUTCOME_REFUSED, OUTCOME_CACHE_UNREAD = (
     "sent", "would-send", "refused", "cache-unread")
 OUTCOME_BLOCKED, OUTCOME_OFFLINE, OUTCOME_FAILED = "blocked", "offline", "failed"
+OUTCOME_UNKNOWN = "unknown"
 OUTCOMES = (OUTCOME_SENT, OUTCOME_WOULD_SEND, OUTCOME_REFUSED, OUTCOME_CACHE_UNREAD,
-            OUTCOME_BLOCKED, OUTCOME_OFFLINE, OUTCOME_FAILED)
-#: Each outcome's exit code, the verb's number for it.
-EXIT_CODES = {OUTCOME_SENT: EXIT_OK, OUTCOME_WOULD_SEND: EXIT_OK,
-              OUTCOME_REFUSED: EXIT_REFUSED, OUTCOME_CACHE_UNREAD: EXIT_COLD,
-              OUTCOME_BLOCKED: EXIT_BLOCKED, OUTCOME_OFFLINE: EXIT_OFFLINE,
-              OUTCOME_FAILED: EXIT_FAILED}
-_BY_EXIT = {EXIT_REFUSED: OUTCOME_REFUSED, EXIT_COLD: OUTCOME_CACHE_UNREAD,
-            EXIT_BLOCKED: OUTCOME_BLOCKED, EXIT_OFFLINE: OUTCOME_OFFLINE,
-            EXIT_FAILED: OUTCOME_FAILED}
+            OUTCOME_BLOCKED, OUTCOME_OFFLINE, OUTCOME_FAILED, OUTCOME_UNKNOWN)
+#: Each outcome's exit code. A `refused` send exits `REFUSED`, or `USAGE` when what was
+#: refused is the command's own shape (a missing `--posture`, a bad flag value). `TEMPFAIL`
+#: only when nothing was done: an outcome that may have happened never exits it.
+EXIT_CODES = {OUTCOME_SENT: moxi_exit.OK, OUTCOME_WOULD_SEND: moxi_exit.OK,
+              OUTCOME_REFUSED: moxi_exit.REFUSED, OUTCOME_CACHE_UNREAD: moxi_exit.TEMPFAIL,
+              OUTCOME_BLOCKED: moxi_exit.REFUSED, OUTCOME_OFFLINE: moxi_exit.TEMPFAIL,
+              OUTCOME_FAILED: moxi_exit.ERROR, OUTCOME_UNKNOWN: moxi_exit.ERROR}
+#: Each step's outcome and exit code.
+_ENDS = {_REFUSED: (OUTCOME_REFUSED, moxi_exit.REFUSED),
+         _USAGE: (OUTCOME_REFUSED, moxi_exit.USAGE),
+         _BLOCKED: (OUTCOME_BLOCKED, moxi_exit.REFUSED),
+         _OFFLINE: (OUTCOME_OFFLINE, moxi_exit.TEMPFAIL),
+         _AGAIN: (OUTCOME_OFFLINE, moxi_exit.TEMPFAIL),
+         _FAILED: (OUTCOME_FAILED, moxi_exit.ERROR),
+         _UNKNOWN: (OUTCOME_UNKNOWN, moxi_exit.ERROR),
+         _COLD: (OUTCOME_CACHE_UNREAD, moxi_exit.TEMPFAIL)}
 
 #: How a posted message reaches one recipient:
 #:   live       delivered now (a warm, fresh or no-cache read);
@@ -154,10 +162,12 @@ class SendResult:
     refusal: Refusal | None = None
     notes: tuple = ()
     said: tuple = ()
+    #: The verb's `moxi.exit` code; None reads the outcome's (`EXIT_CODES`).
+    code: int | None = None
 
     @property
     def exit_code(self) -> int:
-        return EXIT_CODES[self.outcome]
+        return EXIT_CODES[self.outcome] if self.code is None else self.code
 
     @property
     def posted(self) -> bool:
@@ -262,10 +272,7 @@ class Context:
         """Which backend this process is on, by the selection seam and nothing else.
 
         Resolved once per verb (flag > MOXI_COMMS_BACKEND > the config file > the
-        default) and kept, because a flip is a config line plus a daemon restart. Asked
-        by the nudge, which is the local backend's alone: a record handed in by a test
-        rig is still whatever the box selected, so the question is put to the seam and
-        never to the object.
+        default) and kept, because a flip is a config line plus a daemon restart.
         """
         if self._backend_name is None:
             from . import record as gw
@@ -306,7 +313,7 @@ class Context:
     def daemon(self) -> DaemonClient:
         """A connection to the daemon, once its hello has agreed a comms wire version.
         A version it refuses raises `VersionMismatch`, and a daemon that doesn't answer
-        `DaemonOffline`, which every verb answers with exit 4, so no verb writes a token
+        `DaemonOffline`, which every verb answers with exit 75, so no verb writes a token
         or reads an answer its daemon does not speak."""
         return (DaemonClient(self.socket_path) if self.deadline is None else
                 DaemonClient(self.socket_path, timeout=self.deadline)).connect()
@@ -362,18 +369,18 @@ def _reply(args, ctx: Context) -> int:
         _refuse(ctx, "record-unreadable",
                 f"{e}\nThe record could not be read, so there is nothing to reply to yet. "
                 "Nothing was sent.")
-        return EXIT_FAILED
+        return _FAILED
     if original is None:
         _refuse(ctx, "no-such-message",
                 f"no message {args.message_id} in the record — nothing to reply to.")
-        return EXIT_REFUSED
+        return _REFUSED
     with ctx.db() as db:
         author = attribution.from_record(db, original)
     if author.tier == "unknown":
         _refuse(ctx, "unknown-author",
                 f"message {args.message_id} has an author comms cannot identify — "
                 "there is no name to reply to.")
-        return EXIT_REFUSED
+        return _REFUSED
     # Whom it goes to waits for the sender: a reply to your own message goes to that
     # message's recipients, not back to you (`_reply_targets`). One room: the reply goes
     # to #names whatever room the referent sits in.
@@ -414,7 +421,7 @@ def _reply_targets(ctx: Context, sender, author, referent):
     ml = machine_line.parse(referent.content)
     if ml is None:
         _refuse(ctx, "reply-own-unreadable", REPLY_OWN_UNREADABLE.format(id=referent.id))
-        return EXIT_REFUSED
+        return _REFUSED
     seen, tags = set(), []
     for tag in ml.recipients:
         identity = _identity_named(tag)
@@ -424,7 +431,7 @@ def _reply_targets(ctx: Context, sender, author, referent):
         tags.append(tag)
     if not tags:
         _refuse(ctx, "reply-own-alone", REPLY_OWN_ALONE.format(id=referent.id))
-        return EXIT_REFUSED
+        return _REFUSED
     names = ", ".join(_identity_named(t) for t in tags)
     return tags, (f"replying to your own msg {referent.id}, so it goes to that message's "
                   f"recipients: {names} in {NAMES}")
@@ -450,18 +457,21 @@ def _claim_sender(ctx: Context, path):
     try:
         answer = (claimhold.call(path, "claim") if ctx.deadline is None else
                   claimhold.call(path, "claim", timeout=ctx.deadline))
-    except (OSError, ProtocolError):
+    except AdapterMismatch as e:
+        _refuse(ctx, "adapter-mismatch", str(e))
+        return _FAILED
+    except ClaimUnreachable:
         answer = claimhold.dead_adapter_answer(path)
         if answer is None:
             _refuse(ctx, "adapter-gone",
                     "this session's comms adapter is gone and it holds no comms "
                     "identity — nothing was sent.")
-            return EXIT_REFUSED
+            return _REFUSED
     claim = answer.get("claim") or {}
     refusal = answer.get("error") if not answer.get("ok") else answer.get("line")
     if refusal and not claim.get("qualified"):
         _refuse(ctx, "claim-refused", f"{refusal} — nothing was sent.")
-        return EXIT_REFUSED
+        return _REFUSED
     sender = SenderIdentity(qualified=claim["qualified"], scope=claim["scope"],
                             name=claim["name"])
     return sender, answer
@@ -474,13 +484,7 @@ def _claim_token(ctx: Context, sender: SenderIdentity, answer: dict):
                 f"{sender.qualified} is offline: this session's comms adapter is gone, "
                 "so it holds no posting credential — nothing was sent. Relaunch the "
                 "session.")
-        return EXIT_OFFLINE
-    if answer.get("protocol") != CLAIM_PROTOCOL:
-        _refuse(ctx, "claim-protocol",
-                f"{sender.qualified}: this session's comms adapter is from an older "
-                "comms release and cannot bind to this daemon — nothing was sent. "
-                "Relaunch the session.")
-        return EXIT_REFUSED
+        return _OFFLINE
     state = answer.get("state")
     if state == claimfile.OFFLINE:
         _refuse(ctx, "offline",
@@ -488,18 +492,18 @@ def _claim_token(ctx: Context, sender: SenderIdentity, answer: dict):
                 "connected to the daemon, so it holds no posting credential — nothing "
                 "was sent. The adapter reconnects on its own; send again once `moxi "
                 "comms whoami` shows bound.")
-        return EXIT_OFFLINE
+        return _OFFLINE
     if state != claimfile.BOUND:
         refusal = answer.get("line") or f"{sender.qualified} is held by another session"
         _refuse(ctx, "claim-refused", f"{refusal} — nothing was sent.")
-        return EXIT_REFUSED
+        return _REFUSED
     token = answer.get("token")
     if not isinstance(token, str) or not token:
         _refuse(ctx, "claim-credential",
                 f"{sender.qualified} is bound, but this session's adapter handed comms "
                 "no posting credential — nothing was sent. Relaunch the session; if a "
                 "module holds this name, update it.")
-        return EXIT_REFUSED
+        return _REFUSED
     return token
 
 
@@ -511,14 +515,14 @@ def _send(args, ctx: Context, *, tags, reply_to, channel_room, referent=None,
         claim_path = claimhold.socket_from_env(ctx.env)
     except OutsideRuntime as e:
         _refuse(ctx, "outside-runtime", f"{e} Nothing was sent.")
-        return EXIT_REFUSED
+        return _REFUSED
     if claim_path:
         if (ctx.env.get("MOXI_COMMS_OPERATOR") or "").strip():
             _refuse(ctx, "operator-in-session",
                     "comms cannot tell who this process is: it carries the operator's "
                     "own stamp inside an agent's session — nothing was sent. The "
                     "operator's lane is its own terminal.")
-            return EXIT_REFUSED
+            return _REFUSED
         got = _claim_sender(ctx, claim_path)
         if isinstance(got, int):
             return got
@@ -541,7 +545,7 @@ def _send(args, ctx: Context, *, tags, reply_to, channel_room, referent=None,
                 "claimed session is never the operator, and comms will not choose "
                 "between them on your behalf. The operator's lane is its own terminal. "
                 "(Both stamps are named in this process's comms log.)")
-        return EXIT_REFUSED
+        return _REFUSED
     if operator_id is not None and _inside_a_session():
         # The operator's lane is a terminal outside every session: a process inside a
         # live session is refused it, so an agent process that strips its stamp still
@@ -550,7 +554,7 @@ def _send(args, ctx: Context, *, tags, reply_to, channel_room, referent=None,
                 "comms cannot tell who this process is: it carries the operator's own "
                 "stamp inside an agent's session — nothing was sent. The operator's "
                 "lane is its own terminal.")
-        return EXIT_REFUSED
+        return _REFUSED
     if operator_id is not None:
         # The operator is not an agent and borrows nothing: no bundle, no seat, no name
         # on the wire (the record reads the display off the operators row). Its identity
@@ -574,7 +578,7 @@ def _send(args, ctx: Context, *, tags, reply_to, channel_room, referent=None,
                 "sends as its identity through its own claim socket, which its comms "
                 "adapter gives it at launch, and this process has none. Launching is "
                 "the operator's; ask them.")
-        return EXIT_REFUSED
+        return _REFUSED
     if any(claimfile.names_identity(r, stamped) for _k, r in claimfile.live_records()):
         # A live session holds the name (as a claim, a waiting launch claim included),
         # and this process is not inside it: say so.
@@ -582,13 +586,13 @@ def _send(args, ctx: Context, *, tags, reply_to, channel_room, referent=None,
                 f"this process is not inside the session that holds {stamped} — "
                 "nothing was sent. A session sends as its identity through its own claim "
                 "socket.")
-        return EXIT_REFUSED
+        return _REFUSED
     _refuse(ctx, "no-claim-socket",
             f"this process has no comms claim socket, so it sends under no identity — "
             f"nothing was sent. Its launch stamp names {stamped}, but a stamp is not a "
             "live session holding a name: a session sends as its identity through its own "
             "claim socket.")
-    return EXIT_REFUSED
+    return _REFUSED
 
 
 def _stamped_identity(env, project) -> str | None:
@@ -608,11 +612,11 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
                    channel_room, project, referent=None, claim_answer=None,
                    claim_path=None, author=None) -> int:
     """Everything a send does once it knows WHO is sending: the checks, the machine
-    line, the length cap, the post and the nudge.
+    line, the length cap and the post.
 
     Two lanes reach here and differ at the posting seam. An agent presents its live
-    claim token to the daemon, whose record fanout needs no nudge. The operator posts
-    through its local credential and nudges afterward. Everything around that seam is
+    claim token to the daemon; the operator presents the operator's credential to the
+    daemon. The daemon is the one writer either way. Everything around that seam is
     shared: both lanes type the same machine line, obey the same `max_content_length`,
     and print the same `sent <id>` line.
 
@@ -649,40 +653,33 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
                      next_turn=plan.flagged, cold_at=plan.cold_at, posture=plan.posture,
                      **plan.marks)
     if bodies is None:
-        return EXIT_REFUSED             # over the cap; _bodies said why
-    token = channel_id = None
+        return _REFUSED             # over the cap; _bodies said why
+    token = None
     if operator_id is not None:
         try:
             with ctx.db() as db:
                 # The operator's lane needs a credential like every other lane:
                 # the holder's own token out of the store, read the declared way.
-                token, channel_id = operator_credential(db, room=channel_room, env=ctx.env)
+                token, _channel_id = operator_credential(db, room=channel_room, env=ctx.env)
         except (SendFailed, RecordError) as e:
             _refuse(ctx, "credential", str(e))
-            return EXIT_FAILED
+            return _FAILED
     if getattr(args, "check", False):
         # `--check` stops here, at the post: every refusal above is send's own, said in
         # send's words with send's exit code, and nothing below has run. No post, no
-        # nudge, no record.
+        # record.
         _say_would_send(ctx, plan, len(bodies))
-        return EXIT_OK
+        return _OK
     (body,) = bodies
     if operator_id is None:
         posted = _post_from_claim(ctx, claim_path, sender, claim_answer["token"], body)
-        if isinstance(posted, int):
-            return posted
-        message_id = str(posted)
     else:
-        try:
-            msg = post_as_operator(ctx.record, operator_id, channel_id, body, token=token)
-        except (SendFailed, RecordError) as e:
-            _refuse(ctx, "post-failed", str(e))
-            return EXIT_FAILED
-        message_id = msg.id
+        posted = _post_as_operator(ctx, operator_id, token, body)
+    if isinstance(posted, int):
+        return posted
+    message_id = str(posted)
     _keep(ctx, message_id=message_id)
     ctx.say(f"sent {message_id} to {', '.join(plan.resolved)} in {channel_room}")
-    if operator_id is not None:
-        _nudge_daemon(ctx)
     held, tiers = plan.held, plan.tiers
     if held:
         # Posted, and queued by the daemon for each cold one's next release point: one
@@ -698,7 +695,7 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
         # The outcome line, last: `tail -1` says the message was held, and when
         # each held recipient reads it.
         ctx.say(_held_last_line(held, tiers=tiers, operator=operator_id is not None))
-    return EXIT_OK
+    return _OK
 
 
 def _post_from_claim(ctx: Context, path, sender: SenderIdentity, token: str,
@@ -708,9 +705,9 @@ def _post_from_claim(ctx: Context, path, sender: SenderIdentity, token: str,
     try:
         client = ctx.daemon()
         try:
-            answer = client.post(sender.qualified, token, content)
+            answer = client.send(sender.qualified, token, content)
         except DaemonError as error:
-            if not error.response.get("credential"):
+            if not error.data.get("credential"):
                 raise
             refreshed = _claim_sender(ctx, path)
             if isinstance(refreshed, int):
@@ -723,28 +720,78 @@ def _post_from_claim(ctx: Context, path, sender: SenderIdentity, token: str,
                 _refuse(ctx, "credential",
                         "comms refused this session's posting credential — nothing was "
                         "sent")
-                return EXIT_FAILED
+                return _FAILED
             try:
-                answer = client.post(current_sender.qualified, current, content)
+                answer = client.send(current_sender.qualified, current, content)
             except DaemonError as retry_error:
-                if retry_error.response.get("credential"):
+                if retry_error.data.get("credential"):
                     _refuse(ctx, "credential",
                             "comms refused this session's posting credential — nothing "
                             "was sent")
-                    return EXIT_FAILED
+                    return _FAILED
                 raise
         return answer["message_id"]
     except DaemonNoAnswer:
-        _refuse(ctx, "post-no-answer",
-                "the daemon did not answer, so this message may have been sent; check "
-                "`moxi comms history` before sending it again")
-        return EXIT_FAILED
-    except (DaemonOffline, VerbProtocolMismatch) as error:
+        _refuse(ctx, "post-no-answer", NO_ANSWER)
+        return _UNKNOWN
+    except VersionMismatch as error:
+        _refuse(ctx, "protocol-mismatch", str(error))
+        return _FAILED
+    except DaemonOffline as error:
         _refuse(ctx, "offline", f"{error} Nothing was sent.")
-        return EXIT_OFFLINE
+        return _OFFLINE
     except DaemonError as error:
-        _refuse(ctx, "post-failed", f"{error} Nothing was sent.")
-        return EXIT_FAILED
+        return _send_refused(ctx, error)
+    finally:
+        if client is not None:
+            client.close()
+
+
+def _send_refused(ctx: Context, error: DaemonError) -> int:
+    """A `send` the daemon answered with an error, by the code's range: a refusal, a
+    "try again" (the daemon committed nothing), or anything else, a failure."""
+    if error.refused:
+        _refuse(ctx, "post-refused", f"{error} — nothing was sent.")
+        return _REFUSED
+    if error.try_again:
+        _refuse(ctx, "post-again", f"{error} Nothing was sent; try again.")
+        return _AGAIN
+    _refuse(ctx, "post-failed", f"{error} Nothing was sent.")
+    return _FAILED
+
+
+#: What a send says when its request was written and no answer came: it may have been
+#: sent.
+NO_ANSWER = ("the daemon did not answer, so this message may have been sent; check "
+             "`moxi comms history` before sending it again")
+
+
+def _post_as_operator(ctx: Context, user_id: str, token: str, content: str):
+    """The operator's post: `send` as `operator` with the operator's credential, the
+    one writer being the daemon. Returns the message id, or a step code once the
+    refusal is said."""
+    client = None
+    try:
+        client = ctx.daemon()
+        try:
+            answer = client.send("operator", token, content, user=user_id)
+        except DaemonError as error:
+            if error.data.get("credential"):
+                _refuse(ctx, "credential", f"{error} — nothing was sent.")
+                return _FAILED
+            raise
+        return answer["message_id"]
+    except DaemonNoAnswer:
+        _refuse(ctx, "post-no-answer", NO_ANSWER)
+        return _UNKNOWN
+    except VersionMismatch as error:
+        _refuse(ctx, "protocol-mismatch", str(error))
+        return _FAILED
+    except DaemonOffline as error:
+        _refuse(ctx, "offline", f"{error} Nothing was sent.")
+        return _OFFLINE
+    except DaemonError as error:
+        return _send_refused(ctx, error)
     finally:
         if client is not None:
             client.close()
@@ -853,7 +900,7 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
                 "digits). The reply token rides the machine line, so a malformed id "
                 "would make the whole line prose and the message would reach no one. "
                 "Nothing was sent.")
-        return EXIT_REFUSED, None
+        return _USAGE, None
     typed_audience = getattr(args, "audience", None)
     audience = machine_line.normalize_audience(typed_audience)
     if typed_audience is not None and audience is None:
@@ -864,7 +911,7 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
                 "digits, `.`, `_`, `-`, and one optional `@scope`). The mark rides the "
                 "machine line, so a malformed one would make the whole line prose and "
                 "the message would reach no one. Nothing was sent.")
-        return EXIT_REFUSED, None
+        return _USAGE, None
     typed = getattr(args, "posture", None)
     cap_text = getattr(args, "cap", None)
     no_cap = bool(getattr(args, "no_cap", False))
@@ -872,22 +919,22 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
     new_send = reply_to is None
     if new_send and typed is None and not exempt:
         _refuse(ctx, "posture-required", POSTURE_REQUIRED)
-        return EXIT_REFUSED, None
+        return _USAGE, None
     if getattr(args, "new", False) and reply_to is not None:
         _refuse(ctx, "new-with-reply-to",
                 "--new says this message is not a reply, and --reply-to makes it one. "
                 "Nothing was sent. Drop --new to send the reply, or drop --reply-to to "
                 "send a new message.")
-        return EXIT_REFUSED, None
+        return _USAGE, None
     cap = None
     if cap_text is not None and no_cap:
         _refuse(ctx, "cap-both", CAP_BOTH)
-        return EXIT_REFUSED, None
+        return _USAGE, None
     if cap_text is not None:
         text = str(cap_text).strip()
         if not text.isdigit() or int(text) < 1:
             _refuse(ctx, "cap-shape", CAP_SHAPE)
-            return EXIT_REFUSED, None
+            return _USAGE, None
         cap = int(text)
     if _blocked(ctx):
         # Advisory only: enforcement is at daemon routing. Refusing here is a
@@ -895,19 +942,19 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
         _refuse(ctx, "blocked",
                 "block is on in comms' config — not sending. (Advisory check: "
                 "enforcement is at daemon routing, which is symmetric.)")
-        return EXIT_BLOCKED, None
+        return _BLOCKED, None
 
     # ---- 2. the daemon block --------------------------------------------------------
     try:
         client = ctx.daemon()
-    except VerbProtocolMismatch as e:
+    except VersionMismatch as e:
         _refuse(ctx, "protocol-mismatch", str(e))
-        return EXIT_OFFLINE, None
+        return _FAILED, None
     except DaemonOffline as e:
         _refuse(ctx, "offline",
                 f"{e}\nThe daemon performs tier/route resolution; without it the verb "
                 "cannot tell an ephemeral typo from a chosen name.")
-        return EXIT_OFFLINE, None
+        return _OFFLINE, None
     # The cache read: every sender, every bound recipient of every adapter, `--held`
     # included: an unknown read refuses a flagged send too. The `session` query
     # runs HERE, on the connection the resolve loop already holds, before the `finally`
@@ -925,17 +972,17 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
         resolved, deferred = [], []
         for tag in tags:
             try:
-                r = client.query("resolve", name=tag)
+                r = client.call("resolve", {"name": tag})
             except DaemonError as e:
                 _refuse(ctx, "resolve-refused", _refused_tag(tag, e))
-                return EXIT_REFUSED, None
+                return _REFUSED, None
             if r.get("send_only"):
                 # The whole post, before anything is posted: a send-only identity
                 # receives nothing, bound or not, and a reply to one of its messages
                 # resolves to it and is refused the same way.
                 _refuse(ctx, "send-only", send_only_refusal(r["qualified"]))
 
-                return EXIT_REFUSED, None
+                return _REFUSED, None
             if getattr(args, "standing", False) and not r.get("standing_row"):
                 # The sender DECLARED a standing recipient. Nothing in the record or the
                 # tag distinguishes an undeclared standing name from a chosen one, so the
@@ -948,7 +995,7 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
                         + (", currently bound" if r["bound"] else ", unbound")
                         + "). Nothing was sent. Drop --standing to send it as a chosen "
                         "name, or have the provisioner declare the row first.")
-                return EXIT_REFUSED, None
+                return _REFUSED, None
             if (typed_names and r["deferred"] and r.get("tier") != TIER_STANDING
                     and r["qualified"] != OPERATOR
                     and r.get("ever_bound") is False
@@ -960,7 +1007,7 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
                 # on as before. The operator is always known, standing row or not: a box
                 # provisioned by default writes none, and sending to it keeps working.
                 _refuse(ctx, "never-bound", _never_bound_refusal(tag, r))
-                return EXIT_REFUSED, None
+                return _REFUSED, None
             resolved.append(r["qualified"])
             tiers[r["qualified"]] = r.get("tier")
             if r["deferred"]:
@@ -997,7 +1044,7 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
         if open_asks:
             _refuse(ctx, "single-reply",
                     _ask_refusal(open_asks, tags, resolved, now=ctx.clock(), args=args))
-            return EXIT_REFUSED, None
+            return _REFUSED, None
 
     # ---- 4. the reply checks --------------------------------------------------------
     notes = []
@@ -1008,7 +1055,7 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
         open_mark = typed == machine_line.POSTURE_OPEN
         if (cap is not None or no_cap) and not open_mark:
             _refuse(ctx, "cap-no-thread", CAP_NO_THREAD)
-            return EXIT_REFUSED, None
+            return _USAGE, None
         if open_mark:
             marks.update(open_mark=True, cap=cap, no_cap=no_cap)
             sent_lines.append(_open_line(cap, no_cap, ctx))
@@ -1026,7 +1073,7 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
                         f"{e}\nThe message this answers ({reply_to}) could not be read, "
                         "so comms cannot copy its audience onto the reply. Nothing was "
                         "sent.")
-                return (EXIT_OFFLINE if isinstance(e, DaemonOffline) else EXIT_FAILED), None
+                return (_OFFLINE if isinstance(e, DaemonOffline) else _FAILED), None
         names_text = ",".join(tags)
         got = _reply_checks(args, ctx, sender=sender, exempt=exempt, typed=typed,
                             cap=cap, no_cap=no_cap, referent=referent,
@@ -1040,7 +1087,7 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
         notes += reply_notes
 
     # ---- 5. the cache reads ---------------------------------------------------------
-    # A read comms cannot make refuses the WHOLE post, exit 6, nothing posted:
+    # A read comms cannot make refuses the WHOLE post, exit 75, nothing posted:
     # an `unknown` verdict, a name that unbound while comms checked it, a failed query.
     # The sender sends again in a moment. A `cold` read posts and the message waits in
     # the queue (every adapter); a passing read delivers. `--held` reads like any
@@ -1052,7 +1099,7 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
     if refused:
         _refuse(ctx, "cache-unread", _hold_text(refused,
                            others=len(set(resolved)) > len({s.target for s in refused})))
-        return EXIT_COLD, None
+        return _COLD, None
     # `[held]` only when a recipient other than the operator takes it.
     flagged = held_typed and any(q != OPERATOR for q in resolved)
     if held_typed and OPERATOR in resolved:
@@ -1069,7 +1116,7 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
         audience, refusal = _reply_audience(referent, audience)
         if refusal:
             _refuse(ctx, "audience-differs", refusal)
-            return EXIT_REFUSED, None
+            return _REFUSED, None
     waiting = {t.label: t.endpoint_for for t in targets if t.endpoint is False}
     return None, SendPlan(resolved=resolved, deferred=deferred, tiers=tiers, held=held,
                           audience=audience, posture=posture, flagged=flagged,
@@ -1285,7 +1332,7 @@ def _reply_checks(args, ctx: Context, *, sender, exempt, typed, cap, no_cap,
         _refuse(ctx, "no-reply",
                 NO_REPLY_REFUSED.format(id=referent.id, author=author.qualified,
                                         names=names_text, new=new_flag()))
-        return EXIT_REFUSED
+        return _REFUSED
 
     notes = []
     thread = ThreadRead()
@@ -1320,7 +1367,7 @@ def _reply_checks(args, ctx: Context, *, sender, exempt, typed, cap, no_cap,
                 else ONCE_ASK)
         _refuse(ctx, "once-not-open",
                 ONCE_NOT_OPEN.format(what=what, names=names_text, new=new_flag()))
-        return EXIT_REFUSED
+        return _REFUSED
     if posture == REFUSE_CLOSED:
         root = thread.root.id
         if thread.closed == "cap":
@@ -1333,7 +1380,7 @@ def _reply_checks(args, ctx: Context, *, sender, exempt, typed, cap, no_cap,
             text = CLOSED_BY_NONE.format(root=root, closer=closer, id=closed_by,
                                          names=names_text, new=new_flag())
         _refuse(ctx, "thread-closed", text)
-        return EXIT_REFUSED
+        return _REFUSED
 
     marks, lines = {}, []
     k = thread.count + 1
@@ -1344,16 +1391,16 @@ def _reply_checks(args, ctx: Context, *, sender, exempt, typed, cap, no_cap,
             marks.update(cap=cap, no_cap=no_cap)
         elif not thread.open:
             _refuse(ctx, "cap-no-thread", CAP_NO_THREAD)
-            return EXIT_REFUSED
+            return _USAGE
         elif thread.closed:
             _refuse(ctx, "cap-closed", CAP_CLOSED)
-            return EXIT_REFUSED
+            return _REFUSED
         elif sender.qualified != thread.opener:
             _refuse(ctx, "cap-not-opener", CAP_NOT_OPENER.format(opener=thread.opener))
-            return EXIT_REFUSED
+            return _REFUSED
         elif cap is not None and cap < k:
             _refuse(ctx, "cap-below", CAP_BELOW.format(k=k))
-            return EXIT_REFUSED
+            return _REFUSED
         else:
             marks.update(cap=cap, no_cap=no_cap)
             lines.append(_open_line(cap, no_cap, ctx))
@@ -1474,8 +1521,8 @@ def _thread_idle(ctx: Context, items, sender, epoch) -> tuple[bool, str | None]:
         try:
             client = ctx.daemon()
             try:
-                answer = client.query("readable", identity=sender.qualified,
-                                      ids=[m.id for m in theirs])
+                answer = client.call("readable", {"identity": sender.qualified,
+                                                  "ids": [m.id for m in theirs]})
             finally:
                 client.close()
         except Exception as e:  # noqa: BLE001 -- a failed read lets the reply through
@@ -1527,12 +1574,13 @@ ASK_CHECK_NO_ANSWER = "NOTE: the single-reply check did not run (the daemon did 
 def _nominated_asks(client, sender, resolved) -> tuple[list[str], str | None]:
     """(the ask ids the daemon nominates, or a NOTE saying the check did not run).
 
-    `DaemonOffline` cannot reach here in the ordinary way -- the verb exits 4 before
+    `DaemonOffline` cannot reach here in the ordinary way -- the verb exits 75 before
     resolution when the daemon is down -- but a daemon that closes the connection in
     between is a daemon that did not answer, and it lets the send through like one.
     """
     try:
-        answer = client.query("asks", sender=sender.qualified, recipients=list(resolved))
+        answer = client.call("asks", {"sender": sender.qualified,
+                                     "recipients": list(resolved)})
     except (DaemonTimeout, DaemonOffline):
         return [], ASK_CHECK_NO_ANSWER
     except DaemonError as e:
@@ -1547,7 +1595,7 @@ def _open_asks(ctx: Context, sender, nominated, resolved) -> tuple[list, list[st
     the record the verb already holds. ANY error there -- `RecordError`,
     `DaemonOffline`, the local backend's own `sqlite3.Error`, or anything else the check
     cannot finish -- treats that ask as not open and says so; if the record is truly
-    broken the post itself fails, with exit 5.
+    broken the post itself fails, with exit 1.
     """
     now = ctx.clock()
     found, notes = [], []
@@ -1692,7 +1740,7 @@ def _refusal_reason(state) -> str:
 
 
 def _hold_text(refused, *, others: bool = False) -> str:
-    """The refusal for reads comms cannot make: exit 6, nothing posted.
+    """The refusal for reads comms cannot make: exit 75, nothing posted.
     It opens with "Nothing was sent:" and each refused recipient's reason, says how to
     reach the others when the post had others, tells the sender to send it again, and
     closes with "Nothing was sent." -- so the first line and the last both say it."""
@@ -1771,37 +1819,6 @@ def _reply_audience(referent, passed: str | None) -> tuple[str | None, str | Non
         f"set. Nothing was sent. Drop --audience (the reply carries {original!r} on its "
         "own), or, if this is for someone else, send it as a new message rather than a "
         "reply.")
-
-
-def _nudge_daemon(ctx: Context) -> None:
-    """Tell the daemon a post is in the record.
-
-    On the local backend the CLI writes the record itself, so nothing else tells the
-    daemon the row is there: its pump would find it at the next `poll_interval`. One
-    fire-and-forget frame on the socket the daemon already owns cuts that wait to the
-    width of a unix send. Local only, by the seam and not by the record object: the
-    mock fans out in-process, so it has no nudge to take.
-
-    No answer is read and none is expected. Two misses are accepted and NOT coded
-    around: an old daemon answers `unknown op` to a frame nobody waits for, and a CLI
-    whose XDG_RUNTIME_DIR is unset names the STATE fallback socket, where the nudge
-    lands nowhere and delivery waits one poll interval.
-
-    The operator's lane posts through `post_as_user` and needs this line too. It
-    lands here by the same route an agent's post does: `_send_resolved` nudges on
-    whatever reached the record, whichever door it went through, so the operator's typed
-    message is delivered at the width of a unix send and not at the next poll.
-    """
-    if ctx.backend_name() != LOCAL:
-        return
-    try:
-        client = ctx.daemon()
-    except DaemonOffline:
-        return                  # no daemon, the poll will find it
-    try:
-        client.notify("nudge")
-    finally:
-        client.close()
 
 
 def _bodies(args, ctx: Context, resolved, reply_to, audience=None, *,
@@ -1883,7 +1900,7 @@ def run(ctx: Context, args, *, tags=None) -> SendResult:
             # A config file that does not load refuses the send, naming the key and the
             # fix.
             ctx.refuse("config", str(e))
-            code = EXIT_REFUSED
+            code = _REFUSED
     finally:
         ctx.capture = outer
     return _result(code, capture, check=bool(getattr(args, "check", False)))
@@ -1891,10 +1908,11 @@ def run(ctx: Context, args, *, tags=None) -> SendResult:
 
 def _result(code: int, capture: _Capture, *, check: bool) -> SendResult:
     said, notes = tuple(capture.said), tuple(capture.notes)
-    if code != EXIT_OK:
-        outcome = _BY_EXIT.get(code, OUTCOME_FAILED)
+    if code != _OK:
+        outcome, exit_code = _ENDS.get(code, (OUTCOME_FAILED, moxi_exit.ERROR))
         refusal = capture.refusal or Refusal(outcome, "\n".join(map(str, said)))
-        return SendResult(outcome=outcome, refusal=refusal, notes=notes, said=said)
+        return SendResult(outcome=outcome, refusal=refusal, notes=notes, said=said,
+                          code=exit_code)
     recipients = (_recipients(capture.plan) if capture.plan is not None else ())
     if check:
         return SendResult(outcome=OUTCOME_WOULD_SEND, recipients=recipients, notes=notes,

@@ -38,7 +38,8 @@ from ..config import ConfigError
 from ..context import BARE_COMMS
 from ..membership import DEFAULT_PROC, TREE, Root
 from . import binding
-from .claude_shim import OFFLINE_MESSAGE, render_digest, survive_supervisor_error
+from .claude_shim import (ACTIVITY_METHODS, OFFLINE_MESSAGE, render_digest,
+                          survive_supervisor_error)
 
 #: The one value of `deliver` that puts a batch back on the queue.
 REQUEUE = object()
@@ -262,7 +263,7 @@ class HarnessAdapter:
         """This adapter is its session's top process and its claim holder. Its claim
         file is keyed by its pid and that pid's start time, so a reused pid never meets
         a dead adapter's file as its own; its claim socket is
-        RUNTIME/comms-adapter-<pid>.sock, stamped into everything it spawns."""
+        RUNTIME/comms/claim-<pid>-<start>.sock, stamped into everything it spawns."""
         from ..paths import runtime_root
         me = os.getpid()
         start = DEFAULT_PROC.start_time(me) or "0"
@@ -270,7 +271,7 @@ class HarnessAdapter:
         suffix = "" if n == 0 else f"-{n}"
         self.claims = ClaimHolder(
             kind=self.KIND, key=f"{me}-{start}{suffix}",
-            socket_path=runtime_root() / f"comms-adapter-{me}{suffix}.sock",
+            socket_path=runtime_root() / f"claim-{me}-{start}{suffix}.sock",
             lock=self._lock, roots=[Root(me, start, TREE)], keying="pid")
         agent = self.agent
         name, scope = getattr(agent, "name", None), getattr(agent, "scope", None)
@@ -302,10 +303,8 @@ class HarnessAdapter:
             with self.claims.register_lock:
                 self.connect_daemon()
         except DaemonError as e:
-            response = getattr(e, "response", None) or {}
-            holder = (response.get("holder") or {}).get("qualified")
-            if not (self.autoreconnect and response.get("refused")
-                    and not response.get("transient") and holder == self.agent.qualified):
+            holder = (e.data.get("holder") or {}).get("qualified")
+            if not (self.autoreconnect and e.refused and holder == self.agent.qualified):
                 raise
             self.claims.name_refused(holder)
             self.status_sink(f"comms unbound: {self.agent.qualified} is held by another "
@@ -337,11 +336,11 @@ class HarnessAdapter:
                 # once, so a reconnect's replay from the unmoved cursor never hands them
                 # again.
                 holding = sorted(self.held_ids, key=int)
-            return client.register(name=self.agent.name, scope=self.agent.scope,
-                                   global_=self.agent.scope == "global",
-                                   project=self.agent.scope, adapter=self.KIND,
-                                   holding=holding,
-                                   report=self.session_report(register=True))
+            return client.bind(name=self.agent.name, scope=self.agent.scope,
+                               global_=self.agent.scope == "global",
+                               project=self.agent.scope, adapter=self.KIND,
+                               holding=holding,
+                               report=self.session_report(register=True))
 
         def accept(resp):
             qualified = resp["identity"]["qualified"]
@@ -388,10 +387,9 @@ class HarnessAdapter:
         self.claims.close()
 
     # ------------------------------------------------------------------ daemon side
-    def _on_push(self, frame: dict) -> None:
-        op = frame.get("op")
-        if op == "deliver":
-            payload = frame["payload"]
+    def _on_push(self, method: str, params: dict) -> None:
+        if method == "deliver":
+            payload = params["payload"]
             with self._lock:
                 if not self.claims.holds:
                     return     # nothing is injected addressed to a claim not held
@@ -401,13 +399,13 @@ class HarnessAdapter:
                 self.held_ids.add(mid)
                 self.queue.append(payload)
             self._wake.set()
-        elif op == "replay_complete":
+        elif method == "replay_complete":
             with self._lock:
                 self.replaying = False
-                if frame.get("truncated"):
-                    self.replay_notice = frame.get("notice")
-            self.log.info("replay complete for %s at cursor %s", frame.get("identity"),
-                          frame.get("cursor"))
+                if params.get("truncated"):
+                    self.replay_notice = params.get("notice")
+            self.log.info("replay complete for %s at cursor %s", params.get("identity"),
+                          params.get("cursor"))
             self._wake.set()
 
     def _on_daemon_close(self) -> None:
@@ -446,10 +444,8 @@ class HarnessAdapter:
                         self.status_sink("comms online: reconnected to the delivery "
                                          "daemon.")
                     except DaemonError as e:
-                        response = getattr(e, "response", None) or {}
-                        holder = (response.get("holder") or {}).get("qualified")
-                        if (response.get("refused") and not response.get("transient")
-                                and holder == self.agent.qualified):
+                        holder = (e.data.get("holder") or {}).get("qualified")
+                        if e.refused and holder == self.agent.qualified:
                             # A name held by another connection: a claim this adapter
                             # has held is gone for good (standby); a launch waits.
                             self.claims.name_refused(holder)
@@ -474,8 +470,8 @@ class HarnessAdapter:
         """Tell the daemon a digest went in, with its text."""
         daemon = self._daemon
         if daemon is not None:
-            daemon.notify("injected", identity=identity, through=str(through),
-                          digest=digest)
+            daemon.notify("injected", {"identity": identity, "through": str(through),
+                                       "text": digest})
 
     def notify_activity(self, identity, kind: str | None = None, **fields) -> bool:
         """Tell the daemon the agent did something, with the port's session report.
@@ -485,9 +481,9 @@ class HarnessAdapter:
         daemon = self._daemon
         if daemon is None or not daemon.connected:
             return False
-        extra = {"kind": kind} if kind else {}
-        daemon.notify("activity", identity=identity, **extra, **fields,
-                      **self.session_report(register=False))
+        daemon.notify(ACTIVITY_METHODS.get(kind, "activity"),
+                      {"identity": identity, **fields,
+                       **self.session_report(register=False)})
         return True
 
     def reregister(self) -> None:
