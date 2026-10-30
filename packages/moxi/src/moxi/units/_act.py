@@ -37,6 +37,7 @@ from collections.abc import Iterable, Sequence
 from . import _backend
 from ._apply import core_lock, fence as _fence
 from ._backend import ReadError, UnitRef
+from ._fence import FenceError
 from ._types import Acted, Stopped
 
 #: The acts on named units.
@@ -212,7 +213,11 @@ def _act(act: str, module: str, names, foreign: bool, runner) -> list[Acted]:
             if isinstance(unit, str):
                 out.append(Acted(owner, name, act, False, (unit,)))
                 continue
-            acted = impl.act(act, unit, fence)
+            try:
+                acted = impl.act(act, unit, fence)
+            except FenceError as exc:  # a name the fence refuses is that name's refusal
+                out.append(Acted(owner, name, act, False, (f"{name}: {exc}",)))
+                continue
             out.append(Acted(owner, name, act, acted.ok, acted.lines))
         return out
 
@@ -240,11 +245,14 @@ def _marked_unit(marked: Sequence[UnitRef], module: str, name: str) -> UnitRef |
 
 def foreign_unit(impl, ref: str, fence) -> UnitRef | str:
     """The `UnitRef` of foreign unit `ref`, or the line refusing it: a name in moxi's
-    own namespace, or a unit whose file carries a moxi mark."""
+    own namespace, a name the fence refuses, or a unit whose file carries a moxi mark."""
     if impl.own(ref):
         return (f"{ref} is in moxi's own unit namespace; foreign=True takes only units "
                 "moxi did not write")
-    unit = impl.foreign(ref, fence)
+    try:
+        unit = impl.foreign(ref, fence)
+    except FenceError as exc:
+        return f"{ref}: {exc}"
     for path in unit.paths:
         try:
             text = path.read_bytes().decode(impl.encoding, errors="replace")

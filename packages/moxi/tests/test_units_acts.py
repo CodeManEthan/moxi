@@ -185,7 +185,7 @@ def test_a_failed_act_carries_the_supervisors_text(w):
     w.sup.fail[("restart", "moxi-demo-relay.service")] = "Job failed. See journal."
     [acted] = units.restart("demo", ["relay"])
     assert not acted.ok
-    assert acted.lines == ("`systemctl --user restart moxi-demo-relay.service` failed: "
+    assert acted.lines == ("`systemctl --user restart -- moxi-demo-relay.service` failed: "
                            "Job failed. See journal.",)
 
 
@@ -218,6 +218,18 @@ def test_foreign_refuses_a_name_in_moxis_own_namespace(w, ref):
     for act in (units.start, units.stop, units.enable, units.disable, units.restart):
         [acted] = act("services", [ref], foreign=True)
         assert not acted.ok and "moxi's own unit namespace" in acted.lines[0]
+    assert w.sup.calls == []
+
+
+@pytest.mark.parametrize("ref", ["-Hhost.service", "--host=x.timer"])
+def test_foreign_refuses_a_name_led_by_a_dash_without_a_supervisor_call(w, ref):
+    w.installed(DAEMONS=DAEMON)
+    for act in (units.start, units.stop, units.enable, units.disable, units.restart):
+        [acted] = act("services", [ref], foreign=True)
+        assert not acted.ok and acted.lines[0].startswith(f"{ref}: ")
+        assert "none starting with -" in acted.lines[0]
+    acted = units.wrap("-Hhost.timer", module="demo", key="rows.backup", name="backup")
+    assert not acted.ok and "none starting with -" in acted.lines[0]
     assert w.sup.calls == []
 
 
@@ -371,9 +383,9 @@ def test_a_refused_start_is_reported_never_retried_and_the_next_is_started(w):
     first, second = units.resume(record)
     assert not first.ok and second.ok
     assert first.lines == (
-        "moxi-demo-relay.service: `systemctl --user start moxi-demo-relay.service` "
+        "moxi-demo-relay.service: `systemctl --user start -- moxi-demo-relay.service` "
         "failed: Unit is masked.",
-        "start it by hand: systemctl --user start moxi-demo-relay.service")
+        "start it by hand: systemctl --user start -- moxi-demo-relay.service")
     assert w.sup.calls == [("start", "moxi-demo-relay.service"),
                            ("start", "moxi-demo-other.service")]
 
@@ -412,7 +424,7 @@ def test_resume_clears_the_record_of_a_unit_it_started_and_keeps_the_others(w):
                         "'other': {'command': 'moxi-demo-relay'}}")
     for unit in ("moxi-demo-relay.service", "moxi-demo-other.service"):
         doctor.record("demo", f"{unit} was not started", key=f"resume:{unit}",
-                      fix=f"systemctl --user start {unit}")
+                      fix=f"systemctl --user start -- {unit}")
     doctor.record("demo", "unrelated", key="other")
     record: list = []
     units.stop("demo", record=record)

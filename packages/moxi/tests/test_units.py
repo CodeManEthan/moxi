@@ -516,7 +516,7 @@ def test_a_failed_step_prints_the_command_and_a_remedy_and_goes_on(w):
     done = {a.change.name: a for a in w.apply(units.plan("demo"))}
     assert done["relay"].ok and not done["other"].ok
     assert done["other"].lines == (
-        "`systemctl --user enable --now moxi-demo-other.service` failed: Failed to enable "
+        "`systemctl --user enable --now -- moxi-demo-other.service` failed: Failed to enable "
         "unit: denied",
         "the unit file is written; fix the cause and run `moxi install demo` again")
 

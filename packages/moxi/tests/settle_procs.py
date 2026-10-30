@@ -96,7 +96,8 @@ class Supervisor(FakeSupervisor):
 
     def __call__(self, cmd, *, env=None, timeout=None):
         self.load()
-        args = list(cmd[2:]) if cmd[0] != "loginctl" else list(cmd)
+        args = ([a for a in cmd[2:] if a != "--"] if cmd[0] != "loginctl"
+                else list(cmd))
         if LOG in os.environ:
             note("sup", begin=args)
         if args and args[0] in self.probe:

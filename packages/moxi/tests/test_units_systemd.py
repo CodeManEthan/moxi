@@ -483,7 +483,7 @@ def test_a_remove_the_supervisor_refuses_leaves_the_files(w):
     [done] = w.apply(units.plan("demo"))
     assert not done.ok
     assert done.lines == (
-        "`systemctl --user disable --now moxi-demo-relay.service` failed: Access denied",
+        "`systemctl --user disable --now -- moxi-demo-relay.service` failed: Access denied",
         "the unit is left in place; fix the cause and run `moxi install demo` again")
     assert (w.root / "moxi-demo-relay.service").exists()
     assert ("daemon-reload",) not in w.sup.calls[-1:]
@@ -599,7 +599,8 @@ def test_uninstall_removes_every_marked_unit_with_one_reload(w):
 # -- acts ---------------------------------------------------------------------------------------
 
 class Recorder:
-    """A runner that records each command after `systemctl --user` and answers from a
+    """A runner that records each command after `systemctl --user`, without the `--` before
+    the units, and answers from a
     table of (verb, unit) to (code, stdout, stderr)."""
 
     def __init__(self, answers=None, show=""):
@@ -608,7 +609,8 @@ class Recorder:
         self.show = show
 
     def __call__(self, cmd, *, env=None, timeout=None):
-        args = tuple(cmd[2:]) if cmd[0] == "systemctl" else tuple(cmd)
+        args = (tuple(a for a in cmd[2:] if a != "--") if cmd[0] == "systemctl"
+                else tuple(cmd))
         self.calls.append(args)
         if args[0] == "show":
             show = self.show(args) if callable(self.show) else self.show
@@ -744,7 +746,7 @@ def test_stopping_a_unit_that_is_not_loaded_is_done_and_other_failures_are_not(u
     run = Recorder({("start", "moxi-demo-relay.service"): (1, "", "Job failed.\n")})
     acted = SystemdBackend().act("start", unit, Fence("systemd", run))
     assert not acted.ok
-    assert acted.lines == ("`systemctl --user start moxi-demo-relay.service` failed: "
+    assert acted.lines == ("`systemctl --user start -- moxi-demo-relay.service` failed: "
                            "Job failed.",)
 
 
@@ -915,7 +917,7 @@ class Manager:
         self.reload_fails = ""
 
     def __call__(self, cmd, *, env=None, timeout=None):
-        args = tuple(cmd[2:])
+        args = tuple(a for a in cmd[2:] if a != "--")
         self.calls.append(args)
         if args[0] == "daemon-reload":
             return subprocess.CompletedProcess(cmd, 1 if self.reload_fails else 0, "",

@@ -414,11 +414,11 @@ def test_a_start_the_supervisor_refuses_is_reported_and_recorded(w, capsys, monk
     w.sup.fail[("start", SERVICE)] = "Unit is masked."
     code, out = settle(w, capsys, monkeypatch, setup="fail")
     assert code == 1
-    assert (f"demo: {SERVICE}: `systemctl --user start {SERVICE}` failed" in out
-            and f"start it by hand: systemctl --user start {SERVICE}" in out), out
+    assert (f"demo: {SERVICE}: `systemctl --user start -- {SERVICE}` failed" in out
+            and f"start it by hand: systemctl --user start -- {SERVICE}" in out), out
     records = json.loads((moxi.paths.Layout("demo").state_dir() / "doctor.json")
                          .read_text())
-    assert records[f"resume:{SERVICE}"]["fix"] == f"systemctl --user start {SERVICE}"
+    assert records[f"resume:{SERVICE}"]["fix"] == f"systemctl --user start -- {SERVICE}"
     assert w.calls("enable") == []
 
 
@@ -527,7 +527,7 @@ def test_a_signal_inside_a_held_span_lets_the_move_finish(w, capsys, monkeypatch
     _settle.install_handlers()
 
     def runner(cmd, **kw):
-        if cmd[2:4] == ["stop", SERVICE]:
+        if cmd[2:5] == ["stop", "--", SERVICE]:
             os.kill(os.getpid(), signal.SIGINT)
         return w.sup(cmd, **kw)
     monkeypatch.setattr(w.backend, "runner", runner)
