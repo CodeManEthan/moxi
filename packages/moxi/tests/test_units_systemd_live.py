@@ -160,7 +160,7 @@ def test_wrap_on_this_boxs_user_manager(tmp_path, monkeypatch, capsys):
         dropin = row.dir / f"{row.service}.d" / f"50-moxi-{MODULE}.conf"
         text = dropin.read_text()
         assert str(dropin) in row.show("DropInPaths")["DropInPaths"].split()
-        unit = row.backend.foreign(row.timer, row.fence)
+        unit = row.backend.foreign(row.timer, None)
         [state] = row.backend.status([unit], row.fence)
         assert state.wrapped == Wrapped(MODULE, KEY, NAME)
         report.append(f"status: {state.state} wrapped={state.wrapped} last={state.last}")

@@ -24,7 +24,7 @@ import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from ._backend import ApplyIO, Rendered, RenderError, Spec, UnitRef
+from ._backend import ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef
 from ._fence import Fence, Ran
 from ._types import Acted, UnitChange, UnitState, Wrapped
 
@@ -341,7 +341,13 @@ class SystemdBackend:
         if restart:
             daemons = [c for c in keeps if c.kind == "daemon" and c.enabled
                        and c.entry.get("upgrade", "restart") == "restart"]
-            running = self.running([self._id(c) for c in daemons], fence)
+            try:
+                running = self.running([self._id(c) for c in daemons], fence)
+            except ReadError as exc:
+                for change in daemons:
+                    io.fail(change, exc.ran, "the unit is written; restart it with "
+                                             f"`systemctl --user restart {self._id(change)}`")
+                return
             for change in daemons:
                 if self._id(change) in running:
                     self._run(io, change, "restart", self._id(change))
@@ -429,13 +435,25 @@ class SystemdBackend:
     def own(self, ref: str) -> bool:
         return ref.startswith("moxi-")
 
-    def foreign(self, ref: str, fence: Fence) -> UnitRef:
+    def foreign(self, ref: str, fence: Fence | None) -> UnitRef:
+        """A foreign unit; a timer's ids are its `.timer` and the unit its `Triggers`
+        names, or, with `fence` None (no supervisor call), its `.timer` alone."""
         if ref.endswith(".timer"):
+            if fence is None:
+                return UnitRef(None, ref, "timer", (ref,))
             ran = fence.run("show", "--property=Id,Triggers", ref)
             block = _by_id(ran, [ref]).get(ref, {})
             triggers = tuple(_one(block, "Triggers").split())
             return UnitRef(None, ref, "timer", (ref, *triggers))
         return UnitRef(None, ref, "daemon", (ref,))
+
+    def ids(self, module: str, name: str, kind: str) -> tuple[str, ...]:
+        """The ids the writer gives a unit, file or not: a daemon's `.socket` then its
+        `.service`; a timer's `.timer` then its `.service`."""
+        stem = self._stem(module, name)
+        if kind == "timer":
+            return (f"{stem}.timer", f"{stem}.service")
+        return (f"{stem}.socket", f"{stem}.service")
 
     def _socket_of(self, unit: UnitRef) -> tuple[str, ...]:
         """A marked daemon's `.socket` id, when a file with its mark is there."""
@@ -488,6 +506,8 @@ class SystemdBackend:
         if not ids:
             return frozenset()
         ran = fence.run("show", "--property=Id,ActiveState", *ids)
+        if not ran.ok:
+            raise ReadError(ran)
         return frozenset(unit for unit, block in _by_id(ran, ids).items()
                          if _one(block, "ActiveState") in ("active", "activating",
                                                            "reloading"))
@@ -583,12 +603,15 @@ class SystemdBackend:
         """Put the foreign timer `ref`'s runs behind `module`'s switch `key`, recorded as
         `<module>/<name>`: a marked drop-in on the service it triggers, with the gate's
         two wrap forms as `ExecCondition=` and `ExecStopPost=`, then one `daemon-reload`.
-        Refuses, with one line, a systemd older than 243, a timer that is not loaded or
-        does not trigger exactly one service, a service without exactly one `ExecStart`
-        or of another `Type` than oneshot, simple or exec, a service another module
-        wrapped, an unmarked file at the drop-in's path, and a service this module
-        wrapped for another timer or with another key or name. A second wrap of the same
-        timer with the same key and name rewrites the drop-in."""
+        The core has already checked `ref` as a foreign name, `key` as a switch, `name`,
+        and that no other wrap of `module` conflicts (`wraps`). This refuses, with one line
+        naming what it found: a manager older than 243 (or whose version it cannot read);
+        a timer not loaded or not triggering exactly one service; a service not loaded,
+        without exactly one `ExecStart`, or with a `Type` other than oneshot, simple or
+        exec; a drop-in on that service marked for another module; an unmarked file at
+        the drop-in's path; no `moxi` gate script. As a guard it also refuses a name in
+        moxi's own namespace and a ref that is not a `.timer`. A drop-in there with
+        `module`'s mark is rewritten."""
         from .. import files, paths
 
         def no(line: str) -> Acted:
@@ -652,9 +675,6 @@ class SystemdBackend:
                 return no(f"{path} exists and was not written by moxi; not wrapped")
             if mark[0] != module:
                 return no(f"{service} is wrapped by {mark[0]}")
-            if mark[1:] != (ref, key, name):
-                return no(f"{service} is already wrapped by {module} for {mark[1]} (key "
-                          f"{mark[2]}, record {module}/{mark[3]}); unwrap it first")
         try:
             gate = str(paths.script("moxi"))
         except FileNotFoundError:
@@ -686,6 +706,13 @@ class SystemdBackend:
             if mark and mark[0] == module:
                 out.append((path, mark))
         return out
+
+    def wraps(self, module: str) -> tuple[tuple[str, str, Wrapped], ...]:
+        """Every drop-in with `module`'s wrap mark, as `(timer ref, service, Wrapped)`,
+        read from the files."""
+        return tuple((mark[1], path.parent.name.removesuffix(".d"),
+                      Wrapped(module, mark[2], mark[3]))
+                     for path, mark in self._drop_ins(module))
 
     def unwrap(self, ref: str, *, module: str, fence: Fence) -> Acted:
         found = [path for path, mark in self._drop_ins(module) if mark[1] == ref]

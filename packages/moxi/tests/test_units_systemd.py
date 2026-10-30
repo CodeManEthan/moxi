@@ -18,7 +18,8 @@ import pytest
 import moxi.paths
 from moxi import units
 from moxi.units import _backend, _systemd
-from moxi.units._backend import Backend, RenderError, Schedule, Socket, Spec, UnitRef
+from moxi.units._backend import (
+    Backend, ReadError, RenderError, Schedule, Socket, Spec, UnitRef)
 from moxi.units._fake import FakeSupervisor
 from moxi.units._fence import Fence
 from moxi.units._systemd import SystemdBackend, quote
@@ -675,6 +676,47 @@ def test_a_foreign_timer_acts_on_the_unit_its_triggers_names(unit_root):
     assert not any("backup.service" in c for c in run.calls)
 
 
+def test_a_foreign_timer_with_no_fence_is_its_timer_alone(unit_root):
+    assert SystemdBackend().foreign("backup.timer", None) == UnitRef(
+        None, "backup.timer", "timer", ("backup.timer",))
+    assert SystemdBackend().foreign("backup.service", None).ids == ("backup.service",)
+
+
+def test_ids_are_the_writers_whether_or_not_a_file_is_there(unit_root):
+    backend = SystemdBackend()
+    assert backend.ids("comms", "daemon", "daemon") == ("moxi-comms-daemon.socket",
+                                                        "moxi-comms-daemon.service")
+    assert backend.ids("notes", "snap", "timer") == ("moxi-notes-snap.timer",
+                                                     "moxi-notes-snap.service")
+
+
+def test_a_failed_running_read_raises_and_is_never_nothing_runs(unit_root):
+    def fail(cmd, *, env=None, timeout=None):
+        return subprocess.CompletedProcess(cmd, 1, "", "Failed to connect to bus\n")
+
+    with pytest.raises(ReadError) as caught:
+        SystemdBackend().running(["a.service"], Fence("systemd", fail))
+    assert "Failed to connect to bus" in caught.value.ran.stderr
+
+
+def test_restart_after_an_upgrade_fails_its_daemons_when_the_read_fails(w):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=DAEMON)
+    w.apply(units.plan("demo"))
+    real = w.sup.__call__
+
+    def broken(cmd, **kw):
+        if cmd[2:3] == ["show"]:
+            return subprocess.CompletedProcess(cmd, 1, "", "Failed to connect to bus\n")
+        return real(cmd, **kw)
+
+    w.sup.calls.clear()
+    [done] = units.apply(units.plan("demo"), restart=True, runner=broken,
+                         say=w.lines.append)
+    assert not done.ok and "Failed to connect to bus" in done.lines[0]
+    assert not any(c[0] == "restart" for c in w.sup.calls)
+
+
 def test_a_foreign_timer_with_no_triggers_cannot_be_started(unit_root):
     run = Recorder(show="Id=lone.timer\nTriggers=\n")
     backend = SystemdBackend()
@@ -964,16 +1006,27 @@ def test_wrap_never_touches_an_unmarked_file_at_its_path(unit_root, bin_dir):
     assert path.read_text() == "[Service]\nEnvironment=A=1\n"
 
 
-@pytest.mark.parametrize("change", [dict(key="other.enabled"), dict(name="nightly"),
-                                    dict(ref="other.timer")])
-def test_wrap_refuses_a_service_this_module_wrapped_otherwise(unit_root, bin_dir, change):
+def test_wrap_rewrites_this_modules_drop_in_whatever_it_held(unit_root, bin_dir):
+    """The core refuses a conflicting wrap of the module first (from `wraps`); the
+    backend rewrites a drop-in that carries the module's mark."""
     _wrap(unit_root)
+    acted, _ = _wrap(unit_root, key="other.enabled", name="nightly")
     path = unit_root / "backup-run.service.d" / "50-moxi-services.conf"
-    before = path.read_text()
-    acted, _ = _wrap(unit_root, **change)
-    assert not acted.ok and len(acted.lines) == 1
-    assert "is already wrapped by services for backup.timer" in acted.lines[0]
-    assert path.read_text() == before
+    assert acted.ok and "if = services.other.enabled" in path.read_text()
+
+
+def test_wraps_reads_every_drop_in_of_the_module_with_no_call(unit_root, bin_dir):
+    _wrap(unit_root)
+    _wrap(unit_root, ref="other.timer", manager=Manager(unit_root,
+                                                        triggers="other-run.service"),
+          key="o.enabled", name="other")
+    _wrap(unit_root, module="tools", ref="third.timer",
+          manager=Manager(unit_root, triggers="third-run.service"), key="t.enabled")
+    assert SystemdBackend().wraps("services") == (
+        ("backup.timer", "backup-run.service", Wrapped("services", "backup.enabled",
+                                                       "backup")),
+        ("other.timer", "other-run.service", Wrapped("services", "o.enabled", "other")))
+    assert SystemdBackend().wraps("nobody") == ()
 
 
 def test_wrap_refuses_moxis_own_names_and_non_timers(unit_root, bin_dir):
