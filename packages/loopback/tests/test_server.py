@@ -7,6 +7,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import sys
 import threading
 import time
 
@@ -555,6 +557,22 @@ def test_asset_traversal_forms_are_404(pages, path):
     chain, inner = served(pages)
     assert run(drive(chain, scope(path=path))).status == 404
     assert run(drive(inner, scope(path=path, checked=True))).status == 404
+
+
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0,
+                    reason="a file mode that refuses reading")
+def test_an_asset_that_cannot_be_read_is_a_refused_page(tmp_path, monkeypatch):
+    from moxi_loopback.routes import Page
+
+    web = tmp_path / "pagepkg_unreadable" / "web"
+    web.mkdir(parents=True)
+    (web.parent / "__init__.py").write_text("")
+    (web / "app.js").write_text("x")
+    (web / "app.js").chmod(0)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    page = Page(routes=(), assets="web", package="pagepkg_unreadable")
+    with pytest.raises(PageError, match="app.js cannot be read"):
+        app(page, module="m", server_id="s")
 
 
 # --- health ----------------------------------------------------------------------------

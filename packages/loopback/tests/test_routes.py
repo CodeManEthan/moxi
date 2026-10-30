@@ -2,6 +2,7 @@
 export, the query and body allowlist, and projection."""
 
 import json
+import sys
 import textwrap
 
 import pytest
@@ -418,6 +419,17 @@ def test_build_table_refuses_a_bad_asset_table(make_package, files, dirs):
     package = make_package(f"pagepkg_bad_{abs(hash((tuple(files), tuple(dirs))))}", files, dirs)
     page = Page(routes=(), assets="web", package=package)
     with pytest.raises(PageError):
+        build_table(page)
+    with pytest.raises(PageError):
+        export(page)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege on Windows")
+def test_build_table_refuses_an_asset_entry_that_is_not_a_file(make_package, tmp_path):
+    package = make_package("pagepkg_dangling", ["app.js"])
+    (tmp_path / package / "web" / "gone.js").symlink_to(tmp_path / "nowhere.js")
+    page = Page(routes=(), assets="web", package=package)
+    with pytest.raises(PageError, match="gone.js is not a file"):
         build_table(page)
     with pytest.raises(PageError):
         export(page)

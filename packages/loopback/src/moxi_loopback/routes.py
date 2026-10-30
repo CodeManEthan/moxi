@@ -609,6 +609,10 @@ def list_assets(page: Page) -> tuple[str, ...]:
         name = item.name
         if item.is_dir():
             raise PageError(f"the asset directory {page.assets} holds a subdirectory, {name}")
+        if not item.is_file():
+            # A dangling link or a special file would pass here and break the server's
+            # start, so the export and the runner refuse it alike.
+            raise PageError(f"the asset {name} is not a file")
         if not _ASSET_NAME.match(name):
             raise PageError(f"the asset name {name!r} is not a plain file name")
         suffix = name[name.rfind("."):] if "." in name else ""

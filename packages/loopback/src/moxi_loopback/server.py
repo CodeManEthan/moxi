@@ -684,7 +684,11 @@ class PageApp:
 
             root = importlib.resources.files(page.package).joinpath(page.assets)
             for name in names:
-                body = root.joinpath(name).read_bytes()
+                try:
+                    body = root.joinpath(name).read_bytes()
+                except OSError as err:
+                    raise PageError(f"the asset {name} cannot be read: "
+                                    f"{err.strerror or type(err).__name__}") from None
                 suffix = name[name.rfind("."):]
                 self._assets["/" + name] = (body, _etag(body), CONTENT_TYPES[suffix])
             if "/index.html" in self._assets:
@@ -910,8 +914,8 @@ def app(page: Page, *, module: str, server_id: str, prefix: str = "",
     `CHECKED` key, so serve it behind `guard`. It strips `prefix` from the raw path before
     it matches, and a raw path that does not start with `prefix + "/"` is a 404. It does
     not answer `/api/prove`. Handler and health targets are resolved here, once; a
-    target that cannot be loaded raises `PageError`, as `build_table` does for a refused
-    asset table. `version` is reported by the health route. `strict` (the testing
+    target that cannot be loaded, or an asset that cannot be read, raises `PageError`, as
+    `build_table` does for a refused asset table. `version` is reported by the health route. `strict` (the testing
     helper's) makes a value with an undeclared key a 500 rather than a dropped key.
     """
     return PageApp(page, module=module, server_id=server_id, prefix=prefix,
