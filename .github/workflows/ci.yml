@@ -1,6 +1,7 @@
 # The same check a contributor runs before asking for a merge: `moxi-dev check`.
 # Linux runs on every push to any branch; Windows and macOS run on pushes to main,
-# after the merge, and gate nothing while the packages are Linux-only.
+# after the merge, and gate nothing while the packages are Linux-only. secrets
+# supports Windows, so its tests also run on Windows on every push, and gate.
 # Actions are pinned to a release commit, with its version beside it.
 
 name: check
@@ -52,3 +53,21 @@ jobs:
           python-version: "3.12"
       - run: uv sync --locked
       - run: uv run --locked moxi-dev check --full
+
+  secrets-windows:
+    # The secrets rule files are compared byte for byte (the pin's sha256, the
+    # sets.json regeneration). A Windows checkout that rewrites line endings must
+    # leave them alone, so line-ending conversion is turned on before the checkout.
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - run: git config --global core.autocrlf true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      - run: uv sync --locked
+      - name: the secrets tests
+        working-directory: packages/secrets
+        run: uv run --locked pytest
