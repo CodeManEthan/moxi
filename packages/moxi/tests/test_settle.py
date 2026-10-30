@@ -375,6 +375,76 @@ def test_a_clean_settle_moves_sets_up_applies_and_starts_the_record(w, capsys, m
     assert _settle.setup_version("demo") == "0.1.0"
 
 
+def _other_command(w, *, keep=False):
+    """The relay's socket daemon with another command: its service text changes and its
+    socket set does not. (The name is longer, so the module file's size changes and its
+    cached bytecode, written in the same second, is not taken for it.)"""
+    script = moxi.paths._scripts() / "moxi-demo-relay-next"
+    script.write_text("#!/bin/sh\n")
+    script.chmod(0o755)
+    w.module(DAEMONS=SOCKET.replace("'moxi-demo-relay'", "'moxi-demo-relay-next'"
+                                    + (", 'upgrade': 'keep'" if keep else "")))
+    assert {c.kind: c.action for c in units.plan("demo")} == {"daemon": "change",
+                                                              "socket": "keep"}
+
+
+def _show_fails_after_the_move(w, monkeypatch):
+    """The supervisor's `show` fails once the move has stopped the service, so the unit
+    step's read of which services run fails and the move's own read does not."""
+    def runner(cmd, **kw):
+        if cmd[2:3] == ["show"] and ("stop", SERVICE) in w.sup.calls:
+            w.sup.calls.append(tuple(a for a in cmd[2:] if a != "--"))
+            import subprocess
+            return subprocess.CompletedProcess(cmd, 1, "", "Failed to connect to bus\n")
+        return w.sup(cmd, **kw)
+
+    monkeypatch.setattr(w.backend, "runner", runner)
+
+
+@pytest.mark.parametrize("read", ["answered", "failed"])
+def test_after_a_move_a_changed_socket_daemon_starts_its_units_first_and_exits_0(
+        w, capsys, monkeypatch, read):
+    """The service's text changed and its set did not (`upgrade = "restart"`): the unit
+    step starts the socket unit, then the service (after a `stop` that does nothing when
+    the read failed, never a `restart`), and `resume`'s starts of the same ids are no-ops
+    the supervisor refuses none of."""
+    w.installed(DAEMONS=SOCKET)
+    _other_command(w)
+    w.legacy()
+    if read == "failed":
+        _show_fails_after_the_move(w, monkeypatch)
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert "refusing" not in out
+    sock = "moxi-demo-relay.socket"
+    unit_step = [("start", sock), ("start", SERVICE)]
+    if read == "failed":
+        unit_step = [("stop", SERVICE)] + unit_step
+    assert w.calls("stop", "start", "restart") == [
+        ("stop", sock), ("stop", SERVICE), *unit_step, ("start", sock), ("start", SERVICE)]
+    assert w.active(sock) and w.active(SERVICE)
+
+
+@pytest.mark.parametrize("read", ["answered", "failed"])
+def test_after_a_move_a_keep_socket_daemon_with_its_set_unchanged_waits_for_resume(
+        w, capsys, monkeypatch, read):
+    """`upgrade = "keep"` with an unchanged set: the unit step starts nothing, and
+    `resume` starts the socket unit while the service is down, then the service."""
+    monkeypatch.setattr(_plan, "ipv6_loopback", lambda: True)
+    w.installed(DAEMONS=SOCKET.replace("'moxi-demo-relay'",
+                                       "'moxi-demo-relay', 'upgrade': 'keep'"))
+    _other_command(w, keep=True)
+    w.legacy()
+    if read == "failed":
+        _show_fails_after_the_move(w, monkeypatch)
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    sock = "moxi-demo-relay.socket"
+    assert w.calls("stop", "start", "restart") == [
+        ("stop", sock), ("stop", SERVICE), ("start", sock), ("start", SERVICE)]
+    assert w.active(sock) and w.active(SERVICE)
+
+
 @pytest.mark.parametrize("path", ["refusal", "rename", "setup", "exit", "command",
                                   "switch", "keep"])
 def test_every_path_out_starts_exactly_the_recorded_units(w, capsys, monkeypatch, path):
@@ -521,6 +591,8 @@ def test_a_socket_unit_the_set_dropped_leaves_the_record(w, capsys, monkeypatch)
     assert ("disable", "--now", "moxi-demo-relay-1.socket") in w.calls("disable")
     assert not (w.root / "moxi-demo-relay-1.socket").exists()
     assert ("start", "moxi-demo-relay-1.socket") not in w.calls("start")
+    starts = w.calls("start")
+    assert starts.index(("start", "moxi-demo-relay.socket")) < starts.index(("start", SERVICE))
     assert w.active("moxi-demo-relay.socket") and w.active(SERVICE)
 
 
