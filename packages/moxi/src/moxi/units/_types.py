@@ -147,6 +147,18 @@ class UnitState:
     when a socket unit starts again. It is None for every other state and kind, and on
     launchd and Task Scheduler.
 
+    `triggers` is set on a systemd timer's state only, marked or foreign: the unit its
+    `.timer`'s `Triggers` names, read in the same `show` as its state, so it costs no
+    call. A marked timer's is `<stem>.service`; a foreign one's is the unit its `Unit=`
+    names, or the service of its own name when it names none. systemd lets a timer name
+    one unit and ignores a second `Unit=`, so this is one name. It is None for a daemon
+    and a socket; for a timer that is `missing` (systemd shows an empty `Triggers` for a
+    unit it does not hold), `unknown` (nothing was read), `off` or `nobackend` (no read
+    was made), or whose `Triggers` is empty; and always on launchd and Task Scheduler,
+    where a label or a task is its own job with no second unit. When the `show` of the
+    unit a foreign timer names fails after its `.timer` was read, `triggers` is still
+    set and `last` is None.
+
     `last` is how the unit's last run went, None when nothing is known. Its keys at the top
     level are the gate's newest run line (`unit`, `at`, `seconds`, `result`, `exit`), the
     same on every backend, present for a marked unit (and a wrapped foreign timer) once
@@ -178,6 +190,7 @@ class UnitState:
     enabled: bool | None = None
     wrapped: Wrapped | None = None
     epoch: str | None = None
+    triggers: str | None = None
 
 
 @dataclass(frozen=True)

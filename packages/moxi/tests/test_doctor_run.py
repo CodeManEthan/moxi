@@ -11,6 +11,7 @@ import sys
 import textwrap
 import time
 import types
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +20,7 @@ from moxi import cli, doctor, files, modules, strays, units
 from moxi.doctor import Row, _run
 from moxi.units import _backend, _state
 from moxi.units._fake import FakeBackend, FakeSupervisor
+from moxi.units._launchd import LaunchdBackend
 from moxi.units._types import UnitChange, UnitState, Wrapped
 
 SETTINGS = """
@@ -678,6 +680,38 @@ def test_on_launchd_a_label_not_loaded_shows_its_socket_in_the_daemon_row(d, mon
     row = got[("demo", "daemon relay")]
     assert (row.state, row.detail) == (
         "warn", "up to date; inactive; its socket: inactive (not loaded)")
+
+
+def test_on_launchd_the_recorded_print_of_an_idle_label_gives_the_same_rows(d, tmp_path,
+                                                                           monkeypatch):
+    """The launchd backend's own plan and status, its `status` reading the recorded
+    print of a loaded socket daemon that has not run yet: the daemon row is `ok`, idle
+    with its socket listening, and there is no socket row."""
+    monkeypatch.syspath_prepend(str(Path(__file__).parent))
+    from test_units_launchd import SOCKETS_PRINTED, UID
+
+    calls = []
+
+    def run(cmd, *, env=None, timeout=None):
+        calls.append(cmd)
+        assert cmd == ["launchctl", "print", f"gui/{UID}"]
+        return subprocess.CompletedProcess(cmd, 0, SOCKETS_PRINTED, "")
+
+    agents = tmp_path / "LaunchAgents"
+    agents.mkdir()
+    d.script("moxi-demo-relay")
+    d.module(DAEMONS="{'idle': {'command': 'moxi-demo-relay', 'socket': {'setting': 'port', "
+                     "'addresses': ['127.0.0.1']}}}")
+    with _backend.use(LaunchdBackend(agents=agents, uid=UID, runner=run)):
+        [change] = units.plan("demo")
+        assert (change.kind, change.action) == ("daemon", "add")
+        files.atomic_write(change.paths[0], change.text)
+        got = {k: r for k, r in d.rows("demo", runner=run).items()
+               if k[1].startswith(("daemon", "socket"))}
+    assert set(got) == {("demo", "daemon idle")}
+    assert (got[("demo", "daemon idle")].state, got[("demo", "daemon idle")].detail) == (
+        "ok", "up to date; idle, socket listening")
+    assert calls == [["launchctl", "print", f"gui/{UID}"]]
 
 
 @pytest.mark.parametrize("seen, state", [("inactive", "warn"), ("active", "ok"),

@@ -826,9 +826,12 @@ class SystemdBackend:
         wrapped = None
         if unit.kind == "timer" and not unit.marked and service is not head:
             wrapped = self._wrapped(unit.ids[0], _one(service, "DropInPaths").split())
+        # The unit the `.timer` names, from its own block: a timer names one.
+        named = _one(head, "Triggers").split() if unit.kind == "timer" else []
         return UnitState(unit.module, unit.name, unit.kind, self.name, state, pid=pid,
                          since=since, last=last, detail=detail, log=self.log(unit),
-                         enabled=enabled, wrapped=wrapped)
+                         enabled=enabled, wrapped=wrapped,
+                         triggers=named[0] if named else None)
 
     def log(self, unit: UnitRef) -> str | None:
         """`journalctl --user -u <unit>`: a timer's service, where its runs write; a

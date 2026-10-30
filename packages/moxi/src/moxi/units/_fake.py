@@ -559,10 +559,13 @@ class FakeBackend:
             last = ({"result": service.get("Result"),
                      "status": service.get("ExecMainStatus")}
                     if unit.kind == "timer" and service else None)
+            named = (head.get("Triggers", "").split()
+                     if unit.kind == "timer" and state != "missing" else [])
             out.append(UnitState(unit.module, unit.name, unit.kind, self.name, state,
                                  pid=pid, last=last, detail=detail,
                                  log=None if state == "missing" else self.log(unit),
-                                 enabled=enabled, wrapped=self._wrapped(service)))
+                                 enabled=enabled, wrapped=self._wrapped(service),
+                                 triggers=named[0] if named else None))
         return out
 
     def log(self, unit: UnitRef) -> str | None:

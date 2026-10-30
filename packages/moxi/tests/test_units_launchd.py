@@ -959,6 +959,16 @@ def test_a_timer_reads_its_schedule_never_its_last_run(mac, monkeypatch):
     assert states["running"].pid == 777 and "disabled" in states["off"].detail
 
 
+def test_a_timer_names_no_triggered_unit_on_launchd(mac):
+    """A label is its own job: no timer state carries `triggers`, armed or not."""
+    for name in ("failing", "running", "off"):
+        [group] = mac.backend.render(spec("timer", name=name, schedule=Schedule(every=5)))
+        group.files[0][0].write_text(group.files[0][1])
+    states = mac.backend.status(list(mac.backend.marked("demo")), recorded(TIMERS_PRINTED))
+    assert sorted((s.name, s.kind, s.triggers) for s in states) == [
+        ("failing", "timer", None), ("off", "timer", None), ("running", "timer", None)]
+
+
 def test_status_when_the_print_fails_is_unknown(mac):
     """Every unit the one print covers, daemon, timer and foreign label alike."""
     def run(cmd, *, env=None, timeout=None):
