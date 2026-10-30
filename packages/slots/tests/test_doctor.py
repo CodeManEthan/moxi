@@ -40,7 +40,7 @@ def test_the_rows_on_a_system_slots_runs_on(fake_tmux, monkeypatch):
     monkeypatch.setattr(units, "backend", lambda: None)
     names = [row.name for row in doctor.rows()]
     assert names == ["system", "tmux", "server mode", "options", "socket", "launch files",
-                     "trampoline", "mismatches"]
+                     "trampoline", "mismatches", "registry", "holds"]
 
 
 def test_the_tmux_row(fake_tmux, fence):

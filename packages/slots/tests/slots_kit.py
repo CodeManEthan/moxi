@@ -81,3 +81,27 @@ def kill(path: str, socket: str, proc: subprocess.Popen | None) -> None:
             proc.wait(timeout=5)
     if os.path.exists(socket):
         os.remove(socket)
+
+
+def run_window(number: int, *command: str) -> tuple[str, str]:
+    """Make a run window in slot `number` by hand, as a start would (marked, kept when
+    its pane dies), running `command`; returns (window id, pane id)."""
+    made = tmux.call("new-window", "-d", "-P", "-F", "#{window_id} #{pane_id}",
+                     "-t", f"=slot-{number}:", *command)
+    window, pane = made.out.split()
+    tmux.call("set-option", "-w", "-t", window, "@moxi_slot_run", "on", ";",
+              "set-option", "-w", "-t", window, "remain-on-exit", "on")
+    return window, pane
+
+
+def pane_field(pane: str, name: str) -> str:
+    return tmux.call("display-message", "-p", "-t", pane, f"#{{{name}}}").out.strip()
+
+
+def wait_for(check, timeout: float = 5.0, what: str = "the condition"):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if value := check():
+            return value
+        time.sleep(0.02)
+    raise AssertionError(f"timed out waiting for {what}")

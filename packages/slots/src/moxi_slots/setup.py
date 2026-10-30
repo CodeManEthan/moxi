@@ -1,4 +1,5 @@
-"""slots' `SETUP`, run at every `moxi install slots`: record tmux's absolute path.
+"""slots' `SETUP`, run at every `moxi install slots`: record tmux's absolute path; and its
+`TEARDOWN`, run before an uninstall removes anything.
 
 The rule: no slots process looks tmux up on a PATH at run time; the server, every client
 call and the doctor use the one absolute path recorded here.
@@ -17,6 +18,11 @@ With tmux absent, not runnable, or below 3.2, the step prints what it found and 
 writing nothing; the install then writes no unit. On a system slots does not run on
 (native Windows) the step says so and exits 0: the package installs there, and the
 core's writer skips the daemon.
+
+The teardown refuses (`moxi.modules.Refused`, naming the slots) while any slot is
+occupied or not idle, since the uninstall's unit removal stops the server and that ends
+every session in every slot. The uninstall then removes nothing. With no server
+answering, nothing runs in a slot and the teardown accepts.
 """
 
 from __future__ import annotations
@@ -103,4 +109,32 @@ def setup() -> int:
     return codes.OK
 
 
-__all__ = ["INSTALL", "install_hint", "setup_wrote", "resolve", "setup"]
+def teardown() -> int:
+    """Accept the uninstall (0) unless a slot is occupied or not idle; then raise
+    `moxi.modules.Refused` naming them. A server that can't be read is refused too."""
+    from moxi.modules import Refused
+
+    from .errors import SlotsError
+    from .settings import NotSetUp
+    from .slots import busy
+
+    if not support.system_ok():
+        return codes.OK
+    try:
+        if tmux.ping() is None:
+            return codes.OK
+        lines = busy()
+    except NotSetUp:
+        return codes.OK
+    except SlotsError as exc:
+        raise Refused(f"the slots could not be read ({exc}), so the server is left "
+                      "running; try again, or remove the slots first") from None
+    if lines:
+        raise Refused("; ".join(lines) + ". Uninstalling stops the server, which ends "
+                      "every slot's session. End the launches through their sessions; for a "
+                      "slot that is only not idle, close what you opened there or `moxi "
+                      "slots remove N --force` it")
+    return codes.OK
+
+
+__all__ = ["INSTALL", "install_hint", "setup_wrote", "resolve", "setup", "teardown"]

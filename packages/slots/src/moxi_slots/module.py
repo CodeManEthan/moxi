@@ -16,6 +16,9 @@ INTERNAL_ENV = {}
 SETTINGS = "settings.toml"
 #: Records tmux's absolute path, which every slots process uses.
 SETUP = "moxi_slots.setup:setup"
+#: Refuses an uninstall while any slot is occupied or not idle: stopping the server ends
+#: every session in every slot.
+TEARDOWN = "moxi_slots.setup:teardown"
 SEGMENT = None
 #: The tmux server, in the foreground under the supervisor. Stopping it ends every
 #: session in every slot, so an install or upgrade rewrites its unit but never restarts

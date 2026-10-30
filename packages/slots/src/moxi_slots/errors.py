@@ -7,6 +7,9 @@
 - `TryAgain`: the module lock was not had in its wait, or the server is not answering
   yet. Trying again later may work; a command exits 75 on it.
 - `TmuxError`: a tmux call failed, or tmux itself cannot be run. A command exits 1 on it.
+- `RegistryError`: the registry file cannot be read or written. A command exits 1 on it.
+- `UsageError` (also a `ValueError`): the call's arguments are wrong (a number outside
+  1-999, a name that breaks the name rule). A command exits 2 on it.
 
 Reads return typed results and never raise for "empty".
 """
@@ -43,4 +46,13 @@ class TmuxError(SlotsError):
     """A tmux call failed, or tmux cannot be run; the message says which and why."""
 
 
-__all__ = ["REASONS", "SlotsError", "Refused", "TryAgain", "TmuxError"]
+class RegistryError(SlotsError):
+    """The registry cannot be read (or written); the message names the file and why."""
+
+
+class UsageError(SlotsError, ValueError):
+    """An argument is wrong; the message says which and what is allowed."""
+
+
+__all__ = ["REASONS", "SlotsError", "Refused", "TryAgain", "TmuxError", "RegistryError",
+           "UsageError"]

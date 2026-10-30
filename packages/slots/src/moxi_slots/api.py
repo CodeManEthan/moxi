@@ -9,7 +9,15 @@ What a call raises when it does not do what was asked:
 
 - `Refused(reason, words, holder)`: declined, `reason` a word of `REASONS`;
 - `TryAgain`: the module lock not had in 10 s, or the server not yet answering;
-- `TmuxError`: a tmux call failed.
+- `TmuxError`: a tmux call failed;
+- `RegistryError`: the registry can't be read or written;
+- `UsageError` (a `ValueError`): an argument is wrong.
+
+All of them are `SlotsError`s.
+
+Reads (`list_slots`, `show`) take no lock and return typed results; `list_slots` never
+raises, and says when it could not read (`Listing.ok` False). Every change runs under
+the module lock.
 
 `supported()` says whether slots runs here; a launcher that finds it false treats slots
 as absent.
@@ -17,7 +25,13 @@ as absent.
 
 from __future__ import annotations
 
-from .errors import REASONS, Refused, TmuxError, TryAgain
+from .errors import (REASONS, Refused, RegistryError, SlotsError, TmuxError, TryAgain,
+                     UsageError)
+from .model import Drift, Hold, Last, Listing, Removed, Slot
+from .slots import attach_argv, create, hold, list_slots, release, remove, rename, show
 from .support import Support, supported
 
-__all__ = ["REASONS", "Refused", "TmuxError", "TryAgain", "Support", "supported"]
+__all__ = ["REASONS", "Refused", "TmuxError", "TryAgain", "RegistryError", "SlotsError",
+           "UsageError", "Support", "supported", "Slot", "Hold", "Last", "Listing", "Drift",
+           "Removed", "list_slots", "show", "create", "remove", "rename", "hold",
+           "release", "attach_argv"]

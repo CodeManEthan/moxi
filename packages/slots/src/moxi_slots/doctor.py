@@ -15,9 +15,12 @@ declared stores. These rows add what only slots knows, and write no doctor recor
                   environment) and warns that it did
     trampoline    fail when `moxi-slots-exec` is not installed
     mismatches    ok, with the count and the path
+    registry      fail when the registry or the server can't be read; warn once per
+                  drift row (a registered slot with no session, a session with no row,
+                  a slot with two run windows)
+    holds         warn on holds in the registry that have run out
 
-Further rows come from `CHECKS`, each a function returning rows, run after these; the
-registry's rows are added there.
+Further rows come from `CHECKS`, each a function returning rows, run after these.
 """
 
 from __future__ import annotations
@@ -219,9 +222,58 @@ def mismatches_row() -> Row:
     return _row("mismatches", "ok", f"{count} saved in {directory}")
 
 
-#: The checks after the fixed rows, in order; each returns rows. The registry's checks
-#: are added here.
-CHECKS: list[Callable[[], Iterable[Row]]] = []
+def registry_rows() -> list[Row]:
+    from . import panes, registry
+    from .errors import RegistryError
+
+    path = places.registry()
+    try:
+        reg = registry.read()
+    except RegistryError as exc:
+        return [_row("registry", "fail", str(exc))]
+    try:
+        listing = panes.listing(reg)
+    except NotSetUp:
+        return [_row("registry", "off", f"{len(reg.rows)} slot(s) in {path}; tmux not "
+                                        "checked: its path is not recorded")]
+    except (TryAgain, TmuxError) as exc:
+        return [_row("registry", "fail", f"the server could not be read: {exc}")]
+    if not listing.drift:
+        return [_row("registry", "ok", f"{len(reg.rows)} slot(s) in {path}, all as tmux "
+                                       "has them")]
+    return [_row("registry", "warn", drift.words, _drift_fix(drift))
+            for drift in listing.drift]
+
+
+def _drift_fix(drift) -> str | None:
+    if drift.kind == "no-session":
+        return f"moxi slots create {drift.number}, or moxi slots remove {drift.number}"
+    if drift.kind == "no-row":
+        return f"moxi slots remove {drift.number} (it kills the session)"
+    return None
+
+
+def holds_rows() -> list[Row]:
+    from . import registry
+    from .errors import RegistryError
+
+    try:
+        reg = registry.read()
+    except RegistryError:
+        return [_row("holds", "off", "not checked: the registry can't be read")]
+    expired = registry.expired_holds(reg)
+    if not expired:
+        live = sum(1 for row in reg.rows.values() if row.live_hold() is not None)
+        return [_row("holds", "ok", f"{live} live hold(s), none run out")]
+    return [_row("holds", "warn",
+                 "; ".join(f"slot {n}'s hold by {hold.holder} ran out" for n, hold in
+                           expired) + "; it reads as absent",
+                 "the next change to the registry drops it, or `moxi slots release N "
+                 "--holder H`")]
+
+
+#: The checks after the fixed rows, in order; each returns rows.
+CHECKS: list[Callable[[], Iterable[Row]]] = [registry_rows, holds_rows]
 
 
 def rows() -> Iterator[Row]:
@@ -245,4 +297,5 @@ def rows() -> Iterator[Row]:
 
 __all__ = ["STALE_LAUNCH", "TRAMPOLINE", "CHECKS", "system_row", "tmux_row",
            "server_mode_row", "linger_row", "options_row", "socket_row",
-           "launch_files_row", "trampoline_row", "mismatches_row", "rows"]
+           "launch_files_row", "trampoline_row", "mismatches_row", "registry_rows",
+           "holds_rows", "rows"]
