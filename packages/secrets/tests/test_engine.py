@@ -81,6 +81,18 @@ def test_escaped_bytes_read_as_the_replacement_character(engine_name):
     assert scan(text, ("credentials", "broad")) == []
 
 
+def test_a_first_scan_on_re2_reads_no_distribution_metadata():
+    # Reading google-re2's version through importlib.metadata costs about 20 ms, twice the
+    # first scan's whole budget; only the doctor asks for the version.
+    code = ("import sys, moxi_secrets\n"
+            "from moxi_secrets import engine\n"
+            "moxi_secrets.scan('hello there', ('credentials', 'broad'))\n"
+            "print(engine.active().name, 'importlib.metadata' in sys.modules)\n")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         check=True, timeout=60)
+    assert out.stdout.split() == ["re2", "False"]
+
+
 def test_the_fallback_gives_the_hits_re2_gives(monkeypatch):
     r = corpus.rng(11)
     texts = [corpus.mixed_text(r) for _ in range(12)]

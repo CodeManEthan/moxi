@@ -155,7 +155,6 @@ class Re2Engine(Engine):
     def __init__(self, module):
         super().__init__()
         self.re2 = module
-        self.version = _re2_version()
 
     def _compile(self, pattern: str):
         # A str pattern compiles in UTF-8 mode; the compiled object then searches bytes
