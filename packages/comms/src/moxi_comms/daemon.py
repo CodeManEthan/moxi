@@ -903,7 +903,10 @@ class Daemon:
         with self._lock:
             # Until the operator's name is reserved, an agent may hold a binding under
             # it: a live binding of that name sends as itself, with its binding's token.
-            operator = who == OPERATOR_NAME and who not in self.bindings
+            # A send that names the operator's `user` is the operator's own lane, and is
+            # checked against the operator's credential whoever holds the name.
+            operator = who == OPERATOR_NAME and (params.get("user") is not None
+                                                 or who not in self.bindings)
         if operator:
             return self._send_as_operator(params, token, content)
         with self._lock, self._db() as db:
