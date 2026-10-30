@@ -115,8 +115,8 @@ def env(monkeypatch, tmp_path):
     # RUNTIME/comms exists, as a login's runtime directory does: a rig's fake daemon
     # binds in it directly.
     (runtime / "comms").mkdir()
-    # turns' roots too: a Claude adapter looks for endpoints under RUNTIME/turns, and the
-    # doctor's turns rows sweep dead endpoints there, so neither may reach the box's own.
+    # turns' roots too: a Claude adapter looks for endpoints under RUNTIME/turns, and
+    # turns' library sweeps dead endpoints there, so neither may reach the box's own.
     monkeypatch.setenv("MOXI_TURNS_RUNTIME_DIR", str(runtime))
     monkeypatch.setenv("MOXI_TURNS_CONFIG_HOME", str(home / "config"))
     for var in ("MOXI_TURNS_HOME", "MOXI_TURNS_COMMANDS"):

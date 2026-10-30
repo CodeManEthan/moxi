@@ -310,7 +310,9 @@ def test_the_session_query_and_the_roster_carry_the_endpoint_state(rig):
     assert unbound["endpoint"] is None and unbound["endpoint_for"] is None
 
 
-def test_the_doctor_names_a_bound_session_with_no_endpoint_and_turns_rows(rig):
+def test_the_doctor_names_a_bound_session_with_no_endpoint_and_leaves_turns_rows(rig):
+    """comms' doctor keeps its own row for a bound session with no endpoint; turns'
+    rows are turns' declared checks, which the front door's doctor runs."""
     from moxi_comms.adapters.claude_adapter import ClaudeAdapter
     shim = rig.shim(name="reviewer", scope="proj-a", start=False)
     a = ClaudeAdapter(shim, 1, look_interval=60).start(tolerate_offline=False)
@@ -323,9 +325,7 @@ def test_the_doctor_names_a_bound_session_with_no_endpoint_and_turns_rows(rig):
     waiting = [ln for ln in out.splitlines() if ln.startswith("waiting")]
     assert len(waiting) == 1 and "reviewer@proj-a: bound, no turns endpoint for" in \
         waiting[0], out
-    turns = [ln for ln in out.splitlines() if ln.startswith("turns")]
-    assert any("listener comms: registered for ready, prompt" in ln for ln in turns), out
-    assert any("endpoints: 0 live" in ln for ln in turns), out
+    assert not [ln for ln in out.splitlines() if ln.startswith("turns")], out
 
 
 def test_the_doctor_says_none_are_waiting(rig):

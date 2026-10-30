@@ -63,7 +63,7 @@ def test_a_box_with_its_daemon_up(rig):
     assert r["daemon"].startswith("answers at ")
     assert set(r) == {"device", "DATA", "STATE", "CACHE", "CONFIG", "RUNTIME", "config",
                       "backend", "secrets", "cache", "claude", "codex", "opencode",
-                      "daemon", "waiting", "turns"}, out
+                      "daemon", "waiting"}, out
 
 
 def test_adapter_binaries_and_their_versions(tmp_path):

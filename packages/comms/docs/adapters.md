@@ -247,7 +247,7 @@ Moxi turns' `turns.codex.launch` with the roster row's thread settings (sandbox 
 permission profile, writable roots, network access, model, multi-agent off) and a check
 of what each thread load reports. turns runs the app-server, wires Codex's hooks with
 their per-launch trust, lays the settings on the start and on every resume, and refuses
-to deliver into a load whose settings did not take. `moxi comms doctor` shows why, in
+to deliver into a load whose settings did not take. `moxi doctor` shows why, in
 turns' rows.
 
 **One thread.** The wrapper delivers into the thread this launch started. /clear, /new

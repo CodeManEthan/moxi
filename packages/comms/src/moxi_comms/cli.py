@@ -710,10 +710,9 @@ def cmd_doctor(args, ctx: Context) -> int:
             row("waiting", line)
     for line in _store_rows(ctx.env):
         row("store", line)
-    # Can comms reach a session? turns answers: its config, the listeners registered with
-    # it (comms' among them), the live endpoints, and its Claude plugins.
-    for found in _turns_rows():
-        row("turns", found)
+    # turns' own rows (its config, the listeners registered with it, the live endpoints,
+    # its Claude plugins) are turns' to declare; `moxi doctor` runs them. comms keeps the
+    # bound sessions that have no endpoint, above.
     if configured and not daemon_up:
         return moxi_exit.TEMPFAIL
     return moxi_exit.OK
@@ -786,18 +785,6 @@ def _waiting_rows(socket_path) -> list[str]:
         lines.append(f"{b.get('qualified')}: bound, no turns endpoint for {age}; its "
                      "mail waits in its adapter")
     return lines or ["none (every bound session that reports one has its endpoint)"]
-
-
-def _turns_rows() -> list[str]:
-    """turns' own rows (`moxi_turns.check()`), each `ok` or `NOT OK`, name, detail."""
-    try:
-        import moxi_turns
-        found = moxi_turns.check()
-    except Exception as e:                                     # noqa: BLE001
-        return [f"NOT OK  turns could not be checked: {type(e).__name__}: {e}"]
-    return [f"{'ok' if r.ok else 'NOT OK'}  {r.name}: {r.detail}" for r in found]
-
-
 
 
 def _field(label: str, first: str, *rest: str) -> list[str]:
