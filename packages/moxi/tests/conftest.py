@@ -177,12 +177,15 @@ def core_wheel(out: Path, version: str = "0.1.0") -> Path:
 
 
 @pytest.fixture
-def offline_uv_env(tmp_path):
-    """Environment variables for an offline uv that touches nothing outside `tmp_path`.
+def offline_uv_env(tmp_path, uv_env):
+    """Environment variables for an offline uv that writes nothing outside `tmp_path`.
 
     Its cache is a new one in tmp, so the tests that ask for it see only the wheels they
     build. The kit's `uv_env` is the other kind: the real cache, for a child that needs
-    what is installed."""
+    what is installed. One thing is taken from it, uv's installed Pythons
+    (`UV_PYTHON_INSTALL_DIR`): the fence points the homes uv would find them under into
+    tmp, so without it a machine whose only Python is one uv installed, off PATH, would
+    have none to build with. Downloads stay off, so uv only reads that directory."""
     import os
     import shutil
 
@@ -192,6 +195,7 @@ def offline_uv_env(tmp_path):
            if not k.startswith(("UV_", "VIRTUAL_ENV", "PYTHON"))}
     env.update(UV_TOOL_DIR=str(tmp_path / "tools"), UV_TOOL_BIN_DIR=str(tmp_path / "bin"),
                UV_CACHE_DIR=str(tmp_path / "uv-cache"), UV_OFFLINE="1",
+               UV_PYTHON_INSTALL_DIR=uv_env["UV_PYTHON_INSTALL_DIR"],
                UV_PYTHON_DOWNLOADS="never", UV_NO_CONFIG="1", UV_NO_PROGRESS="1")
     return env
 

@@ -175,3 +175,10 @@ def test_a_direct_url_with_satisfies_a_dependency(uv):
     assert uv.modules(uv.bin / "moxi") == ["comms", "turns"]
     entry = uv.receipt("moxi-comms")["requirements"][1]
     assert entry == {"name": "moxi-turns", "path": str(turns)}
+
+
+def test_the_offline_env_keeps_uv_s_installed_pythons_and_a_cache_of_its_own(
+        offline_uv_env, uv_env, tmp_path):
+    assert offline_uv_env["UV_PYTHON_INSTALL_DIR"] == uv_env["UV_PYTHON_INSTALL_DIR"]
+    assert offline_uv_env["UV_CACHE_DIR"] == str(tmp_path / "uv-cache")
+    assert offline_uv_env["UV_PYTHON_DOWNLOADS"] == "never"
