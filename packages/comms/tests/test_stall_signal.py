@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 from conftest import cursor_of, wait_until
 
-from moxi_comms import constants, cursors, daemon as daemon_mod, stall
+from moxi_comms import constants, daemon as daemon_mod, stall
 
 import shim_drive
 

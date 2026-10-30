@@ -140,18 +140,17 @@ def test_a_box_role_keys_under_its_own_name(env):
 
 
 def test_the_adapter_surface():
-    from moxi_comms import attribution, client, cursors, machine_line
+    from moxi_comms import attribution, client, machine_line
     from moxi_comms.adapters import claude_shim
 
     assert set(adapter.__all__) == {
         "DaemonClient", "DaemonError", "DaemonOffline", "DaemonNoAnswer",
-        "backoff_delays", "cursors", "render_digest", "frame_line", "TIER_EPHEMERAL",
+        "backoff_delays", "render_digest", "frame_line", "TIER_EPHEMERAL",
         "TIER_CHOSEN", "TIER_STANDING", "TIER_OPERATOR", "TIER_UNKNOWN", "VERIFIED",
         "LABELED", "UNVERIFIED", "parse_machine_line", "MachineLine"}
     assert adapter.DaemonClient is client.DaemonClient
     assert adapter.DaemonNoAnswer is client.DaemonNoAnswer
     assert adapter.backoff_delays is client.backoff_delays
-    assert adapter.cursors is cursors
     assert adapter.render_digest is claude_shim.render_digest
     assert adapter.frame_line is claude_shim.frame_line
     assert adapter.parse_machine_line is machine_line.parse

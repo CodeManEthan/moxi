@@ -24,7 +24,7 @@ import pytest
 from conftest import (no_cold_at, queued, send_turn, wait_for_payload, wait_for_queue,
                       wait_until, write_transcript)
 
-from moxi_comms import attribution, cli, constants, cursors, directory, glossary
+from moxi_comms import attribution, cli, constants, directory, glossary
 from moxi_comms import machine_line
 from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.attribution import Author
@@ -725,10 +725,6 @@ def test_the_index_only_opens_what_it_has_not_held(rig):
 def test_a_send_during_the_boot_race_passes_and_is_refused_once_the_rescan_lands(
         rig, pair, monkeypatch):
     ask = open_ask(rig)
-    # Handled before the stop: the cursors pass the ask while both are bound, so the
-    # unbind at the stop leaves it no row (a cursor moved later deletes no row).
-    for name in (P, R):
-        cursors.advance(name, ask.id)
     rig.daemon.stop()
     gate = threading.Event()
     daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)

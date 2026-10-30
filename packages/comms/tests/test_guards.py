@@ -10,7 +10,7 @@ import pytest
 from conftest import (cursor_of, put_cursor, queued, raw_connection, send_turn, settle,
                       wait_for_queue, wait_until, write_config)
 
-from moxi_comms import constants, cursors, daemon as daemon_mod
+from moxi_comms import constants, daemon as daemon_mod
 from moxi_comms.daemon import Daemon
 from moxi_comms.record import RateLimited
 from moxi_comms.mock_record import MockRecord
@@ -160,76 +160,27 @@ def test_rescan_still_pends_for_a_message_past_the_cursor(rig):
     assert queued(rig.daemon, "curator@proj-a") == {second.id}
 
 
-def test_a_corrupt_cursor_file_does_not_stop_the_daemon_from_BOOTING(rig, tmp_path):
-    """New blast radius since the boot rescan moved into `start()`: an `int(cursor)` on a
-    file holding junk used to raise out of `rescan()` and take BOOT with it -- no socket,
-    no routing, over one unreadable advisory file. An unreadable cursor is treated as no
-    cursor, which degrades toward replay and pending; never toward loss."""
-    rig.post_as("agent-6", ["curator@proj-a"], "waiting behind a corrupt cursor")
+def test_a_cursor_folder_an_earlier_build_left_beside_the_store_is_not_read(rig):
+    """A build that still wrote cursor files left `cursors/` beside a store it made. The
+    folder isn't comms 0.2's (no move fingerprinted it), so the gate leaves it where it
+    is, the daemon boots past it, and nothing in it moves a cursor."""
+    rig.post_as("agent-6", ["curator@proj-a"], "waiting beside a leftover cursor file")
     wait_until(lambda: queued(rig.daemon, "curator@proj-a"))
+    high = max(int(m.id) for m in rig.record.history(rig.names_channel))
     cursors_dir().mkdir(parents=True, exist_ok=True)
-    (cursors_dir() / "curator@proj-a.json").write_text('{"cursor": "not-a-number"}')
+    left = cursors_dir() / "curator@proj-a.json"
+    left.write_text('{"cursor": "%d"}' % high)
 
     fresh = daemon_mod.Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     rig.daemon.stop()
     fresh.start()
     try:
-        assert len(queued(fresh, "curator@proj-a")) == 1, \
-            "the name still pends: an unreadable cursor proves nothing was handled"
+        assert len(queued(fresh, "curator@proj-a")) == 1, "the file proves nothing"
+        assert cursor_of("curator@proj-a") is None
+        assert left.exists(), "left where it is, not renamed"
     finally:
         fresh.stop()
     rig.daemon = fresh
-
-
-@pytest.mark.parametrize("body", ['["1400000000001"]', '{"cursor": {"id": "1"}}',
-                                  'not json at all', '{"no_cursor_key": 1}'])
-def test_an_unreadable_cursor_file_reads_as_no_cursor(rig, body):
-    """Every way of being unusable answers the same way. The JSON LIST is the one that
-    used to escape: valid JSON, so no decode error, and `["cursor"]` raises TypeError
-    rather than KeyError -- straight out of `read` and into the caller."""
-    cursors_dir().mkdir(parents=True, exist_ok=True)
-    (cursors_dir() / "curator@proj-a.json").write_text(body)
-    assert cursor_of("curator@proj-a") is None
-
-
-@pytest.mark.parametrize("body", ['["1400000000001"]', '{"cursor": {"id": "1"}}',
-                                  'not json at all', '{"no_cursor_key": 1}',
-                                  '{"cursor": "not-a-number"}'])
-def test_a_corrupt_cursor_file_does_not_raise_out_of_the_STOP_HOOK(rig, body):
-    """The adapter side of the same rule. `advance` runs inside the Stop
-    hook, and a raise there does not just lose a cursor -- `dispatch` never returns, so
-    the turn boundary itself is lost and the shim stays 'busy' forever. Unusable cursor
-    state is NO cursor: the advance proceeds, which is also the only reading that can
-    heal the file."""
-    cursors_dir().mkdir(parents=True, exist_ok=True)
-    (cursors_dir() / "curator@proj-a.json").write_text(body)
-
-    curator = rig.shim(name="curator", scope="proj-a")
-    rig.post_as("agent-6", ["curator@proj-a"], "arrives over a corrupt cursor")
-    wait_for_queue(curator, 1)
-    delivered = curator.queue[0]["message_id"]
-
-    curator.on_turn_boundary()                   # inject
-    curator.on_turn_boundary()                   # complete: this is where it used to die
-    assert cursor_of("curator@proj-a") == delivered
-
-
-def test_a_cursor_that_cannot_be_written_degrades_to_replay_not_to_a_raise(monkeypatch):
-    """A read-only STATE dir, a full disk: the turn still completed and the record still
-    holds the mail. Seeing it twice is the cost; the hook surviving is the point."""
-    def no_writes(*a, **kw):
-        raise OSError("read-only file system")
-    monkeypatch.setattr(cursors.tempfile, "mkstemp", no_writes)
-    assert cursors.advance("curator@proj-a", "1400000000001") is None
-    assert cursor_of("curator@proj-a") is None
-
-
-def test_a_cursor_record_of_the_wrong_shape_reads_as_no_record(rig):
-    """`read_meta` is the diagnostic read, and it answers like the real one: valid JSON
-    of the wrong shape is not a record."""
-    cursors_dir().mkdir(parents=True, exist_ok=True)
-    (cursors_dir() / "curator@proj-a.json").write_text('["1400000000001"]')
-    assert cursors.read_meta("curator@proj-a") is None
 
 
 def test_bind_deliver_unbind_rescan_leaves_the_pending_view_empty(rig):
@@ -451,3 +402,4 @@ def test_a_partial_ack_re_pends_only_what_it_did_not_handle(rig):
     b.stop()
     assert wait_until(lambda: "reviewer@proj-a" not in rig.daemon.bindings)
     assert queued(rig.daemon, "reviewer@proj-a") == {second.id}
+

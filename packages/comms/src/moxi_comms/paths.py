@@ -123,6 +123,8 @@ def cards_dir(env=None) -> Path:
 
 
 def cursors_dir(env=None) -> Path:
+    """STATE/comms/cursors: comms 0.2's cursor files, which the move into comms.db
+    reads. Nothing writes there now."""
     return state_dir(env) / "cursors"
 
 
@@ -163,8 +165,8 @@ def old_daemon_socket(env=None) -> Path:
 
 
 def codex_threads_dir(env=None) -> Path:
-    """STATE/comms/codex -- thread-id <-> identity, beside the cursors: the thread of
-    each identity's current launch."""
+    """STATE/comms/codex -- thread-id <-> identity: the thread of each identity's
+    current launch."""
     return state_dir(env) / "codex"
 
 

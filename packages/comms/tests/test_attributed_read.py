@@ -14,7 +14,7 @@ import pytest
 from conftest import cursor_of, queued, wait_for_queue, wait_until
 
 from moxi_comms import client as client_mod
-from moxi_comms import cursors, machine_line, provision, wire
+from moxi_comms import machine_line, provision, wire
 from moxi_comms.claimhold import ClaimServer
 from moxi_comms.client import (ATTRIBUTED_FIELDS, DaemonClient, DaemonError,
                                DaemonOffline, attributed_message)

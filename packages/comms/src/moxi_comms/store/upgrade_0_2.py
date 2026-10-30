@@ -676,9 +676,7 @@ def _rename(found: dict, kept: dict, target: Path) -> list[tuple[Path, Path]]:
         kept_print = kept.get(role)
         if kept_print is None:
             if role == "cursors":
-                from . import open as _open
-                if not _open.CURSORS_ARE_0_2:
-                    continue        # this version's own cursor writers made it
+                continue        # an earlier build's cursor writers made it; left alone
             changed.append(f"{p} (not there when the move ran)")
         elif not _same(role, p, kept_print) or _wal_has_frames(p):
             changed.append(str(p))
@@ -730,7 +728,7 @@ def dry_run(target=None, env=None, *, now: float | None = None) -> list[str]:
     from . import open as _open
 
     target = Path(target) if target is not None else _open.path(env)
-    found = _open.zero_two_files(env)
+    found = _open.zero_two_files(env, target)
     if not found:
         return [f"nothing to move: no comms 0.2 files here; the store is {target}"]
     try:
@@ -750,8 +748,7 @@ def dry_run(target=None, env=None, *, now: float | None = None) -> list[str]:
         changed = [str(p) for role, p in present.items()
                    if (role in kept and (not _same(role, p, kept[role])
                                          or _wal_has_frames(p)))
-                   or (role not in kept and (role != "cursors"
-                                             or _open.CURSORS_ARE_0_2))]
+                   or (role not in kept and role != "cursors")]
         if changed:
             raise StoreRefused(target, (
                 "was moved from comms 0.2, but comms' 0.2 files changed after they were "

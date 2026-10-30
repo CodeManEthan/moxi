@@ -298,8 +298,7 @@ class Binding:
     new_session: bool = False
     agent_model: object = cache.MISSING
     #: The newest id CLAIMED for this binding since it registered (what the `owed`
-    #: query reads as undelivered mail). The ids a shim listed in `holding` at register
-    #: are not claims, so a reconnect with no `injected_through` yet reads no mail waiting.
+    #: query reads as undelivered mail).
     handed_max: str = "0"
     #: The ids this binding's adapter named `handled` on a `turn` frame. Their rows are
     #: gone, and an unbind does not queue them again: a queued id can be handled while

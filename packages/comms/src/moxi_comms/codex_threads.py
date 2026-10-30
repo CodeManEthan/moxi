@@ -11,11 +11,11 @@ it is read only for the keys kept beside the launch's own id (`rollout`, `layer_
 and only when the file names that id. An earlier launch's thread stays in Codex's own
 session store.
 
-The ADAPTER writes this file and the daemon never does -- the same category as the
-cursor, and it lives beside the cursors for that reason. It is not routing (routing is
-who is connected right now, and stays in daemon memory).
+The ADAPTER writes this file and the daemon never does: it is the adapter's own state,
+not comms' books. It is not routing (routing is who is connected right now, and stays
+in daemon memory).
 
-Written the same way cursors are: whole file, atomic replace, never appended to.
+Written whole, by atomic replace, never appended to.
 """
 
 from __future__ import annotations

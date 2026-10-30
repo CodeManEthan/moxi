@@ -234,11 +234,28 @@ def test_a_marked_store_with_no_0_2_files_left_opens():
     assert store.state_of(store.path()) == store.MARKED
 
 
-def test_a_leftover_cursor_folder_does_not_trip_the_gate_yet():
-    """The adapters still write cursor files until the daemon keeps the cursors."""
+def test_a_cursor_folder_with_no_store_beside_it_is_comms_0_2s():
     (paths.cursors_dir() / "local").mkdir(parents=True)
+    assert store.zero_two_files() == [paths.cursors_dir()]
+
+
+@pytest.mark.parametrize("marked", [False, True], ids=["fresh-store", "marked-store"])
+def test_a_cursor_folder_an_earlier_build_left_beside_a_store_is_left_alone(marked):
+    """An earlier build's adapters wrote cursor files after its store was made. No move
+    fingerprinted the folder, so it isn't comms 0.2's: the gate opens the store, reads
+    and renames nothing."""
+    if marked:
+        mark(store.path())
+    else:
+        store.open_write().close()
+    folder = paths.cursors_dir() / "local"
+    folder.mkdir(parents=True)
+    (folder / "reviewer@proj-a.json").write_text('{"cursor": "1"}')
     assert store.zero_two_files() == []
     store.open_write().close()
+    store.open_read().close()
+    assert (folder / "reviewer@proj-a.json").exists()
+    assert not (paths.cursors_dir().parent / "cursors.0.2-moved").exists()
 
 
 def test_the_binding_history_does_not_open_a_store_the_gate_refuses():

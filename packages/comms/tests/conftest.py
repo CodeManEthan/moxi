@@ -35,7 +35,7 @@ from pathlib import Path
 
 import pytest
 
-from moxi_comms import cli, config, cursors, machine_line, tokens as tokens_mod
+from moxi_comms import cli, config, machine_line, tokens as tokens_mod
 from moxi_comms.adapters.claude_shim import ACTIVITY_METHODS, ClaudeShim
 from moxi_comms.claimfile import HOLDS
 from moxi_comms.claimhold import CLAIM_SOCKET_ENV, ClaimServer
