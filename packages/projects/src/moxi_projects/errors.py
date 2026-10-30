@@ -1,0 +1,45 @@
+"""The errors projects' own acts raise, beside the read API's.
+
+Each is a `moxi_projects.api.ProjectsError`, carrying `reason`, `fix` and `exit_code`:
+
+- `Refused` (exit 3): the act was declined on what it found: a bad or taken key, a taken
+  root, an unknown kind, a kind's check, a remove refusal.
+- `Broken` (exit 1): a contribution the act depends on won't load, raises, collides or
+  answers out of shape. `modules` names the modules at fault.
+- `Usage` (exit 2): the act was asked wrongly, such as an add with no root and nothing to
+  supply one.
+
+The read API's `NotFound` (3), `Unreadable` (1), `TooNew` (3) and `Busy` (75) are raised
+by the acts too.
+"""
+
+from __future__ import annotations
+
+from .api import Busy, NotFound, ProjectsError, TooNew, Unreadable
+
+
+class Refused(ProjectsError):
+    """The act was declined on what it found."""
+
+    exit_code = 3
+
+
+class Broken(ProjectsError):
+    """A contribution the act depends on is at fault. `modules` names them."""
+
+    exit_code = 1
+
+    def __init__(self, modules: tuple[str, ...] | list[str] | str, reason: str,
+                 fix: str | None = None):
+        self.modules = (modules,) if isinstance(modules, str) else tuple(modules)
+        super().__init__(reason, fix)
+
+
+class Usage(ProjectsError):
+    """The act was asked wrongly."""
+
+    exit_code = 2
+
+
+__all__ = ["ProjectsError", "NotFound", "Unreadable", "TooNew", "Busy", "Refused", "Broken",
+           "Usage"]
