@@ -209,10 +209,7 @@ def remove(numbers: Iterable[int | str] | None = None, *, all_free: bool = False
                 found = listing.find(number)
                 why = _remove_why(found, number, force=force, holder=holder)
                 if why is not None:
-                    raise Refused(why[0], why[1],
-                                  holder=_holder_of(found) if why[0] in ("held",
-                                                                         "occupied")
-                                  else None)
+                    raise Refused(why[0], why[1], holder=_holder_of(found, why[0]))
                 if found not in targets:
                     targets.append(found)
         try:
@@ -227,14 +224,14 @@ def remove(numbers: Iterable[int | str] | None = None, *, all_free: bool = False
     return Removed(tuple(removed), tuple(skipped))
 
 
-def _holder_of(found: Slot | None):
-    """Who has a taken slot: the hold's holder and until, or the last launch's label and
-    meta."""
+def _holder_of(found: Slot | None, reason: str):
+    """Who has a taken slot, for a refusal with `reason`: the hold's holder and until for
+    `held`, the last launch's label and meta for `occupied` (or `live-pane`)."""
     if found is None:
         return None
-    if found.hold is not None:
+    if reason == "held" and found.hold is not None:
         return {"holder": found.hold.holder, "until": found.hold.until}
-    if found.last is not None:
+    if reason in ("occupied", "live-pane") and found.last is not None:
         return {"label": found.last.label, "meta": found.last.meta}
     return None
 
@@ -352,7 +349,10 @@ def attach_env(argv: list[str], environ=None) -> dict[str, str]:
 
 def busy() -> list[str]:
     """Why the server can't be stopped now: one line per slot that is occupied or not
-    idle. [] when none is, or no server answers. Raises when the slots can't be read."""
+    idle, and per job running. [] when none is, or no server answers. Raises when the
+    slots can't be read."""
+    from .jobs import jobs
+
     reg = registry.read()
     listing = panes.listing(reg)
     lines = []
@@ -364,6 +364,7 @@ def busy() -> list[str]:
             lines.append(f"slot {found.number} is occupied{label}")
         elif not found.idle:
             lines.append(f"slot {found.number} is not idle")
+    lines += [f"job {j.name} is running" for j in jobs() if j.running]
     return lines
 
 

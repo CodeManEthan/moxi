@@ -19,9 +19,9 @@ writing nothing; the install then writes no unit. On a system slots does not run
 (native Windows) the step says so and exits 0: the package installs there, and the
 core's writer skips the daemon.
 
-The teardown refuses (`moxi.modules.Refused`, naming the slots) while any slot is
-occupied or not idle, since the uninstall's unit removal stops the server and that ends
-every session in every slot. The uninstall then removes nothing. With no server
+The teardown refuses (`moxi.modules.Refused`, naming the slots and jobs) while any slot
+is occupied or not idle, or a detached job runs, since the uninstall's unit removal stops
+the server and that ends every session in every slot and every job. The uninstall then removes nothing. With no server
 answering, nothing runs in a slot and the teardown accepts.
 """
 
@@ -110,8 +110,9 @@ def setup() -> int:
 
 
 def teardown() -> int:
-    """Accept the uninstall (0) unless a slot is occupied or not idle; then raise
-    `moxi.modules.Refused` naming them. A server that can't be read is refused too."""
+    """Accept the uninstall (0) unless a slot is occupied or not idle, or a job runs;
+    then raise `moxi.modules.Refused` naming them. A server that can't be read is
+    refused too."""
     from moxi.modules import Refused
 
     from .errors import SlotsError

@@ -13,10 +13,11 @@ Repository = "https://github.com/moxihq/moxi"
 Issues = "https://github.com/moxihq/moxi/issues"
 
 # Only the core declares the `moxi` script; the module's commands run as `moxi slots <verb>`.
-# The server wrapper, which the core's writer installs as the module's daemon, is the one
-# script so far.
+# The server wrapper, which the core's writer installs as the module's daemon, and the
+# trampoline every launch's pane runs first are its two scripts; neither is run by hand.
 [project.scripts]
 moxi-slots-server = "moxi_slots.server:main"
+moxi-slots-exec = "moxi_slots.trampoline:main"
 
 # The module's one announcement, read by moxi.modules.
 [project.entry-points."moxi.modules"]

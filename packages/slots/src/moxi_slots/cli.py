@@ -303,10 +303,32 @@ def _run_release(args) -> int:
     return codes.OK
 
 
+def _add_jobs(verbs) -> None:
+    p = verbs.add_parser("jobs", help="the detached jobs that run")
+    p.add_argument("--json", action="store_true", help="print the jobs as JSON")
+
+
+def _run_jobs(args) -> int:
+    from .jobs import jobs
+
+    found = jobs()
+    if args.json:
+        _json([j.to_json() for j in found])
+        return codes.OK
+    if not found:
+        print("no jobs")
+        return codes.OK
+    print(_table([["JOB", "STATE", "PANE", "PID"],
+                  *([j.name, "running" if j.running else "ended", j.pane_id,
+                     str(j.pane_pid) if j.pane_pid else "-"] for j in found)]))
+    return codes.OK
+
+
 VERBS.update({"list": (_add_list, _run_list), "show": (_add_show, _run_show),
               "create": (_add_create, _run_create), "remove": (_add_remove, _run_remove),
               "rename": (_add_rename, _run_rename), "attach": (_add_attach, _run_attach),
-              "hold": (_add_hold, _run_hold), "release": (_add_release, _run_release)})
+              "hold": (_add_hold, _run_hold), "release": (_add_release, _run_release),
+              "jobs": (_add_jobs, _run_jobs)})
 
 
 __all__ = ["VERBS", "parser", "refused", "main"]

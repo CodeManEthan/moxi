@@ -15,9 +15,14 @@ What a call raises when it does not do what was asked:
 
 All of them are `SlotsError`s.
 
-Reads (`list_slots`, `show`) take no lock and return typed results; `list_slots` never
-raises, and says when it could not read (`Listing.ok` False). Every change runs under
-the module lock.
+Reads (`list_slots`, `show`, `job`, `jobs`) take no lock and return typed results;
+`list_slots` never raises, and says when it could not read (`Listing.ok` False). Every
+change runs under the module lock.
+
+`start` and `respawn` place a launch in a slot and `run_job` runs a detached one: the
+launch's environment goes through a private file the pane's trampoline reads, never
+through tmux, and each returns once the command has started or has not (`exec`
+`started`, `failed` or `unconfirmed`). `wait_ended` waits for a run pane to end.
 
 `supported()` says whether slots runs here; a launcher that finds it false treats slots
 as absent.
@@ -27,11 +32,14 @@ from __future__ import annotations
 
 from .errors import (REASONS, Refused, RegistryError, SlotsError, TmuxError, TryAgain,
                      UsageError)
-from .model import Drift, Hold, Last, Listing, Removed, Slot
+from .jobs import job, jobs, run_job
+from .launch import respawn, start, wait_ended
+from .model import Drift, Ended, Hold, Job, Last, Listing, Placed, Removed, Slot
 from .slots import attach_argv, create, hold, list_slots, release, remove, rename, show
 from .support import Support, supported
 
 __all__ = ["REASONS", "Refused", "TmuxError", "TryAgain", "RegistryError", "SlotsError",
            "UsageError", "Support", "supported", "Slot", "Hold", "Last", "Listing", "Drift",
-           "Removed", "list_slots", "show", "create", "remove", "rename", "hold",
-           "release", "attach_argv"]
+           "Removed", "Placed", "Job", "Ended", "list_slots", "show", "create", "remove",
+           "rename", "hold", "release", "attach_argv", "start", "respawn", "wait_ended",
+           "run_job", "job", "jobs"]

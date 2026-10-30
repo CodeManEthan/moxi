@@ -220,6 +220,82 @@ class Removed:
                 "skipped": [{"number": n, "why": why} for n, why in self.skipped]}
 
 
+#: What a launch's exec verdict says: the command started (`execve` succeeded), it did not
+#: (the line says why), or no verdict came within the bound.
+STARTED = "started"
+FAILED = "failed"
+UNCONFIRMED = "unconfirmed"
+EXEC_OUTCOMES = (STARTED, FAILED, UNCONFIRMED)
+
+
+@dataclass(frozen=True)
+class Placed:
+    """Where a `start` or `respawn` put a launch, and its exec verdict.
+
+    `exec` is `started` only on evidence that `execve` succeeded; `failed` with
+    `exec_line` saying why (`failed: cwd: ...`, `not taken`, `trampoline died`, ...);
+    `unconfirmed` when the launch was taken but no verdict came within the bound.
+    `dead_status` is the run pane's exit status when it had already died at the
+    verdict (a command that ran and ended, or one that failed), else None."""
+
+    slot: int
+    pane_id: str
+    window_id: str
+    exec: str
+    exec_line: str
+    dead_status: int | None = None
+
+    def to_json(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class Job:
+    """A detached job in session `moxi-jobs`. `running` is whether its pane lives;
+    `exec`, `exec_line` and `dead_status` are the exec verdict, set by `run_job` and
+    None from a read."""
+
+    name: str
+    window_id: str
+    pane_id: str
+    running: bool
+    pane_pid: int | None = None
+    exec: str | None = None
+    exec_line: str | None = None
+    dead_status: int | None = None
+
+    def to_json(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class Ended:
+    """What `wait_ended` saw: whether the pane ended within the bound, its exit status
+    when tmux kept it, and whether the pane is gone altogether."""
+
+    slot: int
+    pane_id: str
+    ended: bool
+    dead_status: int | None = None
+    gone: bool = False
+
+    def to_json(self) -> dict:
+        return asdict(self)
+
+
+#: A job name: letters, digits, `.`, `_`, `:` and `-`, 1-128 characters.
+JOB_NAME_MAX = 128
+_JOB_NAME = re.compile(r"[A-Za-z0-9._:-]+")
+
+
+def check_job_name(name: object) -> str:
+    if not isinstance(name, str) or not _JOB_NAME.fullmatch(name) \
+            or len(name) > JOB_NAME_MAX:
+        raise UsageError(f"a job name is 1-{JOB_NAME_MAX} letters, digits, '.', '_', ':' "
+                         f"and '-'; {name!r} is not one")
+    return name
+
+
 def launchable(state: str, hold: Hold | None, holder: str | None = None) -> bool:
     """Whether a slot in `state` with live hold `hold` takes a launch from `holder`."""
     return state in (FREE, ENDED) and (hold is None or hold.holder == holder)
@@ -229,5 +305,6 @@ __all__ = ["LOWEST", "HIGHEST", "SESSION_PREFIX", "HOME_MARK", "RUN_MARK", "MISS
            "FREE", "ENDED", "OCCUPIED", "STATES", "NAME_MAX", "LABEL_MAX", "HOLDER_MAX",
            "META_MAX", "HOLD_MAX", "session_name", "session_target", "window_target",
            "number_of", "check_number", "check_name", "check_label", "check_holder",
-           "check_meta", "Hold", "Last", "Slot", "Drift", "Listing", "Removed",
-           "launchable"]
+           "check_meta", "check_job_name", "Hold", "Last", "Slot", "Drift", "Listing",
+           "Removed", "STARTED", "FAILED", "UNCONFIRMED", "EXEC_OUTCOMES", "Placed", "Job",
+           "Ended", "JOB_NAME_MAX", "launchable"]
