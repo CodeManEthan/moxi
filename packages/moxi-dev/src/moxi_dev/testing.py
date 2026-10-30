@@ -74,13 +74,40 @@ marked `honest_fsync`; the no-op still refuses a closed descriptor. Code must ca
 Markers registered here: `browser`, `live`, `slow`, `build`, `touches`, `finding` and
 `honest_fsync`. A package's `addopts` deselects the four tiers in `TIERS`; a `live` test
 also needs `MOXI_TEST_LIVE=1` in the environment pytest starts with, else it is skipped.
+
+Selection. Three variables, read from the environment pytest starts with, change what
+runs; `moxi-dev check` sets them for each suite, and a contributor may set them by hand:
+
+- `MOXI_TEST_TIERS=all` puts back every test of the `browser`, `slow` and `build` tiers
+  that the package's `-m` deselected. A `live` test is never put back.
+- `MOXI_TEST_CHANGED=<file>` names a file of repository paths that changed, separated by
+  NUL bytes. A `browser`, `slow` or `build` test (never a `live` one) marked
+  `@pytest.mark.touches("packages/<p>/<glob>")` is put back when one of its globs
+  matches one of the paths (`touches_match`).
+- `MOXI_TEST_FINDING=L<n>[,L<n>...]` runs only the tests marked `finding` with one of
+  those arguments, a tier test among them put back as above; every other test is
+  deselected.
+
+A test put back gets the marker `lifted`, and the run's `-m` expression becomes
+`(<expression>) or lifted`, so pytest's own deselection keeps it and `-k` still applies.
+
+Durations. Each run writes `durations.json`: every test's seconds by phase (`setup`,
+`call`, `teardown`) and its outcome, from the reports the main process sees (under
+xdist, the controller's). It goes to the path in `MOXI_TEST_DURATIONS`, else to
+`moxi-dev/durations.json` in pytest's cache directory; with neither (the cache plugin
+off) nothing is written.
+
+A seam with two implementations: `Seam` parametrizes a fixture over every
+implementation for the contract suites and gives the rest the default one.
 """
 
 from __future__ import annotations
 
 import contextlib
 import dataclasses
+import functools
 import ipaddress
+import json
 import os
 import re
 import shutil
@@ -119,6 +146,24 @@ MARKERS = {
 
 #: The variable a `live` test needs, set to 1.
 LIVE_ENV = "MOXI_TEST_LIVE"
+
+#: `all`: every tier but `live` runs (module doc, Selection).
+TIERS_ENV = "MOXI_TEST_TIERS"
+#: A file of the repository paths that changed, NUL-separated (module doc, Selection).
+CHANGED_ENV = "MOXI_TEST_CHANGED"
+#: `L<n>[,L<n>...]`: only the tests that carry one of these findings run.
+FINDING_ENV = "MOXI_TEST_FINDING"
+#: Where `durations.json` goes.
+DURATIONS_ENV = "MOXI_TEST_DURATIONS"
+
+#: The marker the kit sets on a tier test it puts back; not for tests to use.
+LIFTED = "lifted"
+
+#: The shape of a finding's name, as `finding(...)` and `MOXI_TEST_FINDING` take it.
+FINDING_NAME = re.compile(r"L[0-9]+")
+
+#: The tiers a selection can put back: every tier but `live`.
+LIFTABLE = tuple(tier for tier in TIERS if tier != "live")
 
 #: The harness homes the fence points under the test's home, each relative to it.
 HARNESS_HOMES = {
@@ -446,6 +491,13 @@ def _quiet_fsync(fd: Any) -> None:
 def pytest_configure(config: pytest.Config) -> None:
     for name, line in MARKERS.items():
         config.addinivalue_line("markers", f"{name}: {line}")
+    config.addinivalue_line("markers", f"{LIFTED}: set by the kit on a tier test this "
+                                       "run puts back; not for tests to use")
+    # Per run, from the environment this pytest started with; a pytest run inside a
+    # fenced test sees the fenced one, so the outer run's selection never reaches it.
+    config.stash[_SELECTION] = selection(os.environ)
+    if not hasattr(config, "workerinput"):          # an xdist worker reports to the main
+        config.pluginmanager.register(_Durations(config), "moxi-dev-durations")
     # Read once, from the environment this process started with: a pytest run inside a
     # test (pytester's in-process run) already sees the fenced one.
     _SESSION.setdefault("live", os.environ.get(LIVE_ENV) == "1")
@@ -457,6 +509,222 @@ def pytest_configure(config: pytest.Config) -> None:
 def pytest_runtest_setup(item: pytest.Item) -> None:
     if item.get_closest_marker("live") and not _SESSION.get("live"):
         pytest.skip(f"a live test runs only with {LIVE_ENV}=1")
+
+
+# --- selection -------------------------------------------------------------------------
+
+@dataclasses.dataclass(frozen=True)
+class Selection:
+    """What a run puts back past the package's `-m`, and what it keeps (module doc)."""
+
+    all_tiers: bool = False
+    changed: tuple[str, ...] = ()
+    findings: frozenset[str] = frozenset()
+
+    def lifts(self, item: pytest.Item) -> bool:
+        """Whether this run puts `item` back: a `browser`, `slow` or `build` test, never
+        a `live` one, that every tier, a changed path or a finding asks for."""
+        if item.get_closest_marker("live"):
+            return False
+        if not any(item.get_closest_marker(tier) for tier in LIFTABLE):
+            return False
+        if self.all_tiers or (self.findings and findings_of(item) & self.findings):
+            return True
+        return any(touches_match(glob, path)
+                   for mark in item.iter_markers("touches") for glob in mark.args
+                   if isinstance(glob, str) for path in self.changed)
+
+
+_SELECTION = pytest.StashKey[Selection]()
+
+
+def selection(environ: Mapping[str, str]) -> Selection:
+    """The selection the environment asks for; `pytest.UsageError` for a bad value."""
+    tiers = environ.get(TIERS_ENV, "").strip()
+    if tiers not in ("", "all"):
+        raise pytest.UsageError(f"{TIERS_ENV} is 'all' or unset; it is {tiers!r}")
+    changed: tuple[str, ...] = ()
+    where = environ.get(CHANGED_ENV, "")
+    if where:
+        try:
+            text = Path(where).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise pytest.UsageError(f"{CHANGED_ENV}: can't read {where} ({exc})") from exc
+        changed = tuple(path for path in text.split("\0") if path)
+    names = [name.strip() for name in environ.get(FINDING_ENV, "").split(",")]
+    names = [name for name in names if name]
+    bad = [name for name in names if not FINDING_NAME.fullmatch(name)]
+    if bad:
+        raise pytest.UsageError(f"{FINDING_ENV} names findings as L<n>, comma-separated; "
+                                f"{', '.join(map(repr, bad))} is not one")
+    return Selection(all_tiers=tiers == "all", changed=changed, findings=frozenset(names))
+
+
+def findings_of(item: pytest.Item) -> set[str]:
+    """The findings `item`'s `finding` marks name."""
+    return {arg for mark in item.iter_markers("finding") for arg in mark.args
+            if isinstance(arg, str)}
+
+
+@functools.lru_cache(maxsize=256)
+def _glob_regex(glob: str) -> re.Pattern[str]:
+    out, i, n = [], 0, len(glob)
+    while i < n:
+        if glob.startswith("**/", i):
+            out.append("(?:[^/]*/)*")
+            i += 3
+        elif glob.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif glob[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif glob[i] == "?":
+            out.append("[^/]")
+            i += 1
+        elif glob[i] == "[" and (end := glob.find("]", i + 2)) != -1:
+            body = glob[i + 1:end]
+            if body.startswith("!"):
+                body = "^" + body[1:]
+            out.append("[" + body.replace("\\", "\\\\") + "]")
+            i = end + 1
+        else:
+            out.append(re.escape(glob[i]))
+            i += 1
+    return re.compile("".join(out))
+
+
+def touches_match(glob: str, path: str) -> bool:
+    """Whether a repository path matches a `touches` glob, both relative to the
+    repository's root with `/` between parts. `*` and `?` stay within one part, `[...]`
+    is a set of characters, and `**` is any number of parts (`a/**` is everything
+    under `a`). A glob that matches a directory the path is under matches the path."""
+    glob = glob.strip().strip("/")
+    if not glob:
+        return False
+    regex = _glob_regex(glob)
+    parts = path.strip("/").split("/")
+    return any(regex.fullmatch("/".join(parts[:end])) for end in range(len(parts), 0, -1))
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Keep only a finding's tests when one is asked for, and put back the tier tests the
+    run asks for, before pytest's own `-m` deselects (module doc, Selection)."""
+    chosen = config.stash.get(_SELECTION, None)
+    if chosen is None:
+        return
+    if chosen.findings:
+        keep = [item for item in items if findings_of(item) & chosen.findings]
+        dropped = [item for item in items if not findings_of(item) & chosen.findings]
+        if dropped:
+            config.hook.pytest_deselected(items=dropped)
+            items[:] = keep
+    lifted = False
+    for item in items:
+        if chosen.lifts(item):
+            item.add_marker(getattr(pytest.mark, LIFTED))
+            lifted = True
+    if lifted and config.option.markexpr:
+        config.option.markexpr = f"({config.option.markexpr}) or {LIFTED}"
+
+
+# --- durations -------------------------------------------------------------------------
+
+class _Durations:
+    """Collects each test's seconds by phase and writes `durations.json` at the end."""
+
+    def __init__(self, config: pytest.Config) -> None:
+        self.config = config
+        self.tests: dict[str, dict[str, Any]] = {}
+
+    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        entry = self.tests.setdefault(report.nodeid, {})
+        entry[report.when] = round(entry.get(report.when, 0.0) + report.duration, 6)
+        if report.failed:
+            entry["outcome"] = "failed"
+        elif report.skipped and entry.get("outcome") != "failed":
+            entry["outcome"] = "skipped"
+        else:
+            entry.setdefault("outcome", "passed")
+
+    def path(self) -> Path | None:
+        given = os.environ.get(DURATIONS_ENV)
+        if given:
+            return Path(given)
+        cache = getattr(self.config, "cache", None)
+        return cache.mkdir("moxi-dev") / "durations.json" if cache is not None else None
+
+    def pytest_sessionfinish(self, session: pytest.Session) -> None:
+        path = self.path()
+        if path is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        part = path.with_name(path.name + ".part")
+        part.write_text(json.dumps({"format": 1, "tests": self.tests}, indent=1,
+                                   sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(part, path)
+
+
+# --- a seam with two implementations -------------------------------------------------------
+
+class Seam:
+    """A seam with two or more implementations, behind one fixture.
+
+    The contract suites (`contract`, test file names such as `test_delivery.py`) run
+    each of their tests once on every implementation; every other test that asks for
+    the fixture gets `default`. In the package's `conftest.py`:
+
+        BACKEND = Seam("backend", ["mock", "local"], default="mock",
+                       contract=["test_delivery.py", "test_claims.py"])
+        backend = BACKEND.fixture
+
+        def pytest_generate_tests(metafunc):
+            BACKEND.parametrize(metafunc)
+
+    The fixture's value is the implementation (a name, usually), which the package's own
+    fixtures build from. Test ids are `param_id` of each implementation, the same on
+    every run. A test that parametrizes the fixture itself is left as it is."""
+
+    def __init__(self, name: str, implementations: Iterable[Any], *, default: Any,
+                 contract: Iterable[str]) -> None:
+        values = tuple(implementations)
+        if len(values) < 2:
+            raise ValueError(f"seam {name!r}: a seam has two implementations or more")
+        if len(set(map(param_id, values))) != len(values):
+            raise ValueError(f"seam {name!r}: two implementations have the same id")
+        if default not in values:
+            raise ValueError(f"seam {name!r}: the default {default!r} is not one of "
+                             f"its implementations")
+        self.name = name
+        self.implementations = values
+        self.default = default
+        self.contract = frozenset(contract)
+
+        @pytest.fixture(name=name)
+        def _fixture(request: pytest.FixtureRequest) -> Any:
+            return getattr(request, "param", default)
+
+        self.fixture = _fixture
+
+    def is_contract(self, metafunc: pytest.Metafunc) -> bool:
+        """Whether `metafunc`'s test is in one of the contract suites."""
+        module = getattr(metafunc, "module", None)
+        where = getattr(module, "__file__", None)
+        return where is not None and Path(where).name in self.contract
+
+    def parametrize(self, metafunc: pytest.Metafunc) -> None:
+        """Call from `pytest_generate_tests`: a contract test that asks for the fixture
+        runs on each implementation."""
+        if self.name not in metafunc.fixturenames or not self.is_contract(metafunc):
+            return
+        for mark in metafunc.definition.iter_markers("parametrize"):
+            names = mark.args[0] if mark.args else mark.kwargs.get("argnames", ())
+            if isinstance(names, str):
+                names = [part.strip() for part in names.split(",")]
+            if self.name in names:
+                return
+        metafunc.parametrize(self.name, self.implementations, indirect=True, ids=param_id)
 
 
 @pytest.hookimpl(wrapper=True)
@@ -671,6 +939,8 @@ def _statements(script: str) -> Iterator[str]:
         yield pending
 
 
-__all__ = ["Fence", "FenceError", "HARNESS_HOMES", "KEPT_ENV", "LIVE_ENV", "MARKERS",
-           "SHUTDOWN_POLL", "TIERS", "fence", "param_id", "served", "short_dir",
-           "uv_env", "wait_for", "write_sqlite"]
+__all__ = ["CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence", "FenceError",
+           "HARNESS_HOMES", "KEPT_ENV", "LIFTED", "LIVE_ENV", "MARKERS", "SHUTDOWN_POLL",
+           "Seam", "Selection", "TIERS", "TIERS_ENV", "fence", "findings_of", "param_id",
+           "selection", "served", "short_dir", "touches_match", "uv_env", "wait_for",
+           "write_sqlite"]
