@@ -597,10 +597,25 @@ def test_a_foreign_timer_is_read_by_its_triggers_unit_in_two_calls(w):
     assert "backup.service" not in " ".join(" ".join(c) for c in w.sup.calls)
 
 
-def test_status_refuses_a_foreign_name_in_moxis_namespace(w):
+def test_status_refuses_a_bad_foreign_name_alone_and_reads_the_rest(w):
     w.installed(DAEMONS=DAEMON)
-    with pytest.raises(ValueError, match="own unit namespace"):
-        units.status("demo", foreign=["moxi-demo-relay.service"])
+    w.foreign_timer()
+    states = units.status("demo", foreign=["moxi-demo-relay.service", "backup.timer", "",
+                                           "-Hhost.timer", "plain"])
+    by_name = {(s.module, s.name): s for s in states}
+    assert by_name[("demo", "relay")].state == "active"
+    assert by_name[(None, "backup.timer")].state == "active"
+    own = by_name[(None, "moxi-demo-relay.service")]
+    assert (own.state, own.kind) == ("unknown", "daemon")
+    assert "moxi's own unit namespace" in own.detail
+    assert by_name[(None, "")].state == "unknown"
+    for ref in ("-Hhost.timer", "plain"):
+        bad = by_name[(None, ref)]
+        assert bad.state == "unknown" and bad.detail.startswith(f"{ref}: ")
+        assert "the fence takes" in bad.detail
+    assert [s.name for s in states] == ["relay", "moxi-demo-relay.service", "backup.timer",
+                                        "", "-Hhost.timer", "plain"]
+    assert not any("-Hhost" in " ".join(c) or "plain" in c for c in w.sup.calls)
 
 
 def test_last_runs_gives_the_newest_lines_of_one_timer_oldest_first(w):

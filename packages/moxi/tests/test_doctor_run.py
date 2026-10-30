@@ -510,6 +510,20 @@ def test_a_wrap_shows_the_timer_s_state_its_key_and_its_last_run(d):
     assert d.rows("demo")[("demo", "wrap backup.timer")].state == "warn"
 
 
+def test_a_hand_edited_wrap_ref_costs_only_its_own_row(d):
+    d.installed(DAEMONS=DAEMON)
+    d.sup.state("moxi-demo-relay.service")["active"] = True
+    dropin = d.root / "own.service.d" / "50-moxi-demo.conf"
+    dropin.parent.mkdir()
+    dropin.write_text("# moxi wrap: demo/backup\n"
+                      "# moxi: timer = moxi-demo-relay.timer, if = demo.rows.backup\n")
+    got = d.rows("demo")
+    assert ("demo", "units") not in got
+    assert got[("demo", "daemon relay")].state == "ok"
+    wrap = got[("demo", "wrap moxi-demo-relay.timer")]
+    assert wrap.state == "warn" and "moxi's own unit namespace" in wrap.detail
+
+
 @pytest.mark.parametrize("seen, state", [("missing", "warn"), ("failed", "fail"),
                                           ("unknown", "warn")])
 def test_a_wrap_whose_timer_is_gone_or_failed(d, seen, state):

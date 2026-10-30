@@ -25,6 +25,7 @@ from dataclasses import replace
 from . import _backend
 from ._apply import fence as _fence
 from ._backend import UnitRef
+from ._fence import FenceError, argv
 from ._plan import _platform
 from ._types import DeclarationError, Declarations, UnitState
 
@@ -39,8 +40,9 @@ def status(modules: Iterable[str] | str | None = None, *, foreign: Iterable[str]
 
     A module's units are its declared daemons and timers, in declared order, then every
     other unit carrying its mark (one a module no longer declares, a daemon's own
-    `.socket` unit). A foreign name in moxi's own namespace raises `ValueError`: read
-    such a unit through its module.
+    `.socket` unit). A foreign name that is empty, in moxi's own namespace (read such a
+    unit through its module), or one the supervisor's fence refuses is `unknown` with the
+    reason, and the other units are read as ever.
     """
     from .. import modules as _modules
 
@@ -68,16 +70,29 @@ def status(modules: Iterable[str] | str | None = None, *, foreign: Iterable[str]
             else:
                 rows.append(row)
     for ref in foreign:
-        if not isinstance(ref, str) or not ref:
-            raise ValueError(f"a foreign unit's name is a non-empty string, not {ref!r}")
+        if not isinstance(ref, str):
+            raise ValueError(f"a foreign unit's name is a string, not {ref!r}")
+        kind = "timer" if ref.endswith(".timer") else "daemon"
+        backend = None if isinstance(impl, str) else impl.name
+        if not ref:
+            rows.append(UnitState(None, ref, kind, backend, "unknown",
+                                  detail="a foreign unit's name is not empty; not read"))
+            continue
         if isinstance(impl, str):
-            kind = "timer" if ref.endswith(".timer") else "daemon"
             rows.append(UnitState(None, ref, kind, None, "nobackend", detail=impl))
             continue
         if impl.own(ref):
-            raise ValueError(f"{ref} is in moxi's own unit namespace; read it through the "
-                             "module whose mark it carries")
-        read(impl.foreign(ref, None))
+            rows.append(UnitState(None, ref, kind, backend, "unknown",
+                                  detail=f"{ref} is in moxi's own unit namespace; read it "
+                                         "through the module whose mark it carries"))
+            continue
+        unit = impl.foreign(ref, None)
+        refused = _refused(impl, unit)
+        if refused is not None:
+            rows.append(UnitState(None, ref, kind, backend, "unknown",
+                                  detail=f"{ref}: {refused}; not read"))
+            continue
+        read(unit)
     if refs:
         read_states = impl.status(refs, _fence(impl, runner))
         if len(read_states) != len(refs):
@@ -87,6 +102,19 @@ def status(modules: Iterable[str] | str | None = None, *, foreign: Iterable[str]
         for slot, ref, state in zip(slots, refs, read_states):
             rows[slot] = _with_last(state, ref, runs)
     return [row for row in rows if row is not None]
+
+
+def _refused(impl, unit: UnitRef) -> str | None:
+    """Why the fence would refuse to read foreign `unit`, or None. Only systemd puts a
+    foreign name on the command line of its read; the other backends read the whole
+    domain, or pass the names in the environment."""
+    if impl.supervisor != "systemd":
+        return None
+    try:
+        argv("systemd", "show", "--property=Id", *unit.ids)
+    except FenceError as exc:
+        return str(exc)
+    return None
 
 
 def last_runs(module: str, timer: str, n: int = 1) -> list[dict]:
