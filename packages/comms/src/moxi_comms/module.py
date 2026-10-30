@@ -44,3 +44,6 @@ CONFIG_CHECK = "moxi_comms.config:check_text"
 #: since nothing rebuilds it. The doctor warns when its file can be read by others.
 STORES = {"record": {"root": "state", "path": "record.db", "kind": "sqlite",
                      "private": True, "retention": "keep", "rebuildable": False}}
+#: The delivery daemon, which `moxi install comms` writes as a unit through the core's
+#: writer. `moxi comms service` still writes today's unmarked unit, as it always has.
+DAEMONS = {"daemon": {"command": "moxi-comms-daemon", "doc": "the delivery daemon"}}
