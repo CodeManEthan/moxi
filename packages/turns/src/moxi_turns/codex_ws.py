@@ -15,7 +15,19 @@ from . import codex_protocol as proto
 log = logging.getLogger("moxi.turns.codex.ws")
 
 CLIENT_NAME = "moxi-turns"
-CLIENT_VERSION = "0.1.0"
+
+
+def _own_version() -> str:
+    """turns' installed version, which the app-server is told as the client's."""
+    try:
+        from importlib.metadata import version
+
+        return version("moxi-turns")
+    except Exception:  # noqa: BLE001
+        return "0+unknown"
+
+
+CLIENT_VERSION = _own_version()
 
 
 AppServerOffline = proto.AppServerOffline
