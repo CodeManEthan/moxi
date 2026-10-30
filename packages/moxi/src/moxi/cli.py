@@ -1051,6 +1051,12 @@ def _install(argv: list[str]) -> int:
     return install.main(argv)
 
 
+def _run(argv: list[str]) -> int:
+    from . import run
+
+    return run.main(argv)
+
+
 def _help(argv: list[str]) -> int:
     if not argv:
         sys.stdout.write(USAGE)
@@ -1092,6 +1098,7 @@ _VERBS = {
     "check": _check,
     "help": _help,
     "version": _version,
+    "run": _run,
 }
 
 
