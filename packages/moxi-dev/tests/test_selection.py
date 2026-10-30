@@ -120,6 +120,26 @@ def test_a_change_elsewhere_brings_nothing_back(package, monkeypatch):
     assert ran(result) == PLAIN
 
 
+@pytest.mark.parametrize("glob", ["src/p/claude/**", "tests/test_x.py", "**/claude/**", ""])
+def test_a_touches_glob_not_from_the_repository_root_is_refused(pytester, glob):
+    pytester.makeconftest('pytest_plugins = ["moxi_dev.testing"]\n')
+    pytester.makeini(INI)
+    pytester.makepyfile(test_bad=f"""
+import pytest
+
+@pytest.mark.slow
+@pytest.mark.touches("packages/p/ok/**", {glob!r})
+def test_slow():
+    pass
+""")
+    result = pytester.runpytest("-p", "no:cacheprovider")
+    assert result.ret == pytest.ExitCode.USAGE_ERROR
+    err = "\n".join(result.errlines)
+    assert "a touches glob is a path from the repository's root, under packages/" in err
+    assert f"test_bad.py::test_slow: {glob!r}" in err
+    assert "packages/p/ok/**" not in err.split("these are not:")[1]
+
+
 def test_a_lifted_test_still_answers_to_k(package, monkeypatch):
     monkeypatch.setenv(testing.TIERS_ENV, "all")
     result = package.runpytest("-p", "no:cacheprovider", "-k", "not touches")

@@ -83,7 +83,8 @@ runs; `moxi-dev check` sets them for each suite, and a contributor may set them 
 - `MOXI_TEST_CHANGED=<file>` names a file of repository paths that changed, separated by
   NUL bytes. A `browser`, `slow` or `build` test (never a `live` one) marked
   `@pytest.mark.touches("packages/<p>/<glob>")` is put back when one of its globs
-  matches one of the paths (`touches_match`).
+  matches one of the paths (`touches_match`). A glob that does not start with
+  `packages/` is refused when the tests are collected, since it could never match.
 - `MOXI_TEST_FINDING=L<n>[,L<n>...]` runs only the tests marked `finding` with one of
   those arguments, a tier test among them put back as above; every other test is
   deselected.
@@ -155,6 +156,10 @@ CHANGED_ENV = "MOXI_TEST_CHANGED"
 FINDING_ENV = "MOXI_TEST_FINDING"
 #: Where `durations.json` goes.
 DURATIONS_ENV = "MOXI_TEST_DURATIONS"
+
+#: Where every `touches` glob starts: the changed paths are the repository's, and each
+#: package is under it.
+TOUCHES_ROOT = "packages/"
 
 #: The marker the kit sets on a tier test it puts back; not for tests to use.
 LIFTED = "lifted"
@@ -614,6 +619,16 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     chosen = config.stash.get(_SELECTION, None)
     if chosen is None:
         return
+    bad = [f"{item.nodeid}: {glob!r}" for item in items
+           for mark in item.iter_markers("touches") for glob in mark.args
+           if not (isinstance(glob, str)
+                   and glob.strip().strip("/").startswith(TOUCHES_ROOT))]
+    if bad:
+        # A glob relative to the package would never match a changed path, and its test
+        # would quietly run only under every tier.
+        raise pytest.UsageError(
+            f"a touches glob is a path from the repository's root, under {TOUCHES_ROOT} "
+            f"(such as '{TOUCHES_ROOT}<package>/src/**'); these are not: " + "; ".join(bad))
     if chosen.findings:
         keep = [item for item in items if findings_of(item) & chosen.findings]
         dropped = [item for item in items if not findings_of(item) & chosen.findings]
