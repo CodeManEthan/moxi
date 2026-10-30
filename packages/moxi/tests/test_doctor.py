@@ -108,3 +108,15 @@ def test_importing_the_package_stays_light():
     out = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True,
                          text=True, check=True).stdout.strip()
     assert out == ""
+
+
+def test_the_core_s_records_are_in_the_core_s_state_directory(tmp_path, monkeypatch):
+    """A module-style variable for the name `moxi` doesn't move the core's records."""
+    from moxi import paths
+
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path / "moxi-home"))
+    monkeypatch.setenv("MOXI_MOXI_STATE_HOME", str(tmp_path / "elsewhere"))
+    doctor.record("moxi", "the core's own row", key="k")
+    written = paths.core().state_dir() / "doctor.json"
+    assert json.loads(written.read_text())["k"]["text"] == "the core's own row"
+    assert not (tmp_path / "elsewhere").exists()
