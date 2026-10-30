@@ -290,6 +290,19 @@ def test_an_absent_module_or_one_without_settings_refuses_with_exit_3(demo, modu
     assert exc.exit_code == 3 and words in exc.fix
 
 
+@pytest.mark.parametrize("argv", [("set", "demo", "block", "true"),
+                                  ("unset", "demo", "block")])
+def test_a_schema_whose_override_is_misspelled_refuses_with_exit_3(demo, site, capsys,
+                                                                    argv):
+    site.write("moxi_demo/settings.toml",
+               SCHEMA.replace('env = "MOXI_DEMO_BACKEND"', 'env = "OTHER_BACKEND"'))
+    exc = refused(config.set, "demo", "block", True, by="cli")
+    assert exc.exit_code == 3 and "OTHER_BACKEND" in exc.problem
+    code, _, err = run(capsys, "config", *argv)
+    assert code == 3 and "OTHER_BACKEND" in err
+    assert not demo.exists()
+
+
 def test_set_returns_no_applied_units_and_needs_a_by(demo):
     assert config.set("demo", "block", True, by="ui") == []
     assert refused(config.set, "demo", "block", True, by="").exit_code == 2
