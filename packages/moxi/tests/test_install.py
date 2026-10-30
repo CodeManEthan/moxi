@@ -428,7 +428,7 @@ def test_install_refuses_with_and_without_the_same_extra(fake, capsys):
 
 def test_install_refuses_a_bad_name_or_a_verb(fake, capsys):
     assert "not a module name" in moxi_install(capsys, "Comms")[2]
-    assert "moxi's own commands" in moxi_install(capsys, "check")[2]
+    assert "moxi's own commands" in moxi_install(capsys, "config")[2]
 
 
 def test_install_from_puts_every_spec_into_the_same_run(fake, capsys):

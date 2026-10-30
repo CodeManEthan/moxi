@@ -2,11 +2,13 @@
 
 Run from the repository's root as `uv run --locked moxi-dev check [--full] [--base REV]`.
 It first reads the workspace, the worker count and the changed paths; a bad workspace,
-worker count or base stops it there, before any step runs. Then, in order, each step
-only once the ones before it have passed:
+worker count or base stops it there, before any step runs. Then, in order:
 
-1. `uv lock --check`: the committed `uv.lock` matches every package's declarations.
-2. Pick the packages. The changed paths are the commits since the branch left `main`
+1. `uv lock --check`: the committed `uv.lock` matches every package's declarations. A
+   stale lock stops the check here.
+2. The tag check over the repository's files (`moxi_dev.tags`): no ruling, design,
+   review or build tags in code, tests or docs.
+3. Pick the packages. The changed paths are the commits since the branch left `main`
    (`git merge-base main HEAD`, or `--base REV` in place of `main`) plus the working
    tree's staged, unstaged and untracked files. A path under `packages/<p>/` picks `p`;
    any other path (the root files, the lock, the workflow) picks every package. Then
@@ -14,10 +16,13 @@ only once the ones before it have passed:
    dependencies or dependency groups, is picked too, and so on until nothing is added:
    a plain path filter would skip a dependent's tests and its contract check. `--full`
    picks every package.
-3. Sync the check's own environment, `.moxi-dev/env-3.12` under the root, with every
+4. Sync the check's own environment, `.moxi-dev/env-3.12` under the root, with every
    package, extra and group at the lowest Python the packages support. The root's own
-   `.venv` is never touched.
-4. Run each picked package's tests in a pytest session of its own, from the package's
+   `.venv` is never touched. A failed sync stops the check here.
+5. For each picked package, the contract's import rules: import-linter and deptry, run
+   in that environment with a configuration written from the package's declarations
+   (`moxi_dev.lint`, which writes it under `.moxi-dev/lint/`).
+6. Run each picked package's tests in a pytest session of its own, from the package's
    directory (each has its own conftest, and test names repeat across packages), always
    spread over workers: `-n N`, where N is the CPUs this process may run on, at most
    `MOXI_TEST_WORKERS` when that is set, and never less than one. A serial run is not a
@@ -25,8 +30,12 @@ only once the ones before it have passed:
    can turn `-n auto` into a serial run) and the caller's `PYTEST_ADDOPTS` are dropped
    from the suites' environment, and an option that would undo the workers (`--pdb`)
    makes pytest refuse the run.
-5. Print one summary line, the last line of the output: the commit, the packages, each
-   package's result and seconds, the total and the exit code.
+7. Print one summary line, the last line of the output: the commit, the packages, the
+   lock, tag, sync and lint results, each package's tests and seconds, the total and the
+   exit code.
+
+The tags, each package's lint and each package's tests all run even when one before them
+failed, so one run shows every failure.
 
 The exit code is 0 only when every step passed, 1 when one failed, and 2 when the check
 could not start or a step could not be run (not in a workspace, a member with no readable
@@ -47,12 +56,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
+from . import lint, tags
+
 PYTHON = "3.12"
 ENV_DIR = Path(".moxi-dev") / f"env-{PYTHON}"
+LINT_DIR = Path(".moxi-dev") / "lint"
 WORKERS_VAR = "MOXI_TEST_WORKERS"
 
 # A step's command, run from `cwd` with `env`; returns the exit code. Tests replace it.
 Run = Callable[[Sequence[str], Path, Mapping[str, str]], int]
+# The lint's commands for a package: (package dir, work dir, every member's dir).
+Plan = Callable[[Path, Path, Sequence[Path]], list[lint.Command]]
 
 
 class CheckError(Exception):
@@ -209,7 +223,9 @@ class Result:
     commit: str = "unknown"
     packages: list[str] | None = None
     lock: str = "not run"
+    tags: str = "not run"
     sync: str = "not run"
+    lint: list[tuple[str, bool]] | None = None
     suites: list[tuple[str, bool, float]] = field(default_factory=list)
     seconds: float = 0.0
     code: int = 0
@@ -218,9 +234,16 @@ class Result:
         names = "unknown" if self.packages is None else ", ".join(self.packages) or "none"
         suites = ", ".join(f"{name} {'pass' if ok else 'fail'} {secs:.1f}s"
                            for name, ok, secs in self.suites) or "no suites run"
+        if self.lint is None:
+            linted = "not run"
+        elif not self.lint:
+            linted = "none"
+        else:
+            failed = [name for name, ok in self.lint if not ok]
+            linted = f"fail ({', '.join(failed)})" if failed else "pass"
         return (f"moxi-dev check: commit {self.commit} | packages: {names} | "
-                f"lock {self.lock} | sync {self.sync} | {suites} | "
-                f"total {self.seconds:.1f}s | exit {self.code}")
+                f"lock {self.lock} | tags {self.tags} | sync {self.sync} | "
+                f"lint {linted} | {suites} | total {self.seconds:.1f}s | exit {self.code}")
 
 
 def _commit(root: Path) -> str:
@@ -230,10 +253,12 @@ def _commit(root: Path) -> str:
 
 
 def check(root: Path, *, full: bool = False, base: str | None = None,
-          environ: Mapping[str, str] | None = None, run: Run | None = None) -> Result:
+          environ: Mapping[str, str] | None = None, run: Run | None = None,
+          plan: Plan | None = None) -> Result:
     """Run the check's steps on the workspace at `root`; the result holds the exit code."""
     environ = os.environ if environ is None else environ
     run = run or _run
+    plan = plan or lint.plan
     started = time.monotonic()
     result = Result()
     try:
@@ -242,7 +267,8 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
         workers = worker_args(environ)
         chosen = list(packages) if full else pick(packages, changed_paths(root, base or "main"))
         result.packages = [package.dir for package in chosen]
-        result.code = 0 if _steps(root, chosen, workers, environ, run, result) else 1
+        steps = _Steps(root, packages, workers, environ, run, plan, result)
+        result.code = 0 if steps.all(chosen) else 1
     except CheckError as exc:
         print(f"moxi-dev check: {exc}", file=sys.stderr, flush=True)
         result.code = 2
@@ -250,42 +276,93 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
     return result
 
 
-def _steps(root: Path, chosen: Sequence[Package], workers: Sequence[str],
-           environ: Mapping[str, str], run: Run, result: Result) -> bool:
-    """The lock, the sync and the suites, recorded in `result`; True when all passed."""
-    env = _base_env(environ)
-    ok = run(["uv", "lock", "--check"], root, env) == 0
-    result.lock = "pass" if ok else "fail"
-    if ok and chosen:
+@dataclass
+class _Steps:
+    root: Path
+    packages: Sequence[Package]
+    workers: Sequence[str]
+    environ: Mapping[str, str]
+    run: Run
+    plan: Plan
+    result: Result
+
+    def all(self, chosen: Sequence[Package]) -> bool:
+        """The lock, the tags, the sync, the lint and the suites, recorded in the result;
+        True when all passed."""
+        root, run, result = self.root, self.run, self.result
+        env = _base_env(self.environ)
+        ok = run(["uv", "lock", "--check"], root, env) == 0
+        result.lock = "pass" if ok else "fail"
+        if not ok:
+            return False
+        ok = self.tags()
+        if not chosen:
+            result.sync = "skipped"
+            return ok
         venv = root / ENV_DIR
-        ok = run(["uv", "sync", "--locked", "--all-packages", "--all-extras",
-                  "--all-groups", "--python", PYTHON],
-                 root, {**env, "UV_PROJECT_ENVIRONMENT": str(venv)}) == 0
-        result.sync = "pass" if ok else "fail"
-        if ok:
-            suite_env = {key: value for key, value in env.items()
-                         if key not in SUITE_DROPPED_ENV}
-            suite_env = {**suite_env, "VIRTUAL_ENV": str(venv),
-                         "PATH": os.pathsep.join(filter(None, [str(venv / "bin"),
-                                                               env.get("PATH")]))}
-            for package in chosen:
-                began = time.monotonic()
-                passed = run([str(venv / "bin" / "python"), "-m", "pytest", *workers],
-                             package.path, suite_env) == 0
-                result.suites.append((package.dir, passed, time.monotonic() - began))
-                ok = ok and passed
-    elif ok:
-        result.sync = "skipped"
-    return ok
+        synced = run(["uv", "sync", "--locked", "--all-packages", "--all-extras",
+                      "--all-groups", "--python", PYTHON],
+                     root, {**env, "UV_PROJECT_ENVIRONMENT": str(venv)}) == 0
+        result.sync = "pass" if synced else "fail"
+        if not synced:
+            return False
+        suite_env = {key: value for key, value in env.items()
+                     if key not in SUITE_DROPPED_ENV}
+        suite_env = {**suite_env, "VIRTUAL_ENV": str(venv),
+                     "PATH": os.pathsep.join(filter(None, [str(venv / "bin"),
+                                                           env.get("PATH")]))}
+        result.lint = []
+        for package in chosen:
+            ok = self.lint(package, venv, suite_env) and ok
+        for package in chosen:
+            began = time.monotonic()
+            passed = run([str(venv / "bin" / "python"), "-m", "pytest", *self.workers],
+                         package.path, suite_env) == 0
+            result.suites.append((package.dir, passed, time.monotonic() - began))
+            ok = ok and passed
+        return ok
+
+    def tags(self) -> bool:
+        try:
+            hits = tags.scan(self.root)
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise CheckError(f"the tag check could not list the files ({exc})") from exc
+        for hit in hits:
+            print(f"moxi-dev check: {hit}", flush=True)
+        self.result.tags = "fail" if hits else "pass"
+        return not hits
+
+    def lint(self, package: Package, venv: Path, suite_env: Mapping[str, str]) -> bool:
+        """The package's lint commands, run in the check's environment; True when each
+        passed. A package with none is left out of the result."""
+        work = self.root / LINT_DIR / package.dir
+        try:
+            commands = self.plan(package.path, work, [p.path for p in self.packages])
+        except lint.LintError as exc:
+            print(f"moxi-dev check: lint {package.dir}: {exc}", flush=True)
+            self.result.lint.append((package.dir, False))
+            return False
+        if not commands:
+            return True
+        ok = True
+        for command in commands:
+            print(f"moxi-dev check: lint {package.dir}: {command.what}", flush=True)
+            env = {key: value for key, value in suite_env.items() if key != "PYTHONPATH"}
+            if command.pythonpath:
+                env["PYTHONPATH"] = os.pathsep.join(command.pythonpath)
+            argv = [str(venv / "bin" / command.argv[0]), *command.argv[1:]]
+            ok = self.run(argv, package.path, env) == 0 and ok
+        self.result.lint.append((package.dir, ok))
+        return ok
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="moxi-dev check",
-        description="Run the checks a change must pass before it merges: the lock, then "
-                    "the tests of every package the change touches and of every package "
-                    "that depends on one, in an environment of the check's own. Run it "
-                    "from the repository's root.")
+        description="Run the checks a change must pass before it merges: the lock and "
+                    "the tag check, then the import rules and the tests of every package "
+                    "the change touches and of every package that depends on one, in an "
+                    "environment of the check's own. Run it from the repository's root.")
     parser.add_argument("--full", action="store_true",
                         help="check every package, whatever changed")
     parser.add_argument("--base", metavar="REV",

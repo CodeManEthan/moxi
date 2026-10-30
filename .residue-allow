@@ -1,3 +1,11 @@
 packages/comms/tests/test_hygiene.py	(R5)	data: the reference check's own test feeds this string to the pattern it tests, and its comment names the shape
 packages/comms/tests/test_hygiene.py	[R7]	data: the comment above the reference check names the shape the pattern refuses
 packages/comms/tests/test_hygiene.py	[S8]	data: the reference check's own test feeds this comment to the pattern it tests
+packages/moxi-dev/tests/test_check.py	[B5]	data: the check's test writes this tag into a file to see the tag step fail
+packages/moxi-dev/tests/test_tags.py	[B5]	data: the tag check's own tests feed this to the pattern they test
+packages/moxi-dev/tests/test_tags.py	(R5)	data: the tag check's own tests feed this to the pattern they test
+packages/moxi-dev/tests/test_tags.py	§5	data: the tag check's own tests feed this to the pattern they test
+packages/moxi-dev/tests/test_tags.py	design v4	data: the tag check's own tests feed this to the pattern they test
+packages/moxi-dev/tests/test_tags.py	MAJOR 2	data: the tag check's own tests feed this to the pattern they test
+packages/moxi-dev/tests/test_tags.py	round home/slug	data: the tag check's own tests feed this to the pattern they test
+packages/moxi-dev/tests/test_tags.py	D07	data: the tag check's own tests feed this to the pattern they test

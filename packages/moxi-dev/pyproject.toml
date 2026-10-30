@@ -16,9 +16,10 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Testing",
 ]
-# The test runner and its plugins are moxi-dev's own dependencies, so the root's dev
-# group, which names moxi-dev alone, brings them into a contributor's environment.
-dependencies = ["moxi", "pytest", "pytest-xdist", "pytest-timeout"]
+# The test runner, its plugins and the two tools that check the contract's import rules
+# (import-linter and deptry) are moxi-dev's own dependencies, so the root's dev group,
+# which names moxi-dev alone, brings them into a contributor's environment.
+dependencies = ["moxi", "pytest", "pytest-xdist", "pytest-timeout", "import-linter", "deptry"]
 
 [project.scripts]
 moxi-dev = "moxi_dev.cli:main"

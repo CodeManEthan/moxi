@@ -23,9 +23,9 @@ ORG = "moxihq"
 #: shared by every module, each under its own subdirectory.
 NAMESPACE = "moxi"
 
-#: The umbrella's own verbs (`moxi install`, `moxi check`, ...). A module named by one
+#: The umbrella's own verbs (`moxi install`, `moxi config`, ...). A module named by one
 #: could never be reached as `moxi <module>`, so no module may take one.
-VERBS = frozenset({"modules", "install", "shortcut", "config", "check", "help", "version"})
+VERBS = frozenset({"modules", "install", "shortcut", "config", "help", "version"})
 
 _NAME = re.compile(r"[a-z0-9]+")
 

@@ -1,4 +1,4 @@
-"""The umbrella: the verbs, dispatch to a module, `modules`, `shortcut`, `config`, `check`."""
+"""The umbrella: the verbs, dispatch to a module, `modules`, `shortcut`, `config`."""
 
 from __future__ import annotations
 
@@ -423,18 +423,6 @@ def test_config_of_a_module_without_settings_or_absent(site, capsys):
     assert code == 2 and "moxi install nothere" in err
 
 
-# -- moxi check --------------------------------------------------------------------------
-
-def test_check_runs_moxi_contract_main_with_its_arguments(monkeypatch, capsys):
-    seen = []
-    stub = types.ModuleType("moxi.contract")
-    stub.main = lambda argv: seen.append(argv) or 5
-    monkeypatch.setitem(sys.modules, "moxi.contract", stub)
-    monkeypatch.setattr(moxi, "contract", stub, raising=False)
-    assert cli.main(["check", "--staged", "some/path"]) == 5
-    assert seen == [["--staged", "some/path"]]
-
-
 # -- the console script ------------------------------------------------------------------
 
 def test_pyproject_declares_the_moxi_script_and_no_other():
@@ -449,7 +437,7 @@ def test_pyproject_declares_the_moxi_script_and_no_other():
 def test_importing_the_cli_loads_no_verb_module():
     code = ("import sys, moxi.cli\n"
             "bad = [m for m in ('moxi.install', 'moxi.config', 'moxi.modules', "
-            "'moxi.contract', 'importlib.metadata', 'tomllib', 'argparse') "
+            "'importlib.metadata', 'tomllib', 'argparse') "
             "if m in sys.modules]\n"
             "print(bad)\n")
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,

@@ -100,7 +100,7 @@ def module_not_asked(monkeypatch):
 # ============================================================== the seam's own rules
 
 def test_no_import_in_comms_names_cache_s_package():
-    """Only `load` reaches cache; `moxi check` refuses an import of an
+    """Only `load` reaches cache; the contract's lint refuses an import of an
     optional module, and this holds it for every file of the package too."""
     for path in SRC.rglob("*.py"):
         for node in ast.walk(ast.parse(path.read_text())):

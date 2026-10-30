@@ -28,7 +28,7 @@ moxi-turns-ping = "moxi_turns.codex_hooks:main"
 turns = "moxi_turns.module"
 
 [dependency-groups]
-dev = ["pytest", "websockets>=17.0.1"]
+dev = ["pytest", "moxi-dev", "websockets>=17.0.1"]
 
 [build-system]
 requires = ["hatchling>=1.27"]

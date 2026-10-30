@@ -1,4 +1,4 @@
-"""The module contract check over this package, as `moxi check` runs it.
+"""The module contract check over this package.
 
 It runs with the package's suite, so `moxi-dev check` and CI hold every change to it.
 """
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from moxi.contract import check
+from moxi_dev.contract import check
 
 ROOT = Path(__file__).resolve().parents[1]
 

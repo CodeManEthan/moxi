@@ -226,6 +226,7 @@ def test_the_real_workspace_picks_by_the_same_rule():
 
 def run_check(repo, runs, **kw):
     kw.setdefault("environ", {"PATH": "/usr/bin", "VIRTUAL_ENV": str(repo / ".venv")})
+    kw.setdefault("plan", lambda package, work, members: [])
     return check.check(repo, run=runs, **kw)
 
 
@@ -335,7 +336,7 @@ def test_a_stale_lock_stops_before_the_sync(repo):
     runs = Runs({lambda cmd, cwd: cmd[:2] == ["uv", "lock"]: 1})
     result = run_check(repo, runs)
     assert result.code == 1 and len(runs.calls) == 1
-    assert "lock fail | sync not run" in result.line()
+    assert "lock fail | tags not run | sync not run | lint not run" in result.line()
 
 
 def test_a_failed_sync_runs_no_suite(repo):
@@ -349,7 +350,86 @@ def test_nothing_picked_checks_the_lock_and_passes(repo):
     result = run_check(repo, runs)
     assert result.code == 0
     assert [cmd for cmd, _, _ in runs.calls] == [["uv", "lock", "--check"]]
-    assert "packages: none | lock pass | sync skipped | no suites run" in result.line()
+    assert ("packages: none | lock pass | tags pass | sync skipped | lint not run | "
+            "no suites run") in result.line()
+
+
+# --- the tag check and the lint -------------------------------------------------------
+
+def test_a_tag_fails_the_check_and_the_rest_still_run(repo, capsys):
+    tag = "[B5]"
+    commit_file(repo, "packages/sessions/x.py", f"# see {tag}\n")
+    runs = Runs()
+    result = run_check(repo, runs)
+    assert result.code == 1 and result.tags == "fail"
+    assert [name for name, _ in runs.suites()] == ["sessions", "cache", "comms"]
+    assert f"moxi-dev check: packages/sessions/x.py:1: tag {tag!r}" in capsys.readouterr().out
+
+
+def test_each_lint_command_runs_in_the_check_s_environment(repo):
+    commit_file(repo, "packages/sessions/x.py")
+    seen = []
+
+    def plan(package, work, members):
+        seen.append((package, work, list(members)))
+        return [check.lint.Command("one", ["lint-imports", "--config", "c"], ["here"]),
+                check.lint.Command("two", ["deptry", "."])]
+
+    runs = Runs()
+    result = run_check(repo, runs, plan=plan,
+                       environ={"PATH": "/usr/bin", "PYTHONPATH": "/stray"})
+    assert result.code == 0 and "| lint pass |" in result.line()
+    env_dir = repo / ".moxi-dev" / "env-3.12"
+    members = [repo / "packages" / d for d in LAYOUT]
+    assert seen == [(repo / "packages" / d, repo / ".moxi-dev" / "lint" / d, members)
+                    for d in ("sessions", "cache", "comms")]
+    linted = [(cmd, cwd, env) for cmd, cwd, env in runs.calls if "pytest" not in cmd
+              and cmd[0] != "uv"]
+    assert [(cmd[0], cwd.name) for cmd, cwd, _ in linted] == [
+        (str(env_dir / "bin" / tool), d) for d in ("sessions", "cache", "comms")
+        for tool in ("lint-imports", "deptry")]
+    assert linted[0][2]["PYTHONPATH"] == "here" and "PYTHONPATH" not in linted[1][2]
+    assert linted[0][2]["VIRTUAL_ENV"] == str(env_dir)
+    last_lint = max(i for i, call in enumerate(runs.calls) if call in linted)
+    first_suite = min(i for i, (cmd, _, _) in enumerate(runs.calls) if "pytest" in cmd)
+    assert last_lint < first_suite
+
+
+def test_a_lint_failure_fails_the_check_and_the_rest_still_run(repo):
+    commit_file(repo, "packages/sessions/x.py")
+
+    def plan(package, work, members):
+        if package.name == "cache":
+            raise check.lint.LintError("no announcement")
+        return [check.lint.Command("one", ["deptry", "."])]
+
+    runs = Runs({lambda cmd, cwd: cmd[0].endswith("deptry") and cwd.name == "comms": 1})
+    result = run_check(repo, runs, plan=plan)
+    assert result.code == 1
+    assert "| lint fail (cache, comms) |" in result.line()
+    assert [name for name, _ in runs.suites()] == ["sessions", "cache", "comms"]
+
+
+def test_a_package_with_no_lint_commands_is_left_out(repo):
+    commit_file(repo, "packages/sessions/x.py")
+    result = run_check(repo, Runs())
+    assert result.code == 0 and "| lint none |" in result.line()
+
+
+def test_a_failed_sync_runs_no_lint(repo):
+    runs = Runs({lambda cmd, cwd: cmd[:2] == ["uv", "sync"]: 1})
+    calls = []
+    result = run_check(repo, runs, full=True, plan=lambda *a: calls.append(a) or [])
+    assert calls == [] and "| sync fail | lint not run |" in result.line()
+
+
+def test_the_real_plan_runs_over_the_real_layout(repo):
+    """Without a stand-in plan, each package whose required module has no announcement
+    fails its lint with a reason, and the rest still lint."""
+    commit_file(repo, "packages/sessions/x.py")
+    result = check.check(repo, run=Runs(), environ={"PATH": "/usr/bin"})
+    assert "| lint fail (cache, comms) |" in result.line()
+    assert (repo / ".moxi-dev" / "lint" / "sessions" / "importlinter.toml").is_file()
 
 
 # --- the summary line -------------------------------------------------------------------
@@ -357,7 +437,8 @@ def test_nothing_picked_checks_the_lock_and_passes(repo):
 LINE = re.compile(
     r"moxi-dev check: commit (?P<commit>[0-9a-f]{12}(\+dirty)?) \| "
     r"packages: (?P<packages>[^|]+) \| lock (pass|fail|not run) \| "
-    r"sync (pass|fail|skipped|not run) \| (?P<suites>[^|]+) \| "
+    r"tags (pass|fail|not run) \| sync (pass|fail|skipped|not run) \| "
+    r"lint (?P<lint>pass|none|not run|fail \([^)]+\)) \| (?P<suites>[^|]+) \| "
     r"total \d+\.\d+s \| exit (?P<code>\d)$")
 
 

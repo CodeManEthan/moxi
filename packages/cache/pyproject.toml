@@ -23,7 +23,7 @@ moxi-cache-watch = "moxi_cache.watch:main"
 cache = "moxi_cache.module"
 
 [dependency-groups]
-dev = ["pytest"]
+dev = ["pytest", "moxi-dev"]
 
 [build-system]
 requires = ["hatchling>=1.27"]

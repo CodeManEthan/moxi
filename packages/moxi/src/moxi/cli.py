@@ -5,7 +5,6 @@
     moxi install <module> ...    installs a module, sets it up, offers its extras
     moxi shortcut [<module>]     the opt-in bare command for a module
     moxi config <module> ...     a module's settings and its config file
-    moxi check [PATH]            the module contract check
     moxi help [<verb>|<module>]  help
     moxi version                 versions
 
@@ -35,7 +34,6 @@ commands:
   shortcut [<module>] [--remove]     put a bare <module> command on PATH, or take it off
   config <module> [show|path|check|init]
                                      a module's settings and its config file
-  check [--staged] [PATH]            check a module repo against the module contract
   help [<command>|<module>]          this help, or a command's or a module's
   version                            the versions of moxi and its modules
 """
@@ -683,13 +681,7 @@ def _toml_value(value) -> str:
     raise TypeError(f"cannot write {value!r} as TOML")
 
 
-# -- moxi check, help, version --------------------------------------------------------------
-
-def _check(argv: list[str]) -> int:
-    from . import contract
-
-    return contract.main(argv)
-
+# -- moxi install, help, version ------------------------------------------------------------
 
 def _install(argv: list[str]) -> int:
     from . import install
@@ -732,7 +724,6 @@ _VERBS = {
     "install": _install,
     "shortcut": _shortcut,
     "config": _config,
-    "check": _check,
     "help": _help,
     "version": _version,
 }

@@ -66,8 +66,9 @@ send-only = "moxi_comms.kinds:SEND_ONLY"
 [dependency-groups]
 # The suite runs the Codex adapter over turns' real Codex host against a stub app-server,
 # and exercises the cache seam, so the dev environment carries `websockets` (the one
-# dependency of turns' `codex` extra) and `moxi-cache` beside pytest.
-dev = ["pytest", "websockets>=17.0.1", "moxi-cache>=0.1,<0.2"]
+# dependency of turns' `codex` extra) and `moxi-cache` beside pytest, and moxi-dev, whose
+# contract check the suite runs.
+dev = ["pytest", "moxi-dev", "websockets>=17.0.1", "moxi-cache>=0.1,<0.2"]
 
 [build-system]
 requires = ["hatchling>=1.27"]

@@ -1,4 +1,8 @@
-"""The module contract check, rule by rule, over small repos written for each test."""
+"""The module contract check, rule by rule, over small repos written for each test.
+
+The import rules import-linter and deptry check are proved in test_lint.py; here, the
+names an import takes, which those tools cannot see.
+"""
 
 import subprocess
 import textwrap
@@ -6,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from moxi import contract
-from moxi.contract import CheckError, check
+from moxi_dev import contract
+from moxi_dev.contract import CheckError, check
 
 ANNOUNCEMENT = {
     "INTERFACES": "frozenset({1})",
@@ -123,73 +127,54 @@ def test_a_file_that_does_not_parse_is_a_finding(repo):
     assert any("does not parse" in m for m in repo.findings("read"))
 
 
-# --- check 1 ---------------------------------------------------------------------------------
-
-def test_another_modules_internals_are_refused(repo):
-    repo.src("core.py", "import moxi_beta.engine\nfrom moxi_beta import api\n")
-    assert repo.findings("1") == [
-        "src/moxi_alpha/core.py:1: imports moxi_beta.engine, which is not moxi-beta's API "
-        "module (moxi_beta.api); import the API module"]
-
-
-def test_a_sibling_name_beside_the_api_is_refused(repo):
-    repo.src("core.py", "from moxi_beta import api, engine\n")
-    assert len(repo.findings("1")) == 1
-
+# --- check 1: the names an import takes ------------------------------------------------------
 
 def test_a_private_name_from_an_api_is_refused(repo):
     repo.src("core.py", "from moxi_beta.api import _secret\n")
     assert "a name starting with _" in repo.findings("1")[0]
 
 
-def test_internals_in_tests_are_refused_too(repo):
-    repo.write("tests/test_core.py", "import moxi_beta.module\n")
+def test_a_private_name_in_tests_is_refused_too(repo):
+    repo.write("tests/test_core.py", "from moxi_beta.api import _secret\n")
     assert repo.findings("1")[0].startswith("tests/test_core.py:1:")
 
 
-def test_a_module_without_an_api_cannot_be_imported(repo):
-    repo.write("../beta/src/moxi_beta/module.py", announcement())
-    assert "its announcement declares none" in repo.findings("1")[0]
+def test_a_private_module_of_a_required_module_is_refused(repo):
+    repo.src("core.py", "import moxi_beta._wire\n")
+    assert repo.findings("1") == [
+        "src/moxi_alpha/core.py:1: imports moxi_beta._wire: a name starting with _ is not "
+        "part of an API"]
 
 
-def test_an_optional_module_is_reached_only_through_load(repo):
-    repo.write("pyproject.toml", pyproject(extras={"beta": ["moxi-beta>=0.1"]}))
-    repo.src("module.py", announcement(OPTIONAL="{'beta': 'Beta things.'}"))
-    found = repo.findings("1")
-    assert len(found) == 1 and "moxi.modules.load('beta')" in found[0]
-
-
-def test_a_required_module_an_extra_also_names_stays_importable(repo):
-    repo.write("pyproject.toml", pyproject(deps=("moxi>=0.1", "moxi-beta>=0.1"),
-                                           extras={"codex": ["moxi-beta[codex]>=0.1"]}))
-    repo.src("module.py", announcement(OPTIONAL="{'codex': 'The Codex host.'}"))
-    assert repo.findings() == []
-
-
-def test_an_unreadable_announcement_of_a_dependency_is_a_finding(repo, tmp_path):
-    (tmp_path / "beta" / "pyproject.toml").unlink()
-    assert "cannot read to learn its API module" in repo.findings("1")[0]
+def test_a_name_from_an_undeclared_package_is_left_to_the_lint(repo):
+    repo.src("core.py", "from moxi_gamma.api import _secret\nfrom other import _x\n")
+    assert repo.findings("1") == []
 
 
 @pytest.mark.parametrize("line", [
     "from moxi.paths import _expanduser",
     "import moxi._private",
     "from moxi import _thing",
-    "import moxi.secret",
     "from moxi import secret",
-    "import moxi.names.deeper",
 ])
-def test_core_imports_outside_the_table_are_refused(repo, line):
+def test_core_names_outside_the_table_are_refused(repo, line):
     repo.src("core.py", line + "\n")
     assert len(repo.findings("1")) == 1
 
 
 @pytest.mark.parametrize("line", ["import moxi", "from moxi import names, paths, config",
-                                  "import moxi.modules", "from moxi.contract import check",
-                                  "import moxi.cli", "from moxi.cli import main"])
-def test_core_imports_in_the_table_pass(repo, line):
+                                  "import moxi.modules", "from moxi.config import Schema",
+                                  "import moxi.cli", "from moxi.cli import main",
+                                  "from moxi import *"])
+def test_core_names_in_the_table_pass(repo, line):
     repo.src("core.py", line + "\n")
     assert repo.findings("1") == []
+
+
+def test_the_contract_is_no_longer_a_core_module(repo):
+    repo.src("core.py", "from moxi import contract\n")
+    assert "imports moxi.contract, which is not one of the core's modules" in (
+        repo.findings("1")[0])
 
 
 def core_repo(root: Path) -> Repo:
@@ -201,13 +186,6 @@ def core_repo(root: Path) -> Repo:
     return r
 
 
-def test_the_core_imports_no_module(tmp_path):
-    r = core_repo(tmp_path / "moxi")
-    r.write("pyproject.toml", pyproject("moxi", deps=("moxi-beta",), entry_points={}))
-    r.src("names.py", "import moxi_beta.api\n")
-    assert "the core imports no module's package" in r.findings("1")[0]
-
-
 def test_the_core_reaches_its_own_internals(tmp_path):
     r = core_repo(tmp_path / "moxi")
     r.src("config.py", "from .paths import _expanduser\nfrom moxi.paths import _root\n")
@@ -215,63 +193,34 @@ def test_the_core_reaches_its_own_internals(tmp_path):
     assert r.findings() == []
 
 
-# --- check 2 ---------------------------------------------------------------------------------
-
-def test_an_undeclared_import_is_refused(repo):
-    repo.src("core.py", "def f():\n    import requests\n")
-    assert repo.findings("2") == [
-        "src/moxi_alpha/core.py:2: imports requests, which no distribution the repo declares "
-        "provides; declare it in dependencies or an extra, or map the import name to its "
-        "distribution in [tool.moxi.imports]"]
-
-
-def test_a_declared_distribution_counts_whether_or_not_it_is_installed(repo):
-    repo.write("pyproject.toml", pyproject(
-        deps=("moxi>=0.1", "moxi-beta", "no-such-dist-anywhere>=1"),
-        extras={"fast": ["another_missing.dist"]}))
-    repo.src("module.py", announcement(OPTIONAL="{'fast': 'Faster.'}"))
-    repo.src("core.py", "import no_such_dist_anywhere\ndef f():\n"
-                        "    import another_missing_dist\n")
-    assert repo.findings() == []
+def test_the_contributors_package_is_no_module(tmp_path):
+    """A package's tests import moxi_dev like any declared package, and moxi-dev itself
+    is held to neither check 1 nor check 7."""
+    r = core_repo(tmp_path / "moxi")
+    r.write("pyproject.toml", pyproject("moxi", deps=(), entry_points={},
+                                        groups={"dev": ["pytest", "moxi-dev"]}))
+    r.write("tests/test_contract.py", "from moxi_dev.contract import check\n"
+                                      "from moxi_dev import _anything\n")
+    assert r.findings() == []
+    dev = Repo(tmp_path / "moxi-dev", "dev")
+    dev.write("pyproject.toml", pyproject("moxi-dev", entry_points={},
+                                          scripts={"moxi-dev": "moxi_dev.cli:main"}))
+    dev.src("__init__.py")
+    dev.src("cli.py", "from moxi import _private\nimport moxi_beta._x\n"
+                      "def main(argv=None):\n    return 0\n")
+    assert dev.findings() == []
 
 
-def test_the_imports_table_maps_an_import_to_its_distribution(repo):
-    repo.write("pyproject.toml", pyproject(deps=("moxi", "PyYAML>=6"),
-                                           tool='[tool.moxi.imports]\nyaml = "pyyaml"\n'))
-    repo.src("core.py", "import yaml\n")
-    assert repo.findings() == []
-    repo.write("pyproject.toml", pyproject(deps=("moxi", "PyYAML>=6")))
-    assert len(repo.findings("2")) == 1
-
-
-def test_a_moxi_import_maps_by_its_spelling(repo):
-    repo.write("pyproject.toml", pyproject(deps=("moxi-beta",)))
-    repo.src("core.py", "from moxi import names\n")
-    assert "imports moxi," in repo.findings("2")[0]
-
-
-def test_tests_may_import_a_dependency_group(repo):
-    repo.write("tests/test_core.py", "import pytest\nimport hypothesis\n")
-    repo.write("pyproject.toml", pyproject(deps=("moxi", "moxi-beta"),
-                                           groups={"dev": ["pytest", "hypothesis>=6"]}))
-    assert repo.findings() == []
-
-
-def test_src_may_not_import_a_dependency_group(repo):
-    repo.src("core.py", "import pytest\n")
-    assert len(repo.findings("2")) == 1
-
-
-def test_tests_import_their_own_helpers(repo):
-    repo.write("tests/helpers.py", "")
-    repo.write("tests/fakes/__init__.py", "")
-    repo.write("tests/test_core.py", "import helpers\nfrom fakes import x\nimport conftest\n")
-    assert repo.findings() == []
-
-
-def test_relative_and_future_imports_pass(repo):
-    repo.src("core.py", "from __future__ import annotations\nfrom . import module\n")
-    assert repo.findings() == []
+def test_the_contributors_package_reads_its_own_variables(tmp_path):
+    dev = Repo(tmp_path / "moxi-dev", "dev")
+    dev.write("pyproject.toml", pyproject("moxi-dev", entry_points={}, scripts={}))
+    dev.src("__init__.py", """\
+        import os
+        LIVE = os.environ.get("MOXI_TEST_LIVE")
+        OTHER = os.environ.get("MOXI_DEV_MODE")
+        """)
+    found = dev.findings("5")
+    assert len(found) == 1 and "reads MOXI_DEV_MODE" in found[0]
 
 
 # --- check 3 ---------------------------------------------------------------------------------
@@ -467,8 +416,8 @@ def test_a_distribution_not_spelled_moxi_name(repo):
 
 
 def test_a_module_named_by_a_core_verb(tmp_path):
-    r = Repo(tmp_path / "check", "check")
-    r.write("pyproject.toml", pyproject("moxi-check"))
+    r = Repo(tmp_path / "config", "config")
+    r.write("pyproject.toml", pyproject("moxi-config"))
     r.src("__init__.py")
     r.src("module.py", announcement())
     assert "one of the umbrella's own verbs" in r.findings("7")[0]
@@ -588,20 +537,20 @@ def test_a_segment_may_not_reach_turns(repo):
 def test_staged_reads_the_index_not_the_working_tree(repo):
     repo.git("init", "-q")
     repo.git("add", ".")
-    repo.src("core.py", "import requests\n")
+    repo.src("core.py", "from moxi import _thing\n")
     assert repo.findings(staged=True) == []
-    assert len(repo.findings("2")) == 1
+    assert len(repo.findings("1")) == 1
     repo.git("add", ".")
     repo.src("core.py", "")
-    assert len(repo.findings("2", staged=True)) == 1
+    assert len(repo.findings("1", staged=True)) == 1
     assert repo.findings() == []
 
 
 def test_staged_sees_a_file_deleted_from_the_index(repo):
-    repo.src("bad.py", "import requests\n")
+    repo.src("bad.py", "from moxi import _thing\n")
     repo.git("init", "-q")
     repo.git("add", ".")
-    assert len(repo.findings("2", staged=True)) == 1
+    assert len(repo.findings("1", staged=True)) == 1
     repo.git("rm", "-q", "--cached", "src/moxi_alpha/bad.py")
     assert repo.findings(staged=True) == []
 
@@ -622,35 +571,13 @@ def test_staged_outside_git_is_an_error(repo):
 def test_whole_tree_in_git_skips_ignored_files(repo):
     repo.git("init", "-q")
     repo.write(".gitignore", "scratch/\n")
-    repo.write("scratch/probe.py", "import requests\n")
-    repo.write("notes.py", "import requests\n")
-    found = repo.findings("2")
-    assert found == ["notes.py:1: imports requests, which no distribution the repo declares "
-                     "provides; declare it in dependencies or an extra, or map the import "
-                     "name to its distribution in [tool.moxi.imports]"]
+    repo.write("scratch/probe.py", "def (:\n")
+    repo.write("notes.py", "def (:\n")
+    found = repo.findings("read")
+    assert [f.split(":")[0] for f in found] == ["notes.py"]
 
 
 def test_whole_tree_outside_git_skips_environments(repo):
-    repo.write(".venv/lib/x.py", "import requests\n")
-    repo.write("build/lib/x.py", "import requests\n")
+    repo.write(".venv/lib/x.py", "def (:\n")
+    repo.write("build/lib/x.py", "def (:\n")
     assert repo.findings() == []
-
-
-# --- main ------------------------------------------------------------------------------------
-
-def test_main_exits_0_1_and_2(repo, capsys):
-    assert contract.main([str(repo.root)]) == 0
-    assert capsys.readouterr().out == ""
-    repo.src("core.py", "import requests\n")
-    assert contract.main([str(repo.root)]) == 1
-    out = capsys.readouterr()
-    assert out.out.startswith("src/moxi_alpha/core.py:1: check 2: imports requests")
-    assert "1 finding in" in out.err
-    assert contract.main(["--staged", str(repo.root)]) == 2
-    assert "not inside a git work tree" in capsys.readouterr().err
-
-
-def test_main_names_its_prog(capsys):
-    with pytest.raises(SystemExit):
-        contract.main(["--help"], prog="moxi check")
-    assert capsys.readouterr().out.startswith("usage: moxi check [-h] [--staged] [PATH]")
