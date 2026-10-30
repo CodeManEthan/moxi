@@ -5,6 +5,7 @@ names an import takes, which those tools cannot see.
 """
 
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -581,3 +582,47 @@ def test_whole_tree_outside_git_skips_environments(repo):
     repo.write(".venv/lib/x.py", "def (:\n")
     repo.write("build/lib/x.py", "def (:\n")
     assert repo.findings() == []
+
+
+# --- the command -----------------------------------------------------------------------------
+
+def test_main_exits_0_1_and_2(repo, capsys):
+    assert contract.main([str(repo.root)]) == 0
+    assert capsys.readouterr().out == ""
+    repo.src("core.py", "from moxi import _thing\n")
+    assert contract.main([str(repo.root)]) == 1
+    out = capsys.readouterr()
+    assert out.out.startswith("src/moxi_alpha/core.py:1: check 1: ")
+    assert "moxi-dev contract: 1 finding in" in out.err
+    assert contract.main(["--staged", str(repo.root)]) == 2
+    assert "not inside a git work tree" in capsys.readouterr().err
+
+
+def test_main_with_staged_judges_the_index(repo, capsys, monkeypatch):
+    repo.git("init", "-q")
+    repo.git("add", ".")
+    repo.src("core.py", "from moxi import _thing\n")
+    monkeypatch.chdir(repo.root)
+    assert contract.main(["--staged"]) == 0
+    assert contract.main([]) == 1
+    repo.git("add", ".")
+    repo.src("core.py", "")
+    capsys.readouterr()
+    assert contract.main(["--staged"]) == 1
+    assert capsys.readouterr().out.startswith("src/moxi_alpha/core.py:1: check 1: ")
+
+
+def test_main_names_its_prog(capsys):
+    with pytest.raises(SystemExit):
+        contract.main(["--help"])
+    assert capsys.readouterr().out.startswith(
+        "usage: moxi-dev contract [-h] [--staged] [PATH]")
+
+
+def test_the_module_runs_as_a_script(repo):
+    repo.src("core.py", "from moxi import _thing\n")
+    proc = subprocess.run([sys.executable, "-m", "moxi_dev.contract", str(repo.root)],
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 1, proc.stderr
+    assert proc.stdout.startswith("src/moxi_alpha/core.py:1: check 1: ")
+    assert "python -m moxi_dev.contract: 1 finding in" in proc.stderr

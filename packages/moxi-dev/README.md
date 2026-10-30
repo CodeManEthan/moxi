@@ -15,7 +15,9 @@ repository's `uv sync` installs it, and no Moxi module depends on it at run time
   the fence around each test, the tier markers, the durations each run writes and the
   helpers tests share (`Seam` for a seam with two implementations among them).
 - `moxi_dev.contract` holds the module contract check each package's
-  `tests/test_contract.py` runs.
+  `tests/test_contract.py` runs. `moxi-dev contract [--staged] [PATH]` runs it from a
+  shell over any module's directory, inside the repository or not; `--staged` judges
+  git's index, as the next commit lands.
 - `moxi-dev new <module>` starts a new package under `packages/`.
 
 `moxi-dev <verb> --help` shows a verb's own arguments. From the repository root:

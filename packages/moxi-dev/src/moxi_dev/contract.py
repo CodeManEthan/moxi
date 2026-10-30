@@ -5,6 +5,11 @@
 reads every file from git's index instead of the working tree, so a partly staged commit
 is judged as it will land. An empty list means the package keeps the contract.
 
+From a shell, `moxi-dev contract [--staged] [PATH]` (or `python -m moxi_dev.contract`)
+runs the same check over the module directory at PATH, the current directory by
+default, inside the workspace or out of it: it prints each finding, then exits 0 when
+there is none, 1 when there are some and 2 when the check cannot run there.
+
 The contract's two import rules are checked by import-linter and deptry, with a
 configuration `moxi_dev.lint` writes from each package's declarations, and `moxi-dev
 check` runs them. What those tools cannot see stays here. The checks, numbered as each
@@ -52,7 +57,8 @@ from __future__ import annotations
 
 import ast
 import re
-from collections.abc import Iterable, Mapping
+import sys
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -117,6 +123,37 @@ def check(root: Path | str, *, staged: bool = False) -> list[Finding]:
     root = Path(root)
     tree = _IndexTree(root) if staged else _WorkTree(root)
     return sorted(set(_Repo(root, tree).run()))
+
+
+def main(argv: Sequence[str] | None = None, *, prog: str = "moxi-dev contract") -> int:
+    """`moxi-dev contract [--staged] [PATH]`: print the findings; exit 1 on any, 2 when the
+    check cannot run."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description="Check a Moxi module's directory against the module contract: the "
+                    "names its imports take, its extras, its environment reads and its "
+                    "names. The import rules import-linter and deptry check run in "
+                    "moxi-dev check.")
+    parser.add_argument("--staged", action="store_true",
+                        help="read the files from git's index, as the next commit lands")
+    parser.add_argument("path", nargs="?", default=".", metavar="PATH",
+                        help="the module's directory (default: the current directory)")
+    args = parser.parse_args(argv)
+    try:
+        findings = check(args.path, staged=args.staged)
+    except CheckError as exc:
+        print(f"{prog}: {exc}", file=sys.stderr)
+        return 2
+    for finding in findings:
+        print(finding)
+    if findings:
+        count = len(findings)
+        print(f"{prog}: {count} finding{'s' if count != 1 else ''} in {args.path}",
+              file=sys.stderr)
+        return 1
+    return 0
 
 
 # --- reading the tree ----------------------------------------------------------------------
@@ -1187,3 +1224,7 @@ def _api_from_checkout(repo: Path, dist: str) -> tuple[bool, str | None] | None:
 
 #: What a package's tests import from here; these names keep their place.
 __all__ = ["CheckError", "Finding", "check"]
+
+
+if __name__ == "__main__":
+    sys.exit(main(prog="python -m moxi_dev.contract"))

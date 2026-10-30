@@ -18,6 +18,9 @@ def _parser() -> argparse.ArgumentParser:
     verbs = parser.add_subparsers(dest="verb", metavar="<verb>", required=True)
     verbs.add_parser("check", add_help=False,
                      help="run the checks a change must pass before it merges")
+    verbs.add_parser("contract", add_help=False,
+                     help="contract [--staged] [PATH]: check a module's directory against "
+                          "the module contract")
     verbs.add_parser("new", add_help=False,
                      help="new <module>: start a new package under packages/")
     return parser
@@ -30,6 +33,9 @@ def main(argv: list[str] | None = None) -> int:
     if verb == "check":
         from moxi_dev import check
         return check.main(args[1:])
+    if verb == "contract":
+        from moxi_dev import contract
+        return contract.main(args[1:])
     from moxi_dev import new
     return new.main(args[1:])
 
