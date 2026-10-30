@@ -91,8 +91,8 @@ def bearer(r) -> str:
     return "Authorization: " + "Bearer " + chars(r, 40, ALNUM + "._-")
 
 
-def key_header() -> str:
-    return "".join(("-----BEGIN RSA PRIV", "ATE KEY-----"))
+def key_header(kind: str = "RSA", tail: str = "") -> str:
+    return "".join(("-----BEGIN ", kind, " PRIV", "ATE KEY", tail, "-----"))
 
 
 def curl_user(r) -> str:

@@ -59,6 +59,22 @@ def test_the_probe_misses_hit_and_its_false_positives_stay_quiet(engine_name):
     assert scan(quiet, ("personal-data",)) == []
 
 
+def test_the_local_header_rules_hit_in_each_form(engine_name):
+    r = corpus.rng(4)
+    for form in ('curl -H "{h}: {s} {t}" https://api.example.test',
+                 "GET /v1 HTTP/1.1\r\n{h}: {s} {t}\r\n",
+                 '{{"{h}": "{s} {t}"}}'):
+        token = corpus.chars(r, 40, corpus.ALNUM + "._-")
+        text = form.format(h="Author" + "ization", s="Bearer", t=token)
+        hits = [h for h in scan(text, ("credentials",)) if h.rule == "authorization-bearer"]
+        assert [text[h.start:h.end] for h in hits] == [token], form
+    for kind, tail in (("RSA", ""), ("OPENSSH", ""), ("PGP", " BLOCK")):
+        header = corpus.key_header(kind, tail)
+        hits = scan(f"key:\n{header}\n", ("credentials",))
+        assert [(h.rule, h.start, h.end) for h in hits] == [
+            ("private-key-header", 5, 5 + len(header))], kind
+
+
 # -- no-hit cases ---------------------------------------------------------------------------
 
 def every_placeholder():
