@@ -300,3 +300,36 @@ def test_a_real_add_create_makes_a_git_repository(tmp_path, capsys):
                           capture_output=True, text=True, check=False)
     assert done.stdout.strip() == "true"
     assert api.get("real").root == str(root)
+
+
+# --- the commands a message names --------------------------------------------------------
+
+@pytest.mark.parametrize("text, quoted", [
+    (r"C:\src\web", r"C:\src\web"),
+    (r"C:\Users\Jane Doe\web", r'"C:\Users\Jane Doe\web"'),
+    ("C:\\Program Files (x86)\\web", '"C:\\Program Files (x86)\\web"'),
+    (r"C:\src\R&D", r'"C:\src\R&D"'),
+    (r"\\server\share\my web", r'"\\server\share\my web"'),
+    ("C:\\a&b\\", '"C:\\a&b\\\\"'),
+    ("", '""'),
+])
+def test_a_windows_command_quotes_a_path_holding_a_space_or_special_character(
+        monkeypatch, text, quoted):
+    monkeypatch.setattr(os, "name", "nt")
+    assert acts._quote(text) == quoted
+
+
+def test_a_windows_add_command_pastes_back_a_root_with_a_space(monkeypatch):
+    from moxi_projects.contributions import Planned
+
+    row = {"key": "web", "root": r"C:\Users\Jane Doe\web", "kind": "project",
+           "lead": None, "notes_root": None}
+    monkeypatch.setattr(os, "name", "nt")
+    assert acts._add_command(Planned(row, {}, None), None) == (
+        r'moxi projects add web --root "C:\Users\Jane Doe\web"')
+
+
+def test_a_posix_command_quotes_as_the_shell_does(monkeypatch):
+    monkeypatch.setattr(os, "name", "posix")
+    assert acts._quote("/srv/my web") == "'/srv/my web'"
+    assert acts._quote("/srv/web") == "/srv/web"

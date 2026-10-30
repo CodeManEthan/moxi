@@ -216,8 +216,22 @@ def _add_command(planned: Planned, typed_notes_root: str | None) -> str:
     return " ".join(parts)
 
 
+#: Characters a Windows shell (cmd or PowerShell) reads specially outside double quotes.
+_WINDOWS_SPECIAL = frozenset("&|<>^()%!;,=`$@{}'")
+
+
 def _quote(text: str) -> str:
-    return text if os.name == "nt" else shlex.quote(text)
+    """`text` as one word a pasted command line reads back unchanged: shell quoting on
+    POSIX; on Windows, double quotes around text holding a space, a tab or a character
+    the shell reads specially, the way programs split their command lines."""
+    if os.name != "nt":
+        return shlex.quote(text)
+    quoted = subprocess.list2cmdline([text])
+    if quoted != text or not any(c in _WINDOWS_SPECIAL for c in text):
+        return quoted
+    # A run of backslashes before the closing quote is doubled, or it escapes the quote.
+    tail = len(text) - len(text.rstrip("\\"))
+    return '"' + text + "\\" * tail + '"'
 
 
 def _amend(exc: ProjectsError, reason: str, fix: str | None) -> None:
