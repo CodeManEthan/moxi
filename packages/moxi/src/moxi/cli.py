@@ -2,6 +2,7 @@
 
     moxi <module> <verb> ...     runs the module's own command, in this process
     moxi modules [--json]        what this environment holds
+    moxi modules --available     the first-party modules `moxi install` knows by name
     moxi install <module> ...    installs a module, sets it up, offers its extras
     moxi shortcut [<module>]     the opt-in bare command for a module
     moxi config <module> ...     a module's settings and its config file
@@ -15,8 +16,10 @@ The verbs are reserved: no module may take one as its name. A module owns only w
 follows its name: `moxi comms send ...` calls the `CLI` target comms' announcement names
 as `main(argv, prog="moxi comms")` and exits with what it returns.
 
-Every Moxi distribution declares the console script `moxi = "moxi.cli:main"`, so a plain
-`uv tool install moxi-<module>` puts `moxi` on PATH.
+Only the core declares the console script `moxi = "moxi.cli:main"`: `uv tool install
+moxi` puts `moxi` on PATH, and `moxi install <module>` adds a module to the environment it
+runs in. A Moxi module installed anywhere else is a stray, which moxi can't see; every
+command but `help`, `version` and `run` tells each new one once (`moxi.strays`).
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ usage: moxi <module> <verb> ...
 
 commands:
   modules [--json]                   list the Moxi modules this environment holds
+  modules --available [--refresh]    list the first-party modules, installed or not
   install <module> [options]         install a module and offer its optional extras
   shortcut [<module>] [--remove]     put a bare <module> command on PATH, or take it off
   config <module> [show|path|check|init]
@@ -47,14 +51,24 @@ commands:
 """
 
 #: How a shortcut file marks itself; `moxi shortcut --remove` removes only a file
-#: carrying the marker of the module named.
+#: carrying the marker of the module named. A Windows `.cmd` shortcut carries
+#: `CMD_SHORTCUT_MARKER`.
 SHORTCUT_MARKER = "# moxi shortcut: "
+CMD_SHORTCUT_MARKER = "rem moxi shortcut: "
 
 
 def main(argv: list[str] | None = None) -> int:
-    """The `moxi` console script. Returns the exit code."""
+    """The `moxi` console script. Returns the exit code.
+
+    Run as the console script (no `argv` given), every command but `help`, `version` and
+    `run` first tells each stray not told before (`moxi.strays`). A caller passing `argv`
+    in process runs the command alone.
+    """
+    console = argv is None
     argv = list(sys.argv[1:] if argv is None else argv)
     try:
+        if console:
+            _tell_strays(argv)
         return _main(argv)
     except KeyboardInterrupt:
         print("moxi: interrupted", file=sys.stderr)
@@ -88,6 +102,33 @@ def _main(argv: list[str]) -> int:
         sys.stderr.write(USAGE)
         return 2
     return dispatch(first, rest)
+
+
+#: The first words that skip the stray check.
+_NO_STRAY_CHECK = frozenset({"run", "help", "version", "-h", "--help", "--version"})
+
+
+def _tell_strays(argv: list[str]) -> None:
+    """One stderr line per stray not told before. Never fails the command."""
+    if not argv or argv[0] in _NO_STRAY_CHECK:
+        return
+    try:
+        from . import strays
+
+        strays.tell()
+    except Exception:  # noqa: BLE001 - a broken check must not stop the command
+        return
+
+
+def _stray_note(name: str) -> str | None:
+    """The absent-module message's line about a stray copy of `name`, if there is one."""
+    try:
+        from . import strays
+
+        stray = strays.copy_of(name)
+    except Exception:  # noqa: BLE001
+        return None
+    return stray.absent_note() if stray is not None else None
 
 
 def _exit_code(func, argv: list[str]) -> int:
@@ -142,6 +183,10 @@ def dispatch(name: str, argv: list[str]) -> int:
     if found.state != modules.PRESENT:
         _error(found.reason)
         print(install_hint(name), file=sys.stderr)
+        if found.state == modules.ABSENT:
+            note = _stray_note(name)
+            if note:
+                print(note, file=sys.stderr)
         return 2
     if found.cli is None:
         print(f"{name}: {found.summary or '(no summary)'}", file=sys.stderr)
@@ -376,7 +421,7 @@ def describe() -> dict:
             "distribution": dist,
             "version": found.version or "",
             "shortcut": shortcut_dir is not None and _is_shortcut(
-                os.path.join(shortcut_dir, found.name), found.name),
+                _shortcut_path(shortcut_dir, found.name), found.name),
             "requires": required_modules(dist, by_dist) if dist else [],
             "optional": optional,
         })
@@ -406,7 +451,16 @@ def _found_json(found) -> dict:
 def _modules(argv: list[str]) -> int:
     parser = _parser("modules", "List the Moxi modules this Python environment holds.")
     parser.add_argument("--json", action="store_true", help="print one JSON object")
+    parser.add_argument("--available", action="store_true",
+                        help="list the first-party modules moxi install knows by name")
+    parser.add_argument("--refresh", action="store_true",
+                        help="with --available: fetch the published catalogue first (the "
+                             "one command that uses the network)")
     args = parser.parse_args(argv)
+    if args.refresh and not args.available:
+        parser.error("--refresh goes with --available")
+    if args.available:
+        return _available(refresh=args.refresh, as_json=args.json)
     info = describe()
     if args.json:
         import json
@@ -437,6 +491,50 @@ def _modules(argv: list[str]) -> int:
     return 0
 
 
+def _available(*, refresh: bool, as_json: bool) -> int:
+    """`moxi modules --available`: the catalogue, each row installed or not."""
+    from . import catalogue, modules
+
+    try:
+        if refresh:
+            try:
+                listed, said = catalogue.refresh()
+            except catalogue.CatalogueError as exc:
+                listed = catalogue.load()
+                said = f"refresh failed: {exc}; the catalogue in effect stays"
+            print(f"moxi: {said}", file=sys.stderr)
+        else:
+            listed = catalogue.load()
+    except catalogue.CatalogueError as exc:
+        _error(f"the catalogue cannot be read: {exc}")
+        return 1
+    states = {found.name: found for found in modules.scan()}
+    rows = []
+    for entry in listed.entries:
+        found = states.get(entry.name)
+        rows.append({"name": entry.name, "distribution": entry.distribution,
+                     "summary": entry.summary,
+                     "state": found.state if found is not None else modules.ABSENT,
+                     "version": (found.version or "") if found is not None else "",
+                     "install": f"moxi install {entry.name}"})
+    if as_json:
+        import json
+
+        print(json.dumps({"version": listed.version, "source": listed.source,
+                          "modules": rows}, indent=2))
+        return 0
+    for row in rows:
+        if row["state"] == modules.ABSENT:
+            mark = f"not installed  ({row['install']})"
+        else:
+            mark = f"installed {row['version']}".rstrip()
+            if row["state"] != modules.PRESENT:
+                mark += f" ({row['state']})"
+        print(f"{row['name']}  {row['distribution']}  {mark}")
+        print(f"    {row['summary']}")
+    return 0
+
+
 # -- moxi shortcut ------------------------------------------------------------------------
 
 def _shortcut_dir() -> str | None:
@@ -462,13 +560,26 @@ def _shortcut_module(path: str) -> str | None:
     except OSError:
         return None
     for line in head.decode("utf-8", "replace").splitlines()[:3]:
-        if line.startswith(SHORTCUT_MARKER):
-            return line[len(SHORTCUT_MARKER):].strip() or None
+        for marker in (SHORTCUT_MARKER, CMD_SHORTCUT_MARKER):
+            if line.startswith(marker):
+                return line[len(marker):].strip() or None
     return None
 
 
-def shortcut_text(module: str) -> str:
-    """The content of module `module`'s shortcut file."""
+def _on_windows() -> bool:
+    return sys.platform == "win32"
+
+
+def _shortcut_path(where: str, module: str) -> str:
+    """Where module `module`'s shortcut goes in `where`: `<module>.cmd` on Windows."""
+    return os.path.join(where, f"{module}.cmd" if _on_windows() else module)
+
+
+def shortcut_text(module: str, *, windows: bool | None = None) -> str:
+    """The content of module `module`'s shortcut file: a `/bin/sh` script, or on Windows
+    a `.cmd` file (with CRLF line ends)."""
+    if windows if windows is not None else _on_windows():
+        return f"@echo off\r\n{CMD_SHORTCUT_MARKER}{module}\r\nmoxi {module} %*\r\n"
     return f'#!/bin/sh\n{SHORTCUT_MARKER}{module}\nexec moxi {module} "$@"\n'
 
 
@@ -513,7 +624,7 @@ def _shortcut(argv: list[str]) -> int:
         _error("moxi is not on PATH; a shortcut is written beside it, so put the "
                "directory holding moxi on PATH first")
         return 1
-    path = os.path.join(where, module)
+    path = _shortcut_path(where, module)
 
     if args.remove:
         if not os.path.lexists(path):
@@ -548,9 +659,10 @@ def _shortcut(argv: list[str]) -> int:
         _error(f"{path} exists; refusing to overwrite it")
         return 1
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o755)
-        with os.fdopen(fd, "w") as fh:
-            fh.write(shortcut_text(module))
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
+                     0o755)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(shortcut_text(module).encode("utf-8"))
     except OSError as exc:
         _error(f"cannot write {path}: {exc}")
         return 1
@@ -962,4 +1074,4 @@ _VERBS = {
 
 __all__ = ["main", "dispatch", "install_hint", "describe", "speakers_of", "users_of",
            "required_modules", "extra_installed", "normalize", "shortcut_text",
-           "config_template", "SHORTCUT_MARKER"]
+           "config_template", "SHORTCUT_MARKER", "CMD_SHORTCUT_MARKER"]

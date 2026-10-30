@@ -321,6 +321,40 @@ def test_shortcut_remove_removes_only_its_own_file(alpha, path_dirs, capsys):
     assert run(capsys, "shortcut", "nothere", "--remove")[0] == 1
 
 
+def test_the_windows_shortcut_is_a_cmd_file_with_its_marker(alpha, path_dirs, capsys,
+                                                           monkeypatch):
+    """On Windows the shortcut is `<module>.cmd`; read here with the platform faked."""
+    monkeypatch.setattr(cli, "_on_windows", lambda: True)
+    code, out, _ = run(capsys, "shortcut", "alpha")
+    assert code == 0 and "wrote the shortcut" in out
+    path = path_dirs.bin / "alpha.cmd"
+    assert path.read_bytes() == (b"@echo off\r\nrem moxi shortcut: alpha\r\n"
+                                 b"moxi alpha %*\r\n")
+    assert not (path_dirs.bin / "alpha").exists()
+    assert run(capsys, "shortcut")[1] == f"alpha  {path}\n"
+    info = json.loads(run(capsys, "modules", "--json")[1])
+    assert info["modules"][0]["shortcut"] is True
+    # --remove reads the .cmd marker, and leaves a .cmd that isn't moxi's.
+    code, out, _ = run(capsys, "shortcut", "alpha", "--remove")
+    assert code == 0 and not path.exists()
+    path.write_bytes(b"@echo off\r\necho mine\r\n")
+    code, _, err = run(capsys, "shortcut", "alpha", "--remove")
+    assert code == 1 and "not moxi's shortcut" in err and path.exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="runs the .cmd shortcut on Windows")
+def test_the_cmd_shortcut_runs_moxi_with_every_argument(alpha, tmp_path, monkeypatch,
+                                                        capsys):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "moxi.log"
+    (bin_dir / "moxi.cmd").write_text(f"@echo off\r\necho %* >> {log}\r\n")
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    assert run(capsys, "shortcut", "alpha")[0] == 0
+    subprocess.run([str(bin_dir / "alpha.cmd"), "send", "x"], check=True)
+    assert log.read_text().strip() == "alpha send x"
+
+
 def test_shortcut_listing_when_none_is_on(path_dirs, capsys):
     code, out, _ = run(capsys, "shortcut")
     assert code == 0 and "No shortcut is on" in out

@@ -5,9 +5,9 @@
 Run it in the repository (the root is the nearest directory up whose `pyproject.toml`
 declares `[tool.uv.workspace]`). It writes `packages/<module>/`:
 
-- `pyproject.toml` declaring `moxi-<module>`, its `moxi.modules` entry point and the
-  `moxi` console script, a dev group with `pytest` and `moxi-dev`, and pytest options
-  that deselect the browser, slow, build and live tiers;
+- `pyproject.toml` declaring `moxi-<module>` and its `moxi.modules` entry point (no
+  `moxi` console script: only the core declares it), a dev group with `pytest` and
+  `moxi-dev`, and pytest options that deselect the browser, slow, build and live tiers;
 - `conftest.py`, which loads the test kit (`moxi_dev.testing`), so every test runs
   inside its fence;
 - `src/moxi_<module>/` with an announcement that offers nothing yet;

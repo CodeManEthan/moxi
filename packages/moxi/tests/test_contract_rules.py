@@ -36,7 +36,8 @@ def pyproject(name="moxi-alpha", *, deps=("moxi>=0.1",), extras=None, groups=Non
         lines.append("[project.optional-dependencies]")
         lines += [f"{k} = [" + ", ".join(f'"{r}"' for r in v) + "]" for k, v in extras.items()]
     if scripts is None:
-        scripts = {"moxi": "moxi.cli:main"}
+        # Only the core declares the moxi script.
+        scripts = {"moxi": "moxi.cli:main"} if name == "moxi" else {}
     if scripts:
         lines.append("[project.scripts]")
         lines += [f'"{k}" = "{v}"' for k, v in scripts.items()]
@@ -294,7 +295,7 @@ def test_relative_and_future_imports_pass(repo):
 def extra_repo(repo):
     repo.write("pyproject.toml", pyproject(
         deps=("moxi", "moxi-beta"), extras={"codex": ["websockets>=17"]},
-        scripts={"moxi": "moxi.cli:main", "moxi-alpha-codex": "moxi_alpha.codex:main",
+        scripts={"moxi-alpha-codex": "moxi_alpha.codex:main",
                  "moxi-alpha-daemon": "moxi_alpha.daemon:main"}))
     repo.src("module.py", announcement(OPTIONAL="{'codex': 'The Codex host.'}",
                                        GATED="{'moxi-alpha-codex': 'codex'}",
@@ -502,22 +503,20 @@ def test_the_entry_point(repo, eps, needle):
 
 def test_console_scripts_are_named_moxi_module_part(repo):
     repo.write("pyproject.toml", pyproject(deps=("moxi", "moxi-beta"), scripts={
-        "moxi": "moxi.cli:main", "moxi-alpha-daemon": "moxi_alpha.d:main",
+        "moxi-alpha-daemon": "moxi_alpha.d:main",
         "alpha-daemon": "moxi_alpha.d:main", "moxi-alpha-": "moxi_alpha.d:main",
         "moxi-beta-x": "moxi_alpha.d:main"}))
     assert len(repo.findings("7")) == 3
 
 
-def test_a_module_s_moxi_script_is_the_umbrella(repo):
-    """A module's moxi console script points at moxi.cli:main and nothing else."""
+@pytest.mark.parametrize("target", ["moxi.cli:main", "moxi_alpha.module:main"])
+def test_a_module_never_declares_the_moxi_script(repo, target):
+    """Only the core declares moxi, whatever a module's line points at."""
     repo.write("pyproject.toml", pyproject(deps=("moxi", "moxi-beta"), scripts={
-        "moxi": "moxi_alpha.module:main"}))
+        "moxi": target}))
     assert repo.findings("7") == [
-        "pyproject.toml:0: declares the console script moxi = 'moxi_alpha.module:main'; "
-        "every Moxi distribution declares moxi = 'moxi.cli:main'"]
-    repo.write("pyproject.toml", pyproject(deps=("moxi", "moxi-beta"), scripts={
-        "moxi": "moxi.cli : main"}))
-    assert repo.findings("7") == []
+        "pyproject.toml:0: declares the console script moxi; only the core declares it, "
+        "and a module is installed with `moxi install alpha`"]
 
 
 def test_a_second_import_package(repo):
@@ -738,3 +737,94 @@ def test_main_names_its_prog(capsys):
     with pytest.raises(SystemExit):
         contract.main(["--help"], prog="moxi check")
     assert capsys.readouterr().out.startswith("usage: moxi check [-h] [--staged] [PATH]")
+
+
+# --- check 8 ---------------------------------------------------------------------------------
+
+WRITES = '''\
+import os
+import sqlite3
+from pathlib import Path
+
+
+def save(path, data):
+    with open(path, "w") as fh:
+        fh.write(data)
+    os.replace(path, path + ".old")
+
+
+class Store:
+    def keep(self, path):
+        Path(path).write_text("x")
+        Path(path).write_bytes(b"x")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT)
+        with os.fdopen(fd, "a") as fh:
+            pass
+        with Path(path).open("w") as fh:
+            pass
+        return sqlite3.connect(path)
+'''
+
+READS = '''\
+import os
+import webbrowser
+from pathlib import Path
+
+
+def read(path, mode):
+    with open(path) as fh:
+        fh.read()
+    with open(path, "rb") as fh:
+        fh.read()
+    with Path(path).open() as fh:
+        fh.read()
+    os.open(path, os.O_RDONLY)
+    webbrowser.open(path)
+    "a.b".replace(".", "/")
+'''
+
+
+def test_every_write_site_is_found_and_reads_are_not(repo):
+    repo.src("writes.py", WRITES)
+    repo.src("reads.py", READS)
+    found = repo.findings("8")
+    assert [m.split(": writes a file itself ")[1].split(";")[0] for m in found] == [
+        "(save open)", "(save os.replace)", "(Store.keep .write_text)",
+        "(Store.keep .write_bytes)", "(Store.keep os.open)", "(Store.keep os.fdopen)",
+        "(Store.keep .open)", "(Store.keep sqlite3.connect)"]
+    assert found[0].startswith("src/moxi_alpha/writes.py:7:")
+
+
+def test_an_unreadable_mode_counts_as_a_write(repo):
+    repo.src("w.py", "def f(p, m):\n    open(p, m)\n    open(p, mode=m)\n")
+    assert len(repo.findings("8")) == 2
+
+
+def test_listed_sites_pass_and_the_list_counts_each_one(repo):
+    repo.src("writes.py", "import os\ndef save(a, b):\n    os.replace(a, b)\n"
+                          "    os.replace(b, a)\n")
+    repo.write("tests/write-sites.txt", "# a comment\n"
+               "src/moxi_alpha/writes.py save os.replace\n")
+    found = repo.findings("8")
+    assert len(found) == 1 and found[0].startswith("src/moxi_alpha/writes.py:4:")
+    repo.write("tests/write-sites.txt", "src/moxi_alpha/writes.py save os.replace\n" * 2)
+    assert repo.findings("8") == []
+
+
+def test_a_line_no_site_matches_is_refused_so_the_list_only_shrinks(repo):
+    repo.write("tests/write-sites.txt", "src/moxi_alpha/gone.py save os.replace\n")
+    assert repo.findings("8") == [
+        "tests/write-sites.txt:0: lists 'src/moxi_alpha/gone.py save os.replace' 1 more "
+        "time(s) than src/ has it; remove the line, so the list only shrinks"]
+
+
+def test_tests_are_not_write_sites(repo):
+    repo.write("tests/test_w.py", "def test_w(tmp_path):\n"
+                                  "    (tmp_path / 'x').write_text('x')\n")
+    assert repo.findings("8") == []
+
+
+def test_the_core_has_no_write_site_list(tmp_path):
+    r = core_repo(tmp_path / "moxi")
+    r.src("files.py", "import os\ndef atomic_write(a, b):\n    os.replace(a, b)\n")
+    assert r.findings("8") == []

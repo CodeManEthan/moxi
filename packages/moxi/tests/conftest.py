@@ -121,6 +121,19 @@ def see_only(root: Path, monkeypatch) -> None:
     monkeypatch.setattr(moxi.modules._DistInfo, "find", classmethod(find_seen))
 
 
+@pytest.fixture(autouse=True)
+def _no_real_core_roots(tmp_path_factory, monkeypatch):
+    """The core's own roots, uv's tool directory and the user site point into tmp, so
+    nothing the core reads or writes for itself (the catalogue's refreshed copy, the
+    strays record) is the real one. A test that needs another root sets its own."""
+    import moxi.strays
+
+    home = tmp_path_factory.mktemp("core-home")
+    monkeypatch.setenv("MOXI_HOME", str(home / "moxi"))
+    monkeypatch.setenv("UV_TOOL_DIR", str(home / "uv-tools"))
+    monkeypatch.setattr(moxi.strays, "_user_site", lambda: str(home / "user-site"))
+
+
 @pytest.fixture
 def site(tmp_path, monkeypatch):
     """A fresh site on `sys.path` for the test's fake distributions.
@@ -200,9 +213,15 @@ def uv_env(tmp_path):
         pytest.skip("uv is not on PATH")
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("UV_", "VIRTUAL_ENV", "PYTHON"))}
+    # No other moxi on PATH (the workspace's own), which the tool's moxi would tell as
+    # holding strays.
+    env["PATH"] = os.pathsep.join(
+        p for p in env.get("PATH", "").split(os.pathsep)
+        if p and not os.path.isfile(os.path.join(p, "moxi")))
     env.update(UV_TOOL_DIR=str(tmp_path / "tools"), UV_TOOL_BIN_DIR=str(tmp_path / "bin"),
                UV_CACHE_DIR=str(tmp_path / "uv-cache"), UV_OFFLINE="1",
-               UV_PYTHON_DOWNLOADS="never", UV_NO_CONFIG="1", UV_NO_PROGRESS="1")
+               UV_PYTHON_DOWNLOADS="never", UV_NO_CONFIG="1", UV_NO_PROGRESS="1",
+               MOXI_HOME=str(tmp_path / "moxi-home"))
     return env
 
 

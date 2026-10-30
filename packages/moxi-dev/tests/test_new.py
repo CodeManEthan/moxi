@@ -98,7 +98,7 @@ def test_the_pyproject_declares_the_module(workspace):
     assert project["description"] == "Moxi's sample: a test."
     assert project["requires-python"] == ">=3.12"
     assert project["dependencies"] == ["moxi>=0.1,<0.2"]
-    assert project["scripts"] == {"moxi": "moxi.cli:main"}
+    assert "scripts" not in project  # only the core declares the moxi script
     assert project["entry-points"] == {"moxi.modules": {"sample": "moxi_sample.module"}}
     assert project["urls"] == {"Homepage": "https://github.com/moxihq/moxi",
                                "Repository": "https://github.com/moxihq/moxi",

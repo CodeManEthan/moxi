@@ -1,8 +1,12 @@
 """`moxi install`: install a module and its required modules, set them up, offer extras.
 
     moxi install <module> [--with EXTRA,...] [--without EXTRA,...] [--all | --none]
-                          [--from SPEC]...
+                          [--from SPEC]... [--third-party]
 
+0. The catalogue (`moxi.catalogue`): a name it lists installs its first-party
+   distribution. Any other name is refused with the nearest listed names, unless a
+   `--from` gives its distribution's source, `--third-party` says to take `moxi-<name>`
+   from the index knowing it isn't first-party, or the module is already installed here.
 1. Which environment: the one `moxi` runs in. A uv tool environment is known by its
    `uv-receipt.toml`; any other virtual environment is a plain one. The system Python is
    refused, and so is an environment whose `moxi` is an editable install.
@@ -39,7 +43,11 @@ PLAIN = "plain"
 
 
 class InstallError(Exception):
-    """The installer refuses, saying why."""
+    """The installer refuses, saying why. `exit_code` is what `moxi install` exits with."""
+
+    def __init__(self, message: str, exit_code: int = 1):
+        super().__init__(message)
+        self.exit_code = exit_code
 
 
 # -- requirements ----------------------------------------------------------------------
@@ -317,21 +325,19 @@ class Environment:
 
 def environment() -> Environment:
     """The environment `moxi` runs in, or `InstallError` when the installer refuses it."""
-    import sysconfig
+    from . import paths
 
     prefix = Path(sys.prefix)
     if sys.prefix == sys.base_prefix:
         raise InstallError(f"moxi runs from the system Python ({sys.executable}); install "
-                           f"Moxi with `uv tool install moxi-<module>` or into a virtual "
+                           f"Moxi with `uv tool install moxi` or into a virtual "
                            f"environment")
     url = _direct_url("moxi")
     if url and (url.get("dir_info") or {}).get("editable"):
         raise InstallError(f"moxi is an editable install here ({prefix}), a workspace's; "
                            f"add a module by declaring it in the workspace and running "
                            f"`uv sync`")
-    scripts = Path(sysconfig.get_path("scripts"))
-    python = scripts / "python"
-    python_text = str(python) if python.exists() else sys.executable
+    python_text = str(paths.python())
     receipt_path = prefix / "uv-receipt.toml"
     if receipt_path.is_file():
         import tomllib
@@ -456,6 +462,9 @@ def _parser(prog: str):
                              "'moxi-turns @ git+https://...'; before PyPI holds the "
                              "modules, give one for each Moxi distribution the module "
                              "needs that this environment lacks")
+    parser.add_argument("--third-party", action="store_true",
+                        help="install moxi-<module> from the index though Moxi's catalogue "
+                             "doesn't list it: a module that isn't first-party")
     return parser
 
 
@@ -475,7 +484,7 @@ def main(argv: list[str] | None = None, prog: str = "moxi install") -> int:
         return Installer(args).run()
     except InstallError as exc:
         print(f"moxi install: {exc}", file=sys.stderr)
-        return 1
+        return exc.exit_code
 
 
 class Installer:
@@ -485,6 +494,9 @@ class Installer:
         self.no = _names(args.without)
         self.every = True if args.all else False if args.none else None
         self.froms = [parse_from(spec) for spec in args.from_]
+        self.third_party = bool(getattr(args, "third_party", False))
+        #: The module's catalogue entry, when the catalogue lists it.
+        self.listed = None
         self.setup_failed: list[str] = []
         self.installed: list[str] = []
         self.on: list[str] = []
@@ -503,6 +515,7 @@ class Installer:
         both = sorted(set(self.yes) & set(self.no))
         if both:
             raise InstallError(f"--with and --without both name {', '.join(both)}")
+        self._catalogue_gate(module)
         env = environment()
         self.env = env
         before = snapshot(env.python)
@@ -523,6 +536,8 @@ class Installer:
                 for s in speakers:
                     print(f"{s.module} declares the extra {module} ({s.requirement}); "
                           f"installing it through {s.distribution}[{module}].")
+            elif self.listed is not None:
+                reqs = [Req(self.listed.distribution)]
             else:
                 reqs = [Req(names.distribution(module))]
             if not self._install(reqs, before):
@@ -566,6 +581,37 @@ class Installer:
         # step 6 ----------------------------------------------------------------------
         self._report(after)
         return 1 if self.setup_failed else 0
+
+    # step 0 ----------------------------------------------------------------------
+    def _catalogue_gate(self, module: str) -> None:
+        """Refuse a name the catalogue doesn't list, unless a source or `--third-party`
+        is given for it or it is installed here already."""
+        from . import catalogue, modules
+
+        try:
+            listed = catalogue.load()
+        except (OSError, catalogue.CatalogueError) as exc:
+            raise InstallError(f"Moxi's catalogue cannot be read ({exc}); reinstall moxi")
+        self.listed = listed.get(module)
+        if self.listed is not None:
+            return
+        own = normalize(names.distribution(module))
+        if any(normalize(req.name) == own for req in self.froms):
+            return
+        if modules.load(module).state != modules.ABSENT:
+            return
+        if self.third_party:
+            print(f"{module} is not in Moxi's catalogue: installing "
+                  f"{names.distribution(module)} from the index as a third-party module, "
+                  f"not a first-party one.")
+            return
+        near = listed.suggest(module)
+        hint = f"did you mean {' or '.join(near)}? " if near else ""
+        raise InstallError(
+            f"{module!r} is not a first-party Moxi module (`moxi modules --available` "
+            f"lists them). {hint}To install a third-party module, give --third-party to "
+            f"take {names.distribution(module)} from the index, or --from with its source.",
+            exit_code=3)
 
     # the route ---------------------------------------------------------------------
     def _install(self, reqs: list[Req], before: dict) -> bool:

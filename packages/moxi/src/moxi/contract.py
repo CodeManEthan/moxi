@@ -30,10 +30,17 @@ The checks, numbered as each finding names them:
 6. A module's own console script looked up on PATH with `shutil.which` (in `src/`).
 7. The names: the `moxi.modules` entry point, the distribution and import names (no
    module may take a core verb or a name the core keeps for itself), the console
-   scripts, the announcement, the `CLI` target's `argv` and `prog` parameters and the
+   scripts (a module never declares `moxi`, which the core alone declares; its others
+   are named `moxi-<name>-<part>`), the announcement, the `CLI` target's `argv` and `prog` parameters and the
    `SETTINGS` schema. Each name of `moxi.modules.KNOWN` the announcement defines is read
    as a literal and held to the checks `moxi.modules.load` runs; a name it leaves out
    passes, as it takes its default.
+8. A write site not listed. In `src/`, every call that writes a file itself (`open`,
+   `io.open`, `os.fdopen` or a path's `.open` in a write mode, `os.open` with a write
+   flag, `.write_text`, `.write_bytes`, `os.replace`, `sqlite3.connect`) must have its
+   line in `tests/write-sites.txt`, and every line there must still match a site. The
+   list holds the sites a module has before it moves onto `moxi.files` and `moxi.store`,
+   so it only shrinks.
 
 `segment` findings hold a status line segment to showing only: the import-time closure of
 the announcement's `SEGMENT` module, within the module's package, may not import
@@ -49,6 +56,7 @@ not apply to `shutil.which("moxi")` inside `moxi.cli`, where the shortcut verb l
 the umbrella's place. Check 7 is replaced: the core declares no `moxi.modules` entry
 point, its import package is `moxi`, and its one console script is
 `moxi = "moxi.cli:main"`. With no announcement, any extra the core declares fails check 4.
+Check 8 does not apply to the core, which holds the helpers modules write through.
 The core's vendored copies under `src/moxi/_vendor/` are released libraries kept as
 released, so no check reads them.
 """
@@ -440,6 +448,8 @@ class _Repo:
         else:
             self.check_names()         # check 7
         self.check_segment()
+        if not self.core:
+            self.check_write_sites()   # check 8
         return self.findings
 
     def _read_pyproject(self) -> bool:
@@ -866,6 +876,35 @@ class _Repo:
                          "another program's script of that name may stand; use "
                          "moxi.paths.script(name)")
 
+    # -- check 8 -----------------------------------------------------------------------------
+
+    def check_write_sites(self) -> None:
+        found: dict[str, list[tuple[str, int]]] = {}
+        for source in sorted(self.sources.values(), key=lambda s: s.path):
+            if not source.in_src:
+                continue
+            for site, line in write_sites(source.tree):
+                found.setdefault(f"{source.path} {site}", []).append((source.path, line))
+        raw = self.tree.read(WRITE_SITES)
+        listed: dict[str, int] = {}
+        for text in (raw or b"").decode("utf-8", "replace").splitlines():
+            text = text.strip()
+            if text and not text.startswith("#"):
+                key = " ".join(text.split())
+                listed[key] = listed.get(key, 0) + 1
+        for key, places in found.items():
+            for path, line in places[listed.get(key, 0):]:
+                self.add(path, line, "8",
+                         f"writes a file itself ({key.split(' ', 1)[1]}); write through "
+                         f"moxi.files or moxi.store, or, for a site this module had "
+                         f"before, list it in {WRITE_SITES}")
+        for key, count in sorted(listed.items()):
+            extra = count - len(found.get(key, ()))
+            if extra > 0:
+                self.add(WRITE_SITES, 0, "8",
+                         f"lists {key!r} {extra} more time(s) than src/ has it; remove "
+                         f"the line, so the list only shrinks")
+
     # -- check 7 -----------------------------------------------------------------------------
 
     def check_core_names(self) -> None:
@@ -934,13 +973,11 @@ class _Repo:
         # Console scripts.
         for script in sorted(self.scripts):
             if script == CORE_SCRIPT[0]:
-                # Every distribution's moxi script is the umbrella's, or a tool
-                # environment it heads would run something else as moxi.
-                if _target(self.scripts[script]) != CORE_SCRIPT[1]:
-                    self.add(here, 0, "7", f"declares the console script {script} = "
-                                           f"{self.scripts[script]!r}; every Moxi "
-                                           f"distribution declares {script} = "
-                                           f"{CORE_SCRIPT[1]!r}")
+                # Only the core declares it. A module that did would put a second moxi
+                # on PATH wherever it was installed on its own.
+                self.add(here, 0, "7", f"declares the console script {script}; only the "
+                                       f"core declares it, and a module is installed with "
+                                       f"`moxi install {name or '<module>'}`")
                 continue
             ok = (name is not None and script.startswith(f"moxi-{name}-")
                   and _SCRIPT_PART.fullmatch(script[len(f"moxi-{name}-"):]))
@@ -1045,6 +1082,90 @@ class _Repo:
                 self.add(source.path, line, "segment",
                          f"calls {call} inside the closure of the segment {segment}; a "
                          "status line segment shows status and triggers nothing")
+
+
+#: A module's list of the write sites it has before moving onto the helpers (check 8).
+WRITE_SITES = "tests/write-sites.txt"
+
+_WRITE_MODE = frozenset("wax+")
+_WRITE_FLAGS = frozenset({"O_WRONLY", "O_RDWR", "O_CREAT", "O_APPEND", "O_TRUNC"})
+
+
+def _mode_writes(node: ast.AST | None) -> bool | None:
+    """True when a mode argument writes, False when it only reads, None when it can't be
+    read (not a string literal)."""
+    if node is None:
+        return False
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return bool(_WRITE_MODE & set(node.value))
+    return None
+
+
+def _flags_write(node: ast.AST | None) -> bool:
+    if node is None:
+        return False
+    named = {n.attr if isinstance(n, ast.Attribute) else n.id
+             for n in ast.walk(node) if isinstance(n, (ast.Attribute, ast.Name))}
+    if named & _WRITE_FLAGS:
+        return True
+    # A flags value the check can't read (a variable, a call) counts as a write.
+    return not (named and all(n in ("os", "O_RDONLY") or n.startswith("O_") for n in named))
+
+
+def _arg(call: ast.Call, index: int, keyword: str) -> ast.AST | None:
+    for kw in call.keywords:
+        if kw.arg == keyword:
+            return kw.value
+    return call.args[index] if len(call.args) > index else None
+
+
+def write_sites(tree: ast.Module) -> list[tuple[str, int]]:
+    """Each `("<scope> <call>", line)` of a call in `tree` that writes a file itself.
+
+    `<scope>` is the dotted name of the enclosing classes and functions, or `<module>`.
+    """
+    out: list[tuple[str, int]] = []
+
+    def visit(node: ast.AST, scope: list[str]) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                visit(child, [*scope, child.name])
+                continue
+            if isinstance(child, ast.Call):
+                call = _write_call(child)
+                if call is not None:
+                    out.append((f"{'.'.join(scope) or '<module>'} {call}", child.lineno))
+            visit(child, scope)
+
+    visit(tree, [])
+    return out
+
+
+def _write_call(call: ast.Call) -> str | None:
+    func = call.func
+    if isinstance(func, ast.Name):
+        if func.id == "open" and _mode_writes(_arg(call, 1, "mode")) is not False:
+            return "open"
+        return None
+    if not isinstance(func, ast.Attribute):
+        return None
+    owner = func.value.id if isinstance(func.value, ast.Name) else None
+    attr = func.attr
+    if attr in ("write_text", "write_bytes"):
+        return f".{attr}"
+    if owner == "os" and attr == "replace":
+        return "os.replace"
+    if owner == "sqlite3" and attr == "connect":
+        return "sqlite3.connect"
+    if owner == "os" and attr == "open":
+        return "os.open" if _flags_write(_arg(call, 1, "flags")) else None
+    if owner in ("io", "os") and attr in ("open", "fdopen"):
+        return f"{owner}.{attr}" if _mode_writes(_arg(call, 1, "mode")) is not False else None
+    if attr == "open":
+        # A path's open(mode): only a mode the check can read as writing counts, since
+        # many other objects have an `open` (a browser, an archive) taking other things.
+        return ".open" if _mode_writes(_arg(call, 0, "mode")) else None
+    return None
 
 
 def _target(text: str | None) -> str | None:

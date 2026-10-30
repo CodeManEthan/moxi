@@ -1,0 +1,24 @@
+# Moxi's catalogue: the first-party modules `moxi install` installs by name.
+# `moxi modules --available` lists it; `moxi modules --available --refresh` fetches a newer
+# copy from the repository. Raise `version` whenever a line changes.
+version = 1
+
+[[module]]
+name = "cache"
+distribution = "moxi-cache"
+summary = "Know when a session's prompt cache goes cold, and act before it does"
+
+[[module]]
+name = "comms"
+distribution = "moxi-comms"
+summary = "Messages between coding-agent sessions, delivered into their turns"
+
+[[module]]
+name = "sessions"
+distribution = "moxi-sessions"
+summary = "Read a harness's own session records: find a session, read its transcript back"
+
+[[module]]
+name = "turns"
+distribution = "moxi-turns"
+summary = "Drive a coding-agent session's turns: start, hold, steer and read a turn on any harness"
