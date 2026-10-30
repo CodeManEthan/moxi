@@ -314,32 +314,32 @@ class Slot(Target):
         if api is None:
             return [NoSlots()]
         support = api.supported()
-        if not getattr(support, "ok", False):
-            return [SlotsUnsupported(str(getattr(support, "why", "") or "slots says so"))]
+        if not support.ok:
+            return [SlotsUnsupported(support.why or "slots says so")]
         named = named_slot(getattr(resolved, "values", {}) or {})
         if named is None:
             return []
         try:
             found = api.show(named)
-        except _errors(api, "TryAgain") as error:
+        except api.TryAgain as error:
             return [SlotsBusy("slot", f"slots did not answer about slot {named}: {error}",
                               "try again in a moment")]
-        except Exception as error:  # noqa: BLE001  (any failure to ask is a refusal)
+        except api.TmuxError as error:
             return [SlotsFailed("slot", f"slots could not show slot {named}: {error}",
                                 "moxi slots list shows the slots")]
         if found is None:
             return [SlotTaken(named, f"there is no slot {named}",
                               f"make it with moxi slots create, or leave out the slot to "
                               "take the lowest free one")]
-        if getattr(found, "launchable", False):
+        if found.launchable:
             return []
-        state = str(getattr(found, "state", "") or "not launchable")
+        state = found.state or "not launchable"
         holder = _slot_holder(found)
         by = f" by {holder}" if holder else ""
         if state == "missing":
             return [SlotTaken(named, f"slot {named} is missing: its tmux session is gone",
                               f"recreate it with moxi slots create {named}")]
-        if getattr(found, "hold", None) is not None:
+        if found.hold is not None:
             state = "held"
         return [SlotTaken(named, f"slot {named} is {state}{by}",
                           "name another slot, or leave out the slot to take the lowest "
@@ -363,26 +363,24 @@ class Slot(Target):
             placed = api.start(named, list(launch.argv), env=dict(launch.env),
                                cwd=launch.cwd, label=f"launcher:{rid}", meta=meta,
                                create=named is None)
-        except _errors(api, "Refused") as refused:
-            reason = str(getattr(refused, "reason", "") or "refused")
-            holder = _holder_words(getattr(refused, "holder", None))
-            words = str(getattr(refused, "words", "") or refused)
+        except api.Refused as refused:
+            holder = _refused_holder(refused.reason, refused.holder)
+            words = refused.words or f"slots refused the slot: {refused.reason}"
             if holder and holder not in words:
-                words += f" ({reason} by {holder})"
-            return fail(conn, rid, reason, words)
-        except _errors(api, "TryAgain") as error:
+                words += f" ({refused.reason} by {holder})"
+            return fail(conn, rid, refused.reason, words)
+        except api.TryAgain as error:
             return fail(conn, rid, TRY_AGAIN, f"slots' lock was not had in time: {error}")
-        except Exception as error:  # noqa: BLE001  (tmux failed; the row says so)
+        except api.TmuxError as error:
             return fail(conn, rid, SPAWN_FAILED,
                         f"{launch.argv[0]} could not be started in a slot: {error}")
 
-        slot = getattr(placed, "slot", named)
-        pane_id = getattr(placed, "pane_id", None)
+        slot, pane_id = placed.slot, placed.pane_id
         where = {"slot": str(slot), "pane_id": pane_id}
-        verdict = str(getattr(placed, "exec", "") or "")
+        verdict = placed.exec
         if verdict not in ("started", "unconfirmed"):
-            line = getattr(placed, "exec_line", None) or verdict or "no verdict"
-            status = getattr(placed, "dead_status", None)
+            line = placed.exec_line or verdict or "no verdict"
+            status = placed.dead_status
             store.set_facts(conn, rid, **where)
             return fail(conn, rid, SPAWN_FAILED,
                         f"{launch.argv[0]} did not start in slot {slot}: {line}"
@@ -505,52 +503,56 @@ def named_slot(values: Mapping[str, object]) -> int | str | None:
     return int(text) if text.isdigit() else text
 
 
-def _errors(api: Any, *names: str) -> tuple[type[BaseException], ...]:
-    """The exception classes slots' API declares under `names`."""
-    found = (getattr(api, name, None) for name in names)
-    return tuple(c for c in found if isinstance(c, type) and issubclass(c, BaseException))
-
-
 def _slot_holder(found: Any) -> str | None:
     """Who has a slot that `show` read: the hold's holder and until, else the last
     launch's label and meta."""
-    hold = getattr(found, "hold", None)
-    if hold is not None:
-        return _holder_words(hold)
-    return _holder_words(getattr(found, "last", None))
+    if found.hold is not None:
+        return _hold_words(found.hold)
+    return _last_words(found.last)
 
 
-def _holder_words(holder: Any) -> str | None:
-    """`holder` (a hold, a last launch, a mapping of either, or words) in a few words."""
+def _refused_holder(reason: str, holder: Any) -> str | None:
+    """Who has the slot a `start` was refused, in a few words: slots names the hold for
+    `held` and the last launch for `occupied`, and nobody for its other refusals."""
     if holder is None:
         return None
-    if isinstance(holder, str):
-        return holder or None
-    get = holder.get if isinstance(holder, Mapping) else \
-        (lambda name, default=None: getattr(holder, name, default))
-    if get("holder"):
-        until = get("until")
-        when = (f" until {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(until))}"
-                if isinstance(until, (int, float)) else f" until {until}" if until else "")
-        return f"{get('holder')}{when}"
-    label, meta = get("label"), get("meta")
-    if label or meta:
-        words = str(label or "")
-        if isinstance(meta, Mapping) and meta:
-            facts = ", ".join(f"{k} {v}" for k, v in meta.items() if v is not None)
-            words = f"{words} ({facts})" if words else facts
-        return words or None
-    return str(holder)
+    if reason == "held":
+        return _hold_words(holder)
+    if reason == "occupied":
+        return _last_words(holder)
+    return None
+
+
+def _hold_words(hold: Any) -> str | None:
+    """A hold (`holder`, `until` in epoch seconds) in a few words."""
+    if hold is None or not hold.holder:
+        return None
+    until = hold.until
+    when = (f" until {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(until))}"
+            if isinstance(until, (int, float)) else "")
+    return f"{hold.holder}{when}"
+
+
+def _last_words(last: Any) -> str | None:
+    """A last launch (`label`, and the launcher's own `meta`) in a few words."""
+    if last is None:
+        return None
+    words = str(last.label or "")
+    meta = last.meta
+    if isinstance(meta, Mapping) and meta:
+        facts = ", ".join(f"{k} {v}" for k, v in meta.items() if v is not None)
+        words = f"{words} ({facts})" if words else facts
+    return words or None
 
 
 def _pane_pid(api: Any, slot: Any) -> int | None:
     """The pid of slot `slot`'s run pane, as slots shows it, or None."""
     try:
         found = api.show(slot)
-    except Exception:  # noqa: BLE001  (the pid is a fact the row can do without)
+    except (api.TryAgain, api.TmuxError):  # the pid is a fact the row can do without
         return None
-    pid = getattr(found, "pane_pid", None) if found is not None else None
-    return pid if isinstance(pid, int) and pid > 0 else None
+    pid: int | None = found.pane_pid if found is not None else None
+    return pid if pid and pid > 0 else None
 
 
 def _ready(turns: Any, launch: Launch, row: store.LaunchRow | None,

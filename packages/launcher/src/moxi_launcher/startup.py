@@ -17,14 +17,20 @@ is ready or `startup.wait_s` has passed (without turns it runs to the bound), it
 pane with `read_screen`, which sends nothing. When an enabled screen shows, it calls
 `answer_screen` with what remains of the bound (at most `ANSWER_WAIT_S`), since that bound
 covers the whole call, keys and settling included, and records the outcome as a
-`startup-screen` event. Then:
+`startup-screen` event. slots' outcome words decide what follows:
 
-- `mismatch` with slots saying a key never visibly took effect in its bound (`why` starts
-  with `not-settled`): recorded as `not-settled`, not as a mismatch, and the loop goes on.
-- any other `mismatch`: the pane is read once more. If the same screen still shows, the
-  launch fails `screen-mismatch`, with slots' capture of the screen, and nothing more is
-  sent to the session. If not, the loop goes on.
-- a dead pane, at any read, fails the launch `exited`.
+- `gone`: the screen was answered and left; the loop goes on. So does `not-ended`, which
+  slots gives only for a screen that must end its pane, and the pane is still there.
+- `mismatch`: slots could not answer the screen in its bound, maybe because it had not
+  settled yet. The loop goes on, and one interval later answers it again if it still
+  shows, while the bound has time left. If the bound runs out with that screen still
+  showing, the launch fails `screen-mismatch`, with slots' capture of the screen, and
+  nothing more is sent to the session.
+- `ended`, `ended-without-screen` or `no-pane`: the pane died or is gone, and the launch
+  fails `exited`. So does a dead pane at any read.
+
+No answer is started with less than `MIN_ANSWER_S` left. slots' `why` is words for a
+person, recorded beside the outcome and never read as a code.
 
 No Codex screen is declared yet, so a Codex slot launch answers none: a folder Codex has
 not trusted may show Codex's own trust prompt, which waits for a person who attaches, and a
@@ -64,8 +70,12 @@ ANSWER_WAIT_S = 5.0
 MIN_ANSWER_S = 1.0
 #: The `events` kind of each screen the loop answered.
 EVENT = "startup-screen"
-#: The outcome recorded when slots spent its settle bound after a key.
-NOT_SETTLED = "not-settled"
+#: slots' answers after which the loop goes on watching.
+GO_ON = frozenset({"gone", "not-ended"})
+#: slots' answer when it could not answer a screen in its bound.
+MISMATCH = "mismatch"
+#: slots' answers that mean the pane died or is gone.
+PANE_ENDED = frozenset({"ended", "ended-without-screen", "no-pane"})
 #: The reasons a launch fails with here.
 EXITED = "exited"
 SCREEN_MISMATCH = "screen-mismatch"
@@ -94,9 +104,10 @@ class Watched:
     """How the loop ended.
 
     `ended` is `ready` (the session said it is ready), `bound` (`startup.wait_s` passed),
-    `stopped` (slots could not be read; the ready wait decides), or `failed`, with
-    `reason` (`exited` or `screen-mismatch`), `why`, and slots' `capture` of a screen it
-    could not answer. `answered` lists each answer's screen and recorded outcome."""
+    `stopped` (slots could not be read, or answered in a word the loop does not know; the
+    ready wait decides), or `failed`, with `reason` (`exited` or `screen-mismatch`), `why`,
+    and slots' `capture` of a screen it could not answer. `answered` lists each answer's
+    screen and slots' outcome word."""
 
     ended: str
     reason: str | None = None
@@ -112,18 +123,10 @@ class Watched:
 def screens(harness: str, api: Any, current: Mapping[str, Any] | None = None
             ) -> list[tuple[str, Any]]:
     """The screens a slot launch of `harness` answers: each one whose setting is on, as
-    slots declares it, by name. None for Codex, which has no screen declared yet."""
-    wanted = [name for key, name in SCREENS.get(harness, ()) if _setting(current, key)]
-    found = []
-    for name in wanted:
-        screen = getattr(api, name, None)
-        if screen is None:
-            screen = getattr(getattr(api, "screens", None), name, None)
-        if screen is None:
-            log.warning("slots declares no screen %s; it is not answered", name)
-            continue
-        found.append((name, screen))
-    return found
+    slots' API module declares it, by name. None for Codex, which has no screen declared
+    yet."""
+    return [(name, getattr(api, name)) for key, name in SCREENS.get(harness, ())
+            if _setting(current, key)]
 
 
 def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
@@ -145,56 +148,62 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
     shown = [screen for _, screen in enabled]
     answered: list[tuple[str, str]] = []
     deadline = clock() + wait_s
+    # The screen slots last could not answer, its words and its capture: it fails the
+    # launch if it is still showing when the bound runs out.
+    unanswered: tuple[str, str, str | None] | None = None
+    failures = (api.TryAgain, api.TmuxError)
 
     def done(ended: str, **more: Any) -> Watched:
         return Watched(ended, answered=tuple(answered), **more)
 
+    def at_bound(showing: str | None) -> Watched:
+        if unanswered is None or showing != unanswered[0]:
+            return done("bound")
+        name, why, capture = unanswered
+        return done("failed", reason=SCREEN_MISMATCH,
+                    why=f"the {name} screen was still showing when startup.wait_s ran "
+                        f"out, and slots could not answer it" + (f": {why}" if why else ""),
+                    capture=capture)
+
     while True:
         left = deadline - clock()
-        if left <= 0:
+        if left <= 0 and unanswered is None:
             return done("bound")
         try:
             seen = api.read_screen(slot, screens=shown)
-        except Exception as error:  # noqa: BLE001  (slots unreadable: the ready wait decides)
+        except failures as error:  # slots unreadable: the ready wait decides
             return _stopped(conn, request_id, error, done)
-        if _dead(seen):
-            return done("failed", reason=EXITED, why=_died(seen.dead))
-        name, screen = _named(getattr(seen, "screen", None), enabled)
+        if seen.dead:
+            return done("failed", reason=EXITED, why=_exited(api, slot))
+        name, screen = _named(seen.screen, enabled)
+        if unanswered is not None and name != unanswered[0]:
+            unanswered = None
+        left = deadline - clock()
+        if left <= 0:
+            return at_bound(name)
         if screen is not None:
-            left = deadline - clock()
             if left < MIN_ANSWER_S:
-                return done("bound")
+                return at_bound(name)
             wait = min(ANSWER_WAIT_S, left)
             try:
                 answer = api.answer_screen(slot, screen, wait=wait)
-            except Exception as error:  # noqa: BLE001
+            except failures as error:
                 return _stopped(conn, request_id, error, done)
-            outcome = str(getattr(answer, "outcome", ""))
-            why = str(getattr(answer, "why", "") or "")
-            capture = getattr(answer, "capture", None)
-            settled = not (outcome == "mismatch" and why.startswith(NOT_SETTLED))
-            recorded = outcome if settled else NOT_SETTLED
-            answered.append((name, recorded))
-            detail = {"screen": name, "outcome": recorded, "why": why, "wait": wait,
-                      "capture": str(capture) if capture else None}
-            if not settled:
-                detail["answer"] = outcome
-            store.add_event(conn, EVENT, detail, request_id=request_id)
-            if outcome == "no-pane":
-                return done("failed", reason=EXITED, why="the slot's run pane is gone")
-            if outcome == "mismatch" and settled:
-                try:
-                    again = api.read_screen(slot, screens=shown)
-                except Exception as error:  # noqa: BLE001
-                    return _stopped(conn, request_id, error, done)
-                if _dead(again):
-                    return done("failed", reason=EXITED, why=_died(again.dead))
-                if _named(getattr(again, "screen", None), enabled)[0] == name:
-                    return done("failed", reason=SCREEN_MISMATCH,
-                                why=f"the {name} screen showed and could not be answered"
-                                    + (f": {why}" if why else ""),
-                                capture=str(capture) if capture else None)
-            continue
+            outcome, why = answer.outcome, answer.why or ""
+            capture = str(answer.capture) if answer.capture else None
+            answered.append((name, outcome))
+            store.add_event(conn, EVENT, {"screen": name, "outcome": outcome, "why": why,
+                                          "wait": wait, "capture": capture},
+                            request_id=request_id)
+            if outcome in PANE_ENDED:
+                return done("failed", reason=EXITED, why=_exited(api, slot))
+            if outcome in GO_ON:
+                continue
+            if outcome != MISMATCH:
+                return _stopped(conn, request_id,
+                                f"slots answered the {name} screen {outcome!r}", done)
+            # Asked again after one interval, while the bound has time left.
+            unanswered = (name, why, capture)
         step = min(interval, max(deadline - clock(), 0))
         began = clock()
         if ready is not None:
@@ -209,32 +218,32 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
 
 
 def _named(shown: Any, enabled: Sequence[tuple[str, Any]]) -> tuple[str | None, Any]:
-    """The enabled screen `shown` names, whether slots gave the screen itself or its
-    name."""
+    """The enabled screen that slots' read matched, by the name the launcher knows it
+    under, or `(None, None)`."""
     if shown is None:
         return None, None
     for name, screen in enabled:
-        if shown is screen or shown == screen or shown == name \
-                or getattr(shown, "name", None) == name:
+        if shown is screen or shown == screen:
             return name, screen
     return None, None
 
 
-def _dead(seen: Any) -> bool:
-    """Whether a read saw the pane dead: `dead` set, a status of 0 included."""
-    dead = getattr(seen, "dead", None)
-    return dead is not None and dead is not False
-
-
-def _died(dead: Any) -> str:
-    if dead is True:
+def _exited(api: Any, slot: Any) -> str:
+    """Why the launch failed when its pane died: with the pane's exit status, when slots
+    can show it."""
+    try:
+        found = api.show(slot)
+    except (api.TryAgain, api.TmuxError):
+        found = None
+    status = found.dead_status if found is not None else None
+    if status is None:
         return "the session exited before it was ready"
-    return f"the session exited before it was ready (pane status {dead})"
+    return f"the session exited before it was ready (pane status {status})"
 
 
-def _stopped(conn, request_id: str, error: BaseException,
+def _stopped(conn, request_id: str, error: BaseException | str,
              done: Callable[..., Watched]) -> Watched:
-    why = f"{type(error).__name__}: {error}".rstrip(": ")
+    why = error if isinstance(error, str) else f"{type(error).__name__}: {error}".rstrip(": ")
     log.warning("startup screens of %s not watched further: %s", request_id, why)
     store.add_event(conn, EVENT, {"outcome": "stopped", "why": why},
                     request_id=request_id)
@@ -300,5 +309,6 @@ def _ask(question: str) -> bool:
     return answer.strip().lower() in ("y", "yes")
 
 
-__all__ = ["ANSWER_WAIT_S", "EVENT", "EXITED", "INTERVAL_S", "MIN_ANSWER_S", "NOT_SETTLED",
-           "QUESTIONS", "SCREENS", "SCREEN_MISMATCH", "Watched", "screens", "setup", "watch"]
+__all__ = ["ANSWER_WAIT_S", "EVENT", "EXITED", "GO_ON", "INTERVAL_S", "MIN_ANSWER_S",
+           "MISMATCH", "PANE_ENDED", "QUESTIONS", "SCREENS", "SCREEN_MISMATCH", "Watched",
+           "screens", "setup", "watch"]

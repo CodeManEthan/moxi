@@ -321,6 +321,15 @@ def test_a_held_slot_at_start_names_the_hold(work, harness, rig):
     assert "relaunch-77" in got.line
 
 
+def test_a_refusal_naming_nobody_gives_slots_words(work, harness, rig):
+    rig.plan(start="refused", refused={"reason": "no-free-slot",
+                                       "words": "every slot is taken"})
+    got = api.launch(request(work))
+    assert (got.state, got.reason, got.exit_code) == ("failed", "no-free-slot",
+                                                      exits.REFUSED)
+    assert "every slot is taken" in got.line and " by " not in got.line
+
+
 def test_slots_lock_held_too_long_ends_the_row_try_again(work, harness, rig):
     rig.plan(start="try-again")
     got = api.launch(request(work))
@@ -440,9 +449,9 @@ def test_both_screens_are_watched_when_both_settings_are_on(work, harness, rig):
                                                       "CLAUDE_DEV_CHANNELS"]
 
 
-def test_a_screen_still_showing_after_a_mismatch_fails_screen_mismatch(work, harness, rig,
-                                                                        turns):
-    screens_on(3)
+def test_a_screen_still_showing_when_the_bound_runs_out_fails_screen_mismatch(
+        work, harness, rig, turns):
+    screens_on(2)
     turns.plan(ready="timeout")
     rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}],
              answers=[{"outcome": "mismatch", "why": "the option row is missing",
@@ -453,9 +462,12 @@ def test_a_screen_still_showing_after_a_mismatch_fails_screen_mismatch(work, har
     assert "/state/slots/mismatches/1.txt" in got.line
     [failed] = events(kind="start-failed")
     assert failed.detail["capture"] == "/state/slots/mismatches/1.txt"
+    # The screen may not have settled, so it was asked again while the bound had time.
+    asked = rig.calls("answer_screen")
+    assert len(asked) > 1
+    assert {e.detail["outcome"] for e in events(kind=startup.EVENT)} == {"mismatch"}
     # The launcher sends nothing further: no first turn.
     assert turns.calls("deliver") == []
-    assert len(rig.calls("answer_screen")) == 1
     assert targets.exit_of(row()) == exits.ERROR
 
 
@@ -467,28 +479,42 @@ def test_a_mismatch_whose_screen_left_is_not_a_failure(work, harness, rig):
     assert got.state == "started"
     [seen] = events(kind=startup.EVENT)
     assert seen.detail["outcome"] == "mismatch"
+    assert len(rig.calls("answer_screen")) == 1
 
 
-def test_a_spent_settle_bound_is_recorded_as_such_not_as_a_mismatch(work, harness, rig):
+def test_a_mismatch_answered_on_the_next_ask_lets_the_launch_go_on(work, harness, rig):
     screens_on(3)
     rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}, {"screen": "CLAUDE_TRUST_FOLDER"},
                      {"screen": None}],
-             answers=[{"outcome": "mismatch", "why": "not-settled: the marker stayed on "
-                                                    "row 2 for 2 s"},
+             answers=[{"outcome": "mismatch",
+                       "why": "the marker stayed on No, exit for 2 s"},
                       {"outcome": "gone"}])
     got = api.launch(request(work))
     assert got.state == "started" and got.exit_code == 0
     first_answer, second = events(kind=startup.EVENT)
-    assert first_answer.detail["outcome"] == startup.NOT_SETTLED
-    assert first_answer.detail["answer"] == "mismatch"
+    assert first_answer.detail["outcome"] == "mismatch"
+    assert "stayed on" in first_answer.detail["why"]
     assert second.detail["outcome"] == "gone"
     assert row().reason is None
+
+
+def test_a_mismatch_then_an_ended_pane_fails_exited(work, harness, rig, turns):
+    screens_on(3)
+    turns.plan(ready="timeout")
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}], dead_status=1,
+             answers=[{"outcome": "mismatch", "why": "x"}, {"outcome": "ended"}])
+    got = api.launch(request(work, brief=BRIEF))
+    assert (got.state, got.reason) == ("failed", startup.EXITED)
+    assert "pane status 1" in got.line
+    assert [e.detail["outcome"] for e in events(kind=startup.EVENT)] == ["mismatch",
+                                                                        "ended"]
+    assert turns.calls("deliver") == []
 
 
 def test_a_pane_that_died_at_startup_fails_exited(work, harness, rig, turns):
     screens_on(2)
     turns.plan(ready="timeout")
-    rig.plan(frames=[{"screen": None, "dead": 1}])
+    rig.plan(frames=[{"screen": None, "dead": True}], dead_status=1)
     got = api.launch(request(work, brief=BRIEF))
     assert (got.state, got.reason, got.exit_code) == ("failed", startup.EXITED,
                                                       exits.ERROR)
@@ -521,7 +547,10 @@ class Clock:
 
 
 def loop_api(clock: Clock, frames: list, answers: list, *, answer_takes: float = 0.0,
-             fail_read: Exception | None = None):
+             fail_read: Exception | None = None, status: int | None = None):
+    """slots' screen calls on `clock`: each read gives the next of `frames` (`screen`, a
+    screen constant's name or None, and `dead`), each answer the next of `answers`, and
+    `show` the pane's exit `status`."""
     seen = SimpleNamespace(reads=[], answers=[])
 
     def read_screen(slot, screens):
@@ -529,16 +558,22 @@ def loop_api(clock: Clock, frames: list, answers: list, *, answer_takes: float =
             raise fail_read
         seen.reads.append(clock.now)
         frame = frames[min(len(seen.reads) - 1, len(frames) - 1)]
-        return SimpleNamespace(screen=frame.get("screen"), dead=frame.get("dead"))
+        name = frame.get("screen")
+        return fake.Seen(fake.SCREENS[name] if name else None,
+                         dead=frame.get("dead", False))
 
     def answer_screen(slot, screen, wait=5):
         seen.answers.append(wait)
         answer = answers[min(len(seen.answers) - 1, len(answers) - 1)]
         clock.now += min(answer_takes, wait)
-        return SimpleNamespace(outcome=answer["outcome"], why=answer.get("why", ""),
-                               capture=answer.get("capture"))
+        return fake.Answer(answer["outcome"], screen, answer.get("why", ""), None,
+                           answer.get("capture"))
 
-    seen.api = SimpleNamespace(read_screen=read_screen, answer_screen=answer_screen)
+    def show(slot):
+        return fake.Slot(slot, None, "occupied", False, dead_status=status)
+
+    seen.api = SimpleNamespace(read_screen=read_screen, answer_screen=answer_screen,
+                               show=show, TryAgain=fake.TryAgain, TmuxError=fake.TmuxError)
     return seen
 
 
@@ -552,7 +587,9 @@ def conn():
     connection.close()
 
 
-TRUST = [("CLAUDE_TRUST_FOLDER", "trust-screen")]
+TRUST = [("CLAUDE_TRUST_FOLDER", fake.CLAUDE_TRUST_FOLDER)]
+SHOWING = {"screen": "CLAUDE_TRUST_FOLDER"}
+NONE = {"screen": None}
 
 
 def watch(conn, clock, seen, **kw):
@@ -562,7 +599,7 @@ def watch(conn, clock, seen, **kw):
 
 def test_a_screen_that_never_shows_runs_the_loop_to_its_bound(conn):
     clock = Clock()
-    seen = loop_api(clock, [{"screen": None}], [])
+    seen = loop_api(clock, [NONE], [])
     got = watch(conn, clock, seen, wait_s=20)
     assert got.ended == "bound" and not got.failed
     # Every 250 ms, sending nothing.
@@ -572,7 +609,7 @@ def test_a_screen_that_never_shows_runs_the_loop_to_its_bound(conn):
 
 def test_the_loop_ends_once_the_session_is_ready(conn):
     clock = Clock()
-    seen = loop_api(clock, [{"screen": None}], [])
+    seen = loop_api(clock, [NONE], [])
     asked = []
 
     def ready(timeout):
@@ -589,8 +626,7 @@ def test_the_loop_ends_once_the_session_is_ready(conn):
 
 def test_each_answer_gets_what_remains_of_the_bound_at_most_5_s(conn):
     clock = Clock()
-    seen = loop_api(clock, [{"screen": "trust-screen"}], [{"outcome": "gone"}],
-                    answer_takes=4.0)
+    seen = loop_api(clock, [SHOWING], [{"outcome": "gone"}], answer_takes=4.0)
     got = watch(conn, clock, seen, wait_s=12)
     # 12 s: answers at 0 (wait 5), 4 (5), 8 (4); at 12 the bound is spent.
     assert seen.answers == [5.0, 5.0, 4.0]
@@ -600,65 +636,132 @@ def test_each_answer_gets_what_remains_of_the_bound_at_most_5_s(conn):
 
 def test_no_answer_is_started_with_less_than_a_second_left(conn):
     clock = Clock()
-    clock.now = 0.0
-    seen = loop_api(clock, [{"screen": None}, {"screen": "trust-screen"}],
-                    [{"outcome": "gone"}])
+    seen = loop_api(clock, [NONE, SHOWING], [{"outcome": "gone"}])
     got = watch(conn, clock, seen, wait_s=1, interval=0.25)
-    # The screen shows at 0.25 s, with 0.75 s left: too little to answer.
-    assert seen.answers == [] and got.ended == "bound"
+    # The screen shows at 0.25 s, with 0.75 s left: too little to answer, and since slots
+    # never said it could not answer it, the loop just ends at its bound.
+    assert seen.answers == [] and got.ended == "bound" and not got.failed
 
 
-def test_a_mismatch_with_the_screen_still_showing_fails(conn):
+def test_a_mismatch_is_asked_again_until_the_bound_runs_out_then_fails(conn):
     clock = Clock()
-    seen = loop_api(clock, [{"screen": "trust-screen"}],
-                    [{"outcome": "mismatch", "why": "two rows marked", "capture": "/c"}])
-    got = watch(conn, clock, seen, wait_s=20)
+    # The words are for a person: a why that reads like a code changes nothing.
+    seen = loop_api(clock, [SHOWING],
+                    [{"outcome": "mismatch", "why": "not-settled: two rows marked",
+                      "capture": "/c"}], answer_takes=2.0)
+    got = watch(conn, clock, seen, wait_s=6)
+    # Asked at 0 (wait 5), at 2.25 (3.75) and at 4.5 (1.5), one interval after each
+    # mismatch; at 6 the bound is spent with the screen still showing.
+    assert seen.answers == [5.0, 3.75, 1.5]
     assert (got.ended, got.reason, got.capture) == ("failed", startup.SCREEN_MISMATCH,
                                                      "/c")
-    assert "two rows marked" in got.why and len(seen.reads) == 2
+    assert "two rows marked" in got.why and "startup.wait_s" in got.why
+    assert seen.reads[-1] == pytest.approx(6.0)  # read at the bound: still showing
+    assert [a for _, a in got.answered] == ["mismatch"] * 3
+    outcomes = [e.detail["outcome"] for e in store.events(conn, "r1")]
+    assert outcomes == ["mismatch"] * 3
 
 
-def test_a_spent_settle_bound_goes_on_watching(conn):
+def test_a_mismatch_with_under_a_second_left_is_not_asked_again_and_fails(conn):
     clock = Clock()
-    seen = loop_api(clock, [{"screen": "trust-screen"}, {"screen": "trust-screen"},
-                            {"screen": None}],
-                    [{"outcome": "mismatch", "why": "not-settled"}, {"outcome": "gone"}],
-                    answer_takes=2.0)
+    seen = loop_api(clock, [SHOWING], [{"outcome": "mismatch", "capture": "/c"}],
+                    answer_takes=2.5)
+    got = watch(conn, clock, seen, wait_s=3)
+    # Asked at 0 (wait 3); at 2.75 only 0.25 s is left, and the screen still shows.
+    assert seen.answers == [3.0]
+    assert (got.ended, got.reason, got.capture) == ("failed", startup.SCREEN_MISMATCH,
+                                                     "/c")
+
+
+def test_a_mismatch_then_the_screen_answered_goes_on(conn):
+    clock = Clock()
+    seen = loop_api(clock, [SHOWING, SHOWING, NONE],
+                    [{"outcome": "mismatch", "why": "the marker did not move"},
+                     {"outcome": "gone"}], answer_takes=2.0)
     got = watch(conn, clock, seen, wait_s=6)
-    assert not got.failed
-    assert got.answered == (("CLAUDE_TRUST_FOLDER", startup.NOT_SETTLED),
+    assert got.ended == "bound" and not got.failed
+    assert got.answered == (("CLAUDE_TRUST_FOLDER", "mismatch"),
                             ("CLAUDE_TRUST_FOLDER", "gone"))
     detail = [e.detail for e in store.events(conn, "r1")]
-    assert detail[0]["outcome"] == startup.NOT_SETTLED and detail[0]["answer"] == "mismatch"
+    assert [d["outcome"] for d in detail] == ["mismatch", "gone"]
+    assert detail[0]["why"] == "the marker did not move"
 
 
-@pytest.mark.parametrize("frames, answers, why", [
-    ([{"screen": None, "dead": True}], [], "exited before it was ready"),
-    ([{"screen": None, "dead": 137}], [], "pane status 137"),
-    ([{"screen": "trust-screen"}], [{"outcome": "no-pane"}], "pane is gone"),
-    ([{"screen": "trust-screen"}, {"screen": None, "dead": 0}],
-     [{"outcome": "mismatch", "why": "x"}], "pane status 0"),
-])
-def test_a_dead_or_gone_pane_fails_exited(conn, frames, answers, why):
+def test_a_mismatch_whose_screen_left_ends_at_the_bound_without_failing(conn):
     clock = Clock()
-    seen = loop_api(clock, frames, answers)
+    seen = loop_api(clock, [SHOWING, NONE], [{"outcome": "mismatch", "capture": "/c"}],
+                    answer_takes=1.0)
+    got = watch(conn, clock, seen, wait_s=3)
+    assert seen.answers == [3.0]
+    assert got.ended == "bound" and not got.failed and got.capture is None
+
+
+def test_a_mismatch_then_an_ended_pane_fails_exited_with_its_status(conn):
+    clock = Clock()
+    seen = loop_api(clock, [SHOWING], [{"outcome": "mismatch"}, {"outcome": "ended"}],
+                    answer_takes=1.0, status=0)
+    got = watch(conn, clock, seen, wait_s=10)
+    assert (got.ended, got.reason) == ("failed", startup.EXITED)
+    assert "pane status 0" in got.why and len(seen.answers) == 2
+
+
+def test_not_ended_goes_on_watching(conn):
+    clock = Clock()
+    seen = loop_api(clock, [SHOWING, NONE], [{"outcome": "not-ended"}])
+    got = watch(conn, clock, seen, wait_s=2)
+    assert got.ended == "bound" and not got.failed
+    assert got.answered == (("CLAUDE_TRUST_FOLDER", "not-ended"),)
+
+
+def test_an_answer_word_the_loop_does_not_know_stops_the_watch(conn):
+    clock = Clock()
+    seen = loop_api(clock, [SHOWING], [{"outcome": "sideways"}])
+    got = watch(conn, clock, seen, wait_s=20)
+    assert got.ended == "stopped" and not got.failed and "sideways" in got.why
+
+
+@pytest.mark.parametrize("frames, answers, status, why", [
+    ([{"screen": None, "dead": True}], [], None, "exited before it was ready"),
+    ([{"screen": None, "dead": True}], [], 137, "pane status 137"),
+    ([{"screen": None, "dead": True}], [], 0, "pane status 0"),
+    ([SHOWING], [{"outcome": "ended"}], 1, "pane status 1"),
+    ([SHOWING], [{"outcome": "ended-without-screen"}], 1, "pane status 1"),
+    ([SHOWING], [{"outcome": "no-pane"}], None, "exited before it was ready"),
+    ([SHOWING, {"screen": None, "dead": True}], [{"outcome": "mismatch", "why": "x"}], 0,
+     "pane status 0"),
+])
+def test_a_dead_or_gone_pane_fails_exited(conn, frames, answers, status, why):
+    clock = Clock()
+    seen = loop_api(clock, frames, answers, status=status)
     got = watch(conn, clock, seen, wait_s=20)
     assert (got.ended, got.reason) == ("failed", startup.EXITED) and why in got.why
 
 
-def test_a_screen_named_by_its_name_is_answered_as_that_screen(conn):
+def test_a_pane_that_is_alive_is_not_dead_whatever_its_last_status(conn):
     clock = Clock()
-    seen = loop_api(clock, [{"screen": "CLAUDE_TRUST_FOLDER"}, {"screen": None}],
-                    [{"outcome": "gone"}])
+    seen = loop_api(clock, [{"screen": None, "dead": False}], [], status=0)
+    assert watch(conn, clock, seen, wait_s=1).ended == "bound"
+
+
+def test_a_read_matches_the_screen_object_slots_gives(conn):
+    clock = Clock()
+    seen = loop_api(clock, [SHOWING, NONE], [{"outcome": "gone"}])
     got = watch(conn, clock, seen, wait_s=2)
     assert got.answered == (("CLAUDE_TRUST_FOLDER", "gone"),)
-
-
-def test_slots_that_cant_be_read_stop_the_loop_without_failing(conn):
+    # Another screen than the ones enabled is not answered.
     clock = Clock()
-    seen = loop_api(clock, [], [], fail_read=RuntimeError("tmux capture-pane failed"))
+    other = loop_api(clock, [{"screen": "CLAUDE_EXIT_DIALOG"}], [{"outcome": "gone"}])
+    assert watch(conn, clock, other, wait_s=1).ended == "bound"
+    assert other.answers == []
+
+
+@pytest.mark.parametrize("error", [fake.TmuxError("tmux capture-pane failed"),
+                                   fake.TryAgain("the server is not answering yet")])
+def test_slots_that_cant_be_read_stop_the_loop_without_failing(conn, error):
+    clock = Clock()
+    seen = loop_api(clock, [], [], fail_read=error)
     got = watch(conn, clock, seen, wait_s=20)
-    assert got.ended == "stopped" and not got.failed and "capture-pane" in got.why
+    assert got.ended == "stopped" and not got.failed and str(error) in got.why
     [event] = store.events(conn, "r1")
     assert event.kind == startup.EVENT and event.detail["outcome"] == "stopped"
 
@@ -668,12 +771,20 @@ def test_the_enabled_screens_follow_the_settings():
     assert startup.screens("claude", fake, on) == [
         ("CLAUDE_TRUST_FOLDER", fake.CLAUDE_TRUST_FOLDER)]
     both = {"startup.trust_dialog": True, "startup.dev_channels_dialog": True}
-    assert [n for n, _ in startup.screens("claude", fake, both)] == [
-        "CLAUDE_TRUST_FOLDER", "CLAUDE_DEV_CHANNELS"]
+    assert startup.screens("claude", fake, both) == [
+        ("CLAUDE_TRUST_FOLDER", fake.CLAUDE_TRUST_FOLDER),
+        ("CLAUDE_DEV_CHANNELS", fake.CLAUDE_DEV_CHANNELS)]
     off = {"startup.trust_dialog": False, "startup.dev_channels_dialog": False}
     assert startup.screens("claude", fake, off) == []
-    # A screen slots does not declare is left out.
-    assert startup.screens("claude", SimpleNamespace(), both) == []
+
+
+def test_the_screens_are_read_from_slots_api_module_only():
+    both = {"startup.trust_dialog": True, "startup.dev_channels_dialog": True}
+    elsewhere = SimpleNamespace(screens=SimpleNamespace(
+        CLAUDE_TRUST_FOLDER=fake.CLAUDE_TRUST_FOLDER,
+        CLAUDE_DEV_CHANNELS=fake.CLAUDE_DEV_CHANNELS))
+    with pytest.raises(AttributeError):
+        startup.screens("claude", elsewhere, both)
 
 
 # -- the install questions ------------------------------------------------------------------

@@ -10,8 +10,10 @@ how the session reports itself ready.
 
 What each needs, and is skipped without: the harness on PATH; for the launches with
 turns, a turns that offers the interface the launcher calls; for a Codex launch with turns
-in this terminal or a slot, turns' Codex host; for a slot launch, slots installed and the
-launcher's slot target built. The `--help` diff against the catalog is in
+in this terminal or a slot, turns' Codex host; for a slot launch, slots installed and tmux
+on PATH. A slot launch runs slots on a tmux server of its own: `MOXI_HOME` points into a
+short temp dir for the test, slots' socket follows it, and the server is stopped after.
+The default tmux server is never reached. The `--help` diff against the catalog is in
 `test_catalog.py`.
 
 Each brief asks the model to join two random words with a hyphen. The joined word is in
@@ -31,8 +33,8 @@ import threading
 from pathlib import Path
 
 import pytest
-from moxi import modules
-from moxi_dev.testing import wait_for
+from moxi import config, modules, paths
+from moxi_dev.testing import short_dir, wait_for
 
 from moxi_launcher import api, compose, first, handoffs, presets, store, targets
 
@@ -92,8 +94,59 @@ def needs_host() -> None:
 
 
 def needs_slots() -> None:
-    if not modules.available("slots") or isinstance(targets.get("slot"), targets.Unbuilt):
-        pytest.skip("needs slots, and the launcher's slot target")
+    if not modules.available("slots"):
+        pytest.skip("needs slots")
+    if shutil.which("tmux") is None:
+        pytest.skip("tmux is not on PATH")
+
+
+@pytest.fixture
+def own_slots(live_env, monkeypatch):
+    """slots on a tmux server of its own, for one test; yields the server's socket.
+
+    `MOXI_HOME` points into a short temp dir, in this process (where the launcher calls
+    slots) and in the launch's environment, and every `MOXI_SLOTS_*` locator is dropped, so
+    slots' socket follows `MOXI_HOME` there. `TMUX` and `TMUX_PANE` are dropped, and
+    `TMUX_TMPDIR` points into the dir too. The server is stopped after the test."""
+    needs_slots()
+    with short_dir("mxs-") as home:
+        for name in [n for n in os.environ if n.startswith("MOXI_SLOTS_")] + [
+                "TMUX", "TMUX_PANE"]:
+            monkeypatch.delenv(name, raising=False)
+            live_env.pop(name, None)
+        for name, value in (("MOXI_HOME", str(home)), ("TMUX_TMPDIR", str(home))):
+            monkeypatch.setenv(name, value)
+            live_env[name] = value
+        socket = paths.socket_path("slots", "tmux")
+        assert socket.startswith(str(home)), socket
+        tmux = shutil.which("tmux")
+        config.set("slots", "tmux", tmux, by="launcher live test")
+        config.set("slots", "tmux_conf", os.devnull, by="launcher live test")
+        log = open(home / "server.log", "wb")
+        server = subprocess.Popen([str(paths.script("moxi-slots-server"))],
+                                  env=dict(os.environ), stdin=subprocess.DEVNULL,
+                                  stdout=log, stderr=subprocess.STDOUT,
+                                  start_new_session=True)
+
+        def answering() -> bool:
+            return subprocess.run([tmux, "-S", socket, "display-message", "-p", "#{pid}"],
+                                  capture_output=True, env=dict(os.environ),
+                                  timeout=5).returncode == 0
+        try:
+            wait_for(answering, timeout=20, interval=0.2,
+                     what=lambda: f"slots' own server; its log: "
+                                  f"{(home / 'server.log').read_text(errors='replace')}")
+            yield socket
+        finally:
+            subprocess.run([tmux, "-S", socket, "kill-server"], capture_output=True,
+                           env=dict(os.environ), timeout=10)
+            server.terminate()
+            try:
+                server.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait()
+            log.close()
 
 
 def words() -> tuple[str, str]:
@@ -295,10 +348,9 @@ def test_a_headless_launch_with_turns_runs_its_brief(harness, live_env, work):
 
 @pytest.mark.parametrize("harness", ["claude", "codex"])
 def test_a_slot_launch_with_turns_gets_its_brief_as_the_first_turn(harness, live_env,
-                                                                     work):
+                                                                     work, own_slots):
     needs(harness)
     needs_turns()
-    needs_slots()
     if harness == "codex":
         needs_host()
     brief, answer = words()
@@ -312,15 +364,16 @@ def test_a_slot_launch_with_turns_gets_its_brief_as_the_first_turn(harness, live
         assert (row.state, row.reason) == ("first-sent", None)
 
         def screen() -> str:
-            done = subprocess.run(["tmux", "capture-pane", "-p", "-t", row.pane_id],
-                                  capture_output=True, text=True, env=live_env)
+            done = subprocess.run(["tmux", "-S", own_slots, "capture-pane", "-p", "-t",
+                                   row.pane_id], capture_output=True, text=True,
+                                  env=live_env)
             return done.stdout
         wait_for(lambda: answer in screen(), timeout=ANSWER_S, interval=0.5,
                  what=lambda: f"{answer} in pane {row.pane_id}; saw {screen()[-2000:]}")
     finally:
         if row is not None and row.pane_id:
-            subprocess.run(["tmux", "kill-pane", "-t", row.pane_id], env=live_env,
-                           capture_output=True)
+            subprocess.run(["tmux", "-S", own_slots, "kill-pane", "-t", row.pane_id],
+                           env=live_env, capture_output=True)
 
 
 # -- a Codex seat: its instructions in start context ------------------------------------

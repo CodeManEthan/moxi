@@ -12,18 +12,23 @@ The script's keys, each with its default:
 - `slots`: what `show` reads, by slot (`{"3": {"state": "occupied", "launchable": false,
   "hold": null, "label": ..., "last": {"at": ..., "label": ..., "meta": {...}}}}`). A slot
   not listed reads None, except the slot a `start` placed, which reads occupied with the
-  pane's pid.
+  pane's id and pid, and `dead_status` as the pane's exit status.
 - `show`: `ok`, `try-again` (raises `TryAgain`) or `error` (raises `TmuxError`).
-- `start`: `ok`, `refused` (raises `Refused` from `refused`: `reason`, `words`, `holder`),
-  `try-again` or `error`.
+- `start`: `ok`, `refused` (raises `Refused` from `refused`: `reason`, `words`, and
+  `holder`, made a `Hold` for `held` and the last launch for any other reason), `try-again`
+  or `error`.
 - `placed`: the slot a start that names none takes (1).
-- `exec`: `started`, `failed` or `unconfirmed`, with `exec_line` and `dead_status`.
+- `exec`: `started`, `failed` or `unconfirmed`, with `exec_line` and `dead_status`
+  (null while the pane lives).
 - `run`: true to really run the command, detached, with the env and cwd it was given; its
   pid is the pane's. Otherwise the pane's pid is `pane_pid` (4343).
 - `frames`: what each `read_screen` sees in turn, the last repeated: `{"screen": NAME or
-  null, "full": true, "dead": null or a status}`. Default: no screen.
+  null, "full": true, "dead": false}`, NAME a screen constant's name; the read gives that
+  `Screen` itself, as slots does. `dead` is the pane's `pane_dead`. Default: no screen.
 - `answers`: what each `answer_screen` gives in turn, the last repeated: `{"outcome": ...,
-  "why": ..., "capture": ...}`. Default: `gone`.
+  "why": ..., "capture": ...}`, `outcome` one of slots' words (`gone`, `ended`,
+  `not-ended`, `mismatch`, `ended-without-screen`, `no-pane`); `why` is words for a person.
+  Default: `gone`.
 
 The turns through `frames` and `answers` are counted in this process; `reset()` starts
 them again.
@@ -82,7 +87,9 @@ class Slot:
     hold: Hold | None = None
     label: str | None = None
     last: Last | None = None
+    pane_id: str | None = None
     pane_pid: int | None = None
+    dead_status: int | None = None
 
 
 @dataclass(frozen=True)
@@ -97,8 +104,12 @@ class Placed:
 
 @dataclass(frozen=True)
 class Screen:
-    name: str
-    phrases: tuple = ()
+    phrases: tuple
+    option: str
+    marker: str = "❯"
+    items: tuple = ()
+    move: bool = True
+    then: str = "gone"
 
 
 @dataclass(frozen=True)
@@ -107,7 +118,7 @@ class Seen:
     full: bool = False
     why: str = ""
     rows: tuple = ()
-    dead: object = None
+    dead: bool = False
 
 
 @dataclass(frozen=True)
@@ -119,9 +130,21 @@ class Answer:
     capture: str | None = None
 
 
-CLAUDE_TRUST_FOLDER = Screen("CLAUDE_TRUST_FOLDER", ("Accessing workspace:",))
-CLAUDE_DEV_CHANNELS = Screen("CLAUDE_DEV_CHANNELS", ("Loading development channels",))
-SCREENS = {s.name: s for s in (CLAUDE_TRUST_FOLDER, CLAUDE_DEV_CHANNELS)}
+CLAUDE_TRUST_FOLDER = Screen(("Accessing workspace:", "Enter to confirm"),
+                             "Yes, I trust this folder")
+CLAUDE_DEV_CHANNELS = Screen(("Loading development channels", "Enter to confirm"),
+                             "I am using this for local development")
+CLAUDE_EXIT_DIALOG = Screen(("Background work is running", "will stop when you exit"),
+                            "Exit and stop tasks", items=("shell", "monitor"), move=False,
+                            then="ended")
+SCREENS = {"CLAUDE_TRUST_FOLDER": CLAUDE_TRUST_FOLDER,
+           "CLAUDE_DEV_CHANNELS": CLAUDE_DEV_CHANNELS,
+           "CLAUDE_EXIT_DIALOG": CLAUDE_EXIT_DIALOG}
+
+
+def screen_name(screen: Screen) -> str:
+    """The constant `screen` is declared under."""
+    return next(name for name, known in SCREENS.items() if known is screen)
 
 
 @dataclass
@@ -185,8 +208,8 @@ def show(slot):
     placed = _turns.placed.get(str(slot))
     if placed is not None:
         return Slot(int(slot), None, "occupied", False, label=placed["label"],
-                    last=Last(None, placed["label"], placed["meta"]),
-                    pane_pid=placed["pid"])
+                    last=Last(None, placed["label"], placed["meta"]), pane_id="%7",
+                    pane_pid=placed["pid"], dead_status=plan.get("dead_status"))
     return None
 
 
@@ -197,8 +220,11 @@ def start(slot, argv, *, env, cwd, label, meta=None, hold=None, create=False) ->
     how = plan.get("start", "ok")
     if how == "refused":
         given = plan.get("refused", {})
-        raise Refused(given.get("reason", "occupied"), given.get("words", "slot taken"),
-                      given.get("holder"))
+        reason, holder = given.get("reason", "occupied"), given.get("holder")
+        if holder is not None:
+            holder = Hold(**holder) if reason == "held" else Last(
+                holder.get("at"), holder.get("label"), holder.get("meta"))
+        raise Refused(reason, given.get("words", "slot taken"), holder)
     if how == "try-again":
         raise TryAgain("the slots lock was not had in 10 s")
     if how == "error":
@@ -220,17 +246,17 @@ def _nth(items: list, n: int):
 
 
 def read_screen(slot, screens) -> Seen:
-    record("read_screen", slot=slot, screens=[s.name for s in screens])
+    record("read_screen", slot=slot, screens=[screen_name(s) for s in screens])
     frames = script().get("frames") or [{"screen": None}]
     frame = _nth(frames, _turns.reads)
     _turns.reads += 1
     name = frame.get("screen")
-    return Seen(SCREENS.get(name) if name else None, frame.get("full", True),
-                frame.get("why", ""), (), frame.get("dead"))
+    return Seen(SCREENS[name] if name else None, frame.get("full", True),
+                frame.get("why", ""), (), bool(frame.get("dead", False)))
 
 
 def answer_screen(slot, screen, wait=5) -> Answer:
-    record("answer_screen", slot=slot, screen=screen.name, wait=wait)
+    record("answer_screen", slot=slot, screen=screen_name(screen), wait=wait)
     answers = script().get("answers") or [{"outcome": "gone"}]
     answer = _nth(answers, _turns.answers)
     _turns.answers += 1
