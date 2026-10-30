@@ -321,29 +321,35 @@ def _start_watchdog(proc: subprocess.Popen) -> subprocess.Popen:
         started = 0.0  # it has ended already: a start time no process has
     else:
         started = ident.started
+    # stderr has a pipe of its own: an interpreter may write to it before the ready
+    # line (a warning, an import-time profile), and that must not hide the line.
     watchdog = subprocess.Popen(
         [str(python()), "-P", "-m", "moxi._watch", str(proc.pid), repr(started)],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         cwd="/", start_new_session=True)
     said = b""
+    err = b""
     late = False
     try:
         deadline = time.monotonic() + WATCH_START
-        fd = watchdog.stdout.fileno()
+        open_fds = {watchdog.stdout.fileno(), watchdog.stderr.fileno()}
+        out = watchdog.stdout.fileno()
         # Read until the ready line, or to the end of what a failing watchdog writes
         # (a traceback's last line says why).
-        while not said.startswith(_watch.READY) and len(said) < 65536:
+        while open_fds and not said.startswith(_watch.READY) and len(said) < 65536:
             left = deadline - time.monotonic()
             if left <= 0:
                 late = True
                 break
-            ready, _, _ = select.select([fd], [], [], left)
-            if not ready:
-                continue
-            part = os.read(fd, 4096)
-            if not part:
-                break
-            said += part
+            ready, _, _ = select.select(list(open_fds), [], [], left)
+            for fd in ready:
+                part = os.read(fd, 4096)
+                if not part:
+                    open_fds.discard(fd)
+                elif fd == out:
+                    said += part
+                else:
+                    err = (err + part)[-65536:]
         if said.startswith(_watch.READY):
             return watchdog
     except BaseException:
@@ -351,8 +357,10 @@ def _start_watchdog(proc: subprocess.Popen) -> subprocess.Popen:
         raise
     finally:
         watchdog.stdout.close()
+        watchdog.stderr.close()
     _end_watchdog(watchdog)
-    lines = said.decode(errors="replace").strip().splitlines()
+    lines = (err.decode(errors="replace").strip().splitlines()
+             or said.decode(errors="replace").strip().splitlines())
     if lines:
         why = lines[-1]
     elif late:
