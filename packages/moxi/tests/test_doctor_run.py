@@ -670,11 +670,11 @@ def test_comms_world_readable_record_warns_with_its_chmod(monkeypatch, tmp_path)
     monkeypatch.setenv("MOXI_COMMS_STATE_HOME", str(tmp_path / "state"))
     found = modules.load("comms")
     assert found.ok
-    record = tmp_path / "state" / "comms" / "record.db"
+    record = tmp_path / "state" / "comms" / "comms.db"
     record.parent.mkdir(parents=True)
     record.write_bytes(b"")
     record.chmod(0o644)
-    row = {r.name: r for r in _run.store_rows(found)}["store record"]
+    row = {r.name: r for r in _run.store_rows(found)}["store comms"]
     assert (row.state, row.fix) == ("warn", f"chmod 600 {record}")
 
 
