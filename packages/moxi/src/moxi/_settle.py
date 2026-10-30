@@ -31,7 +31,10 @@ start of the unit succeeds, or when a later settle step ends clean and the unit 
 or was removed or disabled by that step; a clean step with the unit still down keeps it.
 
 Skills, install questions and the `moxi.installs` listeners come after the `finally`
-(`_later_steps`), in that order, so a listener sees the run's units and placements. They
+(`_later_steps`), in that order, so a listener sees the run's units and placements.
+Skills are placed by `moxi.place` in this process, its `apply` in a held span; the
+module's skills are asked about only while it has no placement, and a placement refused
+or failed makes the step exit 1. They
 run unless the move refused (other than for an old directory that is a link to a
 relative path), `SETUP` failed, or steps 1 to 3 raised; a unit the plan refused, or a
 start the `finally` couldn't make, leaves them to run and the step exits 1. Each install
@@ -47,7 +50,8 @@ request to stop. A signal that was ignored when the process started stays ignore
 `nohup` install survives its terminal. The handlers are Python handlers, never `SIG_IGN`,
 so a program the child starts gets default dispositions. In the steps, a signal raises
 `Interrupted` at once, except inside the core's own writes (the move, a timer switch with
-its entry, `apply`, a question's setting with its record), which are marked `held()`: there it only sets the request, and the
+its entry, `apply`, the placer's `apply`, a question's setting with its record), which
+are marked `held()`: there it only sets the request, and the
 write finishes before the request is obeyed. In the `finally` it only sets the request,
 so `resume` and its reports always run. Then the child prints how many units it started
 again and exits 130, the pair's private "interrupted" code. Once the step or the teardown
@@ -840,13 +844,111 @@ def _later_steps(step: Settle) -> int:
 
 
 def _skills(step: Settle) -> bool:
-    """Step 4: the module's skills, placed for each harness in `skills.harnesses`.
+    """Step 4: the module's skills (`SKILLS`, one subfolder per skill), placed by the
+    placer (`moxi.place`) for each harness in `skills.harnesses`, with the module as
+    owner. The placer is called in this process, where its lock yields on the install's
+    claim; a `moxi` command started from here would wait for that lock instead.
 
-    Placing is the placer's (`moxi.place`), which this step doesn't call yet: it places
-    nothing and returns True. When it does, it plans with the module as owner, asks
-    `skills_wanted` only when the ledger holds none of the module's placements, applies
-    in a held span, and returns False when a placement failed."""
-    return True
+    The step manages only the placements it makes: those whose source lies in the
+    module's own package (`moxi.place.from_package`). The owner's other placements (one
+    another module handed it, a project's skill it placed for a user) are left exactly as
+    they are: the plan treats `items` as the owner's whole set, so their `remove` steps
+    are dropped before `apply`. When the module has none of its own placements (none
+    placed, none handed over), `skills_wanted` asks first, and a no places nothing. When
+    it has some, there is no question: the plan updates, adds and removes them as the
+    package's `SKILLS` say now, so a module that drops a skill, or `SKILLS` altogether,
+    has it removed, and one handed to another owner is skipped. `apply` runs in a held
+    span. Returns False when the skills can't be read or a placement was refused or
+    failed."""
+    from . import place
+
+    module, found = step.module, step.found
+    try:
+        placed = place.status(module)
+        if found.skills is None and not placed:
+            return True
+        skills, source = _skill_folders(found)
+        if skills is None:
+            say(f"{module}: skills not placed: {source}", err=True)
+            return False
+        harnesses, lines = place.chosen()
+        for line in lines:
+            say(f"{module}: {line}", err=True)
+        items = [place.Item(source / name, harness, name)
+                 for name in skills for harness in harnesses]
+        planned = place.plan(module, items)
+    except Exception as exc:  # noqa: BLE001 - a broken core config or ledger
+        say(f"{module}: skills not placed: {_one_line(exc)}", err=True)
+        return False
+    steps = planned[:len(items)] + [
+        s for s in planned[len(items):]
+        if s.action == "remove" and place.from_package(found, s.item.source)]
+    held_now = {str(p.path) for p in placed}
+    own = len(steps) > len(items) or any(
+        s.action == "skip" or str(s.target) in held_now for s in steps)
+    if not own and (not items or not skills_wanted(step, skills, harnesses)):
+        return True
+    with held():
+        done = place.apply(steps, replace=step.replace,
+                           say=lambda line: say(f"{module}: {line}"))
+    return _skills_report(module, steps, done, step.replace)
+
+
+def _skill_folders(found) -> tuple[list[str] | None, object]:
+    """The skill names in `found`'s `SKILLS` folder (its subfolders, sorted, without
+    `__pycache__` and names that start with a dot) and the folder, read through
+    `importlib.resources`; or None and the line that says why they can't be read. A
+    package not on disk (in a zip, say) is refused, since a harness reads a skill from a
+    folder."""
+    import importlib.resources
+    from pathlib import Path
+
+    if found.skills is None:
+        return [], None
+    try:
+        folder = importlib.resources.files(found.package).joinpath(found.skills)
+    except (ImportError, TypeError, ValueError) as exc:
+        return None, f"package {found.package} can't be read ({_one_line(exc)})"
+    if not isinstance(folder, Path):
+        return None, (f"package {found.package} is not a folder on disk, so its skills "
+                      f"can't be placed")
+    try:
+        names = sorted(entry.name for entry in folder.iterdir()
+                       if entry.is_dir() and not entry.name.startswith(".")
+                       and entry.name != "__pycache__")
+    except OSError as exc:
+        return None, f"SKILLS folder {folder} can't be read ({exc.strerror or exc})"
+    return names, folder
+
+
+def _skills_report(module: str, steps, done, replace: bool) -> bool:
+    """One line per placement the plan added, updated or removed; True when every step
+    went through (a skip counts), False on a refusal `replace` didn't place over or a
+    step `apply` couldn't carry out (it said why)."""
+    from . import place
+
+    left = {str(p.path) for p in done}
+    still = {str(p.path) for p in place.status(module)}
+    ok = True
+    for s in steps:
+        item, target = s.item, str(s.target)
+        if s.action == "remove":
+            if target in still:
+                ok = False
+            else:
+                say(f"{module}: removed skill {item.name} for {item.harness} ({target})")
+        elif s.action in ("add", "update") or (
+                s.action == "refuse" and replace and s.cause == "occupant"):
+            if target in left:
+                verb = "updated" if s.action == "update" else "placed"
+                say(f"{module}: {verb} skill {item.name} for {item.harness} ({target})")
+            else:
+                ok = False
+        elif s.action == "refuse":
+            ok = False
+        elif s.action == "keep" and target not in left:
+            ok = False
+    return ok
 
 
 def skills_wanted(step: Settle, skills: list[str], harnesses: list[str]) -> bool:

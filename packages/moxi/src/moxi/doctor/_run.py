@@ -930,9 +930,10 @@ def _placement_row(placed, entry: Mapping, found, present: bool) -> Row:
         detail = f"{path} was edited after it was copied"
     else:
         detail = f"{path} no longer points at its source {source}"
+    from .. import place
+
     fix = None
-    package = (found.package or "").split(".")[0] if found is not None else ""
-    if present and package and package in Path(source).parts:
+    if present and place.from_package(found, source):
         fix = f"moxi install {placed.owner}"
         if placed.state == "modified":
             from .. import paths

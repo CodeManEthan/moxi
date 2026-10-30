@@ -603,3 +603,41 @@ def test_importing_the_placer_pulls_none_of_its_heavier_pieces():
     done = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True,
                           check=True)
     assert done.stdout.strip() == ""
+
+
+# -- from_package: the placements moxi install makes --------------------------------------
+
+def test_from_package_reads_the_installed_package_and_an_older_install_of_it(
+        tmp_path, monkeypatch):
+    import importlib
+    import types
+
+    site = tmp_path / "site"
+    pkg = site / "moxi_fpdemo"
+    (pkg / "skills" / "x").mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    monkeypatch.syspath_prepend(str(site))
+    importlib.invalidate_caches()
+    found = types.SimpleNamespace(package="moxi_fpdemo.module")
+    assert place.from_package(found, pkg / "skills" / "x")
+    # Reached through a link to the package folder, and the package through a link.
+    alias = tmp_path / "alias"
+    alias.symlink_to(pkg)
+    assert place.from_package(found, alias / "skills" / "x")
+    # Where an older install lay, before an upgrade moved the package.
+    old = tmp_path / "old" / "lib" / "python3.11" / "site-packages" / "moxi_fpdemo"
+    assert place.from_package(found, old / "skills" / "gone")
+    assert place.from_package(found, str(old).replace("site-", "dist-") + "/skills/y")
+    # A project folder named like the package is not the package; nor is the folder
+    # an older install's package lay in, or another package.
+    assert not place.from_package(found, tmp_path / "proj" / "moxi_fpdemo" / "skills" / "x")
+    assert not place.from_package(found, old.parent)
+    assert not place.from_package(found, old)
+    assert not place.from_package(found, site / "moxi_other" / "skills" / "x")
+    assert not place.from_package(types.SimpleNamespace(package=None), pkg / "skills")
+    assert not place.from_package(None, pkg / "skills")
+    assert not place.from_package(found, "")
+    # A package that can't be imported here still counts by an older install's path.
+    gone = types.SimpleNamespace(package="moxi_nowhere")
+    assert not place.from_package(gone, tmp_path / "moxi_nowhere" / "skills" / "x")
+    assert place.from_package(gone, old.parent / "moxi_nowhere" / "skills" / "x")

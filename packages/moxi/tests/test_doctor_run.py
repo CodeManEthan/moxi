@@ -1310,3 +1310,24 @@ def test_a_supervisor_read_that_raises_is_a_fail_row_per_module(d, monkeypatch):
     row = got[("demo", "units")]
     assert row.state == "fail" and "RuntimeError: the bus is gone" in row.detail
     assert got[("demo", "daemon relay")] == Row("demo", "daemon relay", "ok", "up to date")
+
+
+def test_the_install_fix_follows_the_placer_s_own_package_test(pl, tmp_path):
+    """A project folder named like the owner's package is not its package, so no
+    `moxi install` fix; a source where an older install of the package lay is."""
+    project = tmp_path / "proj" / "moxi_demo" / "skills" / "demo-send"
+    project.mkdir(parents=True)
+    (project / "SKILL.md").write_text("# project\n")
+    target = place_demo(pl, source=project)
+    target.unlink()
+    assert pl.rows()[("demo", "placement claude demo-send")].fix is None
+    place.remove("demo", say=lambda line: None)
+    old = (tmp_path / "old" / "lib" / "python3.11" / "site-packages" / "moxi_demo"
+           / "skills" / "demo-send")
+    old.mkdir(parents=True)
+    (old / "SKILL.md").write_text("# send\n")
+    place_demo(pl, source=old)
+    shutil.rmtree(old)
+    row = pl.rows()[("demo", "placement claude demo-send")]
+    assert row.detail.startswith(f"source missing: {old}")
+    assert row.fix == "moxi install demo"
