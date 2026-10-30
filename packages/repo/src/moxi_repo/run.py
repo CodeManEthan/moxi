@@ -137,6 +137,18 @@ def read_registrations() -> dict[str, dict[str, list]] | None:
     return pieces_of(parse_config(proc.stdout))
 
 
+def quote_arg(text) -> str:
+    """`text` (a path or a string) as one word of a command a person pastes, quoted only
+    when it needs it."""
+    text = os.fspath(text)
+    if sys.platform == "win32":
+        bare = text and not any(c in text for c in ' \t"&|<>^()%!;,=')
+        return text if bare else '"' + text.replace('"', '\\"') + '"'
+    import shlex
+
+    return shlex.quote(text)
+
+
 def say(line: str) -> None:
     sys.stderr.write(f"repo: {line}\n")
 
@@ -217,7 +229,7 @@ def _run(event: str, args: tuple, stdin: bytes, chosen: list, refusing: bool) ->
         flagged = "recorded" in section
         if error is not None:
             closed = fail_policy(section) == "closed"
-            root = where.load().root or "."
+            root = quote_arg(where.load().root or ".")
             fix = (f"moxi repo git-hooks disable {root} {piece_id} "
                    f"(or: moxi repo git-hooks remove {root} {piece_id})")
             if refusing and closed:
@@ -239,7 +251,7 @@ def _run(event: str, args: tuple, stdin: bytes, chosen: list, refusing: bool) ->
         elif outcome.kind == "notice":
             say(f"{event}, {piece_id}: {outcome.lines[0]}")
         elif outcome.kind == "record":
-            root = where.load().root or "."
+            root = quote_arg(where.load().root or ".")
             _record(where, piece_id, f"{event} git hook: {piece_id}: {outcome.lines[0]}",
                     f"moxi repo git-hooks disable {root} {piece_id} "
                     f"(or: moxi repo git-hooks remove {root} {piece_id})", flagged)

@@ -312,8 +312,13 @@ def declared() -> tuple[dict[str, Piece], dict[str, str]]:
     """
     good: dict[str, Piece] = {}
     bad: dict[str, str] = {}
-    for ext in extensions():
-        pid = piece_id(ext.name)
+    found = list(extensions())
+    ids = [piece_id(ext.name) for ext in found]
+    for ext, pid in zip(found, ids):
+        if ids.count(pid) > 1:
+            # Whichever of them loads, the id can't say which one runs.
+            bad[pid] = f"two distributions declare {pid}"
+            continue
         try:
             value = ext.load()
         except Exception as exc:  # noqa: BLE001 - ExtensionError, reported per piece
@@ -323,10 +328,6 @@ def declared() -> tuple[dict[str, Piece], dict[str, str]]:
             piece = check(ext.name, value)
         except DeclarationError as exc:
             bad[pid] = exc.reason
-            continue
-        if pid in good:
-            bad[pid] = f"two distributions declare {pid}"
-            good.pop(pid)
             continue
         good[pid] = piece
     return good, bad

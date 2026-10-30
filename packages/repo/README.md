@@ -37,9 +37,13 @@ moxi repo git-hooks list                         # every repo repo has written t
   together give that key's whole list of values, replacing what the repo had; `--set KEY=`
   alone removes the key; keys you don't name are kept. The key is matched ignoring case.
 - `moxi repo git-hooks remove PATH [PIECE...]` removes pieces; with none, everything repo
-  wrote to that repo. On a path that no longer exists it drops the repo from the index.
+  wrote to that repo. On a path that no longer exists it drops the repo from the index, and
+  so it does where an indexed repo is gone and its path is now inside another repo, which
+  it leaves alone.
 - `moxi repo git-hooks enable|disable PATH PIECE` turns one piece on or off in one repo. A
-  disabled piece stays registered, with its settings.
+  disabled piece stays registered, with its settings. An event whose pieces are all
+  disabled, or all removed, loses its hook entry or shim, and in shim mode the existing git
+  hook moves back.
 - `moxi repo git-hooks refresh [PATH]` reads the declarations, git's version and the
   interpreter again, and rewrites every hook entry, shim and launcher of one repo or of
   every indexed repo. It keeps each piece's `enabled` key and settings.
@@ -70,7 +74,9 @@ worktree of the repo shares it, and `git config --get-regexp '^moxi-repo\.'` sho
 So the git hook needs nothing outside the repo to run its pieces: an editor or a GUI
 committing with another environment runs the same ones. repo also keeps an index of the
 repos it has written to, for listings and `refresh`; the git config is the truth, and
-`moxi repo git-hooks add PATH` puts a repo back in the index.
+`moxi repo git-hooks add PATH` puts a repo back in the index. The index knows a repo by its
+common git dir and lists it by its main work tree, whichever worktree you named it from, so
+removing a linked worktree doesn't lose it; a repo is gone only when its git dir is.
 
 ### How pieces run
 
@@ -115,12 +121,22 @@ happen with two gits on one machine (Apple's and Homebrew's, or a GUI that bundl
 own). Shim mode works under every git, so pin `--mode shim` where that is a risk.
 
 In shim mode an existing git hook moves to `<event>.local` beside the shim, and the shim
-runs it after the pieces with the same arguments and stdin; `remove` moves it back. repo
-refuses to place a shim where an `<event>.local` that it didn't move is already there. A
+runs it after the pieces with the same arguments and stdin, also when the guard stops the
+pieces, as git does in config mode; `remove` moves it back. If
+`core.hooksPath` later points somewhere else, `refresh` and `remove` take repo's shims out
+of `.git/hooks` and move each hook it moved aside there back, and `git-hooks list` names
+any left. repo refuses to place a shim where an `<event>.local` that it didn't move is
+already there. A
 shim is known by its first comment line, so `refresh` rewrites it in place even after
 another tool renamed it (`pre-commit`'s installer renames it `.legacy` and still runs it;
 lefthook renames it `.old` and doesn't). `git-hooks list` shows a shim that another tool
 replaced or renamed.
+
+`refresh`, which every `moxi install repo` runs, puts repo's shim back where another git
+hook replaced it, moving that hook to `<event>.local` so that both run, and rewrites every
+hook entry in config mode. So overwriting a shim or an entry doesn't stop repo in a repo for
+long: to stop it, use `moxi repo git-hooks disable PATH PIECE` or
+`moxi repo git-hooks remove PATH`.
 
 ### Hook managers and the chain line
 
@@ -337,11 +353,15 @@ of it. Without projects, paths work as before. The git hooks never ask projects 
   macOS also `/usr/bin/git`: when it is below 2.54 and a repo uses config mode, a commit
   it makes runs no piece there, and the row says to pin that repo to shim mode
   (`moxi repo git-hooks add PATH --mode shim`).
+- **The index** (`index`): a `fail` row when repo's index of repos can't be read. Nothing
+  overwrites it then, and the verbs that need it refuse, since it is the one list of the
+  repos repo has written to; fix or remove the file named, then index each repo again with
+  `moxi repo git-hooks add PATH`.
 - **Each indexed repo** (`hooks PATH`): every event's hook entry, shim or launcher is
   there and is repo's; the interpreter and runner it names exist (a `fail` row when one is
   missing; a `warn` row when it names another environment's); a shim another tool moved
-  aside (`<event>.legacy`, which that tool runs, is fine; any other name means the pieces
-  don't run); a chain line still needed, with the line to add; a launcher missing where
+  aside (`<event>.legacy`, which that tool runs, is fine, and its interpreter and runner
+  are checked as a shim's are; any other name means the pieces don't run); a chain line still needed, with the line to add; a launcher missing where
   the chain line is in place, which makes the pieces skip quietly; a registered piece that
   no installed module declares (a `fail` row when it is enabled and closed, since it then
   refuses every commit). With nothing wrong, one `ok` row gives the mode and each event's
@@ -375,8 +395,8 @@ environment rewrites every hook entry, shim and launcher to name the new interpr
 doctor flags repo when its setup last ran at another version, with `moxi install repo` as
 the fix. One repo's problem, such as a repo that no longer exists, is printed with its
 fix and stays as a doctor row; the install still finishes. The setup fails only when it
-can't run at all: no git 2.39 or later while repos are indexed, or repo's config can't be
-read.
+can't run at all: no git 2.39 or later while repos are indexed, or repo's config or its
+index can't be read.
 
 `refresh` stays for what an install doesn't see: a git upgrade or downgrade, or a change
 of `git_hooks.mode`.

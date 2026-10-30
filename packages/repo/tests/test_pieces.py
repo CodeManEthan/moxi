@@ -58,6 +58,8 @@ def test_bad_entry_names(entry):
     (dict(GOOD, settings={"9lives": "one"}), "setting '9lives'"),
     (dict(GOOD, settings={"order": "one"}), "is a key of the registration itself"),
     (dict(GOOD, settings={"recorded": "one"}), "is a key of the registration itself"),
+    (dict(GOOD, settings={"enabled": "one"}), "is a key of the registration itself"),
+    (dict(GOOD, settings={"tagPattern": "one"}), "setting 'tagPattern': a setting's name"),
 ])
 def test_bad_declarations_name_the_key(value, says):
     assert says in refused("demo.gate", value)
@@ -115,3 +117,27 @@ def test_plan_sets_edges():
             pieces.plan_sets([gate], sets)
     with pytest.raises(pieces.SetError, match="both demo/gate and demo/other declare it"):
         pieces.plan_sets([gate, other], ["label=x"])
+
+
+class _Entry:
+    def __init__(self, name: str, value):
+        self.name, self.value = name, value
+
+    def load(self):
+        return self.value
+
+
+@pytest.mark.parametrize("copies", [2, 3, 4])
+def test_an_id_two_or_more_distributions_declare_is_refused(monkeypatch, copies):
+    entries = [_Entry("demo.gate", GOOD) for _ in range(copies)] + [_Entry("demo.lint", GOOD)]
+    monkeypatch.setattr(pieces, "extensions", lambda: entries)
+    good, bad = pieces.declared()
+    assert set(good) == {"demo/lint"}
+    assert bad == {"demo/gate": "two distributions declare demo/gate"}
+
+
+def test_an_id_declared_twice_is_refused_even_when_one_declaration_is_bad(monkeypatch):
+    entries = [_Entry("demo.gate", dict(GOOD, fail="soft")), _Entry("demo.gate", GOOD)]
+    monkeypatch.setattr(pieces, "extensions", lambda: entries)
+    good, bad = pieces.declared()
+    assert good == {} and bad == {"demo/gate": "two distributions declare demo/gate"}

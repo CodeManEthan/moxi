@@ -423,3 +423,32 @@ def test_setup_fails_without_a_usable_git_while_repos_are_indexed(demo, capsys):
     demo.mp.setattr(gitconf, "git_version", lambda: (2, 34, 1))
     assert repo_install.setup() == 1
     assert "git 2.34.1 is older than 2.39.0" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("garbled", [b'{"repos": {"/a/.git": {"root"', b"[1, 2]",
+                                     b'{"repos": 3}'])
+def test_an_unreadable_index_is_a_fail_row_and_nothing_overwrites_it(demo, capsys, garbled):
+    repo, other = demo.repo("alpha-notes"), demo.repo("beta-code")
+    api.add(repo, "demo/gate")
+    index = api.index_path()
+    index.write_bytes(garbled)
+    [row] = doctor("index")
+    assert row.state == "fail" and str(index) in row.detail
+    assert "moxi repo git-hooks add" in row.fix
+    capsys.readouterr()
+    assert repo_install.setup() == 1
+    assert str(index) in capsys.readouterr().err
+    with pytest.raises(api.Failure) as caught:
+        api.add(other, "demo/gate")
+    assert str(index) in caught.value.text and "the index was not changed" in caught.value.text
+    with pytest.raises(api.Failure):
+        api.status()
+    assert index.read_bytes() == garbled
+
+
+def test_an_empty_index_file_reads_as_no_repo(demo):
+    api.index_path().parent.mkdir(parents=True, exist_ok=True)
+    api.index_path().write_bytes(b"")
+    assert api.indexed() == {} and doctor("index") == []
+    api.add(demo.repo(), "demo/gate")
+    assert len(api.indexed()) == 1

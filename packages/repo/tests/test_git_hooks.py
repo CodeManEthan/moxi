@@ -28,10 +28,24 @@ def existing_hook(repo: Path, event: str, log: Path) -> None:
 def test_pieces_run_in_order_then_the_existing_git_hook(demo, mode):
     repo = demo.repo()
     existing_hook(repo, "pre-commit", demo.log)
-    api.add(repo, ["demo/lint", "demo/gate", "demo/first"], mode=mode)
+    api.add(repo, ["demo/lint", "demo/gate", "demo/first", "demo/zz-early"], mode=mode)
     change(repo)
     assert commit(repo).returncode == 0
-    assert demo.ids() == ["demo/first", "demo/gate", "demo/lint", "existing"]
+    # By order (5, 10, 20, 60), not by id.
+    assert demo.ids() == ["demo/zz-early", "demo/first", "demo/gate", "demo/lint", "existing"]
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_an_existing_git_hook_that_refuses_refuses_after_the_pieces_ran(demo, mode):
+    repo = demo.repo()
+    existing_hook(repo, "pre-commit", demo.log)
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text(hook.read_text() + "exit 1\n")
+    api.add(repo, "demo/gate", mode=mode)
+    change(repo)
+    before = head(repo)
+    assert commit(repo).returncode != 0 and head(repo) == before
+    assert demo.ids() == ["demo/gate", "existing"]
 
 
 @pytest.mark.parametrize("mode", MODES)
@@ -155,6 +169,24 @@ def test_fail_policy_closed_open_and_post_events(demo):
     assert _records.piece_key(cgd, "demo/watch") not in _records.ledger()
 
 
+def test_an_outcome_of_the_wrong_kind_is_a_broken_piece(demo):
+    repo = demo.repo()
+    api.add(repo, "demo/gate", "demo/watch")
+    demo.act(gate="notice")
+    change(repo)
+    done = commit(repo)
+    assert done.returncode != 0
+    assert ("repo: pre-commit refused: demo/gate broke (returned notice, which only post-* "
+            "git hooks take)") in done.stderr
+    demo.act(gate="ok", watch="refuse")
+    done = commit(repo)
+    assert done.returncode == 0, done.stderr
+    assert ("repo: post-commit: demo/watch broke (returned refuse, which only pre-* and "
+            "commit-msg git hooks take); the doctor keeps a record") in done.stderr
+    cgd = gitconf.resolve(repo).common_dir
+    assert _records.piece_key(cgd, "demo/watch") in _records.ledger()
+
+
 def test_a_closed_piece_whose_target_cant_import_refuses(demo):
     repo = demo.repo()
     api.add(repo, ["demo/ghost"])
@@ -218,6 +250,22 @@ def test_a_renamed_shim_still_runs_local_and_refresh_rewrites_it_in_place(demo):
     demo.mp.setattr(gitconf, "interpreter", lambda: str(demo.hook_env["python"]) + "-new")
     api.refresh(repo)
     assert "-new" in (hooks / "pre-commit.legacy").read_text()
+
+
+def test_a_shim_renamed_legacy_has_its_guard_checked(demo):
+    repo = demo.repo()
+    hooks = repo / ".git" / "hooks"
+    api.add(repo, ["demo/gate"], mode="shim")
+    (hooks / "pre-commit").rename(hooks / "pre-commit.legacy")
+    (hooks / "pre-commit").write_text("#!/bin/sh\nexec \"$(dirname \"$0\")/pre-commit.legacy\""
+                                      " \"$@\"\n")
+    gone = str(demo.tmp / "gone" / "python")
+    legacy = hooks / "pre-commit.legacy"
+    legacy.write_text(legacy.read_text().replace(str(demo.hook_env["python"]), gone))
+    [row] = [r for r in problems(f"hooks {repo}") if gone in r.detail]
+    assert row.state == "fail" and row.fix == f"moxi repo git-hooks refresh {repo}"
+    api.refresh(repo)
+    assert problems(f"hooks {repo}") == []
 
 
 def test_shim_mode_outside_the_git_dir_writes_a_launcher_and_a_chain_line(demo):
@@ -348,7 +396,7 @@ def test_exports_are_not_module_names_and_resolve_after_every_import():
         assert callable(moxi_repo.git)
 
 
-def test_chain_lines_are_the_designs():
+def test_chain_lines_name_no_path():
     from moxi_repo import shim
     assert shim.chain_line("pre-commit", False) == (
         'h="$(git rev-parse --path-format=absolute --git-common-dir)/moxi-repo/hook"; '
@@ -601,3 +649,213 @@ def test_a_post_merge_piece_runs_after_a_merge_and_never_stops_it(demo, mode):
     assert done.returncode == 0
     assert "repo: post-merge, demo/after-merge: after-merge noticed something" in done.stderr
     assert _records.piece_key(cgd, "demo/after-merge") not in _records.ledger()
+
+
+# -- the verbs' call forms ------------------------------------------------------------------
+
+def test_add_and_remove_take_piece_ids_as_arguments_or_as_a_list(demo):
+    repo = demo.repo()
+
+    def registered() -> set[str]:
+        return set(gitconf.read(gitconf.resolve(repo)).pieces)
+
+    api.add(repo, "demo/gate")
+    api.add(repo, "demo/lint", "demo/watch", mode="config")
+    api.add(repo, ["demo/first"], sets=())
+    assert registered() == {"demo/gate", "demo/lint", "demo/watch", "demo/first"}
+    api.remove(repo, "demo/gate")
+    api.remove(repo, "demo/lint", "demo/watch")
+    api.remove(repo, piece="demo/first")
+    assert registered() == set()
+    assert gitconf.resolve(repo).key in api.indexed()
+
+
+# -- the index: a repo is its common git dir -------------------------------------------------
+
+def _entries_name(repo: Path, python: str) -> bool:
+    return python in gitconf.read(gitconf.resolve(repo)).entries["pre-commit"]
+
+
+def test_a_repo_added_through_a_linked_worktree_outlives_that_worktree(demo):
+    repo = demo.repo()
+    wt = demo.tmp / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), "-b", "side")
+    api.add(wt, "demo/gate", "demo/watch", mode="config")
+    [entry] = api.indexed().values()
+    assert entry["root"] == str(repo)
+    # The guard's fallback names the main work tree, not the linked one.
+    assert f"remove {repo})" in gitconf.read(gitconf.resolve(repo)).entries["pre-commit"]
+    git(repo, "worktree", "remove", str(wt))
+    [listed] = api.status()
+    assert listed["root"] == str(repo) and listed["problems"] == []
+    moved = str(demo.hook_env["python"]) + "-moved"
+    demo.mp.setattr(gitconf, "interpreter", lambda: moved)
+    report = api.refresh()
+    assert report.ok and f"refreshed {repo}" in report.lines
+    assert _entries_name(repo, moved)
+    # Its old path is not the repo: remove there refuses and leaves the repo alone.
+    with pytest.raises(api.Usage):
+        api.remove(wt)
+    assert set(gitconf.read(gitconf.resolve(repo)).pieces) == {"demo/gate", "demo/watch"}
+
+
+def test_an_index_entry_that_names_a_removed_linked_worktree_finds_the_repo(demo):
+    repo = demo.repo()
+    wt = demo.tmp / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), "-b", "side")
+    api.add(repo, "demo/gate", mode="config")
+    # An index written with the linked worktree as the repo's root.
+    key = gitconf.resolve(repo).key
+    api._index_change(lambda repos: repos[key].update(root=str(wt)))
+    git(repo, "worktree", "remove", str(wt))
+    assert [s["problems"] for s in api.status()] == [[]]
+    assert problems(f"hooks {repo}") == [] and problems(f"hooks {wt}") == []
+    moved = str(demo.hook_env["python"]) + "-moved"
+    demo.mp.setattr(gitconf, "interpreter", lambda: moved)
+    assert api.refresh().ok and _entries_name(repo, moved)
+    assert api.indexed()[key]["root"] == str(repo)
+    # remove on the old path names the live repo and leaves it alone.
+    api._index_change(lambda repos: repos[key].update(root=str(wt)))
+    report = api.remove(wt)
+    assert not report.ok and f"moxi repo git-hooks remove {repo}" in report.problems[0]
+    assert set(gitconf.read(gitconf.resolve(repo)).pieces) == {"demo/gate"}
+    assert api.indexed()[key]["root"] == str(repo)
+
+
+def test_an_indexed_path_now_inside_another_repo_is_that_repo_gone(demo):
+    outer = demo.repo("outer")
+    inner = demo.repo("outer/inner")
+    api.add(outer, "demo/gate")
+    api.add(inner, "demo/lint")
+    inner_key = gitconf.resolve(inner).key
+    import shutil
+    shutil.rmtree(inner / ".git")
+    listed = {s["root"]: s for s in api.status()}
+    assert set(listed) == {str(outer), str(inner)}
+    assert "no longer a git work tree" in listed[str(inner)]["problems"][0]
+    assert listed[str(outer)]["problems"] == []
+    with pytest.raises(api.Usage):
+        api.remove(inner, "demo/gate")
+    report = api.remove(inner)
+    assert report.ok and inner_key not in api.indexed()
+    assert set(gitconf.read(gitconf.resolve(outer)).pieces) == {"demo/gate"}
+    assert gitconf.resolve(outer).key in api.indexed()
+
+
+# -- shims left in the default hooks dir after core.hooksPath moved ----------------------------
+
+def test_refresh_after_core_hookspath_moved_takes_the_old_shim_away_and_puts_back_the_hook(demo):
+    repo = demo.repo()
+    hooks = repo / ".git" / "hooks"
+    existing_hook(repo, "pre-commit", demo.log)
+    original = (hooks / "pre-commit").read_text()
+    api.add(repo, "demo/gate", mode="shim")
+    (repo / ".githooks").mkdir()
+    git(repo, "config", "core.hooksPath", ".githooks")
+    said = [p for p in api.status(repo)[0]["problems"] if str(hooks) in p.detail]
+    assert said and all(p.fix == f"moxi repo git-hooks refresh {repo}" for p in said)
+    assert any(r.state == "warn" and str(hooks) in r.detail for r in problems(f"hooks {repo}"))
+    report = api.refresh(repo)
+    assert report.ok
+    assert (hooks / "pre-commit").read_text() == original
+    assert not (hooks / "pre-commit.local").exists()
+    assert gitconf.read(gitconf.resolve(repo)).moved == set()
+    assert not [p for p in api.status(repo)[0]["problems"] if str(hooks) in p.detail]
+    # Back in the default hooks dir, the next refresh places the shim again.
+    git(repo, "config", "--unset", "core.hooksPath")
+    api.refresh(repo)
+    change(repo)
+    assert commit(repo).returncode == 0
+    assert demo.ids() == ["demo/gate", "existing"]
+
+
+def test_a_moved_hook_stays_recorded_until_it_is_back(demo):
+    repo = demo.repo()
+    hooks = repo / ".git" / "hooks"
+    existing_hook(repo, "pre-commit", demo.log)
+    original = (hooks / "pre-commit").read_text()
+    api.add(repo, "demo/gate", mode="shim")
+    (repo / ".githooks").mkdir()
+    git(repo, "config", "core.hooksPath", ".githooks")
+    # Another tool takes the slot in the old dir: the moved hook can't go back yet.
+    (hooks / "pre-commit").write_text("#!/bin/sh\n")
+    api.refresh(repo)
+    assert (hooks / "pre-commit.local").read_text() == original
+    assert gitconf.read(gitconf.resolve(repo)).moved == {"pre-commit"}
+    assert any("pre-commit.local" in p.detail for p in api.status(repo)[0]["problems"])
+    (hooks / "pre-commit").unlink()
+    api.refresh(repo)
+    assert (hooks / "pre-commit").read_text() == original
+    assert gitconf.read(gitconf.resolve(repo)).moved == set()
+
+
+def test_remove_after_core_hookspath_moved_cleans_the_default_hooks_dir(demo):
+    repo = demo.repo()
+    hooks = repo / ".git" / "hooks"
+    existing_hook(repo, "pre-commit", demo.log)
+    original = (hooks / "pre-commit").read_text()
+    api.add(repo, "demo/gate", mode="shim")
+    (repo / ".githooks").mkdir()
+    git(repo, "config", "core.hooksPath", ".githooks")
+    api.remove(repo)
+    assert (hooks / "pre-commit").read_text() == original
+    assert not (hooks / "pre-commit.local").exists()
+    assert gitconf.read(gitconf.resolve(repo)).sections == set()
+    git(repo, "config", "--unset", "core.hooksPath")
+    change(repo)
+    assert commit(repo).returncode == 0 and demo.ids() == ["existing"]
+
+
+def test_a_shim_left_in_the_default_dir_goes_when_another_inside_dir_takes_over(demo):
+    repo = demo.repo()
+    hooks = repo / ".git" / "hooks"
+    api.add(repo, "demo/gate", mode="shim")
+    git(repo, "config", "core.hooksPath", str(repo / ".git" / "own-hooks"))
+    api.refresh(repo)
+    assert shim_files(repo / ".git" / "own-hooks") == ["pre-commit"]
+    assert shim_files(hooks) == []
+
+
+def shim_files(where: Path) -> list[str]:
+    from moxi_repo import shim
+    return sorted(shim.our_shims(where))
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_an_event_whose_pieces_are_all_disabled_loses_its_entry_or_shim(demo, mode):
+    repo = demo.repo()
+    hooks = repo / ".git" / "hooks"
+    existing_hook(repo, "pre-commit", demo.log)
+    original = (hooks / "pre-commit").read_text()
+    api.add(repo, "demo/gate", "demo/lint", "demo/watch", mode=mode)
+    api.disable(repo, "demo/gate")
+    api.disable(repo, "demo/lint")
+    state = gitconf.read(gitconf.resolve(repo))
+    assert set(state.entries) == ({"post-commit"} if mode == "config" else set())
+    assert (hooks / "pre-commit").read_text() == original
+    assert not (hooks / "pre-commit.local").exists()
+    [listed] = api.status(repo)
+    assert listed["problems"] == [] and problems(f"hooks {repo}") == []
+    assert listed["events"]["pre-commit"]["via"] is None
+    api.enable(repo, "demo/lint")
+    change(repo)
+    assert commit(repo).returncode == 0
+    assert demo.ids() == ["demo/lint", "existing", "demo/watch"]
+
+
+def test_fix_lines_quote_a_root_with_a_space(demo):
+    import shlex
+    repo = demo.repo("my notes")
+    quoted = shlex.quote(str(repo))
+    api.add(repo, "demo/gate", mode="shim")
+    demo.act(gate="raise")
+    change(repo)
+    done = commit(repo)
+    assert f"fix it or run: moxi repo git-hooks disable {quoted} demo/gate" in done.stderr
+    demo.mp.setattr(gitconf, "interpreter", lambda: str(demo.tmp / "gone" / "python"))
+    api.refresh(repo)
+    done = commit(repo)
+    assert done.returncode != 0
+    assert f"(or: moxi repo git-hooks remove {quoted})" in done.stderr
+    [problem] = api.status(repo)[0]["problems"]
+    assert problem.fix == f"moxi repo git-hooks refresh {quoted}"
