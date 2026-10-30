@@ -187,8 +187,8 @@ class FakeOpenCode:
                     return self.reply(handler, 200, list(session["messages"]))
             if method == "GET" and parts[2:] == ["children"]:
                 with self.lock:
-                    kids = [{"id": k, "parentID": sid} for k, s in self.sessions.items()
-                            if s.get("parent") == sid]
+                    kids = [{"id": k, "parentID": sid, "title": s["title"]}
+                            for k, s in self.sessions.items() if s.get("parent") == sid]
                 return self.reply(handler, 200, kids)
             if method == "POST" and parts[2:] == ["prompt_async"]:
                 with self.lock:

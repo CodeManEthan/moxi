@@ -21,6 +21,7 @@
 //            `moxi-turns-window: <nonce>` first (entry, below); one window at a time
 //   append   {op, delivery, text}             a steer: $.session.append, a user row
 //   live     {op, ask}                        the live facts: answered on POST /live
+//   agents   {op, ask}                        $.agent.list(): answered on POST /agents
 //   command  {op, request, name: clear|exit|compact, stop_shells}
 //            $.command.run, which the gate re-checks; with stop_shells, the shell stop
 //            (below) around it
@@ -46,6 +47,9 @@
 //   /ask/stop    {turn_id, session_id, stop_hook_active, task_types, crons}
 //                                                          -> {reason: string | null}
 //   /live        {ask, agents, draft}                      -> {}  (agents null: unreadable)
+//   /agents      {ask, entries}                            -> {}  each entry as the engine
+//                gives it, {id, type, description, status, parentId?, teammateId?}; the
+//                endpoint maps the states (entries null: unreadable)
 //   /hook-times  {samples: [{event, ms}]}                   -> {}  at most once a minute
 //   The gate asks on the same socket: /gate/entry {nonce, draft, agents} and
 //   /gate/command {request, agents, draft} -> {verdict: pass} | {verdict: drop, reason,
@@ -422,6 +426,25 @@ async function live($: Dollar, askId: unknown): Promise<void> {
   await ask($, '/live', { ask: askId, agents, draft }, REPORT_WAIT_MS)
 }
 
+async function agentList($: Dollar, askId: unknown): Promise<void> {
+  // The list as the engine records it, read on this ask, unmapped: the endpoint maps the
+  // states. An unreadable list is sent as null, which the endpoint reads as not complete.
+  let entries: Record<string, unknown>[] | null = null
+  try {
+    entries = (await $.agent.list()).map(a => ({
+      id: a.id,
+      type: a.type,
+      description: a.description,
+      status: a.status,
+      ...(a.parentId !== undefined ? { parentId: a.parentId } : {}),
+      ...(a.teammateId !== undefined ? { teammateId: a.teammateId } : {}),
+    }))
+  } catch {
+    entries = null
+  }
+  await ask($, '/agents', { ask: askId, entries }, REPORT_WAIT_MS)
+}
+
 async function append($: Dollar, delivery: string, text: string): Promise<void> {
   try {
     const r = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
@@ -603,6 +626,8 @@ async function onLine($: Dollar, line: string): Promise<void> {
     await append($, delivery, str(m.text) ?? '')
   } else if (op === 'live') {
     await live($, m.ask)
+  } else if (op === 'agents') {
+    await agentList($, m.ask)
   } else if (op === 'command' && str(m.request) !== undefined && (m.name === 'clear' || m.name === 'exit' || m.name === 'compact')) {
     await command($, m.request as string, m.name, m.stop_shells === true && m.name !== 'exit')
   } else {

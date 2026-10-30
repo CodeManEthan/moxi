@@ -82,7 +82,7 @@ from .doctor import MODULE
 from .endpoint import EXPIRED, Endpoint
 from .harness import CommandRequest, Delivery, Harness, Live
 from .opencode_server import EventStream, Http, NoAnswer, Server, Unreachable
-from .results import Failed, Refused
+from .results import Agent, Agents, Failed, Refused
 
 log = logging.getLogger("moxi.turns.opencode")
 
@@ -213,7 +213,7 @@ class _Post:
 
 class OpenCodeHarness(Harness):
     name = "opencode"
-    can = frozenset({"deliver", "only-if-idle", "compact"})
+    can = frozenset({"deliver", "only-if-idle", "compact", "agents"})
     mod_version = None
 
     def __init__(self, cwd, *, instructions: str | None = None, env=None, options=None,
@@ -595,22 +595,37 @@ class OpenCodeHarness(Harness):
     # -- the core's calls ----------------------------------------------------------------
 
     def live(self) -> Live:
-        """Subagents are the session's child sessions that are running. The host has no
-        window and no prompt box, so `draft` is False."""
+        """The count derived from `agents()`. The host has no window and no prompt box, so
+        `draft` is False."""
+        return Live.of(self.agents())
+
+    def agents(self) -> Agents:
+        """Subagents are the session's child sessions, read now: `running` while the
+        status says busy or retrying (anything but idle), else `idle`. OpenCode sends no
+        final notice, so `final` is None. A read that fails is not complete."""
         sid, http = self.session_id, self.http
         if not sid or http is None:
-            return Live(None, False)
+            return Agents((), False, time.time())
         try:
             cstatus, children = http.json("GET", f"/session/{sid}/children", timeout=2.0)
             sstatus, status = http.json("GET", "/session/status", timeout=2.0)
         except (Unreachable, NoAnswer):
-            return Live(None, False)
+            return Agents((), False, time.time())
         if cstatus != 200 or sstatus != 200 or not isinstance(children, list) \
                 or not isinstance(status, dict):
-            return Live(None, False)
-        running = sum(1 for c in children if isinstance(c, dict)
-                      and not idle_from_status(200, status, c.get("id")))
-        return Live(running, False)
+            return Agents((), False, time.time())
+        entries = []
+        complete = True
+        for child in children:
+            child_id = child.get("id") if isinstance(child, dict) else None
+            if not isinstance(child_id, str) or not child_id:
+                complete = False          # a child turns cannot name: not whole
+                continue
+            state = "idle" if idle_from_status(200, status, child_id) else "running"
+            title = child.get("title")
+            entries.append(Agent(child_id, "subagent", state, None,
+                                 title if isinstance(title, str) and title else None))
+        return Agents(tuple(entries), complete, time.time())
 
     def submit(self, delivery: Delivery) -> None:
         threading.Thread(target=self._submit, args=(delivery,), daemon=True,

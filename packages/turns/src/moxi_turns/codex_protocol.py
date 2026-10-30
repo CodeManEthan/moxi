@@ -154,6 +154,64 @@ def terminal_ids(result) -> list[str]:
     return ids
 
 
+#: A collab agent's status (`CollabAgentStatus`) as turns' state, and whether it is a
+#: final notice.
+COLLAB_STATES = {
+    "pendingInit": ("pending", False), "running": ("running", False),
+    "completed": ("done", True), "errored": ("failed", True),
+    "interrupted": ("stopped", True), "shutdown": ("stopped", True),
+    "notFound": ("unknown", False),
+}
+COLLAB_ITEM = "collabAgentToolCall"
+
+
+def read_params(thread_id: str) -> dict:
+    """`thread/read` with the thread's turns and their items."""
+    return {"threadId": thread_id, "includeTurns": True}
+
+
+def collab_state(status) -> tuple[str, bool | None]:
+    """A collab agent status as `(state, final)`; one turns does not know reads
+    `unknown`, with no notice to call final."""
+    return COLLAB_STATES.get(status, ("unknown", None)) if isinstance(status, str) \
+        else ("unknown", None)
+
+
+def collab_notices(item) -> list[tuple[str, str | None, str | None]]:
+    """A `collabAgentToolCall` item's notices, in order: `(agent thread id, status or
+    None, sender thread id)` for each receiver and each agent its `agentsStates` names.
+    Any other item gives none."""
+    if not isinstance(item, dict) or item.get("type") != COLLAB_ITEM:
+        return []
+    sender = item.get("senderThreadId") if isinstance(item.get("senderThreadId"), str) \
+        else None
+    states = item.get("agentsStates") if isinstance(item.get("agentsStates"), dict) else {}
+    ids = [r for r in item.get("receiverThreadIds") or () if isinstance(r, str) and r]
+    ids += [k for k in states if isinstance(k, str) and k and k not in ids]
+    out = []
+    for agent_id in ids:
+        state = states.get(agent_id)
+        status = state.get("status") if isinstance(state, dict) else None
+        out.append((agent_id, status if isinstance(status, str) else None, sender))
+    return out
+
+
+def thread_items(result) -> list:
+    """The items of a `thread/read` answer, turn by turn in its order. Raises
+    `ValueError` on any other shape: a history turns cannot read is not an empty one."""
+    thread = result.get("thread") if isinstance(result, dict) else None
+    turns = thread.get("turns") if isinstance(thread, dict) else None
+    if not isinstance(turns, list):
+        raise ValueError("the thread read has no turns list")
+    items = []
+    for turn in turns:
+        turn_items = turn.get("items") if isinstance(turn, dict) else None
+        if not isinstance(turn_items, list):
+            raise ValueError("a turn of the thread read has no items list")
+        items.extend(turn_items)
+    return items
+
+
 def thread_is_active(thread: dict | None) -> bool:
     return bool(thread and (thread.get("status") or {}).get("type") == "active")
 
@@ -173,6 +231,7 @@ __all__ = [
     "request", "notification",
     "text_input", "initialize_params", "resume_params", "start_thread_params",
     "steer_params", "start_params", "method_missing", "compact_params",
-    "terminals_params", "terminate_params", "terminal_ids", "thread_is_active",
+    "terminals_params", "terminate_params", "terminal_ids", "COLLAB_STATES", "COLLAB_ITEM",
+    "read_params", "collab_state", "collab_notices", "thread_items", "thread_is_active",
     "active_turn_id",
 ]

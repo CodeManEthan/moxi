@@ -473,8 +473,7 @@ def test_an_exit_that_passes_leaves_the_endpoint_answering(make_endpoint, connec
     registry = listeners.Registry((listeners.Listener(
         "test", frozenset({"gone"}), "test:on_gone", _fn=on_gone),))
     env = dict(os.environ, MOXI_TURNS_COMMANDS="exit")
-    ep, _ = make_endpoint(ExitPasses(can=(*FakeHarness().can, "agents")),
-                          registry=registry, env=env)
+    ep, _ = make_endpoint(ExitPasses(), registry=registry, env=env)
     ep.listen_wait_s = 10
     watch = connect(ep)
     watch.call("watch", {}, timeout=5)
@@ -483,7 +482,7 @@ def test_an_exit_that_passes_leaves_the_endpoint_answering(make_endpoint, connec
     assert R.from_wire(result["result"]) == Passed()
     # The harness is still up: every method answers.
     assert R.from_wire(client.call("facts", {}, timeout=5)).session_id == "s-1"
-    assert R.from_wire(client.call("agents", {}, timeout=5)).complete is False
+    assert R.from_wire(client.call("agents", {}, timeout=5)).complete is True
     assert "facts" in connect(ep).call("watch", {}, timeout=5)
     assert client.call("session", {}, timeout=5)["nonce"] == ep.nonce
     # The endpoint's own end: from then on each method answers `gone`.

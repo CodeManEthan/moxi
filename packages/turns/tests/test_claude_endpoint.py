@@ -83,7 +83,8 @@ def test_the_first_line_and_no_hello_before_the_session_id(claude):
     s = turns.find(session_id="s-9")
     assert s is not None and s.harness == "claude"
     assert s.capabilities == frozenset({"deliver", "only-if-idle", "steer", "stop-handler",
-                                        "clear", "exit", "compact", "stop-shells"})
+                                        "clear", "exit", "compact", "agents",
+                                        "stop-shells"})
     assert s.info["mod_version"] == "0.1.0"
 
 
@@ -288,6 +289,61 @@ def test_live_facts_come_from_the_runner_and_an_unanswered_read_holds(claude):
         assert answer["verdict"] == "drop" and answer["reason"] == reason
         assert bare(d.wait_started(1)) == turns.Refused(reason)
         runner.close(d.id, leg.END_DROP, answer["text"])
+
+
+def test_agents_maps_the_runners_list(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    runner.agent_list = [
+        {"id": "a1", "type": "Explore", "description": "find it", "status": "running"},
+        {"id": "a2", "type": "general-purpose", "description": "d", "status": "pending",
+         "parentId": "a1"},
+        {"id": "a3", "type": "x", "description": "d", "status": "waiting"},
+        {"id": "t1", "type": "teammate", "description": "d", "status": "idle",
+         "teammateId": "ann@crew"},
+        {"id": "a4", "type": "x", "description": "d", "status": "completed"},
+        {"id": "a5", "type": "x", "description": "d", "status": "failed"},
+        {"id": "a6", "type": "x", "description": "d", "status": "killed"},
+        {"id": "a7", "type": "x", "description": "d", "status": "hibernating"},
+    ]
+    a = s.agents()
+    assert a.complete
+    assert [(e.id, e.kind, e.state, e.final) for e in a.entries] == [
+        ("a1", "subagent", "running", False), ("a2", "subagent", "pending", False),
+        ("a3", "subagent", "waiting", False), ("t1", "teammate", "idle", False),
+        ("a4", "subagent", "done", True), ("a5", "subagent", "failed", True),
+        ("a6", "subagent", "stopped", True), ("a7", "subagent", "unknown", None)]
+    assert a.entries[0].description == "find it" and a.entries[1].parent_id == "a1"
+    assert a.busy() == 3
+
+
+def test_an_unread_or_late_agent_list_is_not_complete(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    runner.agent_list = None                     # $.agent.list() could not be read
+    assert s.agents().complete is False
+    runner.agent_list = [{"id": "a1", "status": "running"}, {"status": "running"}]
+    a = s.agents()                               # an entry with no id: not whole
+    assert a.complete is False and [e.id for e in a.entries] == ["a1"]
+    runner.agent_list = []
+    assert s.agents().complete is True
+    runner.answer_live = False
+    t0 = time.monotonic()
+    assert s.agents().complete is False and time.monotonic() - t0 < 1.8
+
+
+def test_a_final_notice_in_an_open_turn_reads_final_at_the_next_read(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    runner.turn_start("T1")
+    runner.agent_list = [{"id": "bg", "type": "x", "description": "d", "status": "running"}]
+    assert s.agents().entries[0].final is False
+    # The task's notification: the engine records it completed; the turn stays open.
+    runner.agent_list = [{"id": "bg", "type": "x", "description": "d",
+                          "status": "completed"}]
+    a = s.agents()
+    assert a.entries[0].final is True and a.entries[0].state == "done"
+    assert s.facts().turn_open
 
 
 def test_holding_answers_the_stop_ask_within_hold_wait(claude, turns_env):
