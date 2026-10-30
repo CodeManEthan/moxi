@@ -3,6 +3,7 @@ the spawn rule, the opener, and the waits, from recorded `units.status` rows."""
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 import time
@@ -243,6 +244,29 @@ def test_on_linux_the_url_goes_to_the_browser(monkeypatch):
     world = World(monkeypatch)
     cli.hand_over("http://127.0.0.1:8460/signin?n=1#t=x", printed=False, say=world.said.append)
     assert world.opened == ["http://127.0.0.1:8460/signin?n=1#t=x"]
+
+
+# --- status -------------------------------------------------------------------------------
+
+
+def test_status_lists_each_page_server_from_the_servers_rows(monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    info = SimpleNamespace(pid=10, port=8460, server_id="s", version="1", started_at="t")
+    data = {"shell": {"pid": 10}, "servers": [
+        {"module": "notes", "state": "running", "pid": 42},
+        {"module": "cache", "state": "idle", "pid": None}]}
+    monkeypatch.setattr(cli, "lock_held", lambda: True)
+    monkeypatch.setattr(cli, "_running", lambda: info)
+    monkeypatch.setattr(cli, "call", lambda *a, **k: (200, data))
+    monkeypatch.setattr(cli, "_units_status", lambda: [socket_unit()])
+    assert cli.main(["status"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].startswith("shell: running, pid 10")
+    assert out[-2:] == ["page notes: running, pid 42", "page cache: idle"]
+    assert cli.main(["status", "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["servers"] == data and report["units"][0]["kind"] == "socket"
 
 
 # --- end to end ----------------------------------------------------------------------------

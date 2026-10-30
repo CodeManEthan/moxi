@@ -31,6 +31,8 @@ from typing import Any
 
 from moxi_loopback.api import Field, Out, Page, Route
 
+from . import settings as _settings
+
 __all__ = [
     "DOCTOR_TIMEOUT",
     "MODULES_SHAPE",
@@ -241,7 +243,7 @@ ROUTES = (
 )
 
 #: The settings view's routes, declared by `settings.py`.
-SETTINGS_ROUTES: tuple[Route, ...] = ()
+SETTINGS_ROUTES: tuple[Route, ...] = _settings.ROUTES
 
 
 def _assets() -> str | None:

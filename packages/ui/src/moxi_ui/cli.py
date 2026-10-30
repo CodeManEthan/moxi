@@ -522,9 +522,11 @@ def cmd_status(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
         detail = f" ({unit['detail']})" if unit["detail"] else ""
         say(f"{unit['kind']}: {unit['state']}{detail}")
     servers = report.get("servers")
-    if isinstance(servers, Mapping):
-        for name, item in sorted(servers.items()):
-            say(f"page {name}: {item.get('state', '?') if isinstance(item, Mapping) else item}")
+    rows = servers.get("servers") if isinstance(servers, Mapping) else None
+    for item in rows if isinstance(rows, list) else ():
+        if isinstance(item, Mapping) and isinstance(item.get("module"), str):
+            pid = f", pid {item['pid']}" if item.get("pid") is not None else ""
+            say(f"page {item['module']}: {item.get('state', '?')}{pid}")
     return 0
 
 
