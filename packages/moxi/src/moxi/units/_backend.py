@@ -257,7 +257,9 @@ class ApplyIO:
             if change.foreign.exists():
                 aside = self._displaced(change.foreign)
                 aside.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(change.foreign, aside)
+                # `shutil.move`, not a rename: the displaced folder may be on another
+                # file system than the unit directory.
+                shutil.move(change.foreign, aside)
                 self.moved.append((change.foreign, aside))
                 self.say(change, f"{change.foreign.name} moved aside to {aside}")
         for path, text in zip(change.paths, change.texts):

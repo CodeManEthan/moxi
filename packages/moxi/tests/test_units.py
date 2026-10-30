@@ -219,6 +219,31 @@ def test_an_unmarked_file_is_refused_and_moved_aside_only_with_replace(w):
     assert aside.read_text() == "[Service]\nExecStart=/old\n"
 
 
+def test_the_move_aside_crosses_file_systems(w, monkeypatch):
+    import errno
+
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=DAEMON)
+    old = w.root / "moxi-demo-relay.service"
+    old.write_text("[Service]\nExecStart=/old\n")
+    change = w.plan()[("relay", "daemon")]
+    renames = {"rename": os.rename, "replace": os.replace}
+
+    def across(name):
+        def call(src, dst, *a, **k):
+            if os.fspath(src) == os.fspath(old):
+                raise OSError(errno.EXDEV, "Invalid cross-device link", src)
+            return renames[name](src, dst, *a, **k)
+        return call
+
+    monkeypatch.setattr(os, "rename", across("rename"))
+    monkeypatch.setattr(os, "replace", across("replace"))
+    [done] = w.apply([change], replace=True)
+    assert done.ok and old.read_text().startswith("# moxi unit: demo/relay")
+    [aside] = (moxi.paths.core().data_dir() / "displaced").glob("*/moxi-demo-relay.service")
+    assert aside.read_text() == "[Service]\nExecStart=/old\n"
+
+
 def test_a_file_marked_for_another_unit_is_foreign(w):
     w.script("moxi-demo-relay")
     w.module(DAEMONS=DAEMON)
