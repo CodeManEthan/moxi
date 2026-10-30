@@ -32,6 +32,13 @@ profile:
 Gates 1 and 3 don't run on a Unix socket, which no browser can open and which lives in a
 directory only you can enter. Every listener binds loopback only.
 
+Every answer the base sends, refusals and 500s included, carries one fixed header set: a
+strict Content-Security-Policy, `nosniff`, `no-referrer`, same-origin opener and resource
+policies, a Permissions-Policy that turns off the camera, microphone, location, USB and
+payment, and `Cache-Control`. Two answers uvicorn sends on its own carry none of it: its
+400 for a request it can't parse, and its 503 when all 128 of a server's connections are
+open. The shell adds whatever header of the set an answer lacks before the browser sees it.
+
 ## Declaring a page
 
 A module announces its page with one line in its announcement (the module named by its
@@ -68,16 +75,20 @@ PAGE = Page(
 - Every query and body key is declared by a `Field`. An unknown or mistyped key is a 400
   that names the key and never repeats the value.
 - Every answer is cut to `returns` before it is sent, at every depth. A key the handler
-  added but `returns` doesn't declare is dropped and logged.
+  added but `returns` doesn't declare is dropped and logged. A `null` is sent only for a
+  key declared with `nullable=True`. A `null` for any other key, or a value of the wrong
+  type, is refused rather than cut, and the request gets a 500.
 - Handlers are `"package.module:function"` strings, so the shell and tests read the table
   without importing handler code. A handler is `def fn(call) -> dict` or
   `async def fn(call) -> dict`. A plain `def` runs on a worker thread. `call` carries the
   checked `query` and `body`, the module name, and `busy(name)`, which holds the idle exit
   while work runs. A handler may return `Accepted(status_path)` (202), or raise
   `Conflict(text)` (409) or `Refused(text)` (422). Anything else it raises is a 500.
-- `assets` names one flat directory of static files in the page module's package. `/`
-  serves its `index.html`. A page's own files use relative URLs, so they work under the
-  shell's `/m/<module>/`.
+- `assets` names one flat directory of static files in the page module's package. That is
+  the package whose code builds the `Page`, so a page built by a helper in another package
+  names its own with `Page(..., package="moxi_usage")`; without it the base looks in the
+  helper's package. `/` serves its `index.html`. A page's own files use relative URLs, so
+  they work under the shell's `/m/<module>/`.
 - A page has at most one stream route. It sends server-sent events for the declared
   `topics`: the current value of each topic first, then each later change. Handlers feed
   it through `Topics(...).publish(name, value)`, and `Snapshot` rebuilds a topic's value
@@ -90,9 +101,11 @@ A page module whose distribution doesn't require `moxi-loopback` reaches the sam
 as `moxi.modules.load("loopback", interface=1).api`, and imports nothing else outside the
 standard library and the core.
 
-`moxi.modules.load` imports a module's `API` module, and the runner and the export command
-load each page through it. So a page module keeps its handler imports out of its `API`
-module. Otherwise reading the page's table imports its handlers too.
+The runner and the export command load each page through `moxi.modules.load`, which
+imports the module's package `__init__`, its announcement and its `API` module, and listing
+the assets imports the package `__init__` again. So a page module keeps its handler imports
+out of its package's `__init__`, its announcement and its `API` module. Otherwise reading
+the page's table imports its handlers too.
 
 `gate_matrix(page)` is a test helper. It sends each route the requests the base must
 refuse (the wrong method, an unknown key, no token, an act without JSON, and a request
@@ -169,11 +182,11 @@ python -P -m moxi_loopback.export <module>...
 
 prints one JSON object, keyed by module: `{"ok": true, "export": {...}}` with the module's
 routes, their fields and shapes, its topics, its asset names and its budget, or `{"ok":
-false, "error": "..."}` for a module with no `PAGE`, a broken target or a refused
-declaration. It exits 0 when every module was read, 3 when any was refused, and 2 with no
-module named. The shell runs it in a fresh process to learn every module's table without
-importing any module's code into itself. It builds the table with the same function the
-runner serves from, and resolves no handler.
+false, "error": "..."}` for a module with no `PAGE`, a broken target, a refused
+declaration or a refused asset table. It exits 0 when every module was read, 3 when any
+was refused, and 2 with no module named. The shell runs it in a fresh process to learn
+every module's table without importing any module's code into itself. It builds the table
+with the same function the runner serves from, and resolves no handler.
 
 ## Limits
 
