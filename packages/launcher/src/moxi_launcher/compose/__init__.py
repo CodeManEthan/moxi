@@ -55,11 +55,11 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
 
 def installed() -> frozenset[str]:
     """The optional links installed here. turns counts only when it offers the interface
-    the launcher calls."""
-    found = {name for name in LINKS if moxi_modules.available(name)}
-    if "turns" in found and moxi_modules.load(
-            "turns", interface=TURNS_INTERFACE).state != moxi_modules.PRESENT:
-        found.discard("turns")
+    the launcher calls, the first-turn sender's answer (`first.turns_api`), so a launch
+    composed with turns is one the sender reaches."""
+    found = {name for name in LINKS if name != "turns" and moxi_modules.available(name)}
+    if first.turns_api(quiet=True) is not None:
+        found.add("turns")
     return frozenset(found)
 
 
@@ -135,11 +135,12 @@ def context(values: Mapping[str, object], *, request_id: str,
 def launch_additions(*, cwd: str, env: Mapping[str, str],
                      session_id: str | None) -> Additions:
     """turns' launch additions for a Claude launch without comms, asked once."""
-    found = moxi_modules.load("turns", interface=TURNS_INTERFACE)
-    call = getattr(found.api, "launch_additions", None) if found.api else None
-    if found.state != moxi_modules.PRESENT or call is None:
-        raise RuntimeError(f"turns' launch additions can't be read: "
-                           f"{found.reason or 'no launch_additions'}")
+    api = first.turns_api(quiet=True)
+    call = getattr(api, "launch_additions", None) if api is not None else None
+    if call is None:
+        raise RuntimeError("turns' launch additions can't be read: "
+                           + ("turns is not reachable" if api is None
+                              else "its API has no launch_additions"))
     got = call("claude", cwd=cwd, env=dict(env), session_id=session_id,
                commands=common.COMMANDS)
     return Additions(argv=tuple(str(word) for word in got.argv),

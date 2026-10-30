@@ -152,7 +152,8 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     return Composition(harness=HARNESS, mode=mode_,
                        target=str(values.get("target") or "terminal"), argv=tuple(argv),
                        env=env, values=recorded, prompt=prompt, first=first,
-                       not_applied=not_applied, warnings=tuple(warnings))
+                       brief=ctx.brief, not_applied=not_applied,
+                       warnings=tuple(warnings))
 
 
 __all__ = ["HARNESS", "HOST_ORDER", "ORDER", "comms_identity", "compose", "mode"]

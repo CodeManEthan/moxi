@@ -160,7 +160,8 @@ class Composition:
     these and `preview` shows them), which `environment` lays over the scrubbed caller's
     environment for the child. `prompt` is the opening prompt on the argv, if any; `first`
     the text owed as the first turn once the session is ready, when it is not on the argv.
-    `values` are the launch's values as the launch records them (`values_json`): the
+    `brief` is the brief's text as the launch read it (inline or from its file), which the
+    launch log keeps for the sender. `values` are the launch's values as the launch records them (`values_json`): the
     resolved values with the `mode` and the rows `not_applied`. `prompt_file` is Claude's
     system prompt file, written before the start. `warnings` are one line each.
     """
@@ -173,6 +174,7 @@ class Composition:
     values: Mapping[str, object]
     prompt: str | None = None
     first: str | None = None
+    brief: str | None = None
     prompt_file: PromptFile | None = None
     not_applied: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()

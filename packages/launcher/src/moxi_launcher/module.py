@@ -6,9 +6,9 @@ service and no socket. Every other Moxi module it works with is an optional link
 through `moxi.modules.load` where the feature needs it.
 """
 
-#: No interface is offered yet: the API module comes with the launch call.
+#: The API module: `launch`, `check` and `preview`. No interface number is offered yet.
 INTERFACES = frozenset()
-API = None
+API = "moxi_launcher.api"
 #: What `moxi launcher` runs, in process, as `main(argv, prog="moxi launcher")`.
 CLI = "moxi_launcher.cli:main"
 SUMMARY = ("Launch Claude Code and Codex sessions from presets over a per-harness flag "
