@@ -106,7 +106,8 @@ class Watch:
         import signal
 
         # Scan first: a child that dies of the SIGTERM before the scan after it leaves its
-        # descendants to init, where no scan finds them.
+        # descendants to init, where no scan finds them. A descendant born between this scan
+        # and the SIGTERM, to a child that then dies of it, can still be missed.
         self.scan()
         self._send(signal.SIGTERM)
         self.scan()
