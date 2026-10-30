@@ -69,6 +69,9 @@ class Reader:
     limit stopped it with lines left. It is set as soon as the reader knows, which can be
     while the caller holds the last line it will get. A caller that stops iterating before
     then sees None.
+
+    `size` is the byte the read treats as the file's end (the size at open, or `end`), and
+    `stat` the open file's `os.stat_result`, so a caller can name the file it read.
     """
 
     def __init__(self, path: str | Path, *, block: int, limit: int, head: bool = False,
@@ -87,7 +90,8 @@ class Reader:
         self.ended: str | None = None
         self._file = open(self.path, "rb")
         try:
-            self._size = os.fstat(self._file.fileno()).st_size
+            self.stat = os.fstat(self._file.fileno())
+            self._size = self.stat.st_size
             if end is not None:
                 self._size = min(self._size, end)
             self._unterminated = False
@@ -100,6 +104,7 @@ class Reader:
         except BaseException:
             self._file.close()
             raise
+        self.size = self._size
         self._lines = self._backward()
         self._next: object = None
         self._primed = False
