@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
 import textwrap
@@ -315,6 +316,23 @@ def test_log_rolls_past_its_cap(demo, monkeypatch):
     older = log.with_name("daemon.log.1")
     assert older.stat().st_size == 1000                  # rolled when it reached the cap
     assert log.stat().st_size == 1000                    # rolls on the next write
+
+
+@POSIX
+def test_the_logs_missing_directories_are_each_made_0700(tmp_path):
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    os.chmod(shared, 0o775)
+    log = run._Log(shared / "a" / "b" / "daemon.log")
+    old = os.umask(0)
+    try:
+        log.write(b"x\n")
+    finally:
+        os.umask(old)
+        log.close()
+    for each in (shared / "a", shared / "a" / "b"):
+        assert stat.S_IMODE(os.stat(each).st_mode) == 0o700, each
+    assert stat.S_IMODE(os.stat(shared).st_mode) == 0o775
 
 
 def test_a_command_that_cannot_start_says_so_in_the_log(demo, tmp_path):
