@@ -32,7 +32,10 @@ with a turn that runs `moxi comms send`). Neither sets the backend or the slots.
     event -- open for writing, mkdir, rename, remove, chmod, a sqlite database, a Unix
     socket bind, a temp file -- and the test fails on any path outside the home.
 
-It needs `uv` and builds a wheel, so it runs only with `--clean-home`.
+It needs `uv` and builds a wheel, so it is a `build` test: a plain pytest run leaves it
+out, and `pytest -m build tests/test_clean_home.py` runs it. Its uv calls get uv's real
+cache and installed Pythons (the kit's `uv_env`); everything the install runs gets the
+environment built from nothing.
 """
 
 from __future__ import annotations
@@ -46,6 +49,7 @@ import sqlite3
 import signal
 import subprocess
 import sys
+import tempfile
 import termios
 import threading
 import time
@@ -59,7 +63,8 @@ REPO = TESTS.parent
 CORE = REPO.parent / "moxi"
 UV = shutil.which("uv")
 
-pytestmark = pytest.mark.skipif(UV is None, reason="the clean-home test needs uv")
+pytestmark = [pytest.mark.build,
+              pytest.mark.skipif(UV is None, reason="the clean-home test needs uv")]
 
 AUDIT_HOOK = r'''
 import os, sys
@@ -241,32 +246,29 @@ def read(path: Path) -> str:
 
 
 @pytest.fixture
-def installed(tmp_path_factory, request):
-    if not request.config.getoption("--clean-home"):
-        pytest.skip("builds the wheel and a venv; run with --clean-home")
-    # A short base: the daemon's socket lives under the home, and a Unix socket path is
-    # capped at 108 bytes.
-    base = Path(subprocess.run(["mktemp", "-d", "/tmp/och-XXXXXX"], capture_output=True,
-                               text=True, check=True).stdout.strip())
+def installed(fence, uv_env):
+    # A short base, in the fence's short directory: the daemon's socket lives under the
+    # home, and a Unix socket path is capped at 108 bytes.
+    base = Path(tempfile.mkdtemp(prefix="och-", dir=fence.short))
     home = base / "home"
     home.mkdir()
     dist = base / "dist"
     build = subprocess.run([UV, "build", "--wheel", "--out-dir", str(dist), str(REPO)],
-                           capture_output=True, text=True, timeout=300)
+                           capture_output=True, text=True, timeout=300, env=uv_env)
     assert build.returncode == 0, build.stderr
     [wheel] = dist.glob("moxi_comms-*.whl")
     core = subprocess.run([UV, "build", "--wheel", "--out-dir", str(dist), str(CORE)],
-                          capture_output=True, text=True, timeout=300)
+                          capture_output=True, text=True, timeout=300, env=uv_env)
     assert core.returncode == 0, core.stderr
     [core_wheel] = dist.glob("moxi-*.whl")
     venv = home / ".local" / "share" / "moxi-comms-venv"
     made = subprocess.run([UV, "venv", "--python", sys.executable, str(venv)],
-                          capture_output=True, text=True, timeout=120)
+                          capture_output=True, text=True, timeout=120, env=uv_env)
     assert made.returncode == 0, made.stderr
     py = venv / "bin" / "python"
     got = subprocess.run([UV, "pip", "install", "--python", str(py), str(wheel),
                           str(core_wheel)],
-                         capture_output=True, text=True, timeout=300)
+                         capture_output=True, text=True, timeout=300, env=uv_env)
     assert got.returncode == 0, got.stderr
     site = subprocess.run([str(py), "-c", "import sysconfig; "
                            "print(sysconfig.get_path('purelib'))"],

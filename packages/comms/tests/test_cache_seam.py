@@ -377,10 +377,10 @@ def test_a_store_handed_in_is_kept_open_at_stop(rig):
         store.close()
 
 
-def test_cache_writes_under_its_own_roots_in_the_rig(rig, tmp_path):
-    """The rig points cache's roots into tmp: the learning lock is there, not in the home
-    of whoever runs the suite."""
+def test_cache_writes_under_its_own_roots_in_the_rig(rig, fence):
+    """The test fence points cache's home into tmp: the learning lock is there, not in the
+    home of whoever runs the suite."""
     cache_api()
     lock = Path(rig.daemon.cache_store.lock_path)
-    assert str(lock).startswith(str(tmp_path)), lock
+    assert lock.is_relative_to(fence.module_home("cache")), lock
     assert json.dumps(str(lock))

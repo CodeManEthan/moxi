@@ -10,9 +10,12 @@ against a real `record.db` under the tmp STATE root. The mock stays the default 
 in-memory double; `local` is there so the seam's second real implementation is
 exercised by the same tests, not by a parallel set of its own.
 
-The `env` fixture points `MOXI_COMMS_HOME` at the test's tmp home, so the config file,
-the record, the store and every path read stay inside tmp. A test that needs settings
-writes its own config file with `write_config(env, text)`.
+Every test runs inside the kit's fence (the package's root `conftest.py`): an emptied
+environment with HOME, the XDG homes, the harness homes and every module's home in tmp,
+no write outside tmp and no connect off the machine or to a socket outside tmp. On top of
+that, the `env` fixture points `MOXI_COMMS_HOME` at a tmp home of comms' own, so the
+config file, the record, the store and every path read stay inside tmp. A test that
+needs settings writes its own config file with `write_config(env, text)`.
 
 The names in fixtures (`planner`, `reviewer`, `lead`, `proj-a`, `console@acme`) are
 placeholders.
@@ -25,7 +28,6 @@ import io
 import json
 import os
 import re
-import shutil
 import tempfile
 import time
 import uuid
@@ -62,20 +64,6 @@ class FakeClock:
         self.t += dt
 
 
-CLEAN_HOME_OPTION = "--clean-home"
-CODEX_LIVE_OPTION = "--codex-live"
-
-
-def pytest_addoption(parser):
-    parser.addoption(CLEAN_HOME_OPTION, action="store_true", default=False,
-                     help="also run the clean-home install test: build the wheel, "
-                          "install it into a venv under a temp HOME, and run the daemon "
-                          "and two OpenCode identities (a stub opencode) from it")
-    parser.addoption(CODEX_LIVE_OPTION, action="store_true", default=False,
-                     help="also run the live check of Codex's hooks: the real codex on "
-                          "PATH, logged in; spends tokens")
-
-
 def write_config(env, text: str) -> Path:
     """Write `text` as comms' config file under the roots `env` names, and return its path.
 
@@ -93,21 +81,22 @@ def write_config(env, text: str) -> Path:
 
 
 @pytest.fixture(autouse=True)
-def env(monkeypatch, tmp_path):
+def env(monkeypatch, tmp_path, fence):
     """All five roots under tmp. RUNTIME gets a SHORT path (unix socket name limit).
 
-    `MOXI_COMMS_HOME` collapses the roots under the tmp home; the device and the runtime
-    directory are set beside it, and every per-root override is cleared, so nothing a
-    test does resolves outside tmp.
+    The fence has already emptied the environment, so no variable of the session running
+    the suite reaches a test: not its comms sockets or launch stamps, which would let a
+    test that pointed at nothing find the real daemon, not its token store or operator
+    lane, and not a variable that overrides a config key. `MOXI_COMMS_HOME` collapses the
+    roots under a tmp home of comms' own, beside the fence's HOME, so a test can see that
+    comms wrote nothing there; the device and the runtime directory are set beside it.
+    Both temp directories below are in the fence's short directory, which goes with it.
     """
-    runtime = Path(tempfile.mkdtemp(prefix="cmx"))
-    home = tmp_path / "home"
+    runtime = Path(tempfile.mkdtemp(prefix="cmx", dir=fence.short))
+    home = tmp_path / "comms-home"
     monkeypatch.setenv("MOXI_COMMS_HOME", str(home))
     monkeypatch.setenv("MOXI_COMMS_DEVICE", "testbox")
     monkeypatch.setenv("MOXI_COMMS_RUNTIME_DIR", str(runtime))
-    for root in ("DATA_HOME", "STATE_HOME", "CACHE_HOME", "CONFIG_HOME"):
-        monkeypatch.delenv(f"MOXI_COMMS_{root}", raising=False)
-    monkeypatch.delenv("MOXI_COMMS_PROJECT", raising=False)
     # RUNTIME/comms exists, as a login's runtime directory does: a rig's fake daemon
     # binds in it directly.
     (runtime / "comms").mkdir()
@@ -115,47 +104,14 @@ def env(monkeypatch, tmp_path):
     # doctor's turns rows sweep dead endpoints there, so neither may reach the box's own.
     monkeypatch.setenv("MOXI_TURNS_RUNTIME_DIR", str(runtime))
     monkeypatch.setenv("MOXI_TURNS_CONFIG_HOME", str(home / "config"))
-    for var in ("MOXI_TURNS_HOME", "MOXI_TURNS_COMMANDS"):
-        monkeypatch.delenv(var, raising=False)
-    # The comms env of whatever session is RUNNING the suite. Developing
-    # comms from inside a comms-connected session is the normal case here, and a live
-    # socket stamp would let a test that had deliberately pointed at nothing find the
-    # real daemon. A test rig that can reach production is not a rig.
-    # `MOXI_COMMS_TOKEN_STORE` and `MOXI_COMMS_OPERATOR` are on the list for the same
-    # reason the sockets are: both name production. The first points the resolver chain
-    # at the operator's REAL 0600 store, and the second turns any send in the suite into
-    # the operator's lane. `MOXI_COMMS_GATEWAY`, `MOXI_COMMS_LOCAL_RECORD` and
-    # `MOXI_COMMS_LOCAL_RETAIN_DAYS` override config keys, so a shell that sets one would
-    # change what a test reads.
-    # `CLAUDE_CODE_SESSION_ID` is the session RUNNING the suite, which every rig shim
-    # would otherwise report as its own.
-    # `MOXI_COMMS_CLAIM_SOCKET` names the running session's real claim socket, and
-    # `MOXI_COMMS_COMMAND` the comms install its launcher ran.
-    for var in ("MOXI_COMMS_SHIM_SOCKET", "MOXI_COMMS_SOCKET", "MOXI_COMMS_NAME",
-                "MOXI_COMMS_SLOT", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL",
-                "MOXI_COMMS_DIRECTORS", "MOXI_COMMS_TOKEN_STORE", "MOXI_COMMS_OPERATOR",
-                "MOXI_COMMS_GATEWAY", "MOXI_COMMS_LOCAL_RECORD",
-                "MOXI_COMMS_LOCAL_RETAIN_DAYS", "MOXI_COMMS_MOCK_GATEWAY",
-                "CLAUDE_CODE_SESSION_ID", "MOXI_COMMS_CLAIM_SOCKET", "MOXI_COMMS_COMMAND"):
-        monkeypatch.delenv(var, raising=False)
     # The cache clock (cold-sends). Every reader's root and every shim's reported root
     # are under tmp: `CLAUDE_CONFIG_DIR` is what a shim reports its session's transcripts
     # under and where the reader finds them (`projects/` in it). Outside `tmp_path`,
-    # which some suites assert is left empty.
-    claude_home = Path(tempfile.mkdtemp(prefix="cmx-claude"))
+    # which some suites assert holds nothing they did not write. cache's and sessions'
+    # homes, which comms' seam reads through, are the fence's.
+    claude_home = Path(tempfile.mkdtemp(prefix="cmx-claude", dir=fence.short))
     (claude_home / "projects").mkdir()
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_home))
-    # The cache module comms' seam reads through (`moxi_comms.cache`), and sessions under
-    # it: their roots under tmp too, so a read takes no config and no drift record of the
-    # user running the suite, and a daemon's learning store locks and writes in tmp.
-    monkeypatch.setenv("MOXI_CACHE_HOME", str(tmp_path / "cache-home"))
-    monkeypatch.setenv("MOXI_SESSIONS_HOME", str(tmp_path / "sessions-home"))
-    for module in ("CACHE", "SESSIONS"):
-        for root in ("DATA_HOME", "STATE_HOME", "CACHE_HOME", "CONFIG_HOME", "RUNTIME_DIR"):
-            monkeypatch.delenv(f"MOXI_{module}_{root}", raising=False)
-    yield
-    shutil.rmtree(runtime, ignore_errors=True)
-    shutil.rmtree(claude_home, ignore_errors=True)
 
 
 #: Suites that run on both backends. A module here has every one of its rig-using tests

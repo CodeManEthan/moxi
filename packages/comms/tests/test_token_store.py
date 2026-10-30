@@ -97,21 +97,30 @@ def test_a_loose_store_directory_is_refused_too(tmp_path):
         store.read_secret(owner, POSTING_KEY)
 
 
+@pytest.fixture
+def empty_root(tmp_path):
+    """An empty directory of the test's own, for a store that must write nothing:
+    `tmp_path` also holds the test fence's HOME."""
+    root = tmp_path / "store"
+    root.mkdir()
+    return root
+
+
 # --------------------------------------------------------------------- the fences
 
-def test_the_provisioner_role_cannot_even_have_a_file_written_for_it(tmp_path):
+def test_the_provisioner_role_cannot_even_have_a_file_written_for_it(empty_root):
     with pytest.raises(TokenStoreError) as e:
-        TokenStore(tmp_path).write_secret(owner_for_role("provisioner"), POSTING_KEY,
-                                          "MASTER-ISH")
+        TokenStore(empty_root).write_secret(owner_for_role("provisioner"), POSTING_KEY,
+                                            "MASTER-ISH")
     assert "crown-jewel" in str(e.value)
-    assert not any(tmp_path.rglob("*"))
+    assert not any(empty_root.rglob("*"))
 
 
-def test_the_provisioner_is_refused_by_the_declared_read_too(tmp_path):
+def test_the_provisioner_is_refused_by_the_declared_read_too(empty_root):
     with pytest.raises(TokenStoreError) as e:
-        TokenStore(tmp_path).read_secret(owner_for_role("provisioner"), POSTING_KEY)
+        TokenStore(empty_root).read_secret(owner_for_role("provisioner"), POSTING_KEY)
     assert "crown-jewel" in str(e.value)
-    assert not any(tmp_path.rglob("*"))
+    assert not any(empty_root.rglob("*"))
 
 
 # ------------------------------------------------------------ the map and the pair
@@ -156,15 +165,15 @@ def test_the_emitter_escapes_a_value_that_looks_like_toml(tmp_path):
         'weird"key\\here': nasty.strip()}
 
 
-def test_the_declared_pair_refuses_an_empty_value_and_an_unprintable_key(tmp_path):
-    store = TokenStore(tmp_path)
+def test_the_declared_pair_refuses_an_empty_value_and_an_unprintable_key(empty_root):
+    store = TokenStore(empty_root)
     with pytest.raises(TokenStoreError):
         store.write_secret(owner_for_role("operator"), POSTING_KEY, "   ")
     with pytest.raises(TokenStoreError):
         store.write_secret(owner_for_role("operator"), "two\nlines", "TOK")
     with pytest.raises(TokenStoreError):
         store.read_secret(owner_for_role("operator"), "")
-    assert not any(tmp_path.rglob("*"))
+    assert not any(empty_root.rglob("*"))
 
 
 def test_a_loose_file_is_refused_by_every_half_of_the_boundary(tmp_path):
