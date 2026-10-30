@@ -424,6 +424,43 @@ def test_python_without_one_in_the_scripts_directory_is_this_interpreter(monkeyp
     assert paths.python() == Path(sys.executable)
 
 
+def test_script_tries_pathext_in_the_scripts_directory_only(monkeypatch, tmp_path):
+    """The Windows search, by hand: each PATHEXT extension in the scripts directory, and
+    never the working directory, where a file of the same name may stand."""
+    scripts, here = tmp_path / "scripts", tmp_path / "here"
+    scripts.mkdir()
+    here.mkdir()
+    (here / "moxi-cache-watch.exe").write_text("")
+    monkeypatch.chdir(here)
+    monkeypatch.setattr(paths, "_WINDOWS", True)
+    monkeypatch.setenv("PATHEXT", ".COM;.EXE")
+    monkeypatch.setattr(os, "pathsep", ";")
+    monkeypatch.setattr(paths, "_scripts", lambda: scripts)
+    with pytest.raises(FileNotFoundError):
+        paths.script("moxi-cache-watch")
+    exe = scripts / "moxi-cache-watch.exe"
+    exe.write_text("")
+    exe.chmod(0o755)
+    assert paths.script("moxi-cache-watch") == exe
+    assert paths.script("moxi-cache-watch.exe") == exe     # a name with its extension
+    for bad in ("", "..", "sub/moxi-cache-watch", "sub\\moxi-cache-watch"):
+        with pytest.raises(FileNotFoundError):
+            paths.script(bad)
+
+
+@WINDOWS
+def test_script_on_windows_never_takes_a_file_in_the_working_directory(monkeypatch,
+                                                                       tmp_path):
+    scripts, here = tmp_path / "scripts", tmp_path / "here"
+    scripts.mkdir()
+    here.mkdir()
+    (here / "moxi-cache-watch.exe").write_text("")
+    monkeypatch.chdir(here)
+    monkeypatch.setattr(paths, "_scripts", lambda: scripts)
+    with pytest.raises(FileNotFoundError):
+        paths.script("moxi-cache-watch")
+
+
 @WINDOWS
 def test_script_and_python_find_exe_files_on_windows():
     assert paths.python().name == "python.exe"

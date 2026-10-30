@@ -315,16 +315,31 @@ def script(name: str) -> Path:
     """The path of console script `name` in this Python environment's scripts directory
     (`name.exe` on Windows), never one found on PATH.
 
-    Raises `FileNotFoundError` when the environment holds no such script.
+    Raises `FileNotFoundError` when the environment holds no such script. Only the scripts
+    directory is looked in: not PATH, and not the working directory, which Windows'
+    own search tries first.
     """
-    import shutil
-
     scripts = _scripts()
-    found = shutil.which(name, path=str(scripts))
-    if found is None:
-        raise FileNotFoundError(f"{name} is not installed in this environment "
-                                f"(looked in {scripts})")
-    return Path(found)
+    for candidate in _script_names(name):
+        path = scripts / candidate
+        if path.is_file() and os.access(path, os.X_OK):
+            return path
+    raise FileNotFoundError(f"{name} is not installed in this environment "
+                            f"(looked in {scripts})")
+
+
+def _script_names(name: str) -> list[str]:
+    """The file names script `name` may have: `name` itself on POSIX; on Windows `name`
+    with each `PATHEXT` extension, or `name` alone when it already ends in one."""
+    if not name or name in (".", "..") or "/" in name or "\\" in name or "\0" in name:
+        return []
+    if not _WINDOWS:
+        return [name]
+    extensions = [e for e in os.environ.get("PATHEXT", "").split(os.pathsep) if e]
+    extensions = extensions or [".COM", ".EXE", ".BAT", ".CMD"]
+    if any(name.lower().endswith(e.lower()) for e in extensions):
+        return [name]
+    return [name + e.lower() for e in extensions]
 
 
 def python() -> Path:
