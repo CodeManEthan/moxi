@@ -361,3 +361,32 @@ describe('the other lines', () => {
     })
   }
 })
+
+describe('hook times', () => {
+  test('a hook times its own work, not what runs behind next, and the samples go out a minute on', async ($: E, on) => {
+    const w = world(on, { spinMs: 80 })
+    await attached($, w)
+    await turnStart($, 't1')
+    await turnEnd($, 't1')
+    const sent = () => w.got.filter(g => g.path === '/hook-times')
+    expect(sent()).toEqual([])
+    await w.clock.advance(60_000)
+    expect(sent().length).toBe(1)
+    const samples = sent()[0]!.body.samples as { event: string; ms: number }[]
+    const events = samples.map(x => x.event)
+    expect(events).toContain('session.start')
+    expect(events).toContain('turn.start')
+    expect(events).toContain('turn.complete')
+    expect(samples.find(x => x.event === 'turn.start')!.ms).toBeLessThan(80)
+    expect(w.kinds()).toEqual(['session', 'turn.start', 'turn.complete'])
+  })
+
+  test('samples are dropped, not sent, once the endpoint has ended', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    await turnStart($, 't1')
+    await w.end()
+    await w.clock.advance(60_000)
+    expect(w.got.filter(g => g.path === '/hook-times')).toEqual([])
+  })
+})

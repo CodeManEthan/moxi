@@ -10,6 +10,13 @@ Stop answered unblocked marks the turn ending, so it takes no more steers.
 
 from __future__ import annotations
 
+import time
+
+# A ping's wall clock at its start, before its other imports: it rides the ping's ask, and
+# the host times the hook from it to its answer.
+_STARTED = time.time()
+# The imports below come after the stamp on purpose.
+
 import argparse
 import hashlib
 import json
@@ -21,7 +28,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import protocol
+from . import hooktimes, protocol
 from .results import StopFacts
 
 log = logging.getLogger("moxi.turns.codex.hooks")
@@ -174,9 +181,11 @@ def hook_fields(data: dict, *, source: str | None = None) -> dict:
 class HookServer:
     """One Unix socket receiving the five hook events for a Codex host."""
 
-    def __init__(self, harness, socket_path):
+    def __init__(self, harness, socket_path, *, times: hooktimes.Recorder | None = None):
         self.harness = harness
         self.socket_path = Path(socket_path)
+        #: The hook times the pings stamp, kept for the doctor.
+        self.times = hooktimes.Recorder("codex") if times is None else times
         self.bound = False
         self._server: socket.socket | None = None
         self._stop = threading.Event()
@@ -204,6 +213,7 @@ class HookServer:
             target=self._accept_loop, daemon=True, name="turns-codex-hooks",
         )
         self._thread.start()
+        self.times.start()
         return self
 
     def stop(self) -> None:
@@ -215,6 +225,7 @@ class HookServer:
         if self.bound:
             self.socket_path.unlink(missing_ok=True)
             self.bound = False
+        self.times.close()
 
     def _accept_loop(self) -> None:
         while not self._stop.is_set():
@@ -236,6 +247,7 @@ class HookServer:
                 reply = self._dispatch(frame, conn)
             if reply is not None:
                 conn.send(reply)
+                self._timed(frame)
         except (OSError, TimeoutError, protocol.ProtocolError):
             pass
         finally:
@@ -268,6 +280,7 @@ class HookServer:
         reason = endpoint.on_stop(facts)
         if reason:
             conn.send({"ok": True, "block": reason})
+            self._timed(frame)
             # The ping still says when it has printed the block. Whether it did or not,
             # the turn's end is Codex's to report.
             try:
@@ -282,10 +295,22 @@ class HookServer:
         return {"ok": True}
 
 
+    def _timed(self, frame: dict) -> None:
+        """Record the hook's wait: from the ping's stamp to this answer. A frame with no
+        stamp (an older ping) and one from another session record nothing."""
+        stamp = frame.get("stamp")
+        if frame.get("session_id") != self.harness.session_id:
+            return
+        if isinstance(stamp, bool) or not isinstance(stamp, (int, float)):
+            return
+        self.times.add(frame.get("event"), (time.time() - stamp) * 1000)
+
+
 class _Ping:
     def __init__(self, path: Path, event: str, source: str | None,
-                 wait_seconds: float):
+                 wait_seconds: float, stamp: float | None = None):
         self.path = path
+        self.stamp = stamp
         self.event = event
         self.source = source
         self.wait_seconds = wait_seconds
@@ -294,7 +319,10 @@ class _Ping:
 
     def body(self, data: dict) -> str | None:
         self.conn = protocol.connect(self.path, PING_TIMEOUT)
-        self.conn.send({"event": self.event, **hook_fields(data, source=self.source)})
+        ask = {"event": self.event, **hook_fields(data, source=self.source)}
+        if self.stamp is not None:
+            ask["stamp"] = self.stamp
+        self.conn.send(ask)
         reply = self.conn.recv(self.wait_seconds)
         if not isinstance(reply, dict) or not reply.get("ok"):
             raise RuntimeError((reply or {}).get("error", "the hook host did not answer"))
@@ -339,7 +367,7 @@ def main(argv=None) -> int:
 
     from .hooks.run import run
 
-    ping = _Ping(Path(args.socket), args.event, args.source, args.wait_seconds)
+    ping = _Ping(Path(args.socket), args.event, args.source, args.wait_seconds, _STARTED)
     render = _block if args.event == "Stop" else None
     kwargs = {"render": render} if render is not None else {}
     return run(args.event, ping.body, seconds=args.wait_seconds, on_error=ping.error,

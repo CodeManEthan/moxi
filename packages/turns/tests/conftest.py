@@ -14,6 +14,14 @@ from moxi_turns import listeners
 from moxi_turns.endpoint import Endpoint
 
 
+@pytest.fixture(autouse=True)
+def state_home(monkeypatch, tmp_path_factory):
+    """Every test keeps turns' state (the hook times among it) in a folder of its own."""
+    root = tmp_path_factory.mktemp("state")
+    monkeypatch.setenv("MOXI_TURNS_STATE_HOME", str(root))
+    return root
+
+
 @pytest.fixture
 def turns_env(monkeypatch, tmp_path_factory):
     root = tmp_path_factory.mktemp("mt")

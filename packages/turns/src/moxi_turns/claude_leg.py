@@ -97,6 +97,12 @@ calls `next`) or `{"ok": true, "verdict": "drop", "reason": r, "text": "<one lin
 person>"}`; the gate drops a `drop` with `text` and never calls `next`. A nonce that names
 no open window reads `late`, and the endpoint logs the late entry.
 
+`/hook-times` — `{samples: [{event, ms}]}` from the runner or the gate, each at most
+once a minute: how long each of its hook handlers took, entry to return less the time in
+`next`. The gate's events carry the prefix `gate `. The leg keeps them for the doctor
+(`hooktimes`), apart from the report queue, so a lost batch costs only its samples.
+Answer `{"ok": true}`.
+
 `/gate/command` — `{request, agents, draft}` from the gate, for a command its runner
 queued, as it comes off the queue. The endpoint re-checks it and records its decision
 before it answers, as `/gate/entry` does.
@@ -111,6 +117,8 @@ import socketserver
 import threading
 from collections.abc import Callable
 from typing import Any, BinaryIO
+
+from . import hooktimes
 
 log = logging.getLogger("moxi.turns.claude")
 
@@ -128,8 +136,9 @@ PATH_STOP = "/ask/stop"
 PATH_CONTEXT = "/ask/context"
 PATH_GATE_ENTRY = "/gate/entry"
 PATH_GATE_COMMAND = "/gate/command"
+PATH_HOOK_TIMES = "/hook-times"
 PATHS = (PATH_REPORT, PATH_LIVE, PATH_STOP, PATH_CONTEXT, PATH_GATE_ENTRY,
-         PATH_GATE_COMMAND)
+         PATH_GATE_COMMAND, PATH_HOOK_TIMES)
 
 #: The report kinds.
 R_SESSION, R_TURN_START, R_TURN_COMPLETE = "session", "turn.start", "turn.complete"
@@ -206,11 +215,14 @@ class _Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 
 class LegServer:
     """The HTTP server on `mod.sock`. `handle(path, body)` answers each request with a
-    dict (sent as `200`), or raises `BadRequest` (`400`)."""
+    dict (sent as `200`), or raises `BadRequest` (`400`). The server answers
+    `/hook-times` itself, into `times`."""
 
-    def __init__(self, path: str, handle: Callable[[str, dict[str, Any]], dict[str, Any]]):
+    def __init__(self, path: str, handle: Callable[[str, dict[str, Any]], dict[str, Any]],
+                 *, times: hooktimes.Recorder | None = None):
         self.path = path
-        handler = _handler_for(handle)
+        self.times = hooktimes.Recorder("claude") if times is None else times
+        handler = _handler_for(_with_hook_times(handle, self.times))
         self._server = _Server(path, handler)
         self._thread = threading.Thread(target=self._server.serve_forever,
                                         kwargs={"poll_interval": 0.2}, daemon=True,
@@ -218,6 +230,7 @@ class LegServer:
 
     def start(self) -> "LegServer":
         self._thread.start()
+        self.times.start()
         return self
 
     def close(self) -> None:
@@ -225,6 +238,22 @@ class LegServer:
             self._server.shutdown()
         finally:
             self._server.server_close()
+            self.times.close()
+
+
+def _with_hook_times(handle, times: hooktimes.Recorder):
+    def answer(path: str, body: dict[str, Any]) -> dict[str, Any]:
+        if path != PATH_HOOK_TIMES:
+            return handle(path, body)
+        samples = body.get("samples")
+        if not isinstance(samples, list):
+            raise BadRequest("hook times without a samples list")
+        for sample in samples:
+            if isinstance(sample, dict):
+                times.add(sample.get("event"), sample.get("ms"))
+        return {}
+
+    return answer
 
 
 def _handler_for(handle):
@@ -279,7 +308,7 @@ def _handler_for(handle):
 
 __all__ = ["LEG", "LINE_HELLO", "LINE_FAILED", "LINE_SUBMIT", "LINE_APPEND", "LINE_COMMAND",
            "LINE_LIVE", "PATH_REPORT", "PATH_LIVE", "PATH_STOP", "PATH_CONTEXT",
-           "PATH_GATE_ENTRY", "PATH_GATE_COMMAND", "PATHS", "R_SESSION", "R_TURN_START",
+           "PATH_GATE_ENTRY", "PATH_GATE_COMMAND", "PATH_HOOK_TIMES", "PATHS", "R_SESSION", "R_TURN_START",
            "R_TURN_COMPLETE", "R_SUBMIT_CLOSE", "R_SUBMIT_BOUND", "R_APPEND_FAILED",
            "R_COMMAND_DONE", "REPORTS", "END_RESOLVE", "END_DROP", "END_FAIL", "ENDS",
            "GATE_CODES", "NONCE_LINE", "LATE", "MAX_BODY",
