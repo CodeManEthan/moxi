@@ -668,6 +668,21 @@ def test_a_detached_output_file_is_created_0600(tmp_path):
     assert stat.S_IMODE(log.stat().st_mode) == 0o600
 
 
+@POSIX
+def test_each_directory_a_detached_output_file_needs_is_made_0700(tmp_path):
+    log = tmp_path / "a" / "b" / "child.log"
+    before = stat.S_IMODE(tmp_path.stat().st_mode)
+    old = os.umask(0)
+    try:
+        proc.spawn([PY, "-c", "print('done', flush=True)"], detached=True, output=log)
+    finally:
+        os.umask(old)
+    assert wait_for(lambda: log.exists() and "done" in log.read_text(), 30)
+    for level in (tmp_path / "a", tmp_path / "a" / "b"):
+        assert stat.S_IMODE(level.stat().st_mode) == 0o700
+    assert stat.S_IMODE(tmp_path.stat().st_mode) == before
+
+
 def test_a_detached_child_without_output_writes_nowhere(tmp_path):
     pid = proc.spawn([PY, "-c", "print('lost')"], detached=True, cwd=tmp_path)
     ident = proc.identity(pid)

@@ -432,8 +432,10 @@ def _spawn_detached(argv: Argv, *, env, cwd, output) -> int:
     else:
         from pathlib import Path
 
+        from . import files
+
         path = Path(output)
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        files._make_dirs(path.parent)
         out = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND
                       | getattr(os, "O_BINARY", 0), 0o600)
     try:
