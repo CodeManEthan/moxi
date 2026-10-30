@@ -510,6 +510,10 @@ def test_adopt_a_linux_timer_wraps_it_and_sets_its_key(fake):
     assert out.code == 0, out
     assert ("wrap", "backup.timer", "services", "adopted.backup", "backup") in fake.calls
     assert key_on("backup") is True
+    # The core's line on how the key stood before it was set is left out.
+    assert not any("runs are off until" in line for line in out.lines)
+    assert "backup.timer: drop-in written" in out.lines
+    assert "backup.timer: runs on (services adopted.backup = true)" in out.lines
     assert fake.foreign["backup.timer"].enabled  # the schedule is armed
     assert all(held for _, held in fake.locked)
 

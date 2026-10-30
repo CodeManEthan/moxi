@@ -234,7 +234,11 @@ class FakeUnits:
         self.wrapped[ref] = Wrapped(module, key, name)
         if self.wrap_fails:
             return Acted(module, ref, "wrap", False, (f"{ref}: daemon-reload failed",))
-        return Acted(module, ref, "wrap", True, (f"{ref} wrapped",))
+        # As the core's: on a success its last line says how the key stands.
+        return Acted(module, ref, "wrap", True,
+                     (f"{ref}: drop-in written",
+                      f"{ref} wrapped; its runs are off until: moxi config set {module} "
+                      f"{key} true"))
 
     def unwrap(self, ref, *, module, runner=None):
         self.calls.append(("unwrap", ref, module))
