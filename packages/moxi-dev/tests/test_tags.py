@@ -15,8 +15,8 @@ from moxi_dev import tags
 from moxi_dev.tags import Hit, scan, tags_in
 
 
-@pytest.mark.parametrize("tag", ["[B5]", "(R5)", "D07", "§5", "design v4", "MAJOR 2",
-                                 "round home/slug"])
+@pytest.mark.parametrize("tag", ["[B5]", "(R5)", "D07", "D07b", "§5", "design v4",
+                                 "MAJOR 2", "round home/slug-two", "Round home-one/slug"])
 def test_each_shape_is_a_tag(tag):
     assert tags_in(f"a line that cites {tag} in passing\n") == [(1, tag)]
 
@@ -25,6 +25,7 @@ def test_each_shape_is_a_tag(tag):
     "the hooks' law L4 holds", "L10 No module's words", "x[0] = y[1]", "D3 and D100",
     "a list [a1] of things", "version 3.12", "X11 sockets", "around home/slug",
     "@pytest.mark.finding(\"L50\")", "pytest.mark.finding('L7')",
+    "a round trip/second", "around home-one/slug", "D07bc",
 ])
 def test_plain_text_and_a_finding_mark_are_not_tags(text):
     assert tags_in(text) == []

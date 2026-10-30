@@ -3,8 +3,10 @@
 Code, tests and docs say a reason in plain words. A tag is the shorthand of the notes a
 change was planned in, which a reader of the repository cannot follow: a short capital id
 with a number in square brackets, one of a few capital letters with a number in
-parentheses, a decision id (a D and two digits), a section sign with a number, a design
-version, a severity with a number, or a round named by its home and slug. No example
+parentheses, a decision id (a D and two digits, perhaps a letter after), a section sign
+with a number, a design version, a severity with a number, or a round named by its home
+and slug, one of the two hyphenated (two plain words with a slash between, after
+"round", are as likely prose). No example
 of one is written here, so this file passes its own check. Hook laws written
 `L4` and other plain ids are not tags.
 
@@ -29,11 +31,11 @@ from pathlib import Path
 TAG = re.compile(
     r"\[[A-Z]{1,2}[0-9]{1,3}[a-z]?\]"
     r"|\([RSCFQNBIX][0-9]+\)"
-    r"|\bD[0-9]{2}\b"
+    r"|\bD[0-9]{2}[a-z]?\b"
     r"|\u00a7 ?[0-9]"
     r"|\bdesign v[0-9]"
     r"|\b(?:MINOR|MAJOR|BLOCKER) [0-9]"
-    r"|(?i:\bround [a-z0-9-]+/[a-z0-9-]+)"
+    r"|\b[Rr]ound (?:[a-z0-9]+-[a-z0-9-]+/[a-z0-9-]+|[a-z0-9-]+/[a-z0-9]+-[a-z0-9-]+)"
 )
 
 #: A finding mark's argument, which is data.

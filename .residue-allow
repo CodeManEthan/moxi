@@ -7,5 +7,8 @@ packages/moxi-dev/tests/test_tags.py	(R5)	data: the tag check's own tests feed t
 packages/moxi-dev/tests/test_tags.py	§5	data: the tag check's own tests feed this to the pattern they test
 packages/moxi-dev/tests/test_tags.py	design v4	data: the tag check's own tests feed this to the pattern they test
 packages/moxi-dev/tests/test_tags.py	MAJOR 2	data: the tag check's own tests feed this to the pattern they test
-packages/moxi-dev/tests/test_tags.py	round home/slug	data: the tag check's own tests feed this to the pattern they test
+packages/moxi-dev/tests/test_tags.py	round home/slug-two	data: the tag check's own tests feed this to the pattern they test
+packages/moxi-dev/tests/test_tags.py	Round home-one/slug	data: the tag check's own tests feed this to the pattern they test
+packages/moxi-dev/tests/test_tags.py	D07b	data: the tag check's own tests feed this to the pattern they test
 packages/moxi-dev/tests/test_tags.py	D07	data: the tag check's own tests feed this to the pattern they test
+packages/moxi-dev/tests/test_tags.py	round trip/second	data: prose the tag check must let through; the commit scan's wider round shape reads it as a round
