@@ -121,3 +121,16 @@ def test_the_moxi_command_reaches_git_hooks(demo):
     assert done.returncode == 2 and "demo/nope" in done.stderr
     done = moxi_repo("git-hooks", "add", str(repo), "demo/camel")
     assert done.returncode == 3
+
+
+def test_commit_takes_a_path_inside_the_repo(demo, capsys):
+    import moxi_repo
+
+    repo = demo.repo()
+    moxi_repo.save_spec(moxi_repo.Spec(name="demo/snap", root=repo, paths=("notes",),
+                                       author=("snap-bot", "snap@example.invalid")))
+    (repo / "notes").mkdir()
+    (repo / "notes" / "a.md").write_text("a line\n", encoding="utf-8")
+    code, out, err = run(capsys, "commit", str(repo / "notes"))
+    assert code == 0, err
+    assert "repo: demo/snap committed" in out

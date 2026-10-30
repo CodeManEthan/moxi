@@ -291,8 +291,10 @@ class _Where:
         return self.cgd / OWN_DIR
 
 
-def _where(root) -> _Where:
-    """The work tree's top, its common git dir and its git dir; raises SpecError."""
+def _where(root, *, exact: bool = True) -> _Where:
+    """The work tree's top, its common git dir and its git dir; raises SpecError. With
+    `exact` (a spec's root), `root` must be the work tree's top; without it, any path
+    inside the work tree will do."""
     root = Path(root)
     if not root.is_dir():
         raise SpecError(f"{root} is not a directory")
@@ -301,10 +303,10 @@ def _where(root) -> _Where:
     lines = done.stdout.splitlines()
     if done.returncode != 0 or len(lines) != 3:
         raise SpecError(f"{root} is not in a git work tree")
-    cgd, top, git_dir = (Path(x) for x in lines)
-    if os.path.realpath(top) != os.path.realpath(root):
-        raise SpecError(f"root {root} is not the top of its work tree ({top})")
-    return _Where(top, cgd, git_dir)
+    cgd, found, git_dir = (Path(x) for x in lines)
+    if exact and os.path.realpath(found) != os.path.realpath(root):
+        raise SpecError(f"root {root} is not the top of its work tree ({found})")
+    return _Where(found, cgd, git_dir)
 
 
 # This thread's passes: the common git dirs whose committer lock it holds.
