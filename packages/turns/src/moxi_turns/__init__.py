@@ -30,7 +30,7 @@ The wire under it is turns' socket protocol, `contracts/socket-protocol.md`.
 
 The package imports nothing when it loads: each name above loads its submodule on first
 use (PEP 562). A hook process imports `moxi_turns.hooks`, which pays this package first,
-and must not pay the core, sockets or threads with it (the hooks' law L3).
+and must not pay the core, sockets or threads with it (the hooks' law 3).
 """
 
 from __future__ import annotations

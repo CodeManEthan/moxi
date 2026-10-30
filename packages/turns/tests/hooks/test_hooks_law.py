@@ -29,7 +29,7 @@ ROOT = SRC.parents[2]
 MODULES = sorted(p for p in SRC.rglob("*.py") if p.name != "__init__.py")
 ALL = MODULES + sorted(SRC.rglob("__init__.py"))
 
-#: The package's own import name, and the stdlib names L3 allows.
+#: The package's own import name, and the stdlib names law 3 allows.
 PACKAGE = "moxi_turns.hooks"
 STDLIB = {"__future__", "json", "signal", "sys"}
 
@@ -60,7 +60,7 @@ def _code_literals(path):
     ]
 
 
-# --- L1 — Stateless -----------------------------------------------------------------
+# --- Law 1 — Stateless --------------------------------------------------------------
 
 def test_l1_the_suite_needs_no_environment():
     """Gauge: the suite needs no environment. Driven as the harness drives it, in a
@@ -80,7 +80,7 @@ def test_l1_the_suite_needs_no_environment():
     assert err == ""
 
 
-# --- L2 — Env-free ------------------------------------------------------------------
+# --- Law 2 — Env-free ---------------------------------------------------------------
 
 def test_l2_no_module_reads_the_environment():
     """Gauge: `os.environ` and `getenv` appear nowhere in the package. A caller's own
@@ -91,7 +91,7 @@ def test_l2_no_module_reads_the_environment():
             assert banned not in text, f"{path.name} reads the environment: {banned}"
 
 
-# --- L3 — Standard library only, and nothing else of Moxi's -------------------------
+# --- Law 3 — Standard library only, and nothing else of Moxi's ----------------------
 
 #: What importing the package adds to a process. The control imports `json`, `signal`
 #: and `__future__` in the same process: `json` drags its decoder, encoder, scanner and
@@ -122,7 +122,7 @@ CLOSURE = ["moxi_turns", *OWN_MODULES]
 
 def test_l3_the_import_closure_is_the_three_names_and_the_kit():
     """Gauge: import the whole kit in a clean subprocess; `sys.modules` gained nothing
-    outside the L3 list and the kit's own modules."""
+    outside the law 3 list and the kit's own modules."""
     code, out, err = drive(
         _CLOSURE % "import moxi_turns.hooks, moxi_turns.hooks.wire, "
                    "moxi_turns.hooks.text, moxi_turns.hooks.run"
@@ -191,7 +191,7 @@ def test_l3_typing_is_never_imported_at_runtime():
 
 
 def test_l3_the_package_is_no_ones_command_and_no_ones_api():
-    """The kit shares turns' distribution, so the build file's half of L3 is what that
+    """The kit shares turns' distribution, so the build file's half of law 3 is what that
     distribution promises about it: no console script runs a module of the kit itself
     (a library has no CLI, and this one selects no exit code), and the announcement's
     `API` is not the kit, so no other module may import it."""
@@ -204,7 +204,7 @@ def test_l3_the_package_is_no_ones_command_and_no_ones_api():
     assert api is None or not api.startswith(PACKAGE)
 
 
-# --- L4 — Imports nothing eagerly ---------------------------------------------------
+# --- Law 4 — Imports nothing eagerly ------------------------------------------------
 
 def test_l4_importing_the_package_binds_no_submodule():
     """Gauge one: `import moxi_turns.hooks` binds no submodule. The saving today is nil
@@ -228,7 +228,7 @@ def test_l4_importing_the_package_binds_no_submodule():
 
 
 def test_l4_the_closure_of_run_is_the_l3_list_and_own_modules():
-    """Gauge two: what importing `moxi_turns.hooks.run` adds is the L3 list and the kit's
+    """Gauge two: what importing `moxi_turns.hooks.run` adds is the law 3 list and the kit's
     own modules, nothing else and nothing heavy, because the kit IS a hook's path."""
     code, out, err = drive(_CLOSURE % "import moxi_turns.hooks.run")
     assert code == 0, err
@@ -262,7 +262,7 @@ def test_l4_an_unknown_attribute_is_still_an_attribute_error():
         hooks.nonesuch
 
 
-# --- L5 — A hard per-hook time bound ------------------------------------------------
+# --- Law 5 — A hard per-hook time bound ---------------------------------------------
 
 def test_l5_a_body_past_the_bound_returns_default_emits_nothing_and_reports_once():
     """Gauge: a body that sleeps past the bound returns `default`, emits nothing, and
@@ -344,9 +344,9 @@ def test_l5_a_nested_guard_does_not_cancel_the_outer_wall():
 
 
 # The rule every gauge below turns on, stated once: a wall is absorbed ONLY by the guard
-# that armed it. Everything else re-raises it untouched. The six L5 gauges above can all
+# that armed it. Everything else re-raises it untouched. The six law 5 gauges above can all
 # pass while the law is broken, because every one of them puts the sleep directly in the
-# body, the one step of six where absorbing the wall happens to coincide with L5's
+# body, the one step of six where absorbing the wall happens to coincide with law 5's
 # required outcome.
 
 def test_l5_a_wall_in_the_read_abandons_the_hook_with_nothing_on_stdout():
@@ -410,7 +410,7 @@ def test_l5_a_wall_in_any_step_is_reported_once_by_the_guard_that_armed_it(
     """Every step of `_once` is its own guard and not one of them arms anything, so
     whichever step the wall lands in, exactly one `deadline` report comes out and the
     hook ends there with nothing written. Five steps; a kit whose step guards absorbed
-    the wall would give L5's outcome in `body` alone, and by accident."""
+    the wall would give law 5's outcome in `body` alone, and by accident."""
     kwargs = dict(stream=io.StringIO("{}"), body=lambda d: "a payload")
     if step == "read":
         kwargs["stream"] = _SlowStream()
@@ -456,7 +456,7 @@ def test_l5_a_failed_arming_leaves_the_process_handler_as_it_found_it():
 @pytest.mark.parametrize("seconds", [0, 0.0, -1, -0.5])
 def test_l5_a_non_positive_bound_is_a_caller_error_and_arms_nothing(seconds):
     """`setitimer(…, 0)` DISARMS, so a bound of zero is a wall that silently is not one.
-    L5 says the bound is off when `seconds` is NOT passed; passing it and getting
+    Law 5 says the bound is off when `seconds` is NOT passed; passing it and getting
     nothing is the one outcome the law does not admit, so it is a caller error: reported
     through `on_error` with `where="deadline"`, no deadline armed, and `remaining()`
     answering `None` rather than `0.0`.
@@ -549,7 +549,7 @@ def test_l5_only_the_arming_guard_absorbs_a_wall_is_in_the_code_and_not_only_the
                for n in ast.walk(deadline[0])), "the clause must re-raise a foreign wall"
 
 
-# --- L6 — A size cap that admits its own cuts ---------------------------------------
+# --- Law 6 — A size cap that admits its own cuts ------------------------------------
 
 @pytest.mark.parametrize("marker", ["…", "[cut]", "\n[... truncated ...]"])
 @pytest.mark.parametrize("length", [0, 1, 7, 40, 500])
@@ -603,7 +603,7 @@ def test_l6_marker_is_required_and_has_no_default():
     assert params["marker"].kind is inspect.Parameter.KEYWORD_ONLY
 
 
-# --- L7 — The hook path cannot raise, and the kit never selects an exit code --------
+# --- Law 7 — The hook path cannot raise, and the kit never selects an exit code -----
 
 class _Bare(BaseException):
     """Not an `Exception`. The class a caller's own `except Exception` would miss."""
@@ -725,7 +725,7 @@ def test_l7_a_wall_inside_a_broken_logger_still_reaches_the_guard_that_armed_it(
     assert out.writes == []
 
 
-# --- L8 — Compose, then emit, once --------------------------------------------------
+# --- Law 8 — Compose, then emit, once -----------------------------------------------
 
 def test_l8_stdout_sees_exactly_one_write_per_run_or_none():
     """Gauge: a stdout double that records every `write` call sees exactly one per run,
@@ -746,7 +746,7 @@ def test_l8_stdout_sees_exactly_one_write_per_run_or_none():
 def test_l8_the_wall_is_lifted_across_the_one_write_and_put_back():
     """A wall delivered between `emit`'s write and its flush leaves the line in the
     buffer, and the interpreter flushes it at exit: the hook reports a deadline AND the
-    harness gets the payload, which is the one outcome L5 forbids. The window is closed
+    harness gets the payload, which is the one outcome law 5 forbids. The window is closed
     by lifting the kit's wall across the write and putting it back, measured here rather
     than raced, because a race has no deterministic gauge."""
     during = []
@@ -800,7 +800,7 @@ def test_l8_a_render_that_raises_writes_nothing_at_all():
     assert seen.wheres == ["render"]
 
 
-# --- L9 — stdout carries the payload or nothing -------------------------------------
+# --- Law 9 — stdout carries the payload or nothing ----------------------------------
 
 def test_l9_every_failure_path_leaves_stderr_empty(capsys):
     """Gauge: every failure path asserts `err == ""` from the kit's own frames. Where a
@@ -848,7 +848,7 @@ def test_l9_the_package_never_touches_stderr():
 def test_l9_the_one_stderr_line_the_kit_cannot_prevent_is_stated_where_a_reader_looks():
     """A harness that closes the read end of the pipe early makes CPython print
     `Exception ignored while flushing sys.stdout: BrokenPipeError` at shutdown. It comes
-    from no frame in the kit, so L9's gauge cannot see it and no test can catch it, which
+    from no frame in the kit, so law 9's gauge cannot see it and no test can catch it, which
     is exactly why it has to be written down instead: in the docstring a caller reads
     when it adopts `emit`, and in the package's own docstring."""
     sentence = "Exception ignored while flushing sys.stdout: BrokenPipeError"
@@ -857,10 +857,10 @@ def test_l9_the_one_stderr_line_the_kit_cannot_prevent_is_stated_where_a_reader_
         "the package docstring lost the shutdown caveat")
 
 
-# --- L10 — No module's words --------------------------------------------------------
+# --- Law 10 — No module's words -----------------------------------------------------
 
 #: Every string the kit owns, spelled out. A new one fails this test until somebody puts
-#: it here, which is the point: the L10 tripwire is only a tripwire if adding a word
+#: it here, which is the point: the law 10 tripwire is only a tripwire if adding a word
 #: costs a deliberate edit. Four groups, and nothing else is allowed to exist.
 OWNED = {
     # the wire's own keys, the longest strings the kit owns, and not the kit's words
