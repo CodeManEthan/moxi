@@ -27,8 +27,8 @@ The script's keys, each with its default:
   `Screen` itself, as slots does. `dead` is the pane's `pane_dead`. Default: no screen.
 - `answers`: what each `answer_screen` gives in turn, the last repeated: `{"outcome": ...,
   "why": ..., "capture": ...}`, `outcome` one of slots' words (`gone`, `ended`,
-  `not-ended`, `mismatch`, `ended-without-screen`, `no-pane`); `why` is words for a person.
-  Default: `gone`.
+  `not-ended`, `mismatch`, `ended-without-screen`, `no-pane`); `why` is words for a person,
+  led by the word `not-settled` for a `mismatch` whose settle bound ran out. Default: `gone`.
 
 The turns through `frames` and `answers` are counted in this process; `reset()` starts
 them again.

@@ -21,16 +21,19 @@ covers the whole call, keys and settling included, and records the outcome as a
 
 - `gone`: the screen was answered and left; the loop goes on. So does `not-ended`, which
   slots gives only for a screen that must end its pane, and the pane is still there.
-- `mismatch`: slots could not answer the screen in its bound, maybe because it had not
-  settled yet. The loop goes on, and one interval later answers it again if it still
-  shows, while the bound has time left. If the bound runs out with that screen still
-  showing, the launch fails `screen-mismatch`, with slots' capture of the screen, and
-  nothing more is sent to the session.
+- `mismatch` whose `why` starts with the word `not-settled`: slots' settle bound ran out
+  before the screen held still. It is recorded as `not-settled`, and one interval later
+  the loop answers the screen again if it still shows, while the bound has time left. If
+  the bound runs out this way, the watch ends at its bound and the ready wait decides.
+- any other `mismatch`: the screen showing is not the one declared. The launch fails
+  `screen-mismatch` at once, with slots' capture of the screen, and nothing more is sent
+  to the session.
 - `ended`, `ended-without-screen` or `no-pane`: the pane died or is gone, and the launch
   fails `exited`. So does a dead pane at any read.
 
 No answer is started with less than `MIN_ANSWER_S` left. slots' `why` is words for a
-person, recorded beside the outcome and never read as a code.
+person, recorded beside the outcome; its leading `not-settled` is the one word the loop
+reads in it.
 
 No Codex screen is declared yet, so a Codex slot launch answers none: a folder Codex has
 not trusted may show Codex's own trust prompt, which waits for a person who attaches, and a
@@ -74,6 +77,9 @@ EVENT = "startup-screen"
 GO_ON = frozenset({"gone", "not-ended"})
 #: slots' answer when it could not answer a screen in its bound.
 MISMATCH = "mismatch"
+#: The word a `mismatch`'s `why` starts with when slots' settle bound ran out: the screen
+#: had not settled. It is also the outcome the loop records for that answer.
+NOT_SETTLED = "not-settled"
 #: slots' answers that mean the pane died or is gone.
 PANE_ENDED = frozenset({"ended", "ended-without-screen", "no-pane"})
 #: The reasons a launch fails with here.
@@ -107,7 +113,7 @@ class Watched:
     `stopped` (slots could not be read, or answered in a word the loop does not know; the
     ready wait decides), or `failed`, with `reason` (`exited` or `screen-mismatch`), `why`,
     and slots' `capture` of a screen it could not answer. `answered` lists each answer's
-    screen and slots' outcome word."""
+    screen and its outcome: slots' word, or `not-settled`."""
 
     ended: str
     reason: str | None = None
@@ -148,26 +154,13 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
     shown = [screen for _, screen in enabled]
     answered: list[tuple[str, str]] = []
     deadline = clock() + wait_s
-    # The screen slots last could not answer, its words and its capture: it fails the
-    # launch if it is still showing when the bound runs out.
-    unanswered: tuple[str, str, str | None] | None = None
     failures = (api.TryAgain, api.TmuxError)
 
     def done(ended: str, **more: Any) -> Watched:
         return Watched(ended, answered=tuple(answered), **more)
 
-    def at_bound(showing: str | None) -> Watched:
-        if unanswered is None or showing != unanswered[0]:
-            return done("bound")
-        name, why, capture = unanswered
-        return done("failed", reason=SCREEN_MISMATCH,
-                    why=f"the {name} screen was still showing when startup.wait_s ran "
-                        f"out, and slots could not answer it" + (f": {why}" if why else ""),
-                    capture=capture)
-
     while True:
-        left = deadline - clock()
-        if left <= 0 and unanswered is None:
+        if deadline - clock() <= 0:
             return done("bound")
         try:
             seen = api.read_screen(slot, screens=shown)
@@ -176,14 +169,10 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
         if seen.dead:
             return done("failed", reason=EXITED, why=_exited(api, slot))
         name, screen = _named(seen.screen, enabled)
-        if unanswered is not None and name != unanswered[0]:
-            unanswered = None
-        left = deadline - clock()
-        if left <= 0:
-            return at_bound(name)
         if screen is not None:
+            left = deadline - clock()
             if left < MIN_ANSWER_S:
-                return at_bound(name)
+                return done("bound")
             wait = min(ANSWER_WAIT_S, left)
             try:
                 answer = api.answer_screen(slot, screen, wait=wait)
@@ -191,10 +180,14 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
                 return _stopped(conn, request_id, error, done)
             outcome, why = answer.outcome, answer.why or ""
             capture = str(answer.capture) if answer.capture else None
-            answered.append((name, outcome))
-            store.add_event(conn, EVENT, {"screen": name, "outcome": outcome, "why": why,
-                                          "wait": wait, "capture": capture},
-                            request_id=request_id)
+            unsettled = outcome == MISMATCH and _not_settled(why)
+            recorded = NOT_SETTLED if unsettled else outcome
+            answered.append((name, recorded))
+            detail = {"screen": name, "outcome": recorded, "why": why, "wait": wait,
+                      "capture": capture}
+            if unsettled:
+                detail["answer"] = outcome
+            store.add_event(conn, EVENT, detail, request_id=request_id)
             if outcome in PANE_ENDED:
                 return done("failed", reason=EXITED, why=_exited(api, slot))
             if outcome in GO_ON:
@@ -202,8 +195,12 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
             if outcome != MISMATCH:
                 return _stopped(conn, request_id,
                                 f"slots answered the {name} screen {outcome!r}", done)
-            # Asked again after one interval, while the bound has time left.
-            unanswered = (name, why, capture)
+            if not unsettled:
+                return done("failed", reason=SCREEN_MISMATCH,
+                            why=f"the {name} screen showed and slots could not answer it"
+                                + (f": {why}" if why else ""),
+                            capture=capture)
+            # Not settled yet: asked again after one interval, while the bound has time.
         step = min(interval, max(deadline - clock(), 0))
         began = clock()
         if ready is not None:
@@ -215,6 +212,14 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
         spent = clock() - began
         if spent < step:
             sleep(step - spent)
+
+
+def _not_settled(why: str) -> bool:
+    """Whether slots' `why` starts with the word `not-settled`: its settle bound ran out."""
+    if not why.startswith(NOT_SETTLED):
+        return False
+    rest = why[len(NOT_SETTLED):]
+    return not rest or not (rest[0].isalnum() or rest[0] in "-_")
 
 
 def _named(shown: Any, enabled: Sequence[tuple[str, Any]]) -> tuple[str | None, Any]:
@@ -310,5 +315,5 @@ def _ask(question: str) -> bool:
 
 
 __all__ = ["ANSWER_WAIT_S", "EVENT", "EXITED", "GO_ON", "INTERVAL_S", "MIN_ANSWER_S",
-           "MISMATCH", "PANE_ENDED", "QUESTIONS", "SCREENS", "SCREEN_MISMATCH", "Watched",
-           "screens", "setup", "watch"]
+           "MISMATCH", "NOT_SETTLED", "PANE_ENDED", "QUESTIONS", "SCREENS",
+           "SCREEN_MISMATCH", "Watched", "screens", "setup", "watch"]

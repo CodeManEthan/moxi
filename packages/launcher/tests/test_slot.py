@@ -449,9 +449,9 @@ def test_both_screens_are_watched_when_both_settings_are_on(work, harness, rig):
                                                       "CLAUDE_DEV_CHANNELS"]
 
 
-def test_a_screen_still_showing_when_the_bound_runs_out_fails_screen_mismatch(
+def test_a_screen_that_is_not_the_one_declared_fails_screen_mismatch_at_once(
         work, harness, rig, turns):
-    screens_on(2)
+    screens_on(3)
     turns.plan(ready="timeout")
     rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}],
              answers=[{"outcome": "mismatch", "why": "the option row is missing",
@@ -460,54 +460,71 @@ def test_a_screen_still_showing_when_the_bound_runs_out_fails_screen_mismatch(
     assert (got.state, got.reason, got.exit_code) == ("failed", startup.SCREEN_MISMATCH,
                                                       exits.ERROR)
     assert "/state/slots/mismatches/1.txt" in got.line
+    assert "the option row is missing" in got.line
     [failed] = events(kind="start-failed")
     assert failed.detail["capture"] == "/state/slots/mismatches/1.txt"
-    # The screen may not have settled, so it was asked again while the bound had time.
-    asked = rig.calls("answer_screen")
-    assert len(asked) > 1
-    assert {e.detail["outcome"] for e in events(kind=startup.EVENT)} == {"mismatch"}
-    # The launcher sends nothing further: no first turn.
+    # Asked once and not again: nothing more is sent, no further read, no first turn.
+    assert len(rig.calls("answer_screen")) == 1 and len(rig.calls("read_screen")) == 1
+    [seen] = events(kind=startup.EVENT)
+    assert seen.detail["outcome"] == "mismatch"
     assert turns.calls("deliver") == []
     assert targets.exit_of(row()) == exits.ERROR
 
 
-def test_a_mismatch_whose_screen_left_is_not_a_failure(work, harness, rig):
+def test_a_screen_not_settled_until_the_bound_runs_out_lets_the_launch_go_on(
+        work, harness, rig):
+    screens_on(2)
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}],
+             answers=[{"outcome": "mismatch", "why": "not-settled: the marker moved",
+                       "capture": "/state/slots/mismatches/2.txt"}])
+    got = api.launch(request(work))
+    # The watch ends at its bound with not-settled recorded, and the launch goes on.
+    assert (got.state, got.exit_code, got.reason) == ("started", 0, None)
+    assert len(rig.calls("answer_screen")) > 1
+    seen = events(kind=startup.EVENT)
+    assert {e.detail["outcome"] for e in seen} == {startup.NOT_SETTLED}
+    assert {e.detail["answer"] for e in seen} == {"mismatch"}
+    assert events(kind="start-failed") == []
+
+
+def test_a_screen_not_settled_whose_screen_left_is_not_a_failure(work, harness, rig):
     screens_on(2)
     rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}, {"screen": None}],
-             answers=[{"outcome": "mismatch", "why": "marker moved away"}])
+             answers=[{"outcome": "mismatch", "why": "not-settled"}])
     got = api.launch(request(work))
     assert got.state == "started"
     [seen] = events(kind=startup.EVENT)
-    assert seen.detail["outcome"] == "mismatch"
+    assert seen.detail["outcome"] == startup.NOT_SETTLED
     assert len(rig.calls("answer_screen")) == 1
 
 
-def test_a_mismatch_answered_on_the_next_ask_lets_the_launch_go_on(work, harness, rig):
+def test_a_screen_not_settled_then_answered_lets_the_launch_go_on(work, harness, rig):
     screens_on(3)
     rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}, {"screen": "CLAUDE_TRUST_FOLDER"},
                      {"screen": None}],
              answers=[{"outcome": "mismatch",
-                       "why": "the marker stayed on No, exit for 2 s"},
+                       "why": "not-settled: the marker stayed on No, exit for 2 s"},
                       {"outcome": "gone"}])
     got = api.launch(request(work))
     assert got.state == "started" and got.exit_code == 0
     first_answer, second = events(kind=startup.EVENT)
-    assert first_answer.detail["outcome"] == "mismatch"
+    assert first_answer.detail["outcome"] == startup.NOT_SETTLED
     assert "stayed on" in first_answer.detail["why"]
     assert second.detail["outcome"] == "gone"
     assert row().reason is None
 
 
-def test_a_mismatch_then_an_ended_pane_fails_exited(work, harness, rig, turns):
+def test_a_screen_not_settled_then_an_ended_pane_fails_exited(work, harness, rig, turns):
     screens_on(3)
     turns.plan(ready="timeout")
     rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}], dead_status=1,
-             answers=[{"outcome": "mismatch", "why": "x"}, {"outcome": "ended"}])
+             answers=[{"outcome": "mismatch", "why": "not-settled: x"},
+                      {"outcome": "ended"}])
     got = api.launch(request(work, brief=BRIEF))
     assert (got.state, got.reason) == ("failed", startup.EXITED)
     assert "pane status 1" in got.line
-    assert [e.detail["outcome"] for e in events(kind=startup.EVENT)] == ["mismatch",
-                                                                        "ended"]
+    assert [e.detail["outcome"] for e in events(kind=startup.EVENT)] == [
+        startup.NOT_SETTLED, "ended"]
     assert turns.calls("deliver") == []
 
 
@@ -643,66 +660,97 @@ def test_no_answer_is_started_with_less_than_a_second_left(conn):
     assert seen.answers == [] and got.ended == "bound" and not got.failed
 
 
-def test_a_mismatch_is_asked_again_until_the_bound_runs_out_then_fails(conn):
+NOT_SETTLED = {"outcome": "mismatch", "why": "not-settled: two rows marked",
+               "capture": "/c"}
+
+
+def test_a_screen_not_settled_is_asked_again_until_the_bound_runs_out(conn):
     clock = Clock()
-    # The words are for a person: a why that reads like a code changes nothing.
-    seen = loop_api(clock, [SHOWING],
-                    [{"outcome": "mismatch", "why": "not-settled: two rows marked",
-                      "capture": "/c"}], answer_takes=2.0)
+    seen = loop_api(clock, [SHOWING], [NOT_SETTLED], answer_takes=2.0)
     got = watch(conn, clock, seen, wait_s=6)
     # Asked at 0 (wait 5), at 2.25 (3.75) and at 4.5 (1.5), one interval after each
-    # mismatch; at 6 the bound is spent with the screen still showing.
+    # answer; at 6 the bound is spent. The watch ends there, not failed: the ready wait
+    # decides.
     assert seen.answers == [5.0, 3.75, 1.5]
-    assert (got.ended, got.reason, got.capture) == ("failed", startup.SCREEN_MISMATCH,
-                                                     "/c")
-    assert "two rows marked" in got.why and "startup.wait_s" in got.why
-    assert seen.reads[-1] == pytest.approx(6.0)  # read at the bound: still showing
-    assert [a for _, a in got.answered] == ["mismatch"] * 3
-    outcomes = [e.detail["outcome"] for e in store.events(conn, "r1")]
-    assert outcomes == ["mismatch"] * 3
+    assert (got.ended, got.reason, got.capture) == ("bound", None, None)
+    assert [a for _, a in got.answered] == [startup.NOT_SETTLED] * 3
+    detail = [e.detail for e in store.events(conn, "r1")]
+    assert [d["outcome"] for d in detail] == [startup.NOT_SETTLED] * 3
+    assert {d["answer"] for d in detail} == {"mismatch"}
+    assert {d["capture"] for d in detail} == {"/c"}
 
 
-def test_a_mismatch_with_under_a_second_left_is_not_asked_again_and_fails(conn):
+def test_a_screen_not_settled_with_under_a_second_left_is_not_asked_again(conn):
     clock = Clock()
-    seen = loop_api(clock, [SHOWING], [{"outcome": "mismatch", "capture": "/c"}],
-                    answer_takes=2.5)
+    seen = loop_api(clock, [SHOWING], [NOT_SETTLED], answer_takes=2.5)
     got = watch(conn, clock, seen, wait_s=3)
     # Asked at 0 (wait 3); at 2.75 only 0.25 s is left, and the screen still shows.
     assert seen.answers == [3.0]
-    assert (got.ended, got.reason, got.capture) == ("failed", startup.SCREEN_MISMATCH,
-                                                     "/c")
+    assert got.ended == "bound" and not got.failed
 
 
-def test_a_mismatch_then_the_screen_answered_goes_on(conn):
+def test_a_screen_not_settled_then_answered_goes_on(conn):
     clock = Clock()
     seen = loop_api(clock, [SHOWING, SHOWING, NONE],
-                    [{"outcome": "mismatch", "why": "the marker did not move"},
+                    [{"outcome": "mismatch", "why": "not-settled: the marker did not move"},
                      {"outcome": "gone"}], answer_takes=2.0)
     got = watch(conn, clock, seen, wait_s=6)
     assert got.ended == "bound" and not got.failed
-    assert got.answered == (("CLAUDE_TRUST_FOLDER", "mismatch"),
+    assert got.answered == (("CLAUDE_TRUST_FOLDER", startup.NOT_SETTLED),
                             ("CLAUDE_TRUST_FOLDER", "gone"))
     detail = [e.detail for e in store.events(conn, "r1")]
-    assert [d["outcome"] for d in detail] == ["mismatch", "gone"]
-    assert detail[0]["why"] == "the marker did not move"
+    assert [d["outcome"] for d in detail] == [startup.NOT_SETTLED, "gone"]
+    assert detail[0]["why"] == "not-settled: the marker did not move"
 
 
-def test_a_mismatch_whose_screen_left_ends_at_the_bound_without_failing(conn):
+def test_a_screen_not_settled_whose_screen_left_ends_at_the_bound(conn):
     clock = Clock()
-    seen = loop_api(clock, [SHOWING, NONE], [{"outcome": "mismatch", "capture": "/c"}],
-                    answer_takes=1.0)
+    seen = loop_api(clock, [SHOWING, NONE], [NOT_SETTLED], answer_takes=1.0)
     got = watch(conn, clock, seen, wait_s=3)
     assert seen.answers == [3.0]
     assert got.ended == "bound" and not got.failed and got.capture is None
 
 
-def test_a_mismatch_then_an_ended_pane_fails_exited_with_its_status(conn):
+def test_a_screen_not_settled_then_an_ended_pane_fails_exited_with_its_status(conn):
     clock = Clock()
-    seen = loop_api(clock, [SHOWING], [{"outcome": "mismatch"}, {"outcome": "ended"}],
+    seen = loop_api(clock, [SHOWING], [NOT_SETTLED, {"outcome": "ended"}],
                     answer_takes=1.0, status=0)
     got = watch(conn, clock, seen, wait_s=10)
     assert (got.ended, got.reason) == ("failed", startup.EXITED)
     assert "pane status 0" in got.why and len(seen.answers) == 2
+    assert [a for _, a in got.answered] == [startup.NOT_SETTLED, "ended"]
+
+
+@pytest.mark.parametrize("why", [
+    "the option row is missing",
+    "",
+    "the screen was not-settled",  # the word must lead
+    "not-settledness",             # and be the whole word
+    "Not-settled: two rows",
+])
+def test_any_other_mismatch_fails_screen_mismatch_at_once(conn, why):
+    clock = Clock()
+    seen = loop_api(clock, [SHOWING], [{"outcome": "mismatch", "why": why,
+                                        "capture": "/c"}], answer_takes=1.0)
+    got = watch(conn, clock, seen, wait_s=20)
+    # One read, one answer, then nothing more: no pause, no read, no second answer.
+    assert seen.answers == [5.0] and len(seen.reads) == 1
+    assert (got.ended, got.reason, got.capture) == ("failed", startup.SCREEN_MISMATCH,
+                                                     "/c")
+    assert "CLAUDE_TRUST_FOLDER" in got.why and why in got.why
+    assert got.answered == (("CLAUDE_TRUST_FOLDER", "mismatch"),)
+    [event] = store.events(conn, "r1")
+    assert event.detail["outcome"] == "mismatch" and "answer" not in event.detail
+
+
+@pytest.mark.parametrize("why", ["not-settled", "not-settled: two rows marked",
+                                 "not-settled (2 s)", "not-settled. the marker moved"])
+def test_a_why_led_by_the_word_not_settled_is_not_settled(conn, why):
+    clock = Clock()
+    seen = loop_api(clock, [SHOWING, NONE], [{"outcome": "mismatch", "why": why}])
+    got = watch(conn, clock, seen, wait_s=2)
+    assert got.ended == "bound" and not got.failed
+    assert got.answered == (("CLAUDE_TRUST_FOLDER", startup.NOT_SETTLED),)
 
 
 def test_not_ended_goes_on_watching(conn):
@@ -727,8 +775,7 @@ def test_an_answer_word_the_loop_does_not_know_stops_the_watch(conn):
     ([SHOWING], [{"outcome": "ended"}], 1, "pane status 1"),
     ([SHOWING], [{"outcome": "ended-without-screen"}], 1, "pane status 1"),
     ([SHOWING], [{"outcome": "no-pane"}], None, "exited before it was ready"),
-    ([SHOWING, {"screen": None, "dead": True}], [{"outcome": "mismatch", "why": "x"}], 0,
-     "pane status 0"),
+    ([SHOWING, {"screen": None, "dead": True}], [NOT_SETTLED], 0, "pane status 0"),
 ])
 def test_a_dead_or_gone_pane_fails_exited(conn, frames, answers, status, why):
     clock = Clock()
