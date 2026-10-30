@@ -135,7 +135,11 @@ def test_sets_json_is_ascii_with_lf_endings():
 
 
 def test_the_rule_files_are_marked_binary_for_git():
-    lines = (PACKAGE / ".gitattributes").read_text(encoding="utf-8").splitlines()
+    attributes = PACKAGE / ".gitattributes"
+    if not attributes.exists():
+        pytest.skip("not a checkout: git attributes live only in the repo (an sdist and an "
+                    "installed package leave them out)")
+    lines = attributes.read_text(encoding="utf-8").splitlines()
     assert "src/moxi_secrets/rules/** -text" in lines
 
 
