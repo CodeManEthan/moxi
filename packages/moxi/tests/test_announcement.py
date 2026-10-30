@@ -44,6 +44,7 @@ EVERY_NEW_NAME = {
     "SESSION_ENV": ("{'MOXI_ALPHA_NAME': 'the session name', 'MOXI_ALPHA_PIN_': 'pins', "
                     "'CLAUDE_EXTRA': 'stamped for the harness'}"),
     "INTERNAL_ENV": "{'MOXI_ALPHA_NAME': 'launcher stamp', 'MOXI_ALPHA_PIN_': 'pins'}",
+    "CONFIG_CHECK": "'moxi_alpha.settings:check'",
     "QUESTIONS": "{'relay.enabled': 'Run the relay?', 'rows.backup': 'Back up rows?'}",
 }
 
@@ -63,7 +64,7 @@ def test_known_holds_every_name_once_in_order():
     assert list(modules.KNOWN)[:11] == [
         "ANNOUNCES", "INTERFACES", "API", "CLI", "SUMMARY", "OPTIONAL", "GATED",
         "INTERNAL_ENV", "SETTINGS", "SETUP", "SEGMENT"]
-    assert len(modules.KNOWN) == 25
+    assert len(modules.KNOWN) == 26
     assert isinstance(modules.KNOWN, MappingProxyType)
     found_fields = set(modules.Found._fields)
     for name in modules.KNOWN:
@@ -78,7 +79,7 @@ def test_today_s_ten_names_load_with_every_new_field_empty(site):
     for attr in ("daemons", "timers", "health", "stores", "budgets", "components",
                  "session_env", "questions"):
         assert dict(getattr(found, attr)) == {}, attr
-    for attr in ("units_from", "doctor", "skills", "page", "teardown"):
+    for attr in ("units_from", "doctor", "skills", "page", "teardown", "config_check"):
         assert getattr(found, attr) is None, attr
     assert found.reserved_names == ()
 
@@ -118,6 +119,7 @@ def test_a_module_with_every_new_name_loads(site):
     assert found.teardown == "moxi_alpha.setup:teardown"
     assert set(found.session_env) == {"MOXI_ALPHA_NAME", "MOXI_ALPHA_PIN_", "CLAUDE_EXTRA"}
     assert found.questions["rows.backup"] == "Back up rows?"
+    assert found.config_check == "moxi_alpha.settings:check"
 
 
 def test_tables_are_read_only_all_the_way_down(site):
@@ -257,6 +259,8 @@ TIMER = "'command': 'moxi-alpha-sweep', 'every': '5m', 'switch': 'sweep.on'"
     ({"RESERVED_NAMES": "['bot', 'bot']"}, "no name twice"),
     ({"RESERVED_NAMES": "'bot'"}, "RESERVED_NAMES"),
     ({"TEARDOWN": "'teardown'"}, "TEARDOWN"),
+    ({"CONFIG_CHECK": "'moxi_alpha.settings'"}, "CONFIG_CHECK"),
+    ({"CONFIG_CHECK": "len"}, "CONFIG_CHECK"),
     ({"SESSION_ENV": "{'NOT-A-NAME': 'x'}"}, "SESSION_ENV"),
     ({"SESSION_ENV": "{'MOXI_ALPHA_NAME': 'stamped'}"},
      "under the module's own prefix MOXI_ALPHA_, and INTERNAL_ENV does not declare it"),

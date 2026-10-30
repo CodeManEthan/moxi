@@ -36,6 +36,10 @@ line of doc and, for a few, the one variable that overrides it for one process:
     [codex.agents."planner@proj-a"]         # the Codex roster (adapters/codex_roster)
     [opencode.agents."planner@proj-a"]      # the OpenCode roster
 
+`check_text(text)` is the same whole read over one config text alone, with no path, no
+environment and no cache; it is the announcement's `CONFIG_CHECK`, which `moxi config set`,
+`unset` and `check` run before they write or pass a file.
+
 `load(env=None)` returns a `CommsConfig`: the typed tables comms reads, with the
 rosters' `codex` and `opencode` tables as raw dicts for their own parsers. A test points
 `MOXI_COMMS_CONFIG_HOME` (or `MOXI_COMMS_HOME`) at a directory of its own.
@@ -253,6 +257,50 @@ def _read(path: Path, environ) -> CommsConfig:
     return _typed(settings, path)
 
 
+def check_text(text: str) -> None:
+    """comms' whole read over config text `text` alone: the token refusal, the schema's
+    checks and comms' own, as `load` makes them, but with no path, no environment
+    overrides and no cache. Raises `ConfigError`, naming no file."""
+    try:
+        raw = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(None, None, f"is not readable TOML ({e})",
+                          "correct the file's TOML syntax") from None
+    refuse_secrets(None, raw)
+    try:
+        _moxi_config.check_text(MODULE, schema(), text)
+    except ConfigError:
+        raise
+    except _moxi_config.ConfigError as e:
+        raise ConfigError(e.file, e.key, e.problem, e.fix) from None
+    _typed(_text_settings(raw), None)
+
+
+def _text_settings(raw: dict) -> _moxi_config.Settings:
+    """The settings a config text gives when nothing else is read: each key the text sets,
+    else its default. The text has passed the schema's checks."""
+    keys = schema().keys
+    given: dict = {}
+
+    def walk(table, prefix):
+        for name, value in table.items():
+            dotted = f"{prefix}{name}"
+            if dotted in keys:
+                given[dotted] = value
+            elif isinstance(value, dict):
+                walk(value, f"{dotted}.")
+
+    walk(raw, "")
+    values, sources = {}, {}
+    for key in schema().live():
+        if key.name in given:
+            values[key.name], sources[key.name] = given[key.name], _moxi_config.FILE
+        else:
+            default = None if key.type == "path" and key.default == "" else key.default
+            values[key.name], sources[key.name] = default, _moxi_config.DEFAULT
+    return _moxi_config.Settings(MODULE, None, schema(), values, sources)
+
+
 class Config(_moxi_config.Config):
     """The reader a long-running comms process keeps (the daemon): moxi.config's
     `Config` over comms' whole read, so the token refusal and comms' own range checks
@@ -310,7 +358,7 @@ def load_file(path, env=None) -> CommsConfig:
     return cfg
 
 
-def _typed(settings, path: Path) -> CommsConfig:
+def _typed(settings, path: Path | None) -> CommsConfig:
     v = settings.values
 
     def bad(key: str, problem: str, fix: str) -> ConfigError:
@@ -352,7 +400,7 @@ def _typed(settings, path: Path) -> CommsConfig:
         block=v["block"],
         codex=_roster(bad, "codex", v),
         opencode=_roster(bad, "opencode", v),
-        source=str(path) if path.exists() else "defaults",
+        source=str(path) if path is not None and path.exists() else "defaults",
         sources=dict(settings.sources),
     )
 
@@ -425,7 +473,7 @@ def _roster(bad, table: str, v) -> dict:
     return out
 
 
-def refuse_secrets(path: Path, raw: dict) -> None:
+def refuse_secrets(path: Path | None, raw: dict) -> None:
     """The refusal every comms config table shares: a token-shaped key is a hard stop."""
     def walk(node, trail):
         if isinstance(node, dict):
@@ -441,5 +489,6 @@ def refuse_secrets(path: Path, raw: dict) -> None:
 
 __all__ = ["Config", "ConfigError", "LocalConfig", "ThreadsConfig", "SecretsConfig", "PolicyConfig",
            "ProvisionConfig", "ReplayConfig", "CommsConfig", "GatewayConfig",
-           "BUILTIN_ROLES", "config_path", "load", "load_file", "refuse_secrets", "schema",
+           "BUILTIN_ROLES", "check_text", "config_path", "load", "load_file",
+           "refuse_secrets", "schema",
            "LOCAL_RETAIN_DAYS"]

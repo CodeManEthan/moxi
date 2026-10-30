@@ -37,3 +37,6 @@ INTERNAL_ENV = {
 SETTINGS = "settings.toml"
 SETUP = None
 SEGMENT = None
+#: comms' whole loader over a config text alone, run by `moxi config set`, `unset` and
+#: `check`, so the verb never writes a file comms would refuse.
+CONFIG_CHECK = "moxi_comms.config:check_text"
