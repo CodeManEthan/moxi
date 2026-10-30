@@ -15,7 +15,8 @@ import fake_opencode
 from fake_opencode import DROP_ADMITTED, DROP_UNADMITTED, FakeOpenCode
 from moxi_turns import opencode
 from moxi_turns.client import TurnsError
-from moxi_turns.results import Ended, Failed, Lost, Ran, Refused, Started, TurnEnded
+from moxi_turns.results import (Agent, Ended, Failed, Lost, Ran, Refused, Started,
+                                TurnEnded)
 from conftest import bare, opener
 
 
@@ -174,7 +175,7 @@ def test_no_instructions_lays_the_options_alone(host):
 def test_the_host_is_an_endpoint_that_can_start_and_compact(host):
     s, h, world = host()
     assert s.harness == "opencode"
-    assert s.capabilities == frozenset({"deliver", "only-if-idle", "compact"})
+    assert s.capabilities == frozenset({"deliver", "only-if-idle", "compact", "agents"})
     assert s.session_id == h.session_id and h.session_id.startswith("ses_")
     for call, lacking in ((lambda: s.steer("x"), "steer"),
                           (lambda: s.command("clear"), "clear"),
@@ -444,6 +445,40 @@ def test_running_child_sessions_are_subagents(host):
     assert s.facts().agents == 1
     d = s.deliver("x", only_if_idle=True, refuse_agents=True)
     assert bare(d.wait_started(5)) == Refused("busy-agents")
+
+
+def test_child_sessions_are_listed_as_agents_with_no_final_notice(host):
+    s, h, world = host()
+    first = s.agents()
+    assert first.complete and first.entries == ()
+    one = world.fake.create_session("look around", parent=h.session_id)["id"]
+    two = world.fake.create_session("retry me", parent=h.session_id)["id"]
+    world.fake.create_session("someone else's")              # not a child: not listed
+    world.fake.set_status(one, "busy")
+    world.fake.set_status(two, "retry")
+    a = s.agents()
+    assert a.complete
+    assert sorted(a.entries, key=lambda e: e.description) == [
+        Agent(one, "subagent", "running", None, "look around"),
+        Agent(two, "subagent", "running", None, "retry me")]
+    world.fake.set_status(two, "idle")
+    a = s.agents()
+    assert {e.id: e.state for e in a.entries} == {one: "running", two: "idle"}
+    assert a.busy() == 1 and s.facts().agents == 1
+    # OpenCode gives no final notice: an idle child reads idle, never done.
+    world.fake.set_status(one, "idle")
+    assert all(e.final is None and e.state == "idle" for e in s.agents().entries)
+    assert s.facts().agents == 0
+
+
+def test_a_child_list_that_cannot_be_read_is_not_complete(host):
+    s, h, world = host()
+    child = world.fake.create_session("c", parent=h.session_id)["id"]
+    world.fake.set_status(child, "busy")
+    h.http.json = lambda *a, **k: (500, {"name": "Broken"})
+    a = s.agents()
+    assert a.complete is False and a.busy() is None
+    assert s.facts().agents is None
 
 
 # -- posts that fail -----------------------------------------------------------------------

@@ -96,7 +96,7 @@ class SlowLive(FakeHarness):
     def live(self):
         self.reads += 1
         time.sleep(self.delay)
-        return Live(self.agents, self.draft)
+        return Live(self.live_agents, self.draft)
 
 
 # -- only_if_idle: the ledger's checks in the answer, the harness's in the value ---------
@@ -129,7 +129,7 @@ def test_a_flagged_deliver_never_waits_on_a_slow_live_read(make_endpoint, connec
     got = client.call("wait", {"delivery": answer["delivery"], "until": "started",
                                "timeout_ms": 5000}, timeout=10)
     assert R.from_wire(got["result"]).reason == "draft"
-    fake.draft, fake.agents = False, 1
+    fake.draft, fake.live_agents = False, 1
     answer = client.call("deliver", {"text": "x", "only_if_idle": True,
                                      "refuse_agents": True}, timeout=5)
     got = client.call("wait", {"delivery": answer["delivery"], "until": "started",

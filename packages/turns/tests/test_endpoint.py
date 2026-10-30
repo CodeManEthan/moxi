@@ -31,7 +31,8 @@ def test_find_by_session_id_and_by_pid(make_endpoint):
     s = turns.find(session_id="s-1")
     assert s is not None and s.harness == "fake" and s.pid == os.getpid()
     assert s.capabilities == frozenset({"deliver", "only-if-idle", "steer", "stop-handler",
-                                        "clear", "exit", "compact", "stop-shells"})
+                                        "clear", "exit", "compact", "agents",
+                                            "stop-shells"})
     assert s.endpoint_pid == os.getpid() and s.address == ep.address
     assert turns.find(pid=os.getpid()).dir == ep.dir
     assert turns.find(session_id="nobody") is None
@@ -111,11 +112,11 @@ def test_start_refusals(make_endpoint):
     assert idle_start(s, if_turn_number=0) == turns.Refused("stale-turn")
     fake.draft = True
     assert idle_start(s, refuse_draft=True) == turns.Refused("draft")
-    fake.draft, fake.agents = False, 1
+    fake.draft, fake.live_agents = False, 1
     assert idle_start(s, refuse_agents=True) == turns.Refused("busy-agents")
     fake.live_fails = True
     assert idle_start(s, refuse_draft=True) == turns.Refused("draft")
-    fake.live_fails, fake.agents = False, 0
+    fake.live_fails, fake.live_agents = False, 0
     d = s.deliver("x", only_if_idle=True, if_turn_number=1, refuse_draft=True, refuse_agents=True)
     assert bare(d.wait_started(1)) == turns.Started("t2")
 
@@ -125,7 +126,7 @@ def test_an_unreadable_subagent_list_is_unknown_and_counts_as_busy(make_endpoint
     env = dict(os.environ, MOXI_TURNS_COMMANDS="clear")
     ep, fake = make_endpoint(env=env)
     s = turns.find(session_id="s-1")
-    fake.agents = None
+    fake.live_agents = None
     assert s.facts().agents is None
     assert idle_start(s, refuse_agents=True) == turns.Refused("busy-agents")
     assert s.command("clear") == turns.Refused("busy-agents")
@@ -349,9 +350,9 @@ def test_a_command_runs_only_from_an_idle_snapshot(make_endpoint):
     assert s.command("clear") == turns.Refused("busy-turn")
     fake.end_turn()
     assert s.command("clear", if_turn_number=0) == turns.Refused("stale-turn")
-    fake.agents = 1
+    fake.live_agents = 1
     assert s.command("clear") == turns.Refused("busy-agents")
-    fake.agents, fake.draft = 0, True
+    fake.live_agents, fake.draft = 0, True
     assert s.command("clear") == turns.Refused("draft")
     fake.draft = False
     fake.auto_commands = False

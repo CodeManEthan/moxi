@@ -206,9 +206,13 @@ Per harness: on Claude Code the entries are what Claude Code lists as its agents
 reads `done`, `killed` reads `stopped`), and a workflow's agents are not listed. On Codex
 they are the collaborating agents the host has seen (`pendingInit` reads `pending`,
 `errored` reads `failed`, `interrupted` and `shutdown` read `stopped`, `notFound` reads
-`unknown`), and each background terminal as a `shell` entry, `running`, `final` false. On
-OpenCode they are the session's child sessions, `running` when busy or retrying, else
-`idle`, with `final` null: OpenCode sends no final notice.
+`unknown`), and each background terminal as a `shell` entry, `running`, `final` false. A
+collaborating agent named before Codex gives its status reads `pending` with `final` null.
+The Codex list is not complete while the host is not connected, when a resumed load could
+not read the thread's history, or when the terminals could not be listed. On OpenCode they
+are the session's child sessions, `running` when busy or retrying, else `idle`, with
+`final` null: OpenCode sends no final notice. On every harness a status turns does not
+know reads `unknown`, with `final` null.
 
 **Ran.** `new_session_id` is the new session's id after `clear`, and null after `compact`
 and `exit`. `shells` is null unless the command was given `stop_shells`, and then

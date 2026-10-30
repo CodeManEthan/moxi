@@ -66,7 +66,8 @@ from . import codex_protocol as proto
 from .doctor import MODULE
 from .endpoint import Endpoint
 from .harness import SHELL_STOP_S, CommandRequest, Delivery, Harness, Live
-from .results import SHELL_UNLISTED, Failed, LeftShell, Refused, Shells, StopFacts
+from .results import (SHELL_UNLISTED, Agent, Agents, Failed, LeftShell, Refused, Shells,
+                      StopFacts)
 
 log = logging.getLogger("moxi.turns.codex")
 
@@ -134,7 +135,7 @@ class _Compaction:
 class CodexHarness(Harness):
     name = "codex"
     can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "compact",
-                     "stop-shells"})
+                     "agents", "stop-shells"})
     mod_version = None
 
     def __init__(self, cwd, *, instructions: str | None = None, env=None,
@@ -197,6 +198,13 @@ class CodexHarness(Harness):
         self._accepted = threading.Event()
         self._priming = False        # a fresh thread's priming turn is not yet accepted
         self._compacting: _Compaction | None = None
+        #: The session's collab subagents by thread id, `(state, final, parent_id)`: the
+        #: host's record of Codex's own notices, kept from the item stream and rebuilt from
+        #: the thread's history at each resumed load.
+        self._collab: dict[str, tuple[str, bool | None, str | None]] = {}
+        #: Whether that record holds every subagent: False once a resumed load could not
+        #: read the history, until one can.
+        self._collab_whole = True
 
     def attach(self, endpoint) -> None:
         super().attach(endpoint)
@@ -386,6 +394,9 @@ class CodexHarness(Harness):
                     log.warning("thread/start reports different settings: %s", warning)
 
                 thread = result.get("thread") or {}
+                # A fresh thread has spawned nothing yet; a resumed one may have, before
+                # this connection or this host saw its items.
+                collab, whole = ({}, True) if starting else self._read_collab(ws, thread_id)
                 active = False if starting else proto.thread_is_active(thread)
                 turn_id = None
                 if active:
@@ -401,6 +412,7 @@ class CodexHarness(Harness):
                     self.session_id = thread_id
                     self.thread_active = active
                     self.active_turn_id = turn_id
+                    self._collab, self._collab_whole = collab, whole
                     if active:
                         # The load shows Codex running: a status backstop timer set
                         # before the reconnect no longer speaks for it.
@@ -493,18 +505,68 @@ class CodexHarness(Harness):
             self.settle_turn(self.active_turn_id, "error")
 
     def live(self) -> Live:
-        ws, thread_id = self.ws, self.session_id
-        if ws is None or not thread_id:
-            return Live()
+        """The count derived from `agents()`'s list, read the same way. A terminal list
+        that fails leaves the count unknown, never 0; the subagents alone stay known for a
+        command with `stop_shells`, which leaves the terminals out."""
+        subagents, whole, shells = self._read_agents()
+        busy = sum(1 for a in subagents if a.busy) if whole else None
+        if busy is None or shells is None:
+            return Live(None, False, without_shells=busy)
+        return Live(busy + len(shells), False, shells=len(shells))
+
+    def agents(self) -> Agents:
+        """The collab subagents as the host recorded Codex's notices, and the background
+        terminals as `shell`, read from Codex now. Not complete while the app-server is not
+        connected, when a resumed load could not read the history, or when the terminals
+        could not be listed."""
+        subagents, whole, shells = self._read_agents()
+        return Agents(tuple(subagents) + tuple(shells or ()),
+                      whole and shells is not None, time.time())
+
+    def _read_agents(self) -> tuple[list[Agent], bool, list[Agent] | None]:
+        """The subagents, whether they are all of them, and the terminals (None: they
+        could not be listed)."""
+        with self._lock:
+            ws, thread_id = self.ws, self.session_id
+            whole = self._collab_whole and ws is not None and bool(thread_id)
+            subagents = [Agent(agent_id, "subagent", state, final, None, parent)
+                         for agent_id, (state, final, parent) in self._collab.items()]
         try:
-            result = ws.call(
-                "thread/backgroundTerminals/list", {"threadId": thread_id}, timeout=2.0
-            )
-        except Exception:
-            return Live()
-        data = result.get("data") if isinstance(result, dict) else None
-        terminals = len(data) if isinstance(data, list) else 0
-        return Live(terminals, False, shells=terminals)
+            shells = [Agent(pid, "shell", "running", False)
+                      for pid in self._terminals(ws, thread_id)]
+        except Exception as exc:  # noqa: BLE001 - an unread list is unknown, never empty
+            log.info("the background terminals could not be listed: %s", exc)
+            shells = None
+        return subagents, whole, shells
+
+    def _read_collab(self, ws, thread_id: str
+                     ) -> tuple[dict[str, tuple[str, bool | None, str | None]], bool]:
+        """The collab record rebuilt from the thread's history (`thread/read`), and True;
+        on any failure the record as it stands, and False."""
+        try:
+            items = proto.thread_items(ws.call("thread/read", proto.read_params(thread_id)))
+        except Exception as exc:  # noqa: BLE001 - the record is then not whole
+            log.warning("the thread's history could not be read (%s); its subagent list "
+                        "is not complete", exc)
+            with self._lock:
+                return dict(self._collab), False
+        record: dict[str, tuple[str, bool | None, str | None]] = {}
+        for item in items:
+            _apply_collab(record, item, thread_id)
+        return record, True
+
+    def _track_collab(self, params: dict) -> None:
+        """An item's start or end: a collab tool call's notices update the record. Items
+        of the session's thread count, and those of a subagent's own thread (its spawns)."""
+        item = params.get("item")
+        if not isinstance(item, dict) or item.get("type") != proto.COLLAB_ITEM:
+            return
+        thread = params.get("threadId")
+        with self._lock:
+            main = self.session_id
+            if isinstance(thread, str) and thread != main and thread not in self._collab:
+                return
+            _apply_collab(self._collab, item, main)
 
     def submit(self, delivery: Delivery) -> None:
         threading.Thread(
@@ -514,10 +576,12 @@ class CodexHarness(Harness):
 
     def _submit(self, delivery: Delivery) -> None:
         reason = self.endpoint.entering(delivery.id)
-        if reason is None and delivery.refuse_agents and self.live().agents:
-            reason = "busy-agents"
-        if reason is None and delivery.refuse_draft and self.live().draft:
-            reason = "draft"
+        if reason is None and (delivery.refuse_agents or delivery.refuse_draft):
+            live = self.live()
+            if delivery.refuse_agents and live.busy():   # an unknown count is busy
+                reason = "busy-agents"
+            elif delivery.refuse_draft and live.draft:
+                reason = "draft"
         if reason is not None:
             self.endpoint.refused(delivery.id, reason)
             return
@@ -911,6 +975,8 @@ class CodexHarness(Harness):
             self._report_started(turn_id, claim=True)
         elif method == "turn/completed":
             self._completed(params)
+        elif method in ("item/started", "item/completed"):
+            self._track_collab(params)
         elif method == "thread/status/changed":
             active = (params.get("status") or {}).get("type") == "active"
             with self._lock:
@@ -1097,6 +1163,25 @@ class CodexHarness(Harness):
         if (self._supervisor is not None
                 and self._supervisor is not threading.current_thread()):
             self._supervisor.join(timeout=2.0)
+
+
+def _apply_collab(record: dict, item, main: str | None) -> None:
+    """Apply a collab item's notices to `record`, in order. An agent's latest status is
+    its state; one named with no status yet is pending, with no notice to call final.
+    Its parent is the thread that first named it, when that is not the session's own."""
+    for agent_id, status, sender in proto.collab_notices(item):
+        if agent_id == main:
+            continue
+        prev = record.get(agent_id)
+        if status is not None:
+            state, final = proto.collab_state(status)
+        elif prev is not None:
+            state, final = prev[0], prev[1]
+        else:
+            state, final = "pending", None
+        parent = prev[2] if prev is not None else (
+            sender if sender and sender != main else None)
+        record[agent_id] = (state, final, parent)
 
 
 def _no_reply(exc: BaseException) -> str:

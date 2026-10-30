@@ -64,9 +64,9 @@ def test_compact_refusals_slot_and_rate(make_endpoint, monkeypatch):
     fake.start_turn()
     assert s.command("compact") == turns.Refused("busy-turn")
     fake.end_turn()
-    fake.agents = 1
+    fake.live_agents = 1
     assert s.command("compact") == turns.Refused("busy-agents")
-    fake.agents, fake.draft = 0, True
+    fake.live_agents, fake.draft = 0, True
     assert s.command("compact") == turns.Refused("draft")
     fake.draft = False
     fake.auto_commands = False
@@ -105,7 +105,7 @@ def test_a_ready_before_the_hand_off_settles_nothing(make_endpoint):
 @pytest.mark.parametrize("name", ["clear", "compact"])
 def test_stop_shells_runs_once_and_ran_carries_the_report(make_endpoint, name):
     ep, fake, s = granted(make_endpoint)
-    fake.agents = fake.shells = 2              # only shells live: they leave the check
+    fake.live_agents = fake.shells = 2              # only shells live: they leave the check
     assert s.command(name, stop_shells=False) == turns.Refused("busy-agents")
     r = s.command(name, stop_shells=True)
     assert isinstance(r, turns.Ran) and r.shells == Shells(("sh1",), (), True)
@@ -116,7 +116,7 @@ def test_stop_shells_runs_once_and_ran_carries_the_report(make_endpoint, name):
 
 def test_a_subagent_still_holds_a_command_with_stop_shells(make_endpoint):
     ep, fake, s = granted(make_endpoint)
-    fake.agents, fake.shells = 2, 1
+    fake.live_agents, fake.shells = 2, 1
     assert s.command("clear", stop_shells=True) == turns.Refused("busy-agents")
     assert fake.stops == []
 

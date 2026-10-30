@@ -52,6 +52,8 @@ Then, in any order:
         with `$.tool.call` `TaskStop` within `SHELL_STOP_S` and reports `shells`.
     {"op": "live", "ask": n}
         Read `$.agent.list()` and `$.prompt.read()` and answer on `/live`.
+    {"op": "agents", "ask": n}
+        Read `$.agent.list()` and answer on `/agents`, each entry as the engine gives it.
 
 Requests (runner and gate to endpoint, `POST` on `mod.sock`)
 ------------------------------------------------------------
@@ -95,6 +97,11 @@ was lost: the endpoint fails the open submit window (its delivery reads `Lost`, 
 `/live` — `{ask, agents, draft}` (or `{ask, error}`), the answer to a `live` line.
 `agents` is null when `$.agent.list()` could not be read: unknown, which counts as busy
 and never as 0. An unreadable box is sent as `draft: true`. Answer `{"ok": true}`.
+
+`/agents` — `{ask, entries}` (or `{ask, error}`), the answer to an `agents` line. `entries`
+is `$.agent.list()` unmapped, each `{id, type, description, status, parentId?,
+teammateId?}`; the endpoint maps the states. `entries` is null when the list could not be
+read: the list is then not complete, which counts as busy. Answer `{"ok": true}`.
 
 `/ask/stop` — `{turn_id, session_id, stop_hook_active, task_types, crons}` at a main-loop
 `classic.Stop`. Answer `{"ok": true, "reason": "<text>" | null}`: a reason holds the turn
@@ -155,17 +162,19 @@ NOT_STOPPED_AFTER_CLEAR = "not-stopped-after-clear"
 #: The endpoint's line ops.
 LINE_HELLO, LINE_FAILED = "hello", "failed"
 LINE_SUBMIT, LINE_APPEND, LINE_COMMAND, LINE_LIVE = "submit", "append", "command", "live"
+LINE_AGENTS = "agents"
 
 #: The request paths on `mod.sock`.
 PATH_REPORT = "/report"
 PATH_LIVE = "/live"
+PATH_AGENTS = "/agents"
 PATH_STOP = "/ask/stop"
 PATH_CONTEXT = "/ask/context"
 PATH_GATE_ENTRY = "/gate/entry"
 PATH_GATE_COMMAND = "/gate/command"
 PATH_HOOK_TIMES = "/hook-times"
-PATHS = (PATH_REPORT, PATH_LIVE, PATH_STOP, PATH_CONTEXT, PATH_GATE_ENTRY,
-         PATH_GATE_COMMAND, PATH_HOOK_TIMES)
+PATHS = (PATH_REPORT, PATH_LIVE, PATH_AGENTS, PATH_STOP, PATH_CONTEXT,
+         PATH_GATE_ENTRY, PATH_GATE_COMMAND, PATH_HOOK_TIMES)
 
 #: The report kinds.
 R_SESSION, R_TURN_START, R_TURN_COMPLETE = "session", "turn.start", "turn.complete"
@@ -335,7 +344,8 @@ def _handler_for(handle):
 
 
 __all__ = ["LEG", "STOP_AFTER_CLEAR", "NOT_STOPPED_AFTER_CLEAR", "LINE_HELLO", "LINE_FAILED", "LINE_SUBMIT", "LINE_APPEND", "LINE_COMMAND",
-           "LINE_LIVE", "PATH_REPORT", "PATH_LIVE", "PATH_STOP", "PATH_CONTEXT",
+           "LINE_LIVE", "LINE_AGENTS", "PATH_REPORT", "PATH_LIVE", "PATH_AGENTS",
+           "PATH_STOP", "PATH_CONTEXT",
            "PATH_GATE_ENTRY", "PATH_GATE_COMMAND", "PATH_HOOK_TIMES", "PATHS", "R_SESSION",
            "R_TURN_START", "R_TURN_COMPLETE", "R_SUBMIT_CLOSE", "R_SUBMIT_BOUND", "R_APPEND_DONE",
            "R_APPEND_FAILED",

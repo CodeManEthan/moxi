@@ -16,7 +16,7 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     clock,
     surfaces: options.surfaces ?? ['terminal'],
     sessionId: 'S-1',
-    agents: [] as { id: string; status: string }[],
+    agents: [] as Record<string, unknown>[],
     /** `$.agent.list()` throws: the list cannot be read. */
     agentsFail: false,
     box: '',

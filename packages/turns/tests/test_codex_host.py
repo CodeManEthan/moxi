@@ -101,6 +101,14 @@ class FakeClient:
             return {"turnId": self.live_turn}
         if method == "thread/backgroundTerminals/list":
             return {"data": []}
+        if method == "thread/read":
+            # The thread's history: the collab items a test recorded on the harness.
+            error = getattr(self.harness, "fake_read_error", None)
+            if error is not None:
+                raise error
+            items = list(getattr(self.harness, "fake_history", ()))
+            return {"thread": {"id": "thread-1", "turns": [
+                {"id": "turn-0", "status": "completed", "items": items}]}}
         if method == "thread/turns/list":
             data = [] if self.live_turn is None else [
                 {"id": self.live_turn, "status": "inProgress"}

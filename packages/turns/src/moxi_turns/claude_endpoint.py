@@ -84,7 +84,7 @@ from typing import Any, BinaryIO
 
 from . import claude_leg as leg
 from .harness import CommandRequest, Delivery, Harness, Live
-from .results import (COMMAND_REFUSALS, LOST_UNTIED, OUTCOMES, SHELL_UNLISTED, Failed,
+from .results import (Agent, Agents, COMMAND_REFUSALS, LOST_UNTIED, OUTCOMES, SHELL_UNLISTED, Failed,
                       LeftShell, Passed, Ran, Refused, Shells, StopFacts)
 
 log = logging.getLogger("moxi.turns.claude")
@@ -125,7 +125,7 @@ class ClaudeHarness(Harness):
 
     name = "claude"
     can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "clear", "exit",
-                     "compact", "stop-shells"})
+                     "compact", "agents", "stop-shells"})
     live_wait_s = LIVE_WAIT_S
 
     def __init__(self, out: BinaryIO, *, pid: int | None = None, cwd: str | None = None,
@@ -176,7 +176,7 @@ class ClaudeHarness(Harness):
         if path == leg.PATH_REPORT:
             self.report(body)
             return {}
-        if path == leg.PATH_LIVE:
+        if path in (leg.PATH_LIVE, leg.PATH_AGENTS):
             self._live_answer(body)
             return {}
         if path == leg.PATH_STOP:
@@ -199,21 +199,7 @@ class ClaudeHarness(Harness):
     # -- the core calls these -----------------------------------------------------------
 
     def live(self) -> Live:
-        ask = next(self._asks)
-        slot: list = [threading.Event(), None]
-        with self._lock:
-            self._live[ask] = slot
-        try:
-            if not self._lines.write({"op": leg.LINE_LIVE, "ask": ask}):
-                raise OSError("the runner's line is closed")
-            if not slot[0].wait(LIVE_WAIT_S):
-                raise TimeoutError(f"the runner did not answer live within {LIVE_WAIT_S} s")
-        finally:
-            with self._lock:
-                self._live.pop(ask, None)
-        answer = slot[1] or {}
-        if answer.get("error") is not None:
-            raise OSError(f"the runner could not read the live facts: {answer['error']}")
+        answer = self._ask_runner(leg.LINE_LIVE, "the live facts")
         agents, draft = answer.get("agents"), answer.get("draft")
         # `agents` null: the runner could not list the subagents. Unknown, which counts
         # as busy and never reads as 0.
@@ -221,6 +207,32 @@ class ClaudeHarness(Harness):
                 or not isinstance(draft, bool)):
             raise OSError(f"the runner's live answer is malformed: {answer!r}")
         return Live(agents=agents, draft=draft)
+
+    def agents(self) -> Agents:
+        """The runner's `$.agent.list()`, read on this call; the states are mapped here. A
+        list the runner could not read, or that came back malformed, is not complete."""
+        answer = self._ask_runner(leg.LINE_AGENTS, "agents")
+        return agents_from_runner(answer.get("entries"), time.time())
+
+    def _ask_runner(self, op: str, what: str) -> dict:
+        """Send the runner a line that asks for a live read and wait `LIVE_WAIT_S` for its
+        answer. Raises when the line is closed, the answer is late or it names an error."""
+        ask = next(self._asks)
+        slot: list = [threading.Event(), None]
+        with self._lock:
+            self._live[ask] = slot
+        try:
+            if not self._lines.write({"op": op, "ask": ask}):
+                raise OSError("the runner's line is closed")
+            if not slot[0].wait(LIVE_WAIT_S):
+                raise TimeoutError(f"the runner did not answer {what} within {LIVE_WAIT_S} s")
+        finally:
+            with self._lock:
+                self._live.pop(ask, None)
+        answer = slot[1] or {}
+        if answer.get("error") is not None:
+            raise OSError(f"the runner could not read {what}: {answer['error']}")
+        return answer
 
     def submit(self, delivery: Delivery) -> None:
         with self._lock:
@@ -568,6 +580,36 @@ def _shells(value: Any) -> Shells:
     if not complete and unnamed not in entries:
         entries.append(unnamed)
     return Shells(tuple(stopped), tuple(entries), complete)
+
+
+#: Claude Code's agent statuses (`AgentStatus`) as turns' states.
+CLAUDE_STATES = {"pending": "pending", "running": "running", "waiting": "waiting",
+                 "idle": "idle", "completed": "done", "failed": "failed",
+                 "killed": "stopped"}
+#: The statuses that are a final notice.
+CLAUDE_FINAL = frozenset({"completed", "failed", "killed"})
+
+
+def agents_from_runner(entries: Any, at: float) -> Agents:
+    """The runner's unmapped `$.agent.list()` entries as `Agents`. Null is a list the runner
+    could not read; an entry with no id makes the list not complete, never shorter. A
+    status turns does not know reads `unknown`, with no notice to call final."""
+    if not isinstance(entries, list):
+        return Agents((), False, at)
+    out: list[Agent] = []
+    complete = True
+    for raw in entries:
+        if not isinstance(raw, dict) or not isinstance(raw.get("id"), str) \
+                or not raw["id"]:
+            complete = False
+            continue
+        status = raw.get("status")
+        state = CLAUDE_STATES.get(status, "unknown") if isinstance(status, str) else "unknown"
+        final = (status in CLAUDE_FINAL) if state != "unknown" else None
+        teammate = isinstance(raw.get("teammateId"), str) or raw.get("type") == "teammate"
+        out.append(Agent(raw["id"], "teammate" if teammate else "subagent", state, final,
+                         _opt_str(raw, "description"), _opt_str(raw, "parentId")))
+    return Agents(tuple(out), complete, at)
 
 
 def _opt_str(body: dict[str, Any], key: str) -> str | None:

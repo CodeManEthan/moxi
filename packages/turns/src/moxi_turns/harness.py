@@ -11,6 +11,9 @@ The core calls the adapter:
     live()                the live facts: subagents and the prompt box (`Live`); the core
                           bounds the read by `live_wait_s` and reads a late one as
                           unreadable
+    agents()              the session's subagents, teammates and background shells as the
+                          harness records them (`Agents`), bounded the same way; `Live`'s
+                          count is the one derived from this list (`Live.of`)
     steering(delivery_id) a steer is being recorded: called under the endpoint's lock, so
                           it touches only the adapter's own state and never calls the
                           harness or the endpoint (the base does nothing)
@@ -101,7 +104,14 @@ complete)`: an entry still running is `left` with its `why` (`timeout`, `denied`
 `unsupported`, or the harness's own words), and `complete` False adds the one entry
 `LeftShell(None, "unlisted")` for the shells it could not name. A listed entry it chose
 not to stop carries a `why` of its own, never `unlisted`, which stays the unnamed entry's.
-A report that never comes reads as a list turns cannot vouch for. A `submit`, `append` or `command` that
+A report that never comes reads as a list turns cannot vouch for. Subagent liveness: `agents()` reads the harness's own record on every call and keeps no copy
+between calls, so an entry reads `final` as soon as the harness records its final notice,
+whether or not a main-loop turn is open. An adapter maps the harness's states into
+`AGENT_STATES` and sets `final` True only for a final notice (done, failed or stopped),
+None when the harness gives no notice to read. A list it could not read whole is
+`complete` False, never a shorter list: an unknown count is not zero.
+
+A `submit`, `append` or `command` that
 raises counts as settled (the delivery is refused, the command fails). Until it settles,
 a submitted delivery holds the endpoint's one in-flight slot (later only-if-idle
 deliveries refuse `busy-turn`, later plain ones queue) and a command holds the one command
@@ -125,7 +135,10 @@ takes effect, after `entering` passes. A steer is taken into the running turn or
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
+
+from .results import Agents
 
 #: How long an adapter's stop of a command's background shells may take, from the
 #: command's moment of effect, in seconds. A stop not back by then is `left` `timeout`.
@@ -147,13 +160,26 @@ class Live:
     #: Of `agents`, the background shells (Codex's terminals), which a command with
     #: `stop_shells` leaves out of its agent check. Claude's list holds none.
     shells: int = 0
+    #: With `agents` None because the shells alone could not be listed: the count with
+    #: the shells left out, which a command with `stop_shells` reads. None otherwise.
+    without_shells: int | None = None
+
+    @classmethod
+    def of(cls, agents: Agents, draft: bool = False) -> Live:
+        """The live facts with the count derived from `agents`: entries not final and
+        pending, running or waiting, and of them the `shell` entries; None when the list
+        is not complete."""
+        count = agents.busy()
+        if count is None:
+            return cls(None, draft)
+        return cls(count, draft, count - (agents.busy(shells=False) or 0))
 
     def busy(self, *, shells: bool = True) -> bool:
         """Whether a live subagent keeps the session busy; an unreadable list does. With
         `shells` False the background shells counted among `agents` are left out, as a
         command with `stop_shells` reads it."""
         if self.agents is None:
-            return True
+            return shells or self.without_shells is None or self.without_shells > 0
         return self.agents - (0 if shells else max(0, self.shells)) > 0
 
 
@@ -205,7 +231,13 @@ class Harness:
         self.endpoint = endpoint
 
     def live(self) -> Live:
-        return Live()
+        """The live facts. The base derives the count from `agents()` and reads no box."""
+        return Live.of(self.agents())
+
+    def agents(self) -> Agents:
+        """The session's subagents as the harness records them, read on every call. The
+        base cannot list any: its list is not complete, which counts as busy."""
+        return Agents((), False, time.time())
 
     def loading(self) -> bool:
         """Whether this adapter has no accepted load to receive input."""

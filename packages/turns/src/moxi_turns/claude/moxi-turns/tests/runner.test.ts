@@ -327,6 +327,33 @@ describe('the other lines', () => {
     expect(w.got.find(g => g.path === '/live')?.body).toEqual({ ask: 8, agents: null, draft: false })
   })
 
+  test('agents: the list as the engine gives it, answered on /agents', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    w.agents = [
+      { id: 'a', type: 'Explore', description: 'look', status: 'running', spawnedBy: 'p', name: 'n' },
+      { id: 'b', type: 'teammate', description: 'mate', status: 'idle', teammateId: 'ann@crew', parentId: 'a' },
+      { id: 'c', type: 'x', description: 'done', status: 'completed' },
+    ]
+    await w.line({ op: 'agents', ask: 3 })
+    expect(w.got.find(g => g.path === '/agents')?.body).toEqual({
+      ask: 3,
+      entries: [
+        { id: 'a', type: 'Explore', description: 'look', status: 'running' },
+        { id: 'b', type: 'teammate', description: 'mate', status: 'idle', parentId: 'a', teammateId: 'ann@crew' },
+        { id: 'c', type: 'x', description: 'done', status: 'completed' },
+      ],
+    })
+  })
+
+  test('agents: an unreadable list is sent as null, never empty', async ($: E, on) => {
+    const w = world(on)
+    w.agentsFail = true
+    await attached($, w)
+    await w.line({ op: 'agents', ask: 4 })
+    expect(w.got.find(g => g.path === '/agents')?.body).toEqual({ ask: 4, entries: null })
+  })
+
   test('append: a steer is a user row, reported', async ($: E, on) => {
     const w = world(on)
     await attached($, w)

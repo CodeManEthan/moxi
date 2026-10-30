@@ -75,3 +75,22 @@ def test_only_method_not_found_reads_as_a_missing_method():
     assert proto.method_missing(proto.classify_error({"code": -32601, "message": "x"}))
     assert not proto.method_missing(proto.classify_error({"code": -32603, "message": "x"}))
     assert not proto.method_missing(proto.NoReply("timed out"))
+
+
+def test_collab_notices_name_each_agent_with_its_status_and_sender():
+    item = {"type": "collabAgentToolCall", "senderThreadId": "main",
+            "receiverThreadIds": ["a", "b"],
+            "agentsStates": {"b": {"status": "running"}, "c": {"status": "completed"}}}
+    assert proto.collab_notices(item) == [("a", None, "main"), ("b", "running", "main"),
+                                          ("c", "completed", "main")]
+    assert proto.collab_notices({"type": "agentMessage"}) == []
+    assert proto.collab_state("errored") == ("failed", True)
+    assert proto.collab_state("new-word") == ("unknown", None)
+
+
+def test_a_thread_read_of_another_shape_raises_never_reads_empty():
+    ok = {"thread": {"turns": [{"items": [1, 2]}, {"items": [3]}]}}
+    assert proto.thread_items(ok) == [1, 2, 3]
+    for bad in ({}, {"thread": {}}, {"thread": {"turns": [{"id": "t"}]}}):
+        with pytest.raises(ValueError):
+            proto.thread_items(bad)

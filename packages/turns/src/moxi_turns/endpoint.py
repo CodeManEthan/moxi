@@ -957,9 +957,18 @@ class Endpoint:
         return agents if agents is not None else Agents((), False, time.time())
 
     def _agents_now(self) -> Agents:
-        """The adapter's list. Until the adapter can list them, the list is not complete,
-        which counts as busy."""
-        return Agents((), False, time.time())
+        """The adapter's list, read from the harness on this call. One that fails, or
+        answers something other than a list, is not complete: unknown, which counts as
+        busy and never as an empty list."""
+        try:
+            agents = self.harness.agents()
+        except Exception as exc:  # noqa: BLE001 - an unreadable list is unknown
+            log.warning("reading the subagents failed: %s", exc)
+            return Agents((), False, time.time())
+        if not isinstance(agents, Agents):
+            log.warning("the adapter's subagent list is not a list: %r", agents)
+            return Agents((), False, time.time())
+        return agents
 
     def watch(self, conn, first: Reading, live: Live | None) -> Facts | None:
         """A watch's second half, on the loop: under one hold of the lock, the facts as of
