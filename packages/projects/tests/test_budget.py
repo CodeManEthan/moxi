@@ -25,7 +25,7 @@ ALLOWED = frozenset({
     "moxi_projects", "moxi_projects.module", "moxi_projects.api",
     "sqlite3", "sqlite3.dbapi2", "_sqlite3", "datetime", "_datetime", "warnings",
     "_py_warnings",
-    "moxi.store", "typing", "_typing", "typing.io", "typing.re",
+    "moxi.store",
 })
 #: What projects adds over the core's hook path, in milliseconds: its import and a read.
 #: A hook that reads projects budgets this cost itself.
