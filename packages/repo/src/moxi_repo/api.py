@@ -315,7 +315,9 @@ def _flip(path: str | os.PathLike, piece_id: str, value: bool) -> Report:
     try:
         gitconf.set_enabled(repo, piece_id, value, state)
         if not value:
+            # The record, its ledger key, then the flag.
             _records.close_piece(repo.common_dir, piece_id)
+            gitconf.clear_recorded(repo, piece_id, state)
         report.take(repo.root, gitconf.sync(repo, state))
     except gitconf.GitError as exc:
         raise Failure(str(exc)) from None

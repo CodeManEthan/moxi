@@ -332,3 +332,245 @@ def test_chain_lines_are_the_designs():
         'h="$(git rev-parse --path-format=absolute --git-common-dir)/moxi-repo/hook"; '
         'if [ -f "$h" ]; then sh "$h" pre-commit "$@" || exit 1; fi')
     assert json.dumps(shim.chain_line("pre-push", True)).count("mktemp") == 1
+
+
+# -- managers: a hooks dir repo doesn't own ------------------------------------------------
+
+def manager_hook(path: Path, log: Path, name: str, *, before: str = "") -> None:
+    """A manager's git hook at `path`: `before` (a chain line), then one log line."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"#!/bin/sh\n{before}\necho '{{\"id\": \"{name}\"}}' >> '{log}'\n",
+                    encoding="utf-8")
+    path.chmod(0o755)
+
+
+def test_config_mode_under_a_managers_hooks_path_runs_both(demo):
+    repo = demo.repo()
+    husky = repo / ".husky" / "_"
+    manager_hook(husky / "pre-commit", demo.log, "husky")
+    git(repo, "config", "core.hooksPath", ".husky/_")
+    api.add(repo, ["demo/gate"], mode="config")
+    assert sorted(p.name for p in husky.iterdir()) == ["pre-commit"]
+    change(repo)
+    assert commit(repo).returncode == 0
+    assert demo.ids() == ["demo/gate", "husky"]
+    demo.act(gate="refuse")
+    change(repo, text="2\n")
+    assert commit(repo).returncode != 0
+    # git runs the manager's hook whatever our entry returned, as with its own hooks.
+    assert demo.ids() == ["demo/gate", "husky"]
+
+
+def test_a_hooks_dir_two_repos_share_gets_nothing_written_and_each_its_own_launcher(demo):
+    shared = demo.tmp / "shared-hooks"
+    shared.mkdir()
+    alpha, beta = demo.repo("alpha-notes"), demo.repo("beta-code")
+    for repo in (alpha, beta):
+        git(repo, "config", "core.hooksPath", str(shared))
+    report = api.add(alpha, ["demo/gate"], mode="shim")
+    api.add(beta, ["demo/lint"], mode="shim")
+    assert list(shared.iterdir()) == []
+    assert (alpha / ".git" / "moxi-repo" / "hook").exists()
+    assert (beta / ".git" / "moxi-repo" / "hook").exists()
+    [(_, event, hook, line, present)] = report.chain
+    assert (event, hook, present) == ("pre-commit", str(shared / "pre-commit"), False)
+    for repo in (alpha, beta):
+        assert api.status(repo)[0]["events"]["pre-commit"]["chain_line"] == "needed"
+    manager_hook(shared / "pre-commit", demo.log, "manager", before=line)
+    for repo in (alpha, beta):
+        assert api.status(repo)[0]["events"]["pre-commit"]["chain_line"] == "present"
+    demo.act(gate="refuse", lint="refuse")
+    change(alpha)
+    assert commit(alpha).returncode != 0
+    assert demo.ids() == ["demo/gate"]
+    change(beta)
+    # lint is open, so its refusal refuses too: each repo runs only its own pieces.
+    assert commit(beta).returncode != 0
+    assert demo.ids() == ["demo/lint"]
+    demo.act(gate="ok", lint="ok")
+    assert commit(alpha).returncode == 0 and commit(beta).returncode == 0
+    assert demo.ids() == ["demo/gate", "manager", "demo/lint", "manager"]
+
+
+def _temp_files() -> set[str]:
+    import os
+    return {p for p in os.listdir(os.environ["TMPDIR"]) if p.startswith("tmp.")}
+
+
+def test_the_pre_push_chain_line_leaves_stdin_to_the_managers_lines(demo):
+    repo = demo.repo()
+    remote = demo.tmp / "remote.git"
+    git(demo.tmp, "init", "-q", "--bare", "remote.git")
+    git(repo, "remote", "add", "origin", str(remote))
+    git(repo, "config", "core.hooksPath", ".githooks")
+    report = api.add(repo, ["demo/push-check"], mode="shim")
+    [(_, _, hook, line, _)] = report.chain
+    seen = demo.tmp / "manager-stdin"
+    Path(hook).parent.mkdir()
+    Path(hook).write_text(f"#!/bin/sh\n{line}\ncat > '{seen}'\n", encoding="utf-8")
+    Path(hook).chmod(0o755)
+    before = _temp_files()
+    git(repo, "push", "-q", "origin", "main")
+    ref_line = f"refs/heads/main {head(repo)} refs/heads/main {'0' * 40}"
+    [run] = demo.runs()
+    assert run["stdin"].strip() == ref_line
+    assert seen.read_text(encoding="utf-8").strip() == ref_line
+    assert _temp_files() == before
+    seen.unlink()
+    demo.act(push_check="refuse")
+    change(repo)
+    commit(repo)
+    done = git(repo, "push", "-q", "origin", "main", check=False)
+    assert done.returncode != 0 and "push-check says no" in done.stderr
+    assert not seen.exists()
+    assert _temp_files() == before
+
+
+# -- shims ---------------------------------------------------------------------------------
+
+def test_a_shim_another_tool_replaced_shows_in_the_listing(demo):
+    repo = demo.repo()
+    api.add(repo, ["demo/gate"], mode="shim")
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    [listed] = api.status(repo)
+    assert any("repo's shim is missing or another tool replaced it" in p
+               for p in listed["problems"])
+    # refresh puts the shim back, and the other tool's git hook runs after the pieces.
+    api.refresh(repo)
+    assert api.status(repo)[0]["problems"] == []
+    assert (hook.parent / "pre-commit.local").read_text() == "#!/bin/sh\nexit 0\n"
+
+
+# -- the interpreter and the runner ----------------------------------------------------------
+
+VIAS = ["config", "shim", "launcher"]
+
+
+def _set_up(demo, via: str, pieces_: list[str]) -> Path:
+    """A repo with `pieces_` reached through a config entry, a shim, or the launcher and its
+    chain line in a tracked `.githooks/`."""
+    repo = demo.repo()
+    if via == "launcher":
+        git(repo, "config", "core.hooksPath", ".githooks")
+        report = api.add(repo, pieces_, mode="shim")
+        lines = {event: line for _, event, _, line, _ in report.chain}
+        (repo / ".githooks").mkdir()
+        hook = repo / ".githooks" / "pre-commit"
+        hook.write_text(f"#!/bin/sh\n{lines['pre-commit']}\n", encoding="utf-8")
+        hook.chmod(0o755)
+    else:
+        api.add(repo, pieces_, mode=via)
+    return repo
+
+
+@pytest.mark.parametrize("via", VIAS)
+@pytest.mark.parametrize("lost", ["interpreter", "runner"])
+def test_a_lost_interpreter_or_runner_gives_the_guards_one_line(demo, via, lost):
+    good = str(demo.hook_env["python"])
+    if lost == "interpreter":
+        gone = str(demo.tmp / "gone" / "python")
+        demo.mp.setattr(gitconf, "interpreter", lambda: gone)
+        python = gone
+    else:
+        gone = str(demo.tmp / "gone" / "moxi_repo" / "run.py")
+        demo.mp.setattr(gitconf, "runner_file", lambda: gone)
+        python = good
+    repo = _set_up(demo, via, ["demo/gate", "demo/lint"])
+    root = gitconf.resolve(repo).root
+    what = (f"{python} is missing" if lost == "interpreter"
+            else f"the environment of {python} has no moxi_repo")
+    line = (f"repo: git hooks can't run here: {what}; run: moxi install repo "
+            f"(or: moxi repo git-hooks remove {root})")
+    change(repo)
+    done = commit(repo)
+    assert done.returncode != 0
+    assert line in done.stderr.splitlines()
+    assert "Traceback" not in done.stderr and demo.ids() == []
+    # With only an open piece left, the event goes on, still saying the line.
+    api.remove(repo, ["demo/gate"])
+    done = commit(repo)
+    assert done.returncode == 0, done.stderr
+    assert line in done.stderr.splitlines() and demo.ids() == []
+    # refresh writes this environment's paths again, and the pieces run.
+    demo.mp.setattr(gitconf, "interpreter", lambda: good)
+    demo.mp.setattr(gitconf, "runner_file", lambda: REAL_RUNNER_FILE())
+    api.add(repo, ["demo/gate"])
+    api.refresh(repo)
+    change(repo, text="2\n")
+    done = commit(repo)
+    assert done.returncode == 0, done.stderr
+    assert "can't run here" not in done.stderr
+    assert demo.ids() == ["demo/gate", "demo/lint"]
+
+
+REAL_INTERPRETER = gitconf.interpreter
+REAL_RUNNER_FILE = gitconf.runner_file
+
+
+def test_the_paths_written_are_the_environments_python_and_its_runner(demo):
+    from importlib.util import find_spec
+
+    from moxi import paths
+    from moxi_repo import shim
+
+    demo.mp.setattr(gitconf, "interpreter", REAL_INTERPRETER)
+    python = Path(paths.python()).as_posix()
+    runner = Path(find_spec("moxi_repo.run").origin).as_posix()
+    assert gitconf.interpreter() == python and gitconf.runner_file() == runner
+    assert Path(runner).is_file() and Path(runner).name == "run.py"
+    repo = demo.repo()
+    api.add(repo, ["demo/gate"], mode="config")
+    command = gitconf.read(gitconf.resolve(repo)).entries["pre-commit"]
+    assert f"[ -x {shim.sh_quote(python)} ]" in command
+    assert f"[ -f {shim.sh_quote(runner)} ]" in command
+    assert command.endswith(f"{shim.sh_quote(python)} -I -m moxi_repo.run pre-commit")
+
+
+# -- the other events the first users need -----------------------------------------------------
+
+@pytest.mark.parametrize("mode", MODES)
+def test_a_commit_msg_piece_reads_the_message_and_can_refuse(demo, mode):
+    repo = demo.repo()
+    api.add(repo, ["demo/msg"], mode=mode)
+    change(repo)
+    assert commit(repo, message="a message").returncode == 0
+    [run] = demo.runs()
+    assert run["id"] == "demo/msg" and run["event"] == "commit-msg"
+    assert run["message"] == "a message\n"
+    demo.act(msg="refuse")
+    change(repo, text="2\n")
+    before = head(repo)
+    done = commit(repo)
+    assert done.returncode != 0 and head(repo) == before
+    assert "repo: commit-msg refused by demo/msg: msg says no" in done.stderr
+    assert commit(repo, "--no-verify").returncode == 0
+    assert demo.ids() == ["demo/msg"]
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_a_post_merge_piece_runs_after_a_merge_and_never_stops_it(demo, mode):
+    repo = demo.repo()
+    api.add(repo, ["demo/after-merge"], mode=mode)
+    git(repo, "checkout", "-q", "-b", "side")
+    change(repo)
+    commit(repo)
+    git(repo, "checkout", "-q", "main")
+    demo.act(after_merge="raise")
+    done = git(repo, "merge", "-q", "--no-ff", "--no-edit", "side", check=False)
+    assert done.returncode == 0, done.stderr
+    [run] = demo.runs()
+    assert run["id"] == "demo/after-merge" and run["args"] == ["0"]
+    assert ("repo: post-merge: demo/after-merge broke (ValueError: after-merge fell over); "
+            "the doctor keeps a record") in done.stderr
+    cgd = gitconf.resolve(repo).common_dir
+    assert _records.piece_key(cgd, "demo/after-merge") in _records.ledger()
+    demo.act(after_merge="notice")
+    git(repo, "checkout", "-q", "side")
+    change(repo, text="2\n")
+    commit(repo)
+    git(repo, "checkout", "-q", "main")
+    done = git(repo, "merge", "-q", "--no-edit", "side", check=False)
+    assert done.returncode == 0
+    assert "repo: post-merge, demo/after-merge: after-merge noticed something" in done.stderr
+    assert _records.piece_key(cgd, "demo/after-merge") not in _records.ledger()

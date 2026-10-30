@@ -290,6 +290,14 @@ def set_enabled(repo: Repo, piece_id: str, value: bool, state: State) -> None:
     state.pieces.setdefault(piece_id, {})["enabled"] = ["true" if value else "false"]
 
 
+def clear_recorded(repo: Repo, piece_id: str, state: State) -> None:
+    """Unset the piece's `recorded` flag, if it is set."""
+    section = state.pieces.get(piece_id, {})
+    if "recorded" in section:
+        _unset(repo, piece_key(piece_id, "recorded"))
+        section.pop("recorded", None)
+
+
 def apply_settings(repo: Repo, piece_id: str, changes: dict[str, list[str] | None],
                    state: State) -> None:
     """Each named setting takes its whole new list, or goes when None; others stay."""
@@ -436,6 +444,6 @@ def remove_all(repo: Repo, state: State | None = None) -> list[str]:
 
 
 __all__ = ["Repo", "State", "Sync", "NotARepo", "GitError", "FLOOR", "CONFIG_FROM",
-           "resolve", "read", "register", "set_enabled", "apply_settings", "remove_piece",
+           "resolve", "read", "register", "set_enabled", "clear_recorded", "apply_settings", "remove_piece",
            "set_mode", "sync", "remove_all", "pick_mode", "git_version", "parse_version",
            "interpreter", "runner_file", "chain_state", "check_shims", "key_of"]

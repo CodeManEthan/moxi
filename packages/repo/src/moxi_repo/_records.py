@@ -17,8 +17,9 @@ open key even when the repo it names is gone. A `clear` that fails because the r
 already gone counts as done. No code holds the ledger's lock across a git call.
 
 `sweep()` clears each key whose subject is gone: its repo's common git dir doesn't exist,
-or its piece's section is missing or disabled; and it sets a missing `recorded` flag on an
-open piece key whose piece is registered and enabled. Spec and push keys are judged by the
+or its piece's section is missing or disabled (and then unsets the disabled piece's
+`recorded` flag); and it sets a missing `recorded` flag on an open piece key whose piece is
+registered and enabled. Spec and push keys are judged by the
 committer's own rules, through `SPEC_GONE`.
 """
 
@@ -154,6 +155,10 @@ def close_piece(cgd: str | os.PathLike, piece_id: str) -> bool:
 SPEC_GONE: Callable[[str, str, dict], str | None] | None = None
 
 
+#: The reason a piece key is cleared whose section stays, so its flag is unset too.
+DISABLED = "its piece is disabled"
+
+
 class Finding:
     """One thing the sweep found: a key to clear, or a flag to set."""
 
@@ -210,7 +215,7 @@ def judge(repo: str | os.PathLike | None = None) -> list[Finding]:
                     out.append(Finding(key, "clear", "its piece is no longer registered",
                                        cgd, subject))
                 elif not enabled(section):
-                    out.append(Finding(key, "clear", "its piece is disabled", cgd, subject))
+                    out.append(Finding(key, "clear", DISABLED, cgd, subject))
                 elif "recorded" not in section:
                     out.append(Finding(key, "flag", "its piece has no recorded flag", cgd,
                                        subject))
@@ -228,11 +233,14 @@ def sweep(repo: str | os.PathLike | None = None) -> list[Finding]:
 
     found = judge(repo)
     for item in found:
-        if item.action == "clear":
+        flag = f"moxi-repo.piece.{item.subject.get('piece')}.recorded"
+        if item.action == "clear" and item.reason == DISABLED:
+            close_record(item.key, after=lambda cgd=item.cgd, flag=flag: git(
+                cgd, f"--git-dir={cgd}", "config", "--local", "--unset-all", flag))
+        elif item.action == "clear":
             close_record(item.key)
         elif item.action == "flag":
-            git(item.cgd, f"--git-dir={item.cgd}", "config", "--local",
-                f"moxi-repo.piece.{item.subject.get('piece')}.recorded", "true")
+            git(item.cgd, f"--git-dir={item.cgd}", "config", "--local", flag, "true")
     return found
 
 
