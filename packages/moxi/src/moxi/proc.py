@@ -11,7 +11,8 @@
 - `identity` and `alive` name a process by its pid and start time, so a pid the system
   has given to another process since never matches.
 
-psutil is imported only inside `identity`, so importing this module is cheap.
+psutil is imported only inside the functions that use it, so importing this module is
+cheap.
 """
 
 from __future__ import annotations
@@ -37,6 +38,8 @@ EXIT_GRACE = 5.0
 # How far apart, in seconds, two reads of one process's start time may be for `alive`
 # to take them as one process. A pid is not given to another process within a second.
 _START_TOLERANCE = 1.0
+#: How long `spawn(..., lifeline="watch")` waits for its watchdog to say it is watching.
+WATCH_START = 10.0
 #: The lifeline kinds `spawn` takes.
 LIFELINES = ("stdin", "fd", "watch")
 
@@ -190,11 +193,17 @@ def spawn(argv: Argv, *, lifeline: str | None = None,
       at EOF on stdin stops when the pipe closes.
     - `"fd"`: an extra pipe whose read end the child inherits, named in
       `MOXI_LIFELINE_FD`, so its stdin stays free. The child calls `moxi.proc.lifeline()`.
-    - `"watch"`: for a program that knows nothing of lifelines. POSIX: the child starts in
-      a new session, and a small watchdog process holds the lifeline; when it closes, the
-      watchdog sends the child's process group SIGTERM and, two seconds later, SIGKILL.
-      Windows: the child is put in a Job Object that kills it when this process closes it
-      or dies.
+    - `"watch"`: for a program that knows nothing of lifelines and may keep the terminal.
+      The child has the terminal exactly as a plain child of this process has it, and
+      the terminal's foreground group is never moved. POSIX: the child stays in this
+      process's group and session, so a stop, Ctrl-C, a resize or a background read
+      reaches it as it reaches this process. A small watchdog in a session of its own
+      holds the lifeline and keeps a set of the child's descendants, each named by pid
+      and start time; when the lifeline closes it sends SIGTERM to the child and that
+      set and, two seconds later, SIGKILL to what is left (see `moxi._watch`). `spawn`
+      returns once the watchdog says it is watching; one that fails to start has the
+      child and its descendants killed and `OSError` raised. Windows: the child is put
+      in a Job Object that kills it when this process closes it or dies.
 
     The returned `Popen` carries the lifeline as `lifeline`, an object with `close()`:
     closing it tells the child to stop, as this process's death would. It is closed when
@@ -276,26 +285,107 @@ def _spawn_watched(argv: Argv, *, env, cwd, stdout, stderr) -> subprocess.Popen:
             raise
         proc.lifeline = job
         return proc
+    # The child stays in this process's group and session, as a plain child does, so
+    # the terminal treats the two alike: a stop, Ctrl-C, a resize or a background read
+    # reaches both. Nothing here moves the terminal's foreground group.
     proc = subprocess.Popen(_argv(argv), stdout=stdout, stderr=stderr, env=_env(env),
-                            cwd=cwd, start_new_session=True)
+                            cwd=cwd)
     try:
-        # The watchdog sits in a session of its own too, so a signal meant for this
-        # process's terminal group (Ctrl-C) never reaches it: only its stdin ends it.
-        # -P: the watchdog's directory is not put on its path, so no file there can
-        # stand in for moxi.
-        from .paths import python
-
-        watchdog = subprocess.Popen(
-            [str(python()), "-P", "-m", "moxi._watch", str(proc.pid)],
-            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            cwd="/", start_new_session=True)
+        watchdog = _start_watchdog(proc)
     except BaseException:
-        _signal_group(proc.pid, _sig("SIGKILL"))
-        proc.wait()
+        _kill_tree(proc)
         raise
     proc.lifeline = watchdog.stdin
     proc.watchdog = watchdog
     return proc
+
+
+def _start_watchdog(proc: subprocess.Popen) -> subprocess.Popen:
+    """Start the watchdog for `proc` and wait until it says it is watching.
+
+    The watchdog sits in a session of its own, so no signal from this process's terminal
+    (Ctrl-C, a stop, a hangup) reaches it: only the end of its stdin ends it. `-P`: the
+    watchdog's directory is not put on its path, so no file there can stand in for moxi.
+    Raises `OSError` when it can't be started or exits without saying it is ready.
+    """
+    import select
+    import time
+
+    from . import _watch
+    from .paths import python
+
+    ident = identity(proc.pid)
+    if ident is None:
+        if proc.poll() is None:
+            raise OSError(f"can't read the start time of process {proc.pid}")
+        started = 0.0  # it has ended already: a start time no process has
+    else:
+        started = ident.started
+    watchdog = subprocess.Popen(
+        [str(python()), "-P", "-m", "moxi._watch", str(proc.pid), repr(started)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        cwd="/", start_new_session=True)
+    said = b""
+    late = False
+    try:
+        deadline = time.monotonic() + WATCH_START
+        fd = watchdog.stdout.fileno()
+        # Read until the ready line, or to the end of what a failing watchdog writes
+        # (a traceback's last line says why).
+        while not said.startswith(_watch.READY) and len(said) < 65536:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                late = True
+                break
+            ready, _, _ = select.select([fd], [], [], left)
+            if not ready:
+                continue
+            part = os.read(fd, 4096)
+            if not part:
+                break
+            said += part
+        if said.startswith(_watch.READY):
+            return watchdog
+    except BaseException:
+        _end_watchdog(watchdog)
+        raise
+    finally:
+        watchdog.stdout.close()
+    _end_watchdog(watchdog)
+    lines = said.decode(errors="replace").strip().splitlines()
+    if lines:
+        why = lines[-1]
+    elif late:
+        why = f"it said nothing within {WATCH_START:g} seconds"
+    else:
+        why = f"it exited with status {watchdog.returncode}"
+    raise OSError(f"the watchdog for process {proc.pid} did not start: {why}")
+
+
+def _end_watchdog(watchdog: subprocess.Popen) -> None:
+    if watchdog.poll() is None:
+        watchdog.kill()
+    watchdog.wait()
+    watchdog.stdin.close()
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """SIGKILL a child and its descendants, the child first so it starts no more, and
+    reap the child."""
+    import psutil
+
+    try:
+        below = psutil.Process(proc.pid).children(recursive=True)
+    except psutil.Error:
+        below = []
+    if proc.poll() is None:
+        proc.kill()
+    for process in below:
+        try:
+            process.kill()  # psutil checks the pid still names the process it found
+        except psutil.Error:
+            pass
+    proc.wait()
 
 
 def _spawn_detached(argv: Argv, *, env, cwd, output) -> int:
