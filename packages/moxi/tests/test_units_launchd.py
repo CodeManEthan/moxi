@@ -1522,3 +1522,234 @@ def test_proof_record_what_launchd_shows_for_an_address_it_cannot_bind(tmp_path,
     finally:
         backend.stop_id(ref.ids[0], fence)
         fence.run("enable", backend.target(ref.ids[0]))
+
+
+# A socket daemon for the reload proof rows: it takes `Listeners` by name and appends one
+# line per start to the file in its first argument (its pid, then how many fds the key
+# gave it). It keeps each connection open and answers every line on it with its pid, so a
+# row can tell whether a connection outlived an apply; it exits 0 on a line `exit` or after
+# 60 seconds. Started with no socket (a job without `Sockets`), it stays up 60 seconds.
+HOLDING_DAEMON = '''\
+import ctypes, os, select, socket, sys, time
+lib = ctypes.CDLL(None)
+lib.launch_activate_socket.argtypes = [
+    ctypes.c_char_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_int)),
+    ctypes.POINTER(ctypes.c_size_t)]
+fds = ctypes.POINTER(ctypes.c_int)()
+count = ctypes.c_size_t()
+err = lib.launch_activate_socket(b"Listeners", ctypes.byref(fds), ctypes.byref(count))
+held = [] if err else [fds[i] for i in range(count.value)]
+with open(sys.argv[1], "a") as out:
+    out.write(f"{os.getpid()} Listeners={len(held)}\\n")
+if not held:
+    time.sleep(60)
+    sys.exit(0)
+listening = [socket.socket(fileno=fd) for fd in held]
+conns = []
+deadline = time.monotonic() + 60
+while time.monotonic() < deadline:
+    ready, _, _ = select.select(listening + conns, [], [], 1)
+    for sock in ready:
+        if sock in listening:
+            conns.append(sock.accept()[0])
+            continue
+        line = sock.recv(64).strip()
+        if not line:
+            conns.remove(sock)
+            sock.close()
+            continue
+        sock.sendall(f"{os.getpid()}\\n".encode())
+        if line == b"exit":
+            sys.exit(0)
+'''
+
+
+class RecordedLaunchctl:
+    """The real `launchctl`, with each call's arguments after `launchctl` kept in
+    `calls`."""
+
+    def __init__(self):
+        from moxi.units._fence import default_runner
+
+        self.calls: list[tuple[str, ...]] = []
+        self._run = default_runner()
+
+    def __call__(self, cmd, *, env=None, timeout=None):
+        self.calls.append(tuple(cmd[1:]))
+        return self._run(cmd, env=env, timeout=timeout)
+
+    def verbs(self) -> list[str]:
+        """The verbs called, without the domain reads."""
+        return [c[0] for c in self.calls if c[0] != "print"]
+
+
+@pytest.fixture
+def real_mac(site, tmp_path, monkeypatch):
+    """A throwaway module `proof<8 hex>` with one daemon, `shell`, declared `upgrade =
+    "keep"`, applied through `plan` and `apply` by the real `launchctl`. Its plist is in
+    tmp (never in ~/Library/LaunchAgents), and its label is removed in a `finally`."""
+    if os.environ.get("MOXI_TEST_REAL_SUPERVISOR") != "1":
+        pytest.skip("a proof row: set MOXI_TEST_REAL_SUPERVISOR=1 on a Mac")
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path / "home"))
+    module = f"proof{os.urandom(4).hex()}"
+    scripts = tmp_path / "bin"
+    scripts.mkdir()
+    monkeypatch.setattr(moxi.paths, "_scripts", lambda: scripts)
+    for name, body in (("moxi", "#!/bin/sh\n"),
+                       (f"moxi-{module}-shell", f"#!{sys.executable} -I\n{HOLDING_DAEMON}"),
+                       (f"moxi-{module}-next", f"#!{sys.executable} -I\n{HOLDING_DAEMON}")):
+        (scripts / name).write_text(body)
+        (scripts / name).chmod(0o755)
+    port, other = _free_port(), _free_port()
+    while other == port:
+        other = _free_port()
+    site.write(f"moxi_{module}/settings.toml",
+               SETTINGS.replace("default = 8470", f"default = {port}"))
+    agents = tmp_path / "agents"
+    agents.mkdir()
+    ctl = RecordedLaunchctl()
+    backend = LaunchdBackend(agents=agents, gate="/usr/bin/true", runner=ctl)
+    fence = Fence("launchd", ctl)
+    starts = tmp_path / "starts.txt"
+    lines: list[str] = []
+
+    def declare(*, command="shell", socket=True):
+        entry = {"command": f"moxi-{module}-{command}", "args": [str(starts)],
+                 "upgrade": "keep", "doc": "a throwaway daemon for the reload proof"}
+        if socket:
+            entry["socket"] = {"setting": "port", "addresses": ["127.0.0.1"]}
+        site.module(module, SETTINGS="'settings.toml'", DAEMONS=repr({"shell": entry}))
+        for name in [m for m in sys.modules if m.split(".")[0] == f"moxi_{module}"]:
+            del sys.modules[name]
+        moxi.modules.reset()
+
+    def apply():
+        lines.clear()
+        return units.apply(units.plan(module), say=lines.append)
+
+    def daemon():
+        [ref] = backend.marked(module)
+        [state] = backend.status([ref], fence)
+        return state
+
+    def started() -> list[str]:
+        return starts.read_text().splitlines() if starts.exists() else []
+
+    label = backend.label(module, "shell")
+    with _backend.use(backend):
+        try:
+            yield types.SimpleNamespace(module=module, port=port, other=other, ctl=ctl,
+                                        backend=backend, fence=fence, label=label,
+                                        declare=declare, apply=apply, daemon=daemon,
+                                        started=started, lines=lines,
+                                        plist=lambda: plistlib.loads(
+                                            (agents / f"{label}.plist").read_bytes()))
+        finally:
+            units.remove(module, say=lines.append)
+            backend.stop_id(label, fence)
+            fence.run("enable", backend.target(label))
+
+
+def _hold(port: int):
+    """An open connection to the daemon on `port`, and the pid that answered it."""
+    import socket
+
+    conn = socket.create_connection(("127.0.0.1", port), timeout=10)
+    conn.sendall(b"hi\n")
+    return conn, conn.recv(64).strip()
+
+
+def _refused(port: int) -> bool:
+    """Whether a connection to `port` is refused, waiting up to 10 s for it to be."""
+    def attempt():
+        try:
+            return _ask("127.0.0.1", port, b"hi") and False
+        except ConnectionRefusedError:
+            return True
+        except OSError:
+            return False
+
+    return _until(attempt, bool, seconds=10.0)
+
+
+@darwin
+@pytest.mark.parametrize("serving", [False, True], ids=["idle", "serving"])
+def test_proof_a_keep_socket_daemons_port_change_reloads_it(real_mac, serving):
+    """A loaded `upgrade = "keep"` socket daemon whose port changed, idle or while a
+    connection is served: `apply` runs `bootout`, `enable` and `bootstrap`, the old port
+    refuses a connection, a connection to the new one starts the daemon, and the next
+    `plan` reads `keep`."""
+    from moxi import config
+
+    m = real_mac
+    m.declare()
+    assert all(a.ok for a in m.apply()), m.lines
+    first = m.daemon()
+    assert (first.state, first.pid) == ("inactive", None)
+    conn = None
+    if serving:
+        conn, pid = _hold(m.port)
+        assert _until(m.daemon, lambda d: d.pid).pid == int(pid)
+    try:
+        config.set(m.module, "port", str(m.other), by="test")
+        m.ctl.calls.clear()
+        [done] = m.apply()
+        assert done.ok, m.lines
+        assert m.ctl.verbs() == RELOAD
+        assert m.plist()["Sockets"] == {"Listeners": listener("127.0.0.1", str(m.other))}
+    finally:
+        if conn is not None:
+            conn.close()
+    assert _refused(m.port)
+    before = len(m.started())
+    answer = _ask("127.0.0.1", m.other, b"hi")
+    assert len(m.started()) == before + 1
+    assert m.started()[-1] == f"{int(answer)} Listeners=1"
+    assert [c.action for c in units.plan(m.module)] == ["keep"]
+
+
+@darwin
+def test_proof_a_change_outside_sockets_while_serving_keeps_the_connection(real_mac):
+    """A loaded `upgrade = "keep"` socket daemon whose command's path changes while it
+    serves a connection: `apply` runs no `bootout`, prints the rewritten line, and the open
+    connection is kept, answered by the same process."""
+    m = real_mac
+    m.declare()
+    assert all(a.ok for a in m.apply()), m.lines
+    conn, pid = _hold(m.port)
+    try:
+        m.declare(command="next")
+        assert [(c.kind, c.action) for c in units.plan(m.module)] == [("daemon", "change")]
+        m.ctl.calls.clear()
+        [done] = m.apply()
+        assert done.ok, m.lines
+        assert m.ctl.verbs() == []
+        assert done.lines == (f"{m.label} rewritten; the new code runs from its next start",)
+        assert m.plist()["ProgramArguments"][0].endswith(f"moxi-{m.module}-next")
+        conn.sendall(b"again\n")
+        assert conn.recv(64).strip() == pid
+        assert len(m.started()) == 1
+    finally:
+        conn.close()
+
+
+@darwin
+def test_proof_a_keep_daemon_that_drops_its_socket_is_reloaded_and_runs(real_mac):
+    """A loaded `upgrade = "keep"` socket daemon, idle, declared again without `socket`:
+    `apply` runs `bootout`, `enable` and `bootstrap`, the new plist has `RunAtLoad` and
+    `KeepAlive` and no `Sockets`, launchd starts it at once, and its port refuses."""
+    m = real_mac
+    m.declare()
+    assert all(a.ok for a in m.apply()), m.lines
+    assert m.daemon().pid is None
+    m.declare(socket=False)
+    m.ctl.calls.clear()
+    [done] = m.apply()
+    assert done.ok, m.lines
+    assert m.ctl.verbs() == RELOAD
+    body = m.plist()
+    assert "Sockets" not in body and body["RunAtLoad"] is True and body["KeepAlive"]
+    running = _until(m.daemon, lambda d: d.pid)
+    assert running.state == "active" and running.pid
+    assert _until(m.started, bool) == [f"{running.pid} Listeners=0"]
+    assert _refused(m.port)
