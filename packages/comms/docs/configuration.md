@@ -27,8 +27,8 @@ comms keeps its files in its own five directories under Moxi's roots:
 
 With no `XDG_RUNTIME_DIR` and no `MOXI_COMMS_RUNTIME_DIR`, the runtime root is under the
 state root, `runtime/`. State and cache directories left under a host folder by an older
-layout (`~/.local/state/moxi/<host>/comms/`) are read where they are until
-`moxi install comms` moves them. `moxi paths comms` prints every directory.
+layout (`~/.local/state/moxi/<host>/comms/`) are read where they are; a later release of
+moxi moves them. `moxi paths comms` prints every directory.
 
 | variable | what it does |
 |---|---|

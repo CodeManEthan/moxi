@@ -993,8 +993,8 @@ def _paths_of(module: str) -> dict:
     directories = {"data": layout.data_dir(), "state": layout.state_dir(),
                    "cache": layout.cache_dir(), "config": layout.config_dir(),
                    "runtime": layout.runtime_dir()}
-    notes = [f"{kind} is read where it is, under a host folder, until "
-             f"`moxi install {module}` moves it"
+    notes = [f"{kind} is read where it is, under a host folder; a later release of "
+             "moxi moves it"
              for kind, root in (("state", layout.state_root()), ("cache", layout.cache_root()))
              if directories[kind] != root / module]
     listed = []
