@@ -110,7 +110,16 @@ class LocalRecord:
 
     # ------------------------------------------------------------------ connections
     def _conn(self) -> sqlite3.Connection:
-        """One connection per thread. WAL lets them all read while one writes."""
+        """One connection per thread. WAL lets them all read while one writes.
+
+        Opened through `store.open_write`, which opens with the core's store connect: a
+        store it creates is private to its owner (0600) from its first byte and starts
+        in WAL, in a directory left as it was when it was there already (a missing one
+        is made 0700); an existing store is opened as it is, its mode and journal mode
+        untouched.
+        A thread that is done with the record calls `release()`, or its connection stays
+        open until `close()`.
+        """
         conn = getattr(self._local, "conn", None)
         if conn is None:
             # check_same_thread=False so `close()` may be called from any thread; the
@@ -121,6 +130,23 @@ class LocalRecord:
             with self._lock:
                 self._conns.append(conn)
         return conn
+
+    def release(self) -> None:
+        """Close the calling thread's connection, if it has one, and forget it.
+
+        For a thread that is about to end while the record stays open: without this each
+        such thread leaves one connection open until `close()`. The daemon serves its
+        clients on a fixed pool whose threads live as long as its socket, so it needs no
+        release per client. The thread's next call opens a new one.
+        """
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            return
+        self._local.conn = None
+        with self._lock:
+            self._conns = [c for c in self._conns if c is not conn]
+        with contextlib.suppress(sqlite3.Error):
+            conn.close()
 
     @contextlib.contextmanager
     def _write(self):

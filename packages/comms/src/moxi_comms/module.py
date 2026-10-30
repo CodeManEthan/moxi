@@ -57,3 +57,6 @@ STORES = {
     "opencode": {"root": "state", "path": "opencode", "kind": "dir", "private": True,
                  "retention": "keep", "rebuildable": False, "lazy": True},
 }
+#: The delivery daemon, which `moxi install comms` writes as a unit through the core's
+#: writer. `moxi comms service` still writes today's unmarked unit, as it always has.
+DAEMONS = {"daemon": {"command": "moxi-comms-daemon", "doc": "the delivery daemon"}}

@@ -341,6 +341,10 @@ class MockRecord:
                         sub.last_id = m["id"]
                         sub._push({"t": "MESSAGE_CREATE", "d": m})
 
+    def release(self) -> None:
+        """The local record's per-thread release; the mock holds no connection, so it does
+        nothing."""
+
     def close(self) -> None:
         self._stop.set()
         for sub in list(self._subs):
