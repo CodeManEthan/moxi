@@ -1,7 +1,7 @@
 [project]
 name = "moxi-sessions"
-version = "0.1.1"
-description = "Read a harness's own session records: find a session, read its transcript back."
+version = "0.2.0"
+description = "Read each harness's own session records in one shape: find a session and its subagents, list a root's sources, read records forward or back."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"

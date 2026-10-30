@@ -1,26 +1,31 @@
-"""`moxi sessions`: where a session's record is, and which projects root is read.
+"""`moxi sessions`: where a session's records are, and which root each harness is read
+from.
 
-    moxi sessions find SESSION [--harness claude|codex] [--root PATH] [--json]
+    moxi sessions find SESSION [--harness claude|codex|opencode] [--root PATH] [--json]
     moxi sessions root [--json]
 
-`find` prints the path of the session's record, or every root it probed and why each
-found none, and exits 1 then. `root` prints the Claude projects root a session that
-stated none is read under, and where that root came from.
+`find` prints where the session's records are (a Claude Code transcript, every rollout
+file of a Codex thread, or the OpenCode database that holds the session), or every root it
+probed and why each held none, and exits 1 then. `root` prints the root each harness is
+read from when a caller names none, and where that root came from.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from collections.abc import Sequence
-from pathlib import Path
 
 from moxi.config import ConfigError
 
-from . import claude, codex
-from .settings import current
+from . import claude
+from .find import find
+from .shape import CLAUDE, CODEX, HARNESSES
+from .source import root, root_origin
+
+#: What `find` calls a harness's record when it finds none.
+RECORD = {CLAUDE: "transcript", CODEX: "rollout", "opencode": "session row"}
 
 
 def main(argv: Sequence[str] | None = None, *, prog: str = "moxi sessions") -> int:
@@ -29,21 +34,21 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi sessions") -> i
     verbs = parser.add_subparsers(dest="verb", metavar="VERB")
     verbs.required = True
 
-    find = verbs.add_parser("find", help="print where a session's record is",
-                            description="Print where a session's record is, or the roots "
-                                        "probed and why none held it.")
-    find.add_argument("session", metavar="SESSION", help="the session or thread id")
-    find.add_argument("--harness", choices=("claude", "codex"), default="claude",
-                      help="whose record to look for (default: claude)")
-    find.add_argument("--root", action="append", default=[], metavar="PATH",
-                      help="a further root to probe after the usual one; may repeat")
-    find.add_argument("--json", action="store_true", help="print one JSON object")
+    finder = verbs.add_parser("find", help="print where a session's records are",
+                              description="Print where a session's records are, or the "
+                                          "roots probed and why none held them.")
+    finder.add_argument("session", metavar="SESSION", help="the session or thread id")
+    finder.add_argument("--harness", choices=HARNESSES, default=CLAUDE,
+                        help="whose record to look for (default: claude)")
+    finder.add_argument("--root", action="append", default=[], metavar="PATH",
+                        help="a further root to probe after the usual one (for OpenCode, "
+                             "a database); may repeat")
+    finder.add_argument("--json", action="store_true", help="print one JSON object")
 
-    root = verbs.add_parser("root", help="print the Claude projects root and its source",
-                            description="Print the Claude projects root read for a "
-                                        "session that stated none, and where it came "
-                                        "from.")
-    root.add_argument("--json", action="store_true", help="print one JSON object")
+    roots = verbs.add_parser("root", help="print each harness's root and its source",
+                             description="Print the root each harness is read from when "
+                                         "a caller names none, and where it came from.")
+    roots.add_argument("--json", action="store_true", help="print one JSON object")
 
     args = parser.parse_args(argv)
     try:
@@ -62,77 +67,39 @@ def _find(args, prog: str) -> int:
     if not claude.SAFE_ID_RE.match(session):
         print(f"{prog} find: {session!r} is not a session id", file=sys.stderr)
         return 2
-    if args.harness == "claude":
-        live = claude.projects_root(None)
-        probes, paths = _find_claude(claude.search_roots(live=live, extra=args.root),
-                                     session)
-    else:
-        live = _codex_sessions_root(os.environ)
-        probes, paths = _find_codex(claude.search_roots(live=live, extra=args.root),
-                                    session)
+    roots = claude.search_roots(live=root(args.harness), extra=args.root)
+    found = find(args.harness, session, root=roots)
+    paths = [hit.source.path for hit in found.hits]
     if args.json:
+        probes = [{"root": probe.root, "outcome": probe.outcome,
+                   "paths": [hit.source.path for hit in probe.hits]}
+                  for probe in found.probes]
         print(json.dumps({"harness": args.harness, "session": session,
-                          "found": bool(paths), "paths": paths, "probes": probes},
-                         indent=2))
+                          "found": found.found, "paths": paths,
+                          "compressed": [hit.source.path for hit in found.hits
+                                         if hit.compressed],
+                          "probes": probes}, indent=2))
     elif paths:
         for path in paths:
             print(path)
     else:
-        what = "transcript" if args.harness == "claude" else "rollout"
-        print(f"no {what} for {session}; probed:")
-        for probe in probes:
-            print(f"  {probe['root']}: {probe['outcome']}")
-    return 0 if paths else 1
-
-
-def _find_claude(roots: list[Path], session: str) -> tuple[list[dict], list[str]]:
-    probes = []
-    for root in roots:
-        probe = claude.probe_root(root, session)
-        probes.append({"root": probe.root, "outcome": probe.outcome,
-                       "paths": [probe.path] if probe.path else []})
-        if probe.hit:
-            return probes, [probe.path]
-    return probes, []
-
-
-def _find_codex(roots: list[Path], thread: str) -> tuple[list[dict], list[str]]:
-    probes = []
-    for root in roots:
-        try:
-            found = [str(p) for p in codex.find_rollout(root, thread)]
-        except OSError as exc:
-            probes.append({"root": str(root), "outcome": f"unreadable: {exc}", "paths": []})
-            continue
-        if found:
-            probes.append({"root": str(root), "outcome": "hit", "paths": found})
-            return probes, found
-        probes.append({"root": str(root), "outcome": "miss", "paths": []})
-    return probes, []
-
-
-def _codex_sessions_root(environ) -> Path:
-    """Codex's own rule: `${CODEX_HOME:-~/.codex}/sessions`."""
-    home = environ.get("CODEX_HOME")
-    base = Path(home).expanduser() if home else Path.home() / ".codex"
-    return base / "sessions"
+        print(f"no {RECORD[args.harness]} for {session}; probed:")
+        for probe in found.probes:
+            print(f"  {probe.root}: {probe.outcome}")
+    return 0 if found.found else 1
 
 
 # --- root -----------------------------------------------------------------------------
 
 def _root(args) -> int:
-    settings = current()
-    path = claude.projects_root(None)
-    if settings["claude.projects"] is not None:
-        source, detail = "config", f"claude.projects in {settings.file}"
-    elif os.environ.get("CLAUDE_CONFIG_DIR"):
-        source, detail = "environment", "CLAUDE_CONFIG_DIR/projects"
-    else:
-        source, detail = "default", "~/.claude/projects (CLAUDE_CONFIG_DIR is unset)"
+    origins = [root_origin(harness) for harness in HARNESSES]
     if args.json:
-        print(json.dumps({"root": str(path), "source": source, "detail": detail},
-                         indent=2))
-    else:
-        print(path)
-        print(f"  from: {detail}")
+        print(json.dumps({origin.harness: {"root": str(origin.path),
+                                           "source": origin.source,
+                                           "detail": origin.detail}
+                          for origin in origins}, indent=2))
+        return 0
+    for origin in origins:
+        print(f"{origin.harness}: {origin.path}")
+        print(f"  from: {origin.detail}")
     return 0
