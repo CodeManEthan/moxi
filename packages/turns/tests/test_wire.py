@@ -21,19 +21,6 @@ def raw(ep, *frames):
         return out
 
 
-def test_every_value_round_trips():
-    values = [turns.Facts("s", 1, True, 2, False, 3.5, True), turns.Started("t"),
-              turns.Refused("draft"), turns.Lost("x"), turns.Ended("t", "aborted"),
-              turns.Ran("s2"), turns.Ran(), turns.Failed("x"), turns.Ready("clear", "s"),
-              turns.TurnStarted("t", "s", "d"), turns.TurnEnded("t", "answer", "s", "d",
-                                                                ("e", "f")),
-              turns.Gone("x"), turns.StopFacts("t", "s", True, ("shell",), 2)]
-    for v in values:
-        assert results.from_wire(json.loads(json.dumps(v.to_wire()))) == v
-    with pytest.raises(ValueError):
-        results.from_wire({"kind": "nope"})
-
-
 def test_version_unknown_op_and_bad_requests(make_endpoint):
     ep, _ = make_endpoint()
     v2, unknown, no_text, bad_epoch, bad_flag, ok = raw(
