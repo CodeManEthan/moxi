@@ -33,30 +33,17 @@ from types import MappingProxyType
 from typing import Any
 from urllib.parse import parse_qsl
 
+# Only the names `moxi_loopback.api` re-exports are public; the rest are the package's own.
 __all__ = [
-    "BODY_CAP",
-    "BODY_CAP_MAX",
-    "BUDGET",
-    "CONTENT_TYPES",
-    "FORMAT",
-    "HEALTH_PATH",
-    "PROVE_PATH",
-    "BadRequest",
     "Entry",
     "Field",
     "Out",
     "Page",
     "PageError",
-    "ProjectionError",
     "Route",
     "Table",
     "build_table",
     "export",
-    "list_assets",
-    "parse_body",
-    "parse_query",
-    "parse_size",
-    "project",
 ]
 
 #: The export's shape. A reader tells shapes apart by it.

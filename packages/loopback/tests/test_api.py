@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
 import inspect
+import pkgutil
 import subprocess
 import sys
 from pathlib import Path
@@ -71,6 +73,14 @@ def test_every_name_is_the_defining_files_own_object():
         for name in names:
             assert getattr(api, name) is getattr(home, name), name
             assert name in home.__all__, f"{home.__name__} does not list {name}"
+
+
+def test_every_public_name_of_the_package_is_reachable_from_the_api():
+    for info in pkgutil.iter_modules(moxi_loopback.__path__):
+        home = importlib.import_module(f"moxi_loopback.{info.name}")
+        for name in getattr(home, "__all__", ()):
+            assert name in api.__all__ and getattr(api, name) is getattr(home, name), \
+                f"{home.__name__} lists {name}, which the api does not reach"
 
 
 def _shape(fn):

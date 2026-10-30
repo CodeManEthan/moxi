@@ -56,13 +56,8 @@ import time  # noqa: E402
 from collections.abc import Awaitable, Callable, Iterable  # noqa: E402
 from typing import Any  # noqa: E402
 
+# Only the names `moxi_loopback.api` re-exports are public; the rest are the package's own.
 __all__ = [
-    "CLOSE_DEADLINE",
-    "CONNECTION_CAP",
-    "EXIT_DEADLINE",
-    "LOCK_WAIT",
-    "PROMISE",
-    "main",
     "serve",
 ]
 

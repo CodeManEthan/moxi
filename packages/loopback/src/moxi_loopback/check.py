@@ -43,16 +43,14 @@ from dataclasses import dataclass
 
 from moxi_loopback.routes import PROVE_PATH, Entry, Table
 
+# Only the names `moxi_loopback.api` re-exports are public; the rest are the package's own.
 __all__ = [
-    "BASE_NAMES",
-    "TOKEN_PATTERN",
     "Profile",
     "Refusal",
     "RequestView",
     "browser",
     "check",
     "proof",
-    "prove_nonce",
     "token_matches",
     "upstream",
 ]

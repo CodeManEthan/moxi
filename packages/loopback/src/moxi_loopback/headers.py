@@ -15,13 +15,9 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Sequence
 
+# Only the names `moxi_loopback.api` re-exports are public; the rest are the package's own.
 __all__ = [
-    "CSP",
-    "NO_CACHE",
-    "NO_STORE",
-    "SECURITY_HEADERS",
     "complete",
-    "csp",
     "response_headers",
 ]
 

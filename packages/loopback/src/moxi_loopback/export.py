@@ -34,7 +34,8 @@ from typing import TYPE_CHECKING  # noqa: E402
 if TYPE_CHECKING:
     from .routes import Page
 
-__all__ = ["PageLoadError", "load_page", "main"]
+# `moxi_loopback.api` re-exports nothing from the command, so it has no public names.
+__all__: list[str] = []
 
 _USAGE = "usage: python -P -m moxi_loopback.export <module>...\n"
 

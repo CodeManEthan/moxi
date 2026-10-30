@@ -52,29 +52,18 @@ from moxi_loopback.routes import (
     project,
 )
 
+# Only the names `moxi_loopback.api` re-exports are public; the rest are the package's own.
 __all__ = [
-    "CHECKED",
-    "HANDED",
-    "HEADER_CAP",
-    "HEALTH_LIMIT",
-    "HEARTBEAT",
-    "INFLIGHT_CAP",
-    "STREAM_CAP",
     "Accepted",
-    "Activity",
     "Call",
     "Conflict",
-    "PageApp",
     "Refused",
     "Snapshot",
-    "Stream",
     "Topics",
     "app",
     "busy",
     "guard",
     "prove",
-    "read_topics",
-    "settle",
 ]
 
 #: The scope key `guard` sets on a request `check` passed. `app` refuses any request

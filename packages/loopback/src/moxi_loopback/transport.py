@@ -36,19 +36,14 @@ from .check import BASE_NAMES, proof
 from .routes import PROVE_PATH
 from .runtime import RuntimeInfo
 
+# Only the names `moxi_loopback.api` re-exports are public; the rest are the package's own.
 __all__ = [
-    "ANSWER_MAX",
-    "PROVE_LIMIT",
     "BrowserSockets",
     "NotLoopback",
     "NotOurServer",
-    "NotPrivate",
     "bind_browser",
-    "bind_tcp",
-    "bind_unix",
     "browser_names",
     "call",
-    "check_private_dir",
     "open_connection",
 ]
 
