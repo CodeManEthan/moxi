@@ -18,7 +18,7 @@ import pytest
 
 import moxi.modules
 import moxi.paths
-from moxi import units
+from moxi import files, units
 from moxi.units import _backend, _launchd, _state
 from moxi.units._backend import Backend, RenderError, Schedule, Socket, Spec, UnitRef
 from moxi.units._fence import Fence
@@ -853,6 +853,113 @@ def test_the_default_paths_are_the_users_launch_agents_and_uid(monkeypatch):
     backend = LaunchdBackend()
     assert backend.agents == Path("/Users/ana/Library/LaunchAgents")
     assert backend.domain == f"gui/{os.getuid()}"
+
+
+# -- foreign with no fence, ids, wraps, and a read that fails -----------------------------------
+
+def test_foreign_with_no_fence_reads_the_same_unit_and_makes_no_call(mac):
+    plist = mac.agents / "com.example.backup.plist"
+    plist.write_bytes(plistlib.dumps({"Label": "com.example.backup", "StartInterval": 60}))
+    with_fence = mac.backend.foreign("com.example.backup", mac.fence)
+    assert mac.backend.foreign("com.example.backup", None) == with_fence
+    assert with_fence.kind == "timer" and with_fence.paths == (plist,)
+    assert mac.backend.foreign("com.example.gone", None) == UnitRef(
+        None, "com.example.gone", "daemon", ("com.example.gone",))
+    assert mac.ctl.calls == []
+
+
+def test_ids_is_the_label_whether_or_not_a_plist_is_there(mac):
+    assert mac.backend.ids("demo", "relay", "daemon") == (RELAY,)
+    assert mac.backend.ids("demo", "snap", "timer") == ("moxi.demo.snap",)
+    refs = installed(mac, timer=True)
+    assert refs["relay"].ids == mac.backend.ids("demo", "relay", "daemon")
+    assert refs["snap"].ids == mac.backend.ids("demo", "snap", "timer")
+    assert mac.ctl.calls == []
+
+
+def test_wraps_is_empty_on_launchd(mac):
+    assert mac.backend.wraps("demo") == () and mac.ctl.calls == []
+
+
+def test_running_raises_when_the_domain_read_fails(mac):
+    installed(mac)
+    assert mac.backend.running([], mac.fence) == frozenset() and mac.ctl.calls == []
+    mac.ctl.fail[("print", None)] = (113, "Could not find domain for gui: 501")
+    with pytest.raises(_backend.ReadError) as raised:
+        mac.backend.running([RELAY], mac.fence)
+    assert raised.value.ran.argv == ("launchctl", "print", DOMAIN)
+    assert "Could not find domain for gui: 501" in str(raised.value)
+
+
+def test_a_failed_domain_read_stops_nothing_and_records_nothing(mac):
+    mac.script("moxi-demo-relay")
+    mac.module(DAEMONS=DAEMON)
+    mac.apply(units.plan("demo"))
+    mac.ctl.calls.clear()
+    mac.ctl.fail[("print", None)] = (1, "Operation not permitted")
+    record: list = []
+    [done] = units.stop("demo", record=record)
+    assert not done.ok and done.lines[0].startswith("cannot tell which units of demo run")
+    assert "Operation not permitted" in done.lines[0]
+    assert record == [] and RELAY in mac.ctl.loaded and mac.ctl.verbs() == []
+
+
+def test_stop_with_replace_takes_an_unmarked_job_by_its_label_and_resume_starts_it(mac):
+    mac.script("moxi-demo-relay")
+    mac.module(DAEMONS=DAEMON)
+    (mac.agents / f"{RELAY}.plist").write_bytes(plistlib.dumps(
+        {"Label": RELAY, "ProgramArguments": ["/bin/true"], "RunAtLoad": True}))
+    mac.ctl.loaded[RELAY] = [99, None]
+    record: list = []
+    [done] = units.stop("demo", replace=True, record=record)
+    assert done.ok and done.lines == (f"{RELAY} stopped",)
+    assert [(e.unit, e.marked, e.backend) for e in record] == [(RELAY, False, "launchd")]
+    assert RELAY not in mac.ctl.loaded
+    [started] = units.resume(record)
+    assert started.ok and RELAY in mac.ctl.loaded
+
+
+def test_status_gives_one_state_per_unit_in_order_with_only_launchds_result(mac):
+    for name in ("relay", "idle"):
+        [group] = mac.backend.render(spec(name=name))
+        group.files[0][0].write_text(group.files[0][1])
+    [snap] = mac.backend.render(spec("timer", name="snap", schedule=Schedule(every=5)))
+    snap.files[0][0].write_text(snap.files[0][1])
+    mac.ctl.loaded.update({RELAY: [321, None], "moxi.demo.snap": [None, 2],
+                           "com.example.agent": [612, None]})
+    marked = {r.name: r for r in mac.backend.marked("demo")}
+    refs = [mac.backend.foreign("com.example.agent", None), marked["snap"], marked["idle"],
+            marked["relay"], mac.backend.foreign("com.example.gone", None)]
+    states = mac.backend.status(refs, mac.fence)
+    assert mac.ctl.calls == [("print", DOMAIN)]
+    assert [(s.module, s.name, s.kind) for s in states] == [
+        (r.module, r.name, r.kind) for r in refs]
+    assert [s.state for s in states] == ["active", "active", "inactive", "active", "missing"]
+    assert states[1].last == {"status": 2}
+    assert all(s.last is None for s in states if s.kind == "daemon")
+
+
+def test_status_through_the_core_adds_the_run_line_beside_launchds_result(mac):
+    mac.script("moxi-demo-relay")
+    mac.script("moxi-demo-snap")
+    mac.module(DAEMONS=DAEMON, TIMERS=TIMER)
+    changes = units.plan("demo")
+    for change in changes:
+        if change.digest:
+            _state.record("demo", change.name, change.digest)
+    mac.apply(changes)
+    mac.ctl.loaded["moxi.demo.snapshot"] = [None, 2]
+    line = {"unit": "demo/snapshot", "at": "2026-01-01T00:00:00Z", "seconds": 0.5,
+            "result": "ran", "exit": 2}
+    files.append_record(moxi.paths.Layout("demo").state_dir() / "runs.jsonl", line)
+    mac.ctl.calls.clear()
+    rows = units.status("demo", foreign=["com.example.agent"])
+    assert mac.ctl.calls == [("print", DOMAIN)]
+    assert [(r.module, r.name, r.kind) for r in rows] == [
+        ("demo", "relay", "daemon"), ("demo", "snapshot", "timer"),
+        (None, "com.example.agent", "daemon")]
+    assert rows[1].last == {**line, "supervisor": {"status": 2}}
+    assert rows[0].last is None and rows[2].state == "missing"
 
 
 # -- on a real Mac -------------------------------------------------------------------------------
