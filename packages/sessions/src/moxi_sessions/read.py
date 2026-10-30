@@ -400,7 +400,9 @@ def records(source: Any, *, kinds: Iterable[str] | None = None,
     line's or row's decoded object in its records' `raw`. A request still open at the end
     of the file comes with `final` false. Raises Unreadable when the source cannot be
     opened or read (a compressed rollout among them), and ValueError for an OpenCode
-    source that names no session.
+    source that names no session. An OpenCode read checks the session table when it
+    opens and the message and part tables when its records are first asked for, so its
+    `header` needs only the first.
     """
     src, bound = unpack(source)
     wanted = _wanted(kinds)
@@ -410,13 +412,15 @@ def records(source: Any, *, kinds: Iterable[str] | None = None,
         snap = oc.Snapshot(src.path)
         try:
             row = snap.session(session_id)
-            snap.require("message", "part")
         except BaseException:
             snap.close()
             raise
 
+        # The message and part columns are checked when the records are first asked
+        # for, so a caller that reads only the header needs only the session table.
         def stream() -> Iterator[Record]:
             try:
+                snap.require("message", "part")
                 yield from snap.records(session_id, kinds=wanted, keep_raw=keep_raw)
             finally:
                 snap.close()

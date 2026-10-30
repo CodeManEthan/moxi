@@ -385,6 +385,21 @@ def test_lines_that_will_not_read_are_malformed_with_why(rollout):
     assert bad[0].session_id == rollout.thread_id
 
 
+def test_a_listed_line_without_its_time_as_text_is_malformed(rollout):
+    """Codex writes every line with its `timestamp` as text: a line of a listed kind
+    without one is bad structure, while a time that is text but not a time reads as an
+    unknown time."""
+    rollout.turn()
+    rollout.add({"type": "turn_context", "payload": {"turn_id": "t", "model": "m"}})
+    rollout.add({"timestamp": 1793354400, "type": "world_state", "payload": {}})
+    rollout.add({"timestamp": "not a time", "type": "world_state", "payload": {}})
+    records = read(rollout.write())
+    bad = of(records, Malformed)
+    assert [(b.raw_kind, b.why) for b in bad] == [("turn_context", "bad_structure"),
+                                                  ("world_state", "bad_structure")]
+    assert records[-1].raw_kind == "world_state" and records[-1].time is UNKNOWN
+
+
 def test_keep_raw_hands_back_the_decoded_line(rollout):
     rollout.turn()
     records = read(rollout.write(), keep_raw=True)

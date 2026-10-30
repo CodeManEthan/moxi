@@ -481,8 +481,11 @@ def line_records(raw: bytes | str, *, at: dict, state: State, agent_id: str | No
     Every request is `final`: Codex writes a request in one line.
     """
     entry, why = decode(raw)
-    if why is not None or (entry is not None and not isinstance(entry.get("payload"), dict)
-                           and entry.get("type") in TOP_KINDS):
+    # A line of a kind on the list must carry its payload object and its time as text;
+    # one that does not is a line Codex did not write as it writes that kind.
+    if why is not None or (entry is not None and entry.get("type") in TOP_KINDS
+                           and (not isinstance(entry.get("payload"), dict)
+                                or not isinstance(entry.get("timestamp"), str))):
         data = raw if isinstance(raw, bytes) else raw.encode("utf-8")
         kind = entry.get("type") if entry is not None else None
         return [Malformed(harness=CODEX, session_id=state.session_id, agent_id=agent_id,

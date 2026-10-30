@@ -207,6 +207,27 @@ def test_opencode_records_read_the_session_in_one_snapshot(db):
         records(Source("opencode", str(path), None))
 
 
+def test_an_opencode_header_needs_only_the_session_table(db):
+    """A caller that reads only the header (a session row's model, say) reads a database
+    whose part table is gone; asking for the records then raises."""
+    import sqlite3
+
+    s = db.session(title="the title")
+    s.user()
+    path = db.write()
+    conn = sqlite3.connect(path)
+    conn.execute("DROP TABLE part")
+    conn.commit()
+    conn.close()
+    read = records(Source("opencode", str(path), s.id))
+    try:
+        assert read.header.title == "the title"
+        with pytest.raises(Unreadable, match="no `part` table"):
+            list(read)
+    finally:
+        read.close()
+
+
 # --- records_back --------------------------------------------------------------------------
 
 def test_a_backward_read_gives_the_forward_records_newest_first(projects):
