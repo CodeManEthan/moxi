@@ -394,6 +394,12 @@ class Daemon:
         #: the catch-up boundary exact now that the boundary's record read happens
         #: OUTSIDE the lock: see `_register`.
         self._seen_max = "0"
+        #: The lowest `#names` id the `block` setting kept from routing, or None. The
+        #: routed mark stays below it until a rescan routes it, so the next rescan (at
+        #: boot, too) still finds it. `_skips` counts every such skip, so a rescan knows
+        #: whether the block skipped anything while it ran. Both under `_lock`.
+        self._unrouted: int | None = None
+        self._skips = 0
         #: Set under `_lock` by `stop()` before anything closes. From then on a register
         #: is answered with a close.
         self._stopping = False
@@ -608,10 +614,12 @@ class Daemon:
             # The rescan queues mail posted to unbound names while no daemon ran. A
             # daemon that cannot do it is still a daemon that can deliver, and refusing
             # to boot would take live routing down with it -- so this is
-            # log-and-continue, exactly as the event loop's rescan already is. Replay
-            # past each name's cursor still finds that mail at its next bind.
-            log.exception("boot rescan failed; replay at each name's next bind finds "
-                          "what it would have queued")
+            # log-and-continue, exactly as the event loop's rescan already is. The
+            # routed mark is held where it stands, so the next rescan or the next boot
+            # still finds what this one would have queued.
+            log.exception("boot rescan failed; the next rescan or boot queues what it "
+                          "would have")
+            self._hold_routed()
         if self._start_trim_thread:
             self._spawn(self._trim_loop)
 
@@ -735,8 +743,15 @@ class Daemon:
             raise Refusal("open_digest: `ids` lists the message ids of the digest",
                           code=wire.INVALID_PARAMS)
         asked = {str(i) for i in ids}
-        opened = self.books.open_digest(b.qualified, b.history_id,
-                                        list(dict.fromkeys(str(i) for i in ids)))
+        # Only what this binding was handed goes in its digest: a turn end acks the
+        # digest's rows, and a row the binding never got is not its to ack.
+        with self._lock:
+            mine = [mid for mid in dict.fromkeys(str(i) for i in ids)
+                    if mid in b.delivered]
+        if len(mine) < len(asked):
+            log.info("open_digest from %s names %s, which it was not handed; left out",
+                     b.qualified, ", ".join(sorted(asked - set(mine), key=_as_id)))
+        opened = self.books.open_digest(b.qualified, b.history_id, mine)
         if opened.dropped:
             with self._lock:
                 rows = self.queue.get(b.qualified, {})
@@ -1493,22 +1508,31 @@ class Daemon:
                 log.exception("event handling failed")
 
     def rescan(self) -> None:
-        """Route the record's newest `RESCAN_LIMIT` messages again: mail to an unbound
-        name gets a row, and mail a bound name has not been handed is routed as live."""
+        """Route the record again: every message above the routed mark, however many,
+        and the newest `RESCAN_LIMIT` for the indexes. Mail to an unbound name gets a
+        row, and mail a bound name has not been handed is routed as live. With no
+        routed mark (a home that has routed nothing since its migration) the pass is
+        the newest `RESCAN_LIMIT`, gated by each name's cursor alone."""
         channel_id = self._names_channel()
         msgs = self.record.history(channel_id, limit=constants.RESCAN_LIMIT)
         with self._lock:
             self.rescans += 1
+            skips = self._skips
         memo: dict = {}   # one cursor read per name for THIS pass only
         # The ids routed before this pass began have their rows, or had them until they
         # were acked: the pass routes only what is above them.
         try:
-            memo[_ROUTED_MEMO] = (self.books.routed_through() if self.books.is_open
-                                  else None)
+            through = self.books.routed_through() if self.books.is_open else None
         except Exception:                                          # noqa: BLE001
             log.exception("rescan: could not read the routed mark; every message is "
                           "routed by its cursor alone")
-            memo[_ROUTED_MEMO] = None
+            through = None
+        memo[_ROUTED_MEMO] = through
+        if (through is not None and len(msgs) >= constants.RESCAN_LIMIT
+                and _as_id(msgs[0].id) > through + 1):
+            # The newest window does not reach down to the mark: everything above the
+            # mark is read, so no message the daemon never routed is left behind.
+            msgs = self.record.history(channel_id, after=str(through))
         try:
             for m in msgs:
                 try:
@@ -1519,6 +1543,15 @@ class Daemon:
                     # re-reads the same record and has the same reason to.
                     log.exception("rescan: routing message %s failed",
                                   getattr(m, "id", "?"))
+            # The pass routed what the block had kept back, unless the block skipped
+            # more while it ran: the mark may rise past those ids now.
+            last = _as_id(msgs[-1].id) if msgs else -1
+            with self._lock:
+                cleared = self._skips == skips and self._unrouted is not None
+                if cleared:
+                    self._unrouted = None
+            if cleared and last > 0:
+                self._raise_routed(last)
         finally:
             self._end_pass(memo)
 
@@ -1652,8 +1685,14 @@ class Daemon:
         self._index_audience(msg, ml)                 # at parse, before any claim
         if self.settings.use("block"):
             # symmetric: a blocked identity is neither delivered to nor routed from.
-            # The setting is a bare bool, read at use, so it blocks all routing.
+            # The setting is a bare bool, read at use, so it blocks all routing. The
+            # message is not routed yet: the routed mark stays below it.
             log.info("block on: not routing message %s", msg.id)
+            if seen is not None:
+                with self._lock:
+                    self._skips += 1
+                    if self._unrouted is None or seen < self._unrouted:
+                        self._unrouted = seen
             return
         author = self.attribute(msg, live=not backlog)
         memo = {} if cursor_memo is None else cursor_memo
@@ -1663,9 +1702,8 @@ class Daemon:
         opens = ml.posture == POSTURE_ONCE and author.attribution == attribution.VERIFIED
         try:
             self._route_recipients(msg, ml, author, memo, opens, backlog)
-            if seen is not None and self.books.is_open:
-                self._book("raise the routed mark for", msg.id,
-                           lambda: self.books.routed(seen))
+            if seen is not None:
+                self._raise_routed(seen)
         finally:
             # The sent index is fed AFTER the recipients are claimed (the claim that
             # hands a message to a recipient's binding precedes the lock section that
@@ -1676,6 +1714,32 @@ class Daemon:
             if cursor_memo is None:
                 # A live message is a pass of its own; a rescan ends its pass itself.
                 self._end_pass(memo)
+
+    def _hold_routed(self) -> None:
+        """Keep the routed mark where it stands until a rescan completes: what lies
+        above it was not routed."""
+        try:
+            through = self.books.routed_through() if self.books.is_open else None
+        except Exception:                                          # noqa: BLE001
+            log.exception("could not read the routed mark to hold it")
+            return
+        if through is None:
+            return
+        with self._lock:
+            self._skips += 1
+            if self._unrouted is None or through + 1 < self._unrouted:
+                self._unrouted = through + 1
+
+    def _raise_routed(self, through: int) -> None:
+        """Raise the routed mark to `through`, but never to or past a message the block
+        kept from routing: a rescan must still find that one."""
+        with self._lock:
+            hold = self._unrouted
+        if hold is not None:
+            through = min(through, hold - 1)
+        if through > 0 and self.books.is_open:
+            self._book("raise the routed mark for", str(through),
+                       lambda: self.books.routed(through))
 
     def _index_ask(self, msg, ml, author: Author, r: Resolution, *, opens: bool,
                    opening: bool | None) -> bool | None:
