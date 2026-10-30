@@ -10,12 +10,14 @@ from __future__ import annotations
 import copy
 import json
 import pickle
+from pathlib import Path
 
 import pytest
 
-from moxi_sessions.shape import (KINDS, MARKERS, SHAPE, UNKNOWN, LimitWindow, Limits,
-                                 Malformed, Marker, Message, Other, Request, ToolCall,
-                                 document, from_json, known, to_json, tool_summary)
+from moxi_sessions.shape import (KINDS, MARKERS, OTEL_CONVENTIONS, SHAPE, UNKNOWN,
+                                 LimitWindow, Limits, Malformed, Marker, Message, Other,
+                                 Request, ToolCall, document, from_json, known, to_json,
+                                 tool_summary)
 
 
 # --- unknown ----------------------------------------------------------------------------
@@ -162,3 +164,16 @@ def test_a_summary_names_the_tool_and_its_identifying_argument():
 def test_a_summary_cuts_its_argument_at_160_characters_and_says_so():
     summary = tool_summary("Bash", {"command": "x" * 200})
     assert summary == "Bash(" + "x" * 160 + "... [+40 chars])"
+
+
+def test_the_readme_names_the_shape_version_and_the_conventions_release():
+    """The README tells a stranger the record shape: its kinds, the shape version and the
+    OpenTelemetry release the names were checked against, as the code has them."""
+    readme = (Path(__file__).parents[1] / "README.md").read_text()
+    assert f"conventions' {OTEL_CONVENTIONS} release" in readme
+    assert f"`SHAPE` is that shape version, an integer, now {SHAPE}." in readme
+    assert f'{{"shape": {SHAPE}, ...}}' in readme
+    for kind in KINDS:
+        assert f"`{kind}`" in readme, kind
+    for read in ("records", "records_back", "last_request", "records_since", "window"):
+        assert f"- `{read}`" in readme, read
