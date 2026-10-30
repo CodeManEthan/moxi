@@ -849,6 +849,10 @@ def _config_change(op: str, argv: list[str]) -> int:
         print(f"{args.module}: {args.key}: one item {done} (by {args.by})")
     else:
         print(f"{args.module}: {args.key} {op} (by {args.by})")
+    if op in ("set", "unset"):
+        applied = config.apply_units(args.module, args.key)
+        if any(not a.ok for a in applied):
+            return 1
     return 0
 
 

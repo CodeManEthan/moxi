@@ -50,7 +50,9 @@ nor call `os.system`, `os.exec*`, `os.spawn*`, `os.fork` or `os.kill`.
 The core's own repo, known by its distribution name `moxi`, is held to checks 1 to 6 with
 two exemptions: check 5 does not apply inside `moxi.paths` and `moxi.config`, which read
 every module's root locators and declared overrides by computed keys, nor inside
-`moxi.log` and `moxi.proc`, which read the core's own logging and lifeline variables, and
+`moxi.log` and `moxi.proc`, which read the core's own logging and lifeline variables, nor
+inside `moxi.units._fence`, which reads the variable that lets a proof row reach a real
+supervisor under pytest, and
 check 6 does
 not apply to `shutil.which("moxi")` inside `moxi.cli`, where the shortcut verb looks up
 the umbrella's place. Check 7 is replaced: the core declares no `moxi.modules` entry
@@ -88,7 +90,8 @@ VENDORED = "src/moxi/_vendor/"
 #: The core's one console script.
 CORE_SCRIPT = ("moxi", "moxi.cli:main")
 #: Inside these core modules check 5 does not apply.
-CORE_ENV_READERS = frozenset({"moxi.paths", "moxi.config", "moxi.log", "moxi.proc"})
+CORE_ENV_READERS = frozenset({"moxi.paths", "moxi.config", "moxi.log", "moxi.proc",
+                              "moxi.units._fence"})
 #: The core's own plumbing variables, which the core reads where check 5 applies.
 CORE_INTERNAL_ENV = frozenset({"MOXI_CORE_LOCK_FD"})
 #: What a segment's closure may not import (top-level package names), besides turns.
