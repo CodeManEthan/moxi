@@ -2,7 +2,9 @@
 
 - `connect` opens a store with the same settings everywhere: write-ahead logging on a
   store it creates, `synchronous=NORMAL`, a busy timeout, foreign keys on, and no implicit
-  transactions. A store it creates is private to its owner from its first byte.
+  transactions. A store it creates is private to its owner from its first byte, and so
+  is each directory it creates on the way; a directory that is already there is left as
+  it is.
 - `transaction` runs a block in one `BEGIN IMMEDIATE` transaction.
 - `migrate` walks the store's `user_version` forward through a list of steps, each step
   and its version bump in one transaction, so two processes never run a step twice.
@@ -15,6 +17,7 @@ one. `sqlite3` is imported only inside the functions, so importing this module i
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -27,6 +30,7 @@ if TYPE_CHECKING:
     T = TypeVar("T")
 
 _BINARY = getattr(os, "O_BINARY", 0)
+_WINDOWS = sys.platform == "win32"
 
 
 class StoreError(Exception):
@@ -54,9 +58,17 @@ def connect(path: str | os.PathLike, *, private: bool = True, create: bool = Tru
             timeout: float = 5.0, check_same_thread: bool = True) -> sqlite3.Connection:
     """Open the SQLite store at `path` and return its connection.
 
-    A missing file raises `StoreError` with `create=False`. With `create=True` its parent
-    directory is made (only its owner may enter it when `private`), the file is created
-    0600 before SQLite opens it, and the store is switched to write-ahead logging.
+    A missing file raises `StoreError` with `create=False`. With `create=True` each
+    missing directory on the way to it is made, one level at a time, the file is created
+    0600 before SQLite opens it (on Windows with an access list that grants only the
+    current user), and the store is switched to write-ahead logging.
+
+    `private` covers only what this call creates: with `private=True` each directory it
+    makes is 0700 (on Windows given the owner-only access list), and with `private=False`
+    it gets the default mode. A directory that already exists is never changed, its mode,
+    owner and access list kept, and a symbolic link on the way is followed as any open
+    follows it. So a store placed in a shared or linked directory the user chose opens
+    there, private as a file, and the directory stays as the user set it.
 
     An existing store is opened as it is: nothing is written to it. Its journal mode is
     read, and one warning is logged when it is not `wal`. With `create=True`, an empty
@@ -82,9 +94,9 @@ def connect(path: str | os.PathLike, *, private: bool = True, create: bool = Tru
     if not path.exists():
         if not create:
             raise StoreError(f"{path} does not exist")
-        _make_parent(path.parent, private)
+        _make_parents(path.parent, private)
         try:
-            os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o600))
+            _create_file(path)
             fresh = True
         except FileExistsError:
             pass  # another process created it first; it is opened below like any other
@@ -114,13 +126,42 @@ def connect(path: str | os.PathLike, *, private: bool = True, create: bool = Tru
     return conn
 
 
-def _make_parent(directory: Path, private: bool) -> None:
-    if private:
-        from .files import private_dir
+def _make_parents(directory: Path, private: bool) -> None:
+    """Make each missing directory down to `directory`, outermost first. One that exists
+    (a link to a directory counts) is left as it is."""
+    missing = []
+    while not os.path.isdir(directory):
+        missing.append(directory)
+        if directory.parent == directory:
+            break
+        directory = directory.parent
+    for each in reversed(missing):
+        _make_dir(each, private)
 
-        private_dir(directory)
-    else:
-        directory.mkdir(parents=True, exist_ok=True)
+
+def _make_dir(directory: Path, private: bool) -> None:
+    """Make one directory: 0700 (the owner-only access list on Windows) when `private`,
+    else the default mode. One another process made a moment ago is left as it is."""
+    if private and _WINDOWS:
+        from . import _win
+
+        _win.make_private_dir(directory)
+        return
+    try:
+        os.mkdir(directory, 0o700 if private else 0o777)
+    except FileExistsError:
+        pass  # what is there is not this call's to change; the file's open says if it fits
+
+
+def _create_file(path: Path) -> None:
+    """Create the empty file `path`, readable and writable only by its owner. Raises
+    `FileExistsError` when something is there already."""
+    if _WINDOWS:
+        from . import _win
+
+        _win.private_file(path)
+        return
+    os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o600))
 
 
 @contextmanager

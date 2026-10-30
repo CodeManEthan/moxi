@@ -44,31 +44,46 @@ KINDS = ("state", "cache")
 class MoveError(Exception):
     """The move refused, or did not finish. `line` is the one line that says why, naming
     the module; `refused` is True when nothing was stopped (a refusal), False when units
-    may have been stopped (a stop that did not finish, a rename that failed)."""
+    may have been stopped (a stop that did not finish, a rename that failed).
+    `only_move` is True for the one refusal that leaves the rest of the install to run:
+    an old directory that is a link to a relative path, which stays read in place."""
 
-    def __init__(self, line: str, *, refused: bool):
+    def __init__(self, line: str, *, refused: bool, only_move: bool = False):
         super().__init__(line)
         self.line = line
         self.refused = refused
+        self.only_move = only_move
 
 
 def legacy(module: str) -> list[tuple[str, Path, Path]]:
-    """Each old directory of `module` that `moxi.paths` would still read in place, as
-    `(kind, old, new)`: an old state or cache directory under a host folder. Reads the file
-    system only."""
+    """Each old directory of `module` under a host folder, as `(kind, old, new)`, found by
+    the test `moxi.paths` reads in place by: a directory, or a symbolic link to one. Reads
+    the file system only."""
     from . import paths
 
     layout = paths.Layout(module)
     out = []
     for kind in KINDS:
         root = getattr(layout, f"{kind}_root")()
-        new = root / module
-        for label in paths._legacy_labels(layout.prefix, os.environ):
-            old = root / label / module
-            if old.is_dir() and not old.is_symlink():
-                out.append((kind, old, new))
-                break
+        old = layout._legacy(root, os.environ)
+        if old is not None:
+            out.append((kind, old, root / module))
     return out
+
+
+def relative_link(path: Path) -> bool:
+    """Whether `path` is a symbolic link whose target is a relative path: renaming it one
+    folder up would point it elsewhere."""
+    try:
+        return os.path.islink(path) and not os.path.isabs(os.readlink(path))
+    except OSError:
+        return False
+
+
+def link_fix(module: str, old: Path, new: Path) -> str:
+    """What to do about an old directory that is a link to a relative path."""
+    return (f"make {old} an absolute link, or move the folder to {new} by hand, then "
+            f"run `moxi install {module}` again")
 
 
 def move(module: str, record: list, *, replace: bool = False,
@@ -82,9 +97,13 @@ def move(module: str, record: list, *, replace: bool = False,
     `moxi.units.resume(record)` however the move ends. With nothing to move, nothing is
     read or stopped and `record` comes back empty.
 
-    Raises `MoveError`: a refusal (both directories hold data, the rename would cross file
-    systems, the declarations can't be read, an unmarked unit without `replace=True`)
-    before anything is stopped; a stop that did not finish, or a failed rename, after.
+    An old directory that is a symbolic link to an absolute path is moved as the link:
+    the new path becomes the link, and the data stays where the user put it.
+
+    Raises `MoveError`: a refusal (an old directory that is a link to a relative path,
+    both directories hold data, the rename would cross file systems, the declarations
+    can't be read, an unmarked unit without `replace=True`) before anything is stopped; a
+    stop that did not finish, or a failed rename, after.
     Takes the core lock with `nested=True`, so under an install it yields.
     """
     from . import files, paths
@@ -113,8 +132,13 @@ def move(module: str, record: list, *, replace: bool = False,
 def _what_moves(module: str, say) -> list[tuple[str, Path, Path]]:
     """Step 1: the directories to rename, or a refusal. An empty old directory beside a
     new one is removed, with nothing to stop."""
+    found = legacy(module)
+    for _, old, new in found:
+        if relative_link(old):
+            raise MoveError(f"{module}: {old} is a link to a relative path; "
+                            f"{link_fix(module, old, new)}", refused=True, only_move=True)
     moves = []
-    for kind, old, new in legacy(module):
+    for kind, old, new in found:
         if os.path.lexists(new):
             if _empty(old):
                 _tidy(old)
@@ -124,7 +148,8 @@ def _what_moves(module: str, say) -> list[tuple[str, Path, Path]]:
                                 f"merge them by hand and remove {old}; nothing moved",
                                 refused=True)
         try:
-            crosses = os.stat(old).st_dev != os.stat(new.parent).st_dev
+            # The old path itself: a link is renamed as the link, wherever it points.
+            crosses = os.lstat(old).st_dev != os.stat(new.parent).st_dev
         except OSError as exc:
             raise MoveError(f"{module}: can't read {old} or {new.parent} ({exc}); "
                             "nothing moved", refused=True) from None
@@ -202,7 +227,9 @@ def _stop(module: str, names: list[str], replace: bool, record: list) -> None:
 
 
 def _rename(module: str, old: Path, new: Path, say) -> None:
-    """Step 5: rename, then remove the host folder when it is left empty."""
+    """Step 5: rename, then remove the host folder when it is left empty. A link (to an
+    absolute path, step 1) is renamed as the link: the new path becomes the link, and the
+    data stays where it points."""
     try:
         if new.is_dir() and not new.is_symlink() and _empty(new):
             new.rmdir()
@@ -224,7 +251,10 @@ def _empty(path: Path) -> bool:
 
 def _tidy(old: Path) -> None:
     try:
-        old.rmdir()
+        if old.is_symlink():
+            old.unlink()  # a link to an empty folder: the folder stays where it is
+        else:
+            old.rmdir()
     except OSError:
         return
     _tidy_label(old.parent)
@@ -237,4 +267,4 @@ def _tidy_label(folder: Path) -> None:
         pass  # not empty: another module's data is still there
 
 
-__all__ = ["KINDS", "MoveError", "legacy", "move"]
+__all__ = ["KINDS", "MoveError", "legacy", "link_fix", "move", "relative_link"]

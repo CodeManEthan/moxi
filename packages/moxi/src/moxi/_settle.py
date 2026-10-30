@@ -25,7 +25,9 @@ record; the module's `SETUP`; then the units: `plan`, each timer switch with its
 exactly the units the move stopped (`moxi.units.resume`), on every path: a refusal, a
 failed stop or rename, a failed `SETUP`, a plan that refuses or keeps the unit, an
 interrupt. A start the supervisor refuses is printed with the command that starts it by
-hand, left as a doctor record, and the install exits 1. Skills, install questions and the
+hand, left as a doctor record, and the install exits 1. That record clears when a later
+start of the unit succeeds, or when a later settle step ends clean and the unit then runs
+or was removed or disabled by that step; a clean step with the unit still down keeps it. Skills, install questions and the
 `moxi.installs` listeners come after the `finally` (`_later_steps`).
 
 Signals. The child takes SIGINT, SIGTERM, SIGHUP and SIGQUIT (on Windows SIGINT for
@@ -376,6 +378,12 @@ class Settle:
     #: The stop record the move fills and the `finally` starts again.
     record: list = field(default_factory=list)
     failed: bool = False
+    #: The backend ids of the units the unit step removed or disabled: their `resume:`
+    #: records clear at a clean end, since the declaration now sets their state.
+    gone: set = field(default_factory=set)
+    #: The move refused in a way that leaves the rest of the step to run (an old
+    #: directory that is a link to a relative path): the step goes on, and exits 1.
+    moved: bool = True
 
     @property
     def restart(self) -> bool:
@@ -417,11 +425,11 @@ def settle(module: str, *, replace: bool = False) -> int:
         say(f"{module}: interrupted; started again {started} of the {len(step.record)} "
             f"units the move stopped", err=True)
         return INTERRUPTED
-    if step.failed or problems:
+    if step.failed or problems or not step.moved:
         return 1
     code = _later_steps(step)
     if code == 0:
-        _clear_resume_records(module)
+        _clear_resume_records(step)
     return code
 
 
@@ -448,6 +456,11 @@ def _move(step: Settle) -> bool:
             home.move(step.module, step.record, replace=step.replace, say=say)
     except home.MoveError as exc:
         say(exc.line, err=True)
+        if exc.only_move:
+            # Nothing was stopped or moved, and the old directory is still read in
+            # place, so setup and the units go on; the install still exits 1.
+            step.moved = False
+            return True
         return False
     return True
 
@@ -506,14 +519,22 @@ def _units(step: Settle) -> bool:
     with held():
         applied = units.apply(changes, replace=step.replace, restart=step.restart, say=say)
         _take_out(step.record, applied)
+    step.gone = _gone_ids(module, applied)
     return ok and all(a.ok for a in applied)
 
 
 def _switches(step: Settle, changes) -> bool:
     """Each switched timer `plan` will write or keep: a new one is asked about (off with
     nobody at the keyboard), a changed one is set off, an unchanged one is left. The
-    switch is written first and its `units.json` entry second."""
+    switch is written first and its `units.json` entry second.
+
+    A switch key another daemon or timer of the module also uses is never written here:
+    writing it would turn that unit on or off too. The key is left as the file has it.
+    While it reads off, the timer's entry is written and the timer installed, off; while
+    it reads on, no entry is written, so `apply` holds the timer and says how it gets
+    installed. One line names the key either way."""
     from . import config
+    from .units import _apply
     from .units import _state as recorded
 
     module, ok = step.module, True
@@ -525,6 +546,10 @@ def _switches(step: Settle, changes) -> bool:
         if before == change.digest:
             continue
         switch = change.switch
+        others = _apply.sharers(change, changes)
+        if others:
+            ok = _shared(step, change, others) and ok
+            continue
         turn_on = f"moxi config set {module} {switch} true"
         on = False
         if before is None:
@@ -544,6 +569,29 @@ def _switches(step: Settle, changes) -> bool:
         if line:
             say(line)
     return ok
+
+
+def _shared(step: Settle, change, others: list[str]) -> bool:
+    """A new or changed timer whose switch other units also use: the key is read, never
+    written. Off: the entry is written, so the timer is installed off. On: nothing is
+    written, and `apply` holds the timer (it prints the line for an `add` or `change`)."""
+    from . import config
+    from .units import _apply
+    from .units import _state as recorded
+
+    module, switch = step.module, change.switch
+    try:
+        on = bool(config.load(module, config.schema_for(step.found))[switch])
+    except (config.ConfigError, KeyError, TypeError) as exc:
+        say(f"{change.unit}: its switch {switch} cannot be read: {_one_line(exc)}", err=True)
+        return False
+    if not on:
+        with held():
+            recorded.record(module, change.name, change.digest)
+        say(_apply.shared_line(change, others, held=False))
+    elif change.action == "keep":
+        say(_apply.shared_line(change, others, held=True))
+    return True
 
 
 def _ask(question: str) -> bool:
@@ -598,6 +646,31 @@ def _take_out(record: list, applied) -> None:
                  and not (entry.unit in gone_ids)]
 
 
+def _gone_ids(module: str, applied) -> set[str]:
+    """The backend ids of the daemons and sockets an `ok` `Applied` removed, or disabled
+    because their declaration turned `enabled = false`."""
+    from .units import _backend
+
+    try:
+        impl = _backend.implementation()
+    except NotImplementedError:
+        return set()
+    if impl is None:
+        return set()
+    gone: set[str] = set()
+    for result in applied:
+        change = result.change
+        disabled = (change.action == "change" and not change.enabled
+                    and change.enabled_before)
+        if not result.ok or (change.action != "remove" and not disabled):
+            continue
+        if change.kind == "socket":
+            gone |= {path.name for path in change.paths}
+        elif change.kind == "daemon":
+            gone |= set(impl.ids(module, change.name, "daemon"))
+    return gone
+
+
 def _restart(step: Settle) -> tuple[int, list[str]]:
     """The `finally`: start the record again; print and record each start that failed.
     Returns how many started, and the lines of those that didn't."""
@@ -634,20 +707,66 @@ def _restart(step: Settle) -> tuple[int, list[str]]:
     return started, problems
 
 
-def _clear_resume_records(module: str) -> None:
-    """The settle step ended clean: no `resume:` record of the module stands."""
-    from . import doctor
+def _clear_resume_records(step: Settle) -> None:
+    """The settle step ended clean: clear each `resume:<unit>` record of the module whose
+    unit now runs (one `status` read shows it `active`), or that the unit step removed or
+    disabled. A record whose unit is still down keeps its by-hand command, and when the
+    `status` read fails only the removed and disabled units' records clear."""
+    import json
 
-    if not doctor._path(module).exists():
+    from . import doctor
+    from .units._act import RESUME_KEY
+
+    module = step.module
+    prefix = RESUME_KEY.format(unit="")
+    try:
+        held = json.loads(doctor._path(module).read_bytes())
+    except (OSError, ValueError):
+        return
+    if not isinstance(held, dict):
+        return
+    waiting = {key[len(prefix):] for key in held if str(key).startswith(prefix)}
+    if not waiting:
+        return
+    clear = waiting & step.gone
+    if waiting - clear:
+        clear |= waiting & _running_ids(module)
+    if not clear:
         return
 
     def drop(records: dict) -> dict:
-        return {k: v for k, v in records.items() if not str(k).startswith("resume:")}
+        return {k: v for k, v in records.items()
+                if not (str(k).startswith(prefix) and str(k)[len(prefix):] in clear)}
 
     try:
         doctor._change(module, drop)
     except (OSError, ValueError):
         pass
+
+
+def _running_ids(module: str) -> set[str]:
+    """The backend ids of the module's daemons and sockets that one `status` read shows
+    `active`; empty when the read fails."""
+    from . import units
+    from .units import _backend
+
+    try:
+        impl = _backend.implementation()
+        states = units.status([module])
+    except Exception:  # noqa: BLE001 - a failed read clears nothing
+        return set()
+    if impl is None:
+        return set()
+    out: set[str] = set()
+    for state in states:
+        if state.module != module or state.state != "active":
+            continue
+        if state.kind not in ("daemon", "socket"):
+            continue
+        ids = impl.ids(module, state.name, "daemon")
+        # A daemon's own id is its last; a socket's is the one before it.
+        out.add(ids[0] if state.kind == "socket" and len(ids) > 1 else ids[-1])
+    return out
 
 
 def _later_steps(step: Settle) -> int:

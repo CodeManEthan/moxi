@@ -148,6 +148,8 @@ def settle(w, capsys, monkeypatch, *, setup="ok", replace=False):
 
 
 SERVICE = "moxi-demo-relay.service"
+POSIX = pytest.mark.skipif(sys.platform == "win32",
+                           reason="symbolic links need a privilege on Windows")
 
 
 # -- the move ----------------------------------------------------------------------------------
@@ -199,14 +201,15 @@ def test_each_refusal_comes_before_any_stop(w, monkeypatch, case):
     if case == "unmarked":
         (w.root / SERVICE).write_text("[Service]\nExecStart=/bin/true\n")
     if case == "device":
-        real = os.stat
+        for name in ("stat", "lstat"):
+            real = getattr(os, name)
 
-        def stat(path, *a, **k):
-            st = real(path, *a, **k)
-            if Path(path) == old:
-                return os.stat_result((*st[:2], st.st_dev + 1, *st[3:]))
-            return st
-        monkeypatch.setattr(os, "stat", stat)
+            def stat(path, *a, real=real, **k):
+                st = real(path, *a, **k)
+                if Path(path) == old:
+                    return os.stat_result((*st[:2], st.st_dev + 1, *st[3:]))
+                return st
+            monkeypatch.setattr(os, name, stat)
     record: list = []
     with pytest.raises(home.MoveError) as caught:
         home.move("demo", record)
@@ -257,6 +260,95 @@ def test_an_empty_new_directory_is_replaced_and_an_empty_old_one_tidied(w):
     w.sup.calls.clear()
     assert home.move("demo", []) == [] and w.sup.calls == []
     assert not old.exists()
+
+
+# -- an old directory that is a symbolic link ---------------------------------------------
+
+def home_rows(module="demo"):
+    from moxi.doctor import _run
+
+    return {r.name: r for r in _run.run([module]) if r.name.startswith("home ")}
+
+
+def linked_legacy(w, *, relative=False, label="oldbox"):
+    """The old state folder as a link to data kept elsewhere."""
+    elsewhere = w.tmp / "disk" / "demo-state"
+    elsewhere.mkdir(parents=True)
+    (elsewhere / "data.txt").write_text("live")
+    link = w.home / "state" / label / "demo"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(os.path.relpath(elsewhere, link.parent) if relative else elsewhere)
+    return link, elsewhere
+
+
+@POSIX
+def test_an_absolute_legacy_link_is_read_named_and_moved_as_the_link(w):
+    w.installed(DAEMONS=ONE)
+    link, elsewhere = linked_legacy(w)
+    new = w.home / "state" / "demo"
+    assert moxi.paths.Layout("demo").state_dir() == link
+    row = home_rows()["home state"]
+    assert (row.state, row.fix) == ("warn", "moxi install demo")
+    assert str(link) in row.detail
+    record = home.move("demo", [])
+    assert [s.unit for s in record] == [SERVICE]
+    assert new.is_symlink() and new.resolve() == elsewhere.resolve()
+    assert (new / "data.txt").read_text() == "live"
+    assert not os.path.lexists(link) and not link.parent.exists()
+    assert moxi.paths.Layout("demo").state_dir() == new
+    assert "home state" not in home_rows()
+
+
+@POSIX
+def test_a_relative_legacy_link_refuses_the_move_before_any_stop(w):
+    w.installed(DAEMONS=ONE)
+    link, elsewhere = linked_legacy(w, relative=True)
+    new = w.home / "state" / "demo"
+    assert moxi.paths.Layout("demo").state_dir() == link
+    record: list = []
+    with pytest.raises(home.MoveError) as caught:
+        home.move("demo", record)
+    assert caught.value.refused and caught.value.only_move and record == []
+    assert w.calls("stop") == []
+    assert caught.value.line == (
+        f"demo: {link} is a link to a relative path; make {link} an absolute link, or "
+        f"move the folder to {new} by hand, then run `moxi install demo` again")
+    assert link.is_symlink() and (link / "data.txt").read_text() == "live"
+    row = home_rows()["home state"]
+    assert row.fix == home.link_fix("demo", link, new)
+
+
+@POSIX
+def test_with_two_labels_whose_first_is_a_link_all_three_take_the_first(w, monkeypatch):
+    monkeypatch.setattr(moxi.paths, "_host_name", lambda: "thishost")
+    w.installed(DAEMONS=ONE)
+    link, elsewhere = linked_legacy(w)
+    second = w.home / "state" / "thishost" / "demo"
+    second.mkdir(parents=True)
+    (second / "other.txt").write_text("other")
+    assert moxi.paths.Layout("demo").state_dir() == link
+    assert str(link) in home_rows()["home state"].detail
+    assert [old for _, old, _ in home.legacy("demo")] == [link]
+    home.move("demo", [])
+    new = w.home / "state" / "demo"
+    assert new.is_symlink() and (new / "data.txt").read_text() == "live"
+    assert (second / "other.txt").exists()
+
+
+@POSIX
+def test_a_relative_legacy_link_lets_the_rest_of_the_install_run_and_exits_1(
+        w, capsys, monkeypatch):
+    w.installed(DAEMONS=ONE)
+    link, _ = linked_legacy(w, relative=True)
+    w.module(DAEMONS=ONE, version="0.2.0")
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 1
+    assert "is a link to a relative path" in out
+    assert "setup demo: done" in out
+    assert _settle.setup_version("demo") == "0.2.0"
+    assert w.calls("stop") == []                     # the move stopped nothing
+    assert w.active(SERVICE)
+    assert moxi.paths.Layout("demo").state_dir() == link
 
 
 def test_the_move_takes_the_core_lock_nested(w, monkeypatch):
@@ -475,6 +567,169 @@ def test_resume_records_clear_only_when_the_step_ends_clean(w, capsys, monkeypat
     code, _ = settle(w, capsys, monkeypatch)
     assert code == 0
     assert set(json.loads(path.read_text())) == {"other"}
+
+
+def resume_records():
+    path = moxi.paths.Layout("demo").state_dir() / "doctor.json"
+    return {k: v for k, v in json.loads(path.read_text()).items()
+            if k.startswith("resume:")}
+
+
+def test_a_resume_record_survives_a_clean_rerun_while_its_unit_is_down(
+        w, capsys, monkeypatch):
+    w.installed(DAEMONS=ONE)
+    w.legacy()
+    w.sup.fail[("start", SERVICE)] = "Unit is masked."
+    code, _ = settle(w, capsys, monkeypatch)
+    assert code == 1 and not w.active(SERVICE)
+    fix = resume_records()[f"resume:{SERVICE}"]["fix"]
+    # The re-run the failure line advises: nothing to move, the daemon planned keep.
+    del w.sup.fail[("start", SERVICE)]
+    code, _ = settle(w, capsys, monkeypatch)
+    assert code == 0 and not w.active(SERVICE)
+    assert resume_records()[f"resume:{SERVICE}"]["fix"] == fix
+    # Started by hand: the next clean step clears it.
+    w.sup.state(SERVICE)["active"] = True
+    code, _ = settle(w, capsys, monkeypatch)
+    assert code == 0 and resume_records() == {}
+
+
+def test_a_failed_status_read_at_the_end_leaves_the_resume_record(w, capsys, monkeypatch):
+    w.installed(DAEMONS=ONE)
+    doctor.record("demo", "old failure", key=f"resume:{SERVICE}", fix="x")
+    real = units.status
+
+    def broken(*a, **k):
+        raise RuntimeError("the supervisor did not answer")
+
+    monkeypatch.setattr(units, "status", broken)
+    code, _ = settle(w, capsys, monkeypatch)
+    assert code == 0 and f"resume:{SERVICE}" in resume_records()
+    monkeypatch.setattr(units, "status", real)
+    code, _ = settle(w, capsys, monkeypatch)
+    assert code == 0 and resume_records() == {}
+
+
+def test_a_socket_s_resume_record_reads_the_socket_s_own_state(w, capsys, monkeypatch):
+    w.installed(DAEMONS=SOCKET)
+    sock = "moxi-demo-relay.socket"
+    doctor.record("demo", "old failure", key=f"resume:{sock}", fix="x")
+    w.sup.state(sock)["active"] = False
+    code, _ = settle(w, capsys, monkeypatch)
+    assert code == 0 and w.active(SERVICE)
+    assert set(resume_records()) == {f"resume:{sock}"}
+    w.sup.state(sock)["active"] = True
+    code, _ = settle(w, capsys, monkeypatch)
+    assert code == 0 and resume_records() == {}
+
+
+@pytest.mark.parametrize("how", ["dropped", "switched off", "enabled false"])
+def test_a_resume_record_for_a_unit_the_step_removed_or_disabled_clears(
+        w, capsys, monkeypatch, tmp_path, how):
+    tool = tmp_path / "tool"
+    tool.write_text("")
+    body = ("def units():\n    return {'daemons': {'aux': {'argv': [%r]%s}}}\n")
+    w.installed(DAEMONS=ONE, units_from=body % (str(tool), ""))
+    aux = "moxi-demo-aux.service"
+    w.sup.state(aux)["active"] = False
+    doctor.record("demo", "old failure", key=f"resume:{aux}", fix="x")
+    if how == "dropped":
+        w.module(DAEMONS=ONE)
+    elif how == "switched off":
+        w.module(DAEMONS=ONE,
+                 units_from=body % (str(tool), ", 'switch': 'snapshot.enabled'"))
+    else:
+        w.module(DAEMONS=ONE, units_from=body % (str(tool), ", 'enabled': False"))
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert resume_records() == {}
+
+
+# -- a switch key other units also use ---------------------------------------------------
+
+SHARED = ("{'relay': {'command': 'moxi-demo-relay', 'doc': 'the relay', "
+          "'switch': 'snapshot.enabled'}}")
+TIMER_TOO = ("{'snapshot': {'command': 'moxi-demo-relay', 'every': '5m', "
+             "'doc': 'take a snapshot', 'switch': 'snapshot.enabled'}, "
+             "'prune': {'command': 'moxi-demo-relay', 'every': '1h', "
+             "'doc': 'prune', 'switch': 'snapshot.enabled'}}")
+TIMER_FILE = "moxi-demo-snapshot.timer"
+
+
+def shared_running(w, **names):
+    """`relay` installed and running under switch snapshot.enabled, which reads on."""
+    w.installed(DAEMONS=SHARED, **names)
+    config.set("demo", "snapshot.enabled", True, by="test")
+    assert w.active(SERVICE)
+    w.sup.calls.clear()
+
+
+def test_a_new_timer_sharing_a_running_daemon_s_switch_leaves_both_and_is_held(
+        w, capsys, monkeypatch):
+    shared_running(w)
+    w.module(DAEMONS=SHARED, TIMERS=TIMER)
+    before = moxi.paths.Layout("demo").config_file().read_bytes()
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert moxi.paths.Layout("demo").config_file().read_bytes() == before
+    assert w.active(SERVICE) and w.calls("stop", "disable") == []
+    assert not (w.root / TIMER_FILE).exists()
+    assert _state.recorded("demo", "snapshot") is None
+    line = ("demo/snapshot: snapshot.enabled is also demo/relay's switch; set it with "
+            "moxi config set demo snapshot.enabled; it is installed off at the next moxi "
+            "install once snapshot.enabled is false")
+    assert out.count(line) == 1, out
+    assert "applies it and asks" not in out
+    from moxi.doctor import _run
+
+    row = {r.name: r for r in _run.run(["demo"])}["timer snapshot"]
+    assert (row.state, row.detail) == ("warn", "not installed")
+    assert row.fix == ("moxi config set demo snapshot.enabled false, then: moxi install "
+                       "demo, then: moxi config set demo snapshot.enabled true")
+
+
+def test_with_the_shared_key_off_the_timer_is_installed_off_and_the_key_left(
+        w, capsys, monkeypatch):
+    w.installed(DAEMONS=SHARED)
+    w.module(DAEMONS=SHARED, TIMERS=TIMER)
+    config_file = moxi.paths.Layout("demo").config_file()
+    before = config_file.read_bytes() if config_file.exists() else None
+    monkeypatch.setattr(_settle, "_ask", lambda q: pytest.fail("asked"))
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    after = config_file.read_bytes() if config_file.exists() else None
+    assert after == before
+    assert (w.root / TIMER_FILE).exists()
+    assert _state.recorded("demo", "snapshot") is not None
+    assert ("demo/snapshot: snapshot.enabled is also demo/relay's switch; set it with "
+            "moxi config set demo snapshot.enabled\n") in out
+    assert "installed off at the next" not in out
+
+
+def test_a_changed_timer_sharing_the_key_is_held_while_it_reads_on(w, capsys, monkeypatch):
+    shared_running(w, TIMERS=TIMER)
+    assert (w.root / TIMER_FILE).exists()
+    text = (w.root / TIMER_FILE).read_text()
+    w.module(DAEMONS=SHARED, TIMERS=TIMER.replace("'5m'", "'10m'"))
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert (w.root / TIMER_FILE).read_text() == text
+    assert w.active(SERVICE) and w.calls("stop", "disable") == []
+    assert "is installed off at the next moxi install" in out
+
+
+def test_two_timers_on_one_key_never_reset_each_other(w, capsys, monkeypatch):
+    one = ("{'snapshot': {'command': 'moxi-demo-relay', 'every': '5m', "
+           "'doc': 'take a snapshot', 'switch': 'snapshot.enabled'}}")
+    w.installed(TIMERS=one)
+    config.set("demo", "snapshot.enabled", True, by="test")
+    w.module(TIMERS=TIMER_TOO)
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert config.load("demo", config.schema_for(moxi.modules.load("demo")))[
+        "snapshot.enabled"] is True
+    assert not (w.root / "moxi-demo-prune.timer").exists()
+    assert "demo/prune: snapshot.enabled is also demo/snapshot's switch" in out
 
 
 def test_setup_json_holds_the_version_and_a_new_version_restarts(w, capsys, monkeypatch):

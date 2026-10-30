@@ -11,6 +11,11 @@ that entry, after it has set the switch, so no other caller makes a changed time
 behind a switch that was on for its old declaration. Any other caller gets
 `Applied(ok=True)` with a line naming `moxi install <module>`, and the unit is left as it
 is. A switchless timer has no entry and is written by any caller.
+
+A switch another unit of the module also uses (a daemon's, or another timer's) is never
+written by the settle step, so such a timer is installed, off, only while that key reads
+off. Its held line says so and names the key, rather than sending the user to an install
+that would hold it again.
 """
 
 from __future__ import annotations
@@ -88,7 +93,7 @@ def apply_held(changes: Sequence[UnitChange], *, replace: bool = False,
         elif change.action == "keep" and not restart:
             done[id(change)] = Applied(change, True)
         elif change.action in ("add", "change") and _held(change, recorded):
-            line = _held_line(change)
+            line = _held_line(change, sharers(change, changes))
             say(line)
             done[id(change)] = Applied(change, True, (line,))
         elif change.action in ("add", "change", "remove", "keep"):
@@ -164,7 +169,40 @@ def _held(change: UnitChange, recorded: dict) -> bool:
     return not (isinstance(entry, dict) and entry.get("digest") == change.digest)
 
 
-def _held_line(change: UnitChange) -> str:
+def _held_line(change: UnitChange, others: Sequence[str] = ()) -> str:
+    if others:
+        return shared_line(change, others, held=True)
     what = "is new" if change.action == "add" else "changed"
     return (f"{change.unit} {what}; `moxi install {change.module}` applies it and asks "
             "about its switch")
+
+
+def sharers(change: UnitChange, changes: Iterable[UnitChange]) -> list[str]:
+    """The other daemons and timers among `changes` whose switch is `change`'s, as
+    `<module>/<name>`, in plan order. Empty for a unit with no switch."""
+    switch = change.switch
+    if switch is None:
+        return []
+    out = []
+    for other in changes:
+        if other.kind not in ("daemon", "timer") or other.switch != switch:
+            continue
+        if (other.kind, other.name) == (change.kind, change.name):
+            continue
+        if other.unit not in out:
+            out.append(other.unit)
+    return out
+
+
+def shared_line(change: UnitChange, others: Sequence[str], *, held: bool) -> str:
+    """The line for a switched timer whose switch key other units also use: the settle
+    step leaves that key as it is. With `held`, the timer waits for the key to read off,
+    and the line says how it gets installed."""
+    switch, module = change.switch, change.module
+    whose = (f"{others[0]}'s switch" if len(others) == 1
+             else f"the switch of {', '.join(others)}")
+    line = (f"{change.unit}: {switch} is also {whose}; set it with moxi config set "
+            f"{module} {switch}")
+    if held:
+        line += f"; it is installed off at the next moxi install once {switch} is false"
+    return line

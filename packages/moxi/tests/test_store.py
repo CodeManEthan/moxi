@@ -63,6 +63,126 @@ def test_a_store_that_is_not_private_gets_an_ordinary_parent(tmp_path):
     assert mode_of(path) == 0o600
 
 
+@POSIX
+def test_each_directory_connect_makes_is_0700_from_the_outermost(tmp_path):
+    old = os.umask(0o022)
+    try:
+        path = tmp_path / "a" / "b" / "c" / "record.db"
+        store.connect(path).close()
+    finally:
+        os.umask(old)
+    for each in (tmp_path / "a", tmp_path / "a" / "b", tmp_path / "a" / "b" / "c"):
+        assert mode_of(each) == 0o700, each
+    assert mode_of(path) == 0o600
+
+
+@POSIX
+def test_a_store_in_an_existing_shared_directory_leaves_the_directory_as_it_is(tmp_path):
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    shared.chmod(0o775)
+    path = shared / "record.db"
+    store.connect(path).close()
+    assert mode_of(shared) == 0o775
+    assert mode_of(path) == 0o600
+
+
+@POSIX
+def test_a_store_through_a_linked_directory_follows_the_link_and_changes_neither(tmp_path):
+    real = tmp_path / "elsewhere"
+    real.mkdir()
+    real.chmod(0o755)
+    link = tmp_path / "linked"
+    link.symlink_to(real)
+    store.connect(link / "record.db").close()
+    assert link.is_symlink()
+    assert mode_of(real) == 0o755
+    assert mode_of(real / "record.db") == 0o600
+
+
+@POSIX
+def test_a_store_in_a_directory_another_user_owns_but_lets_us_write_opens(tmp_path):
+    import tempfile
+    import uuid
+
+    candidates = [Path(tempfile.gettempdir()), Path("/tmp"), Path("/var/tmp")]
+    found = None
+    for each in candidates:
+        try:
+            st = os.stat(each)
+        except OSError:
+            continue
+        if st.st_uid != os.getuid() and os.access(each, os.W_OK | os.X_OK):
+            found = each
+            break
+    if found is None:
+        pytest.skip("no writable directory owned by another user here")
+    before = os.stat(found)
+    path = found / f"moxi-store-test-{uuid.uuid4().hex}.db"
+    try:
+        store.connect(path).close()
+        assert mode_of(path) == 0o600
+        after = os.stat(found)
+        assert (after.st_mode, after.st_uid, after.st_gid) == (
+            before.st_mode, before.st_uid, before.st_gid)
+    finally:
+        for suffix in ("", "-wal", "-shm"):
+            Path(f"{path}{suffix}").unlink(missing_ok=True)
+
+
+@POSIX
+def test_a_directory_made_by_another_process_between_the_check_and_the_mkdir_is_left(
+        tmp_path, monkeypatch):
+    target = tmp_path / "raced"
+    real_mkdir = os.mkdir
+
+    def racing(path, mode=0o777, **kw):
+        if Path(path) == target:
+            real_mkdir(path, 0o755)
+            os.chmod(path, 0o755)
+            raise FileExistsError(path)
+        return real_mkdir(path, mode, **kw)
+
+    monkeypatch.setattr(os, "mkdir", racing)
+    store.connect(target / "record.db").close()
+    assert mode_of(target) == 0o755
+    assert mode_of(target / "record.db") == 0o600
+
+
+WINDOWS = pytest.mark.skipif(sys.platform != "win32", reason="Windows access lists")
+
+
+def _icacls_entries(path) -> list[str]:
+    out = subprocess.run(["icacls", str(path)], capture_output=True, text=True,
+                         check=True).stdout
+    return [line for line in out.splitlines()[:-1] if line.strip()]
+
+
+@WINDOWS
+def test_on_windows_a_new_store_file_grants_only_this_user(tmp_path):
+    from moxi import _win
+
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    before = _icacls_entries(shared)
+    path = shared / "record.db"
+    store.connect(path).close()
+    assert _icacls_entries(shared) == before
+    assert _win._only_user(path, _win._token_sid(_win._TOKEN_USER))
+
+
+@WINDOWS
+def test_on_windows_each_directory_connect_makes_grants_only_this_user(tmp_path):
+    from moxi import _win
+
+    path = tmp_path / "a" / "b" / "record.db"
+    store.connect(path).close()
+    user = _win._token_sid(_win._TOKEN_USER)
+    assert _win._only_user(tmp_path / "a", user)
+    assert _win._only_user(tmp_path / "a" / "b", user)
+    assert _win._only_user(path, user)
+
+
 def test_create_false_refuses_a_missing_store_and_makes_nothing(tmp_path):
     path = tmp_path / "s" / "record.db"
     with pytest.raises(store.StoreError, match="does not exist"):

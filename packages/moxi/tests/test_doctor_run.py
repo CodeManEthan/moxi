@@ -696,6 +696,21 @@ def test_a_state_directory_read_in_place_under_a_host_folder_warns(d, monkeypatc
     assert str(legacy) in row.detail
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="symbolic links")
+def test_a_legacy_link_to_a_relative_path_names_the_link_fix(d, monkeypatch, tmp_path):
+    d.module(settings=None)
+    monkeypatch.setenv("MOXI_DEMO_DEVICE", "oldhost")
+    root = moxi.paths.Layout("demo").state_root()
+    legacy = root / "oldhost" / "demo"
+    legacy.parent.mkdir(parents=True)
+    (tmp_path / "kept").mkdir()
+    legacy.symlink_to(os.path.relpath(tmp_path / "kept", legacy.parent))
+    row = d.rows("demo")[("demo", "home state")]
+    assert row.state == "warn"
+    assert row.fix == (f"make {legacy} an absolute link, or move the folder to "
+                       f"{root / 'demo'} by hand, then run `moxi install demo` again")
+
+
 def test_a_stray_warns_with_both_commands(d, monkeypatch):
     stray = strays.Stray("demo", "0.0.9", "/tools/moxi-demo", "tool", "moxi-demo")
     monkeypatch.setattr(strays, "find", lambda *a, **k: [stray])

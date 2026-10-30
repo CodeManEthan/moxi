@@ -78,6 +78,45 @@ def test_a_new_record_is_created_private(tmp_path):
 
 
 @POSIX
+def test_a_record_in_a_shared_directory_opens_there_and_leaves_it_shared(tmp_path):
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    shared.chmod(0o775)
+    gateway = LocalGateway(shared / "record.db")
+    try:
+        assert shared.stat().st_mode & 0o777 == 0o775
+        assert (shared / "record.db").stat().st_mode & 0o777 == 0o600
+    finally:
+        gateway.close()
+
+
+@POSIX
+def test_a_record_through_a_linked_directory_opens_and_leaves_the_link(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    real.chmod(0o755)
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    gateway = LocalGateway(link / "record.db")
+    try:
+        assert link.is_symlink()
+        assert real.stat().st_mode & 0o777 == 0o755
+        assert (real / "record.db").stat().st_mode & 0o777 == 0o600
+    finally:
+        gateway.close()
+
+
+@POSIX
+def test_a_missing_record_directory_is_made_private(tmp_path):
+    gateway = LocalGateway(tmp_path / "state" / "comms" / "record.db")
+    try:
+        assert (tmp_path / "state").stat().st_mode & 0o777 == 0o700
+        assert (tmp_path / "state" / "comms").stat().st_mode & 0o777 == 0o700
+    finally:
+        gateway.close()
+
+
+@POSIX
 def test_an_existing_record_keeps_its_mode_and_is_not_rewritten(tmp_path):
     """The record is reported, never changed: an existing file is opened as it is."""
     import sqlite3

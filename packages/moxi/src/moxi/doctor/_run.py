@@ -301,7 +301,7 @@ def _module_units(found, by_unit: Mapping) -> list[Row]:
     daemons = decl.daemons if decl is not None else found.daemons
     for change in changes:
         state = by_unit.get((module, change.name, change.kind))
-        rows.append(_unit_row(change, state))
+        rows.append(_unit_row(change, state, _shared_fix(found, change, changes)))
         if change.kind == "timer" and change.action in ("keep", "change"):
             label = f"timer {change.name}"
             if change.switch is not None:
@@ -314,12 +314,35 @@ def _module_units(found, by_unit: Mapping) -> list[Row]:
     return rows
 
 
-def _unit_row(change, state) -> Row:
+def _shared_fix(found, change, changes) -> str | None:
+    """The fix for a new or changed switched timer whose switch other units also use, when
+    that switch reads on: an install holds it then, so the fix turns the key off for the
+    install and on again after. None for every other unit."""
+    from .. import config
+    from ..units import _apply
+
+    if change.kind != "timer" or change.action not in ("add", "change"):
+        return None
+    if not _apply.sharers(change, changes):
+        return None
+    module, switch = found.name, change.switch
+    try:
+        on = bool(config.load(module, config.schema_for(found))[switch])
+    except (config.ConfigError, KeyError, TypeError):
+        return None
+    if not on:
+        return None
+    return (f"moxi config set {module} {switch} false, then: moxi install {module}, then: "
+            f"moxi config set {module} {switch} true")
+
+
+def _unit_row(change, state, install: str | None = None) -> Row:
     """The row for one planned unit, with the supervisor's state folded in where a unit
-    is written."""
+    is written. `install` replaces the plain `moxi install <module>` fix of a unit that is
+    not installed or stale."""
     module = change.module
     label = f"{change.kind} {change.name}"
-    install = f"moxi install {module}"
+    install = install or f"moxi install {module}"
     action, cause = change.action, change.cause
     if action == "keep":
         planned = ("ok", "up to date", None)
@@ -655,17 +678,22 @@ def _tree_size(path: Path) -> int:
 # -- 6. home, 7. strays, 8. setup versions, 9. records -------------------------------------------
 
 def _check_home(ctx: _Context) -> list[Row]:
-    from .. import paths
+    from .. import home, paths
 
     rows = []
     for found in ctx.present:
         layout = paths.Layout(found.name)
         for kind, root, where in (("state", layout.state_root(), layout.state_dir()),
                                   ("cache", layout.cache_root(), layout.cache_dir())):
-            if where != root / found.name:
-                rows.append(Row(found.name, f"home {kind}", "warn",
-                                f"its {kind} is read in place under a host folder: "
-                                f"{where}", f"moxi install {found.name}"))
+            new = root / found.name
+            if where == new:
+                continue
+            # The move refuses a link to a relative path, so its fix is the link's own.
+            fix = (home.link_fix(found.name, where, new) if home.relative_link(where)
+                   else f"moxi install {found.name}")
+            rows.append(Row(found.name, f"home {kind}", "warn",
+                            f"its {kind} is read in place under a host folder: {where}",
+                            fix))
     return rows
 
 
