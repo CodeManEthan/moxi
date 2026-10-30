@@ -458,7 +458,7 @@ def _check_deep(preset: Preset, values: Mapping[str, object],
     key = _project_key_of(values)
     if key is not None:
         try:
-            project = _get_project(key, where)
+            project = _get_project(key, where, avail)
             root = project.root
         except Refused as exc:
             problems.append(Problem.of(where, "project" if "project" in values else HOME,
@@ -582,10 +582,10 @@ def _front_matter_name(file: Path) -> str | None:
 
 # -- projects -------------------------------------------------------------------------
 
-def projects_api(what: str = "this"):
+def projects_api(what: str = "this", available: Callable[[str], bool] | None = None):
     """projects' API module, loaded at the point of use; `NeedsProjects` when projects is
     not installed or does not load."""
-    if not modules.available("projects"):
+    if not _avail(available)("projects"):
         raise NeedsProjects(what)
     found = modules.load("projects", interface=1)
     if not found.ok or found.api is None:
@@ -616,8 +616,8 @@ def _projects_call(api, call: Callable, *args):
         raise
 
 
-def _get_project(key: str, what: str):
-    api = projects_api(what)
+def _get_project(key: str, what: str, available=None):
+    api = projects_api(what, available)
     return _projects_call(api, api.get, key)
 
 
@@ -626,7 +626,7 @@ def _project_for(directory: str, available) -> object | None:
     if not available("projects"):
         return None
     try:
-        api = projects_api()
+        api = projects_api("this", available)
     except NeedsProjects:
         return None
     return _projects_call(api, api.for_path, directory)
@@ -644,11 +644,13 @@ class Agent:
 
 
 def project_agents(key: str, *, presets: Presets | None = None,
-                   env: Mapping[str, str] | None = None) -> tuple[str, list[Agent]]:
+                   env: Mapping[str, str] | None = None,
+                   available: Callable[[str], bool] | None = None
+                   ) -> tuple[str, list[Agent]]:
     """`moxi launcher presets --project KEY`: the project's key as projects spells it, and
     its agents (the lead first, then the set, names only), each with the seats whose
     `identity` matches its name, or none. A seat's home plays no part."""
-    project = _get_project(key, f"--project {key}")
+    project = _get_project(key, f"--project {key}", available)
     found = presets if presets is not None else read(env=env)
     by_identity: dict[str, list[str]] = {}
     for seat in found.seats.values():
@@ -913,7 +915,7 @@ def _place(place: Mapping[str, object], caller: str, avail, what: str
         return None, True, None
     key = _project_key_of(place)
     if key is not None:
-        project = _get_project(key, what)
+        project = _get_project(key, what, avail)
         return str(project.root), False, project
     if HOME in place:
         directory = _home_path(str(place[HOME]), what, None)
