@@ -256,6 +256,9 @@ comms = [
 projects = [
     { name = "moxi-projects" },
 ]
+slots = [
+    { name = "moxi-slots" },
+]
 turns = [
     { name = "moxi-turns" },
 ]
@@ -271,9 +274,10 @@ requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-comms", marker = "extra == 'comms'", editable = "packages/comms" },
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
+    { name = "moxi-slots", marker = "extra == 'slots'", editable = "packages/slots" },
     { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
 ]
-provides-extras = ["turns", "comms", "projects"]
+provides-extras = ["turns", "comms", "projects", "slots"]
 
 [package.metadata.requires-dev]
 dev = [

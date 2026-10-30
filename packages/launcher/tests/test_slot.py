@@ -1061,8 +1061,8 @@ def real_slots(monkeypatch):
 
 
 def _model(api_module):
-    """The module slots' API takes its shapes and words from, reached through the API
-    (the launcher declares no dependency on slots)."""
+    """The module slots' API takes its shapes and words from, reached through the API,
+    since the launcher reads slots only through its API module."""
     return sys.modules[api_module.Answer.__module__]
 
 

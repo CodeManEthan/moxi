@@ -21,6 +21,9 @@ OPTIONAL = {
     "comms": "Identities: a launch may take a comms name, a scope, directors and the "
              "with: posture, and the launcher's console name is reserved. Without it every "
              "launch is a plain harness launch.",
+    "slots": "Tmux slots: a launch may start in a numbered tmux session (--target slot, "
+             "--slot), and the startup screens it is set to answer are answered there. "
+             "Without it a launch starts in this terminal or headless.",
     "projects": "Project keys: a preset, a seat's home or --project may name a project "
                 "instead of a path, a launch records the key of the project its directory "
                 "is in, and presets --project lists a project's agents beside their seats. "

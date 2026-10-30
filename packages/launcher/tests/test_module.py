@@ -3,6 +3,8 @@ declares."""
 
 from __future__ import annotations
 
+from importlib import metadata
+
 import pytest
 
 from moxi import modules
@@ -26,7 +28,9 @@ def test_the_launcher_loads_present(found):
 
 
 def test_it_declares_its_optional_links_as_extras(found):
-    assert set(found.optional) == {"turns", "comms", "projects"}
+    assert set(found.optional) == {"turns", "comms", "slots", "projects"}
+    extras = set(metadata.distribution("moxi-launcher").metadata.get_all("Provides-Extra"))
+    assert set(found.optional) == extras
 
 
 def test_it_reserves_the_console_name(found):
