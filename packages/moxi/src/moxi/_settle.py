@@ -631,13 +631,15 @@ def _take_out(record: list, applied) -> None:
     """Drop the entries of units an `ok` `Applied` removed, or disabled because their
     declaration turned `enabled = false`: the unit step has set their state. The record
     holds daemons only, so a timer's change never drops an entry, even a daemon's of the
-    same name; a `.socket` drops the entry of its own id."""
+    same name; a socket unit drops the entry of its own id, and so does a socket unit a
+    daemon's set dropped, which has no file left to start."""
     gone_names: set[str] = set()
     gone_ids: set[str] = set()
     for result in applied:
         change = result.change
         if not result.ok:
             continue
+        gone_ids |= {path.name for path in change.dropped}
         disabled = (change.action == "change" and not change.enabled
                     and change.enabled_before)
         if change.action != "remove" and not disabled:
@@ -653,7 +655,8 @@ def _take_out(record: list, applied) -> None:
 
 def _gone_ids(module: str, applied) -> set[str]:
     """The backend ids of the daemons and sockets an `ok` `Applied` removed, or disabled
-    because their declaration turned `enabled = false`."""
+    because their declaration turned `enabled = false`, and the socket units a daemon's
+    set dropped."""
     from .units import _backend
 
     try:
@@ -667,6 +670,8 @@ def _gone_ids(module: str, applied) -> set[str]:
         change = result.change
         disabled = (change.action == "change" and not change.enabled
                     and change.enabled_before)
+        if result.ok:
+            gone |= {path.name for path in change.dropped}
         if not result.ok or (change.action != "remove" and not disabled):
             continue
         if change.kind == "socket":
@@ -758,6 +763,8 @@ def _running_ids(module: str) -> set[str]:
     try:
         impl = _backend.implementation()
         states = units.status([module])
+        sockets = {} if impl is None else {ref.name: ref.ids for ref in impl.marked(module)
+                                           if ref.kind == "socket"}
     except Exception:  # noqa: BLE001 - a failed read clears nothing
         return set()
     if impl is None:
@@ -766,11 +773,12 @@ def _running_ids(module: str) -> set[str]:
     for state in states:
         if state.module != module or state.state != "active":
             continue
-        if state.kind not in ("daemon", "socket"):
-            continue
-        ids = impl.ids(module, state.name, "daemon")
-        # A daemon's own id is its last; a socket's is the one before it.
-        out.add(ids[0] if state.kind == "socket" and len(ids) > 1 else ids[-1])
+        if state.kind == "daemon":
+            # A daemon's own id is its last.
+            out.add(impl.ids(module, state.name, "daemon")[-1])
+        elif state.kind == "socket":
+            # An active socket state means every unit of its set is active.
+            out |= set(sockets.get(state.name, ()))
     return out
 
 

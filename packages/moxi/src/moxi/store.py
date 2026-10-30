@@ -102,7 +102,9 @@ def connect(path: str | os.PathLike, *, private: bool = True, create: bool = Tru
     if not path.exists():
         if not create:
             raise StoreError(f"{path} does not exist")
-        _make_parents(path.parent, private)
+        from .files import _make_dirs
+
+        _make_dirs(path.parent, private=private)
         try:
             _create_file(path)
             fresh = True
@@ -132,33 +134,6 @@ def connect(path: str | os.PathLike, *, private: bool = True, create: bool = Tru
         conn.close()
         raise
     return conn
-
-
-def _make_parents(directory: Path, private: bool) -> None:
-    """Make each missing directory down to `directory`, outermost first. One that exists
-    (a link to a directory counts) is left as it is."""
-    missing = []
-    while not os.path.isdir(directory):
-        missing.append(directory)
-        if directory.parent == directory:
-            break
-        directory = directory.parent
-    for each in reversed(missing):
-        _make_dir(each, private)
-
-
-def _make_dir(directory: Path, private: bool) -> None:
-    """Make one directory: 0700 (the owner-only access list on Windows) when `private`,
-    else the default mode. One another process made a moment ago is left as it is."""
-    if private and _WINDOWS:
-        from . import _win
-
-        _win.make_private_dir(directory)
-        return
-    try:
-        os.mkdir(directory, 0o700 if private else 0o777)
-    except FileExistsError:
-        pass  # what is there is not this call's to change; the file's open says if it fits
 
 
 def _create_file(path: Path) -> None:

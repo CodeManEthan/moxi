@@ -222,6 +222,21 @@ def test_the_device_id_is_written_once(home):
     assert paths.device_id(home) == first
 
 
+@POSIX
+def test_the_device_ids_missing_directories_are_each_made_0700(home):
+    root = Path(home["MOXI_HOME"])
+    root.mkdir()
+    os.chmod(root, 0o775)
+    old = os.umask(0)
+    try:
+        paths.device_id(home)
+    finally:
+        os.umask(old)
+    for each in (root / "state", root / "state" / "moxi"):
+        assert stat.S_IMODE(os.stat(each).st_mode) == 0o700, each
+    assert stat.S_IMODE(os.stat(root).st_mode) == 0o775
+
+
 def test_two_first_runs_agree_on_one_device_id(home):
     code = "from moxi.paths import device_id; print(device_id())"
     procs = [subprocess.Popen([sys.executable, "-c", code], env={**os.environ, **home},

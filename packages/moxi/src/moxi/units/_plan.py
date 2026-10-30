@@ -4,12 +4,29 @@
 in this environment, its switch, its socket's port), renders it through the backend, and
 compares the new text with what is on disk. It writes nothing and makes no supervisor
 call, so it takes no lock.
+
+A daemon's sockets. On a backend that writes them as units of their own (systemd), they
+are one `socket` change over the whole set: `add` when none is written, `keep` when the
+written set names the same files and each is byte-equal, else `change`, with the written
+units the render no longer names in `dropped`. The service names the set, so a set that
+grows or shrinks changes the daemon too.
+
+No IPv6 loopback. Once per `plan` call, before the first daemon with an IPv6 address is
+rendered (on a backend that writes sockets at all), `plan` creates a TCP socket, binds it
+to `[::1]:0` and closes it. When the create or the bind fails with `EADDRNOTAVAIL` or
+`EAFNOSUPPORT`, every IPv6 address in that plan is left out and each change it touches
+says so in its reason; any other error, or none, keeps them. An IPv4 address is never
+left out, and a daemon left with no address is refused, cause `socket`. Each address
+keeps its place, so the others keep their names and a later plan whose bind works adds
+the left-out ones back as a `change`.
 """
 
 from __future__ import annotations
 
+import errno
 import sys
 from collections.abc import Iterable, Mapping
+from dataclasses import replace as _replaced
 from pathlib import Path
 
 from . import _backend
@@ -18,6 +35,9 @@ from ._declare import digest, merge, switch_problem, switch_value
 from ._types import DeclarationError, Declarations, UnitChange
 
 _DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+#: The errors of the IPv6 probe that mean the system has no IPv6 loopback.
+NO_IPV6 = (errno.EADDRNOTAVAIL, errno.EAFNOSUPPORT)
 
 
 def plan(module: str, *, only: Iterable[str] | None = None,
@@ -101,6 +121,13 @@ class _Planner:
         self.impl = impl
         self.env = env
         self._schema: list = []
+        self._ipv6: list[bool] = []
+
+    def ipv6(self) -> bool:
+        """Whether this system has an IPv6 loopback, probed once per plan."""
+        if not self._ipv6:
+            self._ipv6.append(ipv6_loopback())
+        return self._ipv6[0]
 
     def schema(self):
         """The module's settings schema, or a `moxi.config.ConfigError`, read once."""
@@ -144,11 +171,19 @@ class _Planner:
                             for ref in refs]
                 return [_unit(module, name, kind, "skip", "switch", line, entry)]
         socket = None
+        note = ""
         if kind == "daemon" and "socket" in entry:
             socket = self._socket(entry["socket"])
             if isinstance(socket, str):
                 return [_unit(module, name, kind, "refuse", "socket", f"{unit}: {socket}",
                               entry, _paths(refs))]
+            if socket.left_out:
+                note = (f"{', '.join(socket.left_out)} left out: no IPv6 loopback on this "
+                        "system")
+                if not socket.listens:
+                    return [_unit(module, name, kind, "refuse", "socket",
+                                  f"{unit}: its socket has no address left to listen on "
+                                  f"({note})", entry, _paths(refs))]
         command = _command(entry)
         if isinstance(command, str):
             return [_unit(module, name, kind, "refuse", "command", command, entry,
@@ -167,7 +202,11 @@ class _Planner:
             return [_unit(module, name, kind, "refuse", exc.cause, exc.text, entry,
                           _paths(refs))]
         stamp = digest(entry) if kind == "timer" and switch is not None else None
-        out = [self._compare(name, group, entry, stamp) for group in rendered]
+        written = {ref.kind: ref for ref in refs}
+        out = [self._compare(name, group, entry, stamp, written.get(group.kind))
+               for group in rendered]
+        if note:
+            out = [_replaced(c, reason=f"{c.reason}; {note}") for c in out]
         kinds = {group.kind for group in rendered}
         out += [_remove(module, ref, entry, "no longer declared")
                 for ref in refs if ref.kind not in kinds]
@@ -196,13 +235,26 @@ class _Planner:
             return f"its socket setting {setting} cannot be read: {exc}"
         if not isinstance(port, int) or isinstance(port, bool) or not 0 < port < 65536:
             return f"its socket setting {setting} is {port!r}, not a port from 1 to 65535"
-        return Socket(setting, tuple(declared["addresses"]), port)
+        addresses = tuple(declared["addresses"])
+        left_out: tuple[str, ...] = ()
+        if self.impl.sockets != "none":
+            six = tuple(a for a in addresses if _is_ipv6(a))
+            if six and not self.ipv6():
+                left_out = six
+        return Socket(setting, addresses, port, left_out)
 
-    def _compare(self, name: str, group, entry: Mapping, stamp: str | None) -> UnitChange:
+    def _compare(self, name: str, group, entry: Mapping, stamp: str | None,
+                 written: UnitRef | None = None) -> UnitChange:
+        """The change for one rendered group. `written` is the marked unit of the same
+        kind already there; for a `socket` group its files the render no longer names
+        are the change's `dropped`."""
         module, impl = self.module, self.impl
         unit = f"{module}/{name}"
         paths = tuple(path for path, _ in group.files)
         texts = tuple(text for _, text in group.files)
+        dropped: tuple[Path, ...] = ()
+        if group.kind == "socket" and written is not None:
+            dropped = tuple(path for path in written.paths if path not in paths)
         missing = same = 0
         foreign: tuple[Path, str | None] | None = None
         enabled_before: bool | None = None
@@ -225,7 +277,7 @@ class _Planner:
             if old == text.encode(impl.encoding):
                 same += 1
         common = dict(paths=paths, text="".join(texts), texts=texts, entry=entry,
-                      enabled_before=enabled_before, digest=stamp)
+                      enabled_before=enabled_before, digest=stamp, dropped=dropped)
         if foreign is not None:
             path, mark = foreign
             what = (f"is marked for {mark}" if mark and "/" in mark
@@ -235,14 +287,45 @@ class _Planner:
                       "moves it to DATA/moxi/displaced/")
             return UnitChange(module, name, group.kind, "refuse", "foreign",
                               reason=reason, foreign=path, **common)
-        if missing == len(paths):
+        if missing == len(paths) and not dropped:
             return UnitChange(module, name, group.kind, "add", None,
                               reason="not installed", **common)
-        if same == len(paths):
+        if same == len(paths) and not dropped:
             return UnitChange(module, name, group.kind, "keep", None, reason="up to date",
                               **common)
-        return UnitChange(module, name, group.kind, "change", None, reason="stale",
+        reason = "stale"
+        if dropped:
+            reason += f" (drops {', '.join(path.name for path in dropped)})"
+        return UnitChange(module, name, group.kind, "change", None, reason=reason,
                           **common)
+
+
+def ipv6_loopback() -> bool:
+    """False when this system has no IPv6 loopback: creating a TCP socket or binding it
+    to `[::1]:0` fails with `EADDRNOTAVAIL` or `EAFNOSUPPORT` (or this Python has no
+    IPv6 at all). Any other error, or none, is True."""
+    import socket
+
+    family = getattr(socket, "AF_INET6", None)
+    if family is None:
+        return False
+    try:
+        probe = socket.socket(family, socket.SOCK_STREAM)
+    except OSError as exc:
+        return exc.errno not in NO_IPV6
+    try:
+        probe.bind(("::1", 0))
+    except OSError as exc:
+        return exc.errno not in NO_IPV6
+    finally:
+        probe.close()
+    return True
+
+
+def _is_ipv6(address: str) -> bool:
+    import ipaddress
+
+    return ipaddress.ip_address(address).version == 6
 
 
 def _unit(module, name, kind, action, cause, reason, entry, paths=()) -> UnitChange:

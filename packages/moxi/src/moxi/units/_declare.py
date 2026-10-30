@@ -11,7 +11,9 @@ that raises, overruns or returns anything but a table of `daemons` and `timers` 
 its result dropped). Each entry it returns is checked as an announcement's entry is, with
 four forms allowed only here: `argv` in place of `command`, `cwd`, `enabled` and a timer
 with no `switch`. An entry that fails, or whose name is also in `DAEMONS` or `TIMERS`, is
-kept out of the merged tables and listed in `Declarations.rejected` with the reason.
+kept out of the merged tables and listed in `Declarations.rejected` with the reason. So is a run-time entry that would share a systemd file name with another
+unit (a daemon's socket unit for its k-th address is named for `<daemon>-<k>`): the
+run-time one of the pair, or the one named `<daemon>-<k>` when both are run-time.
 """
 
 from __future__ import annotations
@@ -53,6 +55,7 @@ def merge(found) -> Declarations:
         from .. import modules
 
         declared = set(daemons) | set(timers)
+        runtime: set[str] = set()
         seen: dict[str, str] = {}
         for key, kind in _KINDS:
             table = returned.get(key, {})
@@ -78,6 +81,8 @@ def merge(found) -> Declarations:
                     rejected[(kind, name)] = f"UNITS_FROM ({found.units_from}) {exc}"
                     continue
                 (daemons if kind == "daemon" else timers)[name] = modules._freeze(entry)
+                runtime.add(name)
+        _refuse_clashes(found, daemons, timers, runtime, rejected)
         merged_daemons = set(daemons) | {n for k, n in rejected if k == "daemon"}
         for key in sorted(found.health):
             if key not in merged_daemons:
@@ -85,6 +90,30 @@ def merge(found) -> Declarations:
                                              "of DAEMONS or UNITS_FROM")
     return Declarations(module, MappingProxyType(daemons), MappingProxyType(timers),
                         MappingProxyType(rejected))
+
+
+def _refuse_clashes(found, daemons: dict, timers: dict, runtime: set[str],
+                    rejected: dict) -> None:
+    """Keep out the run-time entry of each pair whose systemd files would share a name
+    (`moxi.modules.stem_clashes`): the run-time one when the other is the
+    announcement's, the one named `<daemon>-<k>` when both are run-time. One pair at a
+    time, so an entry kept out takes its own pairs with it."""
+    from .. import modules
+
+    while True:
+        for daemon, kind, other in modules.stem_clashes(daemons, timers):
+            if daemon in runtime or other in runtime:
+                break
+        else:
+            return
+        if other in runtime:
+            drop, drop_kind = other, kind
+        else:
+            drop, drop_kind = daemon, "daemon"
+        (daemons if drop_kind == "daemon" else timers).pop(drop)
+        runtime.discard(drop)
+        rejected[(drop_kind, drop)] = (f"UNITS_FROM ({found.units_from}) "
+                                       + modules.clash_line(daemon, kind, other))
 
 
 def call_units_from(module: str, target: str) -> Mapping:
