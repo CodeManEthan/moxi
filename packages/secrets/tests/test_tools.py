@@ -270,6 +270,27 @@ def test_the_fold_table_step(monkeypatch, capsys, outside, table_unicode, passes
         assert "U+A7CE" in capsys.readouterr().out
 
 
+def test_the_package_tests_step_runs_the_slow_tier(monkeypatch):
+    # The project's addopts leave the slow tier out; the bump must run it, since the cost
+    # budgets are held there.
+    seen = []
+
+    class Done:
+        returncode, stdout = 0, "1 passed\n"
+
+    def run(cmd, **kwargs):
+        seen.append(cmd)
+        return Done()
+
+    monkeypatch.setattr(bump.subprocess, "run", run)
+    assert bump.package_tests() is True
+    cmd = seen[0]
+    marks = cmd[cmd.index("-m", cmd.index("pytest") + 1) + 1]
+    assert "slow" not in marks
+    for kept_out in ("browser", "build", "live"):
+        assert f"not {kept_out}" in marks
+
+
 def test_outside_names_each_fold_that_reaches_past_its_set():
     tool = bump.name_folds()
     held = {"a": "Aa", "A": "Aa"}

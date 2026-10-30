@@ -23,7 +23,8 @@ these steps in order and stops at the first that fails:
    names the slowest rules where a text goes over it.
 6. Runs the gitleaks binary of the tag on the package's own directory with
    `credentials.toml`, from `rules/`, and expects no hit.
-7. Checks the private names' fold table, then runs the package's tests. When the running
+7. Checks the private names' fold table, then runs the package's tests with the slow tier,
+   so the cost budgets are held again on every shape of the cost test. When the running
    Python's re folds a character under IGNORECASE outside its set in `_folds.py` (a newer
    Unicode adds case pairs), it regenerates the table with `name_folds.py` where this
    Python's Unicode is newer than the table's, and stops either way.
@@ -566,8 +567,11 @@ def fold_table() -> bool:
 
 def package_tests() -> bool:
     try:
-        done = subprocess.run([sys.executable, "-m", "pytest", "-q"], cwd=PACKAGE,
-                              capture_output=True, text=True, timeout=1800)
+        # The slow tier too: the cost budgets on every shape, which step 5's own timing
+        # does not cover.
+        done = subprocess.run([sys.executable, "-m", "pytest", "-q", "-m",
+                               "not browser and not build and not live"], cwd=PACKAGE,
+                              capture_output=True, text=True, timeout=3600)
     except (OSError, subprocess.SubprocessError) as exc:
         raise Stop(f"the tests did not run: {exc}") from None
     tail = done.stdout.strip().splitlines()[-1:] or ["(no output)"]
