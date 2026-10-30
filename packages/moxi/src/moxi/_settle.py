@@ -738,7 +738,7 @@ def main(argv: list[str] | None = None,
     runs after the handlers are in place and before the step (tests)."""
     from . import files, paths
 
-    handed = files.CLAIM_VARIABLE in os.environ
+    handed = "MOXI_CORE_LOCK_FD" in os.environ  # moxi.files.CLAIM_VARIABLE
     if not files.adopt_core_claim(paths.core_lock()) and handed:
         say("the install's lock claim did not check; nothing done", err=True)
         return 1
