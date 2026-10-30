@@ -87,15 +87,35 @@ def run():
 """
 
 TEARDOWN = """
-import time
+import os, time
 from settle_procs import note
 
 def run():
     note("teardown", begin=True)
+    if os.environ.get("MOXITEST_DOWN") == "quick":
+        return None
     try:
         time.sleep(30)
     finally:
         note("teardown", ran_finally=True)
+"""
+
+#: An install listener whose calls each take the core lock nested, trying once: under an
+#: install or uninstall they yield, so a call that waited would fail here instead.
+LISTENER = """
+import moxi.paths
+from moxi import files
+from settle_procs import note
+
+def _yields(event, module):
+    with files.lock(moxi.paths.core_lock(), nested=True, timeout=0):
+        note("listener", **{event: module})
+
+def on_install(module, found):
+    _yields("installed", module)
+
+def on_uninstall(module):
+    _yields("uninstalled", module)
 """
 
 ONE = "{'relay': {'command': 'moxi-demo-relay', 'doc': 'the relay'}}"
@@ -133,19 +153,24 @@ class Box:
         for name in ("MOXI_TEST_REAL_SUPERVISOR", files.CLAIM_VARIABLE):
             self.env.pop(name, None)
 
-    def module(self, **names):
+    def module(self, *, listener: bool = False, **names):
         self.site.write("moxi_demo/settings.toml", SETTINGS)
         self.site.write("moxi_demo/setup.py", SETUP)
         self.site.write("moxi_demo/down.py", TEARDOWN)
         names.setdefault("SETTINGS", "'settings.toml'")
         names.setdefault("SETUP", "'moxi_demo.setup:run'")
         self.site.module("demo", **names)
+        if listener:
+            self.site.write("moxi_demo/installs.py", LISTENER)
+            self.site.write("moxi_demo-0.1.0.dist-info/entry_points.txt",
+                            "[moxi.modules]\ndemo = moxi_demo.module\n"
+                            "[moxi.installs]\ndemo = moxi_demo.installs\n")
         moxi.modules.reset()
 
-    def installed(self, **names):
+    def installed(self, *, listener: bool = False, **names):
         """The module with its units written and running, its timers' switches recorded,
         and its `SETUP` recorded as run at its version."""
-        self.module(**names)
+        self.module(listener=listener, **names)
         for change in units.plan("demo"):
             if change.digest is not None:
                 _state.record("demo", change.name, change.digest)
@@ -294,6 +319,33 @@ def test_config_set_of_a_daemon_switch_from_setup_yields_in_the_settle_child(box
     assert done.returncode == 0, done.stdout + done.stderr
     assert box.value("setup", "applied") == [["relay", "add", True]]
     assert box.calls("enable") == [("enable", "--now", SERVICE)]
+
+
+def test_an_install_listener_s_core_call_yields_in_the_settle_child(box):
+    box.module(DAEMONS=ONE, listener=True)
+    box.env["MOXITEST_LATER"] = "1"
+    done = parent_run(box, "demo")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert box.value("listener", "installed") == "demo"
+    assert box.events(key="raised") == []
+
+
+def test_uninstall_runs_teardown_in_a_child_then_listeners_units_and_package(box):
+    """The whole uninstall under its own hold of the core lock: the teardown child adopts
+    the claim, and the listener's core call and `units.remove` in the parent yield."""
+    box.installed(DAEMONS=ONE, TEARDOWN="'moxi_demo.down:run'", listener=True)
+    box.env["MOXITEST_DOWN"] = "quick"
+    assert (box.root / SERVICE).exists()
+    done = parent_run(box, "demo", "--teardown")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert box.value("child", "exit") == 0
+    assert box.events("child", "started")[0]["claim"] is True
+    assert box.value("listener", "uninstalled") == "demo"
+    assert not (box.root / SERVICE).exists()
+    ran = box.value("parent", "ran")
+    assert ran[-1] == "moxi-demo" and "uninstall" in ran
+    assert "uninstalled demo (moxi-demo 0.1.0)" in done.stdout
+    assert box.events(key="raised") == []
 
 
 HOLDER = textwrap.dedent("""
@@ -675,4 +727,7 @@ def test_ctrl_c_during_teardown_abandons_it_and_its_finally_runs(box, job):
     assert box.events("sup") == []
     assert [e["sent"] for e in box.events("parent", "sent")] == [signal.SIGINT]
     assert b"teardown demo: interrupted; nothing was removed" in j.screen
+    assert b"interrupted in demo's teardown; nothing was removed" in j.screen
+    assert box.events("parent", "ran") == []                # no package step
+    assert (box.root / SERVICE).exists()                    # nor the units
     assert box.events(key="raised") == []

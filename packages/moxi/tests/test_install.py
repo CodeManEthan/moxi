@@ -242,6 +242,7 @@ class Fake:
         self.fail_setup: set[str] = set()
         self.interrupt: set[str] = set()
         self.replaces: list[bool] = []
+        self.skills: list = []
         self.fail_run = False
         self.installed: set[str] = set()
         self.receipt = list(receipt)
@@ -270,13 +271,14 @@ class Fake:
         importlib.invalidate_caches()
         return cli.describe()
 
-    def run_settle(self, python, module, *, replace=False):
+    def run_settle(self, python, module, *, replace=False, skills=None):
         from moxi import _settle, files, paths
 
         # The install holds the core lock while it settles each module.
         files._descriptor(paths.core_lock())
         self.setups.append(module)
         self.replaces.append(replace)
+        self.skills.append(skills)
         if module in self.interrupt:
             return _settle.Outcome(_settle.INTERRUPTED)
         return _settle.Outcome(1 if module in self.fail_setup else 0)
@@ -559,6 +561,39 @@ def test_install_passes_replace_to_each_settle_step(fake, capsys):
     code, _, err = moxi_install(capsys, "comms", "--replace")
     assert code == 0, err
     assert fake.setups == ["turns", "comms"] and fake.replaces == [True, True]
+
+
+@pytest.mark.parametrize("flag, answer", [("--skills", True), ("--no-skills", False),
+                                          (None, None)])
+def test_install_passes_the_skills_answer_to_each_settle_step(fake, capsys, flag, answer):
+    code, _, err = moxi_install(capsys, "comms", *([flag] if flag else []))
+    assert code == 0, err
+    assert fake.setups == ["turns", "comms"] and fake.skills == [answer, answer]
+
+
+def test_skills_and_no_skills_together_are_refused(fake, capsys):
+    code, _, err = moxi_install(capsys, "comms", "--skills", "--no-skills")
+    assert code == 2 and "not allowed with argument --skills" in err
+    assert fake.runs == []
+
+
+def test_skills_form_sets_the_core_setting_before_any_settle_step(fake, capsys, monkeypatch):
+    from moxi import config
+
+    seen = []
+    real = fake.run_settle
+
+    def settle(python, module, **kwargs):
+        seen.append(config.load("moxi", config._core_schema())["skills.form"])
+        return real(python, module, **kwargs)
+    monkeypatch.setattr(install, "run_settle", settle)
+    code, out, err = moxi_install(capsys, "comms", "--skills-form", "copy")
+    assert code == 0, err
+    assert "skills.form set to copy" in out
+    assert seen == ["copy", "copy"]
+    assert config.history("moxi", "skills.form")[-1]["by"] == "moxi install"
+    code, _, err = moxi_install(capsys, "comms", "--skills-form", "hardlink")
+    assert code == 2 and "invalid choice" in err
 
 
 def test_an_interrupted_settle_step_ends_the_install(fake, capsys):
