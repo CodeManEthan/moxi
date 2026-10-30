@@ -16,7 +16,9 @@ The core calls the adapter:
                           harness or the endpoint (the base does nothing)
     submit(delivery)      put the text in as a new turn
     append(delivery)      put the text into the running turn (a steer)
-    command(request)      run `/clear` or `/exit`
+    command(request)      run `/clear`, `/exit` or a compaction, and with
+                          `request.stop_shells` stop the session's background shells once
+                          it has taken effect
     expired(delivery_id)  the core settled a delivery it handed without the adapter's word
                           (`PENDING_TTL_S`), or the worker skipped a steer that had
                           settled: the adapter lets go of it (the base does nothing)
@@ -64,6 +66,14 @@ through the endpoint's adapter-side calls:
                                           a command is about to take effect: the re-check
     endpoint.command_settled(request_id, result)
                                           a command ran (`Ran`), failed or was refused
+    endpoint.command_took_effect(request_id)
+                                          the command took effect: with `stop_shells`
+                                          the stop begins, bounded by `SHELL_STOP_S`
+                                          (a compaction's Ready marks it by itself)
+    endpoint.command_ran(request_id, new_session_id=None, shells=None)
+                                          the command ran, with the stop's report when
+                                          `stop_shells` was set; a compaction settles at
+                                          the later of this and its Ready
     endpoint.gone(reason)                 the session ended
 
 The adapter's duty to settle: every delivery handed to `submit` ends in exactly one
@@ -71,7 +81,22 @@ The adapter's duty to settle: every delivery handed to `submit` ends in exactly 
 `refused(delivery.id, reason)` or `lost(delivery.id, reason)`; every delivery handed to
 `append` in one `steered(delivery.id)`, `refused(delivery.id, "idle")` (the harness had no
 turn to take it into) or `lost(delivery.id, reason)`; and every request handed to `command`
-in one `command_settled(request.id, result)`. A `submit`, `append` or `command` that
+in one `command_settled(request.id, result)` or `command_ran(request.id, …)`. A compaction
+is confirmed by the session: the core settles it `ran` at the next Ready with source
+`compact` (with `stop_shells`, once `command_ran` has reported the stop too); the adapter
+settles it itself only when it fails or is refused.
+
+Stopping shells (`request.stop_shells`): the adapter checks it may stop them before the
+command runs, with nothing stopped yet, and a stop the harness turns down settles
+`Refused("unsupported")` and runs nothing. A list it cannot vouch for, or no list at all,
+is no refusal: the command runs, and the report says so. A harness that lacks the list
+call altogether refuses `unsupported` there. Once the command has taken effect it stops
+the shells it can list within `SHELL_STOP_S` and reports `Shells(stopped, left,
+complete)`: an entry still running is `left` with its `why` (`timeout`, `denied`,
+`unsupported`, or the harness's own words), and `complete` False adds the one entry
+`LeftShell(None, "unlisted")` for the shells it could not name. A listed entry it chose
+not to stop carries a `why` of its own, never `unlisted`, which stays the unnamed entry's.
+A report that never comes reads as a list turns cannot vouch for. A `submit`, `append` or `command` that
 raises counts as settled (the delivery is refused, the command fails). Until it settles,
 a submitted delivery holds the endpoint's one in-flight slot (later only-if-idle
 deliveries refuse `busy-turn`, later plain ones queue) and a command holds the one command
@@ -97,6 +122,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+#: How long an adapter's stop of a command's background shells may take, from the
+#: command's moment of effect, in seconds. A stop not back by then is `left` `timeout`.
+SHELL_STOP_S = 10.0
+
 
 @dataclass(frozen=True)
 class Live:
@@ -110,6 +139,9 @@ class Live:
 
     agents: int | None = 0
     draft: bool = False
+    #: Of `agents`, the background shells (Codex's terminals), which a command with
+    #: `stop_shells` leaves out of its agent check. Claude's list holds none.
+    shells: int = 0
 
 
 @dataclass(frozen=True)
@@ -134,7 +166,9 @@ class CommandRequest:
     """One session command handed to the adapter."""
 
     id: str
-    name: str                    # "clear" or "exit"
+    name: str                    # "clear", "exit" or "compact"
+    #: Stop the session's background shells once the command has taken effect.
+    stop_shells: bool = False
 
 
 class Harness:
@@ -183,4 +217,4 @@ class Harness:
         pass
 
 
-__all__ = ["Live", "Delivery", "CommandRequest", "Harness"]
+__all__ = ["SHELL_STOP_S", "Live", "Delivery", "CommandRequest", "Harness"]

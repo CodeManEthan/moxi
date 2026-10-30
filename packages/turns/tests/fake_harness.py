@@ -15,14 +15,14 @@ import threading
 import time
 
 from moxi_turns.harness import CommandRequest, Delivery, Harness, Live
-from moxi_turns.results import Ran
+from moxi_turns.results import Ran, Shells
 
 
 class FakeHarness(Harness):
     name = "fake"
 
     def __init__(self, can=("deliver", "only-if-idle", "steer", "stop-handler", "clear",
-                            "exit"), *, auto=True, auto_steer=True,
+                            "exit", "compact", "stop-shells"), *, auto=True, auto_steer=True,
                  pid=None):
         self.can = frozenset(can)
         self.pid = os.getpid() if pid is None else pid
@@ -31,12 +31,20 @@ class FakeHarness(Harness):
         self.auto_steer = auto_steer
         self.agents = 0
         self.draft = False
+        #: Of `agents`, how many are background shells.
+        self.shells = 0
         self.live_fails = False
         self.submitted: list[Delivery] = []
         self.appended: list[Delivery] = []
         self.commands: list[CommandRequest] = []
         self.auto_commands = True
         self.open_turn: str | None = None
+        #: What a command's shell stop reports, and the stops made, in order, after the
+        #: command took effect.
+        self.stop_report = Shells(("sh1",), (), True)
+        self.stops: list[str] = []
+        #: With `compact_ready` off a compaction raises no Ready; the test raises it.
+        self.compact_ready = True
         self._turns = itertools.count(1)
         self._sessions = itertools.count(2)
         self._lock = threading.Lock()
@@ -46,7 +54,7 @@ class FakeHarness(Harness):
     def live(self) -> Live:
         if self.live_fails:
             raise OSError("the prompt box cannot be read")
-        return Live(self.agents, self.draft)
+        return Live(self.agents, self.draft, self.shells)
 
     def submit(self, delivery: Delivery) -> None:
         self.submitted.append(delivery)
@@ -113,9 +121,23 @@ class FakeHarness(Harness):
     def run_command(self, request: CommandRequest) -> None:
         if self.endpoint.command_entering(request.id) is not None:
             return
+        ep = self.endpoint
         if request.name == "clear":
             new_id = f"s-{next(self._sessions)}"
-            self.endpoint.ready("clear", new_id)
-            self.endpoint.command_settled(request.id, Ran(new_id))
+            ep.ready("clear", new_id)
+            if request.stop_shells:
+                ep.command_took_effect(request.id)
+                self.stops.append(request.id)
+                ep.command_ran(request.id, new_session_id=new_id, shells=self.stop_report)
+            else:
+                ep.command_settled(request.id, Ran(new_id))
+        elif request.name == "compact":
+            if self.compact_ready:
+                ep.ready("compact", ep.ledger.session_id)
+            if request.stop_shells:
+                self.stops.append(request.id)
+                ep.command_ran(request.id, shells=self.stop_report)
+            else:
+                ep.command_ran(request.id)
         else:
-            self.endpoint.command_settled(request.id, Ran(None))
+            ep.command_settled(request.id, Ran(None))

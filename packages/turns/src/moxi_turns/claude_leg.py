@@ -18,12 +18,17 @@ Lines (endpoint to runner)
 
 The first line, always first, before the runner sends anything:
 
-    {"op": "hello", "leg": 1, "mod_sock": "<absolute path>", "hold_wait_ms": n,
-     "listen_wait_ms": n, "endpoint_version": "…", "pid": <endpoint pid>}
+    {"op": "hello", "leg": 2, "mod_sock": "<absolute path>", "stop_wait_ms": n,
+     "listen_wait_ms": n, "endpoint_version": "…", "pid": <endpoint pid>,
+     "stop_after_clear": bool}
+
+`stop_after_clear` says whether the runner stops a `clear`'s shells through `TaskStop`
+after the clear (`STOP_AFTER_CLEAR`); false, it stops none after a clear and reports
+every listed one left, why `not-stopped-after-clear`.
 
 or, when the endpoint cannot start (its config is broken), its only line:
 
-    {"op": "failed", "leg": 1, "error": "<words>"}
+    {"op": "failed", "leg": 2, "error": "<words>"}
 
 Then, in any order:
 
@@ -37,8 +42,14 @@ Then, in any order:
         `$.session.append` a user-role row into the running turn (a steer). The runner
         reports `append.done` when the call resolves without a deny, else
         `append.failed`.
-    {"op": "command", "request": id, "name": "clear" | "exit"}
-        `$.command.run` the command; the gate re-checks it (`/gate/command`).
+    {"op": "command", "request": id, "name": "clear" | "exit" | "compact",
+     "stop_shells": bool}
+        `$.command.run` the command; the gate re-checks it (`/gate/command`). With
+        `stop_shells` (never with `exit`), before the run the runner asks
+        `$.tool.check` for a `TaskStop` of each background shell and Monitor it lists,
+        and any answer but `allow` reports `refused` `unsupported` with nothing run.
+        Once the run returns without the gate's withdrawal, it stops each listed one
+        with `$.tool.call` `TaskStop` within `SHELL_STOP_S` and reports `shells`.
     {"op": "live", "ask": n}
         Read `$.agent.list()` and `$.prompt.read()` and answer on `/live`.
 
@@ -62,9 +73,13 @@ own count from 1 for this load, and `kind`:
     append.done    {delivery}                       a steer appended: `$.session.append`
                                                     resolved without a deny
     append.failed  {delivery, reason}               a steer the runner could not append
-    command.done   {request, state, reason, new_session_id}
+    command.done   {request, state, reason, new_session_id, shells?}
                                                     `$.command.run` settled: `state` is
-                                                    `ran`, `refused` or `failed`
+                                                    `ran`, `refused` or `failed`. With
+                                                    `stop_shells` a `ran` carries
+                                                    `shells: {stopped: [id], left: [{id,
+                                                    why}], complete}`, sent once the
+                                                    stop is done
 
 Reports are keyed by their window's delivery: an end for a window that is not the open
 one is logged and changes nothing. The bound is a report, not a close: the endpoint fails
@@ -83,7 +98,7 @@ and never as 0. An unreadable box is sent as `draft: true`. Answer `{"ok": true}
 
 `/ask/stop` — `{turn_id, session_id, stop_hook_active, task_types, crons}` at a main-loop
 `classic.Stop`. Answer `{"ok": true, "reason": "<text>" | null}`: a reason holds the turn
-open (`block`), null lets it end. The endpoint answers within `hold.wait_ms`.
+open (`block`), null lets it end. The endpoint answers within `stop_handler.wait_ms`.
 
 `/ask/context` — `{event: "ready" | "prompt", source, session_id}` at
 `classic.SessionStart` (`ready`) and `classic.UserPromptSubmit` (`prompt`). Answer
@@ -127,7 +142,15 @@ from . import hooktimes
 log = logging.getLogger("moxi.turns.claude")
 
 #: This leg's version.
-LEG = 1
+LEG = 2
+
+#: Whether the runner stops a `clear`'s shells after the clear. Claude Code may no longer
+#: find a task through `TaskStop` once `/clear` has run; until a live session shows it
+#: does, this stays as the design has it, and turning it off keeps the order (the stop
+#: after the command) and stops nothing after a clear.
+STOP_AFTER_CLEAR = True
+#: The `why` of a listed shell left running because the runner stops none after a clear.
+NOT_STOPPED_AFTER_CLEAR = "not-stopped-after-clear"
 
 #: The endpoint's line ops.
 LINE_HELLO, LINE_FAILED = "hello", "failed"
@@ -311,7 +334,7 @@ def _handler_for(handle):
     return Handler
 
 
-__all__ = ["LEG", "LINE_HELLO", "LINE_FAILED", "LINE_SUBMIT", "LINE_APPEND", "LINE_COMMAND",
+__all__ = ["LEG", "STOP_AFTER_CLEAR", "NOT_STOPPED_AFTER_CLEAR", "LINE_HELLO", "LINE_FAILED", "LINE_SUBMIT", "LINE_APPEND", "LINE_COMMAND",
            "LINE_LIVE", "PATH_REPORT", "PATH_LIVE", "PATH_STOP", "PATH_CONTEXT",
            "PATH_GATE_ENTRY", "PATH_GATE_COMMAND", "PATH_HOOK_TIMES", "PATHS", "R_SESSION",
            "R_TURN_START", "R_TURN_COMPLETE", "R_SUBMIT_CLOSE", "R_SUBMIT_BOUND", "R_APPEND_DONE",

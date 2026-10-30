@@ -2,24 +2,28 @@
 //
 // It spawns the session's endpoint (`endpoint.json` beside this plugin names the command),
 // reports the session's main-loop turns to it, puts in what it hands over (a submit, a
-// steer, a /clear or /exit), and asks it at SessionStart, UserPromptSubmit and Stop. The
-// runner reads no setting: its bounds are the constants below, and the endpoint's first
-// line carries `hold_wait_ms` and `listen_wait_ms`.
+// steer, a /clear, /exit or /compact), and asks it at SessionStart, UserPromptSubmit and
+// Stop. The runner reads no setting: its bounds are the constants below, and the
+// endpoint's first line carries `stop_wait_ms` and `listen_wait_ms`.
 //
 // The internal leg (not the socket contract; it changes only with the package). The
 // endpoint's half, moxi_turns.claude_leg, states it in full; the runner's part:
 //
 // Endpoint to runner: one JSON object per line on the child's stdout, by `op`:
-//   hello    {op, leg: 1, mod_sock, hold_wait_ms, listen_wait_ms, endpoint_version, pid}
+//   hello    {op, leg: 2, mod_sock, stop_wait_ms, listen_wait_ms, endpoint_version, pid,
+//            stop_after_clear}
 //            the first line. Before it the runner sends nothing, and it sends nothing to an
-//            endpoint whose leg it does not speak.
+//            endpoint whose leg it does not speak. `stop_after_clear` false: after a clear
+//            the runner stops no shell (each listed one is left, `not-stopped-after-clear`).
 //   failed   {op, leg, error}   the endpoint could not start: its only line
 //   submit   {op, delivery, kind, text, nonce}
 //            opens the submit's window and calls $.prompt.submit with the line
 //            `moxi-turns-window: <nonce>` first (entry, below); one window at a time
 //   append   {op, delivery, text}             a steer: $.session.append, a user row
 //   live     {op, ask}                        the live facts: answered on POST /live
-//   command  {op, request, name: clear|exit}  $.command.run, which the gate re-checks
+//   command  {op, request, name: clear|exit|compact, stop_shells}
+//            $.command.run, which the gate re-checks; with stop_shells, the shell stop
+//            (below) around it
 //
 // Runner to endpoint: HTTP POST with a JSON body to `mod_sock`, answered with a JSON object.
 //   /report  {seq, kind, ...} through one ordered queue, each sent once the one before it
@@ -35,7 +39,9 @@
 //              submit.bound   {delivery, reason}  the runner's bound (below)
 //              append.done    {delivery}  $.session.append resolved without a deny
 //              append.failed  {delivery, reason}
-//              command.done   {request, state: ran|refused|failed, reason, new_session_id}
+//              command.done   {request, state: ran|refused|failed, reason, new_session_id,
+//                             shells?}  with stop_shells a `ran` carries
+//                             shells: {stopped: [id], left: [{id, why}], complete}
 //   /ask/context {event: ready|prompt, source, session_id}  -> {context: string | null}
 //   /ask/stop    {turn_id, session_id, stop_hook_active, task_types, crons}
 //                                                          -> {reason: string | null}
@@ -51,7 +57,7 @@
 //
 // The internal leg rule: no hook waits on the endpoint longer than a bound this plugin's
 // own timer keeps, and a request that misses its bound counts as unanswered. A reporting
-// hook waits at most 1 s for its report; the Stop ask hold_wait_ms + 1 s; a context ask
+// hook waits at most 1 s for its report; the Stop ask stop_wait_ms + 1 s; a context ask
 // listen_wait_ms + 1 s; SessionStart waits at most 2 s for the first line.
 //
 // The queue: a report made before the first line waits in the queue and is sent after the
@@ -83,6 +89,29 @@
 // off on a pass and drops everything else. The gate is required: without it in
 // $.command.list() the runner submits nothing, and the submit closes as `unsupported`.
 //
+// The shell stop (a command's stop_shells): the runner stops the session's Bash background
+// shells and Monitors, never subagents, teammates or workflows. The mod API has no list
+// call for background tasks, so the runner keeps the latest `background_tasks` from every
+// classic.Stop and classic.SubagentStop input it sees (an agent's and a headless one's
+// too), the entries of type `shell` or `monitor`. Before the run it asks
+// `$.tool.check` for a `TaskStop` of each; any answer but `allow` reports `refused`
+// `unsupported` and nothing runs. Once `$.command.run` has returned without the gate's
+// withdrawal, it calls `TaskStop` for each within 10 s and reports what it stopped and
+// what it left (`timeout`, `denied`, or the harness's words); an entry the call says had
+// already ended goes in neither list.
+//
+// The list rule: the runner vouches for its list only when nothing that could start a
+// shell has run since the harness gave it. A shell or Monitor starts only from a tool
+// call, so a `tool.call` hook keeps the calls in flight across every loop, by
+// `tool_use_id`, and marks the list at each call's start and end. A Stop or SubagentStop
+// carrying `background_tasks`, seen with no call in flight, replaces the list and clears
+// the mark. A reload starts with no list and the mark set. The mark is read as the stop
+// begins, after the command took effect, and the runner's own `TaskStop` calls set
+// nothing. With the mark set the report has `complete` false and the one unnamed entry
+// `{id: null, why: "unlisted"}`, so a list turns cannot vouch for never reads as empty.
+// A turn's abort drops the main loop's calls from the count (their tools are stopped);
+// a call whose hook never returns keeps the mark set, which errs to `complete` false.
+//
 // The non-interactive rule: `$.session.surfaces()` empty means headless, read in
 // whichever of session.start and classic.SessionStart runs first; the first read decides.
 // A headless run spawns no endpoint and every hook returns at once.
@@ -103,14 +132,21 @@ const QUEUE_MAX = 1000
 const BUSY_AGENT = new Set(['pending', 'running', 'waiting'])
 const GATE_DROP = /^moxi-turns-gate: .*\(([a-z-]+)\)$/
 const NONCE_LINE = 'moxi-turns-window: '
-const LEG = 1
+const LEG = 2
+const PLUGIN = 'moxi-turns'
+const SHELL_STOP_MS = 10_000
+const STOPPABLE = new Set(['shell', 'monitor'])
+const UNLISTED = 'unlisted'
+const NOT_STOPPED_AFTER_CLEAR = 'not-stopped-after-clear'
+/** What TaskStop says of a task that has already ended. */
+const ENDED = /not running|no longer running|already (?:stopped|completed|finished|exited|ended|killed)|has (?:already )?(?:completed|finished|exited|ended)/i
 const HOOK_TIMES_MS = 60_000
 const HOOK_TIMES_MAX = 1000
 
 const ENDPOINT = { plugin: 'moxi-turns', key: 'endpoint' } as const
 const COMMAND = { plugin: 'moxi-turns', key: 'command' } as const
 
-type Hello = { sock: string; holdWaitMs: number; listenWaitMs: number }
+type Hello = { sock: string; stopWaitMs: number; listenWaitMs: number; stopAfterClear: boolean }
 type Json = Record<string, unknown>
 type Report = { kind: string; fields: Json; seq: number; landed: Promise<void>; land: () => void }
 type Win = {
@@ -136,6 +172,14 @@ let queue: Report[] = []
 let sending = false
 let samples: { event: string; ms: number }[] = []
 let samplesArmed = false
+/** The latest background shells and Monitors the harness listed, or null before any. */
+let tasks: { id: string; type: string }[] | null = null
+/** Set while the list cannot be vouched for: a tool call ran since the harness gave it. */
+let tasksMarked = true
+/** The tool calls in flight, by `tool_use_id`, with the loop each runs in. */
+const inflight = new Map<string, string | undefined>()
+/** The task ids the runner's own `TaskStop` calls are stopping now. */
+const stopping = new Set<string>()
 
 const log = ($: Dollar, text: string): void => {
   try {
@@ -389,15 +433,95 @@ async function append($: Dollar, delivery: string, text: string): Promise<void> 
   }
 }
 
-async function command($: Dollar, request: string, name: 'clear' | 'exit'): Promise<void> {
+type Name = 'clear' | 'exit' | 'compact'
+type Left = { id: string | null; why: string }
+type ShellReport = { stopped: string[]; left: Left[]; complete: boolean }
+
+/** A Stop or SubagentStop input's `background_tasks`: with no call in flight it replaces
+ *  the list and clears the mark; else it changes nothing. */
+function noteTasks(list: unknown): void {
+  if (!Array.isArray(list) || inflight.size > 0) return
+  tasks = list
+    .filter(t => t !== null && typeof t === 'object' && typeof (t as Json).id === 'string' && STOPPABLE.has(String((t as Json).type)))
+    .map(t => ({ id: (t as Json).id as string, type: String((t as Json).type) }))
+  tasksMarked = false
+}
+
+/** Step 2: may every listed shell be stopped? `$.tool.check` must answer `allow` for each.
+ *  No list, or an empty one, is no refusal. */
+async function mayStop($: Dollar): Promise<boolean> {
+  const list = tasks ?? []
+  const checks = Promise.all(list.map(async t => {
+    try {
+      return (await $.tool.check({ tool: 'TaskStop', input: { task_id: t.id } })).decision === 'allow'
+    } catch (err) {
+      log($, `the TaskStop check for ${t.id} failed: ${String(err)}`)
+      return false
+    }
+  }))
+  const verdicts = await Promise.race([checks, after<boolean[]>($, SHELL_STOP_MS)])
+  return verdicts !== undefined && verdicts.every(v => v)
+}
+
+/** Stops one task through `TaskStop`, by `deadline` at the latest: stopped, left with why,
+ *  or null when the call says it had already ended. */
+async function stopOne($: Dollar, id: string, deadline: Promise<undefined>): Promise<{ stopped: string } | { left: Left } | null> {
+  stopping.add(id)
+  const call = $.tool.call({ tool: 'TaskStop', task_id: id }).then(
+    r => ({ r: r as { deny?: string; isError?: boolean; text?: string } }),
+    err => ({ err }),
+  )
+  try {
+    const x = await Promise.race([call, deadline])
+    if (x === undefined) return { left: { id, why: 'timeout' } }
+    if ('err' in x) return { left: { id, why: String(x.err) } }
+    const r = x.r
+    if (typeof r.deny === 'string') return { left: { id, why: 'denied' } }
+    if (r.isError === true) {
+      const text = typeof r.text === 'string' && r.text !== '' ? r.text : 'TaskStop failed'
+      return ENDED.test(text) ? null : { left: { id, why: text } }
+    }
+    return { stopped: id }
+  } finally {
+    // A call still out at the deadline keeps its id until it returns.
+    void call.finally(() => stopping.delete(id))
+  }
+}
+
+/** Step 4: stops what the list names, once the command has taken effect. The mark is read
+ *  here, as the stop begins. */
+async function stopShells($: Dollar, name: Name): Promise<ShellReport> {
+  const complete = tasks !== null && !tasksMarked
+  const list = tasks ?? []
+  const report: ShellReport = { stopped: [], left: [], complete }
+  if (name === 'clear' && hello?.stopAfterClear === false) {
+    for (const t of list) report.left.push({ id: t.id, why: NOT_STOPPED_AFTER_CLEAR })
+  } else {
+    const deadline = after<undefined>($, SHELL_STOP_MS) as Promise<undefined>
+    for (const x of await Promise.all(list.map(t => stopOne($, t.id, deadline)))) {
+      if (x === null) continue
+      if ('stopped' in x) report.stopped.push(x.stopped)
+      else report.left.push(x.left)
+    }
+  }
+  if (!complete) report.left.push({ id: null, why: UNLISTED })
+  return report
+}
+
+async function command($: Dollar, request: string, name: Name, stopShellsToo: boolean): Promise<void> {
+  const done = (fields: Json) => void report($, 'command.done', { request, reason: null, new_session_id: null, ...fields })
   if (!(await gateLoaded($))) {
-    void report($, 'command.done', { request, state: 'refused', reason: 'unsupported', new_session_id: null })
+    done({ state: 'refused', reason: 'unsupported' })
+    return
+  }
+  if (stopShellsToo && !(await mayStop($))) {
+    done({ state: 'refused', reason: 'unsupported' })
     return
   }
   try {
     await $.state.set(COMMAND, { request, name, sock: hello!.sock })
   } catch (err) {
-    void report($, 'command.done', { request, state: 'failed', reason: `the command's mark was not written: ${String(err)}`, new_session_id: null })
+    done({ state: 'failed', reason: `the command's mark was not written: ${String(err)}` })
     return
   }
   let text: string | null = null
@@ -407,17 +531,23 @@ async function command($: Dollar, request: string, name: 'clear' | 'exit'): Prom
   } catch (err) {
     error = String(err)
   }
-  let sessionId: string | null = null
-  try {
-    sessionId = await $.session.id()
-  } catch {
-    sessionId = null
-  }
   // The gate's withdrawal is the command's own answer, one line naming the reason.
   const withdrawn = text === null ? null : GATE_DROP.exec(text)
-  if (error !== null) void report($, 'command.done', { request, state: 'failed', reason: error, new_session_id: null })
-  else if (withdrawn) void report($, 'command.done', { request, state: 'refused', reason: withdrawn[1] ?? 'gone', new_session_id: null })
-  else void report($, 'command.done', { request, state: 'ran', reason: null, new_session_id: sessionId })
+  if (error !== null) {
+    done({ state: 'failed', reason: error })
+  } else if (withdrawn) {
+    done({ state: 'refused', reason: withdrawn[1] ?? 'gone' })
+  } else {
+    // The command took effect: only now are the shells stopped.
+    const shells = stopShellsToo ? await stopShells($, name) : undefined
+    let sessionId: string | null = null
+    try {
+      sessionId = await $.session.id()
+    } catch {
+      sessionId = null
+    }
+    done({ state: 'ran', new_session_id: sessionId, ...(shells === undefined ? {} : { shells }) })
+  }
   void $.state.set(COMMAND, null).catch(() => {})
 }
 
@@ -453,7 +583,7 @@ async function onLine($: Dollar, line: string): Promise<void> {
     let land: () => void = () => {}
     const landed = new Promise<void>(resolve => { land = resolve })
     queue.unshift({ kind: 'session', fields: { session_id: sessionId, mod_version: MOD_VERSION }, seq: 0, landed, land })
-    hello = { sock, holdWaitMs: num(m.hold_wait_ms, 2000), listenWaitMs: num(m.listen_wait_ms, 2000) }
+    hello = { sock, stopWaitMs: num(m.stop_wait_ms, 2000), listenWaitMs: num(m.listen_wait_ms, 2000), stopAfterClear: m.stop_after_clear !== false }
     helloSeen()
     void pump($)
     void writeSock($).catch(err => log($, `the mod.sock path was not written: ${String(err)}`))
@@ -473,8 +603,8 @@ async function onLine($: Dollar, line: string): Promise<void> {
     await append($, delivery, str(m.text) ?? '')
   } else if (op === 'live') {
     await live($, m.ask)
-  } else if (op === 'command' && str(m.request) !== undefined && (m.name === 'clear' || m.name === 'exit')) {
-    await command($, m.request as string, m.name)
+  } else if (op === 'command' && str(m.request) !== undefined && (m.name === 'clear' || m.name === 'exit' || m.name === 'compact')) {
+    await command($, m.request as string, m.name, m.stop_shells === true && m.name !== 'exit')
   } else {
     log($, `the endpoint wrote an op the runner does not take: ${String(op)}`)
   }
@@ -624,6 +754,7 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const hook = watch()
     try {
+      if (e.agentId === undefined && e.isAborted) dropMainLoopCalls()
       if (e.agentId !== undefined || headless === true || ended) return behind(hook, performance.now(), await next(e))
       turnOpen = null
       await reportAndWait($, 'turn.complete', { turn_id: e.turnId, reason: e.reason, is_aborted: e.isAborted })
@@ -637,6 +768,7 @@ export const register: Register = on => {
   on('classic.Stop', async ($, e, next) => {
     const hook = watch()
     try {
+      noteTasks(e.background_tasks)
       if (e.agent_id !== undefined || headless === true || hello === undefined || ended) return behind(hook, performance.now(), await next(e))
       const facts = {
         turn_id: turnOpen,
@@ -645,7 +777,7 @@ export const register: Register = on => {
         task_types: e.background_tasks === undefined ? null : e.background_tasks.map(t => String((t as { type?: unknown }).type ?? 'unknown')),
         crons: e.session_crons === undefined ? null : e.session_crons.length,
       }
-      const answer = await ask($, '/ask/stop', facts, hello.holdWaitMs + MARGIN_MS)
+      const answer = await ask($, '/ask/stop', facts, hello.stopWaitMs + MARGIN_MS)
       const r = behind(hook, performance.now(), await next(e))
       const reason = answer?.reason
       return typeof reason === 'string' && reason !== '' ? { ...r, block: reason } : r
@@ -653,4 +785,51 @@ export const register: Register = on => {
       timeHook($, 'classic.Stop', hook)
     }
   })
+
+  on('classic.SubagentStop', async ($, e, next) => {
+    const hook = watch()
+    try {
+      noteTasks(e.background_tasks)
+      return behind(hook, performance.now(), await next(e))
+    } finally {
+      timeHook($, 'classic.SubagentStop', hook)
+    }
+  })
+
+  // Every loop's tool calls pass here: each one in flight marks the list. The call goes on
+  // unchanged, and the hook's time leaves out the tool's own run (`next`). The runner's
+  // own TaskStop calls mark nothing.
+  on('tool.call', async ($, e, next) => {
+    const hook = watch()
+    const id = e.tool_use_id
+    const own = next.origin.plugin === PLUGIN || (e.tool === 'TaskStop' && stopping.has(String((e as Json).task_id)))
+    if (!own) {
+      inflight.set(id, e.agentId)
+      tasksMarked = true
+    }
+    const since = performance.now()
+    try {
+      return await next(e)
+    } finally {
+      hook.away += performance.now() - since
+      if (!own) {
+        inflight.delete(id)
+        tasksMarked = true
+      }
+      timeHook($, 'tool.call', hook)
+    }
+  })
+
+  // A turn's abort stops its running tools: the main loop's calls leave the count, so a
+  // frame that never returns cannot hold it for good.
+  on('turn.abort', async ($, e, next) => {
+    dropMainLoopCalls()
+    return next(e)
+  })
+}
+
+/** The main loop's calls leave the count. Each set the mark as it started, so the mark
+ *  stays until a Stop; a turn that made no call leaves the list as it was. */
+function dropMainLoopCalls(): void {
+  for (const [id, agentId] of inflight) if (agentId === undefined) inflight.delete(id)
 }
