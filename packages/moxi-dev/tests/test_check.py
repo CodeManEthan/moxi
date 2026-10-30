@@ -588,6 +588,19 @@ def test_the_line_gives_the_tests_seconds_and_the_slowest_share(ignoring):
     assert LINE.match(result.line()), result.line()
 
 
+def test_the_slowest_share_counts_one_test_in_twenty_rounded_up(ignoring):
+    commit_file(ignoring, "packages/cache/x.py")
+    # 41 tests: 5 % is 2.05, so the slowest three count: two of 10 s and one of 4 s.
+    runs = Timed({"cache": [10.0, 4.0] + [0.5] * 19, "comms": [10.0] + [0.5] * 19})
+    result = run_check(ignoring, runs)
+    assert result.durations.tests == 41
+    assert "| durations 43.0s, slowest 5% 56%, delta none |" in result.line()
+    # 40 tests: exactly two count
+    runs = Timed({"cache": [10.0] + [0.5] * 19, "comms": [10.0] + [0.5] * 19})
+    assert "| durations 39.0s, slowest 5% 51%, delta none |" in run_check(
+        ignoring, runs).line()
+
+
 def test_a_clean_run_keeps_the_commit_s_record_of_the_suites_that_passed(ignoring):
     commit_file(ignoring, "packages/cache/x.py")
     runs = Timed({"cache": [1.0], "comms": [2.0]},
