@@ -17,8 +17,11 @@ these steps in order and stops at the first that fails:
    on every text, RE2's matches and secrets equal Go's, the fallback's equal Go's, and the
    fallback's hits equal RE2's. No difference is allowed, on the variants with a dotless
    i for each i and a dotted I for each i and I as on any other: the translator writes
-   Go's case folds out. The step also checks Go's fold orbit (unicode.SimpleFold) of every
-   ASCII character against the translator's. No sample is stored.
+   Go's case folds out. A rule also fails where the secret secrets takes from a match (its
+   group in context) differs from the one gitleaks takes (its group from the regex run
+   again on the match with newlines trimmed). The step also checks Go's fold orbit
+   (unicode.SimpleFold) of every ASCII character against the translator's. No sample is
+   stored.
 5. Times the scan on RE2 over generated adversarial texts against the cost budget, and
    names the slowest rules where a text goes over it.
 6. Runs the gitleaks binary of the tag on the package's own directory with
@@ -259,6 +262,7 @@ class Comparison:
         self.show = show
         self.rows = Counter()
         self.hit_lists = 0
+        self.secrets_compared = 0
         self.orbits_checked = 0
         self.go_unicode = ""
         self.orbit_faults: list[str] = []
@@ -314,10 +318,25 @@ class Comparison:
             if row["found"]:
                 self.hits(self.Text("x"), text, p["owner"], text)
         elif p["kind"] == "rule":
+            self.secrets(row, p["owner"], text)
             path = self.paths.get(p["owner"])
             if path is None and (p["owner"] + ".path") in self.pats:
                 self.no_path.add(p["owner"])
             self.hits(t, path, p["owner"], text)
+
+    def secrets(self, row: dict, owner: str, text: str) -> None:
+        """Each match's secret as secrets takes it against the one gitleaks takes."""
+        pairs = row.get("secrets")
+        if pairs is None or len(pairs) != len(row["matches"]):
+            self.fail(owner, "secrets: the sampler sent no secrets for the matches", text)
+            return
+        data = text.encode("utf-8", "surrogatepass")
+        for bs, be, gs, ge in pairs:
+            self.secrets_compared += 1
+            ours = data[bs:be] if bs >= 0 else None
+            theirs = data[gs:ge] if gs >= 0 else None
+            if ours != theirs:
+                self.fail(owner, f"secret against gitleaks' {row['kind']}", text)
 
     def hits(self, t, path, owner, shown) -> None:
         self.hit_lists += 1
@@ -334,6 +353,8 @@ class Comparison:
         plain = self.rows["plain"]
         say(f"{len(self.pats)} patterns, {plain} samples, {total - plain} variants; "
             f"{self.hit_lists} hit lists on each engine")
+        say(f"{self.secrets_compared} rule matches: the secret taken in context against "
+            "gitleaks' (the regex run again on the trimmed match)")
         if self.orbits_checked:
             say(f"Go's fold orbits (Unicode {self.go_unicode}) of {self.orbits_checked} ASCII "
                 f"characters: {len(self.orbit_faults)} differ from the translator's")

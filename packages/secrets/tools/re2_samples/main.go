@@ -14,12 +14,19 @@
 //
 // and then, for each text, one JSON line,
 //
-//	{"id": "...", "kind": "plain", "text": "...", "found": true, "matches": [[ms, me, ss, se]]}
+//	{"id": "...", "kind": "plain", "text": "...", "found": true, "matches": [[ms, me, ss, se]],
+//	 "secrets": [[bs, be, gs, ge]]}
 //
 // where `found` is MatchString, and `matches` lists every non-empty match of
-// FindAllStringSubmatchIndex with its secret, as gitleaks takes it: the group `group` names
-// when it is above zero, else the first non-empty group, else the whole match. A secret
-// group the match has no span for is [-1, -1]. Offsets are UTF-8 byte offsets.
+// FindAllStringSubmatchIndex with its secret group's span in context: the group `group`
+// names when it is above zero, else the first non-empty group, else the whole match. A
+// secret group the match has no span for is [-1, -1].
+//
+// `secrets` gives each match's secret two ways. [bs, be] is the secret as secrets takes it:
+// the match with its leading and trailing newlines trimmed, then the group in context, else
+// the trimmed match. [gs, ge] is the secret as gitleaks takes it: FindStringSubmatch run
+// again on the trimmed match alone, its group, else the trimmed match. [-1, -1] is a match
+// that way drops. Offsets are UTF-8 byte offsets into the text.
 //
 // Nothing is stored: the caller reads the lines as they come and keeps none.
 package main
@@ -55,6 +62,7 @@ type sample struct {
 	Text    string  `json:"text"`
 	Found   bool    `json:"found"`
 	Matches [][]int `json:"matches"`
+	Secrets [][]int `json:"secrets"`
 }
 
 var rng *rand.Rand
@@ -187,23 +195,69 @@ func asciiOrbits() map[string]any {
 	return map[string]any{"unicode": unicode.Version, "orbits": orbits}
 }
 
-func secret(span []int, group int) (int, int) {
+// pick is the secret group of one match's spans: the group `group` names when it is above
+// zero, else the first non-empty group. ok is false when the pattern has no group or no
+// group is non-empty; a named group the match has no span for is [-1, -1].
+func pick(span []int, group int) (s, e int, ok bool) {
 	groups := len(span)/2 - 1
 	if groups == 0 {
-		return span[0], span[1]
+		return 0, 0, false
 	}
 	if group > 0 {
 		if group > groups {
-			return -1, -1
+			return -1, -1, true
 		}
-		return span[2*group], span[2*group+1]
+		return span[2*group], span[2*group+1], true
 	}
 	for g := 1; g <= groups; g++ {
 		if span[2*g] >= 0 && span[2*g+1] > span[2*g] {
-			return span[2*g], span[2*g+1]
+			return span[2*g], span[2*g+1], true
 		}
 	}
+	return 0, 0, false
+}
+
+func secret(span []int, group int) (int, int) {
+	if s, e, ok := pick(span, group); ok {
+		return s, e
+	}
 	return span[0], span[1]
+}
+
+// secrets is one match's secret as secrets takes it (in context) and as gitleaks takes it
+// (FindStringSubmatch on the newline-trimmed match), as [bs, be, gs, ge].
+func secrets(compiled *regexp.Regexp, text string, span []int, group int) []int {
+	ts, te := span[0], span[1]
+	for ts < te && text[ts] == '\n' {
+		ts++
+	}
+	for te > ts && text[te-1] == '\n' {
+		te--
+	}
+	if ts == te {
+		return []int{-1, -1, ts, te}
+	}
+	bs, be := ts, te
+	if s, e, ok := pick(span, group); ok {
+		bs, be = s, e
+	}
+	if bs < 0 || be <= bs {
+		bs, be = -1, -1
+	}
+	gs, ge := ts, te
+	if sub := compiled.FindStringSubmatchIndex(text[ts:te]); len(sub) >= 4 {
+		if s, e, ok := pick(sub, group); ok {
+			switch {
+			case s < 0 && group > len(sub)/2-1:
+				gs, ge = -1, -1 // gitleaks drops the match
+			case s < 0:
+				gs, ge = ts, ts // a group with no span is the empty secret
+			default:
+				gs, ge = ts+s, ts+e
+			}
+		}
+	}
+	return []int{bs, be, gs, ge}
 }
 
 func run() error {
@@ -236,15 +290,16 @@ func run() error {
 			var b strings.Builder
 			gen(tree, &b)
 			for _, v := range variants(b.String()) {
-				matches := [][]int{}
+				matches, both := [][]int{}, [][]int{}
 				for _, span := range compiled.FindAllStringSubmatchIndex(v[1], -1) {
 					if span[1] == span[0] {
 						continue
 					}
 					ss, se := secret(span, p.Group)
 					matches = append(matches, []int{span[0], span[1], ss, se})
+					both = append(both, secrets(compiled, v[1], span, p.Group))
 				}
-				row := sample{p.ID, v[0], v[1], compiled.MatchString(v[1]), matches}
+				row := sample{p.ID, v[0], v[1], compiled.MatchString(v[1]), matches, both}
 				if err := enc.Encode(row); err != nil {
 					return err
 				}

@@ -171,6 +171,30 @@ def test_a_row_where_go_differs_fails_both_engines_for_the_owner():
     assert set(c.failures["some-rule"]) == {"re2 allow plain", "fallback allow plain"}
 
 
+def _rule_row(text: str, secrets: list) -> tuple:
+    c = _comparison(r"k(e+)y")
+    c.pats["p"]["kind"] = "rule"
+    c.run_gitleaks = lambda *args: {}   # no hits on either engine: only the secrets differ
+    row = go_row(r"k(e+)y", text)
+    row["secrets"] = secrets
+    return c, row
+
+
+def test_a_rule_whose_secret_matches_gitleaks_fails_nothing():
+    c, row = _rule_row("a key", [[3, 4, 3, 4]])
+    c.row(row)
+    assert not c.failures and c.secrets_compared == 1
+
+
+@pytest.mark.parametrize("secrets", [[[3, 4, 2, 5]], [[3, 4, -1, -1]], [[-1, -1, 3, 3]], []])
+def test_a_rule_whose_secret_differs_from_gitleaks_fails(secrets):
+    # Go agrees with both engines here; only the secret gitleaks would take differs, or the
+    # sampler sent none for the match.
+    c, row = _rule_row("a key", secrets)
+    c.row(row)
+    assert [what for what in c.failures["some-rule"] if "secret" in what]
+
+
 @pytest.mark.parametrize("text", ["kı", "kİ", "Kİ", "\u212ai"])
 def test_dotless_and_dotted_i_variants_are_held_to_equality(text):
     c = _comparison("(?i)ki")
@@ -333,3 +357,27 @@ def test_the_sampler_agrees_with_both_engines_on_a_few_rules():
     assert not c.failures
     assert c.orbits_checked == 128 and c.orbit_faults == []
     assert c.rows["plain"] == 3 * len(pats)
+
+
+
+@pytest.mark.slow
+def test_the_sampler_reports_where_gitleaks_takes_a_different_secret():
+    if shutil.which("go") is None:
+        pytest.skip("Go is not on the path")
+    # For "d", in context the group starts after the newline's next character; gitleaks
+    # runs the regex again on the match with the newline trimmed, finds no match, and keeps
+    # the whole trimmed match. "s" takes the same secret either way.
+    pats = [{"id": "d", "pattern": r"(?:\n|x)\w(\w+)", "group": 1},
+            {"id": "s", "pattern": r"tok_(\w+)", "group": 1}]
+    seen = {"d": 0, "s": 0}
+    differ = {"d": 0, "s": 0}
+    for row in bump.go_rows(pats, 6, 7):
+        if "orbits" in row:
+            continue
+        data = row["text"].encode()
+        for bs, be, gs, ge in row["secrets"]:
+            seen[row["id"]] += 1
+            if (data[bs:be] if bs >= 0 else None) != (data[gs:ge] if gs >= 0 else None):
+                differ[row["id"]] += 1
+    assert seen["d"] and seen["s"]
+    assert differ["d"] > 0 and differ["s"] == 0
