@@ -527,6 +527,58 @@ def test_a_changed_port_stops_the_service_restarts_the_socket_and_starts_it_agai
                            ("start", "moxi-demo-relay.service")]
 
 
+KEEP_SOCKET = ("{'relay': {'command': 'moxi-demo-relay', 'upgrade': 'keep', "
+               "'socket': {'setting': 'port', 'addresses': ['127.0.0.1']}}}")
+
+
+@pytest.mark.parametrize("service_too", [False, True])
+def test_a_changed_socket_of_a_running_keep_daemon_ends_with_it_running(w, service_too):
+    """A changed socket restarts its daemon whatever `upgrade` says: the service is
+    stopped for the socket's restart and started again, never left for the socket's next
+    connection, whether or not the service's own text changed too."""
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=KEEP_SOCKET)
+    w.apply(units.plan("demo"))
+    assert w.sup.units["moxi-demo-relay.service"]["active"]
+    from moxi import config
+
+    config.set("demo", "port", "9000", by="test")
+    if service_too:
+        (w.root / "moxi-demo-relay.service").write_text("# moxi unit: demo/relay\nold\n")
+    plan = {(c.kind, c.action) for c in units.plan("demo")}
+    assert plan == {("daemon", "change" if service_too else "keep"), ("socket", "change")}
+    w.sup.calls.clear()
+    done = w.apply(units.plan("demo"))
+    assert all(a.ok for a in done)
+    assert w.sup.calls[:5] == [("daemon-reload",), ("stop", "moxi-demo-relay.service"),
+                               ("enable", "moxi-demo-relay.socket"),
+                               ("restart", "moxi-demo-relay.socket"),
+                               ("start", "moxi-demo-relay.service")]
+    assert w.sup.calls[5:] == ([("enable", "moxi-demo-relay.service")] if service_too
+                               else [])
+    assert w.sup.units["moxi-demo-relay.service"]["active"]
+    if service_too:
+        [line] = [line for a in done if a.change.kind == "daemon" for line in a.lines]
+        assert line == "moxi-demo-relay.service rewritten and restarted, since its socket changed"
+
+
+def test_a_new_socket_of_a_restart_daemon_is_started_by_the_services_own_restart(w):
+    """With `upgrade = "restart"` the service's own change starts it after the socket, so
+    the socket step does not start it as well."""
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=DAEMON)
+    w.apply(units.plan("demo"))
+    w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', "
+                     "'socket': {'setting': 'port', 'addresses': ['127.0.0.1']}}}")
+    w.sup.calls.clear()
+    w.apply(units.plan("demo"))
+    assert w.sup.calls == [("daemon-reload",), ("stop", "moxi-demo-relay.service"),
+                           ("enable", "--now", "moxi-demo-relay.socket"),
+                           ("enable", "moxi-demo-relay.service"),
+                           ("restart", "moxi-demo-relay.service")]
+    assert w.sup.units["moxi-demo-relay.service"]["active"]
+
+
 def test_dropping_a_socket_disables_it_before_the_service_is_restarted(w):
     w.script("moxi-demo-relay")
     w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', "
@@ -898,6 +950,70 @@ def test_a_failed_show_reads_unknown_with_the_supervisors_text(unit_root):
                                      Fence("systemd", fail))
     assert read.state == "unknown" and "Failed to connect to bus" in read.detail
     assert read.enabled is None
+
+
+def test_a_failed_show_makes_every_unit_it_covers_unknown(unit_root):
+    """A daemon, its socket, a marked timer and a foreign timer: one call covers them all,
+    so all are `unknown`, and no second call is made for the foreign timer's service."""
+    calls = []
+
+    def fail(cmd, *, env=None, timeout=None):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1, "", "Failed to connect to bus\n")
+
+    units_ = [UnitRef("a", "b", "daemon", ("moxi-a-b.service",)),
+              UnitRef("a", "b", "socket", ("moxi-a-b.socket",)),
+              UnitRef("a", "snap", "timer", ("moxi-a-snap.timer", "moxi-a-snap.service")),
+              UnitRef(None, "backup.timer", "timer", ("backup.timer",))]
+    states = SystemdBackend().status(units_, Fence("systemd", fail))
+    assert [s.state for s in states] == ["unknown"] * 4 and len(calls) == 1
+    assert all("Failed to connect to bus" in s.detail and s.enabled is None
+               and s.last is None for s in states)
+
+
+@pytest.mark.parametrize("service_state", ["failed", "inactive", "activating"])
+def test_an_armed_timer_whose_service_failed_reads_active(unit_root, service_state):
+    """The `.timer` decides: armed is `active` whatever its service's last run did; the
+    run's result goes in `last`."""
+    show = _shown(
+        _block(Id="moxi-a-snap.service", LoadState="loaded", ActiveState=service_state,
+               SubState="x", MainPID="0", Result="exit-code", ExecMainStatus="1",
+               UnitFileState="static"),
+        _block(Id="moxi-a-snap.timer", LoadState="loaded", ActiveState="active",
+               SubState="waiting", UnitFileState="enabled", Triggers="moxi-a-snap.service"))
+    unit = UnitRef("a", "snap", "timer", ("moxi-a-snap.timer", "moxi-a-snap.service"))
+    [read] = SystemdBackend().status([unit], Fence("systemd", Recorder(show=show)))
+    assert read.state == "active"
+    assert read.last == {"result": "exit-code", "status": "1"}
+
+
+@pytest.mark.parametrize("timer_state, state", [("inactive", "inactive"),
+                                                ("failed", "failed")])
+def test_a_timer_that_is_not_armed_reads_its_timers_state(unit_root, timer_state, state):
+    show = _shown(
+        _block(Id="moxi-a-snap.service", LoadState="loaded", ActiveState="inactive",
+               Result="success", ExecMainStatus="0", UnitFileState="static"),
+        _block(Id="moxi-a-snap.timer", LoadState="loaded", ActiveState=timer_state,
+               SubState="dead", UnitFileState="disabled", Triggers="moxi-a-snap.service"))
+    unit = UnitRef("a", "snap", "timer", ("moxi-a-snap.timer", "moxi-a-snap.service"))
+    [read] = SystemdBackend().status([unit], Fence("systemd", Recorder(show=show)))
+    assert (read.state, read.enabled) == (state, False)
+
+
+def test_a_foreign_timer_whose_service_read_fails_keeps_its_timers_state(unit_root):
+    def run(cmd, *, env=None, timeout=None):
+        if "backup.timer" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, _block(
+                Id="backup.timer", LoadState="loaded", ActiveState="active",
+                SubState="waiting", UnitFileState="enabled",
+                Triggers="backup-run.service"), "")
+        return subprocess.CompletedProcess(cmd, 1, "", "Connection timed out\n")
+
+    [read] = SystemdBackend().status([UnitRef(None, "backup.timer", "timer",
+                                              ("backup.timer",))], Fence("systemd", run))
+    assert read.state == "active" and read.last is None
+    assert "its triggered unit could not be read" in read.detail
+    assert "Connection timed out" in read.detail
 
 
 # -- wrap ---------------------------------------------------------------------------------------
