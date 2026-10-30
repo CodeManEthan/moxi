@@ -134,13 +134,14 @@ class FakeSupervisor:
 
     def _file_state(self, unit: str, state: dict) -> str:
         """`static` for a socket daemon's service, which has no install section (the
-        fake's `sockets = ` line), else `enabled` or `disabled`."""
+        fake's `sockets = ` line, or the systemd backend's `Sockets=`), else `enabled` or
+        `disabled`."""
         if unit.endswith(".service"):
             try:
                 text = (self.root / unit).read_text(encoding="utf-8")
             except OSError:
                 text = ""
-            if "\nsockets = " in text:
+            if "\nsockets = " in text or "\nSockets=" in text:
                 return "static"
         return "enabled" if state["enabled"] else "disabled"
 
@@ -710,6 +711,8 @@ def _socket_service(path: Path) -> str | None:
     for line in lines:
         if line.startswith("service = "):
             return line[len("service = "):]
+        if line.startswith("Service="):  # the systemd backend's text
+            return line[len("Service="):]
     return None
 
 
