@@ -506,6 +506,67 @@ def test_a_disabled_timer_warns_unless_declared_disabled(enabled, state):
     assert _run._unit_row(change, read).state == state
 
 
+# -- a daemon's sockets ------------------------------------------------------------------------
+
+STEM = "moxi-demo-relay"
+
+
+def sockets(*addresses):
+    return ("{'relay': {'command': 'moxi-demo-relay', 'socket': {'setting': 'port', "
+            f"'addresses': {list(addresses)!r}}}}}}}")
+
+
+@pytest.fixture
+def ipv6(monkeypatch):
+    """This box has no IPv6 loopback, so a test that renders `::1` says whether one is
+    there."""
+    held = {"loopback": True}
+    monkeypatch.setattr(units._plan, "ipv6_loopback", lambda: held["loopback"])
+    return held
+
+
+def test_an_address_taken_out_names_the_unit_the_set_drops(d, ipv6):
+    d.installed(DAEMONS=sockets("127.0.0.1", "::1"))
+    d.module(DAEMONS=sockets("127.0.0.1"))
+    got = d.rows("demo")
+    sock = got[("demo", "socket relay")]
+    assert sock.state == "warn" and sock.fix == "moxi install demo"
+    assert sock.detail.startswith(f"stale (drops {STEM}-1.socket); active")
+    assert got[("demo", "daemon relay")].detail.startswith("stale; ")
+
+
+def test_a_changed_port_and_a_dropped_unit_in_one_row(d, ipv6):
+    d.installed(DAEMONS=sockets("127.0.0.1", "::1"))
+    path = moxi.paths.Layout("demo").config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("port = 8471\n")
+    d.module(DAEMONS=sockets("127.0.0.1"))
+    sock = d.rows("demo")[("demo", "socket relay")]
+    assert sock.detail.startswith(
+        f"port 8470 written, setting says 8471 (drops {STEM}-1.socket); active")
+
+
+def test_an_ipv6_address_left_out_says_so_in_each_row(d, ipv6):
+    ipv6["loopback"] = False
+    note = "; ::1 left out: no IPv6 loopback on this system"
+    d.script("moxi-demo-relay")
+    d.module(DAEMONS=sockets("127.0.0.1", "::1"))
+    got = d.rows("demo")
+    for label in ("daemon relay", "socket relay"):
+        assert (got[("demo", label)].state, got[("demo", label)].detail) == (
+            "warn", "not installed" + note)
+    d.installed(DAEMONS=sockets("127.0.0.1", "::1"))
+    assert [p.name for p in units.plan("demo")[1].paths] == [f"{STEM}.socket"]
+    got = d.rows("demo")
+    for label in ("daemon relay", "socket relay"):
+        assert got[("demo", label)].state == "ok"
+        assert got[("demo", label)].detail.startswith("up to date" + note + "; active")
+    # The loopback back: the set grows by the unit for ::1, and the note goes.
+    ipv6["loopback"] = True
+    sock = d.rows("demo")[("demo", "socket relay")]
+    assert sock.state == "warn" and sock.detail.startswith("stale; active")
+
+
 # -- HEALTH ------------------------------------------------------------------------------------
 
 HEALTHS = """\

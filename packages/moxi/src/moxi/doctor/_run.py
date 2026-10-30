@@ -339,17 +339,23 @@ def _shared_fix(found, change, changes) -> str | None:
 def _unit_row(change, state, install: str | None = None) -> Row:
     """The row for one planned unit, with the supervisor's state folded in where a unit
     is written. `install` replaces the plain `moxi install <module>` fix of a unit that is
-    not installed or stale."""
+    not installed or stale.
+
+    A change whose IPv6 addresses `plan` left out keeps that note in its row, and a
+    socket change names the units it drops."""
     module = change.module
     label = f"{change.kind} {change.name}"
     install = install or f"moxi install {module}"
     action, cause = change.action, change.cause
+    note = _left_out(change)
     if action == "keep":
-        planned = ("ok", "up to date", None)
+        planned = ("ok", "up to date" + note, None)
     elif action == "add":
-        planned = ("warn", "not installed", install)
+        planned = ("warn", "not installed" + note, install)
     elif action == "change":
-        planned = ("warn", _stale(change), install)
+        drops = (f" (drops {', '.join(path.name for path in change.dropped)})"
+                 if change.dropped else "")
+        planned = ("warn", _stale(change) + drops + note, install)
     elif action == "remove":
         planned = ("warn", "switched off, unit still installed" if cause == "switch"
                    else "no longer declared", install)
@@ -372,6 +378,18 @@ def _unit_row(change, state, install: str | None = None) -> Row:
     seen = _state_of(change, state)
     worse = seen if _RANK[seen[0]] > _RANK[planned[0]] else planned
     return Row(module, label, worse[0], f"{planned[1]}; {seen[1]}", worse[2])
+
+
+#: The end of the note `plan` adds to each change of a daemon whose IPv6 addresses it left
+#: out, after "; " and the addresses.
+LEFT_OUT = "left out: no IPv6 loopback on this system"
+
+
+def _left_out(change) -> str:
+    """`plan`'s note on a change whose IPv6 addresses were left out, with its "; ", or
+    the empty string."""
+    _, sep, tail = change.reason.rpartition("; ")
+    return f"; {tail}" if sep and tail.endswith(LEFT_OUT) else ""
 
 
 def _state_of(change, state) -> tuple[str, str, str | None]:
