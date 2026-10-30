@@ -10,5 +10,6 @@ No line a builder writes is cut from a real record.
 """
 
 from .claude import ClaudeRequest, ClaudeTranscript, usage
+from .opencode import OpenCodeDb
 
-__all__ = ["ClaudeTranscript", "ClaudeRequest", "usage"]
+__all__ = ["ClaudeTranscript", "ClaudeRequest", "usage", "OpenCodeDb"]
