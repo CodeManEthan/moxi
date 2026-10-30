@@ -334,9 +334,9 @@ def s_daemon_offline(rig, mp):
 
 
 def s_verb_protocol(rig, mp):
-    """A daemon speaking another verb protocol is offline, exit 4."""
+    """A daemon sharing no comms wire version with the verb is offline, exit 4."""
     pair(rig)
-    mp.setattr("moxi_comms.daemon.CLI_PROTOCOL", 0)
+    mp.setattr("moxi_comms.wire.VERSIONS", (2, 2))
     return Case(["send", "reviewer", "x", "--posture", "none"], PLANNER, 4)
 
 

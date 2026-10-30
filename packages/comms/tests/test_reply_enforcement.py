@@ -301,12 +301,14 @@ def test_owed_referents_say_whose_message_and_its_posture(rig):
                     theirs.id: {"own": False, "posture": "open"}, "12345": None}
 
 
-def test_an_unknown_query_kind_is_what_an_old_daemon_answers(rig):
+def test_an_unknown_read_is_what_an_old_daemon_answers(rig):
+    """A read the daemon does not have is the wire's method-not-found, a refusal."""
     client = DaemonClient(daemon_socket()).connect()
     try:
         from moxi_comms.client import DaemonError
-        with pytest.raises(DaemonError, match="unknown query kind 'nope'"):
+        with pytest.raises(DaemonError, match="method not found: nope") as refused:
             client.query("nope")
+        assert refused.value.response["refused"] is True
     finally:
         client.close()
 

@@ -743,7 +743,7 @@ def test_a_send_during_the_boot_race_passes_and_is_refused_once_the_rescan_lands
     booting = threading.Thread(target=daemon.start, daemon=True)
     booting.start()
     try:
-        assert wait_until(lambda: daemon._sub is not None and daemon.bound)
+        assert wait_until(lambda: daemon._sub is not None and daemon.host is not None)
         rig.shim(**PLANNER)
         rig.shim(**REVIEWER)
         code, out = rig.cli(["send", "--posture", "none", "planner", "before the rescan"], **REVIEWER)
@@ -837,18 +837,18 @@ def test_the_payload_carries_the_posture_on_release_at_bind(rig):
 
 def test_the_payload_carries_the_posture_on_rescan(rig, pair):
     """The rescan routes through `_deliver` like live routing and replay. The shim drops
-    an id it already holds, so the frame is read off the daemon's side of the socket."""
+    an id it already holds, so the push is read off the daemon's side of the socket."""
     _, reviewer = pair
     ask = open_ask(rig)
     wait_until(lambda: any(p["message_id"] == ask.id for p in reviewer.queue))
     binding = rig.daemon.bindings[R]
-    sent, real_send = [], binding.conn.send
+    sent, real_notify = [], binding.conn.notify_threadsafe
 
-    def record(frame):
-        sent.append(frame)
-        return real_send(frame)
+    def record(method, params=None):
+        sent.append({"op": method, **(params or {})})
+        return real_notify(method, params)
 
-    binding.conn.send = record
+    binding.conn.notify_threadsafe = record
     with rig.daemon._lock:
         binding.delivered.clear()
     rig.daemon.rescan()

@@ -257,7 +257,7 @@ def test_a_lost_token_store_refuses_to_start(tmp_path):
     try:
         with pytest.raises(RuntimeError, match="token"):
             daemon.start()
-        assert not daemon.bound and not daemon_socket().exists()
+        assert daemon.host is None and not daemon_socket().exists()
         assert store.read_secret(tokens.owner_for_role(tokens.ROLE_OPERATOR),
                                  tokens.OPERATOR_SECRET_ID) is None, "nothing re-minted"
     finally:
@@ -324,7 +324,7 @@ def test_the_daemon_process_provisions_without_slots(tmp_path, runtime_dir):
     home = tmp_path / "solo"
     env = _clean_env(tmp_path, MOXI_COMMS_HOME=str(home),
                      MOXI_COMMS_RUNTIME_DIR=str(runtime_dir), MOXI_COMMS_DEVICE="t")
-    code, out = _run_daemon(env, runtime_dir / "comms" / "moxi-comms-daemon.sock")
+    code, out = _run_daemon(env, runtime_dir / "comms" / "daemon.sock")
     assert code == 0, out
     db = home / "state" / "comms" / "comms.db"
     conn = directory.connect(db, read_only=True)
@@ -346,7 +346,7 @@ def test_a_daemon_process_on_mock_never_provisions(tmp_path, runtime_dir):
                      MOXI_COMMS_RUNTIME_DIR=str(runtime_dir), MOXI_COMMS_DEVICE="t",
                      MOXI_COMMS_BACKEND="mock",
                      MOXI_COMMS_MOCK_BACKEND=str(tmp_path / "mock.json"))
-    code, out = _run_daemon(env, runtime_dir / "comms" / "moxi-comms-daemon.sock")
+    code, out = _run_daemon(env, runtime_dir / "comms" / "daemon.sock")
     assert code == 0, out
     conn = directory.connect(home / "state" / "comms" / "comms.db", read_only=True)
     try:
