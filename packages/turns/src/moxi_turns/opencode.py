@@ -13,7 +13,15 @@ taken at that turn's next step, and the running turn's own reply is never writte
 That status read is where a start takes effect: the ledger re-check
 (`entering`) runs first, then the status read, and a busy session refuses the start
 `busy-turn`. A deliver that meets a busy session waits for the next idle and is posted
-then. OpenCode has no Stop to hold and no session command.
+then. OpenCode has no Stop to hold.
+
+**Compaction.** `compact` posts `POST /session/:id/summarize` with the model of the
+session's last assistant message, or the launch's `model` option; with neither it fails
+("no model known yet"). Like a start, it runs on a thread of its own: the ledger re-check
+(`command_entering`), then the status read just before the post. A 404 (a server without
+the route) refuses it `unsupported`. The server's `session.compacted` raises
+`Ready(compact)`, which settles it in the core. OpenCode has no `clear`, `exit` or
+background shells to stop.
 
 **The tie.** A turn is one run of the session's loop, from its busy status to its idle.
 Its turn id is the id of the user message that opened it (the host's message id for a
@@ -66,13 +74,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from moxi import doctor as moxi_doctor
+
 from . import client as turns_client
 from . import protocol
-from .doctor import Row
+from .doctor import MODULE
 from .endpoint import EXPIRED, Endpoint
 from .harness import CommandRequest, Delivery, Harness, Live
 from .opencode_server import EventStream, Http, NoAnswer, Server, Unreachable
-from .results import Failed
+from .results import Failed, Refused
 
 log = logging.getLogger("moxi.turns.opencode")
 
@@ -99,6 +109,9 @@ BACKOFF_FACTOR = 2.0
 BACKOFF_JITTER = 0.2
 #: The longest a waiting delivery sleeps before it looks at the host again.
 WAIT_STEP = 1.0
+#: How long the host waits for `summarize` to answer, in seconds: the server may answer
+#: only once the compaction has run. The core's own bound settles a command first.
+SUMMARIZE_WAIT = 330.0
 #: What a refusal a retry cannot fix means, by status (comms' wording).
 MEANINGS = {400: "a request the server refuses", 401: "the server password did not match",
             403: "forbidden", 404: "this launch's session is gone"}
@@ -157,6 +170,26 @@ def outcome_of(last: dict, errored: bool) -> str:
     return "answer"
 
 
+def model_of(info: dict) -> tuple[str, str] | None:
+    """`(providerID, modelID)` of a message's info, read flat or under `model`, or
+    None."""
+    for source in (info, info.get("model")):
+        if isinstance(source, dict):
+            provider, model = source.get("providerID"), source.get("modelID")
+            if isinstance(provider, str) and provider and isinstance(model, str) and model:
+                return provider, model
+    return None
+
+
+def model_option(options: Mapping) -> tuple[str, str] | None:
+    """`(providerID, modelID)` from a `model` option written `provider/model`, or None."""
+    value = options.get("model")
+    if not isinstance(value, str):
+        return None
+    provider, _, model = value.partition("/")
+    return (provider, model) if provider and model else None
+
+
 def resolve_binary(path: str | None = None) -> str | None:
     """`opencode` on PATH, else the installer's directory, as an absolute path."""
     found = shutil.which(BINARY, path=path)
@@ -180,7 +213,7 @@ class _Post:
 
 class OpenCodeHarness(Harness):
     name = "opencode"
-    can = frozenset({"deliver", "only-if-idle"})
+    can = frozenset({"deliver", "only-if-idle", "compact"})
     mod_version = None
 
     def __init__(self, cwd, *, instructions: str | None = None, env=None, options=None,
@@ -588,7 +621,80 @@ class OpenCodeHarness(Harness):
         self.endpoint.refused(delivery.id, "unsupported")
 
     def command(self, request: CommandRequest) -> None:
-        self.endpoint.command_settled(request.id, Failed("unsupported"))
+        if request.name != "compact":
+            self.endpoint.command_settled(request.id, Failed("unsupported"))
+            return
+        threading.Thread(target=self._compact, args=(request,), daemon=True,
+                         name="turns-opencode-compact").start()
+
+    def _compact(self, request: CommandRequest) -> None:
+        """Post `summarize` into an idle session; settle every road but the one where
+        the server took it, whose `session.compacted` Ready settles it."""
+        with self._lock:
+            sid, http, ready = self.session_id, self.http, self._ready
+        if not ready or http is None or not sid:
+            self.endpoint.command_settled(request.id, Refused("loading"))
+            return
+        model = self._model(http, sid)
+        if model is None:
+            self.endpoint.command_settled(request.id, Failed("no model known yet"))
+            return
+        if self.endpoint.command_entering(request.id) is not None:
+            return
+        try:
+            status, body = http.json("GET", "/session/status")
+        except (Unreachable, NoAnswer) as e:
+            log.warning("the session's status could not be read before /compact: %s", e)
+            self.endpoint.command_settled(request.id, Refused("loading"))
+            return
+        with self._lock:
+            busy = self._turn_id is not None or self._busy
+        if busy or not idle_from_status(status, body, sid):
+            self.endpoint.command_settled(request.id, Refused("busy-turn"))
+            return
+        provider, model_id = model
+        try:
+            code, answer = http.request("POST", f"/session/{sid}/summarize",
+                                        {"providerID": provider, "modelID": model_id},
+                                        timeout=SUMMARIZE_WAIT)
+        except Unreachable as e:
+            log.warning("/compact found no server: %s", e)
+            self.endpoint.command_settled(request.id, Refused("loading"))
+            return
+        except NoAnswer as e:
+            # The server may be compacting: its `session.compacted` settles the command,
+            # or the core's bound does.
+            log.warning("/compact had no answer: %s", e)
+            return
+        if 200 <= code < 300:
+            return
+        if code == 404:
+            log.warning("the OpenCode server has no summarize route (404); /compact "
+                        "refuses unsupported")
+            self.endpoint.command_settled(request.id, Refused("unsupported"))
+            return
+        detail = str(answer or "").strip()[:300] or "(no body)"
+        self.endpoint.command_settled(
+            request.id, Failed(f"the OpenCode server answered {code}: {detail}"))
+
+    def _model(self, http: Http, sid: str) -> tuple[str, str] | None:
+        """The model to compact with: the session's last assistant message's, else the
+        launch's `model` option."""
+        try:
+            status, messages = http.json("GET", f"/session/{sid}/message")
+        except (Unreachable, NoAnswer) as e:
+            log.warning("the session's messages could not be read for /compact: %s", e)
+            messages = None
+        else:
+            if status != 200:
+                messages = None
+        for message in reversed(messages if isinstance(messages, list) else []):
+            info = (message or {}).get("info") if isinstance(message, dict) else None
+            if isinstance(info, dict) and info.get("role") == "assistant":
+                found = model_of(info)
+                if found is not None:
+                    return found
+        return model_option(self.options)
 
     def expired(self, delivery_id: str) -> None:
         with self._lock:
@@ -732,10 +838,12 @@ def _run(harness: OpenCodeHarness):
     return session
 
 
-def rows() -> list[Row]:
+def rows() -> list[moxi_doctor.Row]:
+    """The OpenCode host's doctor row: experimental and optional, so no binary is `off`."""
     binary = resolve_binary()
-    return [Row("OpenCode binary (experimental host)", binary is not None,
-                binary or "opencode is not on PATH or in the installer's directory")]
+    return [moxi_doctor.Row(
+        MODULE, "OpenCode binary (experimental host)", "ok" if binary else "off",
+        binary or "opencode is not on PATH or in the installer's directory")]
 
 
 def _close_hosts() -> None:

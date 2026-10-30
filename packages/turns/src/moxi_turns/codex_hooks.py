@@ -268,6 +268,11 @@ class HookServer:
             # The accepted load raised this start's or resume's Ready.
             loaded = event == "SessionStart" and source in ("startup", "resume")
             context = endpoint.ready(source, self.harness.session_id, announce=not loaded)
+            if source == "compact":
+                # A compaction the host sent took effect: its shell stop may begin.
+                compacted = getattr(self.harness, "compacted", None)
+                if compacted is not None:
+                    compacted()
             return {"ok": True, "context": context}
         if event == "UserPromptSubmit":
             return {"ok": True, "context": endpoint.prompt()}

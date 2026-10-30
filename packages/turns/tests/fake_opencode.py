@@ -7,7 +7,9 @@ session is a 404; `GET /session/status` is `{}` when idle and names a running se
 busy; `GET /session/:id/children` lists child sessions; the event stream (`GET /event`)
 carries `server.connected`, `server.heartbeat`, `message.updated` (the user message, then
 the assistant message parented to it, its final update sent twice), `session.status`,
-`session.idle`, `session.error` and `session.compacted`. Every id here is synthetic.
+`session.idle`, `session.error` and `session.compacted`. `POST /session/:id/summarize`
+(off with `summarize_route = False`, a 404 as from a server without it) runs the loop busy,
+sends `session.compacted`, goes idle and answers `true`. Every id here is synthetic.
 
 As an executable (`install`), it answers `opencode serve ...` and `opencode --version`,
 driven by `FAKE_OPENCODE_DIR` (records: `events.jsonl`, and `sessions.json`, kept across
@@ -30,6 +32,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 VERSION = "1.18.34 (fake)"
+#: The model an assistant message names.
+PROVIDER, MODEL = "fakeprovider", "fake-model"
 #: A `post_answers` entry that admits the prompt and closes the connection unanswered.
 DROP_ADMITTED = ("drop", True)
 #: One that closes the connection unanswered and admits nothing.
@@ -64,6 +68,10 @@ class FakeOpenCode:
         self.url = None
         #: False: a prompt is admitted and runs, but no reply is ever written.
         self.reply_to_prompts = True
+        #: False: the server has no summarize route.
+        self.summarize_route = True
+        #: (status, body) to answer the next summarize posts with, in place of running.
+        self.summarize_answers: list = []
         if self.store and self.store.exists():
             # A session's status lives in the server's memory: a new server finds every
             # stored session idle.
@@ -199,6 +207,14 @@ class FakeOpenCode:
                         "message": "Expected a string starting with \"msg\""}})
                 self.prompt(sid, mid, body)
                 return self.reply(handler, 204)
+            if method == "POST" and parts[2:] == ["summarize"] and self.summarize_route:
+                with self.lock:
+                    answer = (self.summarize_answers.pop(0) if self.summarize_answers
+                              else None)
+                if answer is not None:
+                    return self.reply(handler, answer[0], answer[1])
+                self.summarize(sid)
+                return self.reply(handler, 200, True)
         return self.reply(handler, 404, {"name": "NotFoundError", "data": {
             "message": f"no route {method} {path}"}})
 
@@ -278,7 +294,8 @@ class FakeOpenCode:
         if not self.reply_to_prompts:
             return
         assistant = {"id": mint("msg"), "role": "assistant", "sessionID": sid,
-                     "parentID": mid, "time": {"created": int(time.time() * 1000)}}
+                     "parentID": mid, "providerID": PROVIDER, "modelID": MODEL,
+                     "time": {"created": int(time.time() * 1000)}}
         with self.lock:
             self.sessions[sid]["running"] = assistant
         self._message(sid, assistant)
@@ -317,6 +334,12 @@ class FakeOpenCode:
 
     def compacted(self, sid):
         self.emit("session.compacted", {"sessionID": sid})
+
+    def summarize(self, sid):
+        """A compaction: the loop runs, the session is compacted, then idle."""
+        self.set_status(sid, "busy")
+        self.compacted(sid)
+        self.go_idle(sid)
 
     def type(self, sid, text="typed"):
         """A prompt of the person's own (a window's)."""

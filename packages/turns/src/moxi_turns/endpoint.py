@@ -607,14 +607,17 @@ class Endpoint:
         return turns_listeners.ask(self.registry, self._event("prompt"), self.listen_wait_s)
 
     def turn_started(self, turn_id: str | None, delivery_id: str | None = None, *,
-                     held: bool = False) -> None:
+                     held: bool = False, command: str | None = None) -> None:
         """A main-loop turn started. `delivery_id` is the adapter's tie: the
         delivery that took this turn, or None for the person's own turn.
 
         `held`: which delivery took the turn is decided only after it started (Claude
         Code's tie). The ledger opens the turn now, so `facts()` and a
         start's re-check see it, but its `TurnStarted` (and its `TurnEnded`, if it ends
-        first) wait for `turn_tied` or `turn_released`."""
+        first) wait for `turn_tied` or `turn_released`.
+
+        `command`: the turns command the harness runs this turn for (`compact`, on a
+        harness that runs a compaction as a turn); such a turn opens with no delivery."""
         if held:
             with self._lock:
                 if self._gone is not None:
@@ -635,7 +638,9 @@ class Endpoint:
                 log.warning("turn %s names delivery %s, which is not waiting to start; "
                             "it counts as the person's turn", turn_id, delivery_id)
                 delivery_id, d = None, None
-            previous, turn = self.ledger.started(turn_id, delivery_id)
+            if command is not None:
+                delivery_id, d = None, None
+            previous, turn = self.ledger.started(turn_id, delivery_id, command=command)
             if previous is not None:
                 log.warning("turn %s started while turn %s was open; that one ends as "
                             "error", turn_id, previous.turn_id)
@@ -862,15 +867,19 @@ class Endpoint:
             if c is not None and c.result is None:
                 self._settle_command(c, result)
 
-    def command_took_effect(self, request_id: str) -> None:
+    def command_took_effect(self, request_id: str) -> bool:
         """The command took effect (a `clear`'s call returned without a withdrawal; a
         compaction's Ready, which the core marks itself). With `stop_shells` the adapter
         stops the shells from here: `PENDING_TTL_S` no longer counts, and the stop has
-        `SHELL_STOP_S` and a margin to report."""
+        `SHELL_STOP_S` and a margin to report. False when the command has already
+        settled (its bound passed first): the adapter then stops nothing."""
         with self._lock:
             c = self._commands.get(request_id)
-            if c is not None and c.result is None and c.effect_at is None:
+            if c is None or c.result is not None:
+                return False
+            if c.effect_at is None:
                 c.effect_at = time.monotonic()
+            return True
 
     def command_ran(self, request_id: str, *, new_session_id: str | None = None,
                     shells: Shells | None = None) -> None:
@@ -1513,9 +1522,7 @@ def _busy(live: Live | None, *, shells: bool = True) -> bool:
     """A subagent pending, running or waiting, or a list that could not be read: unknown
     counts as busy, never as 0. With `shells` False the background shells the adapter
     counts among `agents` are left out, as a command with `stop_shells` reads it."""
-    if live is None or live.agents is None:
-        return True
-    return live.agents - (0 if shells else max(0, live.shells)) > 0
+    return live is None or live.busy(shells=shells)
 
 
 def _unvouched() -> Shells:

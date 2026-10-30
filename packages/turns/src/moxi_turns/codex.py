@@ -26,6 +26,15 @@ from ``_steering`` and runs the completions it held. Its ``turn/steer``, if alre
 may still be taken by Codex: the caller read ``lost``, and Codex's late answer changes
 nothing.
 
+Compaction. ``command`` runs ``compact`` on the endpoint's worker: with ``stop_shells`` it
+first lists the background terminals (a method-not-found refuses ``unsupported``; any
+other failure leaves a list turns cannot vouch for), then re-checks the ledger and the
+live facts, and sends ``thread/compact/start``. Codex runs the compaction as a turn of its
+own, which the host reports with ``command`` ``compact``. Its ``PostCompact`` hook raises
+``Ready(compact)``, which settles the command in the core; with ``stop_shells`` the host
+then terminates the terminals it lists at that moment, lists them again, and reports
+what it stopped (``command_ran``), all within ``SHELL_STOP_S``.
+
 The ending form: once a Stop is answered unblocked, Codex may complete the turn
 at any moment, and a steer it takes in that gap can be written into the turn and never
 answered. So the turn is marked ending: it stays open, but no ``turn/steer`` for it goes
@@ -43,18 +52,21 @@ import os
 import random
 import shutil
 import threading
+import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
+from moxi import doctor as moxi_doctor
 from moxi.paths import script
 
 from . import client as turns_client
 from . import codex_hooks
 from . import codex_protocol as proto
-from .doctor import Row
+from .doctor import MODULE
 from .endpoint import Endpoint
-from .harness import CommandRequest, Delivery, Harness, Live
-from .results import Failed, StopFacts
+from .harness import SHELL_STOP_S, CommandRequest, Delivery, Harness, Live
+from .results import SHELL_UNLISTED, Failed, LeftShell, Refused, Shells, StopFacts
 
 log = logging.getLogger("moxi.turns.codex")
 
@@ -74,6 +86,8 @@ BACKOFF_MAX = 30.0
 BACKOFF_FACTOR = 2.0
 BACKOFF_JITTER = 0.2
 VERIFY_WAIT = 30.0
+#: How long one ``thread/backgroundTerminals/list`` may take, in seconds.
+TERMINALS_WAIT = 2.0
 PRIMING_TEXT = "The hosted session is ready. Wait for the next instruction."
 OWNED_OPTIONS = frozenset({
     "cwd", "developerInstructions", "threadId", "excludeTurns", "approvalPolicy",
@@ -105,9 +119,22 @@ class _TurnEnding(RuntimeError):
     """The steer's turn had its Stop answered unblocked: the text is not sent."""
 
 
+@dataclass
+class _Compaction:
+    """A ``compact`` the host sent, until its Ready."""
+
+    request: CommandRequest
+    #: The terminals listed before the send, or None when the list could not be read.
+    listed: list[str] | None
+    sent_at: float
+    #: The turn Codex ran the compaction as, once reported.
+    turn_id: str | None = None
+
+
 class CodexHarness(Harness):
     name = "codex"
-    can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler"})
+    can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "compact",
+                     "stop-shells"})
     mod_version = None
 
     def __init__(self, cwd, *, instructions: str | None = None, env=None,
@@ -169,6 +196,7 @@ class CodexHarness(Harness):
         self._supervisor: threading.Thread | None = None
         self._accepted = threading.Event()
         self._priming = False        # a fresh thread's priming turn is not yet accepted
+        self._compacting: _Compaction | None = None
 
     def attach(self, endpoint) -> None:
         super().attach(endpoint)
@@ -475,7 +503,8 @@ class CodexHarness(Harness):
         except Exception:
             return Live()
         data = result.get("data") if isinstance(result, dict) else None
-        return Live(len(data) if isinstance(data, list) else 0, False)
+        terminals = len(data) if isinstance(data, list) else 0
+        return Live(terminals, False, shells=terminals)
 
     def submit(self, delivery: Delivery) -> None:
         threading.Thread(
@@ -573,7 +602,180 @@ class CodexHarness(Harness):
             self._turn_completed(params)
 
     def command(self, request: CommandRequest) -> None:
-        self.endpoint.command_settled(request.id, Failed("unsupported"))
+        """On the endpoint's worker: ``compact`` through ``thread/compact/start``. Blocks
+        the worker until Codex answers the send, so a hand-off recorded after the command
+        goes out after it. ``clear`` and ``exit`` are not offered."""
+        if request.name != "compact":
+            self.endpoint.command_settled(request.id, Failed("unsupported"))
+            return
+        with self._lock:
+            thread_id, ws = self.session_id, self.ws
+        if ws is None or not thread_id or self.loading():
+            self.endpoint.command_settled(request.id, Refused("loading"))
+            return
+        listed = None
+        if request.stop_shells:
+            # Nothing is stopped yet. A Codex without the list call turns the stop down;
+            # a list that fails otherwise is reported once the compaction has run.
+            try:
+                listed = self._terminals(ws, thread_id)
+            except Exception as exc:  # noqa: BLE001 - every failure is reported
+                if proto.method_missing(exc):
+                    log.warning("Codex has no background terminal list (%s); /compact "
+                                "with stop_shells refuses unsupported", exc)
+                    self.endpoint.command_settled(request.id, Refused("unsupported"))
+                    return
+                log.warning("the background terminals could not be listed before "
+                            "/compact (%s); none will be stopped", exc)
+        # The re-check, just before the send: the ledger, the turn Codex runs, and the
+        # live facts (a stop_shells command leaves the terminals out).
+        if self.endpoint.command_entering(request.id) is not None:
+            return
+        with self._lock:
+            running = self.active_turn_id is not None
+        if running:
+            self.endpoint.command_settled(request.id, Refused("busy-turn"))
+            return
+        if self.live().busy(shells=not request.stop_shells):
+            self.endpoint.command_settled(request.id, Refused("busy-agents"))
+            return
+        compaction = _Compaction(request, listed, time.monotonic())
+        with self._lock:
+            self._compacting = compaction
+        try:
+            ws.call("thread/compact/start", proto.compact_params(thread_id))
+        except proto.NoReply as exc:
+            # The request went out and Codex may be compacting: its Ready settles the
+            # command, or the core's bound does.
+            log.warning("Codex did not answer /compact %s: %s", request.id, exc)
+        except Exception as exc:  # noqa: BLE001 - the command settles on every road
+            with self._lock:
+                if self._compacting is compaction:
+                    self._compacting = None
+            if proto.method_missing(exc):
+                result = Refused("unsupported")
+            elif isinstance(exc, proto.CodexError):
+                result = Failed(f"Codex refused the compaction: {exc}")
+            elif isinstance(exc, proto.AppServerOffline):
+                result = Refused("loading")     # never sent
+            else:
+                result = Failed(f"the compaction could not be sent: "
+                                f"{self._failure_reason(exc)}")
+            log.warning("/compact %s did not run: %s", request.id, exc)
+            self.endpoint.command_settled(request.id, result)
+
+    def compacted(self) -> None:
+        """A Ready with source ``compact`` was raised (the core settles a plain
+        compaction there). The compaction the host sent has taken effect: with
+        ``stop_shells`` the stop begins, on a thread of its own, so the hook that raised
+        the Ready is answered at once."""
+        with self._lock:
+            compaction, self._compacting = self._compacting, None
+        if compaction is None or not compaction.request.stop_shells:
+            return
+        threading.Thread(target=self._stop_shells, args=(compaction,), daemon=True,
+                         name="turns-codex-stop-shells").start()
+
+    def _stop_shells(self, compaction: _Compaction) -> None:
+        request = compaction.request
+        deadline = time.monotonic() + SHELL_STOP_S
+        if not self.endpoint.command_took_effect(request.id):
+            log.info("/compact %s settled before its Ready; no terminal is stopped",
+                     request.id)
+            return
+        try:
+            shells = self._stop_terminals(compaction.listed, deadline)
+        except Exception:  # noqa: BLE001 - an unread stop is reported as unvouched
+            log.exception("stopping the background terminals failed")
+            shells = None
+        self.endpoint.command_ran(request.id, shells=shells)
+
+    def _terminals(self, ws, thread_id: str | None,
+                   deadline: float | None = None) -> list[str]:
+        """The background terminals' process ids, read from Codex. Raises on any failure,
+        a list of another shape included: never an empty list in place of an error."""
+        if ws is None or not thread_id:
+            raise proto.AppServerOffline("the Codex app-server is not connected")
+        timeout = TERMINALS_WAIT
+        if deadline is not None:
+            timeout = min(timeout, deadline - time.monotonic())
+            if timeout <= 0:
+                raise proto.NoReply("no time was left to list the background terminals")
+        result = ws.call("thread/backgroundTerminals/list",
+                         proto.terminals_params(thread_id), timeout=timeout)
+        return proto.terminal_ids(result)
+
+    def _stop_terminals(self, listed: list[str] | None, deadline: float) -> Shells:
+        """Terminate each background terminal and read what is left, by `deadline`."""
+        if listed is None:
+            # No list before the command: nothing is stopped, and the report says so.
+            return Shells((), (LeftShell(None, SHELL_UNLISTED),), False)
+        with self._lock:
+            thread_id, ws = self.session_id, self.ws
+        complete = True
+        try:
+            # Read as the stop begins, after the compaction took effect.
+            ids = self._terminals(ws, thread_id, deadline)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("the background terminals could not be listed as the stop "
+                        "began (%s); the list from before /compact is used", exc)
+            ids, complete = list(listed), False
+        terminated: dict[str, bool] = {}
+        why: dict[str, str] = {}
+        for process_id in ids:
+            if process_id in why:
+                continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or ws is None:
+                why[process_id] = ("timeout" if remaining <= 0
+                                   else "the Codex app-server is not connected")
+                continue
+            try:
+                result = ws.call("thread/backgroundTerminals/terminate",
+                                 proto.terminate_params(thread_id, process_id),
+                                 timeout=remaining)
+            except Exception as exc:  # noqa: BLE001 - each entry reports its own words
+                if proto.method_missing(exc):
+                    for rest in ids:
+                        if rest not in terminated:
+                            why.setdefault(rest, "unsupported")
+                    break
+                why[process_id] = ("timeout" if isinstance(exc, proto.NoReply)
+                                   and time.monotonic() >= deadline
+                                   else self._failure_reason(exc))
+                continue
+            terminated[process_id] = (isinstance(result, dict)
+                                      and result.get("terminated") is True)
+        try:
+            still: set[str] | None = set(self._terminals(ws, thread_id, deadline))
+            list_error = None
+        except Exception as exc:  # noqa: BLE001
+            still = None
+            list_error = ("timeout" if time.monotonic() >= deadline
+                          else self._failure_reason(exc))
+            log.warning("the background terminals could not be listed after the stop: "
+                        "%s", list_error)
+        stopped: list[str] = []
+        left: list[LeftShell] = []
+        for process_id in ids:
+            if still is None:
+                # No second list: Codex's own answer decides.
+                if terminated.get(process_id):
+                    stopped.append(process_id)
+                else:
+                    left.append(LeftShell(process_id, why.get(process_id) or list_error))
+            elif process_id in still:
+                left.append(LeftShell(process_id, why.get(process_id) or (
+                    "still listed after terminate" if terminated.get(process_id)
+                    else "Codex did not terminate it")))
+            elif terminated.get(process_id):
+                stopped.append(process_id)
+            # Otherwise it ended by itself: in neither list.
+        for process_id in sorted((still or set()) - set(ids)):
+            left.append(LeftShell(process_id, "started during the stop"))
+        if not complete:
+            left.append(LeftShell(None, SHELL_UNLISTED))
+        return Shells(tuple(stopped), tuple(left), complete)
 
     def _inject(self, text: str) -> str | None:
         with self._lock:
@@ -666,8 +868,10 @@ class CodexHarness(Harness):
         """Report a turn Codex started, tied to `delivery_id` while that delivery is
         still the one waiting (or, with `claim`, to whichever is; with `answered_only`
         too, only once its turn/start has answered, since before that the text may not
-        have gone out). False when the turn was already reported, and then nothing is
-        said: a second `turn_started` for it would close it as `error`."""
+        have gone out). A turn no delivery took while a compaction the host sent waits
+        for its Ready is that compaction's. False when the turn was already reported, and
+        then nothing is said: a second `turn_started` for it would close it as
+        `error`."""
         with self._lock:
             if turn_id in self._reported_turns:
                 return False
@@ -683,9 +887,19 @@ class CodexHarness(Harness):
                 delivery_id = None   # settled meanwhile: the turn counts as the person's
             if delivery_id is not None:
                 self._pending_delivery = None
+            command = None
+            compaction = self._compacting
+            if (delivery_id is None and compaction is not None
+                    and compaction.turn_id is None
+                    and time.monotonic() - compaction.sent_at
+                    < getattr(self.endpoint, "pending_ttl_s", 300.0)):
+                compaction.turn_id, command = turn_id, "compact"
             self._started_turn = turn_id
             self._started.set()
-        self.endpoint.turn_started(turn_id, delivery_id)
+        if command is None:
+            self.endpoint.turn_started(turn_id, delivery_id)
+        else:
+            self.endpoint.turn_started(turn_id, command=command)
         return True
 
     def _on_notification(self, method: str, params: dict, rid=None) -> None:
@@ -916,20 +1130,23 @@ def launch(cwd, *, instructions: str | None = None, env=None,
     return session
 
 
-def rows() -> list[Row]:
+def rows() -> list[moxi_doctor.Row]:
+    """The Codex host's doctor rows. The host is optional: a missing extra or binary is
+    `off`; a missing hook command in an installed turns is a fault."""
     installed = importlib.util.find_spec("websockets") is not None
-    output = [Row("Codex extra", installed,
-                  "websockets is installed" if installed
-                  else "install turns with the codex extra")]
+    output = [moxi_doctor.Row(
+        MODULE, "Codex extra", "ok" if installed else "off",
+        "websockets is installed" if installed else "the Codex host is not installed",
+        None if installed else "moxi install turns --with codex")]
     binary = shutil.which(BINARY)
-    output.append(Row("Codex binary", binary is not None,
-                      binary or "codex is not on PATH"))
+    output.append(moxi_doctor.Row(MODULE, "Codex binary", "ok" if binary else "off",
+                                  binary or "codex is not on PATH"))
     try:
         ping = script("moxi-turns-ping")
     except FileNotFoundError as exc:
-        output.append(Row("Codex hook command", False, str(exc)))
+        output.append(moxi_doctor.Row(MODULE, "Codex hook command", "fail", str(exc)))
     else:
-        output.append(Row("Codex hook command", True, str(ping)))
+        output.append(moxi_doctor.Row(MODULE, "Codex hook command", "ok", str(ping)))
     return output
 
 

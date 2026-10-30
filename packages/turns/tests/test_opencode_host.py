@@ -15,7 +15,7 @@ import fake_opencode
 from fake_opencode import DROP_ADMITTED, DROP_UNADMITTED, FakeOpenCode
 from moxi_turns import opencode
 from moxi_turns.client import TurnsError
-from moxi_turns.results import Ended, Lost, Refused, Started, TurnEnded
+from moxi_turns.results import Ended, Failed, Lost, Ran, Refused, Started, TurnEnded
 from conftest import bare, opener
 
 
@@ -171,15 +171,18 @@ def test_no_instructions_lays_the_options_alone(host):
 
 # -- the session ---------------------------------------------------------------------------
 
-def test_the_host_is_an_endpoint_that_can_only_start(host):
+def test_the_host_is_an_endpoint_that_can_start_and_compact(host):
     s, h, world = host()
     assert s.harness == "opencode"
-    assert s.capabilities == frozenset({"deliver", "only-if-idle"})
+    assert s.capabilities == frozenset({"deliver", "only-if-idle", "compact"})
     assert s.session_id == h.session_id and h.session_id.startswith("ses_")
-    for call in (lambda: s.steer("x"), lambda: s.command("clear")):
+    for call, lacking in ((lambda: s.steer("x"), "steer"),
+                          (lambda: s.command("clear"), "clear"),
+                          (lambda: s.command("compact", stop_shells=True), "stop-shells")):
         with pytest.raises(TurnsError) as caught:
             call()
         assert caught.value.code == 1002
+        assert lacking in str(caught.value)
 
 
 def test_a_start_posts_under_a_minted_id_and_the_reply_ties_it(host):
@@ -326,6 +329,89 @@ def test_a_compaction_is_ready_compact(host):
     world.fake.compacted(h.session_id)
     ev = events.get(timeout=5)
     assert (ev.source, ev.session_id) == ("compact", h.session_id)
+
+
+def _compacting(host, **kw):
+    s, h, world = host(env={"MOXI_TURNS_COMMANDS": "compact"}, **kw)
+    return s, h, world
+
+
+def summaries(world):
+    return [b for m, p, b in world.fake.requests if p.endswith("/summarize")]
+
+
+def test_compact_posts_summarize_with_the_last_replys_model_and_settles_at_ready(host):
+    s, h, world = _compacting(host)
+    d = s.deliver("hello", only_if_idle=True)
+    d.wait_ended(5)
+    events = watching(s)
+    assert s.command("compact", timeout=10) == Ran(None)
+    assert summaries(world) == [{"providerID": fake_opencode.PROVIDER,
+                                 "modelID": fake_opencode.MODEL}]
+    seen = []
+    until(lambda: seen.extend(_drain(events)) or any(
+        getattr(e, "source", None) == "compact" for e in seen))
+    assert [e.source for e in seen if type(e).__name__ == "Ready"] == ["compact"]
+    assert s.facts().session_id == h.session_id
+
+
+def _drain(q):
+    import queue
+
+    out = []
+    while True:
+        try:
+            out.append(q.get_nowait())
+        except queue.Empty:
+            return out
+
+
+def test_compact_with_no_reply_yet_uses_the_launchs_model_option(host):
+    s, h, world = _compacting(host, options={"model": "prov/some-model"})
+    assert s.command("compact", timeout=10) == Ran(None)
+    assert summaries(world) == [{"providerID": "prov", "modelID": "some-model"}]
+
+
+def test_compact_with_no_model_known_fails_and_posts_nothing(host):
+    s, h, world = _compacting(host)
+    assert s.command("compact", timeout=10) == Failed("no model known yet")
+    assert summaries(world) == []
+
+
+def test_compact_on_a_server_without_the_route_refuses_unsupported(host):
+    s, h, world = _compacting(host, options={"model": "prov/m"})
+    world.fake.summarize_route = False
+    assert s.command("compact", timeout=10) == Refused("unsupported")
+    # The slot is free again; the rate still counts the accepted command.
+    assert s.command("compact", timeout=10) == Refused("rate")
+
+
+def test_compact_the_server_turns_down_fails_with_its_answer(host):
+    s, h, world = _compacting(host, options={"model": "prov/m"})
+    world.fake.summarize_answers.append((400, {"name": "BadRequest"}))
+    result = s.command("compact", timeout=10)
+    assert isinstance(result, Failed) and "400" in result.reason
+    assert "BadRequest" in result.reason
+
+
+def test_compact_meets_a_busy_status_at_the_post_and_refuses(host):
+    from moxi_turns.harness import Live
+
+    s, h, world = _compacting(host, options={"model": "prov/m"})
+    h.live = lambda: Live(0, False)      # so the one status answer meets the re-check
+    world.fake.status_answers.append((200, json.dumps({h.session_id: {"type": "busy"}})))
+    assert s.command("compact", timeout=10) == Refused("busy-turn")
+    assert summaries(world) == []
+
+
+def test_compact_needs_consent_and_an_idle_session(host):
+    s, h, world = host(auto=False, options={"model": "prov/m"})
+    assert s.command("compact") == Refused("not-allowed")
+    s, h, world = _compacting(host, auto=False, options={"model": "prov/m"})
+    world.fake.type(h.session_id)
+    assert until(lambda: s.facts().turn_open)
+    assert s.command("compact") == Refused("busy-turn")
+    assert summaries(world) == []
 
 
 def test_listeners_context_the_host_cannot_carry_is_logged_as_dropped(host, monkeypatch,
@@ -522,4 +608,4 @@ def test_the_doctor_names_the_opencode_binary(monkeypatch, tmp_path):
     monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.setattr(opencode, "INSTALL_DIR", tmp_path / "none")
     [row] = opencode.rows()
-    assert not row.ok and "experimental" in row.name
+    assert row.state == "off" and "experimental" in row.name
