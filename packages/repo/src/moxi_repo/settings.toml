@@ -1,0 +1,9 @@
+# The repo module's config schema. The file it governs is CONFIG/repo/config.toml;
+# `moxi config repo` shows every key and `moxi config repo init` writes the file.
+
+[git_hooks.mode]
+type = "enum"
+values = ["auto", "config", "shim"]
+default = "auto"
+doc = "How repo reaches the git hook runner in a repo that pins no mode: auto picks config entries on git 2.54 and later and shims below; config or shim picks that one. A repo's own pin (git-hooks add --mode) wins."
+read = "use"
