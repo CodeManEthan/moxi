@@ -55,6 +55,10 @@ def test_the_announcement_declares_the_doctor_budget_and_store():
     assert module.DOCTOR == "moxi_turns.doctor:check"
     assert module.BUDGETS == {"hook_ms": 2.0}
     assert module.STORES["hook-times"]["path"] == hooktimes.FILE
+    # The commands grant is stamped per launch and read by turns: declared in both.
+    from moxi_turns.config import COMMANDS_ENV
+
+    assert COMMANDS_ENV in found.session_env and COMMANDS_ENV in module.INTERNAL_ENV
     import moxi_turns
 
     assert not hasattr(moxi_turns, "check") and "check" not in moxi_turns.__all__

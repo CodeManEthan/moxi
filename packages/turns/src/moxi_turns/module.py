@@ -18,6 +18,11 @@ INTERNAL_ENV = {
     "MOXI_LIFELINE_FD": "the core's lifeline pipe: the Codex host entry ends on it only "
                         "when a Moxi parent gave it one, and never reads its stdin",
 }
+#: A per-launch stamp turns' launch additions render, so a launcher scrubs it from what
+#: it inherits and stamps its own. turns also reads it, so it stays in INTERNAL_ENV.
+SESSION_ENV = {
+    "MOXI_TURNS_COMMANDS": "the session commands one launch grants, stamped per launch",
+}
 SETTINGS = "settings.toml"
 SETUP = "moxi_turns.claude_setup:setup"
 SEGMENT = None
