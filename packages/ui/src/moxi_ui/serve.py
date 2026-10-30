@@ -10,7 +10,13 @@ It runs under `moxi.aio.run(workers=4, slow=0.5)` and:
 4. writes its runtime file, `page.json`, with loopback's `write_runtime` (format 1, TCP);
 5. serves `worker_layer(guard(prove(router), profile))` on the listeners with loopback's
    `serve` and a 4 MiB head limit, so every request head Chromium or Firefox can send,
-   a worker's update check under a full cookie jar included, reaches the worker layer.
+   a worker's update check under a full cookie jar included, reaches the worker layer;
+6. reads its module snapshot (`moxi modules --json` and the page exports, in fresh
+   processes on a worker thread) and serves the table it gives from the next request
+   on, reading it again when a module directory changes.
+
+The shell's own page (`moxi_ui.page`) is served in process at `/m/ui/`, its export
+mounted there in the table like any module's.
 
 A port another program holds exits 1, naming the fix. At a clean stop it closes the
 listeners and removes `page.json` before it lets go of the lock.
@@ -22,6 +28,7 @@ import argparse
 import asyncio
 import logging
 import sys
+import time
 from collections.abc import Callable, Mapping, Sequence
 from importlib import metadata
 from typing import Any
@@ -33,6 +40,7 @@ from moxi_loopback.api import (
     RuntimeInfo,
     Table,
     app,
+    export,
     guard,
     prove,
     remove_runtime,
@@ -41,11 +49,25 @@ from moxi_loopback.api import (
 )
 
 from . import cli, config, listen
+from . import page as shell_page
 from .listen import Listeners
 from .proxy import Proxy
 from .push import Push
 from .router import ASGIApp, Router, shell_profile, shell_table, worker_layer
-from .session import TICKETS_DIR, OwnerCheck, Sessions, Tickets, open_store
+from .session import (
+    HEALTH_PATH,
+    SERVERS_PATH,
+    SIGNIN_API,
+    SIGNOUT_API,
+    STOP_PATH,
+    TICKETS_DIR,
+    WORKER_PATH,
+    OwnerCheck,
+    Sessions,
+    Tickets,
+    open_store,
+)
+from .snapshot import ModuleSnapshot, View
 from .starter import Starters
 
 MODULE = "ui"
@@ -62,6 +84,11 @@ WORKERS = 4
 SLOW = 0.5
 
 _log = logging.getLogger("moxi.ui")
+
+#: The paths under `/m/` that never need the module snapshot: the token routes, the
+#: worker answer and the sign-in.
+_NO_SNAPSHOT = frozenset(path.encode("ascii") for path in (
+    HEALTH_PATH, SERVERS_PATH, STOP_PATH, WORKER_PATH, SIGNIN_API, SIGNOUT_API))
 
 
 def version() -> str:
@@ -102,6 +129,12 @@ class Shell:
     Without a `proxy`, `/m/<module>/` goes to the proxy over those starters, and without a
     `push`, `/m/ui/api/push` goes to a `Push` over them and `mounts` (`Shell.push`; the
     snapshot gives it new exports with `set_exports` and `ui.modules` with `publish`).
+
+    `page` is the shell's own page, `moxi_ui.page.PAGE` unless given; its export is
+    mounted at `/m/ui`. `modules` and `mounts` are the table before any snapshot. With
+    `snapshot` True (or a `ModuleSnapshot`), the shell reads its module snapshot when
+    `run()` starts and takes each refresh's table, versions, exports and modules view;
+    `leave_out` names installed modules it leaves out (test shells only).
     """
 
     def __init__(self, listeners: Listeners, *, epoch: str | None,
@@ -109,7 +142,8 @@ class Shell:
                  modules: Sequence[str] = (), mounts: Mapping[str, Mapping[str, Any]] | None = None,
                  page: Page | None = None, push: ASGIApp | None = None,
                  proxy: ASGIApp | None = None, starters: Starters | None = None,
-                 child_args: Sequence[str] = ()):
+                 child_args: Sequence[str] = (), snapshot: bool | ModuleSnapshot = False,
+                 leave_out: Sequence[str] = ()):
         self.listeners = listeners
         self.epoch = epoch
         self.layout = layout or Layout(MODULE)
@@ -118,15 +152,25 @@ class Shell:
         tickets = Tickets(self.layout.runtime_dir() / TICKETS_DIR)
         self.sessions = Sessions(store, tickets, owner=owner or OwnerCheck.here(),
                                  token=lambda: self.info.token if self.info else None)
+        self._page = page or shell_page.PAGE
+        self.own_export = export(self._page)
         self._modules = tuple(modules)
-        self._mounts = dict(mounts or {})
-        self._page = page or Page(routes=())
+        self._mounts = {**(mounts or {}), MODULE: self.own_export}
+        self.started = time.monotonic()
         self.starters = starters or Starters(
             runtime_dir=self.layout.runtime_dir(), state_dir=self.layout.state_dir(),
             log=cli.log_path(), child_args=child_args)
         self.push = push if push is not None else Push(self.starters, mounts=self._mounts)
         self._proxy = proxy if proxy is not None else Proxy(
             self.starters, table=lambda: self.profile.table)
+        if snapshot is True:
+            snapshot = ModuleSnapshot(cwd=self.layout.runtime_dir(), env=self.starters.child_env,
+                                      leave_out=leave_out)
+        self.snapshot: ModuleSnapshot | None = snapshot or None
+        if self.snapshot is not None:
+            if self.snapshot.own is None:
+                self.snapshot.own = self.own_export
+            self.snapshot.on_view = self.take_view
         self.router: Router | None = None
         self.asgi: ASGIApp | None = None
         self.profile = None
@@ -137,14 +181,40 @@ class Shell:
         """Write the runtime file and build the request path. Returns the runtime info."""
         self.info = write_runtime(MODULE, transport="tcp", address="127.0.0.1",
                                   port=self.listeners.port, version=version())
+        self.started = time.monotonic()
         page = app(self._page, module=MODULE, server_id=self.info.server_id, prefix="/m/ui",
                    version=self.info.version)
-        self.router = Router(self.sessions, page=page, push=self.push, proxy=self._proxy)
+        self.router = Router(self.sessions, page=shell_page.serving(self, page),
+                             push=self.push, proxy=self._proxy)
         self.set_table(shell_table(self._modules, self._mounts))
-        self.asgi = worker_layer(guard(
-            prove(self.router, token=self.info.token, server_id=self.info.server_id),
-            lambda: self.profile))
+        inner = guard(prove(self.router, token=self.info.token, server_id=self.info.server_id),
+                      lambda: self.profile)
+        if self.snapshot is not None:
+            inner = _needing(self.snapshot, inner)
+        self.asgi = worker_layer(inner)
         return self.info
+
+    @property
+    def mounts(self) -> dict[str, Mapping[str, Any]]:
+        """The exports the table mounts now, module to export, the shell's own included."""
+        return self._mounts
+
+    def take_view(self, view: View) -> None:
+        """Take a snapshot refresh: its table from the next request on, its versions (a
+        running server of another version is drained), its exports for the push, and
+        its modules view as `ui.modules`."""
+        mounts = {**view.exports.mounts, MODULE: self.own_export}
+        try:
+            table = shell_table(view.pages, mounts)
+        except ValueError:
+            _log.exception("the module snapshot's table was refused; the last one stays")
+            return
+        self._modules, self._mounts = tuple(view.pages), mounts
+        self.set_table(table)
+        self.starters.set_versions(view.versions)
+        if isinstance(self.push, Push):
+            self.push.set_exports(mounts)
+            self.push.publish("modules", view.value)
 
     def set_table(self, table: Table) -> None:
         """Check every request from the next one on against `table`, which this freezes."""
@@ -159,11 +229,15 @@ class Shell:
         # Push streams never end on their own, so the stop ends them itself rather than
         # leave them to the server's shutdown deadline.
         ending = asyncio.ensure_future(self._end_push_at_stop())
+        if self.snapshot is not None:
+            self.snapshot.start()
         try:
             await serve(self.asgi, self.listeners.sockets, should_exit=self._should_exit,
                         head_limit=HEAD_LIMIT)
         finally:
             ending.cancel()
+            if self.snapshot is not None:
+                await self.snapshot.aclose()
             if isinstance(self.push, Push):
                 await self.push.aclose()
             await self.starters.aclose()
@@ -190,6 +264,24 @@ class Shell:
                 remove_runtime(MODULE, self.info.server_id)
             except OSError:
                 _log.exception("removing the runtime file failed")
+
+
+def _needing(snapshot: ModuleSnapshot, inner: ASGIApp) -> ASGIApp:
+    """`inner`, with each request that needs the module snapshot (any path under `/m/`
+    but the token routes, the worker answer and the sign-in) giving it the chance to look
+    for a changed module directory, and waiting for the first snapshot after the start."""
+
+    async def layer(scope: dict[str, Any], receive: Callable[..., Any],
+                    send: Callable[..., Any]) -> None:
+        if scope.get("type") == "http":
+            raw = scope.get("raw_path") or b""
+            if raw.startswith(b"/m/") and raw not in _NO_SNAPSHOT:
+                snapshot.touch()
+                if snapshot.current is None:
+                    await snapshot.ready()
+        await inner(scope, receive, send)
+
+    return layer
 
 
 def run(*, bind: Callable[[int], Listeners] = listen.bind,
@@ -225,7 +317,7 @@ def _run_held(layout: Layout, bind: Callable[[int], Listeners], say: Callable[[s
     except OSError as err:
         say(f"moxi ui: the listener on port {port} could not be bound: {err}")
         return 1
-    shell = Shell(listeners, epoch=epoch_for(listeners), layout=layout)
+    shell = Shell(listeners, epoch=epoch_for(listeners), layout=layout, snapshot=True)
     try:
         shell.start()
         from moxi import aio
