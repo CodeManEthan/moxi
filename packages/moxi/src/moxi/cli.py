@@ -5,6 +5,7 @@
     moxi install <module> ...    installs a module, sets it up, offers its extras
     moxi shortcut [<module>]     the opt-in bare command for a module
     moxi config <module> ...     a module's settings and its config file
+    moxi config set ...          changes one of them (`moxi config unset` removes one)
     moxi check [PATH]            the module contract check
     moxi help [<verb>|<module>]  help
     moxi version                 versions
@@ -36,6 +37,8 @@ commands:
   shortcut [<module>] [--remove]     put a bare <module> command on PATH, or take it off
   config <module> [show|path|check|init]
                                      a module's settings and its config file
+  config set|unset <module> <key> ...
+                                     change one of a module's settings
   check [--staged] [PATH]            check a module repo against the module contract
   help [<command>|<module>]          this help, or a command's or a module's
   version                            the versions of moxi and its modules
@@ -558,15 +561,28 @@ def _shortcut(argv: list[str]) -> int:
 
 # -- moxi config --------------------------------------------------------------------------
 
+_CONFIG_USAGE = """\
+usage: moxi config <module> [show|path|check|init]
+       moxi config set <module> <key> <value> [--by WHO]
+       moxi config set <module> <key> (--add VALUE | --remove VALUE) [--by WHO]
+       moxi config unset <module> <key> [--by WHO]
+"""
+
+
 def _config(argv: list[str]) -> int:
-    parser = _parser("config", "A module's settings and its config file.")
+    if argv and argv[0] in ("set", "unset"):
+        return _config_change(argv[0], argv[1:])
+    parser = _parser("config", "A module's settings and its config file. `moxi config "
+                     "set` and `moxi config unset` change one key; `moxi` names the "
+                     "core's own settings.")
+    parser.usage = _CONFIG_USAGE.removeprefix("usage: ")
     parser.add_argument("module")
     parser.add_argument("action", nargs="?", default="show",
                         choices=("show", "path", "check", "init"),
-                        help="show (the default): every key with its value, source, doc "
-                             "and when it is read; path: the file's path; check: exit "
-                             "non-zero when the file cannot be read; init: write the file "
-                             "with every key commented out at its default")
+                        help="show (the default): every key with its value, source, doc, "
+                             "when it is read and who last set it; path: the file's path; "
+                             "check: exit non-zero when the file cannot be read; init: "
+                             "write the file with every key commented out at its default")
     args = parser.parse_args(argv)
     from . import config, modules
     from .paths import Layout
@@ -575,17 +591,20 @@ def _config(argv: list[str]) -> int:
     if not names.is_module_name(module):
         _error(f"{module!r} is not a module name")
         return 2
-    found = modules.load(module)
-    if found.state != modules.PRESENT:
-        _error(found.reason)
-        print(install_hint(module), file=sys.stderr)
-        return 2
+    if module == names.HARNESS:
+        found = None
+    else:
+        found = modules.load(module)
+        if found.state != modules.PRESENT:
+            _error(found.reason)
+            print(install_hint(module), file=sys.stderr)
+            return 2
     path = Layout(module).config_file()
     if args.action == "path":
         print(path)
         return 0
     try:
-        schema = config.schema_for(found)
+        schema = config._core_schema() if found is None else config.schema_for(found)
     except config.ConfigError as exc:
         _error(f"{module}'s settings schema cannot be read: {exc}")
         return 1
@@ -620,6 +639,7 @@ def _config(argv: list[str]) -> int:
         state = "" if path.exists() else " (no file: every key at its default)"
         print(f"ok: {path}{state}")
         return 0
+    last = _last_set(config.history(module, tail=None), schema.keys)
     print(f"# {path}{'' if path.exists() else '  (no file: every key at its default)'}")
     for key in schema.live():
         value = settings[key.name]
@@ -630,6 +650,75 @@ def _config(argv: list[str]) -> int:
         if key.env:
             extra += f"; env {key.env}"
         print(f"    {key.doc} ({extra})")
+        record = last.get(key.name)
+        if record is not None:
+            print(f"    last {_DONE.get(record.get('op'), 'changed')} by "
+                  f"{record.get('by')} at {record.get('at')}")
+    return 0
+
+
+_DONE = {"set": "set", "unset": "unset", "add": "added to", "remove": "removed from"}
+
+
+def _last_set(records: list[dict], keys) -> dict[str, dict]:
+    """The newest change of each key in `keys`, a switch table's entries counting as
+    changes of their table. `records` is oldest first."""
+    last: dict[str, dict] = {}
+    for record in records:
+        key = record.get("key")
+        if isinstance(key, str):
+            for name in (key, key.rpartition(".")[0]):
+                if name in keys:
+                    last[name] = record
+    return last
+
+
+def _config_change(op: str, argv: list[str]) -> int:
+    """`moxi config set` and `moxi config unset`."""
+    if op == "set":
+        description = ("Set one key of a module's config file. The value is read by the "
+                       "key's type; a list or a table is one TOML value. --add and "
+                       "--remove change one item of a list.")
+    else:
+        description = "Remove one key from a module's config file, so it reads its default."
+    parser = _parser(f"config {op}", description)
+    parser.add_argument("module", help="the module, or moxi for the core's own settings")
+    parser.add_argument("key", help="the setting's dotted name")
+    if op == "set":
+        parser.add_argument("value", nargs="?", help="the new value")
+        group = parser.add_mutually_exclusive_group()
+        group.add_argument("--add", metavar="VALUE", help="add one item to a list")
+        group.add_argument("--remove", metavar="VALUE",
+                           help="remove one item from a list")
+    parser.add_argument("--by", default="cli", metavar="WHO",
+                        help="who makes the change, for the history (default: cli)")
+    args = parser.parse_args(argv)
+    if op == "set":
+        given = [v is not None for v in (args.value, args.add, args.remove)]
+        if sum(given) != 1:
+            parser.error("give exactly one of a value, --add VALUE or --remove VALUE")
+        if args.add is not None:
+            op, value = "add", args.add
+        elif args.remove is not None:
+            op, value = "remove", args.remove
+        else:
+            value = args.value
+    else:
+        value = None
+    from . import config
+
+    try:
+        changed = config._change(args.module, args.key, op, value, by=args.by, text=True)
+    except config.ConfigError as exc:
+        _error(str(exc))
+        return exc.exit_code
+    if not changed:
+        print(f"{args.module}: {args.key} already holds that item; nothing changed")
+    elif op in ("add", "remove"):
+        done = "added" if op == "add" else "removed"
+        print(f"{args.module}: {args.key}: one item {done} (by {args.by})")
+    else:
+        print(f"{args.module}: {args.key} {op} (by {args.by})")
     return 0
 
 
