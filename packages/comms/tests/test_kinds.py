@@ -110,9 +110,11 @@ def test_the_daemon_accepts_a_declared_kind_and_refuses_an_unknown_one(rig):
         answer = client.register(name="planner", scope="proj-a",
                                  adapter="person-kind")
         assert answer["ok"]
+        # Read while the connection is open: closing it deregisters the binding, and
+        # the daemon's thread can do that before a read after `close()` runs.
+        assert rig.daemon.bindings["planner@proj-a"].adapter == "person-kind"
     finally:
         client.close()
-    assert rig.daemon.bindings["planner@proj-a"].adapter == "person-kind"
 
 
 def test_a_default_daemon_reads_the_group(rig):
