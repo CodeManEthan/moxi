@@ -90,3 +90,36 @@ def site(tmp_path, monkeypatch):
         if mod.split(".")[0] in s.packages:
             del sys.modules[mod]
     moxi.modules.reset()
+
+
+# --- the core's writer, faked -----------------------------------------------------------
+
+@pytest.fixture
+def fake(monkeypatch):
+    """A fake `moxi.units` in place of the one services' acts and reads call, so no test
+    reaches a supervisor. Its `probe` records, at each of its calls, whether the core
+    lock is held by services' act."""
+    from fake_units import FakeUnits
+
+    from moxi_services import acts, state
+
+    units = FakeUnits()
+    depth = [0]
+    real = acts._locked
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def watched():
+        with real():
+            depth[0] += 1
+            try:
+                yield
+            finally:
+                depth[0] -= 1
+
+    units.probe = lambda: depth[0] > 0
+    monkeypatch.setattr(acts, "_locked", watched)
+    monkeypatch.setattr(acts, "units", units)
+    monkeypatch.setattr(state, "units", units)
+    return units

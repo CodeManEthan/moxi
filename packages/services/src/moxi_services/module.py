@@ -16,7 +16,8 @@ OPTIONAL = {
 }
 GATED = {}
 INTERNAL_ENV = {}
-SETTINGS = None
+#: The config schema: one on/off switch per adopted Linux timer, by its row's name.
+SETTINGS = "settings.toml"
 SETUP = None
 SEGMENT = None
 ANNOUNCES = 1
