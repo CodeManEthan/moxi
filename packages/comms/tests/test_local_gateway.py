@@ -65,6 +65,97 @@ def test_the_file_is_wal_with_its_pragmas(gw):
     assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
 
 
+POSIX = pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
+
+
+@POSIX
+def test_a_new_record_is_created_private(tmp_path):
+    gateway = LocalGateway(tmp_path / "state" / "record.db")
+    try:
+        assert (tmp_path / "state" / "record.db").stat().st_mode & 0o777 == 0o600
+    finally:
+        gateway.close()
+
+
+@POSIX
+def test_an_existing_record_keeps_its_mode_and_is_not_rewritten(tmp_path):
+    """The record is reported, never changed: an existing file is opened as it is."""
+    import sqlite3
+
+    path = tmp_path / "record.db"
+    first = LocalGateway(path)
+    first.close()
+    path.chmod(0o644)
+    before = path.read_bytes()
+    second = LocalGateway(path)
+    try:
+        second._conn().execute("SELECT 1")
+        assert path.stat().st_mode & 0o777 == 0o644
+        assert path.read_bytes() == before
+    finally:
+        second.close()
+    with sqlite3.connect(path) as plain:
+        assert plain.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+def test_release_closes_the_calling_threads_connection_and_only_that(gw):
+    import sqlite3
+    import threading
+
+    mine = gw._conn()
+    theirs: list = []
+    held = threading.Event()
+    done = threading.Event()
+
+    def other():
+        theirs.append(gw._conn())
+        held.set()
+        done.wait(10)
+        gw.release()
+
+    thread = threading.Thread(target=other)
+    thread.start()
+    held.wait(10)
+    assert len(gw._conns) == 2
+    gw.release()
+    assert gw._conns == [theirs[0]]
+    with pytest.raises(sqlite3.ProgrammingError):
+        mine.execute("SELECT 1")
+    theirs[0].execute("SELECT 1")               # the other thread's is still open
+    done.set()
+    thread.join(10)
+    assert gw._conns == []
+    gw.release()                                # a thread with none: nothing happens
+    again = gw._conn()                          # and the next call opens a new one
+    assert again is not mine and gw._conns == [again]
+    assert gw.channel_by_name("nothing") is None
+
+
+def test_each_client_the_daemon_serves_closes_its_connection_when_it_leaves(rig):
+    """One connection per client used to stay open for the daemon's life: each thread
+    serving a client now releases its own when the client goes."""
+    import sqlite3
+
+    local = rig.backend == "local"
+    released = []
+    real = rig.gateway.release
+
+    def watching():
+        released.append(getattr(rig.gateway._local, "conn", None) if local else None)
+        real()
+
+    rig.gateway.release = watching
+    for n in range(3):
+        rig.shim(name=f"leaver{n}", scope="proj-a").stop()
+    assert wait_until(lambda: len(released) >= 3)
+    if local:
+        assert all(conn is not None for conn in released)   # each served on the record
+        assert not any(conn in rig.gateway._conns for conn in released)
+        for conn in released:
+            with pytest.raises(sqlite3.ProgrammingError):
+                conn.execute("SELECT 1")
+
+
 def test_the_schema_has_no_retired_credential_table_or_reply_column(gw):
     conn = gw._conn()
     tables = {r[0] for r in conn.execute(
@@ -519,6 +610,35 @@ def test_the_daemon_takes_a_flag_that_agrees_and_mock_with_a_scratch_store(monke
         with pytest.raises(RuntimeError, match="open_gateway reached"):
             daemon_mod.main(argv)
         assert reached, f"{argv} should have got past the flag check"
+
+
+@pytest.mark.parametrize("has_sighup", [True, False])
+def test_the_daemon_stops_on_sigterm_and_on_sighup_where_there_is_one(monkeypatch, tmp_path,
+                                                                    has_sighup):
+    """Windows has no SIGHUP; the daemon starts there all the same."""
+    import signal
+
+    installed: list = []
+
+    class Refusing:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError("stop here")
+
+    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "mock")
+    monkeypatch.setenv("MOXI_COMMS_MOCK_GATEWAY", str(tmp_path / "store.json"))
+    monkeypatch.setattr(gateway_mod, "open_gateway",
+                        lambda *a, **k: MockGateway(tmp_path / "store.json"))
+    monkeypatch.setattr(daemon_mod, "Daemon", Refusing)
+    monkeypatch.setattr(signal, "signal", lambda sig, handler: installed.append(sig))
+    if not has_sighup:
+        monkeypatch.delattr(signal, "SIGHUP", raising=False)
+    with pytest.raises(SystemExit, match="stop here"):
+        daemon_mod.main([])
+    expected = [signal.SIGTERM] + ([signal.SIGHUP] if has_sighup else [])
+    assert installed == expected
 
 
 def test_a_local_gateway_the_daemon_opens_delivers_through_the_seam(rig):

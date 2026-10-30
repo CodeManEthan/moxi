@@ -10,6 +10,8 @@
   lifeline) calls to stop when its parent goes.
 - `identity` and `alive` name a process by its pid and start time, so a pid the system
   has given to another process since never matches.
+- `environ` reads another process's environment as it was started, where the system
+  lets one: Linux and macOS.
 
 psutil is imported only inside the functions that use it, so importing this module is
 cheap.
@@ -570,4 +572,116 @@ def alive(proc: ProcId) -> bool:
         return False
 
 
-__all__ = ["LIFELINE_ENV", "ProcId", "run", "spawn", "lifeline", "identity", "alive"]
+# -- environment -------------------------------------------------------------------------
+
+def environ(pid: int) -> dict[str, str] | None:
+    """The environment process `pid` was started with, or None when it can't be read.
+
+    Linux reads `/proc/<pid>/environ`. macOS asks the kernel for the process's arguments
+    (`sysctl` with `KERN_PROCARGS2`), which answers only for a process of the same user.
+    Windows, and any other system, returns None. A process that is gone, or one the
+    system won't show, returns None everywhere.
+
+    What is read is the environment the process started with: a variable it set or
+    removed itself since is not seen. An entry without `=` is skipped, and bytes that are
+    not UTF-8 are replaced. Standard library only.
+    """
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        return None
+    if sys.platform.startswith("linux"):
+        return _linux_environ(pid)
+    if sys.platform == "darwin":
+        return _mac_environ(pid)
+    return None
+
+
+def _linux_environ(pid: int, root: str = "/proc") -> dict[str, str] | None:
+    try:
+        with open(os.path.join(root, str(pid), "environ"), "rb") as f:
+            raw = f.read()
+    except OSError:
+        return None
+    return _pairs(raw.split(b"\0"))
+
+
+def _mac_environ(pid: int) -> dict[str, str] | None:
+    import ctypes
+    import ctypes.util
+
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+        sysctl = libc.sysctl
+    except (OSError, AttributeError):
+        return None
+    sysctl.argtypes = (ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
+                       ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t)
+    sysctl.restype = ctypes.c_int
+    # The largest argument area a process may have, which bounds what PROCARGS2 returns.
+    mib = (ctypes.c_int * 2)(_CTL_KERN, _KERN_ARGMAX)
+    argmax = ctypes.c_int(0)
+    size = ctypes.c_size_t(ctypes.sizeof(argmax))
+    if sysctl(mib, 2, ctypes.byref(argmax), ctypes.byref(size), None, 0) != 0:
+        return None
+    if argmax.value <= 0:
+        return None
+    buffer = ctypes.create_string_buffer(argmax.value)
+    size = ctypes.c_size_t(argmax.value)
+    mib = (ctypes.c_int * 3)(_CTL_KERN, _KERN_PROCARGS2, pid)
+    if sysctl(mib, 3, buffer, ctypes.byref(size), None, 0) != 0:
+        return None  # gone, another user's, or refused
+    return _procargs2(buffer.raw[:size.value])
+
+
+# macOS's sysctl names: <sys/sysctl.h>.
+_CTL_KERN = 1
+_KERN_ARGMAX = 8
+_KERN_PROCARGS2 = 49
+
+
+def _procargs2(raw: bytes) -> dict[str, str] | None:
+    """The environment in a `KERN_PROCARGS2` answer.
+
+    Its layout: `argc` as a C int; the executable's path, NUL-terminated, then NUL
+    padding; the `argc` arguments, each NUL-terminated; the environment's entries, each
+    NUL-terminated, ended by an empty string; then strings the system keeps for itself,
+    which are not the environment.
+    """
+    width = 4
+    if len(raw) < width:
+        return None
+    argc = int.from_bytes(raw[:width], sys.byteorder, signed=True)
+    if argc < 0:
+        return None
+    at = raw.find(b"\0", width)
+    if at < 0:
+        return None
+    while at < len(raw) and raw[at] == 0:
+        at += 1
+    for _ in range(argc):
+        end = raw.find(b"\0", at)
+        if end < 0:
+            return None  # cut short
+        at = end + 1
+    entries = []
+    while at < len(raw):
+        end = raw.find(b"\0", at)
+        if end < 0:
+            end = len(raw)
+        if end == at:
+            break  # the empty string that ends the environment
+        entries.append(raw[at:end])
+        at = end + 1
+    return _pairs(entries)
+
+
+def _pairs(entries) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for item in entries:
+        key, sep, value = item.partition(b"=")
+        if sep and key:
+            env[key.decode("utf-8", "replace")] = value.decode("utf-8", "replace")
+    return env
+
+
+__all__ = ["LIFELINE_ENV", "ProcId", "run", "spawn", "lifeline", "identity", "alive",
+           "environ"]

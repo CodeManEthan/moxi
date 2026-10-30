@@ -510,6 +510,134 @@ def test_procid_is_frozen():
         ident.pid = 3  # type: ignore[misc]
 
 
+# -- environ -------------------------------------------------------------------------------
+
+LINUX = pytest.mark.skipif(not sys.platform.startswith("linux"),
+                           reason="reads /proc, which only Linux has")
+MACOS = pytest.mark.skipif(sys.platform != "darwin",
+                           reason="sysctl KERN_PROCARGS2 is macOS's; owed to a Mac")
+WINDOWS = pytest.mark.skipif(sys.platform != "win32", reason="Windows only; owed to Windows")
+
+
+def _child_with(env: dict[str, str]) -> subprocess.Popen:
+    """A child started with `env` as its whole environment, which waits on its stdin. It
+    has said it is running, so its environment is its own and not this process's."""
+    child = subprocess.Popen([PY, "-c", "import sys; print('up', flush=True); sys.stdin.read()"],
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env)
+    assert child.stdout.readline() == b"up\n"
+    return child
+
+
+def _end(child: subprocess.Popen) -> None:
+    child.stdin.close()
+    child.wait(timeout=10)
+    child.stdout.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no environment reader")
+def test_environ_reads_a_child_as_it_was_started():
+    env = {"PATH": os.environ.get("PATH", ""), "MOXI_TEST_A": "1",
+           "MOXI_TEST_B": "x=y", "MOXI_TEST_C": "", "MOXI_TEST_D": "caf\u00e9"}
+    if sys.platform == "darwin":
+        env["HOME"] = os.environ.get("HOME", "/")
+    child = _child_with(env)
+    try:
+        read = proc.environ(child.pid)
+    finally:
+        _end(child)
+    assert read is not None
+    for key in ("MOXI_TEST_A", "MOXI_TEST_B", "MOXI_TEST_C", "MOXI_TEST_D"):
+        assert read[key] == env[key]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no environment reader")
+def test_environ_of_this_process_reads_what_it_started_with():
+    read = proc.environ(os.getpid())
+    assert read is not None and read.get("PATH") == os.environ.get("PATH")
+
+
+def test_environ_of_a_gone_process_is_none():
+    child = subprocess.Popen([PY, "-c", "pass"])
+    child.wait()
+    assert proc.environ(child.pid) is None
+
+
+@pytest.mark.parametrize("pid", [0, -1, True])
+def test_environ_of_no_pid_is_none(pid):
+    assert proc.environ(pid) is None
+
+
+@LINUX
+def test_environ_of_another_users_process_is_none():
+    if os.geteuid() == 0:
+        pytest.skip("root reads every process")
+    if not os.path.exists("/proc/1/environ"):
+        pytest.skip("no pid 1 under /proc")
+    assert proc.environ(1) is None
+
+
+@LINUX
+def test_the_linux_reader_splits_entries_and_skips_what_is_not_one(tmp_path):
+    fake = tmp_path / "12"
+    fake.mkdir()
+    (fake / "environ").write_bytes(b"A=1\0B=x=y\0junk\0C=\0=nokey\0D=\xff\0")
+    assert proc._linux_environ(12, str(tmp_path)) == {
+        "A": "1", "B": "x=y", "C": "", "D": "\ufffd"}
+    assert proc._linux_environ(13, str(tmp_path)) is None
+
+
+def _procargs(argc: int, path: bytes, argv: list[bytes], env: list[bytes],
+              apple: list[bytes], pad: int = 3) -> bytes:
+    out = argc.to_bytes(4, sys.byteorder, signed=True) + path + b"\0" * (1 + pad)
+    out += b"".join(a + b"\0" for a in argv)
+    out += b"".join(e + b"\0" for e in env) + b"\0"
+    out += b"".join(a + b"\0" for a in apple)
+    return out
+
+
+def test_a_procargs2_answer_gives_the_environment_and_not_the_system_strings():
+    raw = _procargs(2, b"/usr/bin/python3", [b"python3", b"-c"],
+                    [b"A=1", b"B=x=y", b"junk", b"C="],
+                    [b"executable_path=/usr/bin/python3", b"ptr_munge="])
+    assert proc._procargs2(raw) == {"A": "1", "B": "x=y", "C": ""}
+
+
+def test_a_procargs2_answer_with_no_environment_is_empty():
+    assert proc._procargs2(_procargs(1, b"/bin/x", [b"x"], [], [b"apple=1"])) == {}
+    raw = 1 .to_bytes(4, sys.byteorder) + b"/bin/x\0\0x\0"
+    assert proc._procargs2(raw) == {}
+
+
+def test_a_procargs2_answer_cut_short_is_none():
+    assert proc._procargs2(b"\x01") is None
+    assert proc._procargs2(2 .to_bytes(4, sys.byteorder) + b"/bin/x") is None
+    assert proc._procargs2(3 .to_bytes(4, sys.byteorder) + b"/bin/x\0\0a\0b") is None
+    assert proc._procargs2((-1).to_bytes(4, sys.byteorder, signed=True) + b"/x\0") is None
+
+
+@MACOS
+def test_environ_on_macos_reads_a_same_user_process_through_the_kernel():
+    child = _child_with({"PATH": "/usr/bin:/bin", "MOXI_TEST_MAC": "here"})
+    try:
+        read = proc._mac_environ(child.pid)
+    finally:
+        _end(child)
+    assert read is not None and read["MOXI_TEST_MAC"] == "here"
+    assert "executable_path" not in read  # the system's own strings are not the environment
+
+
+@MACOS
+def test_environ_on_macos_of_another_users_process_is_none():
+    if os.geteuid() == 0:
+        pytest.skip("root reads every process")
+    assert proc.environ(1) is None  # launchd, root's
+
+
+@WINDOWS
+def test_environ_on_windows_is_none():
+    assert proc.environ(os.getpid()) is None
+
+
 # -- import weight -------------------------------------------------------------------------
 
 def test_importing_the_module_loads_no_psutil_or_ctypes():

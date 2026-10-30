@@ -382,14 +382,47 @@ def test_requires_env_not_met_is_checked_again_at_the_next_tick(tmp_path, exe):
     assert asks(t, {A: record()}, T0 + TTL + 10) == [("r", A)]
 
 
-def test_proc_environ_reads_a_process_and_none_for_a_gone_one(tmp_path):
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no environment reader")
+def test_proc_environ_reads_a_process_and_none_for_a_gone_one():
     env = timer.proc_environ(os.getpid())
     assert env is not None and env.get("PATH") == os.environ.get("PATH")
-    fake = tmp_path / "proc" / "12"
-    fake.mkdir(parents=True)
-    (fake / "environ").write_bytes(b"A=1\0B=x=y\0junk\0C=\0")
-    assert timer.proc_environ(12, tmp_path / "proc") == {"A": "1", "B": "x=y", "C": ""}
-    assert timer.proc_environ(13, tmp_path / "proc") is None
+    import subprocess
+
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()
+    assert timer.proc_environ(gone.pid) is None
+
+
+def test_proc_environ_is_moxi_procs_reader(monkeypatch):
+    from moxi import proc
+
+    monkeypatch.setattr(proc, "environ", lambda pid: {"PID": str(pid)})
+    assert timer.proc_environ(7) == {"PID": "7"}
+    monkeypatch.setattr(proc, "environ", lambda pid: None)
+    assert timer.proc_environ(7) is None
+
+
+@pytest.mark.parametrize("platform, expected",
+                         [("linux", True), ("darwin", True), ("win32", False)])
+def test_env_checkable_asks_the_platform_and_reads_no_process(monkeypatch, platform,
+                                                              expected):
+    from moxi import proc
+
+    def refuse(*_):
+        raise AssertionError("env_checkable read a process")
+
+    monkeypatch.setattr(proc, "environ", refuse)
+    monkeypatch.setattr(timer, "proc_environ", refuse)
+    monkeypatch.setattr(sys, "platform", platform)
+    assert timer.env_checkable() is expected
+
+
+def test_a_subscription_needing_env_never_asks_where_env_cannot_be_read(tmp_path, exe):
+    t, spawner, _ = make_timer(tmp_path, [raw_sub(exe, name="r", at=0,
+                                                  requires_env={"V": "on"})],
+                               environ=lambda pid: None)
+    assert asks(t, {A: record()}, T0 + TTL) == []
+    assert spawner.argvs == []
 
 
 # --- the log ------------------------------------------------------------------------------------
@@ -476,6 +509,59 @@ def test_the_run_starts_detached_with_no_shell(tmp_path):
     assert got["stdin"] == got["stdout"] == "/dev/null"
     (line,) = timer.read_log(tmp_path / "timer.jsonl")
     assert line["exit"] == 0 and line["child"] == entry["child"]
+
+
+def test_on_windows_an_ask_starts_through_moxi_procs_detached_spawn(tmp_path, exe,
+                                                                     monkeypatch):
+    from moxi import proc
+
+    started, running = [], {4242}
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(proc, "spawn",
+                        lambda argv, **kw: started.append((argv, kw)) or 4242)
+    monkeypatch.setattr(proc, "identity", lambda pid: proc.ProcId(pid, 1.0))
+    monkeypatch.setattr(proc, "alive", lambda ident: ident.pid in running)
+    t = Timer(config_entries=lambda: [], modules=[raw_sub(exe, name="r", at=0)],
+              environ=lambda pid: {}, log_file=tmp_path / "timer.jsonl")
+    (entry,) = t.tick({A: record(pid=31)}, T0 + TTL)
+    assert started == [([str(exe), "--session", A], {"detached": True})]
+    assert entry["child"] == 4242
+    t.reap(T0 + TTL + 1)
+    assert logged(t) == []                       # still running: nothing written yet
+    running.clear()
+    t.reap(T0 + TTL + 2)
+    (line,) = logged(t)
+    assert line["child"] == 4242 and line["exit"] is None and line["ended"] == T0 + TTL + 2
+    assert line["error"] == "its exit status is not known (only its pid was kept)"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a POSIX start of moxi.proc's own")
+def test_a_detached_ask_is_seen_gone_by_pid_and_start_time(tmp_path):
+    from moxi import proc
+
+    pid = proc.spawn([sys.executable, "-c", "pass"], detached=True)
+    ask = timer.Detached(pid)
+    deadline = time.time() + 10
+    while ask.poll() is None and time.time() < deadline:
+        time.sleep(0.05)
+    assert ask.poll() is timer.GONE
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows only; owed to Windows")
+def test_on_windows_a_real_ask_starts_and_is_seen_gone(tmp_path):
+    out = tmp_path / "out.txt"
+    t = Timer(config_entries=lambda: [], log_file=tmp_path / "timer.jsonl",
+              modules=[checked({"name": "probe", "at": 0,
+                                "run": [sys.executable, "-c",
+                                        f"open({str(out)!r}, 'w').write('{{session}}')"]})])
+    (entry,) = t.tick({A: record(pid=31)}, T0 + TTL)
+    deadline = time.time() + 10
+    while t.pending and time.time() < deadline:
+        time.sleep(0.05)
+        t.reap()
+    assert t.pending == [] and out.read_text() == A
+    (line,) = timer.read_log(tmp_path / "timer.jsonl")
+    assert line["child"] == entry["child"] and line["exit"] is None
 
 
 # --- loading: the same check at each tick as `timers` and doctor run ------------------------
@@ -772,3 +858,35 @@ run = ["bin/verb"]
     assert "timer: 1 subscription(s), 0 from modules, 1 from your config: ok" in out
     assert "timer: refused rel (config): run[0] 'bin/verb' is not an absolute path" in out
     assert "timer log: " in out and "(no ask yet)" in out
+
+
+# --- cache's doctor rows ---------------------------------------------------------------------
+
+def test_the_doctor_warns_where_requires_env_cannot_be_checked(own_roots, exe, monkeypatch):
+    from moxi_cache import doctor
+
+    write_cache_config(own_roots, f"""
+[[timer.subscriber]]
+name = "warm"
+at = 0
+run = ["{exe}"]
+requires_env = {{ V = "on" }}
+
+[[timer.subscriber]]
+name = "plain"
+at = 0
+run = ["{exe}"]
+""")
+    monkeypatch.setattr(timer, "env_checkable", lambda: True)
+    assert list(doctor.rows()) == []
+    monkeypatch.setattr(timer, "env_checkable", lambda: False)
+    (row,) = doctor.rows()
+    assert (row.module, row.state) == ("cache", "warn")
+    assert row.detail.endswith("never ask: warm") and "requires_env" in row.detail
+
+
+def test_the_doctor_says_nothing_with_no_subscription_needing_env(own_roots, monkeypatch):
+    from moxi_cache import doctor
+
+    monkeypatch.setattr(timer, "env_checkable", lambda: False)
+    assert list(doctor.rows()) == []
