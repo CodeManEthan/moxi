@@ -434,9 +434,20 @@ class _Steps:
         clean = not result.commit.endswith("+dirty")
         if passed and clean and not self.findings:
             head = _git(self.root, "rev-parse", "HEAD").strip()
-            result.kept = durations.keep(directory, head, passed)
+            try:
+                result.kept = durations.keep(directory, head, passed)
+            except OSError as exc:
+                # The record is a by-product; the check's own results and its line come
+                # first, so a disk that refuses the write costs the record, not the run.
+                print(f"moxi-dev check: durations: keeping no record for {head[:12]} "
+                      f"({exc})", file=sys.stderr, flush=True)
         if not self.findings:
-            result.delta = durations.against_main(self.root, directory, passed, self.base)
+            try:
+                result.delta = durations.against_main(self.root, directory, passed,
+                                                      self.base)
+            except OSError as exc:
+                print(f"moxi-dev check: durations: no delta ({exc})", file=sys.stderr,
+                      flush=True)
 
     def tags(self) -> bool:
         try:

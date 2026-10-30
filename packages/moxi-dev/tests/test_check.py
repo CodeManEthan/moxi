@@ -8,9 +8,11 @@ real thing once.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -664,6 +666,68 @@ def test_head_s_own_record_is_not_its_ancestor(ignoring):
     run_check(ignoring, Timed({"moxi": [1.0]}), full=True)
     result = run_check(ignoring, Timed({"moxi": [1.0]}), full=True)
     assert result.kept is not None and result.delta is None
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root writes into a read-only directory")
+def test_a_record_the_disk_refuses_is_said_and_the_line_still_prints(
+        ignoring, monkeypatch, capsys):
+    commit_file(ignoring, "packages/cache/x.py")
+    where = records(ignoring)
+    where.mkdir(parents=True)
+    where.chmod(0o500)
+    monkeypatch.setattr(check, "_run", Timed({"cache": [1.0], "comms": [2.0]}))
+    monkeypatch.setattr(check.lint, "plan", lambda package, work, members: [])
+    monkeypatch.chdir(ignoring)
+    try:
+        assert check.main([]) == 0
+    finally:
+        where.chmod(0o700)
+    out, err = capsys.readouterr()
+    assert f"durations: keeping no record for {head(ignoring)[:12]}" in err
+    assert "Permission denied" in err
+    assert LINE.match(out.splitlines()[-1]), out
+    assert "| durations 3.0s, slowest 5% 67%, delta none |" in out
+    assert list(where.iterdir()) == []
+
+
+def test_another_writer_s_part_file_is_left_alone(tmp_path):
+    from moxi_dev import durations
+    tmp_path = tmp_path / "records"
+    tmp_path.mkdir()
+    run = durations.PackageRun(tiers="plain", tests={"t::a": {"call": 1.0}})
+    theirs = tmp_path / "abc.json.part"
+    theirs.write_text("another check's half-written record\n")
+    kept = durations.keep(tmp_path, "abc", {"cache": run})
+    assert theirs.read_text() == "another check's half-written record\n"
+    assert list(durations.read_record(kept)) == ["cache"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == [".lock", "abc.json",
+                                                           "abc.json.part"]
+
+
+def test_two_checks_keeping_one_commit_at_once_drop_neither_s_packages(tmp_path):
+    from moxi_dev import durations
+    tmp_path = tmp_path / "records"
+    names = [f"p{i}" for i in range(16)]
+    start = threading.Barrier(len(names))
+    errors = []
+
+    def keep(name):
+        start.wait()
+        try:
+            for round_ in range(5):
+                durations.keep(tmp_path, "abc", {name: durations.PackageRun(
+                    tiers="plain", tests={f"t::{round_}": {"call": 1.0}})})
+        except Exception as exc:  # noqa: BLE001 -- reported below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=keep, args=(name,)) for name in names]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+    assert sorted(durations.read_record(tmp_path / "abc.json")) == sorted(names)
+    assert not list(tmp_path.glob("*.part"))
 
 
 # --- --finding ------------------------------------------------------------------------------

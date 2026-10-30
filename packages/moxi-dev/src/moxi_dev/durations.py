@@ -9,6 +9,12 @@ seconds. A later run at the same commit replaces the packages it ran and keeps t
 A run on a tree with changes of its own, or one that ran a finding's tests only, keeps
 no record: its times are not the commit's.
 
+Two checks can keep the same commit's record at once, from two worktrees of one clone.
+Each writes its own part file and replaces the record with it, and on a system with
+`fcntl` the read, merge and write hold a lock on `.lock` beside the records, so neither
+drops the packages the other kept. Where `fcntl` is missing the last writer's packages
+win.
+
 The comparison is with the newest record for a commit on `main` that is an ancestor of
 HEAD (the commits from the merge base back), HEAD itself left out, over the packages
 both ran the same way (every tier, or not).
@@ -16,13 +22,20 @@ both ran the same way (every tier, or not).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
+
+try:
+    import fcntl
+except ImportError:                     # not on Windows: no lock (module doc)
+    fcntl = None
 
 FORMAT = 1
 #: The share of tests, slowest first, whose part of the total the summary gives.
@@ -101,18 +114,40 @@ def read_record(path: Path) -> dict[str, PackageRun] | None:
         return None
 
 
+@contextlib.contextmanager
+def _locked(directory: Path) -> Iterator[None]:
+    """Hold the records' lock, where the system has `fcntl` (module doc)."""
+    if fcntl is None:
+        yield
+        return
+    fd = os.open(directory / ".lock", os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)                    # closing the descriptor releases the lock
+
+
 def keep(directory: Path, commit: str, runs: Mapping[str, PackageRun]) -> Path:
-    """Write the commit's record: these packages' runs over any it already holds."""
+    """Write the commit's record: these packages' runs over any it already holds. An
+    `OSError` (a read-only or full disk) reaches the caller, and no part file is left."""
     path = directory / f"{commit}.json"
-    packages = dict(read_record(path) or {})
-    packages.update(runs)
     directory.mkdir(parents=True, exist_ok=True)
-    body = {"format": FORMAT, "commit": commit,
-            "packages": {name: {"tiers": run.tiers, "tests": dict(run.tests)}
-                         for name, run in sorted(packages.items())}}
-    part = path.with_name(path.name + ".part")
-    part.write_text(json.dumps(body, indent=1, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(part, path)
+    with _locked(directory):
+        packages = dict(read_record(path) or {})
+        packages.update(runs)
+        body = {"format": FORMAT, "commit": commit,
+                "packages": {name: {"tiers": run.tiers, "tests": dict(run.tests)}
+                             for name, run in sorted(packages.items())}}
+        fd, part = tempfile.mkstemp(dir=directory, prefix=f"{commit}.", suffix=".part")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as out:
+                out.write(json.dumps(body, indent=1, sort_keys=True) + "\n")
+            os.replace(part, path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(part)
+            raise
     return path
 
 
