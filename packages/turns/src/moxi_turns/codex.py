@@ -1193,11 +1193,22 @@ _HOSTS_LOCK = threading.Lock()
 
 
 def launch(cwd, *, instructions: str | None = None, env=None,
-           window: bool = True, options=None, verify=None):
-    """Launch a hosted Codex thread and return its live turns ``Session``."""
+           window: bool = True, options=None, verify=None, additions=None):
+    """Launch a hosted Codex thread and return its live turns ``Session``.
+
+    ``options`` are the thread parameters each load sends: top-level ``sandbox`` or
+    ``permissions`` and ``model``, and a nested ``config`` of Codex config overrides.
+    ``additions`` is the launch's ``LaunchAdditions`` for ``codex``; without it the host
+    asks ``launch_additions`` once itself, and with it asks nothing. Its variables go
+    over ``env`` and its options under ``options``. A key turns owns in either is refused
+    with ``ValueError``.
+    """
+    from .additions import for_host
+
     path = Path(cwd).resolve()
     if not path.is_dir():
         raise FileNotFoundError(f"Codex working directory does not exist: {path}")
+    env, options = for_host("codex", additions, cwd=path, env=env, options=options)
     harness = CodexHarness(path, instructions=instructions, env=env, window=window,
                            options=options, verify=verify)
     endpoint = Endpoint(harness, env=harness.env).open()

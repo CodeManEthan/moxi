@@ -827,13 +827,22 @@ _HOSTS: list[tuple[Endpoint, OpenCodeHarness]] = []
 _HOSTS_LOCK = threading.Lock()
 
 
-def launch(cwd, *, instructions: str | None = None, env=None, options=None):
+def launch(cwd, *, instructions: str | None = None, env=None, options=None,
+           additions=None):
     """Launch a hosted OpenCode session (experimental) and return its live turns
     ``Session``. Returns once the server listens, the session exists and its event
-    stream is reconciled; raises with the reason when any of that fails."""
+    stream is reconciled; raises with the reason when any of that fails.
+
+    ``additions`` is the launch's ``LaunchAdditions`` for ``opencode``; without it the
+    host asks ``launch_additions`` once itself, and with it asks nothing. Its variables
+    go over ``env`` and its options (a ``permission`` fragment among them) under
+    ``options``, a mapping in both joined."""
+    from .additions import for_host
+
     path = Path(cwd).resolve()
     if not path.is_dir():
         raise FileNotFoundError(f"OpenCode working directory does not exist: {path}")
+    env, options = for_host("opencode", additions, cwd=path, env=env, options=options)
     harness = OpenCodeHarness(path, instructions=instructions, env=env, options=options)
     return _run(harness)
 

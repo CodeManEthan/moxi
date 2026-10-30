@@ -30,9 +30,14 @@ out of the harness. This package is turns' whole public API, the announcement's
                               # TurnEnded, and one Gone; w.close()
     h = s.handle_stops(on_stop)   # one stop handler per session; h.close()
     s.close()                 # or `with turns.find(...) as s:`
-    turns.claude_plugin_dirs()  # the Claude plugin folders, for a per-launch --plugin-dir
-    s = turns.opencode.launch(cwd, *, instructions=None, env=None, options=None)
-                              # an OpenCode host, experimental
+    adds = turns.launch_additions(harness, *, cwd, env, session_id=None, commands=())
+                              # LaunchAdditions(harness, argv, env, options, notes): what a
+                              # launch about to start adds; modules contribute through the
+                              # group moxi.turns.additions (a Contribution each)
+    s = turns.codex.launch(cwd, *, instructions=None, env=None, window=True, options=None,
+                           verify=None, additions=None)          # a Codex host
+    s = turns.opencode.launch(cwd, *, instructions=None, env=None, options=None,
+                              additions=None)   # an OpenCode host, experimental
 
 A request the endpoint never got reads as refused (`Refused("gone")`); one it got and
 did not answer in time has an unknown outcome, never a refusal (the `Delivery` above,
@@ -52,7 +57,8 @@ _WHERE = {
     "codex": "codex",
     **dict.fromkeys(("find", "sessions", "wait_ready", "Session", "Delivery", "Watch",
                      "StopHandler", "TurnsError", "VersionError"), "client"),
-    "claude_plugin_dirs": "claude_setup",
+    **dict.fromkeys(("launch_additions", "LaunchAdditions", "Contribution",
+                     "AdditionsRequest"), "additions"),
     "opencode": "opencode",     # a host's namespace (`turns.opencode.launch`): the module
     **dict.fromkeys(("Facts", "Agents", "Agent", "OpenTurn", "Started", "Refused", "Lost",
                      "Ended", "Ran", "Shells", "LeftShell", "Failed", "Ready",
@@ -63,7 +69,8 @@ _WHERE = {
 }
 
 __all__ = [
-    "find", "sessions", "wait_ready", "codex", "claude_plugin_dirs", "opencode",
+    "find", "sessions", "wait_ready", "codex", "opencode",
+    "launch_additions", "LaunchAdditions", "Contribution", "AdditionsRequest",
     "Session", "Delivery", "Watch", "StopHandler", "TurnsError", "VersionError",
     "Facts", "Agents", "Agent", "OpenTurn", "Started", "Refused", "Lost", "Ended", "Ran",
     "Shells", "LeftShell", "Failed", "Ready", "TurnStarted", "TurnSteered", "TurnEnded",
