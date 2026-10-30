@@ -83,7 +83,7 @@ class OpenCodeAgent:
     name: str
     scope: str
     cwd: str
-    session_file: Path
+    session_file: Path | None       # None only in a roster built to check rows
     models: list = field(default_factory=lambda: list(DEFAULT_MODELS))
     binary: str | None = None
     directors: list = field(default_factory=list)   # qualified at load, one spelling
@@ -135,9 +135,13 @@ def load(env=None, path=None) -> Roster:
     return from_table(cfg.opencode, cfg.source)
 
 
-def from_table(table: dict, source: str = "defaults") -> Roster:
+def from_table(table: dict, source: str = "defaults", *, check: bool = False) -> Roster:
     """The roster from the raw `[opencode]` table, `{"defaults": {...}, "agents":
-    {...}}`. `source` is the file the table came from, which every refusal names."""
+    {...}}`. `source` is the file the table came from, which every refusal names.
+
+    `check=True` checks the rows and nothing more, for a check of config text: it reads
+    no environment, so a row with no `session_file` of its own gets None in place of its
+    default under STATE. The roster it returns is not one to launch from."""
     defaults = dict((table or {}).get("defaults") or {})
     where = roster_rows.check_defaults("opencode", source, defaults, _ENTRY_KEYS,
                                        _DEFAULT_KEYS)
@@ -149,7 +153,7 @@ def from_table(table: dict, source: str = "defaults") -> Roster:
         if isinstance(section, dict):
             section = {**{k: v for k, v in defaults.items() if k not in section},
                        **section}
-        agent = _entry(source, qualified, section)
+        agent = _entry(source, qualified, section, check=check)
         agents[agent.qualified] = agent
     return Roster(agents=agents, source=source)
 
@@ -161,7 +165,7 @@ def _models_ok(model) -> bool:
             and all(isinstance(m, str) and "/" in m for m in models))
 
 
-def _entry(path, qualified: str, section) -> OpenCodeAgent:
+def _entry(path, qualified: str, section, *, check: bool = False) -> OpenCodeAgent:
     head = roster_rows.parse_head(
         "opencode", path, qualified, section, _ENTRY_KEYS,
         stamped=": the server's environment is stamped at spawn, before any register "
@@ -182,7 +186,7 @@ def _entry(path, qualified: str, section) -> OpenCodeAgent:
     return OpenCodeAgent(
         qualified=qualified, name=head.name, scope=head.scope,
         cwd=head.cwd, session_file=(Path(section["session_file"]) if section.get("session_file")
-                      else session_path(qualified)),
+                      else None if check else session_path(qualified)),
         models=list(models), binary=binary, directors=declared)
 
 

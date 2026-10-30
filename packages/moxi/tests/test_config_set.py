@@ -263,9 +263,19 @@ def test_unset_removes_the_key_so_it_reads_its_default(demo):
     assert settings().source("local.retain_days") == "default"
 
 
-def test_unset_of_a_key_the_file_lacks_changes_nothing(demo):
-    config.unset("demo", "block", by="cli")
-    assert demo.read_text() == ""
+def test_unset_of_a_key_the_file_lacks_changes_nothing(demo, capsys):
+    assert config.unset("demo", "block", by="cli") == []
+    assert not demo.parent.exists()
+    config.set("demo", "name", "x", by="cli")
+    before, stamp = demo.read_text(), os.stat(demo).st_mtime_ns
+    assert config.unset("demo", "block", by="cli") == []
+    assert config.unset("demo", "local.retain_days", by="cli") == []
+    assert (demo.read_text(), os.stat(demo).st_mtime_ns) == (before, stamp)
+    assert [r["op"] for r in config.history("demo")] == ["set"]
+    code, out, err = run(capsys, "config", "unset", "demo", "block")
+    assert (code, out, err) == (0, "demo: block is not set in the file; nothing changed\n",
+                                "")
+    assert [r["op"] for r in config.history("demo")] == ["set"]
 
 
 # -- the key, the module, the file ---------------------------------------------------------
@@ -852,10 +862,23 @@ def test_check_text_reads_the_text_alone(monkeypatch):
     schema = Schema.parse(SCHEMA)
     monkeypatch.setenv("MOXI_DEMO_BACKEND", "bogus")
     before = dict(config._cache)
-    assert config.check_text("demo", schema, 'backend = "remote"\n[local]\nretain_days = 3\n'
-                             'root = "~/rec"\n') is None
-    assert config.check_text("demo", schema, "") is None
+    got = config.check_text("demo", schema, 'backend = "remote"\n[local]\nretain_days = 3\n'
+                            'root = "~/rec"\n')
+    assert (got["backend"], got.source("backend"), got.file) == ("remote", "file", None)
+    empty = config.check_text("demo", schema, "")
+    assert (empty["backend"], empty.source("backend")) == ("local", "default")
     assert config._cache == before
+
+
+def test_check_text_gives_the_values_load_gives_from_the_same_text(demo):
+    text = ('private_names = ["a"]\n[local]\nretain_days = 3\nroot = "~/rec"\n'
+            '[watch]\ntick = 2\n')
+    demo.parent.mkdir(parents=True)
+    demo.write_text(text)
+    given, loaded = config.check_text("demo", Schema.parse(SCHEMA), text), settings()
+    assert dict(given.values) == dict(loaded.values)
+    assert dict(given.sources) == dict(loaded.sources)
+    assert isinstance(given["local.root"], Path) and given["watch.tick"] == 2.0
 
 
 @pytest.mark.parametrize("text, key, words", [

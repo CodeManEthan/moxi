@@ -66,7 +66,9 @@ value of the wrong type raises `ConfigError` naming the file, the key and the fi
 `path=` reads that file in place of the module's own.
 
 `check_text(module, schema, text)` is the same reader over a config file's text alone: no
-path, no environment overrides, no cache. It raises `ConfigError` or returns None.
+path, no environment overrides, no cache. It raises `ConfigError`, or returns the
+`Settings` the text gives (no path; each key the text sets, typed as `load` types it, else
+its default), so a module's own check can read the same values its loader reads.
 
 `Config(module, schema)` is the same reader for a running module: `start()` raises, and
 `use(key)` reads one key at the point of use, keeping the last good settings when the file
@@ -375,14 +377,15 @@ class Settings(_Frozen):
 _NO_ENV = _MappingProxy({})
 
 
-def check_text(module: str, schema: Schema, text: str) -> None:
+def check_text(module: str, schema: Schema, text: str) -> Settings:
     """Check config text `text` of module `module` as `load` would read it, but from the
     text alone: no path, no environment overrides. Raises `ConfigError`; an error names no
-    file."""
-    _read_text(module, schema, text, None)
+    file. Returns the `Settings` the text gives: `file` None, each key the text sets as
+    `load` types it (a path's `~` expanded to the user's home), else its default."""
+    return _read_text(module, schema, text, None)
 
 
-def _read_text(module, schema, text, path) -> None:
+def _read_text(module, schema, text, path) -> Settings:
     """`check_text`, with each error naming `path`."""
     import tomllib
 
@@ -392,7 +395,7 @@ def _read_text(module, schema, text, path) -> None:
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(path, None, f"is not valid TOML ({exc})",
                           "correct the file's TOML syntax") from None
-    _walk_file(data, "", schema, path, {}, _NO_ENV)
+    return _settings(module, schema, path, data, _NO_ENV)
 
 
 def load(module: str, schema: Schema, *, env=None, path=None) -> Settings:
@@ -790,7 +793,9 @@ def set(module: str, key: str, value, *, by: str) -> list:
 
 def unset(module: str, key: str, *, by: str) -> list:
     """Remove `key` from module `module`'s config file, so it reads its default (a switch
-    table's entry then reads false). Returns the units applied, as `set` does."""
+    table's entry then reads false). Returns the units applied, as `set` does. A key the
+    file does not hold changes nothing: no file is made or written and no history line is
+    added, though the file is still checked as it is (a missing one as the empty text)."""
     _change(module, key, "unset", None, by=by)
     return []
 
@@ -1015,6 +1020,11 @@ def _change(module, key, op, value, *, by, text=False) -> bool:
             raise ConfigError(path, key, "is a switch, not a list",
                               "set it to true or false")
         item = _coerce_item(target, key, value, path, text)
+    if op == "unset" and not os.path.lexists(path):
+        # Nothing to remove and no file to make: the text is still checked, as the empty
+        # text `config check` reads for a missing file.
+        _check_file(module, schema, check, "", path, key)
+        return False
     try:
         with files.edit_toml(path, timeout=LOCK_TIMEOUT) as doc:
             parts = target.name.split(".")
@@ -1024,12 +1034,14 @@ def _change(module, key, op, value, *, by, text=False) -> bool:
                 node = _container(doc, parts[:-1], path, create=True)
                 node[parts[-1]] = _item(new)
             elif op == "unset":
-                _drop(doc, parts)
+                dropped = _drop(doc, parts)
             else:
                 _edit_list(doc, parts, target, op, item, path, module, key)
             from ._vendor import tomlkit
 
             _check_file(module, schema, check, tomlkit.dumps(doc), path, key)
+            if op == "unset" and not dropped:
+                raise _Unchanged
     except _Unchanged:
         return False
     except files.LockTimeout as exc:
@@ -1070,14 +1082,17 @@ def _container(doc, parts, path, *, create):
     return node
 
 
-def _drop(doc, parts) -> None:
+def _drop(doc, parts) -> bool:
+    """Delete the dotted key `parts` from `doc`; False when `doc` does not hold it."""
     node = doc
     for part in parts[:-1]:
         if not isinstance(node, dict) or part not in node:
-            return
+            return False
         node = node[part]
     if isinstance(node, dict) and parts[-1] in node:
         del node[parts[-1]]
+        return True
+    return False
 
 
 def _plain(value):

@@ -840,7 +840,9 @@ def _config_change(op: str, argv: list[str]) -> int:
     except config.ConfigError as exc:
         _error(str(exc))
         return exc.exit_code
-    if not changed:
+    if not changed and op == "unset":
+        print(f"{args.module}: {args.key} is not set in the file; nothing changed")
+    elif not changed:
         print(f"{args.module}: {args.key} already holds that item; nothing changed")
     elif op in ("add", "remove"):
         done = "added" if op == "add" else "removed"
@@ -993,8 +995,8 @@ def _paths_of(module: str) -> dict:
     directories = {"data": layout.data_dir(), "state": layout.state_dir(),
                    "cache": layout.cache_dir(), "config": layout.config_dir(),
                    "runtime": layout.runtime_dir()}
-    notes = [f"{kind} is read where it is, under a host folder, until "
-             f"`moxi install {module}` moves it"
+    notes = [f"{kind} is read where it is, under a host folder; a later release of "
+             "moxi moves it"
              for kind, root in (("state", layout.state_root()), ("cache", layout.cache_root()))
              if directories[kind] != root / module]
     listed = []

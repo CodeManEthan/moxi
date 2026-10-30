@@ -233,7 +233,7 @@ class Specifier(BaseSpecifier):
 
         Added a stable pickle format. Pickles created with packaging 26.2+ can
         be unpickled with future releases.  Backward compatibility with pickles
-        from moxi._vendor.packaging < 26.2 is supported but may be removed in a future
+        from packaging < 26.2 is supported but may be removed in a future
         release.
     """
 

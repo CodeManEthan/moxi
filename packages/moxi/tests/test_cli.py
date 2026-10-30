@@ -566,8 +566,8 @@ def test_paths_names_a_directory_read_under_a_host_folder(stored, monkeypatch, c
     old.mkdir(parents=True)
     info = json.loads(run(capsys, "paths", "alpha", "--json")[1])
     assert info["directories"]["state"] == str(old)
-    assert info["notes"] == ["state is read where it is, under a host folder, until "
-                             "`moxi install alpha` moves it"]
+    assert info["notes"] == ["state is read where it is, under a host folder; a later "
+                             "release of moxi moves it"]
 
 
 def test_paths_of_the_core(stored, capsys):

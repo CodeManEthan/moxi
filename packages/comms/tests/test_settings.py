@@ -412,6 +412,60 @@ def test_the_text_entry_reads_no_environment(monkeypatch):
         config.check_text('backend = "remote"\n')
 
 
+#: A codex row the roster takes but warns about at launch, and an opencode row: neither
+#: names its own state file, so a launch builds both defaults from the environment.
+WARNED_ROWS = ('[codex.agents."p@x"]\ncwd = "/src"\nnetwork_access = false\n'
+               '[opencode.agents."q@x"]\ncwd = "/src"\n')
+
+
+class _NoEnvironment(dict):
+    """A process environment any read of which fails the test."""
+
+    def _read(self, *args):
+        raise AssertionError(f"the environment was read: {args!r}")
+
+    __getitem__ = get = __contains__ = __iter__ = __len__ = keys = items = _read
+    values = copy = _read
+
+
+def test_the_text_entry_reads_nothing_but_the_text(monkeypatch):
+    # A path's `~` is the user's home, the one thing the core's reader reads to type it.
+    text = EVERY_TABLE.replace('"~/rec.db"', '"/var/rec.db"')
+    config.schema()
+    monkeypatch.setattr(os, "environ", _NoEnvironment())
+    assert config.check_text(text) is None
+    assert config.check_text(WARNED_ROWS) is None
+
+
+def test_the_text_entry_logs_no_roster_warning(caplog, capsys):
+    from moxi_comms.adapters import codex_roster
+
+    with caplog.at_level("WARNING"):
+        assert config.check_text(WARNED_ROWS) is None
+    assert caplog.records == [] and capsys.readouterr().err == ""
+    write_config(None, WARNED_ROWS)
+    with caplog.at_level("WARNING"):
+        roster = codex_roster.load()
+    assert [r.name for r in caplog.records] == ["comms.codex.roster"]
+    assert "network_access is off" in caplog.records[0].getMessage()
+    assert roster.agents["p@x"].thread_file.name == "p@x.json"
+
+
+def test_the_text_entry_types_the_values_as_the_loader_does(monkeypatch):
+    seen = []
+    typed = config._typed
+
+    def spy(settings, path):
+        seen.append((dict(settings.values), dict(settings.sources)))
+        return typed(settings, path)
+
+    monkeypatch.setattr(config, "_typed", spy)
+    write_config(None, EVERY_TABLE)
+    config.load()
+    config.check_text(EVERY_TABLE)
+    assert len(seen) == 2 and seen[0] == seen[1]
+
+
 def test_the_text_entry_leaves_no_cache_entry():
     checked, cached = dict(config._checked), dict(moxi_config._cache)
     config.check_text(EVERY_TABLE)
@@ -465,6 +519,17 @@ def test_config_set_refuses_a_row_its_roster_refuses(core_state, capsys, key):
     assert out == "" and f"{path}: " in err and "slot is retired" in err
     assert path.read_text() == "block = true\n"
     assert moxi_config.history("comms") == []
+
+
+def test_config_set_and_check_print_no_roster_warning(core_state, capsys, caplog):
+    from moxi import cli
+
+    path = write_config(None, WARNED_ROWS)
+    with caplog.at_level("WARNING"):
+        assert cli.main(["config", "set", "comms", "block", "false"]) == 0
+        assert cli.main(["config", "comms", "check"]) == 0
+    assert capsys.readouterr().err == "" and caplog.records == []
+    assert "network_access = false" in path.read_text()
 
 
 def test_config_set_and_check_pass_a_good_file_under_a_bad_variable(core_state, capsys,
