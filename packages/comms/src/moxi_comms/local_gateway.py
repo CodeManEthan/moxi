@@ -120,25 +120,48 @@ class LocalGateway:
         self._pump: threading.Thread | None = None
         self._wake = threading.Event()
         self._stop = threading.Event()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # `connect` makes a missing directory of the record's, private; one already
+        # there, such as a shared directory a configured record names, is left as it is.
         self._init_schema()
 
     # ------------------------------------------------------------------ connections
     def _conn(self) -> sqlite3.Connection:
-        """One connection per thread. WAL lets them all read while one writes."""
+        """One connection per thread. WAL lets them all read while one writes.
+
+        Opened through `moxi.store.connect`: a record it creates is private to its owner
+        (0600) from its first byte and starts in WAL, in a directory left as it was when it
+        was there already (a missing one is made 0700); an existing record is opened as it
+        is, its mode and journal mode untouched. A thread that is done with the record
+        calls `release()`, or its connection stays open until `close()`.
+        """
         conn = getattr(self._local, "conn", None)
         if conn is None:
+            from moxi.store import connect
+
             # check_same_thread=False so `close()` may be called from any thread; the
             # connection is still only ever USED by the thread it was opened for.
-            conn = sqlite3.connect(str(self.path), timeout=self.busy_timeout_ms / 1000.0,
-                                   isolation_level=None, check_same_thread=False)
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
+            conn = connect(self.path, timeout=self.busy_timeout_ms / 1000.0,
+                           check_same_thread=False)
             self._local.conn = conn
             with self._lock:
                 self._conns.append(conn)
         return conn
+
+    def release(self) -> None:
+        """Close the calling thread's connection, if it has one, and forget it.
+
+        For a thread that is about to end, such as the daemon's handler for one client:
+        without this each such thread leaves one connection open for the process's life.
+        The thread's next call opens a new one.
+        """
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            return
+        self._local.conn = None
+        with self._lock:
+            self._conns = [c for c in self._conns if c is not conn]
+        with contextlib.suppress(sqlite3.Error):
+            conn.close()
 
     def _init_schema(self) -> None:
         conn = self._conn()
