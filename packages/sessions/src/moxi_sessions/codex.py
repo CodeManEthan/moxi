@@ -941,6 +941,14 @@ SPAWN_ITEM = "SubAgentActivity"
 SPAWN_ITEM_BYTES = b'"SubAgentActivity"'
 #: The spawn item kind whose `id` is the spawn call's `call_id`.
 SPAWN_STARTED = "started"
+#: The tool call that spawns a thread, by its `response_item` payload `name`.
+SPAWN_CALL = "spawn_agent"
+#: The `event_msg` payload type Codex 0.153.0 may persist for a spawn, never seen written.
+SPAWN_EVENT = "sub_agent_activity"
+#: The bytes a line must hold to be a spawn call or a spawn event, so a scan decodes no
+#: other line.
+SPAWN_CALL_BYTES = b'"spawn_agent"'
+SPAWN_EVENT_BYTES = b'"sub_agent_activity"'
 
 
 @dataclass(frozen=True)
@@ -1011,12 +1019,33 @@ class Spawned:
 @dataclass(frozen=True)
 class Spawns:
     """A rollout's spawn items, read once: line 1's `session_meta` payload (None when
-    line 1 is not one), the children in the order first named, and `size`, the bytes
-    read."""
+    line 1 is not one), the children in the order first named, `size`, the bytes read,
+    and `unread_spelling`, what the rollout holds that marks a spawn in a spelling this
+    reader does not take children from (a `spawn_agent` call, a `sub_agent_activity`
+    event), the first one seen, else None."""
 
     meta: dict | None
     children: tuple[Spawned, ...]
     size: int
+    unread_spelling: str | None = None
+
+
+def _unread_spelling(data: bytes) -> str | None:
+    """What line `data` is when it marks a spawn without a spawn item: a `spawn_agent`
+    call or a `sub_agent_activity` event. Decodes only a line holding one of the two
+    names in quotes."""
+    call = SPAWN_CALL_BYTES in data
+    if not call and SPAWN_EVENT_BYTES not in data:
+        return None
+    entry = parse_line(data)
+    payload = entry.get("payload") if entry is not None else None
+    if not isinstance(payload, dict):
+        return None
+    if call and entry.get("type") == "response_item" and payload.get("name") == SPAWN_CALL:
+        return f"a `{SPAWN_CALL}` call"
+    if entry.get("type") == "event_msg" and payload.get("type") == SPAWN_EVENT:
+        return f"a `{SPAWN_EVENT}` event"
+    return None
 
 
 def read_spawns(path: str | Path, *, thread_id: str | None = None,
@@ -1029,7 +1058,9 @@ def read_spawns(path: str | Path, *, thread_id: str | None = None,
     `agent_thread_id`. An item whose `thread_id` names a thread other than this one
     (`thread_id`, else line 1's `id`) is history the rollout carries from another thread,
     and is not this thread's spawn. A last line still being written does not decode and
-    is skipped.
+    is skipped. A `spawn_agent` call or a `sub_agent_activity` event is noted in
+    `unread_spelling`, so a rollout that spawned in a spelling not read here is not
+    taken for one that spawned nothing.
 
     Raises OSError when the file cannot be read, and ValueError for a compressed rollout,
     which this does not read.
@@ -1041,6 +1072,7 @@ def read_spawns(path: str | Path, *, thread_id: str | None = None,
     paths: dict[str, Any] = {}
     calls: dict[str, Any] = {}
     kinds: dict[str, list[str]] = {}
+    unread: str | None = None
     with open(path, "rb") as handle:
         size = os.fstat(handle.fileno()).st_size
         if end is not None:
@@ -1062,6 +1094,8 @@ def read_spawns(path: str | Path, *, thread_id: str | None = None,
                         thread_id = _str(meta.get("id"))
                 continue
             if SPAWN_ITEM_BYTES not in data:
+                if unread is None:
+                    unread = _unread_spelling(data)
                 continue
             entry = parse_line(data)
             payload = entry.get("payload") if entry is not None else None
@@ -1090,4 +1124,5 @@ def read_spawns(path: str | Path, *, thread_id: str | None = None,
                     and _str(item.get("id")) is not None):
                 calls[child] = item["id"]
     return Spawns(meta, tuple(Spawned(child, paths[child], calls[child],
-                                      tuple(kinds[child])) for child in order), size)
+                                      tuple(kinds[child])) for child in order), size,
+                  unread)

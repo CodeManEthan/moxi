@@ -696,6 +696,11 @@ def _codex_subagents(source: Source, bound: int | None) -> SubagentListing:
         return SubagentListing(source, UNREADABLE,
                                f"the rollout cannot be read: {exc.strerror or exc}")
     if not spawns.children:
+        if spawns.unread_spelling is not None:
+            return SubagentListing(
+                source, UNREADABLE,
+                f"the rollout holds {spawns.unread_spelling} but no `{codex.SPAWN_ITEM}` "
+                "item naming a child thread; that spawn spelling is not one sessions reads")
         return SubagentListing(source, NONE)
     # A child of a spawned thread names that thread as the agent that spawned it; a child
     # of a main thread names none. With no line 1, which of the two is not known.
@@ -734,8 +739,10 @@ def subagents(source: Any) -> SubagentListing:
     * Codex: the child threads the rollout's spawn items name (`codex.read_spawns`),
       each found by its thread id under the rollout's own sessions root, with no walk,
       and labelled from the spawn items and the child's line 1. A child named but not
-      found is named in `unreadable_parts`. For a spawned thread's own rollout, the
-      listing holds the threads it spawned.
+      found is named in `unreadable_parts`. A rollout that holds a `spawn_agent` call
+      or a `sub_agent_activity` event but no spawn item naming a child is `unreadable`,
+      not `none`. For a spawned thread's own rollout, the listing holds the threads it
+      spawned.
     * OpenCode: the session's child sessions, read in one snapshot with its row.
 
     Never raises for what the place holds or whether it can be read. Raises ValueError for

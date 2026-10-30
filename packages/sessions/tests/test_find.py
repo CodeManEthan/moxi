@@ -575,6 +575,32 @@ def test_codex_a_parent_with_no_spawns_is_none(rollouts):
     assert listing.state == NONE and listing.reason is None and listing.entries == ()
 
 
+def test_codex_a_spawn_in_a_spelling_not_read_is_unreadable_not_none(rollouts):
+    # A `spawn_agent` call with no spawn item naming the child.
+    r = rollout(rollouts)
+    r.item("function_call", id="fc_call_x", name="spawn_agent", namespace="collaboration",
+           call_id="call_x", arguments="{}")
+    r.write()
+    listing = subagents(Source("codex", str(r.path), THREAD))
+    assert listing.state == UNREADABLE and listing.entries == ()
+    assert "`spawn_agent` call" in listing.reason
+    assert "not one sessions reads" in listing.reason
+    # A `sub_agent_activity` event, the other spelling Codex may persist.
+    r = rollout(rollouts, THREAD_B)
+    r.event("sub_agent_activity", agent_thread_id=CHILD)
+    r.write()
+    listing = subagents(Source("codex", str(r.path), THREAD_B))
+    assert listing.state == UNREADABLE and "`sub_agent_activity` event" in listing.reason
+
+
+def test_codex_a_spawn_name_in_text_is_not_a_spawn(rollouts):
+    r = rollout(rollouts)
+    r.user('call "spawn_agent" or emit "sub_agent_activity"')
+    r.tool_call("spawn_agent_docs", "ls")
+    r.write()
+    assert subagents(Source("codex", str(r.path), THREAD)).state == NONE
+
+
 def test_codex_a_missing_or_compressed_parent_is_unreadable(rollouts):
     listing = subagents(Source("codex", str(rollouts / "absent.jsonl"), THREAD))
     assert listing.state == UNREADABLE and "cannot be read" in listing.reason
