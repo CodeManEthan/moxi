@@ -641,6 +641,20 @@ def test_a_setup_version_that_differs_warns(d, held):
     assert ("demo", "setup version") not in d.rows("demo")
 
 
+def test_the_doctor_reads_the_setup_version_the_settle_step_writes(d, monkeypatch):
+    from moxi import _settle
+
+    d.module(settings=None)
+    _settle.record_setup("demo", "0.0.9")
+    assert d.rows("demo")[("demo", "setup version")].state == "warn"
+    moved = d.tmp / "elsewhere" / "setup.json"
+    moved.parent.mkdir()
+    monkeypatch.setattr(_settle, "setup_path", lambda: moved)
+    assert ("demo", "setup version") not in d.rows("demo")
+    _settle.record_setup("demo", "0.0.8")
+    assert "0.0.8" in d.rows("demo")[("demo", "setup version")].detail
+
+
 def test_records_are_fail_rows_until_cleared(d):
     d.module(settings=None)
     doctor.record("demo", "resume failed", key="resume:moxi-demo-relay.service")

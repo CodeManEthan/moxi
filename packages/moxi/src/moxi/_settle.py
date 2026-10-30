@@ -306,6 +306,7 @@ def _start(argv: list[str], environ: dict[str, str], fd: int) -> subprocess.Pope
 # -- setup.json ------------------------------------------------------------------------------------
 
 def setup_path():
+    """`setup.json`'s path; the settle step and the doctor both read it here."""
     from . import paths
 
     return paths.core().state_dir() / SETUP_FILE
