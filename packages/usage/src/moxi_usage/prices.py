@@ -3,7 +3,8 @@
 Opt in: nothing else in usage reaches the network. `update` fetches the file from config
 `prices.url`, runs the converter (`moxi_usage.convert`) with the shipped supplement,
 refuses a result with fewer than half the shipped table's rows, works out which models
-the change adds, removes and reprices in the table in effect, and writes
+the change adds, removes and reprices in the table in effect, and which of the models the
+token index has seen it reprices, prices for the first time or leaves unpriced, and writes
 `DATA/usage/models-snapshot.json` with `moxi.files.atomic_write` unless it is a dry run.
 `revert` removes the snapshot, so the shipped table rules again.
 
@@ -70,12 +71,32 @@ class Update:
     removed: list[str] = field(default_factory=list)
     repriced: list[str] = field(default_factory=list)
     written: bool = False
+    #: What the change does to the models the token index has seen (`InIndex`), or None
+    #: when there is no index to read.
+    in_index: InIndex | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {"url": self.url, "path": str(self.path), "snapshot": dict(self.snapshot),
                 "rows": self.rows, "shipped_rows": self.shipped_rows,
                 "added": self.added, "removed": self.removed, "repriced": self.repriced,
-                "written": self.written}
+                "written": self.written,
+                "in_index": None if self.in_index is None else self.in_index.as_dict()}
+
+
+@dataclass(frozen=True)
+class InIndex:
+    """The models the token index's claimed requests name, and what a new snapshot does
+    to their prices as a report would look them up now: `repriced` (a price changed),
+    `priced` (unpriced before, priced after) and `unpriced` (unpriced after)."""
+
+    models: int
+    repriced: list[str] = field(default_factory=list)
+    priced: list[str] = field(default_factory=list)
+    unpriced: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"models": self.models, "repriced": self.repriced, "priced": self.priced,
+                "unpriced": self.unpriced}
 
 
 def supplement() -> Mapping[str, Any]:
@@ -118,12 +139,71 @@ def update(*, fetcher: Fetch | None = None, now: float | None = None,
     before = models.table(env)
     after = models.Table(shipped, doc)
     added, removed, repriced = _changes(before.rows, after.rows)
+    in_index = _in_index(before, models.Table(shipped, doc, before.overrides),
+                         index_models(env), at=when)
     path = models.snapshot_path(env)
     if not dry_run:
         atomic_write(path, convert.dumps(doc))
     return Update(url=url, path=path, snapshot=doc["snapshot"], rows=rows,
                   shipped_rows=shipped_rows, added=added, removed=removed,
-                  repriced=repriced, written=not dry_run)
+                  repriced=repriced, written=not dry_run, in_index=in_index)
+
+
+def index_models(env: Mapping[str, str] | None = None) -> list[tuple[Any, Any]] | None:
+    """Each `(model, provider)` the token index's claimed requests name, or None when
+    there is no index, or none this usage can read. The index is only read."""
+    import sqlite3
+
+    from moxi.store import StoreError
+
+    from . import store
+
+    if not store.index_path(env).exists():
+        return None
+    try:
+        conn = store.connect(env=env, create=False)
+    except (StoreError, sqlite3.Error):
+        return None
+    try:
+        return [(row[0], row[1]) for row in conn.execute(
+            "SELECT DISTINCT COALESCE(model, response_model), provider FROM requests "
+            "WHERE won = 1")]
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+
+
+def _price_key(facts: models.ModelFacts) -> tuple:
+    def plain(value: Any) -> Any:
+        return None if value is models.UNKNOWN else value
+
+    tiers = facts.tiers if isinstance(facts.tiers, Mapping) else {}
+    return (*(plain(getattr(facts, name)) for name in PRICE_FIELDS),
+            json.dumps(tiers, sort_keys=True))
+
+
+def _in_index(before: models.Table, after: models.Table,
+              seen: list[tuple[Any, Any]] | None, *, at: float) -> InIndex | None:
+    if seen is None:
+        return None
+    names: set[str] = set()
+    repriced: set[str] = set()
+    priced: set[str] = set()
+    unpriced: set[str] = set()
+    for model, provider in seen:
+        name = model if isinstance(model, str) and model else "(no model)"
+        names.add(name)
+        old = before.lookup(model, provider=provider, at=at)
+        new = after.lookup(model, provider=provider, at=at)
+        if not new.priced:
+            unpriced.add(name)
+        elif not old.priced:
+            priced.add(name)
+        elif _price_key(old) != _price_key(new):
+            repriced.add(name)
+    return InIndex(models=len(names), repriced=sorted(repriced), priced=sorted(priced),
+                   unpriced=sorted(unpriced))
 
 
 def revert(*, dry_run: bool = False, env: Mapping[str, str] | None = None) -> Path | None:
