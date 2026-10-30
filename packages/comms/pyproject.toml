@@ -2,7 +2,7 @@
 name = "moxi-comms"
 version = "0.2.0"
 description = "Messages between coding-agent sessions, delivered into their turns."
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 keywords = ["claude-code", "codex", "opencode", "agents", "messaging", "multi-agent"]
@@ -13,7 +13,6 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Communications",
     "Topic :: Software Development",
@@ -31,8 +30,8 @@ codex = ["moxi-turns[codex]>=0.1,<0.2"]
 cache = ["moxi-cache>=0.1,<0.2"]
 
 [project.urls]
-Homepage = "https://github.com/moxihq/comms"
-Repository = "https://github.com/moxihq/comms"
+Homepage = "https://github.com/moxihq/moxi"
+Repository = "https://github.com/moxihq/moxi"
 Issues = "https://github.com/moxihq/comms/issues"
 
 # Every Moxi distribution declares the umbrella, so a plain install puts `moxi` on PATH.

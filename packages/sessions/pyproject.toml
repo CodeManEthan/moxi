@@ -3,14 +3,14 @@ name = "moxi-sessions"
 version = "0.1.1"
 description = "Read a harness's own session records: find a session, read its transcript back."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 dependencies = ["moxi>=0.1,<0.2"]
 
 [project.urls]
-Homepage = "https://github.com/moxihq/sessions"
-Repository = "https://github.com/moxihq/sessions"
+Homepage = "https://github.com/moxihq/moxi"
+Repository = "https://github.com/moxihq/moxi"
 Issues = "https://github.com/moxihq/sessions/issues"
 
 # Every Moxi distribution declares the umbrella, so a plain install puts `moxi` on PATH.

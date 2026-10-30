@@ -36,7 +36,7 @@ commands:
 
 ## Install
 
-Linux, Python 3.11 or later, and [uv](https://docs.astral.sh/uv/).
+Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/).
 
 ```sh
 uv tool install moxi

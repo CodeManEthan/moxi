@@ -70,8 +70,11 @@ def test_pyproject_spells_it_the_same():
     project = PYPROJECT["project"]
     assert project["name"] == release.DISTRIBUTION
     assert project["entry-points"]["moxi.modules"] == {"comms": "moxi_comms.module"}
-    for url in project["urls"].values():
-        assert url.startswith(release.REPO_URL)
+    # The code lives in the one Moxi repository; issues stay at the module's own tracker.
+    urls = project["urls"]
+    one_repo = f"https://github.com/{names.ORG}/{names.HARNESS}"
+    assert urls["Homepage"] == urls["Repository"] == one_repo
+    assert urls["Issues"] == f"{release.REPO_URL}/issues"
 
 
 def test_the_public_identity_is_one_everywhere():

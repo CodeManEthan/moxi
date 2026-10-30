@@ -39,7 +39,7 @@ moxi install turns --from 'moxi-turns @ git+https://github.com/moxihq/turns'
 
 ## Requirements
 
-- Linux and Python 3.11 or later.
+- Linux and Python 3.12 or later.
 - `moxi` (0.1).
 - The `codex` extra adds `websockets`, which the Codex host needs; it also needs `codex`
   on PATH.

@@ -3,14 +3,14 @@ name = "moxi-cache"
 version = "0.1.1"
 description = "Know when a session's prompt cache goes cold, and act before it does."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 dependencies = ["moxi>=0.1,<0.2", "moxi-sessions>=0.1,<0.2"]
 
 [project.urls]
-Homepage = "https://github.com/moxihq/cache"
-Repository = "https://github.com/moxihq/cache"
+Homepage = "https://github.com/moxihq/moxi"
+Repository = "https://github.com/moxihq/moxi"
 Issues = "https://github.com/moxihq/cache/issues"
 
 # Every Moxi distribution declares the umbrella, so a plain install puts `moxi` on PATH.

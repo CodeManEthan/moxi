@@ -37,7 +37,7 @@ experimental adapters.
 
 ## Install
 
-Linux, Python 3.11 or later.
+Linux, Python 3.12 or later.
 
 ```sh
 uv tool install moxi-comms
@@ -51,8 +51,8 @@ Until the package is on PyPI, install from the repository:
 uv tool install git+https://github.com/moxihq/comms
 ```
 
-`pipx install` works the same way. `uv tool install` fetches Python 3.11 if the machine
-lacks it; otherwise `uv python install 3.11` supplies one.
+`pipx install` works the same way. `uv tool install` fetches Python 3.12 if the machine
+lacks it; otherwise `uv python install 3.12` supplies one.
 
 The install brings the `moxi` command with it; comms' commands run as `moxi comms
 <verb>`. `moxi shortcut comms` adds a bare `comms` command if you want one.

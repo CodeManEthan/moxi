@@ -1,6 +1,6 @@
 """The clean-home install test.
 
-Builds comms' wheel and the core's (`moxi`, from its checkout beside this one: Moxi's
+Builds comms' wheel and the core's (`moxi`, from its directory beside this one: Moxi's
 members declare no sources), installs both into a fresh venv inside a temp HOME, and
 runs everything from that install with an environment built from nothing: HOME and every
 XDG root in the temp home, TMPDIR there too, no `MOXI_COMMS_*`, so nothing in the
@@ -55,7 +55,7 @@ import pytest
 
 TESTS = Path(__file__).resolve().parent
 REPO = TESTS.parent
-#: The core's checkout, beside this one in ~/moxi and in a build layout alike.
+#: The core's package directory, beside this one under packages/.
 CORE = REPO.parent / "moxi"
 UV = shutil.which("uv")
 

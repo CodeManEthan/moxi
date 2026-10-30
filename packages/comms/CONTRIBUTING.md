@@ -1,16 +1,18 @@
 # Contributing
 
-Thanks for looking. Issues and pull requests are welcome at
-https://github.com/moxihq/comms.
+Thanks for looking. Issues are welcome at https://github.com/moxihq/comms/issues, and
+pull requests at https://github.com/moxihq/moxi, the repository that holds every Moxi
+package; comms is `packages/comms` there.
 
 ## Setting up
 
-You need Linux, Python 3.11 or later and [uv](https://docs.astral.sh/uv/).
+You need Linux, Python 3.12 or later and [uv](https://docs.astral.sh/uv/).
 
 ```sh
-git clone https://github.com/moxihq/comms
-cd comms
+git clone https://github.com/moxihq/moxi
+cd moxi
 uv sync
+cd packages/comms
 uv run pytest
 ```
 
@@ -30,7 +32,7 @@ uv run pytest --clean-home tests/test_clean_home.py
   `write_config(env, text)` (`tests/conftest.py`), under the test's temporary home.
 - **Both backends.** The suites listed in `BOTH_BACKENDS` in `tests/conftest.py` run
   each test against the in-memory mock and against a real local `record.db`.
-- **The clean-home test** builds comms' wheel and the core's (`moxi`, from its checkout
+- **The clean-home test** builds comms' wheel and the core's (`moxi`, from its directory
   beside this one), installs both into a venv under a temporary `HOME`, follows the README's install steps, and checks that the daemon provisions
   itself on its first start, that two OpenCode agents (on a stub `opencode`) can talk,
   that everything stops cleanly and that nothing is written outside that home. It needs
