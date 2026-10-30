@@ -10,7 +10,9 @@ every committer on that repo:
   returned, so a failed push is retried by the first pass after `push_backoff`;
 - the record part: the repo's state file, then the doctor records, then the sweep.
 
-Only a `busy` pass, which never took the lock, skips the push and record parts.
+Only a `busy` pass, which never took the lock, skips the push and record parts. A failure
+in the commit part ends it `error` (unstaging what it staged), and a failure in the push
+part is a `push_error`; either way the record part runs.
 
 Every path the committer hands git is literal by its own form (`:(literal)<path>`). A list
 of changed paths goes on stdin (`--pathspec-from-file=- --pathspec-file-nul`); the only
@@ -28,9 +30,9 @@ The git calls of a pass:
 | dirty | `status --porcelain -z --untracked-files=all --no-renames -- <spec paths>` |
 | staged before | `rev-parse -q --verify HEAD^{commit}`; `diff-index --cached --raw -z --no-renames <HEAD or the empty tree> -- <spec paths>` (on an unborn branch, `hash-object -t tree --stdin` first) |
 | stage | `add --all --pathspec-from-file=- --pathspec-file-nul` |
-| ours | the same `diff-index` with `-M` in place of `--no-renames` |
+| ours | the same `diff-index` with `-M` in place of `--no-renames`; a path staged and not read back as ours is unstaged as below |
 | drop, unstage | `reset -q --pathspec-from-file=- --pathspec-file-nul`, then the `diff-index` again to verify |
-| commit | `commit -q -F <file> [--trailer k=v]... --pathspec-from-file=- --pathspec-file-nul`; `rev-parse -q --verify HEAD^{commit}`; `diff-tree -r -z --no-renames --raw --root --no-commit-id <new commit>` |
+| commit | `rev-parse -q --verify HEAD^{commit}`; `commit -q -F <file> [--trailer k=v]... --pathspec-from-file=- --pathspec-file-nul`; `rev-list -1 --parents HEAD` (when `HEAD`'s parent isn't the `HEAD` read before, `rev-list --reverse --parents --basic-regexp --author=<anchored> HEAD ^<old HEAD>`); `diff-tree -r -z --no-renames --raw --root --no-commit-id <new commit>` |
 | push | `symbolic-ref -q HEAD`; `remote`; per branch `rev-parse -q --verify refs/heads/<b>`, `rev-list --count refs/remotes/<r>/<b>..refs/heads/<b>`, `push -q <r> refs/heads/<b>:refs/heads/<b>` |
 """
 
@@ -532,6 +534,12 @@ class _Pass:
         self.push_state: dict[str, dict | None] = {}
         #: paths this pass staged and could not unstage: path -> staged blob
         self.stranded: dict[str, str | None] = {}
+        #: the lines of the push part's successful pushes (also in `hook_lines`)
+        self.push_lines: list[str] = []
+        #: branch -> the sha a push of it sent, or None to forget it
+        self.pushed_sha: dict[str, str | None] = {}
+        #: True once git commit has made the commit
+        self.landed = False
 
     def end(self, status: str, detail: str = "") -> None:
         self.status, self.detail = status, detail
@@ -608,10 +616,13 @@ def _run(name: str, where: _Where, wait: float, load: Callable[[], Spec | None]
         else:
             try:
                 _commit_part(spec, p, state)
-            except (GitFailed, OSError, SpecError) as exc:
+            except Exception as exc:  # noqa: BLE001 - the push and record parts still run
                 p.end("error", str(exc) if isinstance(exc, SpecError) else _describe(exc))
         if _pushable(spec):
-            _push_part(spec, p, state)
+            try:
+                _push_part(spec, p, state)
+            except Exception as exc:  # noqa: BLE001 - the record part still runs
+                p.push_errors.append(f"the push part failed: {_describe(exc)}")
         _record_part(p, spec, state)
     return p.result()
 
@@ -693,7 +704,7 @@ def _unstage(p: _Pass, spec: Spec, paths: list[str], judged: dict) -> bool:
         if not _index_locked(p):
             break
     for x in left:
-        p.stranded[x] = judged.get(x)
+        p.stranded[x] = judged.get(x, still.get(x))
     return False
 
 
@@ -737,18 +748,59 @@ def _commit_part(spec: Spec, p: _Pass, state: dict) -> None:
         if attempt == 2:
             p.end("error", "git add failed twice: " + _last_line(done.stderr))
             return
-    ours = []
-    for c in _staged(p, spec.paths, renames=True):
-        if c.path in before:
+    try:
+        _after_staging(spec, p, before, stage, since)
+    except Exception as exc:  # noqa: BLE001 - a failure after staging unstages our paths
+        p.end("error", str(exc) if isinstance(exc, SpecError) else _describe(exc))
+        if not p.landed:
+            _undo_staging(p, spec, stage)
+
+
+def _ours(staged_now: list[Change], before: dict) -> list[Change]:
+    """Our staged changes: what is staged now minus what was staged before the pass. When
+    git pairs one of our paths with someone else's as a rename, our side stays ours, as
+    the plain add or deletion it is."""
+    out = []
+    for c in staged_now:
+        if c.old_path is None:
+            if c.path not in before:
+                out.append(c)
             continue
-        if c.old_path is not None and c.old_path in before:
-            c = Change("A", c.path, None, c.blob)
-        ours.append(c)
+        new_ours, old_ours = c.path not in before, c.old_path not in before
+        if new_ours and old_ours:
+            out.append(c)
+        elif new_ours:
+            out.append(Change("A", c.path, None, c.blob))
+        elif old_ours:
+            out.append(Change("D", c.old_path, None, None))
+    return out
+
+
+def _sides(ours: list[Change]) -> list[str]:
+    return [x for c in ours for x in ((c.path, c.old_path) if c.old_path else (c.path,))]
+
+
+def _undo_staging(p: _Pass, spec: Spec, stage: list[str]) -> None:
+    """After a failure, unstage what step 5 staged; what can't be is kept as stranded."""
+    try:
+        _unstage(p, spec, stage, {})
+    except Exception as exc:  # noqa: BLE001
+        p.detail += f"; its paths could not be unstaged: {_describe(exc)}"
+
+
+def _after_staging(spec: Spec, p: _Pass, before: dict, stage: list[str],
+                   since: float | None) -> None:
+    """Steps 6-10: ours, prepare, commit. Any path step 5 staged that isn't ours is
+    unstaged first, so nothing the pass staged is left in the index."""
+    ours = _ours(_staged(p, spec.paths, renames=True), before)
     judged = _blobs(ours)
+    every = _sides(ours)
+    stray = sorted(set(stage) - set(every))
+    if stray:
+        _unstage(p, spec, stray, {})
     if not ours:
         p.end("clean")
         return
-    every = [x for c in ours for x in ((c.path, c.old_path) if c.old_path else (c.path,))]
 
     # Prepare: what to drop, then unstage it and verify.
     if spec.prepare is not None:
@@ -769,7 +821,7 @@ def _commit_part(spec: Spec, p: _Pass, state: dict) -> None:
         if ours is None:
             return
         judged = _blobs(ours)
-        every = [x for c in ours for x in ((c.path, c.old_path) if c.old_path else (c.path,))]
+        every = _sides(ours)
         if not ours:
             p.end("clean")
             return
@@ -789,6 +841,7 @@ def _commit_part(spec: Spec, p: _Pass, state: dict) -> None:
     for key, value in trailers:
         args += ["--trailer", f"{key}={value}"]
     args += ["--pathspec-from-file=-", "--pathspec-file-nul"]
+    old_head = head_commit(p.where.top)
     try:
         done = _g(p, *args, input=_stdin(every), author=tuple(spec.author),
                   extra_env={COMMITTER_ENV: spec.name}, timeout=COMMIT_TIMEOUT)
@@ -809,15 +862,38 @@ def _commit_part(spec: Spec, p: _Pass, state: dict) -> None:
         else:
             p.end("refused", p.hook_lines[0] if p.hook_lines else f"git commit exited {code}")
         return
-    sha = head_commit(p.where.top)
+    p.landed = True
+    sha = _our_commit(p, spec, old_head)
+    if sha is None:
+        p.end("committed", "HEAD moved before the commit could be read back")
+        return
     tree = _g(p, "diff-tree", "-r", "-z", "--no-renames", "--raw", "--root", "--no-commit-id",
-              sha or "HEAD", binary=True)
+              sha, binary=True)
     committed = _blobs(parse_raw(tree.stdout)) if tree.returncode == 0 else {}
     p.sha = sha
     p.files = sorted(committed)
     p.unjudged = sorted(x for x, blob in committed.items()
                         if x not in judged or judged[x] != blob)
     p.end("committed")
+
+
+def _our_commit(p: _Pass, spec: Spec, old_head: str | None) -> str | None:
+    """The commit this pass made: `HEAD` when its parent is `old_head`, the `HEAD` just
+    before the commit. When another git committed right after, the commit by the spec's
+    author whose parent is `old_head`; None when there is none to be sure of."""
+    want = [old_head] if old_head else []
+    done = _g(p, "rev-list", "-1", "--parents", "HEAD")
+    fields = done.stdout.split()
+    if done.returncode == 0 and fields and fields[1:] == want:
+        return fields[0]
+    who = f"^{_bre(spec.author[0])} <{_bre(spec.author[1])}>$"
+    done = _g(p, "rev-list", "--reverse", "--parents", "--basic-regexp", f"--author={who}",
+              "HEAD", *([f"^{old_head}"] if old_head else []))
+    for line in done.stdout.splitlines() if done.returncode == 0 else ():
+        fields = line.split()
+        if fields[1:] == want:
+            return fields[0]
+    return None
 
 
 def _size(path: Path) -> int:
@@ -856,6 +932,8 @@ def _drop(p: _Pass, spec: Spec, ours: list[Change], drops: dict[str, str],
     added = False
     for c in ours:
         why = drops.get(c.path)
+        if why is None and c.old_path is not None:
+            why = drops.get(c.old_path)
         if why is None:
             kept.append(c)
             continue
@@ -885,8 +963,7 @@ def _drop(p: _Pass, spec: Spec, ours: list[Change], drops: dict[str, str],
             still = _blobs(_staged(p, spec.paths, renames=False))
             stuck = [x for x in gone if x in still]
             p.end("error", "a dropped path is still staged: " + _named(stuck))
-        every = [x for c in kept for x in ((c.path, c.old_path) if c.old_path else (c.path,))]
-        _unstage(p, spec, every, judged)
+        _unstage(p, spec, _sides(kept), judged)
         return None
     return kept
 
