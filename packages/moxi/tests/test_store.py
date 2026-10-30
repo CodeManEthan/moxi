@@ -70,6 +70,14 @@ def test_create_false_refuses_a_missing_store_and_makes_nothing(tmp_path):
     assert not path.parent.exists()
 
 
+@pytest.mark.parametrize("name", [":memory:", Path(":memory:"), "./:memory:"])
+def test_the_in_memory_name_is_refused_and_makes_nothing(tmp_path, monkeypatch, name):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(store.StoreError, match="in-memory"):
+        store.connect(name)
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_an_existing_store_is_opened_as_it_is(tmp_path, caplog):
     path = tmp_path / "old.db"
     plain = sqlite3.connect(path)

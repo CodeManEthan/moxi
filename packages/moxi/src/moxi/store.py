@@ -65,10 +65,16 @@ def connect(path: str | os.PathLike, *, private: bool = True, create: bool = Tru
     and foreign keys on, and runs with no implicit transactions (`isolation_level=None`):
     each statement commits by itself unless a `transaction` holds it.
     `check_same_thread` is passed to `sqlite3.connect` as given.
+
+    `path` names a file: `":memory:"`, SQLite's name for a database held in memory, raises
+    `StoreError`, since a store is a file.
     """
     import sqlite3
 
     path = Path(path)
+    if str(path) == ":memory:":
+        raise StoreError("':memory:' is SQLite's in-memory database, not a store file; "
+                         "give the path of the store's file")
     fresh = False
     if not path.exists():
         if not create:
