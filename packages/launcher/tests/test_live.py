@@ -36,7 +36,8 @@ import pytest
 from moxi import config, modules, paths
 from moxi_dev.testing import short_dir, wait_for
 
-from moxi_launcher import api, compose, first, handoffs, presets, store, targets
+from moxi_launcher import (api, catalog, compose, first, handoffs, presets, store,
+                           targets)
 
 pytestmark = [pytest.mark.live,
               pytest.mark.skipif(sys.platform == "win32",
@@ -448,3 +449,49 @@ def test_claude_print_with_turns_records_its_id_and_shows_no_pointer(live_env, w
         conn.close()
     assert row.state in ("started", "ready")
     assert "Handoff waiting" not in targets.run_log(result.request_id).read_text()
+
+
+def test_codex_trusts_the_launch_directory_from_the_trust_row_even_with_a_dot_in_it(
+        tmp_path):
+    """The trust row's words, as `codex` and `codex exec` launches carry them, trust the
+    launch's directory in the real Codex, a dot in its path and all, and leave the
+    user's own trusted projects trusted. A project's `.codex/config.toml` is read only in
+    a trusted directory, so `codex features list` shows the feature it turns on. Codex
+    runs with its home in the test's tmp, and no session starts."""
+    needs("codex")
+    home = tmp_path / "codex-home"
+    home.mkdir()
+    env = {**os.environ, "CODEX_HOME": str(home)}
+
+    def features(where: Path, *words: str) -> dict[str, bool]:
+        out = subprocess.run(["codex", "features", "list", *words], cwd=where, env=env,
+                             capture_output=True, text=True, timeout=60, check=True)
+        found = {}
+        for line in out.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[-1] in ("true", "false"):
+                found[parts[0]] = parts[-1] == "true"
+        return found
+
+    stages = {line.split()[0]: line for line in subprocess.run(
+        ["codex", "features", "list"], cwd=tmp_path, env=env, capture_output=True,
+        text=True, timeout=60, check=True).stdout.splitlines() if line.strip()}
+    name = next(name for name, on in features(tmp_path).items()
+                if not on and "removed" not in stages[name])
+    projects = {}
+    for folder in ("my.repo", "other"):
+        projects[folder] = tmp_path / folder
+        (projects[folder] / ".codex").mkdir(parents=True)
+        (projects[folder] / ".codex" / "config.toml").write_text(
+            f"[features]\n{name} = true\n", encoding="utf-8")
+    (home / "config.toml").write_text(
+        f'[projects.{catalog.toml_literal(str(projects["other"]))}]\n'
+        'trust_level = "trusted"\n', encoding="utf-8")
+    cwd = projects["my.repo"]
+    assert features(cwd)[name] is False
+    assert features(projects["other"])[name] is True
+    row = catalog.load("codex")["trust_cwd"]
+    for mode in ("interactive", "exec"):
+        words = row.tokens(mode, True, cwd=str(cwd))
+        assert features(cwd, *words)[name] is True, (mode, words)
+        assert features(projects["other"], *words)[name] is True, (mode, words)

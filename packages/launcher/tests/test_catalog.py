@@ -3,6 +3,8 @@ the modes rule, the generated parser, pass-through refusals and the `--help` dif
 
 from __future__ import annotations
 
+import tomllib
+
 import pytest
 
 from moxi.config import Key
@@ -173,13 +175,19 @@ def test_a_row_spells_its_value_in_a_mode(harness, name, mode, value, tokens):
 
 
 def test_the_trust_override_names_the_launch_directory_as_a_toml_key():
+    # codex -c splits its key at every dot, so the directory goes as the key of an
+    # inline table, the value of the one-part key `projects`.
     row = catalog.load("codex")["trust_cwd"]
-    assert row.tokens("interactive", True, cwd="/home/me/my repo") == [
-        "-c", 'projects."/home/me/my repo".trust_level="trusted"']
+    assert row.tokens("interactive", True, cwd="/home/me/my.repo") == [
+        "-c", 'projects={"/home/me/my.repo"={trust_level="trusted"}}']
     assert row.tokens("host", True, cwd='/a"b') == [
         "--option", 'projects."/a\\"b".trust_level="trusted"']
     assert row.tokens("exec", True, cwd="/{value}") == [
-        "-c", 'projects."/{value}".trust_level="trusted"']
+        "-c", 'projects={"/{value}"={trust_level="trusted"}}']
+    word = row.tokens("exec", True, cwd='/a"b.c d')[1]
+    key, _, value = word.partition("=")
+    assert key == "projects"
+    assert tomllib.loads(f"v = {value}")["v"] == {'/a"b.c d': {"trust_level": "trusted"}}
     with pytest.raises(ValueError, match="directory"):
         row.tokens("exec", True)
 

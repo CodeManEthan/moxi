@@ -196,7 +196,7 @@ CODEX_ROWS = {
           "-c", "model_reasoning_effort=high", "-c", "x.y=1"]),
         ({"trust_cwd": True},
          ["-s", "workspace-write", "-a", "on-request",
-          "-c", 'projects."/work".trust_level="trusted"']),
+          "-c", 'projects={"/work"={trust_level="trusted"}}']),
     ],
     "exec": [
         ({}, ["-s", "workspace-write"]),
@@ -207,7 +207,7 @@ CODEX_ROWS = {
         ({"add_dir": ["/a"]}, ["-s", "workspace-write", "--add-dir", "/a"]),
         ({"config": ["x.y=1"]}, ["-s", "workspace-write", "-c", "x.y=1"]),
         ({"trust_cwd": True},
-         ["-s", "workspace-write", "-c", 'projects."/work".trust_level="trusted"']),
+         ["-s", "workspace-write", "-c", 'projects={"/work"={trust_level="trusted"}}']),
     ],
     "host": [
         ({}, ["--sandbox", "workspace-write", *UPDATE_OPTION]),
@@ -280,7 +280,7 @@ def test_every_codex_row_composed_at_once_in_each_mode():
     assert list(got.argv) == [
         "codex", "Brief from launcher, launched by ann\n\nb", *CODEX_HEAD,
         "-m", "gpt-5", "-s", "read-only", "-a", "never", "-p", "fast", "--search",
-        "--add-dir", "/a", "-c", "x=1", "-c", 'projects."/work".trust_level="trusted"',
+        "--add-dir", "/a", "-c", "x=1", "-c", 'projects={"/work"={trust_level="trusted"}}',
         "--image", "/i.png"]
 
 

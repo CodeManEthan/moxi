@@ -93,12 +93,16 @@ doc = "Let codex exec run outside a git repository; set for a scratch launch."
 flag = "--skip-git-repo-check"
 modes = ["exec"]
 
+# codex -c splits its key at every dot, quotes or not, so a dotted key naming the
+# launch's directory would miss it whenever the path holds a dot. The key here is
+# `projects` alone, its value an inline table keyed by the directory; Codex merges it into
+# the projects table of the user's config.toml, and its entry wins over one there.
 [trust_cwd]
 type = "bool"
 default = false
 doc = "Trust the launch's directory for this launch only."
 flag = "-c"
-modes = { interactive = { flag = "-c", value = "projects.{cwd_toml}.trust_level=\"trusted\"" }, exec = { flag = "-c", value = "projects.{cwd_toml}.trust_level=\"trusted\"" }, host = { flag = "--option", value = "projects.{cwd_toml}.trust_level=\"trusted\"" } }
+modes = { interactive = { flag = "-c", value = "projects={{cwd_toml}={trust_level=\"trusted\"}}" }, exec = { flag = "-c", value = "projects={{cwd_toml}={trust_level=\"trusted\"}}" }, host = { flag = "--option", value = "projects.{cwd_toml}.trust_level=\"trusted\"" } }
 
 [catalog]
 harness = "codex"
