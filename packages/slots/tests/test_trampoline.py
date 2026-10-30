@@ -3,7 +3,6 @@ environment rule, its verdict file, and the launches it refuses to run."""
 
 from __future__ import annotations
 
-import fcntl
 import os
 import subprocess
 import sys
@@ -14,6 +13,11 @@ import pytest
 from moxi import paths
 from moxi_slots import launchfile, trampoline
 from moxi_slots.trampoline import EXEC, NOT_RUN, TAKEN, TERM_NAMES, child_env
+
+fcntl = pytest.importorskip(
+    "fcntl",
+    reason="the launch file's lock is a POSIX flock; native Windows tests only the "
+           "unsupported path")
 
 pytestmark = pytest.mark.touches("packages/slots/src/moxi_slots/trampoline.py")
 

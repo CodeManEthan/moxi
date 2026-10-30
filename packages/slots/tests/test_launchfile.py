@@ -3,7 +3,6 @@ order, the give-up at the bound, and the sweep."""
 
 from __future__ import annotations
 
-import fcntl
 import os
 import stat
 import threading
@@ -14,6 +13,11 @@ import pytest
 from moxi_slots import launchfile, places
 from moxi_slots.errors import UsageError
 from moxi_slots.launchfile import PaneState, Verdict
+
+fcntl = pytest.importorskip(
+    "fcntl",
+    reason="the launch file's lock is a POSIX flock; native Windows tests only the "
+           "unsupported path")
 
 pytestmark = pytest.mark.touches("packages/slots/src/moxi_slots/launchfile.py")
 
