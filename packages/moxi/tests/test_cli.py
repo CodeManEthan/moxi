@@ -439,6 +439,85 @@ def test_config_of_a_module_without_settings_or_absent(site, capsys):
     assert code == 2 and "moxi install nothere" in err
 
 
+# -- moxi paths --------------------------------------------------------------------------
+
+STORES = ("{'record': {'root': 'state', 'path': 'record.db', 'kind': 'sqlite'}, "
+          "'log': {'root': 'data', 'path': 'logs', 'kind': 'dir'}, "
+          "'later': {'root': 'cache', 'path': 'later.jsonl', 'kind': 'jsonl', 'lazy': True}}")
+
+
+@pytest.fixture
+def stored(site, tmp_path, monkeypatch):
+    site.module("alpha", STORES=STORES)
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path / "home"))
+    for var in ("MOXI_ALPHA_HOME", "MOXI_ALPHA_STATE_HOME", "MOXI_ALPHA_DATA_HOME",
+                "MOXI_ALPHA_CACHE_HOME", "MOXI_ALPHA_CONFIG_HOME", "MOXI_ALPHA_RUNTIME_DIR"):
+        monkeypatch.delenv(var, raising=False)
+    return tmp_path / "home"
+
+
+def test_paths_gives_the_directories_and_each_store(stored, capsys):
+    db = stored / "state" / "alpha" / "record.db"
+    db.parent.mkdir(parents=True)
+    db.write_bytes(b"x" * 2048)
+    db.chmod(0o600)
+    (stored / "data" / "alpha" / "logs" / "a").mkdir(parents=True)
+    (stored / "data" / "alpha" / "logs" / "a" / "one").write_bytes(b"y" * 10)
+    code, out, _ = run(capsys, "paths", "alpha", "--json")
+    assert code == 0
+    info = json.loads(out)
+    assert info["directories"] == {kind: str(stored / kind / "alpha") for kind in
+                                   ("data", "state", "cache", "config", "runtime")}
+    assert info["config_file"] == str(stored / "config" / "alpha" / "config.toml")
+    assert info["notes"] == []
+    by_name = {store["name"]: store for store in info["stores"]}
+    assert by_name["record"] == {
+        "name": "record", "path": str(db), "root": "state", "kind": "sqlite",
+        "lazy": False, "exists": True, "size": 2048,
+        "mode": "0600" if sys.platform != "win32" else by_name["record"]["mode"]}
+    assert by_name["log"]["exists"] and by_name["log"]["size"] == 10
+    assert by_name["later"] == {
+        "name": "later", "path": str(stored / "cache" / "alpha" / "later.jsonl"),
+        "root": "cache", "kind": "jsonl", "lazy": True, "exists": False, "size": None,
+        "mode": None}
+    code, out, _ = run(capsys, "paths", "alpha")
+    assert code == 0
+    lines = out.splitlines()
+    assert lines[0] == "alpha"
+    assert f"  state       {stored / 'state' / 'alpha'}" in lines
+    assert f"  config file {stored / 'config' / 'alpha' / 'config.toml'}" in lines
+    assert "stores" in lines
+    assert any(line.startswith("  record ") and "sqlite  2.0 KB" in line for line in lines)
+    assert any(line.startswith("  later ") and "not created yet" in line for line in lines)
+
+
+def test_paths_names_a_directory_read_under_a_host_folder(stored, monkeypatch, capsys):
+    from moxi import paths
+
+    monkeypatch.setattr(paths, "_host_name", lambda: "thishost")
+    old = stored / "state" / "thishost" / "alpha"
+    old.mkdir(parents=True)
+    info = json.loads(run(capsys, "paths", "alpha", "--json")[1])
+    assert info["directories"]["state"] == str(old)
+    assert info["notes"] == ["state is read where it is, under a host folder, until "
+                             "`moxi install alpha` moves it"]
+
+
+def test_paths_of_the_core(stored, capsys):
+    code, out, _ = run(capsys, "paths", "moxi", "--json")
+    assert code == 0
+    info = json.loads(out)
+    assert info["directories"]["state"] == str(stored / "state" / "moxi")
+    assert info["stores"] == []
+
+
+def test_paths_of_an_absent_module_or_a_bad_name(site, capsys):
+    code, _, err = run(capsys, "paths", "nothere")
+    assert code == 2 and "moxi install nothere" in err
+    code, _, err = run(capsys, "paths", "Not-A-Name")
+    assert code == 2 and "not a module name" in err
+
+
 # -- moxi check --------------------------------------------------------------------------
 
 def test_check_runs_moxi_contract_main_with_its_arguments(monkeypatch, capsys):

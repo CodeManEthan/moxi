@@ -6,6 +6,7 @@
     moxi shortcut [<module>]     the opt-in bare command for a module
     moxi config <module> ...     a module's settings and its config file
     moxi config set ...          changes one of them (`moxi config unset` removes one)
+    moxi paths <module> [--json] where a module keeps its files
     moxi check [PATH]            the module contract check
     moxi help [<verb>|<module>]  help
     moxi version                 versions
@@ -39,6 +40,7 @@ commands:
                                      a module's settings and its config file
   config set|unset <module> <key> ...
                                      change one of a module's settings
+  paths <module> [--json]            where a module keeps its files, and its stores
   check [--staged] [PATH]            check a module repo against the module contract
   help [<command>|<module>]          this help, or a command's or a module's
   version                            the versions of moxi and its modules
@@ -807,6 +809,110 @@ def _check(argv: list[str]) -> int:
     return contract.main(argv)
 
 
+# -- moxi paths ---------------------------------------------------------------------------
+
+def _paths(argv: list[str]) -> int:
+    parser = _parser("paths", "Where a module keeps its files: its five directories, its "
+                              "config file and each store it declares. `moxi paths moxi` "
+                              "gives the core's own.")
+    parser.add_argument("module")
+    parser.add_argument("--json", action="store_true", help="print one JSON object")
+    args = parser.parse_args(argv)
+    module = args.module
+    if not names.is_module_name(module):
+        _error(f"{module!r} is not a module name")
+        return 2
+    try:
+        info = _paths_of(module)
+    except LookupError as exc:
+        _error(str(exc))
+        print(install_hint(module), file=sys.stderr)
+        return 2
+    if args.json:
+        import json
+
+        print(json.dumps(info, indent=2))
+        return 0
+    print(info["module"])
+    for kind, path in info["directories"].items():
+        print(f"  {kind:<12}{path}")
+    print(f"  {'config file':<12}{info['config_file']}")
+    for note in info["notes"]:
+        print(f"  {note}")
+    if info["stores"]:
+        print("stores")
+    for store in info["stores"]:
+        if store["exists"]:
+            facts = f"{store['kind']}  {_size_text(store['size'])}  {store['mode']}"
+        else:
+            facts = f"{store['kind']}  " + ("not created yet" if store["lazy"] else "missing")
+        print(f"  {store['name']}  {store['path']}  {facts}")
+    return 0
+
+
+def _paths_of(module: str) -> dict:
+    """`moxi paths <module>` as one JSON-ready mapping. `LookupError` when the module is
+    not installed here, or broken; `moxi` is the core, which declares no stores."""
+    from . import paths
+
+    if module == names.HARNESS:
+        layout, stores = paths.core(), {}
+    else:
+        from . import modules
+
+        found = modules.load(module)
+        if found.state != modules.PRESENT:
+            raise LookupError(found.reason)
+        layout, stores = paths.Layout(module), found.stores
+    directories = {"data": layout.data_dir(), "state": layout.state_dir(),
+                   "cache": layout.cache_dir(), "config": layout.config_dir(),
+                   "runtime": layout.runtime_dir()}
+    notes = [f"{kind} is read where it is, under a host folder, until "
+             f"`moxi install {module}` moves it"
+             for kind, root in (("state", layout.state_root()), ("cache", layout.cache_root()))
+             if directories[kind] != root / module]
+    listed = []
+    for name, entry in stores.items():
+        path = directories[entry["root"]] / entry["path"]
+        listed.append({"name": name, "path": str(path), "root": entry["root"],
+                       "kind": entry["kind"], "lazy": bool(entry.get("lazy", False)),
+                       **_store_facts(path, entry["kind"])})
+    return {"module": module,
+            "directories": {kind: str(path) for kind, path in directories.items()},
+            "config_file": str(layout.config_file()), "notes": notes, "stores": listed}
+
+
+def _store_facts(path, kind: str) -> dict:
+    """Whether a store exists, its size in bytes (a directory's: every file under it) and
+    its permission bits."""
+    import stat
+
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        return {"exists": False, "size": None, "mode": None}
+    size = st.st_size
+    if kind == "dir" and stat.S_ISDIR(st.st_mode):
+        size = 0
+        for top, _, files in os.walk(path):
+            for name in files:
+                try:
+                    size += os.lstat(os.path.join(top, name)).st_size
+                except OSError:
+                    pass
+    return {"exists": True, "size": size, "mode": f"{stat.S_IMODE(st.st_mode):04o}"}
+
+
+def _size_text(size: int) -> str:
+    if size < 1024:
+        return f"{size} B"
+    for unit in ("KB", "MB", "GB"):
+        size /= 1024
+        if size < 1024 or unit == "GB":
+            break
+    return f"{size:.1f} {unit}"
+
+
 def _install(argv: list[str]) -> int:
     from . import install
 
@@ -850,6 +956,7 @@ _VERBS = {
     "install": _install,
     "shortcut": _shortcut,
     "config": _config,
+    "paths": _paths,
     "check": _check,
     "help": _help,
     "version": _version,

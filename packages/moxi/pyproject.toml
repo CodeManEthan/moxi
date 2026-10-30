@@ -17,9 +17,9 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development",
 ]
-# The core declares no extras. psutil reads a process's start time, imported only inside
-# the function that needs it.
-dependencies = ["psutil>=5.9"]
+# The core declares no extras. psutil reads a process's start time and platformdirs finds
+# the Windows folders, each imported only inside the function that needs it.
+dependencies = ["psutil>=5.9", "platformdirs>=4; sys_platform == 'win32'"]
 
 # Every Moxi distribution declares this script, so a plain `uv tool install` of any
 # module puts the umbrella on PATH. The core declares no other.

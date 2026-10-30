@@ -17,27 +17,30 @@ comms keeps its files in its own five directories under Moxi's roots:
 | directory | default | holds |
 |---|---|---|
 | DATA/comms | `~/.local/share/moxi/comms/` | `directory.db`, `bindings.db`, `cards/` |
-| STATE/comms | `~/.local/state/moxi/<device>/comms/` | `record.db`, `cursors/`, `tokens/`, `cold-gate.json`, `codex/`, `opencode/`, `logs/` |
+| STATE/comms | `~/.local/state/moxi/comms/` | `record.db`, `cursors/`, `tokens/`, `cold-gate.json`, `codex/`, `opencode/`, `logs/` |
 | CONFIG/comms | `~/.config/moxi/comms/` | `config.toml` |
-| CACHE/comms | `~/.cache/moxi/<device>/comms/` | nothing yet |
+| CACHE/comms | `~/.cache/moxi/comms/` | nothing yet |
 | RUNTIME/comms | `$XDG_RUNTIME_DIR/moxi/comms/` | `moxi-comms-daemon.sock`, session directories, `opencode/` launch files |
 
-`<device>` is the host name unless `MOXI_COMMS_DEVICE` says otherwise. With no
-`XDG_RUNTIME_DIR` and no `MOXI_COMMS_RUNTIME_DIR`, the runtime root is under the state
-root, `runtime/`.
+With no `XDG_RUNTIME_DIR` and no `MOXI_COMMS_RUNTIME_DIR`, the runtime root is under the
+state root, `runtime/`. State and cache directories left under a host folder by an older
+layout (`~/.local/state/moxi/<host>/comms/`) are read where they are until
+`moxi install comms` moves them. `moxi paths comms` prints every directory.
 
 | variable | what it does |
 |---|---|
-| `MOXI_COMMS_HOME` | puts all five roots under one directory: `data`, `state/<device>`, `cache/<device>`, `config` and `runtime` in it |
+| `MOXI_COMMS_HOME` | puts all five roots under one directory: `data`, `state`, `cache`, `config` and `runtime` in it |
+| `MOXI_HOME` | the same for every Moxi module at once |
 | `MOXI_COMMS_DATA_HOME` | the data root |
 | `MOXI_COMMS_STATE_HOME` | the state root |
 | `MOXI_COMMS_CACHE_HOME` | the cache root |
 | `MOXI_COMMS_CONFIG_HOME` | the config root |
 | `MOXI_COMMS_RUNTIME_DIR` | the runtime root |
-| `MOXI_COMMS_DEVICE` | the device name in the state and cache paths |
+| `MOXI_COMMS_DEVICE` | this device's label in comms' output; it moves no directory |
 | `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_RUNTIME_DIR` | the usual XDG bases, used when the variables above are unset |
 
-A per-root variable wins over `MOXI_COMMS_HOME`, which wins over XDG.
+A per-root variable wins over `MOXI_COMMS_HOME`, which wins over `MOXI_HOME`, which wins
+over XDG.
 
 comms uses a claim or daemon socket only when it lies inside RUNTIME/comms. The daemon's
 socket is always `RUNTIME/comms/moxi-comms-daemon.sock`, and no variable moves it. A

@@ -50,8 +50,8 @@ def test_a_box_with_its_daemon_up(rig):
     assert r["device"] == "testbox"
     home = Path(os.environ["MOXI_COMMS_HOME"])
     assert r["DATA"] == str(home / "data" / "comms") == str(paths.data_dir())
-    assert r["STATE"] == str(home / "state" / "testbox" / "comms")
-    assert r["CACHE"] == str(home / "cache" / "testbox" / "comms")
+    assert r["STATE"] == str(home / "state" / "comms")
+    assert r["CACHE"] == str(home / "cache" / "comms")
     assert r["CONFIG"] == str(home / "config" / "comms") == str(paths.config_dir())
     assert r["RUNTIME"] == str(paths.runtime_dir())
     assert r["backend"] == "local (the default)"
