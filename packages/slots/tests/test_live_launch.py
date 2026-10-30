@@ -16,7 +16,7 @@ import pytest
 
 from moxi.modules import Refused as UninstallRefused
 from moxi_slots import cli, doctor, jobs, launch, places, registry, setup, slots, tmux
-from moxi_slots.errors import Refused, UsageError
+from moxi_slots.errors import Refused, TryAgain, UsageError
 from moxi_slots.model import ENDED, OCCUPIED
 from moxi_slots.trampoline import TERM_NAMES
 
@@ -250,13 +250,32 @@ def test_two_starts_into_one_slot_at_once_one_wins(server, tmp_path):
     assert len(runs) == 1
 
 
-def test_wait_ended_wakes_when_the_pane_dies(server, base, tmp_path):
+def test_wait_ended_wakes_when_the_pane_dies(server, base, tmp_path, monkeypatch):
+    # The pane dies at 0.5 s, inside the first one-second wait. Only the pane-died hook's
+    # signal ends that wait early; without it the wait runs out (TryAgain) first.
     slots.create(count=2)
+    waits: list[str] = []
+    real = tmux.attempt
+
+    def counted(*args, **kw):
+        if args[:1] != ("wait-for",):
+            return real(*args, **kw)
+        try:
+            got = real(*args, **kw)
+        except TryAgain:
+            waits.append("ran out")
+            raise
+        waits.append("signalled" if got.ok else "failed")
+        return got
+
+    monkeypatch.setattr(tmux, "attempt", counted)
     placed = go(1, "sh", "-c", "sleep 0.5; exit 4", env=base, cwd=tmp_path)
     started = time.monotonic()
     got = launch.wait_ended(1, pane_id=placed.pane_id, timeout=10)
     assert (got.ended, got.dead_status, got.gone) == (True, 4, False)
-    assert time.monotonic() - started < 1.5
+    assert waits == ["signalled"]
+    assert time.monotonic() - started < 0.95
+    monkeypatch.setattr(tmux, "attempt", real)
     again_ = launch.wait_ended(1, pane_id=placed.pane_id, timeout=0)
     assert again_.ended and again_.dead_status == 4
     long = go(2, "sleep", "60", env=base, cwd=tmp_path)
