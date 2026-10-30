@@ -40,10 +40,12 @@ from moxi_loopback.api import (
     write_runtime,
 )
 
-from . import config, listen
+from . import cli, config, listen
 from .listen import Listeners
+from .proxy import Proxy
 from .router import ASGIApp, Router, shell_profile, shell_table, worker_layer
 from .session import TICKETS_DIR, OwnerCheck, Sessions, Tickets, open_store
+from .starter import Starters
 
 MODULE = "ui"
 #: The most bytes of an unfinished request head the shell's listener buffers. Above the
@@ -91,14 +93,20 @@ class Shell:
     """One shell process's serving state, on listeners it already holds.
 
     `start()` writes the runtime file and builds the request path; `run()` serves until
-    `stop()`; `close()` closes the listeners and removes the runtime file.
+    `stop()`, then stops every page server the shell started; `close()` closes the
+    listeners and removes the runtime file.
+
+    `starters` is the shell's one set of page-server starters, built here unless given;
+    `child_args` go to every page server it starts (tests pass `("--idle-s", "0.5")`).
+    Without a `proxy`, `/m/<module>/` goes to the proxy over those starters.
     """
 
     def __init__(self, listeners: Listeners, *, epoch: str | None,
                  layout: Layout | None = None, owner: OwnerCheck | None = None,
                  modules: Sequence[str] = (), mounts: Mapping[str, Mapping[str, Any]] | None = None,
                  page: Page | None = None, push: ASGIApp | None = None,
-                 proxy: ASGIApp | None = None):
+                 proxy: ASGIApp | None = None, starters: Starters | None = None,
+                 child_args: Sequence[str] = ()):
         self.listeners = listeners
         self.epoch = epoch
         self.layout = layout or Layout(MODULE)
@@ -110,8 +118,12 @@ class Shell:
         self._modules = tuple(modules)
         self._mounts = dict(mounts or {})
         self._page = page or Page(routes=())
+        self.starters = starters or Starters(
+            runtime_dir=self.layout.runtime_dir(), state_dir=self.layout.state_dir(),
+            log=cli.log_path(), child_args=child_args)
         self._push = push
-        self._proxy = proxy
+        self._proxy = proxy if proxy is not None else Proxy(
+            self.starters, table=lambda: self.profile.table)
         self.router: Router | None = None
         self.asgi: ASGIApp | None = None
         self.profile = None
@@ -141,8 +153,11 @@ class Shell:
         self._should_exit = asyncio.Event()
         _log.info("serving on 127.0.0.1:%d (%s)", self.listeners.port,
                   ", ".join(sorted(self.listeners.names)))
-        await serve(self.asgi, self.listeners.sockets, should_exit=self._should_exit,
-                    head_limit=HEAD_LIMIT)
+        try:
+            await serve(self.asgi, self.listeners.sockets, should_exit=self._should_exit,
+                        head_limit=HEAD_LIMIT)
+        finally:
+            await self.starters.aclose()
 
     def stop(self) -> None:
         """Ask a running shell to stop; safe from any thread."""
