@@ -619,12 +619,12 @@ def _restart(step: Settle) -> tuple[int, list[str]]:
         by_hand = None
         if lines[-1].startswith("start it by hand: "):
             by_hand = lines.pop()[len("start it by hand: "):]
-        line = f"{module}: {'; '.join(lines)}"
-        if by_hand:
-            line += f"; start it by hand: {by_hand}"
+        detail = f"{module}: {'; '.join(lines)}"
+        # The record's own `fix` holds the by-hand command, so its text doesn't repeat it.
+        line = f"{detail}; start it by hand: {by_hand}" if by_hand else detail
         say(line, err=True)
         try:
-            doctor.record(module, line, key=RESUME_KEY.format(unit=entry.unit), fix=by_hand)
+            doctor.record(module, detail, key=RESUME_KEY.format(unit=entry.unit), fix=by_hand)
         except (OSError, ValueError):
             pass
         problems.append(line)

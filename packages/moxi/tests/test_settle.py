@@ -419,7 +419,30 @@ def test_a_start_the_supervisor_refuses_is_reported_and_recorded(w, capsys, monk
     records = json.loads((moxi.paths.Layout("demo").state_dir() / "doctor.json")
                          .read_text())
     assert records[f"resume:{SERVICE}"]["fix"] == f"systemctl --user start -- {SERVICE}"
+    assert records[f"resume:{SERVICE}"]["text"] == (
+        f"demo: {SERVICE}: `systemctl --user start -- {SERVICE}` failed: Unit is masked.")
     assert w.calls("enable") == []
+
+
+def test_a_start_that_raises_is_recorded_with_its_by_hand_command(w, capsys, monkeypatch):
+    w.installed(DAEMONS=ONE)
+    w.legacy()
+
+    def runner(cmd, **kw):
+        if cmd[2:] == ["start", "--", SERVICE]:
+            raise RuntimeError("the runner broke")
+        return w.sup(cmd, **kw)
+
+    monkeypatch.setattr(w.backend, "runner", runner)
+    code, out = settle(w, capsys, monkeypatch, setup="fail")
+    assert code == 1
+    assert (f"demo: {SERVICE}: RuntimeError: the runner broke; start it by hand: "
+            f"systemctl --user start -- {SERVICE}") in out, out
+    records = json.loads((moxi.paths.Layout("demo").state_dir() / "doctor.json")
+                         .read_text())
+    assert records[f"resume:{SERVICE}"] | {"at": None} == {
+        "text": f"demo: {SERVICE}: RuntimeError: the runner broke",
+        "fix": f"systemctl --user start -- {SERVICE}", "at": None}
 
 
 def test_resume_records_clear_only_when_the_step_ends_clean(w, capsys, monkeypatch):

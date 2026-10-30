@@ -395,18 +395,32 @@ def test_a_start_that_raises_is_caught_into_its_entry(w, monkeypatch):
                         "'other': {'command': 'moxi-demo-relay'}}")
     record: list = []
     units.stop("demo", record=record)
-    real = w.backend.start_id
 
-    def start_id(unit, fence):
-        if unit == "moxi-demo-relay.service":
-            raise OSError("no such program")
-        return real(unit, fence)
+    def runner(cmd, **kw):
+        if cmd[2:] == ["start", "--", "moxi-demo-relay.service"]:
+            raise RuntimeError("the runner broke")
+        return w.sup(cmd, **kw)
 
-    monkeypatch.setattr(w.backend, "start_id", start_id)
+    monkeypatch.setattr(w.backend, "runner", runner)
     first, second = units.resume(record)
     assert not first.ok and first.lines == (
-        "moxi-demo-relay.service: OSError: no such program",)
+        "moxi-demo-relay.service: RuntimeError: the runner broke",
+        "start it by hand: systemctl --user start -- moxi-demo-relay.service")
     assert second.ok
+
+
+def test_a_start_that_raises_before_naming_its_command_has_no_by_hand_line(w, monkeypatch):
+    w.installed(DAEMONS=DAEMON)
+    record: list = []
+    units.stop("demo", record=record)
+
+    def start_id(unit, fence):
+        raise RuntimeError("the backend broke")
+
+    monkeypatch.setattr(w.backend, "start_id", start_id)
+    [acted] = units.resume(record)
+    assert not acted.ok and acted.lines == (
+        "moxi-demo-relay.service: RuntimeError: the backend broke",)
 
 
 def test_resume_starts_a_unit_the_user_disabled_and_leaves_it_disabled(w):
