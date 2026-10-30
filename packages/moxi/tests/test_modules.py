@@ -80,11 +80,12 @@ def test_two_claimants_are_broken_naming_both(site):
     assert "moxi-alpha 0.1.0" in found.reason and "other-alpha 2.0" in found.reason
 
 
-def test_a_core_verb_is_broken_naming_the_clash(site):
-    site.module("config")
-    found = modules.load("config")
+@pytest.mark.parametrize("verb", ["config", "check"])
+def test_a_core_verb_is_broken_naming_the_clash(site, verb):
+    site.module(verb)
+    found = modules.load(verb)
     assert found.state == BROKEN
-    assert "verbs" in found.reason and "moxi config" in found.reason
+    assert "verbs" in found.reason and f"moxi {verb}" in found.reason
 
 
 def test_a_name_that_breaks_the_rule_is_broken(site):

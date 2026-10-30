@@ -24,8 +24,11 @@ ORG = "moxihq"
 NAMESPACE = "moxi"
 
 #: The umbrella's own verbs (`moxi install`, `moxi config`, ...). A module named by one
-#: could never be reached as `moxi <module>`, so no module may take one.
-VERBS = frozenset({"modules", "install", "shortcut", "config", "help", "version"})
+#: could never be reached as `moxi <module>`, so no module may take one. `check` only
+#: says where the contract check went, and stays reserved so no module takes the name a
+#: contributor still types.
+VERBS = frozenset({"modules", "install", "shortcut", "config", "check", "help",
+                   "version"})
 
 _NAME = re.compile(r"[a-z0-9]+")
 

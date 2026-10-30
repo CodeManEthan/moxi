@@ -34,5 +34,6 @@ def test_anything_else_is_refused(name):
 
 
 def test_the_umbrellas_verbs_are_reserved():
-    assert names.VERBS == {"modules", "install", "shortcut", "config", "help", "version"}
+    assert names.VERBS == {"modules", "install", "shortcut", "config", "check", "help",
+                           "version"}
     assert isinstance(names.VERBS, frozenset)

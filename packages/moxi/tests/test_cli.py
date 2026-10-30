@@ -68,6 +68,16 @@ def test_help_on_a_verb_prints_that_verb_s_help(capsys):
     assert code == 0 and "usage: moxi modules" in out
 
 
+def test_check_says_the_contract_check_moved_to_moxi_dev(capsys):
+    code, out, err = run(capsys, "check", "--staged", "some/path")
+    assert code == 2 and out == ""
+    assert err.startswith("moxi check: the module contract check moved out of moxi")
+    assert "moxi-dev check " in err and "moxi-dev contract [--staged] [PATH]" in err
+    assert "install" not in err
+    code, out, _ = run(capsys, "help", "check")
+    assert code == 0 and "moxi-dev contract" in out
+
+
 def test_help_on_a_module_runs_its_help(alpha, capsys):
     code, out, _ = run(capsys, "help", "alpha")
     assert code == 0 and "usage: moxi alpha" in out
