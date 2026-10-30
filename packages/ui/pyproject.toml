@@ -8,6 +8,11 @@ license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 dependencies = ["moxi>=0.1.1,<0.2", "moxi-loopback>=0.1,<0.2"]
 
+# Only the core declares the `moxi` script; this is the shell's own entry point, the
+# command its unit runs.
+[project.scripts]
+moxi-ui-serve = "moxi_ui.serve:main"
+
 [project.urls]
 Homepage = "https://github.com/moxihq/moxi"
 Repository = "https://github.com/moxihq/moxi"

@@ -2,7 +2,7 @@
 
 INTERFACES = frozenset()
 API = None
-CLI = None
+CLI = "moxi_ui.cli:main"
 SUMMARY = "The browser shell: one origin for every module's page"
 OPTIONAL = {}
 GATED = {}
