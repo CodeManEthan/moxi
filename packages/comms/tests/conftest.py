@@ -106,6 +106,9 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setenv("MOXI_COMMS_HOME", str(home))
     monkeypatch.setenv("MOXI_COMMS_DEVICE", "testbox")
     monkeypatch.setenv("MOXI_COMMS_RUNTIME_DIR", str(runtime))
+    # Sends write no expiry unless a test asks for one, so line zero reads as the
+    # tests that pin it expect; the expiry tests set it back.
+    monkeypatch.setenv("MOXI_COMMS_DELIVERY_EXPIRY", "never")
     for root in ("DATA_HOME", "STATE_HOME", "CACHE_HOME", "CONFIG_HOME"):
         monkeypatch.delenv(f"MOXI_COMMS_{root}", raising=False)
     monkeypatch.delenv("MOXI_COMMS_PROJECT", raising=False)
@@ -229,7 +232,7 @@ def build_store(backend: str):
 
 
 #: The verbs that post under the sender's identity.
-SEND_VERBS = ("send", "reply")
+SEND_VERBS = ("send", "reply", "delete")
 
 
 def _stamp_of(environ) -> SenderIdentity | None:

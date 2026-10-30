@@ -52,6 +52,7 @@ from pathlib import Path
 from moxi.store import transaction
 
 from .config import LOCAL_RETAIN_DAYS
+from .machine_line import parse as parse_machine_line
 from .record import (
     MAX_CONTENT_LENGTH,
     Forbidden,
@@ -283,21 +284,43 @@ class LocalRecord:
                       author_id=author_id, author_kind=author_kind,
                       author_display=author_display, content=content,
                       timestamp=self._now())
+        # Line zero is parsed once, here, so the store can ask about the interrupt mark
+        # and the expiry without parsing: they are copies of what line zero says.
+        ml = parse_machine_line(content)
         conn.execute(
             "INSERT INTO messages(id, room_id, author_id, author_kind, author_display, "
-            "content, timestamp) VALUES (?,?,?,?,?,?,?)",
+            "content, timestamp, interrupt, expires_at) VALUES (?,?,?,?,?,?,?,?,?)",
             (int(msg.id), msg.channel_id, msg.author_id, msg.author_kind,
-             msg.author_display, msg.content, msg.timestamp))
+             msg.author_display, msg.content, msg.timestamp,
+             int(ml is not None and ml.interrupt),
+             None if ml is None else ml.expires_at))
         return msg
 
+    def withdraw(self, message_id: str, at: str) -> bool:
+        """Mark a message withdrawn at `at`; a message already withdrawn keeps its first
+        time. The daemon's delete writes the same mark in its own transaction; this is
+        the record's half of the seam, so either backend answers `withdrawn_at`."""
+        with self._write() as conn:
+            return conn.execute("UPDATE messages SET withdrawn_at = ? WHERE id = ? AND "
+                                "withdrawn_at IS NULL", (at, int(message_id))).rowcount > 0
+
+    def operator_token_ok(self, token: str | None) -> bool:
+        """The operator's credential check on its own, for a request that posts nothing
+        (a delete): the same compare `post_as_user` makes."""
+        stored = self.meta_get(META_OPERATOR_TOKEN_HASH)
+        if not stored:
+            return True
+        return token is not None and secrets.compare_digest(stored, token_hash(token))
+
     # ------------------------------------------------------------------ the record
-    _COLUMNS = ("id, room_id, author_id, author_kind, author_display, content, timestamp")
+    _COLUMNS = ("id, room_id, author_id, author_kind, author_display, content, timestamp, "
+                "withdrawn_at")
 
     @staticmethod
     def _message(row) -> Message:
         return Message(id=str(row[0]), channel_id=row[1], author_id=row[2],
                        author_kind=row[3], author_display=row[4], content=row[5],
-                       timestamp=row[6])
+                       timestamp=row[6], withdrawn_at=row[7])
 
     def history(self, channel_id: str, *, after: str | None = None,
                 limit: int | None = None) -> list[Message]:

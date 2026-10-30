@@ -88,6 +88,13 @@ default = false
 doc = "Refuse to start the daemon when the cache module is absent or broken, so the cold-send hold cannot switch off without a word."
 read = "start"
 
+[delivery.expiry]
+type = "string"
+default = "24h"
+doc = "How long a sent message may wait before it is dropped undelivered, when the send names no --expires: a whole number with s, m, h or d (30m, 6h, 3d), or never."
+read = "use"
+env = "MOXI_COMMS_DELIVERY_EXPIRY"
+
 [block]
 type = "bool"
 default = false

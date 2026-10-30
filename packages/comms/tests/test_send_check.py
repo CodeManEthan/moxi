@@ -305,6 +305,18 @@ def s_cap_shape(rig, mp):
     return Case(["send", "reviewer", "x", "--posture", "open", "--cap", "0"], PLANNER, 2)
 
 
+def s_interrupt_with_held(rig, mp):
+    pair(rig)
+    return Case(["send", "reviewer", "x", "--posture", "none", "--interrupt", "--held"],
+                PLANNER, 2)
+
+
+def s_expires_shape(rig, mp):
+    pair(rig)
+    return Case(["send", "reviewer", "x", "--posture", "none", "--expires", "5y"],
+                PLANNER, 2)
+
+
 def s_block(rig, mp):
     pair(rig)
     write_config(None, "block = true\n")
@@ -549,6 +561,9 @@ ROWS = [
         (("_send_checks", "--new says this message"),)),
     Row("cap-and-no-cap", s_cap_both, 2, (("_send_checks", "CAP_BOTH"),)),
     Row("cap-shape", s_cap_shape, 2, (("_send_checks", "CAP_SHAPE"),)),
+    Row("interrupt-with-held", s_interrupt_with_held, 2,
+        (("_send_checks", "INTERRUPT_WITH_HELD"),)),
+    Row("expires-shape", s_expires_shape, 2, (("_send_checks", "--expires:"),)),
     Row("block", s_block, 3, (("_send_checks", "block is on in comms' config"),)),
     # 2. the daemon block
     Row("daemon-offline", s_daemon_offline, 75,
@@ -691,6 +706,7 @@ CODES = {
     "reply-to-not-digits": "reply-to-shape", "audience-shape": "audience-shape",
     "posture-required": "posture-required", "new-with-reply-to": "new-with-reply-to",
     "cap-and-no-cap": "cap-both", "cap-shape": "cap-shape", "block": "blocked",
+    "interrupt-with-held": "interrupt-with-held", "expires-shape": "expires-shape",
     "daemon-offline": "offline", "verb-protocol-mismatch": "protocol-mismatch",
     "resolve-refused": "resolve-refused", "send-only": "send-only",
     "standing-without-row": "not-standing", "never-bound": "never-bound",

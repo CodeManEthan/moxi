@@ -227,6 +227,22 @@ class MockRecord:
         self._fanout()
         return msg
 
+    def withdraw(self, message_id: str, at: str) -> bool:
+        """Mark a message withdrawn at `at`; one already withdrawn keeps its first time."""
+        with self._txn(write=True) as st:
+            for m in st.messages:
+                if m["id"] == str(message_id):
+                    if m.get("withdrawn_at"):
+                        return False
+                    m["withdrawn_at"] = at
+                    return True
+        return False
+
+    def operator_token_ok(self, token: str | None) -> bool:
+        """The mock holds no operator credential (see `post_as_user`): every token
+        passes."""
+        return True
+
     # ------------------------------------------------------------------ the record
     def history(self, channel_id: str, *, after: str | None = None,
                 limit: int | None = None) -> list[Message]:

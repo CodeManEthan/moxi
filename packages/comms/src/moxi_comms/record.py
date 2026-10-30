@@ -99,6 +99,9 @@ class Message:
     author_display: str       # webhook override, user display, or qualified identity
     content: str
     timestamp: str
+    #: When its author withdrew it (`moxi comms delete`), the record's own time
+    #: spelling; None while it stands. A withdrawn message stays in the record.
+    withdrawn_at: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)

@@ -129,6 +129,18 @@ class Opened:
 
 
 @dataclass(frozen=True)
+class Withdrawn:
+    """`withdraw`'s answer: the names the message was withdrawn from, the names that
+    had it in a digest, the names whose row expired first, and whether anything was
+    written."""
+
+    withdrawn: list
+    delivered: list
+    expired: list
+    written: bool
+
+
+@dataclass(frozen=True)
 class Ended:
     """`turn_ended`'s answer: the ids acked, the ids back to waiting, and the cursor."""
 
@@ -308,13 +320,109 @@ class Books:
             return sum(conn.execute("DELETE FROM queue WHERE name = ? AND message_id = ?",
                                     (name, mid)).rowcount for mid in mids)
 
+    # ------------------------------------------------------------------ dropping
+    def drop_gone(self, name: str, ids, reason: str) -> list[str]:
+        """`ids` may no longer go to `name`'s model (`reason`, `withdrawn` or `expired`):
+        each row not in a digest is deleted, and a `dropped` row says why. An id with no
+        row gets its `dropped` row too (a message dropped at routing). A row in a digest
+        is left: what a model may have read isn't pulled back. Returns the ids dropped."""
+        at = self._now()
+        out = []
+        with self._lock, self._write() as conn:
+            for mid in _ids(ids):
+                row = conn.execute("SELECT state FROM queue WHERE name = ? AND "
+                                   "message_id = ?", (name, mid)).fetchone()
+                if row is not None and row[0] == IN_DIGEST:
+                    continue
+                conn.execute("DELETE FROM queue WHERE name = ? AND message_id = ?",
+                             (name, mid))
+                conn.execute("INSERT OR IGNORE INTO dropped(message_id, name, reason, at) "
+                             "VALUES (?, ?, ?, ?)", (mid, name, reason, at))
+                out.append(str(mid))
+        return out
+
+    def sweep(self, now: float, expires=None) -> list[tuple[str, str]]:
+        """The expiry sweep: every `waiting` row whose message is past its expiry is
+        deleted, with a `dropped` row. The expiry is the store's `messages.expires_at`,
+        or `expires` (message id -> Unix second) for a message another backend keeps.
+        Rows handed or in a digest are left: `open_digest` drops a handed one, and a
+        digest's rows go back to waiting at a release. Returns (name, id) pairs."""
+        at = stamp(now)
+        given = {}
+        for mid, when in dict(expires or {}).items():
+            if when is not None:
+                try:
+                    given[int(mid)] = when
+                except (TypeError, ValueError):
+                    continue
+        with self._lock, self._write() as conn:
+            rows = conn.execute(
+                "SELECT q.name, q.message_id, m.expires_at FROM queue q LEFT JOIN "
+                "messages m ON m.id = q.message_id WHERE q.state = 'waiting'").fetchall()
+            out = []
+            for name, mid, stored in rows:
+                when = stored if stored is not None else given.get(int(mid))
+                if when is None or when > now:
+                    continue
+                conn.execute("DELETE FROM queue WHERE name = ? AND message_id = ?",
+                             (name, mid))
+                conn.execute("INSERT OR IGNORE INTO dropped(message_id, name, reason, at) "
+                             "VALUES (?, ?, ?, ?)", (mid, name, EXPIRED, at))
+                out.append((name, str(mid)))
+        return out
+
+    def withdraw(self, message_id, *, unrouted=(), at: str | None = None) -> "Withdrawn":
+        """The author's delete, in one transaction ordered against `open_digest` by
+        `BEGIN IMMEDIATE`: every row of the message that was never in a digest is
+        deleted with a `withdrawn` row in `dropped`, each name in `unrouted` (routing
+        hasn't reached it yet) gets its `withdrawn` row, and the message is marked
+        withdrawn. Names whose row has been in a digest had it delivered. When nothing
+        can be withdrawn (no undelivered row and no unrouted name, and the message was
+        not withdrawn before), nothing is written."""
+        mid = int(message_id)
+        at = at or self._now()
+        with self._lock, self._write() as conn:
+            rows = conn.execute("SELECT name, digested_once FROM queue WHERE "
+                                "message_id = ? ORDER BY name", (mid,)).fetchall()
+            before = {r[0]: r[1] for r in conn.execute(
+                "SELECT name, reason FROM dropped WHERE message_id = ?", (mid,))}
+            withdrawn = [n for n, once in rows if not once]
+            delivered = [n for n, once in rows if once]
+            fresh = [n for n in unrouted if n not in before and n not in withdrawn
+                     and n not in delivered]
+            again = sorted(n for n, why in before.items() if why == WITHDRAWN)
+            if not withdrawn and not fresh and not again:
+                return Withdrawn(withdrawn=[], delivered=delivered,
+                                 expired=sorted(n for n, why in before.items()
+                                                if why == EXPIRED), written=False)
+            for n in withdrawn + fresh:
+                conn.execute("INSERT OR REPLACE INTO dropped(message_id, name, reason, at) "
+                             "VALUES (?, ?, ?, ?)", (mid, n, WITHDRAWN, at))
+            conn.execute("DELETE FROM queue WHERE message_id = ? AND digested_once = 0",
+                         (mid,))
+            conn.execute("UPDATE messages SET withdrawn_at = ? WHERE id = ? AND "
+                         "withdrawn_at IS NULL", (at, mid))
+        return Withdrawn(withdrawn=sorted(set(withdrawn + fresh + again)),
+                         delivered=delivered,
+                         expired=sorted(n for n, why in before.items() if why == EXPIRED),
+                         written=True)
+
+    def dropped_reason(self, name: str, message_id) -> str | None:
+        """Why `message_id` left `name`'s queue undelivered, or None."""
+        with self._lock:
+            row = self._conn.execute("SELECT reason FROM dropped WHERE name = ? AND "
+                                     "message_id = ?", (name, int(message_id))).fetchone()
+        return None if row is None else row[0]
+
     # ------------------------------------------------------------------ digests
-    def open_digest(self, name: str, binding_id, ids) -> Opened:
+    def open_digest(self, name: str, binding_id, ids, *, expires=None) -> Opened:
         """The adapter is about to put `ids` in one digest. Rows of withdrawn or expired
         messages are deleted, with their `dropped` rows, and answered in `dropped`. The
         rest of the name's rows asked for go `in_digest` under a new digest. An id with
-        no row is left out: it was acked or dropped already."""
+        no row is left out: it was acked or dropped already. `expires` (message id ->
+        Unix second) is the expiry of a message the store's `messages` doesn't hold."""
         mids = _ids(ids)
+        given = {str(k): v for k, v in dict(expires or {}).items()}
         now = self.clock()
         at = stamp(now)
         with self._lock, self._write() as conn:
@@ -328,7 +436,7 @@ class Books:
                     if gone is not None:
                         dropped.append({"id": str(mid), "reason": gone[0]})
                     continue
-                why = _why_dropped(conn, mid, now)
+                why = _why_dropped(conn, mid, now, given.get(str(mid)))
                 if why is not None:
                     conn.execute("DELETE FROM queue WHERE name = ? AND message_id = ?",
                                  (name, mid))
@@ -438,13 +546,14 @@ def _digest(row) -> dict:
             "outcome": row[8]}
 
 
-def _why_dropped(conn, mid: int, now: float) -> str | None:
-    """`withdrawn` or `expired` for a message the store holds that may no longer be
-    delivered; None otherwise (and for a message another backend keeps)."""
+def _why_dropped(conn, mid: int, now: float, expires=None) -> str | None:
+    """`withdrawn` or `expired` for a message that may no longer be delivered; None
+    otherwise. A message another backend keeps has no `messages` row here: `expires` is
+    its expiry, and its withdrawal already deleted its undelivered rows."""
     row = conn.execute("SELECT withdrawn_at, expires_at FROM messages WHERE id = ?",
                        (mid,)).fetchone()
     if row is None:
-        return None
+        return EXPIRED if expires is not None and expires <= now else None
     if row[0] is not None:
         return WITHDRAWN
     if row[1] is not None and row[1] <= now:

@@ -158,6 +158,10 @@ CASE_TURN_INCOMPLETE = "delivered-but-the-turn-never-completed"
 #: out since it was queued. `moxi comms explain` checks it before the cursor, so a queued id
 #: never reads `cursor-behind-it`.
 CASE_WAITING = books_mod.WAITING
+#: Two more: the message left the name's queue undelivered, past its expiry or withdrawn
+#: by its author. Read from the books' `dropped` rows, before every other case.
+CASE_EXPIRED = books_mod.EXPIRED
+CASE_WITHDRAWN = books_mod.WITHDRAWN
 
 #: The `kind` of an `activity` notify for a turn that ran and ended. With `handled` on
 #: it, it is a release point and settles the ids it names.
@@ -212,6 +216,12 @@ CASE_REASONS = {
         "The adapter reported the message reaching the model and no turn has completed "
         "since. The cursor moves on the adapter's turn boundary and on nothing else, "
         "so a session that died mid-turn stops exactly here."),
+    CASE_EXPIRED: (
+        "The message waited past its expiry and was dropped before it reached the "
+        "model. Its sender was not told; the expiry is on its line zero."),
+    CASE_WITHDRAWN: (
+        "Its author withdrew the message (moxi comms delete) before it reached the "
+        "model, so it was never handed over."),
 }
 
 
@@ -473,6 +483,19 @@ class Daemon:
         #: It names no standing: it says which message went unanswered, by whom.
         self.unanswered: dict[tuple, dict] = {}
         self.injected_through: dict[str, str] = {}
+        #: Message ids withdrawn by their author in this daemon's life (`delete`). A
+        #: withdrawn message is never handed again: routing, a release and a push all
+        #: check it under `_lock`, and the record's `withdrawn_at` says the same after a
+        #: restart.
+        self.withdrawn: set[str] = set()
+        #: message id -> its line zero's `[expires:...]` Unix second, for every message
+        #: this daemon has parsed that has one and may still hold a row. The expiry
+        #: sweep's timer waits for the soonest after `_swept_at`, the clock of the last
+        #: sweep; a sweep forgets an expired id no binding still holds. Both under
+        #: `_expiry_cond`.
+        self.expires: dict[str, int] = {}
+        self._swept_at = 0.0
+        self._expiry_cond = threading.Condition()
         #: The LAST DIGEST TEXT each live identity was shown.
         #: Carried on the `injected` ping and readable back out with
         #: `query kind="injected"`, so the explainer can show the input and not only
@@ -510,6 +533,7 @@ class Daemon:
                 "resolve", "agents", "session", "owner", "asks", "owed", "readable",
                 "explain", "binding_window", "attributed_message", "rooms", "message",
                 "history", "max_id", "last_digest")},
+            "delete": self._delete,
             "open_digest": self._open_digest,
             "turn_ended": self._turn_ended,
             "injected": self._injected,
@@ -605,6 +629,7 @@ class Daemon:
         # ever answered from a half-read record.
         self._rebuild_sent_logged()
         self._spawn(self._window_loop)
+        self._spawn(self._expiry_loop)
         self.host.open()
 
         self._sub = self.record.subscribe()
@@ -641,6 +666,8 @@ class Daemon:
         self._stop.set()
         with self._window_cond:
             self._window_cond.notify_all()
+        with self._expiry_cond:
+            self._expiry_cond.notify_all()
         if self.host is not None:
             if not self.host.close():
                 log.warning("the daemon socket did not close within %.0f s",
@@ -753,7 +780,9 @@ class Daemon:
         if len(mine) < len(asked):
             log.info("open_digest from %s names %s, which it was not handed; left out",
                      b.qualified, ", ".join(sorted(asked - set(mine), key=_as_id)))
-        opened = self.books.open_digest(b.qualified, b.history_id, mine)
+        with self._expiry_cond:
+            expires = {mid: self.expires.get(mid) for mid in mine}
+        opened = self.books.open_digest(b.qualified, b.history_id, mine, expires=expires)
         if opened.dropped:
             with self._lock:
                 rows = self.queue.get(b.qualified, {})
@@ -1019,6 +1048,104 @@ class Daemon:
             qualified = binding.qualified
         message = self.record.post_as_identity(qualified, self._names_channel(), content)
         return {"message_id": str(message.id)}
+
+    def _delete(self, conn, params: dict) -> dict:
+        """`delete`: the author withdraws `message_id` from every recipient that hasn't
+        had it in a digest. Refused `not-sender` for anyone but its author,
+        `already-delivered` when every recipient has had it, `unknown-message` for an
+        id the record doesn't hold. A message withdrawn again answers as the first time
+        did. The record keeps the message, marked withdrawn."""
+        who = params.get("as")
+        token = params.get("token")
+        mid = params.get("message_id")
+        if not isinstance(who, str) or not who:
+            raise Refusal("delete: `as` names the deleting identity",
+                          code=wire.INVALID_PARAMS)
+        if mid is None or not str(mid).isdigit():
+            raise Refusal("delete: `message_id` is a message id",
+                          code=wire.INVALID_PARAMS)
+        mid = str(mid)
+        with self._lock:
+            if self._stopping:
+                raise DaemonStopping()
+            operator = who == OPERATOR_NAME and (params.get("user") is not None
+                                                 or who not in self.bindings)
+        if operator:
+            user = self._operator_user(params)
+            if not self.record.operator_token_ok(token if isinstance(token, str)
+                                                 else None):
+                raise Refusal("the operator's credential was refused",
+                              code=wire.CREDENTIAL, credential=True)
+            author = ("user", user)
+        else:
+            with self._lock:
+                binding = self.bindings.get(who)
+                given = (hashlib.sha256(token.encode()).digest()
+                         if isinstance(token, str) else b"")
+                if binding is None or not hmac.compare_digest(binding.token_hash, given):
+                    raise Refusal("posting credential refused", code=wire.CREDENTIAL,
+                                  credential=True)
+                author = ("identity", binding.qualified)
+        msg = self.record.get_message(mid)
+        if msg is None:
+            raise _unknown_message(mid)
+        if (msg.author_kind, str(msg.author_id)) != author:
+            raise Refusal(f"message {mid} is not yours to delete: only its author may "
+                          "withdraw it", code=wire.NOT_SENDER, message_id=mid)
+        ml = parse_machine_line(msg.content)
+        names = []
+        if ml is not None:
+            for tag in ml.recipients:
+                r = self.resolve(tag)
+                if r.resolvable and not r.send_only and r.qualified not in names:
+                    names.append(r.qualified)
+        # Under the lock, so routing (which checks `withdrawn` under it before it
+        # queues or hands a row) and this delete see one order. A name with no row
+        # that routing hasn't reached yet is withdrawn from too; one routing passed
+        # (acked, or at or below its cursor) had it.
+        with self._lock:
+            through = self.books.routed_through()
+            routed = (through is not None and int(mid) <= through
+                      and not (self._unrouted is not None and int(mid) >= self._unrouted))
+            unrouted = [] if routed else [
+                q for q in names if not self._past_cursor(q, mid, {})]
+            done = self.books.withdraw(mid, unrouted=unrouted)
+            if done.written:
+                self.withdrawn.add(mid)
+                for q in done.withdrawn:
+                    rows_q = self.queue.get(q)
+                    if rows_q is not None:
+                        rows_q.pop(mid, None)
+                        if not rows_q:
+                            self.queue.pop(q, None)
+                    b = self.bindings.get(q)
+                    if b is not None and b.overflow.pop(mid, None) is not None:
+                        b.delivered.discard(mid)
+        if done.written:
+            self._book("mark withdrawn", mid,
+                       lambda: self.record.withdraw(mid, books_mod.stamp(self.clock())))
+            log.info("delete %s by %s: withdrawn from %s; delivered to %s", mid,
+                     author[1], ", ".join(done.withdrawn) or "nobody",
+                     ", ".join(done.delivered) or "nobody")
+        delivered = [q for q in names if q not in done.withdrawn and q not in done.expired]
+        if not done.withdrawn:
+            raise Refusal(f"message {mid} has already reached every recipient; nothing was "
+                          "withdrawn", code=wire.ALREADY_DELIVERED, message_id=mid,
+                          delivered=delivered, expired=list(done.expired))
+        return {"message_id": mid, "withdrawn": list(done.withdrawn),
+                "delivered": delivered, "expired": list(done.expired)}
+
+    def _operator_user(self, params: dict) -> str:
+        """The operator's user id: `user`, or the directory's one operator."""
+        user = params.get("user")
+        if isinstance(user, str) and user:
+            return user
+        with self._db() as db:
+            rows = db.execute("SELECT user_id FROM operators").fetchall()
+        if len(rows) != 1:
+            raise Refusal("the operator's lane: `user` names the operator's user id",
+                          code=wire.INVALID_PARAMS)
+        return rows[0][0]
 
     def _send_as_operator(self, params: dict, token, content: str) -> dict:
         """The operator's send. `user` names the operator's user id; without it, the
@@ -1390,7 +1517,18 @@ class Daemon:
             row = None
         cursor = books_mod.explain_cursor(row, message_id)
         case = case_error = None
-        if message_id is not None and message_id in waiting:
+        dropped = None
+        if message_id is not None and self.books.is_open:
+            try:
+                dropped = self.books.dropped_reason(identity, message_id)
+            except (TypeError, ValueError):
+                dropped = None
+            except Exception:                                      # noqa: BLE001
+                log.exception("explain: could not read why %s left %s's queue",
+                              message_id, identity)
+        if dropped is not None:
+            case = dropped
+        elif message_id is not None and message_id in waiting:
             # Queued BEFORE the cursor: a queued id is not `cursor-behind-it`, whose
             # sentence says a turn that would advance it has not completed -- not why
             # it waits.
@@ -1577,6 +1715,13 @@ class Daemon:
                 # Routed before this pass: its rows are in the books, or it was acked.
                 continue
             q = r.qualified
+            gone = self._gone(msg.id, ml, msg)
+            if gone is not None and not r.send_only and r.resolvable and (
+                    r.binding is not None or r.tier in (TIER_CHOSEN, TIER_STANDING)):
+                # Withdrawn, or past its expiry: no name gets it, and `explain` says why.
+                self._book("drop at routing for", q,
+                           lambda q=q, gone=gone: self.books.drop_gone(q, [msg.id], gone))
+                continue
             if r.send_only:
                 # A record line that names a send-only identity (typed by hand, or from
                 # an older client): delivered to nobody, queued for nobody. The verbs
@@ -1691,6 +1836,7 @@ class Daemon:
         if ml is None:
             return                                    # no machine line at position zero
         self._index_audience(msg, ml)                 # at parse, before any claim
+        self._note_message(msg, ml)
         if self.settings.use("block"):
             # symmetric: a blocked identity is neither delivered to nor routed from.
             # The setting is a bare bool, read at use, so it blocks all routing. The
@@ -2079,6 +2225,16 @@ class Daemon:
         # And what this binding was handed with no row (the ids its adapter said it held
         # at bind) and never handled: it waits again too.
         back = set(released) | {mid for mid in b.delivered if mid not in b.handled}
+        # A withdrawn or expired message doesn't wait again: its row is dropped.
+        gone = {}
+        for mid in back:
+            why = self._gone(mid)
+            if why is not None:
+                gone.setdefault(why, []).append(mid)
+        for why, ids in gone.items():
+            back -= set(ids)
+            self._book("drop rows of", b.qualified,
+                       lambda why=why, ids=ids: self.books.drop_gone(b.qualified, ids, why))
         rows = self.queue.setdefault(b.qualified, {})
         memo: dict = {}
         # A row that waited before this binding took it waits again whatever the
@@ -2106,7 +2262,7 @@ class Daemon:
         race by construction; the claim is what makes at-least-once not mean
         twice-in-one-breath."""
         with self._lock:
-            if message_id in binding.delivered:
+            if message_id in binding.delivered or message_id in self.withdrawn:
                 return False
             binding.delivered.add(message_id)
             binding.returned.discard(message_id)
@@ -2118,6 +2274,109 @@ class Daemon:
                        lambda: self.books.hand(binding.qualified, message_id,
                                                binding.history_id))
             return True
+
+    # ------------------------------------------------------------------ gone mail
+    def _note_message(self, msg, ml) -> None:
+        """What a parsed message says about whether it may still go: its expiry, kept
+        for the sweep's timer, and the record's withdrawn mark."""
+        if getattr(msg, "withdrawn_at", None):
+            with self._lock:
+                self.withdrawn.add(str(msg.id))
+        if ml is None or ml.expires_at is None:
+            return
+        with self._expiry_cond:
+            mid = str(msg.id)
+            if mid in self.expires:
+                return
+            soonest = self._next_expiry()
+            self.expires[mid] = ml.expires_at
+            if soonest is None or ml.expires_at < soonest:
+                self._expiry_cond.notify_all()
+
+    def _next_expiry(self) -> int | None:
+        """The soonest expiry the last sweep did not pass. Under `_expiry_cond`."""
+        return min((at for at in self.expires.values() if at > self._swept_at),
+                   default=None)
+
+    def _gone(self, message_id, ml=None, msg=None, *, expires_at=None) -> str | None:
+        """`withdrawn` or `expired` for a message that may no longer be handed to a
+        model, by this daemon's clock; None while it may. `ml` and `msg` are the parsed
+        message when the caller has it; `expires_at` an expiry it already holds."""
+        mid = str(message_id)
+        if mid in self.withdrawn or (msg is not None and getattr(msg, "withdrawn_at", None)):
+            return books_mod.WITHDRAWN
+        if ml is not None and ml.expires_at is not None:
+            expires_at = ml.expires_at
+        if expires_at is None:
+            with self._expiry_cond:
+                expires_at = self.expires.get(mid)
+        if expires_at is not None and expires_at <= self.clock():
+            return books_mod.EXPIRED
+        return None
+
+    def _drop_rows(self, qualified: str, ids, reason: str) -> None:
+        """Rows that may no longer go to `qualified`: out of the queue and the books,
+        with why."""
+        ids = [str(i) for i in ids]
+        with self._lock:
+            rows = self.queue.get(qualified, {})
+            for mid in ids:
+                rows.pop(mid, None)
+            if not rows:
+                self.queue.pop(qualified, None)
+        self._book("drop rows of", qualified,
+                   lambda: self.books.drop_gone(qualified, ids, reason))
+        log.info("dropped %s for %s: %s", ", ".join(ids), qualified, reason)
+
+    def sweep_expired(self) -> int:
+        """The expiry sweep: every waiting row past its message's expiry is dropped, in
+        the books and in memory. Run by the timer for the soonest expiry and at every
+        release; returns how many rows went."""
+        now = self.clock()
+        with self._expiry_cond:
+            due = {mid: at for mid, at in self.expires.items() if at <= now}
+        if not self.books.is_open:
+            return 0
+        try:
+            gone = self.books.sweep(now, due)
+        except Exception:                                          # noqa: BLE001
+            log.exception("the expiry sweep failed; the next one tries again")
+            return 0
+        with self._lock:
+            for q, mid in gone:
+                rows = self.queue.get(q)
+                if rows is not None:
+                    rows.pop(mid, None)
+                    if not rows:
+                        self.queue.pop(q, None)
+            # An expired id a binding still holds (handed, or in a digest) is kept: its
+            # next move (`open_digest`, a release) checks it. The rest are forgotten.
+            held = {mid for rows in self.queue.values() for mid in rows}
+            for b in self.bindings.values():
+                held |= b.delivered
+        with self._expiry_cond:
+            self._swept_at = max(self._swept_at, now)
+            for mid in due:
+                if mid not in held:
+                    self.expires.pop(mid, None)
+        if gone:
+            log.info("expiry sweep: dropped %d row(s) past their expiry: %s", len(gone),
+                     ", ".join(f"{mid} for {q}" for q, mid in gone[:10]))
+        return len(gone)
+
+    def _expiry_loop(self) -> None:
+        """One timer, set for the soonest expiry this daemon knows of, never a poll:
+        it sleeps until then (or until a sooner one is noted) and sweeps."""
+        while not self._stop.is_set():
+            with self._expiry_cond:
+                soonest = self._next_expiry()
+                wait = None if soonest is None else soonest - self.clock()
+                if wait is None or wait > 0:
+                    # A clock that moves by hand (a test's) is re-read at least once a
+                    # minute; the real clock wakes at the expiry.
+                    self._expiry_cond.wait(None if wait is None else min(wait, 60.0))
+                    continue
+            self.sweep_expired()
 
     # ------------------------------------------------------------------ the queue
     def _book(self, what: str, qualified: str, write) -> None:
@@ -2139,6 +2398,8 @@ class Daemon:
         rows = self.queue.get(qualified)
         if rows is not None and message_id in rows:
             return
+        if message_id in self.withdrawn:
+            return                          # its author withdrew it
         b = self.bindings.get(qualified)
         if b is not None and message_id in b.delivered:
             return
@@ -2173,6 +2434,7 @@ class Daemon:
                 continue
             if msg is None:
                 continue
+            self._note_message(msg, parse_machine_line(msg.content))
             with self._lock:
                 rows = self.queue.get(q)
                 if rows is not None and rows.get(mid, 0) is None:
@@ -2483,6 +2745,7 @@ class Daemon:
         """
         q = binding.qualified
         handed = 0
+        self.sweep_expired()
         with self._name_lock(q):
             with self._lock:
                 if self.bindings.get(q) is not binding:
@@ -2508,6 +2771,12 @@ class Daemon:
                                     "is skipped at every release", mid, q,
                                     "gone from the record" if msg is None
                                     else "not a machine line the daemon can read")
+                    continue
+                self._note_message(msg, ml)
+                gone = self._gone(mid, ml, msg)
+                if gone is not None:
+                    # Past its expiry, or withdrawn: dropped here, never handed.
+                    self._drop_rows(q, [mid], gone)
                     continue
                 if not flagged and _flagged(ml, q):
                     continue
@@ -2694,6 +2963,11 @@ class Daemon:
             "audience": audience,
             "audience_source": audience_source,
             "timestamp": msg.timestamp,
+            # line zero's `[interrupt]`: the sender asks for a running turn where the
+            # harness can take it there.
+            "interrupt": ml.interrupt,
+            # line zero's `[expires:...]`, a Unix second; None never expires.
+            "expires_at": ml.expires_at,
         }
         if ml.thread_mark:
             # "one-left" or "last", the thread mark the send verb wrote on a reply in an
@@ -2763,6 +3037,17 @@ class Daemon:
             return
         with self._name_lock(binding.qualified):
             for payload in ready:
+                mid = payload["message_id"]
+                gone = self._gone(mid, expires_at=payload.get("expires_at"))
+                if gone is not None:
+                    # It waited for room past its expiry, or was withdrawn meanwhile.
+                    with self._lock:
+                        binding.window.discard(mid)
+                        binding.delivered.discard(mid)
+                    self._book("drop a row of", binding.qualified,
+                               lambda gone=gone, mid=mid: self.books.drop_gone(
+                                   binding.qualified, [mid], gone))
+                    continue
                 self._push(binding, payload)
 
     # ------------------------------------------------------------------ the audience
