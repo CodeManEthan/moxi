@@ -499,8 +499,11 @@ def claim(conn: sqlite3.Connection, request_id: str, *, harness: str,
     launch's stamp (a session started from inside the launched one) gets None.
 
     A held launch is claimed again only when the endpoint holding it is gone and the new
-    endpoint's event names the row's own session id: a session whose endpoint was
-    replaced (Claude starts a new one when its plugins reload) keeps its launch. Gone
+    endpoint's event names a session id the launch is known by: the row's own, or any
+    recorded for it in `session_ids` (only the endpoint holding a launch records its ids,
+    so an id there is the launch's own session after a clear or a compaction). So a
+    session whose endpoint was replaced (Claude starts a new one when its plugins reload)
+    keeps its launch, before or after a `/clear`. Gone
     means the held endpoint's process has ended (`endpoint_gone`), never that it did not
     answer once. The claim moves in one conditional update on the held endpoint, so of
     two new endpoints only one takes it, and a `reclaimed` event records the move.
@@ -518,7 +521,7 @@ def claim(conn: sqlite3.Connection, request_id: str, *, harness: str,
         row = get(conn, request_id)
         held = row.endpoint if row is not None else None
         if (held is not None and held != endpoint and session_id is not None
-                and row.harness == harness and row.session_id == session_id
+                and row.harness == harness and _known_by(conn, row, session_id)
                 and endpoint_gone(held)):
             moved = conn.execute(
                 "UPDATE launches SET endpoint = ?, updated_at = ? "
@@ -532,6 +535,14 @@ def claim(conn: sqlite3.Connection, request_id: str, *, harness: str,
                      _encode({"endpoint": endpoint, "was": held})))
                 row = get(conn, request_id)
     return row if row is not None and row.endpoint == endpoint else None
+
+
+def _known_by(conn: sqlite3.Connection, row: LaunchRow, session_id: str) -> bool:
+    """Whether the launch `row` is known by `session_id`: its own, or one recorded for it."""
+    if row.session_id == session_id:
+        return True
+    return conn.execute("SELECT 1 FROM session_ids WHERE session_id = ? AND request_id = ?",
+                        (session_id, row.request_id)).fetchone() is not None
 
 
 def endpoint_gone(endpoint: str) -> bool:

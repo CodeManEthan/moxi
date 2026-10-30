@@ -22,8 +22,9 @@ process, so the endpoint is named by its own pid and start time.
 
 An endpoint serves its session for the endpoint's own life, and a session may outlive it:
 Claude starts a new endpoint for the same session when its plugins reload. The new
-endpoint claims the launch again when its event names the launch's own session id and the
-endpoint that held it has ended (`store.claim`).
+endpoint claims the launch again when its event names a session id the launch is known by
+(its own, or one recorded for it, as after a `/clear`) and the endpoint that held it has
+ended (`store.claim`).
 """
 
 from __future__ import annotations

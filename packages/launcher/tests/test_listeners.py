@@ -241,6 +241,36 @@ def test_a_new_endpoint_reclaims_the_launch_once_the_one_holding_it_has_ended(
     assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted"), (CLEARED_ID, "clear")]
 
 
+def test_a_reload_after_a_clear_reclaims_by_the_cleared_id(conn, endpoint, dead):
+    # The session was cleared, so its id is the cleared one, then its plugins reloaded.
+    launch_claude(conn)
+    endpoint(dead)
+    listen_ready.observe(ready("claude", CLAUDE_ID, "r1"))
+    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="clear"))
+    endpoint(NESTED)
+    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="startup"))
+    assert store.get(conn, "r1").endpoint == NESTED
+    [moved] = store.events(conn, "r1")
+    assert (moved.kind, moved.session_id) == (store.RECLAIMED, CLEARED_ID)
+    assert moved.detail == {"endpoint": NESTED, "was": dead}
+    # Its later ids are recorded again.
+    listen_ready.observe(ready("claude", "c0mpact-id", "r1", source="compact"))
+    assert store.session_ids(conn, "r1") == [
+        (CLAUDE_ID, "minted"), (CLEARED_ID, "clear"), ("c0mpact-id", "compact")]
+
+
+def test_an_id_recorded_for_another_launch_does_not_reclaim(conn, endpoint, dead):
+    launch_claude(conn, "r0", session_id="other-minted-id")
+    store.learn_session(conn, "r0", CLEARED_ID, "clear")
+    launch_claude(conn)
+    endpoint(dead)
+    listen_ready.observe(ready("claude", CLAUDE_ID, "r1"))
+    endpoint(NESTED)
+    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="startup"))
+    assert store.get(conn, "r1").endpoint == dead
+    assert store.events(conn, "r1") == []
+
+
 def test_a_new_endpoint_with_another_session_id_does_not_reclaim(conn, endpoint, dead):
     launch_claude(conn)
     endpoint(dead)
