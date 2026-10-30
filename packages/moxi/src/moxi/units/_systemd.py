@@ -183,6 +183,7 @@ class SystemdBackend:
     name = "systemd"
     supervisor = "systemd"
     encoding = "utf-8"
+    sockets = "units"
     #: The fence's runner when a call passes none: the real supervisor.
     runner = None
 

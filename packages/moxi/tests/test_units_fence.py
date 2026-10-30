@@ -181,7 +181,8 @@ def test_the_fake_backend_acts_and_reads_marked_and_foreign_units(tmp_path):
     sup = FakeSupervisor(root)
     fake = FakeBackend(root, runner=sup)
     fence = Fence(fake.supervisor, sup)
-    (root / "moxi-demo-shell.service").write_text("# moxi unit: demo/shell\n")
+    (root / "moxi-demo-shell.service").write_text(
+        "# moxi unit: demo/shell\nsockets = moxi-demo-shell.socket\n")
     (root / "moxi-demo-shell.socket").write_text("# moxi unit: demo/shell\n")
     sup.extra |= {"backup.timer", "backup-run.service"}
     sup.triggers["backup.timer"] = "backup-run.service"
@@ -190,8 +191,8 @@ def test_the_fake_backend_acts_and_reads_marked_and_foreign_units(tmp_path):
     shell = refs[("shell", "daemon")]
     assert shell.ids == ("moxi-demo-shell.service",) and shell.marked
     assert fake.act("enable", shell, fence).ok
-    assert sup.calls[-1] == ("enable", "--now", "moxi-demo-shell.socket",
-                             "moxi-demo-shell.service")
+    assert sup.calls[-2:] == [("enable", "--now", "moxi-demo-shell.socket"),
+                              ("start", "moxi-demo-shell.service")]
     assert fake.running(["moxi-demo-shell.service", "x.service"], fence) == {
         "moxi-demo-shell.service"}
     backup = fake.foreign("backup.timer", fence)
@@ -201,9 +202,16 @@ def test_the_fake_backend_acts_and_reads_marked_and_foreign_units(tmp_path):
     assert fake.own("moxi-x.service") and not fake.own("backup.timer")
     assert fake.wrap("backup.timer", module="demo", key="rows.backup", name="backup",
                      fence=fence).ok
+    socket = refs[("shell", "socket")]
+    states = {(s.name, s.kind): s for s in fake.status([shell, socket, backup], fence)}
+    assert states[("shell", "daemon")].state == "active"
+    # The service reads static; the core takes the daemon's enabled from its socket.
+    assert states[("shell", "daemon")].enabled is None
+    assert states[("shell", "socket")].state == "active"
+    assert states[("shell", "socket")].enabled is True
+    assert states[("shell", "socket")].epoch == (
+        f"moxi-demo-shell.socket={sup.invocations['moxi-demo-shell.socket']}")
     states = {s.name: s for s in fake.status([shell, backup], fence)}
-    assert states["shell"].state == "active"
-    assert states["shell"].enabled is True
     assert states["shell"].log == "journalctl --user -u moxi-demo-shell.service"
     assert states["backup.timer"].wrapped == units.Wrapped("demo", "rows.backup", "backup")
     assert fake.unwrap("backup.timer", module="demo", fence=fence).ok

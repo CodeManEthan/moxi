@@ -76,6 +76,7 @@ class LaunchdBackend:
     name = "launchd"
     supervisor = "launchd"
     encoding = "utf-8"
+    sockets = "job"
 
     def __init__(self, *, agents: Path | None = None, uid: int | None = None,
                  gate: str | None = None, runner=None):

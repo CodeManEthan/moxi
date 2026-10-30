@@ -59,6 +59,7 @@ class SchtasksBackend:
     name = "schtasks"
     supervisor = "schtasks"
     encoding = "utf-16"
+    sockets = "none"
 
     def __init__(self, *, user: str | None = None, folder: str = FOLDER):
         self._user = user
