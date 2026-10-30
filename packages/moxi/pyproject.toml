@@ -47,3 +47,6 @@ only-include = ["LICENSE", "README.md", "src/moxi", "tests", "tools"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Timed tests are the slow tier: a plain run leaves them out; `-m slow` runs them.
+addopts = "-m 'not slow'"
+markers = ["slow: takes long or is timed; deselected by a plain pytest run"]
