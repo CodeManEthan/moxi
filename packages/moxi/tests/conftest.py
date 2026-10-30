@@ -172,7 +172,8 @@ def build_wheel(out: Path, name: str, version: str, files: dict[str, str], *,
 def core_wheel(out: Path, version: str = "0.1.0") -> Path:
     """This checkout's `moxi` package as a wheel, with its console script."""
     src = Path(__file__).resolve().parents[1] / "src" / "moxi"
-    files = {f"moxi/{p.name}": p.read_text() for p in sorted(src.glob("*.py"))}
+    files = {f"moxi/{p.relative_to(src).as_posix()}": p.read_text()
+             for p in sorted(src.rglob("*.py")) if "__pycache__" not in p.parts}
     return build_wheel(out, "moxi", version, files, scripts={"moxi": "moxi.cli:main"})
 
 
