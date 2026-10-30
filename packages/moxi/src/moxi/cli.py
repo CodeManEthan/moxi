@@ -706,7 +706,7 @@ def _config(argv: list[str]) -> int:
                              "write the file with every key commented out at its default")
     args = parser.parse_args(argv)
     from . import config, modules
-    from .paths import Layout
+    from .paths import _layout
 
     module = args.module
     if not names.is_module_name(module):
@@ -720,7 +720,7 @@ def _config(argv: list[str]) -> int:
             _error(found.reason)
             print(install_hint(module), file=sys.stderr)
             return 2
-    path = Layout(module).config_file()
+    path = _layout(module).config_file()
     if args.action == "path":
         print(path)
         return 0

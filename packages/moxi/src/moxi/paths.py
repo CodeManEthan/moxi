@@ -108,9 +108,10 @@ class Layout:
         own = tuple(f"{self.prefix}{suffix}" for suffix in LOCATORS) if self.prefix else ()
         return (*own, HOME)
 
-    def device(self, env: Mapping[str, str] | None = None) -> str:
-        """This device's label for the module (`device_label`)."""
-        return _label(self.prefix, _environ(env))
+    def device(self, env: Mapping[str, str] | None = None, *,
+               create: bool = True) -> str | None:
+        """This device's label for the module (`device_label`, with its `create`)."""
+        return _label(self.prefix, _environ(env), create)
 
     # -- the roots ---------------------------------------------------------------------
 
@@ -222,8 +223,8 @@ DEVICE_ID = "device-id"
 def device_id(env: Mapping[str, str] | None = None) -> str:
     """This device's id: a UUID (32 hex digits) written once in the core's state directory.
 
-    Two first runs at once agree on one id: the file is written under a lock, and only
-    when it is still missing once the lock is held.
+    Two first runs at once, in two processes or two threads of one, agree on one id: the
+    file is written under a lock, and only when it is still missing once the lock is held.
     """
     path = core().state_dir(env) / DEVICE_ID
     if found := _read_id(path):
@@ -233,7 +234,8 @@ def device_id(env: Mapping[str, str] | None = None) -> str:
     from . import files
 
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with files.lock(path.with_name(f"{DEVICE_ID}.lock")):
+    # This process's threads queue for the lock rather than being refused by it.
+    with files._gated_lock(path.with_name(f"{DEVICE_ID}.lock")):
         if found := _read_id(path):
             return found
         fresh = uuid.uuid4().hex
@@ -241,17 +243,27 @@ def device_id(env: Mapping[str, str] | None = None) -> str:
     return fresh
 
 
-def device_label(module: str | None = None, env: Mapping[str, str] | None = None) -> str:
+def device_label(module: str | None = None, env: Mapping[str, str] | None = None, *,
+                 create: bool = True) -> str | None:
     """This device's label: `MOXI_<M>_DEVICE` when `module` is given and that is set, else
     `MOXI_DEVICE`, else `device_id()`. The variables name the device only; neither moves
-    a root."""
+    a root.
+
+    `create=False` only reads, for a reader such as a doctor: it gives None where
+    `device_id()` would write the first id, and a state root it can't read raises
+    `OSError`.
+    """
     prefix = names.env_prefix(module) if module is not None else ""
-    return _label(prefix, _environ(env))
+    return _label(prefix, _environ(env), create)
 
 
-def _label(prefix: str, environ: Mapping[str, str]) -> str:
+def _label(prefix: str, environ: Mapping[str, str], create: bool = True) -> str | None:
     own = environ.get(f"{prefix}DEVICE") if prefix else None
-    return own or environ.get(DEVICE) or device_id(environ)
+    if label := own or environ.get(DEVICE):
+        return label
+    if create:
+        return device_id(environ)
+    return _read_id(core().state_dir(environ) / DEVICE_ID)
 
 
 def _read_id(path: Path) -> str | None:
@@ -314,16 +326,31 @@ def script(name: str) -> Path:
     """The path of console script `name` in this Python environment's scripts directory
     (`name.exe` on Windows), never one found on PATH.
 
-    Raises `FileNotFoundError` when the environment holds no such script.
+    Raises `FileNotFoundError` when the environment holds no such script. Only the scripts
+    directory is looked in: not PATH, and not the working directory, which Windows'
+    own search tries first.
     """
-    import shutil
-
     scripts = _scripts()
-    found = shutil.which(name, path=str(scripts))
-    if found is None:
-        raise FileNotFoundError(f"{name} is not installed in this environment "
-                                f"(looked in {scripts})")
-    return Path(found)
+    for candidate in _script_names(name):
+        path = scripts / candidate
+        if path.is_file() and os.access(path, os.X_OK):
+            return path
+    raise FileNotFoundError(f"{name} is not installed in this environment "
+                            f"(looked in {scripts})")
+
+
+def _script_names(name: str) -> list[str]:
+    """The file names script `name` may have: `name` itself on POSIX; on Windows `name`
+    with each `PATHEXT` extension, or `name` alone when it already ends in one."""
+    if not name or name in (".", "..") or "/" in name or "\\" in name or "\0" in name:
+        return []
+    if not _WINDOWS:
+        return [name]
+    extensions = [e for e in os.environ.get("PATHEXT", "").split(os.pathsep) if e]
+    extensions = extensions or [".COM", ".EXE", ".BAT", ".CMD"]
+    if any(name.lower().endswith(e.lower()) for e in extensions):
+        return [name]
+    return [name + e.lower() for e in extensions]
 
 
 def python() -> Path:
@@ -357,10 +384,17 @@ def _environ(env: Mapping[str, str] | None) -> Mapping[str, str]:
 
 
 def _expanduser(path: str, environ: Mapping[str, str]) -> str:
-    """`os.path.expanduser`, reading HOME from `environ` when it is a mapping of its own."""
+    """`os.path.expanduser`, reading HOME from `environ` when it is a mapping of its own.
+
+    Only a bare `~` or a `~/` start is this user's home; `~user/...` is another user's,
+    found the way `os.path.expanduser` finds it.
+    """
     if environ is os.environ or "HOME" not in environ:
         return os.path.expanduser(path)
-    return environ["HOME"] + path[1:] if path.startswith("~") else path
+    seps = ("/", "\\") if _WINDOWS else ("/",)
+    if path == "~" or path.startswith(tuple("~" + sep for sep in seps)):
+        return environ["HOME"] + path[1:]
+    return os.path.expanduser(path)
 
 
 def _windows_folders() -> tuple[str, str]:

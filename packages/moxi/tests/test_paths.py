@@ -4,6 +4,7 @@ import stat
 import subprocess
 import sys
 import sysconfig
+import time
 from pathlib import Path
 
 import pytest
@@ -229,6 +230,48 @@ def test_two_first_runs_agree_on_one_device_id(home):
     assert len(ids) == 1 and ids == {paths.device_id(home)}
 
 
+def test_a_label_read_without_create_never_writes_the_id(home):
+    where = Path(home["MOXI_HOME"], "state", "moxi", "device-id")
+    assert paths.device_label("cache", home, create=False) is None
+    assert Layout("cache").device(home, create=False) is None
+    assert not Path(home["MOXI_HOME"]).exists()
+    assert paths.device_label("cache", {**home, "MOXI_DEVICE": "all"}, create=False) == "all"
+    me = paths.device_id(home)
+    assert where.is_file()
+    assert Layout("cache").device(home, create=False) == me == Layout("cache").device(home)
+
+
+def test_two_threads_of_one_process_agree_on_one_device_id(home, monkeypatch):
+    """The second thread waits for the first one's lock instead of being refused by it."""
+    import threading
+
+    from moxi import files
+
+    barrier = threading.Barrier(2)
+    real_write = files.atomic_write
+
+    def slow_write(*args, **kwargs):
+        time.sleep(0.3)             # the other thread has read no id and reached the lock
+        return real_write(*args, **kwargs)
+
+    monkeypatch.setattr(files, "atomic_write", slow_write)
+    found, failed = [], []
+
+    def first_run():
+        barrier.wait()
+        try:
+            found.append(paths.device_id(home))
+        except Exception as e:  # noqa: BLE001 - the test reports it
+            failed.append(e)
+
+    threads = [threading.Thread(target=first_run) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    assert failed == [] and len(found) == 2 and len(set(found)) == 1
+
+
 def test_the_device_label(home):
     me = paths.device_id(home)
     assert paths.device_label(env=home) == me
@@ -392,10 +435,61 @@ def test_python_without_one_in_the_scripts_directory_is_this_interpreter(monkeyp
     assert paths.python() == Path(sys.executable)
 
 
+def test_script_tries_pathext_in_the_scripts_directory_only(monkeypatch, tmp_path):
+    """The Windows search, by hand: each PATHEXT extension in the scripts directory, and
+    never the working directory, where a file of the same name may stand."""
+    scripts, here = tmp_path / "scripts", tmp_path / "here"
+    scripts.mkdir()
+    here.mkdir()
+    (here / "moxi-cache-watch.exe").write_text("")
+    monkeypatch.chdir(here)
+    monkeypatch.setattr(paths, "_WINDOWS", True)
+    monkeypatch.setenv("PATHEXT", ".COM;.EXE")
+    monkeypatch.setattr(os, "pathsep", ";")
+    monkeypatch.setattr(paths, "_scripts", lambda: scripts)
+    with pytest.raises(FileNotFoundError):
+        paths.script("moxi-cache-watch")
+    exe = scripts / "moxi-cache-watch.exe"
+    exe.write_text("")
+    exe.chmod(0o755)
+    assert paths.script("moxi-cache-watch") == exe
+    assert paths.script("moxi-cache-watch.exe") == exe     # a name with its extension
+    for bad in ("", "..", "sub/moxi-cache-watch", "sub\\moxi-cache-watch"):
+        with pytest.raises(FileNotFoundError):
+            paths.script(bad)
+
+
+@WINDOWS
+def test_script_on_windows_never_takes_a_file_in_the_working_directory(monkeypatch,
+                                                                       tmp_path):
+    scripts, here = tmp_path / "scripts", tmp_path / "here"
+    scripts.mkdir()
+    here.mkdir()
+    (here / "moxi-cache-watch.exe").write_text("")
+    monkeypatch.chdir(here)
+    monkeypatch.setattr(paths, "_scripts", lambda: scripts)
+    with pytest.raises(FileNotFoundError):
+        paths.script("moxi-cache-watch")
+
+
 @WINDOWS
 def test_script_and_python_find_exe_files_on_windows():
     assert paths.python().name == "python.exe"
     assert paths.script("moxi").suffix.lower() == ".exe"
+
+
+# -- a user's home in a given environment ---------------------------------------------------
+
+@POSIX
+def test_a_given_home_expands_only_this_users_tilde():
+    import pwd
+
+    me = pwd.getpwuid(os.getuid())
+    given = {"HOME": "/home/given"}
+    assert paths._expanduser("~", given) == "/home/given"
+    assert paths._expanduser("~/x", given) == "/home/given/x"
+    assert paths._expanduser(f"~{me.pw_name}/x", given) == os.path.join(me.pw_dir, "x")
+    assert paths._expanduser("/abs/~x", given) == "/abs/~x"
 
 
 # -- import cost --------------------------------------------------------------------------
