@@ -315,12 +315,14 @@ def test_a_created_runtime_directory_grants_only_this_user(home):
 
 @POSIX
 def test_a_short_socket_path_is_in_the_runtime_directory(monkeypatch, tmp_path):
-    monkeypatch.setenv("MOXI_CACHE_RUNTIME_DIR", str(tmp_path))
-    assert paths.socket_path("cache", "daemon") == str(tmp_path / "cache" / "daemon.sock")
-    assert paths.socket_path("cache", "page") == str(tmp_path / "cache" / "page.sock")
-    monkeypatch.setenv("MOXI_HOME", str(tmp_path / "home"))
-    assert paths.socket_path("moxi", "daemon") == str(tmp_path / "home/runtime/moxi/daemon.sock")
-    assert not (tmp_path / "cache").exists()
+    # Short roots that need not exist: socket_path makes no runtime directory.
+    monkeypatch.setattr(paths, "_SHORT_ROOT", str(tmp_path / "t"))
+    monkeypatch.setenv("MOXI_CACHE_RUNTIME_DIR", "/r")
+    assert paths.socket_path("cache", "daemon") == "/r/cache/daemon.sock"
+    assert paths.socket_path("cache", "page") == "/r/cache/page.sock"
+    monkeypatch.setenv("MOXI_HOME", "/h")
+    assert paths.socket_path("moxi", "daemon") == "/h/runtime/moxi/daemon.sock"
+    assert not (tmp_path / "t").exists()
 
 
 @POSIX
@@ -341,7 +343,8 @@ def test_a_long_socket_path_is_hashed_into_a_private_directory(monkeypatch, tmp_
     assert paths.socket_path("cache", "page") != got
 
 
-def test_a_socket_name_is_one_plain_name():
+def test_a_socket_name_is_one_plain_name(monkeypatch, tmp_path):
+    monkeypatch.setattr(paths, "_SHORT_ROOT", str(tmp_path))
     for bad in ("", "..", "a/b"):
         with pytest.raises(ValueError):
             paths.socket_path("cache", bad)
