@@ -72,6 +72,10 @@ def test_the_next_stop_counts_the_reminder_and_the_turn_end_reports_unanswered(
     assert codex.fake.stop(stop_hook_active=True, task_types=(), crons=0) is None
     codex.fake.end_turn("answer")
     assert wait_until(lambda: msg.id in unanswered(rig))
+    # The stop recorded it unanswered; the turn end settles later, on the adapter's own
+    # thread, so wait for its frame and the cleared block before reading them.
+    assert wait_until(lambda: not codex.blocked and any(
+        f["handled"] == [msg.id] for f in frame_kinds(frames, "turn")))
     assert unanswered(rig)[msg.id]["owing"] == CODEX
     assert codex.reply_ledger.debts == {} and not codex.blocked
     assert frame_kinds(frames, "turn")[-1]["handled"] == [msg.id]
