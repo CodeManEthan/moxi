@@ -205,9 +205,12 @@ def test_the_default_close_ends_a_process_that_ignores_the_interrupt(tmp_path):
         signal.signal(signal.SIGINT, signal.default_int_handler)
         proc.EXIT_GRACE = 0.5
         proc.lifeline()
-        print("ready", flush=True)
+        ready = False
         while True:
             try:
+                if not ready:
+                    ready = True
+                    print("ready", flush=True)
                 time.sleep(60)
             except KeyboardInterrupt:
                 pass
