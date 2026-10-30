@@ -692,3 +692,82 @@ def test_an_indexed_path_now_inside_another_repo_is_that_repo_gone(demo):
     assert report.ok and inner_key not in api.indexed()
     assert set(gitconf.read(gitconf.resolve(outer)).pieces) == {"demo/gate"}
     assert gitconf.resolve(outer).key in api.indexed()
+
+
+# -- shims left in the default hooks dir after core.hooksPath moved ----------------------------
+
+def test_refresh_after_core_hookspath_moved_takes_the_old_shim_away_and_puts_back_the_hook(demo):
+    repo = demo.repo()
+    hooks = repo / ".git" / "hooks"
+    existing_hook(repo, "pre-commit", demo.log)
+    original = (hooks / "pre-commit").read_text()
+    api.add(repo, "demo/gate", mode="shim")
+    (repo / ".githooks").mkdir()
+    git(repo, "config", "core.hooksPath", ".githooks")
+    said = [p for p in api.status(repo)[0]["problems"] if str(hooks) in p.detail]
+    assert said and all(p.fix == f"moxi repo git-hooks refresh {repo}" for p in said)
+    assert any(r.state == "warn" and str(hooks) in r.detail for r in problems(f"hooks {repo}"))
+    report = api.refresh(repo)
+    assert report.ok
+    assert (hooks / "pre-commit").read_text() == original
+    assert not (hooks / "pre-commit.local").exists()
+    assert gitconf.read(gitconf.resolve(repo)).moved == set()
+    assert not [p for p in api.status(repo)[0]["problems"] if str(hooks) in p.detail]
+    # Back in the default hooks dir, the next refresh places the shim again.
+    git(repo, "config", "--unset", "core.hooksPath")
+    api.refresh(repo)
+    change(repo)
+    assert commit(repo).returncode == 0
+    assert demo.ids() == ["demo/gate", "existing"]
+
+
+def test_a_moved_hook_stays_recorded_until_it_is_back(demo):
+    repo = demo.repo()
+    hooks = repo / ".git" / "hooks"
+    existing_hook(repo, "pre-commit", demo.log)
+    original = (hooks / "pre-commit").read_text()
+    api.add(repo, "demo/gate", mode="shim")
+    (repo / ".githooks").mkdir()
+    git(repo, "config", "core.hooksPath", ".githooks")
+    # Another tool takes the slot in the old dir: the moved hook can't go back yet.
+    (hooks / "pre-commit").write_text("#!/bin/sh\n")
+    api.refresh(repo)
+    assert (hooks / "pre-commit.local").read_text() == original
+    assert gitconf.read(gitconf.resolve(repo)).moved == {"pre-commit"}
+    assert any("pre-commit.local" in p.detail for p in api.status(repo)[0]["problems"])
+    (hooks / "pre-commit").unlink()
+    api.refresh(repo)
+    assert (hooks / "pre-commit").read_text() == original
+    assert gitconf.read(gitconf.resolve(repo)).moved == set()
+
+
+def test_remove_after_core_hookspath_moved_cleans_the_default_hooks_dir(demo):
+    repo = demo.repo()
+    hooks = repo / ".git" / "hooks"
+    existing_hook(repo, "pre-commit", demo.log)
+    original = (hooks / "pre-commit").read_text()
+    api.add(repo, "demo/gate", mode="shim")
+    (repo / ".githooks").mkdir()
+    git(repo, "config", "core.hooksPath", ".githooks")
+    api.remove(repo)
+    assert (hooks / "pre-commit").read_text() == original
+    assert not (hooks / "pre-commit.local").exists()
+    assert gitconf.read(gitconf.resolve(repo)).sections == set()
+    git(repo, "config", "--unset", "core.hooksPath")
+    change(repo)
+    assert commit(repo).returncode == 0 and demo.ids() == ["existing"]
+
+
+def test_a_shim_left_in_the_default_dir_goes_when_another_inside_dir_takes_over(demo):
+    repo = demo.repo()
+    hooks = repo / ".git" / "hooks"
+    api.add(repo, "demo/gate", mode="shim")
+    git(repo, "config", "core.hooksPath", str(repo / ".git" / "own-hooks"))
+    api.refresh(repo)
+    assert shim_files(repo / ".git" / "own-hooks") == ["pre-commit"]
+    assert shim_files(hooks) == []
+
+
+def shim_files(where: Path) -> list[str]:
+    from moxi_repo import shim
+    return sorted(shim.our_shims(where))

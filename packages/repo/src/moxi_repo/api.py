@@ -709,6 +709,20 @@ def _status_of(repo: Repo, in_index: bool, version, good: dict) -> dict:
                 problems += _guard_problems(event, repo.launcher.read_text(
                     encoding="utf-8", errors="replace"), python, runner, repo.root)
         events[event] = info
+    for event, path, fixable in gitconf.leftovers(repo, state):
+        if shim.shim_event(path) is not None:
+            problems.append(Problem(f"{event}: repo's shim {path} is left in {path.parent}, "
+                                    "which git no longer reads as the hooks dir",
+                                    f"moxi repo git-hooks refresh {repo.root}", state="warn"))
+        elif fixable:
+            problems.append(Problem(f"{event}: the git hook repo moved aside is still "
+                                    f"{path}, which nothing runs",
+                                    f"moxi repo git-hooks refresh {repo.root}", state="warn"))
+        else:
+            problems.append(Problem(f"{event}: the git hook repo moved aside is still "
+                                    f"{path}, which nothing runs, and another git hook took "
+                                    f"{path.with_name(event)}; merge them or remove one",
+                                    state="warn"))
     return {"root": str(repo.root), "common_dir": str(repo.common_dir),
             "hooks_dir": str(repo.hooks_dir), "indexed": in_index,
             "git_version": gitconf.version_text(version), "mode": mode,

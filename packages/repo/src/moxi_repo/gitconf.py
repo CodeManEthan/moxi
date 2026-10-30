@@ -6,7 +6,8 @@ never tracks:
     [moxi-repo]
         mode = config                  ; config or shim: what repo wrote
         mode-set = auto                ; auto, config or shim: what the user pinned
-        moved = pre-push               ; events whose existing git hook repo moved to .local
+        moved = pre-push               ; events whose existing git hook repo moved to .local,
+                                       ; kept until that hook is back in its place
     [moxi-repo "piece.notes/secret-gate"]
         event = pre-commit
         target = moxi_notes.gates:pre_commit
@@ -25,7 +26,10 @@ written once when the piece is first registered and then only by `enable` and `d
 the settings only by `--set`; `recorded` only by the runner and the sweep.
 
 `sync` makes an event's config entry, shim or launcher match its registered pieces, and
-runs after every change to them, since the guard's exit status depends on them.
+runs after every change to them, since the guard's exit status depends on them. When git
+reads another hooks dir than `<common git dir>/hooks` (`core.hooksPath` changed), `sync`
+and `remove_all` also take repo's shims out of that default dir and move back the git
+hooks repo moved aside there.
 """
 
 from __future__ import annotations
@@ -84,6 +88,19 @@ class Repo:
     @property
     def launcher(self) -> Path:
         return self.common_dir.joinpath(*shim.LAUNCHER)
+
+    @property
+    def stray_dir(self) -> Path | None:
+        """`<common git dir>/hooks` when git now reads another hooks dir: where shims and a
+        moved git hook may be left after `core.hooksPath` changed. None when it is the
+        hooks dir."""
+        default = self.common_dir / "hooks"
+        try:
+            if default.exists() and self.hooks_dir.exists():
+                return None if os.path.samefile(default, self.hooks_dir) else default
+        except OSError:
+            pass
+        return None if key_of(default) == key_of(self.hooks_dir) else default
 
     @property
     def own_dir(self) -> Path:
@@ -413,6 +430,60 @@ def check_shims(repo: Repo, state: State, events) -> list[str]:
     return out
 
 
+def _present(path: Path) -> bool:
+    return path.exists() or path.is_symlink()
+
+
+def _settle(hooks_dir: Path, moved: set[str], keep: set[str], *,
+            say_left: bool = False) -> list[str]:
+    """In `hooks_dir`, take away our shims for every event not in `keep`, and move back
+    each git hook repo moved aside for such an event where its slot is free. With
+    `say_left`, also name each moved hook that stays because another hook took its slot."""
+    lines = []
+    ours = shim.our_shims(hooks_dir)
+    for event in sorted((set(ours) | moved) - keep):
+        hook, local = hooks_dir / event, hooks_dir / (event + shim.LOCAL)
+        if event in ours or (event in moved and _present(local) and not _present(hook)):
+            lines += shim.take_away(hooks_dir, event, event in moved)
+        elif say_left and event in moved and _present(local):
+            lines.append(f"left {local}: {hook} is now another tool's git hook, so the one "
+                         "repo moved aside stays where it is")
+    return lines
+
+
+def _moved_dirs(repo: Repo) -> list[Path]:
+    """The dirs a git hook repo moved aside can be in: the hooks dir when it is inside the
+    git dir, and the default one when git now reads another."""
+    return (([repo.hooks_dir] if repo.hooks_inside else [])
+            + ([repo.stray_dir] if repo.stray_dir else []))
+
+
+def _still_moved(repo: Repo, moved: set[str], keep: set[str]) -> set[str]:
+    """`moved` less each event not in `keep` whose moved hook is back: no `.local` left
+    where repo may have moved it."""
+    return {event for event in moved if event in keep
+            or any(_present(d / (event + shim.LOCAL)) for d in _moved_dirs(repo))}
+
+
+def leftovers(repo: Repo, state: State) -> list[tuple[str, Path, bool]]:
+    """What a hooks-dir change left behind: (event, our shim or a moved git hook, whether
+    `refresh` can put it right)."""
+    keep = set(state.events()) if state.mode == "shim" and repo.hooks_inside else set()
+    out = []
+    stray = repo.stray_dir
+    if stray is not None:
+        for event, paths in sorted(shim.our_shims(stray).items()):
+            out += [(event, path, True) for path in paths]
+    for event in sorted(state.moved - keep):
+        for d in _moved_dirs(repo):
+            local = d / (event + shim.LOCAL)
+            if _present(local):
+                hook = d / event
+                out.append((event, local, not _present(hook)
+                            or shim.shim_event(hook) is not None))
+    return out
+
+
 def sync(repo: Repo, state: State) -> Sync:
     """Make the entries, shims and launcher match `state`'s pieces and mode."""
     from moxi import files
@@ -435,10 +506,13 @@ def sync(repo: Repo, state: State) -> Sync:
             _remove_section(repo, f"hook.{HOOK_PREFIX}{event}")
             state.entries.pop(event, None)
     inside = state.mode == "shim" and repo.hooks_inside
-    for event in sorted(shim.our_shims(repo.hooks_dir)):
-        if not inside or event not in events:
-            out.lines += shim.take_away(repo.hooks_dir, event, event in moved)
-            moved.discard(event)
+    keep = set(events) if inside else set()
+    out.lines += _settle(repo.hooks_dir, moved if repo.hooks_inside else set(), keep)
+    if repo.stray_dir is not None:
+        # Every shim there goes; a moved hook of an event placed in the hooks dir is that
+        # dir's, so it stays.
+        out.lines += _settle(repo.stray_dir, moved - keep, set())
+    moved = _still_moved(repo, moved, keep)
     if inside:
         for event, code in sorted(events.items()):
             text = shim.shim_text(event, python, runner, root, code, event in STDIN_EVENTS)
@@ -470,10 +544,17 @@ def remove_all(repo: Repo, state: State | None = None) -> list[str]:
     lines: list[str] = []
     for event in sorted(state.entries):
         _remove_section(repo, f"hook.{HOOK_PREFIX}{event}")
-    for event in sorted(shim.our_shims(repo.hooks_dir)):
-        lines += shim.take_away(repo.hooks_dir, event, event in state.moved)
+    moved = set(state.moved)
+    lines += _settle(repo.hooks_dir, moved if repo.hooks_inside else set(), set(),
+                     say_left=True)
+    if repo.stray_dir is not None:
+        lines += _settle(repo.stray_dir, moved, set(), say_left=True)
     for name in sorted(state.sections, key=len, reverse=True):
         _remove_section(repo, name)
+    state.moved = set()
+    # A moved git hook that couldn't go back stays recorded, so a later `remove` (once
+    # its slot is free) still moves it back.
+    _write_moved(repo, state, _still_moved(repo, moved, set()))
     if repo.own_dir.exists():
         shutil.rmtree(repo.own_dir)
     return lines
@@ -482,4 +563,5 @@ def remove_all(repo: Repo, state: State | None = None) -> list[str]:
 __all__ = ["Repo", "State", "Sync", "NotARepo", "GitError", "FLOOR", "CONFIG_FROM",
            "resolve", "read", "register", "set_enabled", "clear_recorded", "apply_settings", "remove_piece",
            "set_mode", "sync", "remove_all", "pick_mode", "git_version", "parse_version",
-           "interpreter", "runner_file", "chain_state", "check_shims", "key_of", "worktrees"]
+           "interpreter", "runner_file", "chain_state", "check_shims", "key_of", "worktrees",
+           "leftovers"]

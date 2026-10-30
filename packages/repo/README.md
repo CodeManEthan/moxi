@@ -119,8 +119,11 @@ happen with two gits on one machine (Apple's and Homebrew's, or a GUI that bundl
 own). Shim mode works under every git, so pin `--mode shim` where that is a risk.
 
 In shim mode an existing git hook moves to `<event>.local` beside the shim, and the shim
-runs it after the pieces with the same arguments and stdin; `remove` moves it back. repo
-refuses to place a shim where an `<event>.local` that it didn't move is already there. A
+runs it after the pieces with the same arguments and stdin; `remove` moves it back. If
+`core.hooksPath` later points somewhere else, `refresh` and `remove` take repo's shims out
+of `.git/hooks` and move each hook it moved aside there back, and `git-hooks list` names
+any left. repo refuses to place a shim where an `<event>.local` that it didn't move is
+already there. A
 shim is known by its first comment line, so `refresh` rewrites it in place even after
 another tool renamed it (`pre-commit`'s installer renames it `.legacy` and still runs it;
 lefthook renames it `.old` and doesn't). `git-hooks list` shows a shim that another tool
