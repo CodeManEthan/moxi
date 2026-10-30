@@ -66,8 +66,11 @@ def test_a_refused_turns_delivery_is_requeued_and_retried(rig, tmp_path):
                            name="main", scope="proj-a")
         assert code == 0
         assert wait_until(lambda: fake.delivered)
+        # The adapter retries every 0.01 s, so more refused deliveries can land before
+        # the answer flips: a count of deliveries says nothing about a started turn.
+        # Wait for the turn a retry after the flip starts, and end that one.
         fake.answer = "start"
-        assert wait_until(lambda: len(fake.delivered) >= 2)
+        assert wait_until(lambda: fake.open_turn), "a retry after the flip starts a turn"
         fake.end_turn("answer")
         assert wait_until(lambda: not adapter.held_ids)
     finally:
