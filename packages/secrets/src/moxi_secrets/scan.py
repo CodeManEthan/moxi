@@ -314,6 +314,46 @@ def _finding_allowed(allowlists, secret, match, line, path, eng) -> bool:
     return False
 
 
+def trimmed(target, start: int, end: int) -> tuple[int, int]:
+    """The span `start:end` of `target` (bytes or str) with its leading and trailing
+    newlines left out, as gitleaks trims a match."""
+    newline = 10 if isinstance(target, bytes) else "\n"
+    while start < end and target[start] == newline:
+        start += 1
+    while end > start and target[end - 1] == newline:
+        end -= 1
+    return start, end
+
+
+def secret_span(rx, target, start: int, end: int, group: int):
+    """The secret gitleaks takes from the trimmed match `target[start:end]`, as a span of
+    `target`, or None where gitleaks drops the match.
+
+    gitleaks runs the rule's regex again on the trimmed match alone, as a string of its
+    own, so `^`, `$` and `\\b` meet its ends and not the text around it. If that finds a
+    match and the pattern has a group, the secret is the group `group` names (the match
+    is dropped if there is no such group; a group with no span is the empty secret), else
+    the first non-empty group, else the trimmed match. If the second run finds nothing,
+    the secret is the trimmed match.
+    """
+    groups = rx.groups
+    if not groups:
+        return start, end
+    m = rx.search(target[start:end])
+    if m is None:
+        return start, end
+    if group > 0:
+        if group > groups:
+            return None
+        gs, ge = m.span(group)
+        return (start, start) if gs < 0 else (start + gs, start + ge)
+    for g in range(1, groups + 1):
+        gs, ge = m.span(g)
+        if gs >= 0 and ge > gs:
+            return start + gs, start + ge
+    return start, end
+
+
 def run_gitleaks(t, set_names, path, eng) -> dict:
     """The gitleaks-format sets' hits on `t`, as gitleaks' detector finds them.
 
@@ -349,18 +389,11 @@ def run_gitleaks(t, set_names, path, eng) -> dict:
                     path and eng.compile(rule.path[eng.key]).search(path)):
                 continue
             rx = eng.compile(rule.regex[eng.key])
-            groups = rx.groups
             for m in rx.finditer(target):
-                bs, be = m.span()
+                bs, be = trimmed(target, *m.span())
                 if bs == be:
                     continue
                 s, e = conv(t, bs), conv(t, be)
-                while s < e and etext[s] == "\n":
-                    s += 1
-                while e > s and etext[e - 1] == "\n":
-                    e -= 1
-                if s == e:
-                    continue
                 bounds = t.line_bounds(s, e)
                 marked = allowed_lines.get(bounds)
                 if marked is None:
@@ -368,23 +401,11 @@ def run_gitleaks(t, set_names, path, eng) -> dict:
                         _ALLOW_MARK in etext[bounds[0]:bounds[1]])
                 if marked:
                     continue
-                ss, se = s, e
-                if groups:
-                    if rule.group > 0:
-                        if rule.group > groups:
-                            continue
-                        gs, ge = m.span(rule.group)
-                        if gs < 0:
-                            continue
-                        ss, se = conv(t, gs), conv(t, ge)
-                    else:
-                        for g in range(1, groups + 1):
-                            gs, ge = m.span(g)
-                            if gs >= 0 and ge > gs:
-                                ss, se = conv(t, gs), conv(t, ge)
-                                break
-                if se <= ss:
+                span = secret_span(rx, target, bs, be, rule.group)
+                # An empty secret is no hit: a hit is a span to redact.
+                if span is None or span[1] <= span[0]:
                     continue
+                ss, se = conv(t, span[0]), conv(t, span[1])
                 secret = etext[ss:se]
                 if rule.entropy and _entropy(secret) <= rule.entropy:
                     continue

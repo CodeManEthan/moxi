@@ -171,6 +171,37 @@ def test_the_secret_is_the_group_then_the_first_non_empty_group_then_the_match(s
     assert run("op") == []                # a secret group past the last group
 
 
+def test_the_secret_comes_from_the_regex_run_again_on_the_trimmed_match(small):
+    # gitleaks takes the groups from the regex run again on the match alone, its newlines
+    # trimmed, not from the match in the text; so `$` and a missing newline decide there.
+    run = small([rule("end", r"(t[a-z\\]+)(?:\s|\\r|$)"),
+                 rule("nl", r"(?:\n|x)\w(\w+)", group=1),
+                 rule("past", r"(?:\n|q)\w(\w+)", group=5)])
+    # In the text the group must stop before the literal \r for `\\r` to match ahead of
+    # "!"; alone, the group runs to the end and `$` matches.
+    assert run("t = tab\\r!") == [("end", "tab\\r")]
+    assert run("é tab\\r!") == [("end", "tab\\r")]
+    # Alone, the trimmed match has no newline or "x", so the second run finds nothing and
+    # the secret is the whole trimmed match, even for a secret group past the last.
+    assert run("a\nbcde") == [("nl", "bcde"), ("past", "bcde")]
+    assert run("é\nbcde") == [("nl", "bcde"), ("past", "bcde")]
+    assert run("xbcde") == [("nl", "cde")]
+    assert run("qbcde") == []                 # found again: a secret group past the last
+
+
+def test_a_jwt_takes_the_secret_gitleaks_takes(engine_name):
+    # gitleaks v8.30.1 reports this jwt's secret with the literal \r after it: in the text
+    # the group stops before it (Go's \s does not match the vertical tab), but run again on
+    # the match alone the group takes it and `$` ends the match.
+    token = ".".join(("ey7E1932wTWObj47iX59", "ey\\__p2c-\\B-9/0F\\\\9", "3mj-_y_z6\\\\J"))
+    text = f"key = {token}\\r\x0b"
+    hits = [h for h in scan(text, ("credentials",)) if h.rule == "jwt"]
+    start = text.index(token)
+    assert [(h.start, h.end) for h in hits] == [(start, start + len(token) + 2)]
+    assert hits[0].fingerprint == scan_mod.fingerprint(token + "\\r")
+    assert redact(text, ("credentials",)) == "key = [REDACTED:jwt]\x0b"
+
+
 def test_global_and_rule_allowlists(small):
     run = small([rule("r", r"tok_([a-z0-9]+)", allowlists=[
                     allowlist(regexes=[r"^safe"]),

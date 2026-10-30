@@ -192,18 +192,31 @@ def _rule_row(text: str, secrets: list) -> tuple:
 
 
 def test_a_rule_whose_secret_matches_gitleaks_fails_nothing():
-    c, row = _rule_row("a key", [[3, 4, 3, 4]])
+    c, row = _rule_row("a key", [[3, 4]])
     c.row(row)
     assert not c.failures and c.secrets_compared == 1
 
 
-@pytest.mark.parametrize("secrets", [[[3, 4, 2, 5]], [[3, 4, -1, -1]], [[-1, -1, 3, 3]], []])
+@pytest.mark.parametrize("secrets", [[[2, 5]], [[-1, -1]], [[3, 3]], []])
 def test_a_rule_whose_secret_differs_from_gitleaks_fails(secrets):
-    # Go agrees with both engines here; only the secret gitleaks would take differs, or the
-    # sampler sent none for the match.
+    # Go agrees with both engines here; only the secret gitleaks would take differs (another
+    # span, a dropped match, an empty secret the scan drops), or the sampler sent none.
     c, row = _rule_row("a key", secrets)
     c.row(row)
-    assert [what for what in c.failures["some-rule"] if "secret" in what]
+    failed = {what for what in c.failures["some-rule"] if "secret" in what}
+    assert failed
+    if secrets:
+        assert failed == {"re2 secret against gitleaks' plain",
+                          "fallback secret against gitleaks' plain"}
+
+
+def test_the_scan_secret_is_the_one_run_gitleaks_reports():
+    scan = bump.scan_module()
+    rx = engine.python().compile(r"(?:\n|x)\w(\w+)")
+    assert bump.scan_secret(scan, rx, "a\nbcde\n", 1, 7, 1) == (2, 6)
+    assert bump.scan_secret(scan, rx, "xbcde", 0, 5, 1) == (2, 5)
+    assert bump.scan_secret(scan, rx, "xbcde", 0, 5, 2) is None
+    assert bump.scan_secret(scan, rx, "\n\n", 0, 2, 1) is None
 
 
 @pytest.mark.parametrize("text", ["kı", "kİ", "Kİ", "\u212ai"])
@@ -372,23 +385,26 @@ def test_the_sampler_agrees_with_both_engines_on_a_few_rules():
 
 
 @pytest.mark.slow
-def test_the_sampler_reports_where_gitleaks_takes_a_different_secret():
+def test_the_scan_takes_gitleaks_secret_where_the_group_in_context_differs():
     if shutil.which("go") is None:
         pytest.skip("Go is not on the path")
+    if engine.re2_module() is None:
+        pytest.skip("google-re2 is not installed")
+    from moxi_secrets._generate import translate
+
     # For "d", in context the group starts after the newline's next character; gitleaks
     # runs the regex again on the match with the newline trimmed, finds no match, and keeps
     # the whole trimmed match. "s" takes the same secret either way.
-    pats = [{"id": "d", "pattern": r"(?:\n|x)\w(\w+)", "group": 1},
-            {"id": "s", "pattern": r"tok_(\w+)", "group": 1}]
-    seen = {"d": 0, "s": 0}
+    pats = [{"id": i, "owner": i, "kind": "rule", "group": 1, "pattern": p,
+             "fallback": translate(p)}
+            for i, p in (("d", r"(?:\n|x)\w(\w+)"), ("s", r"tok_(\w+)"))]
+    c = bump.Comparison(pats, engine.Re2Engine(engine.re2_module()), engine.python(),
+                        lambda *args: {}, engine.Text)
     differ = {"d": 0, "s": 0}
     for row in bump.go_rows(pats, 6, 7):
-        if "orbits" in row:
-            continue
-        data = row["text"].encode()
-        for bs, be, gs, ge in row["secrets"]:
-            seen[row["id"]] += 1
-            if (data[bs:be] if bs >= 0 else None) != (data[gs:ge] if gs >= 0 else None):
-                differ[row["id"]] += 1
-    assert seen["d"] and seen["s"]
+        c.row(row)
+        if "orbits" not in row:
+            differ[row["id"]] += sum(m[2:4] != g
+                                     for m, g in zip(row["matches"], row["secrets"]))
+    assert c.secrets_compared and not c.failures
     assert differ["d"] > 0 and differ["s"] == 0

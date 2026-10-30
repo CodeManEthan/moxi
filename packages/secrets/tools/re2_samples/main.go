@@ -15,18 +15,18 @@
 // and then, for each text, one JSON line,
 //
 //	{"id": "...", "kind": "plain", "text": "...", "found": true, "matches": [[ms, me, ss, se]],
-//	 "secrets": [[bs, be, gs, ge]]}
+//	 "secrets": [[gs, ge]]}
 //
 // where `found` is MatchString, and `matches` lists every non-empty match of
 // FindAllStringSubmatchIndex with its secret group's span in context: the group `group`
 // names when it is above zero, else the first non-empty group, else the whole match. A
 // secret group the match has no span for is [-1, -1].
 //
-// `secrets` gives each match's secret two ways. [bs, be] is the secret as secrets takes it:
-// the match with its leading and trailing newlines trimmed, then the group in context, else
-// the trimmed match. [gs, ge] is the secret as gitleaks takes it: FindStringSubmatch run
-// again on the trimmed match alone, its group, else the trimmed match. [-1, -1] is a match
-// that way drops. Offsets are UTF-8 byte offsets into the text.
+// `secrets` gives each match's secret as gitleaks takes it (detect.go at the pin): the
+// match with its leading and trailing newlines trimmed, FindStringSubmatch run again on
+// that alone, its group, else the trimmed match. A group with no span is the empty secret
+// at the trimmed match's start; [-1, -1] is a match gitleaks drops (a secret group past
+// the pattern's last). Offsets are UTF-8 byte offsets into the text.
 //
 // Nothing is stored: the caller reads the lines as they come and keeps none.
 package main
@@ -224,25 +224,15 @@ func secret(span []int, group int) (int, int) {
 	return span[0], span[1]
 }
 
-// secrets is one match's secret as secrets takes it (in context) and as gitleaks takes it
-// (FindStringSubmatch on the newline-trimmed match), as [bs, be, gs, ge].
-func secrets(compiled *regexp.Regexp, text string, span []int, group int) []int {
+// gitleaksSecret is one match's secret as gitleaks takes it (FindStringSubmatch on the
+// newline-trimmed match), as [gs, ge].
+func gitleaksSecret(compiled *regexp.Regexp, text string, span []int, group int) []int {
 	ts, te := span[0], span[1]
 	for ts < te && text[ts] == '\n' {
 		ts++
 	}
 	for te > ts && text[te-1] == '\n' {
 		te--
-	}
-	if ts == te {
-		return []int{-1, -1, ts, te}
-	}
-	bs, be := ts, te
-	if s, e, ok := pick(span, group); ok {
-		bs, be = s, e
-	}
-	if bs < 0 || be <= bs {
-		bs, be = -1, -1
 	}
 	gs, ge := ts, te
 	if sub := compiled.FindStringSubmatchIndex(text[ts:te]); len(sub) >= 4 {
@@ -257,7 +247,7 @@ func secrets(compiled *regexp.Regexp, text string, span []int, group int) []int 
 			}
 		}
 	}
-	return []int{bs, be, gs, ge}
+	return []int{gs, ge}
 }
 
 func run() error {
@@ -297,7 +287,7 @@ func run() error {
 					}
 					ss, se := secret(span, p.Group)
 					matches = append(matches, []int{span[0], span[1], ss, se})
-					both = append(both, secrets(compiled, v[1], span, p.Group))
+					both = append(both, gitleaksSecret(compiled, v[1], span, p.Group))
 				}
 				row := sample{p.ID, v[0], v[1], compiled.MatchString(v[1]), matches, both}
 				if err := enc.Encode(row); err != nil {
