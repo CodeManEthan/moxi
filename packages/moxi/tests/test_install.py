@@ -173,6 +173,16 @@ def test_environment_tells_a_tool_environment_by_its_receipt(monkeypatch, tmp_pa
     assert env.receipt["tool"]["requirements"] == [{"name": "moxi"}]
 
 
+def test_environment_runs_fresh_processes_on_moxi_paths_python(monkeypatch, tmp_path):
+    import moxi.paths
+
+    monkeypatch.setattr(sys, "base_prefix", "/somewhere/else")
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(install, "_direct_url", lambda name: None)
+    monkeypatch.setattr(moxi.paths, "python", lambda: tmp_path / "Scripts" / "python.exe")
+    assert install.environment().python == str(tmp_path / "Scripts" / "python.exe")
+
+
 def test_installed_source_reads_direct_url(site):
     site.distribution("moxi-comms", direct_url={
         "url": "https://github.com/o/comms",
@@ -359,8 +369,9 @@ def test_install_a_module_named_like_a_feature_extra_goes_to_its_own_distributio
     named codex; it installs from moxi-codex."""
     moxi_install(capsys, "comms")
     fake.runs.clear()
-    code, out, err = moxi_install(capsys, "codex")
+    code, out, err = moxi_install(capsys, "codex", "--third-party")
     assert code == 0, err
+    assert "codex is not in Moxi's catalogue" in out
     assert "declares the extra codex" not in out
     assert fake.runs[0][3:] == ["moxi", "--with", "moxi-comms", "--with", "moxi-codex",
                                 "--find-links", "file:///w"]
@@ -472,7 +483,7 @@ def test_install_a_failed_setup_keeps_the_install(fake, capsys):
 def test_install_a_distribution_that_is_no_module(fake, capsys):
     CATALOG["moxi-nomod"] = {}
     try:
-        code, _, err = moxi_install(capsys, "nomod")
+        code, _, err = moxi_install(capsys, "nomod", "--third-party")
     finally:
         del CATALOG["moxi-nomod"]
     assert code == 1 and "no installed distribution declares the Moxi module" in err
@@ -526,3 +537,73 @@ def test_plain_environment_without_uv_uses_pip(monkeypatch):
         sys.executable, "-m", "pip", "install", "moxi-comms[cache]"]
     with pytest.raises(InstallError, match="editable"):
         install._plain_command([Req("moxi-x", editable="/src/x")])
+
+
+# -- the catalogue gate ----------------------------------------------------------------------
+
+def test_an_unlisted_name_is_refused_with_the_nearest_names(fake, capsys):
+    code, out, err = moxi_install(capsys, "comm")
+    assert code == 3
+    assert ("moxi install: 'comm' is not a first-party Moxi module (`moxi modules "
+            "--available` lists them). did you mean comms? To install a third-party "
+            "module, give --third-party to take moxi-comm from the index, or --from "
+            "with its source.") in err
+    assert fake.runs == []
+
+
+def test_an_unlisted_name_far_from_every_listed_one_suggests_nothing(fake, capsys):
+    code, _, err = moxi_install(capsys, "zzzz")
+    assert code == 3 and "did you mean" not in err
+
+
+def test_third_party_installs_moxi_name_from_the_index_and_says_so(fake, capsys):
+    CATALOG["moxi-extra"] = dict(module="extra")
+    try:
+        code, out, err = moxi_install(capsys, "extra", "--third-party")
+    finally:
+        del CATALOG["moxi-extra"]
+    assert code == 0, err
+    assert ("extra is not in Moxi's catalogue: installing moxi-extra from the index as a "
+            "third-party module, not a first-party one.") in out
+    assert fake.runs[0][3:5] == ["moxi", "--with"] and fake.runs[0][5] == "moxi-extra"
+
+
+def test_a_from_for_the_module_s_own_distribution_passes_the_gate(fake, capsys):
+    CATALOG["moxi-extra"] = dict(module="extra")
+    try:
+        code, _, err = moxi_install(capsys, "extra", "--from",
+                                    "moxi-extra @ git+https://h/extra")
+    finally:
+        del CATALOG["moxi-extra"]
+    assert code == 0, err
+
+
+def test_a_from_for_another_distribution_does_not_pass_the_gate(fake, capsys):
+    code, _, err = moxi_install(capsys, "extra", "--from",
+                                "moxi-turns @ git+https://h/turns")
+    assert code == 3 and "not a first-party Moxi module" in err
+
+
+def test_an_unlisted_module_already_installed_runs_its_setup_again(fake, capsys):
+    fake.site.module("extra")
+    code, out, err = moxi_install(capsys, "extra")
+    assert code == 0, err
+    assert "extra is already installed" in out
+
+
+def test_a_listed_name_installs_the_catalogue_s_distribution(fake, capsys, monkeypatch):
+    import moxi.catalogue as catalogue
+
+    seen = []
+    real = catalogue.load
+
+    def load(env=None):
+        found = real(env)
+        seen.append(found.get("turns"))
+        return found
+
+    monkeypatch.setattr(catalogue, "load", load)
+    code, _, err = moxi_install(capsys, "turns", "--none")
+    assert code == 0, err
+    assert seen[0].distribution == "moxi-turns"
+    assert fake.runs[0][5] == "moxi-turns"
