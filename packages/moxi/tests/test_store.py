@@ -110,12 +110,24 @@ def test_an_empty_file_is_made_a_wal_store(tmp_path, caplog):
     path = tmp_path / "s.db"
     path.touch()
     with caplog.at_level(logging.WARNING, logger="moxi.store"):
-        conn = store.connect(path, create=False)
+        conn = store.connect(path)
     try:
         assert pragma(conn, "journal_mode") == "wal"
     finally:
         conn.close()
     assert not caplog.records
+
+
+def test_create_false_on_an_empty_file_writes_nothing(tmp_path):
+    path = tmp_path / "s.db"
+    path.touch()
+    conn = store.connect(path, create=False)
+    try:
+        assert pragma(conn, "journal_mode") == "delete"
+    finally:
+        conn.close()
+    assert path.stat().st_size == 0
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["s.db"]
 
 
 def test_check_same_thread_is_passed_through(tmp_path):

@@ -59,8 +59,10 @@ def connect(path: str | os.PathLike, *, private: bool = True, create: bool = Tru
     0600 before SQLite opens it, and the store is switched to write-ahead logging.
 
     An existing store is opened as it is: nothing is written to it. Its journal mode is
-    read, and one warning is logged when it is not `wal`. An empty file (another process
-    created it a moment ago and has not yet opened it) counts as one this call creates.
+    read, and one warning is logged when it is not `wal`. With `create=True`, an empty
+    file (another process created it a moment ago and has not yet opened it) counts as
+    one this call creates; with `create=False` it is opened as it is, like any other, so
+    a call that may not create writes nothing.
 
     Every connection then gets `synchronous=NORMAL`, a busy timeout of `timeout` seconds
     and foreign keys on, and runs with no implicit transactions (`isolation_level=None`):
@@ -86,7 +88,7 @@ def connect(path: str | os.PathLike, *, private: bool = True, create: bool = Tru
             fresh = True
         except FileExistsError:
             pass  # another process created it first; it is opened below like any other
-    if not fresh:
+    if not fresh and create:
         try:
             fresh = path.stat().st_size == 0
         except FileNotFoundError:
