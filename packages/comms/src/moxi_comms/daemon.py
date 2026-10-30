@@ -494,16 +494,10 @@ class Daemon:
             "send": self._send,
             "bind": self._bind,
             # The reads take no connection.
-            **{name: _read(fn) for name, fn in (
-                ("resolve", self._resolve_query), ("agents", self._agents_query),
-                ("session", self._session_query), ("owner", self._owner_query),
-                ("asks", self._asks_query), ("owed", self._owed_query),
-                ("readable", self._readable_query), ("explain", self._explain_query),
-                ("binding_window", self._binding_window_query),
-                ("attributed_message", self._attributed_message_query),
-                ("rooms", self._rooms_query), ("message", self._message_query),
-                ("history", self._history_query), ("max_id", self._max_id_query),
-                ("last_digest", self._last_digest_query))},
+            **{name: _read(self, f"_{name}_query") for name in (
+                "resolve", "agents", "session", "owner", "asks", "owed", "readable",
+                "explain", "binding_window", "attributed_message", "rooms", "message",
+                "history", "max_id", "last_digest")},
             "turn_ended": self._turn_ended,
             "injected": self._injected,
             "ready": self._ready,
@@ -2801,9 +2795,11 @@ class Refusal(Exception):
         self.extra = extra
 
 
-def _read(fn):
-    """A read method as the method table calls it, with the connection it ignores."""
-    return lambda conn, params: fn(params)
+def _read(daemon, attr: str):
+    """A read method as the method table calls it, with the connection it ignores. The
+    read is looked up on the daemon at each call, so the table follows the daemon's own
+    attribute."""
+    return lambda conn, params: getattr(daemon, attr)(params)
 
 
 def _asked(frame: dict) -> str:
