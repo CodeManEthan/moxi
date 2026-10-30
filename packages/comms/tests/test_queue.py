@@ -22,7 +22,7 @@ import time
 import uuid
 
 import pytest
-from conftest import (as_frames, projects_root, queued, record_rows, store_rows, synced,
+from conftest import (cursor_of, as_frames, projects_root, queued, record_rows, store_rows, synced,
                       wait_until, write_config)
 
 from moxi_comms import cache, constants, cursors, machine_line
@@ -262,7 +262,7 @@ def test_a_held_id_the_cursor_passed_survives_a_restart_and_goes_at_the_next_tur
     assert wait_until(lambda: live in peer.handed())
     cursors.advance(REVIEWER_Q, live)              # the adapter's cursor write
     peer.turn(handled=[live])
-    assert int(cursors.read(REVIEWER_Q)) > int(held)
+    assert int(cursor_of(REVIEWER_Q)) > int(held)
     assert rows(rig, REVIEWER_Q) == {held}
     peer.client.close()
     daemon = reboot()
@@ -639,7 +639,7 @@ def frames(rig, monkeypatch):
             frame = dict(params)
             if _KINDS[method] is not None:
                 frame["kind"] = _KINDS[method]
-            seen.seen.append((frame, cursors.read(str(frame.get("identity")))))
+            seen.seen.append((frame, cursor_of(str(frame.get("identity")))))
             return real(conn, params)
         return handle
 
@@ -717,7 +717,7 @@ def test_the_clamp_keeps_the_cursor_below_a_held_live_id_and_unbind_queues_it(
     """The turn's cursor stops below L; the shim dies;
     L is a row at unbind."""
     peer, low, high = _clamp_setup(rig, blocked)
-    assert cursors.read(REVIEWER_Q) is None or int(cursors.read(REVIEWER_Q)) < int(low)
+    assert cursor_of(REVIEWER_Q) is None or int(cursor_of(REVIEWER_Q)) < int(low)
     assert low not in rows(rig, REVIEWER_Q)
     peer.shim.die_mid_turn()
     wait_until(lambda: REVIEWER_Q not in rig.daemon.bindings)
@@ -729,7 +729,7 @@ def test_the_clamps_high_water_mark_reaches_the_earlier_digest(rig, frames, bloc
     peer, low, high = _clamp_setup(rig, blocked)
     peer.shim.on_turn_boundary()                     # L completes
     peer.sync()
-    assert cursors.read(REVIEWER_Q) == high
+    assert cursor_of(REVIEWER_Q) == high
     assert rows(rig, REVIEWER_Q) == set()
 
 

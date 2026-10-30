@@ -5,19 +5,17 @@ safely take the message -- turn boundaries only, queue and coalesce. Backlog coa
 ONE injected turn; live messages, arriving one at a time, flush one at a time through the
 same code -- the boundary rule produces both.
 
-The cursor writer: this adapter advances the identity's cursor when an injected turn
-runs to completion. Turn completion for `claude-shim` is the Stop hook, which is exactly
+The adapter reports completion; the daemon keeps the books. Before it renders a batch the
+shim opens a digest with the daemon (`open_digest`) and renders only the ids the answer
+keeps. Turn completion for `claude-shim` is the Stop hook, which is exactly
 `on_turn_boundary()`: one call both completes the turn that was running and opens the
-next one. A StopFailure (an API error) ends the turn without completing it. Death
-mid-turn means the call never comes, the cursor never advances, and the whole digest
-replays on the next registration. Replay is the safe direction.
-
-The cursor is clamped: queued mail can reach the shim out of id
-order, so the cursor advances to the highest `through` of every completed digest, but
-never to or past an id the shim still holds. After the cursor write, every turn end
-sends `activity kind=turn` with `handled` (the ids of each digest whose turn completed)
-and `unhandled` (the ids of each digest whose turn failed), so the daemon can settle the
-queue per id. The idle tick is not a turn and sends no `kind`.
+next one. Every turn end sends `turn_ended` with `handled` (each digest whose turn
+completed) and `unhandled` (each digest whose turn failed): the daemon deletes the
+handled digests' rows and advances the cursor in one transaction, and the unhandled ones
+wait again. A StopFailure (an API error) ends the turn without completing it. Death
+mid-turn means the call never comes; the binding's end puts the rows back to waiting,
+and the whole digest replays at the next bind. Replay is the safe direction. The idle
+tick is not a turn and sends no `kind`.
 
 Authority: the frame line is where a recipient's
 launch-declared directors become visible. The declaration arrives as `--director`
@@ -66,7 +64,7 @@ the ledger of owed replies (`owed.Ledger`), opened at injection, and at every St
 decides whether the Stop is a boundary or holds the turn open with one reminder
 (`on_stop`). A debt draws one counted reminder, never while work that will wake the
 session runs, and every missing or failed fact lets the turn end. A blocked turn flushes
-nothing and advances no cursor until the next Stop, a StopFailure, a prompt, or a
+nothing and reports no turn end until the next Stop, a StopFailure, a prompt, or a
 SessionStart that is not a compaction resolves it.
 
 The word `labeled` is retired from RENDERED output in favour of `unverified`
@@ -86,7 +84,7 @@ import time
 
 from moxi import exit as moxi_exit
 
-from .. import (attribution, cache, claimfile, constants, cursors,
+from .. import (attribution, cache, claimfile, constants,
                 directors as directors_mod, envelope, machine_line, owed,
                 stall, wire)
 from ..claimhold import ClaimHolder
@@ -99,10 +97,11 @@ from . import binding
 
 log = logging.getLogger("comms.shim")
 
-#: The `activity` kinds this shim sends (the daemon's `ACTIVITY_READY`, `ACTIVITY_TURN`).
+#: The `activity` kinds this shim sends, each as its own method. A turn's end is the
+#: `turn_ended` request (`_send_turn`).
 ACTIVITY_READY, ACTIVITY_TURN = "ready", "turn"
 #: The daemon method each kind is sent as; no kind is a plain `activity`.
-ACTIVITY_METHODS = {ACTIVITY_READY: "ready", ACTIVITY_TURN: "turn_ended", "look": "look"}
+ACTIVITY_METHODS = {ACTIVITY_READY: "ready", "look": "look"}
 
 #: Exit codes, `moxi.exit`'s: a claim that was refused, and a daemon that was not there.
 EXIT_REFUSED, EXIT_OFFLINE = moxi_exit.REFUSED, moxi_exit.TEMPFAIL
@@ -117,10 +116,9 @@ OFFLINE_MESSAGE = ("comms offline: the delivery daemon is unreachable. Messages 
 #: The launch line when the daemon was down as this session started, and the session
 #: started anyway. "Binds when it returns" is exact about the binding and deliberately
 #: quiet about the backlog -- what delivers a late first bind's mail is the daemon's own
-#: post-register replay (`daemon._handle` -> `_replay`), and with no cursor that is
-#: BOUNDED (REPLAY_N / REPLAY_T). A long outage recovers the identity in full and the mail
-#: only to that bound, with the truncation notice saying so in the digest. (`self.replaying`
-#: is test visibility on this path; nothing in the claude path reads it.)
+#: catch-up, which hands the name's rows, every message routed to it that no turn has
+#: acked. (`self.replaying` is test visibility on this path; nothing in the claude path
+#: reads it.)
 #:
 #: KNOWN GAP, and it is the TRANSITION, not the launch. Telling the agent comms is
 #: offline is met at launch by comms' listener: at the session's start it answers turns
@@ -514,24 +512,19 @@ class ClaudeShim:
         self.queue: list = []
         self.injected: list = []          # every digest text injected (test visibility)
         self.awaiting_completion: str | None = None
-        #: Ids queued or injected whose turn has not ended. A daemon restart replays from
-        #: the cursor, which has not moved past either, so without this the same message
-        #: arrives twice. A digest's ids leave it when its turn ends, exactly those ids
-        #: and never by comparing ids with the cursor.
+        #: Ids queued or injected under this binding whose turn has not ended: a second
+        #: hand-over of one is dropped. A new binding starts it empty, since the daemon
+        #: hands the name's rows again at every bind.
         self.held_ids: set[str] = set()
-        #: The ids of the digest awaiting completion, beside `awaiting_completion`.
+        #: The ids of the digest awaiting completion, beside `awaiting_completion`, and
+        #: the daemon's id for that digest.
         self.awaiting_ids: tuple[str, ...] = ()
-        #: The clamp's high-water mark: the highest `through` of every digest
-        #: whose turn completed, and the hold it completed in. The cursor advances to it,
-        #: or to one below the lowest id still held, whichever is lower.
-        self.completed_through: str | None = None
-        self.completed_mark = None
-        #: The ids of digests whose turn ended since the last `turn` frame went out:
-        #: completed (`handled`) and failed (`unhandled`). A failed digest's turn did not
-        #: end `answer`. Its ids stay in `held_ids` until a frame naming them has been
-        #: sent.
-        self.unreported_handled: list[str] = []
-        self.unreported_unhandled: list[str] = []
+        self.awaiting_digest: int | None = None
+        #: The digests whose turn ended since the last `turn_ended` went out: completed
+        #: (`handled`) and failed (`unhandled`). A failed digest's turn did not end
+        #: `answer`.
+        self.unreported_handled: list[int] = []
+        self.unreported_unhandled: list[int] = []
         #: A SessionStart that came while this shim was not bound: `{"source": ...}`,
         #: sent once right after the next register answer. None when nothing is
         #: owed.
@@ -565,8 +558,8 @@ class ClaudeShim:
         self.last_refusal: str | None = None
         #: The register answer the last bind got.
         self._last_resp: dict | None = None
-        #: The hold the digest awaiting completion was injected under: a cursor moves
-        #: only in that hold of that name.
+        #: The hold the digest awaiting completion was injected under: its turn's end is
+        #: reported only in that hold of that name.
         self.awaiting_mark = None
         self.listen_claims = listen_claims
         self._make_holder(claim_key, claim_socket, claim_roots, claim_proc)
@@ -723,21 +716,22 @@ class ClaudeShim:
         """
         def register(client):
             with self._lock:
-                # `holding`: the ids this shim already has queued or injected and whose
-                # turn has not completed. The daemon claims them for the new
-                # binding at once, so a reconnect is never handed them again -- and so
-                # a replay that finds only these releases no held next-turn mail.
-                # Ids whose completed turn the daemon has not yet been told of ride it
-                # too, so the new binding counts them handed and the next `turn` frame
-                # can settle them.
-                holding = sorted(self.held_ids | set(self.unreported_handled), key=int)
+                # A new binding, before its first hand-over can land: the last one's
+                # rows went back to waiting when it ended, and its digests with it. The
+                # daemon hands the rows again, so what this shim held or queued under
+                # it goes, and so do the turn ends it had not reported: the digests
+                # they name have ended.
+                self.queue = []
+                self.held_ids = set()
+                self.awaiting_digest = None
+                self._forget_turns()
                 session_id, projects_root, turned = (self.session_id, self.projects_root,
                                                      self.turned)
                 endpoint = self.endpoint
             return client.bind(name=self.name, scope=self.scope,
                                global_=self.global_, project=self.project,
                                adapter="claude-shim", session_id=session_id,
-                               holding=holding, projects_root=projects_root,
+                               projects_root=projects_root,
                                turned=turned, endpoint=endpoint)
 
         owed_ready = None
@@ -751,10 +745,6 @@ class ClaudeShim:
             # After the claim file is written: when that write raises, the owed `ready`
             # and the unreported turns stay for the next bind.
             nonlocal owed_ready
-            if self.identity is not None and resp["identity"]["qualified"] != self.identity:
-                # Another name: the clamp's mark and the unreported turns were the old
-                # name's.
-                self._forget_turns()
             owed_ready, self.owed_ready = self.owed_ready, None
 
         resp = binding.register_and_install(
@@ -1002,7 +992,7 @@ class ClaudeShim:
 
     def on_turn_failed(self) -> str | None:
         """StopFailure: a boundary that never blocks, whose digest did not complete: its
-        ids are `unhandled` on the `turn` frame and the cursor does not pass them."""
+        digest is `unhandled` on the `turn_ended`, and its rows wait again."""
         return self.on_turn_boundary(failed=True)
 
     def on_session_start(self, source, session_id) -> bool:
@@ -1035,12 +1025,10 @@ class ClaudeShim:
         with self._lock:
             self.turned = True
 
-    def notify_activity(self, kind: str | None, *, source: str | None = None,
-                        handled=None, unhandled=None) -> bool:
+    def notify_activity(self, kind: str | None, *, source: str | None = None) -> bool:
         """Tell the daemon the harness is alive, which session it is, and what kind of
-        moment this is: `ready` (a SessionStart, with its `source`) or `turn` (a turn has
-        ended, with its `handled` and `unhandled` ids). None sends no `kind`, which
-        releases nothing. Every notify carries the session id, `projects_root` and
+        moment this is: `ready` (a SessionStart, with its `source`) or `look`. None
+        sends no `kind`, which releases nothing. Every notify carries the session id, `projects_root` and
         `turned`, read together under the lock. True when the frame went out on a
         connection that is still open."""
         with self._lock:
@@ -1055,10 +1043,6 @@ class ClaudeShim:
             fields["endpoint"] = endpoint
         if source:
             fields["source"] = source
-        if handled is not None:
-            fields["handled"] = list(handled)
-        if unhandled is not None:
-            fields["unhandled"] = list(unhandled)
         if session_id:
             fields["session_id"] = session_id
         if projects_root:
@@ -1094,74 +1078,99 @@ class ClaudeShim:
                 self.owed_ready = {"source": source}
 
     def _forget_turns(self) -> None:
-        """The name's turn state, when the name is released or another is bound."""
-        self.completed_through, self.completed_mark = None, None
+        """The name's unreported turn ends, when another binding starts."""
         self.unreported_handled, self.unreported_unhandled = [], []
 
-    def _cursor_target(self) -> str | None:
-        """The clamp: the high-water mark of completed digests, or one below the
-        lowest id still held, whichever is lower. None when there is nothing to write."""
-        if self.completed_through is None:
-            return None
-        target = int(self.completed_through)
-        if self.held_ids:
-            target = min(target, min(int(i) for i in self.held_ids) - 1)
-        return str(target) if target > 0 else None
-
     def _complete_turn(self, *, failed: bool = False) -> None:
-        """End the turn that was running: settle its digest, write the cursor, then tell
-        the daemon (`kind=turn` with `handled` and `unhandled`), in that order, so
-        the daemon never deletes a row while the cursor is still below its id.
-
-        `failed` names the digest `unhandled`: its turn did not end `answer`."""
+        """End the turn that was running: its digest is handled, or `unhandled` when
+        `failed` (its turn did not end `answer`), and `turn_ended` tells the daemon,
+        which keeps the books."""
         # A boundary proves the turn both started and ended, so it answers the timer too.
         self.stall.witness()
         with self._lock:
             through = self.awaiting_completion
             ids, self.awaiting_ids = self.awaiting_ids, ()
             mark, self.awaiting_mark = self.awaiting_mark, None
+            digest, self.awaiting_digest = self.awaiting_digest, None
             self.awaiting_completion = None
             identity = self.identity
+            self.held_ids.difference_update(ids)
             if through and not self.claims.may_advance(mark):
                 # The digest went in under a hold this shim no longer has (the name
-                # went elsewhere and the claim is standby). Nothing advances, so the
-                # ids stay ahead of the name's cursor, and they are not this
-                # binding's to report.
-                log.info("turn ended after %s was released; no cursor advance", identity)
-                self.held_ids.difference_update(ids)
-            elif through and failed:
-                # Held until the frame naming them `unhandled` has gone out; the
-                # daemon gives them a row and hands them again at a later release.
-                self.unreported_unhandled.extend(i for i in ids
-                                                 if i not in self.unreported_unhandled)
-            elif through:
-                self.held_ids.difference_update(ids)
-                self.unreported_handled.extend(i for i in ids
-                                               if i not in self.unreported_handled)
-                if (self.completed_through is None or self.completed_mark != mark
-                        or int(through) > int(self.completed_through)):
-                    self.completed_through, self.completed_mark = through, mark
-            target, write_mark = self._cursor_target(), self.completed_mark
-        if target and identity and self.claims.may_advance(write_mark):
-            cursor = cursors.advance(identity, target)
-            if cursor is not None:
-                log.info("turn ended: cursor for %s advanced to %s", identity, cursor)
+                # went elsewhere and the claim is standby): not this binding's to report.
+                log.info("turn ended after %s was released; its digest is not reported",
+                         identity)
+            elif digest is not None and failed:
+                if digest not in self.unreported_unhandled:
+                    self.unreported_unhandled.append(digest)
+            elif digest is not None:
+                if digest not in self.unreported_handled:
+                    self.unreported_handled.append(digest)
         self._send_turn()
 
     def _send_turn(self) -> None:
-        """The `turn` frame, carrying every digest that ended since the last one went
-        out. A frame that could not go out leaves them for the next."""
+        """`turn_ended`, carrying every digest that ended since the last one went out.
+        One that could not go out leaves them for the next, under this binding."""
         with self._lock:
             handled = list(self.unreported_handled)
             unhandled = list(self.unreported_unhandled)
-        if not self.notify_activity(ACTIVITY_TURN, handled=handled, unhandled=unhandled):
+            identity, client = self.identity, self._client
+            session_id, projects_root, turned = (self.session_id, self.projects_root,
+                                                 self.turned)
+            endpoint = self.endpoint
+        if not (identity and client and client.connected):
+            return
+        fields = {"identity": identity, "handled": handled, "unhandled": unhandled,
+                  "turned": turned}
+        if endpoint is not None:
+            fields["endpoint"] = endpoint
+        if session_id:
+            fields["session_id"] = session_id
+        if projects_root:
+            fields["projects_root"] = projects_root
+        try:
+            answer = client.call("turn_ended", fields)
+        except (DaemonOffline, DaemonError) as e:
+            log.warning("turn end for %s not reported: %s", identity, e)
             return
         with self._lock:
-            self.unreported_handled = [i for i in self.unreported_handled
-                                       if i not in handled]
-            self.unreported_unhandled = [i for i in self.unreported_unhandled
-                                         if i not in unhandled]
-            self.held_ids.difference_update(unhandled)
+            self.unreported_handled = [d for d in self.unreported_handled
+                                       if d not in handled]
+            self.unreported_unhandled = [d for d in self.unreported_unhandled
+                                         if d not in unhandled]
+        log.info("turn ended for %s: %d digest(s) handled, %d unhandled; cursor %s",
+                 identity, len(handled), len(unhandled), answer.get("cursor"))
+
+    def _open(self, batch: list) -> tuple[list, int | None]:
+        """`open_digest` for a batch: the payloads the answer keeps and the digest's
+        id. With the daemon gone the batch is dropped (its rows wait again with the
+        binding's end); a refused or unanswered open puts it back for the next
+        boundary."""
+        ids = [str(p["message_id"]) for p in batch]
+        with self._lock:
+            client = self._client
+        try:
+            if client is None or not client.connected:
+                raise DaemonOffline("comms offline: not connected to the daemon")
+            opened = client.call("open_digest", {"ids": ids})
+        except DaemonOffline as e:
+            log.info("digest not opened (%s); its rows wait again for the next binding", e)
+            with self._lock:
+                self.held_ids.difference_update(ids)
+            return [], None
+        except DaemonError as e:
+            log.warning("digest not opened: %s; the batch waits for the next boundary", e)
+            with self._lock:
+                self.queue = batch + self.queue
+            return [], None
+        kept = {str(mid) for mid in opened.get("ids") or ()}
+        dropped = [mid for mid in ids if mid not in kept]
+        if dropped:
+            log.info("digest leaves out %s: withdrawn, expired or already acked",
+                     ", ".join(dropped))
+            with self._lock:
+                self.held_ids.difference_update(dropped)
+        return [p for p in batch if str(p["message_id"]) in kept], opened.get("digest")
 
     def _flush(self) -> str | None:
         with self._lock:
@@ -1171,6 +1180,9 @@ class ClaudeShim:
             self.queue = []
             notice, self.replay_notice = self.replay_notice, None
             identity = self.identity
+        batch, digest = self._open(batch)
+        if not batch:
+            return None
         text = render_digest(batch, notice, self.directors, clock=self.clock)
         self.injector(text)
         high = max(int(p["message_id"]) for p in batch)
@@ -1188,11 +1200,14 @@ class ClaudeShim:
             self.injected.append(text)
             self.awaiting_completion = str(high)
             self.awaiting_ids = tuple(str(p["message_id"]) for p in batch)
+            self.awaiting_digest = digest
             self.awaiting_mark = self.claims.hold_mark()
-        if self._client:
-            self._client.notify("injected", {"identity": identity, "through": str(high),
-                                             "text": text})
-        log.info("injected %d message(s) for %s through %s", len(batch), identity, high)
+            client = self._client
+        if client:
+            client.notify("injected", {"identity": identity, "digest": digest,
+                                       "text": text})
+        log.info("injected %d message(s) for %s through %s (digest %s)", len(batch),
+                 identity, high, digest)
         return text
 
     # ------------------------------------------------------------------ helpers

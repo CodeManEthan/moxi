@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from conftest import queued, raw_connection, settle, wait_for_queue, wait_until, write_config
+from conftest import cursor_of, queued, raw_connection, settle, wait_for_queue, wait_until, write_config
 
 from moxi_comms import constants, cursors, daemon as daemon_mod
 from moxi_comms.daemon import Daemon
@@ -141,7 +141,7 @@ def test_rescan_does_not_re_pend_what_an_unbound_name_already_handled(rig):
 def test_rescan_still_pends_for_a_name_that_never_bound(rig):
     """No cursor at all means nothing was ever handled: the message stays pending."""
     rig.post_as("agent-6", ["curator@proj-a"], "nobody has ever held this name")
-    assert cursors.read("curator@proj-a") is None
+    assert cursor_of("curator@proj-a") is None
 
     rig.daemon.rescan()
     assert len(queued(rig.daemon, "curator@proj-a")) == 1
@@ -188,7 +188,7 @@ def test_an_unreadable_cursor_file_reads_as_no_cursor(rig, body):
     rather than KeyError -- straight out of `read` and into the caller."""
     cursors_dir().mkdir(parents=True, exist_ok=True)
     (cursors_dir() / "curator@proj-a.json").write_text(body)
-    assert cursors.read("curator@proj-a") is None
+    assert cursor_of("curator@proj-a") is None
 
 
 @pytest.mark.parametrize("body", ['["1400000000001"]', '{"cursor": {"id": "1"}}',
@@ -210,7 +210,7 @@ def test_a_corrupt_cursor_file_does_not_raise_out_of_the_STOP_HOOK(rig, body):
 
     curator.on_turn_boundary()                   # inject
     curator.on_turn_boundary()                   # complete: this is where it used to die
-    assert cursors.read("curator@proj-a") == delivered
+    assert cursor_of("curator@proj-a") == delivered
 
 
 def test_advance_never_writes_a_cursor_that_is_not_a_message_id():
@@ -221,7 +221,7 @@ def test_advance_never_writes_a_cursor_that_is_not_a_message_id():
     assert cursors.advance("curator@proj-a", "1400000000009") == "1400000000009"
     assert cursors.advance("curator@proj-a", "not-an-id") is None
     assert cursors.advance("curator@proj-a", None) is None
-    assert cursors.read("curator@proj-a") == "1400000000009", "the good one is untouched"
+    assert cursor_of("curator@proj-a") == "1400000000009", "the good one is untouched"
 
 
 def test_a_cursor_that_cannot_be_written_degrades_to_replay_not_to_a_raise(monkeypatch):
@@ -231,7 +231,7 @@ def test_a_cursor_that_cannot_be_written_degrades_to_replay_not_to_a_raise(monke
         raise OSError("read-only file system")
     monkeypatch.setattr(cursors.tempfile, "mkstemp", no_writes)
     assert cursors.advance("curator@proj-a", "1400000000001") is None
-    assert cursors.read("curator@proj-a") is None
+    assert cursor_of("curator@proj-a") is None
 
 
 def test_a_cursor_record_of_the_wrong_shape_reads_as_no_record(rig):
@@ -252,7 +252,7 @@ def test_bind_deliver_unbind_rescan_leaves_the_pending_view_empty(rig):
     delivered = curator.queue[0]["message_id"]
     curator.on_turn_boundary()
     curator.on_turn_boundary()
-    assert cursors.read("curator@proj-a") == delivered
+    assert cursor_of("curator@proj-a") == delivered
 
     curator.stop()
     wait_until(lambda: "curator@proj-a" not in rig.daemon.bindings)
@@ -418,7 +418,7 @@ def test_mail_handed_to_a_session_that_unbinds_before_its_cursor_moves_is_pendin
 
     b.stop()                                          # no turn boundary: cursor unmoved
     assert wait_until(lambda: "reviewer@proj-a" not in rig.daemon.bindings)
-    assert cursors.read("reviewer@proj-a") is None
+    assert cursor_of("reviewer@proj-a") is None
     assert queued(rig.daemon, "reviewer@proj-a") == {msg.id}
 
     code, out = rig.cli(["agents", "--seats"])

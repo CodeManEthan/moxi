@@ -31,7 +31,7 @@ import threading
 import time
 
 import pytest
-from conftest import (projects_root, raw_connection, record_rows, send_ready, send_turn, settle,
+from conftest import (cursor_of, projects_root, raw_connection, record_rows, send_ready, send_turn, settle,
                       wait_for_queue, wait_until, write_config, write_transcript)
 
 from moxi import exit as moxi_exit
@@ -634,7 +634,7 @@ def test_a_cursor_past_a_held_id_leaves_its_row(rig):
     wait_for_queue(reviewer, 3)
     reviewer.on_turn_boundary(idle=True)     # the idle tick injects the live mail
     reviewer.on_turn_boundary()              # its Stop: cursor written, then `turn`
-    assert int(cursors.read(REVIEWER_Q)) > int(held)
+    assert int(cursor_of(REVIEWER_Q)) > int(held)
     assert held_of(rig) == {held}
     # First digest only: the Stop's warm release (`handled=[]`) may land before its flush.
     assert held not in reviewer.injected[0]

@@ -626,7 +626,10 @@ def settle(client) -> None:
 
 
 def cursor_of(qualified: str):
-    return cursors.read(qualified)
+    """The name's cursor in comms.db's books, read from outside the daemon."""
+    from moxi_comms.store import books
+    row = books.read_cursor(qualified) if qualified else None
+    return None if row is None else row["cursor"]
 
 
 @pytest.fixture
@@ -695,24 +698,51 @@ def as_frames(frames: list):
 
 @pytest.fixture
 def frames(monkeypatch):
-    """Every `activity` frame a harness adapter sends, with its identity's cursor as it
-    stood when the frame went out (`cursor_then`). A kind sent as its own method
-    (`turn_ended`, `ready`, `look`) is recorded as an `activity` frame with that `kind`."""
+    """Every `activity` frame a harness adapter sends. A kind sent as its own method
+    (`ready`, `look`) is recorded as an `activity` frame with that `kind`, and a
+    `turn_ended` as one of kind `turn`, with its digests (`handled`, `unhandled`), the
+    message ids they held (`handled_ids`, `unhandled_ids`, read from the books as the
+    request went out), and the daemon's answer (`answer`)."""
     from moxi_comms.client import DaemonClient
     seen: list = []
-    real = DaemonClient.notify
+    real, real_call = DaemonClient.notify, DaemonClient.call
     kinds = {method: kind for kind, method in ACTIVITY_METHODS.items()}
 
     def notify(self, method, params=None):
         if method == "activity" or method in kinds:
-            frame = dict(params or {}, cursor_then=cursor_of((params or {}).get("identity")))
+            frame = dict(params or {})
             if method in kinds:
                 frame["kind"] = kinds[method]
             seen.append(frame)
         return real(self, method, params)
 
+    def call(self, method, params=None, **kw):
+        if method != "turn_ended":
+            return real_call(self, method, params, **kw)
+        frame = dict(params or {}, kind="turn")
+        for key in ("handled", "unhandled"):
+            frame[f"{key}_ids"] = digest_ids(frame.get(key) or ())
+        seen.append(frame)
+        frame["answer"] = answer = real_call(self, method, params, **kw)
+        return answer
+
     monkeypatch.setattr(DaemonClient, "notify", notify)
+    monkeypatch.setattr(DaemonClient, "call", call)
     return seen
+
+
+def digest_ids(digests) -> list:
+    """The message ids the digests held, by id, read from comms.db's books."""
+    from moxi_comms.store import open_read
+    conn = open_read()
+    try:
+        out = []
+        for d in digests:
+            row = conn.execute("SELECT ids FROM digests WHERE id = ?", (int(d),)).fetchone()
+            out.extend(json.loads(row[0]) if row else [])
+    finally:
+        conn.close()
+    return sorted(out, key=int)
 
 
 def frame_kinds(frames, kind):
@@ -743,11 +773,23 @@ def own_activity(adapter, **fields) -> None:
                   {"identity": identity, **{**report, **fields}})
 
 
-def send_turn(adapter, handled=(), unhandled=()) -> None:
-    """`activity kind=turn` with `handled` and `unhandled`, as the adapters
-    send it at every turn end."""
-    own_activity(adapter, kind="turn", turned=True, handled=[str(i) for i in handled],
-                 unhandled=[str(i) for i in unhandled])
+def send_turn(adapter, handled=(), unhandled=()) -> dict:
+    """A turn end on `adapter`'s own connection, named in message ids: one digest is
+    opened for the `handled` ids and one for the `unhandled` ones (as the adapter would
+    have opened them), then `turn_ended` names the two. Returns the daemon's answer."""
+    client = getattr(adapter, "_client", None) or getattr(adapter, "_daemon", None)
+    assert client is not None and client.connected, "the adapter is not connected"
+
+    def opened(ids) -> list:
+        ids = [str(i) for i in ids]
+        if not ids:
+            return []
+        return [client.call("open_digest", {"ids": ids}, timeout=5.0)["digest"]]
+
+    handled_d, unhandled_d = opened(handled), opened(unhandled)
+    return client.call("turn_ended", {"identity": adapter.identity, "turned": True,
+                                      "handled": handled_d, "unhandled": unhandled_d},
+                       timeout=5.0)
 
 
 def send_ready(adapter, source: str | None) -> None:

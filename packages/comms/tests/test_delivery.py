@@ -11,7 +11,7 @@ import itertools
 import re
 import time
 
-from conftest import send_turn, wait_for_queue, wait_until, write_config
+from conftest import cursor_of, send_turn, wait_for_queue, wait_until, write_config
 
 from moxi_comms import cli, constants, cursors, machine_line
 from moxi_comms.daemon import Daemon
@@ -72,9 +72,9 @@ def test_happy_path_end_to_end(rig):
     assert "::to" not in digest
 
     # the cursor only advances when the injected turn RUNS TO COMPLETION
-    assert cursors.read("reviewer@proj-a") is None
+    assert cursor_of("reviewer@proj-a") is None
     reviewer.on_turn_boundary()
-    assert cursors.read("reviewer@proj-a") == payload["message_id"]
+    assert cursor_of("reviewer@proj-a") == payload["message_id"]
 
     # ...and the reply threads back in the room the question was asked in
     code, out = rig.cli(["reply", payload["message_id"], "looks good"],
@@ -113,7 +113,7 @@ def test_deferral_then_bind_then_release_then_handled(rig):
     delivered_id = curator.queue[0]["message_id"]
     curator.on_turn_boundary()
     curator.on_turn_boundary()
-    assert cursors.read("curator@proj-a") == delivered_id
+    assert cursor_of("curator@proj-a") == delivered_id
     # ...and the shim's turn frame names it handled, so it stops waiting (the cursor
     # alone deletes no row: test_cold_sends and test_queue pin that with raw frames)
     assert wait_until(lambda: _waiting(rig, "curator@proj-a") == 0)
@@ -127,7 +127,7 @@ def test_replay_stops_at_the_cursor(rig):
     wait_for_queue(curator, 1)
     curator.on_turn_boundary()
     curator.on_turn_boundary()
-    first_cursor = cursors.read("curator@proj-a")
+    first_cursor = cursor_of("curator@proj-a")
     curator.stop()
     wait_until(lambda: "curator@proj-a" not in rig.daemon.bindings)
 
@@ -225,7 +225,7 @@ def test_mid_turn_death_hands_the_whole_digest_again(rig):
 
     reviewer.die_mid_turn()                    # the Stop hook never fires
     wait_until(lambda: "reviewer@proj-a" not in rig.daemon.bindings)
-    assert cursors.read("reviewer@proj-a") is None, "no advance without completion"
+    assert cursor_of("reviewer@proj-a") is None, "no advance without completion"
     # the unbind gives every handed, unhandled id past the cursor a row
     assert _queue(rig, "reviewer@proj-a") == {m.id for m in sent}
 
@@ -251,11 +251,11 @@ def test_multicast_is_one_post_one_thread_and_per_recipient_cursors(rig):
 
     b.on_turn_boundary()
     b.on_turn_boundary()
-    assert cursors.read("reviewer@proj-a") == mid
-    assert cursors.read("main@proj-a") is None, "cursors are per recipient, never shared"
+    assert cursor_of("reviewer@proj-a") == mid
+    assert cursor_of("main@proj-a") is None, "cursors are per recipient, never shared"
     c.on_turn_boundary()
     c.on_turn_boundary()
-    assert cursors.read("main@proj-a") == mid
+    assert cursor_of("main@proj-a") == mid
 
 
 def test_standing_attribution_is_verified_even_replayed(rig):
@@ -391,7 +391,7 @@ def test_an_id_claimed_from_holding_keeps_its_row_until_handled(rig):
     shim = rig.shim(**REVIEWER, autoreconnect=True, backoff=itertools.repeat(0.5))
     msg = rig.post_as("agent-6", [REVIEWER_Q], "handed, turn not over")
     wait_for_queue(shim, 1)
-    assert cursors.read(REVIEWER_Q) is None
+    assert cursor_of(REVIEWER_Q) is None
 
     daemon = _reboot(rig)                 # start() runs the rescan before it returns
     assert _queue(rig, REVIEWER_Q) == {msg.id}, "unbound at rescan time: a row"
@@ -492,7 +492,7 @@ def test_a_present_cursor_replays_mail_older_than_REPLAY_T(rig, monkeypatch):
     owed1, owed2 = posted_while_down(rig, monkeypatch, lambda: [
         rig.post_as("agent-6", [REVIEWER_Q], "owed one (668)"),
         rig.post_as("agent-6", [REVIEWER_Q], "owed two (671)")])
-    assert cursors.read(REVIEWER_Q) == handled.id
+    assert cursor_of(REVIEWER_Q) == handled.id
     assert _queue(rig, REVIEWER_Q) == set(), "no row: replay's mail"
 
     rig.clock.advance(47 * 3600)

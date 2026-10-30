@@ -52,6 +52,39 @@ EXPIRED = "expired"
 
 TIMESTAMP_FMT = "%Y-%m-%dT%H:%M:%SZ"
 
+#: The `meta` key that holds the highest message id the daemon has routed. Every id at
+#: or below it was given its rows when it was routed, so a boot rescan routes only what
+#: is above it: a message acked above a lower held one has no row and sits above the
+#: clamped cursor, and routing it again would deliver it twice.
+META_ROUTED_THROUGH = "routed_through"
+
+# --------------------------------------------------------------- the cursor's reasons
+#: Why a name's cursor stands where it does, for `moxi comms explain`. A name, not an
+#: error code: the first two are the commonest states in a healthy home.
+NO_CURSOR_YET = "no-cursor-yet"
+ALREADY_PAST = "cursor-already-past-it"
+BEHIND = "cursor-behind-it"
+#: Not the cursor's own: the message has a row for the name. `explain` checks it before
+#: the cursor, so a message with a row never reads `cursor-behind-it`.
+WAITING = "waiting"
+
+#: One sentence per reason, in the terms of the person reading it at a terminal because
+#: an agent went quiet. `moxi comms explain` prints these verbatim.
+REASONS = {
+    NO_CURSOR_YET: (
+        "No turn of this name has acked a digest yet, so it has no cursor. Its mail "
+        "waits in its rows until a turn answers it."),
+    ALREADY_PAST: (
+        "The cursor is at or past this message. This is the handled case: a turn "
+        "answered the digest that carried it."),
+    BEHIND: (
+        "The cursor has not reached this message. Nothing declined anything: the turn "
+        "that answers its digest has not ended, or a lower message still waits."),
+    WAITING: (
+        "This message waits in the name's rows for its next release point: its next "
+        "session start, /clear, compaction, or a turn of its own on a warm cache."),
+}
+
 
 def stamp(t: float) -> str:
     return time.strftime(TIMESTAMP_FMT, time.gmtime(t))
@@ -192,6 +225,31 @@ class Books:
                 "outcome FROM digests WHERE name = ? AND ended_at IS NULL ORDER BY id",
                 (name,)).fetchall()
         return [_digest(r) for r in got]
+
+    def routed_through(self) -> int | None:
+        """The highest message id routed, or None when nothing has been."""
+        with self._lock:
+            row = self._conn.execute("SELECT value FROM meta WHERE key = ?",
+                                     (META_ROUTED_THROUGH,)).fetchone()
+        try:
+            return None if row is None else int(row[0])
+        except (TypeError, ValueError):
+            return None
+
+    def routed(self, message_id) -> None:
+        """A message was routed: the high mark rises to it, and never falls."""
+        mid = int(message_id)
+        with self._lock, self._write() as conn:
+            row = conn.execute("SELECT value FROM meta WHERE key = ?",
+                               (META_ROUTED_THROUGH,)).fetchone()
+            try:
+                if row is not None and int(row[0]) >= mid:
+                    return
+            except (TypeError, ValueError):
+                pass
+            conn.execute("INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO "
+                         "UPDATE SET value = excluded.value",
+                         (META_ROUTED_THROUGH, str(mid)))
 
     def held_ids(self) -> set:
         """Every message id with a row for any name: what retention keeps."""
@@ -406,6 +464,20 @@ def _advance(conn, name: str, acked, at: str) -> str | None:
                  "ON CONFLICT(name) DO UPDATE SET message_id = excluded.message_id, "
                  "updated_at = excluded.updated_at", (name, target, at))
     return str(target)
+
+
+def explain_cursor(row: dict | None, message_id=None) -> dict:
+    """A name's cursor row (`cursor_row`, `read_cursor`) with the reason it stands where
+    it does. With `message_id`, the reason compares against it."""
+    cursor = None if row is None else row.get("cursor")
+    reason = NO_CURSOR_YET if cursor is None else None
+    if cursor is not None and message_id is not None:
+        try:
+            reason = ALREADY_PAST if int(cursor) >= int(message_id) else BEHIND
+        except (TypeError, ValueError):
+            reason = None
+    return {"cursor": cursor, "updated_at": None if row is None else row.get("updated_at"),
+            "reason": reason, "sentence": REASONS.get(reason)}
 
 
 def read_cursor(name: str, *, path=None, env=None) -> dict | None:

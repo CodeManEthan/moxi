@@ -11,7 +11,7 @@ Every rig test here runs on the mock and on the local backend (`BOTH_BACKENDS`).
 from __future__ import annotations
 
 import pytest
-from conftest import queued, wait_for_queue, wait_until
+from conftest import cursor_of, queued, wait_for_queue, wait_until
 
 from moxi_comms import client as client_mod
 from moxi_comms import cursors, machine_line, provision, wire
@@ -186,7 +186,7 @@ def test_the_read_changes_nothing(rig):
                     dict(d.sent_by_id), dict(d.session_owner), d._seen_max,
                     {q: (b.session_id, b.turned, set(b.delivered))
                      for q, b in d.bindings.items()},
-                    cursors.read(R), cursors.read("curator@proj-a"),
+                    cursor_of(R), cursor_of("curator@proj-a"),
                     len(rig.record.history(rig.names_channel)),
                     len(reviewer.queue))
 
