@@ -94,33 +94,6 @@ passes for fresh; Codex's takes the newest reading. When a window has three or m
 readings of its current period in the last `limits.projection_minutes` (60), a straight
 line through them says when it reaches 100%, given only when that comes before the reset.
 
-## Reports
-
-    moxi usage daily|monthly|sessions|models|projects [--since DATE] [--until DATE]
-        [--harness claude|codex|opencode] [--project KEY] [--model MODEL]
-        [--utc] [--no-pass] [--json]
-
-Each report runs the token index's pass first, so it counts what the harnesses have
-written up to now; `--no-pass` reads the index as it is. A request that sits in several
-files (an archive copy, a resumed session) is counted once. `daily` and `monthly` group by
-day or month and model, cut in local time, or UTC with `--utc`; `sessions` puts a session
-and its subagents together; `models` shows where each price came from; `projects` groups
-by the project each session was recorded under, or by its directory when none was.
-`--since` and `--until` are dates, both included.
-
-Cost is worked out when the report runs, from the model table, so a new price or a
-`[[model]]` row applies to past requests too, each priced on its own time when the row has
-a price period. Tiers apply as the table gives them: a long prompt's price, a priority or
-flex service tier, fast mode (whose cache prices are the provider's multipliers over the
-fast input price). Two marks keep a total honest:
-
-- `u`, unpriced: tokens of a model the table cannot price are counted apart and left out
-  of the cost, never priced at $0. Add a `[[model]]` row to price them.
-- `?`, unknown counts: some request in the row had a token count its harness did not
-  report, so the row's sums are at least what they show. Where a provider's rule stands in
-  for a missing count (OpenAI bills cache writes as input, and Codex does not report
-  them), the rule is named instead.
-
 ## The token index
 
 Every request every harness wrote is kept in one SQLite file, `STATE/usage/index.db`, so a
@@ -156,6 +129,33 @@ With Moxi's projects module installed, the pass records each session's project k
 its directory exists, so a build worktree's sessions keep their project after the worktree
 is removed. A directory that no longer exists is never looked up.
 
+## Reports
+
+    moxi usage daily|monthly|sessions|models|projects [--since DATE] [--until DATE]
+        [--harness claude|codex|opencode] [--project KEY] [--model MODEL]
+        [--utc] [--no-pass] [--json]
+
+Each report runs the token index's pass first, so it counts what the harnesses have
+written up to now; `--no-pass` reads the index as it is. A request that sits in several
+files (an archive copy, a resumed session) is counted once. `daily` and `monthly` group by
+day or month and model, cut in local time, or UTC with `--utc`; `sessions` puts a session
+and its subagents together; `models` shows where each price came from; `projects` groups
+by the project each session was recorded under, or by its directory when none was.
+`--since` and `--until` are dates, both included.
+
+Cost is worked out when the report runs, from the model table, so a new price or a
+`[[model]]` row applies to past requests too, each priced on its own time when the row has
+a price period. Tiers apply as the table gives them: a long prompt's price, a priority or
+flex service tier, fast mode (whose cache prices are the provider's multipliers over the
+fast input price). Two marks keep a total honest:
+
+- `u`, unpriced: tokens of a model the table cannot price are counted apart and left out
+  of the cost, never priced at $0. Add a `[[model]]` row to price them.
+- `?`, unknown counts: some request in the row had a token count its harness did not
+  report, so the row's sums are at least what they show. Where a provider's rule stands in
+  for a missing count (OpenAI bills cache writes as input, and Codex does not report
+  them), the rule is named instead.
+
 ## Commands
 
     moxi usage limits [--harness claude|codex] [--no-pull] [--json]
@@ -176,7 +176,10 @@ time or leaves unpriced, and writes the snapshot layer. `--dry-run` prints and w
 `--revert` removes the snapshot layer, so the shipped table rules again. A fetch that fails
 exits 75.
 
-`index` runs a pass and prints what it did. Only one pass writes at a time: another waits
+`index` runs a pass, prints what it did in one line, then the index's status: each lane's
+state, its files, the requests it holds and how many are copies counted once, the rollouts
+left out as imported, the rows held and why, the last pass and the index's schema version
+(also `api.report("status")`). Only one pass writes at a time: another waits
 up to `index.wait_seconds` (30) and then exits 75; `--no-wait` exits 75 at once.
 `--rebuild` reads every source again from its start, in `index.workers` processes (0 picks
 one per core, up to 8). A schema change that would drop the rows of an archive lane whose
@@ -197,11 +200,13 @@ api.models()                                   # every row, with provenance
 
 now = api.limits()                             # api.limits(harness="codex", pull=False)
 for row in now.rows:
-    row.label, row.state, row.used_percent, row.resets_at, row.full_at
+    row.label, row.state, row.used_percent, row.resets_at   # api.UNKNOWN when not read
+    row.full_at                                # None when there is no projection
 report = api.report("daily", since="2026-10-01", tz="UTC")
 for row in report.rows:
     row["day"], row["model"], row["tokens"], row["cost"]   # cost may be api.UNKNOWN
 report.unpriced_models, report.total["unknown_rows"]
+status = api.report("status", fresh=False)    # the index itself, one row per lane
 ```
 
 Every result has `as_dict()` for JSON: an unknown fact is left out and named in the

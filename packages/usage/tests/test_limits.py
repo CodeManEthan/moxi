@@ -163,7 +163,7 @@ def test_a_kind_with_no_duration_is_its_own_row_and_keeps_its_dollars():
     spend = row(limits.limits(harness="claude", now=NOW, pull=False), "claude",
                 "spend_limit")
     assert (spend.window_minutes, spend.state, dict(spend.extra)) == (
-        None, "unavailable", {"usedDollars": 4.5})
+        api.UNKNOWN, "unavailable", {"usedDollars": 4.5})
 
 
 # --- projection -----------------------------------------------------------------------
@@ -406,6 +406,27 @@ def test_api_limits_answers_with_as_dict_for_json():
         "5h", "fresh", 10.0, 60.0)
     assert five["resets_at"] == "2026-10-30T23:40:00Z"
     assert data["pull"] is None
+
+
+def test_what_a_reading_did_not_say_is_unknown_and_named_in_json():
+    put(codex(10.0, 300, None, NOW - MIN, session_id=None))
+    result = api.limits(harness="codex", now=NOW, pull=False)
+    five, seven = row(result, "codex", "5h"), row(result, "codex", "7d")
+    assert (five.state, five.used_percent, five.observed_at) == ("reset", 10.0, NOW - MIN)
+    assert five.resets_at is api.UNKNOWN and five.session_id is api.UNKNOWN
+    assert five.full_at is None                    # usage's own answer: no projection
+    data = five.as_dict()
+    assert "resets_at" not in data and "session_id" not in data
+    assert set(data["unknown"]) == {"resets_at", "session_id", "plan_type"}
+    # no reading at all: every fact a reading gives is unknown, the reason says why
+    assert seven.state == "unavailable" and "no Codex reading" in seven.reason
+    for name in ("used_percent", "resets_at", "observed_at", "age_seconds", "source",
+                 "session_id", "plan_type", "slot"):
+        assert getattr(seven, name) is api.UNKNOWN, name
+    data = json.loads(json.dumps(result.as_dict()))
+    seven = [r for r in data["rows"] if r["label"] == "7d"][0]
+    assert "used_percent" not in seven and "used_percent" in seven["unknown"]
+    assert seven["window_minutes"] == 10080 and seven["reason"]
 
 
 def test_api_limits_refuses_an_unknown_harness():

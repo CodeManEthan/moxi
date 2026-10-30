@@ -8,6 +8,9 @@ returns a `Report`:
   `cwd`, project and first and last request time.
 * `models`: by model, with where its price came from.
 * `projects`: by the project key the pass stored, and by `cwd` for rows with none.
+* `status`: the index itself, by lane: its state at the last pass, its files, excluded,
+  held and duplicate counts, the held rows' reasons, the last pass and the schema
+  version. It counts no tokens, so the sections below are about the other five.
 
 **What a report reads.** Only the requests that hold their key's claim (`won = 1`), joined
 to their files, through the `requests_won_ts` index for a time range. It never reads the
@@ -56,7 +59,7 @@ if TYPE_CHECKING:
 
     from .models import Table
 
-KINDS = ("daily", "monthly", "sessions", "models", "projects")
+KINDS = ("daily", "monthly", "sessions", "models", "projects", "status")
 HARNESSES = ("claude", "codex", "opencode")
 
 #: The model a request names: the one asked for, else the one that answered.
@@ -656,20 +659,121 @@ def projects(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
     return _report("projects", query, out, total)
 
 
+#: How many held rows `status` names before it only counts them.
+HELD_SHOWN = 20
+#: `status`'s totals over its lanes.
+_STATUS_SUMS = ("files", "excluded", "held", "requests", "duplicates")
+
+
+def status(conn: sqlite3.Connection, *, since: Any = None, until: Any = None,
+           harness: str | None = None, project: str | None = None,
+           model: str | None = None, tz: Any = None, table: Table | None = None) -> Report:
+    """The index itself: one row per lane, the lanes in the order a pass runs them.
+
+    A row holds what the last pass learnt of the lane (`state`, `reason`, `listed`,
+    `root`, `rank`, `compressed`, `unreadable`, `checked_at`, and for Codex the imports
+    file's facts), with what the index holds for it now: `files`, `excluded` (rollouts
+    left out as imported), `held` and `held_reasons` (each reason's count), `requests`
+    and `duplicates` (copies of a request another file holds, counted once). `total`
+    sums those and adds `held_rows` (the first `HELD_SHOWN` held rows with their
+    reasons), `last_pass` (epoch seconds, or None) and `index_version`.
+
+    `harness` keeps one harness's lanes. The index has no range, project or model to
+    filter, so `status` refuses those; `tz` and `table` are not used.
+    """
+    import json
+
+    from . import store
+
+    _status_args(since, until, harness, project, model)
+    try:
+        known = json.loads(store.get_meta(conn, store.META_LANES) or "{}")
+    except ValueError:
+        known = {}
+    if not isinstance(known, dict):
+        known = {}
+    counts: dict[str, dict[str, Any]] = {}
+    for row in conn.execute(
+            "SELECT lane, harness, count(*) AS files, count(excluded) AS excluded,"
+            " count(held) AS held FROM files GROUP BY lane, harness"):
+        counts[row["lane"]] = {"harness": row["harness"], "files": row["files"],
+                               "excluded": row["excluded"], "held": row["held"]}
+    for row in conn.execute(
+            "SELECT f.lane, count(*) AS requests, sum(r.won = 0) AS duplicates"
+            " FROM requests r JOIN files f ON f.id = r.file_id GROUP BY f.lane"):
+        counts.setdefault(row["lane"], {}).update(requests=row["requests"],
+                                                  duplicates=row["duplicates"] or 0)
+    reasons: dict[str, dict[str, int]] = {}
+    for row in conn.execute("SELECT lane, held, count(*) FROM files WHERE held IS NOT NULL"
+                            " GROUP BY lane, held ORDER BY lane, held"):
+        reasons.setdefault(row[0], {})[row[1]] = row[2]
+    rows = []
+    for lane in sorted(set(known) | set(counts),
+                       key=lambda name: (_lane_rank(known.get(name)), name)):
+        learnt = known.get(lane) if isinstance(known.get(lane), dict) else {}
+        held = counts.get(lane, {})
+        row = {"lane": lane, "harness": learnt.get("harness", held.get("harness")),
+               "state": learnt.get("state"), "reason": learnt.get("reason")}
+        row.update({name: value for name, value in learnt.items() if name not in row})
+        for name in _STATUS_SUMS:
+            row[name] = int(held.get(name) or 0)
+        row["held_reasons"] = reasons.get(lane, {})
+        if harness is None or row["harness"] == harness:
+            rows.append(row)
+    lanes = [row["lane"] for row in rows]
+    held_rows = []
+    if lanes:
+        marks = ",".join("?" * len(lanes))
+        held_rows = [dict(row) for row in conn.execute(
+            f"SELECT lane, path, part, held AS reason FROM files WHERE held IS NOT NULL"
+            f" AND lane IN ({marks}) ORDER BY lane, path, part LIMIT ?",
+            (*lanes, HELD_SHOWN))]
+    last = store.get_meta(conn, store.META_LAST_PASS)
+    total = _status_total(rows, held_rows,
+                          last_pass=None if last is None else float(last),
+                          version=conn.execute("PRAGMA user_version").fetchone()[0])
+    return Report(kind="status", rows=rows, total=total,
+                  filters={} if harness is None else {"harness": harness})
+
+
+def _status_args(since: Any, until: Any, harness: str | None, project: str | None,
+                 model: str | None) -> None:
+    given = [name for name, value in (("since", since), ("until", until),
+                                      ("project", project), ("model", model))
+             if value is not None]
+    if given:
+        raise ReportError(f"status covers the whole index; it takes no {', '.join(given)}")
+    if harness is not None and harness not in HARNESSES:
+        raise ReportError(f"{harness!r} is not a harness ({', '.join(HARNESSES)})")
+
+
+def _lane_rank(learnt: Any) -> float:
+    rank = learnt.get("rank") if isinstance(learnt, dict) else None
+    return float(rank) if isinstance(rank, (int, float)) else float("inf")
+
+
+def _status_total(rows: list[dict[str, Any]], held_rows: list[dict[str, Any]], *,
+                  last_pass: float | None, version: int) -> dict[str, Any]:
+    total: dict[str, Any] = {name: sum(row[name] for row in rows) for name in _STATUS_SUMS}
+    total.update(lanes=len(rows), held_rows=held_rows, last_pass=last_pass,
+                 index_version=version)
+    return total
+
+
 REPORTS: dict[str, Callable[..., Report]] = {
     "daily": daily, "monthly": monthly, "sessions": sessions, "models": models_report,
-    "projects": projects,
+    "projects": projects, "status": status,
 }
 
 
 # --- a report from the API ------------------------------------------------------------
 
 def run_pass(*, env: Mapping[str, str] | None = None) -> None:
-    """The pass a fresh report runs first (`moxi_usage.index.pass_`). It raises
-    `moxi.files.LockTimeout` when another pass held the index past the wait."""
+    """The pass a fresh report runs first (`moxi_usage.index.pass_`), under `env`. It
+    raises `moxi.files.LockTimeout` when another pass held the index past the wait."""
     from . import index
 
-    index.pass_()
+    index.pass_(env=env)
 
 
 def report(kind: str, *, since: Any = None, until: Any = None, harness: str | None = None,
@@ -682,10 +786,7 @@ def report(kind: str, *, since: Any = None, until: Any = None, harness: str | No
     Raises `ReportError` for an argument it cannot use."""
     from moxi.files import LockTimeout
 
-    from . import store
-
-    fn = REPORTS.get(kind)
-    if fn is None:
+    if kind not in REPORTS:
         raise ReportError(f"{kind!r} is not a report ({', '.join(KINDS)})")
     passed, note = False, None
     if fresh:
@@ -697,6 +798,22 @@ def report(kind: str, *, since: Any = None, until: Any = None, harness: str | No
                     "as it is")
     else:
         note = "no pass ran first; this report reads the index as it is"
+    return read(kind, since=since, until=until, harness=harness, project=project,
+                model=model, tz=tz, passed=passed, note=note, env=env, table=table)
+
+
+def read(kind: str, *, since: Any = None, until: Any = None, harness: str | None = None,
+         project: str | None = None, model: str | None = None, tz: Any = None,
+         passed: bool = False, note: str | None = None,
+         env: Mapping[str, str] | None = None, table: Table | None = None) -> Report:
+    """One report by `kind` from the index as it is, running no pass: what `report`
+    does after its pass. `passed` and `note` go into `Report.index` as given, for a
+    caller that ran the pass itself (`moxi usage index`)."""
+    from . import store
+
+    fn = REPORTS.get(kind)
+    if fn is None:
+        raise ReportError(f"{kind!r} is not a report ({', '.join(KINDS)})")
     path = store.index_path(env)
     if not path.exists():
         empty = _empty(kind, since, until, harness, project, model, tz)
@@ -711,7 +828,7 @@ def report(kind: str, *, since: Any = None, until: Any = None, harness: str | No
 
             if version > store.INDEX_VERSION:
                 raise moxi.store.StoreTooNew(str(path), version, store.INDEX_VERSION)
-            empty = _empty(kind, since, until, harness, project, model, tz)
+            empty = _empty(kind, since, until, harness, project, model, tz, version=version)
             return replace(empty, index={
                 "passed": passed, "last_pass": None,
                 "note": f"the index is at version {version}, before this usage's "
@@ -727,6 +844,11 @@ def report(kind: str, *, since: Any = None, until: Any = None, harness: str | No
 
 
 def _empty(kind: str, since: Any, until: Any, harness: str | None, project: str | None,
-           model: str | None, tz: Any) -> Report:
+           model: str | None, tz: Any, *, version: int = 0) -> Report:
+    if kind == "status":
+        _status_args(since, until, harness, project, model)
+        return Report(kind="status", rows=[],
+                      total=_status_total([], [], last_pass=None, version=version),
+                      filters={} if harness is None else {"harness": harness})
     query = _query(since, until, harness, project, model, tz)
     return _report(kind, query, [], _Row({}))
