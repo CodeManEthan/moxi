@@ -462,6 +462,22 @@ def test_adopt_refuses_a_unit_another_row_holds(fake):
     assert out.code == 3 and "already adopted as services/site" in out.lines[0]
 
 
+def test_adopt_checks_again_under_the_lock_for_a_row_holding_its_unit(fake, monkeypatch):
+    fake.foreign["web.service"] = Unit("daemon", True, active=True)
+    checked = acts._adoptable
+
+    def race(*args):
+        checked(*args)
+        # Another add of the same unit writes its row between the first check and the
+        # lock.
+        add(**adopted("site", kind="daemon", unit="web.service"))
+
+    monkeypatch.setattr(acts, "_adoptable", race)
+    out = acts.add_adopted("web", "web.service", enable=True)
+    assert out.code == 3 and "already adopted as services/site" in out.lines[0]
+    assert store.get("web") is None and fake.acts() == []
+
+
 def test_adopt_refuses_a_timer_another_module_wrapped(fake):
     from moxi.units import Wrapped
 

@@ -599,6 +599,9 @@ def _add_adopted(name, ref, *, enable, timer, health, project, launches_session,
     wrapped = state.is_wrapped(probe) and backend == "systemd"
     retry = f"moxi services {'enable' if enable else 'disable'} {name}"
     with _locked():
+        # Again under the lock: another add of the same unit may have written its row
+        # since the check above.
+        _held(name, ref)
         store.write(lambda c: store.insert(c, enabled=enable, by=by, **fields))
         if wrapped:
             if not _wrap(probe, lines):
