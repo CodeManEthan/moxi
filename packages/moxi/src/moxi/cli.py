@@ -75,6 +75,8 @@ def _main(argv: list[str]) -> int:
     verb = _VERBS.get(first)
     if verb is not None:
         return _exit_code(verb, rest)
+    if first in names.VERBS:
+        return _not_yet(first)
     if first.startswith("-"):
         _error(f"unknown option {first!r}")
         sys.stderr.write(USAGE)
@@ -103,6 +105,12 @@ def _system_exit_code(exc: SystemExit) -> int:
 
 def _error(message: str) -> None:
     print(f"moxi: {message}", file=sys.stderr)
+
+
+def _not_yet(verb: str) -> int:
+    """A verb the core keeps for a command this version does not have."""
+    _error(f"`moxi {verb}` is not in this version of moxi")
+    return 2
 
 
 def _parser(verb: str, description: str):
@@ -708,6 +716,8 @@ def _help(argv: list[str]) -> int:
     verb = _VERBS.get(topic)
     if verb is not None:
         return _exit_code(verb, ["--help"])
+    if topic in names.VERBS:
+        return _not_yet(topic)
     return dispatch(topic, ["--help", *rest])
 
 

@@ -229,9 +229,10 @@ def unchanged(root) -> bool:
 
 @pytest.mark.parametrize("module, says", [
     ("check", "one of the core's own verbs"),
+    ("installs", "a name the core keeps for itself"),
     ("Bad-Name", "not a Moxi module name"),
     ("other", "the workspace already has moxi-other"),
-], ids=["verb", "bad-name", "member"])
+], ids=["verb", "reserved", "bad-name", "member"])
 def test_it_refuses_a_name(workspace, capsys, module, says):
     assert run(module) == 2
     assert says in capsys.readouterr().err

@@ -48,8 +48,16 @@ def alpha(site):
 
 # -- the verbs ---------------------------------------------------------------------------
 
-def test_the_verbs_are_the_reserved_names():
-    assert frozenset(cli._VERBS) == names.VERBS
+def test_every_verb_is_a_reserved_name():
+    assert frozenset(cli._VERBS) <= names.VERBS
+
+
+@pytest.mark.parametrize("verb", sorted(names.VERBS - set(cli._VERBS)))
+def test_a_verb_kept_for_later_says_so(capsys, verb):
+    code, out, err = run(capsys, verb)
+    assert code == 2 and out == ""
+    assert f"`moxi {verb}` is not in this version of moxi" in err
+    assert run(capsys, "help", verb)[0] == 2
 
 
 def test_no_arguments_prints_usage_and_exits_2(capsys):
