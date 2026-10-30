@@ -36,6 +36,29 @@ class Event:
     reason: str | None = None
 
 
+@pytest.fixture(autouse=True)
+def projects_never_read(monkeypatch):
+    """Every listener test fails if the code asks for projects: a listener takes the
+    project key from the launch row and has no time for a projects read."""
+    asked = []
+    real_available, real_load = modules.available, modules.load
+
+    def available(name):
+        if name == "projects":
+            asked.append(("available", name))
+        return real_available(name)
+
+    def load(name, *, interface=None):
+        if name == "projects":
+            asked.append(("load", name))
+        return real_load(name, interface=interface)
+
+    monkeypatch.setattr(modules, "available", available)
+    monkeypatch.setattr(modules, "load", load)
+    yield
+    assert asked == [], "a listener asked for projects"
+
+
 @pytest.fixture
 def endpoint(monkeypatch):
     """Which endpoint process the next event comes from; the launched session's by

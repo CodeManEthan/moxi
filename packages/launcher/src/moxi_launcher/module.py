@@ -21,6 +21,10 @@ OPTIONAL = {
     "comms": "Identities: a launch may take a comms name, a scope, directors and the "
              "with: posture, and the launcher's console name is reserved. Without it every "
              "launch is a plain harness launch.",
+    "projects": "Project keys: a preset, a seat's home or --project may name a project "
+                "instead of a path, a launch records the key of the project its directory "
+                "is in, and presets --project lists a project's agents beside their seats. "
+                "Without it a launch's place is a path or scratch.",
 }
 GATED = {}
 #: Each Moxi variable the launcher reads outside moxi.paths and moxi.config, and why: the

@@ -165,7 +165,7 @@ class UnknownProject(Refused):
 
 
 class ProjectsUnreadable(Refused):
-    """projects' store could not be read."""
+    """projects' store could not be read, or was written by a newer projects."""
 
     code = "projects-unreadable"
 
@@ -595,11 +595,16 @@ def projects_api(what: str = "this", available: Callable[[str], bool] | None = N
 
 def _projects_call(api, call: Callable, *args):
     """Call projects, its errors turned into the launcher's refusals: `NotFound` 3 with
-    its hint, `Unreadable` 3 with its reason and fix, `Busy` 75."""
+    its hint, `Busy` 75, and `Unreadable` 3 with its reason and fix. A store written by a
+    newer projects (`TooNew`) is one the launcher can't read, so it refuses like
+    `Unreadable`. projects' `Busy` and `TooNew` are kinds of its `Unreadable`, so `Busy`
+    is matched first."""
     busy = getattr(api, "Busy", None)
     not_found = getattr(api, "NotFound", None)
-    unreadable = getattr(api, "Unreadable", None)
-    base = getattr(api, "ProjectsError", None)
+    unreadable = tuple(kind for kind in (getattr(api, "TooNew", None),
+                                         getattr(api, "Unreadable", None),
+                                         getattr(api, "ProjectsError", None))
+                       if isinstance(kind, type))
     try:
         return call(*args)
     except Exception as exc:
@@ -609,8 +614,7 @@ def _projects_call(api, call: Callable, *args):
         if not_found is not None and isinstance(exc, not_found):
             raise UnknownProject(getattr(exc, "key", args[0] if args else ""),
                                  getattr(exc, "fix", None)) from None
-        if ((unreadable is not None and isinstance(exc, unreadable))
-                or (base is not None and isinstance(exc, base))):
+        if unreadable and isinstance(exc, unreadable):
             raise ProjectsUnreadable(getattr(exc, "reason", str(exc)),
                                      getattr(exc, "fix", None)) from None
         raise

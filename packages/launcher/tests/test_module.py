@@ -26,7 +26,7 @@ def test_the_launcher_loads_present(found):
 
 
 def test_it_declares_its_optional_links_as_extras(found):
-    assert set(found.optional) == {"turns", "comms"}
+    assert set(found.optional) == {"turns", "comms", "projects"}
 
 
 def test_it_reserves_the_console_name(found):

@@ -16,6 +16,8 @@ dependencies = ["moxi>=0.1,<0.2"]
 turns = ["moxi-turns>=0.1,<0.2"]
 # Identities, scopes, directors, the with: posture and the console name.
 comms = ["moxi-comms>=0.2,<0.3"]
+# Project keys for a launch's place, a directory's key on its row, and a project's agents.
+projects = ["moxi-projects>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/moxihq/moxi"

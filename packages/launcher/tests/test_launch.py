@@ -5,6 +5,7 @@ the scratch directory and the run-log sweep."""
 from __future__ import annotations
 
 import os
+import sqlite3
 import stat
 import sys
 import time
@@ -421,7 +422,7 @@ def write_presets(text: str) -> None:
     (lambda w: request(w, project="moxi"), 3, presets.NeedsProjects),
 ])
 def test_a_refusal_before_the_row_writes_nothing_and_exits_with_its_code(
-        work, harness, make, code, kind):
+        work, harness, no_projects, make, code, kind):
     with pytest.raises(kind) as raised:
         api.launch(make(work))
     assert api.exit_code(raised.value) == code
@@ -475,7 +476,14 @@ def test_a_passed_on_permissions_profile_is_refused_from_a_preset_too(work, harn
     assert api.exit_code(raised.value) == exits.REFUSED and nothing_written()
 
 
-# -- projects: a lookup that fails ---------------------------------------------------------
+# -- projects ------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def no_projects(monkeypatch):
+    """projects not installed, whatever this environment holds."""
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "projects" and real(name))
 
 
 class ProjectsError(Exception):
@@ -494,13 +502,18 @@ class Unreadable(ProjectsError):
     pass
 
 
+class TooNew(Unreadable):
+    pass
+
+
 class Busy(Unreadable):
     pass
 
 
 @pytest.fixture
 def projects(monkeypatch, work):
-    """projects installed, holding `moxi` at `work`; `fake.fail` makes calls raise."""
+    """A fake projects installed, holding `moxi` at `work`; `fake.fail` makes calls raise.
+    Only projects is faked: every other module loads as it is installed."""
     fake = SimpleNamespace(fail=None)
 
     def get(key):
@@ -515,9 +528,11 @@ def projects(monkeypatch, work):
             raise fake.fail
         return get("moxi") if path == str(work) else None
 
-    found = SimpleNamespace(ok=True, state=modules.PRESENT, reason="", api=SimpleNamespace(
-        get=get, for_path=for_path, ProjectsError=ProjectsError, NotFound=NotFound,
-        Unreadable=Unreadable, Busy=Busy))
+    found = modules.Found(name="projects", state=modules.PRESENT,
+                          interfaces=frozenset({1}), api=SimpleNamespace(
+                              get=get, for_path=for_path, ProjectsError=ProjectsError,
+                              NotFound=NotFound, Unreadable=Unreadable, TooNew=TooNew,
+                              Busy=Busy))
     real_available, real_load = modules.available, modules.load
     monkeypatch.setattr(modules, "available",
                         lambda name: name == "projects" or real_available(name))
@@ -529,6 +544,8 @@ def projects(monkeypatch, work):
 @pytest.mark.parametrize("fail, kind, code", [
     (None, presets.UnknownProject, exits.REFUSED),
     (Unreadable("the store is damaged", "moxi doctor"), presets.ProjectsUnreadable,
+     exits.REFUSED),
+    (TooNew("the store is at a newer schema", "upgrade it"), presets.ProjectsUnreadable,
      exits.REFUSED),
     (Busy("the store stayed locked", "try again"), presets.ProjectsBusy, exits.TEMPFAIL),
 ])
@@ -548,6 +565,57 @@ def test_a_project_launch_records_its_key(work, harness, projects, monkeypatch):
     monkeypatch.setattr(targets, "_spawn", lambda argv, **kw: 99)
     api.launch(request(work, project="moxi", target="headless", brief=BRIEF))
     assert row().project_key == "moxi" and row().cwd == str(work)
+
+
+@pytest.fixture
+def real_projects(work, tmp_path):
+    """The installed projects module, its registry in this test's own home, holding
+    `Moxi` at `work` with lead `planner` and agent `builder`, made by its own verbs."""
+    projects_cli = pytest.importorskip("moxi_projects.cli", reason="projects is not "
+                                       "installed")
+    for argv in (["add", "Moxi", "--root", str(work), "--lead", "planner"],
+                 ["agents", "add", "Moxi", "builder"]):
+        assert projects_cli.main(argv, prog="moxi projects") == 0
+    nested = work / "src" / "pkg"
+    nested.mkdir(parents=True)
+    return SimpleNamespace(key="Moxi", nested=nested, api=modules.load(
+        "projects", interface=1).api)
+
+
+def test_a_launch_through_the_installed_projects_takes_its_key_root_and_agents(
+        work, harness, real_projects, monkeypatch):
+    monkeypatch.setattr(targets, "_spawn", lambda argv, **kw: 99)
+    # A project key, typed in another case: projects' own spelling is recorded.
+    resolved = presets.resolve(request(work, project="moxi", target="headless",
+                                       brief=BRIEF))
+    assert resolved.project_key == "Moxi" and resolved.cwd == str(work)
+    assert resolved.agents == ("planner", "builder") and "projects" in resolved.links
+    api.launch(request(work, project="moxi", target="headless", brief=BRIEF))
+    assert row().project_key == "Moxi" and row().cwd == str(work)
+    # A directory inside the project gets the project's key.
+    api.launch(request(real_projects.nested, rid="r2", sid="9a8b7c6d-1111-4222-8333-"
+                       "444455556666", target="headless", brief=BRIEF))
+    assert row("r2").project_key == "Moxi" and row("r2").cwd == str(real_projects.nested)
+
+
+def test_an_unknown_key_in_the_installed_projects_is_refused_with_its_hint(
+        work, harness, real_projects):
+    with pytest.raises(presets.UnknownProject) as raised:
+        api.launch(request(work, project="nope", brief=BRIEF))
+    assert api.exit_code(raised.value) == exits.REFUSED
+    assert "moxi projects add nope" in raised.value.hint and nothing_written()
+
+
+def test_a_projects_store_newer_than_the_installed_projects_is_refused_as_unreadable(
+        work, harness, real_projects):
+    conn = sqlite3.connect(real_projects.api._store_path())
+    conn.execute("PRAGMA user_version = 99")
+    conn.close()
+    with pytest.raises(presets.ProjectsUnreadable) as raised:
+        api.launch(request(work, target="headless", brief=BRIEF))
+    assert api.exit_code(raised.value) == exits.REFUSED
+    assert "newer" in raised.value.problem and "moxi install projects" in raised.value.hint
+    assert nothing_written()
 
 
 # -- check ---------------------------------------------------------------------------------

@@ -65,6 +65,13 @@ class Unreadable(ProjectsError):
     pass
 
 
+class TooNew(Unreadable):
+    def __init__(self):
+        super().__init__("the projects store is at schema version 9, newer than the 1 "
+                         "this version of moxi-projects knows",
+                         "upgrade it with `moxi install projects`")
+
+
 class Busy(Unreadable):
     def __init__(self):
         super().__init__("the projects store stayed locked", "try again in a moment")
@@ -109,12 +116,14 @@ def projects(monkeypatch, tmp_path):
         return None
 
     api = SimpleNamespace(get=get, for_path=for_path, ProjectsError=ProjectsError,
-                          NotFound=NotFound, Unreadable=Unreadable, Busy=Busy)
-    found = SimpleNamespace(ok=True, api=api)
-    real_available = modules.available
+                          NotFound=NotFound, Unreadable=Unreadable, TooNew=TooNew, Busy=Busy)
+    found = modules.Found(name="projects", state=modules.PRESENT, interfaces=frozenset({1}),
+                          api=api)
+    real_available, real_load = modules.available, modules.load
     monkeypatch.setattr(modules, "available",
                         lambda name: name == "projects" or real_available(name))
-    monkeypatch.setattr(modules, "load", lambda name, interface=None: found)
+    monkeypatch.setattr(modules, "load", lambda name, interface=None: found
+                        if name == "projects" else real_load(name, interface=interface))
     return fake
 
 
@@ -384,6 +393,18 @@ def test_unreadable_projects_refuse_with_reason_and_fix(projects):
                 project_preset="p")
     assert caught.value.exit_code == codes.REFUSED
     assert "corrupt" in caught.value.problem and caught.value.hint == "moxi projects doctor"
+
+
+def test_a_projects_store_too_new_to_read_refuses_like_an_unreadable_one(projects):
+    projects.fail = TooNew()
+    with pytest.raises(presets.ProjectsUnreadable) as caught:
+        resolve('[project.p]\nproject = "moxi"\n', available=WITH_PROJECTS,
+                project_preset="p")
+    assert caught.value.exit_code == codes.REFUSED
+    assert "newer" in caught.value.problem and "moxi install projects" in caught.value.hint
+    found = errors('[project.p]\nproject = "moxi"\n', available=WITH_PROJECTS)
+    assert [(p.code, p.exit_code) for p in found] == [("projects-unreadable",
+                                                       codes.REFUSED)]
 
 
 def test_busy_projects_exit_75(projects):

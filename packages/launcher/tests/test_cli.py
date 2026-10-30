@@ -41,6 +41,13 @@ def harness(tmp_path, monkeypatch) -> Harness:
     return Harness.on_path(tmp_path, monkeypatch)
 
 
+@pytest.fixture
+def no_projects(monkeypatch):
+    """projects not installed, whatever this environment holds."""
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "projects" and real(name))
+
+
 def write_presets(text: str) -> None:
     file = presets.path()
     file.parent.mkdir(parents=True, exist_ok=True)
@@ -270,8 +277,8 @@ def test_run_whose_start_fails_exits_1_and_the_row_says_why(work, harness, monke
     (["run", "--project", "moxi"], codes.REFUSED, "needs-module"),
     (["run", "--harness", "codex", "--", "--permissions", "p"], codes.REFUSED, "owned"),
 ])
-def test_run_refuses_before_the_row_and_writes_nothing(work, harness, argv, code, short,
-                                                       capsys):
+def test_run_refuses_before_the_row_and_writes_nothing(work, harness, no_projects, argv,
+                                                       code, short, capsys):
     status, out, err = run(argv, capsys)
     assert status == code, err
     assert err.splitlines()[0].endswith(f"[{short}]") and err.splitlines()[1]
@@ -549,11 +556,24 @@ def test_presets_project_lists_its_agents_beside_their_seats(monkeypatch, capsys
                                                    {"agent": "tester", "seats": []}]}
 
 
-def test_presets_project_without_projects_is_refused(capsys):
-    if modules.available("projects"):
-        pytest.skip("projects is installed")
+def test_presets_project_without_projects_is_refused(no_projects, capsys):
     code, _, err = run(["presets", "--project", "moxi"], capsys)
     assert code == codes.REFUSED and "[needs-module]" in err
+
+
+def test_presets_project_reads_the_installed_projects(tmp_path, capsys):
+    projects_cli = pytest.importorskip("moxi_projects.cli", reason="projects is not "
+                                       "installed")
+    for argv in (["add", "Moxi", "--root", str(tmp_path), "--lead", "lead"],
+                 ["agents", "add", "Moxi", "tester"]):
+        assert projects_cli.main(argv, prog="moxi projects") == 0
+    write_presets('[seat.planner]\nidentity = "lead@moxi"\n')
+    capsys.readouterr()
+    shown = json.loads(run(["presets", "--project", "moxi", "--json"], capsys)[1])
+    assert shown == {"project": "Moxi", "agents": [{"agent": "lead", "seats": ["planner"]},
+                                                   {"agent": "tester", "seats": []}]}
+    code, _, err = run(["presets", "--project", "nope"], capsys)
+    assert code == codes.REFUSED and "[no-project]" in err
 
 
 def test_presets_project_whose_store_is_busy_exits_75(monkeypatch, capsys):
