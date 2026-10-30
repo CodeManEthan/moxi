@@ -1,6 +1,6 @@
 """`moxi uninstall`: take a module out of the environment `moxi` runs in.
 
-    moxi uninstall <module> [--skip-teardown]
+    moxi uninstall <module> [--purge] [--yes] [--skip-teardown]
 
 0. `moxi uninstall moxi` is refused: uninstalling a module never removes the `moxi`
    command (`uv tool uninstall moxi` does). The environment checks are install's: the
@@ -25,12 +25,23 @@
    for that), and the report names each that nothing else requires, with its own
    uninstall line.
 
+7. With `--purge`, its stores: each store its announcement declares (`STORES`, read at
+   step 1, before the package went), with its path and size. A store marked rebuildable
+   is removed; any other is asked about, default no, `--yes` answers yes, and with
+   nobody at the keyboard it is kept and its path printed. Then the core's own stores in
+   the module's state directory (the gate's `runs.jsonl` with its `.1` and `logs/`, the
+   doctor's `doctor.json`), removed without asking, and the module's `setup.json` entry.
+   The config file is kept and its path printed. A store that is a link has the link
+   removed and what it points at kept. A broken module's declared stores can't be read,
+   so only the core's are removed.
+
 From step 3 on, a step that fails prints why and the later steps still run; the exit is
-then 1. The module's config file and stores are kept.
+then 1. Without `--purge` the module's config file and stores are kept.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -54,9 +65,15 @@ def _parser(prog: str):
 
     parser = argparse.ArgumentParser(
         prog=prog, description="Uninstall a Moxi module: run its teardown, then remove its "
-                               "units and its package. Its config file and stores are "
-                               "kept.")
+                               "units, its skills and its package. Its config file is "
+                               "kept, and so are its stores unless --purge is given.")
     parser.add_argument("module", help="the module, by its name (comms, cache, ...)")
+    parser.add_argument("--purge", action="store_true",
+                        help="also remove the module's stores: rebuildable ones at once, "
+                             "any other after asking; and the core's run records, logs "
+                             "and doctor records for it")
+    parser.add_argument("--yes", action="store_true",
+                        help="with --purge, remove every store without asking")
     parser.add_argument("--skip-teardown", action="store_true",
                         help="uninstall without running the module's TEARDOWN, when it "
                              "can't run")
@@ -64,7 +81,10 @@ def _parser(prog: str):
 
 
 def main(argv: list[str] | None = None, prog: str = "moxi uninstall") -> int:
-    args = _parser(prog).parse_args(sys.argv[1:] if argv is None else argv)
+    parser = _parser(prog)
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    if args.yes and not args.purge:
+        parser.error("--yes answers --purge's questions; give it with --purge")
     try:
         return Uninstaller(args).run()
     except InstallError as exc:
@@ -76,6 +96,8 @@ class Uninstaller:
     def __init__(self, args):
         self.module = args.module
         self.skip_teardown = bool(getattr(args, "skip_teardown", False))
+        self.purge = bool(getattr(args, "purge", False))
+        self.yes = bool(getattr(args, "yes", False))
         self.failed: list[str] = []
 
     # step 0 ----------------------------------------------------------------------
@@ -118,6 +140,10 @@ class Uninstaller:
 
         # step 6 ------------------------------------------------------------------
         self._package(module, dist, pulled)
+
+        # step 7 ------------------------------------------------------------------
+        if self.purge:
+            self._purge(target)
 
         # the report ---------------------------------------------------------------
         print()
@@ -245,9 +271,27 @@ class Uninstaller:
 
     # step 5 ----------------------------------------------------------------------
     def _placements(self, module: str) -> None:
-        """The module's placements: its skills and agent files, which the placer
-        (`moxi.place.remove`) removes. This step doesn't call the placer yet, so it
-        removes nothing."""
+        """The module's placements, removed by the placer (`moxi.place.remove`) in this
+        process, where its lock yields on the uninstall's own hold. What the module
+        handed to another owner stays. One line per placement removed; a placement that
+        couldn't be removed is printed by the placer and fails the step."""
+        from . import place
+        from ._settle import _one_line, say
+
+        try:
+            gone = place.remove(module, say=lambda line: say(f"{module}: {line}"))
+            left = place.status(module)
+        except Exception as exc:  # noqa: BLE001 - the later steps still run
+            say(f"{module}: placements not removed: {_one_line(exc)}", err=True)
+            self.failed.append("placements")
+            return
+        for p in gone:
+            say(f"{module}: removed {p.kind} {p.name} for {p.harness} ({p.path})")
+        if left:
+            for p in left:
+                say(f"{module}: {p.kind} {p.name} for {p.harness} was not removed "
+                    f"({p.path})", err=True)
+            self.failed.append("placements")
 
     # step 6 ----------------------------------------------------------------------
     def _package(self, module: str, dist: str, pulled: list[str]) -> None:
@@ -287,6 +331,98 @@ class Uninstaller:
         if code != 0:
             say(f"moxi uninstall: removing {dist} failed (exit {code})", err=True)
             self.failed.append("package")
+
+
+    # step 7 ----------------------------------------------------------------------
+    def _purge(self, target) -> None:
+        """`--purge`: the module's declared stores as read at step 1, the core's stores
+        in its state directory, and its `setup.json` entry. The config file is kept."""
+        from . import modules, paths
+        from ._settle import _ask, _one_line, forget_setup, say
+        from .cli import _size_text, _store_facts
+
+        module = target.name
+        layout = paths.Layout(module)
+        roots = {"data": layout.data_dir, "state": layout.state_dir,
+                 "cache": layout.cache_dir, "runtime": layout.runtime_dir}
+        ok = True
+        if target.state != modules.PRESENT:
+            say(f"{module} is {target.state}, so its declared stores can't be read; only "
+                f"the core's stores in its state directory are removed")
+        for name, entry in target.stores.items():
+            path = roots[entry["root"]]() / entry["path"]
+            if not os.path.lexists(path):
+                say(f"{module}: store {name} is not there ({path})")
+                continue
+            size = _store_facts(path, entry["kind"])["size"]
+            what = f"{path} ({_size_text(size)})" if size is not None else str(path)
+            if not entry.get("rebuildable", False):
+                wanted = self.yes or _ask(f"{module}: remove store {name}, {what}? It "
+                                          f"can't be rebuilt. [y/N] ")
+                if not wanted:
+                    say(f"{module}: kept store {name}: {what}")
+                    continue
+            ok = _remove_store(module, f"store {name}", path, entry["kind"], what) and ok
+        state = layout.state_dir()
+        for name in modules.CORE_STATE_FILES + modules.CORE_STATE_DIRS:
+            path = state / name
+            if os.path.lexists(path):
+                kind = "dir" if name in modules.CORE_STATE_DIRS else "file"
+                ok = _remove_store(module, name, path, kind, str(path)) and ok
+        try:
+            forget_setup(module)
+        except OSError as exc:
+            say(f"{module}: its setup.json entry was not dropped: {_one_line(exc)}",
+                err=True)
+            ok = False
+        config = layout.config_file()
+        if config.exists():
+            say(f"{module}: kept its config file: {config}")
+        if not ok:
+            self.failed.append("purge")
+
+
+#: The files SQLite keeps beside a store, removed with it.
+_SQLITE_SIDES = ("-wal", "-shm", "-journal")
+
+
+def _remove_store(module: str, label: str, path: Path, kind: str, what: str) -> bool:
+    """Remove one store at `path`; True when it went. A link (or a junction) is removed
+    as a link, and what it points at is kept. A SQLite store's `-wal`, `-shm` and
+    `-journal` files go with it."""
+    import shutil
+
+    from ._settle import say
+
+    try:
+        if os.path.islink(path) or _is_junction(path):
+            pointed = os.readlink(path)
+            try:
+                os.unlink(path)
+            except (IsADirectoryError, PermissionError):
+                os.rmdir(path)   # a directory link or junction on Windows
+            say(f"{module}: removed {label}, a link; kept what it points at ({pointed})")
+            return True
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+        else:
+            os.unlink(path)
+        if kind == "sqlite":
+            for side in _SQLITE_SIDES:
+                try:
+                    os.unlink(f"{path}{side}")
+                except FileNotFoundError:
+                    pass
+    except OSError as exc:
+        say(f"{module}: {label} not removed ({path}): {exc.strerror or exc}", err=True)
+        return False
+    say(f"{module}: removed {label}: {what}")
+    return True
+
+
+def _is_junction(path) -> bool:
+    isjunction = getattr(os.path, "isjunction", None)
+    return bool(isjunction and isjunction(path))
 
 
 def uninstall_command(dist: str) -> list[str]:

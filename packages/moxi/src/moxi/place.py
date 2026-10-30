@@ -12,6 +12,7 @@ a ledger of what each owner placed.
     adopt(from_owner, to_owner, placed)  hand placements from one owner to another
     harnesses()                          the harness table, and a line per row skipped
     chosen()                             `skills.harnesses`, and a line per name skipped
+    from_package(found, source)          whether a source lies in a module's own package
 
 `plan` and `status` only read and take no lock. `apply`, `remove` and `adopt` take the
 core lock with `nested=True`: under an install (its own process, or a settle or teardown
@@ -737,6 +738,47 @@ def _record(ledger: dict, owner: str) -> dict:
     return ledger.setdefault(owner, {"placed": {}, "handed": {}})
 
 
+#: The folders an installer puts packages in, which an older install of a package lay in.
+_PACKAGE_HOMES = ("site-packages", "dist-packages")
+
+
+def from_package(found, source: str | os.PathLike) -> bool:
+    """Whether `source`, a placement's recorded source, lies in module `found`'s own
+    installed package: the placements `moxi install` makes for its `SKILLS`.
+
+    It does when the source is under the folder the module's top-level package is
+    installed in now (the link's own path, or that path resolved), or under a folder of
+    the same name directly inside a `site-packages` or `dist-packages` folder, where an
+    older install of the package lay before an upgrade moved it. A project folder that
+    happens to carry the package's name is neither, so a project's own skills and
+    placements handed over from another module never count."""
+    package = getattr(found, "package", None) if found is not None else None
+    if not package or not source:
+        return False
+    top = package.split(".")[0]
+    source = os.path.abspath(os.fspath(source))
+    here = _package_folder(top)
+    if here is not None:
+        for path in {source, os.path.realpath(source)}:
+            if _inside(path, here) or _inside(path, os.path.realpath(here)):
+                return True
+    parts = Path(source).parts
+    return any(parts[i] == top and parts[i - 1] in _PACKAGE_HOMES and i + 1 < len(parts)
+               for i in range(1, len(parts)))
+
+
+def _package_folder(top: str) -> str | None:
+    """The folder top-level package `top` is installed in, or None (not importable, or not
+    a folder on disk)."""
+    import importlib.resources
+
+    try:
+        folder = importlib.resources.files(top)
+    except (ImportError, TypeError, ValueError):
+        return None
+    return os.path.abspath(folder) if isinstance(folder, Path) else None
+
+
 def _core_lock():
     from . import files, paths
 
@@ -1081,5 +1123,5 @@ def adopt(from_owner: str, to_owner: str, placements: Iterable[Placed], *,
 
 __all__ = ["FORMS", "SETTINGS", "KINDS", "ACTIONS", "CAUSES", "STATES", "MARK", "LEDGER",
            "IN_PLACE", "HELD_IN_PLACE", "FILE_NOTE", "FOLDER_NOTE", "Item", "Step", "Placed", "Harness",
-           "harnesses", "chosen", "target_key", "plan", "apply", "status", "remove",
-           "adopt"]
+           "harnesses", "chosen", "target_key", "from_package", "plan", "apply", "status",
+           "remove", "adopt"]

@@ -2,7 +2,7 @@
 a settle (or teardown) child, all on the fake backend.
 
     python settle_procs.py shell ARGV...            the session leader on a terminal
-    python settle_procs.py parent MODULE... [--replace] [--teardown]
+    python settle_procs.py parent MODULE... [--replace] [--skills] [--teardown]
     python settle_procs.py child ARGS...            `python -m moxi._settle ARGS`
 
 The shell takes the terminal as its controlling terminal, starts ARGV in a process group
@@ -188,6 +188,7 @@ def parent(argv: list[str]) -> int:
         child = [sys.executable, str(HERE), "child"]
         child += ["--teardown", module] if teardown else [module]
         child += ["--replace"] if replace else []
+        child += ["--skills"] if skills else []
         note("parent", settle=module)
         outcome = _settle.run_child(child)
         note("parent", outcome=outcome.code, signals=[int(s) for s in outcome.signals])
@@ -215,7 +216,8 @@ def parent(argv: list[str]) -> int:
                 code = exc.exit_code
         else:
             args = install._parser("moxi install").parse_args(
-                [names[0], "--none"] + (["--replace"] if replace else []))
+                [names[0], "--none"] + (["--replace"] if replace else [])
+                + (["--skills"] if "--skills" in argv else []))
             installer = install.Installer(args)
             installer.env = SimpleNamespace(python=sys.executable)
             try:
