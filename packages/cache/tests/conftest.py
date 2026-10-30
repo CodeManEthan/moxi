@@ -1,6 +1,6 @@
 """Shared fixtures for cache's suite. Every record here is synthetic, built from the shapes
 Claude Code, Codex and OpenCode write; none is cut from a real record. Claude transcripts
-are written through sessions' builders (`moxi_sessions.api.testing`).
+and Codex rollouts are written through sessions' builders (`moxi_sessions.api.testing`).
 
 Every test runs with cache's and sessions' roots under a directory of its own
 (`MOXI_CACHE_HOME`, `MOXI_SESSIONS_CONFIG_HOME`), with Claude Code's config directory
@@ -149,3 +149,11 @@ def write_transcript(session_id: str, age: float | None = 0, *, root: Path,
             lines.append(assistant_line(age))
     t = add_lines(transcript(session_id, root=Path(root), project=project), lines)
     return t.write(terminated=newline_at_end)
+
+
+# --- Codex rollouts -------------------------------------------------------------------
+#
+# Rollouts come from sessions' `CodexRollout`, one builder per rollout file.
+
+CodexRollout = testing.CodexRollout
+token_usage = testing.token_usage
