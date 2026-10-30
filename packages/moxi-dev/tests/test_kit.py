@@ -119,14 +119,42 @@ def test_fsync_is_a_no_op_in_a_plain_test(tmp_path):
         os.fsync(fd)                              # still refuses a closed descriptor
 
 
+#: Filesystems that keep files in memory only: an fsync there reaches no disk.
+MEMORY_FILESYSTEMS = {"tmpfs", "ramfs"}
+
+
+def filesystem_type(path: Path) -> str | None:
+    """The type of the filesystem `path` is on, from /proc/self/mountinfo (Linux)."""
+    try:
+        lines = Path("/proc/self/mountinfo").read_text().splitlines()
+    except OSError:
+        return None
+    real, best, kind = os.path.realpath(path), "", None
+    for line in lines:
+        fields = line.split()
+        point = fields[4].replace("\\040", " ")
+        fstype = fields[fields.index("-") + 1]
+        if (real == point or real.startswith(point.rstrip("/") + "/")) \
+                and len(point) >= len(best):
+            best, kind = point, fstype
+    return kind
+
+
 @pytest.mark.honest_fsync
 def test_an_honest_fsync_reaches_the_disk(tmp_path):
     """What it proves: in a test marked honest_fsync the seam hands over the real
     os.fsync; the kernel accepts it on the file and on its directory; then the file's
     cached pages are dropped (POSIX_FADV_DONTNEED drops clean pages only, so they had
-    been written back) and a fresh descriptor reads every byte back. On a disk-backed
-    temp root that read comes from the device. It does not prove the bytes survive a
-    power cut: the drive's own cache is beyond what a test can see."""
+    been written back) and a fresh descriptor reads every byte back. The file is in
+    tmp_path, so it is skipped when pytest's temp root is in memory (tmpfs, as /tmp
+    often is): there a pass would show nothing reached a disk. Run with a disk-backed
+    root (PYTEST_DEBUG_TEMPROOT=/var/tmp) and the read comes from the device. It does
+    not prove the bytes survive a power cut: the drive's own cache is beyond what a test
+    can see."""
+    kind = filesystem_type(tmp_path)
+    if kind in MEMORY_FILESYSTEMS:
+        pytest.skip(f"tmp_path is on {kind}, which has no disk; set PYTEST_DEBUG_TEMPROOT "
+                    "to a disk-backed directory")
     assert os.fsync is testing._REAL_FSYNC
     data = os.urandom(256 * 1024)
     path = tmp_path / "durable"
