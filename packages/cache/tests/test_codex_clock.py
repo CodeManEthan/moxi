@@ -414,6 +414,28 @@ def test_a_line_the_reader_does_not_recognise_is_unknown(tmp_path, bad, where):
         assert clock.kind == "unknown", (where, turned)
 
 
+@pytest.mark.parametrize("turned", [True, False])
+def test_a_message_between_threads_does_not_move_the_clock(tmp_path, turned):
+    """A thread that spawned another writes `inter_agent_communication_metadata` when a
+    message passes between them. The line is known and holds no request, so the clock
+    reads the thread as it reads one without the line."""
+    clocks = []
+    for name, metadata in (("without", False), ("with", True)):
+        root = sessions_root(tmp_path / name)
+        r = Rollout().turn("t1", NOW - 600)
+        if metadata:
+            r.add("inter_agent_communication_metadata", NOW - 590, {"trigger_turn": False})
+        r.turn("t2", NOW - 300)
+        if metadata:
+            r.add("inter_agent_communication_metadata", NOW - 60, {"trigger_turn": True})
+        r.write(root)
+        clocks.append(codex_read(root, turned=turned))
+    without, with_line = clocks
+    assert with_line.code != "unrecognised"
+    assert (with_line.kind, with_line.code, with_line.age_seconds) == (
+        without.kind, without.code, without.age_seconds)
+
+
 def test_a_token_usage_record_with_no_usage_is_unrecognised(tmp_path):
     """A `token_usage_record` with no `usage` object is malformed to sessions, so the
     clock cannot read it as a request with no counts: it is `unknown`, `unrecognised`,
@@ -448,7 +470,7 @@ def test_the_lists_are_pinned():
     too."""
     assert rollouts.TOP_KINDS == ("session_meta", "turn_context", "world_state",
                                   "token_usage_record", "compacted", "event_msg",
-                                  "response_item")
+                                  "response_item", "inter_agent_communication_metadata")
     assert set(rollouts.EVENT_KINDS) == {
         "item_completed", "token_count", "thread_goal_updated", "thread_rolled_back",
         "turn_aborted", "task_started", "task_complete", "thread_settings_applied",
