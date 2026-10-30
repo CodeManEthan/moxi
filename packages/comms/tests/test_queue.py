@@ -22,8 +22,8 @@ import time
 import uuid
 
 import pytest
-from conftest import (as_frames, projects_root, queued, record_rows, synced, wait_until,
-                      write_config)
+from conftest import (as_frames, projects_root, queued, record_rows, store_rows, synced,
+                      wait_until, write_config)
 
 from moxi_comms import cache, constants, cursors, machine_line
 from moxi_comms.adapters.claude_shim import ACTIVITY_METHODS
@@ -498,7 +498,9 @@ def test_replay_makes_a_flagged_message_with_no_row_a_row_and_delivers_it_not(
     assert peer.handed() == [plain]
     assert peer.payloads()[0]["backlog"] is True and "held" not in peer.payloads()[0]
     assert rows(rig, REVIEWER_Q) == {flagged}
-    assert record_rows(rig.record, REVIEWER_Q) == {flagged}
+    # Both hold a row in the store: the flagged one waits, the replayed one is handed.
+    assert sorted(store_rows(REVIEWER_Q)) == [(flagged, REVIEWER_Q, "waiting"),
+                                              (plain, REVIEWER_Q, "handed")]
 
 
 def test_a_rescan_writes_no_row_at_or_below_the_cursor(rig, reads, peers, blocked):
@@ -589,11 +591,11 @@ def test_the_trim_keeps_every_queued_message_past_retention(rig, reads, peers,
     assert rig.record.get_message(offline) is not None
     assert rig.record.get_message(flagged) is not None
     assert rig.record.get_message(plain) is None
-    # A row only in memory: its record write failed and waits for the next pass.
+    # A row only in memory: its write to the books failed.
     def disk_full(*args, **kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr(rig.record, "queue_add", disk_full)
+    monkeypatch.setattr(rig.daemon.books, "add", disk_full)
     unwritten = post(rig, [REVIEWER_Q], "its row is not in the record yet")
     row_for(rig, REVIEWER_Q, unwritten)
     assert unwritten not in record_rows(rig.record, REVIEWER_Q)

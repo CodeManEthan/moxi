@@ -165,6 +165,7 @@ def env(monkeypatch, tmp_path):
 BOTH_BACKENDS = (
     "test_cli.py",                  # the CLI verbs, and the sender through them
     "test_delivery.py",             # the daemon's routing, delivery and replay
+    "test_digests.py",              # the delivery books' methods on the daemon socket
     "test_claims.py",               # claim / release, through the daemon
     "test_directory_provision.py",  # provision against the seam
     "test_local_record.py",        # its rig tests state the no-op half on the mock too
@@ -761,9 +762,22 @@ def queued(daemon, qualified: str) -> set:
         return set(daemon.queue.get(qualified, {}))
 
 
+def store_rows(qualified: str | None = None) -> list:
+    """The delivery books' rows in comms.db, read from outside the daemon."""
+    from moxi_comms.store import open_read
+    conn = open_read()
+    try:
+        sql = "SELECT message_id, name, state FROM queue"
+        got = conn.execute(sql).fetchall()
+    finally:
+        conn.close()
+    return [(str(m), n, st) for m, n, st in got if qualified is None or n == qualified]
+
+
 def record_rows(record, qualified: str | None = None) -> set:
-    """The queue rows in the record: ids for `qualified`, or every (id, name)."""
-    rows = {(str(mid), str(q)) for mid, q in record.queue_rows()}
+    """The queue rows in comms.db, any state: ids for `qualified`, or every (id, name).
+    `record` is not read: the rows are the daemon's, whatever the backend."""
+    rows = {(mid, q) for mid, q, _ in store_rows()}
     if qualified is None:
         return rows
     return {mid for mid, q in rows if q == qualified}

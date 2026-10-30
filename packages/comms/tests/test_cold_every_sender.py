@@ -40,10 +40,11 @@ from types import SimpleNamespace
 
 import pytest
 from conftest import (assistant_line, cache_absent, cache_api, projects_root, raw_connection,
-                      record_rows, send_turn, settle, synced, wait_for_queue, wait_until,
-                      write_transcript)
+                      record_rows, send_turn, settle, store_rows, synced, wait_for_queue,
+                      wait_until, write_transcript)
 
 from moxi import exit as moxi_exit
+from moxi_comms.store import books as books_mod
 from moxi_comms import cache, cli, cursors, machine_line, paths
 from moxi_comms.adapters.claude_shim import ACTIVITY_METHODS, ClaudeShim
 from moxi_comms.client import DaemonClient
@@ -852,10 +853,10 @@ def test_the_daemon_refuses_to_start_when_the_queue_load_raises(rig, monkeypatch
     over an empty memory: a queue read that raises stops the start."""
     rig.daemon.stop()
 
-    def broken():
+    def broken(*args, **kwargs):
         raise RuntimeError("the record's queue could not be read")
 
-    monkeypatch.setattr(rig.record, "queue_rows", broken)
+    monkeypatch.setattr(books_mod.Books, "rows", broken)
     daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     with pytest.raises(RuntimeError, match="queue could not be read"):
         daemon.start()
@@ -907,7 +908,7 @@ def test_a_delivered_message_re_read_after_the_recipient_went_cold_writes_no_row
     rig.daemon.rescan()
     time.sleep(0.1)
     assert held_of(rig, HELPER_Q) == set()
-    assert record_rows(rig.record, HELPER_Q) == set()
+    assert store_rows(HELPER_Q) == [(msg.id, HELPER_Q, "handed")], "its row stays handed"
     assert helper.ids() == [msg.id]
 
 

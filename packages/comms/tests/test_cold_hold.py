@@ -431,7 +431,9 @@ def test_boot_drops_an_agent_ns_rows_and_the_same_number_gets_nothing(rig, reboo
     stop_shim(rig, s, q)
     stop_shim(rig, keeper)
     rig.daemon.stop()
-    rig.record.queue_add(q, [mid])              # as a daemon that died mid-unbind left it
+    rig.daemon.books.open()                     # as a daemon that died mid-unbind left it
+    rig.daemon.books.add(q, mid)
+    rig.daemon.books.close()
     assert record_rows(rig.record, q) == {mid}
     reboot(rig)
     assert held_of(rig, q) == set()
