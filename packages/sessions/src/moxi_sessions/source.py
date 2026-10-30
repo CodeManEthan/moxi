@@ -80,13 +80,16 @@ class Header:
       Claude's titles come as `title` markers among the records, so `title` is unknown for
       both.
     * `parent`: the session this one came from: a Claude subagent's parent session, an
-      OpenCode child's parent, a forked Codex thread's `forked_from_id`; else None.
+      OpenCode child's parent, a forked Codex thread's `forked_from_id` (a spawned
+      thread's parent when line 1 has no `forked_from_id`); else None.
     * Claude: `entrypoint` (`cli`, `sdk-cli`, ...), as the first line that has one writes
       it; `labels`, a subagent's sidecar labels (`agent_type`, `description`,
       `tool_use_id`, `spawn_depth`, `parent_agent_id`, `workflow_id`), None for a main
       transcript. A sidecar that cannot be read costs its labels (each None), not the read.
-    * Codex: `codex_source` (line 1's `source`), `meta` (line 1's `session_meta` facts)
-      and `import_marks` (`codex.ImportMarks`).
+    * Codex: `codex_source` (line 1's `source`), `meta` (line 1's `session_meta` facts),
+      `import_marks` (`codex.ImportMarks`) and `spawn`, the spawn link line 1 names for a
+      thread another thread spawned (`codex.SpawnLink`: parent thread, depth, agent path,
+      nickname and role), None for a thread no thread spawned, `UNKNOWN` with no line 1.
     * OpenCode: `session_row` (`opencode.SessionRow`).
 
     A fact the source did not write is `UNKNOWN`; an object a harness never has is None.
@@ -104,6 +107,7 @@ class Header:
     codex_source: Any = UNKNOWN
     meta: Mapping[str, Any] | None = None
     import_marks: Any = None
+    spawn: Any = None
     session_row: Any = None
     extra: Mapping[str, Any] = field(default_factory=dict)
 
@@ -123,6 +127,10 @@ class Header:
                 out[name] = _plain(value)
         if self.import_marks is not None:
             out["import_marks"] = self.import_marks.as_dict()
+        if self.spawn is UNKNOWN:
+            unknown.append("spawn")
+        elif self.spawn is not None:
+            out["spawn"] = self.spawn.as_dict()
         if self.session_row is not None:
             row = self.session_row
             out["session_row"] = {name: _plain(getattr(row, name))
@@ -241,6 +249,9 @@ def codex_header(source: Source, head: codex.Head,
         facts = {name: meta[name] for name in META_FACTS if name in meta}
         facts["unlisted_keys"] = tuple(k for k in meta if k not in codex.META_KEYS)
     forked = meta.get("forked_from_id") if meta is not None else None
+    spawn = codex.spawn_link(meta) if meta is not None else UNKNOWN
+    if not isinstance(forked, str) and spawn is not None and spawn is not UNKNOWN:
+        forked = spawn.parent_thread_id
     return Header(
         harness=CODEX, session_id=thread if thread is not None else UNKNOWN,
         agent_id=source.agent_id,
@@ -248,7 +259,8 @@ def codex_header(source: Source, head: codex.Head,
         version=meta.get("cli_version", UNKNOWN) if meta is not None else UNKNOWN,
         parent=forked if isinstance(forked, str) else None,
         codex_source=meta.get("source", UNKNOWN) if meta is not None else UNKNOWN,
-        meta=facts, import_marks=codex.import_marks(head, imports, thread_id=thread))
+        meta=facts, import_marks=codex.import_marks(head, imports, thread_id=thread),
+        spawn=spawn)
 
 
 def opencode_header(source: Source, row: Any) -> Header:

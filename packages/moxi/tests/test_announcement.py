@@ -530,3 +530,16 @@ def test_importing_modules_loads_nothing_heavy():
     out = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True,
                          text=True, check=True)
     assert out.stdout.split() == ["False"] * 6
+
+
+def test_a_real_package_imported_earlier_does_not_stand_in_for_the_site_s(site):
+    import types
+
+    stale = types.ModuleType("moxi_stale.module")
+    stale.SUMMARY = "the real one"
+    sys.modules["moxi_stale"] = types.ModuleType("moxi_stale")
+    sys.modules["moxi_stale.module"] = stale
+    site.module("stale", SUMMARY='"the fake one"')
+    found = modules.load("stale")
+    assert found.state == PRESENT, found.reason
+    assert found.summary == "the fake one"
