@@ -81,6 +81,22 @@ def test_escaped_bytes_read_as_the_replacement_character(engine_name):
     assert scan(text, ("credentials", "broad")) == []
 
 
+def test_a_path_with_escaped_bytes_scans_as_the_text_does(engine_name):
+    # A file name that is not UTF-8, decoded with surrogateescape: each path pattern reads
+    # the escaped byte as U+FFFD, and both engines give the same hits.
+    def path(name):
+        return name.encode("utf-8").replace(b"%", b"\xe9").decode("utf-8", "surrogateescape")
+
+    sets = ("credentials", "broad")
+    assert [h.rule for h in scan("hello", sets, path=path("keys/caf%.p12"))] == [
+        "pkcs12-file"]
+    token = corpus.github(corpus.rng(12))
+    assert [h.rule for h in scan(token, ("credentials",), path=path("src/caf%.py"))] == [
+        "github-pat"]
+    # A global path allowance (images) still skips the text.
+    assert scan(token, sets, path=path("img/caf%.png")) == []
+
+
 def test_a_first_scan_on_re2_reads_no_distribution_metadata():
     # Reading google-re2's version through importlib.metadata costs about 20 ms, twice the
     # first scan's whole budget; only the doctor asks for the version.

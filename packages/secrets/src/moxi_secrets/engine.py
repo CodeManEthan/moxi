@@ -138,6 +138,11 @@ class Engine:
     def target(self, t: Text):
         raise NotImplementedError
 
+    def path_target(self, path: str):
+        """`path` as this engine searches it, mapped as a text is: a lone surrogate (a
+        file name byte that is not UTF-8) reads as U+FFFD."""
+        return self.target(Text(path))
+
     def to_str(self, t: Text, offset: int) -> int:
         raise NotImplementedError
 

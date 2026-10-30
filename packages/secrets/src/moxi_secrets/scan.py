@@ -282,7 +282,7 @@ def path_skipped(path, eng, sets: Sets | None = None) -> bool:
     if not path:
         return False
     return _path_allowance(load_sets().allowlists if sets is None else sets.allowlists,
-                           path, eng)
+                           eng.path_target(path), eng)
 
 
 def _path_allowance(allowlists, path, eng) -> bool:
@@ -320,6 +320,8 @@ def run_gitleaks(t, set_names, path, eng) -> dict:
     """
     sets = load_sets()
     out = {name: [] for name in set_names}
+    # Every path pattern searches the path as the engine sees it, mapped as the text is.
+    path = eng.path_target(path) if path else None
     if path and _path_allowance(sets.allowlists, path, eng):
         return out
     keywords = sets.keywords_in(t, eng)
