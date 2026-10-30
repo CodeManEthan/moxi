@@ -464,6 +464,18 @@ def test_a_stdin_child_of_a_child_sees_0_not_its_parents_value(tmp_path, monkeyp
     assert _said(child) == "stdin 0"
 
 
+def test_a_stdin_child_of_a_parent_that_sets_no_variable_reads_none(tmp_path, monkeypatch):
+    # A parent built before stdin lifelines named themselves: stdin is a pipe it holds,
+    # and the environment says nothing, so the child can't know of the lifeline.
+    monkeypatch.delenv(proc.LIFELINE_ENV, raising=False)
+    child = subprocess.Popen([PY, script(tmp_path, "kind.py", KIND)], env=child_env(),
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    try:
+        assert _said(child) == "None None"
+    finally:
+        child.stdin.close()
+
+
 def test_an_fd_child_reads_fd(tmp_path, monkeypatch):
     monkeypatch.setenv(proc.LIFELINE_ENV, "7")
     child = proc.spawn([PY, script(tmp_path, "kind.py", KIND)], lifeline="fd",
