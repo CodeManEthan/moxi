@@ -25,6 +25,7 @@ Claude Code, no network. Moxi's test kit fences each test in (`conftest.py` at t
 package root loads `moxi_dev.testing`): an emptied environment with every home in the
 test's tmp, and a write outside tmp or a connect off the machine fails the test. A plain
 run leaves out the slow, browser, build and live tiers; name one with `-m` to run it.
+`moxi-dev check --full`, from the repository root, runs every tier but live.
 
 ```sh
 uv run pytest
@@ -39,7 +40,8 @@ uv run pytest -m build tests/test_clean_home.py
   beside this one), installs both into a venv under a temporary `HOME`, follows the README's install steps, and checks that the daemon provisions
   itself on its first start, that two OpenCode agents (on a stub `opencode`) can talk,
   that everything stops cleanly and that nothing is written outside that home. It needs
-  `uv`, and it is a `build` test, so it runs only when the `build` tier is asked for.
+  `uv`, and it is a `build` test, so it runs only when the `build` tier is asked for
+  (`-m build`, or `moxi-dev check --full`).
 
 Write the failing test first, then the change.
 
