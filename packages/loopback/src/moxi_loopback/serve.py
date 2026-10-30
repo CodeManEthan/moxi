@@ -87,7 +87,6 @@ _WORKERS = 4
 _SLOW = 0.5
 
 _SIGNALS = ("SIGTERM", "SIGINT", "SIGBREAK")
-_PROVE_RAW = b"/api/prove"
 _CLOSE = (b"connection", b"close")
 
 
@@ -339,7 +338,10 @@ def _protocol_class(stop: _Stop) -> type:
     from uvicorn.protocols.http.flow_control import HIGH_WATER_LIMIT, service_unavailable
     from uvicorn.protocols.http.h11_impl import H11Protocol, RequestResponseCycle
 
+    from moxi_loopback.routes import PROVE_PATH
     from moxi_loopback.server import settle
+
+    prove_raw = PROVE_PATH.encode("ascii")
 
     class StopProtocol(H11Protocol):
         def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -464,7 +466,7 @@ def _protocol_class(stop: _Stop) -> type:
             self.task = task
 
         async def _run_app(self, scope: Any, receive: Any, send: Any) -> None:
-            proof = scope["method"] == "GET" and scope["raw_path"] == _PROVE_RAW
+            proof = scope["method"] == "GET" and scope["raw_path"] == prove_raw
 
             async def sending(message: Any) -> None:
                 if message["type"] == "http.response.start":
