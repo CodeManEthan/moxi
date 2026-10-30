@@ -572,7 +572,11 @@ def _start(args: Any, stop: _Stop, log: logging.Logger) -> int:
 
     try:
         page = load_page(module)
-        version = modules.load(module).version or ""
+        version = modules.load(module).version
+        if not version:
+            # The runtime file carries the version, and it is refused there too late:
+            # after the lock and the bind.
+            raise PageLoadError(f"{module}'s distribution has no version")
         # The server_id is minted with the runtime file, under the lock; the page is
         # loaded and its handlers resolved before that, so a refused page writes nothing.
         inner = app(page, module=module, server_id="starting", version=version)

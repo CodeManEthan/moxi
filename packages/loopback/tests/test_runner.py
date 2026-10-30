@@ -112,7 +112,8 @@ ANNOUNCEMENT = {
 }
 
 
-def _module(root: Path, name: str, files: dict[str, str], page: str | None) -> None:
+def _module(root: Path, name: str, files: dict[str, str], page: str | None, *,
+            version: str | None = "0.1.0") -> None:
     package = root / f"moxi_{name}"
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("")
@@ -122,9 +123,10 @@ def _module(root: Path, name: str, files: dict[str, str], page: str | None) -> N
     (package / "module.py").write_text("".join(f"{k} = {v}\n" for k, v in fields.items()))
     for relpath, text in files.items():
         (package / relpath).write_text(textwrap.dedent(text))
-    info = root / f"moxi_{name}-0.1.0.dist-info"
+    info = root / (f"moxi_{name}-{version}.dist-info" if version else f"moxi_{name}.dist-info")
     info.mkdir()
-    (info / "METADATA").write_text(f"Metadata-Version: 2.1\nName: moxi-{name}\nVersion: 0.1.0\n")
+    (info / "METADATA").write_text(f"Metadata-Version: 2.1\nName: moxi-{name}\n"
+                                   + (f"Version: {version}\n" if version else ""))
     (info / "entry_points.txt").write_text(f"[moxi.modules]\n{name} = moxi_{name}.module\n")
 
 
@@ -133,6 +135,10 @@ def site(tmp_path_factory):
     root = tmp_path_factory.mktemp("runner-site")
     _module(root, MODULE, {"page.py": PAGE, "handlers.py": HANDLERS}, "moxi_prun.page:PAGE")
     _module(root, "pnopage", {}, None)
+    _module(root, "pnoversion",
+            {"page.py": PAGE.replace('H = "moxi_prun.handlers"', 'H = "moxi_pnoversion.handlers"'),
+             "handlers.py": HANDLERS},
+            "moxi_pnoversion.page:PAGE", version=None)
     _module(root, "pbadhandler",
             {"page.py": PAGE.replace('H = "moxi_prun.handlers"', 'H = "moxi_pbadhandler.gone"')},
             "moxi_pbadhandler.page:PAGE")
@@ -722,6 +728,7 @@ def test_started_without_safe_path_it_exits_3_before_importing_anything(spawn, c
     ("pnopage", "declares no PAGE"),
     ("pbadhandler", "cannot be loaded"),
     ("pmissing", "absent"),
+    ("pnoversion", "has no version"),
 ])
 def test_a_page_it_cannot_serve_exits_3_and_writes_nothing(spawn, module, words):
     runner = spawn(module=module)
