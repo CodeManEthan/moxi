@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import os
 import signal
 import subprocess
@@ -9,7 +10,6 @@ import sys
 
 import pytest
 from conftest import clock_reads_warm, cursor_of, wait_until
-from moxi_turns.procs import die_with_parent
 
 from fake_codex import calls, control_call, events, install
 
@@ -17,6 +17,22 @@ from fake_codex import calls, control_call, events, install
 IDENTITY = "hosted@proj-a"
 #: How long a launcher gets to stop on SIGTERM before it is killed.
 STOP_GRACE = 20
+PR_SET_PDEATHSIG = 1                  # linux/prctl.h
+
+
+def die_with_parent():
+    """A `preexec_fn`: the kernel sends the child SIGTERM when this thread exits, and
+    a child whose parent is already gone exits at once. libc is looked up here, never
+    in the child."""
+    prctl = ctypes.CDLL(None, use_errno=True).prctl
+    parent = os.getpid()
+
+    def _pre() -> None:
+        prctl(PR_SET_PDEATHSIG, int(signal.SIGTERM), 0, 0, 0)
+        if os.getppid() != parent:
+            os._exit(0)
+
+    return _pre
 
 
 @pytest.fixture
@@ -29,7 +45,7 @@ def spawn():
     procs = []
 
     def _spawn(argv, **kwargs):
-        proc = subprocess.Popen(argv, preexec_fn=die_with_parent(os.getpid()), **kwargs)
+        proc = subprocess.Popen(argv, preexec_fn=die_with_parent(), **kwargs)
         procs.append(proc)
         return proc
 
