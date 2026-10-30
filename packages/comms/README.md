@@ -31,9 +31,8 @@ directory, and everything talks over Unix sockets.
 Claude Code, Codex and OpenCode sessions take part through adapters. A Claude Code
 session `moxi comms claude` launches gets an adapter process of its own, which binds the
 session's name and delivers mail into the session through Moxi turns, the one way into a
-harness session: the session must load turns' Claude plugin (installed by `moxi install
-turns`, or passed for one launch with `--plugin-dir`). Codex and OpenCode work through
-experimental adapters.
+harness session: `moxi comms claude` loads turns' Claude plugins into the session it
+starts. Codex and OpenCode work through experimental adapters.
 
 ## Install
 
@@ -98,9 +97,9 @@ stay under `~/.local/state/moxi/` and `~/.local/share/moxi/` until you delete th
 
 ## Quick start with Claude Code
 
-Each session needs turns' Claude plugin: `moxi install turns` installs it for every
-session, or pass `-- --plugin-dir DIR` for each folder `moxi_turns.claude_plugin_dirs()`
-returns to load it for one launch.
+Each session needs turns' Claude plugins. `moxi comms claude` asks turns for them and
+passes each as `--plugin-dir` on the launch it starts (`--dry-run` shows the line), so
+there is nothing to add by hand.
 
 Open two terminals in your project and launch a named session in each:
 

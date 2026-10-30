@@ -264,7 +264,7 @@ def test_files_an_earlier_launch_left_are_removed():
     assert not (s.dir / "settings.json").exists() and not (s.dir / "mcp.json").exists()
 
 
-def test_everything_after_the_double_dash_reaches_claude_unchanged(capsys):
+def test_everything_after_the_double_dash_reaches_claude_unchanged(capsys, turns_plugins):
     assert session.split_passthrough(["--name", "x", "--", "-p", "--", "--name", "y"]) == \
         (["--name", "x"], ["-p", "--", "--name", "y"])
     sid = "5e55a1d0-0000-4000-8000-0000000000c2"
@@ -272,19 +272,23 @@ def test_everything_after_the_double_dash_reaches_claude_unchanged(capsys):
                          "--model", "opus", "--", "-n", "z"]) == 0
     out = capsys.readouterr().out
     launch = next(line for line in out.splitlines() if line.startswith("  launch"))
-    assert launch.endswith(f"claude --session-id {sid} --model opus -- -n z -n rev"), \
-        "the named id goes ahead of claude's own --"
+    plugins = (f"--plugin-dir {turns_plugins / 'moxi-turns'} "
+               f"--plugin-dir {turns_plugins / 'moxi-turns-gate'}")
+    assert launch.endswith(f"claude --session-id {sid} {plugins} --model opus -- -n z "
+                           "-n rev"), "the named id goes ahead of claude's own --"
     assert "--settings" not in launch and "hooks" not in out
 
 
-def test_moxi_comms_claude_is_the_wrapper(capsys):
+def test_moxi_comms_claude_is_the_wrapper(capsys, turns_plugins):
     from moxi_comms import cli
     sid = "5e55a1d0-0000-4000-8000-0000000000c5"
     assert cli.main(["claude", "--name", "rev", "--session-id", sid, "--dry-run"],
                     prog="moxi comms") == 0
     out = capsys.readouterr().out
     assert out.startswith(f"session {sid}")
-    assert f"  launch     claude --session-id {sid} -n rev" in out
+    assert (f"  launch     claude --session-id {sid} --plugin-dir "
+            f"{turns_plugins / 'moxi-turns'} --plugin-dir "
+            f"{turns_plugins / 'moxi-turns-gate'} -n rev") in out
     assert cli.main(["claude", "--name", "bad name"], prog="moxi comms") == 2
     assert capsys.readouterr().err.startswith("moxi comms claude: --name ")
 

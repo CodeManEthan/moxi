@@ -162,6 +162,35 @@ def env(monkeypatch, tmp_path):
     shutil.rmtree(claude_home, ignore_errors=True)
 
 
+@pytest.fixture(autouse=True)
+def turns_plugins(monkeypatch, tmp_path_factory) -> Path:
+    """turns' Claude plugins as a folder marketplace of the test's own. The Claude
+    wrapper asks turns for its launch additions, which write `endpoint.json` into the
+    plugins' folder; no test may rewrite the one in the package the suite runs from. A
+    test that runs the wrapper in a child process patches the child the same way
+    (`TURNS_PLUGINS_PATCH`)."""
+    from moxi_turns import claude_setup
+
+    root = tmp_path_factory.mktemp("turns-plugins")
+    (root / ".claude-plugin").mkdir()
+    (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps({
+        "name": "moxi-turns",
+        "plugins": [{"name": "moxi-turns", "source": "./moxi-turns"},
+                    {"name": "moxi-turns-gate", "source": "./moxi-turns-gate"}]}))
+    for name in ("moxi-turns", "moxi-turns-gate"):
+        (root / name / ".claude-plugin").mkdir(parents=True)
+        (root / name / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": name, "version": "0.0.0"}))
+    monkeypatch.setattr(claude_setup, "claude_root", lambda: root)
+    return root
+
+
+#: Python a child process runs first, with the folder `turns_plugins` gave, so the
+#: wrapper's launch additions in the child write their files there too.
+TURNS_PLUGINS_PATCH = ("import pathlib, moxi_turns.claude_setup as _cs; "
+                       "_cs.claude_root = lambda: pathlib.Path({root!r}); ")
+
+
 #: Suites that run on both backends. A module here has every one of its rig-using tests
 #: parametrised; a test in it that does not take `rig` (and so has no `backend` in its
 #: fixture closure) is left alone.

@@ -150,9 +150,11 @@ def fake_claude(tmp_path):
     return script, out
 
 
-def test_the_claude_wrapper_stamps_its_own_comms_command(rig, fake_claude):
+def test_the_claude_wrapper_stamps_its_own_comms_command(rig, fake_claude, turns_plugins):
+    from conftest import TURNS_PLUGINS_PATCH
     script, out = fake_claude
-    code = ("from moxi_comms.adapters import session; raise SystemExit(session.main("
+    code = (TURNS_PLUGINS_PATCH.format(root=str(turns_plugins))
+            + "from moxi_comms.adapters import session; raise SystemExit(session.main("
             f"['--name', 'stamped', '--claude', {str(script)!r}]))")
     env = dict(os.environ, MOXI_COMMS_COMMAND="/inherited/bin/moxi comms")
     proc = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True,
