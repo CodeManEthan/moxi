@@ -50,6 +50,8 @@ CAP = 64 * 1024
 HARNESSES = ("claude", "codex")
 TARGETS = ("terminal", "headless", "slot")
 PRESET_KINDS = ("seat", "project")
+#: The event a claim that moved to a new endpoint records.
+RECLAIMED = "reclaimed"
 #: Every state, in the order a launch moves through them; `failed` may end any but the last
 #: of the others.
 STATES = ("spawning", "started", "ready", "sending", "first-sent", "failed")
@@ -493,21 +495,61 @@ def claim(conn: sqlite3.Connection, request_id: str, *, harness: str,
     endpoint whose event matches the row claims it: the same harness, and for Claude the
     session id minted for the launch; for Codex a launch composed for turns' host whose id
     is not known yet, or is the id the sender learned. One conditional update writes the
-    claim, so of two endpoints only the first wins, and a claimed launch is never claimed
-    again. Any other endpoint carrying the launch's stamp (a session started from inside
-    the launched one) gets None.
+    claim, so of two endpoints only the first wins. Any other endpoint carrying the
+    launch's stamp (a session started from inside the launched one) gets None.
+
+    A held launch is claimed again only when the endpoint holding it is gone and the new
+    endpoint's event names the row's own session id: a session whose endpoint was
+    replaced (Claude starts a new one when its plugins reload) keeps its launch. Gone
+    means the held endpoint's process has ended (`endpoint_gone`), never that it did not
+    answer once. The claim moves in one conditional update on the held endpoint, so of
+    two new endpoints only one takes it, and a `reclaimed` event records the move.
     """
     if harness not in HARNESSES:
         return None
+    moment = at or now()
     with _writing(conn):
         conn.execute(
             "UPDATE launches SET endpoint = ?, updated_at = ? "
             "WHERE request_id = ? AND harness = ? AND endpoint IS NULL "
             "AND (harness <> 'codex' OR json_extract(values_json, '$.mode') = 'host') "
             "AND (session_id = ? OR (session_id IS NULL AND harness = 'codex'))",
-            (endpoint, at or now(), request_id, harness, session_id))
+            (endpoint, moment, request_id, harness, session_id))
         row = get(conn, request_id)
+        held = row.endpoint if row is not None else None
+        if (held is not None and held != endpoint and session_id is not None
+                and row.harness == harness and row.session_id == session_id
+                and endpoint_gone(held)):
+            moved = conn.execute(
+                "UPDATE launches SET endpoint = ?, updated_at = ? "
+                "WHERE request_id = ? AND endpoint = ?",
+                (endpoint, moment, request_id, held))
+            if moved.rowcount == 1:
+                conn.execute(
+                    "INSERT INTO events (request_id, session_id, at, kind, detail_json) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (request_id, session_id, moment, RECLAIMED,
+                     _encode({"endpoint": endpoint, "was": held})))
+                row = get(conn, request_id)
     return row if row is not None and row.endpoint == endpoint else None
+
+
+def endpoint_gone(endpoint: str) -> bool:
+    """Whether the endpoint process a claim names has ended. A claim names it
+    `<pid>@<start time>` (`listeners.endpoint_id`), and the process is gone when no
+    process with that pid and start time runs; one named by its pid alone, its start time
+    unread, is gone when no process has that pid. A name that is neither is never gone."""
+    from moxi import proc
+
+    pid_text, sep, started_text = endpoint.partition("@")
+    try:
+        pid = int(pid_text)
+        started = float(started_text) if sep else None
+    except ValueError:
+        return False
+    if started is None:
+        return proc.identity(pid) is None
+    return not proc.alive(proc.ProcId(pid, started))
 
 
 def add_event(conn: sqlite3.Connection, kind: str, detail: Mapping[str, Any] | None = None,
@@ -651,8 +693,8 @@ def log_lines(*, limit: int | None = None, before: str | datetime | None = None,
     return [_encode(row.as_json(stale_after=after, now=moment)) for row in rows]
 
 
-__all__ = ["CAP", "COLUMNS", "FACTS", "HARNESSES", "HOWS", "LEAVES", "SOURCES", "STATES",
-           "STEPS", "TARGETS", "Busy", "Event", "Inserted", "LaunchRow", "SessionTaken",
-           "TooLarge", "add_event", "add_pick", "claim", "connect", "events", "get", "insert",
-           "learn_session", "log", "log_lines", "now", "parse_time", "path", "picked",
+__all__ = ["CAP", "COLUMNS", "FACTS", "HARNESSES", "HOWS", "LEAVES", "RECLAIMED", "SOURCES",
+           "STATES", "STEPS", "TARGETS", "Busy", "Event", "Inserted", "LaunchRow",
+           "SessionTaken", "TooLarge", "add_event", "add_pick", "claim", "connect",
+           "endpoint_gone", "events", "get", "insert", "learn_session", "log", "log_lines", "now", "parse_time", "path", "picked",
            "resolve", "session_ids", "set_facts", "set_state", "stale_after_s", "stamp"]

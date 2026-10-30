@@ -5,12 +5,15 @@ started from inside a launched one among them."""
 from __future__ import annotations
 
 import ast
+import os
+import subprocess
+import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
-from moxi import modules
+from moxi import modules, proc
 from moxi.paths import Layout
 
 from moxi_launcher import (handoffs, listen_codex, listen_handoff, listen_ready, listeners,
@@ -22,6 +25,8 @@ NESTED_ID = "00000000-aaaa-4bbb-8ccc-dddddddddddd"
 THREAD_ID = "thr-0001"
 PARENT = "1000@1.000000"
 NESTED = "2000@2.000000"
+#: This test process, named as an endpoint: one whose process is alive.
+LIVE = f"{os.getpid()}@{proc.identity(os.getpid()).started:.6f}"
 
 
 @dataclass
@@ -69,6 +74,20 @@ def endpoint(monkeypatch):
     def use(name):
         current["id"] = name
     return use
+
+
+@pytest.fixture
+def dead() -> str:
+    """An endpoint name whose process has ended: a child's pid and start time, read while
+    it ran."""
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        ident = proc.identity(child.pid)
+    finally:
+        child.kill()
+        child.wait()
+    assert ident is not None and not proc.alive(ident)
+    return f"{ident.pid}@{ident.started:.6f}"
 
 
 @pytest.fixture
@@ -192,13 +211,64 @@ def test_a_nested_session_cannot_claim_even_before_the_parent(conn, endpoint):
     assert store.get(conn, "r1").endpoint == PARENT
 
 
-def test_a_second_endpoint_with_the_minted_id_does_not_take_the_launch(conn, endpoint):
+def test_a_second_endpoint_with_the_minted_id_does_not_take_the_launch_while_the_first_lives(
+        conn, endpoint):
     launch_claude(conn)
+    endpoint(LIVE)
     listen_ready.observe(ready("claude", CLAUDE_ID, "r1"))
     endpoint(NESTED)
     listen_ready.observe(ready("claude", CLAUDE_ID, "r1", source="resume"))
-    assert store.get(conn, "r1").endpoint == PARENT
+    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="clear"))
+    assert store.get(conn, "r1").endpoint == LIVE
     assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted")]
+    assert store.events(conn, "r1") == []
+
+
+def test_a_new_endpoint_reclaims_the_launch_once_the_one_holding_it_has_ended(
+        conn, endpoint, dead):
+    # Claude starts a new endpoint for the same session when its plugins reload.
+    launch_claude(conn)
+    endpoint(dead)
+    listen_ready.observe(ready("claude", CLAUDE_ID, "r1"))
+    endpoint(NESTED)
+    listen_ready.observe(ready("claude", CLAUDE_ID, "r1", source="startup"))
+    assert store.get(conn, "r1").endpoint == NESTED
+    [moved] = store.events(conn, "r1")
+    assert (moved.kind, moved.session_id) == (store.RECLAIMED, CLAUDE_ID)
+    assert moved.detail == {"endpoint": NESTED, "was": dead}
+    # From then on the new endpoint's events are the launch's.
+    listen_ready.observe(ready("claude", CLEARED_ID, "r1", source="clear"))
+    assert store.session_ids(conn, "r1") == [(CLAUDE_ID, "minted"), (CLEARED_ID, "clear")]
+
+
+def test_a_new_endpoint_with_another_session_id_does_not_reclaim(conn, endpoint, dead):
+    launch_claude(conn)
+    endpoint(dead)
+    listen_ready.observe(ready("claude", CLAUDE_ID, "r1"))
+    endpoint(NESTED)
+    listen_ready.observe(ready("claude", NESTED_ID, "r1"))
+    assert store.get(conn, "r1").endpoint == dead
+    assert store.events(conn, "r1") == [] and store.resolve(conn, NESTED_ID) is None
+
+
+def test_a_codex_launch_is_reclaimed_only_by_its_thread_id(conn, endpoint, dead):
+    launch_codex(conn)
+    endpoint(dead)
+    listen_ready.observe(ready("codex", THREAD_ID, "c1"))
+    endpoint(NESTED)
+    listen_ready.observe(ready("codex", "thr-other", "c1"))
+    assert store.get(conn, "c1").endpoint == dead
+    listen_ready.observe(ready("codex", THREAD_ID, "c1", source="resume"))
+    assert store.get(conn, "c1").endpoint == NESTED
+
+
+def test_the_held_endpoint_is_gone_only_when_its_process_has_ended(dead):
+    assert store.endpoint_gone(dead)
+    assert not store.endpoint_gone(LIVE)
+    assert not store.endpoint_gone(str(os.getpid()))        # a pid alone, alive
+    assert store.endpoint_gone(dead.partition("@")[0]) == (
+        proc.identity(int(dead.partition("@")[0])) is None)
+    assert not store.endpoint_gone("not-an-endpoint")
 
 
 def test_a_codex_host_ready_claims_and_learns_the_thread_id(conn, endpoint):
@@ -298,6 +368,35 @@ def test_of_two_endpoints_claiming_at_once_exactly_one_wins(conn):
     for t in threads:
         t.join()
     assert len(won) == 1 and store.get(conn, "c1").endpoint == won[0]
+
+
+def test_of_two_endpoints_reclaiming_at_once_exactly_one_wins(conn, dead):
+    launch_claude(conn)
+    assert store.claim(conn, "r1", harness="claude", session_id=CLAUDE_ID,
+                       endpoint=dead) is not None
+    barrier = threading.Barrier(2)
+    won = []
+
+    def race(name):
+        mine = store.connect()
+        try:
+            barrier.wait()
+            if store.claim(mine, "r1", harness="claude", session_id=CLAUDE_ID,
+                           endpoint=name) is not None:
+                won.append(name)
+        finally:
+            mine.close()
+
+    # Both alive, as a reclaiming endpoint is, so the loser can't take it from the winner.
+    parent = proc.identity(os.getppid())
+    other = f"{parent.pid}@{parent.started:.6f}"
+    threads = [threading.Thread(target=race, args=(n,)) for n in (LIVE, other)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(won) == 1 and store.get(conn, "r1").endpoint == won[0]
+    assert [e.kind for e in store.events(conn, "r1")] == [store.RECLAIMED]
 
 
 # -- the Codex seat listener ---------------------------------------------------------------

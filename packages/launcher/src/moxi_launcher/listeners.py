@@ -18,8 +18,12 @@ turns endpoint whose event matches what the launcher set on its process claims t
 endpoint that carries the stamp without claiming it is a session started from inside the
 launched one, an agent's own `claude -p` say, and every listener ignores it: no ids, no
 state, no instructions, no pointer, no pick. Listeners run in the session's endpoint
-process, one endpoint per session process for that process's life, so the endpoint is
-named by its own pid and start time.
+process, so the endpoint is named by its own pid and start time.
+
+An endpoint serves its session for the endpoint's own life, and a session may outlive it:
+Claude starts a new endpoint for the same session when its plugins reload. The new
+endpoint claims the launch again when its event names the launch's own session id and the
+endpoint that held it has ended (`store.claim`).
 """
 
 from __future__ import annotations
