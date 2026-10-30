@@ -82,6 +82,9 @@ on PATH, so run it by its path there:
 "$(uv tool dir)/moxi/bin/moxi-comms-daemon"
 ```
 
+On Windows the script is `Scripts\moxi-comms-daemon.exe` in the same tool directory; in
+PowerShell, `& "$(uv tool dir)\moxi\Scripts\moxi-comms-daemon.exe"`.
+
 `moxi comms service install` prints the same path as the unit's `ExecStart=`, and
 `moxi modules --json` names the environment as `prefix`.
 
@@ -167,7 +170,9 @@ meets.
 comms' own scripts (`moxi-comms-daemon`, `moxi-comms-claude`, `moxi-comms-codex`,
 `moxi-comms-opencode`, `moxi-comms-provision`) are in the `moxi` tool's environment,
 which `moxi install comms` adds comms to, and uv puts none of them on PATH. Run one by
-its path: `"$(uv tool dir)/moxi/bin/<script>"`.
+its path: `"$(uv tool dir)/moxi/bin/<script>"`. On Windows the script is
+`Scripts\<script>.exe` in the same tool directory; in PowerShell,
+`& "$(uv tool dir)\moxi\Scripts\<script>.exe"`.
 
 `explain`, `doctor`, `moxi comms cache` (how cold each agent's prompt cache is, for the
 callers `[policy] cache_callers` names) and `moxi comms owner <session-id>` (which
