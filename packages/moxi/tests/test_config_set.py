@@ -118,7 +118,7 @@ def demo(site, tmp_path, monkeypatch):
     site.module("bare")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MOXI_DEMO_CONFIG_HOME", str(tmp_path / "config"))
-    monkeypatch.setenv("MOXI_MOXI_HOME", str(tmp_path / "core"))
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path / "core"))
     monkeypatch.delenv("MOXI_DEMO_BACKEND", raising=False)
     return tmp_path / "config" / "demo" / "config.toml"
 
@@ -500,7 +500,7 @@ def test_load_and_config_read_a_named_file_in_place(tmp_path):
 # -- the core's own settings ---------------------------------------------------------------
 
 def test_the_cores_schema_and_its_defaults(tmp_path, monkeypatch):
-    monkeypatch.setenv("MOXI_MOXI_HOME", str(tmp_path))
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path))
     schema = config._core_schema()
     assert list(schema.keys) == ["skills.form", "skills.harnesses", "harnesses"]
     s = config.load("moxi", schema)
@@ -511,12 +511,30 @@ def test_the_cores_schema_and_its_defaults(tmp_path, monkeypatch):
 
 
 def test_a_harness_row_is_added_to_the_cores_table(tmp_path, monkeypatch):
-    monkeypatch.setenv("MOXI_MOXI_HOME", str(tmp_path))
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path))
     config.add_item("moxi", "harnesses", {"name": "opencode", "skills": "~/s",
                                           "agents": ""}, by="cli")
     s = config.load("moxi", config._core_schema())
     assert [row["name"] for row in s["harnesses"]] == ["claude", "codex", "opencode"]
     assert "{name = \"opencode\"" in config._config_file("moxi").read_text()
+
+
+def test_the_cores_settings_and_history_follow_only_moxi_home(tmp_path, monkeypatch,
+                                                              capsys):
+    """The core's file and history are where `paths.core()` puts them: the core's own
+    layout reads no `MOXI_MOXI_*` variable."""
+    from moxi import paths
+
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path / "home"))
+    for name in ("MOXI_MOXI_HOME", "MOXI_MOXI_CONFIG_HOME", "MOXI_MOXI_STATE_HOME"):
+        monkeypatch.setenv(name, str(tmp_path / "elsewhere"))
+    assert config._config_file("moxi") == paths.core().config_file()
+    assert run(capsys, "config", "set", "moxi", "skills.form", "copy")[0] == 0
+    assert (paths.core().state_dir() / config.HISTORY).is_file()
+    assert config.load("moxi", config._core_schema())["skills.form"] == "copy"
+    assert run(capsys, "config", "moxi", "path")[1].strip() == str(
+        paths.core().config_file())
+    assert not (tmp_path / "elsewhere").exists()
 
 
 # -- the light import ----------------------------------------------------------------------
@@ -604,7 +622,7 @@ def test_config_show_says_who_last_set_each_key(demo, capsys):
 
 
 def test_config_moxi_reads_the_cores_own_settings(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("MOXI_MOXI_HOME", str(tmp_path))
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path))
     code, out, _ = run(capsys, "config", "moxi", "path")
     assert code == 0 and out.strip().endswith(os.path.join("moxi", "config.toml"))
     assert run(capsys, "config", "set", "moxi", "skills.form", "copy")[0] == 0

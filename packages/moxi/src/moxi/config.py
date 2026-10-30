@@ -366,9 +366,9 @@ def load(module: str, schema: Schema, *, env=None, path=None) -> Settings:
 
     environ = os.environ if env is None else env
     if path is None:
-        from .paths import Layout
+        from .paths import _layout
 
-        path = Layout(module).config_file(environ)
+        path = _layout(module).config_file(environ)
     else:
         path = Path(path)
     return _settings(module, schema, path, _parsed(path), environ)
@@ -780,16 +780,15 @@ def history(module: str, key: str | None = None, *, tail: int | None = 200) -> l
 
 def _config_file(module: str):
     """The path of module `module`'s config file (the core's own for `moxi`)."""
-    from .paths import Layout
+    from .paths import _layout
 
-    return Layout(module).config_file()
+    return _layout(module).config_file()
 
 
 def _history_file():
-    from . import names
-    from .paths import Layout
+    from .paths import core
 
-    return Layout(names.HARNESS).state_dir() / HISTORY
+    return core().state_dir() / HISTORY
 
 
 def _schema_of(module: str) -> Schema:
