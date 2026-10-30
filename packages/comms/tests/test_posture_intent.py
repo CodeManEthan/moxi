@@ -1110,13 +1110,13 @@ def test_the_payload_on_rescan_and_the_hand_over_time(rig, pair, whole_clock):
     root = open_root(rig)
     first_at = delivered(rig, R, root.id)
     binding = rig.daemon.bindings[R]
-    sent, real_send = [], binding.conn.send
+    sent, real_notify = [], binding.conn.notify_threadsafe
 
-    def record(frame):
-        sent.append(frame)
-        return real_send(frame)
+    def record(method, params=None):
+        sent.append({"op": method, **(params or {})})
+        return real_notify(method, params)
 
-    binding.conn.send = record
+    binding.conn.notify_threadsafe = record
     with rig.daemon._lock:
         binding.delivered.clear()
     whole_clock.advance(60)

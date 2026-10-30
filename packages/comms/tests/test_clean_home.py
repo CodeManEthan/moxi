@@ -362,7 +362,7 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
             for pair in shlex.split(entry):
                 key, _, value = pair.partition("=")
                 unit_env[key] = value
-        sock = home / "run" / "moxi" / "comms" / "moxi-comms-daemon.sock"
+        sock = home / "run" / "moxi" / "comms" / "daemon.sock"
         daemon = start(*argv, environ=unit_env)
         wait_for(sock.exists, what="the daemon's socket")
 

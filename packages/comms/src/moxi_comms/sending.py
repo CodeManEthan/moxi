@@ -20,9 +20,9 @@ from dataclasses import dataclass, field
 from . import (attribution, cache, claimfile, claimhold, config, constants, directory,
                machine_line, policy)
 from .membership import sessions_of
-from .protocol import CLI_PROTOCOL, PROTOCOL_VERSION, ProtocolError
+from .claimhold import CLAIM_PROTOCOL, ProtocolError
 from .client import (DaemonClient, DaemonError, DaemonNoAnswer, DaemonOffline,
-                     DaemonTimeout)
+                     DaemonTimeout, VersionMismatch)
 from .record import LOCAL, RecordError
 from .paths import OutsideRuntime, comms_db
 from .provision import NAMES
@@ -83,16 +83,9 @@ HELD_IGNORED_OPERATOR = ("NOTE: --held was ignored for operator: the operator ha
                          "session to hold it for, so it went to him as an ordinary "
                          "message.")
 
-#: `Context.daemon()`'s refusal of a daemon whose verb protocol is not this comms'
-#: (`protocol.CLI_PROTOCOL`). Raised as `DaemonOffline`, so every verb exits 4.
-VERB_PROTOCOL_MISMATCH = ("the comms daemon speaks verb protocol {daemon} and this comms "
-                          "speaks {verb}; restart the daemon (moxi comms service status names "
-                          "its unit), then run this again. Nothing was sent.")
-
-
-class VerbProtocolMismatch(DaemonOffline):
-    """The daemon answers another verb protocol than this comms speaks: offline to every
-    verb (exit 4), and said in its own words."""
+#: The daemon refused this comms' wire version at the hello: a `DaemonOffline`, so every
+#: verb exits 4 for now, said in the words that name the older side.
+VerbProtocolMismatch = VersionMismatch
 
 
 # --------------------------------------------------------------------------- the result
@@ -311,27 +304,12 @@ class Context:
             conn.close()
 
     def daemon(self) -> DaemonClient:
-        """A connection to the daemon, once it has answered `ping` with this comms' verb
-        protocol. An answer without `cli_protocol` reads 0. A mismatch, or a ping
-        that fails, closes it and raises `DaemonOffline`, which every verb answers with
-        exit 4, so no verb writes a token or reads an answer its daemon does not
-        speak."""
-        client = (DaemonClient(self.socket_path) if self.deadline is None else
-                  DaemonClient(self.socket_path, timeout=self.deadline)).connect()
-        try:
-            answer = client.request("ping")
-        except DaemonError as e:
-            client.close()
-            raise DaemonOffline(f"comms offline: the daemon did not answer ping ({e})") from e
-        except DaemonOffline:
-            client.close()
-            raise
-        spoken = answer.get("cli_protocol", 0)
-        if spoken != CLI_PROTOCOL:
-            client.close()
-            raise VerbProtocolMismatch(VERB_PROTOCOL_MISMATCH.format(daemon=spoken,
-                                                                     verb=CLI_PROTOCOL))
-        return client
+        """A connection to the daemon, once its hello has agreed a comms wire version.
+        A version it refuses raises `VersionMismatch`, and a daemon that doesn't answer
+        `DaemonOffline`, which every verb answers with exit 4, so no verb writes a token
+        or reads an answer its daemon does not speak."""
+        return (DaemonClient(self.socket_path) if self.deadline is None else
+                DaemonClient(self.socket_path, timeout=self.deadline)).connect()
 
     def say(self, text: str = "") -> None:
         if self.capture is not None:
@@ -497,7 +475,7 @@ def _claim_token(ctx: Context, sender: SenderIdentity, answer: dict):
                 "so it holds no posting credential — nothing was sent. Relaunch the "
                 "session.")
         return EXIT_OFFLINE
-    if answer.get("protocol") != PROTOCOL_VERSION:
+    if answer.get("protocol") != CLAIM_PROTOCOL:
         _refuse(ctx, "claim-protocol",
                 f"{sender.qualified}: this session's comms adapter is from an older "
                 "comms release and cannot bind to this daemon — nothing was sent. "

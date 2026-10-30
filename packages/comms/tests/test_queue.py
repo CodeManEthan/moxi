@@ -521,20 +521,22 @@ def test_a_rescan_writes_no_row_at_or_below_the_cursor(rig, reads, peers, blocke
 
 # ============================================================ (f) failed hand-off
 
+def closing(monkeypatch, conn) -> None:
+    """`conn` reads as closing from now on, as when its peer went away between the
+    routing decision and the hand-off; every other connection is untouched."""
+    cls = type(conn)
+    real = cls.closed
+    monkeypatch.setattr(cls, "closed", property(
+        lambda self: True if self is conn else real.fget(self)))
+
+
 def test_a_failed_hand_off_is_a_row_the_next_binding_gets(rig, reads, peers, monkeypatch):
-    """The socket fails at `sendall`; the id leaves `delivered`
+    """The connection is closing at the hand-off; the id leaves `delivered`
     and gets a row, and the name's next binding is handed it."""
     reads[REVIEWER_Q] = cache.WARM
     peer = peers()
     binding = rig.daemon.bindings[REVIEWER_Q]
-    real = binding.conn.send
-
-    def closed_before_sendall(frame):
-        if frame.get("op") == "deliver":
-            raise BrokenPipeError(32, "the socket closed before sendall")
-        return real(frame)
-
-    monkeypatch.setattr(binding.conn, "send", closed_before_sendall)
+    closing(monkeypatch, binding.conn)
     mid = post(rig, [REVIEWER_Q], "this one is lost on the wire")
     row_for(rig, REVIEWER_Q, mid)
     assert mid not in binding.delivered
@@ -549,14 +551,7 @@ def test_a_failed_hand_off_to_an_agent_n_writes_no_row(rig, reads, peers, monkey
     try:
         reads[auto.q] = cache.WARM
         binding = rig.daemon.bindings[auto.q]
-        real = binding.conn.send
-
-        def closed_before_sendall(frame):
-            if frame.get("op") == "deliver":
-                raise BrokenPipeError(32, "the socket closed before sendall")
-            return real(frame)
-
-        monkeypatch.setattr(binding.conn, "send", closed_before_sendall)
+        closing(monkeypatch, binding.conn)
         post(rig, [auto.q], "to an agent-N")
         drain(rig)
         assert rows(rig, auto.q) == set()
@@ -624,17 +619,26 @@ class Frames:
                 if f.get("identity") == q and all(f.get(k) == v for k, v in match.items())]
 
 
+#: The adapter methods that were one `activity` frame, and the `kind` each one carried.
+_KINDS = {"activity": None, "turn_ended": "turn", "ready": "ready", "look": "look"}
+
+
 @pytest.fixture
-def frames(monkeypatch):
+def frames(rig, monkeypatch):
     seen = Frames()
-    real = Daemon._handle
+    methods = rig.daemon._methods
 
-    def handle(self, conn, frame):
-        if frame.get("op") == "activity":
-            seen.seen.append((dict(frame), cursors.read(str(frame.get("identity")))))
-        return real(self, conn, frame)
+    def watched(method, real):
+        def handle(conn, params):
+            frame = dict(params)
+            if _KINDS[method] is not None:
+                frame["kind"] = _KINDS[method]
+            seen.seen.append((frame, cursors.read(str(frame.get("identity")))))
+            return real(conn, params)
+        return handle
 
-    monkeypatch.setattr(Daemon, "_handle", handle)
+    for method in _KINDS:
+        monkeypatch.setitem(methods, method, watched(method, methods[method]))
     return seen
 
 

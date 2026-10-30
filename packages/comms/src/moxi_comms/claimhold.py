@@ -21,6 +21,7 @@ and can never be sent as (`state`). There is no other op.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import socket
@@ -34,9 +35,66 @@ from . import claimfile
 from .claimfile import BOUND, HOLDS, OFFLINE, STANDBY, WAITING
 from .client import DaemonClient, DaemonError, DaemonOffline, DaemonTimeout
 from .membership import DEFAULT_PROC, SELF, TREE, ProcView, Root, root_of, sessions_of
-from .protocol import PROTOCOL_VERSION, LineConn, ProtocolError
 
 log = logging.getLogger("comms.claim")
+
+#: The claim socket's version, which its `claim` answer carries as `protocol`. The
+#: claim socket still speaks JSON lines with an `op`, until it moves onto `moxi.ipc`.
+CLAIM_PROTOCOL = 2
+
+
+class ProtocolError(Exception):
+    """A claim socket frame that could not be read or written."""
+
+
+class LineConn:
+    """The claim socket's framing: newline-delimited JSON both ways, with a write
+    lock."""
+
+    def __init__(self, sock: socket.socket):
+        self.sock = sock
+        self._wlock = threading.Lock()
+        self._buf = b""
+        self._closed = False
+
+    def send(self, obj: dict) -> None:
+        data = (json.dumps(obj, separators=(",", ":")) + "\n").encode()
+        with self._wlock:
+            if self._closed:
+                raise ProtocolError("connection closed")
+            self.sock.sendall(data)
+
+    def recv(self) -> dict | None:
+        """Next frame, or None at EOF."""
+        while b"\n" not in self._buf:
+            try:
+                chunk = self.sock.recv(65536)
+            except (OSError, ValueError):
+                return None
+            if not chunk:
+                return None
+            self._buf += chunk
+        line, _, self._buf = self._buf.partition(b"\n")
+        if not line.strip():
+            return self.recv()
+        try:
+            return json.loads(line)
+        except json.JSONDecodeError as e:
+            raise ProtocolError(f"bad frame: {e}") from e
+
+    def close(self) -> None:
+        with self._wlock:
+            self._closed = True
+        # shutdown() first: a peer thread blocked in recv() holds the open file
+        # description alive, so close() alone neither wakes it nor sends FIN.
+        try:
+            self.sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        try:
+            self.sock.close()
+        except OSError:
+            pass
 
 #: The one variable every adapter stamps into what it spawns.
 CLAIM_SOCKET_ENV = "MOXI_COMMS_CLAIM_SOCKET"
@@ -274,7 +332,7 @@ class ClaimHolder:
     def claim_answer(self) -> dict:
         with self.lock:
             claim = dict(self.claim) if self.claim else None
-            answer = {"ok": True, "protocol": PROTOCOL_VERSION,
+            answer = {"ok": True, "protocol": CLAIM_PROTOCOL,
                       "state": self.state, "claim": claim,
                     "hold": self.hold, "launch_session": self.launch_session,
                     "kind": self.kind, "key": self.key,

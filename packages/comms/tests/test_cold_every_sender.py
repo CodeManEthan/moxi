@@ -32,7 +32,6 @@ from __future__ import annotations
 import io
 import os
 import shutil
-import socket
 import tempfile
 import threading
 import time
@@ -40,15 +39,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from conftest import (assistant_line, cache_absent, cache_api, projects_root, record_rows,
-                      send_turn, wait_for_queue, wait_until, write_transcript)
+from conftest import (assistant_line, cache_absent, cache_api, projects_root, raw_connection,
+                      record_rows, send_turn, settle, wait_for_queue, wait_until,
+                      write_transcript)
 
 from moxi_comms import cache, cli, cursors, machine_line, paths
 from moxi_comms.adapters.claude_shim import ClaudeShim
 from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import Daemon
 from moxi_comms.paths import daemon_socket
-from moxi_comms.protocol import CLI_PROTOCOL, LineConn
 from moxi_comms.provision import NAMES
 from moxi_comms.sender import SenderIdentity
 
@@ -859,7 +858,7 @@ def test_the_daemon_refuses_to_start_when_the_queue_load_raises(rig, monkeypatch
     daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     with pytest.raises(RuntimeError, match="queue could not be read"):
         daemon.start()
-    assert not daemon.bound and not daemon_socket().exists()
+    assert daemon.host is None and not daemon_socket().exists()
 
 
 def test_the_trim_keeps_a_cold_bare_bindings_row_and_takes_the_message_once_handled(
@@ -1250,17 +1249,11 @@ def test_both_fields_ride_register_and_every_activity(rig):
 
 def test_the_daemon_takes_them_only_from_the_bindings_own_connection(rig):
     shim(rig, SESS_A, age=60)
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.connect(str(daemon_socket()))
-    conn = LineConn(s)
-    try:
-        conn.send({"op": "activity", "identity": REVIEWER_Q, "session_id": SESS_A,
-                   "projects_root": "/tmp/forged", "turned": True, "kind": "turn",
-                   "seq": 1})
-        conn.send({"id": 1, "op": "ping"})
-        assert conn.recv() == {"id": 1, "ok": True, "cli_protocol": CLI_PROTOCOL}
-    finally:
-        conn.close()
+    with raw_connection() as conn:
+        conn.notify("turn_ended", {"identity": REVIEWER_Q, "session_id": SESS_A,
+                                   "projects_root": "/tmp/forged", "turned": True,
+                                   "seq": 1})
+        settle(conn)
     b = rig.daemon.bindings[REVIEWER_Q]
     assert b.projects_root == str(projects_root()) and b.turned is False
 

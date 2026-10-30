@@ -25,7 +25,7 @@ def _queue(rig, q):
 
 def _waiting(rig, q):
     """`agents`' `waiting` count for `q`, 0 when it has none."""
-    return rig.daemon._query({"kind": "agents"})["waiting"].get(q, {}).get("count", 0)
+    return rig.daemon._agents_query({})["waiting"].get(q, {}).get("count", 0)
 
 
 def posted_while_down(rig, monkeypatch, post):

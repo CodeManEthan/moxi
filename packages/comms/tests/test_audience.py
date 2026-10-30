@@ -389,7 +389,7 @@ def test_a_live_reply_racing_the_boot_rescan_delivers_as_unknown(rig, monkeypatc
     booting = threading.Thread(target=daemon.start, daemon=True)
     booting.start()
     try:
-        assert wait_until(lambda: daemon._sub is not None and daemon.bound)
+        assert wait_until(lambda: daemon._sub is not None and daemon.host is not None)
         planner = rig.shim(**PLANNER)
         early = reply_to_planner(rig, original.id, "raced the rescan.")
         assert delivered(planner, early.id) == (None, "unknown")
@@ -494,7 +494,7 @@ def _boot_racing_the_rescan(rig, monkeypatch, *, snapshot_first):
     booting = threading.Thread(target=daemon.start, daemon=True)
     booting.start()
     try:
-        assert wait_until(lambda: daemon._sub is not None and daemon.bound and "msgs" in snap)
+        assert wait_until(lambda: daemon._sub is not None and daemon.host is not None and "msgs" in snap)
         planner = rig.shim(**PLANNER)
         reviewer = rig.shim(**REVIEWER)
         early = reply_to_planner(rig, original.id, "raced the rescan.")

@@ -74,22 +74,22 @@ import logging
 import os
 import secrets
 import signal
-import socket
 import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import (attribution, bindings, cache, config, constants, cursors, directory,
-               protocol)
+from moxi import ipc
+
+from . import (attribution, bindings, cache, config, constants, cursors, directory, wire)
 from .attribution import Author
 from .machine_line import (COLD_AT_LIVE, POSTURE_NONE,
                            POSTURE_ONCE, parse as parse_machine_line)
 from .record import Message
 from . import kinds as kinds_mod
 from .paths import comms_db, daemon_socket
-from .protocol import CLI_PROTOCOL, PROTOCOL_VERSION, LineConn
+from .record import Forbidden
 from .provision import NAMES
 from .scoping import GLOBAL, NAME_RE, is_auto_name, qualify, split_tag, tag_matches
 
@@ -247,9 +247,16 @@ class SettleWindow:
         return self.opened + self.steps[self.taken]
 
 
+#: The most `deliver` frames one binding may have out that its adapter hasn't yet taken
+#: into a digest. A push past it waits in the binding's overflow and goes out, by id, as
+#: the adapter takes what it has, so a long catch-up never fills the connection's queue
+#: of frames and drops it.
+WINDOW = 64
+
+
 @dataclass
 class Binding:
-    conn: LineConn
+    conn: object          # the `moxi.ipc.Connection` that holds the binding
     qualified: str
     name: str
     scope: str
@@ -305,6 +312,14 @@ class Binding:
     #: (`_route_recipients`), so a read made in the record's lag never queues a row
     #: behind the release that read past it.
     releases_begun: int = 0
+    #: Whether the binding's turns session can take a steer, as its adapter last
+    #: reported it. None until reported.
+    can_steer: bool | None = None
+    #: The ids pushed to the adapter that it hasn't yet taken into a digest (at most
+    #: `WINDOW`), and the claimed ids waiting for room, oldest first, with what their
+    #: `deliver` frame needs.
+    window: set = field(default_factory=set)
+    overflow: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -466,15 +481,34 @@ class Daemon:
         #: have become readable since (`query kind="readable"`).
         self.started_at = self.clock()
 
-        self._server: socket.socket | None = None
-        #: Did THIS daemon actually bind the path? Only a daemon that did may unlink it.
-        #: An old daemon's `stop()` used to delete whatever file was at the path, which
-        #: could be a NEWER daemon's live socket -- and a listening fd cannot be
-        #: re-linked to a name, so the only recovery was a restart.
-        self.bound = False
+        #: The daemon socket's server (`wire.Host`), made at `start()`. `moxi.ipc.serve`
+        #: holds the lock beside the socket for the daemon's life, so a second daemon
+        #: refuses, and removes only the socket it bound.
+        self.host: wire.Host | None = None
         self._threads: list[threading.Thread] = []
         self._stop = threading.Event()
         self._sub = None
+        #: comms' methods on the daemon socket, by name: the reads any client may call,
+        #: `send`, and the adapter's methods on the connection that holds its binding.
+        self._methods = {
+            "send": self._send,
+            "bind": self._bind,
+            # The reads take no connection.
+            **{name: _read(self, f"_{name}_query") for name in (
+                "resolve", "agents", "session", "owner", "asks", "owed", "readable",
+                "explain", "binding_window", "attributed_message", "rooms", "message",
+                "history", "max_id", "last_digest")},
+            "turn_ended": self._turn_ended,
+            "injected": self._injected,
+            "ready": self._ready,
+            "look": self._look,
+            "activity": self._activity,
+            "unanswered": self._note_unanswered,
+            # Until every operator send goes through `send`: the send verb writes the
+            # operator's message to the local record itself and says so here, so the
+            # record's pump fans it out now rather than at its next poll.
+            "nudge": self._nudge,
+        }
 
     # ------------------------------------------------------------------ directory
     @contextlib.contextmanager
@@ -496,52 +530,64 @@ class Daemon:
     # ------------------------------------------------------------------ lifecycle
     def start(self) -> "Daemon":
         # `[cache] required`: a box that says its cold-send hold must hold refuses to
-        # start without the cache module, before anything is probed or written.
+        # start without the cache module, before anything is served or written.
         refusal = cache.required_refusal(self.settings.use("cache").required)
         if refusal:
             raise RuntimeError(refusal)
-        # The PROBE comes first, before anything is written or fenced or unlinked: it is
-        # the one question the rest of boot assumes the answer to. Ask it by knocking.
-        self._probe_or_refuse()
+        # The socket first, before anything is written or fenced: serving it takes the
+        # lock beside it, which is the one question the rest of boot assumes the answer
+        # to. A second daemon refuses here. Clients may connect from now on; their hello
+        # is answered and their first method waits until boot has loaded the queue.
+        self.host = wire.Host(str(self.socket_path), self._call, self._deregister)
+        try:
+            self.host.start()
+        except ipc.AlreadyServing as e:
+            self.host = None
+            who = f"pid {e.holder}" if e.holder else "another process"
+            raise RuntimeError(
+                f"a live comms daemon ({who}) is serving at {self.socket_path}; refusing "
+                f"to start a second one. Stop the running daemon first.") from None
+        except OSError as e:
+            self.host = None
+            raise RuntimeError(f"the comms daemon can't serve {self.socket_path}: {e}") \
+                from None
+        try:
+            self._boot()
+        except BaseException:
+            self.host.close()
+            self.host = None
+            raise
+        return self
+
+    def _boot(self) -> None:
         self.started_at = self.clock()
-        # First-start provisioning, when this daemon has it, runs only now: the probe
-        # has shown that no other daemon holds the socket, so two daemons starting on
-        # one empty home cannot both provision it. It may refuse (RuntimeError).
+        # First-start provisioning, when this daemon has it, runs only now: the lock
+        # shows that no other daemon serves the socket, so two daemons starting on one
+        # empty home cannot both provision it. It may refuse (RuntimeError).
         if self.first_start is not None:
             self.first_start(self.record, self.db_path)
-        # The fence comes after the probe and before the bind. The probe proves no other
-        # daemon can still own an open interval. Live readers use the binding history only for
-        # never-bound checks, while the one-time conversion reads older intervals through
-        # its frozen compatibility reader before a new binding can open.
+        # The fence comes after the lock and before any method is answered. The lock
+        # proves no other daemon can still own an open interval. Live readers use the
+        # binding history only for never-bound checks, while the one-time conversion
+        # reads older intervals through its frozen compatibility reader before a new
+        # binding can open.
         if self.binding_history.open():
             fenced = self.binding_history.fence()
             if fenced:
                 log.warning("boot fence: closed %d custody interval(s) left open by a "
                             "daemon that did not shut down cleanly", fenced)
-        # boot: the queue, BEFORE the socket listens, so no register or routing pass can
+        # boot: the queue, BEFORE any method is answered, so no bind or routing pass can
         # hand a queued id as live mail. A read that RAISES stops the start here: routing
         # without the queue would hand queued mail as if it were new.
         self._load_queue()
         # boot: cache's drift store, opened to learn; every lowering is written by it.
         if self._own_store:
             self.cache_store = cache.open_store(learn=True)
-        # boot: the sent index, also before the socket listens, so no `owed` query is
+        # boot: the sent index, also before any method is answered, so no `owed` query is
         # ever answered from a half-read record.
         self._rebuild_sent_logged()
-        self.socket_path.parent.mkdir(parents=True, exist_ok=True)
-        os.chmod(self.socket_path.parent, 0o700)          # RUNTIME dir posture
-        self.socket_path.unlink(missing_ok=True)          # the probe said: stale
-        self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._server.bind(str(self.socket_path))
-        # Before the chmod, not after the listen: from the instant `bind()` returns, the
-        # file at that path is this daemon's, and a failure in chmod or listen must still
-        # leave a daemon that knows to take it away again.
-        self.bound = True
-        os.chmod(self.socket_path, 0o600)                  # 0600 in a 0700 dir
-        self._server.listen(64)
-        self._server.settimeout(0.2)
         self._spawn(self._window_loop)
-        self._spawn(self._accept_loop)
+        self.host.open()
 
         self._sub = self.record.subscribe()
         self._spawn(self._event_loop)
@@ -558,32 +604,6 @@ class Daemon:
                           "what it would have queued")
         if self._start_trim_thread:
             self._spawn(self._trim_loop)
-        return self
-
-    def _probe_or_refuse(self) -> None:
-        """Knock before taking the path away from whatever is behind it.
-
-        A file at `socket_path` used to be treated as debris and unlinked on sight. It
-        may be a LIVE daemon's socket, and unlinking it leaves that daemon LISTENing on
-        an inode with no name: `moxi comms send` gets ENOENT while `ss -xlp` shows the daemon
-        alive, and nothing short of a restart can re-link a listening fd to a name.
-
-        Only two answers let boot continue, and neither of them is silence.
-        """
-        if not self.socket_path.exists():
-            return
-        verdict, error = protocol.probe(self.socket_path)
-        if verdict == protocol.PROBE_LIVE:
-            raise RuntimeError(
-                f"a live comms daemon is listening on {self.socket_path}; refusing to "
-                f"take the path from it. Stop the running daemon first -- "
-                f"`ss -xlp | grep comms` names its pid.")
-        if verdict != protocol.PROBE_STALE:
-            raise RuntimeError(
-                f"{self.socket_path} exists and could not be probed "
-                f"({type(error).__name__}, errno {error.errno}); refusing to unlink a "
-                f"path this daemon cannot show is dead. Find out what holds it -- "
-                f"`ss -xlp` lists unix listeners -- and clear the path by hand.")
 
     def _spawn(self, target) -> None:
         t = threading.Thread(target=target, daemon=True)
@@ -591,160 +611,170 @@ class Daemon:
         self._threads.append(t)
 
     def stop(self) -> None:
+        """Stop: new `bind` and `send` are answered `stopping`, the socket stops
+        accepting, and every connection closes without waiting on a peer past the write
+        deadline. Each binding's release runs as its connection closes; then the binding
+        history and cache's store close. It takes at most the write deadline and the
+        releases."""
         with self._lock:
             self._stopping = True
         self._stop.set()
         with self._window_cond:
             self._window_cond.notify_all()
-        if self._server:
-            with contextlib.suppress(OSError):
-                self._server.close()
+        if self.host is not None:
+            if not self.host.close():
+                log.warning("the daemon socket did not close within %.0f s",
+                            wire.CLOSE_WAIT)
+            self.host = None
         if self._sub is not None:
             self.record.unsubscribe(self._sub)
-        with self._lock:
-            for b in list(self.bindings.values()):
-                b.conn.close()
         for t in self._threads:
             t.join(timeout=1.0)
-        # after the serve threads have had their chance to record their releases; a
-        # write that lands after this is a no-op, and the next boot's fence closes it
+        # after the connections' releases; a write that lands after this is a no-op,
+        # and the next boot's fence closes it
         self.binding_history.close()
         if self._own_store and self.cache_store is not None:
             cache.close_store(self.cache_store)      # the learning lock goes with it
             self.cache_store = None
-        # You only remove the socket you put there. A daemon whose `start()` refused, or
-        # was never called, removes nothing -- the file at that path is someone else's.
-        if self.bound:
-            with contextlib.suppress(OSError):
-                self.socket_path.unlink(missing_ok=True)
-            self.bound = False
 
-    # ------------------------------------------------------------------ connections
-    def _accept_loop(self) -> None:
-        while not self._stop.is_set():
-            try:
-                sock, _ = self._server.accept()
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-            self._spawn(lambda s=sock: self._serve(LineConn(s)))
-
-    def _serve(self, conn: LineConn) -> None:
+    # ------------------------------------------------------------------ the wire
+    def _call(self, conn, method: str, params: object):
+        """One comms method from `conn`, on a pool thread: its answer, or the
+        `RpcError` it is refused with. A refusal names its code; an accident is logged
+        and answered `failed`, which a client may try again."""
+        handler = self._methods.get(method)
+        if handler is None:
+            raise ipc.RpcError(wire.METHOD_NOT_FOUND, f"method not found: {method}")
+        if params is None:
+            params = {}
+        if not isinstance(params, dict):
+            raise ipc.RpcError(wire.INVALID_PARAMS, f"{method}: params is an object")
         try:
-            while not self._stop.is_set():
-                frame = conn.recv()
-                if frame is None:
-                    break
-                self._handle(conn, frame)
-        except Exception:
-            log.exception("connection handler failed")
-        finally:
-            self._deregister(conn)
-            conn.close()
-
-    def _handle(self, conn: LineConn, frame: dict) -> None:
-        op = frame.get("op")
-        rid = frame.get("id")
-        try:
-            if op == "register":
-                result = self._register(conn, frame)
-                conn.send({"id": rid, "ok": True, **result})
-                bound = self.bindings[result["identity"]["qualified"]]
-                # Register runs replay first, then its release: the unflagged rows, on a
-                # passing read. Flagged rows wait for a real boundary.
-                self._replay(bound)
-                self._on_register(bound)
-            elif op == "post":
-                conn.send({"id": rid, "ok": True, **self._post(frame)})
-            elif op == "query":
-                conn.send({"id": rid, "ok": True, **self._query(frame)})
-            elif op == "injected":
-                if self._ping_ordered(conn, frame):
-                    with self._lock:
-                        self.injected_through[frame["identity"]] = str(frame["through"])
-                        digest = frame.get("digest")
-                        if digest is not None:
-                            self.injected_digest[frame["identity"]] = str(digest)
-            elif op == "activity":
-                if self._ping_ordered(conn, frame):
-                    kind = frame.get("kind")
-                    turn = kind == ACTIVITY_TURN
-                    with self._lock:
-                        self.activity[frame["identity"]] = self.clock()
-                        # The session id rides the notify, and is taken only
-                        # from the connection that holds this binding: the frame's
-                        # identity is a claim, the connection is not. So are
-                        # `projects_root` and `turned`, and a `kind: turn` sets
-                        # `turned` whatever the frame says. So are `source`,
-                        # `handled` and `unhandled`: a forged frame releases and
-                        # settles nothing.
-                        b = self.bindings.get(frame["identity"])
-                        own = b is not None and b.conn is conn
-                        if own:
-                            self._take_session(b, frame, at=self.clock(), turn=turn)
-                    if own and kind == ACTIVITY_READY:
-                        self._on_ready(b, frame.get("source"))
-                    elif own and kind == ACTIVITY_LOOK:
-                        self._on_look(b)
-                    elif own and turn:
-                        self._on_turn(b, frame)
-            elif op == "unanswered":
-                # Reply enforcement: a shim dropped a debt whose reminder was ignored.
-                # A notify, no reply; accepted only from the connection that holds the
-                # owing binding, since the frame's identity is a claim.
-                self._note_unanswered(conn, frame)
-            elif op == "ping":
-                # The verbs' version check (`protocol.CLI_PROTOCOL`).
-                conn.send({"id": rid, "ok": True, "cli_protocol": CLI_PROTOCOL})
-            elif op == "nudge":
-                # Fanout layer 2.
-                # A CLI process writes the local record itself, so nothing in here knows
-                # the row landed; this frame says so and the pump fans out at once
-                # instead of at the next poll. NO REPLY: it is fire-and-forget
-                # (`DaemonClient.notify`), nobody waits for one, and a frame back would
-                # arrive at a socket already closed.
-                # Only the local record has a `nudge`; the mock fans out in-process, so
-                # on the mock this op does nothing.
-                if hasattr(self.record, "nudge"):
-                    self.record.nudge()
-            else:
-                conn.send({"id": rid, "ok": False, "error": f"unknown op {op!r}"})
+            return handler(conn, params)
+        except ipc.RpcError:
+            raise
         except DaemonStopping:
-            # The freeze turned this register away: close, and say nothing
-            # on the wire. The client reads the close as `DaemonOffline` and retries.
-            log.info("register turned away: the daemon is stopping")
-            conn.close()
+            raise wire.error(wire.STOPPING, "the comms daemon is stopping; try again in "
+                             "a moment") from None
         except Refusal as e:
-            # The daemon's own NO: a name somebody else holds, an address that
-            # cannot resolve. `refused` is the word a shim may act on for good.
-            if op == "register":
+            if method == "bind":
                 # One journal line per refused attempt, naming what was asked. A waiting
-                # shim at the backoff ceiling adds about two a minute; that is the price of
-                # the journal showing the attempt at all.
-                log.warning("register refused: %s: %s", _asked(frame), e)
-            conn.send({"id": rid, "ok": False, "error": str(e), "refused": True,
-                       **e.extra})
-        except Exception as e:  # never take the daemon down for one bad frame
-            # An ACCIDENT, not a refusal: a record read that 429'd, a broken socket.
-            # Marked `transient` so a shim that has held its name keeps retrying instead
-            # of reading it as a rival claim (a restart once had three boundary reads
-            # 429 in a burst, and three sessions gave up their names for good).
-            log.exception("op %s failed", op)
-            conn.send({"id": rid, "ok": False, "error": f"{type(e).__name__}: {e}",
-                       "transient": True})
+                # shim at the backoff ceiling adds about two a minute; that is the price
+                # of the journal showing the attempt at all.
+                log.warning("bind refused: %s: %s", _asked(params), e)
+            raise wire.error(e.code, str(e), **e.extra) from None
+        except Exception as e:  # never take the daemon down for one bad message
+            # An ACCIDENT, not a refusal: a record read that failed, say. Answered
+            # `failed`, in the try-again range, so a shim that has held its name keeps
+            # retrying instead of reading it as a rival claim.
+            log.exception("%s failed", method)
+            raise wire.error(wire.FAILED, f"{type(e).__name__}: {e}") from None
+
+    def _own_binding(self, conn, params: dict) -> Binding | None:
+        """The binding `conn` holds that `params` speaks for: the one its `identity`
+        names, or the connection's one binding when it names none. None when the
+        connection holds no such binding."""
+        identity = params.get("identity")
+        with self._lock:
+            if identity:
+                b = self.bindings.get(str(identity))
+                return b if b is not None and b.conn is conn else None
+            mine = [b for b in self.bindings.values() if b.conn is conn]
+        return mine[0] if len(mine) == 1 else None
+
+    def _bound(self, conn, params: dict) -> Binding:
+        b = self._own_binding(conn, params)
+        if b is None:
+            raise Refusal("this connection holds no binding", code=wire.NOT_BOUND)
+        return b
+
+    def _bind(self, conn, params: dict):
+        """`bind`: the binding, answered with its identity, token and catch-up boundary.
+        Its catch-up follows the answer: replay first, then the release of the unflagged
+        rows on a passing read. Flagged rows wait for a real boundary."""
+        result = self._register(conn, params)
+        bound = self.bindings[result["identity"]["qualified"]]
+
+        def catch_up() -> None:
+            self._replay(bound)
+            self._on_register(bound)
+
+        return wire.Then(result, catch_up)
+
+    def _injected(self, conn, params: dict) -> None:
+        """`injected`: the adapter put a digest in. The text is kept for `last_digest`;
+        every pushed id up to `through` has left the binding's window."""
+        b = self._own_binding(conn, params)
+        identity = b.qualified if b is not None else str(params.get("identity") or "")
+        if not identity or not self._ping_ordered(conn, identity, "injected",
+                                                  params.get("seq")):
+            return None
+        through = params.get("through")
+        with self._lock:
+            if through is not None:
+                self.injected_through[identity] = str(through)
+            text = params.get("text")
+            if text is not None:
+                self.injected_digest[identity] = str(text)
+        if b is not None and through is not None:
+            self._window_take(b, lambda mid: _as_id(mid) <= _as_id(str(through)))
+        return None
+
+    def _ready(self, conn, params: dict) -> None:
+        return self._activity(conn, params, kind=ACTIVITY_READY)
+
+    def _look(self, conn, params: dict) -> None:
+        return self._activity(conn, params, kind=ACTIVITY_LOOK)
+
+    def _turn_ended(self, conn, params: dict) -> None:
+        return self._activity(conn, params, kind=ACTIVITY_TURN)
+
+    def _activity(self, conn, params: dict, kind: str | None = None) -> None:
+        """`activity` and its kinds: the session reports, from the binding's own
+        connection, and the release points (`ready`, `look`, a turn's end)."""
+        b = self._own_binding(conn, params)
+        identity = b.qualified if b is not None else str(params.get("identity") or "")
+        method = kind or "activity"
+        if not identity or not self._ping_ordered(conn, identity, method,
+                                                  params.get("seq")):
+            return None
+        turn = kind == ACTIVITY_TURN
+        with self._lock:
+            self.activity[identity] = self.clock()
+            # The session id rides the notification, and is taken only from the
+            # connection that holds this binding: the identity a message names is a
+            # claim, the connection is not. So are `projects_root` and `turned`, and a
+            # turn's end sets `turned` whatever it says. So are `source`, `handled` and
+            # `unhandled`: a forged message releases and settles nothing.
+            if b is not None:
+                self._take_session(b, params, at=self.clock(), turn=turn)
+        if b is None:
+            return None
+        if kind == ACTIVITY_READY:
+            self._on_ready(b, params.get("source"))
+        elif kind == ACTIVITY_LOOK:
+            self._on_look(b)
+        elif turn:
+            named = {str(m) for key in ("handled", "unhandled")
+                     for m in (params.get(key) if isinstance(params.get(key), list) else ())}
+            if named:
+                self._window_take(b, lambda mid: mid in named)
+            self._on_turn(b, params)
+        return None
+
+    def _nudge(self, conn, params: dict) -> None:
+        # Only the local record has a `nudge`; the mock fans out in-process, so on the
+        # mock it does nothing.
+        if hasattr(self.record, "nudge"):
+            self.record.nudge()
+        return None
 
     # ------------------------------------------------------------------ register
-    def _register(self, conn: LineConn, frame: dict) -> dict:
-        if frame.get("protocol") != PROTOCOL_VERSION:
-            raise Refusal(
-                "this session's comms adapter is from an older comms release "
-                "(claims protocol 1) and cannot bind to this daemon (protocol 2). "
-                "Relaunch the session to start the current adapter.")
+    def _register(self, conn, frame: dict) -> dict:
         adapter = frame.get("adapter") or "claude-shim"
         if adapter not in self.kinds:
             raise Refusal(f"unknown adapter kind {adapter!r}; expected one of "
-                          f"{', '.join(self.kinds.names())}")
+                          f"{', '.join(self.kinds.names())}", code=wire.UNKNOWN_ADAPTER)
         # The catch-up boundary is READ BEFORE THE LOCK. It is a record round trip -- a
         # file read, local or mock -- and taking it under the daemon's ONE lock made every register
         # wait out every other register's network call, and every router, resolver and
@@ -764,18 +794,19 @@ class Daemon:
                 self._auto_seq += 1                     # monotonic; NEVER reused
                 name, scope, tier = f"agent-{self._auto_seq}", GLOBAL, TIER_EPHEMERAL
             else:
-                if not NAME_RE.match(name):
-                    raise Refusal(f"{name!r} is not a valid name")
+                if not isinstance(name, str) or not NAME_RE.match(name):
+                    raise Refusal(f"{name!r} is not a valid name", code=wire.INVALID_PARAMS)
                 if is_auto_name(name):
                     raise Refusal(
                         f"{name!r} is refused: the agent-N namespace is reserved for the "
-                        "auto-namer in every scope")
+                        "auto-namer in every scope", code=wire.NAME_RESERVED, name=name)
                 # A register that names no scope binds global. The frame's `project` is
                 # the session's project, never its scope.
                 scope = GLOBAL if frame.get("global") else (frame.get("scope") or GLOBAL)
                 if directory.retired(db, name, scope):
                     raise Refusal(directory.RETIRED_BIND.format(q=qualify(name, scope),
-                                                                name=name))
+                                                                name=name),
+                                  code=wire.NAME_RETIRED, name=qualify(name, scope))
                 tier = TIER_STANDING if directory.standing_row(db, name, scope) else TIER_CHOSEN
             q = qualify(name, scope)
             # A send-only identity binds only as what it is, and only it binds that way:
@@ -785,16 +816,18 @@ class Daemon:
             if adapter == SEND_ONLY_ADAPTER and not send_only_row:
                 raise Refusal(
                     f"{q} is not a send-only identity: the {SEND_ONLY_ADAPTER} adapter kind "
-                    "binds only a name whose directory row is send-only")
+                    "binds only a name whose directory row is send-only",
+                    code=wire.NAME_RESERVED, name=q)
             if send_only_row and adapter != SEND_ONLY_ADAPTER:
                 raise Refusal(
                     f"{q} is a send-only identity and receives no mail: it binds only "
-                    f"with the {SEND_ONLY_ADAPTER} adapter kind, never as {adapter}")
+                    f"with the {SEND_ONLY_ADAPTER} adapter kind, never as {adapter}",
+                    code=wire.NAME_RESERVED, name=q)
             if q in self.bindings:
                 held = self.bindings[q]
                 raise Refusal(
-                    f"{q} is already bound (adapter {held.adapter})",
-                    holder={"qualified": q, "adapter": held.adapter})
+                    f"{q} is already bound (adapter {held.adapter})", code=wire.NAME_HELD,
+                    name=q, holder={"qualified": q, "adapter": held.adapter})
             # The catch-up boundary, FIXED here -- at the same instant the binding becomes
             # visible, and under the same lock. Everything at or below it is replay's
             # business (bounded, possibly dropped); everything above it is live. Without
@@ -855,37 +888,70 @@ class Daemon:
                 qualified=q, name=name, scope=scope, tier=tier,
                 adapter=adapter, at=binding.bound_at)
             log.info("bind %s tier=%s adapter=%s", q, tier, adapter)
-        # `hwm`, the catch-up boundary: the shim's registration
-        # high-water id. A `re:` below it was sent before that shim could see payments.
-        # `protocol`, this daemon's claims-protocol version: a plugin shim ships its own
-        # copy of the source and checks it on connect.
+        # `high`, the catch-up boundary: the shim's registration high-water id. A `re:`
+        # below it was sent before that shim could see payments.
         return {"identity": {"name": name, "scope": scope, "tier": tier, "qualified": q},
-                "hwm": hwm, "protocol": PROTOCOL_VERSION,
-                "token": token}
+                "high": hwm, "token": token}
 
-    def _post(self, frame: dict) -> dict:
-        """Write one identity row after checking the live binding's credential."""
-        identity = frame.get("identity")
-        token = frame.get("token")
-        content = frame.get("content")
+    def _send(self, conn, params: dict) -> dict:
+        """`send`: one message, written by the daemon, under the credential `as` and
+        `token` present. A bound identity's token is its live binding's; the operator's
+        is the operator's credential, which the record checks."""
+        who = params.get("as")
+        token = params.get("token")
+        content = params.get("content")
+        if not isinstance(who, str) or not who:
+            raise Refusal("send: `as` names the sending identity", code=wire.INVALID_PARAMS)
+        if not isinstance(content, str):
+            raise Refusal("send: `content` is the message's text", code=wire.INVALID_PARAMS)
+        if len(content) > self.record.max_content_length:
+            raise Refusal(
+                f"content is {len(content)} characters, over the "
+                f"{self.record.max_content_length}-character cap on one message",
+                code=wire.TOO_LONG)
+        with self._lock:
+            # Until the operator's name is reserved, an agent may hold a binding under
+            # it: a live binding of that name sends as itself, with its binding's token.
+            operator = who == OPERATOR_NAME and who not in self.bindings
+        if operator:
+            return self._send_as_operator(params, token, content)
         with self._lock, self._db() as db:
             if self._stopping:
-                raise Refusal("the daemon is stopping")
-            binding = self.bindings.get(identity)
+                raise DaemonStopping()
+            binding = self.bindings.get(who)
             given = (hashlib.sha256(token.encode()).digest()
                      if isinstance(token, str) else b"")
             if binding is None or not hmac.compare_digest(binding.token_hash, given):
-                raise Refusal("posting credential refused", credential=True)
+                raise Refusal("posting credential refused", code=wire.CREDENTIAL,
+                              credential=True)
             if directory.retired(db, binding.name, binding.scope):
-                raise Refusal(f"{binding.qualified} is retired")
-            if not isinstance(content, str):
-                raise Refusal("post content must be text")
-            if len(content) > self.record.max_content_length:
-                raise Refusal(
-                    f"content is {len(content)} characters, over the "
-                    f"{self.record.max_content_length}-character cap on one message")
+                raise Refusal(f"{binding.qualified} is retired", code=wire.NAME_RETIRED,
+                              name=binding.qualified)
             qualified = binding.qualified
         message = self.record.post_as_identity(qualified, self._names_channel(), content)
+        return {"message_id": str(message.id)}
+
+    def _send_as_operator(self, params: dict, token, content: str) -> dict:
+        """The operator's send. `user` names the operator's user id; without it, the
+        directory's one operator."""
+        with self._lock:
+            if self._stopping:
+                raise DaemonStopping()
+        user = params.get("user")
+        if not isinstance(user, str) or not user:
+            with self._db() as db:
+                rows = db.execute("SELECT user_id FROM operators").fetchall()
+            if len(rows) != 1:
+                raise Refusal("send as the operator: `user` names the operator's user id",
+                              code=wire.INVALID_PARAMS)
+            user = rows[0][0]
+        try:
+            message = self.record.post_as_user(user, self._names_channel(), content,
+                                               token=token if isinstance(token, str)
+                                               else None)
+        except Forbidden as e:
+            raise Refusal(f"the operator's credential was refused: {e}",
+                          code=wire.CREDENTIAL, credential=True) from None
         return {"message_id": str(message.id)}
 
     def _high_water_mark(self):
@@ -893,15 +959,16 @@ class Daemon:
 
         One read per register, concurrent with every other register's: no register
         waits out another's round trip. A failed read fails the register `transient`, and
-        the shim's backoff retries it a moment later. See `_handle`.
+        the shim's backoff retries it a moment later. See `_register`.
         """
         try:
             return self.record.max_message_id(self._names_channel()) or "0", None
         except Exception as e:            # re-raised by the caller, in the old call's place
             return "0", e
 
-    def _ping_ordered(self, conn: LineConn, frame: dict) -> bool:
-        """Is this `activity` / `injected` ping newer than the last from its source?
+    def _ping_ordered(self, conn, identity: str, method: str, raw) -> bool:
+        """Is this ordered notification (`activity` and its kinds, `injected`) newer
+        than the last from its source? `raw` is its `seq`.
 
         The SOURCE is `(connection, identity)` -- one adapter process's attachment to
         this daemon, reporting on one name. That is the grain the sender numbers at
@@ -917,25 +984,26 @@ class Daemon:
         the counter alone. These pings are hints, and dropping a real one costs the same as
         losing it.
         """
-        raw = frame.get("seq")
         if raw is None:
             return True
         try:
             seq = int(raw)
         except (TypeError, ValueError):
             return True
-        identity = frame.get("identity")
         with self._lock:
             seen = self._ping_seq.setdefault(conn, {})
             last = seen.get(identity)
             if last is not None and seq <= last:
                 log.debug("dropped a stale %s ping for %s: seq %s is not past %s",
-                          frame.get("op"), identity, seq, last)
+                          method, identity, seq, last)
                 return False
             seen[identity] = seq
         return True
 
-    def _deregister(self, conn: LineConn) -> None:
+    def _deregister(self, conn) -> None:
+        """A connection closed: each binding it held ends. Its handed mail not yet
+        handled is queued again for the name's next binding. A peer that stopped reading
+        is dropped by `moxi.ipc` after the write deadline, and ends here the same way."""
         with self._lock:
             # The ping counters die with the connection that fed them: the next
             # process to hold this name comes in on a new connection and starts its
@@ -961,85 +1029,72 @@ class Daemon:
                 # the close of the custody interval: the connection IS the liveness
                 # signal, so the connection's end is the release, here and nowhere else
                 self.binding_history.release(b.history_id)
-                log.info("unbind %s", b.qualified)
+                log.info("unbind %s: its connection from pid %s ended (a peer that stops "
+                         "reading is dropped after %.0f s)", b.qualified,
+                         getattr(getattr(conn, "peer", None), "pid", None),
+                         wire.WRITE_DEADLINE)
         if gone:
             self._queue_flush()
 
     # ------------------------------------------------------------------ query
-    def _query(self, frame: dict) -> dict:
-        kind = frame.get("kind")
-        if kind == "resolve":
-            return self._resolve_query(frame)
-        if kind == "agents":
-            with self._lock:
-                bindings = [{"qualified": b.qualified, "name": b.name, "scope": b.scope,
-                             "tier": b.tier, "adapter": b.adapter,
-                             "endpoint": b.endpoint, "endpoint_since": b.endpoint_since}
-                            for b in sorted(self.bindings.values(), key=lambda x: x.qualified)]
-                now = self.clock()
-                waiting = self._waiting_view(now)
-                unanswered = self._unanswered_rows(now)
-            # `waiting`: what waits in the queue for each name, one count, since one
-            # queue holds offline, cold and flagged mail alike and no reason is stored.
-            # `pending` stays in the answer, always empty and read by nothing here: an
-            # adapter started before the queue checks for it before it renders a roster.
-            return {"bindings": bindings, "waiting": waiting, "pending": {},
-                    "unanswered": unanswered}
-        if kind == "injected":
-            # The LAST DIGEST a live identity was shown. The read surface
-            # `moxi comms explain` reads to show the INPUT and not only the
-            # verdict. `identity` is a qualified name, exactly as `kind="agents"`
-            # prints it -- nothing is resolved here, because an explainer asking about
-            # a name is asking about the binding it just listed.
-            #
-            #     -> {"op": "query", "kind": "injected", "identity": "planner@proj-a"}
-            #     <- {"ok": true, "identity": "planner@proj-a", "bound": true,
-            #         "through": "1552...", "digest": "<the text>"}
-            #
-            # `digest` is None when nothing has been injected into this binding yet,
-            # and the whole row is empty once the binding ends: this is runtime state
-            # for a LIVE identity, not a history. It is never a refusal to ask about a
-            # name that is not bound -- `bound: false` is the answer.
-            identity = str(frame.get("identity") or "")
-            with self._lock:
-                return {"identity": identity,
-                        "bound": identity in self.bindings,
-                        "through": self.injected_through.get(identity),
-                        "digest": self.injected_digest.get(identity)}
-        if kind == "session":
-            return self._session_query(frame)
-        if kind == "owner":
-            return self._owner_query(frame)
-        if kind == "asks":
-            return self._asks_query(frame)
-        if kind == "owed":
-            return self._owed_query(frame)
-        if kind == "readable":
-            return self._readable_query(frame)
-        if kind == "explain":
-            return self._explain_query(frame)
-        if kind == "binding_window":
-            with self._lock:
-                window = self.auto_windows.get(frame.get("name"))
-            return {"window": window}
-        # --- record reads, for callers outside comms --------------------------------
-        # Comms' own CLI opens the record directly. Other modules (`record_history`,
-        # `attributed_message`) read it through these queries.
-        if kind == "record_message":
-            msg = self.record.get_message(str(frame.get("message_id")))
-            return {"message": msg.to_dict() if msg else None}
-        if kind == "attributed_message":
-            return self._attributed_message_query(frame)
-        if kind == "record_history":
-            channel_id = frame.get("channel_id") or self._names_channel()
-            msgs = self.record.history(str(channel_id), after=frame.get("after"),
-                                        limit=frame.get("limit"))
-            return {"messages": [m.to_dict() for m in msgs]}
-        if kind == "record_max_id":
-            channel_id = frame.get("channel_id")
-            return {"message_id": self.record.max_message_id(
-                str(channel_id) if channel_id else None)}
-        raise Refusal(f"unknown query kind {kind!r}")
+    def _agents_query(self, frame: dict) -> dict:
+        with self._lock:
+            bindings = [{"qualified": b.qualified, "name": b.name, "scope": b.scope,
+                         "tier": b.tier, "adapter": b.adapter,
+                         "endpoint": b.endpoint, "endpoint_since": b.endpoint_since}
+                        for b in sorted(self.bindings.values(), key=lambda x: x.qualified)]
+            now = self.clock()
+            waiting = self._waiting_view(now)
+            unanswered = self._unanswered_rows(now)
+        # `waiting`: what waits in the queue for each name, one count, since one
+        # queue holds offline, cold and flagged mail alike and no reason is stored.
+        # `pending` stays in the answer, always empty and read by nothing here: an
+        # adapter started before the queue checks for it before it renders a roster.
+        return {"bindings": bindings, "waiting": waiting, "pending": {},
+                "unanswered": unanswered}
+
+    def _last_digest_query(self, frame: dict) -> dict:
+        """The LAST DIGEST a live identity was shown: what `moxi comms explain` reads to
+        show the INPUT and not only the verdict. `identity` is a qualified name, exactly
+        as `agents` prints it; nothing is resolved here.
+
+        `digest` is None when nothing has been injected into this binding yet, and the
+        whole row is empty once the binding ends: this is runtime state for a LIVE
+        identity, not a history. It is never a refusal to ask about a name that is not
+        bound: `bound: false` is the answer."""
+        identity = str(frame.get("identity") or "")
+        with self._lock:
+            return {"identity": identity,
+                    "bound": identity in self.bindings,
+                    "through": self.injected_through.get(identity),
+                    "digest": self.injected_digest.get(identity)}
+
+    def _binding_window_query(self, frame: dict) -> dict:
+        with self._lock:
+            window = self.auto_windows.get(frame.get("name"))
+        return {"window": window}
+
+    def _rooms_query(self, frame: dict) -> dict:
+        """The rooms the directory names: id, name and kind."""
+        with self._db() as db:
+            rows = db.execute("SELECT room_id, name, kind FROM rooms ORDER BY name").fetchall()
+        return {"rooms": [{"room_id": r[0], "name": r[1], "kind": r[2]} for r in rows]}
+
+    # --- record reads, for callers outside comms ------------------------------------
+    def _message_query(self, frame: dict) -> dict:
+        msg = self.record.get_message(str(frame.get("message_id")))
+        return {"message": msg.to_dict() if msg else None}
+
+    def _history_query(self, frame: dict) -> dict:
+        channel_id = frame.get("channel_id") or self._names_channel()
+        msgs = self.record.history(str(channel_id), after=frame.get("after"),
+                                   limit=frame.get("limit"))
+        return {"messages": [m.to_dict() for m in msgs]}
+
+    def _max_id_query(self, frame: dict) -> dict:
+        channel_id = frame.get("channel_id")
+        return {"message_id": self.record.max_message_id(
+            str(channel_id) if channel_id else None)}
 
     def _session_query(self, frame: dict) -> dict:
         """Which live session sits behind one bound name, and since when.
@@ -1277,7 +1332,8 @@ class Daemon:
         if not r.resolvable:
             raise Refusal(r.hint or (
                 f"{tag}: no such ephemeral identity. agent-N names are never reused and a "
-                "retired one is nobody -- there is nothing to deliver to."))
+                "retired one is nobody -- there is nothing to deliver to."),
+                code=wire.NAME_RETIRED if r.hint else wire.NAME_UNKNOWN, name=r.qualified)
         bound = r.binding is not None
         ever = True if bound else self.binding_history.ever_bound(r.name, r.scope)
         answer = {"tier": r.tier, "route": NAMES, "qualified": r.qualified,
@@ -2456,27 +2512,58 @@ class Daemon:
             # Handed from the queue: the recipient is told it waited, and how long.
             # Replay and live delivery send no `held`.
             payload["held"] = True
-        try:
-            binding.conn.send({"op": "deliver", "payload": payload})
-        except Exception:
-            # A failed hand-off is queued, not dropped: the id leaves `delivered`, and
-            # the name's next release point hands it again. Not for an `agent-N`, whose
-            # mail ends with its binding.
-            log.warning("delivery to %s failed (socket gone); msg=%s is queued",
-                        binding.qualified, msg.id)
+        with self._lock:
+            if len(binding.window) >= WINDOW or binding.overflow:
+                # The window is full, or older mail already waits for room in it: this
+                # one waits behind it, so a live message never overtakes an older one.
+                binding.overflow[msg.id] = payload
+                return
+            binding.window.add(msg.id)
+        self._push(binding, payload)
+
+    def _push(self, binding: Binding, payload: dict) -> None:
+        """Hand one `deliver` frame to the binding's connection, whose writer sends it
+        without blocking this thread. A connection already closing takes nothing: the
+        id leaves `delivered` and is queued, and the name's next release point hands it
+        again. Not for an `agent-N`, whose mail ends with its binding. A frame the
+        connection drops after this is queued at its unbind, which re-queues every id
+        handed and not handled."""
+        mid = payload["message_id"]
+        if binding.conn.closed:
+            log.warning("delivery to %s failed (connection closed); msg=%s is queued",
+                        binding.qualified, mid)
             with self._lock:
-                binding.delivered.discard(msg.id)
+                binding.delivered.discard(mid)
+                binding.window.discard(mid)
                 if binding.tier != TIER_EPHEMERAL:
-                    self._queue_add(binding.qualified, msg.id, _epoch(msg.timestamp))
+                    self._queue_add(binding.qualified, mid, _epoch(payload["timestamp"]))
             self._queue_flush()
             return
+        binding.conn.notify_threadsafe("deliver", {"payload": payload})
         with self._lock:
             now = self.clock()
-            # The hand-over time, for `query kind="readable"` and `moxi comms explain`: live
-            # routing, released held mail and replay all hand over here.
-            self.handed_at[(binding.qualified, msg.id)] = now
+            # The hand-over time, for `readable` and `moxi comms explain`: live routing,
+            # released held mail and replay all hand over here.
+            self.handed_at[(binding.qualified, mid)] = now
         log.info("deliver msg=%s room=%s to=%s backlog=%s",
-                 msg.id, payload["room"], binding.qualified, backlog)
+                 mid, payload["room"], binding.qualified, payload["backlog"])
+
+    def _window_take(self, binding: Binding, taken) -> None:
+        """The adapter took into a digest every pushed id for which `taken(id)` is
+        true: they leave the binding's window, and the window is topped up from its
+        overflow, oldest first."""
+        with self._lock:
+            binding.window = {mid for mid in binding.window if not taken(mid)}
+            ready = []
+            while binding.overflow and len(binding.window) + len(ready) < WINDOW:
+                mid = min(binding.overflow, key=_as_id)
+                ready.append(binding.overflow.pop(mid))
+            binding.window.update(p["message_id"] for p in ready)
+        if not ready:
+            return
+        with self._name_lock(binding.qualified):
+            for payload in ready:
+                self._push(binding, payload)
 
     # ------------------------------------------------------------------ the audience
     def _index_audience(self, msg, ml) -> None:
@@ -2629,8 +2716,8 @@ class Daemon:
                  "truncated": truncated}
         if truncated:
             frame["notice"] = constants.replay_notice(replay.messages, replay.seconds)
-        with contextlib.suppress(Exception):
-            binding.conn.send(frame)
+        frame.pop("op")
+        binding.conn.notify_threadsafe("replay_complete", frame)
 
     def _position(self, ml, binding: Binding, msg) -> int | None:
         """The position on line zero of the first tag that names this binding's
@@ -2696,23 +2783,27 @@ class Daemon:
 
 
 class DaemonStopping(Exception):
-    """A register that arrived after `stop()` began.
-
-    Not a refusal and not an accident: the daemon is going away. `_handle` answers it by
-    closing the connection with no reply, which the client reads as `DaemonOffline`, and
-    every adapter already treats that as "the daemon is not there" and retries. A named
-    exception rather than a bare close, so `_handle` catches it quietly: without it the
-    reply to a closed connection raised `ProtocolError`, and the accident arm logged a
-    traceback for a stop working as intended.
-    """
+    """A `bind` or `send` that arrived after `stop()` began: answered `stopping`, in the
+    try-again range. Every adapter already reads that as "the daemon is not there" and
+    retries."""
 
 
 class Refusal(Exception):
-    """A refusal that names the holder where there is one."""
+    """The daemon's own no, with its comms error `code` (`wire`), and in `extra` what
+    it names (the holder of a name, say), which goes in the error's `data`. A refusal
+    without a code is a request whose params don't fit the method."""
 
-    def __init__(self, message, **extra):
+    def __init__(self, message, *, code: int = wire.INVALID_PARAMS, **extra):
         super().__init__(message)
+        self.code = code
         self.extra = extra
+
+
+def _read(daemon, attr: str):
+    """A read method as the method table calls it, with the connection it ignores. The
+    read is looked up on the daemon at each call, so the table follows the daemon's own
+    attribute."""
+    return lambda conn, params: getattr(daemon, attr)(params)
 
 
 def _asked(frame: dict) -> str:

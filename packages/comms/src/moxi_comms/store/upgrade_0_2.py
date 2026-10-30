@@ -249,7 +249,7 @@ def _same(role: str, p: Path, kept: dict) -> bool:
 def daemon_answers(env=None) -> Path | None:
     """The 0.2 daemon's socket path when something answers there, else None. A connect
     and nothing more: nothing is sent, and the path is never bound, removed or renamed."""
-    path = _paths.daemon_socket(env)
+    path = _paths.old_daemon_socket(env)
     family = getattr(socket, "AF_UNIX", None)
     if family is None or not path.exists():
         return None

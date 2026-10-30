@@ -253,8 +253,8 @@ def test_a_bad_cursor_is_refused():
 def test_a_live_0_2_daemon_is_refused():
     zero_two_home()
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    paths.daemon_socket().parent.mkdir(parents=True, exist_ok=True)
-    s.bind(str(paths.daemon_socket()))
+    paths.old_daemon_socket().parent.mkdir(parents=True, exist_ok=True)
+    s.bind(str(paths.old_daemon_socket()))
     s.listen(1)
     try:
         e = _refused("still answers")

@@ -294,7 +294,7 @@ def test_the_session_query_and_the_roster_carry_the_endpoint_state(rig):
         assert wait_until(lambda: binding(rig, "reviewer@proj-a") is not None)
         reply = rig.daemon._session_query({"identity": "reviewer@proj-a"})
         assert reply["endpoint"] is False and reply["endpoint_for"] >= 0
-        agents = rig.daemon._query({"kind": "agents"})["bindings"]
+        agents = rig.daemon._agents_query({})["bindings"]
         (row,) = [b for b in agents if b["qualified"] == "reviewer@proj-a"]
         assert row["endpoint"] is False and row["endpoint_since"] is not None
         shim.notify_endpoint(True)

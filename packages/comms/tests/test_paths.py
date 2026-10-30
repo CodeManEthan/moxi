@@ -33,7 +33,9 @@ def test_comms_locations(monkeypatch, tmp_path):
     # comms writes only under its own five directories, so its logs are in STATE/comms
     assert p.log_dir() == tmp_path / "state" / "comms" / "logs"
     # and its sockets in RUNTIME/comms
-    assert p.daemon_socket() == tmp_path / "runtime" / "comms" / "moxi-comms-daemon.sock"
+    assert p.daemon_socket() == tmp_path / "runtime" / "comms" / "daemon.sock"
+    # comms 0.2's socket, which the move only connects to
+    assert p.old_daemon_socket() == tmp_path / "runtime" / "comms" / "moxi-comms-daemon.sock"
     assert not hasattr(p, "codex_socket"), "turns' host owns the app-server's socket"
     assert p.opencode_runtime_dir() == tmp_path / "runtime" / "comms" / "opencode"
     assert p.config_dir() == tmp_path / "config" / "comms"
@@ -42,7 +44,7 @@ def test_comms_locations(monkeypatch, tmp_path):
 def test_every_location_reads_a_given_environment(tmp_path):
     env = {"MOXI_COMMS_HOME": str(tmp_path), "MOXI_COMMS_DEVICE": "box2"}
     assert paths.comms_db(env) == tmp_path / "state" / "comms" / "comms.db"
-    assert paths.daemon_socket(env) == tmp_path / "runtime" / "comms" / "moxi-comms-daemon.sock"
+    assert paths.daemon_socket(env) == tmp_path / "runtime" / "comms" / "daemon.sock"
 
 
 def test_a_socket_under_the_runtime_directory_passes():
