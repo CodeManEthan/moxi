@@ -2,8 +2,9 @@
 
 Only the core declares the `moxi` script, so a module installed on its own (`uv tool
 install moxi-cache`, `pip install --user moxi-cache`) lands where this `moxi` can't see
-it. A stray is a `moxi-<m>` distribution (a `moxi_<m>-<version>.dist-info` directory)
-found in:
+it. A stray is a `moxi-<m>` distribution (a `moxi_<m>-<version>.dist-info` directory
+whose `entry_points.txt` has a `[moxi.modules]` section, so a module, not a tool such as
+moxi-dev) found in:
 
 1. uv's tool directory: `UV_TOOL_DIR`; else the parent of `sys.prefix` when this is a uv
    tool environment; else uv's default (`$XDG_DATA_HOME/uv/tools` or
@@ -16,8 +17,8 @@ found in:
 The scan is stats and directory listings. Its answer is cached in
 `STATE/moxi/strays.json` under a key made of the tool directory's and the user site's
 modification times, a hash of PATH and this environment's prefix; an unchanged key uses
-the cached answer. The same file records which strays were already told, so each is told
-once.
+the cached answer. The same file records which strays were already told, under the
+environment that told them, so each environment tells each stray once.
 """
 
 from __future__ import annotations
@@ -181,9 +182,19 @@ def _modules_in(site_dir: str) -> list[tuple[str, str]]:
         stem = entry[: -len(".dist-info")]
         dist, _, version = stem.partition("-")
         module = dist[len("moxi_"):].lower()
-        if names.is_module_name(module) and os.path.isdir(os.path.join(site_dir, entry)):
+        if names.is_module_name(module) and _declares_a_module(os.path.join(site_dir,
+                                                                            entry)):
             out.append((module, version))
     return out
+
+
+def _declares_a_module(dist_info: str) -> bool:
+    """Whether the distribution at `dist_info` declares a `moxi.modules` entry point."""
+    try:
+        with open(os.path.join(dist_info, "entry_points.txt"), encoding="utf-8") as fh:
+            return any(line.strip() == "[moxi.modules]" for line in fh)
+    except (OSError, UnicodeDecodeError):
+        return False
 
 
 def scan(environ=None) -> list[Stray]:
@@ -310,28 +321,46 @@ def _write(path, *, key=None, strays=None, told=None) -> None:
             data["key"] = key
             data["strays"] = [s.as_json() for s in strays]
         if told is not None:
-            data["told"] = sorted(told)
+            data["told"] = {env: sorted(keys) for env, keys in sorted(told.items())
+                            if keys}
         return (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
     files.update(path, change)
 
 
+def _environment() -> str:
+    """The environment this `moxi` runs in, which the told record is kept under."""
+    return os.path.abspath(sys.prefix)
+
+
 def tell(stream=None, environ=None) -> list[Stray]:
-    """Print one line for each stray not told before, and record it as told. Returns the
-    strays told now. A stray that goes away is dropped from the record, so it is told
-    again if it comes back."""
+    """Print one line for each stray this environment has not told before, and record it
+    as told. Returns the strays told now. The record is kept per environment, so a run
+    from another environment, which sees other strays, leaves this one's alone. A stray
+    that goes away is dropped from this environment's record, so it is told again if it
+    comes back."""
     stream = sys.stderr if stream is None else stream
     strays = find(environ)
     path = record_path(environ)
-    held = _read(path)
-    told_before = set(held.get("told") or ()) if isinstance(held.get("told"), list) else set()
+    told = _told(_read(path))
+    here = _environment()
+    told_before = set(told.get(here, ()))
     now = {s.key for s in strays}
     new = [s for s in strays if s.key not in told_before]
     for stray in new:
         print(stray.line(), file=stream)
     if new or (told_before - now):
-        _write(path, told=(told_before & now) | {s.key for s in new})
+        _write(path, told={**told, here: (told_before & now) | {s.key for s in new}})
     return new
+
+
+def _told(held: dict) -> dict[str, list]:
+    """The told record: environment -> the keys of the strays told there."""
+    told = held.get("told")
+    if not isinstance(told, dict):
+        return {}
+    return {env: keys for env, keys in told.items()
+            if isinstance(env, str) and isinstance(keys, list)}
 
 
 def copy_of(module: str, environ=None) -> Stray | None:
