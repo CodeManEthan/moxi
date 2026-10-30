@@ -439,9 +439,10 @@ def test_install_questions_record_is_dropped_only_for_the_module(fake, capsys):
 
 
 def test_uninstall_is_in_the_usage_and_help(capsys):
-    assert "uninstall <module> [--skip-teardown]" in cli.USAGE
+    assert "uninstall <module> [--purge [--yes]] [--skip-teardown]" in cli.USAGE
     assert cli.main(["help", "uninstall"]) == 0
-    assert "--skip-teardown" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "--skip-teardown" in out and "--purge" in out and "--yes" in out
 
 
 # -- step 5: the placements --------------------------------------------------------------------
@@ -547,3 +548,139 @@ def test_a_placement_left_behind_by_the_placer_fails_the_step(skilled, capsys, m
     assert (f"turns: skill turns-send for claude was not removed "
             f"({skilled.claude('turns-send')})") in err
     assert "the placements step failed" in err
+
+
+# -- step 7: --purge ---------------------------------------------------------------------------
+
+STORES = ("{'mail': {'root': 'data', 'path': 'mail.db', 'kind': 'sqlite'}, "
+          "'index': {'root': 'cache', 'path': 'index', 'kind': 'dir', 'rebuildable': True}, "
+          "'feed': {'root': 'state', 'path': 'feed.jsonl', 'kind': 'jsonl', "
+          "'lazy': True}}")
+
+
+@pytest.fixture
+def stored(fake, capsys, monkeypatch):
+    """turns installed, declaring three stores, each written, with the core's stores in
+    its state directory, its setup.json entry and its config file."""
+    monkeypatch.setitem(CATALOG, "moxi-turns", {**CATALOG["moxi-turns"], "STORES": STORES})
+    moxi_install(capsys, "turns", "--none")
+    layout = paths.Layout("turns")
+    data, cache, state = layout.data_dir(), layout.cache_dir(), layout.state_dir()
+    for folder in (data, cache / "index" / "deep", state / "logs"):
+        folder.mkdir(parents=True, exist_ok=True)
+    (data / "mail.db").write_bytes(b"x" * 2048)
+    (data / "mail.db-wal").write_bytes(b"w")
+    (data / "mail.db-shm").write_bytes(b"s")
+    (cache / "index" / "deep" / "a").write_text("a")
+    for name in ("runs.jsonl", "runs.jsonl.1", "doctor.json", "logs/relay.log"):
+        (state / name).write_text("{}\n")
+    _settle.record_setup("turns", "0.1.0")
+    _settle.record_setup("cache", "0.1.0")
+    config = layout.config_file()
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("# mine\n")
+    fake.layout, fake.data, fake.cache, fake.state = layout, data, cache, state
+    fake.config = config
+    return fake
+
+
+def core_stores_gone(state) -> bool:
+    return not any(os.path.lexists(state / n)
+                   for n in ("runs.jsonl", "runs.jsonl.1", "doctor.json", "logs"))
+
+
+def test_without_purge_every_store_and_the_setup_entry_stay(stored, capsys):
+    code, out, err = moxi_uninstall(capsys, "turns")
+    assert code == 0, err
+    assert (stored.data / "mail.db").exists() and (stored.cache / "index").exists()
+    assert (stored.state / "runs.jsonl").exists() and (stored.state / "logs").exists()
+    assert "turns" in _settle.setup_versions()
+
+
+def test_purge_with_nobody_at_the_keyboard_keeps_what_cannot_be_rebuilt(stored, capsys):
+    code, out, err = moxi_uninstall(capsys, "turns", "--purge")
+    assert code == 0, err
+    mail = stored.data / "mail.db"
+    assert mail.exists() and (stored.data / "mail.db-wal").exists()
+    assert f"turns: kept store mail: {mail} (2.0 KB)" in out
+    assert not (stored.cache / "index").exists()
+    assert f"turns: removed store index: {stored.cache / 'index'} (1 B)" in out
+    assert f"turns: store feed is not there ({stored.state / 'feed.jsonl'})" in out
+    assert core_stores_gone(stored.state)
+    assert f"turns: removed runs.jsonl: {stored.state / 'runs.jsonl'}" in out
+    assert "turns" not in _settle.setup_versions() and "cache" in _settle.setup_versions()
+    assert stored.config.read_text() == "# mine\n"
+    assert f"turns: kept its config file: {stored.config}" in out
+    # The order: the package first, then the stores.
+    assert out.index("removed store index") > 0 and "moxi-turns" not in stored.installed
+
+
+def test_purge_yes_removes_every_store_with_its_sqlite_files(stored, capsys, monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    code, out, err = moxi_uninstall(capsys, "turns", "--purge", "--yes")
+    assert code == 0, err
+    assert list(stored.data.iterdir()) == []
+    assert f"turns: removed store mail: {stored.data / 'mail.db'} (2.0 KB)" in out
+    assert core_stores_gone(stored.state)
+
+
+def test_purge_asks_at_a_terminal_default_no(stored, capsys, monkeypatch):
+    class Tty:
+        def isatty(self):
+            return True
+    asked: list[str] = []
+    monkeypatch.setattr(sys, "stdin", Tty())
+    monkeypatch.setattr("builtins.input", lambda q: asked.append(q) or "y")
+    code, out, err = moxi_uninstall(capsys, "turns", "--purge")
+    assert code == 0, err
+    assert asked == [f"turns: remove store mail, {stored.data / 'mail.db'} (2.0 KB)? It "
+                     f"can't be rebuilt. [y/N] "]
+    assert not (stored.data / "mail.db").exists()
+
+
+def test_purge_removes_a_store_that_is_a_link_as_a_link(stored, capsys, tmp_path):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "a").write_text("keep me")
+    index = stored.cache / "index"
+    shutil.rmtree(index)
+    index.symlink_to(elsewhere)
+    code, out, err = moxi_uninstall(capsys, "turns", "--purge")
+    assert code == 0, err
+    assert not os.path.lexists(index) and (elsewhere / "a").read_text() == "keep me"
+    assert f"turns: removed store index, a link; kept what it points at ({elsewhere})" in out
+
+
+def test_purge_of_a_broken_module_removes_only_the_core_s_stores(stored, capsys):
+    stored.site.write("moxi_turns/module.py", "ANNOUNCES = 99\n")
+    drop_modules({"moxi_turns"})
+    modules.reset()
+    code, out, err = moxi_uninstall(capsys, "turns", "--purge")
+    assert code == 0, err
+    assert ("turns is broken, so its declared stores can't be read; only the core's "
+            "stores in its state directory are removed") in out
+    assert (stored.data / "mail.db").exists() and (stored.cache / "index").exists()
+    assert core_stores_gone(stored.state)
+
+
+def test_a_store_that_cannot_be_removed_fails_the_purge(stored, capsys, monkeypatch):
+    real = shutil.rmtree
+
+    def rmtree(path, *a, **k):
+        if str(path).endswith("index"):
+            raise PermissionError(13, "Permission denied")
+        return real(path, *a, **k)
+    monkeypatch.setattr(shutil, "rmtree", rmtree)
+    code, out, err = moxi_uninstall(capsys, "turns", "--purge")
+    assert code == 1
+    assert (f"turns: store index not removed ({stored.cache / 'index'}): Permission "
+            f"denied") in err
+    assert "the purge step failed" in err and core_stores_gone(stored.state)
+
+
+def test_yes_without_purge_is_a_usage_error(fake, capsys):
+    with pytest.raises(SystemExit) as raised:
+        uninstall.main(["turns", "--yes"])
+    assert raised.value.code == 2
+    assert "--yes answers --purge's questions; give it with --purge" in \
+        capsys.readouterr().err
