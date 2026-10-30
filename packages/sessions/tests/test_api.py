@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import subprocess
+import sys
 from importlib import metadata
+
+import pytest
 
 from moxi import modules
 from moxi.config import Schema
@@ -84,3 +88,51 @@ def test_the_schema_holds_the_three_roots():
     for name in schema.keys:
         key = schema.keys[name]
         assert (key.type, key.default, key.read, key.env) == ("path", "", "use", None)
+
+
+READ_NAMES = {"records", "records_back", "last_request", "records_since", "window", "Read",
+              "Back", "LastRequest", "Batch", "Window", "CURSOR_VERSION", "BLOCK",
+              "BACK_LIMIT", "WINDOW_LIMIT"}
+SHAPE_NAMES = {"SHAPE", "UNKNOWN", "known", "Record", "Request", "Message", "ToolCall",
+               "ToolResult", "Marker", "MARKERS", "LimitWindow", "Limits", "Malformed",
+               "Other", "KINDS", "to_json", "from_json", "document"}
+
+
+def test_interface_2_reads_and_holds_the_shape():
+    from moxi_sessions import read, shape
+    assert READ_NAMES | SHAPE_NAMES | {"opencode"} <= set(api.__all__)
+    assert len(api.__all__) == len(set(api.__all__))
+    for name in READ_NAMES:
+        assert getattr(api, name) is getattr(read, name), name
+    for name in SHAPE_NAMES:
+        assert getattr(api, name) is getattr(shape, name), name
+    assert api.SHAPE == 1
+    assert set(api.KINDS) == {"request", "message", "tool_call", "tool_result", "marker",
+                              "limits", "malformed", "other"}
+    sig = inspect.signature(api.records_since)
+    assert list(sig.parameters)[:4] == ["source", "cursor", "kinds", "max_bytes"]
+    assert list(inspect.signature(api.last_request).parameters)[:3] == [
+        "source", "synthetic", "limit"]
+    assert list(inspect.signature(api.window).parameters)[:4] == [
+        "source", "turns", "before", "limit"]
+
+
+def test_the_api_lists_every_name_and_refuses_others():
+    assert set(api.__all__) <= set(dir(api))
+    with pytest.raises(AttributeError):
+        api.no_such_name  # noqa: B018
+    from moxi_sessions.api import Source, records  # noqa: F401  (resolves through import)
+
+
+def test_importing_the_api_imports_none_of_its_names(tmp_path):
+    probe = (
+        "import sys\n"
+        "import moxi_sessions.api as api\n"
+        "print(sorted(m for m in sys.modules if m.startswith('moxi_sessions')))\n"
+        "api.records, api.find, api.SHAPE\n"
+        "print('sqlite3' in sys.modules)\n"
+        "api.opencode.Snapshot\n"
+        "print('sqlite3' in sys.modules)\n")
+    out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
+                         cwd=tmp_path, check=True).stdout.splitlines()
+    assert out == ["['moxi_sessions', 'moxi_sessions.api']", "False", "False"]

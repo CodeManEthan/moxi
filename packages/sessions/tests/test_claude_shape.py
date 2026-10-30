@@ -476,3 +476,63 @@ def test_the_filter_decodes_fewer_lines(projects):
     assert 0 < len(decoded) < len(raws)
     assert all(claude.needs_decode(raw, None) for raw in raws)
     assert all(claude.needs_decode(raw, {"message"}) for raw in raws)
+
+
+# --- the head of a line ------------------------------------------------------------------
+
+UNSEEN = claude._UNSEEN
+
+
+@pytest.mark.parametrize("raw, head", [
+    (b'{"a": 1, "type": "user", "promptId": "p", "message": {"type": "x"}}',
+     (b"user", b"p", False)),
+    (b'{"type":"mode","x":true,"y":-2.5e3,"z":null}', (b"mode", UNSEEN, True)),
+    (b'{"type": "user", "toolUseResult": {"a": 1}, "promptId": "p"}', (b"user", UNSEEN, False)),
+    (b'{"type": "user", "list": [1], "promptId": "p"}', (b"user", UNSEEN, False)),
+    (b'{"\\u0074ype": "user", "type": "assistant"}', (UNSEEN, UNSEEN, False)),
+    (b'{"type": "a\\"b", "promptId": "p"}', (UNSEEN, UNSEEN, False)),
+    (b'{"cwd": "type", "promptId": "p", "m": {}}', (UNSEEN, b"p", False)),
+    (b'{"type": null, "promptId": 3}', (None, None, True)),
+    (b'{"type": "", "promptId": ""}', (None, None, True)),
+    (b'{"type": "user", "type": "system"}', (b"system", UNSEEN, True)),
+    (b' {"type": "user"}', (UNSEEN, UNSEEN, False)),
+    (b'[1, 2]', (UNSEEN, UNSEEN, False)),
+])
+def test_a_lines_head_is_read_up_to_its_first_nested_or_escaped_value(raw, head):
+    assert claude.line_head(raw) == head
+
+
+def test_a_long_line_of_the_current_turn_is_passed_by_without_a_decode(projects, monkeypatch):
+    t = ClaudeTranscript(projects)
+    t.user("go")
+    req = t.request()
+    call = req.tool_use("Read", {"file_path": "/w/a"})
+    t.tool_result(call, "x" * (claude.HEAD_FIRST * 2))
+    mapper = claude.Mapper(kinds={"request"})
+    first, second, third = [(line + "\n").encode() for line in t.lines]
+    assert mapper.skip(first) and mapper.prompt_id == t.prompt_id   # read for its turn
+    assert not mapper.skip(second)
+
+    def no_decode(*_args, **_kw):
+        raise AssertionError("decoded")
+    monkeypatch.setattr(claude, "decode", no_decode)
+    monkeypatch.setattr(claude, "parse_line", no_decode)
+    assert mapper.skip(third)
+    # Without kinds nothing is passed by; with a kind no head can rule out, the bytes
+    # decide.
+    assert not claude.Mapper().skip(third)
+    assert not claude.Mapper(kinds={"tool_result"}).skip(third)
+
+
+def test_a_request_only_mapper_builds_no_other_record(projects):
+    t = every_kind_transcript(projects)
+    path = t.write()
+    whole = [r for r in read(path) if r.kind == "request"]
+    mapper = claude.Mapper(kinds={"request"})
+    out = []
+    for number, line in enumerate(t.lines, 1):
+        raw = (line + "\n").encode()
+        out.extend(mapper.feed(raw, line=number, offset=t.offset(number)))
+    out.extend(mapper.finish())
+    assert {r.kind for r in out} <= {"request", "malformed"}
+    assert [r for r in out if r.kind == "request"] == whole

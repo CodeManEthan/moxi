@@ -34,7 +34,6 @@ import binascii
 import hashlib
 import json
 import os
-import re
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import replace
@@ -329,71 +328,46 @@ class Window:
 
 # --- the forward read ----------------------------------------------------------------------
 
-def _mapper(source: Source, keep_raw: bool, *, prompt_id: str | None = None,
-            open_key: str | None = None, state: codex.State | None = None):
+def _mapper(source: Source, keep_raw: bool, wanted: frozenset[str] | None, *,
+            prompt_id: str | None = None, open_key: str | None = None,
+            state: codex.State | None = None):
     if source.harness == CLAUDE:
         return claude.Mapper(session_id=source.session_id, agent_id=source.agent_id,
-                             keep_raw=keep_raw, prompt_id=prompt_id, open_key=open_key)
+                             keep_raw=keep_raw, prompt_id=prompt_id, open_key=open_key,
+                             kinds=wanted)
     return codex.Mapper(session_id=source.session_id, agent_id=source.agent_id,
                         keep_raw=keep_raw, state=state)
 
 
-def _needs(harness: str, mapper: Any, raw: bytes, wanted: frozenset[str] | None) -> bool:
+def _skipper(source: Source, mapper: Any,
+             wanted: frozenset[str] | None) -> Callable[[bytes], bool] | None:
+    """What tells a filtered read that a line can be passed by, None for a read that
+    keeps every kind."""
     if wanted is None:
-        return True
-    if harness == CLAUDE:
-        return claude.needs_decode(raw, wanted)
-    return codex.needs_decode(raw, wanted, legacy=mapper.state.legacy)
-
-
-#: A `promptId` as Claude Code writes it, for reading a line's turn without decoding it.
-_PROMPT = re.compile(rb'"promptId"\s*:\s*"([^"\\]*)"')
-
-
-def _claude_prompt_only(raw: bytes, wanted: frozenset[str] | None) -> bool:
-    """Whether a filtered read decodes this Claude line only for its `promptId`: it holds
-    no requested kind's marker bytes and cannot end a request."""
-    if wanted is None or b'"turn_duration"' in raw:
-        return False
-    for kind in wanted:
-        markers = claude.MARKER_BYTES.get(kind)
-        if markers is None or any(marker in raw for marker in markers):
-            return False
-    return True
-
-
-def _claude_prompt(raw: bytes, current: str | None) -> str | None:
-    """The turn after a line read only for its `promptId`. When every `promptId` the line
-    holds names the current turn, the line cannot change it and is not decoded; otherwise
-    it is, and its own top-level `promptId` (if any) is the turn."""
-    if current is not None:
-        found = _PROMPT.findall(raw)
-        mine = current.encode("utf-8")
-        if found and len(found) == raw.count(b'"promptId"') and all(
-                value == mine for value in found):
-            return current
-    entry = claude.parse_line(raw)
-    prompt = entry.get("promptId") if entry is not None else None
-    return prompt if isinstance(prompt, str) and prompt else current
+        return None
+    if source.harness == CLAUDE:
+        return mapper.skip
+    return lambda raw: not codex.needs_decode(raw, wanted, legacy=mapper.state.legacy)
 
 
 def _feed(source: Source, mapper: Any, data: bytes, wanted: frozenset[str] | None, *,
           line: int, offset: int, unterminated: bool = False) -> list[Record]:
     """One line through the mapper, skipping what a filtered read does not need: a line
     that cannot give a requested record or change one is not decoded, and a Claude line
-    that can only move the turn is read for its `promptId` alone."""
-    if not _needs(source.harness, mapper, data, wanted):
-        return []
-    if source.harness == CLAUDE and _claude_prompt_only(data, wanted):
-        mapper.prompt_id = _claude_prompt(data, mapper.prompt_id)
-        return []
+    that can only move the turn is read for its `promptId` alone (`claude.Mapper.skip`)."""
+    if wanted is not None:
+        if source.harness == CLAUDE:
+            if mapper.skip(data):
+                return []
+        elif not codex.needs_decode(data, wanted, legacy=mapper.state.legacy):
+            return []
     return mapper.feed(data, line=line, offset=offset, unterminated=unterminated)
 
 
 def _file_records(source: Source, handle: BinaryIO, end: int,
                   wanted: frozenset[str] | None, keep_raw: bool) -> Iterator[Record]:
     try:
-        mapper = _mapper(source, keep_raw)
+        mapper = _mapper(source, keep_raw, wanted)
         handle.seek(0)
         offset = 0
         number = 0
@@ -937,21 +911,24 @@ def _file_since(src: Source, handle: BinaryIO, st: os.stat_result, end: int,
 
     if fields is None:
         offset, number = 0, 0
-        mapper = _mapper(src, keep_raw)
+        mapper = _mapper(src, keep_raw, wanted)
     elif src.harness == CLAUDE:
         offset, number = fields["offset"], fields["line"]
-        mapper = _mapper(src, keep_raw, prompt_id=fields.get("prompt_id"),
+        mapper = _mapper(src, keep_raw, wanted, prompt_id=fields.get("prompt_id"),
                          open_key=fields.get("open_key"))
     else:
         offset, number = fields["offset"], fields["line"]
-        mapper = _mapper(src, keep_raw, state=fields["state"])
+        mapper = _mapper(src, keep_raw, wanted, state=fields["state"])
 
     out: list[Record] = []
     taken = 0
     complete = True
     handle.seek(offset)
+    # The loop is the whole cost of a long read, so the per-line steps are bound once.
+    readline, feed = handle.readline, mapper.feed
+    skip = _skipper(src, mapper, wanted)
     while offset < end:
-        data = handle.readline(end - offset)
+        data = readline(end - offset)
         if not data or not data.endswith(b"\n"):
             break                                  # a line still being written
         if max_bytes is not None and taken and taken + len(data) > max_bytes:
@@ -960,8 +937,11 @@ def _file_since(src: Source, handle: BinaryIO, st: os.stat_result, end: int,
         number += 1
         start, offset = offset, offset + len(data)
         taken += len(data)
-        out.extend(_filtered(_feed(src, mapper, data, wanted, line=number, offset=start),
-                             wanted))
+        if skip is not None and skip(data):
+            continue
+        got = feed(data, line=number, offset=start)
+        if got:
+            out.extend(got if wanted is None else [r for r in got if r.kind in wanted])
     out.extend(_filtered(mapper.finish(), wanted))
 
     yielded = {r.request_id for r in out if r.kind == "request"}

@@ -38,3 +38,4 @@ only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_sessions", "tes
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not browser and not slow and not build and not live'"

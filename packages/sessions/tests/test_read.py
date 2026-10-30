@@ -697,6 +697,75 @@ def test_every_claude_builder_line_reads_the_same_with_and_without_the_prefilter
     check_prefilter(claude_source(t), t)
 
 
+LONG = 6000                    # past claude.HEAD_FIRST, so a filtered read looks at the head
+
+
+def every_long_claude_line(t: ClaudeTranscript) -> ClaudeTranscript:
+    """Long lines of every kind a filtered read tells apart by the head or by the bytes."""
+    t.user("go")
+    req = t.request()
+    call = req.tool_use("Read", {"file_path": "/work/project/a"})
+    # The head names the current turn: passed by, whatever the content holds.
+    t.tool_result(call, 'it said "usage", "turn_duration" and "promptId" ' * 200)
+    t.tool_result(call, "x" * LONG)
+    req.text("long answer " * 600)                         # a long request line
+    t.other("queue-operation", content="z" * LONG)         # a whole head, no promptId
+    t.other("attachment", type=None, promptId=t.prompt_id, note="n" * LONG)
+    t.system("turn_duration", durationMs=5, note="d" * LONG)
+    t.user("a long question " * 500)                       # a new turn in the head
+    t.assistant("short")
+    # Another kind of line writes a new turn in its head.
+    t.other("attachment", promptId="prompt-elsewhere", attachment={"text": "y" * LONG})
+    t.assistant("in the other turn")
+    # The head ends at a nested value before the `promptId`: read by the bytes.
+    t.add({"type": "user", "toolUseResult": {"text": "b" * LONG}, "promptId": "prompt-late",
+           "message": {"role": "user", "content": "late"}, "sessionId": t.session_id})
+    t.assistant("in the late turn")
+    # A key that is a value in the head (`cwd`), and an escaped key: read by the bytes.
+    t.other("attachment", cwd="type", promptId="prompt-late", note="c" * LONG)
+    escaped = json.dumps({"type": "assistant", "requestId": "req-escaped",
+                          "promptId": "prompt-late",
+                          "message": {"role": "assistant", "id": "msg-escaped",
+                                      "content": [{"type": "text", "text": "e" * LONG}],
+                                      "usage": usage(output=7)}})
+    t.add_raw(escaped.replace('"type"', '"\\u0074ype"', 1))
+    # Lines that will not decode, their heads naming a new turn and the current one.
+    t.add_raw('{"type": "user", "promptId": "prompt-broken", "message": {"content": "'
+              + "w" * LONG)
+    t.add_raw('{"type": "user", "promptId": "prompt-late", "message": {"content": "'
+              + "w" * LONG)
+    t.title("T" * LONG)
+    t.assistant("after the broken lines")
+    t.tool_result("toolu_open", "o" * LONG)
+    t.request().text("open at the end " * 400)
+    return t
+
+
+def test_every_long_claude_line_reads_the_same_with_and_without_the_prefilter(projects):
+    t = every_long_claude_line(ClaudeTranscript(projects))
+    t.write()
+    assert sum(len(line) > claude.HEAD_FIRST for line in t.lines) >= 15
+    check_prefilter(claude_source(t), t)
+
+
+@pytest.mark.parametrize("build", [every_claude_line, every_long_claude_line])
+def test_a_request_read_gives_the_requests_of_a_whole_read_field_for_field(projects, build):
+    t = build(ClaudeTranscript(projects))
+    t.write()
+    src = claude_source(t)
+    whole = records_since(src)
+    only = records_since(src, kinds={"request"})
+    assert only.records == tuple(requests(whole.records))
+    assert [q.final for q in only.records] == [q.final for q in requests(whole.records)]
+    assert any(not q.final for q in only.records)
+    assert only.closed == whole.closed
+    assert open_cursor(only.cursor) == open_cursor(whole.cursor)
+    turns = {q.turn_id for q in only.records}
+    if build is every_long_claude_line:
+        assert {"prompt-elsewhere", "prompt-late"} <= turns and "prompt-broken" not in turns
+        assert "req-escaped" in {q.request_id for q in only.records}
+
+
 def test_every_codex_builder_line_reads_the_same_with_and_without_the_prefilter(
         codex_root):
     for version in ("0.153.0", "0.146.0"):

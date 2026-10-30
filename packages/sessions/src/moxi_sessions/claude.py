@@ -32,7 +32,7 @@ import os
 import re
 import threading
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -69,13 +69,18 @@ def decode(line: str | bytes) -> tuple[dict | None, str | None]:
     """One raw line to `(entry, None)`, or `(None, why)` when it is not an entry: `why` is
     `undecodable` (not JSON, or not UTF-8) or `not_object` (JSON but not an object). A
     blank line is `(None, None)`. `parse_line` is this with the reason dropped."""
-    line = line.strip()
-    if not line:
-        return None, None
     try:
         obj = json.loads(line)
     except ValueError:
-        return None, UNDECODABLE
+        # The decoder takes JSON's own blanks around a value; other blanks a strip takes
+        # (a form feed, say) are taken off before a second try.
+        line = line.strip()
+        if not line:
+            return None, None
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            return None, UNDECODABLE
     if not isinstance(obj, dict):
         return None, NOT_OBJECT
     return obj, None
@@ -372,6 +377,84 @@ def needs_decode(raw: bytes, kinds: frozenset[str] | set[str] | None) -> bool:
     return any(marker in raw for marker in STATE_BYTES)
 
 
+#: The line types each record kind can come from, for the kinds that come from only some.
+#: A `turn_duration` (a `system` line) can also end a request, so asking for requests makes
+#: `system` lines matter too.
+KIND_LINE_TYPES: dict[str, frozenset[str]] = {
+    "request": frozenset({"assistant", "system"}),
+    "marker": frozenset({"system", "custom-title", "ai-title"}),
+    "limits": frozenset(),
+}
+
+_WS = rb'[ \t\r\n]*'
+#: A top-level key and its value, inside a head: a string that a colon follows is a key.
+#: The group is a string value; any other value leaves it empty.
+_HEAD_VALUE = re.compile(rb'"[^"]*"' + _WS + rb':' + _WS + rb'(?:"([^"]*)"|[-0-9tfn])')
+
+#: The length from which a filtered read looks at a line's head before its bytes: below
+#: it, looking for the marker bytes through the whole line costs less.
+HEAD_FIRST = 4096
+
+#: What `line_head` returns for a key it did not see.
+_UNSEEN = object()
+
+
+def line_head(raw: bytes) -> tuple[Any, Any, bool]:
+    """The top-level `type` and `promptId` a line writes in its head, the part before
+    anything nested or escaped, and whether the head is the whole line.
+
+    Returns `(type, prompt, whole)`: each value as bytes when it is a string with
+    something in it, None when it is empty or not a string, `_UNSEEN` when the head does
+    not hold the key. A key the head writes twice reads as its last, as the decode reads
+    it. Claude Code writes `type` and `promptId` among a line's first keys, ahead of its
+    message, so a read that needs only a line's turn can take it from here without
+    decoding a long tool result. Nothing here says the line is valid JSON; that needs the
+    whole decode."""
+    if raw[:1] != b"{":
+        return _UNSEEN, _UNSEEN, False
+    # The head ends at the first brace, bracket or backslash after the opening brace.
+    # Before it nothing is nested and no string holds an escape, so every quote in it
+    # opens or closes a string, and a string that a colon follows is a top-level key.
+    end = raw.find(b"{", 1)
+    whole = end < 0
+    if whole:
+        end = len(raw)
+    for stop in (b"[", b"\\"):
+        cut = raw.find(stop, 1, end)
+        if cut >= 0:
+            end, whole = cut, False
+    return _head_value(raw, b'"type"', end), _head_value(raw, b'"promptId"', end), whole
+
+
+def _head_value(raw: bytes, key: bytes, end: int) -> Any:
+    at = raw.rfind(key, 1, end)
+    if at < 0:
+        return _UNSEEN
+    found = _HEAD_VALUE.match(raw, at, end)
+    if found is None:
+        return _UNSEEN
+    return found.group(1) or None
+
+
+#: A `promptId` as Claude Code writes it, for reading a line's turn without decoding it.
+_PROMPT = re.compile(rb'"promptId"[ \t\r\n]*:[ \t\r\n]*"([^"\\]*)"')
+
+
+def turn_after(raw: bytes, current: str | None) -> str | None:
+    """The turn after a line that can change nothing but the turn. When the line holds
+    one `promptId` and it names the current turn, the line is not decoded; otherwise it
+    is, and its own top-level `promptId` (if any) is the turn."""
+    if current is not None:
+        first = raw.find(b'"promptId"')
+        found = _PROMPT.match(raw, first) if first >= 0 else None
+        if (found is not None and found.group(1) == current.encode("utf-8")
+                and raw.find(b'"promptId"', first + 10) < 0):
+            return current
+    entry = parse_line(raw)
+    prompt = entry.get("promptId") if entry is not None else None
+    return prompt if isinstance(prompt, str) and prompt else current
+
+
 def _said(obj: dict, key: str) -> Any:
     """The value the line wrote under `key`, None for a null, `UNKNOWN` when absent."""
     return obj[key] if key in obj else UNKNOWN
@@ -428,7 +511,7 @@ def _result_text(content: Any) -> str:
 
 
 def _usage_request(entry: dict, message: dict, usage: dict, common: dict,
-                   key: str) -> Request:
+                   key: str, final: bool = True) -> Request:
     fresh = _count(usage, "input_tokens")
     read = _count(usage, "cache_read_input_tokens")
     written = _count(usage, "cache_creation_input_tokens")
@@ -467,6 +550,7 @@ def _usage_request(entry: dict, message: dict, usage: dict, common: dict,
         speed=_said(usage, "speed"),
         sidechain=entry.get("isSidechain") is True,
         synthetic=synthetic,
+        final=final,
     )
 
 
@@ -543,7 +627,11 @@ _NAMED_BY_KIND = {
     "custom-title": frozenset({"customTitle"}),
     "ai-title": frozenset({"aiTitle"}),
 }
+_NAMED_FOR = {kind: _NAMED | named for kind, named in _NAMED_BY_KIND.items()}
 
+#: The kinds that come from a line's content blocks. A read that asks for none of them
+#: does not map the blocks.
+CONTENT_KINDS = frozenset({"message", "tool_call", "tool_result"})
 
 def line_records(raw: bytes | str, *, at: dict, session_id: Any = None,
                  agent_id: str | None = None, prompt_id: str | None = None,
@@ -562,24 +650,14 @@ def line_records(raw: bytes | str, *, at: dict, session_id: Any = None,
     `unterminated` marks the file's last line written without its newline; it is carried
     only by a malformed record.
     """
-    entry, why = decode(raw)
-    if why is not None:
-        data = raw if isinstance(raw, bytes) else raw.encode("utf-8")
-        return None, [Malformed(harness=CLAUDE, session_id=session_id or UNKNOWN,
-                                agent_id=agent_id, at=at,
-                                turn_id=prompt_id if prompt_id else UNKNOWN,
-                                raw=data.strip(b"\r\n"),
-                                unterminated=unterminated, why=why)], prompt_id
-    if entry is None:
-        return None, [], prompt_id
+    pending, records, prompt_id, _ends = _map_line(raw, at, session_id, agent_id,
+                                                   prompt_id, keep_raw, unterminated)
+    return (_build(pending, True) if pending is not None else None), records, prompt_id
 
-    kind = entry.get("type")
-    kind = kind if isinstance(kind, str) else ""
-    subtype = entry.get("subtype") if kind == "system" else None
-    raw_kind = f"system/{subtype}" if isinstance(subtype, str) else kind
-    own_prompt = entry.get("promptId")
-    if isinstance(own_prompt, str) and own_prompt:
-        prompt_id = own_prompt
+
+def _common(entry: dict, kind: str, raw_kind: str, at: dict, session_id: Any,
+            agent_id: str | None, prompt_id: str | None, keep_raw: bool) -> dict:
+    """The fields every record of one line shares."""
     if session_id is None:
         session_id = entry.get("sessionId")
         if not isinstance(session_id, str):
@@ -589,60 +667,122 @@ def line_records(raw: bytes | str, *, at: dict, session_id: Any = None,
     if agent_id is None and isinstance(entry.get("agentId"), str):
         agent_id = entry["agentId"]
     stamp = parse_timestamp(entry.get("timestamp"))
-    named = _NAMED | _NAMED_BY_KIND.get(kind, frozenset())
-    if kind in ("assistant", "user"):
-        named = named | {key for key, value in entry.items() if isinstance(value, bool)}
-    common = {
+    named = _NAMED_FOR.get(kind, _NAMED)
+    if kind == "assistant" or kind == "user":
+        # A user or assistant line's booleans are its message's `flags`, not `extra`.
+        extra = {key: value for key, value in entry.items()
+                 if key not in named and value is not True and value is not False}
+    else:
+        extra = {key: value for key, value in entry.items() if key not in named}
+    return {
         "harness": CLAUDE, "session_id": session_id, "agent_id": agent_id, "at": at,
         "time": UNKNOWN if stamp is None else stamp,
         "turn_id": prompt_id if prompt_id else UNKNOWN,
         "raw_kind": raw_kind,
-        "extra": {key: value for key, value in entry.items() if key not in named},
+        "extra": extra,
         "raw": entry if keep_raw else None,
     }
 
-    if kind in ("assistant", "user"):
+
+def _build(pending: tuple, final: bool) -> Request:
+    """The request a line wrote, from what `_map_line` kept of it."""
+    entry, message, usage, common, key = pending
+    if isinstance(common, tuple):
+        common = _common(entry, "assistant", "assistant", *common)
+    return _usage_request(entry, message, usage, common, key, final)
+
+
+def _map_line(raw: bytes | str, at: dict, session_id: Any, agent_id: str | None,
+              prompt_id: str | None, keep_raw: bool, unterminated: bool,
+              content: bool = True, others: bool = True,
+              ) -> tuple[tuple | None, list[Record], str | None, bool]:
+    """`line_records` for a read that may not keep every kind: `content` false when it
+    keeps no message, tool call or tool result, `others` false when it keeps no marker and
+    no other record.
+
+    Returns `(pending, records, prompt_id, ends)`. The request is not built: `pending` is
+    what builds it (`_build`), so a forward read builds each request once, from its
+    newest line, when it hands it on. `ends` is true for a line that ends a request (a
+    `turn_duration`). Records of a kind the read does not keep may be left unmapped; a
+    malformed line's record always comes."""
+    entry, why = decode(raw)
+    if why is not None:
+        data = raw if isinstance(raw, bytes) else raw.encode("utf-8")
+        return None, [Malformed(harness=CLAUDE, session_id=session_id or UNKNOWN,
+                                agent_id=agent_id, at=at,
+                                turn_id=prompt_id if prompt_id else UNKNOWN,
+                                raw=data.strip(b"\r\n"),
+                                unterminated=unterminated, why=why)], prompt_id, False
+    if entry is None:
+        return None, [], prompt_id, False
+
+    kind = entry.get("type")
+    kind = kind if isinstance(kind, str) else ""
+    subtype = entry.get("subtype") if kind == "system" else None
+    raw_kind = f"system/{subtype}" if isinstance(subtype, str) else kind
+    own_prompt = entry.get("promptId")
+    if isinstance(own_prompt, str) and own_prompt:
+        prompt_id = own_prompt
+    ends = raw_kind == "system/turn_duration"
+
+    if (kind == "assistant" or kind == "user") and not content:
+        # No content kind is kept: a line with a message gives at most its request, and
+        # what the request shares with the line's other records is worked out only for
+        # the request that is handed on.
+        message = entry.get("message")
+        if isinstance(message, dict):
+            usage = message.get("usage") if kind == "assistant" else None
+            if not isinstance(usage, dict):
+                return None, [], prompt_id, False
+            lazy = (at, session_id, agent_id, prompt_id, keep_raw)
+            return ((entry, message, usage, lazy, request_key(entry, at.get("line"))), [],
+                    prompt_id, False)
+    elif not others and kind != "assistant" and kind != "user":
+        return None, [], prompt_id, ends
+
+    common = _common(entry, kind, raw_kind, at, session_id, agent_id, prompt_id, keep_raw)
+    if kind == "assistant" or kind == "user":
         message = entry.get("message")
         if not isinstance(message, dict):
             data = raw if isinstance(raw, bytes) else raw.encode("utf-8")
             return None, [Malformed(**{**common, "raw": data.strip(b"\r\n")},
-                                    unterminated=unterminated, why=BAD_STRUCTURE)], prompt_id
-        request = None
+                                    unterminated=unterminated, why=BAD_STRUCTURE)], \
+                prompt_id, False
+        pending = None
         synthetic = False
         if kind == "assistant":
             synthetic = message.get("model") == SYNTHETIC_MODEL
             usage = message.get("usage")
             if isinstance(usage, dict):
-                request = _usage_request(entry, message, usage, common,
-                                         request_key(entry, at.get("line")))
+                pending = (entry, message, usage, common, request_key(entry, at.get("line")))
+        if not content:
+            return pending, [], prompt_id, False
         role = message.get("role")
         role = role if isinstance(role, str) else kind
-        return request, _content_records(entry, message, role, common, synthetic), prompt_id
+        return (pending, _content_records(entry, message, role, common, synthetic),
+                prompt_id, False)
 
     if kind == "system" and subtype == "compact_boundary":
         meta = entry.get("compactMetadata")
         meta = meta if isinstance(meta, dict) else {}
         return None, [Marker(**common, marker="compaction", fields={
             "trigger": _said(meta, "trigger"), "pre_tokens": _said(meta, "preTokens")})], \
-            prompt_id
+            prompt_id, ends
     if kind == "system" and subtype == "turn_duration":
         return None, [Marker(**common, marker="turn_end",
-                             fields={"duration_ms": _said(entry, "durationMs")})], prompt_id
+                             fields={"duration_ms": _said(entry, "durationMs")})], \
+            prompt_id, ends
     if kind == "custom-title":
         return None, [Marker(**common, marker="title", fields={
-            "title": _said(entry, "customTitle"), "source": "custom"})], prompt_id
+            "title": _said(entry, "customTitle"), "source": "custom"})], prompt_id, ends
     if kind == "ai-title":
         return None, [Marker(**common, marker="title", fields={
-            "title": _said(entry, "aiTitle"), "source": "ai"})], prompt_id
+            "title": _said(entry, "aiTitle"), "source": "ai"})], prompt_id, ends
     if kind == "system":
         recognised = subtype in KNOWN_SYSTEM_SUBTYPES
     else:
         recognised = kind in KNOWN_KINDS
-    return None, [Other(**common, recognised=recognised)], prompt_id
-
-
-def _ends_request(raw_kind: str) -> bool:
-    return raw_kind == "system/turn_duration"
+    return None, [Other(**common, recognised=recognised)], prompt_id, ends
 
 
 class Mapper:
@@ -671,44 +811,104 @@ class Mapper:
     again the same way.
 
     `session_id` and `agent_id` are the source's (None to take each line's own).
+
+    `kinds`, when given, are the record kinds the caller keeps. The mapper then leaves
+    out the work no kept record needs: it maps no content blocks unless a content kind is
+    kept, builds no marker or other record unless one is kept, works out a request's
+    common fields only for the line it is handed on from, and `skip` passes by the lines
+    that can give no kept record. The kept records,
+    `final`, `closed` and `open_key` are the same as without it.
     """
 
     def __init__(self, *, session_id: str | None = None, agent_id: str | None = None,
                  keep_raw: bool = False, prompt_id: str | None = None,
-                 open_key: str | None = None):
+                 open_key: str | None = None,
+                 kinds: frozenset[str] | set[str] | None = None):
         self.session_id = session_id
         self.agent_id = agent_id
         self.keep_raw = keep_raw
         self.prompt_id = prompt_id
         self.open_key = open_key
         self.closed: list[str] = []
-        self._held: Request | None = None
+        self._held: tuple | None = None
+        self.kinds = frozenset(kinds) if kinds is not None else None
+        self._content = self.kinds is None or not self.kinds.isdisjoint(CONTENT_KINDS)
+        self._others = self.kinds is None or not self.kinds.isdisjoint({"marker", "other"})
+        # The marker bytes of every kind kept (None when a kept kind can come from any
+        # line), and the line types that can give a kept record (None likewise).
+        self._markers: tuple[bytes, ...] | None = None
+        self._types: frozenset[bytes] | None = None
+        if self.kinds is not None and all(k in MARKER_BYTES for k in self.kinds):
+            self._markers = tuple(m for k in sorted(self.kinds) for m in MARKER_BYTES[k])
+        if self.kinds is not None and all(k in KIND_LINE_TYPES for k in self.kinds):
+            self._types = frozenset(t.encode() for k in self.kinds
+                                    for t in KIND_LINE_TYPES[k])
 
     def _end_open(self, out: list[Record], key: str | None) -> None:
         """A line of request `key` (None for a turn's end) was read: end what it ends."""
         held = self._held
-        if held is not None and held.request_id != key:
-            out.append(_final(held))
+        if held is not None and held[4] != key:
+            out.append(_build(held, True))
             self._held = None
         if self.open_key is not None and self.open_key != key:
             self.closed.append(self.open_key)
             self.open_key = None
 
+    def skip(self, raw: bytes) -> bool:
+        """Whether a read keeping `kinds` can pass this line by. A line passed by gives no
+        kept record and changes none (its state, its `final`, a `closed` entry); its turn,
+        if it writes one, is taken. Always false without `kinds`.
+
+        Two ways to tell:
+
+        * For a line longer than `HEAD_FIRST`, the line's head (`line_head`) names a type no kept record comes from. Then only
+          its `promptId` matters: one the head shows naming the current turn, or none in a
+          head that is the whole line, changes nothing. Claude Code writes each key once,
+          so the head's `type` and `promptId` are the line's; a line that wrote one of
+          them again past its head would be read by its head.
+        * The bytes: the line holds no kept kind's marker bytes and no `turn_duration`, so
+          only a `promptId` in it can matter, and `turn_after` reads that.
+        """
+        if self.kinds is None:
+            return False
+        if self._types is not None and len(raw) > HEAD_FIRST:
+            kind, prompt, whole = line_head(raw)
+            if kind is not _UNSEEN and kind not in self._types:
+                if prompt is _UNSEEN:
+                    if whole:
+                        return True
+                elif prompt is None:
+                    return True
+                elif self.prompt_id is not None and prompt == self.prompt_id.encode("utf-8"):
+                    return True
+                else:
+                    return False                 # a new turn: the whole decode reads it
+        if self._markers is None:
+            return False
+        for marker in self._markers:
+            if marker in raw:
+                return False
+        if b'"turn_duration"' in raw:
+            return False
+        if b'"promptId"' in raw:
+            self.prompt_id = turn_after(raw, self.prompt_id)
+        return True
+
     def feed(self, raw: bytes | str, *, line: int, offset: int,
              unterminated: bool = False) -> list[Record]:
         """One line, `line` its 1-based number and `offset` the byte offset of its start.
         Returns the records ready to hand on, in order."""
-        request, records, self.prompt_id = line_records(
-            raw, at={"line": line, "offset": offset}, session_id=self.session_id,
-            agent_id=self.agent_id, prompt_id=self.prompt_id, keep_raw=self.keep_raw,
-            unterminated=unterminated)
+        pending, records, self.prompt_id, ends = _map_line(
+            raw, {"line": line, "offset": offset}, self.session_id, self.agent_id,
+            self.prompt_id, self.keep_raw, unterminated, self._content, self._others)
         out: list[Record] = []
-        if request is not None:
-            self._end_open(out, request.request_id)
-            if self.open_key == request.request_id:
+        if pending is not None:
+            key = pending[4]
+            self._end_open(out, key)
+            if self.open_key == key:
                 self.open_key = None             # it comes again, whole, from here
-            self._held = _open(request)
-        elif records and _ends_request(records[0].raw_kind):
+            self._held = pending
+        elif ends:
             self._end_open(out, None)
         out.extend(records)
         return out
@@ -719,16 +919,8 @@ class Mapper:
         held, self._held = self._held, None
         if held is None:
             return []
-        self.open_key = held.request_id
-        return [held]
-
-
-def _open(request: Request) -> Request:
-    return request if request.final is False else replace(request, final=False)
-
-
-def _final(request: Request) -> Request:
-    return replace(request, final=True)
+        self.open_key = held[4]
+        return [_build(held, False)]
 
 
 def read_records(path: str | Path, *, session_id: str | None = None,
@@ -740,11 +932,12 @@ def read_records(path: str | Path, *, session_id: str | None = None,
     a line being written as the read starts is not half read. A last line with no newline
     is read too; if it will not decode, its malformed record is `unterminated`. With
     `kinds`, only records of those kinds come back, and a line that cannot give one is
-    not decoded (`needs_decode`); the records that do come back are the same as without
+    not decoded (`Mapper.skip`); the records that do come back are the same as without
     the filter. Raises OSError when the file cannot be opened or read.
     """
     wanted = frozenset(kinds) if kinds is not None else None
-    mapper = Mapper(session_id=session_id, agent_id=agent_id, keep_raw=keep_raw)
+    mapper = Mapper(session_id=session_id, agent_id=agent_id, keep_raw=keep_raw,
+                    kinds=wanted)
     with open(path, "rb") as handle:
         size = os.fstat(handle.fileno()).st_size
         offset = 0
@@ -756,7 +949,7 @@ def read_records(path: str | Path, *, session_id: str | None = None,
             number += 1
             start, offset = offset, offset + len(data)
             unterminated = not data.endswith(b"\n")
-            if wanted is not None and not needs_decode(data, wanted):
+            if mapper.skip(data):
                 continue
             for record in mapper.feed(data, line=number, offset=start,
                                       unterminated=unterminated):
