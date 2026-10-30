@@ -1,4 +1,3 @@
-import dataclasses
 import subprocess
 import sys
 from pathlib import Path
@@ -52,8 +51,10 @@ def test_load_reads_the_announcement(site):
 def test_found_is_frozen(site):
     site.module("alpha", OPTIONAL="{'x': 'y'}")
     found = modules.load("alpha")
-    with pytest.raises(dataclasses.FrozenInstanceError):
+    with pytest.raises(AttributeError):
         found.state = BROKEN
+    with pytest.raises(AttributeError):
+        del found.state
     with pytest.raises(TypeError):
         found.optional["z"] = "w"
 
@@ -175,12 +176,11 @@ def test_one_record_per_name_per_process_until_reset(site):
 
 
 def test_load_never_raises(site, monkeypatch):
-    import importlib.metadata
-
     def boom(*args, **kwargs):
         raise OSError("metadata unreadable")
 
-    monkeypatch.setattr(importlib.metadata, "distribution", boom)
+    monkeypatch.setattr(modules, "_read_text", boom)
+    site.module("alpha")
     found = modules.load("alpha")
     assert found.state == BROKEN
     assert "metadata unreadable" in found.reason
