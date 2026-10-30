@@ -5,8 +5,14 @@
 //	{"samples": 60, "seed": 7, "patterns": [{"id": "...", "pattern": "...", "group": 0}]}
 //
 // and for each pattern makes `samples` texts from the pattern's own parse tree, each in a
-// fixed list of variants (case flips, quoting, line endings, Unicode case folds, non-ASCII
-// neighbours). For each text it writes one JSON line to stdout,
+// fixed list of variants (case flips, quoting, line endings, Unicode case folds, a dotless
+// i for each i and a dotted I for each i and I, non-ASCII neighbours). Its first line is
+// Go's case-fold orbit (unicode.SimpleFold) of every ASCII character, for the caller to
+// check against the fallback translator's table,
+//
+//	{"orbits": [[0], ..., [75, 107, 8490], ...], "unicode": "15.0.0"}
+//
+// and then, for each text, one JSON line,
 //
 //	{"id": "...", "kind": "plain", "text": "...", "found": true, "matches": [[ms, me, ss, se]]}
 //
@@ -162,9 +168,23 @@ func variants(s string) [][2]string {
 		{"nbsp", "key = " + s + " rest"},
 		{"unicode-pre", "é" + s},
 		{"dotless-i", strings.ReplaceAll(s, "i", "ı")},
+		{"dotted-I", strings.NewReplacer("i", "İ", "I", "İ").Replace(s)},
 		{"twice", s + " " + s},
 		{"multi", "a\n" + s + "\nb\n" + s},
 	}
+}
+
+// asciiOrbits is the case-fold orbit of each ASCII character, the character first.
+func asciiOrbits() map[string]any {
+	orbits := make([][]rune, 0, 128)
+	for r := rune(0); r < 128; r++ {
+		orbit := []rune{r}
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			orbit = append(orbit, f)
+		}
+		orbits = append(orbits, orbit)
+	}
+	return map[string]any{"unicode": unicode.Version, "orbits": orbits}
 }
 
 func secret(span []int, group int) (int, int) {
@@ -199,6 +219,9 @@ func run() error {
 	out := bufio.NewWriter(os.Stdout)
 	defer out.Flush()
 	enc := json.NewEncoder(out)
+	if err := enc.Encode(asciiOrbits()); err != nil {
+		return err
+	}
 	for _, p := range req.Patterns {
 		compiled, err := regexp.Compile(p.Pattern)
 		if err != nil {

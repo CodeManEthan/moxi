@@ -136,20 +136,15 @@ def test_secret_span_takes_the_group_gitleaks_takes():
     assert bump.secret_span([whole, one], 3) == (-1, -1)
 
 
-def test_inside_skips_absent_spans():
-    assert bump.inside([(2, 3), (-1, -1)], [(0, 5)])
-    assert not bump.inside([(4, 6)], [(0, 5)])
-    assert bump.inside([], [])
-
-
-def _comparison(pattern: str):
+def _comparison(pattern: str, fallback: str | None = None):
     module = engine.re2_module()
     if module is None:
         pytest.skip("google-re2 is not installed")
     from moxi_secrets._generate import translate
 
     pats = [{"id": "p", "owner": "some-rule", "kind": "allow", "group": 0,
-             "pattern": pattern, "fallback": translate(pattern)}]
+             "pattern": pattern, "fallback": translate(pattern) if fallback is None
+             else fallback}]
     return bump.Comparison(pats, engine.Re2Engine(module), engine.python(), None,
                            engine.Text)
 
@@ -176,10 +171,52 @@ def test_a_row_where_go_differs_fails_both_engines_for_the_owner():
     assert set(c.failures["some-rule"]) == {"re2 allow plain", "fallback allow plain"}
 
 
-def test_a_dotless_i_widens_the_fallback_within_the_allowance():
+@pytest.mark.parametrize("text", ["kı", "kİ", "Kİ", "\u212ai"])
+def test_dotless_and_dotted_i_variants_are_held_to_equality(text):
     c = _comparison("(?i)ki")
-    c.row(go_row("(?i)ki", "kı"))
-    assert not c.failures and c.allowed == 1
+    c.row(go_row("(?i)ki", text))
+    assert not c.failures
+
+
+def test_a_fallback_that_folds_wider_than_go_fails():
+    # Python's own IGNORECASE folds i with the dotless i; Go's doesn't. No difference is
+    # allowed, so the wider match fails the rule.
+    c = _comparison("(?i)ki", fallback="(?i)ki")
+    c.row(go_row("(?i)ki", "a kı b"))
+    assert set(c.failures["some-rule"]) == {"fallback allow plain"}
+
+
+def go_orbits(fault: dict | None = None) -> dict:
+    """The sampler's orbit line as Go writes it, with `fault` replacing some orbits."""
+    orbits = []
+    for c in range(0x80):
+        members = [c]
+        if chr(c).isalpha():
+            members.append(c ^ 0x20)
+            members += {0x4B: [0x212A], 0x6B: [0x212A], 0x53: [0x17F], 0x73: [0x17F]}.get(c, [])
+        orbits.append((fault or {}).get(c, members))
+    return {"unicode": "15.0.0", "orbits": orbits}
+
+
+def test_go_s_ascii_orbits_equal_the_translator_s():
+    c = _comparison("a")
+    c.row(go_orbits())
+    assert c.orbits_checked == 128 and c.orbit_faults == []
+
+
+def test_an_orbit_go_and_the_translator_disagree_on_stops_the_bump(capsys):
+    c = _comparison("a")
+    c.row(go_orbits({0x69: [0x69, 0x49, 0x130]}))
+    assert c.orbit_faults == ["U+0069: Go folds it to [73, 105, 304], the translator to "
+                              "[73, 105]"]
+    assert c.report() is False
+    assert "FAIL orbit U+0069" in capsys.readouterr().out
+
+
+def test_a_sampler_that_sends_no_orbits_fails_the_step(capsys):
+    c = _comparison("a")
+    assert c.report() is False
+    assert "sent no fold orbits" in capsys.readouterr().out
 
 
 # -- step 5: the cost shapes ----------------------------------------------------------------
@@ -214,4 +251,5 @@ def test_the_sampler_agrees_with_both_engines_on_a_few_rules():
     for row in bump.go_rows(pats, 3, 7):
         c.row(row)
     assert not c.failures
+    assert c.orbits_checked == 128 and c.orbit_faults == []
     assert c.rows["plain"] == 3 * len(pats)

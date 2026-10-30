@@ -91,7 +91,10 @@ Windows. `moxi install` offers the extra only where a wheel fits, since anywhere
 install would try to build the C++ library.
 
 Without it, a fallback runs the same rules on Python's `re`, each pattern translated by
-the generator. Credentials and broad run in a worker child process with a deadline of 1 s
+the generator. A translation folds case exactly as Go does, written out letter by letter
+rather than left to Python's wider case folding, so it matches the same text on every
+Python version. A rule that ignores case on a character outside ASCII isn't translated and
+is left out on both engines. Credentials and broad run in a worker child process with a deadline of 1 s
 plus 2 s per MB. A scan that reaches it, or whose worker fails in any way, reports the
 text as `unscanned`: one hit per set, spanning the whole text, which a caller treats like
 any other hit, never as clean. Large or unusual texts can come back unscanned on the

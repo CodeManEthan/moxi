@@ -15,9 +15,10 @@ these steps in order and stops at the first that fails:
    runs the same patterns on google-re2 and their translations on Python's re, then the
    in-process scan of both sets on each engine over the same texts. A rule fails unless,
    on every text, RE2's matches and secrets equal Go's, the fallback's equal Go's, and the
-   fallback's hits equal RE2's. On a text holding a dotless i, Python's wider case
-   folding may widen a fallback match, its secret and its hit: each of Go's matches and
-   secrets, and each RE2 hit, must still lie inside a fallback one. No sample is stored.
+   fallback's hits equal RE2's. No difference is allowed, on the variants with a dotless
+   i for each i and a dotted I for each i and I as on any other: the translator writes
+   Go's case folds out. The step also checks Go's fold orbit (unicode.SimpleFold) of every
+   ASCII character against the translator's. No sample is stored.
 5. Times the scan on RE2 over generated adversarial texts against the cost budget, and
    names the slowest rules where a text goes over it.
 6. Runs the gitleaks binary of the tag on the package's own directory with
@@ -63,7 +64,6 @@ GO_MODULE = "github.com/zricethezav/gitleaks/v8"
 PYPI = "https://pypi.org/pypi/google-re2/json"
 TAG = re.compile(r"v\d+\.\d+\.\d+")
 SETS = ("credentials", "broad")
-DOTLESS_I = "ı"
 
 PIN_HEADER = (
     "# The gitleaks release that gitleaks.toml and LICENSE beside this file come from, kept\n"
@@ -240,11 +240,6 @@ def matches(rx, target, group: int, to_bytes=None) -> list:
     return out
 
 
-def inside(inner, outer) -> bool:
-    """Every (start, end) of `inner` lies inside some (start, end) of `outer`."""
-    return all(s < 0 or any(os_ <= s and e <= oe for os_, oe in outer) for s, e in inner)
-
-
 def hit_list(found: dict) -> list:
     return sorted((name, rule, s, e) for name, hits in found.items() for rule, s, e in hits)
 
@@ -259,7 +254,9 @@ class Comparison:
         self.show = show
         self.rows = Counter()
         self.hit_lists = 0
-        self.allowed = 0
+        self.orbits_checked = 0
+        self.go_unicode = ""
+        self.orbit_faults: list[str] = []
         self.no_path = set()
         self.paths: dict[str, str] = {}
         self.failures: dict[str, Counter] = defaultdict(Counter)
@@ -270,13 +267,28 @@ class Comparison:
         if self.show and owner not in self.examples:
             self.examples[owner] = f"{what}: {text!r}"
 
+    def orbits(self, row: dict) -> None:
+        """Go's fold orbit of each ASCII character against the translator's."""
+        from moxi_secrets._generate import orbit
+
+        self.go_unicode = row["unicode"]
+        for members in row["orbits"]:
+            self.orbits_checked += 1
+            cp = members[0]
+            if tuple(sorted(members)) != orbit(cp):
+                self.orbit_faults.append(
+                    f"U+{cp:04X}: Go folds it to {sorted(members)}, the translator to "
+                    f"{list(orbit(cp))}")
+
     def row(self, row: dict) -> None:
+        if "orbits" in row:
+            self.orbits(row)
+            return
         p = self.pats[row["id"]]
         text, kind = row["text"], row["kind"]
         self.rows[kind] += 1
         t = self.Text(text)
         go = row["matches"]
-        dotless = DOTLESS_I in text
 
         r2 = self.re2.compile(p["pattern"])
         r2_rows = matches(r2, t.data, p["group"])
@@ -287,13 +299,7 @@ class Comparison:
         py_rows = matches(rp, t.etext, p["group"], t.byte_pos)
         py_found = rp.search(t.etext) is not None
         if py_rows != go or py_found != row["found"]:
-            wider = (dotless and (py_found or not row["found"])
-                     and inside([(m[0], m[1]) for m in go], [(m[0], m[1]) for m in py_rows])
-                     and inside([(m[2], m[3]) for m in go], [(m[2], m[3]) for m in py_rows]))
-            if wider:
-                self.allowed += 1
-            else:
-                self.fail(p["owner"], f"fallback {p['kind']} {kind}", text)
+            self.fail(p["owner"], f"fallback {p['kind']} {kind}", text)
 
         if p["kind"] == "path" and p["id"].endswith(".path") and not p["id"].startswith("global"):
             # A rule's own path pattern: keep one path Go matches for the rule's samples,
@@ -314,10 +320,6 @@ class Comparison:
         py = hit_list(self.run_gitleaks(t, SETS, path, self.py))
         if r2 == py:
             return
-        if DOTLESS_I in t.text and all(
-                any(f[:2] == h[:2] and f[2] <= h[2] and h[3] <= f[3] for f in py) for h in r2):
-            self.allowed += 1
-            return
         rules = {h[1] for h in set(r2) ^ set(py)} or {owner}
         for rule in rules:
             self.fail(rule, f"hits {('path ' if t.text == 'x' else '')}{owner}", shown)
@@ -326,14 +328,22 @@ class Comparison:
         total = sum(self.rows.values())
         plain = self.rows["plain"]
         say(f"{len(self.pats)} patterns, {plain} samples, {total - plain} variants; "
-            f"{self.hit_lists} hit lists on each engine; {self.allowed} dotless-i texts "
-            "within the allowance")
+            f"{self.hit_lists} hit lists on each engine")
+        if self.orbits_checked:
+            say(f"Go's fold orbits (Unicode {self.go_unicode}) of {self.orbits_checked} ASCII "
+                f"characters: {len(self.orbit_faults)} differ from the translator's")
+        else:
+            self.orbit_faults.append("the sampler sent no fold orbits")
+        for fault in self.orbit_faults:
+            say(f"  FAIL orbit {fault}")
+        if self.orbit_faults:
+            say("The translator's orbit table must equal Go's: fix _generate.py.")
         for owner in sorted(self.no_path):
             say(f"  note: no sampled path matched {owner}'s path pattern; its hits ran "
                 "without a path")
         if not self.failures:
             say("every rule agrees")
-            return True
+            return not self.orbit_faults
         for owner in sorted(self.failures):
             counts = ", ".join(f"{what} x{n}" for what, n in sorted(self.failures[owner].items()))
             say(f"  FAIL {owner}: {counts}")

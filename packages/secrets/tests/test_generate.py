@@ -320,9 +320,13 @@ def test_a_flag_group_holds_to_the_end_of_its_group_across_alternatives():
     assert re.search(translated, "P8E-azx") is None           # but not before it
 
 
-def test_a_leading_flag_stays_global():
-    assert gen.translate(r"(?i)ab") == "(?i)ab"
-    assert gen.translate(r"(?-i)ab") == "(?-i:ab)"
+def test_a_leading_flag_stays_global_and_i_is_never_written():
+    assert gen.translate(r"(?s)a.") == "(?s)a."
+    assert gen.translate(r"(?-s)ab") == "(?-s:ab)"
+    assert gen.translate(r"(?i)ab") == "[Aa][Bb]"
+    assert gen.translate(r"(?is)a.") == "(?s)[Aa]."
+    assert gen.translate(r"(?-i)ab") == "ab"
+    assert gen.translate(r"(?i)a(?-i)b") == "[Aa]b"
 
 
 @pytest.mark.parametrize("pattern", [
@@ -342,3 +346,129 @@ def test_the_translator_refuses_what_it_cannot_express(pattern):
 ])
 def test_translations_keep_the_capture_groups(pattern, groups):
     assert re.compile(gen.translate(pattern)).groups == groups
+
+
+# --- case folding written out -------------------------------------------------------------
+
+# Go's unicode.SimpleFold orbits of the ASCII characters: each letter with its other case,
+# the Kelvin sign with k, the long s with s. Every other character folds only to itself.
+GO_ORBIT = {c: {c, c ^ 0x20} for c in [*range(0x41, 0x5B), *range(0x61, 0x7B)]}
+for _members in ({0x4B, 0x6B, 0x212A}, {0x53, 0x73, 0x17F}):
+    GO_ORBIT.update(dict.fromkeys(_members, _members))
+
+# The characters a translation is tried on: Latin-1, the orbits' members, dotless i and
+# dotted I, and what Python's IGNORECASE folds that Go doesn't (two Greek pairs, a
+# ligature pair, Unicode 16 letters), so a fold Python adds on its own would show.
+UNIVERSE = sorted({*range(0x100), 0x130, 0x131, 0x17F, 0x212A, 0x390, 0x1FD3, 0x3B0, 0x1FE3,
+                   0xFB05, 0xFB06, 0x19B, 0xA7DC, 0x264, 0xA7CB, 0x1C89, 0x1C8A, 0xA7CC,
+                   0xA7CD, 0xA7DA, 0xA7DB, 0x10D50, 0x10D70, 0x10D65, 0x10D85, 0x1E9E})
+W = [*range(0x30, 0x3A), *range(0x41, 0x5B), 0x5F, *range(0x61, 0x7B)]
+
+
+def folded(chars) -> set[int]:
+    return {x for c in chars for x in GO_ORBIT.get(c, {c})}
+
+
+def matched(pattern: str) -> set[int]:
+    rx = re.compile(r"\A(?:" + gen.translate(pattern) + r")\Z")
+    return {c for c in UNIVERSE if rx.match(chr(c))}
+
+
+def go_escape(c: int) -> str:
+    return r"\x{%x}" % c
+
+
+@pytest.mark.parametrize("c", range(0x80))
+def test_every_ascii_character_folds_as_go_does(c):
+    orbit = folded([c])
+    assert matched(f"(?i){go_escape(c)}") == orbit
+    assert matched(f"(?i)[{go_escape(c)}]") == orbit
+    assert matched(f"(?i)[^{go_escape(c)}]") == set(UNIVERSE) - orbit
+
+
+@pytest.mark.parametrize("pattern, negated, chars", [
+    (r"\w", r"\W", W),
+    (r"[\w]", r"[^\w]", W),
+    (r"[a-z]", r"[^a-z]", range(0x61, 0x7B)),
+    (r"[A-Z0-9]", r"[^A-Z0-9]", [*range(0x41, 0x5B), *range(0x30, 0x3A)]),
+    (r"[h-j]", r"[^h-j]", range(0x68, 0x6B)),
+    (r"[[:alpha:]]", r"[[:^alpha:]]", [*range(0x41, 0x5B), *range(0x61, 0x7B)]),
+    (r"[[:lower:]]", r"[^[:lower:]]", range(0x61, 0x7B)),
+    (r"[[:upper:]]", r"[[:^upper:]]", range(0x41, 0x5B)),
+    (r"[[:word:]]", r"[[:^word:]]", W),
+    (r"[[:alnum:]]", r"[^[:alnum:]]",
+     [*range(0x30, 0x3A), *range(0x41, 0x5B), *range(0x61, 0x7B)]),
+    (r"[[:xdigit:]]", r"[[:^xdigit:]]",
+     [*range(0x30, 0x3A), *range(0x41, 0x47), *range(0x61, 0x67)]),
+    (r"[\Wk]", r"[^\Wk]", [c for c in range(0x80) if c not in W] + [0x6B]),
+])
+def test_classes_fold_as_go_does_and_their_negations_are_the_complement(pattern, negated,
+                                                                         chars):
+    orbit = folded(chars)
+    if r"\W" in pattern:                        # \W holds every non-ASCII character too
+        orbit |= {c for c in UNIVERSE if c > 0x7F} - folded(W)
+    assert matched("(?i)" + pattern) == orbit
+    assert matched("(?i)" + negated) == set(UNIVERSE) - orbit
+
+
+def test_dotless_i_and_dotted_i_never_fold_with_i():
+    for pattern in (r"(?i)i", r"(?i)I", r"(?i)[a-z]", r"(?i)\w"):
+        assert not {0x130, 0x131} & matched(pattern), pattern
+    for pattern in (r"(?i)[^i]", r"(?i)\W", r"(?i)[^a-z]"):
+        assert {0x130, 0x131} <= matched(pattern), pattern
+
+
+def test_the_translator_table_is_go_s_for_every_ascii_character():
+    for c in range(0x80):
+        assert set(gen.orbit(c)) == GO_ORBIT.get(c, {c}), c
+
+
+@pytest.mark.parametrize("pattern", [
+    "(?i)é", r"(?i)\x{e9}", r"(?i)\x{212a}", "(?i)ſ", r"(?i)[\x{212a}]",
+    r"(?i)[a-\x{17f}]", r"(?i)[^\x{e9}]", r"(?i:a\x{e9})", r"(?i)\pL",
+])
+def test_a_case_insensitive_item_outside_ascii_is_refused(pattern):
+    with pytest.raises(gen.Unsupported):
+        gen.translate(pattern)
+
+
+def test_a_negated_ascii_range_leaves_out_what_folds_into_it():
+    assert matched(r"(?i)[^\x00-\x7f]") == {c for c in UNIVERSE if c > 0x7F} - {0x17F, 0x212A}
+
+
+def test_outside_case_insensitive_matching_non_ascii_still_translates():
+    assert search(r"\x{e9}(?i)k", "éK") == "éK"
+    assert search(r"(?i:k)\x{e9}", "Ké") == "Ké"
+
+
+def test_a_rule_with_a_non_ascii_case_insensitive_item_is_dropped_with_its_reason(tmp_path):
+    upstream = UPSTREAM.replace(r"'''\bwidget-[a-z]{4}\b'''",
+                                "'''(?i)\\bwidget-é{4}'''")
+    data = gen.build(make_rules(tmp_path, upstream=upstream))
+    assert "widget-token" not in rule_ids(data, "credentials")
+    reason = dropped(data, "credentials")["widget-token"]
+    assert "non-ASCII character under case-insensitive matching" in reason
+
+
+_FLAG_GROUP = re.compile(r"\(\?([a-zA-Z]*(?:-[a-zA-Z]*)?)[:)]")
+
+
+def test_no_translation_in_sets_json_carries_an_i_flag():
+    data = json.loads((RULES / "sets.json").read_bytes())
+    found = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if isinstance(node.get("fallback"), str):
+                found.append(node["fallback"])
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(data)
+    assert len(found) > 300
+    for pattern in found:
+        for flags in _FLAG_GROUP.findall(pattern):
+            assert "i" not in flags, pattern

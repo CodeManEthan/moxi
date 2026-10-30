@@ -65,9 +65,14 @@ class Unsupported(ValueError):
 # --- the fallback translator --------------------------------------------------------------
 #
 # It reads a pattern in Go's regexp syntax (which RE2 shares) and writes one Python's `re`
-# matches the same way, compiled without re.ASCII so (?i) folds the way Go's does. What it
-# changes:
+# matches the same way. What it changes:
 #
+# - It writes no i flag. Under case-insensitive matching each literal and each class becomes
+#   the case-sensitive class of Go's simple case-fold orbits of its characters (unicode.
+#   SimpleFold): k as [Kk\u212a], s as [Ss\u017f], every other ASCII letter with its other
+#   case, a negated class as the complement of the folded one. Python's own folding is wider
+#   (i with \u0130 and \u0131, and more by Unicode version), so it is never used. A
+#   case-insensitive literal or class item outside ASCII is refused: its orbit is not known.
 # - \z becomes \Z, Python's end of text.
 # - $ outside multi-line mode becomes \Z: in Go it is the end of the text, while Python's
 #   also matches before a final newline.
@@ -82,8 +87,8 @@ class Unsupported(ValueError):
 #   written out item by item with its characters escaped, so none of Python's own class
 #   syntax ([[, --, &&, ~~, ||) can change its meaning.
 #
-# It refuses Unicode classes (\p, \P), \Q...\E, \C, the U flag and anything else it does
-# not know; a refused pattern drops its rule.
+# It refuses Unicode classes (\p, \P), \Q...\E, \C, the U flag, a case-insensitive item
+# outside ASCII and anything else it does not know; a refused pattern drops its rule.
 
 _PERL = {
     "d": ((0x30, 0x39),),
@@ -113,6 +118,44 @@ _NAMED = re.compile(r"\(\?P?<([A-Za-z0-9_]+)>")
 _REPEAT = re.compile(r"\{(\d+)(,(\d*))?\}")
 _OCTAL = frozenset("01234567")
 
+def _ascii_orbits() -> dict[int, frozenset[int]]:
+    """Go's case-fold orbits of the ASCII letters: each letter with its other case, plus
+    the Kelvin sign with k and the long s with s. No other character folds to an ASCII
+    letter, and an ASCII character that is not a letter folds only to itself."""
+    orbits = {c: frozenset({c, c ^ 0x20}) for c in [*range(0x41, 0x5B), *range(0x61, 0x7B)]}
+    for members in (frozenset({0x4B, 0x6B, 0x212A}), frozenset({0x53, 0x73, 0x17F})):
+        for c in members:
+            orbits[c] = members
+    return orbits
+
+
+_ORBIT = _ascii_orbits()
+
+
+def orbit(cp: int) -> tuple[int, ...]:
+    """The translator's fold orbit of the ASCII character `cp`, sorted (the bump checks it
+    against Go's `unicode.SimpleFold`)."""
+    if cp > 0x7F:
+        raise ValueError("the translator holds the orbits of ASCII only")
+    return tuple(sorted(_ORBIT.get(cp, (cp,))))
+
+
+def _fold(items) -> tuple[tuple[int, int], ...]:
+    """The ranges `items` with every ASCII character's fold orbit added, as Go's (?i) does."""
+    chars: set[int] = set()
+    for lo, hi in items:
+        if hi > 0x7F:
+            raise Unsupported("a non-ASCII character under case-insensitive matching")
+        for c in range(lo, hi + 1):
+            chars |= _ORBIT.get(c, {c})
+    out: list[list[int]] = []
+    for c in sorted(chars):
+        if out and out[-1][1] == c - 1:
+            out[-1][1] = c
+        else:
+            out.append([c, c])
+    return tuple((lo, hi) for lo, hi in out)
+
 
 def _char(cp: int, in_class: bool) -> str:
     """One character, escaped where Python's `re` could read it as syntax."""
@@ -139,8 +182,9 @@ class _Frame:
     """One open group: its flags now, and the scoped flag groups opened inside it, which
     close at each `|` and `)` and reopen after each `|`."""
 
-    def __init__(self, multiline: bool):
+    def __init__(self, multiline: bool, fold: bool = False):
         self.multiline = multiline
+        self.fold = fold
         self.wraps: list[str] = []
 
 
@@ -183,12 +227,18 @@ class _Translator:
                     self.out.append(r"\{")
                     self.i += 1
             else:
-                self.out.append(_char(ord(c), False))
+                self.out.append(self._literal(ord(c)))
                 self.i += 1
         if len(self.stack) != 1:
             raise Unsupported("an unclosed group")
         self.out.append(")" * len(self.stack[0].wraps))
         return "".join(self.out)
+
+    def _literal(self, cp: int) -> str:
+        if not self.stack[-1].fold:
+            return _char(cp, False)
+        items = _fold(((cp, cp),))
+        return _char(cp, False) if items == ((cp, cp),) else f"[{_ranges(items)}]"
 
     # groups and flags
 
@@ -202,35 +252,41 @@ class _Translator:
             if not on and not off:
                 if end == ":":                      # (?:  a plain group
                     self.out.append("(?:")
-                    self.stack.append(_Frame(frame.multiline))
+                    self.stack.append(_Frame(frame.multiline, frame.fold))
                     self.i = m.end()
                     return
                 raise Unsupported("an empty flag group")
-            flags = on + ("-" + off if off else "")
             multiline = ("m" in on) or (frame.multiline and "m" not in off)
+            fold = ("i" in on) or (frame.fold and "i" not in off)
+            # The i flag is never written: _literal and _class write the folds out.
+            on, off = on.replace("i", ""), off.replace("i", "")
+            flags = on + ("-" + off if off else "")
             self.i = m.end()
             if end == ":":                          # (?flags:...)  a scoped group
                 self.out.append(f"(?{flags}:")
-                self.stack.append(_Frame(multiline))
+                self.stack.append(_Frame(multiline, fold))
                 return
             # (?flags): holds to the end of the enclosing group.
-            if len(self.stack) == 1 and not self.out and not off:
+            if not flags:
+                pass                                # only i changed: nothing to write
+            elif len(self.stack) == 1 and not self.out and not off:
                 self.out.append(f"(?{on})")         # a global flag at the very start
             else:
                 self.out.append(f"(?{flags}:")
                 frame.wraps.append(flags)
             frame.multiline = multiline
+            frame.fold = fold
             return
         m = _NAMED.match(p, self.i)
         if m:
             self.out.append(f"(?P<{m.group(1)}>")
-            self.stack.append(_Frame(frame.multiline))
+            self.stack.append(_Frame(frame.multiline, frame.fold))
             self.i = m.end()
             return
         if p.startswith("(?", self.i):
             raise Unsupported(f"the group {p[self.i:self.i + 4]!r}")
         self.out.append("(")
-        self.stack.append(_Frame(frame.multiline))
+        self.stack.append(_Frame(frame.multiline, frame.fold))
         self.i += 1
 
     def _close(self) -> None:
@@ -254,9 +310,11 @@ class _Translator:
         if c.lower() in _PERL:
             self.i += 2
             items = _PERL[c.lower()]
+            if self.stack[-1].fold:
+                items = _fold(items)
             return f"[^{_ranges(items)}]" if c.isupper() else f"[{_ranges(items)}]"
         cp = self._escaped_char()
-        return _char(cp, False)
+        return self._literal(cp)
 
     def _escaped_char(self) -> int:
         """A single-character escape at self.i, as Go's parser reads it; advances."""
@@ -351,6 +409,9 @@ class _Translator:
                 if hi < lo:
                     raise Unsupported("a reversed range in a class")
             positive.append((lo, hi))
+        if self.stack[-1].fold:
+            positive = list(_fold(positive))
+            negatives = [_fold(n) for n in negatives]
         if not negatives:
             if not positive:
                 raise Unsupported("an empty class")
