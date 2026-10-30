@@ -5,7 +5,7 @@ import os
 import pytest
 
 from moxi_comms import directory
-from moxi_comms.mock_gateway import MockGateway
+from moxi_comms.mock_record import MockRecord
 from moxi_comms.paths import directory_db
 from moxi_comms.provision import (NAMES, ROOM_KINDS, ProvisionError, add_standing,
                                   provision)
@@ -17,7 +17,7 @@ def table_names(conn) -> set[str]:
 
 
 def test_schema_and_file_posture():
-    gw = MockGateway()
+    gw = MockRecord()
     provision(gw, directory_db(), standing=[("planner", "proj-a")])
     assert oct(os.stat(directory_db()).st_mode & 0o777) == "0o600"
     conn = directory.connect(directory_db())
@@ -31,7 +31,7 @@ def test_schema_and_file_posture():
 
 
 def test_foreign_keys_are_live_not_inert():
-    gw = MockGateway()
+    gw = MockRecord()
     _old_directory(gw)
     conn = directory.connect(directory_db())
     try:
@@ -45,7 +45,7 @@ def test_foreign_keys_are_live_not_inert():
 
 
 def test_exactly_one_owner_kind():
-    gw = MockGateway()
+    gw = MockRecord()
     p = _old_directory(gw)
     conn = directory.connect(directory_db())
     try:
@@ -59,7 +59,7 @@ def test_exactly_one_owner_kind():
 
 
 def test_provisioning_creates_one_room_without_agent_webhooks():
-    gw = MockGateway()
+    gw = MockRecord()
     p = provision(gw, directory_db())
     assert list(p.rooms) == [NAMES]
     conn = directory.connect(directory_db(), read_only=True)
@@ -125,7 +125,7 @@ def _old_directory(gw):
 
 
 def test_an_old_directory_with_three_rooms_adds_a_row_without_webhooks():
-    gw = MockGateway()
+    gw = MockRecord()
     _old_directory(gw)
     conn = directory.init(directory_db())
     try:
@@ -145,10 +145,10 @@ def test_an_old_directory_with_three_rooms_adds_a_row_without_webhooks():
 def test_send_only_on_an_old_directory_adds_only_the_row(tmp_path):
     from moxi_comms.provision import send_only_main
 
-    gw = MockGateway()
+    gw = MockRecord()
     _old_directory(gw)
     said: list[str] = []
-    assert send_only_main(["relay@proj-a", "--db", str(directory_db())], gateway=gw,
+    assert send_only_main(["relay@proj-a", "--db", str(directory_db())], record=gw,
                           env={}, out=said.append) == 0
     conn = directory.connect(directory_db(), read_only=True)
     try:
@@ -161,7 +161,7 @@ def test_send_only_on_an_old_directory_adds_only_the_row(tmp_path):
 
 
 def test_standing_identity_gets_no_stored_credential():
-    gw = MockGateway()
+    gw = MockRecord()
     provision(gw, directory_db(), standing=[("planner", "proj-a")])
     conn = directory.connect(directory_db(), read_only=True)
     try:
@@ -171,7 +171,7 @@ def test_standing_identity_gets_no_stored_credential():
 
 
 def test_provisioning_is_idempotent():
-    gw = MockGateway()
+    gw = MockRecord()
     provision(gw, directory_db(), standing=[("planner", "proj-a")])
     provision(gw, directory_db(), standing=[("planner", "proj-a")])
     conn = directory.connect(directory_db(), read_only=True)
@@ -183,7 +183,7 @@ def test_provisioning_is_idempotent():
 
 
 def test_agent_n_namespace_is_refused_as_a_standing_row():
-    gw = MockGateway()
+    gw = MockRecord()
     provision(gw, directory_db())
     conn = directory.connect(directory_db())
     try:
@@ -202,7 +202,7 @@ def test_standing_row_refused_while_the_name_is_live_as_chosen(rig):
     conn = directory.connect(directory_db())
     try:
         with pytest.raises(ProvisionError, match="release it first"):
-            add_standing(rig.gateway, conn, "planner", "proj-a", daemon_client=client)
+            add_standing(rig.record, conn, "planner", "proj-a", daemon_client=client)
     finally:
         conn.close()
         client.close()
@@ -215,11 +215,11 @@ def test_standing_row_refused_while_the_name_is_live_as_chosen(rig):
 # against `local` need no portal, no pasting and no operator beyond running the verb.
 
 def local_rig(tmp_path):
-    """A local record and its store, the pair `moxi-comms-provision --gateway local` builds."""
-    from moxi_comms.local_gateway import LocalGateway
+    """A local record and its store, the pair `moxi-comms-provision --backend local` builds."""
+    from moxi_comms.local_record import LocalRecord
     from moxi_comms.tokens import TokenStore
 
-    return LocalGateway(tmp_path / "record.db"), TokenStore(tmp_path / "store")
+    return LocalRecord(tmp_path / "record.db"), TokenStore(tmp_path / "store")
 
 
 def test_only_the_operator_token_lands_in_the_store(tmp_path):
@@ -296,7 +296,7 @@ def test_half_an_operator_pair_is_replaced_rather_than_left_unusable(tmp_path):
     """A stored token whose hash is not in the record is a lane nobody can use, so the
     converging run mints -- and the two halves agree again afterwards."""
     from moxi_comms import tokens
-    from moxi_comms.local_gateway import META_OPERATOR_TOKEN_HASH, token_hash
+    from moxi_comms.local_record import META_OPERATOR_TOKEN_HASH, token_hash
 
     gw, store = local_rig(tmp_path)
     owner = tokens.owner_for_role(tokens.ROLE_OPERATOR)
@@ -322,7 +322,7 @@ def test_the_mock_is_not_given_a_store(tmp_path):
     from moxi_comms.tokens import TokenStore
 
     store = TokenStore(tmp_path / "store")
-    provision(MockGateway(), directory_db(), standing=[("planner", "proj-a")])
+    provision(MockRecord(), directory_db(), standing=[("planner", "proj-a")])
 
     assert store.owners_present() == []
 
@@ -333,14 +333,14 @@ def test_the_first_start_makes_what_provision_in_config_says(tmp_path):
     """The operator is read when the step runs; with no file it is `operator`."""
     from conftest import write_config
     from moxi_comms import provision as prov
-    from moxi_comms.local_gateway import LocalGateway
+    from moxi_comms.local_record import LocalRecord
     from moxi_comms.tokens import TokenStore
 
     assert prov.configured() == prov.DEFAULT_OPERATOR == ("operator", "operator")
     write_config(None, '[provision]\noperator = "alice"\n')
     assert prov.configured() == ("operator", "alice")
 
-    gw = LocalGateway(tmp_path / "record.db")
+    gw = LocalRecord(tmp_path / "record.db")
     try:
         prov.first_start(TokenStore(tmp_path / "store"))(gw, directory_db())
         conn = directory.connect(directory_db(), read_only=True)

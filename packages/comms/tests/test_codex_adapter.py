@@ -2,7 +2,7 @@
 
 The daemon and its socket are the ordinary rig; the session is `fake_turns.FakeSession`,
 shaped as turns' public `Session`, whose turns the test starts and ends as turns' Codex
-host would report them. `test_codex_turns_host.py` runs the launcher over turns' real
+host would report them. `test_codex_turns_host.py` runs the wrapper over turns' real
 host. Nothing here spawns codex and nothing here touches the network.
 """
 
@@ -19,7 +19,7 @@ from moxi_comms.adapters.codex_roster import CodexAgent
 from moxi_comms.adapters.session import INHERITED_COMMS_ENV
 from moxi_comms.claimhold import CLAIM_SOCKET_ENV
 
-from fake_turns import FakeSession, launcher as fake_launcher
+from fake_turns import FakeSession, fake_launch as fake_wrapper
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +34,7 @@ IDENTITY = "planner@proj-a"
 
 @pytest.fixture
 def launch(rig, tmp_path):
-    """One launcher for `planner@proj-a` over a fresh `FakeSession`."""
+    """One wrapper for `planner@proj-a` over a fresh `FakeSession`."""
     made: list = []
 
     def build(*, name="planner", scope="proj-a", directors=(), start=True,
@@ -50,7 +50,7 @@ def launch(rig, tmp_path):
                            directors=list(directors))
         session = session or FakeSession()
         exits: list = []
-        adapter = CodexAdapter(agent, launch=fake_launcher(session), window=window,
+        adapter = CodexAdapter(agent, launch=fake_wrapper(session), window=window,
                                autoreconnect=autoreconnect, backoff=backoff,
                                clock=rig.clock, started_wait=0.2,
                                status_sink=lambda text: adapter.statuses.append(text),
@@ -86,7 +86,7 @@ def test_it_registers_with_the_codex_kind(rig, launch):
     assert adapter.identity == IDENTITY
 
 
-def test_the_launchers_death_is_its_deregistration(rig, launch):
+def test_the_wrappers_death_is_its_deregistration(rig, launch):
     adapter = launch()
     adapter.stop()
     assert wait_until(lambda: IDENTITY not in rig.daemon.bindings)
@@ -184,7 +184,7 @@ def test_the_holder_is_taken_at_the_launch(rig, launch):
     assert adapter.fake.holder.closed
 
 
-def test_the_launchers_environment_drops_a_stamp_the_identity_does_not_carry():
+def test_the_wrappers_environment_drops_a_stamp_the_identity_does_not_carry():
     environ = {var: "inherited" for var in INHERITED_COMMS_ENV}
     environ["PATH"] = "/bin"
     scrub_own_environ({"MOXI_COMMS_NAME": "planner"}, environ)
@@ -363,10 +363,10 @@ def test_a_launch_into_a_held_name_waits_for_it(rig, launch):
     assert first.identity == IDENTITY
 
 
-# --------------------------------------------------------------------------- the launcher's exit
+# --------------------------------------------------------------------------- the wrapper's exit
 
 @pytest.fixture
-def launcher_main(monkeypatch, tmp_path):
+def wrapper_main(monkeypatch, tmp_path):
     """`codex.main` up to the launch, with a launch that raises what the test says: no
     terminal, signal handler, environment scrub or logging setup of this process is
     touched."""
@@ -394,8 +394,8 @@ def launcher_main(monkeypatch, tmp_path):
 
 
 def test_a_window_launch_that_turns_gives_up_on_exits_3_naming_the_log(
-        launcher_main, capsys):
-    code = launcher_main(RuntimeError("the Codex window did not load within 180 s."),
+        wrapper_main, capsys):
+    code = wrapper_main(RuntimeError("the Codex window did not load within 180 s."),
                          "--window")
     err = capsys.readouterr().err
     assert code == 3, err
@@ -404,11 +404,11 @@ def test_a_window_launch_that_turns_gives_up_on_exits_3_naming_the_log(
     assert err.rstrip().endswith(".log."), err
 
 
-def test_untrusted_hooks_and_a_launch_with_no_window_still_exit_2(launcher_main, capsys):
+def test_untrusted_hooks_and_a_launch_with_no_window_still_exit_2(wrapper_main, capsys):
     class HooksUntrusted(RuntimeError):
         pass
 
-    assert launcher_main(HooksUntrusted("Codex does not trust the hooks"), "--window") == 2
+    assert wrapper_main(HooksUntrusted("Codex does not trust the hooks"), "--window") == 2
     assert "was not launched: Codex does not trust the hooks" in capsys.readouterr().err
-    assert launcher_main(RuntimeError("no codex on PATH")) == 2
+    assert wrapper_main(RuntimeError("no codex on PATH")) == 2
     assert "was not launched: no codex on PATH" in capsys.readouterr().err

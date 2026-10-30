@@ -41,7 +41,7 @@ def raw(message_id):
 def send(rig, to, text, who=PLANNER):
     code, out = rig.send(to, text, sender=who)
     assert code == 0, out
-    return rig.gateway.history(rig.names_channel)[-1]
+    return rig.record.history(rig.names_channel)[-1]
 
 
 def matches_delivery(answer, payload):
@@ -67,7 +67,7 @@ def test_a_verified_send_reads_as_its_delivery_shows(rig):
 
 def test_the_read_answers_for_the_messages_own_time_after_the_sender_has_gone(rig):
     """Live delivery verified it from the binding; the sender then unbinds. The read
-    asks the custody journal who held the seat when the message was posted, so it still
+    asks the binding history who held the seat when the message was posted, so it still
     says verified, and names the sender, not whoever holds the slot now."""
     planner = rig.shim(**PLANNER)
     reviewer = rig.shim(**REVIEWER)
@@ -136,7 +136,7 @@ def test_a_message_in_another_room_names_its_room(rig):
     mail. The channel here is one the test makes: comms provisions no other room an
     agent posts in."""
     rig.shim(**PLANNER)
-    channel = rig.gateway.create_channel("#elsewhere")
+    channel = rig.record.create_channel("#elsewhere")
     msg = rig.post_as(P, [R], "in the room", channel=channel)
     answer = attributed_message(msg.id)
     assert (answer["room"], answer["recipients"], answer["text"]) == \
@@ -176,7 +176,7 @@ def test_the_read_changes_nothing(rig):
     code, out = rig.cli(["send", "--posture", "none", "--new-name", "curator@proj-a",
                          "waiting for curator"], **PLANNER)
     assert code == 0, out
-    pend = rig.gateway.history(rig.names_channel)[-1]
+    pend = rig.record.history(rig.names_channel)[-1]
     assert wait_until(lambda: queued(rig.daemon, "curator@proj-a"))
     d = rig.daemon
 
@@ -188,7 +188,7 @@ def test_the_read_changes_nothing(rig):
                     {q: (b.session_id, b.turned, set(b.delivered))
                      for q, b in d.bindings.items()},
                     cursors.read(R), cursors.read("curator@proj-a"),
-                    len(rig.gateway.history(rig.names_channel)),
+                    len(rig.record.history(rig.names_channel)),
                     len(reviewer.queue))
 
     before = state()
@@ -209,7 +209,7 @@ def test_any_socket_caller_may_ask_and_every_caller_gets_the_same_answer(rig):
     reviewer = rig.shim(**REVIEWER)
     msg = send(rig, R, "same for everyone")
     wait_for_queue(reviewer, 1)
-    code = provision.send_only_main(["relay"], gateway=rig.gateway, store=rig.store,
+    code = provision.send_only_main(["relay"], record=rig.record, store=rig.store,
                                     out=lambda _l: None)
     assert code == 0
     srv = ClaimServer("relay", "global", kind="send-only", arm=True).start()

@@ -9,14 +9,14 @@ import pytest
 from conftest import write_config
 from moxi import config as moxi_config
 
-from moxi_comms import config, constants, gateway, local_gateway, module, secrets, tokens
+from moxi_comms import config, constants, record, local_record, module, secrets, tokens
 
 
 def test_the_schema_parses_and_its_overrides_are_spelled_with_the_prefix():
     schema = config.schema()
     schema.check_env("comms")
     assert {k.env for k in schema.live() if k.env} == {
-        "MOXI_COMMS_GATEWAY", "MOXI_COMMS_LOCAL_RECORD", "MOXI_COMMS_LOCAL_RETAIN_DAYS",
+        "MOXI_COMMS_BACKEND", "MOXI_COMMS_LOCAL_RECORD", "MOXI_COMMS_LOCAL_RETAIN_DAYS",
         "MOXI_COMMS_TOKEN_STORE"}
     assert not set(module.INTERNAL_ENV) & {k.env for k in schema.live()}
 
@@ -53,7 +53,7 @@ def test_the_defaults_with_no_file():
 
 
 def test_one_owner_of_the_retention():
-    assert config.LOCAL_RETAIN_DAYS == local_gateway.RETAIN_DAYS == \
+    assert config.LOCAL_RETAIN_DAYS == local_record.RETAIN_DAYS == \
         config.schema().keys["local.retain_days"].default
 
 
@@ -127,7 +127,7 @@ def test_block_is_read_at_each_use():
 
 def test_an_env_override_wins_over_the_file(monkeypatch, tmp_path):
     write_config(None, 'backend = "mock"\n[local]\nretain_days = 7\n')
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "local")
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "local")
     monkeypatch.setenv("MOXI_COMMS_LOCAL_RETAIN_DAYS", "0")
     monkeypatch.setenv("MOXI_COMMS_LOCAL_RECORD", str(tmp_path / "r.db"))
     monkeypatch.setenv("MOXI_COMMS_TOKEN_STORE", str(tmp_path / "store"))
@@ -215,22 +215,22 @@ def test_the_roster_parsers_can_raise_the_same_error_with_one_message():
 # ------------------------------------------------------------------ the readers
 
 def test_the_backend_choice_names_its_source(monkeypatch):
-    assert gateway.backend_choice() == gateway.BackendChoice("local", gateway.SOURCE_DEFAULT)
-    assert gateway.backend_choice().describe() == "the default"
+    assert record.backend_choice() == record.BackendChoice("local", record.SOURCE_DEFAULT)
+    assert record.backend_choice().describe() == "the default"
     write_config(None, 'backend = "mock"\n')
-    assert gateway.backend_choice() == gateway.BackendChoice("mock", gateway.SOURCE_CONFIG)
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "local")
-    assert gateway.backend_choice().source == gateway.SOURCE_ENV
-    assert gateway.backend_choice("mock").source == gateway.SOURCE_FLAG
-    assert gateway.default_backend() == gateway.LOCAL
+    assert record.backend_choice() == record.BackendChoice("mock", record.SOURCE_CONFIG)
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "local")
+    assert record.backend_choice().source == record.SOURCE_ENV
+    assert record.backend_choice("mock").source == record.SOURCE_FLAG
+    assert record.default_backend() == record.LOCAL
 
 
-def test_an_unknown_backend_is_a_gateway_error(monkeypatch):
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "discord")
-    with pytest.raises(gateway.GatewayError):
-        gateway.backend_choice()
-    with pytest.raises(gateway.GatewayError):
-        gateway.backend_choice("discord")
+def test_an_unknown_backend_is_a_record_error(monkeypatch):
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "discord")
+    with pytest.raises(record.RecordError):
+        record.backend_choice()
+    with pytest.raises(record.RecordError):
+        record.backend_choice("discord")
 
 
 def test_the_token_store_location_comes_from_the_config(monkeypatch, tmp_path):
@@ -403,11 +403,11 @@ def test_the_text_entry_refuses_every_row_its_roster_refuses(text, words):
 
 def test_the_text_entry_reads_no_environment(monkeypatch):
     write_config(None, 'backend = "local"\n')
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "bogus")
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "bogus")
     with pytest.raises(config.ConfigError):
         config.load()
     assert config.check_text('backend = "local"\n') is None
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "mock")
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "mock")
     with pytest.raises(config.ConfigError):
         config.check_text('backend = "remote"\n')
 
@@ -537,7 +537,7 @@ def test_config_set_and_check_pass_a_good_file_under_a_bad_variable(core_state, 
     from moxi import cli
 
     path = write_config(None, "block = true\n")
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "bogus")
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "bogus")
     assert cli.main(["config", "set", "comms", "secrets.roles", "--add", "pager"]) == 0
     assert cli.main(["config", "unset", "comms", "block"]) == 0
     assert cli.main(["config", "comms", "check"]) == 0

@@ -11,7 +11,7 @@ values = ["local", "mock"]
 default = "local"
 doc = "Which record backend: local (this box's SQLite record) or mock (a JSON test double)."
 read = "start"
-env = "MOXI_COMMS_GATEWAY"
+env = "MOXI_COMMS_BACKEND"
 
 [local.record]
 type = "path"

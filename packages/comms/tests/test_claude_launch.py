@@ -3,8 +3,8 @@ and the daemon's no-endpoint state as a sender and the doctor read it.
 
 The launch runs for real in a child process, with a stand-in `claude` that records what
 it found when it started and then exits: the adapter is up, bound and listening on the
-claim socket before `claude` starts (the launcher waits for its ready byte), its claim's
-root is the `claude` process (the launcher's pid, kept across the exec), it reports no
+claim socket before `claude` starts (the wrapper waits for its ready byte), its claim's
+root is the `claude` process (the wrapper's pid, kept across the exec), it reports no
 endpoint while the session has none, and it deregisters and cleans up when `claude`
 exits.
 """
@@ -62,7 +62,7 @@ def test_the_launch_forks_a_bound_adapter_before_claude_and_it_ends_with_claude(
         lines = out.read_text().splitlines()
         assert lines[0] == "socket-ready", "the claim socket listened before claude started"
         pid = int(lines[1].split()[1])
-        assert pid == proc.pid, "claude keeps the launcher's pid"
+        assert pid == proc.pid, "claude keeps the wrapper's pid"
         assert lines[2] == f"args --session-id {SID} --model haiku -n {NAME}", \
             "the launch names its id to claude"
         b = binding(rig)
@@ -84,7 +84,7 @@ def test_the_launch_forks_a_bound_adapter_before_claude_and_it_ends_with_claude(
     assert "claude pid" in log.read_text()
 
 
-def test_the_launcher_waits_a_bounded_time_and_then_starts_claude(capsys, monkeypatch):
+def test_the_wrapper_waits_a_bounded_time_and_then_starts_claude(capsys, monkeypatch):
     """A ready byte that never comes holds `claude` up by `ready_wait` and no more."""
     s = session.Session("fk2", name=NAME, project="proj-a")
     s.write()
@@ -98,7 +98,7 @@ def test_the_launcher_waits_a_bounded_time_and_then_starts_claude(capsys, monkey
         os.close(w)
 
 
-# ------------------------------------------------------------- the launcher's pidfd
+# ------------------------------------------------------------- the wrapper's pidfd
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pidfds are Linux's")
 def test_the_pidfd_comes_from_the_system_call_when_python_lacks_the_wrapper(monkeypatch):
@@ -173,7 +173,7 @@ def test_a_launch_that_names_no_id_gets_one(capsys):
     assert code == 0 and is_uuid(sid)
     assert argv == ["--session-id", sid, "--model", "haiku"], "a fresh UUID, named"
     code, sid, argv, _ = dry_run(capsys, own=SID)
-    assert (sid, argv) == (SID, ["--session-id", SID]), "the launcher's own id, named"
+    assert (sid, argv) == (SID, ["--session-id", SID]), "the wrapper's own id, named"
 
 
 @pytest.mark.parametrize("passthrough", [
@@ -184,7 +184,7 @@ def test_an_id_the_passthrough_names_is_the_id(capsys, passthrough):
     code, sid, argv, _ = dry_run(capsys, *passthrough)
     assert (code, sid, argv) == (0, SID, passthrough), "passed through, nothing added"
     code, sid, argv, _ = dry_run(capsys, *passthrough, own=SID)
-    assert (code, sid, argv) == (0, SID, passthrough), "the launcher's own id agrees"
+    assert (code, sid, argv) == (0, SID, passthrough), "the wrapper's own id agrees"
 
 
 @pytest.mark.parametrize("passthrough", [
@@ -211,7 +211,7 @@ def test_an_unnamed_resume_passes_through_and_names_no_id(capsys, passthrough):
     assert (stated, added) == (None, []), "the binding states no id until the look"
     code, sid, argv, _ = dry_run(capsys, *passthrough, own=SID)
     assert (code, sid, argv) == (0, SID, passthrough), \
-        "the launcher's own id names the session dir and nothing else"
+        "the wrapper's own id names the session dir and nothing else"
     assert session.launch_session_id(passthrough, SID) == (None, [])
 
 
@@ -266,7 +266,7 @@ def test_flags_after_claudes_own_double_dash_are_not_read():
     (None, ["--session-id", "fk1"], "after -- is not a UUID"),
 ], ids=["own-not-uuid", "own-not-uuid-continue", "differs-session-id", "differs-resume",
         "passthrough-not-uuid"])
-def test_the_launcher_refuses_an_id_it_cannot_name(capsys, own, passthrough, says):
+def test_the_wrapper_refuses_an_id_it_cannot_name(capsys, own, passthrough, says):
     code, _, _, err = dry_run(capsys, *passthrough, own=own)
     assert code == 2 and says in err, err
 

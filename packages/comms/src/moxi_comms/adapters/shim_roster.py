@@ -1,7 +1,7 @@
 """The launch context comms gives a session: the roster snapshot and the roster deltas.
 
 comms' listener (`moxi_comms.listener`) answers turns with what this module renders, at
-a session's start and at each prompt; the Codex launcher puts the same layer one into a
+a session's start and at each prompt; the Codex wrapper puts the same layer one into a
 thread's developer instructions (`codex.layer_one_text`). comms writes no hook of its own:
 turns carries the text into the session.
 
@@ -53,12 +53,12 @@ memory any more than in rendering.
 The daemon being unreachable degrades honestly and never raises: a listener that fails
 costs its own context, and comms being down must never stop an agent from working.
 
-Which comms to run: the line names the command the session's launcher stamped,
-`MOXI_COMMS_COMMAND`. A session an older launcher started has no stamp, and the line
+Which comms to run: the line names the command the session's wrapper stamped,
+`MOXI_COMMS_COMMAND`. A session an older wrapper started has no stamp, and the line
 names this process's own install instead (`context.own_comms`); the listener runs in
 turns' endpoint process, whose install is the launching one where one Moxi environment
 serves every session. With neither, the line names the bare `moxi comms`, as the Codex and
-OpenCode launchers' do.
+OpenCode wrappers' do.
 
 The own-binding race: the session's adapter binds before `claude` starts, so the snapshot
 normally lists the session's own binding. When the session carries an identity stamp and
@@ -192,15 +192,15 @@ def render_snapshot(info: dict | None, *, env=None) -> tuple[str, bool]:
 
 
 def comms_command(env) -> str:
-    """The comms the session is told to run: its launcher's stamp, else this process's
-    own install, else the bare `moxi comms`, as the Codex and OpenCode launchers say."""
+    """The comms the session is told to run: its wrapper's stamp, else this process's
+    own install, else the bare `moxi comms`, as the Codex and OpenCode wrappers say."""
     return env.get(COMMAND_ENV) or own_comms() or BARE_COMMS
 
 
 def with_block(body: str, *, directors=(), comms=None) -> str:
     """Layer one, in order: the block, one blank line, the line naming `comms` (when
     there is one) and one blank line, then the roster (or the offline line), as the
-    Codex and OpenCode launchers lay it out. The block is first because it is what the
+    Codex and OpenCode wrappers lay it out. The block is first because it is what the
     roster under it is FOR. A session with a declared director gets the director
     sentence at the block's end."""
     if comms:

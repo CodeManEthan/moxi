@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import config, tokens
-from .gateway import Message
+from .record import Message
 from .paths import bindings_db, state_dir, tokens_dir
 from .scoping import GLOBAL, is_auto_name, qualify, split_tag
 
@@ -87,7 +87,7 @@ def _webhook_row(conn, webhook_id: str):
 
 
 def _holder_at(conn, slot_id, timestamp: str | None):
-    """The old exact-interval match, copied from the retired journal reader."""
+    """The old exact-interval match, copied from the retired binding history reader."""
     if conn is None or slot_id is None or not timestamp:
         return None
     try:
@@ -100,7 +100,7 @@ def _holder_at(conn, slot_id, timestamp: str | None):
     return rows[0] if len(rows) == 1 else None
 
 
-def _legacy_author(directory_conn, msg, journal_conn=None):
+def _legacy_author(directory_conn, msg, history_conn=None):
     """Interpret one old webhook row by the rule the older reader used."""
     from .attribution import TIER_STANDING
 
@@ -115,7 +115,7 @@ def _legacy_author(directory_conn, msg, journal_conn=None):
     claimed = _from_display(msg.author_display)
     if claimed.tier == "unknown":
         return claimed
-    held = _holder_at(journal_conn,
+    held = _holder_at(history_conn,
                       row["slot_id"] if "slot_id" in keys else None,
                       getattr(msg, "timestamp", None))
     if held is not None and held["qualified"] == claimed.qualified:
@@ -123,7 +123,7 @@ def _legacy_author(directory_conn, msg, journal_conn=None):
     return claimed
 
 
-def _open_journal(path: str | Path | None, *, strict: bool):
+def _open_history(path: str | Path | None, *, strict: bool):
     target = Path(path) if path is not None else bindings_db()
     if not target.exists():
         return None
@@ -143,37 +143,37 @@ def _open_journal(path: str | Path | None, *, strict: bool):
         return None
 
 
-def legacy_author(directory_conn, msg, *, journal_path=None):
+def legacy_author(directory_conn, msg, *, history_path=None):
     """Read one old row before the conversion marker exists.
 
-    A history read is best-effort, as the old reader was: an unavailable journal means
+    A history read is best-effort, as the old reader was: an unavailable binding history means
     no corroborating evidence and therefore an unverified display, not a failed read.
     """
-    journal = _open_journal(journal_path, strict=False)
+    history = _open_history(history_path, strict=False)
     try:
-        return _legacy_author(directory_conn, msg, journal)
+        return _legacy_author(directory_conn, msg, history)
     finally:
-        if journal is not None:
-            journal.close()
+        if history is not None:
+            history.close()
 
 
-def stamp_record(gateway, directory_path, *, journal_path=None) -> tuple[int, bool]:
+def stamp_record(record, directory_path, *, history_path=None) -> tuple[int, bool]:
     """Convert old webhook authors and commit the marker in one record transaction."""
-    if gateway.meta_get(META_AUTHOR_STAMPS) is not None:
+    if record.meta_get(META_AUTHOR_STAMPS) is not None:
         return 0, False
 
     directory_conn = sqlite3.connect(f"file:{Path(directory_path)}?mode=ro", uri=True)
     directory_conn.row_factory = sqlite3.Row
-    journal_conn = None
+    history_conn = None
     try:
-        journal_conn = _open_journal(journal_path, strict=True)
+        history_conn = _open_history(history_path, strict=True)
         changed = 0
-        with gateway._write() as record:
-            marker = record.execute("SELECT value FROM meta WHERE key = ?",
-                                    (META_AUTHOR_STAMPS,)).fetchone()
+        with record._write() as conn:
+            marker = conn.execute("SELECT value FROM meta WHERE key = ?",
+                                  (META_AUTHOR_STAMPS,)).fetchone()
             if marker is not None:
                 return 0, False
-            rows = record.execute(
+            rows = conn.execute(
                 "SELECT id, channel_id, author_id, author_kind, author_display, content, "
                 "timestamp FROM messages WHERE author_kind = 'webhook' ORDER BY id"
             ).fetchall()
@@ -181,24 +181,24 @@ def stamp_record(gateway, directory_path, *, journal_path=None) -> tuple[int, bo
                 msg = Message(id=str(row[0]), channel_id=row[1], author_id=row[2],
                               author_kind=row[3], author_display=row[4], content=row[5],
                               timestamp=row[6])
-                author = _legacy_author(directory_conn, msg, journal_conn)
+                author = _legacy_author(directory_conn, msg, history_conn)
                 if author.tier == "unknown":
-                    record.execute("UPDATE messages SET author_kind = 'unknown' WHERE id = ?",
-                                   (row[0],))
+                    conn.execute("UPDATE messages SET author_kind = 'unknown' WHERE id = ?",
+                                 (row[0],))
                     changed += 1
                 elif author.attribution == "verified":
-                    record.execute(
+                    conn.execute(
                         "UPDATE messages SET author_kind = 'identity', author_id = ?, "
                         "author_display = ? WHERE id = ?",
                         (author.qualified, author.qualified, row[0]))
                     changed += 1
-            record.execute("INSERT INTO meta(key, value) VALUES (?, ?)",
-                           (META_AUTHOR_STAMPS, "1"))
+            conn.execute("INSERT INTO meta(key, value) VALUES (?, ?)",
+                         (META_AUTHOR_STAMPS, "1"))
         return changed, True
     finally:
         directory_conn.close()
-        if journal_conn is not None:
-            journal_conn.close()
+        if history_conn is not None:
+            history_conn.close()
 
 
 def _entries(path: Path) -> dict | None:
@@ -298,9 +298,9 @@ def prune_store(store, *, keep_path=None, own_store: bool | None = None) -> Resu
 
 def startup(store, *, keep_path=None, own_store: bool | None = None):
     """Build the daemon's conversion step for the local backend."""
-    def run(gateway, directory_path, journal_path=None) -> Result:
+    def run(record, directory_path, history_path=None) -> Result:
         stamped, marker_written = stamp_record(
-            gateway, directory_path, journal_path=journal_path)
+            record, directory_path, history_path=history_path)
         pruned = prune_store(store, keep_path=keep_path, own_store=own_store)
         result = Result(stamped=stamped, removed_keys=pruned.removed_keys,
                         left_keys=pruned.left_keys, removed_files=pruned.removed_files,

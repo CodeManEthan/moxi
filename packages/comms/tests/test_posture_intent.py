@@ -27,7 +27,7 @@ from moxi_comms import cli, config, constants, context, glossary, machine_line, 
 from moxi_comms.adapters import claude_shim, codex, opencode, shim_roster
 from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.daemon import Daemon
-from moxi_comms.gateway import GatewayError
+from moxi_comms.record import RecordError
 
 # The cold-cache fixtures, so a held send can be shown (the autouse tmp guard among them).
 from test_cold_every_sender import (adapters, cold_harness_report,  # noqa: F401
@@ -46,7 +46,7 @@ HOUR = 3600
 # --------------------------------------------------------------------------- helpers
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def last(rig):
@@ -84,7 +84,7 @@ def posts(rig, who, argv, clock=None):
     code, out = rig.cli(argv, clock=clock, **who)
     assert code == 0, out
     mid = sent_id(out)
-    return rig.gateway.get_message(mid), out
+    return rig.record.get_message(mid), out
 
 
 @pytest.fixture
@@ -203,7 +203,7 @@ def test_keyword_calls_write_todays_bytes_and_positional_ones_fail():
 
 def test_bodies_with_a_bare_namespace_gives_the_plain_bytes(rig):
     args = SimpleNamespace(text="hello")
-    ctx = cli.Context(gateway=rig.gateway, env={})
+    ctx = cli.Context(record=rig.record, env={})
     assert cli._bodies(args, ctx, [P], None) == [f"::to {P}\nhello"]
     assert cli._bodies(args, ctx, [P], "9", posture="once") == \
         [f"::to {P} re:9 [reply-once]\nhello"]
@@ -435,7 +435,7 @@ def test_a_root_without_open_binds_no_limit(rig, pair, whole_clock, root_kind):
 def test_a_members_read_at_the_mocks_declared_bound_posts_with_the_longer_note(rig, pair):
     if rig.backend != "mock":
         pytest.skip("the mock stands in for a bounded backend here")
-    rig.gateway.history_bound = 2
+    rig.record.history_bound = 2
     root = open_root(rig, "--cap", "2")
     msgs = ping_pong(rig, root, 2)
     msg, out = posts(rig, PLANNER, ["reply", msgs[-1].id, "past the cap"])
@@ -447,7 +447,7 @@ def test_a_members_read_at_the_mocks_declared_bound_posts_with_the_longer_note(r
 def test_a_busy_local_channel_keeps_the_cap(rig, pair):
     if rig.backend != "local":
         pytest.skip("the local record reads the whole range back")
-    assert rig.gateway.history_bound is None
+    assert rig.record.history_bound is None
     root = open_root(rig, "--cap", "2")
     for n in range(600):
         rig.post_as("ghost", ["nobody-here"], f"noise {n}")
@@ -559,7 +559,7 @@ def test_the_openers_no_cap_after_the_last_reply_is_refused(rig, pair):
 
 
 class StaleHistory:
-    """The real gateway, except that `history` leaves out messages above `upto`: a
+    """The real record, except that `history` leaves out messages above `upto`: a
     reply whose check read the record before another reply landed."""
 
     def __init__(self, inner, upto):
@@ -578,7 +578,7 @@ def test_two_replies_racing_past_cap_minus_one_both_close_and_a_third_is_refused
     first, _ = posts(rig, REVIEWER, ["reply", root.id, "one"])
     racer, _ = posts(rig, PLANNER, ["reply", first.id, "two"])
     code, out = rig.cli(["reply", first.id, "two, too"],
-                        gateway=StaleHistory(rig.gateway, first.id), **CRITIC)
+                        record=StaleHistory(rig.record, first.id), **CRITIC)
     assert code == 0, out
     assert zero(racer).thread_mark == zero(last(rig)).thread_mark == "last"
     code, out = reply(rig, REVIEWER, racer.id)
@@ -663,7 +663,7 @@ def test_after_a_restart_the_idle_clock_counts_from_since(rig, trio, whole_clock
     code, out = reply(rig, CRITIC, root.id, "chiming in", clock=whole_clock)
     assert code == 2 and "no message for over an hour" in tail(out)
     rig.daemon.stop()
-    rig.daemon = Daemon(rig.gateway, clock=whole_clock, start_trim_thread=False).start()
+    rig.daemon = Daemon(rig.record, clock=whole_clock, start_trim_thread=False).start()
     rig.shim(**PLANNER)
     rig.shim(**REVIEWER)
     rig.shim(**CRITIC)
@@ -913,7 +913,7 @@ def test_a_read_that_raises_posts_with_its_note(rig, pair):
     root = open_root(rig, "--cap", "1")
     first, _ = posts(rig, REVIEWER, ["reply", root.id, "one"])
     code, out = rig.cli(["reply", first.id, "past it"],
-                        gateway=HistoryFails(rig.gateway, GatewayError("the record is away")), **PLANNER)
+                        record=HistoryFails(rig.record, RecordError("the record is away")), **PLANNER)
     assert code == 0, out
     assert ("NOTE: the open-thread check did not run (the record is away), so it did not "
             "hold this reply.") in out.splitlines()
@@ -965,7 +965,7 @@ def his_once_in_a_closed_thread(rig, how, *, gateway=False):
         code, out = rig.cli(gateway_argv(root.id, P, "[gateway] which one?"),
                             env=operator_env(rig))
         assert code == 0, out
-        his = rig.gateway.get_message(sent_id(out))
+        his = rig.record.get_message(sent_id(out))
     else:
         his, _ = posts(rig, OPERATOR, ["reply", root.id, "which one?", "--posture",
                                        "once"])
@@ -1332,7 +1332,7 @@ def test_a_held_once_send_to_a_cold_shim_posts_and_is_indexed_as_an_ask(rig):
     code, out = send(rig, PLANNER, "reviewer", "which branch?", "--posture", "once")
     assert code == 0, out
     assert any(line.startswith("held: reviewer") for line in out.splitlines())
-    ask = rig.gateway.get_message(sent_id(out))
+    ask = rig.record.get_message(sent_id(out))
     assert zero(ask).posture == "once"
     assert wait_until(lambda: ask.id in rig.daemon.asks)
     assert rig.daemon.asks[ask.id]["open"] == {R}
@@ -1398,7 +1398,7 @@ def test_an_outcome_notices_argv(rig, pair):
     assert line_of(msg) == f"::to {P} [no reply]"
 
 
-def test_a_launchers_brief_argv(rig, pair):
+def test_a_wrappers_brief_argv(rig, pair):
     msg, _ = posts(rig, PLANNER, ["send", R, "your brief", "--posture", "none"])
     assert line_of(msg) == f"::to {R} [no reply]"
 
@@ -1417,7 +1417,7 @@ def test_a_gateways_argv_posts_reply_once(rig, op, kind):
     code, out = rig.cli(gateway_argv(ref.id, P, "[gateway · answer button] A"),
                         env=operator_env(rig))
     assert code == 0, out
-    msg = rig.gateway.get_message(sent_id(out))
+    msg = rig.record.get_message(sent_id(out))
     assert line_of(msg) == f"::to {P} re:{ref.id} [reply-once]"
 
 
@@ -1433,14 +1433,14 @@ def test_the_gateway_lane_in_an_open_thread_counts_and_takes_its_mark(rig, op):
     root = open_root(rig, "--cap", "2", to="operator")
     code, out = rig.cli(gateway_argv(root.id, P, "[gateway] yes"), env=operator_env(rig))
     assert code == 0, out
-    his = rig.gateway.get_message(sent_id(out))
+    his = rig.record.get_message(sent_id(out))
     assert (zero(his).posture, zero(his).thread_mark) == ("once", "one-left")
     assert "Sent. One reply left in this thread." in out.splitlines()
     closing, _ = posts(rig, PLANNER, ["reply", his.id, "noted"])
     assert zero(closing).thread_mark == "last"
     code, out = rig.cli(gateway_argv(closing.id, P, "[gateway] one more"), env=operator_env(rig))
     assert code == 0, out
-    assert zero(rig.gateway.get_message(sent_id(out))).posture == "once"
+    assert zero(rig.record.get_message(sent_id(out))).posture == "once"
 
 
 def test_the_terminal_lane_writes_the_same_flags_as_passed(rig, op):
@@ -1449,7 +1449,7 @@ def test_the_terminal_lane_writes_the_same_flags_as_passed(rig, op):
                         (["--posture", "open", "--cap", "3"], f"::to {P} [cap:3] [open]")):
         code, out = rig.cli(["send", P, "typed", *flags], env=operator_env(rig))
         assert code == 0, out
-        assert line_of(rig.gateway.get_message(sent_id(out))) == line
+        assert line_of(rig.record.get_message(sent_id(out))) == line
 
 
 def test_the_gateway_lanes_once_opens_an_ask_the_recipient_answers(rig, op):
@@ -1458,7 +1458,7 @@ def test_the_gateway_lanes_once_opens_an_ask_the_recipient_answers(rig, op):
     code, out = rig.cli(gateway_argv(notice.id, P, "[gateway · answer button] A"),
                         env=operator_env(rig))
     assert code == 0, out
-    his = rig.gateway.get_message(sent_id(out))
+    his = rig.record.get_message(sent_id(out))
     assert wait_until(lambda: his.id in rig.daemon.asks)
     code, out = send(rig, PLANNER, "operator", "unrelated", "--posture", "none")
     assert code == 2 and "still open" in out
@@ -1477,7 +1477,7 @@ def test_the_gateway_lanes_answer_to_an_ask_ends_the_wait_and_asks_back(rig, op)
     code, out = rig.cli(gateway_argv(ask.id, P, "[gateway · answer button] B"),
                         env=operator_env(rig))
     assert code == 0, out
-    his = rig.gateway.get_message(sent_id(out))
+    his = rig.record.get_message(sent_id(out))
     assert wait_until(lambda: his.id in rig.daemon.sent_by_id)
     assert "operator" not in awaiting(rig, P)
     assert zero(his).posture == "once"

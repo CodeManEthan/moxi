@@ -1,10 +1,10 @@
-"""`moxi-comms-codex` -- comms' Codex adapter, one launcher process per identity.
+"""`moxi-comms-codex` -- comms' Codex adapter, one wrapper process per identity.
 
-This lives OUTSIDE the daemon: the launcher is an **ordinary daemon-socket client**, and
+This lives OUTSIDE the daemon: the wrapper is an **ordinary daemon-socket client**, and
 **its socket connection is the liveness anchor -- its death is its deregistration**. The
 daemon stays a pure router with no child supervision.
 
-The Codex session itself is turns': the launcher calls `turns.codex.launch`, and turns'
+The Codex session itself is turns': the wrapper calls `turns.codex.launch`, and turns'
 host spawns and supervises `codex app-server`, holds the WebSocket link, starts and
 resumes the thread, wires Codex's own hooks (`moxi-turns-ping`) with their per-launch
 trust, delivers steer-first, opens the window and reaps every child when the launch ends.
@@ -146,7 +146,7 @@ def scrub_own_environ(stamped: dict, environ=None) -> None:
     """turns' host builds the session's environment as this process's own with the
     launch's `env` over it, so a comms stamp the identity does not carry must not be
     in this process's environment either: an agent that declared no directors would
-    otherwise inherit the launcher's `MOXI_COMMS_DIRECTORS`."""
+    otherwise inherit the wrapper's `MOXI_COMMS_DIRECTORS`."""
     from .session import INHERITED_COMMS_ENV
 
     environ = os.environ if environ is None else environ
@@ -161,7 +161,7 @@ class CodexAdapter(HarnessAdapter):
 
     KIND = ADAPTER_KIND
     STATE_NOUN = "thread-id file"
-    QUIET_OFFLINE_ON_STOP = True   # a launcher stopping closed it: nothing to say
+    QUIET_OFFLINE_ON_STOP = True   # a wrapper stopping closed it: nothing to say
     HOLDS_UNTIL_TURN_ENDS = True   # a digest's ids are held until its turn ends
     log = log
 
@@ -522,12 +522,12 @@ def build_parser():
 
     ap = argparse.ArgumentParser(
         prog="moxi-comms-codex",
-        description="comms' Codex adapter: one launcher per identity, over turns' Codex "
+        description="comms' Codex adapter: one wrapper per identity, over turns' Codex "
                     "host")
     ap.add_argument("identity", help="qualified roster identity, e.g. planner@proj-a")
     ap.add_argument("--window", action="store_true",
                     help="also open the Codex window on this launch's thread, in this "
-                         "terminal; closing the window stops the launcher and takes the "
+                         "terminal; closing the window stops the wrapper and takes the "
                          "identity offline")
     ap.add_argument("--config", metavar="PATH",
                     help="a comms config file, in config.toml's format, whose [codex] "
@@ -541,7 +541,7 @@ def build_parser():
 
 
 def window_log_path(qualified: str) -> Path:
-    """Where a `--window` run's launcher log goes."""
+    """Where a `--window` run's wrapper log goes."""
     from ..paths import codex_threads_dir
 
     return codex_threads_dir() / f"{qualified}.log"
@@ -644,7 +644,7 @@ def main(argv=None) -> int:  # pragma: no cover - exercised end to end by the su
         except Exception as e:                              # noqa: BLE001
             if args.window and type(e).__name__ != "HooksUntrusted":
                 # turns' window wait ran out, or the window failed before a load was
-                # accepted: the launcher gives up, exit 3, with the log named.
+                # accepted: the wrapper gives up, exit 3, with the log named.
                 print(f"moxi-comms-codex: gave up on {agent.qualified}: "
                       f"{str(e).rstrip('. ')}. The log is {log_path}.",
                       file=sys.stderr, flush=True)

@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 
 from moxi_comms import directory, tokens
-from moxi_comms.local_gateway import META_OPERATOR_TOKEN_HASH, LocalGateway
+from moxi_comms.local_record import META_OPERATOR_TOKEN_HASH, LocalRecord
 from moxi_comms.paths import directory_db, tokens_dir
 from moxi_comms.provision import COMPLETE, add_standing, provision, readiness
 
@@ -80,21 +80,21 @@ def _old_directory():
 
 @pytest.fixture
 def rig():
-    gateway = LocalGateway(poll_interval=0.02)
+    record = LocalRecord(poll_interval=0.02)
     try:
-        yield gateway, tokens.TokenStore(tokens_dir())
+        yield record, tokens.TokenStore(tokens_dir())
     finally:
-        gateway.close()
+        record.close()
 
 
-def _ready(gateway, store) -> str:
+def _ready(record, store) -> str:
     return readiness(directory_db(), store=store,
-                     operator_hash=gateway.meta_get(META_OPERATOR_TOKEN_HASH)).state
+                     operator_hash=record.meta_get(META_OPERATOR_TOKEN_HASH)).state
 
 
 def test_a_fresh_directory_has_no_webhook_table(rig):
-    gateway, store = rig
-    provision(gateway, directory_db(), standing=[("planner", "proj-a")], store=store)
+    record, store = rig
+    provision(record, directory_db(), standing=[("planner", "proj-a")], store=store)
     conn = directory.connect(directory_db(), read_only=True)
     try:
         tables = {row[0] for row in conn.execute(
@@ -102,25 +102,25 @@ def test_a_fresh_directory_has_no_webhook_table(rig):
         assert {"slots", "webhooks"}.isdisjoint(tables)
     finally:
         conn.close()
-    assert _ready(gateway, store) == COMPLETE
+    assert _ready(record, store) == COMPLETE
 
 
 def test_a_directory_from_0_1_0_keeps_its_columns_through_every_writer(rig):
-    gateway, store = rig
+    record, store = rig
     path = _old_directory()
     before = _webhook_columns(path)
     assert "bws_secret_id" in [column[1] for column in before]
     assert "secret_id" not in [column[1] for column in before]
 
     # First provisioning, then a re-run that adds standing identities.
-    provision(gateway, path, standing=[("planner", "proj-a")], store=store)
+    provision(record, path, standing=[("planner", "proj-a")], store=store)
     assert _webhook_columns(path) == before
-    provision(gateway, path, standing=[("planner", "proj-a"), ("archivist", "global")],
+    provision(record, path, standing=[("planner", "proj-a"), ("archivist", "global")],
               store=store)
     assert _webhook_columns(path) == before
     conn = directory.init(path)
     try:
-        add_standing(gateway, conn, "reviewer", "proj-b", store=store)
+        add_standing(record, conn, "reviewer", "proj-b", store=store)
     finally:
         conn.close()
     assert _webhook_columns(path) == before
@@ -132,15 +132,15 @@ def test_a_directory_from_0_1_0_keeps_its_columns_through_every_writer(rig):
         conn.close()
     assert rows == []
 
-    assert _ready(gateway, store) == COMPLETE
+    assert _ready(record, store) == COMPLETE
     assert _webhook_columns(path) == before
 
 
 def test_readiness_ignores_missing_slot_tokens_in_an_old_directory(rig):
     """Retired slot credentials do not make an otherwise complete directory lost."""
-    gateway, store = rig
+    record, store = rig
     path = _old_directory()
-    result = provision(gateway, path, store=store)
+    result = provision(record, path, store=store)
     conn = directory.connect(path)
     try:
         for slot_id in (1, 2):
@@ -155,7 +155,7 @@ def test_readiness_ignores_missing_slot_tokens_in_an_old_directory(rig):
     finally:
         conn.close()
     found = readiness(path, store=store,
-                      operator_hash=gateway.meta_get(META_OPERATOR_TOKEN_HASH))
+                      operator_hash=record.meta_get(META_OPERATOR_TOKEN_HASH))
     assert found.state == COMPLETE and found.detail == ""
     assert _webhook_columns(path)[5][1] == "bws_secret_id"
 

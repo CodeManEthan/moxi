@@ -12,8 +12,8 @@ from conftest import queued, wait_for_queue, wait_until, write_config
 
 from moxi_comms import constants, cursors, daemon as daemon_mod
 from moxi_comms.daemon import Daemon
-from moxi_comms.gateway import RateLimited
-from moxi_comms.mock_gateway import MockGateway
+from moxi_comms.record import RateLimited
+from moxi_comms.mock_record import MockRecord
 from moxi_comms.paths import cursors_dir, daemon_socket
 from moxi_comms.protocol import CLI_PROTOCOL, LineConn
 from moxi_comms.sender import SendFailed, _bounded
@@ -44,7 +44,7 @@ def test_send_verb_block_check_is_advisory_and_says_so(rig):
     code, out = rig.cli(["send", "--posture", "none", "reviewer", "hi"],  name="planner", scope="proj-a")
     assert code == 3
     assert "Advisory" in out and "enforcement is at daemon routing" in out
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 # --------------------------------------------------------------------------- 429
@@ -71,7 +71,7 @@ def test_429_exhaustion_is_loud_and_the_message_is_not_in_the_record(rig):
     with pytest.raises(SendFailed, match="SEND FAILED"):
         _bounded(send, as_="planner", attempts=constants.RETRY_ATTEMPTS,
                  sleep=lambda _seconds: None)
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 def test_the_verb_reports_the_loud_failure(rig, monkeypatch):
@@ -80,24 +80,24 @@ def test_the_verb_reports_the_loud_failure(rig, monkeypatch):
     def fail(*_args, **_kwargs):
         raise SendFailed("SEND FAILED: the message was NOT posted")
 
-    monkeypatch.setattr(rig.gateway, "post_as_identity", fail)
+    monkeypatch.setattr(rig.record, "post_as_identity", fail)
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "hi"],  name="planner", scope="proj-a")
     assert code == 5
     assert "SEND FAILED" in out and "was NOT posted" in out
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 # --------------------------------------------------------------------------- rescan
 
-def test_gateway_reconnect_without_resume_triggers_a_rescan(rig):
+def test_record_reconnect_without_resume_triggers_a_rescan(rig):
     b = rig.shim(name="reviewer", scope="proj-a")
     before = rig.daemon.rescans
-    rig.gateway.disconnect()
+    rig.record.disconnect()
     rig.post_as("agent-6", ["reviewer@proj-a"], "posted during the gap")
     wait_until(lambda: False, timeout=0.2)
     assert b.queue == [], "the event never reached the socket"
 
-    rig.gateway.reconnect(resume=False)             # fresh IDENTIFY: the gap is gone
+    rig.record.reconnect(resume=False)             # fresh IDENTIFY: the gap is gone
     assert wait_until(lambda: rig.daemon.rescans > before)
     wait_for_queue(b, 1)
     assert b.queue[0]["text"] == "posted during the gap"
@@ -106,9 +106,9 @@ def test_gateway_reconnect_without_resume_triggers_a_rescan(rig):
 def test_resume_replays_the_gap_without_a_rescan(rig):
     b = rig.shim(name="reviewer", scope="proj-a")
     before = rig.daemon.rescans
-    rig.gateway.disconnect()
+    rig.record.disconnect()
     rig.post_as("agent-6", ["reviewer@proj-a"], "gap message")
-    rig.gateway.reconnect(resume=True)
+    rig.record.reconnect(resume=True)
     wait_for_queue(b, 1)
     assert b.queue[0]["text"] == "gap message"
     assert rig.daemon.rescans == before
@@ -117,7 +117,7 @@ def test_resume_replays_the_gap_without_a_rescan(rig):
 def test_boot_rescan_rebuilds_the_pending_view(rig):
     rig.post_as("agent-6", ["curator@proj-a"], "waiting")
     wait_until(lambda: queued(rig.daemon, "curator@proj-a"))
-    fresh = daemon_mod.Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    fresh = daemon_mod.Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     rig.daemon.stop()
     fresh.start()
     try:
@@ -130,9 +130,9 @@ def test_boot_rescan_rebuilds_the_pending_view(rig):
 def test_rescan_does_not_re_pend_what_an_unbound_name_already_handled(rig):
     """The contract is "rescan #names PAST CURSORS". A chosen name that handled a message
     and then unbound gets no row for it: no reader writes a row for an id at or below
-    the name's cursor. The message is posted while the gateway is down, so only
+    the name's cursor. The message is posted while the record is down, so only
     the rescan reads it."""
-    rig.gateway.disconnect()
+    rig.record.disconnect()
     msg = rig.post_as("agent-6", ["curator@proj-a"], "handled before unbinding")
     cursors.advance("curator@proj-a", msg.id)
 
@@ -151,8 +151,8 @@ def test_rescan_still_pends_for_a_name_that_never_bound(rig):
 
 def test_rescan_still_pends_for_a_message_past_the_cursor(rig):
     """A cursor BEHIND the message proves only the earlier mail was handled. Both are
-    posted while the gateway is down, so only the rescan reads them."""
-    rig.gateway.disconnect()
+    posted while the record is down, so only the rescan reads them."""
+    rig.record.disconnect()
     first = rig.post_as("agent-6", ["curator@proj-a"], "handled")
     second = rig.post_as("agent-6", ["curator@proj-a"], "arrived after the cursor")
     cursors.advance("curator@proj-a", first.id)
@@ -171,7 +171,7 @@ def test_a_corrupt_cursor_file_does_not_stop_the_daemon_from_BOOTING(rig, tmp_pa
     cursors_dir().mkdir(parents=True, exist_ok=True)
     (cursors_dir() / "curator@proj-a.json").write_text('{"cursor": "not-a-number"}')
 
-    fresh = daemon_mod.Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    fresh = daemon_mod.Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     rig.daemon.stop()
     fresh.start()
     try:
@@ -260,7 +260,7 @@ def test_bind_deliver_unbind_rescan_leaves_the_pending_view_empty(rig):
     wait_until(lambda: "curator@proj-a" not in rig.daemon.bindings)
 
     before = rig.daemon.rescans
-    rig.gateway.reconnect(resume=False)
+    rig.record.reconnect(resume=False)
     assert wait_until(lambda: rig.daemon.rescans > before)
     wait_until(lambda: False, timeout=0.2)          # let a bad row show up
     assert queued(rig.daemon, "curator@proj-a") == set()
@@ -276,7 +276,7 @@ def test_shim_surfaces_comms_offline_and_reconnects(rig):
     assert wait_until(lambda: b.offline)
     assert any(OFFLINE_MESSAGE in s for s in b.statuses)
 
-    fresh = daemon_mod.Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+    fresh = daemon_mod.Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     rig.daemon = fresh
     assert wait_until(lambda: b.offline is False, timeout=5.0)
     assert wait_until(lambda: any("comms online" in s for s in b.statuses))
@@ -341,7 +341,7 @@ def test_stop_without_a_start_removes_nothing(shortdir):
     never bound has nothing of its own there, so it takes nothing away."""
     path = shortdir / "d.sock"
     path.write_text("someone else's")
-    d = Daemon(MockGateway(), socket_path=path, start_trim_thread=False)
+    d = Daemon(MockRecord(), socket_path=path, start_trim_thread=False)
     assert d.bound is False
     d.stop()
     assert path.exists(), "a daemon removes only the socket it bound"
@@ -352,7 +352,7 @@ def test_a_start_against_a_live_daemon_refuses_and_leaves_it_serving(rig):
     refuse, and neither the refusal nor its `stop()` may touch what is already there."""
     path = daemon_socket()
     inode = path.stat().st_ino
-    intruder = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    intruder = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
 
     with pytest.raises(RuntimeError, match="live comms daemon"):
         intruder.start()
@@ -368,8 +368,8 @@ def test_a_stale_socket_file_is_cleared_and_the_daemon_serves(rig, shortdir):
     """Unattended recovery still works: the file a dead daemon left behind answers
     ECONNREFUSED, which is the allowlist saying `nothing is here`."""
     path = stale_socket(shortdir / "d.sock")
-    d = Daemon(rig.gateway, clock=rig.clock, socket_path=path, start_trim_thread=False,
-               journal_path=shortdir / "j.db").start()
+    d = Daemon(rig.record, clock=rig.clock, socket_path=path, start_trim_thread=False,
+               history_path=shortdir / "j.db").start()
     try:
         assert d.bound is True
         assert says_ping(path)
@@ -382,8 +382,8 @@ def test_a_clean_stop_removes_the_socket_and_a_second_stop_does_not(rig, shortdi
     """The regression, and the flag's reset: once the file is gone the daemon no
     longer claims it, so a second `stop()` cannot take a successor's socket with it."""
     path = shortdir / "d.sock"
-    d = Daemon(rig.gateway, clock=rig.clock, socket_path=path, start_trim_thread=False,
-               journal_path=shortdir / "j.db").start()
+    d = Daemon(rig.record, clock=rig.clock, socket_path=path, start_trim_thread=False,
+               history_path=shortdir / "j.db").start()
     assert path.exists()
     d.stop()
     assert not path.exists() and d.bound is False
@@ -409,8 +409,8 @@ def test_a_probe_that_cannot_conclude_refuses_and_says_which_errno(monkeypatch, 
         raise error
 
     monkeypatch.setattr(socket.socket, "connect", refuse)
-    d = Daemon(rig.gateway, clock=rig.clock, socket_path=path, start_trim_thread=False,
-               journal_path=shortdir / "j.db")
+    d = Daemon(rig.record, clock=rig.clock, socket_path=path, start_trim_thread=False,
+               history_path=shortdir / "j.db")
     with pytest.raises(RuntimeError) as caught:
         d.start()
     assert f"errno {error.errno}" in str(caught.value)
@@ -420,19 +420,19 @@ def test_a_probe_that_cannot_conclude_refuses_and_says_which_errno(monkeypatch, 
 
 
 def test_a_refused_start_has_no_side_effects_at_all(rig, shortdir):
-    """Refusing is not half-starting: no server socket, no gateway subscription,
-    and no journal -- `Journal.open()` would have created the file and its parent."""
-    journal = shortdir / "fresh" / "bindings.db"
-    subscribers = len(rig.gateway._subs)
-    intruder = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False,
-                      journal_path=journal)
+    """Refusing is not half-starting: no server socket, no record subscription,
+    and no binding history -- `BindingHistory.open()` would have created the file and its parent."""
+    history = shortdir / "fresh" / "bindings.db"
+    subscribers = len(rig.record._subs)
+    intruder = Daemon(rig.record, clock=rig.clock, start_trim_thread=False,
+                      history_path=history)
 
     with pytest.raises(RuntimeError):
         intruder.start()
 
     assert intruder._server is None and intruder.bound is False
-    assert len(rig.gateway._subs) == subscribers, "it never subscribed"
-    assert not journal.exists() and not journal.parent.exists()
+    assert len(rig.record._subs) == subscribers, "it never subscribed"
+    assert not history.exists() and not history.parent.exists()
 
 
 # --------------------------------------------------------------------------- handing is

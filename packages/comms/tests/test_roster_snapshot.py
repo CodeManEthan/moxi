@@ -234,9 +234,9 @@ def test_a_partial_roster_response_does_not_advance_the_delta_memory(rig, tmp_pa
     capsys.readouterr()
 
 
-# ------------------------------------------------------------------- the launcher
+# ------------------------------------------------------------------- the wrapper
 
-def test_the_launcher_writes_no_settings_and_passes_no_comms_flag():
+def test_the_wrapper_writes_no_settings_and_passes_no_comms_flag():
     """comms has no hook, plugin or settings file: the label, the
     passthrough, and nothing else of comms' on the argv."""
     s = session.Session("lch1", name="reviewer", scope="proj-a", project="proj-a")
@@ -268,7 +268,7 @@ def test_everything_after_the_double_dash_reaches_claude_unchanged(capsys):
     assert "--settings" not in launch and "hooks" not in out
 
 
-def test_moxi_comms_claude_is_the_launcher(capsys):
+def test_moxi_comms_claude_is_the_wrapper(capsys):
     from moxi_comms import cli
     sid = "5e55a1d0-0000-4000-8000-0000000000c5"
     assert cli.main(["claude", "--name", "rev", "--session-id", sid, "--dry-run"],
@@ -289,7 +289,7 @@ def test_the_session_env_stamps_the_project_and_the_claim_socket_only():
     assert not [k for k in env if "CHANNEL" in k or "LAUNCH_PID" in k]
 
 
-def test_the_launcher_names_no_hook_command():
+def test_the_wrapper_names_no_hook_command():
     assert not [name for name in ("ping_command", "roster_command", "hook_settings")
                 if hasattr(session, name)]
 
@@ -303,7 +303,7 @@ def test_the_shim_has_no_mcp_seam_and_needs_the_inject_file(capsys):
         claude_shim.build_parser().parse_args(["--mcp"])
 
 
-# --------------------------------------------------------------- the launcher's label and refusals
+# --------------------------------------------------------------- the wrapper's label and refusals
 
 def test_the_native_address_renders_a_project_scope_with_at():
     """The harness reserves `@` in its own address grammar (a native send to
@@ -349,7 +349,7 @@ def test_two_scopes_of_one_name_stay_DISTINCT_natively():
                 session.native_name("main", scoping.GLOBAL)}) == 3
 
 
-def test_the_launchers_label_is_what_n_carries(tmp_path, monkeypatch):
+def test_the_wrappers_label_is_what_n_carries(tmp_path, monkeypatch):
     """A caller with its own session-name field names the Claude Code session through
     `--native-name`; `-n` carries it verbatim, last. No label = the identity spelling."""
     monkeypatch.setattr(session, "sessions_dir", lambda: tmp_path / "sessions")
@@ -386,7 +386,7 @@ def test_the_x_at_y_ambiguity_is_DECLARED_not_defended(capsys):
     assert collide.claude_argv()[-1] == scoped.claude_argv()[-1] == "x-at-y"
     # the identities themselves never collide -- only the label does
     assert scoping.qualify("x-at-y", scoping.GLOBAL) != scoping.qualify("x", "y")
-    # and the launcher refuses neither name
+    # and the wrapper refuses neither name
     assert session.main(["--name", "x-at-y", "--global",
                          "--session-id", "5e55a1d0-0000-4000-8000-0000000000a1",
                          "--dry-run"]) == 0
@@ -432,18 +432,18 @@ def test_nothing_parses_a_native_label_BACK_into_an_identity():
 
 
 def test_the_comms_render_sits_AFTER_the_passthrough_so_a_stale_n_is_overridden():
-    """The position is the mechanism. A launcher that has not yet dropped its own
+    """The position is the mechanism. A wrapper that has not yet dropped its own
     `-n` puts it in the passthrough; comms' render lands later in the argv and wins,
     because a repeated `-n` is last-wins (measured at 2.1.235: `-n probeA -n
     probeB` stores `probeB`). Comms neither inspects nor strips `extra` --
     the stale flag is still passed through verbatim, it is simply outranked."""
     s = session.Session("abc126d", name="reviewer", scope="proj-a", project="proj-a")
     s.write()
-    argv = s.claude_argv(["-n", "stale-launcher-label", "--model", "opus"])
-    assert argv.count("-n") == 2, "the operator's/launcher's flag is passed through, not stripped"
+    argv = s.claude_argv(["-n", "stale-wrapper-label", "--model", "opus"])
+    assert argv.count("-n") == 2, "the operator's/wrapper's flag is passed through, not stripped"
     assert argv.index("-n") < argv.index("-n", argv.index("-n") + 1)
     assert argv[-2:] == ["-n", "reviewer-at-proj-a"], "the comms render is the LAST -n"
-    assert "stale-launcher-label" in argv
+    assert "stale-wrapper-label" in argv
 
 
 def test_a_nameless_Session_renders_no_native_address():
@@ -496,10 +496,10 @@ def test_the_shim_refuses_the_retired_comm_slot_before_serving(monkeypatch, caps
 
 
 @pytest.mark.parametrize("name", ["bad name@x!", "planner@proj-a", "has space", "sl/ash"])
-def test_a_name_outside_the_grammar_is_refused_at_the_LAUNCHER(capsys, name):
+def test_a_name_outside_the_grammar_is_refused_at_the_WRAPPER(capsys, name):
     """`--name 'bad name@x!'` must not be accepted in full, rendered into `-n` and then
     fail at register time inside the session where nobody reads the log. The check
-    belongs here, at the launcher, against comms' own NAME_RE -- and it catches the
+    belongs here, at the wrapper, against comms' own NAME_RE -- and it catches the
     likeliest operator error too, a qualified name typed into --name where the scope half
     has its own flag."""
     assert session.main(["--name", name, "--dry-run"]) == 2
@@ -507,12 +507,12 @@ def test_a_name_outside_the_grammar_is_refused_at_the_LAUNCHER(capsys, name):
     assert "is not a name" in err
 
 
-def test_a_bad_slot_is_refused_at_the_launcher(capsys):
+def test_a_bad_slot_is_refused_at_the_wrapper(capsys):
     assert session.main(["--comm-slot", "seven", "--dry-run"]) == 2
 
 
 def test_the_old_slot_spelling_is_gone(capsys):
-    """The flag is `--comm-slot`, so it cannot be confused with another launcher's slot
+    """The flag is `--comm-slot`, so it cannot be confused with another wrapper's slot
     flag."""
     with pytest.raises(SystemExit) as exc:
         session.main(["--name", "reviewer", "--slot", "3", "--dry-run"])

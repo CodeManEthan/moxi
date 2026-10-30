@@ -198,8 +198,8 @@ def test_the_deadline_reaches_the_daemon_call_and_the_records_busy_timeout(env):
     finally:
         sending.DaemonClient = real
     assert seen["timeout"] == 2.5
-    assert ctx.gateway.busy_timeout_ms == 2500
-    assert sending.Context().gateway.busy_timeout_ms == 5000
+    assert ctx.record.busy_timeout_ms == 2500
+    assert sending.Context().record.busy_timeout_ms == 5000
 
 
 # --------------------------------------------------------------------------- the rig
@@ -237,7 +237,7 @@ def test_a_send_returns_its_data_and_the_verbs_lines(rig):
 def test_a_refusal_is_data_with_a_code(rig):
     rig.shim(name="planner")
     rig.shim(name="reviewer")
-    before = len(rig.gateway.history(rig.names_channel))
+    before = len(rig.record.history(rig.names_channel))
     with rig.session_holding(_sender(rig, "planner")) as path:
         got = api.send(api.Sender.socket(path), "reviewer", "x", posture=None)
     assert got.outcome == "refused" and got.exit_code == 2 and not got.posted
@@ -245,12 +245,12 @@ def test_a_refusal_is_data_with_a_code(rig):
     assert got.refusal.text == cli.POSTURE_REQUIRED
     assert got.lines() == [cli.POSTURE_REQUIRED]
     assert got.recipients == ()
-    assert len(rig.gateway.history(rig.names_channel)) == before
+    assert len(rig.record.history(rig.names_channel)) == before
 
 
 def test_check_posts_nothing_and_says_what_the_send_would(rig):
     rig.shim(name="planner")
-    before = len(rig.gateway.history(rig.names_channel))
+    before = len(rig.record.history(rig.names_channel))
     with rig.session_holding(_sender(rig, "planner")) as path:
         got = api.check(api.Sender.socket(path), "later-agent", "x", posture="none",
                         new_name=True)
@@ -261,7 +261,7 @@ def test_check_posts_nothing_and_says_what_the_send_would(rig):
     assert got.notes == (cli.NOT_BOUND_NOTE.format(name="later-agent"),)
     assert got.lines() == ["would send 1 message(s) to later-agent",
                            cli.NOT_BOUND_NOTE.format(name="later-agent")]
-    assert len(rig.gateway.history(rig.names_channel)) == before
+    assert len(rig.record.history(rig.names_channel)) == before
 
 
 def test_a_held_send_says_held_flag_per_recipient(rig):

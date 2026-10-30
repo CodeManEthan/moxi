@@ -62,7 +62,7 @@ BACKOFF_FACTOR = 2.0
 BACKOFF_MAX = 30.0
 BACKOFF_JITTER = 0.2   # +/- fraction
 
-# --- gateway rescan ------------------------------------------------------------------
+# --- record rescan ------------------------------------------------------------------
 RESCAN_LIMIT = 500     # max #names messages examined by a boot / non-RESUME rescan
 
 # --- the idle boundary (claude-shim) -------------------------------------------------

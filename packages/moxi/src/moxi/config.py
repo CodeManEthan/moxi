@@ -23,7 +23,7 @@ with a `type` (or a `retired`) is a key; any other table groups keys. So the sch
     default = "local"
     doc = "Where messages are recorded."
     read = "start"
-    env = "MOXI_COMMS_GATEWAY"
+    env = "MOXI_COMMS_BACKEND"
 
     [local.retain_days]
     type = "int"

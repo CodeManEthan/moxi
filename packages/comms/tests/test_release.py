@@ -126,12 +126,12 @@ def test_the_announcement_offers_codex_and_gates_its_script():
     assert module.API == "moxi_comms.api" and module.INTERFACES == frozenset({2})
 
 
-def test_internal_env_is_the_launcher_wiring_the_secrets_step_and_the_test_seam():
+def test_internal_env_is_the_wrapper_wiring_the_secrets_step_and_the_test_seam():
     """Every other variable comms reads is a config key's `env` or a root locator."""
     assert set(module.INTERNAL_ENV) == {
         "MOXI_COMMS_NAME", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL",
         "MOXI_COMMS_DIRECTORS", "MOXI_COMMS_SOCKET", "MOXI_COMMS_CLAIM_SOCKET",
         "MOXI_COMMS_PROJECT", "MOXI_COMMS_OPERATOR", "MOXI_COMMS_SECRET_",
-        "MOXI_COMMS_MOCK_GATEWAY",
+        "MOXI_COMMS_MOCK_BACKEND",
     }
     assert all(why.strip() for why in module.INTERNAL_ENV.values())

@@ -37,7 +37,7 @@ def retire(name: str, scope: str) -> None:
 
 
 def history(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def query(kind, **kw):
@@ -109,7 +109,7 @@ def test_a_bare_line_zero_tag_from_an_author_in_s_waits_for_the_global_x(rig):
 
 
 def test_at_a_rescan_and_a_replay_a_bare_tag_is_the_global_x(rig):
-    """The journal knows reviewer@proj-a, the global reviewer was never bound: a rescan
+    """The binding history knows reviewer@proj-a, the global reviewer was never bound: a rescan
     still files the bare tag for the global one, and its first bind's replay delivers it,
     while a rebind of reviewer@proj-a is never handed it."""
     scoped = rig.shim(name="reviewer", scope="proj-a")
@@ -219,9 +219,9 @@ def test_a_bare_whois_reads_the_global_card_only(monkeypatch, tmp_path):
 
 # --------------------------------------------------------------------------- ever bound
 
-def test_journal_ever_bound_reads_the_exact_identity(tmp_path):
-    j = bindings.Journal(tmp_path / "b.db")
-    assert j.ever_bound("x", "global") is None, "a journal that is not open cannot say"
+def test_binding_history_ever_bound_reads_the_exact_identity(tmp_path):
+    j = bindings.BindingHistory(tmp_path / "b.db")
+    assert j.ever_bound("x", "global") is None, "a binding history that is not open cannot say"
     assert j.open()
     j.bind(qualified="x@proj-a", name="x", scope="proj-a", tier="chosen",
            adapter="claude-shim")
@@ -245,8 +245,8 @@ def test_resolve_answers_ever_bound_and_the_identities_seen(rig):
     assert query("resolve", name="reviewer")["seen_as"] == [], "never a retired one"
 
 
-def test_resolve_answers_ever_bound_none_when_the_journal_is_closed(rig):
-    rig.daemon.journal.close()
+def test_resolve_answers_ever_bound_none_when_the_binding_history_is_closed(rig):
+    rig.daemon.binding_history.close()
     got = query("resolve", name="nobody")
     assert got["ever_bound"] is None
 
@@ -327,7 +327,7 @@ def test_a_recorded_tag_naming_a_retired_identity_is_held_for_nobody(rig):
     assert wait_until(lambda: m.id in queued(rig.daemon, "captain"))
     rig.daemon.rescan()
     assert not queued(rig.daemon, "captain@proj-old")
-    assert not record_rows(rig.gateway, "captain@proj-old")
+    assert not record_rows(rig.record, "captain@proj-old")
     assert m.id in queued(rig.daemon, "captain")
 
 
@@ -336,7 +336,7 @@ def test_the_provisioner_does_not_reactivate_a_retired_row(rig):
     retire("console2", "acme")
     with pytest.raises(SystemExit) as e:
         provision.send_only_main(["console2@acme", "--db", str(directory_db())],
-                                 gateway=rig.gateway, store=rig.store)
+                                 record=rig.record, store=rig.store)
     assert "retired" in str(e.value)
     conn = directory.connect(directory_db(), read_only=True)
     try:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end CLI smoke run against the mock gateway -- real processes, real sockets.
+"""End-to-end CLI smoke run against the mock record -- real processes, real sockets.
 
 Boots a file-backed mock record, provisions it, starts a real `moxi-comms-daemon`, two real
 `moxi-comms-shim` adapters, and drives `moxi comms`. Proves the basic loop outside pytest:
@@ -135,14 +135,14 @@ def main() -> int:
     runtime = Path(tempfile.mkdtemp(prefix="cms"))
     (runtime / "comms").mkdir()         # comms' runtime directory, as a login has it
 
-    store = home / "gateway.json"
+    store = home / "record.json"
     for key in list(os.environ):
         if key.startswith(FOREIGN) or key in FOREIGN_NAMES:
             del os.environ[key]
     env = {**clean_environ(),
            "MOXI_COMMS_HOME": str(home), "MOXI_COMMS_DEVICE": "smokebox",
            "MOXI_COMMS_RUNTIME_DIR": str(runtime), "MOXI_COMMS_PROJECT": "smoke",
-           "MOXI_COMMS_MOCK_GATEWAY": str(store),
+           "MOXI_COMMS_MOCK_BACKEND": str(store),
            "PYTHONPATH": str(REPO / "src")}
     # The cold-cache check reads each recipient's clock from its transcript, by the
     # session id and the transcript root its shim reports (`CLAUDE_CONFIG_DIR/projects`).
@@ -153,18 +153,18 @@ def main() -> int:
     claude_dir = home / "claude"
     os.environ.update(env)
 
-    from moxi_comms.mock_gateway import MockGateway
+    from moxi_comms.mock_record import MockRecord
     from moxi_comms.paths import cursors_dir, directory_db
     from moxi_comms.provision import provision
 
     procs, sessions = [], {}
     try:
-        provision(MockGateway(store), directory_db(), slots=4,
+        provision(MockRecord(store), directory_db(), slots=4,
                   standing=[("main", "smoke")], operator=("900001", "operator"))
         print(f"provisioned -> {directory_db()}")
 
         procs.append(subprocess.Popen([BIN / "moxi-comms-daemon",
-                                       "--gateway-store", str(store)],
+                                       "--backend-store", str(store)],
                                       env=env, stdout=subprocess.DEVNULL,
                                       stderr=subprocess.DEVNULL))
         sock = runtime / "comms" / "moxi-comms-daemon.sock"

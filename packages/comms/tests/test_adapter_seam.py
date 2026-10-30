@@ -11,7 +11,7 @@ from moxi_comms import codex_threads
 from moxi_comms.adapters.codex import CodexAdapter
 from moxi_comms.adapters.codex_roster import CodexAgent
 
-from fake_turns import FakeSession, launcher
+from fake_turns import FakeSession, fake_launch
 
 
 IDENTITY = "planner@proj-a"
@@ -21,7 +21,7 @@ def make_adapter(rig, tmp_path, session=None, **kwargs):
     row = CodexAgent(qualified=IDENTITY, name="planner", scope="proj-a",
                      cwd=str(tmp_path), thread_file=codex_threads.path(IDENTITY))
     fake = session or FakeSession()
-    adapter = CodexAdapter(row, launch=launcher(fake), clock=rig.clock,
+    adapter = CodexAdapter(row, launch=fake_launch(fake), clock=rig.clock,
                            started_wait=0.05, **kwargs)
     adapter.fake = fake
     return adapter

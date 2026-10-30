@@ -1,6 +1,6 @@
 """Recipient-declared director authority.
 
-The whole mechanism in one file: the declaration is qualified at LAUNCH (the launcher's
+The whole mechanism in one file: the declaration is qualified at LAUNCH (the wrapper's
 `--director`, the roster's `directors`), stamped into the session environment, and spent
 in exactly one place -- the frame line both adapters share. Nothing here touches the
 daemon, the payload, the record or a verb, and these tests would notice if it did: every
@@ -84,7 +84,7 @@ def test_no_declaration_stamps_nothing_at_all():
     assert directors.from_env(env) == ()
 
 
-def test_the_launcher_qualifies_once_and_hands_the_adapter_the_qualified_names():
+def test_the_wrapper_qualifies_once_and_hands_the_adapter_the_qualified_names():
     import os
     s = session.Session("dir1", name="reviewer", scope="proj-a", project="proj-a",
                         directors=["planner", "herald@global"])
@@ -98,7 +98,7 @@ def test_the_launcher_qualifies_once_and_hands_the_adapter_the_qualified_names()
     assert s.env(base={})[directors.ENV_VAR] == "planner,herald"
 
 
-def test_the_shim_never_re_qualifies_what_the_launcher_qualified():
+def test_the_shim_never_re_qualifies_what_the_wrapper_qualified():
     """A global director renders bare, so a second pass would make it `herald@proj-a`."""
     assert directors.validated(["herald", "planner@proj-a"]) == ("herald",
                                                                   "planner@proj-a")
@@ -216,7 +216,7 @@ def roster_agent(tmp_path, directors_toml, *, key="planner@proj-a"):
     return codex_roster.load().require(key)
 
 
-def test_the_roster_carries_a_directors_list_qualified_like_the_launcher(tmp_path):
+def test_the_roster_carries_a_directors_list_qualified_like_the_wrapper(tmp_path):
     agent = roster_agent(tmp_path, '["main", "herald@global", "other@proj-b"]')
     assert agent.directors == ["main", "herald", "other@proj-b"]
     assert agent.env(base={})[directors.ENV_VAR] == "main,herald,other@proj-b"

@@ -34,7 +34,7 @@ from moxi_comms.claimhold import CLAIM_SOCKET_ENV, NOT_INSIDE, ClaimServer
 from moxi_comms.client import DaemonClient
 from moxi_comms.membership import TREE, root_of
 from moxi_comms.paths import daemon_socket
-from fake_turns import FakeSession, launcher
+from fake_turns import FakeSession, fake_launch
 
 BOB = "bob@proj-a"
 ALICE = "alice@proj-a"
@@ -73,7 +73,7 @@ def world(rig):
 
 
 def history(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def sent_line(out: str, to: str) -> str:
@@ -94,7 +94,7 @@ def claim_env(socket_path) -> dict:
 
 def child_env(**extra) -> dict:
     """A child's environment: the rig's roots, the local record, no stamp."""
-    env = dict(os.environ, MOXI_COMMS_GATEWAY="local", MOXI_COMMS_PROJECT="proj-a")
+    env = dict(os.environ, MOXI_COMMS_BACKEND="local", MOXI_COMMS_PROJECT="proj-a")
     env.update(extra)
     for var in ("MOXI_COMMS_NAME", "MOXI_COMMS_SCOPE", "MOXI_COMMS_SLOT", "MOXI_COMMS_GLOBAL"):
         env.pop(var, None)
@@ -236,7 +236,7 @@ def test_a_claude_shim_session_sends_and_replies_as_on_main(rig):
 def test_a_codex_session_sends_and_replies_as_on_main(rig, tmp_path):
     agent = CodexAgent(qualified=ALICE, name="alice", scope="proj-a",
                        cwd=str(tmp_path), thread_file=codex_threads.path(ALICE), directors=[])
-    adapter = CodexAdapter(agent, launch=launcher(FakeSession()), autoreconnect=False,
+    adapter = CodexAdapter(agent, launch=fake_launch(FakeSession()), autoreconnect=False,
                            clock=rig.clock)
     try:
         adapter.start()

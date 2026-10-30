@@ -482,7 +482,7 @@ def restart(rig):
     made: list = []
 
     def again():
-        fresh = daemon_mod.Daemon(rig.gateway, clock=rig.clock,
+        fresh = daemon_mod.Daemon(rig.record, clock=rig.clock,
                                   start_trim_thread=False).start()
         rig.daemon = fresh
         made.append(fresh)
@@ -580,7 +580,7 @@ def test_a_stop_that_lands_mid_register_never_says_comms_online(rig, monkeypatch
     assert wait_until(lambda: seeds and seeds[0].waits >= 1), "parked, unbound"
 
     restart()
-    rig.gateway.max_message_id_hold = 0.4      # register stays in flight this long
+    rig.record.max_message_id_hold = 0.4      # register stays in flight this long
     seeds[0].step()
     time.sleep(0.15)                           # the supervisor is inside `register`
     shim.stop()                                # ...and the session ends under it
@@ -643,7 +643,7 @@ def test_the_inject_file_seam_reports_a_timeout_as_offline_not_refused(
     """On the hand-run seam: `DaemonTimeout` is a `DaemonError`, so with `except
     DaemonError` first a slow-but-live daemon would print a refusal naming no holder on
     the one seam a human reads directly. The seam's `EXIT_OFFLINE` is what it reaches."""
-    rig.gateway.max_message_id_hold = 0.3      # the mock's declared round trip
+    rig.record.max_message_id_hold = 0.3      # the mock's declared round trip
     real = claude_shim.DaemonClient
     monkeypatch.setattr(claude_shim, "DaemonClient",
                         lambda *a, **kw: real(*a, **{**kw, "timeout": 0.05}))
@@ -768,12 +768,12 @@ def test_a_send_waits_for_the_new_token_after_a_restart(rig, monkeypatch, restar
     code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "before"],
         env={CLAIM_SOCKET_ENV: str(path)})
     assert code == 4 and "holds no posting credential" in out
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
     seeds[0].step()
     assert wait_until(lambda: not planner.offline)
     code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "after"],
         env={CLAIM_SOCKET_ENV: str(path)})
     assert code == 0, out
-    posted = rig.gateway.history(rig.names_channel)[-1]
+    posted = rig.record.history(rig.names_channel)[-1]
     assert (posted.author_kind, posted.author_id) == ("identity", "planner@proj-a")

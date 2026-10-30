@@ -1,6 +1,6 @@
-"""The LOCAL backend: a SQLite file that IS the record, behind the gateway seam.
+"""The LOCAL backend: a SQLite file that IS the record, behind the record seam.
 
-One of `gateway.py`'s two implementations, beside `MockGateway` (in-process, the test
+One of `record.py`'s two implementations, beside `MockRecord` (in-process, the test
 double).
 
 Why it exists: comms reads no platform. Every comms process on the box
@@ -12,7 +12,7 @@ What is fixed here, and must not drift:
 
   * `STATE/comms/record.db` (`paths.record_db()`), one file per box. STATE and not
     DATA because a live DB is never continuous-file-synced.
-  * `max_content_length` 16,000 (`gateway.MAX_CONTENT_LENGTH`), the one cap on one
+  * `max_content_length` 16,000 (`record.MAX_CONTENT_LENGTH`), the one cap on one
     message.
   * `retain_days` 90 (config.toml's `[local] retain_days`, whose default this is),
     `0` disables.
@@ -48,10 +48,10 @@ import time
 from pathlib import Path
 
 from .config import LOCAL_RETAIN_DAYS
-from .gateway import (
+from .record import (
     MAX_CONTENT_LENGTH,
     Forbidden,
-    GatewayError,
+    RecordError,
     Message,
     Subscription,
 )
@@ -92,7 +92,7 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-class LocalGateway:
+class LocalRecord:
     """The box's own record. Every method here is one the seam's callers already use."""
 
     max_content_length = MAX_CONTENT_LENGTH
@@ -245,7 +245,7 @@ class LocalGateway:
         record that has not been provisioned for the operator yet.
         """
         if len(content) > self.max_content_length:
-            raise GatewayError(
+            raise RecordError(
                 f"content is {len(content)} characters, "
                 f"over the {self.max_content_length}-character cap on one message")
         stored = self.meta_get(META_OPERATOR_TOKEN_HASH)
@@ -270,7 +270,7 @@ class LocalGateway:
     def post_as_identity(self, qualified: str, channel_id: str, content: str) -> Message:
         """Write an agent post after the daemon has checked its live binding."""
         if len(content) > self.max_content_length:
-            raise GatewayError(
+            raise RecordError(
                 f"content is {len(content)} characters, "
                 f"over the {self.max_content_length}-character cap on one message")
         with self._write() as conn:
@@ -422,7 +422,7 @@ class LocalGateway:
             self._conn().execute("PRAGMA wal_checkpoint(TRUNCATE)")
         return deleted or 0
 
-    # ------------------------------------------------------------------ the gateway
+    # ------------------------------------------------------------------ events
     def subscribe(self, *, from_id: str | None = None) -> Subscription:
         sub = Subscription(from_id if from_id is not None else (self.max_message_id() or "0"))
         with self._lock:
@@ -509,5 +509,5 @@ class LocalGateway:
         self._local = threading.local()
 
 
-__all__ = ["LocalGateway", "ID_BASE", "MAX_CONTENT_LENGTH", "RETAIN_DAYS", "SCHEMA",
+__all__ = ["LocalRecord", "ID_BASE", "MAX_CONTENT_LENGTH", "RETAIN_DAYS", "SCHEMA",
            "META_NEXT_ID", "META_OPERATOR_TOKEN_HASH", "token_hash"]

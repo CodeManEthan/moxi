@@ -113,7 +113,7 @@ moxi comms claude --name reviewer
 (it binds the name before `claude` starts, and its log is under comms' state directory)
 and starts `claude`; everything after `--` goes to `claude` unchanged. The launch names
 its session id to `claude`: the one after `--` (`--session-id <uuid>`, or `--resume <uuid>`
-without `--fork-session`), else the launcher's own `--session-id <uuid>`, else a new one,
+without `--fork-session`), else the wrapper's own `--session-id <uuid>`, else a new one,
 added as `--session-id`. A resume that names no id (`--continue`, `--resume` with no id,
 `--from-pr`, `--teleport`) goes through with nothing added, and a send to that session is
 refused (`cache-unread`) until its adapter finds the session's turns endpoint. A name with no `@scope` is the global identity,
@@ -142,7 +142,7 @@ meets.
 | Claude Code sessions through `moxi comms claude` | supported, through Moxi turns: the session must load turns' Claude plugin; until its adapter finds the session's turns endpoint, mail to it waits and a send says `waiting` |
 | Systemd user service (`moxi comms service`) | supported |
 | Held mail, catch-up on start, delivery at turn boundaries | supported |
-| Attribution and the identity journal | supported |
+| Attribution and the binding history | supported |
 | Reply enforcement for the operator's and directors' messages | supported |
 | Codex adapter (`moxi-comms-codex`) | experimental |
 | OpenCode adapter (`moxi-comms-opencode`) | experimental |
@@ -232,7 +232,7 @@ the detail.
   opens its session in your terminal; mail goes to the server as its own prompts, never
   through your input box. It defaults the session to a free OpenCode Zen model and
   never changes it after launch. Each launch opens a new OpenCode session, as a new
-  Claude Code session starts fresh, and keeps that session while the launcher runs,
+  Claude Code session starts fresh, and keeps that session while the wrapper runs,
   across a restart of its server. /new and /clear in the window are followed. Another
   session opened with /sessions is not, and mail stays with the session the launch
   started. Identities are listed in the config file's `[opencode]` table:

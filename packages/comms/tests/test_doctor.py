@@ -23,7 +23,7 @@ from moxi_comms import cli, config, paths
 def doctor(env=None, socket_path=None):
     """One doctor run with this test's environment (the rig's tmp roots) under `env`."""
     out = io.StringIO()
-    ctx = cli.Context(gateway=object(), env=dict(os.environ, **(env or {})),
+    ctx = cli.Context(record=object(), env=dict(os.environ, **(env or {})),
                       socket_path=socket_path, out=out, db_path=Path("/nonexistent/db"))
     code = cli.main(["doctor"], ctx=ctx)
     return code, out.getvalue()
@@ -97,10 +97,10 @@ def test_a_configured_box_whose_daemon_is_down_exits_offline(tmp_path):
     assert code == cli.EXIT_OFFLINE
     assert rows(out)["config"] == str(path)
     assert rows(out)["backend"] == "local (the config file)"
-    code, _ = doctor(env={"PATH": "", "MOXI_COMMS_GATEWAY": "local"})
+    code, _ = doctor(env={"PATH": "", "MOXI_COMMS_BACKEND": "local"})
     assert code == cli.EXIT_OFFLINE
     path.unlink()
-    code, _ = doctor(env={"PATH": "", "MOXI_COMMS_GATEWAY": "mock"})
+    code, _ = doctor(env={"PATH": "", "MOXI_COMMS_BACKEND": "mock"})
     assert code == cli.EXIT_OFFLINE                         # the env var configures it too
 
 

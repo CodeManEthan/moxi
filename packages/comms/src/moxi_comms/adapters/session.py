@@ -1,22 +1,22 @@
-"""`moxi comms claude` (and `moxi-comms-claude`) -- the launcher: one command starts a
+"""`moxi comms claude` (and `moxi-comms-claude`) -- the wrapper: one command starts a
 Claude Code session with a comms identity.
 
 It stamps the session's identity into the environment, makes the session's RUNTIME
 directory, forks the session's adapter, and execs `claude`:
 
-  * **The adapter** (`claude_adapter`) is a comms process, one per session. The launcher
+  * **The adapter** (`claude_adapter`) is a comms process, one per session. The wrapper
     takes a handle on its own process (a pidfd: the pid `claude` keeps once this process
     execs it), forks, and the child detaches (its own session, its standard streams to
     comms' log) with the environment `claude` gets. Before `claude` starts it binds the
     name with the daemon and listens on the claim socket, `MOXI_COMMS_CLAIM_SOCKET`, with
-    the `claude` process as the claim's root: the launcher waits for its ready byte, at
+    the `claude` process as the claim's root: the wrapper waits for its ready byte, at
     most `READY_WAIT` seconds, so an in-session `moxi comms send` is answered from the
     session's first command. It then finds the session's turns endpoint and delivers
     through it, and ends when `claude` exits.
   * **No hooks, no settings file, no plugin.** turns is the one interface to the session:
     its plugin is the one a session loads, and comms' context (layer one, the roster and
     its deltas) reaches the session through comms' listener, which turns asks
-    (`moxi_comms.listener`). This launcher writes no `--settings` file, passes no
+    (`moxi_comms.listener`). This wrapper writes no `--settings` file, passes no
     `--mcp-config`, and adds no plugin flag of its own. A session that is to load turns'
     plugin for one launch passes `--plugin-dir` itself, after `--`.
 
@@ -31,7 +31,7 @@ The identity is stamped into the session's environment at launch (`MOXI_COMMS_NA
 beside the adapter's claim socket (`MOXI_COMMS_CLAIM_SOCKET`). `moxi comms send` inside that
 session reads who it is speaking as from the claim socket; the stamp alone sends nothing.
 
-The launcher also stamps how its own comms is run, `MOXI_COMMS_COMMAND` (its `moxi`
+The wrapper also stamps how its own comms is run, `MOXI_COMMS_COMMAND` (its `moxi`
 script by absolute path, `context.own_comms`). comms' listener names it in the session's
 layer one, so the agent runs this install's comms and not whatever `moxi` its shell's
 PATH finds first.
@@ -58,11 +58,11 @@ from ..context import COMMAND_ENV, own_comms
 from ..paths import log_dir, runtime_root
 from ..scoping import GLOBAL, NAME_RE, project_key
 
-#: The old launcher stamp, scrubbed from a child's environment so a nested session
+#: The old wrapper stamp, scrubbed from a child's environment so a nested session
 #: does not inherit its parent's (no comms code reads it).
 SOCKET_ENV = "MOXI_COMMS_SHIM_SOCKET"
 
-#: How long the launcher waits for the adapter's ready byte before it execs `claude`
+#: How long the wrapper waits for the adapter's ready byte before it execs `claude`
 #: anyway (the adapter's bind and listen take well under a second; a daemon that is not
 #: there does not hold it up, since the adapter then binds when the daemon returns).
 READY_WAIT = 5.0
@@ -100,7 +100,7 @@ def native_name(name: str, scope: str) -> str:
     collision costs a rename and no identity confusion. It is declared, not defended
     against; no machinery here guards it.
 
-    The renderer lives HERE, in the launcher, rather than beside `qualify()`, because
+    The renderer lives HERE, in the wrapper, rather than beside `qualify()`, because
     the native label is a harness artifact with exactly one writer -- this process, at
     launch. Keeping it out of `scoping` keeps the identity module free of a spelling no
     comms surface should ever be tempted to consume.
@@ -109,14 +109,14 @@ def native_name(name: str, scope: str) -> str:
 
 
 def sessions_dir(env=None) -> Path:
-    """RUNTIME/comms/comms-sessions: one directory per session this launcher starts,
+    """RUNTIME/comms/comms-sessions: one directory per session this wrapper starts,
     holding its claim socket and its roster memory."""
     return runtime_root(env) / "comms-sessions"
 
 
 # Every variable comms sets on a session. A child's comms identity is composed ONLY of
 # what its caller stamps, so all of these come off first -- see `stamped_env`.
-#: The claim socket: a session never inherits its launcher's.
+#: The claim socket: a session never inherits its wrapper's.
 CLAIM_SOCKET_ENV = "MOXI_COMMS_CLAIM_SOCKET"
 
 INHERITED_COMMS_ENV = ("MOXI_COMMS_NAME", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL",
@@ -138,7 +138,7 @@ def stamped_env(base=None, **claim) -> dict:
     session that launched it. The socket is the visible symptom; the one that
     matters is `MOXI_COMMS_DIRECTORS`, because authority is the recipient's own grant and
     nobody may be handed one by proximity. An agent that declared no directors would
-    have inherited its launcher's and rendered another agent's mail as `directive from`.
+    have inherited its wrapper's and rendered another agent's mail as `directive from`.
 
     Every stamp site goes through here -- `Session.env`, the codex roster and the
     opencode roster -- because the leak was in the pattern, not in any one of them.
@@ -204,7 +204,7 @@ class Session:
     # ------------------------------------------------------------------ pieces
     def env(self, base=None) -> dict:
         """The session's environment: the identity stamp, the claim socket and the
-        launcher's comms command, over a scrubbed `base`."""
+        wrapper's comms command, over a scrubbed `base`."""
         env = stamped_env(base, name=self.name, scope=self.scope,
                           global_=self.global_, project=self.project,
                           directors=self.directors)
@@ -241,8 +241,8 @@ class Session:
         harness reserves `@` in its own address grammar and a `name@scope` label is
         unaddressable. Global still renders bare. See `native_name`.
 
-        Position is deliberate: the render goes AFTER `*extra`, the launcher
-        passthrough, so a stale launcher that still passes `-n` is overridden by
+        Position is deliberate: the render goes AFTER `*extra`, the wrapper
+        passthrough, so a stale wrapper that still passes `-n` is overridden by
         position. A repeated `-n` is LAST-WINS -- measured, not assumed
         (`claude --bg -n first -n second` -> session store `name`
         `second`, banner and `claude agents --json` agreeing; Claude Code
@@ -260,7 +260,7 @@ class Session:
         hand `os.execve` a `-n "None-at-proj"` or a literal `None`.
 
         **`--native-name` overrides the render.** A caller that names the session
-        (a launcher with its own session-name field) hands the name here as
+        (a wrapper with its own session-name field) hands the name here as
         `--native-name`. When one is given it is what `-n` carries, verbatim; the identity
         spelling (`native_name()`) remains the render when no label is given, so a bare
         `moxi-comms-claude --name x` still comes up as `x`. The position (last, after the
@@ -273,14 +273,14 @@ class Session:
         return argv
 
     def native_label(self) -> str:
-        """What `-n` carries: the launcher's label or the identity spelling."""
+        """What `-n` carries: the wrapper's label or the identity spelling."""
         return self.native or native_name(self.name, self.scope)
 
 
 # --------------------------------------------------------------------------- main
 
 def split_passthrough(argv) -> tuple[list[str], list[str]]:
-    """The launcher's own arguments, and everything after the first `--`, which goes to
+    """The wrapper's own arguments, and everything after the first `--`, which goes to
     `claude` exactly as given (a later `--` included)."""
     argv = list(sys.argv[1:] if argv is None else argv)
     if "--" in argv:
@@ -338,9 +338,9 @@ def launch_session_id(passthrough, own=None):
     An id the passthrough names is the id: `--session-id U`, or `--resume U` / `-r U`
     with `U` a UUID and no `--fork-session`. A launch that resumes without naming one
     (`--continue`, `-c`, `--resume` with no UUID, `--from-pr`, `--teleport`) and does not
-    fork passes through unchanged and names none: (None, []). Otherwise the launcher
+    fork passes through unchanged and names none: (None, []). Otherwise the wrapper
     names one, its own `--session-id` or a fresh UUID, and adds `--session-id U`.
-    Raises ValueError when the launcher's own `--session-id` or the passthrough's is not
+    Raises ValueError when the wrapper's own `--session-id` or the passthrough's is not
     a UUID, or the two differ.
 
     The id comes back in lowercase, the spelling `claude` and turns report it in and
@@ -421,7 +421,7 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
         print(f"{prog}: pass --name <name>.\n"
               "  A claim is a name: it is what the record shows, what a recipient's frame\n"
               "  line says, and what `moxi comms send` speaks as. `agent-N` is minted by the\n"
-              "  daemon at register time — after this launcher has handed the session its\n"
+              "  daemon at register time — after this wrapper has handed the session its\n"
               "  environment — so there is no identity to stamp into it. Add --name.",
               file=sys.stderr)
         return 2
@@ -430,7 +430,7 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
         # accepted in full and rendered into the address as `-n 'bad name@x!@proj-a'`.
         # It then failed at REGISTER time, inside the session, where the shim's refusal
         # goes to a debug log nobody reads.
-        # NAME_RE is comms' own; this is the launcher consulting it, not a second copy.
+        # NAME_RE is comms' own; this is the wrapper consulting it, not a second copy.
         print(f"{prog}: --name {args.name!r} is not a name. A comms identity is "
               f"{NAME_RE.pattern} -- letters, digits, dot, underscore, hyphen. The scope "
               "half goes in --scope or --global, never in the name.", file=sys.stderr)
@@ -443,7 +443,7 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
         print(f"{prog}: {e}", file=sys.stderr)
         return 2
     # An unnamed resume states no id until the look; its runtime dir is still named, by
-    # the launcher's own --session-id when it has one, in lowercase as a stated id is.
+    # the wrapper's own --session-id when it has one, in lowercase as a stated id is.
     session_id = stated or (args.session_id or "").lower() or uuid.uuid4().hex[:8]
     try:
         session = Session(session_id, name=args.name,
@@ -501,7 +501,7 @@ def launch(session: Session, binary: str, cmd: list[str], env: dict, *,
     its pid, so the handle is the adapter's watch on `claude`, and a reused pid cannot
     stand in for it. The adapter is forked twice over (its first parent leaves at once),
     so it is never `claude`'s child and is not left a zombie under it, and it runs in a
-    session of its own. The launcher waits for its ready byte, at most `ready_wait`
+    session of its own. The wrapper waits for its ready byte, at most `ready_wait`
     seconds, then execs whatever it heard; past the bound it says so on stderr."""
     from .terminal import pidfd_open   # not at the top: it needs termios, and the listener
     #                                    imports this module
@@ -590,7 +590,7 @@ def adapter_shim(session: Session, harness_pid: int, **extra):
     session id, its claim socket in the session's directory with the `claude` process as
     the claim's root, and its supervisor on. The session id is the one the launch named
     to `claude`, stated from the bind until the first look replaces it; an
-    unnamed resume states none. Never an inherited `CLAUDE_CODE_SESSION_ID` (a launcher
+    unnamed resume states none. Never an inherited `CLAUDE_CODE_SESSION_ID` (a wrapper
     run inside another session carries that session's)."""
     from ..membership import TREE, root_of
     from .claude_shim import ClaudeShim

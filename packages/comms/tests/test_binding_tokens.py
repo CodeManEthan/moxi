@@ -50,7 +50,7 @@ def test_a_live_token_posts_one_stamped_row_in_the_names_room(
         rig, bind_answered, backend):
     holder, answer = bind_answered(name="planner", scope="proj-a")
     posted = holder.post("planner@proj-a", answer["token"], "hello")
-    rows = rig.gateway.history(rig.names_channel)
+    rows = rig.record.history(rig.names_channel)
     assert [row.id for row in rows] == [posted["message_id"]]
     assert (rows[0].channel_id, rows[0].author_kind, rows[0].author_id,
             rows[0].author_display, rows[0].content) == (
@@ -80,13 +80,13 @@ def test_wrong_missing_released_and_unbound_credentials_write_nothing(
             assert raised.value.response["credential"] is True
     finally:
         caller.close()
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 def test_a_token_from_before_a_daemon_restart_is_dead(rig, bind_answered):
     old, answer = bind_answered(name="planner", scope="proj-a")
     rig.daemon.stop()
-    rig.daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+    rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     caller = client()
     try:
         with pytest.raises(DaemonError) as raised:
@@ -95,14 +95,14 @@ def test_a_token_from_before_a_daemon_restart_is_dead(rig, bind_answered):
     finally:
         caller.close()
         old.close()
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 def test_retired_overlong_and_stopping_posts_write_nothing(rig, bind_answered):
     holder, answer = bind_answered(name="planner", scope="proj-a")
     with pytest.raises(DaemonError, match="over the") as too_long:
         holder.post("planner@proj-a", answer["token"],
-                    "x" * (rig.gateway.max_content_length + 1))
+                    "x" * (rig.record.max_content_length + 1))
     assert "credential" not in too_long.value.response
 
     db = directory.connect(directory_db())
@@ -124,7 +124,7 @@ def test_retired_overlong_and_stopping_posts_write_nothing(rig, bind_answered):
     finally:
         with rig.daemon._lock:
             rig.daemon._stopping = False
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 def test_a_declared_kind_gets_a_token_and_posts_the_same_way(rig):
@@ -142,7 +142,7 @@ def test_a_declared_kind_gets_a_token_and_posts_the_same_way(rig):
         holder.post("helper@proj-a", answer["token"], "declared")
     finally:
         holder.close()
-    (row,) = rig.gateway.history(rig.names_channel)
+    (row,) = rig.record.history(rig.names_channel)
     assert (row.author_kind, row.author_id, row.content) == (
         "identity", "helper@proj-a", "declared")
 
@@ -234,7 +234,7 @@ def test_more_than_six_names_bind_and_a_protocol_two_slot_is_ignored(
 def test_an_old_register_is_refused_before_it_changes_any_binding_state(rig, slot):
     message = rig.post_as("reviewer@proj-a", ["planner@proj-a"], "waiting")
     assert wait_until(lambda: str(message.id) in rig.daemon.queue.get("planner@proj-a", {}))
-    before = list(rig.daemon.journal.intervals())
+    before = list(rig.daemon.binding_history.intervals())
     old = client()
     try:
         with pytest.raises(DaemonError) as raised:
@@ -248,7 +248,7 @@ def test_an_old_register_is_refused_before_it_changes_any_binding_state(rig, slo
     finally:
         old.close()
     assert "planner@proj-a" not in rig.daemon.bindings
-    assert list(rig.daemon.journal.intervals()) == before
+    assert list(rig.daemon.binding_history.intervals()) == before
     assert str(message.id) in rig.daemon.queue["planner@proj-a"]
 
 
@@ -256,12 +256,12 @@ def test_a_restart_writes_no_keep_file_and_the_name_rebinds_with_a_new_token(
         rig, bind_answered):
     old, answer = bind_answered(name="planner", scope="proj-a")
     old_token = answer["token"]
-    rows = [row for row in rig.daemon.journal.intervals()
+    rows = [row for row in rig.daemon.binding_history.intervals()
             if row["qualified"] == "planner@proj-a"]
     assert len(rows) == 1 and "slot_id" not in rows[0].keys()
     rig.daemon.stop()
     assert not (state_dir() / "slot-keeps.json").exists()
-    rig.daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+    rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     fresh = client()
     try:
         rebound = fresh.register(name="planner", scope="proj-a")

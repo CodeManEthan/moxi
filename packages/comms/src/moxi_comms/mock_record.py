@@ -1,13 +1,13 @@
 """A mock record good enough to BE the record.
 
-The interface it implements lives in `gateway.py`, and `local_gateway.LocalGateway`
+The interface it implements lives in `record.py`, and `local_record.LocalRecord`
 implements the same one on the box's SQLite record. The daemon, the sender and the
 provisioner talk only to these methods and never learn which one they hold:
 
     channels        create_channel / channel_by_name
     permissions     deny_send / can_send
     the record      history(channel, after=, limit=) / get_message
-    the gateway     subscribe() -> Subscription, disconnect(), reconnect(resume=)
+    events          subscribe() -> Subscription, disconnect(), reconnect(resume=)
 
 Fidelity the tests depend on:
   * monotonic message ids (string, comparable as ints);
@@ -16,7 +16,7 @@ Fidelity the tests depend on:
     distinction (a non-RESUME reconnect loses the gap -- the daemon must rescan);
   * an optional JSON store so separate PROCESSES (the `comms` CLI, the daemon) share
     one record -- which is what makes a real end-to-end CLI smoke run possible;
-  * a DECLARED slow-gateway hold on `max_message_id`, because a mock that is
+  * a DECLARED slow-record hold on `max_message_id`, because a mock that is
     always instant hides every race the daemon runs against a real round trip.
 """
 
@@ -31,11 +31,11 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from .gateway import (
+from .record import (
     MAX_CONTENT_LENGTH,
     Fatal,
     Forbidden,
-    GatewayError,
+    RecordError,
     Message,
     RateLimited,
     Subscription,
@@ -45,7 +45,7 @@ from .gateway import (
 _EPOCH_BASE = 1_400_000_000_000  # only monotonicity matters
 
 
-class MockGateway:
+class MockRecord:
     """In-process record. Pass `store_path` to share the record across processes."""
 
     # Declared and enforced on every posting lane.
@@ -65,7 +65,7 @@ class MockGateway:
     # caller that reads outside its lock has to be safe against. It is also taken outside
     # `_txn()`, so a message CAN be posted during the round trip -- which is the whole
     # experiment. `subscribe()` and `reconnect()` read the high-water mark too, so a hold
-    # engaged before them slows the gateway's lifecycle as well as the daemon's registers.
+    # engaged before them slows the record's lifecycle as well as the daemon's registers.
     max_message_id_hold = 0.0
 
     def __init__(self, store_path: str | Path | None = None, poll_interval: float = 0.02,
@@ -196,7 +196,7 @@ class MockGateway:
             if self._rate_limits:
                 raise RateLimited(self._rate_limits.pop(0))
         if len(content) > self.max_content_length:
-            raise GatewayError(
+            raise RecordError(
                 f"content is {len(content)} characters, "
                 f"over the {self.max_content_length}-character cap on one message")
         with self._txn(write=True) as st:
@@ -214,7 +214,7 @@ class MockGateway:
     def post_as_identity(self, qualified: str, channel_id: str, content: str) -> Message:
         """Write an agent post after the daemon has checked its live binding."""
         if len(content) > self.max_content_length:
-            raise GatewayError(
+            raise RecordError(
                 f"content is {len(content)} characters, "
                 f"over the {self.max_content_length}-character cap on one message")
         with self._txn(write=True) as st:
@@ -299,7 +299,7 @@ class MockGateway:
             time.sleep(self.max_message_id_hold)   # the declared round trip, in flight
         return answer
 
-    # ------------------------------------------------------------------ the gateway
+    # ------------------------------------------------------------------ events
     def subscribe(self, *, from_id: str | None = None) -> Subscription:
         sub = Subscription(from_id if from_id is not None else (self.max_message_id() or "0"))
         with self._lock:
@@ -362,5 +362,5 @@ class MockGateway:
         return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.clock()))
 
 
-__all__ = ["MockGateway", "Message", "Subscription",
-           "GatewayError", "RateLimited", "Forbidden", "Fatal"]
+__all__ = ["MockRecord", "Message", "Subscription",
+           "RecordError", "RateLimited", "Forbidden", "Fatal"]

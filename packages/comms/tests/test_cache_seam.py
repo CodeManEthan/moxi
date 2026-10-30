@@ -295,7 +295,7 @@ def test_required_and_absent_refuses_the_start(rig, monkeypatch):
     rig.daemon.stop()
     write_config(None, "[cache]\nrequired = true\n")
     cache_absent(monkeypatch)
-    daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     with pytest.raises(RuntimeError, match=r"\[cache\] required = true") as e:
         daemon.start()
     assert cache.INSTALL in str(e.value)
@@ -307,14 +307,14 @@ def test_required_and_broken_refuses_the_start(rig, monkeypatch):
     write_config(None, "[cache]\nrequired = true\n")
     cache_absent(monkeypatch, "broken")
     with pytest.raises(RuntimeError, match="does not load"):
-        Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+        Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
 
 
 def test_required_and_present_starts(rig):
     cache_api()
     rig.daemon.stop()
     write_config(None, "[cache]\nrequired = true\n")
-    daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+    daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     try:
         assert daemon.bound
     finally:
@@ -324,7 +324,7 @@ def test_required_and_present_starts(rig):
 def test_not_required_and_absent_starts_without_the_hold(rig, monkeypatch):
     rig.daemon.stop()
     cache_absent(monkeypatch)
-    daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+    daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     try:
         assert daemon.bound and daemon.cache_store is None
     finally:
@@ -370,7 +370,7 @@ def test_a_store_handed_in_is_kept_open_at_stop(rig):
     rig.daemon.stop()
     store = api.open_store(learn=True)
     try:
-        daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False,
+        daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False,
                         cache_store=store).start()
         assert daemon.cache_store is store
         daemon.stop()

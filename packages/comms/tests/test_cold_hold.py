@@ -71,7 +71,7 @@ def last_agent_n(q):
 # --------------------------------------------------------------------------- helpers
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def held_of(rig, q=REVIEWER_Q):
@@ -154,7 +154,7 @@ def test_a_plain_send_to_a_cold_shim_is_posted_and_held(rig):
     (cold_at,) = ml.cold_at
     assert isinstance(cold_at, int) and cold_at <= t_send, "a cold read's cold-at is past"
     wait_until(lambda: msg.id in held_of(rig))
-    assert record_rows(rig.gateway, REVIEWER_Q) == {msg.id}
+    assert record_rows(rig.record, REVIEWER_Q) == {msg.id}
     time.sleep(0.1)
     assert s.queue == []
     view = agents_view()
@@ -182,7 +182,7 @@ def test_wake_the_operators_turn_releases_it(rig):
     assert held_of(rig) == {mid}
     send_turn(s, handled=[mid])
     wait_until(lambda: held_of(rig) == set())
-    assert record_rows(rig.gateway, REVIEWER_Q) == set()
+    assert record_rows(rig.record, REVIEWER_Q) == set()
 
 
 def test_the_shims_stop_on_a_warm_read_releases_the_row(rig, monkeypatch):
@@ -413,10 +413,10 @@ def test_an_ended_agent_n_drops_its_rows_from_memory_and_the_record(rig):
     s = agent_n(rig)
     q = s.identity
     _out, mid = cold_send(rig, q)
-    wait_until(lambda: record_rows(rig.gateway, q) == {mid})
+    wait_until(lambda: record_rows(rig.record, q) == {mid})
     stop_shim(rig, s, q)
     assert held_of(rig, q) == set()
-    wait_until(lambda: record_rows(rig.gateway, q) == set())
+    wait_until(lambda: record_rows(rig.record, q) == set())
 
 
 def test_boot_drops_an_agent_ns_rows_and_the_same_number_gets_nothing(rig, reboot):
@@ -431,11 +431,11 @@ def test_boot_drops_an_agent_ns_rows_and_the_same_number_gets_nothing(rig, reboo
     stop_shim(rig, s, q)
     stop_shim(rig, keeper)
     rig.daemon.stop()
-    rig.gateway.queue_add(q, [mid])              # as a daemon that died mid-unbind left it
-    assert record_rows(rig.gateway, q) == {mid}
+    rig.record.queue_add(q, [mid])              # as a daemon that died mid-unbind left it
+    assert record_rows(rig.record, q) == {mid}
     reboot(rig)
     assert held_of(rig, q) == set()
-    assert record_rows(rig.gateway, q) == set()
+    assert record_rows(rig.record, q) == set()
     assert held_of(rig) == {kept}, "a chosen name's rows are untouched"
     later = rig.shim(session_id=SESS_B)          # unrelated, numbered the same
     assert later.identity == q

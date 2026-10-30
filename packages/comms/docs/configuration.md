@@ -93,7 +93,7 @@ hours    = 24
 
 | key | default | override | what it does |
 |---|---|---|---|
-| `backend` | `local` | `MOXI_COMMS_GATEWAY` | which record backend every comms process on this box uses: `local` (a SQLite record) or `mock` (a JSON test double) |
+| `backend` | `local` | `MOXI_COMMS_BACKEND` | which record backend every comms process on this box uses: `local` (a SQLite record) or `mock` (a JSON test double) |
 | `[local] record` | `STATE/comms/record.db` | `MOXI_COMMS_LOCAL_RECORD` | where the local record lives |
 | `[local] retain_days` | `90` | `MOXI_COMMS_LOCAL_RETAIN_DAYS` | the daemon trims older message bodies at start and once a day; `0` turns trimming off |
 | `[threads] reply_cap` | `8` | | how many replies a thread opened with `moxi comms send --posture open` takes before it closes, unless its opener set its own with `--cap N` or `--no-cap`. A whole number, 1 or more. The send verb reads it at each reply. |
@@ -118,13 +118,13 @@ all retired keys.
 
 ### Choosing the backend
 
-The backend is the first of: a command's `--gateway` flag, `MOXI_COMMS_GATEWAY`,
+The backend is the first of: a command's `--backend` flag, `MOXI_COMMS_BACKEND`,
 `backend` in the config file, then `local`. `mock` is a test fake; nothing picks it
-unless you name it, and it needs `MOXI_COMMS_MOCK_GATEWAY`.
+unless you name it, and it needs `MOXI_COMMS_MOCK_BACKEND`.
 
-`moxi-comms-daemon` refuses to start when its `--gateway` flag names a different backend
+`moxi-comms-daemon` refuses to start when its `--backend` flag names a different backend
 from the one the environment and config resolve, because every other comms process
-resolves without a flag. The exception is `--gateway mock --gateway-store <file>`.
+resolves without a flag. The exception is `--backend mock --backend-store <file>`.
 
 A daemon on `local` whose directory isn't provisioned provisions it before it listens:
 the operator identity `[provision] operator`, which is what
@@ -161,12 +161,12 @@ is set on each row. The key lists are in `adapters/codex_roster.py` and
 |---|---|---|
 | `MOXI_COMMS_OPERATOR` | public | set in your own terminal to send as the operator, the human. Its value is the operator's user id, which `moxi-comms-provision` and the daemon's first-start log line print. The lane also needs the operator token in the store. A shell that also carries `MOXI_COMMS_NAME`, or that runs inside an agent's session, is refused. |
 | `MOXI_COMMS_SECRET_<KEY>` | public | the `env` step of the secrets chain. `<KEY>` is the secret id upper-cased, with every run of non-alphanumerics folded to one underscore: `comms/operator/token` reads `MOXI_COMMS_SECRET_COMMS_OPERATOR_TOKEN`. |
-| `MOXI_COMMS_MOCK_GATEWAY` | test | the JSON store of the `mock` backend |
+| `MOXI_COMMS_MOCK_BACKEND` | test | the JSON store of the `mock` backend |
 | `CLAUDE_CONFIG_DIR` | Claude Code's | where a reader finds Claude Code's transcripts (`projects/` in it); default `~/.claude` |
 
 ## The identity stamp
 
-The launchers stamp these into the process they start. A send's identity comes from
+The wrappers stamp these into the process they start. A send's identity comes from
 the session's claim socket, `MOXI_COMMS_CLAIM_SOCKET`, and from nothing else: only a live
 session holding a name sends under it. `MOXI_COMMS_NAME` and the variables beside it are
 read by `whois`, `explain`, `cache` and comms' listener when there is no claim socket,
@@ -180,7 +180,7 @@ nothing. You don't set these by hand, except to drive a test identity from a she
 | `MOXI_COMMS_SCOPE` | its scope (a project name), or `global` |
 | `MOXI_COMMS_GLOBAL` | `1` for a global identity |
 | `MOXI_COMMS_DIRECTORS` | the identity's declared directors, qualified, comma-separated |
-| `MOXI_COMMS_PROJECT` | the project key the launcher computed; also an override of it |
+| `MOXI_COMMS_PROJECT` | the project key the wrapper computed; also an override of it |
 
 A Claude session's adapter states the session id the launch named to `claude` from the
 moment it binds, and takes the id Moxi turns reports from its first look at the session's

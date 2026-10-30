@@ -151,7 +151,7 @@ def test_the_guard_fails_a_path_outside_both_roots_and_names_both(tmp_path_facto
 # --------------------------------------------------------------------------- helpers
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def held_of(rig, q=REVIEWER_Q):
@@ -167,8 +167,8 @@ def queued_ids(shim_or_queue):
 
 
 def nudge(rig):
-    if hasattr(rig.gateway, "nudge"):
-        rig.gateway.nudge()
+    if hasattr(rig.record, "nudge"):
+        rig.record.nudge()
 
 
 def post(rig, recipients, text="past the verb", *, next_turn=False,
@@ -561,7 +561,7 @@ def test_a_caller_past_the_verb_is_still_held(rig):
     out = io.StringIO()
     planner = SenderIdentity(qualified="planner@proj-a", scope="proj-a", name="planner")
     with rig.session_holding(planner) as claim_socket:
-        ctx = cli.Context(gateway=rig.gateway, db_path=paths.directory_db(),
+        ctx = cli.Context(record=rig.record, db_path=paths.directory_db(),
                           socket_path=paths.daemon_socket(),
                           env={"MOXI_COMMS_PROJECT": "proj-a",
                                "MOXI_COMMS_CLAIM_SOCKET": claim_socket}, out=out)
@@ -640,7 +640,7 @@ def test_a_cold_shim_recipient_is_held_then_released_by_its_own_warm_turn(rig):
     assert held_of(rig) == {msg.id}, "the row stays until the adapter names it handled"
     send_turn(s, handled=[msg.id])
     assert wait_until(lambda: held_of(rig) == set())
-    assert wait_until(lambda: record_rows(rig.gateway, REVIEWER_Q) == set())
+    assert wait_until(lambda: record_rows(rig.record, REVIEWER_Q) == set())
 
 
 def test_cold_held_mail_waits_while_newer_mail_goes_once_warm(rig):
@@ -808,7 +808,7 @@ def test_a_cold_row_survives_a_restart_and_a_shim_that_registers_at_once(rig, re
              backoff=iter(lambda: 0.02, None))
     msg = post(rig, [REVIEWER_Q])
     assert wait_until(lambda: msg.id in held_of(rig))
-    assert wait_until(lambda: record_rows(rig.gateway, REVIEWER_Q) == {msg.id})
+    assert wait_until(lambda: record_rows(rig.record, REVIEWER_Q) == {msg.id})
     assert not paths.cold_gate().exists()
     daemon = reboot(rig)
     assert held_of(rig) == {msg.id}, "loaded before the socket listened"
@@ -858,8 +858,8 @@ def test_the_daemon_refuses_to_start_when_the_queue_load_raises(rig, monkeypatch
     def broken():
         raise RuntimeError("the record's queue could not be read")
 
-    monkeypatch.setattr(rig.gateway, "queue_rows", broken)
-    daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    monkeypatch.setattr(rig.record, "queue_rows", broken)
+    daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     with pytest.raises(RuntimeError, match="queue could not be read"):
         daemon.start()
     assert not daemon.bound and not daemon_socket().exists()
@@ -873,18 +873,18 @@ def test_the_trim_keeps_a_cold_bare_bindings_row_and_takes_the_message_once_hand
         pytest.skip("only the local record trims")
     helper = bare_shim(adapters, sid=SESS_D, age=3 * HOUR)
     msg = post(rig, [HELPER_Q])
-    assert wait_until(lambda: record_rows(rig.gateway, HELPER_Q) == {msg.id})
+    assert wait_until(lambda: record_rows(rig.record, HELPER_Q) == {msg.id})
     rig.age_message(msg.id, time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                           time.gmtime(rig.clock() - 200 * 86400)))
     rig.daemon.trim_record()
-    assert rig.gateway.get_message(msg.id) is not None
+    assert rig.record.get_message(msg.id) is not None
     write_transcript(SESS_D, 5)
     raw_turn(helper, HELPER_Q)
     assert wait_until(lambda: helper.ids() == [msg.id])
     raw_turn(helper, HELPER_Q, handled=[msg.id])
-    assert wait_until(lambda: record_rows(rig.gateway, HELPER_Q) == set())
+    assert wait_until(lambda: record_rows(rig.record, HELPER_Q) == set())
     rig.daemon.trim_record()
-    assert rig.gateway.get_message(msg.id) is None
+    assert rig.record.get_message(msg.id) is None
 
 
 def test_a_cursor_past_a_cold_held_id_leaves_its_row(rig):
@@ -896,7 +896,7 @@ def test_a_cursor_past_a_cold_held_id_leaves_its_row(rig):
     cursors.advance(REVIEWER_Q, msg.id)
     rig.daemon.rescan()
     assert held_of(rig) == {msg.id}
-    assert wait_until(lambda: record_rows(rig.gateway, REVIEWER_Q) == {msg.id})
+    assert wait_until(lambda: record_rows(rig.record, REVIEWER_Q) == {msg.id})
 
 
 def test_a_delivered_message_re_read_after_the_recipient_went_cold_writes_no_row(
@@ -910,7 +910,7 @@ def test_a_delivered_message_re_read_after_the_recipient_went_cold_writes_no_row
     rig.daemon.rescan()
     time.sleep(0.1)
     assert held_of(rig, HELPER_Q) == set()
-    assert record_rows(rig.gateway, HELPER_Q) == set()
+    assert record_rows(rig.record, HELPER_Q) == set()
     assert helper.ids() == [msg.id]
 
 
@@ -953,7 +953,7 @@ def test_the_trim_keeps_cold_held_ids(rig):
     rig.age_message(msg.id, time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                           time.gmtime(rig.clock() - 200 * 86400)))
     rig.daemon.trim_record()
-    assert rig.gateway.get_message(msg.id) is not None
+    assert rig.record.get_message(msg.id) is not None
 
 
 def test_comms_explain_names_a_cold_shims_and_a_cold_bare_bindings_mail_waiting(rig, adapters):

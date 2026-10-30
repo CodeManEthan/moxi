@@ -130,7 +130,7 @@ def is_send_only(conn, name: str, scope: str) -> bool:
 def retired(conn, name: str, scope: str) -> bool:
     """Is (name, scope) retired: an `agents` row at exactly (name, scope) whose status is
     `retired`? A retired identity is one comms no longer binds, routes to or queues for;
-    its journal rows, its messages in the record, its cursor file and its card stay. Read
+    its binding history rows, its messages in the record, its cursor file and its card stay. Read
     per call, like every directory fact the daemon uses."""
     return conn.execute(
         "SELECT 1 FROM agents WHERE name = ? AND scope = ? AND status = 'retired'",

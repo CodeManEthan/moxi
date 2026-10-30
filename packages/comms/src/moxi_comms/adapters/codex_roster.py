@@ -1,7 +1,7 @@
 """The codex roster: the `[codex]` table of comms' config file, NON-SECRET ids only.
 
 **Which app-servers exist is provisioner-configured, never register-triggered.**
-The `moxi-comms-codex` launcher runs an app-server only for an identity named here; an
+The `moxi-comms-codex` wrapper runs an app-server only for an identity named here; an
 inbound `register` on the daemon socket never causes a spawn. The file holds, per
 identity: the cwd, the sandbox/permission profile, and the thread-id file.
 
@@ -78,7 +78,7 @@ _CONTAINMENT_KEYS = {"sandbox", "permissions", "profile"}
 
 @dataclass
 class CodexAgent:
-    """One roster row: everything the launcher needs about one identity."""
+    """One roster row: everything the wrapper needs about one identity."""
 
     qualified: str
     name: str
@@ -97,14 +97,14 @@ class CodexAgent:
     def env(self, base=None) -> dict:
         """Identity stamped into the app-server's environment AT SPAWN.
 
-        The agent's shell inherits this, with the launcher's claim socket beside it,
+        The agent's shell inherits this, with the wrapper's claim socket beside it,
         which is how `moxi comms send` inside the thread knows who it is speaking as. It
         reads the claim socket; the stamp alone sends nothing.
 
         **Scrubbed before it is stamped.** Overlaying the stamp onto an inherited
         environment would let any key the roster has no value for keep whatever the
         process that started `moxi-comms-codex` was carrying -- `MOXI_COMMS_DIRECTORS` above all,
-        which would hand this agent its launcher's authority. `stamped_env` handles it,
+        which would hand this agent its wrapper's authority. `stamped_env` handles it,
         for all three stamp sites at once.
         """
         return roster_rows.stamped_env(self, base)
@@ -198,25 +198,25 @@ def record_write_root(env=None, cwd=None) -> tuple:
 
     Returns `(directory or None, reason)`. It is read the way the CLI reads it, from the
     same environment and the same config file, because the agent's shell inherits the
-    launcher's environment:
+    wrapper's environment:
 
       * `local`: the parent of the record (`MOXI_COMMS_LOCAL_RECORD`, else `[local] record`,
         else `STATE/comms/record.db`). Every local send writes the record and its WAL
         from the sender's own process.
-      * `mock`: the directory of the `MOXI_COMMS_MOCK_GATEWAY` store, which the mock writes
+      * `mock`: the directory of the `MOXI_COMMS_MOCK_BACKEND` store, which the mock writes
         through a temp file beside it.
 
     A relative path resolves against `cwd`, the agent's working directory, as the CLI
     run from the agent's shell would resolve it.
     """
     from .. import config as config_mod
-    from ..gateway import LOCAL, MOCK, GatewayError, backend_name
+    from ..record import LOCAL, MOCK, RecordError, backend_name
     from ..paths import record_db
 
     env = os.environ if env is None else env
     try:
         backend = backend_name(None, env=env)
-    except (GatewayError, ConfigError) as e:
+    except (RecordError, ConfigError) as e:
         return None, f"comms' config could not be read ({e})"
 
     def absolute(value) -> Path:
@@ -233,9 +233,9 @@ def record_write_root(env=None, cwd=None) -> tuple:
         source = absolute(record) if record else record_db()
         return source.parent, f"the local backend's record ({source})"
     if backend == MOCK:
-        store = env.get("MOXI_COMMS_MOCK_GATEWAY")
+        store = env.get("MOXI_COMMS_MOCK_BACKEND")
         if not store:
-            return None, "the mock backend names no store (MOXI_COMMS_MOCK_GATEWAY is unset)"
+            return None, "the mock backend names no store (MOXI_COMMS_MOCK_BACKEND is unset)"
         source = absolute(store)
         return source.parent, f"the mock backend's store ({source})"
     return None, f"backend {backend!r} writes nothing locally"

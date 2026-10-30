@@ -5,7 +5,7 @@ copies an ask's audience onto the reply, and refuses a reply that
 would change it. The daemon fills an absent audience in from its own index at
 `_deliver`, and the frame line and `moxi comms history` show it.
 
-Everything here runs against the gateway seam, on the mock and on the local backend
+Everything here runs against the record seam, on the mock and on the local backend
 (`BOTH_BACKENDS` in conftest), and never against the Discord implementation.
 The parser's own grammar is pinned in `test_machine_line.py`.
 """
@@ -23,14 +23,14 @@ from moxi_comms import constants, cursors, machine_line
 from moxi_comms.client import DaemonOffline
 from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.daemon import AUDIENCE_INDEX_SLACK, AUDIENCE_INDEX_UNKNOWN, Daemon
-from moxi_comms.gateway import GatewayError
+from moxi_comms.record import RecordError
 
 PLANNER = dict(name="planner", scope="proj-a")
 REVIEWER = dict(name="reviewer", scope="proj-a")
 
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def line_zero(msg):
@@ -49,7 +49,7 @@ def reboot():
 
     def _reboot(rig):
         rig.daemon.stop()
-        rig.daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+        rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
         started.append(rig.daemon)
         return rig.daemon
 
@@ -59,7 +59,7 @@ def reboot():
 
 
 class ReadFails:
-    """A gateway whose record read raises -- everything else is the real one."""
+    """A record whose record read raises -- everything else is the real one."""
 
     def __init__(self, inner, error):
         self._inner = inner
@@ -186,15 +186,15 @@ def test_a_failed_referent_read_refuses_in_both_verbs(rig):
     """A read that FAILED is not a referent that is missing: posting as typed would drop
     an audience the referent may carry, so both verbs refuse and say so."""
     original = ask(rig, audience="operator")
-    broken = ReadFails(rig.gateway, GatewayError("500 on GET: the record is unreadable"))
+    broken = ReadFails(rig.record, RecordError("500 on GET: the record is unreadable"))
     code, out = rig.cli(["send", "--new-name", "planner@proj-a", "hi", "--reply-to",
-                         original.id], **REVIEWER, gateway=broken)
+                         original.id], **REVIEWER, record=broken)
     assert code == 5 and "could not be read" in out and "Nothing was sent" in out
-    code, out = rig.cli(["reply", original.id, "hi"], **REVIEWER, gateway=broken)
+    code, out = rig.cli(["reply", original.id, "hi"], **REVIEWER, record=broken)
     assert code == 5 and "Nothing was sent" in out
-    offline = ReadFails(rig.gateway, DaemonOffline("comms offline"))
+    offline = ReadFails(rig.record, DaemonOffline("comms offline"))
     code, out = rig.cli(["send", "--new-name", "planner@proj-a", "hi", "--reply-to",
-                         original.id], **REVIEWER, gateway=offline)
+                         original.id], **REVIEWER, record=offline)
     assert code == 4 and "Nothing was sent" in out
     assert posted(rig) == [original]
 
@@ -247,7 +247,7 @@ def test_a_hand_typed_reply_inherits_the_asks_audience(rig):
     original = ask(rig, audience="operator")
     reply = reply_to_planner(rig, original.id)
     assert delivered(planner, reply.id) == ("operator", "inherited")
-    assert line_zero(rig.gateway.get_message(reply.id)).audience is None
+    assert line_zero(rig.record.get_message(reply.id)).audience is None
 
 
 def test_a_chain_of_hand_typed_replies_inherits_transitively(rig):
@@ -377,7 +377,7 @@ def test_a_live_reply_racing_the_boot_rescan_delivers_as_unknown(rig, monkeypatc
     cursors.advance("planner@proj-a", original.id)
 
     gate = threading.Event()
-    daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     rescan = daemon.rescan
 
     def held_rescan():
@@ -469,9 +469,9 @@ def _boot_racing_the_rescan(rig, monkeypatch, *, snapshot_first):
     rig.daemon.stop()
     cursors.advance("planner@proj-a", original.id)
     cursors.advance("reviewer@proj-a", original.id)
-    daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     gate, snap = threading.Event(), {}
-    real_rescan, real_history = daemon.rescan, rig.gateway.history
+    real_rescan, real_history = daemon.rescan, rig.record.history
 
     def held_rescan():
         if snapshot_first:
@@ -483,11 +483,11 @@ def _boot_racing_the_rescan(rig, monkeypatch, *, snapshot_first):
         if snap["msgs"] is None:
             real_rescan()
             return
-        daemon.gateway = _Snapshot(rig.gateway, snap["msgs"])
+        daemon.record = _Snapshot(rig.record, snap["msgs"])
         try:
             real_rescan()
         finally:
-            daemon.gateway = rig.gateway
+            daemon.record = rig.record
 
     monkeypatch.setattr(daemon, "rescan", held_rescan)
     rig.daemon = daemon
@@ -507,7 +507,7 @@ def _boot_racing_the_rescan(rig, monkeypatch, *, snapshot_first):
 
 
 class _Snapshot:
-    """The real gateway, except that `history` answers from a snapshot taken earlier."""
+    """The real record, except that `history` answers from a snapshot taken earlier."""
 
     def __init__(self, inner, msgs):
         self._inner = inner
@@ -592,10 +592,10 @@ def test_a_reconnect_without_resume_feeds_the_index(rig):
     planner = rig.shim(**PLANNER)
     reviewer = rig.shim(**REVIEWER)
     before = rig.daemon.rescans
-    rig.gateway.disconnect()
+    rig.record.disconnect()
     original = ask(rig, audience="operator")
     reply = reply_to_planner(rig, original.id)
-    rig.gateway.reconnect(resume=False)
+    rig.record.reconnect(resume=False)
     assert wait_until(lambda: rig.daemon.rescans > before)
     assert delivered(planner, reply.id) == ("operator", "inherited")
     assert rig.daemon.audiences[reply.id] == "operator"
@@ -614,8 +614,8 @@ def test_a_reconnect_without_resume_keeps_a_known_value_once_the_ask_aged_out(ri
     old = constants.RESCAN_LIMIT
     constants.RESCAN_LIMIT = 1                      # the window holds the reply only
     try:
-        rig.gateway.disconnect()
-        rig.gateway.reconnect(resume=False)
+        rig.record.disconnect()
+        rig.record.reconnect(resume=False)
         assert wait_until(lambda: rig.daemon.rescans > before)
     finally:
         constants.RESCAN_LIMIT = old

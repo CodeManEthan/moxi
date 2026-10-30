@@ -45,7 +45,7 @@ DAEMON_SCRIPT = "moxi-comms-daemon"
 #: Variables that move comms' files or override its settings in the installing shell.
 SHELL_ONLY = ("MOXI_COMMS_HOME", "MOXI_COMMS_DATA_HOME", "MOXI_COMMS_STATE_HOME",
               "MOXI_COMMS_CACHE_HOME", "MOXI_COMMS_CONFIG_HOME", "MOXI_COMMS_RUNTIME_DIR",
-              "MOXI_COMMS_DEVICE", "MOXI_COMMS_GATEWAY", "MOXI_COMMS_LOCAL_RECORD",
+              "MOXI_COMMS_DEVICE", "MOXI_COMMS_BACKEND", "MOXI_COMMS_LOCAL_RECORD",
               "MOXI_COMMS_LOCAL_RETAIN_DAYS", "MOXI_COMMS_TOKEN_STORE")
 
 LINGER = (

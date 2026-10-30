@@ -37,7 +37,7 @@ def posted_while_down(rig, monkeypatch, post):
     made = post()
     rig.post_as("agent-6", ["main@proj-b"], "filler: the one message the boot rescan reads")
     monkeypatch.setattr(constants, "RESCAN_LIMIT", 1)
-    rig.daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+    rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     return made
 
 
@@ -247,7 +247,7 @@ def test_multicast_is_one_post_one_thread_and_per_recipient_cursors(rig):
     wait_for_queue(c, 1)
     mid = b.queue[0]["message_id"]
     assert c.queue[0]["message_id"] == mid, "one post, one thread"
-    assert len(rig.gateway.history(rig.names_channel)) == 1
+    assert len(rig.record.history(rig.names_channel)) == 1
 
     b.on_turn_boundary()
     b.on_turn_boundary()
@@ -272,7 +272,7 @@ def test_a_standing_identity_row_is_verified(rig):
     rig.shim(name="herald", global_=True)          # standing, live
     reviewer = rig.shim(name="reviewer", scope="proj-a")
     body = machine_line.compose(["reviewer@proj-a"], "from my identity row")
-    rig.gateway.post_as_identity("herald", rig.names_channel, body)
+    rig.record.post_as_identity("herald", rig.names_channel, body)
     wait_for_queue(reviewer, 1)
     assert reviewer.queue[0]["author"] == {"name": "herald", "tier": "standing",
                                            "attribution": "verified"}
@@ -302,7 +302,7 @@ def test_a_hand_typed_re_token_correlates_and_a_malformed_one_is_prose(rig):
     assert reviewer.queue[2]["reply_to"] == "999999999999999999"
 
     # a non-digit id fails line zero's grammar, so the message is prose and never routes
-    rig.gateway.post_as_user(rig.prov.operator_user_id, rig.names_channel,
+    rig.record.post_as_user(rig.prov.operator_user_id, rig.names_channel,
                              "::to reviewer@proj-a re:nonsense\nnever routed",
                              token=rig.operator_token)
     rig.post_as_operator(["reviewer@proj-a"], "the next real one")
@@ -313,7 +313,7 @@ def test_a_hand_typed_re_token_correlates_and_a_malformed_one_is_prose(rig):
 
 def test_tag_shaped_prose_in_the_body_is_never_routed(rig):
     reviewer = rig.shim(name="reviewer", scope="proj-a")
-    rig.gateway.post_as_identity(
+    rig.record.post_as_identity(
         "ghost", rig.names_channel,
         "here is what I would send:\n::to reviewer@proj-a\nhi")
     rig.post_as("agent-6", ["reviewer@proj-a"], "the real one")
@@ -354,7 +354,7 @@ def test_the_record_carries_the_machine_line_at_position_zero(rig):
     before = int(time.time())
     rig.cli(["send", "--posture", "none", "--new-name", "reviewer@proj-a", "body text"],  name="planner", scope="proj-a")
     after = int(time.time())
-    msg = rig.gateway.history(rig.names_channel)[-1]
+    msg = rig.record.history(rig.names_channel)[-1]
     zero = msg.content.splitlines()[0]
     assert re.fullmatch(r"::to reviewer@proj-a \[cold-at:\d+\] \[no reply\]", zero), zero
     ml = machine_line.parse(msg.content)
@@ -379,7 +379,7 @@ REVIEWER_Q = "reviewer@proj-a"
 
 def _reboot(rig):
     rig.daemon.stop()
-    rig.daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+    rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     return rig.daemon
 
 

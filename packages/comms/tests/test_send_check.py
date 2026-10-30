@@ -34,7 +34,7 @@ from conftest import wait_until, write_config, write_transcript
 from moxi_comms import cli, provision, sending
 from moxi_comms.client import DaemonClient, DaemonOffline
 from moxi_comms.daemon import Refusal
-from moxi_comms.gateway import GatewayError
+from moxi_comms.record import RecordError
 
 # The cold-cache fixtures (the autouse tmp-path guard among them), so a held send can be
 # shown.
@@ -192,7 +192,7 @@ def _home_files() -> dict:
 def snapshot(rig) -> dict:
     """Everything a send writes or moves: the record, every room; the daemon's queued
     and delivered ids; each shim's queue; every file under the homes."""
-    rooms = {name: [(m.id, m.content) for m in rig.gateway.history(cid)]
+    rooms = {name: [(m.id, m.content) for m in rig.record.history(cid)]
              for name, cid in rig.prov.rooms.items()}
     with rig.daemon._lock:
         daemon = dict(queue={k: sorted(v) for k, v in rig.daemon.queue.items() if v},
@@ -348,7 +348,7 @@ def s_resolve_refused(rig, mp):
 def s_send_only(rig, mp):
     pair(rig)
     lines = []
-    assert provision.send_only_main(["console@acme"], gateway=rig.gateway,
+    assert provision.send_only_main(["console@acme"], record=rig.record,
                                     store=rig.store, out=lines.append) == 0, lines
     return Case(["send", "console@acme", "x", "--posture", "none"], PLANNER, 2)
 
@@ -359,7 +359,7 @@ def s_standing(rig, mp):
 
 
 def s_never_bound(rig, mp):
-    """The daemon says the journal has never seen the name bound (`ever_bound` false;
+    """The daemon says the binding history has never seen the name bound (`ever_bound` false;
     the daemon's half is tested with the names), and no `--new-name`."""
     pair(rig)
     real = rig.daemon._resolve_query
@@ -436,7 +436,7 @@ def _unreadable(exc):
         def broken(message_id):
             raise exc
 
-        mp.setattr(rig.gateway, "get_message", broken)
+        mp.setattr(rig.record, "get_message", broken)
         return Case(["send", "planner", "a", "--reply-to", ask], REVIEWER, 0)
     return setup
 
@@ -530,7 +530,7 @@ def s_audience_changed(rig, mp):
 
 def s_over_the_cap(rig, mp):
     pair(rig)
-    text = "x" * rig.gateway.max_content_length
+    text = "x" * rig.record.max_content_length
     return Case(["send", "reviewer", text, "--posture", "none"], PLANNER, 2)
 
 
@@ -583,7 +583,7 @@ ROWS = [
     # 4. the reply checks
     Row("cap-on-a-new-send-opening-no-thread", s_cap_no_thread_new, 2,
         (("_send_checks", "CAP_NO_THREAD"),)),
-    Row("referent-unreadable-gateway", _unreadable(GatewayError("record read failed")), 5,
+    Row("referent-unreadable-record", _unreadable(RecordError("record read failed")), 5,
         (("_send_checks", "could not be read"),)),
     Row("referent-unreadable-offline", _unreadable(DaemonOffline("daemon down")), 4,
         (("_send_checks", "could not be read"),)),
@@ -709,7 +709,7 @@ CODES = {
     "bound-without-token": "claim-credential", "dead-adapter": "offline",
     "single-reply": "single-reply",
     "cap-on-a-new-send-opening-no-thread": "cap-no-thread",
-    "referent-unreadable-gateway": "referent-unreadable",
+    "referent-unreadable-record": "referent-unreadable",
     "referent-unreadable-offline": "referent-unreadable",
     "reply-to-no-reply": "no-reply", "open-on-a-once-ask": "once-not-open",
     "thread-closed-by-cap": "thread-closed", "thread-closed-by-none": "thread-closed",

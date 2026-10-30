@@ -99,7 +99,7 @@ TERMS: tuple[Entry, ...] = (
         "verified",
         "attribution the machinery PROVED: the credential that posted the message and "
         "the name it displayed agree (live: checked against the live session; "
-        "catch-up: checked against the custody record of who held what, when). "
+        "catch-up: checked against the binding history of who held what, when). "
         "Unmarked frames are verified — silence is the guarantee, not the absence of "
         "one.",
     ),

@@ -2,11 +2,11 @@
 
 turns asks it in the session's endpoint process (`moxi_comms.listeners` registers it),
 with the session's facts and the environment the endpoint inherited from the session,
-which carries the launcher's identity stamps. What it answers is what the roster hooks
+which carries the wrapper's identity stamps. What it answers is what the roster hooks
 printed when comms wrote its own hooks (`adapters/shim_roster`):
 
     ready    layer one: the context block, the line naming which comms to run (the
-             command the launcher stamped, `MOXI_COMMS_COMMAND`), then the roster
+             command the wrapper stamped, `MOXI_COMMS_COMMAND`), then the roster
              snapshot (or the offline line)
     prompt   the roster's joins and leaves since this session last looked, and each
              ignored reminder naming this session as its author, once; or nothing
@@ -17,7 +17,7 @@ gets layer one as developer instructions at its launch.
 
 **The roster memory.** The deltas diff against what this session last saw, kept in
 `roster.json` in the session's runtime directory, the directory that holds the claim
-socket the launcher stamped (`MOXI_COMMS_CLAIM_SOCKET`). `ready` seeds it on a roster it
+socket the wrapper stamped (`MOXI_COMMS_CLAIM_SOCKET`). `ready` seeds it on a roster it
 could read; a session with no such directory gets no deltas, since deltas without memory
 would announce the world every prompt.
 
@@ -44,7 +44,7 @@ MEMORY = "roster.json"
 
 def memory_path(env) -> Path | None:
     """The session's roster memory file, or None when the session has no runtime
-    directory of comms' own (a claim socket in a session directory the launcher made)."""
+    directory of comms' own (a claim socket in a session directory the wrapper made)."""
     from .adapters.session import sessions_dir
     from .claimhold import CLAIM_SOCKET_ENV
     from .paths import OutsideRuntime, refuse_outside_runtime

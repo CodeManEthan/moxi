@@ -290,7 +290,7 @@ class RegisterDrop:
     def fresh_daemon(self):
         """A daemon on the same socket, in the rig before it accepts anything, so a drop
         inside its first register stops this one."""
-        d = Daemon(self.rig.gateway, clock=self.rig.clock, start_trim_thread=False)
+        d = Daemon(self.rig.record, clock=self.rig.clock, start_trim_thread=False)
         self.rig.daemon = d
         self.daemons.append(d)
         self.booting.add(id(d))

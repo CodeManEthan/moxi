@@ -23,7 +23,7 @@ from .membership import sessions_of
 from .protocol import CLI_PROTOCOL, PROTOCOL_VERSION, ProtocolError
 from .client import (DaemonClient, DaemonError, DaemonNoAnswer, DaemonOffline,
                      DaemonTimeout)
-from .gateway import LOCAL, GatewayError
+from .record import LOCAL, RecordError
 from .paths import OutsideRuntime, directory_db
 from .provision import NAMES
 from .scoping import (GLOBAL, identity_of, project_key, qualify, tag_matches)
@@ -239,8 +239,8 @@ class Sender:
 class Context:
     """Everything the verbs need that is not an argument.
 
-    Which backend the verb talks to is the selection seam: `--gateway`, then
-    `MOXI_COMMS_GATEWAY`, then the config file, then the default (`local`). On the mock and
+    Which backend the verb talks to is the selection seam: `--backend`, then
+    `MOXI_COMMS_BACKEND`, then the config file, then the default (`local`). On the mock and
     on `local` the record is a file this process can open, so it opens it.
 
     `deadline` is seconds, passed to every daemon call, to the claim socket's call and to
@@ -250,7 +250,7 @@ class Context:
     instead of printed, with the refusal and the NOTEs as data beside it.
     """
 
-    def __init__(self, gateway=None, db_path=None, socket_path=None, env=None, out=None,
+    def __init__(self, record=None, db_path=None, socket_path=None, env=None, out=None,
                  backend=None, clock=None, deadline: float | None = None):
         self.env = env if env is not None else os.environ
         self.deadline = deadline
@@ -262,44 +262,44 @@ class Context:
         self.socket_path = socket_path
         self.out = out or sys.stdout
         self.backend = backend
-        self._gateway = gateway
+        self._record = record
         self._backend_name = None
 
     def backend_name(self) -> str:
         """Which backend this process is on, by the selection seam and nothing else.
 
-        Resolved once per verb (flag > MOXI_COMMS_GATEWAY > the config file > the
+        Resolved once per verb (flag > MOXI_COMMS_BACKEND > the config file > the
         default) and kept, because a flip is a config line plus a daemon restart. Asked
-        by the nudge, which is the local backend's alone: a gateway handed in by a test
+        by the nudge, which is the local backend's alone: a record handed in by a test
         rig is still whatever the box selected, so the question is put to the seam and
         never to the object.
         """
         if self._backend_name is None:
-            from . import gateway as gw
+            from . import record as gw
             self._backend_name = gw.backend_name(self.backend, env=self.env)
         return self._backend_name
 
     @property
-    def gateway(self):
-        if self._gateway is None:
-            from . import gateway as gw
+    def record(self):
+        if self._record is None:
+            from . import record as gw
             name = self.backend_name()
             if name == gw.MOCK:
-                from .mock_gateway import MockGateway
-                store = self.env.get("MOXI_COMMS_MOCK_GATEWAY")
+                from .mock_record import MockRecord
+                store = self.env.get("MOXI_COMMS_MOCK_BACKEND")
                 if not store:
                     raise SystemExit(
                         "comms is pointed at the mock record and has no store: set "
-                        "MOXI_COMMS_MOCK_GATEWAY=<store.json>.")
-                self._gateway = MockGateway(store)
+                        "MOXI_COMMS_MOCK_BACKEND=<store.json>.")
+                self._record = MockRecord(store)
             else:
                 # In-process, like the mock and for the same reason: the record is a
                 # file this process may open. Reads are direct WAL reads and writes are
                 # direct inserts, so `moxi comms send` lands and `moxi comms history` answers with
                 # the daemon down; delivery is what waits for the daemon's boot rescan.
-                self._gateway = gw.open_gateway(name, env=self.env,
+                self._record = gw.open_record(name, env=self.env,
                                                 busy_timeout=self.deadline)
-        return self._gateway
+        return self._record
 
     @contextlib.contextmanager
     def db(self):
@@ -363,7 +363,7 @@ def _keep(ctx, **facts) -> None:
 
 def _refuse(ctx, code: str, text: str) -> None:
     """`ctx.refuse`, or `ctx.say` on a context without one (a caller's own stand-in for
-    `_bodies`, which needs only `say` and `gateway`)."""
+    `_bodies`, which needs only `say` and `record`)."""
     refuse = getattr(ctx, "refuse", None)
     if refuse is None:
         ctx.say(text)
@@ -377,8 +377,8 @@ def _reply(args, ctx: Context) -> int:
     """`moxi comms reply <id>`: read the message it answers, then send to the name its
     author (or, for your own message, its recipients) holds."""
     try:
-        original = ctx.gateway.get_message(args.message_id)
-    except GatewayError as e:
+        original = ctx.record.get_message(args.message_id)
+    except RecordError as e:
         # A read that raised is not "no such message": the original may carry an audience
         # the reply has to copy, and posting blind would drop it.
         _refuse(ctx, "record-unreadable",
@@ -390,7 +390,7 @@ def _reply(args, ctx: Context) -> int:
                 f"no message {args.message_id} in the record — nothing to reply to.")
         return EXIT_REFUSED
     with ctx.db() as db:
-        author = attribution.from_record(db, original, record=ctx.gateway)
+        author = attribution.from_record(db, original, record=ctx.record)
     if author.tier == "unknown":
         _refuse(ctx, "unknown-author",
                 f"message {args.message_id} has an author comms cannot identify — "
@@ -588,7 +588,7 @@ def _send(args, ctx: Context, *, tags, reply_to, channel_room, referent=None,
     # identity the stamp claims; nothing is ever sent as it.
     stamped = _stamped_identity(ctx.env, project)
     if stamped is None:
-        # No stamp and no socket: nothing to say on the wire. The cure is the launcher's:
+        # No stamp and no socket: nothing to say on the wire. The cure is the wrapper's:
         # a session gets its claim socket from its comms adapter, and nothing an agent
         # exports gives it one.
         _refuse(ctx, "no-identity",
@@ -633,7 +633,7 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
     line, the length cap, the post and the nudge.
 
     Two lanes reach here and differ at the posting seam. An agent presents its live
-    claim token to the daemon, whose gateway fanout needs no nudge. The operator posts
+    claim token to the daemon, whose record fanout needs no nudge. The operator posts
     through its local credential and nudges afterward. Everything around that seam is
     shared: both lanes type the same machine line, obey the same `max_content_length`,
     and print the same `sent <id>` line.
@@ -679,7 +679,7 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
                 # The operator's lane needs a credential like every other lane:
                 # the holder's own token out of the store, read the declared way.
                 token, channel_id = operator_credential(db, room=channel_room, env=ctx.env)
-        except (SendFailed, GatewayError) as e:
+        except (SendFailed, RecordError) as e:
             _refuse(ctx, "credential", str(e))
             return EXIT_FAILED
     if getattr(args, "check", False):
@@ -696,8 +696,8 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
         message_id = str(posted)
     else:
         try:
-            msg = post_as_operator(ctx.gateway, operator_id, channel_id, body, token=token)
-        except (SendFailed, GatewayError) as e:
+            msg = post_as_operator(ctx.record, operator_id, channel_id, body, token=token)
+        except (SendFailed, RecordError) as e:
             _refuse(ctx, "post-failed", str(e))
             return EXIT_FAILED
         message_id = msg.id
@@ -975,10 +975,10 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
                     and r["qualified"] != OPERATOR
                     and r.get("ever_bound") is False
                     and not getattr(args, "new_name", False)):
-                # A name the custody journal has never seen bound, typed on a `moxi comms
+                # A name the binding history has never seen bound, typed on a `moxi comms
                 # send`: most likely a typo, and its mail would wait for a session that
                 # never starts. `--new-name` says the agent has not started yet. A daemon
-                # that cannot read the journal answers no `ever_bound`, and the send goes
+                # that cannot read the binding history answers no `ever_bound`, and the send goes
                 # on as before. The operator is always known, standing row or not: a box
                 # provisioned by default writes none, and sending to it keeps working.
                 _refuse(ctx, "never-bound", _never_bound_refusal(tag, r))
@@ -1037,10 +1037,10 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
     else:
         if referent is None:
             # `reply` hands the original in; `send --reply-to` reads it here, before
-            # any posture check, through the gateway this verb already holds.
+            # any posture check, through the record this verb already holds.
             try:
-                referent = ctx.gateway.get_message(str(reply_to))
-            except (DaemonOffline, GatewayError) as e:
+                referent = ctx.record.get_message(str(reply_to))
+            except (DaemonOffline, RecordError) as e:
                 # Posting as typed on a failed read would silently drop an audience the
                 # referent may carry. A referent that is simply NOT in the record is a
                 # different fact, and it posts as typed below.
@@ -1104,13 +1104,13 @@ NEVER_BOUND = ("{tag}: comms has never seen {name} bound, so no agent of that na
                "started. If it has not started yet, send it again with --new-name and the "
                "message waits for its first session; if it has, check the name (moxi comms "
                "agents lists who you can message).{seen} Nothing was sent.")
-#: Added to `NEVER_BOUND` when the journal has seen the same name bound in other scopes.
+#: Added to `NEVER_BOUND` when the binding history has seen the same name bound in other scopes.
 NEVER_BOUND_SEEN = " {name} was seen bound only as {seen}; address {that} if it is who you mean."
 
 
 def _never_bound_refusal(tag: str, r: dict) -> str:
     """`NEVER_BOUND` for one resolve answer, naming the identities of the same name the
-    journal has seen bound elsewhere (`seen_as`), when the daemon lists any."""
+    binding history has seen bound elsewhere (`seen_as`), when the daemon lists any."""
     name = r["qualified"]
     seen_as = [q for q in (r.get("seen_as") or ()) if q != name]
     seen = ""
@@ -1295,7 +1295,7 @@ def _reply_checks(args, ctx: Context, *, sender, exempt, typed, cap, no_cap,
     verified = False
     if referent is not None:
         with ctx.db() as db:
-            author = attribution.from_record(db, referent, record=ctx.gateway)
+            author = attribution.from_record(db, referent, record=ctx.record)
         verified = author.attribution == attribution.VERIFIED
 
     def new_flag() -> str:
@@ -1418,7 +1418,7 @@ def _read_thread(ctx: Context, referent, sender) -> ThreadRead:
                 if hops > constants.THREAD_WALK_LIMIT:
                     thread.note = THREAD_NOTE_LONG
                     return thread
-                parent = ctx.gateway.get_message(cml.reply_to)
+                parent = ctx.record.get_message(cml.reply_to)
                 if parent is None:
                     thread.note = THREAD_NOTE_MISSING.format(id=cml.reply_to)
                     return thread
@@ -1428,11 +1428,11 @@ def _read_thread(ctx: Context, referent, sender) -> ThreadRead:
             if (rml is None or not rml.open_mark or names_channel is None
                     or root.channel_id != names_channel):
                 return thread
-            root_author = attribution.from_record(db, root, record=ctx.gateway)
+            root_author = attribution.from_record(db, root, record=ctx.record)
             if root_author.attribution != attribution.VERIFIED:
                 return thread
-            after = ctx.gateway.history(names_channel, after=root.id)
-            bound = getattr(ctx.gateway, "history_bound", constants.RESCAN_LIMIT)
+            after = ctx.record.history(names_channel, after=root.id)
+            bound = getattr(ctx.record, "history_bound", constants.RESCAN_LIMIT)
             if bound is not None and len(after) >= bound:
                 thread.note = THREAD_NOTE_LONG
                 return thread
@@ -1442,7 +1442,7 @@ def _read_thread(ctx: Context, referent, sender) -> ThreadRead:
                 if mml is None or mml.reply_to not in ids:
                     continue
                 ids.add(m.id)
-                who = attribution.from_record(db, m, record=ctx.gateway)
+                who = attribution.from_record(db, m, record=ctx.record)
                 if who.attribution == attribution.VERIFIED:
                     members.append((m, mml, who))
         thread.open, thread.root = True, root
@@ -1566,9 +1566,9 @@ def _open_asks(ctx: Context, sender, nominated, resolved) -> tuple[list, list[st
     """([(ask, asker)] for each nominated ask `open_for` holds on, and NOTEs).
 
     Each ask is read with `get_message`, and the replies after it with `history`, through
-    the gateway the verb already holds. ANY error there -- `GatewayError`,
+    the record the verb already holds. ANY error there -- `RecordError`,
     `DaemonOffline`, the local backend's own `sqlite3.Error`, or anything else the check
-    cannot finish -- treats that ask as not open and says so; if the gateway is truly
+    cannot finish -- treats that ask as not open and says so; if the record is truly
     broken the post itself fails, with exit 5.
     """
     now = ctx.clock()
@@ -1580,10 +1580,10 @@ def _open_asks(ctx: Context, sender, nominated, resolved) -> tuple[list, list[st
             names_channel = room["channel_id"] if room else None
             for ask_id in nominated:
                 try:
-                    ask = ctx.gateway.get_message(ask_id)
+                    ask = ctx.record.get_message(ask_id)
                     asker = open_for(db, ask, sender, now=now, names_channel=names_channel,
-                                     record=ctx.gateway,
-                                     replies=lambda a=ask_id: ctx.gateway.history(
+                                     record=ctx.record,
+                                     replies=lambda a=ask_id: ctx.record.history(
                                          names_channel, after=a))
                 except Exception as e:  # noqa: BLE001 -- every failure here only relaxes
                     notes.append(f"NOTE: the single-reply check could not read msg {ask_id} "
@@ -1801,7 +1801,7 @@ def _nudge_daemon(ctx: Context) -> None:
     On the local backend the CLI writes the record itself, so nothing else tells the
     daemon the row is there: its pump would find it at the next `poll_interval`. One
     fire-and-forget frame on the socket the daemon already owns cuts that wait to the
-    width of a unix send. Local only, by the seam and not by the gateway object: the
+    width of a unix send. Local only, by the seam and not by the record object: the
     mock fans out in-process, so it has no nudge to take.
 
     No answer is read and none is expected. Two misses are accepted and NOT coded
@@ -1833,8 +1833,8 @@ def _bodies(args, ctx: Context, resolved, reply_to, audience=None, *,
     """The postable body for one `send`, as a one-item list, or None when it is over
     the cap and refused; the refusal is printed here.
 
-    The gateway seam declares `max_content_length`, the one cap on one message
-    (`gateway.MAX_CONTENT_LENGTH`). Comms does not split: over the cap, nothing is sent.
+    The record seam declares `max_content_length`, the one cap on one message
+    (`record.MAX_CONTENT_LENGTH`). Comms does not split: over the cap, nothing is sent.
 
     Only `args.text` is read off `args`. `[held]` (`next_turn`), the cold-at, `posture`,
     `[open]`, the cap tokens and the thread mark are keywords the verb decided on its
@@ -1846,7 +1846,7 @@ def _bodies(args, ctx: Context, resolved, reply_to, audience=None, *,
                                     open_mark=open_mark, cap=cap, no_cap=no_cap,
                                     thread_mark=thread_mark)
     body = f"{line}\n{args.text}"
-    limit = ctx.gateway.max_content_length
+    limit = ctx.record.max_content_length
     if len(body) <= limit:
         return [body]
     _refuse(ctx, "too-long",

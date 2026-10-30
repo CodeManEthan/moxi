@@ -1,14 +1,14 @@
-"""bindings.db -- the binding custody journal.
+"""bindings.db -- the binding history.
 
-The daemon's routing table is memory only and dies with the socket.  This journal keeps
+The daemon's routing table is memory only and dies with the socket.  This file keeps
 the binding history used by the never-bound check and its scope hint.  Existing rows
 from older releases also supply evidence to the one-time record conversion; new rows
 have no allocation number.
 
-What this file is NOT: it is never consulted for routing or addressability. A journal
-row is history, not a live binding, and nothing here can make a dead agent addressable.
+What this file is NOT: it is never consulted for routing or addressability. A binding
+history row is history, not a live binding, and nothing here can make a dead agent addressable.
 
-Posture, mirroring directory.db: DATA (device-agnostic -- the journal interprets the
+Posture, mirroring directory.db: DATA (device-agnostic -- the binding history interprets the
 record, and the record is not a device's), mode 0600, written by the daemon alone,
 every other consumer opens read-only. Journal mode is WAL, which is the whole reason
 a read-only consumer can read the file while the daemon holds it open: a rollback
@@ -34,7 +34,7 @@ from .paths import bindings_db
 
 log = logging.getLogger("comms.bindings")
 
-#: The record's timestamp format, the one the gateway normalizes timestamps into.
+#: The record's timestamp format, the one the record normalizes timestamps into.
 #: Containment is a string comparison because this format sorts chronologically.
 TIMESTAMP_FMT = "%Y-%m-%dT%H:%M:%SZ"
 
@@ -69,7 +69,7 @@ def connect(path: str | Path, *, read_only: bool = False) -> sqlite3.Connection:
 
 
 def init(path: str | Path) -> sqlite3.Connection:
-    """Create the journal, 0600, in WAL. The daemon's connection, and only its."""
+    """Create the binding history, 0600, in WAL. The daemon's connection, and only its."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = connect(path)
@@ -85,7 +85,7 @@ def init(path: str | Path) -> sqlite3.Connection:
 
 # ------------------------------------------------------------------------- the writer
 
-class Journal:
+class BindingHistory:
     """The daemon's custody writer: bind, release, and the boot fence. Nothing else.
 
     Every method is failure-swallowing on purpose (see the module docstring): a write
@@ -105,15 +105,15 @@ class Journal:
 
     # -- lifecycle ----------------------------------------------------------
     def open(self) -> bool:
-        """Open (creating) the journal. False means custody goes unrecorded this run."""
+        """Open (creating) the binding history. False means custody goes unrecorded this run."""
         with self._lock:
             if self._conn is not None:
                 return True
             try:
                 self._conn = init(self._resolved())
             except (sqlite3.Error, OSError) as e:
-                log.warning("custody journal unavailable (%s: %s); bindings will not be "
-                            "journalled and replay attribution stays unverified",
+                log.warning("binding history unavailable (%s: %s); bindings will not be "
+                            "recorded and replay attribution stays unverified",
                             type(e).__name__, e)
                 self._conn = None
                 return False
@@ -170,7 +170,7 @@ class Journal:
                 self._conn.commit()
             except sqlite3.Error:
                 # logged, never fatal: the binding is real whether or not it is recorded
-                log.exception("custody journal: failed to record the bind of %s", qualified)
+                log.exception("binding history: failed to record the bind of %s", qualified)
                 return None
             return cur.lastrowid
 
@@ -188,13 +188,13 @@ class Journal:
                     (stamp(self.clock() if at is None else at), int(row_id)))
                 self._conn.commit()
             except sqlite3.Error:
-                log.exception("custody journal: failed to record the release of row %s",
+                log.exception("binding history: failed to record the release of row %s",
                               row_id)
 
     # -- read-back for the daemon's never-bound checks -----------------------
     def ever_bound(self, name: str, scope: str) -> bool | None:
         """Has the identity (name, scope) ever been bound on this box? None when the
-        journal is not open or the read fails: the caller then does not know, and the
+        binding history is not open or the read fails: the caller then does not know, and the
         send's never-bound check does not run."""
         with self._lock:
             if self._conn is None:
@@ -233,4 +233,4 @@ class Journal:
                 return []
 
 
-__all__ = ["Journal", "SCHEMA", "TIMESTAMP_FMT", "connect", "init", "stamp"]
+__all__ = ["BindingHistory", "SCHEMA", "TIMESTAMP_FMT", "connect", "init", "stamp"]

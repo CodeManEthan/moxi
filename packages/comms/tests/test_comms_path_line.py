@@ -2,9 +2,9 @@
 path, in the same words on every harness.
 
 Codex and OpenCode write layer one themselves and always carried the line. A Claude
-session gets layer one from comms' listener: the launcher stamps its own comms command
+session gets layer one from comms' listener: the wrapper stamps its own comms command
 into the session's environment (`MOXI_COMMS_COMMAND`) and the listener renders the line
-from it. A session an older launcher started carries no stamp and gets the listener's
+from it. A session an older wrapper started carries no stamp and gets the listener's
 own install; with neither, the line is left out.
 """
 
@@ -69,7 +69,7 @@ def test_the_line_follows_the_director_sentence(rig, capsys):
 
 
 def test_with_no_stamp_the_line_names_the_listeners_own_install(rig, capsys, monkeypatch):
-    """A session an older launcher started: the fallback is this process's comms."""
+    """A session an older wrapper started: the fallback is this process's comms."""
     monkeypatch.setattr(shim_roster, "own_comms", lambda: "/endpoint/bin/moxi comms")
     rig.daemon.stop()
     env = session_env()
@@ -121,7 +121,7 @@ def test_codex_and_opencode_layer_one_and_its_hash_are_unchanged():
     assert codex.layer_one_hash() == "2a8e3a7162ca0ea8"
 
 
-# ------------------------------------------------------------------- the launcher's stamp
+# ------------------------------------------------------------------- the wrapper's stamp
 
 def test_stamped_env_scrubs_an_inherited_comms_command():
     env = session.stamped_env({"MOXI_COMMS_COMMAND": "/other/bin/moxi comms",
@@ -130,7 +130,7 @@ def test_stamped_env_scrubs_an_inherited_comms_command():
     assert "MOXI_COMMS_COMMAND" in session.INHERITED_COMMS_ENV
 
 
-def test_a_session_carries_its_launchers_command_and_never_an_inherited_one():
+def test_a_session_carries_its_wrappers_command_and_never_an_inherited_one():
     s = session.Session("pl2", name="x", project="proj-a", comms=COMMAND)
     env = s.env({"MOXI_COMMS_COMMAND": "/other/bin/moxi comms"})
     assert env["MOXI_COMMS_COMMAND"] == COMMAND
@@ -150,7 +150,7 @@ def fake_claude(tmp_path):
     return script, out
 
 
-def test_the_claude_launcher_stamps_its_own_comms_command(rig, fake_claude):
+def test_the_claude_wrapper_stamps_its_own_comms_command(rig, fake_claude):
     script, out = fake_claude
     code = ("from moxi_comms.adapters import session; raise SystemExit(session.main("
             f"['--name', 'stamped', '--claude', {str(script)!r}]))")

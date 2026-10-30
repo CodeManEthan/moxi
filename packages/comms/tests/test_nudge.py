@@ -1,13 +1,13 @@
 """Fanout layer 2: the nudge.
 
-Layer 1 is in-process and layer 3 is the slow poll; both live in `local_gateway.py` and
+Layer 1 is in-process and layer 3 is the slow poll; both live in `local_record.py` and
 are tested there. This is the middle one for the operator lane: its CLI process writes
 the record itself, so the daemon learns of the row from a fire-and-forget
-`{"op": "nudge"}` frame. Agent posts go through the daemon and its gateway fans them out
+`{"op": "nudge"}` frame. Agent posts go through the daemon and its record fans them out
 in-process without a nudge.
 
-Every test that measures the nudge posts through a SECOND `LocalGateway` on the same
-file (`cli_gateway`), because that is what a CLI process is. Posting through the rig's
+Every test that measures the nudge posts through a SECOND `LocalRecord` on the same
+file (`cli_record`), because that is what a CLI process is. Posting through the rig's
 own instance would fan out in-process and the nudge would be measuring layer 1.
 """
 
@@ -18,7 +18,7 @@ import time
 import pytest
 from conftest import wait_for_queue, wait_until
 
-from moxi_comms.local_gateway import LocalGateway
+from moxi_comms.local_record import LocalRecord
 
 from moxi_comms import cli
 
@@ -26,16 +26,16 @@ POLL = 0.5              # the default `poll_interval`, and slow on purpose here
 
 
 @pytest.fixture
-def cli_gateway(rig):
-    """The CLI as its own process: a second gateway on the same `record.db`.
+def cli_record(rig):
+    """The CLI as its own process: a second record on the same `record.db`.
 
     Its own pump never runs (nothing subscribes to it), and it resolves the rig's minted
     webhook tokens out of the box's 0600 store, which is where provision wrote them
     -- so this really is what a second process sees.
     """
-    gateway = LocalGateway(clock=rig.clock, poll_interval=3600)
-    yield gateway
-    gateway.close()
+    record = LocalRecord(clock=rig.clock, poll_interval=3600)
+    yield record
+    record.close()
 
 
 @pytest.fixture
@@ -62,15 +62,15 @@ class Frames:
         self.sent.append(frame)
 
 
-def quiet_pump(gateway, interval: float = 5.0) -> None:
+def quiet_pump(record, interval: float = 5.0) -> None:
     """Put the rig's 20 ms pump on a long wait, and start that wait NOW.
 
     The nudge sets the pump's wake event, so nudging once here makes it fan out, clear
     the event and re-enter the wait at the new interval. Without the realignment a pump
     pass could land inside the measurement by luck rather than by nudge.
     """
-    gateway.poll_interval = interval
-    gateway.nudge()
+    record.poll_interval = interval
+    record.nudge()
     time.sleep(0.05)
 
 
@@ -82,26 +82,26 @@ def a_pair(rig):
 # --------------------------------------------------------------------------- the nudge
 
 @pytest.mark.parametrize("backend", ["local"], indirect=True)
-def test_an_agent_post_delivers_within_50ms_without_a_nudge(rig, cli_gateway, notified):
+def test_an_agent_post_delivers_within_50ms_without_a_nudge(rig, cli_record, notified):
     """The daemon writes and fans out an agent post on the same call."""
     planner, reviewer = a_pair(rig)
-    quiet_pump(rig.gateway)
+    quiet_pump(rig.record)
 
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "the nudge carries this"],
                         name="planner", scope="proj-a",
-                        env={"MOXI_COMMS_GATEWAY": "local"}, gateway=cli_gateway)
+                        env={"MOXI_COMMS_BACKEND": "local"}, record=cli_record)
     t0 = time.monotonic()
     assert code == 0 and "sent" in out
     assert "nudge" not in notified
 
     assert wait_until(lambda: len(reviewer.queue) >= 1, timeout=0.05), \
-        "the daemon's own gateway committed and fanned out the row"
+        "the daemon's own record committed and fanned out the row"
     assert time.monotonic() - t0 < 0.05
     assert reviewer.queue[0]["text"] == "the nudge carries this"
 
 
 @pytest.mark.parametrize("backend", ["local"], indirect=True)
-def test_a_lost_nudge_is_delivered_by_the_poll(rig, cli_gateway, monkeypatch):
+def test_a_lost_nudge_is_delivered_by_the_poll(rig, cli_record, monkeypatch):
     """A lost nudge still delivers within `poll_interval`. The frame never reaches the
     socket (an old daemon, a CLI naming the fallback socket); the pump is the net and the
     message is late, never lost."""
@@ -110,12 +110,12 @@ def test_a_lost_nudge_is_delivered_by_the_poll(rig, cli_gateway, monkeypatch):
                         lambda self, op, **kw: None if op == "nudge"
                         else real(self, op, **kw))
     _planner, reviewer = a_pair(rig)
-    quiet_pump(rig.gateway, POLL)
+    quiet_pump(rig.record, POLL)
 
     code, _ = rig.cli(["send", "reviewer@proj-a", "the poll carries this"],
-                      env={"MOXI_COMMS_GATEWAY": "local",
+                      env={"MOXI_COMMS_BACKEND": "local",
                            "MOXI_COMMS_OPERATOR": rig.prov.operator_user_id},
-                      gateway=cli_gateway)
+                      record=cli_record)
     t0 = time.monotonic()
     assert code == 0
     assert not wait_until(lambda: len(reviewer.queue) >= 1, timeout=0.05), \
@@ -127,10 +127,10 @@ def test_a_lost_nudge_is_delivered_by_the_poll(rig, cli_gateway, monkeypatch):
 
 
 @pytest.mark.parametrize("backend", ["local"], indirect=True)
-def test_the_op_wakes_the_local_gateway(rig, monkeypatch):
-    """The sixth op's whole body: `self.gateway.nudge()` when the gateway has one."""
+def test_the_op_wakes_the_local_record(rig, monkeypatch):
+    """The sixth op's whole body: `self.record.nudge()` when the record has one."""
     woken: list = []
-    monkeypatch.setattr(rig.gateway, "nudge", lambda: woken.append(1))
+    monkeypatch.setattr(rig.record, "nudge", lambda: woken.append(1))
     conn = Frames()
     rig.daemon._handle(conn, {"op": "nudge"})
     assert woken == [1]
@@ -139,7 +139,7 @@ def test_the_op_wakes_the_local_gateway(rig, monkeypatch):
 
 # ------------------------------------------------------------------- the old daemon
 
-def test_nudge_is_a_no_op_on_a_gateway_without_one_and_never_replies(rig):
+def test_nudge_is_a_no_op_on_a_record_without_one_and_never_replies(rig):
     """The mock has no `nudge` (nor does Discord): the op is taken and does nothing."""
     conn = Frames()
     rig.daemon._handle(conn, {"id": 11, "op": "nudge"})
@@ -167,13 +167,13 @@ def test_an_old_daemon_answers_unknown_op_and_is_otherwise_unharmed(rig):
 
 def test_the_cli_on_the_mock_backend_sends_no_nudge(rig, notified):
     """The mock fans out in-process, so the frame would buy nothing. The backend is the
-    seam's answer here, not the gateway object's: this rig hands the CLI a gateway, and
+    seam's answer here, not the record object's: this rig hands the CLI a record, and
     the selection chain answers mock because the environment names it (the default
     would be local)."""
     planner, reviewer = a_pair(rig)
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "no nudge for the mock"],
                         name="planner", scope="proj-a",
-                        env={"MOXI_COMMS_GATEWAY": "mock"})
+                        env={"MOXI_COMMS_BACKEND": "mock"})
     assert code == 0 and "sent" in out
     assert "nudge" not in notified
     wait_for_queue(reviewer, 1)

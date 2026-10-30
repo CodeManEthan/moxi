@@ -43,13 +43,13 @@ changes nothing.
 comms' five directories under Moxi's roots (`moxi.paths`), the config file, the backend
 and where it came from, the secrets chain, the adapter binaries
 on PATH and whether the daemon answers. It writes nothing, posts nothing, and exits 0
-unless the daemon is configured (a config file or `MOXI_COMMS_GATEWAY`) and down.
+unless the daemon is configured (a config file or `MOXI_COMMS_BACKEND`) and down.
 
 Send boundary, enforced here:
   * an unbound EPHEMERAL name is an honest error at the verb -- a retired agent-N is
     nobody and the number is never reused;
   * a CHOSEN name accepts, deferring when unbound, with an explicit notice -- declared
-    latency, never a silent success. A `moxi comms send` to an identity the custody journal
+    latency, never a silent success. A `moxi comms send` to an identity the binding history
     has never seen bound (a bare name is the global identity; `x@S` is x@S), with no
     standing row, is refused unless the sender passes `--new-name`;
   * an UNDECLARED STANDING name is an honest error too -- but nothing in a bare name
@@ -124,7 +124,7 @@ wakes it for this message alone. It holds a warm recipient too. It reads the rec
 caches like any send and is accepted for every recipient; to the operator it is ignored,
 with a NOTE.
 
-Length is the verb's business too. The gateway seam declares `max_content_length`, the
+Length is the verb's business too. The record seam declares `max_content_length`, the
 one cap on one message; the verb checks it before any credential is resolved, and a
 message over it is refused with nothing posted. Comms does not split a message.
 """
@@ -142,7 +142,7 @@ import time
 from . import (attribution, cache, cards, claimfile, claimhold, config, cursors,
                directory, glossary, machine_line, policy, sending)
 from .client import DaemonClient, DaemonError, DaemonOffline, DaemonTimeout
-from .gateway import GatewayError
+from .record import RecordError
 from .provision import NAMES
 from .roster_view import render_agents
 from .scoping import identity_of, is_auto_name, project_key
@@ -225,7 +225,7 @@ def cmd_history(args, ctx: Context) -> int:
             return EXIT_OK
     with ctx.db() as db:
         room = directory.room_by_name(db, NAMES)
-        msgs = ctx.gateway.history(room["channel_id"], limit=args.limit)
+        msgs = ctx.record.history(room["channel_id"], limit=args.limit)
         rows = []
         # The effective audience of every message IN THIS PAGE, oldest first (the seam's
         # `history` is ascending), so a hand-typed reply can show the audience it
@@ -238,7 +238,7 @@ def cmd_history(args, ctx: Context) -> int:
                 continue
             effective[m.id] = ml.audience or (effective.get(ml.reply_to)
                                               if ml.reply_to else None)
-            author = attribution.from_record(db, m, record=ctx.gateway)
+            author = attribution.from_record(db, m, record=ctx.record)
             if window is not None and not _in_window(m, window):
                 continue
             addressed = any(_tag_matches(t, identity) for t in ml.recipients)
@@ -291,7 +291,7 @@ def _history_audience(ml, effective: dict) -> str:
 def cmd_help(args, ctx: Context) -> int:
     """The vocabulary lookup. Reads `glossary.TERMS` and nothing else.
 
-    Note what this function does NOT touch: `ctx.daemon()`, `ctx.gateway`, `ctx.db()`.
+    Note what this function does NOT touch: `ctx.daemon()`, `ctx.record`, `ctx.db()`.
     That is the whole point -- an agent that met `(unverified)` in a frame needs the
     word explained, and whether the daemon is up has no bearing on what the word means.
     Every other verb has a reason to be offline-fragile; this one must never acquire
@@ -317,7 +317,7 @@ def cmd_whois(args, ctx: Context) -> int:
     Same posture as `cmd_help`, and for a sharper reason: an agent runs this at the
     moment it is about to message someone, which is also the moment the context is worth
     spending -- and whether the daemon is up has no bearing on who someone is. So this
-    function touches `ctx.daemon()`, `ctx.gateway` and `ctx.db()` exactly as much as
+    function touches `ctx.daemon()`, `ctx.record` and `ctx.db()` exactly as much as
     `cmd_help` does, which is not at all, and `EXIT_OFFLINE` is unreachable from here.
 
     Absence answers EXIT_OK, deliberately diverging from `help`'s exit-2 miss: a glossary
@@ -374,7 +374,7 @@ def cmd_explain(args, ctx: Context) -> int:
     finally:
         client.close()
     ctx.say(_render_explain(info))
-    for line in _launcher_status(qualified, ctx.env):
+    for line in _wrapper_status(qualified, ctx.env):
         ctx.say(line)
     return EXIT_OK
 
@@ -434,14 +434,14 @@ def cmd_owner(args, ctx: Context) -> int:
     return EXIT_OK
 
 
-#: How many of a launcher's newest status lines `moxi comms explain` prints.
-LAUNCHER_STATUS_SHOWN = 5
+#: How many of a wrapper's newest status lines `moxi comms explain` prints.
+WRAPPER_STATUS_SHOWN = 5
 
 
-def _launcher_status(qualified: str, env) -> list:
-    """The newest lines of an `opencode` launcher's status line for this name: what it
+def _wrapper_status(qualified: str, env) -> list:
+    """The newest lines of an `opencode` wrapper's status line for this name: what it
     said while its window covered its own terminal. Read from the session file the
-    launcher writes; nothing when there is none."""
+    wrapper writes; nothing when there is none."""
     from .adapters import opencode, opencode_roster
     from .config import ConfigError
 
@@ -452,7 +452,7 @@ def _launcher_status(qualified: str, env) -> list:
             path = agent.session_file
     except ConfigError:
         pass
-    lines = opencode.status_lines(path)[-LAUNCHER_STATUS_SHOWN:]
+    lines = opencode.status_lines(path)[-WRAPPER_STATUS_SHOWN:]
     if not lines:
         return []
     return ["", "moxi-comms-opencode status (newest last):"] + [
@@ -592,7 +592,7 @@ def cmd_doctor(args, ctx: Context) -> int:
     """What this box's comms is and where it lives. Read-only."""
     import shutil
 
-    from . import gateway as gw, secrets
+    from . import record as gw, secrets
     from .paths import LAYOUT, daemon_socket
 
     def row(label: str, value: str) -> None:
@@ -604,7 +604,7 @@ def cmd_doctor(args, ctx: Context) -> int:
     for name in DOCTOR_DIRS:
         row(f"  {name.upper()}", str(getattr(LAYOUT, f"{name}_dir")()))
 
-    configured = bool(ctx.env.get("MOXI_COMMS_GATEWAY"))
+    configured = bool(ctx.env.get("MOXI_COMMS_BACKEND"))
     try:
         cfg = config.load(env=ctx.env)
         configured = configured or cfg.source != "defaults"
@@ -616,7 +616,7 @@ def cmd_doctor(args, ctx: Context) -> int:
             + ("" if tuple(cfg.secrets.chain) != tuple(secrets.default_chain())
                else " (the default)"))
         required = cfg.cache.required
-    except (config.ConfigError, GatewayError) as e:
+    except (config.ConfigError, RecordError) as e:
         row("config", f"ERROR: {e}")
         required = False
 
@@ -843,18 +843,18 @@ CHECK_HELP = ("run every check this send makes before posting and then stop: pos
 
 def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog=prog, description="agent-to-agent comms")
-    ap.add_argument("--gateway", choices=("mock",),
+    ap.add_argument("--backend", choices=("mock",),
                     help="which backend to talk to: mock (default: "
-                         "MOXI_COMMS_GATEWAY, then the config file, then local)")
+                         "MOXI_COMMS_BACKEND, then the config file, then local)")
     sub = ap.add_subparsers(dest="verb", required=True)
 
-    # `claude` is the launcher (`adapters/session.py`), with a parser of its own; `main`
+    # `claude` is the wrapper (`adapters/session.py`), with a parser of its own; `main`
     # hands it every argument after the verb, `--` and what follows included. Listed here
     # so `--help` names it.
     sub.add_parser("claude", add_help=False,
                    help="start a Claude Code session with a comms identity "
                         "(`claude --help` for its options). The options of "
-                        "`moxi comms` itself, such as --gateway, do not apply to it")
+                        "`moxi comms` itself, such as --backend, do not apply to it")
 
     s = sub.add_parser("send", help="message an identity by name")
     s.add_argument("to", help="name, or a comma-separated list (one post, one thread)")
@@ -1009,7 +1009,7 @@ def main(argv=None, ctx: Context | None = None, *, prog: str = PROG) -> int:
         from .adapters import session
         return session.main(argv[1:], prog=f"{prog} claude")
     args = build_parser(prog).parse_args(argv)
-    ctx = ctx or Context(backend=getattr(args, "gateway", None))
+    ctx = ctx or Context(backend=getattr(args, "backend", None))
     try:
         return args.func(args, ctx)
     except config.ConfigError as e:

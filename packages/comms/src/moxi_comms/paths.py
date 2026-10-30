@@ -92,10 +92,10 @@ def directory_db(env=None) -> Path:
 
 
 def bindings_db(env=None) -> Path:
-    """DATA/comms/bindings.db -- the binding custody journal, beside directory.db.
+    """DATA/comms/bindings.db -- the binding history, beside directory.db.
 
     DATA and deliberately not STATE, though a binding is a live-session fact: what the
-    journal records is used to INTERPRET the record, and the record is device-agnostic.
+    binding history records is used to INTERPRET the record, and the record is device-agnostic.
     An attribution answer must not depend on which box is asking.
     """
     return data_dir(env) / "bindings.db"
@@ -166,14 +166,14 @@ def codex_threads_dir(env=None) -> Path:
 
 
 def opencode_runtime_dir(env=None) -> Path:
-    """RUNTIME/comms/opencode -- what an `opencode` launcher writes for its own server's launch:
+    """RUNTIME/comms/opencode -- what an `opencode` wrapper writes for its own server's launch:
     the layer-one instructions file the server reads by absolute path."""
     return runtime_dir(env) / "opencode"
 
 
 def opencode_sessions_dir(env=None) -> Path:
     """STATE/comms/opencode -- session-id <-> identity for the `opencode` adapter, and
-    the launcher's log and status lines.
+    the wrapper's log and status lines.
 
     The same category as `codex_threads_dir` (the adapter writes it, the daemon never
     does). It holds the session of the identity's current launch: each launch creates
@@ -184,5 +184,5 @@ def opencode_sessions_dir(env=None) -> Path:
 
 
 def log_dir(env=None) -> Path:
-    """STATE/comms/logs -- the daemon's and the launchers' logs."""
+    """STATE/comms/logs -- the daemon's and the wrappers' logs."""
     return state_dir(env) / "logs"

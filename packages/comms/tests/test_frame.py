@@ -113,7 +113,7 @@ def test_the_default_room_is_never_rendered_in_either_spelling(room):
 @pytest.mark.parametrize("room", ["#conference", "#notices", "1400000000001"])
 def test_any_other_room_still_says_where_it_came_from(room):
     """The room is rendered exactly when it is news -- including the bare channel id
-    the daemon falls back to when the gateway cannot name the channel."""
+    the daemon falls back to when the record cannot name the channel."""
     assert frame_line(payload(room=room)).endswith(f"· msg 101 · in {room}")
 
 
@@ -126,7 +126,7 @@ def test_a_missing_room_renders_no_room_bit_rather_than_a_dangling_one(room):
 
 def test_a_non_string_room_renders_instead_of_raising():
     """`room` is a courtesy field the daemon fills with the bare channel_id when the
-    gateway cannot name the channel -- and an int there used to raise out of `lstrip`.
+    record cannot name the channel -- and an int there used to raise out of `lstrip`.
     A rendering must never take the whole digest down over a field it only uses to
     be helpful."""
     assert frame_line(payload(room=1400000000001)).endswith(
@@ -352,7 +352,7 @@ def test_the_other_deviation_marks_still_render_inside_a_catch_up():
 
 def test_a_backlog_batch_of_MIXED_verification_gets_NO_note_and_keeps_its_marks():
     """The note is a blanket, and this batch is not uniform: one frame the daemon proved
-    (custody journal) beside two it could not. A note here would blame replay for the
+    (binding history) beside two it could not. A note here would blame replay for the
     proven frame, and the suppression under it would render proven and unproven
     identically -- the reader could no longer tell them apart at all, which is the whole
     job of the mark. So: nothing in the header, and every frame speaks for itself."""

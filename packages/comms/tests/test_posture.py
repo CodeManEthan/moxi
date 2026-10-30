@@ -30,7 +30,7 @@ from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.attribution import Author
 from moxi_comms.client import DaemonClient, DaemonOffline, DaemonTimeout
 from moxi_comms.daemon import ASK_INDEX_SLACK, Daemon, Refusal, Resolution
-from moxi_comms.gateway import GatewayError, Message
+from moxi_comms.record import RecordError, Message
 from moxi_comms.paths import directory_db
 from moxi_comms.sender import SenderIdentity
 
@@ -47,7 +47,7 @@ P, R, C = "planner", "reviewer", "critic"
 # --------------------------------------------------------------------------- helpers
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def line_zero(msg):
@@ -93,7 +93,7 @@ def refused(code, out):
 
 
 class ReadFails:
-    """The real gateway, except that one record read raises."""
+    """The real record, except that one record read raises."""
 
     def __init__(self, inner, error, *, what="get_message"):
         self._inner, self._error, self._what = inner, error, what
@@ -112,7 +112,7 @@ def reboot():
 
     def _reboot(rig):
         rig.daemon.stop()
-        rig.daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+        rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
         started.append(rig.daemon)
         return rig.daemon
 
@@ -196,7 +196,7 @@ def test_keyword_calls_give_todays_bytes_and_a_positional_one_fails():
 def test_bodies_with_a_text_only_namespace_gives_one_plain_body():
     """A caller outside comms compares its own render with `cli._bodies(args, ...)`,
     with an `args` that carries the text: no posture on `args`."""
-    ctx = SimpleNamespace(gateway=SimpleNamespace(max_content_length=16_000),
+    ctx = SimpleNamespace(record=SimpleNamespace(max_content_length=16_000),
                           say=lambda _t="": None)
     fits = SimpleNamespace(text="hello")
     assert cli._bodies(fits, ctx, ["reviewer"], None) == ["::to reviewer\nhello"]
@@ -413,14 +413,14 @@ def test_any_other_daemon_error_lets_the_send_through_quoting_it(rig, pair, monk
 
 
 @pytest.mark.parametrize("what", ["get_message", "history"])
-@pytest.mark.parametrize("error", [GatewayError("500: the record is unreadable"),
+@pytest.mark.parametrize("error", [RecordError("500: the record is unreadable"),
                                    DaemonOffline("comms offline"),
                                    sqlite3.OperationalError("disk I/O error"),
                                    RuntimeError("an unforeseen defect")])
 def test_a_failed_record_read_lets_the_send_through_naming_the_ask(rig, pair, what, error):
     ask = open_ask(rig)
     code, out = rig.cli(["send", "--posture", "none", "planner", "hi"], **REVIEWER,
-                        gateway=ReadFails(rig.gateway, error, what=what))
+                        record=ReadFails(rig.record, error, what=what))
     assert code == 0, out
     assert f"NOTE: the single-reply check could not read msg {ask.id}" in out
     assert str(error) in out
@@ -431,7 +431,7 @@ def test_a_failed_record_read_lets_the_send_through_naming_the_ask(rig, pair, wh
 def test_a_failed_directory_read_lets_the_single_reply_check_through(rig, pair,
                                                                      monkeypatch, seam):
     ask = open_ask(rig)
-    ctx = cli.Context(gateway=rig.gateway, db_path=directory_db(), clock=rig.clock)
+    ctx = cli.Context(record=rig.record, db_path=directory_db(), clock=rig.clock)
     sender = SenderIdentity(qualified=R, scope="global", name="reviewer")
 
     if seam == "db":
@@ -731,7 +731,7 @@ def test_a_send_during_the_boot_race_passes_and_is_refused_once_the_rescan_lands
         cursors.advance(name, ask.id)
     rig.daemon.stop()
     gate = threading.Event()
-    daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     rescan = daemon.rescan
 
     def held_rescan():

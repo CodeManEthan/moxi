@@ -106,7 +106,7 @@ def reviewer_with_session(rig, session_id=SESS_REVIEWER, **kwargs):
 
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def sent_id(out):
@@ -134,7 +134,7 @@ def reboot():
 
     def _reboot(rig):
         rig.daemon.stop()
-        rig.daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+        rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
         started.append(rig.daemon)
         return rig.daemon
 
@@ -787,8 +787,8 @@ def test_the_trim_keeps_held_mail_past_retention(rig):
     rig.age_message(mid, stamp)
     rig.age_message(old.id, stamp)
     rig.daemon.trim_record()
-    assert rig.gateway.get_message(mid) is not None
-    assert rig.gateway.get_message(old.id) is None
+    assert rig.record.get_message(mid) is not None
+    assert rig.record.get_message(old.id) is None
 
 
 def test_the_queue_load_runs_before_the_socket_listens(rig, monkeypatch):
@@ -807,7 +807,7 @@ def test_the_queue_load_runs_before_the_socket_listens(rig, monkeypatch):
         return real(self)
 
     monkeypatch.setattr(Daemon, "_load_queue", gated)
-    daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     boot = threading.Thread(target=daemon.start)
     boot.start()
     try:
@@ -832,7 +832,7 @@ def test_the_trim_waits_for_the_queue_load(rig, monkeypatch, reboot):
     if rig.backend != "local":
         pytest.skip("only the local record trims")
     mid = next_turn(rig)
-    assert wait_until(lambda: (mid, REVIEWER_Q) in rig.gateway.queue_rows())
+    assert wait_until(lambda: (mid, REVIEWER_Q) in rig.record.queue_rows())
     # Stopped before `ancient` is posted: a live daemon would route it to the unbound
     # name and give it a row whenever its pass beat the cursor below.
     rig.daemon.stop()
@@ -841,25 +841,25 @@ def test_the_trim_waits_for_the_queue_load(rig, monkeypatch, reboot):
     rig.age_message(mid, stamp)
     rig.age_message(ancient.id, stamp)
     cursors.advance("main@proj-b", ancient.id)     # handled: the boot rescan gives no row
-    unloaded = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    unloaded = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     assert unloaded._queue_loaded is False
     unloaded.trim_record()
-    assert rig.gateway.get_message(mid) is not None
-    assert rig.gateway.get_message(ancient.id) is not None, "skipped, not partial"
+    assert rig.record.get_message(mid) is not None
+    assert rig.record.get_message(ancient.id) is not None, "skipped, not partial"
 
     def broken(self):
         raise RuntimeError("the boot read failed")
 
     with monkeypatch.context() as patched:
-        patched.setattr(rig.gateway, "queue_rows", lambda: broken(None))
+        patched.setattr(rig.record, "queue_rows", lambda: broken(None))
         with pytest.raises(RuntimeError):
-            Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+            Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     assert os.environ["CLAUDE_CONFIG_DIR"].startswith(tempfile.gettempdir())
     daemon = reboot(rig)
     assert daemon._queue_loaded is True
     daemon.trim_record()
-    assert rig.gateway.get_message(mid) is not None
-    assert rig.gateway.get_message(ancient.id) is None
+    assert rig.record.get_message(mid) is not None
+    assert rig.record.get_message(ancient.id) is None
 
 
 def test_the_release_order_is_kept_per_name_not_across_names(rig):
