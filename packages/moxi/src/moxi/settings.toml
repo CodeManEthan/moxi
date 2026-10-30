@@ -1,0 +1,28 @@
+# The core's own settings, read and set as module `moxi`: `moxi config moxi` shows them,
+# and `moxi config set moxi KEY VALUE` sets one. The format is moxi.config's.
+
+[skills.form]
+type = "enum"
+values = ["auto", "link", "copy"]
+default = "auto"
+doc = "How skills and agent files are placed: auto links where it can and copies where it can't."
+read = "use"
+
+[skills.harnesses]
+type = "list"
+items = "str"
+default = ["claude", "codex"]
+doc = "The harnesses `moxi install` places a module's skills for, each a name in harnesses."
+read = "use"
+
+# An empty folder means the harness's built-in one, which only claude and codex have:
+# claude's under $CLAUDE_CONFIG_DIR, else ~/.claude; codex's ~/.agents/skills and
+# ~/.codex/agents. `~` is expanded.
+[harnesses]
+type = "list"
+default = [
+    { name = "claude", skills = "", agents = "" },
+    { name = "codex", skills = "", agents = "" },
+]
+doc = "The harness table: each row's name and its skills and agents folders (empty: the built-in one)."
+read = "use"

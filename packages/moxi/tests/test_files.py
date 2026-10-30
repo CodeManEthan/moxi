@@ -274,6 +274,101 @@ def test_update_from_many_processes_loses_nothing(tmp_path):
     assert target.read_bytes() == b"100"
 
 
+# -- edit_toml ---------------------------------------------------------------------------
+
+EDITED = textwrap.dedent("""\
+    # the module's settings
+    backend = "local"   # where messages go
+
+    [local]
+    # kept for a month
+    retain_days = 30
+    record = ""
+""")
+
+
+def test_edit_toml_keeps_comments_and_order(tmp_path):
+    target = tmp_path / "config.toml"
+    target.write_text(EDITED)
+    with files.edit_toml(target) as doc:
+        doc["local"]["retain_days"] = 7
+        doc["block"] = True
+    assert target.read_text() == (
+        EDITED.replace("retain_days = 30", "retain_days = 7")
+        .replace("# where messages go\n", "# where messages go\nblock = true\n"))
+
+
+def test_edit_toml_writes_nothing_when_the_block_raises(tmp_path):
+    target = tmp_path / "config.toml"
+    target.write_text(EDITED)
+    with pytest.raises(KeyError):
+        with files.edit_toml(target) as doc:
+            doc["backend"] = "remote"
+            raise KeyError("no")
+    assert target.read_text() == EDITED
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["config.toml", "config.toml.lock"]
+
+
+def test_edit_toml_of_a_missing_file_starts_empty_and_writes_0600(tmp_path):
+    target = tmp_path / "new" / "config.toml"
+    with files.edit_toml(target) as doc:
+        assert doc.unwrap() == {}
+        doc["a"] = 1
+    assert target.read_text() == "a = 1\n"
+    if sys.platform != "win32":
+        assert mode_of(target) == 0o600
+
+
+@POSIX
+def test_edit_toml_keeps_an_existing_files_mode(tmp_path):
+    target = tmp_path / "config.toml"
+    target.write_text("a = 1\n")
+    os.chmod(target, 0o644)
+    with files.edit_toml(target) as doc:
+        doc["a"] = 2
+    assert target.read_text() == "a = 2\n"
+    assert mode_of(target) == 0o644
+
+
+@POSIX
+def test_edit_toml_writes_through_a_symbolic_link(tmp_path):
+    real = tmp_path / "dotfiles" / "config.toml"
+    real.parent.mkdir()
+    real.write_text("a = 1\n")
+    link = tmp_path / "config.toml"
+    link.symlink_to(real)
+    with files.edit_toml(link) as doc:
+        doc["a"] = 2
+    assert link.is_symlink()
+    assert real.read_text() == "a = 2\n"
+
+
+def test_edit_toml_refuses_a_file_that_is_not_toml(tmp_path):
+    target = tmp_path / "config.toml"
+    target.write_text("a = \n")
+    with pytest.raises(ValueError):
+        with files.edit_toml(target):
+            pytest.fail("the block ran")
+    assert target.read_text() == "a = \n"
+
+
+def test_edit_toml_holds_the_files_lock(tmp_path, holder):
+    target = tmp_path / "config.toml"
+    holder(tmp_path / "config.toml.lock")
+    with pytest.raises(files.LockTimeout):
+        with files.edit_toml(target, timeout=0.1):
+            pytest.fail("the block ran")
+    assert not target.exists()
+
+
+def test_importing_moxi_files_loads_no_tomlkit():
+    code = ("import sys, moxi.files\n"
+            "print(sorted(m for m in sys.modules if 'tomlkit' in m))\n")
+    done = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True,
+                          text=True, check=True)
+    assert done.stdout.strip() == "[]"
+
+
 # -- append_record and read_records ------------------------------------------------------
 
 def test_append_record_writes_one_compact_line(tmp_path):

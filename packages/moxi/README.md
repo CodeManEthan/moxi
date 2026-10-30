@@ -31,7 +31,9 @@ commands:
   `--without`, `--all` and `--none` answer ahead.
 - `moxi shortcut <module>` puts a bare `<module>` command on PATH. It is off by default
   and refused when the name is already taken; `--remove` takes it off.
-- `moxi config <module>` shows a module's settings and its config file.
+- `moxi config <module>` shows a module's settings and its config file; `moxi config set
+  <module> <key> <value>` changes one, keeping the file's comments, and `moxi config unset`
+  removes one. `moxi config moxi` is the core's own.
 - `moxi check` checks a module's package against the module contract.
 
 ## Install

@@ -170,10 +170,12 @@ def build_wheel(out: Path, name: str, version: str, files: dict[str, str], *,
 
 
 def core_wheel(out: Path, version: str = "0.1.0") -> Path:
-    """This checkout's `moxi` package as a wheel, with its console script."""
+    """This checkout's `moxi` package as a wheel, with its console script: every file
+    under `src/moxi`, its settings schema and vendored copies included."""
     src = Path(__file__).resolve().parents[1] / "src" / "moxi"
-    files = {f"moxi/{p.relative_to(src).as_posix()}": p.read_text()
-             for p in sorted(src.rglob("*.py")) if "__pycache__" not in p.parts}
+    files = {f"moxi/{p.relative_to(src).as_posix()}": p.read_text(encoding="utf-8")
+             for p in sorted(src.rglob("*"))
+             if p.is_file() and "__pycache__" not in p.parts}
     return build_wheel(out, "moxi", version, files, scripts={"moxi": "moxi.cli:main"})
 
 

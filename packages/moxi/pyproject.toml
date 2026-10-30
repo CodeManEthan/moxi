@@ -43,7 +43,7 @@ packages = ["src/moxi"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution built from any branch holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "src/moxi", "tests"]
+only-include = ["LICENSE", "README.md", "src/moxi", "tests", "tools"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -288,3 +288,40 @@ def test_the_running_reader_is_moxi_configs():
     assert issubclass(config.Config, moxi_config.Config)
     with pytest.raises(RuntimeError):
         config.Config().current()
+
+
+def test_a_named_file_is_read_in_place(tmp_path, monkeypatch):
+    import tempfile
+
+    def no_temp_root(*args, **kwargs):
+        raise AssertionError("load_file made a temporary config root")
+
+    monkeypatch.setattr(tempfile, "TemporaryDirectory", no_temp_root)
+    named = tmp_path / "launch.toml"
+    named.write_text("block = true\n[replay]\nmessages = 9\n")
+    cfg = config.load_file(named)
+    assert cfg.block is True and cfg.replay.messages == 9
+    assert cfg.source == str(named)
+    assert config.load().block is False
+
+
+def test_a_named_relative_file_is_read_from_the_working_directory(tmp_path, monkeypatch):
+    (tmp_path / "launch.toml").write_text("block = true\n")
+    monkeypatch.chdir(tmp_path)
+    assert config.load_file("launch.toml").source == str(tmp_path / "launch.toml")
+
+
+@pytest.mark.parametrize("text, key", [("block = 3\n", "block"),
+                                       ('[codex.agents.p]\napi_token = "x"\n',
+                                        "codex.agents.p.api_token")])
+def test_a_named_file_s_errors_name_that_file(tmp_path, text, key):
+    named = tmp_path / "launch.toml"
+    named.write_text(text)
+    with pytest.raises(config.ConfigError) as caught:
+        config.load_file(named)
+    assert caught.value.file == str(named) and caught.value.key == key
+
+
+def test_a_named_file_that_does_not_exist_is_refused(tmp_path):
+    with pytest.raises(config.ConfigError, match="is not a file"):
+        config.load_file(tmp_path / "missing.toml")
