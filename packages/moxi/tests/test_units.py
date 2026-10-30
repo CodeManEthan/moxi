@@ -123,6 +123,42 @@ def test_declarations_merge_units_from_and_reject_bad_entries(w, tmp_path):
     assert "absolute path" in decl.rejected[("daemon", "rel")]
 
 
+def test_a_run_time_unit_sharing_a_socket_unit_name_is_rejected(w):
+    """A daemon's socket for its k-th address is a unit named for `<daemon>-<k>`, so a
+    run-time unit of that name is kept out: the run-time one of the pair, or the
+    `<daemon>-<k>` one when both are run-time."""
+    w.module(DAEMONS="{'shell': {'command': 'moxi-demo-shell', 'socket': {'setting': "
+                     "'port', 'addresses': ['127.0.0.1', '::1']}}, "
+                     "'web-1': {'command': 'moxi-demo-web'}}",
+             units_from="""
+             two = {"setting": "port", "addresses": ["127.0.0.1", "::1"]}
+             def units():
+                 return {"daemons": {"shell-1": {"command": "moxi-demo-x"},
+                                     "shell-2": {"command": "moxi-demo-x", "socket": two},
+                                     "web": {"command": "moxi-demo-x", "socket": two},
+                                     "api": {"command": "moxi-demo-x", "socket": two}},
+                         "timers": {"api-1": {"command": "moxi-demo-x", "every": "5m"},
+                                    "shell-3": {"command": "moxi-demo-x", "every": "5m"}}}
+             """)
+    decl = units.declarations("demo")
+    assert set(decl.daemons) == {"shell", "web-1", "shell-2", "api"}
+    assert set(decl.timers) == {"shell-3"}
+    assert set(decl.rejected) == {("daemon", "shell-1"), ("daemon", "web"),
+                                  ("timer", "api-1")}
+    assert "declares daemon 'shell-1' beside daemon 'shell'" in \
+        decl.rejected[("daemon", "shell-1")]
+    assert "declares daemon 'web-1' beside daemon 'web'" in decl.rejected[("daemon", "web")]
+    assert "declares timer 'api-1' beside daemon 'api'" in decl.rejected[("timer", "api-1")]
+    assert all(r.startswith("UNITS_FROM (moxi_demo.runtime:units) ")
+               for r in decl.rejected.values())
+    # plan refuses each one, cause declaration
+    w.script("moxi-demo-shell")
+    plan = w.plan()
+    assert plan[("shell-1", "daemon")].action == "refuse"
+    assert plan[("shell-1", "daemon")].cause == "declaration"
+    assert plan[("api-1", "timer")].cause == "declaration"
+
+
 @pytest.mark.parametrize("body, text", [
     ("raise RuntimeError('no rows file')", "RuntimeError: no rows file"),
     ("return [1]", "returned list"),
