@@ -41,11 +41,11 @@ from moxi_comms.claimhold import CLAIM_SOCKET_ENV, ClaimServer
 from moxi_comms.daemon import Daemon
 from moxi_comms.local_gateway import LocalGateway
 from moxi_comms.membership import SELF, root_of
-from moxi_comms.mock_gateway import NO_MENTIONS, MockGateway
+from moxi_comms.mock_gateway import MockGateway
 from moxi_comms.paths import daemon_socket, directory_db, tokens_dir
 from moxi_comms.provision import NAMES, provision
-from moxi_comms.scoping import project_key
-from moxi_comms.sender import MalformedStamp, SenderIdentity, credential_for, sender_from_env
+from moxi_comms.scoping import is_auto_name, project_key
+from moxi_comms.sender import MalformedStamp, SenderIdentity, sender_from_env
 from moxi_comms.tokens import TokenStore
 
 
@@ -165,7 +165,6 @@ BOTH_BACKENDS = (
     "test_cli.py",                  # the CLI verbs, and the sender through them
     "test_delivery.py",             # the daemon's routing, delivery and replay
     "test_claims.py",               # claim / release, through the daemon
-    "test_custody.py",              # the custody journal and the binding fence
     "test_directory_provision.py",  # provision against the seam
     "test_local_gateway.py",        # its rig tests state the no-op half on the mock too
     "test_audience.py",             # the audience mark, verb to frame
@@ -177,7 +176,6 @@ BOTH_BACKENDS = (
     "test_posture_intent.py",       # posture on every new send, replies, open threads
     "test_old_marks.py",            # records with an older mark still parse
     "test_reply_enforcement.py",    # reply enforcement, mark to reminder (its)
-    "test_slot_fix.py",             # keeps, the slot fallback, the bundle's binding
     "test_claim_ops.py",            # the claim socket's op classes and ops
     "test_claim_server.py",         # a binding held by a module's own process
     "test_claim_send.py",           # sending as the claim; ordinary sends unchanged
@@ -294,41 +292,13 @@ class Rig:
                          (timestamp, int(message_id)))
 
     # -- senders ------------------------------------------------------------
-    def post_from_slot(self, slot_id: int, recipients, text, *,
-                       reply_to=None, display=None, audience=None):
-        """Post a tagged message straight through a slot's #names webhook."""
-        from moxi_comms import directory
-        db = directory.connect(directory_db(), read_only=True)
-        try:
-            sender = SenderIdentity.for_slot(slot_id, display or f"slot-{slot_id}", "global")
-            cred, _ = credential_for(self.gateway, db, sender)
-        finally:
-            db.close()
-        body = machine_line.compose(recipients, text, reply_to=reply_to,
-                                    audience=audience)
-        return self.gateway.execute_webhook(cred, body, username=display or f"slot-{slot_id}",
-                                            allowed_mentions=NO_MENTIONS)
-
-    def slot_webhook_id(self, slot_id: int, room: str = NAMES) -> str:
-        """Which webhook a slot's bundle owns in `room` -- so a test can assert on the
-        credential a post actually spent, not just on the name it wore."""
-        from moxi_comms import directory
-        db = directory.connect(directory_db(), read_only=True)
-        try:
-            channel_id = directory.room_by_name(db, room)["channel_id"]
-            return directory.slot_webhook(db, slot_id, channel_id)["webhook_id"]
-        finally:
-            db.close()
-
-    def agent_webhook_id(self, name: str, scope: str, room: str = NAMES) -> str:
-        """The standing identity's OWN webhook in `room` (the one a pin must not use)."""
-        from moxi_comms import directory
-        db = directory.connect(directory_db(), read_only=True)
-        try:
-            channel_id = directory.room_by_name(db, room)["channel_id"]
-            return directory.agent_webhook(db, name, scope, channel_id)["webhook_id"]
-        finally:
-            db.close()
+    def post_as(self, name: str, recipients, text=None, *, reply_to=None, audience=None,
+                next_turn=False, cold_at=None, channel=None, raw=False):
+        """Seed a stamped identity row for test setup, without exercising a send."""
+        body = recipients if raw else machine_line.compose(
+            recipients, text, reply_to=reply_to, audience=audience,
+            next_turn=next_turn, cold_at=cold_at)
+        return self.gateway.post_as_identity(name, channel or self.names_channel, body)
 
     def post_as_operator(self, recipients, text, *, reply_to=None, audience=None):
         """The operator's lane, holding the operator's own credential. On `local` a
@@ -340,7 +310,7 @@ class Rig:
                                          body, token=self.operator_token)
 
     # -- adapters -----------------------------------------------------------
-    def shim(self, *, slot="next-free", name=None, scope=None, global_=False,
+    def shim(self, *, name=None, scope=None, global_=False,
              project="proj-a", autoreconnect=False, backoff=None, start=True,
              directors=(), session_id=WARM_SESSION, **extra) -> ClaudeShim:
         """A claude-shim on the rig. By default its session is a new id with a WARM
@@ -354,7 +324,7 @@ class Rig:
         if session_id is WARM_SESSION:
             session_id = str(uuid.uuid4())
             write_transcript(session_id, age=0)
-        s = ClaudeShim(slot=slot, name=name, scope=scope, global_=global_, project=project,
+        s = ClaudeShim(name=name, scope=scope, global_=global_, project=project,
                        injector=injected.append, status_sink=status.append,
                        autoreconnect=autoreconnect, backoff=backoff, directors=directors,
                        clock=self.clock,   # the record and the catch-up age agree
@@ -367,22 +337,20 @@ class Rig:
         return s
 
     # -- the CLI ------------------------------------------------------------
-    def cli(self, argv, *, slot=None, name=None, scope=None, project="proj-a", env=None,
+    def cli(self, argv, *, name=None, scope=None, project="proj-a", env=None,
             gateway=None, stamp_only=False, clock=None):
         """Run one CLI verb in this process.
 
-        `name`, `scope` and `slot` stamp the environment as a launcher does. A send verb
+        `name` and `scope` stamp the environment as a launcher does. A send verb
         (`send`, `reply`) with a stamp runs INSIDE a live session holding the stamped
         identity, because only such a session sends under it: the
         rig shim bound as that name, through its own claim socket, or, when no rig shim
-        holds it, a session holding the claim `offline` on the stamped slot. Either way
-        this process is a `self` root of that session for the one call. `stamp_only=True`
+        holds it, a slotless stand-in that binds for this call only. Either way this
+        process is a `self` root of that session for the one call. `stamp_only=True`
         sends from the stamp alone, which is refused. An `env` that brings its own claim
         socket or the operator's stamp is left as it is. `clock` is the verb's clock
         (`Context.clock`); None leaves it the wall clock."""
         environ = {"MOXI_COMMS_PROJECT": project}
-        if slot is not None:
-            environ["MOXI_COMMS_SLOT"] = str(slot)
         if name is not None:
             environ["MOXI_COMMS_NAME"] = name
         if scope is not None:
@@ -397,12 +365,19 @@ class Rig:
                     return self._run_cli(argv, environ, gateway, clock)
         return self._run_cli(argv, environ, gateway, clock)
 
+    def send(self, to, text, *flags, sender=None, posture="none", **kw):
+        """`moxi comms send` to `to` from `sender` (the `cli` stamp: `name`, `scope`),
+        stating `posture` (None states none). `kw` goes to `cli` as it is.
+        Returns `cli`'s (code, output)."""
+        argv = ["send"] if posture is None else ["send", "--posture", posture]
+        return self.cli([*argv, to, text, *flags], **(sender or {}), **kw)
+
     @contextlib.contextmanager
     def session_holding(self, sender: SenderIdentity):
         """This process inside a live session holding `sender`, for one call: yields its
         claim socket. A started rig shim whose claim holds the name (bound or offline)
-        is that session; otherwise a `ClaimServer` holding the claim `offline` on the
-        stamped slot stands in for the session, and goes at the end of the call. A
+        is that session; otherwise a slotless `ClaimServer` binds for the call, stops at
+        its end, and the rig waits a bounded time for the daemon to show it unbound. A
         binding this process holds itself (`holders`) is sent through as it is."""
         held = self.holders.get(sender.qualified)
         if held is not None:
@@ -426,17 +401,28 @@ class Rig:
                     holder.roots = [r for r in holder.roots if r is not me]
                     holder.save()
             return
+        if is_auto_name(sender.name):
+            shim = self.shim(name="auto", scope=None, session_id=None)
+            try:
+                yield str(shim.claims.socket_path)
+            finally:
+                shim.stop(remove_claim_file=True)
+            return
         server = ClaimServer(sender.name, sender.scope, kind="claude-shim",
-                             slot=sender.slot_id if sender.slot_id is not None
-                             else "next-free",
-                             global_=sender.scope == "global")
-        server.holder.ever_held = True
-        server.set_offline()
-        server.start()
+                             global_=sender.scope == "global", arm=True,
+                             daemon_socket=daemon_socket()).start()
         try:
             yield str(server.socket_path)
         finally:
+            bound_here = server.holder.ever_held
             server.stop()
+            if bound_here:
+                deadline = time.monotonic() + 5.0
+                while (sender.qualified in self.daemon.bindings
+                       and time.monotonic() < deadline):
+                    time.sleep(0.01)
+                if sender.qualified in self.daemon.bindings:
+                    pytest.fail(f"stand-in session for {sender.qualified} stayed bound")
 
     def _run_cli(self, argv, environ, gateway, clock=None):
         # The verb's env is this process's (the env fixture's tmp roots) plus the stamps:
@@ -455,12 +441,10 @@ def rig(backend):
     clock = FakeClock()
     gateway = build_gateway(backend, clock)
     store = build_store(backend)
-    # On `local`, provision is the token writer: every bundle's token and
-    # the operator's own land in their holder's 0600 file here, and nothing serves them
-    # back but the store. On the mock, `store` is None and the mock's record holds them,
-    # which is what it always did.
+    # On `local`, provision writes the operator's token to its 0600 holder file. On the
+    # mock, `store` is None and the mock's record holds it.
     prov = provision(
-        gateway, directory_db(), slots=6,
+        gateway, directory_db(),
         standing=[("main", "proj-a"), ("main", "proj-b"), ("herald", "global")],
         operator=("900001", "operator"), store=store,
     )
@@ -600,6 +584,35 @@ def wait_for_queue(shim, count: int, timeout: float = 3.0):
 
 def cursor_of(qualified: str):
     return cursors.read(qualified)
+
+
+@pytest.fixture
+def bind_answered():
+    """Bindings held by bare DaemonClients: `bind_answered(**register_fields)` registers
+    one and returns the client and the daemon's register answer. Closed at the end of
+    the test."""
+    from moxi_comms.client import DaemonClient
+    made = []
+
+    def _bind(**kwargs):
+        c = DaemonClient(daemon_socket()).connect()
+        answer = c.register(**kwargs)
+        made.append(c)
+        return c, answer
+
+    yield _bind
+    for c in made:
+        c.close()
+
+
+@pytest.fixture
+def bind(bind_answered):
+    """Bindings held by bare DaemonClients (the operator's own binding, a worker):
+    `bind(**register_fields)` returns the client."""
+    def _bind(**kwargs):
+        return bind_answered(**kwargs)[0]
+
+    return _bind
 
 
 @pytest.fixture

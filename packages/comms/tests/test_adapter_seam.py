@@ -18,7 +18,7 @@ IDENTITY = "planner@proj-a"
 
 
 def make_adapter(rig, tmp_path, session=None, **kwargs):
-    row = CodexAgent(qualified=IDENTITY, name="planner", scope="proj-a", slot=3,
+    row = CodexAgent(qualified=IDENTITY, name="planner", scope="proj-a",
                      cwd=str(tmp_path), thread_file=codex_threads.path(IDENTITY))
     fake = session or FakeSession()
     adapter = CodexAdapter(row, launch=launcher(fake), clock=rig.clock,
@@ -63,7 +63,7 @@ def test_a_refused_turns_delivery_is_requeued_and_retried(rig, tmp_path):
     adapter.start()
     try:
         code, _ = rig.cli(["send", "--posture", "none", IDENTITY, "again"],
-                          slot=1, name="main", scope="proj-a")
+                           name="main", scope="proj-a")
         assert code == 0
         assert wait_until(lambda: fake.delivered)
         fake.answer = "start"
@@ -82,7 +82,7 @@ def test_a_delivery_turns_cannot_place_is_not_injected_twice(rig, tmp_path, answ
     adapter.start()
     try:
         code, _ = rig.cli(["send", "--posture", "none", IDENTITY, "once"],
-                          slot=1, name="main", scope="proj-a")
+                           name="main", scope="proj-a")
         assert code == 0
         assert wait_until(lambda: adapter.unhandled_owed)
         assert len(fake.delivered) == 1

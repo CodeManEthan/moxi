@@ -14,7 +14,7 @@ from moxi_comms import claimfile, claimhold
 from moxi_comms.claimhold import NOT_INSIDE, ClaimHolder
 from moxi_comms.membership import SELF, TREE, ProcView, Root, inside, root_of, sessions_of
 
-SEAT, OTHER = "seat@proj-a", "other@proj-a"
+PLANNER, REVIEWER = "planner@proj-a", "reviewer@proj-a"
 
 
 @pytest.fixture
@@ -26,7 +26,7 @@ def world(rig):
 
 def pair(world):
     """Two sessions of the same scope, each bound under its own name."""
-    return world.session("seat", slot=2), world.session("other", slot=3)
+    return world.session("planner"), world.session("reviewer")
 
 
 # --------------------------------------------------------------------------- membership
@@ -80,22 +80,26 @@ def test_the_real_proc_reads_a_start_time_and_a_parent():
 
 def test_claim_answers_inside_the_session_only(rig, world):
     p, n = pair(world)
-    assert world.call(p, p.verb_pid, "claim")["claim"]["qualified"] == SEAT
+    answer = world.call(p, p.verb_pid, "claim")
+    assert answer["claim"]["qualified"] == PLANNER
+    assert answer["protocol"] == 2 and answer["token"] == p.holder.token
     stranger = world.proc.spawn()
     answer = world.call(p, stranger, "claim")
     assert not answer["ok"] and answer["error"] == NOT_INSIDE
+    assert set(answer) == {"ok", "error", "not_inside"}
     answer = world.call(n, p.verb_pid, "claim")               # P's verb on N's socket
     assert not answer["ok"] and answer["error"] == NOT_INSIDE
-    assert world.call(n, n.verb_pid, "claim")["claim"]["qualified"] == OTHER
+    assert world.call(n, n.verb_pid, "claim")["claim"]["qualified"] == REVIEWER
 
 
 def test_state_answers_anyone_and_carries_nothing_to_send_as(rig, world):
     p, n = pair(world)
     answer = world.call(p, world.proc.spawn(), "state")
-    assert answer["ok"] and answer["claim"] == SEAT
-    assert world.call(p, n.verb_pid, "state")["claim"] == SEAT    # N's verb on P's socket
+    assert answer["ok"] and answer["claim"] == PLANNER
+    assert world.call(p, n.verb_pid, "state")["claim"] == PLANNER
     # the trimmed answer, and nothing in it to send as
     assert set(answer) == {"ok", "state", "kind", "key", "claim", "claim_name", "lost"}
+    assert p.holder.token not in str(answer)
 
 
 def test_the_real_socket_reads_the_callers_pid(rig, tmp_path):
@@ -105,7 +109,7 @@ def test_the_real_socket_reads_the_callers_pid(rig, tmp_path):
     h = ClaimHolder(kind="codex", key="real-test", keying="pid",
                     socket_path=tmp_path / "c.sock", roots=[me])
     h.start_launch({"name": "x", "scope": "proj-a", "qualified": "x@proj-a",
-                    "slot": 1, "directors": []})
+                    "directors": []})
     h.state = claimfile.BOUND
     h.listen()
     try:
@@ -125,23 +129,25 @@ def test_the_real_socket_reads_the_callers_pid(rig, tmp_path):
 def test_a_name_held_elsewhere_moves_a_held_claim_to_standby_and_leaves_a_launch_waiting(
         rig, world):
     from moxi_comms.client import DaemonError
-    p = world.session("seat", slot=2)
-    late = world.session("seat", slot=2, bind=False)
+    p = world.session("planner")
+    late = world.session("planner", bind=False)
     with pytest.raises(DaemonError) as e:
         late.bind()
     holder = (e.value.response.get("holder") or {}).get("qualified")
     late.holder.name_refused(holder)
     assert late.state == "waiting" and late.holder.claim
     p.holder.name_refused(holder)                 # as if its register were refused now
-    assert p.state == "standby" and p.holder.lost == SEAT and p.holder.claim is None
+    assert p.state == "standby" and p.holder.lost == PLANNER and p.holder.claim is None
 
 
 def test_the_file_holds_the_recorded_keys_and_goes_with_a_clean_stop(rig, world):
     p, n = pair(world)
     rec = n.record()
-    for key in ("roots", "launch_session", "hold", "exact_slot", "lost"):
+    for key in ("roots", "launch_session", "hold", "lost"):
         assert key in rec
-    assert rec["state"] == "bound" and rec["claim"]["qualified"] == OTHER
+    assert "exact_slot" not in rec and "slot" not in rec["claim"]
+    assert rec["state"] == "bound" and rec["claim"]["qualified"] == REVIEWER
+    assert n.holder.token not in str(rec)
     for key in ("for", "pass_from", "launch_argv", "retired", "contingent",
                 "contingent_to", "grants"):                  # keys an older file carried
         assert key not in rec
@@ -157,9 +163,11 @@ def test_an_old_files_passing_state_loads_as_standby(rig, tmp_path):
     h = ClaimHolder(kind="claude-shim", key="old-passing", keying="session",
                     socket_path=tmp_path / "c.sock", roots=[])
     h.load({"state": "passing", "hold": 3, "lost": None,
-            "claim": {"name": "seat", "scope": "proj-a", "global": False,
-                      "qualified": SEAT, "slot": 2, "tier": None, "directors": []}})
+            "claim": {"name": "planner", "scope": "proj-a", "global": False,
+                      "qualified": PLANNER, "slot": 2, "tier": None, "directors": []}})
     assert h.state == "standby"
+    assert "slot" not in h.claim
+    assert h.token is None
     assert not h.holds and not h.may_register()
     h.listen()
     try:
@@ -169,17 +177,30 @@ def test_an_old_files_passing_state_loads_as_standby(rig, tmp_path):
         h.close()
 
 
+def test_a_bind_rebuilds_the_claim_from_current_fields(rig, tmp_path):
+    h = ClaimHolder(kind="claude-shim", key="old-claim", keying="session",
+                    socket_path=tmp_path / "c.sock", roots=[])
+    h.claim = {"name": "planner", "scope": "proj-a", "global": False,
+               "qualified": PLANNER, "tier": None, "directors": [], "stale": "old"}
+    h.bound({"identity": {"name": "planner", "scope": "proj-a",
+                          "qualified": PLANNER, "tier": "chosen"},
+             "token": "new-token"})
+    assert h.claim == {"name": "planner", "scope": "proj-a", "global": False,
+                       "qualified": PLANNER, "tier": "chosen", "directors": []}
+    assert h.token == "new-token"
+
+
 def test_a_cursor_moves_only_in_the_hold_its_digest_was_injected_under(rig, world):
     p, n = pair(world)
     mark = p.holder.hold_mark()
-    assert mark == (SEAT, 1) and p.holder.may_advance(mark)
-    assert not p.holder.may_advance((SEAT, 2))                   # another hold
-    assert not p.holder.may_advance((OTHER, 1))                  # another name
+    assert mark == (PLANNER, 1) and p.holder.may_advance(mark)
+    assert not p.holder.may_advance((PLANNER, 2))                # another hold
+    assert not p.holder.may_advance((REVIEWER, 1))               # another name
     assert not p.holder.may_advance(None)
     assert not n.holder.may_advance(mark)
     p.holder.went_offline()                                      # still held, same hold
     assert p.state == "offline" and p.holder.may_advance(mark)
-    p.holder.name_refused(SEAT)                                  # the name went elsewhere
+    assert p.holder.token is None
+    p.holder.name_refused(PLANNER)                               # the name went elsewhere
     assert p.state == "standby" and p.holder.hold_mark() is None
     assert not p.holder.may_advance(mark)
-

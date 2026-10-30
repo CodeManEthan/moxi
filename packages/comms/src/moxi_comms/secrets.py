@@ -1,6 +1,6 @@
 """The resolver CHAIN: one way to turn a secret id into a value, two places to look.
 
-Every backend resolves secrets through it rather than its own lookup. The chain is the
+The operator lane resolves its posting credential through this chain. The chain is the
 one door, declared in config.toml:
 
     [secrets]
@@ -12,11 +12,12 @@ and the interface is one method:
 
 THE STEPS, in the order the file declares them:
 
-  1. `env` -- `MOXI_COMMS_SECRET_<KEY>`, for comms' own role credentials. The KEY is the
+  1. `env` -- `MOXI_COMMS_SECRET_<KEY>`, for comms' own credentials. The KEY is the
      secret id upper-cased with every run of non-alphanumerics folded to one underscore
-     (`env_key` below), so `comms/slot-1/names` is `MOXI_COMMS_SECRET_COMMS_SLOT_1_NAMES`
+     (`env_key` below), so `comms/operator/token` is
+     `MOXI_COMMS_SECRET_COMMS_OPERATOR_TOKEN`
      and a role credential already named like a variable (`ANTHROPIC_API_KEY`) keeps its
-     own spelling under the prefix.
+    own spelling under the prefix.
   2. `store` -- the custody store's DECLARED READ, `TokenStore.read_secret(owner,
      secret_id)`, with the `owner` that rides down from the send verb. A store hit has
      no note: the store is a flat key/value map.
@@ -78,11 +79,11 @@ def env_key(secret_id: str) -> str:
     """The env step's variable name for one secret id, stated once and used everywhere.
 
     Every run of characters that is not a letter or a digit folds to one underscore and
-    the rest upper-cases: `comms/slot-1/names` -> `MOXI_COMMS_SECRET_COMMS_SLOT_1_NAMES`,
+    the rest upper-cases: `comms/operator/token` becomes
+    `MOXI_COMMS_SECRET_COMMS_OPERATOR_TOKEN`,
     `ANTHROPIC_API_KEY` -> `MOXI_COMMS_SECRET_ANTHROPIC_API_KEY`. Two ids that differ only in
-    punctuation therefore share a variable, which is why this is the step for comms' own
-    ROLE credentials (a handful of named keys) and not a general back door for bundle
-    tokens (which have a store and a provision verb).
+    punctuation therefore share a variable, which is why this is the step for comms'
+    own credentials with named keys.
     """
     folded = re.sub(r"[^A-Za-z0-9]+", "_", str(secret_id)).strip("_")
     return ENV_PREFIX + folded.upper()

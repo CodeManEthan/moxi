@@ -18,37 +18,36 @@ import pytest
 from conftest import wait_until, write_config
 
 from moxi_comms import config, daemon as daemon_mod, gateway as gateway_mod, paths
-from moxi_comms.gateway import NO_MENTIONS, Forbidden, GatewayError
+from moxi_comms.gateway import Forbidden, GatewayError
 from moxi_comms.local_gateway import (
     ID_BASE,
     META_OPERATOR_TOKEN_HASH,
     LocalGateway,
-    token_hash,
-)
+    token_hash)
+from moxi_comms.mock_gateway import MockGateway
 
 
 @pytest.fixture
 def gw(tmp_path):
     """A record of its own, with the pump fast enough for a test to wait on it."""
-    tokens: dict[str, str] = {}
-    gateway = LocalGateway(tmp_path / "record.db", poll_interval=0.02,
-                           secret_reader=lambda owner, sid: tokens.get(sid))
-    gateway.minted = tokens
+    gateway = LocalGateway(tmp_path / "record.db", poll_interval=0.02)
     try:
         yield gateway
     finally:
         gateway.close()
 
 
-def webhook(gateway, channel_id, name="slot-1", secret_id="comms/slot-1/names"):
-    cred = gateway.create_webhook(channel_id, name, secret_id)
-    gateway.minted[secret_id] = cred.token
-    return cred
+def post(gateway, channel_id, text, username="planner"):
+    return gateway.post_as_identity(username, channel_id, text)
 
 
-def post(gateway, cred, text, username="planner"):
-    return gateway.execute_webhook(cred, text, username=username,
-                                   allowed_mentions=NO_MENTIONS)
+def test_both_backends_expose_the_remaining_posting_contract():
+    active = {"post_as_user", "post_as_identity", "history", "get_message",
+              "subscribe", "create_channel", "delete_channel", "register_principal"}
+    retired = {"create_webhook", "resolve_secret", "execute_webhook", "webhook_channel"}
+    for backend in (LocalGateway, MockGateway):
+        assert all(callable(getattr(backend, name, None)) for name in active)
+        assert all(not hasattr(backend, name) for name in retired)
 
 
 # --------------------------------------------------------------------------- the file
@@ -66,11 +65,11 @@ def test_the_file_is_wal_with_its_pragmas(gw):
     assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
 
 
-def test_the_schema_is_seven_tables_and_no_reply_column(gw):
+def test_the_schema_has_no_retired_credential_table_or_reply_column(gw):
     conn = gw._conn()
     tables = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert {"channels", "webhooks", "principals", "denied", "messages", "meta"} <= tables
+    assert {"channels", "principals", "denied", "messages", "meta", "queue"} == tables
     columns = [r[1] for r in conn.execute("PRAGMA table_info(messages)")]
     # `Message`'s seven fields and nothing else
     assert columns == ["id", "channel_id", "author_id", "author_kind", "author_display",
@@ -84,26 +83,24 @@ def test_the_counter_outlives_a_trim_to_empty(gw):
     """The regression: `MAX(id)+1` over a table retention also empties
     hands out an id every reader's cursors already compare as past."""
     channel = gw.create_channel("#names")
-    cred = webhook(gw, channel)
-    first = post(gw, cred, "one")
-    last = post(gw, cred, "two")
+    first = post(gw, channel, "one")
+    last = post(gw, channel, "two")
     assert gw.trim(retain_days=0) == 0, "0 disables trimming"
     gw.clock = lambda: time.time() + 100 * 86400        # a hundred days pass
     assert gw.trim() == 2
     assert gw.history(channel) == []
-    after = post(gw, cred, "three")
+    after = post(gw, channel, "three")
     assert int(after.id) > int(last.id) > int(first.id)
 
 
 def test_every_id_comes_from_one_sequence_above_every_older_id(gw):
     channel = gw.create_channel("#names")
-    cred = webhook(gw, channel)
     principal = gw.register_principal("comms-reader")
-    msg = post(gw, cred, "hello")
-    assert channel.startswith("ch-") and cred.webhook_id.startswith("wh-")
-    numbers = [int(channel.removeprefix("ch-")), int(cred.webhook_id.removeprefix("wh-")),
-               int(principal.removeprefix("pr-")), int(msg.id)]
-    assert numbers == sorted(numbers) and len(set(numbers)) == 4
+    msg = post(gw, channel, "hello")
+    assert channel.startswith("ch-")
+    numbers = [int(channel.removeprefix("ch-")), int(principal.removeprefix("pr-")),
+               int(msg.id)]
+    assert numbers == sorted(numbers) and len(set(numbers)) == 3
     assert all(n > ID_BASE for n in numbers)
     # message ids ride the wire as bare digits, exactly as today
     assert msg.id.isdigit()
@@ -116,12 +113,10 @@ def test_two_processes_writing_never_collide_and_never_go_backwards(gw, tmp_path
     posting while the daemon posts a notice, two connections, one file.
     """
     channel = gw.create_channel("#names")
-    cred = webhook(gw, channel)
     child = subprocess.Popen(
-        [sys.executable, "-c", CHILD_WRITER, str(tmp_path / "record.db"), channel,
-         cred.secret_id, cred.token, "40"],
+        [sys.executable, "-c", CHILD_WRITER, str(tmp_path / "record.db"), channel, "40"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    mine = [int(post(gw, cred, f"parent {i}").id) for i in range(40)]
+    mine = [int(post(gw, channel, f"parent {i}").id) for i in range(40)]
     out, err = child.communicate(timeout=60)
     assert child.returncode == 0, err
     theirs = [int(line) for line in out.split()]
@@ -135,98 +130,49 @@ def test_two_processes_writing_never_collide_and_never_go_backwards(gw, tmp_path
 
 CHILD_WRITER = """
 import sys
-from moxi_comms.gateway import NO_MENTIONS
 from moxi_comms.local_gateway import LocalGateway
 
-record, channel, secret_id, token, count = sys.argv[1:6]
-gw = LocalGateway(record, poll_interval=60,
-                  secret_reader=lambda owner, sid: token)
-cred = gw.resolve_secret(secret_id)
+record, channel, count = sys.argv[1:4]
+gw = LocalGateway(record, poll_interval=60)
 for i in range(int(count)):
-    print(gw.execute_webhook(cred, "child %d" % i, username="child",
-                             allowed_mentions=NO_MENTIONS).id)
+    print(gw.post_as_identity("helper", channel, "child %d" % i).id)
 gw.close()
 """
 
 
-# --------------------------------------------------------------------------- webhooks
-
-def test_a_webhook_row_keeps_only_the_hash_and_the_compare_is_against_it(gw):
+def test_the_identity_post_obeys_the_cap_and_denial(gw):
     channel = gw.create_channel("#names")
-    cred = webhook(gw, channel)
-    stored = gw._conn().execute("SELECT token_hash FROM webhooks WHERE webhook_id = ?",
-                                (cred.webhook_id,)).fetchone()[0]
-    assert stored == token_hash(cred.token)
-    assert cred.token not in gw.path.read_bytes().decode("latin-1")
-    assert post(gw, cred, "fine").content == "fine"
-
-    from moxi_comms.gateway import Credential
-    forged = Credential(cred.webhook_id, "not-the-token", secret_id=cred.secret_id)
-    with pytest.raises(GatewayError, match="bad webhook credential"):
-        post(gw, forged, "nope")
-    assert len(gw.history(channel)) == 1, "a refused post writes nothing"
-
-
-def test_resolve_secret_reads_the_holders_store_and_says_so_when_it_is_empty(gw):
-    channel = gw.create_channel("#names")
-    cred = gw.create_webhook(channel, "slot-1", "comms/slot-1/names")   # NOT stored
-    with pytest.raises(GatewayError, match="token store"):
-        gw.resolve_secret("comms/slot-1/names")
-    gw.minted["comms/slot-1/names"] = cred.token
-    again = gw.resolve_secret("comms/slot-1/names")
-    assert (again.webhook_id, again.token) == (cred.webhook_id, cred.token)
-    with pytest.raises(GatewayError, match="unknown secret"):
-        gw.resolve_secret("comms/slot-9/names")
-
-
-def test_resolve_secret_goes_through_the_stores_declared_read(tmp_path):
-    """No injected lookup: the real `TokenStore.read_secret`,
-    reading the key provision writes under the row's `secret_id`."""
-    from moxi_comms import tokens
-
-    store = tokens.TokenStore()
-    owner = tokens.owner_for_slot(1)
-    gateway = LocalGateway(tmp_path / "record.db", poll_interval=60)
-    try:
-        channel = gateway.create_channel("#names")
-        cred = gateway.create_webhook(channel, "slot-1", "comms/slot-1/names")
-        store.write_secret(owner, "comms/slot-1/names", cred.token)
-        resolved = gateway.resolve_secret("comms/slot-1/names", owner=owner)
-        assert (resolved.webhook_id, resolved.token) == (cred.webhook_id, cred.token)
-        assert gateway.execute_webhook(resolved, "through the store", username="slot-1",
-                                       allowed_mentions=NO_MENTIONS).content == \
-            "through the store"
-    finally:
-        gateway.close()
-
-
-def test_the_refusals_keep_the_mocks_order(gw):
-    channel = gw.create_channel("#names")
-    cred = webhook(gw, channel)
-    # mentions first, so a post with a bad credential AND mentions says mentions
-    from moxi_comms.gateway import Credential
-    forged = Credential(cred.webhook_id, "wrong", secret_id=cred.secret_id)
-    with pytest.raises(GatewayError, match="allowed_mentions"):
-        gw.execute_webhook(forged, "x", username="a", allowed_mentions=None)
-    # ...then the cap, then the credential
-    with pytest.raises(GatewayError, match="cap on one message"):
-        gw.execute_webhook(forged, "x" * 20_000, username="a",
-                           allowed_mentions=NO_MENTIONS)
-    # ...then the denial
-    gw.deny_send(cred.webhook_id, channel)
+    gw.deny_send("planner", channel)
     with pytest.raises(Forbidden):
-        post(gw, cred, "denied")
+        gw.post_as_user("planner", channel, "denied")
 
 
 def test_the_cap_is_sixteen_thousand(gw):
     """One cap on one message, 16,000 characters."""
     channel = gw.create_channel("#names")
-    cred = webhook(gw, channel)
     assert gw.max_content_length == 16_000
-    assert post(gw, cred, "x" * 16_000).content == "x" * 16_000
+    assert post(gw, channel, "x" * 16_000).content == "x" * 16_000
     with pytest.raises(GatewayError, match="cap on one message"):
-        post(gw, cred, "x" * 16_001)
+        post(gw, channel, "x" * 16_001)
     assert len(gw.history(channel)) == 1
+
+
+def test_an_identity_post_writes_one_stamped_row_on_both_backends(rig):
+    message = rig.gateway.post_as_identity(
+        "planner@proj-a", rig.names_channel, "bound sender")
+
+    assert (message.author_kind, message.author_id, message.author_display) == \
+        ("identity", "planner@proj-a", "planner@proj-a")
+    assert rig.gateway.history(rig.names_channel) == [message]
+
+
+def test_an_overlong_identity_post_writes_nothing_on_both_backends(rig):
+    with pytest.raises(GatewayError, match="cap on one message"):
+        rig.gateway.post_as_identity(
+            "planner@proj-a", rig.names_channel,
+            "x" * (rig.gateway.max_content_length + 1))
+
+    assert rig.gateway.history(rig.names_channel) == []
 
 
 def test_the_reader_denial_is_a_real_check(gw):
@@ -268,10 +214,8 @@ def test_a_registered_principal_wears_its_own_display(gw):
 def test_history_with_a_limit_takes_the_tail(gw):
     channel = gw.create_channel("#names")
     other = gw.create_channel("#elsewhere")
-    cred = webhook(gw, channel)
-    elsewhere = webhook(gw, other, "elsewhere", "comms/slot-2/elsewhere")
-    ids = [post(gw, cred, f"m{i}").id for i in range(10)]
-    post(gw, elsewhere, "another channel")
+    ids = [post(gw, channel, f"m{i}").id for i in range(10)]
+    post(gw, other, "another channel")
     assert [m.id for m in gw.history(channel)] == ids
     assert [m.id for m in gw.history(channel, limit=3)] == ids[-3:]
     assert [m.id for m in gw.history(channel, after=ids[6])] == ids[7:]
@@ -282,9 +226,8 @@ def test_history_with_a_limit_takes_the_tail(gw):
 def test_get_message_and_max_message_id(gw):
     channel = gw.create_channel("#names")
     other = gw.create_channel("#elsewhere")
-    cred = webhook(gw, channel)
     assert gw.max_message_id() is None and gw.max_message_id(channel) is None
-    msg = post(gw, cred, "one")
+    msg = post(gw, channel, "one")
     assert gw.get_message(msg.id).content == "one"
     assert gw.get_message("4611686018427387000") is None
     assert gw.get_message("not-a-message-id") is None
@@ -296,12 +239,11 @@ def test_get_message_and_max_message_id(gw):
 
 def test_retention_drops_what_is_past_the_window_and_keeps_the_rest(gw):
     channel = gw.create_channel("#names")
-    cred = webhook(gw, channel)
     now = time.time()
     gw.clock = lambda: now - 120 * 86400
-    ancient = post(gw, cred, "a hundred and twenty days ago")
+    ancient = post(gw, channel, "a hundred and twenty days ago")
     gw.clock = lambda: now - 10 * 86400
-    recent = post(gw, cred, "ten days ago")
+    recent = post(gw, channel, "ten days ago")
     gw.clock = lambda: now
 
     assert gw.trim(retain_days=0) == 0
@@ -328,13 +270,12 @@ def test_two_subscriptions_each_see_every_id_exactly_once(gw):
     """The pump iterates `_subs` per pass and each subscription's `last_id` moves
     under the gateway's own lock."""
     channel = gw.create_channel("#names")
-    cred = webhook(gw, channel)
     first = gw.subscribe(from_id="0")
     second = gw.subscribe(from_id="0")
     assert first.next_event(timeout=1.0)["t"] == "READY"
     assert second.next_event(timeout=1.0)["t"] == "READY"
 
-    posted = [post(gw, cred, f"m{i}").id for i in range(25)]
+    posted = [post(gw, channel, f"m{i}").id for i in range(25)]
     for sub in (first, second):
         seen = []
         while len(seen) < len(posted):
@@ -358,12 +299,10 @@ def test_the_pump_finds_what_another_process_wrote(gw, tmp_path):
     """Layer 3, the safety net: no nudge arrives from another process (that is the
     daemon's socket op), and the poll finds the row anyway."""
     channel = gw.create_channel("#names")
-    cred = webhook(gw, channel)
     sub = gw.subscribe(from_id="0")
     assert sub.next_event(timeout=1.0)["t"] == "READY"
     out = subprocess.run(
-        [sys.executable, "-c", CHILD_WRITER, str(tmp_path / "record.db"), channel,
-         cred.secret_id, cred.token, "1"],
+        [sys.executable, "-c", CHILD_WRITER, str(tmp_path / "record.db"), channel, "1"],
         capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
     event = sub.next_event(timeout=3.0)
@@ -372,18 +311,16 @@ def test_the_pump_finds_what_another_process_wrote(gw, tmp_path):
 
 
 def test_nudge_wakes_the_pump_without_waiting_out_the_interval(tmp_path):
-    gateway = LocalGateway(tmp_path / "record.db", poll_interval=30,
-                           secret_reader=lambda owner, sid: None)
+    gateway = LocalGateway(tmp_path / "record.db", poll_interval=30)
     try:
         channel = gateway.create_channel("#names")
-        cred = gateway.create_webhook(channel, "slot-1", "comms/slot-1/names")
         sub = gateway.subscribe(from_id="0")
         assert sub.next_event(timeout=1.0)["t"] == "READY"
         # a row written behind the gateway's back: only the pump can find it, and only
         # the nudge can make it look before the 30-second interval is up
         with gateway._write() as conn:
-            gateway._insert(conn, channel_id=channel, author_id=cred.webhook_id,
-                            author_kind="webhook", author_display="planner",
+            gateway._insert(conn, channel_id=channel, author_id="planner",
+                            author_kind="identity", author_display="planner",
                             content="nudged")
         assert sub.next_event(timeout=0.3) is None
         gateway.nudge()
@@ -395,11 +332,10 @@ def test_nudge_wakes_the_pump_without_waiting_out_the_interval(tmp_path):
 
 def test_a_reconnect_without_resume_makes_the_daemon_rescan(gw):
     channel = gw.create_channel("#names")
-    cred = webhook(gw, channel)
     sub = gw.subscribe(from_id="0")
     assert sub.next_event(timeout=1.0)["t"] == "READY"
     gw.disconnect()
-    post(gw, cred, "into the gap")
+    post(gw, channel, "into the gap")
     assert sub.next_event(timeout=0.2) is None
     gw.reconnect(resume=False)
     assert sub.next_event(timeout=1.0) == {"t": "READY", "resumed": False}
@@ -500,7 +436,7 @@ def test_local_is_one_of_two_backends_and_open_gateway_returns_it(monkeypatch, t
     try:
         assert isinstance(opened, LocalGateway)
         assert opened.path == tmp_path / "elsewhere.db"
-        assert opened.role == "reader"           # accepted and ignored
+        assert not hasattr(opened, "role")        # selection accepts it; record does not use it
         assert opened.retain_days == 90
     finally:
         opened.close()
@@ -588,8 +524,8 @@ def test_the_daemon_takes_a_flag_that_agrees_and_mock_with_a_scratch_store(monke
 def test_a_local_gateway_the_daemon_opens_delivers_through_the_seam(rig):
     """The whole point, said once on both backends: a post through the seam reaches the
     daemon's subscription and comes back out of the record."""
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
-    rig.post_from_slot(6, ["reviewer@proj-a"], "hello from the record")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
+    rig.post_as("agent-6", ["reviewer@proj-a"], "hello from the record")
     wait_until(lambda: len(reviewer.queue) >= 1)
     assert reviewer.queue[0]["message_id"] in [
         m.id for m in rig.gateway.history(rig.names_channel)]

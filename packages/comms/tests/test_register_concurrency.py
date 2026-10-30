@@ -13,9 +13,9 @@ What these pin, in order:
     each other -- with the read under the lock the overlap count would be 1 by
     construction, and no timing luck could make it anything else;
   * no register pays for another register's round trip;
-  * exclusivity is exactly as it was: one binding per name, one per slot, the loser
-    refused in the daemon's own words with the holder named, and nothing journalled for
-    a refusal -- now proven under the concurrency the hoist actually permits;
+  * exclusivity is exactly as it was: one binding per name, the loser refused in the
+    daemon's own words with the holder named, and nothing journalled for a refusal,
+    now proven under the concurrency the hoist actually permits;
   * the catch-up boundary stays EXACT. A message that lands DURING the hoisted round
     trip is above the value the gateway answered with, and the router resolved it
     against a table with no binding in it. It is delivered exactly once (as catch-up)
@@ -103,8 +103,8 @@ def test_concurrent_registers_overlap_their_gateway_round_trips(rig):
     calls = instrument(rig.gateway)
     cs = clients(3)
     try:
-        results = race(lambda i: cs[i].register(slot=i + 1, name=f"peer-{i}",
-                                                scope="proj-a"), 3)
+        names = ("planner", "reviewer", "curator")
+        results = race(lambda i: cs[i].register(name=names[i], scope="proj-a"), 3)
         assert [r[1] for r in results.values()] == [None, None, None]
         assert len(calls) == 3, "one boundary read per register, no more"
         assert max_overlap(calls) == 3, (
@@ -131,11 +131,11 @@ def test_no_register_waits_out_another_registers_round_trip(rig):
     cs = clients(5)
     try:
         t0 = time.monotonic()
-        control.register(slot=1, name="control", scope="proj-a")
+        control.register(name="planner", scope="proj-a")
         solo = time.monotonic() - t0
 
-        results = race(lambda i: cs[i].register(slot=i + 2, name=f"seat-{i}",
-                                                scope="proj-a"), 5)
+        names = ("reviewer", "curator", "coder", "critic", "scout")
+        results = race(lambda i: cs[i].register(name=names[i], scope="proj-a"), 5)
         assert [r[1] for r in results.values()] == [None] * 5
         contended = sorted(seconds for _, _, seconds in results.values())
         assert contended[-1] < solo + HOLD * 2, (
@@ -156,41 +156,19 @@ def test_one_name_survives_a_concurrent_stampede(rig):
     instrument(rig.gateway)
     cs = clients(4)
     try:
-        results = race(lambda i: cs[i].register(slot=i + 1, name="only", scope="proj-a"), 4)
+        results = race(lambda i: cs[i].register(name="planner", scope="proj-a"), 4)
         winners = [i for i, (_, error, _) in results.items() if error is None]
         assert len(winners) == 1, "exactly one claimant binds a name, concurrent or not"
         for i, (_, error, _) in results.items():
             if i in winners:
                 continue
             assert isinstance(error, DaemonError)
-            assert "only@proj-a is already bound" in str(error)
-            assert error.response["holder"]["qualified"] == "only@proj-a"
-        assert list(rig.daemon.bindings) == ["only@proj-a"]
-        rows = [r for r in rig.daemon.journal.intervals() if r["qualified"] == "only@proj-a"]
+            assert "planner@proj-a is already bound" in str(error)
+            assert error.response["holder"]["qualified"] == "planner@proj-a"
+        assert list(rig.daemon.bindings) == ["planner@proj-a"]
+        rows = [r for r in rig.daemon.journal.intervals()
+                if r["qualified"] == "planner@proj-a"]
         assert len(rows) == 1, "a refused register journals nothing; only the bind is custody"
-    finally:
-        for c in cs:
-            c.close()
-
-
-def test_one_slot_survives_a_concurrent_stampede(rig):
-    """The other refusal, same law: the slot is picked and taken under one lock."""
-    instrument(rig.gateway)
-    cs = clients(4)
-    try:
-        results = race(lambda i: cs[i].register(slot=1, name=f"claimant-{i}",
-                                                scope="proj-a"), 4)
-        winners = [i for i, (_, error, _) in results.items() if error is None]
-        assert len(winners) == 1
-        held = results[winners[0]][0]["identity"]["qualified"]
-        for i, (_, error, _) in results.items():
-            if i in winners:
-                continue
-            assert isinstance(error, DaemonError)
-            assert str(error) == f"slot 1 is already bound by {held}"
-            assert error.response["holder"] == {"qualified": held, "slot": 1,
-                                                "adapter": "claude-shim"}
-        assert list(rig.daemon.by_slot) == [1]
     finally:
         for c in cs:
             c.close()
@@ -202,7 +180,7 @@ def test_a_broken_gateway_does_not_change_which_refusal_a_register_gets(rig):
     the record was doing at the time. That is why the read is deferred-raise -- the
     exception is raised where the call itself used to sit."""
     held = clients(1)[0]
-    held.register(slot=1, name="held", scope="proj-a")
+    held.register(name="planner", scope="proj-a")
 
     def unreachable(channel_id=None):
         raise GatewayError("503 the record is unreachable")
@@ -211,33 +189,17 @@ def test_a_broken_gateway_does_not_change_which_refusal_a_register_gets(rig):
 
     late = clients(1)[0]
     try:
-        with pytest.raises(DaemonError, match="held@proj-a is already bound"):
-            late.register(slot=2, name="held", scope="proj-a")
+        with pytest.raises(DaemonError, match="planner@proj-a is already bound"):
+            late.register(name="planner", scope="proj-a")
         # ...and a register that WOULD have bound still fails on the gateway, and binds
         # nothing: the boundary is not something a register may proceed without.
         with pytest.raises(DaemonError, match="the record is unreachable"):
-            late.register(slot=2, name="fresh", scope="proj-a")
-        assert list(rig.daemon.bindings) == ["held@proj-a"]
-        assert [r["qualified"] for r in rig.daemon.journal.intervals()] == ["held@proj-a"]
+            late.register(name="reviewer", scope="proj-a")
+        assert list(rig.daemon.bindings) == ["planner@proj-a"]
+        assert [r["qualified"] for r in rig.daemon.journal.intervals()] == ["planner@proj-a"]
     finally:
         held.close()
         late.close()
-
-
-def test_next_free_hands_out_distinct_slots_under_the_hoist(rig):
-    """`next-free` reads `by_slot` and writes it in the same breath. Six claimants, six
-    slots, no two the same -- the check the hoist would have broken had it taken the
-    slot pick outside the lock with the gateway read."""
-    instrument(rig.gateway)
-    cs = clients(6)
-    try:
-        results = race(lambda i: cs[i].register(name=f"free-{i}", scope="proj-a"), 6)
-        assert [r[1] for r in results.values()] == [None] * 6
-        slots = sorted(value["slot"] for value, _, _ in results.values())
-        assert slots == [1, 2, 3, 4, 5, 6]
-    finally:
-        for c in cs:
-            c.close()
 
 
 # ------------------------------------------------------------------- the instruments
@@ -297,7 +259,7 @@ def test_a_message_that_lands_during_the_round_trip_is_delivered_not_stranded(ri
 
     def register():
         try:
-            outcome["ok"] = client.register(slot=1, name="late", scope="proj-a",
+            outcome["ok"] = client.register(name="planner", scope="proj-a",
                                             session_id=warm)      # a working agent
         except Exception as e:
             outcome["error"] = e
@@ -306,22 +268,23 @@ def test_a_message_that_lands_during_the_round_trip_is_delivered_not_stranded(ri
     thread.start()
     try:
         assert entered.wait(5), "the register reached its boundary read"
-        msg = rig.post_from_slot(2, ["late@proj-a"], "posted while the register was in flight")
-        assert wait_until(lambda: msg.id in queued(rig.daemon, "late@proj-a")), (
+        msg = rig.post_as("agent-2", ["planner@proj-a"],
+                          "posted while the register was in flight")
+        assert wait_until(lambda: msg.id in queued(rig.daemon, "planner@proj-a")), (
             "precondition: the router resolved this message against a table with no "
             "binding in it -- that is the window the hoist opens")
         release.set()
         thread.join(10)
-        assert outcome.get("error") is None and outcome["ok"]["slot"] == 1
+        assert outcome.get("error") is None and "slot" not in outcome["ok"]
 
         delivered = wait_until(lambda: [p for p in pushes if p.get("op") == "deliver"])
         assert [p["payload"]["message_id"] for p in delivered] == [msg.id], (
             "the message that landed during the round trip was delivered exactly once")
         assert delivered[0]["payload"].get("held") is True, \
             "the register's release owns it (its row), not live routing"
-        client.notify("activity", identity="late@proj-a", kind="turn", turned=True,
+        client.notify("activity", identity="planner@proj-a", kind="turn", turned=True,
                       handled=[msg.id], unhandled=[], session_id=warm)
-        assert wait_until(lambda: not queued(rig.daemon, "late@proj-a")), (
+        assert wait_until(lambda: not queued(rig.daemon, "planner@proj-a")), (
             "and it left the queue when its turn completed")
     finally:
         release.set()

@@ -6,11 +6,10 @@ what it holds to its claim file (`claimfile`) before it answers anything, and se
 local claim socket whose path it stamps into everything it spawns as
 `MOXI_COMMS_CLAIM_SOCKET`.
 
-**The token rule.** Each comms identity is a single token. At every instant it sits in
-claim files, and at most one of them holds it in a form that may bind. It leaves a file
-only when the daemon refuses it because a different connection holds the name, or when
-the process that holds the file ends. A timeout, an unreachable daemon, or a refusal by
-the adapter's own still-open connection never removes it.
+**The token rule.** A claim file records which identity and state the adapter holds, but
+never its posting token. While the claim is bound, the live token stays only in the
+holder's memory and is handed only to a send inside that session. Every transition away
+from bound clears it.
 
 **Who may call each op.** What a process may send as is answered only inside the
 session that holds it (`claim`); what the session holds is answered to any local caller
@@ -35,7 +34,7 @@ from . import claimfile
 from .claimfile import BOUND, HOLDS, OFFLINE, STANDBY, WAITING
 from .client import DaemonClient, DaemonError, DaemonOffline, DaemonTimeout
 from .membership import DEFAULT_PROC, SELF, TREE, ProcView, Root, root_of, sessions_of
-from .protocol import LineConn, ProtocolError
+from .protocol import PROTOCOL_VERSION, LineConn, ProtocolError
 
 log = logging.getLogger("comms.claim")
 
@@ -45,6 +44,10 @@ CLAIM_SOCKET_ENV = "MOXI_COMMS_CLAIM_SOCKET"
 CLAIM_OPS = ("claim",)
 STATE_OPS = ("state",)
 OPS = CLAIM_OPS + STATE_OPS
+
+#: The fields a current claim file may carry. Rebuilding at compatibility boundaries
+#: drops fields written by older releases without teaching live code their names.
+CLAIM_KEYS = ("name", "scope", "global", "qualified", "tier", "directors")
 
 #: The refusal any caller outside the socket's own session gets for `claim`.
 NOT_INSIDE = ("this process is not inside the session that holds this socket's identity")
@@ -95,6 +98,11 @@ class _Conn:
         self.pid = pid
 
 
+def _current_claim(claim: dict) -> dict:
+    """Copy only fields understood by this release."""
+    return {key: claim[key] for key in CLAIM_KEYS if key in claim}
+
+
 # --------------------------------------------------------------------------- holder
 
 class ClaimHolder:
@@ -120,7 +128,6 @@ class ClaimHolder:
         #: runs none; None while it is not known (a port that has not noted one yet). A record with no key at
         #: all, or null, reads as not known.
         self.running_session: str | None = None
-        self.exact_slot = False
         self.lost: str | None = None
         self.ever_held = False
         #: Why a `waiting` claim waits, when it is not that another session holds its
@@ -128,6 +135,9 @@ class ClaimHolder:
         #: daemon's words for a refusal that names no holder. None (null, or no key):
         #: another session holds the name. Only a `ClaimServer` sets it.
         self.waiting_why: str | None = None
+        #: The live binding's posting credential. It is deliberately outside `claim`
+        #: and `record()`, so neither the claim file nor a state answer can carry it.
+        self.token: str | None = None
         #: One register in flight: the adapter's supervisor's.
         self.register_lock = threading.Lock()
         self._server: socket.socket | None = None
@@ -147,7 +157,7 @@ class ClaimHolder:
                 "roots": [r.as_dict() for r in self.roots],
                 "launch_session": self.launch_session,
                 "running_session": self.running_session,
-                "exact_slot": self.exact_slot, "lost": self.lost,
+                "lost": self.lost,
                 "ever_held": self.ever_held, "waiting_why": self.waiting_why}
 
     def save(self) -> None:
@@ -160,12 +170,13 @@ class ClaimHolder:
         """Come up in a recorded state (a respawned shim inside its session). A state
         this holder does not know (an old file's `passing`) comes up `standby`."""
         state = record.get("state")
-        self.claim = record.get("claim") or None
+        claim = record.get("claim")
+        self.claim = _current_claim(claim) if isinstance(claim, dict) and claim else None
         self.hold = int(record.get("hold") or 0)
         self.running_session = record.get("running_session")
-        self.exact_slot = bool(record.get("exact_slot"))
         self.lost = record.get("lost")
         self.ever_held = bool(record.get("ever_held"))
+        self.token = None
         if record.get("launch_session"):
             self.launch_session = record["launch_session"]
         # A held claim comes back offline: its connection went with the old process.
@@ -190,10 +201,10 @@ class ClaimHolder:
         claim."""
         return self.claim is not None and self.state in (OFFLINE, WAITING)
 
-    def register_claim(self) -> tuple:
-        """(claim, exact_slot) for the adapter's next register."""
+    def register_claim(self) -> dict:
+        """The claim for the adapter's next register."""
         with self.lock:
-            return dict(self.claim or {}), self.exact_slot
+            return dict(self.claim or {})
 
     def bound(self, resp: dict) -> None:
         """A register of the claim was accepted."""
@@ -201,12 +212,14 @@ class ClaimHolder:
             if self.claim is None:
                 return
             ident = resp.get("identity") or {}
-            self.claim.update(qualified=ident.get("qualified", self.claim.get("qualified")),
-                              tier=ident.get("tier"), slot=resp.get("slot"),
-                              name=ident.get("name", self.claim.get("name")),
-                              scope=ident.get("scope", self.claim.get("scope")))
+            claim = dict(self.claim)
+            claim.update(qualified=ident.get("qualified", claim.get("qualified")),
+                         tier=ident.get("tier"),
+                         name=ident.get("name", claim.get("name")),
+                         scope=ident.get("scope", claim.get("scope")))
+            self.claim = _current_claim(claim)
             self.state = BOUND
-            self.exact_slot = False
+            self.token = resp.get("token")
             if self.lost == self.claim.get("qualified"):
                 self.lost = None           # a name lost and bound again; another stays said
             self.ever_held = True
@@ -214,6 +227,7 @@ class ClaimHolder:
 
     def went_offline(self) -> None:
         with self.lock:
+            self.token = None
             if self.state == BOUND:
                 self.state = OFFLINE
                 self.save()
@@ -223,6 +237,7 @@ class ClaimHolder:
         this adapter has held leaves it (`standby` with `lost`); a launch claim never
         held keeps waiting."""
         with self.lock:
+            self.token = None
             if self.claim is None:
                 return
             if not self.ever_held:
@@ -259,10 +274,14 @@ class ClaimHolder:
     def claim_answer(self) -> dict:
         with self.lock:
             claim = dict(self.claim) if self.claim else None
-            return {"ok": True, "state": self.state, "claim": claim,
+            answer = {"ok": True, "protocol": PROTOCOL_VERSION,
+                      "state": self.state, "claim": claim,
                     "hold": self.hold, "launch_session": self.launch_session,
                     "kind": self.kind, "key": self.key,
                     "line": send_line(self.record())}
+            if self.state == BOUND and self.token is not None:
+                answer["token"] = self.token
+            return answer
 
     def state_answer(self) -> dict:
         with self.lock:
@@ -308,6 +327,7 @@ class ClaimHolder:
         with self.lock:
             self._stop.set()
             self._removed = self._removed or remove_file
+            self.token = None
         if self._server is not None:
             try:
                 self._server.close()
@@ -410,7 +430,7 @@ def socket_from_env(env=None) -> Path | None:
 # --------------------------------------------------------------------------- whoami
 
 def whoami(env=None, say=print, opener=None, proc=None) -> int:
-    """`moxi comms whoami`: what this session holds, `<qualified> (<state>, slot <slot>)`,
+    """`moxi comms whoami`: what this session holds, `<qualified> (<state>)`,
     or the line a send would refuse with; then `session <id>` when the claim records
     its launch session. 0 when it holds an identity, 2 when it holds none."""
     from .paths import OutsideRuntime
@@ -443,7 +463,7 @@ def whoami(env=None, say=print, opener=None, proc=None) -> int:
     claim = answer.get("claim") or {}
     line = answer.get("line")
     if line is None:
-        say(f"{claim.get('qualified')} ({answer.get('state')}, slot {claim.get('slot')})")
+        say(f"{claim.get('qualified')} ({answer.get('state')})")
     else:
         say(line)
     if answer.get("launch_session"):
@@ -494,7 +514,7 @@ class ClaimServer:
     refusal (logged once), and closes the binding at `stop`.
     """
 
-    def __init__(self, name: str, scope: str, *, kind: str, slot="next-free",
+    def __init__(self, name: str, scope: str, *, kind: str,
                  directors=(), socket_path=None, arm: bool = False, daemon_socket=None,
                  proc=None, global_: bool = False, backoff=None):
         from .paths import runtime_root
@@ -507,7 +527,7 @@ class ClaimServer:
         self.claim = {"name": name, "scope": GLOBAL if global_ else scope,
                       "global": global_, "qualified": qualify(name, GLOBAL if global_
                                                               else scope),
-                      "slot": slot, "tier": None, "directors": list(directors)}
+                      "tier": None, "directors": list(directors)}
         key = f"srv-{me}-{start}-{self.claim['qualified']}"
         path = socket_path or runtime_root() / f"comms-claimsrv-{me}-{abs(hash(key)) % 10**8}.sock"
         self.holder = ClaimHolder(kind=kind, key=key, socket_path=path, proc=self.proc,
@@ -516,12 +536,6 @@ class ClaimServer:
         self.holder.state = WAITING
         self.holder.waiting_why = ""            # not bound yet, and nothing refused it
         self.arm = arm
-        #: The slot the holder asked for, which is what every register asks: `next-free`
-        #: unless the holder pinned a number. Never the slot a bind answered, which the
-        #: claim keeps for the send verb: re-asking that by number after a daemon
-        #: restart would turn a free choice into a pin another name can squat on. A
-        #: `next-free` register gets the slot kept for this name back anyway.
-        self.asked = slot if slot is not None else "next-free"
         self.daemon_socket = daemon_socket
         self.kind = kind
         self._client: DaemonClient | None = None
@@ -539,13 +553,13 @@ class ClaimServer:
 
     # holder-reported state. Each is a no-op once `stop()` has run: the file went with
     # the socket, and a late report would write it back as a dead `srv-` file.
-    def set_bound(self, slot=None, tier=None) -> None:
+    def set_bound(self, tier=None, *, token) -> None:
         with self.holder.lock:
             if self._stop.is_set():
                 return
-            self.holder.claim.update(slot=slot if slot is not None else
-                                     self.holder.claim.get("slot"), tier=tier)
+            self.holder.claim.update(tier=tier)
             self.holder.state = BOUND
+            self.holder.token = token
             self.holder.ever_held = True
             self.holder.save()
 
@@ -553,6 +567,7 @@ class ClaimServer:
         with self.holder.lock:
             if self._stop.is_set():
                 return
+            self.holder.token = None
             self.holder.state = OFFLINE if self.holder.ever_held else WAITING
             self.holder.save()
 
@@ -563,6 +578,7 @@ class ClaimServer:
         with self.holder.lock:
             if self._stop.is_set():
                 return
+            self.holder.token = None
             self.holder.state = WAITING
             self.holder.waiting_why = refusal
             self.holder.save()
@@ -626,6 +642,7 @@ class ClaimServer:
         # stop, and one that took it first has written before the file is removed.
         with self.holder.lock:
             self._stop.set()
+            self.holder.token = None
             client = self._client
         if client is not None:
             client.close()
@@ -636,17 +653,7 @@ class ClaimServer:
         client = DaemonClient(self.daemon_socket, on_close=self._on_close)
         try:
             client.connect()
-            try:
-                resp = self._register(client, c)
-            except DaemonError as e:
-                if not self._slot_refusal(e, c):
-                    raise
-                # A pinned slot another name holds: bind wherever the daemon gives,
-                # as the Claude shim does, and ask `next-free` from then on.
-                log.warning("slot %s was refused for %s (%s); registering next-free",
-                            self.asked, c["qualified"], e)
-                self.asked = "next-free"
-                resp = self._register(client, c)
+            resp = self._register(client, c)
         except (DaemonOffline, DaemonTimeout):
             client.close()
             self.set_offline()
@@ -681,24 +688,14 @@ class ClaimServer:
                 return False
             self._client = client
             self.refusal = None
-            self.set_bound(resp.get("slot"), (resp.get("identity") or {}).get("tier"))
+            self.set_bound((resp.get("identity") or {}).get("tier"),
+                           token=resp["token"])
         return True
 
     def _register(self, client, c) -> dict:
-        return client.register(slot=self.asked, name=c["name"], scope=c["scope"],
+        return client.register(name=c["name"], scope=c["scope"],
                                global_=c.get("global", False), project=c["scope"],
                                adapter=self.kind)
-
-    def _slot_refusal(self, error, c) -> bool:
-        """A refusal of a numbered register that is not about this binding's own name:
-        the slot is held by another name, or not provisioned."""
-        if self.asked == "next-free":
-            return False
-        response = getattr(error, "response", None) or {}
-        if not response.get("refused") or response.get("transient"):
-            return False
-        holder = (response.get("holder") or {}).get("qualified")
-        return holder != c["qualified"]
 
     def _on_close(self) -> None:
         if not self._stop.is_set():
@@ -722,7 +719,7 @@ __all__ = ["CLAIM_OPS", "CLAIM_SOCKET_ENV", "ClaimConn", "STAMP_VARS", "claim_ov
            "dead_adapter_answer", "peer_pid", "send_line", "socket_from_env", "whoami"]
 
 
-STAMP_VARS = ("MOXI_COMMS_NAME", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL", "MOXI_COMMS_SLOT")
+STAMP_VARS = ("MOXI_COMMS_NAME", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL")
 
 
 def claim_overlay(env) -> dict:
@@ -755,6 +752,4 @@ def claim_overlay(env) -> dict:
     if claim.get("global"):
         out["MOXI_COMMS_GLOBAL"] = "1"
     out["MOXI_COMMS_SCOPE"] = claim.get("scope") or ""
-    if isinstance(claim.get("slot"), int):
-        out["MOXI_COMMS_SLOT"] = str(claim["slot"])
     return out

@@ -23,12 +23,9 @@ from conftest import queued, wait_for_queue, wait_until
 from moxi_comms import directory, machine_line
 from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.daemon import Daemon
-from moxi_comms.mock_gateway import NO_MENTIONS
-from moxi_comms.paths import directory_db
-from moxi_comms.sender import SenderIdentity, credential_for
 
-PLANNER = dict(slot=1, name="planner", scope="proj-a")
-REVIEWER = dict(slot=2, name="reviewer", scope="proj-a")
+PLANNER = dict(name="planner", scope="proj-a")
+REVIEWER = dict(name="reviewer", scope="proj-a")
 P, R = "planner@proj-a", "reviewer@proj-a"
 
 TOKENS = ("operator-words", "via-phone", "speaker")
@@ -122,19 +119,6 @@ def test_nothing_new_writes_a_removed_mark():
 
 # ------------------------------------------------------------- on the rig
 
-def raw_post(rig, slot, display, body):
-    """Post a body exactly as given through a slot's webhook, wearing `display`: a
-    record as an older comms wrote it."""
-    db = directory.connect(directory_db(), read_only=True)
-    try:
-        cred, _ = credential_for(rig.gateway, db,
-                                 SenderIdentity.for_slot(slot, display, "global"))
-    finally:
-        db.close()
-    return rig.gateway.execute_webhook(cred, body, username=display,
-                                       allowed_mentions=NO_MENTIONS)
-
-
 def history_row(out, message_id):
     (row,) = [ln for ln in out.splitlines() if ln.startswith(f"{message_id} ")]
     return row
@@ -143,8 +127,8 @@ def history_row(out, message_id):
 @pytest.mark.parametrize("tokens", TOKEN_SETS, ids=TOKEN_IDS)
 def test_history_shows_an_old_message_as_it_shows_the_same_one_unmarked(rig, tokens):
     kw = dict(audience="operator", posture="reply-once")
-    plain = raw_post(rig, 1, P, old_line(R, (), **kw) + "\nplain ask")
-    marked = raw_post(rig, 1, P, old_line(R, tokens, **kw) + "\nmarked ask")
+    plain = rig.post_as(P, old_line(R, (), **kw) + "\nplain ask", raw=True)
+    marked = rig.post_as(P, old_line(R, tokens, **kw) + "\nmarked ask", raw=True)
     code, out = rig.cli(["history", R])
     assert code == 0, out
     for t in TOKENS:
@@ -164,8 +148,8 @@ def test_reply_to_an_old_message_posts_as_to_the_same_one_unmarked(rig, tokens, 
     and takes the posture a reply to the unmarked message takes; or both refuse alike."""
     replies = {}
     for name, toks in (("plain", ()), ("marked", tokens)):
-        ask = raw_post(rig, 6, P, old_line(R, toks, audience="operator", posture=posture)
-                       + f"\n{name} ask")
+        ask = rig.post_as(P, old_line(R, toks, audience="operator", posture=posture)
+                       + f"\n{name} ask", raw=True)
         code, out = rig.cli(["reply", ask.id, "the answer"], **REVIEWER)
         replies[name] = (code, re.sub(r"\d{10,}", "<id>", out))
         if code == 0:
@@ -182,8 +166,8 @@ def test_a_boot_rescan_routes_a_pending_old_message(rig, tokens):
     """Daemon down, the old message posted, daemon up: the rescan queues it for reviewer,
     and reviewer's bind hands it over with every other field, and no removed key."""
     rig.daemon.stop()
-    old = raw_post(rig, 6, P, old_line(R, tokens, audience="operator", posture="reply-once")
-                   + "\nposted while the daemon was down")
+    old = rig.post_as(P, old_line(R, tokens, audience="operator", posture="reply-once")
+                   + "\nposted while the daemon was down", raw=True)
     rig.daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
     assert old.id in queued(rig.daemon, R), "the rescan queues it"
     shim = rig.shim(**REVIEWER)
@@ -205,8 +189,8 @@ def test_a_boot_rescan_routes_a_pending_old_message(rig, tokens):
 def test_a_live_old_message_is_routed_and_delivered(rig):
     """The same, with the daemon up: the routed old line reaches its recipient."""
     shim = rig.shim(**REVIEWER)
-    old = raw_post(rig, 6, P, old_line(R, set(TOKENS), reply_to="5", posture="no reply")
-                   + "\nfyi")
+    old = rig.post_as(P, old_line(R, set(TOKENS), reply_to="5", posture="no reply")
+                   + "\nfyi", raw=True)
     (payload,) = wait_for_queue(shim, 1)
     assert (payload["message_id"], payload["posture"], payload["reply_to"]) == \
         (old.id, "none", "5")

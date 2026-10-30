@@ -41,7 +41,7 @@ changes nothing.
 
 `doctor` reads what this box's comms is and where it lives. It prints the device and
 comms' five directories under Moxi's roots (`moxi.paths`), the config file, the backend
-and where it came from, the provisioned slots, the secrets chain, the adapter binaries
+and where it came from, the secrets chain, the adapter binaries
 on PATH and whether the daemon answers. It writes nothing, posts nothing, and exits 0
 unless the daemon is configured (a config file or `MOXI_COMMS_GATEWAY`) and down.
 
@@ -73,7 +73,7 @@ Send boundary, enforced here:
     posture from what it answers. A reply to a verified `[no reply]` is refused. A reply
     to `[reply-once]` or `[reply-optional]` goes out `[no reply]`, closing the exchange,
     unless it asks back with `--posture once`; `--posture open` there is refused. A
-    reply in an open thread is open. Any other reply is open, with nothing in the slot.
+    reply in an open thread is open. Any other reply is open, with no explicit token.
   * open threads: a thread is derived from the record at each reply, by walking `re:`
     up to its root. Only a verified root carrying `[open]` makes one. A reply in it is
     refused once the thread has had its cap of verified replies (`--cap N` or `--no-cap`
@@ -238,7 +238,7 @@ def cmd_history(args, ctx: Context) -> int:
                 continue
             effective[m.id] = ml.audience or (effective.get(ml.reply_to)
                                               if ml.reply_to else None)
-            author = attribution.from_record(db, m)
+            author = attribution.from_record(db, m, record=ctx.gateway)
             if window is not None and not _in_window(m, window):
                 continue
             addressed = any(_tag_matches(t, identity) for t in ml.recipients)
@@ -570,43 +570,6 @@ def _binary_version(path: str) -> str:
     return first[0] if first else f"version not read (exit {proc.returncode})"
 
 
-def _slots_row(backend: str, cfg, ctx: Context) -> str:
-    """The provisioned slots, by `provision.readiness`, the definition the daemon's
-    first start uses. Read-only: nothing is opened for writing and nothing is created.
-    A daemon on the local backend provisions an empty directory on its first start
-    (`[provision] slots` of them); the mock keeps its own record."""
-    from . import gateway as gw, provision, tokens
-    from .paths import record_db
-
-    local = backend == gw.LOCAL
-    try:
-        if local:
-            record = cfg.local.record or record_db()
-
-            found = provision.readiness(
-                ctx.db_path, operator_hash=provision.operator_hash_in(record),
-                store=tokens.TokenStore(None, env=ctx.env))
-        else:
-            found = provision.readiness(ctx.db_path, operator_hash=None, store=None)
-    except Exception as e:  # an unreadable store or directory is reported, not raised
-        return f"unknown ({e})"
-    if found.state == provision.EMPTY:
-        if local:
-            return (f"none yet (the daemon provisions {cfg.provision.slots} on its "
-                    "first start)")
-        return "none (moxi-comms-provision makes them)"
-    if found.state == provision.COMPLETE:
-        return f"{found.slots} provisioned"
-    if found.state == provision.UNFINISHED:
-        then = ("the daemon finishes it on its next start" if local
-                else "run moxi-comms-provision to finish it")
-        return f"{found.slots}, unfinished: {found.detail}; {then}"
-    then = ("the daemon will not start until the store is restored or the directory is "
-            "provisioned afresh" if local else
-            "sends that need those tokens fail until the store is restored")
-    return f"{found.slots}, but {found.detail}; {then}"
-
-
 #: The directories `moxi comms doctor` prints: comms' own under each of Moxi's roots.
 DOCTOR_DIRS = ("data", "state", "cache", "config", "runtime")
 
@@ -635,7 +598,6 @@ def cmd_doctor(args, ctx: Context) -> int:
             else f"none ({config.config_path(ctx.env)} does not exist)")
         choice = gw.backend_choice(None, env=ctx.env)
         row("backend", f"{choice.name} ({choice.describe()})")
-        row("slots", _slots_row(choice.name, cfg, ctx))
         row("secrets", ", ".join(cfg.secrets.chain)
             + ("" if tuple(cfg.secrets.chain) != tuple(secrets.default_chain())
                else " (the default)"))
@@ -940,8 +902,8 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
 
     a = sub.add_parser("agents", help="who you can message")
     a.add_argument("--seats", action="store_true",
-                   help="operator view: also show send-only identities, each binding's "
-                        "slot, and the mail waiting for each name")
+                   help="operator view: also show send-only identities and the mail "
+                        "waiting for each name")
     a.set_defaults(func=cmd_agents)
 
     h = sub.add_parser("history", help="an identity's record, with honest attribution")
@@ -990,7 +952,7 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
     c.set_defaults(func=cmd_cache)
 
     d = sub.add_parser("doctor",
-                       help="this box's comms: directories, config, backend, slots, "
+                       help="this box's comms: directories, config, backend, "
                             "daemon (read-only)")
     d.set_defaults(func=cmd_doctor)
 

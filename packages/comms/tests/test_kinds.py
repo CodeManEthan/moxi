@@ -103,16 +103,16 @@ def test_the_daemon_accepts_a_declared_kind_and_refuses_an_unknown_one(rig):
     client = DaemonClient(rig.daemon.socket_path).connect()
     try:
         with pytest.raises(DaemonError) as e:
-            client.register(slot="next-free", name="talker", scope="proj-a",
+            client.register(name="planner", scope="proj-a",
                             adapter="no-such-kind")
         assert "unknown adapter kind 'no-such-kind'" in str(e.value)
         assert "claude-shim, codex, opencode, send-only, person-kind" in str(e.value)
-        answer = client.register(slot="next-free", name="talker", scope="proj-a",
+        answer = client.register(name="planner", scope="proj-a",
                                  adapter="person-kind")
         assert answer["ok"]
     finally:
         client.close()
-    assert rig.daemon.bindings["talker@proj-a"].adapter == "person-kind"
+    assert rig.daemon.bindings["planner@proj-a"].adapter == "person-kind"
 
 
 def test_a_default_daemon_reads_the_group(rig):

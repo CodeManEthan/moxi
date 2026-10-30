@@ -25,13 +25,13 @@ from moxi_comms.attribution import Author
 from moxi_comms.paths import directory_db
 from moxi_comms.provision import add_standing
 
-from test_posture_intent import make_ref, open_root, posts, raw_post  # noqa: F401
+from test_posture_intent import make_ref, open_root, posts  # noqa: F401
 
 # Global identities: a bare tag is the global identity, and a session with no
 # scope binds global.
-PLANNER = dict(slot=1, name="planner")
-REVIEWER = dict(slot=2, name="reviewer")
-CRITIC = dict(slot=3, name="critic")
+PLANNER = dict(name="planner")
+REVIEWER = dict(name="reviewer")
+CRITIC = dict(name="critic")
 P, R, C = "planner", "reviewer", "critic"
 
 
@@ -366,7 +366,7 @@ def test_your_own_no_reply_is_refused_naming_its_recipients(rig, trio):
 
 
 def test_your_own_prose_message_is_refused(rig, pair):
-    prose = raw_post(rig, PLANNER["slot"], P, "no routing line here")
+    prose = rig.post_as(P, "no routing line here", raw=True)
     before = len(posted(rig))
     code, out = rig.cli(["reply", prose.id, "x"], **PLANNER)
     assert (code, out.strip()) == (2, (
@@ -376,7 +376,7 @@ def test_your_own_prose_message_is_refused(rig, pair):
 
 
 def test_your_own_message_to_yourself_alone_is_refused(rig, pair):
-    alone = raw_post(rig, PLANNER["slot"], P, f"::to {P}\nnote to self")
+    alone = rig.post_as(P, f"::to {P}\nnote to self", raw=True)
     before = len(posted(rig))
     code, out = rig.cli(["reply", alone.id, "x"], **PLANNER)
     assert (code, out.strip()) == (2, (
@@ -466,8 +466,7 @@ def test_a_send_to_a_never_bound_name_is_refused(rig, pair, monkeypatch):
 def test_one_never_bound_name_refuses_the_whole_post(rig, pair, monkeypatch):
     journal(rig, monkeypatch)
     before = len(posted(rig))
-    code, out = rig.cli(["send", "reviewer,newbie", "brief", "--posture", "none"],
-                        **PLANNER)
+    code, out = rig.cli(["send", "reviewer,newbie", "brief", "--posture", "none"], **PLANNER)
     assert (code, out.strip()) == (2, NEVER)
     assert len(posted(rig)) == before
 
@@ -481,8 +480,7 @@ def test_send_reply_to_is_checked_too(rig, pair, monkeypatch):
 
 def test_new_name_defers_the_message(rig, pair, monkeypatch):
     journal(rig, monkeypatch)
-    code, out = rig.cli(["send", "newbie", "brief", "--posture", "none", "--new-name"],
-                        **PLANNER)
+    code, out = rig.cli(["send", "newbie", "brief", "--posture", "none", "--new-name"], **PLANNER)
     assert code == 0, out
     assert out.splitlines()[-1] == cli.NOT_BOUND_NOTE.format(name="newbie")
     assert line_of(last(rig)).startswith("::to newbie")
@@ -525,8 +523,7 @@ def test_the_operator_is_known_on_a_box_provisioned_by_default(rig):
     code, out = rig.cli(["send", "operator", "x", "--posture", "none"], **PLANNER)
     assert code == 0, out
     assert line_of(last(rig)).startswith("::to operator")
-    code, out = rig.cli(["send", "operator", "y", "--posture", "none", "--held"],
-                        **PLANNER)
+    code, out = rig.cli(["send", "operator", "y", "--posture", "none", "--held"], **PLANNER)
     assert code == 0, out
     assert cli.HELD_IGNORED_OPERATOR in out
 
@@ -611,8 +608,7 @@ def test_reply_check_prints_the_replying_to_line_first_and_posts_nothing(rig, pa
     assert (code, out.splitlines()) == (0, [
         f"replying to {P} (chosen, verified) in #names", f"would send 1 message(s) to {P}"])
     assert len(posted(rig)) == before
-    code, out = rig.cli(["reply", theirs.id, "a", "--check", "--posture", "open"],
-                        **REVIEWER)
+    code, out = rig.cli(["reply", theirs.id, "a", "--check", "--posture", "open"], **REVIEWER)
     assert code == 2 and out.splitlines()[0].startswith("replying to")
     assert len(posted(rig)) == before
 

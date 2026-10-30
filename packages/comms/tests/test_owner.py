@@ -62,7 +62,7 @@ def test_a_shims_session_is_owned_by_its_binding_as_comms_renders_it(rig):
 
 
 def test_a_global_identity_renders_bare(rig):
-    lead = rig.shim(slot=6, name="lead", global_=True)
+    lead = rig.shim(name="lead", global_=True)
     bound(rig, "lead")
     assert owner(lead.session_id)["owner"] == "lead"
 
@@ -103,7 +103,7 @@ def test_a_director_with_a_reply_once_ask_out_awaits_its_worker(rig):
 def test_a_worker_that_asked_its_own_director_once_awaits_the_director(rig):
     """A worker that asked its director with `--posture once` and waits on the
     answer counts too. The director is global, so it is awaited bare."""
-    rig.shim(slot=6, name="lead", global_=True)
+    rig.shim(name="lead", global_=True)
     planner = rig.shim(**PLANNER, directors=("lead",))
     bound(rig, "lead")
     ask = send(rig, "lead", "which way?", "--posture", "once", who=PLANNER)
@@ -149,17 +149,17 @@ def test_the_read_changes_nothing(rig):
 def test_a_send_only_binding_owns_a_session_only_if_its_register_named_one(rig):
     """No shipped send-only holder reports a session id (`ClaimServer._register`), so it
     owns none; a register that does carry one is answered as any owner, by its kind."""
-    code = provision.send_only_main(["console@acme"], gateway=rig.gateway,
+    code = provision.send_only_main(["relay@proj-a"], gateway=rig.gateway,
                                     store=rig.store, out=lambda _l: None)
     assert code == 0
     c = DaemonClient(daemon_socket()).connect()
     try:
-        c.register(slot="next-free", name="console", scope="acme",
-                   project="acme", adapter="send-only",
+        c.register(name="relay", scope="proj-a",
+                   project="proj-a", adapter="send-only",
                    session_id="5e5e5e5e-0000-4000-8000-000000000000")
         answer = owner("5e5e5e5e-0000-4000-8000-000000000000")
         assert (answer["owner"], answer["adapter"], answer["awaiting"]) == \
-            ("console@acme", "send-only", [])
+            ("relay@proj-a", "send-only", [])
     finally:
         c.close()
 

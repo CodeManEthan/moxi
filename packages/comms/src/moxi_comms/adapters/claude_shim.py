@@ -28,8 +28,8 @@ seam -- `adapters/codex` renders through the same two functions.
 Injection seam: `injector(text)` is the ONE place the harness is touched. In a session
 `moxi comms claude` launches it is the session's adapter process (`claude_adapter`), which
 hands the digest to turns (`deliver`) and settles it from the turn's outcome; `--inject-file`
-fills it with a file writer, which the tests read. The shim holds no posting credentials,
-ever.
+fills it with a file writer, which the tests read. While bound, the shim holds the
+binding's posting credential in memory and hands it only to sends inside its session.
 
 The frame line carries only what the reader cannot get anywhere else. The default room
 is not rendered (`moxi comms help names` says mail comes from `#names`), `re: <id>` says what
@@ -93,6 +93,7 @@ from ..client import (DaemonClient, DaemonError, DaemonOffline, DaemonTimeout,
                       backoff_delays)
 from ..directors import standing_of
 from ..scoping import GLOBAL, project_key, qualify
+from . import binding
 
 log = logging.getLogger("comms.shim")
 
@@ -151,18 +152,12 @@ REFUSED_TERMINAL = ("comms offline for the rest of this session: another session
                     "holds this name. Not retrying -- relaunching with this identity is "
                     "the successor. Messages wait in the record.")
 
-#: A supervisor-side refusal that is neither this shim's name nor a slot it asked for by
-#: number: no free slot, an invalid name, an unknown adapter kind. Said once per
+#: A supervisor-side refusal that is not this shim's name: an invalid name or an unknown
+#: adapter kind. Said once per
 #: distinct reason, in the daemon's words, and retried on the current backoff -- the
 #: same generator, never re-seeded.
 REFUSED_RETRYING = ("comms unbound: the delivery daemon refused this session's register "
                     "({reason}). Still retrying; this session binds when that clears.")
-
-#: After a slot refusal the shim registered `next-free` at once and bound. Said once, to
-#: the shim's log, an operator surface: frame lines carry no slot, and delivery is by
-#: name.
-SLOT_MOVED = ("comms online on another bundle: slot {asked} was refused ({reason}); this "
-              "session took slot {got}.")
 
 #: Anything the supervisor did not expect. Said once per exception type; the loop
 #: carries on at its next backoff.
@@ -170,7 +165,7 @@ SUPERVISOR_ERROR = ("comms supervisor: unexpected error ({error}); still retryin
                     "traceback is in this log.")
 
 #: How a register refusal reads.
-NAME_REFUSAL, SLOT_REFUSAL, OTHER_REFUSAL = "name", "slot", "other"
+NAME_REFUSAL, OTHER_REFUSAL = "name", "other"
 
 
 def survive_supervisor_error(adapter, error, delays, logger):
@@ -379,10 +374,8 @@ def backlog_frames(payloads: list) -> list:
 def replay_is_unverified(payloads: list) -> bool:
     """Does this catch-up batch need the header's attribution note?
 
-    Replay reads the record, and a slot-owned webhook's record entry proves the slot and
-    not the holder -- so most catch-ups carry unverified names. That is a property of the
-    BATCH, said once in the header, exactly as "this is replay" already is. An all-verified
-    catch-up (standing senders, journalled custody) says nothing, and the silence is honest.
+    Replay reads the record's author. A batch with any unverified author needs the note;
+    an all-verified catch-up says nothing, and the silence is honest.
 
     `all` over the BACKLOG frames, not `any` over every frame: the note is a
     blanket statement and a blanket statement earns its silence only when it is true of
@@ -459,14 +452,13 @@ def render_digest(payloads: list, notice: str | None = None, directors=(), *,
 
 
 class ClaudeShim:
-    def __init__(self, *, slot="next-free", name=None, scope=None, global_=False,
+    def __init__(self, *, name=None, scope=None, global_=False,
                  project=None, injector=None, socket_path=None, status_sink=None,
                  autoreconnect: bool = False, backoff=None, directors=(),
                  clock=time.time, session_id=None, owed_query=None,
                  projects_root=None,
                  claim_key=None, claim_socket=None, claim_roots=None,
                  listen_claims: bool = False, claim_proc=None):
-        self.slot = slot
         #: The live Claude session behind this shim, the latest it has been told. It
         #: starts from the environment Claude
         #: Code spawned the shim with, which is right at spawn and goes stale after a
@@ -517,7 +509,6 @@ class ClaudeShim:
 
         self.identity: str | None = None
         self.tier: str | None = None
-        self.slot_id: int | None = None
         self.queue: list = []
         self.injected: list = []          # every digest text injected (test visibility)
         self.awaiting_completion: str | None = None
@@ -559,20 +550,17 @@ class ClaudeShim:
         #: shim's own blocks (0 or 1) and whether the running turn is one it blocked.
         #: `owed_query(identity, authors, referents)` is the daemon's `owed` query on a
         #: short connection of its own; injectable so a test can answer it.
-        self.ledger = owed.Ledger()
-        self.turn_blocks = 0
-        self.blocked = False
         self.owed_query = owed_query or self._query_owed
+        self.replies = owed.ReplyCheck(
+            self._lock, clock=lambda: self.clock(), identity=lambda: self.identity,
+            queued=lambda: bool(self.queue),
+            owed_query=lambda *args: self.owed_query(*args),
+            connection=lambda: self._client, log=log)
         #: Why the supervisor ended, recorded on each of its two ways out: "stopped", or
         #: the has-held stop's reason. None while it runs.
         self.ended_because: str | None = None
         #: The daemon's words for the last refusal this shim was given, or None.
         self.last_refusal: str | None = None
-        #: After a slot fallback: the number this shim was launched with, and the
-        #: daemon's words refusing it. None when there was none. `slot_id` stays the
-        #: slot actually bound.
-        self.slot_asked: int | None = None
-        self.slot_refused_by: str | None = None
         #: The register answer the last bind got.
         self._last_resp: dict | None = None
         #: The hold the digest awaiting completion was injected under: a cursor moves
@@ -606,24 +594,22 @@ class ClaudeShim:
             self.claims.load(record)
             self.claims.roots = list(roots or ()) or self.claims.roots
             if self.claims.claim:
-                self._apply_claim(self.claims.claim, self.claims.exact_slot)
+                self._apply_claim(self.claims.claim)
             self.claims.save()
             return
         name = None if not self.name or self.name == "auto" else self.name
         scope = GLOBAL if self.global_ else (self.scope or GLOBAL)
         claim = {"name": name, "scope": scope, "global": bool(self.global_),
-                 "qualified": qualify(name, scope) if name else None, "slot": self.slot,
+                 "qualified": qualify(name, scope) if name else None,
                  "tier": None, "directors": list(self.directors)}
         self.claims.start_launch(claim)
 
-    def _apply_claim(self, claim: dict, exact: bool) -> None:
+    def _apply_claim(self, claim: dict) -> None:
         """Register what the claim file holds, for a shim respawned inside its session:
-        the name on its slot, with its declared directors."""
+        the name with its declared directors."""
         self.name = claim.get("name")
         self.global_ = bool(claim.get("global"))
         self.scope = claim.get("scope")
-        if claim.get("slot") is not None:
-            self.slot = claim["slot"]
         if claim.get("directors") is not None:
             self.directors = tuple(claim["directors"])
 
@@ -676,8 +662,7 @@ class ClaudeShim:
         except DaemonError as e:
             # A launch into a name another session holds waits for it and cannot send
             # while it waits. Any other refusal ends the adapter, with one line.
-            if (not self.autoreconnect or self.refusal_kind(
-                    e, numbered=False) != NAME_REFUSAL):
+            if not self.autoreconnect or self.refusal_kind(e) != NAME_REFUSAL:
                 raise
             self.claims.name_refused((e.response.get("holder") or {}).get("qualified"))
             self._report("refused", REFUSED_WAITING)
@@ -697,15 +682,11 @@ class ClaudeShim:
         scope = GLOBAL if self.global_ else (self.scope or GLOBAL)
         return qualify(self.name, scope)
 
-    def refusal_kind(self, error, *, numbered: bool) -> str | None:
+    def refusal_kind(self, error) -> str | None:
         """Classify a register's `DaemonError`.
 
         None when it is not a refusal at all (a transient accident, a timeout). A NAME
-        refusal names this shim's own identity as the holder. A SLOT refusal is any other
-        refusal of a register that asked for a slot by number: the slot is held by
-        another name, or is not provisioned -- and the rare numbered register refused for
-        something else (an invalid name) costs one extra register, whose `next-free`
-        retry is refused the same way and falls to OTHER. Everything else is OTHER.
+        refusal names this shim's own identity as the holder. Everything else is OTHER.
         """
         response = getattr(error, "response", None) or {}
         if not response.get("refused") or response.get("transient"):
@@ -714,47 +695,18 @@ class ClaudeShim:
         own = self.own_qualified()
         if own is not None and holder == own:
             return NAME_REFUSAL
-        return SLOT_REFUSAL if numbered else OTHER_REFUSAL
+        return OTHER_REFUSAL
 
     def connect(self) -> bool:
-        """Bind, taking the slot fallback on a slot refusal.
-
-        A register that asked for a slot by number and was refused for the slot sends
-        this shim at once to `next-free` -- no backoff, no status line between -- and it
-        binds on whatever slot the daemon gives it ("neither wait nor exit"). The
-        process registers `next-free` from then on. The second register's outcome is the
-        one returned or raised, and being unnumbered it can be a name refusal or
-        anything else, never a slot refusal again. The first bind and every reconnect
-        come through here alike.
-        """
-        asked = self.slot
-        numbered = asked != "next-free" and asked is not None
+        """Bind once. The first bind and every reconnect come through here alike."""
         try:
             return self._connect_once()
         except DaemonError as e:
-            kind = self.refusal_kind(e, numbered=numbered)
+            kind = self.refusal_kind(e)
             if kind is not None:
                 with self._lock:
                     self.last_refusal = str(e)
-            if kind != SLOT_REFUSAL:
-                raise
-            reason = str(e)
-        log.warning("slot %s was refused (%s); registering next-free", asked, reason)
-        with self._lock:
-            self.slot_asked = asked
-            self.slot_refused_by = reason
-            self.slot = "next-free"
-        try:
-            bound = self._connect_once()
-        except DaemonError as e:
-            if self.refusal_kind(e, numbered=False) is not None:
-                with self._lock:
-                    self.last_refusal = str(e)
             raise
-        if bound:
-            self.status_sink(SLOT_MOVED.format(asked=asked, reason=reason,
-                                               got=self.slot_id))
-        return bound
 
     def _connect_once(self) -> bool:
         """One register. True when a binding was INSTALLED.
@@ -767,14 +719,7 @@ class ClaudeShim:
         here used to be indistinguishable from a bind, so the supervisor said "comms
         online: reconnected" over a shim that was shutting down bound to nothing.
         """
-        with self._lock:
-            # armed BEFORE the register round-trip: replay_complete can land on the
-            # reader thread before register() returns, and a late flag would strand it.
-            self.replaying = True
-        client = DaemonClient(self.socket_path, on_push=self._on_push,
-                              on_close=self._on_close)
-        try:
-            client.connect()
+        def register(client):
             with self._lock:
                 # `holding`: the ids this shim already has queued or injected and whose
                 # turn has not completed. The daemon claims them for the new
@@ -787,66 +732,35 @@ class ClaudeShim:
                 session_id, projects_root, turned = (self.session_id, self.projects_root,
                                                      self.turned)
                 endpoint = self.endpoint
-            resp = client.register(slot=self.slot, name=self.name, scope=self.scope,
+            return client.register(name=self.name, scope=self.scope,
                                    global_=self.global_, project=self.project,
                                    adapter="claude-shim", session_id=session_id,
                                    holding=holding, projects_root=projects_root,
                                    turned=turned, endpoint=endpoint)
-        except BaseException:
-            client.close()          # a refused claim never leaves a connection behind
-            with self._lock:
-                # Nothing landed, so nothing is replaying. Disarming here is what keeps
-                # the flag honest on the tolerate path, where the round trip may never
-                # complete at all: a launch into a down daemon used to leave `replaying`
-                # True for the life of the session. It is read only by tests on this
-                # path, and a permanently-wrong visibility field is a trap for the next
-                # test author.
-                self.replaying = False
-            raise
-        with self._lock:
-            if self._stop.is_set():
-                # A bind must not outlive `stop()`. The window is real and ordinary: a
-                # session that ends while the daemon is down has a supervisor
-                # running by construction, and one already inside `register` would
-                # otherwise hand `self._client` a live binding with nothing left to close
-                # it -- the daemon journals a bind whose release comes only at process
-                # exit. Closing here releases it now, where the close belongs.
-                client.close()
-                self.replaying = False
-                return False
-            if not client.connected:
-                # The daemon answered `register` and the connection died before this
-                # thread reached the assignment below. `_on_close` runs on the reader
-                # thread and has ALREADY run -- it saw `offline` still True, so it
-                # emitted nothing and will never run again for this client. Marking
-                # online here would strand the supervisor for the life of the session:
-                # `_supervise` retries only while `offline` is True, and it would be
-                # False over a dead client with nothing left to notice.
-                #
-                # The check makes the ordering total rather than narrow. Either this
-                # thread sees the close and declines the bind, or `_on_close` runs after
-                # the assignment, takes the same lock, sees `was_online` and reports the
-                # outage. There is no third interleaving.
-                client.close()
-                self.replaying = False
-                return False
+
+        owed_ready = None
+
+        def install(client, resp):
+            nonlocal owed_ready
             self._client = client
-            if self.ledger.hwm is None and resp.get("hwm") is not None:
-                # The FIRST registration's catch-up boundary: a `re:` at or below
-                # it was sent before this process could see payments.
-                self.ledger.hwm = str(resp["hwm"])
             self._last_resp = resp
-            self.claims.bound(resp)
+
+        def bound(resp):
+            # After the claim file is written: when that write raises, the owed `ready`
+            # and the unreported turns stay for the next bind.
+            nonlocal owed_ready
             if self.identity is not None and resp["identity"]["qualified"] != self.identity:
                 # Another name: the clamp's mark and the unreported turns were the old
                 # name's.
                 self._forget_turns()
-            self.identity = resp["identity"]["qualified"]
-            self.tier = resp["identity"]["tier"]
-            self.slot_id = resp["slot"]
-            self.offline = False
             owed_ready, self.owed_ready = self.owed_ready, None
-        log.info("registered as %s (tier %s, slot %s)", self.identity, self.tier, self.slot_id)
+
+        resp = binding.register_and_install(
+            self, client_type=DaemonClient, on_close=self._on_close, register=register,
+            install=install, bound=bound, ledger=self.ledger)
+        if resp in (binding.STOPPED, binding.DROPPED):
+            return False
+        log.info("registered as %s (tier %s)", self.identity, self.tier)
         if owed_ready is not None:
             # The SessionStart that came before this bind, once, right after the register
             # answer.
@@ -894,8 +808,7 @@ class ClaudeShim:
         """Reconnect with backoff; re-register and take replay through catch-up.
 
         This loop also owns the FIRST bind of a session launched while the daemon was
-        down. What it does with a refusal turns on what the refusal names. A slot refusal
-        never reaches here: `connect()` has already registered `next-free`. A NAME
+        down. What it does with a refusal turns on what the refusal names. A NAME
         refusal splits on whether this shim has EVER held the name: held it, and a
         successor has it, so stop; never held it, so wait. Anything else is retried on the
         backoff and said once.
@@ -971,7 +884,7 @@ class ClaudeShim:
                 log.warning("register failed transiently (%s); retrying", e)
                 self._stop.wait(next(delays))
                 return None
-            kind = self.refusal_kind(e, numbered=self.slot != "next-free")
+            kind = self.refusal_kind(e)
             if kind == NAME_REFUSAL and self.ever_bound:
                 # Held it, and a successor now holds it. Stop competing: this process
                 # stays alive and serves the session offline.
@@ -993,7 +906,7 @@ class ClaudeShim:
                 self._report("refused", REFUSED_WAITING)
                 self._stop.wait(next(delays))
                 return None
-            # Anything else: no free slot, an invalid name, an unknown adapter kind, or
+            # Anything else: an invalid name, an unknown adapter kind, or
             # an error that is no refusal at all. Retried on the same backoff, said once
             # per distinct reason, in the daemon's words.
             log.warning("register refused (%s); still retrying", e)
@@ -1048,11 +961,23 @@ class ClaudeShim:
         return self._flush()
 
     # ------------------------------------------------------------------ reply enforcement
+    @property
+    def ledger(self) -> owed.Ledger:
+        """The ledger of owed replies (`replies.ledger`)."""
+        return self.replies.ledger
+
+    @property
+    def blocked(self) -> bool:
+        """Whether the running turn is one this shim blocked."""
+        return self.replies.blocked
+
+    @property
+    def turn_blocks(self) -> int:
+        """This shim's blocks in the running turn (0 or 1)."""
+        return self.replies.turn_blocks
+
     def _clear_block(self) -> None:
-        with self._lock:
-            self.ledger.void_pending()
-            self.blocked = False
-            self.turn_blocks = 0
+        self.replies.clear_block()
 
     def on_stop(self, fields: dict) -> owed.Decision:
         """The steps for one Stop: a boundary (`block` None) or a block.
@@ -1061,79 +986,18 @@ class ClaudeShim:
         nothing here raises into the holder. `dropped` lists the debts counted and
         dropped at this Stop, already recorded with the daemon.
         """
-        try:
-            decision = self._decide(fields if isinstance(fields, dict) else {})
-        except Exception:                                          # noqa: BLE001
-            log.exception("the Stop check failed; this Stop passes")
-            with self._lock:
-                self.ledger.void_pending()
-            return owed.Decision()
-        for debt in decision.dropped:
-            self._record_unanswered(debt)
-        return decision
-
-    def _decide(self, fields: dict) -> owed.Decision:
-        now = self.clock()
-        with self._lock:
-            self.ledger.expire(now)                               # step 1
-            if not self.ledger.debts:
-                return owed.Decision()
-            active = fields.get("stop_hook_active")
-            tasks = fields.get("task_types")
-            crons = fields.get("crons")
-            if (not isinstance(active, bool) or not isinstance(tasks, list)   # step 2
-                    or not isinstance(crons, int) or isinstance(crons, bool)):
-                self.ledger.void_pending()
-                return owed.Decision()
-            authors, referents = self.ledger.query_args()
-            identity = self.identity
-        answer = None
-        if identity is not None:                                  # step 3
-            try:
-                answer = self.owed_query(identity, authors, referents)
-            except Exception as e:                                # noqa: BLE001
-                log.info("the owed query failed (%s); this Stop passes", e)
-        if not isinstance(answer, dict):
-            with self._lock:
-                self.ledger.void_pending()
-            return owed.Decision()
-        with self._lock:
-            self.ledger.settle(answer, now)
-            work = owed.is_work(tasks, crons, queued=bool(self.queue),       # step 4
-                                undelivered=answer.get("undelivered"),
-                                awaiting=answer.get("awaiting"))
-            return self.ledger.decide(stop_hook_active=active,         # steps 5 to 9
-                                      turn_blocks=self.turn_blocks, work=work,
-                                      floor=answer.get("floor"), now=now)
+        return self.replies.check(fields)
 
     def _query_owed(self, identity: str, authors: dict, referents: list) -> dict:
         """The daemon's `owed` query on a short connection of its own, with a 0.5 s
         timeout. Raises on any failure."""
-        client = DaemonClient(self.socket_path, timeout=constants.OWED_QUERY_TIMEOUT)
-        client.connect()
-        try:
-            return client.query("owed", identity=identity, authors=authors,
-                                referents=referents)
-        finally:
-            client.close()
-
-    def _record_unanswered(self, debt: owed.Debt) -> None:
-        """Record an ignored reminder: one notify on the binding's own connection."""
-        with self._lock:
-            identity, client = self.identity, self._client
-        if identity and client:
-            client.notify("unanswered", identity=identity, message_id=debt.message_id,
-                          author=debt.author, at=debt.at)
-        log.info("comms: %s ended a turn without answering %s's msg %s", identity,
-                 debt.author, debt.message_id)
+        return binding.query_owed(self.socket_path, identity, authors, referents,
+                                  client_type=DaemonClient)
 
     def mark_blocked(self, names) -> None:
         """The holder returned the block: the turn is held open, the named
         debts are pending, and this turn has had its one block."""
-        with self._lock:
-            self.blocked = True
-            self.ledger.mark_pending(names)
-            self.turn_blocks += 1
+        self.replies.mark_blocked(names)
 
     def on_turn_failed(self) -> str | None:
         """StopFailure: a boundary that never blocks, whose digest did not complete: its
@@ -1145,13 +1009,7 @@ class ClaudeShim:
         empties the debts the running context never saw. While blocked, a start with
         source startup, resume or clear resolves the turn as a full boundary (True: the
         caller has had its boundary); `compact`, or no source, resolves nothing."""
-        with self._lock:
-            gone = self.ledger.session_changed(source, session_id)
-            blocked = self.blocked
-        if gone:
-            log.info("SessionStart %s: %d owed repl(ies) left the ledger with the context",
-                     source, gone)
-        if blocked and source in owed.RESOLVING_SOURCES:
+        if self.replies.session_changed(source, session_id):
             self.on_turn_boundary()
             return True
         return False
@@ -1350,9 +1208,7 @@ def build_parser():
     ap = argparse.ArgumentParser(
         prog="moxi-comms-shim",
         description="the claude-shim delivery adapter (one process, one session)")
-    ap.add_argument("--comm-slot", dest="slot", default="next-free",
-                    help="the comms slot whose webhook bundle this session spends "
-                         "(moxi-comms-claude passes it)")
+    ap.add_argument("--comm-slot", dest="retired_slot", help=argparse.SUPPRESS)
     ap.add_argument("--name")
     ap.add_argument("--scope")
     ap.add_argument("--global", dest="global_", action="store_true")
@@ -1377,11 +1233,14 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
     """One adapter, one seam: `--inject-file` writes each digest to a file."""
     args = build_parser().parse_args(argv)
     logging.basicConfig(level="INFO", stream=sys.stderr)
+    if args.retired_slot is not None:
+        print("moxi-comms-shim: --comm-slot is retired; remove it: comms has no slots.",
+              file=sys.stderr)
+        return 2
     if not args.inject_file:
         print("moxi-comms-shim: no injection seam: pass --inject-file. The transport into "
               "a live session is the turns module's; comms carries none.", file=sys.stderr)
         return 2
-    slot = args.slot if args.slot == "next-free" else int(args.slot)
     try:
         declared = directors_mod.validated(args.director or directors_mod.from_env())
     except directors_mod.BadDirector as e:
@@ -1389,7 +1248,7 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
         return 2
     if declared:
         log.info("directors declared for this session: %s", ", ".join(declared))
-    common = dict(slot=slot, name=args.name, scope=args.scope, global_=args.global_,
+    common = dict(name=args.name, scope=args.scope, global_=args.global_,
                   autoreconnect=True, directors=declared)
     if args.project:
         common["project"] = args.project
@@ -1453,9 +1312,9 @@ __all__ = ["ClaudeShim", "frame_line", "frame_marks", "render_digest", "digest_h
            "REFUSED_PREFIX",
            "EXIT_REFUSED", "EXIT_OFFLINE",
            "TOLERATED_OFFLINE_MESSAGE", "ONLINE_MESSAGE",
-           "REFUSED_WAITING", "REFUSED_TERMINAL", "REFUSED_RETRYING", "SLOT_MOVED",
+           "REFUSED_WAITING", "REFUSED_TERMINAL", "REFUSED_RETRYING",
            "SUPERVISOR_ERROR", "survive_supervisor_error",
-           "NAME_REFUSAL", "SLOT_REFUSAL", "OTHER_REFUSAL",
+           "NAME_REFUSAL", "OTHER_REFUSAL",
            "constants"]
 
 

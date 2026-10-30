@@ -29,7 +29,7 @@ import moxi_turns
 from moxi_comms import api, owed
 from moxi_comms.adapters.claude_adapter import ClaudeAdapter
 
-PLANNER = dict(slot=1, name="planner", scope="proj-a")
+PLANNER = dict(name="planner", scope="proj-a")
 REVIEWER = "reviewer@proj-a"
 SESSION = "5e55a1d0-0000-4000-8000-000000000001"
 
@@ -89,7 +89,7 @@ def adapter(bare_adapter, warm):
 
 
 def send(rig, text, *flags):
-    return rig.cli(["send", "--posture", "none", REVIEWER, text, *flags], **PLANNER)
+    return rig.send(REVIEWER, text, *flags, sender=PLANNER)
 
 
 def found(a, ep) -> bool:
@@ -139,11 +139,11 @@ def test_before_its_endpoint_the_adapter_holds_mail_and_a_send_reports_waiting(
 
 def test_waiting_is_data_on_the_library_result(rig, bare_adapter):
     from conftest import _stamp_of
-    rig.shim(slot=1, name="planner", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
     bare_adapter()
     assert wait_until(lambda: binding(rig) is not None)
     planner = _stamp_of({"MOXI_COMMS_PROJECT": "proj-a", "MOXI_COMMS_NAME": "planner",
-                         "MOXI_COMMS_SCOPE": "proj-a", "MOXI_COMMS_SLOT": "1"})
+                         "MOXI_COMMS_SCOPE": "proj-a"})
     with rig.session_holding(planner) as sock:
         result = api.send(api.Sender.socket(sock), [REVIEWER], "data", posture="none")
     assert result.outcome == "sent", result.lines()

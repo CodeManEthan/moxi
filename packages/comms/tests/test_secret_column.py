@@ -1,9 +1,4 @@
-"""The directory's secret column: `secret_id` in a directory this release creates, and
-the older name kept in a directory created before it.
-
-A directory keeps the column names it was created with. Every reader and writer takes the
-column's name from the table it opens, so a directory made by the earlier release sends,
-provisions and re-provisions here, and none of that changes its columns."""
+"""Retired credential columns remain untouched in an older directory."""
 
 import sqlite3
 
@@ -13,7 +8,6 @@ from moxi_comms import directory, tokens
 from moxi_comms.local_gateway import META_OPERATOR_TOKEN_HASH, LocalGateway
 from moxi_comms.paths import directory_db, tokens_dir
 from moxi_comms.provision import COMPLETE, add_standing, provision, readiness
-from moxi_comms.sender import SenderIdentity, credential_for, post
 
 #: The directory schema of comms 0.1.0, as that release wrote it. Only this test holds it.
 SCHEMA_0_1_0 = """
@@ -93,57 +87,40 @@ def rig():
         gateway.close()
 
 
-def _send(gateway, sender: SenderIdentity, body: str) -> None:
-    """Resolve the sender's credential through the directory and post with it."""
-    db = directory.connect(directory_db(), read_only=True)
-    try:
-        cred, channel_id = credential_for(gateway, db, sender)
-    finally:
-        db.close()
-    post(gateway, cred, body, username=sender.qualified)
-    assert body in [m.content for m in gateway.history(channel_id)]
-
-
 def _ready(gateway, store) -> str:
     return readiness(directory_db(), store=store,
                      operator_hash=gateway.meta_get(META_OPERATOR_TOKEN_HASH)).state
 
 
-def test_a_fresh_directory_names_the_column_secret_id_and_sends(rig):
+def test_a_fresh_directory_has_no_webhook_table(rig):
     gateway, store = rig
-    provision(gateway, directory_db(), slots=2, standing=[("planner", "proj-a")],
-              store=store)
-    names = [column[1] for column in _webhook_columns(directory_db())]
-    assert "secret_id" in names and directory.OLD_SECRET_COLUMN not in names
+    provision(gateway, directory_db(), standing=[("planner", "proj-a")], store=store)
     conn = directory.connect(directory_db(), read_only=True)
     try:
-        assert directory.secret_column(conn) == "secret_id"
-        assert all(directory.secret_of(row).startswith("comms/")
-                   for row in conn.execute("SELECT * FROM webhooks"))
+        tables = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"slots", "webhooks"}.isdisjoint(tables)
     finally:
         conn.close()
     assert _ready(gateway, store) == COMPLETE
-    _send(gateway, SenderIdentity.for_agent("planner", "proj-a"), "from a standing row")
-    _send(gateway, SenderIdentity.for_slot(2, "agent-1@proj-a", "proj-a"), "from a slot")
 
 
 def test_a_directory_from_0_1_0_keeps_its_columns_through_every_writer(rig):
     gateway, store = rig
     path = _old_directory()
     before = _webhook_columns(path)
-    assert directory.OLD_SECRET_COLUMN in [column[1] for column in before]
+    assert "bws_secret_id" in [column[1] for column in before]
     assert "secret_id" not in [column[1] for column in before]
 
-    # First provisioning, then a re-run that adds a slot and a standing identity.
-    provision(gateway, path, slots=2, standing=[("planner", "proj-a")], store=store)
+    # First provisioning, then a re-run that adds standing identities.
+    provision(gateway, path, standing=[("planner", "proj-a")], store=store)
     assert _webhook_columns(path) == before
-    provision(gateway, path, slots=3, standing=[("planner", "proj-a"), ("archivist", "global")],
+    provision(gateway, path, standing=[("planner", "proj-a"), ("archivist", "global")],
               store=store)
     assert _webhook_columns(path) == before
     conn = directory.init(path)
     try:
         add_standing(gateway, conn, "reviewer", "proj-b", store=store)
-        assert directory.secret_column(conn) == directory.OLD_SECRET_COLUMN
     finally:
         conn.close()
     assert _webhook_columns(path) == before
@@ -153,30 +130,37 @@ def test_a_directory_from_0_1_0_keeps_its_columns_through_every_writer(rig):
         rows = conn.execute("SELECT * FROM webhooks").fetchall()
     finally:
         conn.close()
-    assert len(rows) == 3 + 3
-    assert all(directory.secret_of(row).startswith("comms/") for row in rows)
+    assert rows == []
 
     assert _ready(gateway, store) == COMPLETE
-    _send(gateway, SenderIdentity.for_agent("planner", "proj-a"), "old directory, standing")
-    _send(gateway, SenderIdentity.for_agent("archivist", "global"), "old directory, global")
-    _send(gateway, SenderIdentity.for_agent("reviewer", "proj-b"), "old directory, added")
-    _send(gateway, SenderIdentity.for_slot(3, "agent-2@proj-a", "proj-a"), "old directory, slot")
     assert _webhook_columns(path) == before
 
 
-def test_readiness_finds_a_missing_slot_token_in_an_old_directory(rig):
-    """The SQL reader names the old column too: a slot whose token is gone is found."""
+def test_readiness_ignores_missing_slot_tokens_in_an_old_directory(rig):
+    """Retired slot credentials do not make an otherwise complete directory lost."""
     gateway, store = rig
     path = _old_directory()
-    provision(gateway, path, slots=2, store=store)
-    store.path_for(tokens.owner_for_slot(2)).unlink()
+    result = provision(gateway, path, store=store)
+    conn = directory.connect(path)
+    try:
+        for slot_id in (1, 2):
+            conn.execute("INSERT INTO slots(slot_id, created_at) VALUES (?, ?)",
+                         (slot_id, directory.now()))
+            conn.execute(
+                "INSERT INTO webhooks(webhook_id, slot_id, agent_name, agent_scope, "
+                "channel_id, bws_secret_id, created_at) VALUES (?,?,NULL,NULL,?,?,?)",
+                (f"legacy-{slot_id}", slot_id, result.rooms["#names"],
+                 f"comms/slot-{slot_id}/names", directory.now()))
+        conn.commit()
+    finally:
+        conn.close()
     found = readiness(path, store=store,
                       operator_hash=gateway.meta_get(META_OPERATOR_TOKEN_HASH))
-    assert "slot-2" in found.detail and "slot-1" not in found.detail
-    assert _webhook_columns(path)[5][1] == directory.OLD_SECRET_COLUMN
+    assert found.state == COMPLETE and found.detail == ""
+    assert _webhook_columns(path)[5][1] == "bws_secret_id"
 
 
-def test_the_schema_declares_secret_id():
-    assert directory.SECRET_COLUMN == "secret_id"
-    assert "secret_id " in directory.SCHEMA
-    assert directory.OLD_SECRET_COLUMN not in directory.SCHEMA
+def test_the_fresh_schema_declares_no_retired_credential_tables():
+    assert "CREATE TABLE IF NOT EXISTS slots" not in directory.SCHEMA
+    assert "CREATE TABLE IF NOT EXISTS webhooks" not in directory.SCHEMA
+    assert "bws_secret_id" not in directory.SCHEMA

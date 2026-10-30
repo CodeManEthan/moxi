@@ -8,9 +8,11 @@ import pytest
 
 from claim_kit import World, wait_for
 from conftest import clock_reads_warm, wait_for_queue
-from moxi_comms.client import DaemonClient, DaemonError
+from moxi_comms import claimfile
+from moxi_comms.client import (DaemonClient, DaemonError, DaemonNoAnswer,
+                               DaemonOffline)
 
-SEAT = "seat@proj-a"
+PLANNER = "planner@proj-a"
 
 
 @pytest.fixture
@@ -29,130 +31,149 @@ def last(rig):
     return rig.gateway.history(rig.names_channel)[-1]
 
 
-def test_a_send_inside_the_session_goes_out_as_the_claim_on_its_bound_slot(rig, world):
-    s = world.real("seat", slot=3)
+def test_a_send_inside_the_session_is_stamped_as_the_claim(rig, world):
+    s = world.real("planner")
     code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "hello"], env=as_claim(s))
     assert code == 0, out
     msg = last(rig)
-    assert msg.author_display == SEAT
-    assert msg.author_id == rig.slot_webhook_id(3)
+    assert (msg.author_kind, msg.author_id, msg.author_display) == (
+        "identity", PLANNER, PLANNER)
 
 
 def test_the_stamp_is_not_read_when_the_claim_socket_is_there(rig, world):
-    s = world.real("seat", slot=3)
-    code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "hello"], name="impostor", slot=5,
+    s = world.real("planner")
+    code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "hello"], name="stranger",
                         env=as_claim(s))
     assert code == 0, out
-    assert last(rig).author_display == SEAT
+    assert last(rig).author_display == PLANNER
 
 
 def test_a_process_outside_the_session_is_refused(rig, world):
-    s = world.session("seat", slot=3)               # rooted in a fake, unrelated tree
+    s = world.session("planner")            # rooted in a fake, unrelated tree
     code, out = rig.cli(["send", "--posture", "none", "nobody", "hello"], env=as_claim(s))
     assert code == 2
     assert "not inside the session" in out and "nothing was sent" in out
 
 
 def test_a_session_that_holds_nothing_says_why(rig, world):
-    s = world.real("seat", slot=3)
+    s = world.real("planner")
     s.holder.claim, s.holder.state = None, "standby"
     code, out = rig.cli(["send", "--posture", "none", "nobody", "hello"], env=as_claim(s))
     assert code == 2
     assert "this session holds no comms identity — nothing was sent." in out
-    s.holder.lost = SEAT                            # another session took its name
+    s.holder.lost = PLANNER                         # another session took its name
     code, out = rig.cli(["send", "--posture", "none", "nobody", "hello"], env=as_claim(s))
     assert code == 2
-    assert f"{SEAT} is held by another session — nothing was sent." in out
+    assert f"{PLANNER} is held by another session — nothing was sent." in out
 
 
 def test_offline_with_the_name_bound_elsewhere_is_refused(rig, world):
-    s = world.real("seat", slot=3)
-    s.client.close()
-    assert wait_for(lambda: s.holder.state == "offline")
-    rig.shim(name="seat", scope="proj-a", slot=4)
-    code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "hello"], env=as_claim(s))
-    assert code == 2 and "bound by another session" in out
+    world.real("planner")
+    code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "hello"],
+                        name="planner", scope="proj-a")
+    assert code == 2 and "held by another session" in out
 
 
-def test_offline_with_the_name_unbound_posts_as_the_claim(rig, world):
-    s = world.real("seat", slot=3)
+def test_offline_with_the_name_unbound_is_refused(rig, world):
+    s = world.real("planner")
     s.client.close()
     assert wait_for(lambda: s.holder.state == "offline")
     code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "hello"], env=as_claim(s))
-    assert code == 0, out
-    assert last(rig).author_id == rig.slot_webhook_id(3)
+    assert code == 4
+    assert "is offline" in out and "holds no posting credential" in out
+    assert rig.gateway.history(rig.names_channel) == []
 
 
-def test_offline_with_the_lookup_failing_posts_on_the_claims_slot(rig, world, monkeypatch):
-    s = world.real("seat", slot=3)
+def test_offline_refusal_does_not_look_up_another_binding(rig, world, monkeypatch):
+    s = world.real("planner")
     s.client.close()
     assert wait_for(lambda: s.holder.state == "offline")
-    real = DaemonClient.query
-
-    def failing(self, kind, **kw):
+    def refusing_lookup(self, kind, **kw):
         if kind == "agents":
-            raise DaemonError("down for this")
-        return real(self, kind, **kw)
+            raise AssertionError("an offline send must not query bindings")
+        return original(self, kind, **kw)
 
-    monkeypatch.setattr(DaemonClient, "query", failing)
+    original = DaemonClient.query
+    monkeypatch.setattr(DaemonClient, "query", refusing_lookup)
     code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "hello"], env=as_claim(s))
+    assert code == 4 and "holds no posting credential" in out
+
+
+def test_a_bound_claim_posts_with_its_token_without_a_binding_query(
+        rig, world, monkeypatch):
+    planner = world.real("planner")
+    rig.shim(name="reviewer", scope="proj-a")
+    original = DaemonClient.query
+
+    def refusing_lookup(self, kind, **kw):
+        if kind == "agents":
+            raise AssertionError("a bound send must not query bindings")
+        return original(self, kind, **kw)
+
+    monkeypatch.setattr(DaemonClient, "query", refusing_lookup)
+    code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "hello"],
+                        env=as_claim(planner))
     assert code == 0, out
-    assert last(rig).author_id == rig.slot_webhook_id(3)
+    assert last(rig).author_id == PLANNER
 
 
-def test_a_dead_adapter_sends_by_its_claim_file_while_nobody_holds_the_name(rig, world):
-    s = world.real("seat", slot=3)
+def test_a_dead_adapter_is_refused_while_nobody_holds_the_name(rig, world):
+    from moxi_comms import claimhold
+
+    s = world.real("planner")
+    token = s.holder.token
     s.client.close()
     s.holder.close(remove_file=False)               # the shim died; Claude lives on
-    assert wait_for(lambda: SEAT not in rig.daemon.bindings)
+    assert wait_for(lambda: PLANNER not in rig.daemon.bindings)
+    answer = claimhold.dead_adapter_answer(s.socket)
+    assert answer is not None and token not in str(answer) and "token" not in answer
     code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "hello"], env=as_claim(s))
-    assert code == 0, out
-    rig.shim(name="seat", scope="proj-a", slot=4)
-    code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "hello"], env=as_claim(s))
-    assert code == 2 and "bound by another session" in out
+    assert code == 4
+    assert "comms adapter is gone" in out and "holds no posting credential" in out
+    assert rig.gateway.history(rig.names_channel) == []
 
 
 def test_a_dead_adapter_with_no_live_file_is_refused(rig, world):
-    s = world.real("seat", slot=3)
+    s = world.real("planner")
     s.holder.close()
     code, out = rig.cli(["send", "--posture", "none", "nobody", "hello"], env=as_claim(s))
     assert code == 2 and "comms adapter is gone" in out
 
 
 def test_a_stamp_is_refused_when_a_live_session_holds_its_name(rig, world):
-    world.real("seat", slot=3)
-    code, out = rig.cli(["send", "--posture", "none", "nobody", "hello"], name="seat", scope="proj-a",
+    world.real("planner")
+    code, out = rig.cli(["send", "--posture", "none", "nobody", "hello"], name="planner", scope="proj-a",
                         stamp_only=True)
-    assert code == 2 and "not inside the session that holds seat@proj-a" in out
+    assert code == 2 and "not inside the session that holds planner@proj-a" in out
     assert rig.gateway.history(rig.names_channel) == []
 
 
 def test_a_stamp_is_refused_while_a_waiting_launch_names_it(rig, world):
-    waiting = world.session("later", bind=False)
-    waiting.holder.name_refused("later@proj-a")
+    waiting = world.session("newbie", bind=False)
+    waiting.holder.name_refused("newbie@proj-a")
     assert waiting.state == "waiting"
-    code, out = rig.cli(["send", "--posture", "none", "nobody", "hi"], name="later", scope="proj-a",
+    code, out = rig.cli(["send", "--posture", "none", "nobody", "hi"], name="newbie", scope="proj-a",
                         stamp_only=True)
-    assert code == 2 and "not inside the session that holds later@proj-a" in out
+    assert code == 2 and "not inside the session that holds newbie@proj-a" in out
 
 
 def test_a_stamp_no_live_session_names_is_refused_too(rig):
     """There is no env path. A stamp is refused even when no live claim file names its
     identity, and the refusal names the
     identity the stamp claims. The binding is there; only a session holding it sends."""
-    rig.shim(name="seat", scope="proj-a", slot=3)
-    code, out = rig.cli(["send", "--posture", "none", "nobody", "hello"], name="seat", scope="proj-a",
+    rig.shim(name="planner", scope="proj-a")
+    code, out = rig.cli(["send", "--posture", "none", "nobody", "hello"], name="planner", scope="proj-a",
                         stamp_only=True)
     assert code == 2, out
     assert out.strip() == (
         "this process has no comms claim socket, so it sends under no identity — nothing "
-        "was sent. Its launch stamp names seat@proj-a, but a stamp is not a live session "
+        "was sent. Its launch stamp names planner@proj-a, but a stamp is not a live session "
         "holding a name: a session sends as its identity through its own claim socket.")
     assert rig.gateway.history(rig.names_channel) == []
 
 
 def test_the_operators_lane_is_refused_inside_a_session(rig, world):
-    s = world.real("seat", slot=3)
+    s = world.real("planner")
     code, out = rig.cli(["send", "--posture", "none", "nobody", "hi"],
                         env={**as_claim(s), "MOXI_COMMS_OPERATOR": rig.prov.operator_user_id})
     assert code == 2 and "operator's lane is its own terminal" in out
@@ -168,13 +189,13 @@ def _sent_id(out):
 
 
 def test_a_reply_through_the_claim_goes_out_to_its_own_or_anothers_message(rig, world):
-    s = world.real("seat", slot=3)
-    code, out = rig.cli(["send", "--posture", "once", "--new-name", "peer", "before"], env=as_claim(s))
+    s = world.real("planner")
+    code, out = rig.cli(["send", "--posture", "once", "--new-name", "reviewer", "before"], env=as_claim(s))
     assert code == 0, out
     mine = _sent_id(out)
     code, out = rig.cli(["reply", mine, "fine"], env=as_claim(s))     # its own message
     assert code == 0, out
-    other = rig.post_from_slot(5, ["seat"], "from someone else", display="other@proj-a")
+    other = rig.post_as("bob@proj-a", ["planner"], "from someone else")
     code, out = rig.cli(["reply", other.id, "fine"], env=as_claim(s))  # another's
     assert code == 0, out
 
@@ -184,13 +205,15 @@ def test_a_reply_through_the_claim_goes_out_to_its_own_or_anothers_message(rig, 
 def test_whoami_prints_the_claim_and_its_session(rig, world):
     """The first line, then `session <id>` when the claim records its launch
     session, and nothing else."""
-    s = world.real("seat", slot=3)
+    s = world.real("planner")
+    token = s.holder.token
     code, out = rig.cli(["whoami"], env=as_claim(s))
-    assert code == 0 and out.splitlines() == ["seat@proj-a (bound, slot 3)"], out
+    assert code == 0 and out.splitlines() == ["planner@proj-a (bound)"], out
+    assert token not in out
     s.holder.launch_session = "0a1b2c3d-sess"
     code, out = rig.cli(["whoami"], env=as_claim(s))
     assert code == 0, out
-    assert out.splitlines() == ["seat@proj-a (bound, slot 3)", "session 0a1b2c3d-sess"]
+    assert out.splitlines() == ["planner@proj-a (bound)", "session 0a1b2c3d-sess"]
 
 
 def test_whoami_outside_any_session(rig):
@@ -199,11 +222,12 @@ def test_whoami_outside_any_session(rig):
 
 
 def test_whois_and_the_cache_caller_read_the_claim(rig, world, monkeypatch):
-    s = world.real("seat", slot=3)
+    s = world.real("planner")
     from moxi_comms import claimhold
     env = claimhold.claim_overlay({"MOXI_COMMS_CLAIM_SOCKET": s.socket, "MOXI_COMMS_NAME": "stale"})
-    assert env["MOXI_COMMS_NAME"] == "seat" and env["MOXI_COMMS_SCOPE"] == "proj-a"
-    assert env["MOXI_COMMS_SLOT"] == "3"
+    assert env["MOXI_COMMS_NAME"] == "planner" and env["MOXI_COMMS_SCOPE"] == "proj-a"
+    assert "MOXI_COMMS_SLOT" not in env
+    assert s.holder.token not in str(env) and "token" not in env
     s.holder.claim, s.holder.state = None, "standby"
     env = claimhold.claim_overlay({"MOXI_COMMS_CLAIM_SOCKET": s.socket, "MOXI_COMMS_NAME": "stale"})
     assert "MOXI_COMMS_NAME" not in env
@@ -220,12 +244,12 @@ def test_a_dead_adapters_file_admits_only_a_process_inside_its_session(rig, worl
     from claim_kit import Session
     other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
-        s = Session(DEFAULT_PROC, "seat", slot=3, root=root_of(other.pid, TREE))
+        s = Session(DEFAULT_PROC, "planner",  root=root_of(other.pid, TREE))
         world.sessions.append(s)
         s.bind()
         s.client.close()
         s.holder.close(remove_file=False)
-        assert wait_for(lambda: SEAT not in rig.daemon.bindings)
+        assert wait_for(lambda: PLANNER not in rig.daemon.bindings)
         code, out = rig.cli(["send", "--posture", "none", "nobody", "hello"], env=as_claim(s))
         assert code == 2 and "comms adapter is gone" in out
     finally:
@@ -234,9 +258,7 @@ def test_a_dead_adapters_file_admits_only_a_process_inside_its_session(rig, worl
 
 # --------------------------------------------------------------------------- ordinary sends
 # Ordinary messaging is no harder for the claim: bare-name sends between agents and sends
-# through a claim print, exit, deliver and attribute as any ordinary send. The one visible difference the
-# released-slot keep makes is which slot a `next-free` launch gets within SLOT_KEEP of
-# another session's exit; that is asserted and nothing else changes.
+# through a claim print, exit, deliver and attribute as any ordinary send.
 
 def sent_line(out, to):
     first = out.splitlines()[0]
@@ -248,8 +270,8 @@ def sent_line(out, to):
 def test_bare_name_sends_between_agents_are_unchanged(rig):
     """A bare name is the global identity, so the bare-name case is two global
     agents."""
-    a = rig.shim(name="alice", slot=1)
-    b = rig.shim(name="bob", slot=3)
+    a = rig.shim(name="alice")
+    b = rig.shim(name="bob")
     code, out = rig.cli(["send", "--posture", "once", "bob", "hello bob"], name="alice")
     assert code == 0 and out.count("\n") == 1, out
     mid = sent_line(out, "bob")
@@ -265,8 +287,8 @@ def test_bare_name_sends_between_agents_are_unchanged(rig):
 
 
 def test_sends_through_the_claim_print_and_deliver_as_stamped_sends_did(rig, world):
-    a = world.real("alice", slot=1)
-    b = rig.shim(name="bob", slot=3)                  # global: a bare `bob` reaches it
+    a = world.real("alice")
+    b = rig.shim(name="bob")                  # global: a bare `bob` reaches it
     code, out = rig.cli(["send", "--posture", "none", "bob", "hello"], env={"MOXI_COMMS_CLAIM_SOCKET": a.socket})
     assert code == 0 and out.count("\n") == 1, out
     sent_line(out, "bob")
@@ -276,14 +298,94 @@ def test_sends_through_the_claim_print_and_deliver_as_stamped_sends_did(rig, wor
         "alice@proj-a", "chosen", "verified")
 
 
-def test_the_one_visible_difference_is_the_slot_a_next_free_launch_gets(rig, world):
-    first = rig.shim(name="first", scope="proj-a", slot=1)
-    first.stop()
-    assert wait_for(lambda: "first@proj-a" not in rig.daemon.bindings)
-    late = rig.shim(name="late", scope="proj-a")              # next-free
-    assert late.slot_id != 1, "slot 1 waits for first@proj-a"
-    back = rig.shim(name="first", scope="proj-a")             # its own kept slot
-    assert back.slot_id == 1
-    code, out = rig.cli(["send", "--posture", "none", "late@proj-a", "hi"], name="first", scope="proj-a")
-    assert code == 0 and out.count("\n") == 1
-    sent_line(out, "late@proj-a")
+def test_a_replaced_token_is_read_again_and_retried_once(rig, world, monkeypatch):
+    planner = world.real("planner")
+    reviewer = rig.shim(name="reviewer")
+    original = DaemonClient.post
+    calls = []
+
+    def replaced(client, identity, token, content):
+        calls.append(token)
+        if len(calls) == 1:
+            planner.client.close()
+            assert wait_for(lambda: planner.holder.state == "offline")
+            planner.bind()
+            raise DaemonError("posting credential refused", {"credential": True})
+        return original(client, identity, token, content)
+
+    monkeypatch.setattr(DaemonClient, "post", replaced)
+    code, out = rig.cli(["send", "--posture", "none", "reviewer", "hello"],
+                        env=as_claim(planner))
+    assert code == 0, out
+    assert len(calls) == 2 and calls[0] != calls[1]
+    wait_for_queue(reviewer, 1)
+    assert last(rig).author_id == "planner@proj-a"
+
+
+def test_a_refused_unchanged_token_fails_without_a_retry(rig, world, monkeypatch):
+    planner = world.real("planner")
+    rig.shim(name="reviewer")
+    calls = []
+
+    def refused(_client, _identity, token, _content):
+        calls.append(token)
+        raise DaemonError("posting credential refused", {"credential": True})
+
+    monkeypatch.setattr(DaemonClient, "post", refused)
+    code, out = rig.cli(["send", "--posture", "none", "reviewer", "hello"],
+                        env=as_claim(planner))
+    assert code == 5 and "refused this session's posting credential" in out
+    assert len(calls) == 1 and rig.gateway.history(rig.names_channel) == []
+
+
+@pytest.mark.parametrize(
+    "next_state,exit_code,phrase",
+    [(claimfile.OFFLINE, 4, "is offline"),
+     (claimfile.WAITING, 2, "is held by another session"),
+     (claimfile.STANDBY, 2, "is held by another session")])
+def test_a_credential_refusal_rereads_the_changed_claim_state(
+        rig, world, monkeypatch, next_state, exit_code, phrase):
+    planner = world.real("planner")
+    rig.shim(name="reviewer")
+    calls = []
+
+    def refused(_client, _identity, token, _content):
+        calls.append(token)
+        if next_state == claimfile.OFFLINE:
+            planner.holder.went_offline()
+        elif next_state == claimfile.WAITING:
+            with planner.holder.lock:
+                planner.holder.token = None
+                planner.holder.state = claimfile.WAITING
+                planner.holder.waiting_why = None
+                planner.holder.save()
+        else:
+            planner.holder.name_refused("planner@proj-a")
+        raise DaemonError("posting credential refused", {"credential": True})
+
+    monkeypatch.setattr(DaemonClient, "post", refused)
+    code, out = rig.cli(["send", "--posture", "none", "reviewer", "hello"],
+                        env=as_claim(planner))
+    assert code == exit_code and phrase in out
+    assert len(calls) == 1
+    assert rig.gateway.history(rig.names_channel) == []
+
+
+@pytest.mark.parametrize(
+    "error, phrase",
+    [(DaemonOffline("write failed"), "Nothing was sent"),
+     (DaemonNoAnswer("closed after post was sent"), "may have been sent"),
+     (DaemonNoAnswer("timeout waiting for post"), "may have been sent")])
+def test_post_transport_failures_say_whether_it_may_have_landed(
+        rig, world, monkeypatch, error, phrase):
+    planner = world.real("planner")
+    rig.shim(name="reviewer")
+
+    def failed(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(DaemonClient, "post", failed)
+    code, out = rig.cli(["send", "--posture", "none", "reviewer", "hello"],
+                        env=as_claim(planner))
+    assert code == (4 if isinstance(error, DaemonOffline) else 5)
+    assert phrase in out and rig.gateway.history(rig.names_channel) == []

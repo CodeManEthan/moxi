@@ -31,16 +31,15 @@ from moxi_comms.attribution import Author
 from moxi_comms.client import DaemonClient, DaemonOffline, DaemonTimeout
 from moxi_comms.daemon import ASK_INDEX_SLACK, Daemon, Refusal, Resolution
 from moxi_comms.gateway import GatewayError, Message
-from moxi_comms.mock_gateway import NO_MENTIONS
 from moxi_comms.paths import directory_db
-from moxi_comms.sender import SenderIdentity, credential_for
+from moxi_comms.sender import SenderIdentity
 
 from test_cold_sends import bind  # noqa: F401 -- a shared fixture
 
-PLANNER = dict(slot=1, name="planner")
-REVIEWER = dict(slot=2, name="reviewer")
-CRITIC = dict(slot=3, name="critic")
-ARCHIVIST = dict(slot=5, name="archivist", env={"MOXI_COMMS_GLOBAL": "1"})
+PLANNER = dict(name="planner")
+REVIEWER = dict(name="reviewer")
+CRITIC = dict(name="critic")
+ARCHIVIST = dict(name="archivist", env={"MOXI_COMMS_GLOBAL": "1"})
 
 P, R, C = "planner", "reviewer", "critic"
 
@@ -57,18 +56,6 @@ def line_zero(msg):
 
 def last(rig):
     return posted(rig)[-1]
-
-
-def raw_post(rig, slot, display, body):
-    """Post a body exactly as given through a slot's webhook, wearing `display`."""
-    db = directory.connect(directory_db(), read_only=True)
-    try:
-        cred, _ = credential_for(rig.gateway, db,
-                                 SenderIdentity.for_slot(slot, display, "global"))
-    finally:
-        db.close()
-    return rig.gateway.execute_webhook(cred, body, username=display,
-                                       allowed_mentions=NO_MENTIONS)
 
 
 def indexed(rig, ask_id, daemon=None):
@@ -234,7 +221,7 @@ def test_send_writes_the_posture_it_is_given(rig, flags, token):
 @pytest.mark.parametrize("verb", ["send", "reply"])
 @pytest.mark.parametrize("flag", [["--speaker"], ["--operator-words"], ["--cold"]])
 def test_a_removed_flag_is_argparses_error_and_nothing_is_posted(rig, verb, flag):
-    ask = rig.post_from_slot(6, [R], "q", display=P)
+    ask = rig.post_as(P, [R], "q")
     argv = (["send", "planner", "hi", "--posture", "open"] if verb == "send"
             else ["reply", ask.id, "hi"])
     with pytest.raises(SystemExit) as exc:
@@ -244,7 +231,7 @@ def test_a_removed_flag_is_argparses_error_and_nothing_is_posted(rig, verb, flag
 
 
 def _reply_token(rig, referent_line, flags=(), *, verb="reply"):
-    referent = raw_post(rig, 6, P, f"{referent_line}\nthe ask")
+    referent = rig.post_as(P, f"{referent_line}\nthe ask", raw=True)
     argv = (["reply", referent.id, "answer", *flags] if verb == "reply" else
             ["send", "--new-name", "planner", "answer", "--reply-to", referent.id, *flags])
     code, out = rig.cli(argv, **REVIEWER)
@@ -269,8 +256,7 @@ def test_the_reply_default_table(rig, verb):
 
 
 def test_a_reply_to_a_referent_not_in_the_record_is_open(rig):
-    code, out = rig.cli(["send", "--new-name", "planner", "hi", "--reply-to", "1400000009999"],
-                        **REVIEWER)
+    code, out = rig.cli(["send", "--new-name", "planner", "hi", "--reply-to", "1400000009999"], **REVIEWER)
     assert code == 0, out
     assert line_zero(last(rig)).posture == "open"
 
@@ -313,20 +299,6 @@ def test_several_open_asks_are_listed_newest_first_at_most_three(rig, pair):
     assert [ln.split()[1] for ln in listed] == [a.id for a in reversed(asks)][:3]
     assert "(and 1 more)" in out
     assert f'moxi comms reply {asks[-1].id} "text"' in out
-
-
-def test_an_unverified_ask_is_delivered_stamped_and_binds_nobody(rig):
-    reviewer = rig.shim(**REVIEWER)
-    ask = raw_post(rig, 6, P, "::to reviewer [reply-once]\nwhich branch?")
-    payload = next(p for p in wait_for_queue(reviewer, 1) if p["message_id"] == ask.id)
-    frame = frame_line(payload)
-    assert "(unverified)" in frame and frame.endswith("[reply-once]")
-    assert payload["posture"] == "once"
-    assert ask.id not in rig.daemon.asks
-    code, out = rig.cli(["send", "--new-name", "--posture", "none", "planner", "on main."], **REVIEWER)
-    assert code == 0, out
-    assert "single-reply" not in out
-    assert line_zero(last(rig)).text == "on main."
 
 
 def test_a_closed_ask_lets_the_plain_send_through(rig, pair):
@@ -457,7 +429,7 @@ def test_a_failed_directory_read_lets_the_single_reply_check_through(rig, pair,
                                                                      monkeypatch, seam):
     ask = open_ask(rig)
     ctx = cli.Context(gateway=rig.gateway, db_path=directory_db(), clock=rig.clock)
-    sender = SenderIdentity.for_slot(REVIEWER["slot"], R, "global")
+    sender = SenderIdentity(qualified=R, scope="global", name="reviewer")
 
     if seam == "db":
         class BrokenDb:
@@ -495,12 +467,6 @@ def test_clause_1_a_message_that_is_not_once_binds_nobody(rig, pair, monkeypatch
     assert rig.cli(["send", "--new-name", "--posture", "none", "planner", "hi"], **REVIEWER)[0] == 0
 
 
-def test_clause_2_an_unverified_ask_binds_nobody(rig, monkeypatch):
-    ask = raw_post(rig, 6, P, "::to reviewer [reply-once]\nq")
-    force_nomination(monkeypatch, rig, ask.id)
-    assert rig.cli(["send", "--new-name", "--posture", "none", "planner", "hi"], **REVIEWER)[0] == 0
-
-
 def test_clause_2_an_ask_does_not_bind_its_own_author(rig, pair, monkeypatch):
     ask = open_ask(rig, to="planner,reviewer", who=REVIEWER)
     force_nomination(monkeypatch, rig, ask.id)
@@ -531,8 +497,7 @@ def test_clause_5_a_threaded_reply_to_the_asker_closes_it(rig, pair, monkeypatch
 def test_clause_5_a_reply_that_does_not_address_the_asker_does_not_close(rig, pair,
                                                                         monkeypatch):
     ask = open_ask(rig)
-    code, out = rig.cli(["send", "--new-name", "critic", "about that ask", "--reply-to", ask.id],
-                        **REVIEWER)
+    code, out = rig.cli(["send", "--new-name", "critic", "about that ask", "--reply-to", ask.id], **REVIEWER)
     assert code == 0, out
     force_nomination(monkeypatch, rig, ask.id)
     assert refused(*rig.cli(["send", "--posture", "none", "planner", "hi"], **REVIEWER))
@@ -563,7 +528,7 @@ def pure(monkeypatch):
     """`from_record` answers from the display this test gives each message."""
     authors = {}
 
-    def from_record(db, msg):
+    def from_record(db, msg, *, record=None):
         return authors[msg.id]
 
     monkeypatch.setattr(attribution, "from_record", from_record)
@@ -637,7 +602,7 @@ def test_the_operators_terminal_is_never_refused(rig):
     if rig.backend != "local":
         pytest.skip("the credentialled operator lane exists on the local backend alone")
     rig.shim(**PLANNER)
-    rig.shim(slot=4, name="operator", global_=True)
+    rig.shim(name="operator", global_=True)
     ask = open_ask(rig, to="operator")
     assert indexed(rig, ask.id)["open"] == {"operator"}
     assert rig.daemon._asks_query({"sender": "operator", "recipients": [P]})["asks"] == \
@@ -650,11 +615,11 @@ def test_the_operators_terminal_is_never_refused(rig):
 
 def test_an_agent_lane_sender_claiming_operator_is_never_refused(rig):
     rig.shim(**PLANNER)
-    rig.shim(slot=4, name="operator", global_=True)
+    rig.shim(name="operator", global_=True)
     ask = open_ask(rig, to="operator")
     assert rig.daemon._asks_query({"sender": "operator", "recipients": [P]})["asks"] == \
         [ask.id]
-    code, out = rig.cli(["send", "--posture", "none", "planner", "spoken, not that"], slot=4,
+    code, out = rig.cli(["send", "--posture", "none", "planner", "spoken, not that"],
                         name="operator", env={"MOXI_COMMS_GLOBAL": "1"})
     assert code == 0, out
     assert "single-reply" not in out
@@ -662,9 +627,9 @@ def test_an_agent_lane_sender_claiming_operator_is_never_refused(rig):
 
 def test_the_operators_reply_to_an_agents_ask_still_carries_the_default(rig):
     rig.shim(**PLANNER)
-    rig.shim(slot=4, name="operator", global_=True)
+    rig.shim(name="operator", global_=True)
     ask = open_ask(rig, to="operator")
-    code, out = rig.cli(["reply", ask.id, "yes"], slot=4, name="operator",
+    code, out = rig.cli(["reply", ask.id, "yes"],  name="operator",
                         env={"MOXI_COMMS_GLOBAL": "1"})
     assert code == 0, out
     assert line_zero(last(rig)).posture == "none", "a stamp, not a refusal"
@@ -674,7 +639,7 @@ def test_the_operators_reply_to_an_agents_ask_still_carries_the_default(rig):
 
 def test_an_agents_ask_binds_archivist_as_an_agent(rig):
     rig.shim(**PLANNER)
-    rig.shim(slot=5, name="archivist", global_=True)
+    rig.shim(name="archivist", global_=True)
     ask = open_ask(rig, to="archivist")
     code, out = rig.cli(["send", "--posture", "none", "planner", "unrelated"], **ARCHIVIST)
     assert refused(code, out), out
@@ -699,7 +664,7 @@ def test_a_second_reply_to_an_answered_ask_posts(rig, pair):
 
 
 def test_a_reply_to_an_old_speaker_message_is_not_refused(rig, pair):
-    announced = raw_post(rig, 6, P, "::to reviewer [speaker]\nfyi")
+    announced = rig.post_as(P, "::to reviewer [speaker]\nfyi", raw=True)
     code, out = rig.cli(["reply", announced.id, "noted, and one thought"], **REVIEWER)
     assert code == 0, out
     assert line_zero(last(rig)).posture == "open"
@@ -776,6 +741,8 @@ def test_a_send_during_the_boot_race_passes_and_is_refused_once_the_rescan_lands
     booting.start()
     try:
         assert wait_until(lambda: daemon._sub is not None and daemon.bound)
+        rig.shim(**PLANNER)
+        rig.shim(**REVIEWER)
         code, out = rig.cli(["send", "--posture", "none", "planner", "before the rescan"], **REVIEWER)
         assert code == 0, out
         # It passed because the index was empty, not because the check did
@@ -792,12 +759,12 @@ def test_a_send_during_the_boot_race_passes_and_is_refused_once_the_rescan_lands
 def test_block_indexes_nothing(rig, pair):
     from conftest import write_config
     write_config(None, "block = true\n")
-    first = raw_post(rig, 1, P, "::to reviewer [reply-once]\nq")
+    first = rig.post_as(P, "::to reviewer [reply-once]\nq", raw=True)
     time.sleep(0.3)
     assert rig.daemon.asks == {}
     # the positive control: the same body with `block` off is indexed.
     write_config(None, "block = false\n")
-    second = raw_post(rig, 1, P, "::to reviewer [reply-once]\nq")
+    second = rig.post_as(P, "::to reviewer [reply-once]\nq", raw=True)
 
     assert indexed(rig, second.id)["open"] == {R}
     assert first.id not in rig.daemon.asks
@@ -826,16 +793,15 @@ def test_new_with_no_open_ask_changes_nothing(rig):
 
 
 def test_new_with_reply_to_is_refused_and_posts_nothing(rig):
-    ask = rig.post_from_slot(6, [R], "q", display=P)
-    code, out = rig.cli(["send", "planner", "hi", "--new", "--reply-to", ask.id],
-                        **REVIEWER)
+    ask = rig.post_as(P, [R], "q")
+    code, out = rig.cli(["send", "planner", "hi", "--new", "--reply-to", ask.id], **REVIEWER)
     assert code == 2, out
     assert "--new" in out and "--reply-to" in out and "Nothing was sent" in out
     assert posted(rig) == [ask]
 
 
 def test_reply_does_not_take_new(rig):
-    ask = rig.post_from_slot(6, [R], "q", display=P)
+    ask = rig.post_as(P, [R], "q")
     with pytest.raises(SystemExit) as e:
         rig.cli(["reply", ask.id, "hi", "--new"], **REVIEWER)
     assert e.value.code == 2
@@ -931,9 +897,9 @@ def test_the_speaker_entry_is_gone():
 
 
 def test_history_renders_the_token_and_not_an_old_speaker_mark(rig):
-    ask = raw_post(rig, 6, P, "::to reviewer [reply-once]\nq")
-    note = raw_post(rig, 6, P, "::to reviewer [speaker]\nfyi")
-    plain = raw_post(rig, 6, P, "::to reviewer\nhi")
+    ask = rig.post_as(P, "::to reviewer [reply-once]\nq", raw=True)
+    note = rig.post_as(P, "::to reviewer [speaker]\nfyi", raw=True)
+    plain = rig.post_as(P, "::to reviewer\nhi", raw=True)
     code, out = rig.cli(["history", R])
     assert code == 0, out
     rows = {ln.split()[0]: ln for ln in out.splitlines() if ln[:1].isdigit()}

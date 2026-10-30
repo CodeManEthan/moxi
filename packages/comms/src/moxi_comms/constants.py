@@ -62,14 +62,6 @@ BACKOFF_FACTOR = 2.0
 BACKOFF_MAX = 30.0
 BACKOFF_JITTER = 0.2   # +/- fraction
 
-# --- slot keeps ----------------------------------------------------------------------
-# How long a restart keeps a name's slot for it. It must exceed the worst gap between a
-# returning adapter's attempts plus one failed attempt: ceiling x (1 + jitter) + client
-# timeout + ceiling x (1 + jitter) = 36 + 10 + 36 = 82 s with the numbers above. 120
-# leaves margin, and a longer window costs almost nothing: a keep refuses no register,
-# and next-free gives a kept slot up when nothing else is free.
-SLOT_KEEP = 120.0      # seconds, from the moment the booting daemon listens
-
 # --- gateway rescan ------------------------------------------------------------------
 RESCAN_LIMIT = 500     # max #names messages examined by a boot / non-RESUME rescan
 

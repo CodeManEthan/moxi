@@ -21,7 +21,7 @@ def launcher(records, tmp_path):
     work = tmp_path / "work"
     work.mkdir()
     config = tmp_path / "candidate.toml"
-    config.write_text(f'[codex.agents."{IDENTITY}"]\nslot = 4\ncwd = "{work}"\n')
+    config.write_text(f'[codex.agents."{IDENTITY}"]\ncwd = "{work}"\n')
     env = dict(os.environ)
     env.update({
         "PATH": f"{binary.parent}{os.pathsep}{env.get('PATH', '')}",
@@ -31,8 +31,7 @@ def launcher(records, tmp_path):
     return subprocess.Popen(
         [sys.executable, "-m", "moxi_comms.adapters.codex", IDENTITY,
          "--config", str(config)],
-        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-    )
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
 
 def digest_with(records, message_id) -> list:
@@ -56,7 +55,7 @@ def test_mail_sent_through_the_daemon_reaches_the_hosted_thread_and_settles(
             proc.stdout.read() if proc.poll() is not None else "no binding"
         assert wait_until(lambda: rig.daemon.bindings[IDENTITY].session_id, 20)
         code, out = rig.cli(["send", "--posture", "none", IDENTITY, "through the daemon"],
-                            slot=1, name="main", scope="proj-a")
+                             name="main", scope="proj-a")
         assert code == 0, out
         mid = out.split()[1]
         assert wait_until(lambda: digest_with(records, mid), 20), calls(records)
@@ -82,7 +81,6 @@ def test_the_launcher_runs_turns_real_host_and_passes_the_roster_options(
     config = tmp_path / "candidate.toml"
     config.write_text(
         f'[codex.agents."{IDENTITY}"]\n'
-        'slot = 4\n'
         f'cwd = "{work}"\n'
         'sandbox = "workspace-write"\n'
         f'writable_roots = ["{writable}"]\n'
@@ -98,8 +96,7 @@ def test_the_launcher_runs_turns_real_host_and_passes_the_roster_options(
     proc = subprocess.Popen(
         [sys.executable, "-m", "moxi_comms.adapters.codex", IDENTITY,
          "--config", str(config)],
-        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-    )
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
         assert wait_until(lambda: calls(records, "thread/start"), 20), \
             proc.stdout.read() if proc.poll() is not None else "thread/start did not arrive"

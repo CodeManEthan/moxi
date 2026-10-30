@@ -61,7 +61,7 @@ def launcher(rig, fake, tmp_path, monkeypatch):
 
     def build(*, models=("opencode/minimax-m3.1-flash-free",), start=True, silence=None,
               directors=()):
-        agent = OpenCodeAgent(qualified=IDENTITY, name="coder", scope="proj-a", slot=5,
+        agent = OpenCodeAgent(qualified=IDENTITY, name="coder", scope="proj-a",
                               cwd=str(tmp_path), session_file=opencode_roster.session_path(
                                   IDENTITY), models=list(models), directors=list(directors))
         statuses: list = []
@@ -82,8 +82,8 @@ def launcher(rig, fake, tmp_path, monkeypatch):
         adapter.stop()
 
 
-def send(rig, text, *, to=IDENTITY, slot=1, name="main", scope="proj-a"):
-    code, out = rig.cli(["send", "--posture", "none", to, text], slot=slot, name=name, scope=scope)
+def send(rig, text, *, to=IDENTITY,  name="main", scope="proj-a"):
+    code, out = rig.send(to, text, sender=dict(name=name, scope=scope))
     assert code == 0, out
 
 
@@ -98,10 +98,10 @@ def session_of(adapter):
 
 # --------------------------------------------------------------------------- binding
 
-def test_it_registers_with_the_pinned_slot_and_the_opencode_kind(rig, launcher):
+def test_it_registers_with_the_opencode_kind(rig, launcher):
     adapter = launcher()
     binding = rig.daemon.bindings[IDENTITY]
-    assert (binding.adapter, binding.slot_id) == ("opencode", 5)
+    assert binding.adapter == "opencode"
     assert adapter.identity == IDENTITY
 
 
@@ -647,7 +647,7 @@ def test_a_launch_on_the_default_prints_no_notice(launcher, capsys):
 def test_the_status_line_is_kept_in_the_session_file_and_explain_shows_it(rig, launcher):
     adapter = launcher()
     adapter.status_sink("coder@proj-a: a line he should see")
-    code, out = rig.cli(["explain", IDENTITY], slot=1, name="main", scope="proj-a")
+    code, out = rig.cli(["explain", IDENTITY],  name="main", scope="proj-a")
     assert code == 0, out
     assert "moxi-comms-opencode status" in out
     assert "a line he should see" in out

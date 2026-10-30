@@ -64,12 +64,6 @@ default = {}
 doc = "Send-only identities by qualified name, each mapped to the words its refusal uses."
 read = "start"
 
-[provision.slots]
-type = "int"
-default = 6
-doc = "How many slots a first start provisions in an empty directory; 1 or more."
-read = "start"
-
 [provision.operator]
 type = "string"
 default = "operator"
@@ -135,3 +129,6 @@ retired = "remove it: no sender is exempt from the cold-cache hold"
 
 [policy.next_turn_refused]
 retired = "remove it: no name refuses a next-turn send"
+
+[provision.slots]
+retired = "remove it: comms has no slots"

@@ -1,9 +1,10 @@
 """Fanout layer 2: the nudge.
 
 Layer 1 is in-process and layer 3 is the slow poll; both live in `local_gateway.py` and
-are tested there. This is the middle one: a CLI process writes the record itself,
-so the daemon learns of the row from a fire-and-forget `{"op": "nudge"}` frame on the
-socket it already owns, and the poll is only the safety net underneath it.
+are tested there. This is the middle one for the operator lane: its CLI process writes
+the record itself, so the daemon learns of the row from a fire-and-forget
+`{"op": "nudge"}` frame. Agent posts go through the daemon and its gateway fans them out
+in-process without a nudge.
 
 Every test that measures the nudge posts through a SECOND `LocalGateway` on the same
 file (`cli_gateway`), because that is what a CLI process is. Posting through the rig's
@@ -74,28 +75,27 @@ def quiet_pump(gateway, interval: float = 5.0) -> None:
 
 
 def a_pair(rig):
-    return rig.shim(slot=1, name="planner", scope="proj-a"), \
-        rig.shim(slot=2, name="reviewer", scope="proj-a")
+    return rig.shim(name="planner", scope="proj-a"), \
+        rig.shim(name="reviewer", scope="proj-a")
 
 
 # --------------------------------------------------------------------------- the nudge
 
 @pytest.mark.parametrize("backend", ["local"], indirect=True)
-def test_a_nudge_delivers_a_cli_post_within_50ms(rig, cli_gateway, notified):
-    """A nudge delivers within 50 ms. The pump is parked on a 5 s wait, so
-    nothing but the frame can account for the delivery."""
+def test_an_agent_post_delivers_within_50ms_without_a_nudge(rig, cli_gateway, notified):
+    """The daemon writes and fans out an agent post on the same call."""
     planner, reviewer = a_pair(rig)
     quiet_pump(rig.gateway)
 
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "the nudge carries this"],
-                        slot=planner.slot_id, name="planner", scope="proj-a",
+                        name="planner", scope="proj-a",
                         env={"MOXI_COMMS_GATEWAY": "local"}, gateway=cli_gateway)
     t0 = time.monotonic()
     assert code == 0 and "sent" in out
-    assert "nudge" in notified, "the local backend's CLI tells the daemon itself"
+    assert "nudge" not in notified
 
     assert wait_until(lambda: len(reviewer.queue) >= 1, timeout=0.05), \
-        "the daemon was nudged and the row was committed; nothing else had to happen"
+        "the daemon's own gateway committed and fanned out the row"
     assert time.monotonic() - t0 < 0.05
     assert reviewer.queue[0]["text"] == "the nudge carries this"
 
@@ -109,12 +109,13 @@ def test_a_lost_nudge_is_delivered_by_the_poll(rig, cli_gateway, monkeypatch):
     monkeypatch.setattr(cli.DaemonClient, "notify",
                         lambda self, op, **kw: None if op == "nudge"
                         else real(self, op, **kw))
-    planner, reviewer = a_pair(rig)
+    _planner, reviewer = a_pair(rig)
     quiet_pump(rig.gateway, POLL)
 
-    code, _ = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "the poll carries this"],
-                      slot=planner.slot_id, name="planner", scope="proj-a",
-                      env={"MOXI_COMMS_GATEWAY": "local"}, gateway=cli_gateway)
+    code, _ = rig.cli(["send", "reviewer@proj-a", "the poll carries this"],
+                      env={"MOXI_COMMS_GATEWAY": "local",
+                           "MOXI_COMMS_OPERATOR": rig.prov.operator_user_id},
+                      gateway=cli_gateway)
     t0 = time.monotonic()
     assert code == 0
     assert not wait_until(lambda: len(reviewer.queue) >= 1, timeout=0.05), \
@@ -171,7 +172,7 @@ def test_the_cli_on_the_mock_backend_sends_no_nudge(rig, notified):
     would be local)."""
     planner, reviewer = a_pair(rig)
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "no nudge for the mock"],
-                        slot=planner.slot_id, name="planner", scope="proj-a",
+                        name="planner", scope="proj-a",
                         env={"MOXI_COMMS_GATEWAY": "mock"})
     assert code == 0 and "sent" in out
     assert "nudge" not in notified

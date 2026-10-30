@@ -3,7 +3,7 @@
 One launcher process per identity, an ordinary daemon-socket client whose connection is
 its liveness, like `moxi-comms-codex`. What it owns:
 
-  * one registration on the daemon socket, with the slot the roster PINS;
+  * one registration on the daemon socket for the roster identity;
   * one `opencode serve` (`opencode_server`), spawned with the identity stamped into its
     environment, on loopback, with a per-launch password;
   * a new OpenCode session at every launch, whose id it records in STATE; it never
@@ -84,7 +84,7 @@ from ..config import ConfigError
 from ..context import BARE_COMMS, MOXI_COMMS_PATH_LINE, own_comms
 from . import opencode_roster
 from .harness import (REQUEUE, SOURCE_CLEAR, SOURCE_COMPACT, SOURCE_STARTUP, TURN_COMPLETED,
-                      HarnessAdapter, TurnLedger, launch_stamp)
+                      HarnessAdapter, TurnLedger, launch_stamp, plan_comms, plan_head)
 from .opencode_server import (EventStream, Http, NoAnswer, Server, Unreachable,
                               parse_stream_line)
 
@@ -366,7 +366,7 @@ def list_age(env, now=None) -> str:
 
 def launch_config(model: str | None, instructions: str | None) -> dict:
     """What `OPENCODE_CONFIG_CONTENT` carries for comms' server: the launch default on
-    both model slots (or none), layer one by absolute path, and answers to the two
+    both model positions (or none), layer one by absolute path, and answers to the two
     permission asks no one would be there to answer. No credential, key or provider
     entry, ever: the person's own OpenCode config and sign-in are what the server uses
     for the rest."""
@@ -1431,20 +1431,15 @@ def print_plan(agent, roster, *, binary, version, comms_path, out=None) -> None:
     def say(text):
         print(text, file=out)
 
-    say(f"identity   {agent.qualified} (slot {agent.slot}, pinned by the roster)")
-    say(f"  roster     {roster.source}")
-    say(f"  cwd        {agent.cwd}")
-    say(f"  session    {agent.session_file} (a new session at this launch)")
-    if agent.directors:
-        say(f"  directors  {', '.join(agent.directors)} "
-            "(verified messages from these render as directives)")
+    plan_head(agent, roster, say,
+              record=f"  session    {agent.session_file} (a new session at this launch)")
     say(f"  model      {', then '.join(agent.models)} (the launch default, if offered "
         "free; comms never changes it after launch)")
     say(f"  refresh    {binary or opencode_roster.BINARY} {' '.join(MODELS_REFRESH_ARGS)} "
         f"before the server starts, within {MODELS_REFRESH_TIMEOUT:g}s; the model is "
         "chosen from the refreshed list")
     say(f"  opencode   {binary or 'opencode (does not resolve)'} ({version})")
-    say(f"  comms      {comms_path or BARE_COMMS + ' (this environment has no moxi script)'}")
+    plan_comms(comms_path, say)
     say("  spawn      " + " ".join(serve_argv(binary or opencode_roster.BINARY)))
     say("  window     " + f"{binary or opencode_roster.BINARY} attach <url> -s <session>")
     say(f"  log        {launcher_log_file(agent.qualified)}")

@@ -45,8 +45,8 @@ from moxi_comms.protocol import LineConn
 
 import shim_drive
 
-PLANNER = dict(slot=1, name="planner", scope="proj-a")
-REVIEWER = dict(slot=2, name="reviewer", scope="proj-a")
+PLANNER = dict(name="planner", scope="proj-a")
+REVIEWER = dict(name="reviewer", scope="proj-a")
 REVIEWER_Q = "reviewer@proj-a"
 
 SESS_REVIEWER = "11111111-1111-4111-8111-111111111111"
@@ -61,23 +61,20 @@ HOUR = 3600
 # --------------------------------------------------------------------------- fixtures
 
 @pytest.fixture
-def bind(rig):
+def bind(rig, bind_answered):
     """Bindings held by bare DaemonClients: archivist, the operator, a codex name, a
     console. This process holds each the way a module's own process does: its own
     connection, reported to a `ClaimServer` the rig sends through. Closed at the end of
     the test."""
-    made, servers = [], []
+    servers = []
 
     def _bind(**kwargs):
-        c = DaemonClient(daemon_socket()).connect()
-        answer = c.register(**kwargs)
-        made.append(c)
+        c, answer = bind_answered(**kwargs)
         ident = answer.get("identity") or {}
         scope = "global" if kwargs.get("global_") else kwargs.get("scope") or "global"
         server = ClaimServer(kwargs["name"], scope,
-                             kind=kwargs.get("adapter", "claude-shim"),
-                             slot=kwargs.get("slot", "next-free")).start()
-        server.set_bound(answer.get("slot"), ident.get("tier"))
+                             kind=kwargs.get("adapter", "claude-shim")).start()
+        server.set_bound(ident.get("tier"), token=answer["token"])
         servers.append(server)
         rig.holders[server.claim["qualified"]] = server
         return c
@@ -85,22 +82,20 @@ def bind(rig):
     yield _bind
     for server in servers:
         server.stop()
-    for c in made:
-        c.close()
 
 
 def bind_archivist(bind, session_id=SESS_ARCHIVIST):
     """archivist, a global name held by a bare claude-shim binding on `session_id`, which
     reads its transcript; `""` is a session that has made no request yet (`fresh`)."""
-    return bind(slot=3, name="archivist", global_=True, adapter="claude-shim",
+    return bind(name="archivist", global_=True, adapter="claude-shim",
                 session_id=session_id or SESS_BLANK, projects_root=str(projects_root()),
                 turned=bool(session_id))
 
 
-def bind_operator(bind, slot=4):
+def bind_operator(bind):
     """The operator, held by a bare claude-shim binding of its own on a session that has
     made no request yet (`fresh`)."""
-    return bind(slot=slot, name="operator", global_=True, adapter="claude-shim",
+    return bind(name="operator", global_=True, adapter="claude-shim",
                 session_id=SESS_OPERATOR, projects_root=str(projects_root()), turned=False)
 
 
@@ -119,7 +114,7 @@ def sent_id(out):
 
 
 def send(rig, to, text="hello", *flags, sender=PLANNER, env=None):
-    return rig.cli(["send", "--posture", "none", to, text, *flags], **sender, env=env)
+    return rig.send(to, text, *flags, sender=sender, env=env)
 
 
 def held_of(rig, qualified=REVIEWER_Q):
@@ -152,21 +147,9 @@ def fast_backoff():
     return itertools.repeat(0.05)
 
 
-def post_many(rig, recipients, n, *, slot=6, display="planner@proj-a", next_turn=False):
-    """`n` messages through one credential, resolved once."""
-    from moxi_comms import directory
-    from moxi_comms.mock_gateway import NO_MENTIONS
-    from moxi_comms.paths import directory_db
-    from moxi_comms.sender import SenderIdentity, credential_for
-    db = directory.connect(directory_db(), read_only=True)
-    try:
-        cred, _ = credential_for(rig.gateway, db,
-                                 SenderIdentity.for_slot(slot, display, "global"))
-    finally:
-        db.close()
-    return [rig.gateway.execute_webhook(cred, machine_line.compose(recipients, f"m{i}",
-                                                                   next_turn=next_turn),
-                                        username=display, allowed_mentions=NO_MENTIONS)
+def post_many(rig, recipients, n, *, display="planner@proj-a", next_turn=False):
+    """`n` stamped setup rows with the same sender and line-zero flags."""
+    return [rig.post_as(display, recipients, f"m{i}", next_turn=next_turn)
             for i in range(n)]
 
 
@@ -336,7 +319,7 @@ def test_a_send_to_a_cold_recipient_is_posted_and_held(rig):
 def test_a_reply_is_held(rig):
     reviewer_with_session(rig)
     write_transcript(SESS_REVIEWER, 2 * HOUR)
-    ask = rig.post_from_slot(6, ["planner@proj-a"], "q?", display="reviewer@proj-a")
+    ask = rig.post_as("reviewer@proj-a", ["planner@proj-a"], "q?")
     code, out = rig.cli(["reply", ask.id, "a."], **PLANNER)
     assert code == 0 and "held: reviewer@proj-a's cache went cold" in out, out
     assert out.splitlines()[-1] == HELD_LAST, out
@@ -420,7 +403,7 @@ def test_no_rerun_line_beside_archivist_the_operator_or_codex(rig, bind):
     write_transcript(SESS_REVIEWER, 2 * HOUR)
     bind_archivist(bind, session_id="")                    # blank anchor: fresh
     bind_operator(bind)
-    bind(slot=5, name="coder", scope="proj-a", adapter="codex")
+    bind(name="coder", scope="proj-a", adapter="codex")
     for other in ("archivist", "operator"):
         code, out = send(rig, f"reviewer@proj-a,{other}")
         assert code == 0, (other, out)
@@ -453,7 +436,7 @@ def test_no_sender_is_exempt(rig, bind):
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "from archivist"], name="archivist",
                         env={"MOXI_COMMS_GLOBAL": "1"})
     assert code == 0 and out.splitlines()[-1] == HELD_LAST, out
-    bind(slot=4, name="console", scope="acme")
+    bind(name="console", scope="acme")
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "from the console"], name="console",
                         scope="acme")
     assert code == 0 and out.splitlines()[-1] == HELD_LAST, out
@@ -489,7 +472,7 @@ def test_several_recipients_are_held_per_recipient(rig, bind):
     write_transcript(SESS_REVIEWER, 2 * HOUR)
     bind_archivist(bind)
     write_transcript(SESS_ARCHIVIST, 300)          # warm
-    rig.shim(slot=4, name="main", scope="proj-a", session_id=SESS_OTHER)
+    rig.shim(name="main", scope="proj-a", session_id=SESS_OTHER)
     write_transcript(SESS_OTHER, 3 * HOUR)       # cold too
     code, out = send(rig, "reviewer@proj-a,archivist,main@proj-a")
     assert code == 0 and len(posted(rig)) == 1, out
@@ -503,7 +486,7 @@ def test_several_recipients_are_held_per_recipient(rig, bind):
 
 def test_two_held_recipients_each_get_their_own_line(rig, bind):
     reviewer_with_session(rig)
-    rig.shim(slot=4, name="main", scope="proj-a", session_id=SESS_OTHER)
+    rig.shim(name="main", scope="proj-a", session_id=SESS_OTHER)
     write_transcript(SESS_REVIEWER, 2 * HOUR)
     write_transcript(SESS_OTHER, 4 * HOUR)
     code, out = send(rig, "reviewer@proj-a,main@proj-a")
@@ -530,7 +513,7 @@ AS_OPERATOR = dict(env={"MOXI_COMMS_OPERATOR": "900001"})
 def test_comms_cache_speaks_one_line_per_kind(rig, bind):
     reviewer_with_session(rig)
     write_transcript(SESS_REVIEWER, 4 * 60)
-    rig.shim(slot=4, name="main", scope="proj-a", session_id=SESS_OTHER)
+    rig.shim(name="main", scope="proj-a", session_id=SESS_OTHER)
     write_transcript(SESS_OTHER, HOUR + 18 * HOUR)
     bind_archivist(bind)
     write_transcript(SESS_ARCHIVIST, HOUR + 70 * 60)
@@ -561,7 +544,7 @@ def test_comms_cache_with_no_argument_reads_every_bound_name(rig, bind):
 
 def test_comms_cache_says_why_it_does_not_know(rig, bind):
     rig.shim(**REVIEWER, session_id=None)
-    bind(slot=5, name="coder", scope="proj-a", adapter="codex")
+    bind(name="coder", scope="proj-a", adapter="codex")
     code, out = cache_cli(rig, "reviewer@proj-a", "coder@proj-a", "nobody", **AS_OPERATOR)
     assert code == 0
     lines = out.splitlines()
@@ -576,7 +559,6 @@ def test_comms_cache_says_why_it_does_not_know(rig, bind):
     dict(**PLANNER),                                       # any other name
     dict(name="archivist", env={"MOXI_COMMS_GLOBAL": "1"}),  # a global name, not listed
     dict(),                                                # no identity at all
-    dict(name="operator", env={"MOXI_COMMS_GLOBAL": "1", "MOXI_COMMS_SLOT": "x"}),  # malformed
     dict(name="planner", env={"MOXI_COMMS_OPERATOR": "900001"}),   # both stamps at once
 ])
 def test_comms_cache_refuses_any_other_caller_and_reads_nothing(rig, who):
@@ -783,7 +765,7 @@ def test_unbind_keeps_a_handed_rows_row(rig):
 
 
 def test_an_ended_agent_n_loses_its_held_mail(rig):
-    auto = rig.shim(slot=5)
+    auto = rig.shim()
     q = auto.identity
     mid = next_turn(rig, to=q)
     auto.stop()
@@ -795,7 +777,7 @@ def test_the_trim_keeps_held_mail_past_retention(rig):
     if rig.backend != "local":
         pytest.skip("only the local record trims")
     mid = next_turn(rig)
-    old = rig.post_from_slot(6, ["main@proj-b"], "ancient")
+    old = rig.post_as("agent-6", ["main@proj-b"], "ancient")
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(rig.clock() - 200 * 86400))
     rig.age_message(mid, stamp)
     rig.age_message(old.id, stamp)
@@ -827,8 +809,7 @@ def test_the_queue_load_runs_before_the_socket_listens(rig, monkeypatch):
         assert entered.wait(5)
         with pytest.raises(DaemonOffline):
             DaemonClient(daemon_socket()).connect()      # not listening yet
-        live = rig.post_from_slot(6, [REVIEWER_Q], "live, inside the boot window",
-                                  display="planner@proj-a")
+        live = rig.post_as("planner@proj-a", [REVIEWER_Q], "live, inside the boot window")
     finally:
         go.set()
         boot.join(10)
@@ -846,7 +827,7 @@ def test_the_trim_waits_for_the_queue_load(rig, monkeypatch, reboot):
     if rig.backend != "local":
         pytest.skip("only the local record trims")
     mid = next_turn(rig)
-    ancient = rig.post_from_slot(6, ["main@proj-b"], "ancient")
+    ancient = rig.post_as("agent-6", ["main@proj-b"], "ancient")
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(rig.clock() - 200 * 86400))
     rig.age_message(mid, stamp)
     rig.age_message(ancient.id, stamp)
@@ -922,10 +903,10 @@ class Pushes:
 
 
 @pytest.mark.parametrize("kw,at_register", [
-    (dict(slot=5, name="coder", scope="proj-a", adapter="codex"), False),
-    (dict(slot=3, name="archivist", global_=True, adapter="claude-shim",
+    (dict(name="coder", scope="proj-a", adapter="codex"), False),
+    (dict(name="archivist", global_=True, adapter="claude-shim",
           session_id=SESS_BLANK, turned=False), False),
-    (dict(slot=4, name="operator", global_=True, adapter="claude-shim",
+    (dict(name="operator", global_=True, adapter="claude-shim",
           session_id=SESS_OPERATOR, turned=False), True),
 ], ids=["codex", "global-name", "operator"])
 def test_flagged_mail_waits_at_every_adapters_bind_but_the_operators(
@@ -1014,7 +995,7 @@ def test_held_to_an_unbound_archivist_or_operator_by_name_posts(rig):
 
 def test_reply_takes_held(rig):
     reviewer = rig.shim(**REVIEWER)
-    ask = rig.post_from_slot(6, ["planner@proj-a"], "q?", display="reviewer@proj-a")
+    ask = rig.post_as("reviewer@proj-a", ["planner@proj-a"], "q?")
     code, out = rig.cli(["reply", ask.id, "later.", "--held"], **PLANNER)
     assert code == 0, out
     assert posted(rig)[-1].content.splitlines()[0] == \
@@ -1054,7 +1035,7 @@ def test_cache_callers_names_who_may_read_the_cache(rig, bind):
     write_config(None, '[policy]\ncache_callers = ["operator", "planner@proj-a"]\n')
     reviewer_with_session(rig)
     write_transcript(SESS_REVIEWER, 9 * HOUR)
-    bind(slot=4, name="console", scope="tools")
+    bind(name="console", scope="tools")
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "from tools"],
                         name="console", scope="tools")
     assert code == 0, out

@@ -66,7 +66,7 @@ a harness.
    The daemon spawns and supervises nothing.
 2. **A roster names the agents a launcher runs.** `moxi-comms-codex` and `moxi-comms-opencode`
    read theirs from the `[codex]` and `[opencode]` tables of comms' config file: a
-   pinned slot per identity and a closed key set, and a key that looks like a token is
+   closed key set, and a key that looks like a token is
    refused. `--config PATH` names another comms config file, checked whole, whose table
    that one launch reads as its roster instead (a launcher checks a candidate file with
    `--config PATH --dry-run` before it replaces the box's); every other setting still
@@ -76,7 +76,14 @@ a harness.
    can't leak in from whoever started the launcher. The adapter is its session's claim
    holder and stamps its claim socket into everything it spawns; that socket, not the
    stamp, is what a send speaks as.
-4. **One renderer.** Every adapter renders the digest with `render_digest`, so every
+4. **A live binding token.** Registration mints a fresh token for the binding. The
+   adapter keeps it in memory outside the claim record and hands it to the daemon only
+   through the claim socket inside its session. A send needs that live binding, so a
+   session whose adapter is not connected cannot send. A daemon restart invalidates
+   the old token; the adapter rebinds with backoff, up to 30 seconds plus 20% jitter,
+   and sends wait for that rebind. An older adapter protocol is refused and the session
+   must be relaunched.
+5. **One renderer.** Every adapter renders the digest with `render_digest`, so every
    model reads the same frame lines. A frame line ends with the message's marks, each
    only when present: the thread mark (`[1 reply left]` or `[last reply]`) and the posture (`[no reply]`, `[reply-optional]`, `[reply-once]`, or `[open]` on the
    message that opens a thread with limits). An open message with no posture token shows
@@ -92,7 +99,7 @@ a harness.
    With no `moxi` script to name, every harness's line names the bare `moxi comms`.
    Codex's thread record hashes the director sentence and that line with the rest, so a
    thread whose director changes is handed the new layer one.
-5. **One flush path.** Nothing is delivered while catch-up is still arriving. A backlog
+6. **One flush path.** Nothing is delivered while catch-up is still arriving. A backlog
    coalesces into one digest, sorted by message id; live mail arrives one message at a
    time and takes the same path.
    - **When a batch goes back.** The flush puts a batch back on the queue, ahead of
@@ -104,10 +111,10 @@ a harness.
      replays when the name next binds.
    - **The wait before a retry.** Every batch that goes back waits before the next try,
      one second by default, so an adapter whose delivery keeps failing doesn't spin.
-6. **The adapter is the only cursor writer, and writes only on completion evidence.** A
+7. **The adapter is the only cursor writer, and writes only on completion evidence.** A
    digest whose turn can't be identified stays untracked and replays at the next bind.
    Replay is the safe direction; a cursor that moved too far is not.
-7. **A recorded session is resumed, never replaced.** Where an adapter resumes a session
+8. **A recorded session is resumed, never replaced.** Where an adapter resumes a session
    (Codex and OpenCode), the session or thread id lives in STATE, written by
    the adapter. A resume that fails is said out loud and retried; the
    adapter never starts a fresh session under the same name, because that would be an
@@ -121,13 +128,13 @@ a harness.
    thread or session fails to resume or is gone, that is said out loud and never
    replaced. Codex retries the resume; OpenCode stops posting for the rest of the
    launch.
-8. **Supervision retries.** A lost daemon connection, or a lost CLI server, is retried
+9. **Supervision retries.** A lost daemon connection, or a lost CLI server, is retried
    with backoff rather than ending the process, since an adapter that exits leaves its
    name silent. An unexpected error is logged with its traceback, said once per
    exception type, and retried. A daemon refusal of the name at start is fatal.
    `moxi-comms-codex --window` gives up and exits 3 if its thread is never ready to show, and
    so does `moxi-comms-opencode` if its session never is.
-9. **The daemon hears about deliveries.** The adapter reports `injected`, with the
+10. **The daemon hears about deliveries.** The adapter reports `injected`, with the
    digest's text, and `activity`, so `moxi comms explain` works for every kind.
 
 ## The base
@@ -252,7 +259,6 @@ local model through Ollama.
 ```toml
 # CONFIG/comms/config.toml
 [opencode.agents."coder"]
-slot      = 6
 cwd       = "/home/me/src/my-project"    # best at a git root
 directors = ["main"]
 # model   = "opencode/minimax-m3.1-flash-free"  # the launch default; a list adds
@@ -369,16 +375,14 @@ the launcher cannot know, and mail still goes to the old session.
 ## Send-only identities
 
 A send-only identity is a standing row whose directory `kind` is `send-only`, made with
-`moxi-comms-provision send-only NAME@SCOPE`. It posts from its own webhook bundle, and its
-holder is a module's own process (a `ClaimServer` with a daemon arm), which binds it
+`moxi-comms-provision send-only NAME@SCOPE`. Its holder is a module's own process (a
+`ClaimServer` with a daemon arm), which binds it
 with the `send-only` adapter kind. The daemon accepts that kind only for such a row, and
 such a row only with that kind, so no agent session can bind the name and take mail in
 its place.
 
-It holds no slot. Its register asks `next-free` and is answered `"slot": null`; one that
-asks for a slot by number is refused. It takes none of the provisioned slots, gets no
-slot keep when it ends, and no free-slot count sees it. `moxi comms agents --seats` shows it
-with `no slot`.
+It uses the same live binding-token path as every other adapter kind. It has no delivery
+queue, and `moxi comms agents --seats` shows it as send-only.
 
 Nothing is delivered to it, bound or not. `moxi comms send` and `moxi comms reply` refuse it as a
 recipient before anything is posted; a record line that names it anyway is delivered to

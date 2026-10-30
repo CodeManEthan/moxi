@@ -18,7 +18,7 @@ IDENTITY = "planner@proj-a"
 
 def payload(mid):
     return {"message_id": str(mid), "channel_id": "c1", "room": "#names",
-            "author": {"name": "lead", "tier": "chosen", "attribution": "verified"},
+            "author": {"name": "captain", "tier": "chosen", "attribution": "verified"},
             "recipients": [IDENTITY], "posture": "open",
             "backlog": True, "text": f"body {mid}", "reply_to": None, "audience": None,
             "audience_source": None,
@@ -146,7 +146,7 @@ def test_the_register_lists_the_held_ids_as_holding(monkeypatch):
 
     monkeypatch.setattr(harness, "DaemonClient", Client)
     port = online_port()
-    port.agent = SimpleNamespace(directors=(), slot=3, name="planner", scope="proj-a")
+    port.agent = SimpleNamespace(directors=(), name="planner", scope="proj-a")
     push(port, 12, 9)
     port.flush()                          # 9 and 12 in turn-1, which has not ended
     push(port, 15)                        # queued

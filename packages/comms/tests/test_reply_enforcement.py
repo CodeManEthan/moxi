@@ -24,21 +24,19 @@ import time
 import pytest
 from conftest import projects_root, wait_for_queue, wait_until, write_config
 
-from moxi_comms import cli, constants, directory, machine_line, scoping
+from moxi_comms import cli, constants, machine_line, scoping
 from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import Daemon
-from moxi_comms.mock_gateway import NO_MENTIONS
-from moxi_comms.paths import daemon_socket, directory_db
-from moxi_comms.sender import SenderIdentity, credential_for
+from moxi_comms.paths import daemon_socket
 
 import shim_drive
 
-PLANNER = dict(slot=1, name="planner")
-REVIEWER = dict(slot=2, name="reviewer")
-CRITIC = dict(slot=3, name="critic")
-ARCHIVIST = dict(slot=5, name="archivist", env={"MOXI_COMMS_GLOBAL": "1"})
-LEAD = dict(slot=6, name="lead", env={"MOXI_COMMS_GLOBAL": "1"})
+PLANNER = dict(name="planner")
+REVIEWER = dict(name="reviewer")
+CRITIC = dict(name="critic")
+ARCHIVIST = dict(name="archivist", env={"MOXI_COMMS_GLOBAL": "1"})
+LEAD = dict(name="lead", env={"MOXI_COMMS_GLOBAL": "1"})
 
 P, R, C = "planner", "reviewer", "critic"
 
@@ -74,10 +72,8 @@ def send(rig, to, text="x", *flags, who=PLANNER):
     send with no `--posture` states open. Many send before the recipient's first bind,
     so it passes `--new-name`; on a name bound now or before that changes
     nothing."""
-    flags = list(flags)
-    if "--posture" not in flags and "--reply-to" not in flags:
-        flags += ["--posture", "open"]
-    code, out = rig.cli(["send", "--new-name", to, text, *flags], **who)
+    posture = None if "--posture" in flags or "--reply-to" in flags else "open"
+    code, out = rig.send(to, text, "--new-name", *flags, sender=who, posture=posture)
     assert code == 0, out
     return last(rig)
 
@@ -95,38 +91,10 @@ def indexed(rig, message_id, daemon=None):
     return daemon.sent_by_id[message_id]
 
 
-def raw_post(rig, slot, display, body):
-    """Post a body exactly as given through a slot's webhook, wearing `display`."""
-    db = directory.connect(directory_db(), read_only=True)
-    try:
-        cred, _ = credential_for(rig.gateway, db,
-                                 SenderIdentity.for_slot(slot, display, "global"))
-    finally:
-        db.close()
-    return rig.gateway.execute_webhook(cred, body, username=display,
-                                       allowed_mentions=NO_MENTIONS)
-
-
-@pytest.fixture
-def bind():
-    """Bindings held by bare DaemonClients (the operator's own binding, a worker)."""
-    made = []
-
-    def _bind(**kwargs):
-        c = DaemonClient(daemon_socket()).connect()
-        c.register(**kwargs)
-        made.append(c)
-        return c
-
-    yield _bind
-    for c in made:
-        c.close()
-
-
 def bind_operator(bind):
     """The operator bound by a bare binding of its own: a session that has made no
     request yet, so its cache reads `fresh` and mail to it goes live."""
-    return bind(slot=4, name="operator", global_=True, adapter="claude-shim",
+    return bind(name="operator", global_=True, adapter="claude-shim",
                 session_id=OPERATOR_SID, projects_root=str(projects_root()), turned=False)
 
 
@@ -224,14 +192,14 @@ def test_the_index_is_fed_live_with_literal_tags_posture_reply_and_attribution(r
     e = indexed(rig, ask.id)
     assert (e.author, e.tags, e.posture, e.reply_to, e.verified) == \
         (P, (R,), "once", None, True), "the verb writes qualified tags"
-    typed = raw_post(rig, 1, P, "::to reviewer re:5\nby hand")
+    typed = rig.post_as(P, "::to reviewer re:5\nby hand", raw=True)
     e = indexed(rig, typed.id)
     assert (e.tags, e.reply_to) == (("reviewer",), "5"), "tags exactly as written"
 
 
-def test_an_unbound_sender_is_indexed_unverified(rig):
+def test_a_stand_in_sender_is_indexed_verified(rig):
     m = send(rig, "reviewer", "hi")
-    assert indexed(rig, m.id).verified is False
+    assert indexed(rig, m.id).verified is True
 
 
 def test_a_reparse_adds_nothing(rig):
@@ -243,15 +211,15 @@ def test_a_reparse_adds_nothing(rig):
 
 def test_block_indexes_nothing(rig):
     write_config(None, "block = true\n")
-    m = raw_post(rig, 1, P, "::to reviewer\nhi")
+    m = rig.post_as(P, "::to reviewer\nhi", raw=True)
     rig.daemon._route(m, backlog=False)
     assert m.id not in rig.daemon.sent_by_id
 
 
 def test_the_boot_read_rebuilds_the_same_entries_for_bare_and_qualified_tags(rig, reboot):
     rig.shim(**PLANNER)
-    bare = raw_post(rig, 1, P, "::to reviewer\nbare")
-    qualified = raw_post(rig, 1, P, f"::to {R}@global\nqualified")
+    bare = rig.post_as(P, "::to reviewer\nbare", raw=True)
+    qualified = rig.post_as(P, f"::to {R}@global\nqualified", raw=True)
     live = {i: indexed(rig, i) for i in (bare.id, qualified.id)}
     before = query_owed(P, {R: "0"})["sent"][R]
     assert [row["id"] for row in before] == [bare.id, qualified.id]
@@ -410,16 +378,6 @@ def test_a_no_reply_reply_threaded_to_the_ask_ends_the_wait(rig):
     assert query_owed(R)["awaiting"] == []
 
 
-def test_an_unverified_ask_starts_no_awaiting(rig):
-    rig.shim(**PLANNER)
-    ask = raw_post(rig, 2, R, "::to planner [reply-once]\ndo it")
-    indexed(rig, ask.id)
-    assert rig.daemon.sent_by_id[ask.id].verified is False
-    assert query_owed(R)["awaiting"] == []
-
-
-# undelivered
-
 def test_mail_claimed_but_not_injected_is_undelivered_and_injection_clears_it(rig):
     reviewer = rig.shim(**REVIEWER)
     send(rig, "reviewer", "task")
@@ -477,8 +435,8 @@ def test_render_agents_lists_the_operator_as_a_row():
     assert roster_view.render_agents({"bindings": []}) == (
         "no live bindings — nothing is addressable right now.")
     up = roster_view.render_agents({"bindings": [
-        {"qualified": "operator", "tier": "standing", "adapter": "claude-shim", "slot": 4},
-        {"qualified": P, "tier": "chosen", "adapter": "claude-shim", "slot": 1}]})
+        {"qualified": "operator", "tier": "standing", "adapter": "claude-shim"},
+        {"qualified": P, "tier": "chosen", "adapter": "claude-shim"}]})
     assert up.splitlines() == [
         "operator                 standing   adapter claude-shim",
         f"{P:<24} chosen     adapter claude-shim"]
@@ -634,8 +592,7 @@ def msg(mid, author=LEAD_Q, *, tier="chosen", attribution="verified", **extra):
     """A delivered payload from `author`, stamped T0."""
     extra.setdefault("timestamp", STAMP)
     return payload(message_id=str(mid),
-                   author={"name": author, "tier": tier, "attribution": attribution},
-                   **extra)
+                   author={"name": author, "tier": tier, "attribution": attribution}, **extra)
 
 
 class Answers:
@@ -1168,7 +1125,7 @@ def test_the_reminder_never_asks_for_progress():
 def pair(rig):
     """lead (global) and reviewer, whose declared director it is; both bound, so
     each one's messages are verified."""
-    lead = rig.shim(slot=6, name="lead", global_=True)
+    lead = rig.shim(name="lead", global_=True)
     rev = rig.shim(**REVIEWER, directors=(LEAD_Q,))
     return lead, rev
 
@@ -1243,8 +1200,8 @@ def test_examples_old_marked_archivist_mail_owes_nothing(rig, pair):
     """An `[operator-words]` line an older comms wrote reaches reviewer and owes
     nothing."""
     lead, rev = pair
-    rig.shim(slot=5, name="archivist", global_=True)
-    words = raw_post(rig, 5, "archivist", f"::to {R} [operator-words]\nhe asks: done?")
+    rig.shim(name="archivist", global_=True)
+    words = rig.post_as("archivist", f"::to {R} [operator-words]\nhe asks: done?", raw=True)
     arrive(rev, words)
     assert owed_ids(rev) == []
 
@@ -1261,7 +1218,7 @@ def test_examples_operator_mail_owes_and_only_operator_pays_while_the_operator_i
     lead, rev = pair
     bind_operator(bind)
     wait_until(lambda: "operator" in rig.daemon.bindings)
-    status = raw_post(rig, 3, "operator", f"::to {R}\nstatus?")
+    status = rig.post_as("operator", f"::to {R}\nstatus?", raw=True)
     arrive(rev, status)
     assert owed_ids(rev) == [status.id]
     assert rev.ledger.debts[status.id].branch == "operator"
@@ -1274,7 +1231,7 @@ def test_examples_operator_mail_owes_and_only_operator_pays_while_the_operator_i
 def test_examples_a_message_to_archivist_does_not_pay_the_operator_while_it_is_unbound(
         rig, pair):
     lead, rev = pair
-    status = raw_post(rig, 3, "operator", f"::to {R}\nstatus?")
+    status = rig.post_as("operator", f"::to {R}\nstatus?", raw=True)
     arrive(rev, status)
     answer = send(rig, "archivist", "building", who=REVIEWER)
     assert settle(rig, rev, answer.id) == [status.id]
@@ -1412,4 +1369,3 @@ def test_the_unanswered_record_drops_only_on_a_message_to_operator(rig):
                        reply_to=None, at=0.0, verified=True)
     assert rig.daemon._pays(to_archivist, R, "operator", "100") is False
     assert rig.daemon._pays(to_him, R, "operator", "100") is True
-

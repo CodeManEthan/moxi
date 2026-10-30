@@ -8,12 +8,11 @@ live. Numbers named here are in `src/moxi_comms/constants.py`.
 
 - **The record** holds every message. `local` is the supported backend: the record is
   one SQLite file, `STATE/comms/record.db`, in WAL mode, written directly by every comms
-  process on the machine, with the rooms, the webhook-shaped credentials and the machine
-  line this page describes. Message ids come from a persisted counter
+  process on the machine, with the rooms and the machine line this page describes.
+  Message ids come from a persisted counter
   starting at 2^62 and only grow, even after retention trims old rows.
-- **The directory**, `DATA/comms/directory.db`, holds the rooms, the slots, the
-  standing identities, the operator and the webhook rows that tie a posting credential
-  to a slot or an identity.
+- **The directory**, `DATA/comms/directory.db`, holds the rooms, standing identities
+  and the operator.
 - **The daemon**, `moxi-comms-daemon`, is the one reader. It subscribes to the record, works
   out who each message is for, and hands it to the adapter bound to that name. Routing
   lives in memory; restarting the daemon rebuilds it from the adapters that reconnect.
@@ -23,8 +22,7 @@ live. Numbers named here are in `src/moxi_comms/constants.py`.
   A `send-only` binding is a name that sends and is never delivered to
   ([adapters.md](adapters.md#send-only-identities)).
 - **The CLI**, `moxi comms`, posts messages and reads the record. On `local` it writes the
-  record itself and then nudges the daemon, so a send lands even while the daemon is
-  down; delivery waits for the daemon.
+  record itself and then nudges the daemon; delivery waits for the daemon.
 
 There is one room, `#names`, where every agent and the operator post addressed mail.
 
@@ -44,15 +42,12 @@ which identity a tag names. A retired identity is refused.
 
 Tiers:
 
-- **chosen**: a name a session claims at launch. It borrows a slot's credential while
-  bound.
-- **standing**: provisioned with credentials of its own (`moxi-comms-provision --standing`).
+- **chosen**: a name a session claims at launch. Its adapter holds the binding token
+  while connected.
+- **standing**: provisioned as a durable identity (`moxi-comms-provision --standing`).
 - **ephemeral**: an `agent-N` name the daemon mints for a session that claimed none.
-- **operator**: the human, who posts through the operator's own credential.
-
-A **slot** is a bundle of posting credentials, one per room. Slots are capacity, not
-addresses: nothing an agent is shown names one. `moxi comms agents --seats` shows them for
-your own diagnostics.
+- **operator**: the human, whose lane reads the operator's credential through the
+  configured resolver chain.
 
 ## Addressability
 
@@ -96,7 +91,7 @@ The parser change landed; the suite is green.
 - the posture: `[no reply]` (none), `[reply-optional]` (optional, a reply only if the
   recipient has something to add; nothing is owed), `[reply-once]` (once, one reply
   through `moxi comms reply`), or `[open]` (open, stated on a new send: the root of an open thread). An
-  open message with nothing in the slot is open too, with no limits.
+  open message with no cap is open too, with no limits.
 
 Optional tokens appear in that order, each at most once. Inside `[no reply]`, `[1 reply
 left]` and `[last reply]` the words are separated by one space. The sigil and tokens are
@@ -116,7 +111,7 @@ file and send a pointer to it.
 Every new `moxi comms send` (no `--reply-to`) states what it wants back with `--posture none`,
 `optional`, `once` or `open`; without it the verb refuses, exit 2, posting nothing. The operator
 (any lane whose sender is `operator`) is exempt from every posture refusal: a new send of
-his with no `--posture` is open with nothing in the slot, and what he passes is written
+his with no `--posture` is open with no cap, and what he passes is written
 as passed.
 
 A reply (`moxi comms reply <id>`, or `moxi comms send --reply-to <id>`) needs no `--posture`; it
@@ -156,19 +151,20 @@ the reply through with a `NOTE:`. The daemon counts nothing and refuses nothing;
 the marks into the payload and answers the verb's questions.
 
 Every verb checks its daemon's verb protocol before it does anything else (see "The
-daemon socket"), so no verb writes a token its daemon cannot parse.
+daemon socket"), so no verb uses a surface its daemon cannot parse.
 
 ## Attribution
 
-The daemon attributes a message by the credential that posted it: the webhook row in
-the directory names a slot or a standing identity. For a slot, the daemon checks that
-the name the message carries is the name bound to that slot when it was posted. When
-the two agree the message is **verified**; when the daemon can't show they agree it is
-**unverified**, and every way of not knowing lands there, never on a false verified.
+The daemon attributes a live message from the identity of the binding whose token
+authorized the post. The record writer used for test and operator setup can stamp an
+identity directly, but it does not authorize a live post. A live binding is
+**verified**; when the daemon cannot show who held the identity at the message's time,
+the message is **unverified**, and every way of not knowing lands there, never on a
+false verified.
 
 For mail delivered later from the record ("catch-up"), the **custody journal**,
 `DATA/comms/bindings.db`, supplies the binding history. The daemon alone writes it, at
-each bind and each release: who held which slot over which interval, with exact
+each bind and each release: which identity was held over which interval, with exact
 containment (`bound_at <= T <= released_at`, second resolution). A daemon that stopped
 without releasing has its open intervals closed at its next start, marked fenced. A
 journal that won't open costs verification and nothing else.
@@ -264,9 +260,9 @@ is in [adapters.md](adapters.md).
    `INJECT_STALL_WINDOW` (15 s). `moxi comms explain <identity>` prints which of four cases
    an identity is in: `handled`, `not-addressable`, `delivered-and-ignored`, or
    `delivered-but-the-turn-never-completed`.
-6. **Slots come back after a restart.** On shutdown the daemon writes which names held
-   which slots (`STATE/comms/slot-keeps.json`); for `SLOT_KEEP` (120 s) after it starts
-   listening, each slot is kept for the name that held it.
+6. **Bindings do not survive a restart.** The daemon keeps no name hold across a
+   restart. Every adapter must register again and receives a fresh binding token; a
+   message sent before that rebind is refused and remains queued for the identity.
 
 ## Held mail
 
@@ -396,9 +392,9 @@ carries an `id`, which the reply echoes. Frames the daemon pushes (`deliver`,
 push on one connection.
 
 ```
-->  {"id": 1, "op": "register", "slot": "next-free", "name": "planner",
+->  {"id": 1, "op": "register", "protocol": 2, "name": "planner",
      "scope": "proj-a", "adapter": "claude-shim"}
-<-  {"id": 1, "ok": true, "identity": {...}, "slot": 1, "hwm": "...", "protocol": 1}
+<-  {"id": 1, "ok": true, "identity": {...}, "token": "...", "hwm": "...", "protocol": 2}
 <-  {"op": "deliver", "payload": {...}}
 <-  {"op": "replay_complete", "identity": "planner@proj-a", "cursor": "..."}
 ->  {"id": 2, "op": "query", "kind": "resolve", "name": "reviewer"}
@@ -586,13 +582,12 @@ clear the path.
 
 | path | written by | what |
 |---|---|---|
-| `DATA/comms/directory.db` | provisioning | rooms, slots, standing identities, the operator, webhook rows (0600) |
+| `DATA/comms/directory.db` | provisioning | rooms, standing identities and the operator (0600) |
 | `DATA/comms/bindings.db` | the daemon | the custody journal (0600, WAL) |
 | `DATA/comms/cards/<identity>` | each identity | the card `moxi comms whois` reads |
 | `STATE/comms/record.db` | every comms process | the record, on `local` |
-| `STATE/comms/tokens/` | provisioning | one 0600 file per credential holder |
+| `STATE/comms/tokens/` | provisioning | the operator and role credentials (0600) |
 | `STATE/comms/cursors/<backend>/` | the adapters | one cursor per identity |
-| `STATE/comms/slot-keeps.json` | the daemon | which name held which slot |
 | `STATE/comms/codex/`, `STATE/comms/opencode/` | the Codex and OpenCode adapters | thread and session ids per identity |
 | `RUNTIME/comms/moxi-comms-daemon.sock` | the daemon | the daemon socket |
 | `CONFIG/comms/config.toml` | you | comms' settings, `block` among them |

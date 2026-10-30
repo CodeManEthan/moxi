@@ -121,13 +121,13 @@ def test_the_announcement_offers_codex_and_gates_its_script():
     assert module.SETTINGS == "settings.toml"
     assert set(module.OPTIONAL) == set(PYPROJECT["project"]["optional-dependencies"])
     assert module.GATED == {"moxi-comms-codex": "codex"}
-    assert module.API == "moxi_comms.api" and module.INTERFACES == frozenset({1})
+    assert module.API == "moxi_comms.api" and module.INTERFACES == frozenset({2})
 
 
 def test_internal_env_is_the_launcher_wiring_the_secrets_step_and_the_test_seam():
     """Every other variable comms reads is a config key's `env` or a root locator."""
     assert set(module.INTERNAL_ENV) == {
-        "MOXI_COMMS_NAME", "MOXI_COMMS_SLOT", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL",
+        "MOXI_COMMS_NAME", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL",
         "MOXI_COMMS_DIRECTORS", "MOXI_COMMS_SOCKET", "MOXI_COMMS_CLAIM_SOCKET",
         "MOXI_COMMS_PROJECT", "MOXI_COMMS_OPERATOR", "MOXI_COMMS_SECRET_",
         "MOXI_COMMS_MOCK_GATEWAY",

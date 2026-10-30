@@ -27,7 +27,6 @@ from conftest import projects_root, queued, record_rows, wait_until, write_confi
 from moxi_comms import cache, constants, cursors, machine_line
 from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import META_QUEUE_MIGRATED, Daemon
-from moxi_comms.mock_gateway import NO_MENTIONS
 from moxi_comms.paths import daemon_socket
 
 
@@ -37,10 +36,10 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize("backend", ["mock", "local"], indirect=True)
 
 
-PLANNER = dict(slot=1, name="planner", scope="proj-a")
-REVIEWER = dict(slot=2, name="reviewer", scope="proj-a")
+PLANNER = dict(name="planner", scope="proj-a")
+REVIEWER = dict(name="reviewer", scope="proj-a")
 REVIEWER_Q = "reviewer@proj-a"
-CODER = dict(slot=5, name="coder", scope="proj-a", adapter="codex")
+CODER = dict(name="coder", scope="proj-a", adapter="codex")
 CODER_Q = "coder@proj-a"
 SENTINEL_Q = "main@proj-b"          # a standing name nothing binds: its rows mark a pass
 HOUR = 3600
@@ -81,12 +80,12 @@ class Peer:
     same connection, which the daemon answers only after it has handled the frame (one
     connection, one serving thread), so a test reads the outcome without sleeping."""
 
-    def __init__(self, rig, *, slot, name, scope=None, global_=False,
+    def __init__(self, rig, *, name, scope=None, global_=False,
                  adapter="claude-shim", holding=None):
         self.rig = rig
         self.frames: list = []
         self.client = DaemonClient(daemon_socket(), on_push=self.frames.append).connect()
-        kw = dict(slot=slot, name=name, adapter=adapter, holding=holding)
+        kw = dict(name=name, adapter=adapter, holding=holding)
         if global_:
             kw["global_"] = True
         else:
@@ -203,21 +202,10 @@ def blocked(rig):
 
 
 def post(rig, recipients, text="hello", *, held=False, cold_at=None, raw=None):
-    """One message through slot 6's #names webhook, line zero composed here: `held`
-    writes `[held]`, `cold_at` the send's `[cold-at:…]`. `raw` posts that body as it is."""
-    from moxi_comms import directory
-    from moxi_comms.paths import directory_db
-    from moxi_comms.sender import SenderIdentity, credential_for
-    db = directory.connect(directory_db(), read_only=True)
-    try:
-        cred, _ = credential_for(rig.gateway, db,
-                                 SenderIdentity.for_slot(6, "planner@proj-a", "global"))
-    finally:
-        db.close()
+    """One stamped setup row; `held` and `cold_at` compose line zero as before."""
     body = raw if raw is not None else machine_line.compose(
         list(recipients), text, next_turn=held, cold_at=cold_at)
-    return rig.gateway.execute_webhook(cred, body, username="planner@proj-a",
-                                       allowed_mentions=NO_MENTIONS).id
+    return rig.post_as("planner@proj-a", body, raw=True).id
 
 
 def drain(rig) -> None:
@@ -237,7 +225,7 @@ def rows(rig, q) -> set:
 
 
 def send(rig, to, text, *flags, sender=PLANNER):
-    return rig.cli(["send", "--posture", "none", to, text, *flags], **sender)
+    return rig.send(to, text, *flags, sender=sender)
 
 
 def sent_id(out) -> str:
@@ -557,7 +545,7 @@ def test_a_failed_hand_off_is_a_row_the_next_binding_gets(rig, reads, peers, mon
 
 
 def test_a_failed_hand_off_to_an_agent_n_writes_no_row(rig, reads, peers, monkeypatch):
-    auto = Peer(rig, slot=4, name=None)
+    auto = Peer(rig,  name=None)
     try:
         reads[auto.q] = cache.WARM
         binding = rig.daemon.bindings[auto.q]

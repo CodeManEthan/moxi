@@ -44,19 +44,14 @@ def render_agents(info, *, seats: bool = False, now: float | None = None) -> str
 
     The default view is the names an agent can message, one row each, and nothing else:
     it reads `bindings` alone. `seats=True` (the `--seats` flag, the operator's view)
-    lists every binding with its slot, send-only ones included, then the mail waiting
-    for each name (`waiting`), the unanswered rows and the slot keeps. A slot is
-    webhook-bundle capacity, provisioner inventory, so no agent-facing surface names
-    one; the snapshot never asks for `--seats`. `now` (default: the wall clock) ages
-    the waiting rows.
+    lists every binding, send-only ones included, then the mail waiting for each name
+    (`waiting`) and the unanswered rows. The snapshot never asks for `--seats`. `now`
+    (default: the wall clock) ages the waiting rows.
     """
     rows = info["bindings"] if seats else messageable(info["bindings"])
     lines = [] if rows else [NO_BINDINGS]
     for b in rows:
-        # A send-only binding holds no slot (`slot` is null): `no slot`, same width.
-        seat = (("no slot  " if b["slot"] is None else f"slot {b['slot']:<3} ")
-                if seats else "")
-        lines.append(f"{b['qualified']:<24} {b['tier']:<10} {seat}"
+        lines.append(f"{b['qualified']:<24} {b['tier']:<10} "
                      f"adapter {b['adapter']}")
     if not seats:
         return "\n".join(lines)
@@ -73,15 +68,6 @@ def render_agents(info, *, seats: bool = False, now: float | None = None) -> str
     for row in info["unanswered"]:
         lines.append(f"unanswered: {row['owing']} owes {row['author']} msg "
                      f"{row['message_id']}, {waited(row['for'])}")
-    # Slot keeps: a slot held for a name a restart has not brought back yet. JSON makes
-    # the slot keys strings.
-    keeps = info["keeps"]
-    if keeps:
-        lines.append("")
-        lines.append("slot keeps (held for a name a restart has not brought back yet):")
-        for slot, row in sorted(keeps.items(), key=lambda kv: int(kv[0])):
-            lines.append(f"  slot {str(slot):<3} {row['qualified']:<24} "
-                         f"{int(row['expires_in'])}s left")
     return "\n".join(lines)
 
 
@@ -95,4 +81,3 @@ def waited(seconds: float) -> str:
         return f"{hours}h {minutes}m"
     days, hours = divmod(hours, 24)
     return f"{days}d {hours}h"
-

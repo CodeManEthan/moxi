@@ -18,13 +18,13 @@ COMMS = "/opt/moxi/bin/moxi comms"
 
 
 def row(tmp_path):
-    return CodexAgent(qualified=IDENTITY, name="pilot", scope="proj-a", slot=3,
+    return CodexAgent(qualified=IDENTITY, name="pilot", scope="proj-a",
                       cwd=str(tmp_path), thread_file=codex_threads.path(IDENTITY))
 
 
 def test_layer_one_is_the_block_then_the_comms_path_then_the_roster():
     text = layer_one_text({"bindings": [{"qualified": IDENTITY, "tier": "chosen",
-                                         "slot": 3, "adapter": "codex"}],
+                                         "adapter": "codex"}],
                            "pending": {}}, COMMS)
     assert text.startswith(CONTEXT_BLOCK + "\n\n")
     assert f"Run every comms verb with {COMMS}" in text

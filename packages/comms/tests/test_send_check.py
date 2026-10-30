@@ -40,8 +40,8 @@ from moxi_comms.gateway import GatewayError
 # shown.
 from test_cold_every_sender import adapters, only_tmp_paths  # noqa: F401
 
-PLANNER = dict(slot=1, name="planner")
-REVIEWER = dict(slot=2, name="reviewer")
+PLANNER = dict(name="planner")
+REVIEWER = dict(name="reviewer")
 P, R = "planner", "reviewer"
 HOUR = 3600
 
@@ -81,9 +81,17 @@ def _is_bodies_refusal(node) -> bool:
     return isinstance(node.value, ast.Constant) and node.value.value is None
 
 
+def _is_claim_refusal(node) -> bool:
+    """An exit-code return in `_claim_token`, not its token return."""
+    return (isinstance(node.value, ast.Name)
+            and node.value.id.startswith("EXIT_"))
+
+
 #: The functions whose refusals the table must cover: name -> (the function, which of its
 #: returns are refusals in the source, which return values are refusals when traced).
 GUARDED = {
+    "_claim_token": (sending._claim_token, _is_claim_refusal,
+                     lambda v: isinstance(v, int)),
     "_send_checks": (cli._send_checks, _is_checks_refusal,
                      lambda v: isinstance(v, tuple) and len(v) == 2 and v[1] is None
                      and v[0] is not None),
@@ -187,8 +195,7 @@ def snapshot(rig) -> dict:
     rooms = {name: [(m.id, m.content) for m in rig.gateway.history(cid)]
              for name, cid in rig.prov.rooms.items()}
     with rig.daemon._lock:
-        daemon = dict(
-            queue={k: sorted(v) for k, v in rig.daemon.queue.items() if v},
+        daemon = dict(queue={k: sorted(v) for k, v in rig.daemon.queue.items() if v},
             delivered={q: sorted(b.delivered) for q, b in rig.daemon.bindings.items()})
     queues = [list(s.queue) for s in rig.shims]
     return dict(rooms=rooms, daemon=daemon, queues=queues, files=_home_files())
@@ -196,15 +203,15 @@ def snapshot(rig) -> dict:
 
 @pytest.fixture
 def doors(monkeypatch):
-    """Every post through either door, every call of the nudge (`_nudge_daemon`), and
+    """Every post through either lane, every call of the nudge (`_nudge_daemon`), and
     every frame handed to `notify` (where the local backend's nudge goes)."""
     seen = dict(posts=[], notify=[], nudges=[])
-    real_post, real_op = sending.post, sending.post_as_operator
+    real_post, real_op = DaemonClient.post, sending.post_as_operator
     real_notify, real_nudge = DaemonClient.notify, sending._nudge_daemon
 
-    def post(*a, **kw):
-        seen["posts"].append(a[2] if len(a) > 2 else kw.get("content"))
-        return real_post(*a, **kw)
+    def post(self, identity, token, content):
+        seen["posts"].append(content)
+        return real_post(self, identity, token, content)
 
     def post_as_operator(*a, **kw):
         seen["posts"].append(a[3] if len(a) > 3 else kw.get("content"))
@@ -218,7 +225,7 @@ def doors(monkeypatch):
         seen["nudges"].append(ctx)
         return real_nudge(ctx)
 
-    monkeypatch.setattr(sending, "post", post)
+    monkeypatch.setattr(DaemonClient, "post", post)
     monkeypatch.setattr(sending, "_nudge_daemon", nudge)
     monkeypatch.setattr(sending, "post_as_operator", post_as_operator)
     monkeypatch.setattr(DaemonClient, "notify", notify)
@@ -367,27 +374,42 @@ def s_never_bound(rig, mp):
 
 
 def s_bound_elsewhere(rig, mp):
-    """The adapter holds the claim offline and another connection binds the name."""
-    pair(rig)
-    real = DaemonClient.query
-
-    def agents(self, kind, **kw):
-        if kind == "agents":
-            return {"bindings": [{"qualified": P}]}
-        return real(self, kind, **kw)
-
-    mp.setattr(DaemonClient, "query", agents)
-    real_claim = sending._claim_sender
-
-    def offline(ctx, path):
-        got = real_claim(ctx, path)
-        if isinstance(got, int):
-            return got
-        sender, _state = got
-        return sender, cli.claimfile.OFFLINE
-
-    mp.setattr(sending, "_claim_sender", offline)
+    """The rig's stand-in register meets another connection's binding."""
+    planner, _reviewer = pair(rig)
+    planner.claims.state = cli.claimfile.WAITING
+    planner.claims.token = None
     return Case(["send", "reviewer", "x", "--posture", "none"], PLANNER, 2)
+
+
+def s_claim_offline(rig, mp):
+    planner, _reviewer = pair(rig)
+    planner.claims.went_offline()
+    return Case(["send", "reviewer", "x", "--posture", "none"], PLANNER, 4)
+
+
+def _changed_claim(**changes):
+    code = changes.pop("_code")
+
+    def setup(rig, mp):
+        planner, _reviewer = pair(rig)
+        real = planner.claims.claim_answer
+
+        def changed():
+            answer = real()
+            for key, value in changes.items():
+                if value is _DROP:
+                    answer.pop(key, None)
+                else:
+                    answer[key] = value
+            return answer
+
+        mp.setattr(planner.claims, "claim_answer", changed)
+        return Case(["send", "reviewer", "x", "--posture", "none"], PLANNER,
+                    code)
+    return setup
+
+
+_DROP = object()
 
 
 # ---- 3. the single-reply refusal
@@ -512,12 +534,6 @@ def s_over_the_cap(rig, mp):
     return Case(["send", "reviewer", text, "--posture", "none"], PLANNER, 2)
 
 
-def s_no_credential(rig, mp):
-    ghost = rig.shim(slot=3)
-    return Case(["send", ghost.identity, "hello", "--posture", "none"],
-                dict(name="planner"), 5)
-
-
 # ---- before the checks: who is sending (`_send`)
 
 def s_stamp_only(rig, mp):
@@ -527,6 +543,7 @@ def s_stamp_only(rig, mp):
 
 
 GOT = ("_send_checks", "return got, None")
+CLAIM_GOT = ("_send_checks", "return checked, None")
 
 ROWS = [
     # 1. the flag checks
@@ -552,7 +569,15 @@ ROWS = [
         (("_send_checks", "declared standing"),)),
     Row("never-bound", s_never_bound, 2, (("_send_checks", "_never_bound_refusal"),)),
     Row("bound-by-another-session", s_bound_elsewhere, 2,
-        (("_send_checks", "is bound by another session"),)),
+        (("_claim_token", "state != claimfile.BOUND"), CLAIM_GOT)),
+    Row("claim-offline", s_claim_offline, 4,
+        (("_claim_token", "state == claimfile.OFFLINE"), CLAIM_GOT)),
+    Row("older-claim-protocol", _changed_claim(protocol=_DROP, _code=2), 2,
+        (("_claim_token", "answer.get(\"protocol\")"), CLAIM_GOT)),
+    Row("bound-without-token", _changed_claim(token=_DROP, _code=2), 2,
+        (("_claim_token", "not isinstance(token, str)"), CLAIM_GOT)),
+    Row("dead-adapter", _changed_claim(dead_adapter=True, _code=4), 4,
+        (("_claim_token", "answer.get(\"dead_adapter\")"), CLAIM_GOT)),
     # 3. the single-reply refusal
     Row("single-reply", s_single_reply, 2, (("_send_checks", "_ask_refusal"),)),
     # 4. the reply checks
@@ -581,10 +606,9 @@ ROWS = [
     # 6. the audience table
     Row("reply-changes-the-audience", s_audience_changed, 2,
         (("_send_checks", "_reply_audience"),)),
-    # after the checks: the bodies and the credential (no guarded site for the last)
+    # after the checks: the bodies
     Row("over-the-cap", s_over_the_cap, 2,
         (("_bodies", "cap on one message"),)),
-    Row("no-posting-credential", s_no_credential, 5),
     # before the checks: who is sending (`_send`, not guarded)
     Row("stamp-without-a-session", s_stamp_only, 2),
 ]
@@ -624,12 +648,12 @@ def test_check_stop_is_immediately_before_the_post_loop():
             and [e.id for e in one.targets[0].elts] == ["body"]
             and isinstance(one.value, ast.Name)
             and one.value.id == "bodies")
-    assert (isinstance(posting, ast.Try)
-            and posting.body
+    assert (isinstance(posting, ast.If)
+            and isinstance(posting.test, ast.Compare)
+            and isinstance(posting.test.left, ast.Name)
+            and posting.test.left.id == "operator_id"
             and isinstance(posting.body[0], ast.Assign)
-            and posting.body[0].targets[0].id == "msg"
-            and isinstance(posting.body[0].value, ast.IfExp)
-            and posting.body[0].value.body.func.id == "post")
+            and posting.body[0].value.func.id == "_post_from_claim")
 
 
 def test_the_site_reader_finds_send_checks_refusals():
@@ -640,6 +664,7 @@ def test_the_site_reader_finds_send_checks_refusals():
     for func, _line in sites:
         by_func[func] = by_func.get(func, 0) + 1
     assert by_func["_send_checks"] >= 20
+    assert by_func["_claim_token"] == 5
     assert by_func["_reply_checks"] >= 7
     assert by_func["_bodies"] == 1
 
@@ -679,7 +704,10 @@ CODES = {
     "daemon-offline": "offline", "verb-protocol-mismatch": "protocol-mismatch",
     "resolve-refused": "resolve-refused", "send-only": "send-only",
     "standing-without-row": "not-standing", "never-bound": "never-bound",
-    "bound-by-another-session": "bound-elsewhere", "single-reply": "single-reply",
+    "bound-by-another-session": "claim-refused", "claim-offline": "offline",
+    "older-claim-protocol": "claim-protocol",
+    "bound-without-token": "claim-credential", "dead-adapter": "offline",
+    "single-reply": "single-reply",
     "cap-on-a-new-send-opening-no-thread": "cap-no-thread",
     "referent-unreadable-gateway": "referent-unreadable",
     "referent-unreadable-offline": "referent-unreadable",
@@ -688,7 +716,7 @@ CODES = {
     "cap-on-a-reply-in-no-thread": "cap-no-thread", "cap-in-a-closed-thread": "cap-closed",
     "cap-not-the-opener": "cap-not-opener", "cap-below-the-count": "cap-below",
     "cold-not-held": "cache-unread", "reply-changes-the-audience": "audience-differs",
-    "over-the-cap": "too-long", "no-posting-credential": "credential",
+    "over-the-cap": "too-long",
     "stamp-without-a-session": "no-claim-socket",
 }
 
@@ -733,7 +761,7 @@ def test_a_passing_check_says_would_send_and_posts_nudges_and_records_nothing(ri
     # The same command without --check posts, and the snapshot sees it: it is not blind.
     code, out = rig.cli(argv, **PLANNER)
     assert code == 0 and out.startswith("sent ")
-    assert len(doors["posts"]) == 1 and len(doors["nudges"]) == 1
+    assert len(doors["posts"]) == 1 and doors["nudges"] == []
     wait_until(lambda: reviewer.queue)
     settle()
     after = snapshot(rig)
@@ -747,8 +775,7 @@ def test_a_passing_check_says_would_send_and_posts_nudges_and_records_nothing(ri
 def test_a_passing_check_records_no_ask_for_the_single_reply_check(rig):
     """A once check opens no ask: the recipient's plain send to the checker still goes."""
     pair(rig)
-    code, out = rig.cli(with_check(["send", "reviewer", "q?", "--posture", "once"]),
-                        **PLANNER)
+    code, out = rig.cli(with_check(["send", "reviewer", "q?", "--posture", "once"]), **PLANNER)
     assert code == 0, out
     code, out = rig.cli(["send", "planner", "unrelated", "--posture", "none"], **REVIEWER)
     assert code == 0 and out.startswith("sent "), out
@@ -778,9 +805,8 @@ def test_a_check_held_for_a_cold_recipient_prints_the_held_lines_send_prints(rig
 
 def test_a_check_to_several_names_names_them_all(rig):
     planner, reviewer = pair(rig)
-    critic = rig.shim(slot=3, name="critic")
-    code, out = rig.cli(with_check(["send", "reviewer,critic", "hi", "--posture", "none"]),
-                        **PLANNER)
+    critic = rig.shim(name="critic")
+    code, out = rig.cli(with_check(["send", "reviewer,critic", "hi", "--posture", "none"]), **PLANNER)
     assert (code, out) == (0, f"would send 1 message(s) to {R}, critic\n")
     settle()
     assert reviewer.queue == [] and critic.queue == []

@@ -5,9 +5,9 @@ Requests carry an `id`; the daemon echoes it on the reply. Daemon-initiated fram
 (`deliver`, `replay_complete`, `notice`) carry no `id` -- that is how a client tells a
 reply from a push on one duplex connection.
 
-    ->  {"id": 1, "op": "register", "slot": 1, "name": "planner", "project": "proj-a",
-         "adapter": "claude-shim"}
-    <-  {"id": 1, "ok": true, "identity": {...}, "slot": 1}
+    ->  {"id": 1, "op": "register", "name": "planner", "project": "proj-a",
+         "adapter": "claude-shim", "protocol": 2}
+    <-  {"id": 1, "ok": true, "identity": {...}, "token": "..."}
     <-  {"op": "deliver", "payload": {...}}          # the delivery payload
     <-  {"op": "replay_complete", "identity": "...", "cursor": "..."}
     ->  {"id": 2, "op": "query", "kind": "resolve", "name": "main"}
@@ -33,7 +33,7 @@ class ProtocolError(Exception):
 
 #: The claims protocol's version. The daemon answers `register` with it. Raise it when a
 #: frame either side sends changes shape.
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 
 #: The verbs' contract with their daemon, apart from the claims protocol above: what a
 #: verb writes on line zero and which query answers it reads. The daemon answers `ping`
@@ -42,7 +42,8 @@ PROTOCOL_VERSION = 1
 #: changes shape. 1 (2026-10): `[held]`, `[cold-at:…]`, `[reply-optional]`, `ever_bound`
 #: in the resolve answer and `waiting` in the agents answer.
 #: 2 (2026-10): `cache_code` in the session answer.
-CLI_PROTOCOL = 2
+#: 3 (2026-10): agent sends use the binding token and the daemon's `post` op.
+CLI_PROTOCOL = 3
 
 
 # ------------------------------------------------------------------- ping ordering

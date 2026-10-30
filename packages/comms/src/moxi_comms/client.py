@@ -15,7 +15,7 @@ import time
 
 from . import constants
 from .paths import daemon_socket
-from .protocol import ORDERED_NOTIFY, LineConn, ProtocolError
+from .protocol import ORDERED_NOTIFY, PROTOCOL_VERSION, LineConn, ProtocolError
 
 
 class DaemonOffline(Exception):
@@ -37,12 +37,16 @@ class DaemonTimeout(DaemonError):
     and there is no holder to name. The shim's tolerate-at-launch path therefore treats
     it as offline (retry) rather than printing a refusal line for a claim nobody
     contested. Register is the call that made this concrete -- it holds a gateway round
-    trip in production -- but the timeout is raised for every op from one place, so this
-    is the honest name for it.
+    trip in production. A post uses `DaemonNoAnswer` instead because, once sent, it may
+    have landed even when its answer did not return.
 
     A SUBCLASS on purpose: every existing `except DaemonError` (the CLI's, the shim's
     refusal arm) keeps catching it, and only code that wants the split says so.
     """
+
+
+class DaemonNoAnswer(DaemonError):
+    """A request left this process, but the daemon did not answer it."""
 
 
 class DaemonClient:
@@ -114,6 +118,9 @@ class DaemonClient:
 
     # ------------------------------------------------------------------ requests
     def request(self, op: str, **kwargs) -> dict:
+        return self._request(op, **kwargs)
+
+    def _request(self, op: str, *, no_answer=None, **kwargs) -> dict:
         if not self.connected:
             raise DaemonOffline("comms offline: not connected to the daemon")
         rid = next(self._ids)
@@ -126,9 +133,13 @@ class DaemonClient:
         with self._cv:
             while rid not in self._pending:
                 if self._closed:
+                    if no_answer is not None:
+                        raise no_answer(f"daemon closed the connection after {op} was sent")
                     raise DaemonOffline("comms offline: daemon closed the connection")
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
+                    if no_answer is not None:
+                        raise no_answer(f"timeout waiting for {op}")
                     raise DaemonTimeout(f"timeout waiting for {op}")
                 self._cv.wait(remaining)
             resp = self._pending.pop(rid)
@@ -153,7 +164,7 @@ class DaemonClient:
         except (ProtocolError, OSError):
             self._closed = True
 
-    def register(self, *, slot="next-free", name=None, scope=None, global_=False,
+    def register(self, *, name=None, scope=None, global_=False,
                  project=None, adapter="claude-shim", session_id=None,
                  holding=None, projects_root=None, turned=None, report=None,
                  endpoint=None) -> dict:
@@ -166,7 +177,10 @@ class DaemonClient:
         daemon older than them reads none, and they are left off when there is nothing
         to say. `endpoint` is a Claude adapter's word on whether its session has a turns
         endpoint yet; None sends nothing."""
-        extra = dict(report or {})
+        report_fields = {"session_id", "cache_source", "turned", "new_session",
+                         "agent_model"}
+        extra = {key: value for key, value in dict(report or {}).items()
+                 if key in report_fields}
         if session_id:
             extra["session_id"] = session_id
         if holding:
@@ -177,9 +191,16 @@ class DaemonClient:
             extra["turned"] = bool(turned)
         if endpoint is not None:
             extra["endpoint"] = bool(endpoint)
-        return self.request("register", slot=slot, name=name, scope=scope,
-                            **{"global": global_}, project=project, adapter=adapter,
-                            **extra)
+        register = {**extra, "name": name, "scope": scope, "global": global_,
+                    "project": project, "adapter": adapter,
+                    "protocol": PROTOCOL_VERSION}
+        return self.request("register", **register)
+
+    def post(self, identity: str, token: str, content: str) -> dict:
+        """Post as a live binding, distinguishing a frame that never left from one
+        whose answer was lost."""
+        return self._request("post", no_answer=DaemonNoAnswer,
+                             identity=identity, token=token, content=content)
 
     def query(self, kind: str, **kwargs) -> dict:
         return self.request("query", kind=kind, **kwargs)

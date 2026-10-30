@@ -51,12 +51,12 @@ def test_provision_gives_the_operator_a_holder_and_the_record_only_its_hash(rig)
 
 # ------------------------------------------------------------------ the guard
 
-@pytest.mark.parametrize("claim", [{"MOXI_COMMS_NAME": "planner"}, {"MOXI_COMMS_SLOT": "3"}])
-def test_a_claimed_session_is_never_the_operator(rig, claim):
+def test_a_claimed_session_is_never_the_operator(rig):
     """A claim must not spell its way into `post_as_user`, which is the
     fabricated-identity class. Either stamp
     beside the trigger and the verb refuses, rather than preferring one of the two."""
-    code, out = rig.cli(["send", "reviewer@proj-a", "ship it"], env=operator_env(**claim))
+    code, out = rig.cli(["send", "reviewer@proj-a", "ship it"],
+                        env=operator_env(MOXI_COMMS_NAME="planner"))
 
     assert code == 2, out
     assert "nothing was sent" in out
@@ -90,8 +90,10 @@ def test_no_operator_credential_on_the_box_is_a_loud_refusal(rig):
                         env=operator_env())
 
     assert code == 5, out
-    assert "operator's posting credential is not on this box" in out
-    assert "moxi-comms-provision" in out
+    assert "cannot resolve the posting credential comms/operator/token" in out
+    assert "the environment (MOXI_COMMS_SECRET_COMMS_OPERATOR_TOKEN)" in out
+    assert "the holder's token store" in out
+    assert "ask the operator" in out
     assert rig.gateway.history(rig.names_channel) == []
 
 
@@ -103,7 +105,7 @@ def test_the_operator_posts_with_the_provisioned_token_and_lands_as_the_operator
     What the recipient reads back is the operators row (`attribution.from_record`), so a
     message typed in the operator's terminal arrives the way one typed in Discord always
     did."""
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
 
     code, out = rig.cli(["send", "reviewer@proj-a", "ship it"], env=operator_env())
 

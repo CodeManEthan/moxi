@@ -49,7 +49,7 @@ def oc_rig(rig, tmp_path):
     stub = fake_opencode.install(tmp_path / "bin")
     work = tmp_path / "work"
     work.mkdir()
-    roster = write_config(None, f'[opencode.agents."{IDENTITY}"]\nslot = 5\ncwd = "{work}"\n')
+    roster = write_config(None, f'[opencode.agents."{IDENTITY}"]\ncwd = "{work}"\n')
     launched = []
 
     class Rig:
@@ -97,8 +97,7 @@ def test_the_launch_opens_the_window_on_its_own_server_and_a_close_takes_it_offl
     assert serve["argv"] == ["serve", "--hostname", "127.0.0.1", "--port", "0",
                              "--print-logs", "--log-level", "INFO"]
     assert serve["password"] is True
-    assert serve["stamp"] == {"MOXI_COMMS_NAME": "coder", "MOXI_COMMS_SLOT": "5",
-                              "MOXI_COMMS_SCOPE": "proj-a"}
+    assert serve["stamp"] == {"MOXI_COMMS_NAME": "coder", "MOXI_COMMS_SCOPE": "proj-a"}
     assert serve["config"]["model"] == serve["config"]["small_model"] == \
         "opencode/minimax-m3.1-flash-free"
     assert serve["config"]["permission"] == {"external_directory": "allow",
@@ -185,12 +184,12 @@ def test_config_names_the_comms_config_file_this_launch_reads_its_roster_from(
     """`--config PATH`: the candidate file's [opencode] table is this launch's roster."""
     w = oc_rig
     candidate = tmp_path / "candidate.toml"
-    candidate.write_text(f'[opencode.agents."{IDENTITY}"]\nslot = 6\n'
+    candidate.write_text(f'[opencode.agents."{IDENTITY}"]\n'
                          f'cwd = "{tmp_path / "work"}"\n')
     proc = w.launch(extra=("--dry-run", "--config", str(candidate)))
     assert proc.wait(20.0) == 0
     out = proc.text()
-    assert f"identity   {IDENTITY} (slot 6, pinned by the roster)" in out
+    assert f"identity   {IDENTITY}" in out
     assert f"roster     {candidate}" in out
     assert w.events() == []
 
@@ -200,7 +199,7 @@ def test_dry_run_prints_the_plan_and_spawns_nothing(oc_rig):
     proc = w.launch(extra=("--dry-run",))
     assert proc.wait(20.0) == 0
     out = proc.text()
-    assert f"identity   {IDENTITY} (slot 5, pinned by the roster)" in out
+    assert f"identity   {IDENTITY}" in out
     assert (f"{', then '.join(opencode_roster.DEFAULT_MODELS)} (the launch default"
             in out), "a row with no model gets the shipped list"
     assert "models --refresh" in out and "before the server starts" in out

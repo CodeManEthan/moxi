@@ -43,10 +43,10 @@ def test_the_shipped_defaults_are_the_zero_retention_free_models_in_order():
 
 def test_a_row_that_names_no_model_gets_the_whole_list(tmp_path):
     roster = opencode_roster.from_table(
-        {"agents": {IDENTITY: {"slot": 5, "cwd": str(tmp_path)}}})
+        {"agents": {IDENTITY: {"cwd": str(tmp_path)}}})
     assert roster.agents[IDENTITY].models == [MINIMAX, GLM, DEEPSEEK]
     named = opencode_roster.from_table(
-        {"agents": {IDENTITY: {"slot": 5, "cwd": str(tmp_path), "model": PICKLE}}})
+        {"agents": {IDENTITY: {"cwd": str(tmp_path), "model": PICKLE}}})
     assert named.agents[IDENTITY].models == [PICKLE], "a named model is kept as it is"
 
 
@@ -85,7 +85,7 @@ class Handle:
 
 def unnamed_row(cwd) -> opencode_roster.OpenCodeAgent:
     """The roster row with no `model`, as the config file gives it."""
-    roster = opencode_roster.from_table({"agents": {IDENTITY: {"slot": 5, "cwd": str(cwd)}}})
+    roster = opencode_roster.from_table({"agents": {IDENTITY: {"cwd": str(cwd)}}})
     return roster.agents[IDENTITY]
 
 

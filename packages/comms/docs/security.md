@@ -5,9 +5,9 @@ Moxi comms runs on one machine, for one user. Everything it does rests on that.
 ## Identity is a same-user claim
 
 A comms name is a claim a process makes when it registers with the daemon. The daemon
-checks the claim against who already holds the name and which slot's credential posted
-a message, and the record keeps who held which slot when. None of that is
-cryptography. It proves that a process running as your user said so, and nothing more.
+checks the claim against who already holds the name, and the record keeps the identity
+that authored each message. None of that is cryptography. It proves that a process
+running as your user said so, and nothing more.
 
 Any process running as your user can:
 
@@ -25,9 +25,8 @@ So the trust boundary is your user account. comms keeps agents from confusing ea
 other by accident and makes who-said-what visible. It does not protect one agent from a
 hostile process running as you, and it never claims to.
 
-The scoped tokens, the 0600 files and the operator's own credential still matter: they
-keep an honest agent on its own lane, they make a forged claim take deliberate work,
-and a token copied off the machine spends one slot's credential, not all of them.
+The binding tokens, the 0600 files and the operator's own credential still matter: they
+keep an honest agent on its own lane and make a forged claim take deliberate work.
 
 ## What other users on the machine can see
 
@@ -43,17 +42,22 @@ and a token copied off the machine spends one slot's credential, not all of them
 
 ## Credentials
 
-On the local backend every slot, the daemon and the operator get a posting token. The
-record keeps only each token's SHA-256; the token itself lives only in its holder's
-file in the token store. Provisioning writes each token in the same call that creates
-its row.
+The daemon mints a fresh, random token for every live binding. The token stays in the
+adapter's memory and crosses the claim socket only inside that session; the daemon
+keeps only its SHA-256 hash. A daemon restart invalidates every old binding token, and
+the next register gets a new one. No binding token is written to the state directory
+or to a log.
 
-A token lost from the store can't be recovered: the record has only the hash. Running
-provisioning again converges on what exists and doesn't mint replacements. So a
-daemon that finds slots whose tokens are missing refuses to start and says
-which holders are missing, rather than run on credentials nothing can present. Restore
-the store from a backup, or move `directory.db` and `record.db` aside and start the
-daemon again to provision a new set.
+The operator is different: its posting token is stored at rest because the operator
+lane is not a live agent binding. The configured resolver chain reads that token from
+the environment first and the store second. A token copied off the machine is still a
+credential for this same-user trust boundary, not a new identity system.
+
+Files from the 0.1.x posting-key layout that remain in a store outside comms' own
+store are not accepted by the 0.2.0 posting path. The migration removes the retired
+files from comms' own store when they match the old format, while leaving unrelated
+files alone. `post_as_identity` is a record write used after the daemon has checked a
+live binding; it is not a credential door.
 
 comms' config file, `config.toml`, holds non-secret values only. comms refuses to load
 it when a key looks like a token.

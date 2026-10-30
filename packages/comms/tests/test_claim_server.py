@@ -27,8 +27,8 @@ ASK = ("import json,os,sys\nfrom moxi_comms import claimhold\n"
 def servers(rig):
     operator = ClaimServer("operator", "global", kind="codex").start()
     archivist = ClaimServer("archivist", "global", kind="opencode").start()
-    operator.set_bound(slot=1, tier="standing")
-    archivist.set_bound(slot=2, tier="chosen")
+    operator.set_bound(tier="standing", token="operator-token")
+    archivist.set_bound(tier="chosen", token="archivist-token")
     yield operator, archivist
     operator.stop()
     archivist.stop()
@@ -36,8 +36,31 @@ def servers(rig):
 
 def test_the_holder_sends_as_each_binding_it_holds(servers):
     operator, archivist = servers
-    assert call(operator.socket_path, "claim")["claim"]["qualified"] == "operator"
-    assert call(archivist.socket_path, "claim")["claim"]["qualified"] == "archivist"
+    answer = call(operator.socket_path, "claim")
+    assert answer["claim"]["qualified"] == "operator"
+    assert answer["protocol"] == 2 and answer["token"] == "operator-token"
+    assert call(archivist.socket_path, "claim")["token"] == "archivist-token"
+
+
+def test_set_bound_requires_and_clears_the_token(rig):
+    srv = ClaimServer("relay", "proj-a", kind="codex").start()
+    try:
+        with pytest.raises(TypeError):
+            srv.set_bound(tier="chosen")
+        srv.set_bound(tier="chosen", token="first-token")
+        assert call(srv.socket_path, "claim")["token"] == "first-token"
+        srv.set_offline()
+        assert "token" not in call(srv.socket_path, "claim")
+        srv.set_bound(tier="chosen", token="second-token")
+        srv.set_waiting()
+        assert "token" not in call(srv.socket_path, "claim")
+        srv.set_bound(tier="chosen", token="third-token")
+        srv.holder.name_refused("relay@proj-a")
+        assert srv.holder.token is None
+        assert "token" not in call(srv.socket_path, "claim")
+    finally:
+        srv.stop()
+    assert srv.holder.token is None
 
 
 def test_a_child_root_is_inside_its_binding_and_refused_on_the_self_only_one(servers):
@@ -84,19 +107,20 @@ def test_with_its_own_daemon_arm_it_binds_and_goes_offline_with_the_daemon(rig):
     try:
         assert wait_for(lambda: "relay@proj-a" in rig.daemon.bindings)
         assert srv.holder.state == "bound"
-        assert call(srv.socket_path, "claim")["claim"]["slot"] is not None
+        assert "slot" not in call(srv.socket_path, "claim")["claim"]
     finally:
         srv.stop()
     assert wait_for(lambda: "relay@proj-a" not in rig.daemon.bindings)
 
 
 def test_a_refused_register_leaves_it_holding_nothing(rig):
-    first = ClaimServer("dup", "proj-a", kind="codex", arm=True).start()
-    second = ClaimServer("dup", "proj-a", kind="codex", arm=True).start()
+    first = ClaimServer("planner", "proj-a", kind="codex", arm=True).start()
+    second = ClaimServer("planner", "proj-a", kind="codex", arm=True).start()
     try:
         assert wait_for(lambda: first.holder.state == "bound")
         assert second.holder.state == "waiting" and second.refusal
-        assert call(second.socket_path, "claim")["line"] == "dup@proj-a is held by another session"
+        assert call(second.socket_path, "claim")["line"] == (
+            "planner@proj-a is held by another session")
     finally:
         first.stop()
         second.stop()
@@ -108,16 +132,17 @@ def test_a_report_after_stop_writes_no_claim_file(rig):
     (a supervisor finishing a register, a binding going offline or waiting, a
     reap landing) writes nothing. Otherwise each would write back a dead `srv-` file
     that nothing sweeps."""
-    srv = ClaimServer("late", "proj-a", kind="codex").start()
+    srv = ClaimServer("helper", "proj-a", kind="codex").start()
     child = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"],
                              stdin=subprocess.PIPE)
     try:
-        srv.set_bound(slot=1, tier="chosen")
+        srv.set_bound(tier="chosen", token="first-token")
         assert srv.add_root(child.pid) is not None
         assert claimfile.read(srv.holder.key)["state"] == "bound"
         srv.stop()
         assert claimfile.read(srv.holder.key) is None
-        for what, report in (("set_bound", lambda: srv.set_bound(slot=2, tier="chosen")),
+        for what, report in (("set_bound", lambda: srv.set_bound(
+                                 tier="chosen", token="late-token")),
                              ("set_offline", srv.set_offline),
                              ("set_waiting", srv.set_waiting),
                              ("drop_root", lambda: srv.drop_root(child.pid))):
@@ -148,17 +173,18 @@ def line_of(srv) -> str:
 def test_a_binding_never_bound_says_so(rig, tmp_path):
     """A claim the daemon has not bound yet says that, not that another session
     holds it: before any report, and through a daemon that is down at start."""
-    srv = ClaimServer("fresh", "proj-a", kind="codex").start()
-    down = ClaimServer("early", "proj-a", kind="codex", arm=True,
+    srv = ClaimServer("newbie", "proj-a", kind="codex").start()
+    down = ClaimServer("nobody", "proj-a", kind="codex", arm=True,
                        daemon_socket=tmp_path / "no-daemon.sock").start()
     try:
-        assert line_of(srv) == "fresh@proj-a is not bound to comms yet"
-        code, out = rig.cli(["send", "nobody", "hello"],
+        assert line_of(srv) == "newbie@proj-a is not bound to comms yet"
+        code, out = rig.cli(["send", "--posture", "none", "--new-name",
+                             "nobody", "hello"],
                             env={CLAIM_SOCKET_ENV: str(srv.socket_path)})
         assert code == 2
-        assert "fresh@proj-a is not bound to comms yet — nothing was sent." in out, out
+        assert "newbie@proj-a is not bound to comms yet — nothing was sent." in out, out
         assert down.holder.state == "waiting"
-        assert line_of(down) == "early@proj-a is not bound to comms yet"
+        assert line_of(down) == "nobody@proj-a is not bound to comms yet"
     finally:
         srv.stop()
         down.stop()
@@ -167,15 +193,16 @@ def test_a_binding_never_bound_says_so(rig, tmp_path):
 def test_a_refusal_that_names_no_holder_says_the_daemons_words(rig):
     """A register refused for good (`unknown adapter kind`) names the refusal,
     from the arm's own register and from a holder that reports it."""
-    arm = ClaimServer("odd", "proj-a", kind="no-such-kind", arm=True).start()
-    held = ClaimServer("told", "proj-a", kind="codex").start()
+    arm = ClaimServer("stranger", "proj-a", kind="no-such-kind", arm=True).start()
+    held = ClaimServer("reviewer", "proj-a", kind="codex").start()
     try:
         assert arm.holder.state == "waiting" and arm.refusal
-        assert line_of(arm) == f"comms refused odd@proj-a: {arm.refusal}"
+        assert line_of(arm) == f"comms refused stranger@proj-a: {arm.refusal}"
         assert arm.refusal.startswith("unknown adapter kind 'no-such-kind'")
-        held.set_bound(slot=1, tier="chosen")
+        held.set_bound(tier="chosen", token="held-token")
         held.set_waiting(refusal="unknown adapter kind 'x'")
-        assert line_of(held) == "comms refused told@proj-a: unknown adapter kind 'x'"
+        assert line_of(held) == (
+            "comms refused reviewer@proj-a: unknown adapter kind 'x'")
     finally:
         arm.stop()
         held.stop()
@@ -185,15 +212,16 @@ def test_a_held_name_still_says_another_session_holds_it(rig):
     """Only the never-bound and the refused lines are their own: a holder that drops its
     claim to `waiting` without the daemon's words (a link that retries after a
     refusal) still says another session holds it."""
-    srv = ClaimServer("taken", "proj-a", kind="codex").start()
+    srv = ClaimServer("planner", "proj-a", kind="codex").start()
     try:
-        srv.set_bound(slot=1, tier="chosen")
+        srv.set_bound(tier="chosen", token="held-token")
         srv.set_waiting()
-        assert line_of(srv) == "taken@proj-a is held by another session"
-        code, out = rig.cli(["send", "nobody", "hello"],
+        assert line_of(srv) == "planner@proj-a is held by another session"
+        code, out = rig.cli(["send", "--posture", "none", "--new-name",
+                             "nobody", "hello"],
                             env={CLAIM_SOCKET_ENV: str(srv.socket_path)})
         assert code == 2
-        assert "taken@proj-a is held by another session — nothing was sent." in out, out
+        assert "planner@proj-a is held by another session — nothing was sent." in out, out
     finally:
         srv.stop()
 
@@ -208,9 +236,9 @@ def test_a_claim_socket_outside_comms_runtime_directory_is_never_asked(
     operator, _ = servers
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    stray = ClaimServer("stray", "proj-a", kind="codex",
+    stray = ClaimServer("scout", "proj-a", kind="codex",
                         socket_path=elsewhere / "c.sock").start()
-    stray.set_bound(slot=3, tier="chosen")
+    stray.set_bound(tier="chosen", token="scout-token")
     try:
         env = {CLAIM_SOCKET_ENV: str(stray.socket_path)}
         with pytest.raises(paths.OutsideRuntime) as caught:
@@ -221,9 +249,9 @@ def test_a_claim_socket_outside_comms_runtime_directory_is_never_asked(
         said: list[str] = []
         assert claimhold.whoami(env, say=said.append) == 2
         assert said and "outside comms' runtime directory" in said[0]
-        assert "stray" not in " ".join(said)
+        assert "scout" not in " ".join(said)
 
-        overlay = claimhold.claim_overlay(dict(env, MOXI_COMMS_NAME="stray",
+        overlay = claimhold.claim_overlay(dict(env, MOXI_COMMS_NAME="scout",
                                                MOXI_COMMS_SCOPE="proj-a"))
         assert "MOXI_COMMS_NAME" not in overlay and "MOXI_COMMS_SCOPE" not in overlay
 
@@ -231,7 +259,7 @@ def test_a_claim_socket_outside_comms_runtime_directory_is_never_asked(
         code, out = rig.cli(["send", "main", "hello"], env=env)
         assert code == 2, out
         assert "outside comms' runtime directory" in out and CLAIM_SOCKET_ENV in out, out
-        assert "Nothing was sent." in out and "stray" not in out, out
+        assert "Nothing was sent." in out and "scout" not in out, out
 
         # A socket inside the directory is the one comms asks.
         inside = {CLAIM_SOCKET_ENV: str(operator.socket_path)}

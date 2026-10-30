@@ -39,7 +39,7 @@ def unanswered(rig):
 @pytest.fixture
 def codex(rig, tmp_path):
     session = FakeSession()
-    row = CodexAgent(qualified=CODEX, name="planner", scope="proj-a", slot=3,
+    row = CodexAgent(qualified=CODEX, name="planner", scope="proj-a",
                      cwd=str(tmp_path), thread_file=codex_threads.path(CODEX))
     adapter = CodexAdapter(row, launch=launcher(session), autoreconnect=False,
                            clock=rig.clock, started_wait=0.2)
@@ -134,7 +134,7 @@ def fake():
 @pytest.fixture
 def opencode(rig, fake, tmp_path, monkeypatch):
     monkeypatch.setattr(oc, "FLUSH_RETRY", 0.05)
-    agent = OpenCodeAgent(qualified=OPENCODE, name="coder", scope="proj-a", slot=5,
+    agent = OpenCodeAgent(qualified=OPENCODE, name="coder", scope="proj-a",
                           cwd=str(tmp_path),
                           session_file=opencode_roster.session_path(OPENCODE),
                           models=["opencode/minimax-m3.1-flash-free"])

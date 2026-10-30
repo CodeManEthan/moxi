@@ -1,33 +1,21 @@
 """Attribution honesty.
 
-Verification is always author `webhook_id` -> directory, never display names.
 What the record alone can prove:
 
-  * a webhook owned by an agent row      -> that standing identity, **verified**
+  * an identity row stamped by the daemon   -> that qualified identity, **verified**
+                                               at its current directory tier
   * the operator's user id                -> the operator, **verified**
-  * a SLOT-owned webhook                  -> the slot is not an address; who held it is
-                                             not in the record -- but it IS in the
-                                             custody journal, and when the journal names
-                                             a single holder over an interval containing
-                                             the message's timestamp AND that holder's
-                                             qualified name matches the display, that is
-                                             two independent facts agreeing -> **verified**
-                                             Otherwise the display name is all
-                                             there is -> **labeled**
+  * an unconverted webhook row            -> the frozen migration reader gives the same
+                                             answer the older release gave
+  * a webhook row left after conversion   -> its display, **labeled**
   * anything else                         -> `unknown`, never guessed
-
-The daemon can do better still for LIVE delivery: it knows who holds the slot right now
-without reading anything. The journal is that same match-gate run against the past --
-`bindings.py` is where the interval and its edges (the boot fence, the no-tolerance
-containment) are spelled out -- so live and replay now answer the same question the same
-way, and only the source of the custody fact differs.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from . import bindings, directory
+from . import directory, migration
 from .scoping import GLOBAL, is_auto_name, qualify, split_tag
 
 TIER_EPHEMERAL, TIER_CHOSEN, TIER_STANDING = "ephemeral", "chosen", "standing"
@@ -74,41 +62,29 @@ def from_display(display: str) -> Author:
     return Author(name, scope, qualify(name, scope), tier, LABELED)
 
 
-def from_record(db, msg) -> Author:
+def from_record(db, msg, *, record=None, journal_path=None) -> Author:
     """Everything the record + directory can prove about who authored `msg`."""
+    if msg.author_kind == "identity":
+        name, scope = split_tag(msg.author_id)
+        scope = scope or GLOBAL
+        if directory.standing_row(db, name, scope) is not None:
+            tier = TIER_STANDING
+        elif is_auto_name(name):
+            tier = TIER_EPHEMERAL
+        else:
+            tier = TIER_CHOSEN
+        return Author(name, scope, qualify(name, scope), tier, VERIFIED)
     if msg.author_kind == "user":
         row = directory.operator(db, msg.author_id)
         if row:
             return Author(row["name"], GLOBAL, row["name"], TIER_OPERATOR, VERIFIED)
         return unknown()
-    row = directory.webhook(db, msg.author_id)
-    if row is None:
+    if msg.author_kind == "unknown":
         return unknown()
-    if row["agent_name"] is not None:
-        # STANDING: webhook -> directory row, no slot and no journal in it. Untouched.
-        name, scope = row["agent_name"], row["agent_scope"]
-        return Author(name, scope, qualify(name, scope), TIER_STANDING, VERIFIED)
-    return from_slot(row["slot_id"], msg)
-
-
-def from_slot(slot_id, msg) -> Author:
-    """A slot-owned webhook: the retroactive match-gate, then the display-derived label.
-
-    The credential proves the SEAT. The journal says who held that seat when the message
-    was posted. The display is the sender's CLAIM about who spoke, and it is what the
-    record will show forever. Two of those three agreeing is what `verified` means; the
-    journal is what lets the custody fact survive the socket.
-
-    Every way of not knowing lands in the same place -- no journal, no covering interval,
-    two overlapping intervals, an unparseable display, a display that names someone other
-    than the holder -- and that place is the display-derived label. Ambiguity degrades
-    toward unverified; it never invents a verified.
-    """
-    claimed = from_display(msg.author_display)
-    if claimed.tier == TIER_UNKNOWN:
-        return claimed                      # nothing to match against
-    held = bindings.holder_at(slot_id, getattr(msg, "timestamp", None))
-    if held is not None and held["qualified"] == claimed.qualified:
-        return Author(held["name"], held["scope"], held["qualified"], held["tier"],
-                      VERIFIED)
-    return claimed
+    if msg.author_kind == "webhook":
+        marker = (record.meta_get(migration.META_AUTHOR_STAMPS)
+                  if record is not None else migration.META_AUTHOR_STAMPS)
+        if marker is None:
+            return migration.legacy_author(db, msg, journal_path=journal_path)
+        return from_display(msg.author_display)
+    return unknown()

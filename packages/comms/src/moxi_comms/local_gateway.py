@@ -21,8 +21,7 @@ What is fixed here, and must not drift:
   * Ids from a PERSISTED counter, `meta('next_id')`, never `MAX(id)+1`.
     Retention trims messages; a high-water mark taken off the trimmed table resets the
     sequence after a trim, and every cursor on the box then compares as "after" every
-    new id. The counter is the fix, and it is what lets channels, webhooks, principals
-    and messages share one sequence.
+    new id. The counter is the fix, and channels, principals and messages share it.
 
 Fanout is three layers under one lock, and two of them live here:
 
@@ -51,7 +50,6 @@ from pathlib import Path
 from .config import LOCAL_RETAIN_DAYS
 from .gateway import (
     MAX_CONTENT_LENGTH,
-    Credential,
     Forbidden,
     GatewayError,
     Message,
@@ -72,9 +70,6 @@ BUSY_TIMEOUT_MS = 5_000
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS channels  (channel_id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
                         created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS webhooks  (webhook_id TEXT PRIMARY KEY, channel_id TEXT NOT NULL,
-                        name TEXT NOT NULL, secret_id TEXT NOT NULL,
-                        token_hash TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS principals(principal_id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE);
 CREATE TABLE IF NOT EXISTS denied    (principal_id TEXT NOT NULL, channel_id TEXT NOT NULL,
                         PRIMARY KEY (principal_id, channel_id));
@@ -105,8 +100,8 @@ class LocalGateway:
     history_bound = None
 
     def __init__(self, record=None, *, retain_days: int = RETAIN_DAYS,
-                 poll_interval: float = 0.5, clock=time.time, role: str = "reader",
-                 resolver=None, secret_reader=None, busy_timeout: float | None = None):
+                 poll_interval: float = 0.5, clock=time.time,
+                 busy_timeout: float | None = None):
         from .paths import record_db
 
         self.path = Path(record) if record else record_db()
@@ -117,9 +112,6 @@ class LocalGateway:
         self.busy_timeout_ms = (BUSY_TIMEOUT_MS if busy_timeout is None
                                 else max(0, int(busy_timeout * 1000)))
         self.clock = clock            # record timestamps; injectable so tests can age mail
-        self.role = role              # ignored locally; kept so the seam is one shape
-        self._resolver = resolver     # the chain; built on first use when None
-        self._secret_reader = secret_reader
         self._local = threading.local()
         self._conns: list[sqlite3.Connection] = []
         self._lock = threading.RLock()
@@ -209,95 +201,10 @@ class LocalGateway:
                                    (str(channel_id),)).fetchone()
         return row[0] if row else None
 
-    # ------------------------------------------------------------------ webhooks
-    def create_webhook(self, channel_id: str, name: str, secret_id: str) -> Credential:
-        """One token per ROW, minted here and never stored in the clear.
-
-        The row keeps only the SHA-256; the plaintext goes back to the caller once, and
-        the caller (`moxi-comms-provision` on the local path) writes it
-        into the holder's store file under `secret_id`. That is what makes
-        `resolve_secret` a map lookup and `execute_webhook` a hash compare.
-        """
-        with self._write() as conn:
-            if conn.execute("SELECT 1 FROM channels WHERE channel_id = ?",
-                            (str(channel_id),)).fetchone() is None:
-                raise GatewayError(f"unknown channel {channel_id}")
-            wid = f"wh-{self._next_id(conn)}"
-            token = secrets.token_urlsafe(32)
-            conn.execute(
-                "INSERT INTO webhooks(webhook_id, channel_id, name, secret_id, token_hash, "
-                "created_at) VALUES (?,?,?,?,?,?)",
-                (wid, str(channel_id), name, secret_id, token_hash(token), self._now()))
-        return Credential(wid, token, secret_id=secret_id)
-
-    def resolve_secret(self, secret_id: str, *, owner=None) -> Credential:
-        """The holder's store file is the token's only home. No network.
-
-        `owner` is the custody seam: WHO is spending this secret.
-        With none threaded down, this process's own role holder pays.
-        """
-        row = self._conn().execute(
-            "SELECT webhook_id FROM webhooks WHERE secret_id = ?", (secret_id,)).fetchone()
-        if row is None:
-            raise GatewayError(f"unknown secret {secret_id}")
-        token = self._read_secret(owner if owner is not None else self._own_owner(), secret_id)
-        if not token:
-            raise GatewayError(
-                f"cannot resolve the posting credential {secret_id}: it is not in the "
-                "holder's token store. Provisioning writes it there; ask the operator.")
-        return Credential(row[0], token, secret_id=secret_id)
-
-    @property
-    def resolver(self):
-        """The box's declared chain, built on FIRST USE and not at
-        construction: a record opened to read history resolves no credentials and should
-        read no config to do it."""
-        if self._resolver is None:
-            from .secrets import from_config
-
-            self._resolver = from_config()
-        return self._resolver
-
-    def _own_owner(self):
-        from . import tokens
-
-        return tokens.owner_for_role(self.role)
-
-    def _read_secret(self, owner, secret_id: str) -> str | None:
-        """One token out of the resolver chain.
-
-        The chain is what this module touches now, and its `store` step is what touches
-        the custody store: `TokenStore.read_secret(owner, secret_id)`, THE DECLARED
-        READ. On a box whose chain is `["env", "store"]` the local path never leaves the
-        machine.
-
-        `secret_reader=` stays as the test seam it was -- a lookup injected instead of a
-        file laid down -- and short-circuits the chain when it is given, answering None
-        for a miss so the caller's own sentence is what an agent reads. The CHAIN's miss
-        is not swallowed: `SecretNotFound` is a `GatewayError` already worded in the
-        caller's language, and it names every step that was tried and the holder, which
-        `resolve_secret`'s own sentence cannot (that one knows only about the store).
-        """
-        if self._secret_reader is not None:
-            return self._secret_reader(owner, secret_id)
-        return self.resolver.get(secret_id, owner=owner)["value"]
-
-    def webhook_channel(self, webhook_id: str) -> str | None:
-        row = self._conn().execute("SELECT channel_id FROM webhooks WHERE webhook_id = ?",
-                                   (str(webhook_id),)).fetchone()
-        return row[0] if row else None
-
     # ------------------------------------------------------------------ teardown
-    # Operator machinery, as the mock has it: no comms verb deletes anything, and these
-    # exist so a spike run can undo itself.
-    def delete_webhook(self, webhook_id: str) -> None:
-        with self._write() as conn:
-            conn.execute("DELETE FROM webhooks WHERE webhook_id = ?", (str(webhook_id),))
-
     def delete_channel(self, channel_id: str) -> None:
         channel_id = str(channel_id)
         with self._write() as conn:
-            conn.execute("DELETE FROM webhooks WHERE channel_id = ?", (channel_id,))
             conn.execute("DELETE FROM messages WHERE channel_id = ?", (channel_id,))
             conn.execute("DELETE FROM channels WHERE channel_id = ?", (channel_id,))
 
@@ -326,33 +233,6 @@ class LocalGateway:
         return row is None
 
     # ------------------------------------------------------------------ posting
-    def execute_webhook(self, cred: Credential, content: str, *, username: str | None = None,
-                        allowed_mentions: dict | None = None) -> Message:
-        """The mock's refusals in the mock's order, with a hash compare in place of its
-        plaintext one. Nothing is written by a refused post, here either."""
-        if allowed_mentions is None or allowed_mentions.get("parse") != []:
-            raise GatewayError("allowed_mentions must be {'parse': []} on every post")
-        if len(content) > self.max_content_length:
-            raise GatewayError(
-                f"content is {len(content)} characters, "
-                f"over the {self.max_content_length}-character cap on one message")
-        with self._write() as conn:
-            row = conn.execute(
-                "SELECT channel_id, name, token_hash FROM webhooks WHERE webhook_id = ?",
-                (str(cred.webhook_id),)).fetchone()
-            if row is None or not secrets.compare_digest(row[2], token_hash(cred.token)):
-                raise GatewayError("bad webhook credential")
-            channel_id, name, _ = row
-            if conn.execute("SELECT 1 FROM denied WHERE principal_id = ? AND channel_id = ?",
-                            (str(cred.webhook_id), channel_id)).fetchone():
-                raise Forbidden(f"Send denied in {channel_id}")
-            msg = self._insert(conn, channel_id=channel_id, author_id=str(cred.webhook_id),
-                               author_kind="webhook", author_display=username or name,
-                               content=content)
-        self._fanout()
-        self.nudge()
-        return msg
-
     def post_as_user(self, user_id: str, channel_id: str, content: str, *,
                      token: str | None = None) -> Message:
         """The operator's lane, guarded by a credential like every other lane.
@@ -382,6 +262,20 @@ class LocalGateway:
                                (str(user_id),)).fetchone()
             msg = self._insert(conn, channel_id=str(channel_id), author_id=str(user_id),
                                author_kind="user", author_display=row[0] if row else "operator",
+                               content=content)
+        self._fanout()
+        self.nudge()
+        return msg
+
+    def post_as_identity(self, qualified: str, channel_id: str, content: str) -> Message:
+        """Write an agent post after the daemon has checked its live binding."""
+        if len(content) > self.max_content_length:
+            raise GatewayError(
+                f"content is {len(content)} characters, "
+                f"over the {self.max_content_length}-character cap on one message")
+        with self._write() as conn:
+            msg = self._insert(conn, channel_id=str(channel_id), author_id=str(qualified),
+                               author_kind="identity", author_display=str(qualified),
                                content=content)
         self._fanout()
         self.nudge()

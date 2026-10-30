@@ -79,18 +79,18 @@ def test_x_and_x_at_global_resolve_to_one_identity_from_every_scope(rig):
 
 
 def test_a_bare_name_typed_in_s_goes_to_the_global_x_while_x_at_s_is_bound(rig):
-    first = rig.shim(slot=3, name="reviewer")         # the global one has bound before
+    first = rig.shim(name="reviewer")         # the global one has bound before
     first.stop()
     assert wait_until(lambda: "reviewer" not in rig.daemon.bindings)
-    scoped = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    scoped = rig.shim(name="reviewer", scope="proj-a")
     assert scoped.identity == "reviewer@proj-a"
     code, out = rig.cli(["send", "--posture", "none", "reviewer", "to global"],
-                        slot=1, name="planner", scope="proj-a")
+                         name="planner", scope="proj-a")
     assert code == 0, out
     assert history(rig)[-1].content.splitlines()[0].startswith("::to reviewer")
     assert "reviewer is not bound right now" in out
     assert scoped.queue == [], "never reaches x@S"
-    glob = rig.shim(slot=3, name="reviewer")
+    glob = rig.shim(name="reviewer")
     assert glob.identity == "reviewer"
     wait_for_queue(glob, 1)
     assert glob.queue[0]["text"] == "to global"
@@ -100,9 +100,9 @@ def test_a_bare_name_typed_in_s_goes_to_the_global_x_while_x_at_s_is_bound(rig):
 def test_a_bare_line_zero_tag_from_an_author_in_s_waits_for_the_global_x(rig):
     """Live route: an author in proj-a writes bare `reviewer` while reviewer@proj-a is
     bound. It waits for the global reviewer and never reaches reviewer@proj-a."""
-    scoped = rig.shim(slot=2, name="reviewer", scope="proj-a")
-    rig.shim(slot=1, name="planner", scope="proj-a")
-    m = rig.post_from_slot(1, ["reviewer"], "bare from proj-a", display="planner@proj-a")
+    scoped = rig.shim(name="reviewer", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
+    m = rig.post_as("planner@proj-a", ["reviewer"], "bare from proj-a")
     assert wait_until(lambda: m.id in queued(rig.daemon, "reviewer"))
     assert not queued(rig.daemon, "reviewer@proj-a")
     assert scoped.queue == []
@@ -112,46 +112,45 @@ def test_at_a_rescan_and_a_replay_a_bare_tag_is_the_global_x(rig):
     """The journal knows reviewer@proj-a, the global reviewer was never bound: a rescan
     still files the bare tag for the global one, and its first bind's replay delivers it,
     while a rebind of reviewer@proj-a is never handed it."""
-    scoped = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    scoped = rig.shim(name="reviewer", scope="proj-a")
     scoped.stop()
     assert wait_until(lambda: "reviewer@proj-a" not in rig.daemon.bindings)
-    m = rig.post_from_slot(1, ["reviewer"], "for the global one", display="planner@proj-a")
+    m = rig.post_as("planner@proj-a", ["reviewer"], "for the global one")
     assert wait_until(lambda: m.id in queued(rig.daemon, "reviewer"))
     rig.daemon.rescan()
     assert m.id in queued(rig.daemon, "reviewer")
     assert not queued(rig.daemon, "reviewer@proj-a")
-    again = rig.shim(slot=2, name="reviewer", scope="proj-a")
-    glob = rig.shim(slot=3, name="reviewer")
+    again = rig.shim(name="reviewer", scope="proj-a")
+    glob = rig.shim(name="reviewer")
     wait_for_queue(glob, 1)
     assert glob.queue[0]["message_id"] == m.id
     assert again.queue == []
 
 
 def test_a_reply_to_a_global_author_goes_to_the_global_author(rig):
-    lead = rig.shim(slot=3, name="lead")
-    rig.shim(slot=2, name="lead", scope="proj-a")
-    code, out = rig.cli(["send", "--posture", "none", "lead", "from the global"], slot=1,
+    lead = rig.shim(name="lead")
+    rig.shim(name="lead", scope="proj-a")
+    code, out = rig.cli(["send", "--posture", "once", "lead", "from the global"],
                         name="planner")
     assert code == 0, out
     asked = history(rig)[-1]
     code, out = rig.cli(["reply", "--posture", "none", str(asked.id), "an answer"],
-                        slot=4, name="planner", scope="proj-a")
+                         name="planner", scope="proj-a")
     assert code == 0, out
     assert history(rig)[-1].content.splitlines()[0].startswith("::to planner ")
     assert lead.identity == "lead"
 
 
 def test_attributed_message_resolves_by_the_rule(rig):
-    rig.shim(slot=2, name="reviewer", scope="proj-a")
-    m = rig.post_from_slot(1, ["reviewer", "reviewer@proj-a"], "two",
-                           display="planner@proj-a")
+    rig.shim(name="reviewer", scope="proj-a")
+    m = rig.post_as("planner@proj-a", ["reviewer", "reviewer@proj-a"], "two")
     got = query("attributed_message", message_id=m.id)
     assert got["resolved"] == ["reviewer", "reviewer@proj-a"]
 
 
 def test_history_spells_the_typed_identity_once_by_the_rule(rig):
-    rig.shim(slot=3, name="lead")
-    code, out = rig.cli(["send", "--posture", "none", "lead", "hello"], slot=1, name="planner")
+    rig.shim(name="lead")
+    code, out = rig.cli(["send", "--posture", "none", "lead", "hello"],  name="planner")
     assert code == 0, out
     code, a = rig.cli(["history", "lead@global"])
     code, b = rig.cli(["history", "lead"])
@@ -163,9 +162,9 @@ def test_history_spells_the_typed_identity_once_by_the_rule(rig):
 # --------------------------------------------------------------------------- the bind default
 
 def test_a_shim_with_no_scope_binds_global(rig):
-    unstarted = rig.shim(slot=2, name="reviewer", project="proj-a", start=False)
+    unstarted = rig.shim(name="reviewer", project="proj-a", start=False)
     assert unstarted.own_qualified() == "reviewer", "the holder a refusal is about"
-    s = rig.shim(slot=2, name="reviewer", project="proj-a")
+    s = rig.shim(name="reviewer", project="proj-a")
     assert s.identity == "reviewer"
 
 
@@ -224,7 +223,7 @@ def test_journal_ever_bound_reads_the_exact_identity(tmp_path):
     j = bindings.Journal(tmp_path / "b.db")
     assert j.ever_bound("x", "global") is None, "a journal that is not open cannot say"
     assert j.open()
-    j.bind(qualified="x@proj-a", name="x", scope="proj-a", tier="chosen", slot_id=1,
+    j.bind(qualified="x@proj-a", name="x", scope="proj-a", tier="chosen",
            adapter="claude-shim")
     assert j.ever_bound("x", "proj-a") is True
     assert j.ever_bound("x", "global") is False
@@ -233,7 +232,7 @@ def test_journal_ever_bound_reads_the_exact_identity(tmp_path):
 
 
 def test_resolve_answers_ever_bound_and_the_identities_seen(rig):
-    s = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    s = rig.shim(name="reviewer", scope="proj-a")
     got = query("resolve", name="reviewer@proj-a")
     assert got["ever_bound"] is True and "seen_as" not in got
     s.stop()
@@ -276,7 +275,7 @@ def test_a_retired_identity_cannot_bind(rig):
                                                    name="captain")
     finally:
         c.close()
-    glob = rig.shim(slot=2, name="captain")
+    glob = rig.shim(name="captain")
     assert glob.identity == "captain", "the global name binds"
 
 
@@ -287,7 +286,7 @@ def test_a_retired_identity_cannot_bind(rig):
 def test_a_send_or_check_to_a_retired_identity_is_refused(rig, argv):
     retire("mate", "proj-old")
     before = len(history(rig))
-    code, out = rig.cli(argv, slot=1, name="planner")
+    code, out = rig.cli(argv,  name="planner")
     assert code == 2
     assert out.strip() == RETIRED_SEND.format(q="mate@proj-old",
                                               name="mate")
@@ -295,14 +294,13 @@ def test_a_send_or_check_to_a_retired_identity_is_refused(rig, argv):
 
 
 def test_a_reply_to_a_retired_author_is_refused(rig):
-    rig.shim(slot=2, name="mate", scope="proj-old")
-    m = rig.post_from_slot(2, ["planner"], "from the old address",
-                           display="mate@proj-old")
+    rig.shim(name="mate", scope="proj-old")
+    m = rig.post_as("mate@proj-old", ["planner"], "from the old address")
     rig.shims[-1].stop()
     assert wait_until(lambda: "mate@proj-old" not in rig.daemon.bindings)
     retire("mate", "proj-old")
     before = len(history(rig))
-    code, out = rig.cli(["reply", "--posture", "none", str(m.id), "answer"], slot=1,
+    code, out = rig.cli(["reply", "--posture", "none", str(m.id), "answer"],
                         name="planner")
     assert code == 2
     assert RETIRED_SEND.format(q="mate@proj-old",
@@ -324,9 +322,8 @@ def test_a_recorded_tag_naming_a_retired_identity_is_held_for_nobody(rig):
     """A line zero typed by hand (or written before the retirement): the live route and
     a rescan write nothing for it, and the global name is untouched."""
     retire("captain", "proj-old")
-    rig.shim(slot=1, name="planner")
-    m = rig.post_from_slot(1, ["captain@proj-old", "captain"], "two",
-                           display="planner")
+    rig.shim(name="planner")
+    m = rig.post_as("planner", ["captain@proj-old", "captain"], "two")
     assert wait_until(lambda: m.id in queued(rig.daemon, "captain"))
     rig.daemon.rescan()
     assert not queued(rig.daemon, "captain@proj-old")

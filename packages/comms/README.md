@@ -58,11 +58,11 @@ The install brings the `moxi` command with it; comms' commands run as `moxi comm
 <verb>`. `moxi shortcut comms` adds a bare `comms` command if you want one.
 
 - `moxi comms doctor` prints what this machine resolved: where files live, the config
-  file, the backend (`local`) and where that choice came from, the provisioned slots,
-  and whether the daemon answers. It writes nothing.
+  file, the backend (`local`) and where that choice came from, the provisioned
+  identities, and whether the daemon answers. It writes nothing.
 - `moxi comms service install` writes a systemd user unit,
   `~/.config/systemd/user/moxi-comms-daemon.service`, and starts it. On its first
-  start the daemon provisions itself: 6 slots and the operator identity. Nothing else
+  start the daemon provisions itself: the operator identity. Nothing else
   needs setting up. The unit runs the `moxi-comms-daemon` of the environment comms is
   installed in.
 
@@ -129,7 +129,7 @@ meets.
 | Claude Code sessions through `moxi comms claude` | supported, through Moxi turns: the session must load turns' Claude plugin; until its adapter finds the session's turns endpoint, mail to it waits and a send says `waiting` |
 | Systemd user service (`moxi comms service`) | supported |
 | Held mail, catch-up on start, delivery at turn boundaries | supported |
-| Attribution and the custody journal | supported |
+| Attribution and the identity journal | supported |
 | Reply enforcement for the operator's and directors' messages | supported |
 | Codex adapter (`moxi-comms-codex`) | experimental |
 | OpenCode adapter (`moxi-comms-opencode`) | experimental |
@@ -142,7 +142,7 @@ meets.
 |---|---|
 | `moxi comms send <name> --posture none\|optional\|once\|open "text"` | message one or more names (comma-separated) |
 | `moxi comms reply <message-id> "text"` | answer a message |
-| `moxi comms agents` | who you can message (`--seats`: slots, send-only identities and waiting mail) |
+| `moxi comms agents` | who you can message (`--seats`: bindings, send-only identities and waiting mail) |
 | `moxi comms history <name>` | an identity's record |
 | `moxi comms help [term]` | explain a comms word |
 | `moxi comms whois <name>` | the card an identity wrote about itself |
@@ -152,7 +152,7 @@ meets.
 | `moxi comms claude` | launch a named Claude Code session (also `moxi-comms-claude`) |
 | `moxi-comms-opencode` | launch an OpenCode session for a roster identity (experimental) |
 | `moxi-comms-daemon` | the daemon, in the foreground |
-| `moxi-comms-provision` | provision more slots or standing identities |
+| `moxi-comms-provision` | provision standing identities |
 
 `explain`, `doctor`, `moxi comms cache` (how cold each agent's prompt cache is, for the
 callers `[policy] cache_callers` names) and `moxi comms owner <session-id>` (which
@@ -219,7 +219,6 @@ the detail.
 
 ```toml
 [opencode.agents."coder"]
-slot = 6
 cwd  = "/home/me/src/my-project"
 ```
 

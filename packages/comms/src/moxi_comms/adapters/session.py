@@ -26,8 +26,8 @@ and is whoever launches the session's to pass, `-n` carries the label and is com
 render, because only this process knows both halves of the identity. See
 `Session.claude_argv`. Everything after `--` reaches `claude` exactly as given.
 
-The identity is stamped into the session's environment at launch (`MOXI_COMMS_SLOT` /
-`MOXI_COMMS_NAME` / `MOXI_COMMS_SCOPE` / `MOXI_COMMS_GLOBAL`, and `MOXI_COMMS_PROJECT`),
+The identity is stamped into the session's environment at launch (`MOXI_COMMS_NAME` /
+`MOXI_COMMS_SCOPE` / `MOXI_COMMS_GLOBAL`, and `MOXI_COMMS_PROJECT`),
 beside the adapter's claim socket (`MOXI_COMMS_CLAIM_SOCKET`). `moxi comms send` inside that
 session reads who it is speaking as from the claim socket; the stamp alone sends nothing.
 
@@ -119,7 +119,7 @@ def sessions_dir(env=None) -> Path:
 #: The claim socket: a session never inherits its launcher's.
 CLAIM_SOCKET_ENV = "MOXI_COMMS_CLAIM_SOCKET"
 
-INHERITED_COMMS_ENV = ("MOXI_COMMS_NAME", "MOXI_COMMS_SLOT", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL",
+INHERITED_COMMS_ENV = ("MOXI_COMMS_NAME", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL",
                        "MOXI_COMMS_DIRECTORS", SOCKET_ENV, "MOXI_COMMS_SOCKET",
                        "MOXI_COMMS_PROJECT", CLAIM_SOCKET_ENV, COMMAND_ENV)
 
@@ -150,7 +150,7 @@ def stamped_env(base=None, **claim) -> dict:
     return env
 
 
-def identity_env(*, name=None, slot=None, scope=None, global_=False,
+def identity_env(*, name=None, scope=None, global_=False,
                  project=None, directors=()) -> dict:
     """The claim, stamped where the CLI reads it.
 
@@ -162,8 +162,6 @@ def identity_env(*, name=None, slot=None, scope=None, global_=False,
     env.update(directors_mod.stamp(directors))
     if name:
         env["MOXI_COMMS_NAME"] = name
-    if slot is not None:
-        env["MOXI_COMMS_SLOT"] = str(slot)
     if global_:
         env["MOXI_COMMS_GLOBAL"] = "1"
         env["MOXI_COMMS_SCOPE"] = GLOBAL
@@ -177,7 +175,7 @@ def identity_env(*, name=None, slot=None, scope=None, global_=False,
 class Session:
     """Everything one launched session needs, written down in one place."""
 
-    def __init__(self, session_id: str, *, name=None, slot=None, scope=None,
+    def __init__(self, session_id: str, *, name=None, scope=None,
                  global_=False, project=None, directors=(), native=None, comms=None):
         self.id = session_id
         #: How the launching install's comms is run (`context.own_comms`), stamped as
@@ -190,7 +188,6 @@ class Session:
         # The caller's LABEL for `-n` (`--native-name`).
         # None = the identity spelling, `native_name()`, as before.
         self.native = native
-        self.slot = slot
         # Neither `--scope` nor `--global` is exactly `--global`: a session binds in a
         # project scope only when its launch names one. The project still feeds the
         # session's environment; it is not the scope.
@@ -208,7 +205,7 @@ class Session:
     def env(self, base=None) -> dict:
         """The session's environment: the identity stamp, the claim socket and the
         launcher's comms command, over a scrubbed `base`."""
-        env = stamped_env(base, name=self.name, slot=self.slot, scope=self.scope,
+        env = stamped_env(base, name=self.name, scope=self.scope,
                           global_=self.global_, project=self.project,
                           directors=self.directors)
         env[CLAIM_SOCKET_ENV] = str(self.claim_socket)   # scrubbed above; this session's
@@ -278,53 +275,6 @@ class Session:
     def native_label(self) -> str:
         """What `-n` carries: the launcher's label or the identity spelling."""
         return self.native or native_name(self.name, self.scope)
-
-
-# ----------------------------------------------------------- the bundle must exist
-
-def provisioned_slots(env=None) -> list[int]:
-    """The comms slot numbers this box holds a token bundle for, ascending.
-
-    `owners_present` is a key-level question of the declared store boundary: which holders
-    have a file, never what any of them holds.
-    """
-    from ..tokens import TokenStore
-    store = TokenStore(env=env if env is not None else os.environ)
-    out = []
-    for key in store.owners_present():
-        head, _, _ = key.partition("/")
-        if head.startswith("slot-") and head[5:].isdigit():
-            out.append(int(head[5:]))
-    return sorted(set(out))
-
-
-def unprovisioned(slot: int, env=None) -> str | None:
-    """Why `--comm-slot <slot>` cannot launch, or None when its bundle is present.
-
-    Reads the token store the way the shim will at bind (`owner_for_slot`), so a
-    refusal here and a silent unbound session there cannot disagree. A store that
-    refuses to be read (loose permissions) is reported as that, not as absence.
-
-    The question is whether the bundle EXISTS, so it is asked of the holder's keys and
-    no credential is read to answer it. `secret_ids` is the store's key-level half of
-    that boundary, and it answers for a holder whose file carries posting tokens and no
-    machine token, which `read` by its meaning cannot.
-    """
-    from ..tokens import TokenStore, TokenStoreError, owner_for_slot
-    store = TokenStore(env=env if env is not None else os.environ)
-    try:
-        present = bool(store.secret_ids(owner_for_slot(slot)))
-    except TokenStoreError as e:
-        return f"--comm-slot {slot}: the token store could not answer: {e}"
-    if present:
-        return None
-    have = provisioned_slots(env)
-    inventory = (f"provisioned comms slots on this box: {', '.join(map(str, have))}"
-                 if have else "this box has no provisioned comms slot at all")
-    return (f"--comm-slot {slot} names no provisioned webhook bundle ({inventory}). "
-            f"A session launched on it would register against nothing and come up "
-            f"comms-mute, so this is a refusal. Pick a provisioned number, or run "
-            f"moxi-comms-provision to add bundles.")
 
 
 # --------------------------------------------------------------------------- main
@@ -432,10 +382,7 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
         description="start a Claude Code session with a comms identity",
         epilog="anything after -- is passed to claude unchanged")
     ap.add_argument("--name", help="claim this chosen (or standing) name")
-    ap.add_argument("--comm-slot", dest="slot",
-                    help="spend this comms slot's webhook bundle ('next-free' or a "
-                         "provisioned number). Operator inventory, never an identity: it "
-                         "requires --name.")
+    ap.add_argument("--comm-slot", dest="retired_slot", help=argparse.SUPPRESS)
     ap.add_argument("--scope", help="a project scope, only to keep apart two agents of one "
                                     "name in different projects (default: global)")
     ap.add_argument("--global", dest="global_", action="store_true")
@@ -463,28 +410,19 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
         print(f"{prog}: {e}", file=sys.stderr)
         return 2
 
-    slot = args.slot
-    if slot is not None and slot != "next-free":
-        try:
-            slot = int(slot)
-        except ValueError:
-            print(f"{prog}: --comm-slot {args.slot!r} is not a number or 'next-free'",
-                  file=sys.stderr)
-            return 2
+    if args.retired_slot is not None:
+        print(f"{prog}: --comm-slot is retired; remove it: comms has no slots.",
+              file=sys.stderr)
+        return 2
     if not args.name:
         # A claim is a NAME. An auto-named claim resolves to `agent-N` only when the shim
         # registers, which happens after this process has already handed the environment
-        # to claude, so there is no honest MOXI_COMMS_NAME to stamp -- and a slot is no
-        # substitute: a slot alone would stamp a nameless claim whose verb then wore
-        # `slot-3` on the wire, a fabricated identity.
-        # Refuse rather than stamp a seat where a name belongs.
+        # to claude, so there is no honest MOXI_COMMS_NAME to stamp.
         print(f"{prog}: pass --name <name>.\n"
               "  A claim is a name: it is what the record shows, what a recipient's frame\n"
               "  line says, and what `moxi comms send` speaks as. `agent-N` is minted by the\n"
               "  daemon at register time — after this launcher has handed the session its\n"
-              "  environment — so there is no identity to stamp into it, and --comm-slot\n"
-              "  names a webhook bundle, not an agent. Add --name; --comm-slot <n> may ride\n"
-              "  with it.",
+              "  environment — so there is no identity to stamp into it. Add --name.",
               file=sys.stderr)
         return 2
     if not NAME_RE.match(args.name):
@@ -498,17 +436,6 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
               "half goes in --scope or --global, never in the name.", file=sys.stderr)
         return 2
 
-    if isinstance(slot, int):
-        # A pinned bundle number must EXIST. A launch that pins a slot the box does not
-        # have registers against nothing: the shim exits and the session comes up
-        # unbound and silent. Presence is the token store's answer -- the same
-        # file the shim would read at bind -- so the refusal and the failure it prevents
-        # have one source of truth.
-        reason = unprovisioned(slot, env=os.environ)
-        if reason:
-            print(f"{prog}: {reason}", file=sys.stderr)
-            return 2
-
     import uuid
     try:
         stated, named_argv = launch_session_id(passthrough, args.session_id)
@@ -520,7 +447,7 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
     session_id = stated or (args.session_id or "").lower() or uuid.uuid4().hex[:8]
     try:
         session = Session(session_id, name=args.name,
-                          slot=slot, scope=args.scope, global_=args.global_,
+                          scope=args.scope, global_=args.global_,
                           project=args.project,
                           directors=args.director, native=args.native,
                           comms=own_comms())
@@ -656,7 +583,7 @@ def _adapter_process(session: Session, env: dict, harness_pid: int, handle: int,
 
 
 def adapter_shim(session: Session, harness_pid: int, **extra):
-    """The session's `ClaudeShim`: its claim (name, slot, scope, directors) keyed by the
+    """The session's `ClaudeShim`: its claim (name, scope, directors) keyed by the
     session id, its claim socket in the session's directory with the `claude` process as
     the claim's root, and its supervisor on. The session id is the one the launch named
     to `claude`, stated from the bind until the first look replaces it; an
@@ -666,8 +593,7 @@ def adapter_shim(session: Session, harness_pid: int, **extra):
     from .claude_shim import ClaudeShim
 
     root = root_of(harness_pid, TREE)
-    shim = ClaudeShim(slot=session.slot if session.slot is not None else "next-free",
-                      name=session.name, scope=None if session.global_ else session.scope,
+    shim = ClaudeShim(name=session.name, scope=None if session.global_ else session.scope,
                       global_=session.global_, project=session.project,
                       directors=session.directors, autoreconnect=True,
                       session_id="", claim_key=session.id,

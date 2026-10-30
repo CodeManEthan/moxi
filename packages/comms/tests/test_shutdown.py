@@ -39,17 +39,17 @@ def _deliver(shim, message_id):
 
 
 def test_a_replayed_message_already_queued_is_dropped(rig):
-    shim = rig.shim(slot=1, name="planner", scope="proj-a")
+    shim = rig.shim(name="planner", scope="proj-a")
     _deliver(shim, "329")
     _deliver(shim, "329")
     assert [p["message_id"] for p in shim.queue] == ["329"]
 
 
 def _one_real_delivery(rig):
-    planner = rig.shim(slot=1, name="planner", scope="proj-a")
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    planner = rig.shim(name="planner", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     code, _ = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "the parser diff"],
-                      slot=planner.slot_id, name="planner", scope="proj-a")
+                      name="planner", scope="proj-a")
     assert code == 0
     wait_for_queue(reviewer, 1)
     return reviewer, dict(reviewer.queue[0])

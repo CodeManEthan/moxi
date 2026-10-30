@@ -76,30 +76,30 @@ def write(tmp_path, text):
 
 
 def test_a_row_loads_with_the_default_model_and_its_session_file(tmp_path):
-    path = write(tmp_path, '[agents."coder@proj-a"]\nslot = 6\ncwd = "/w"\n'
+    path = write(tmp_path, '[agents."coder@proj-a"]\ncwd = "/w"\n'
                            'directors = ["main"]\n')
     agent = roster.load(path).require("coder@proj-a")
-    assert (agent.slot, agent.cwd, agent.models) == (6, "/w", list(roster.DEFAULT_MODELS))
+    assert (agent.cwd, agent.models) == ("/w", list(roster.DEFAULT_MODELS))
     assert agent.session_file == roster.session_path("coder@proj-a")
     assert agent.directors == ["main"], "a bare director is the global identity"
     env = agent.env({"MOXI_COMMS_DIRECTORS": "boss@x", "PATH": "/bin"})
-    assert (env["MOXI_COMMS_NAME"], env["MOXI_COMMS_SLOT"], env["MOXI_COMMS_SCOPE"]) == \
-        ("coder", "6", "proj-a")
+    assert (env["MOXI_COMMS_NAME"], env["MOXI_COMMS_SCOPE"]) == ("coder", "proj-a")
+    assert "MOXI_COMMS_SLOT" not in env
     assert env["MOXI_COMMS_DIRECTORS"] == "main", "the launcher's own grant never leaks"
 
 
 def test_a_model_list_names_the_default_and_then_its_fallbacks(tmp_path):
-    path = write(tmp_path, '[agents."coder@proj-a"]\nslot = 6\ncwd = "/w"\n'
+    path = write(tmp_path, '[agents."coder@proj-a"]\ncwd = "/w"\n'
                            'model = ["opencode/a", "opencode/b"]\n')
     assert roster.load(path).require("coder@proj-a").models == ["opencode/a", "opencode/b"]
 
 
 @pytest.mark.parametrize("row,why", [
-    ('cwd = "/w"\n', "no slot"),
-    ('slot = 6\n', "no cwd"),
-    ('slot = 6\ncwd = "/w"\nmodel = "nope"\n', "provider/model"),
-    ('slot = 6\ncwd = "/w"\nport = 4096\n', "unknown key"),
-    ('slot = 6\ncwd = "/w"\napi_key = "sk-abcdefghijklmnopqrstuvwxyz0123456789"\n', ""),
+    ('slot = 6\ncwd = "/w"\n', "remove it: comms has no slots"),
+    ('model = "nope"\n', "no cwd"),
+    ('cwd = "/w"\nmodel = "nope"\n', "provider/model"),
+    ('cwd = "/w"\nport = 4096\n', "unknown key"),
+    ('cwd = "/w"\napi_key = "sk-abcdefghijklmnopqrstuvwxyz0123456789"\n', ""),
 ])
 def test_a_bad_row_is_refused(tmp_path, row, why):
     path = write(tmp_path, f'[agents."coder@proj-a"]\n{row}')
@@ -116,15 +116,15 @@ def test_an_identity_the_roster_does_not_name_starts_nothing(tmp_path):
 
 def test_a_row_takes_the_default_model_it_does_not_name(tmp_path):
     write(tmp_path, '[opencode.defaults]\nmodel = "opencode/d"\n'
-                    '[agents."coder@proj-a"]\nslot = 6\ncwd = "/w"\n'
-                    '[agents."other@proj-a"]\nslot = 7\ncwd = "/w"\nmodel = "opencode/o"\n')
+                    '[agents."coder@proj-a"]\ncwd = "/w"\n'
+                    '[agents."reviewer@proj-a"]\ncwd = "/w"\nmodel = "opencode/o"\n')
     loaded = roster.load()
     assert loaded.require("coder@proj-a").models == ["opencode/d"]
-    assert loaded.require("other@proj-a").models == ["opencode/o"]
+    assert loaded.require("reviewer@proj-a").models == ["opencode/o"]
 
 
 @pytest.mark.parametrize("row,why", [
-    ("slot = 6\n", "one identity's own"),
+    ("slot = 6\n", "remove it: comms has no slots"),
     ('session_file = "/tmp/s.json"\n', "one identity's own"),
     ("port = 4096\n", "unknown key"),
     # The defaults hold the model alone.

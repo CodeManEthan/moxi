@@ -43,7 +43,7 @@ import pytest
 from conftest import (assistant_line, cache_absent, cache_api, projects_root, record_rows,
                       send_turn, wait_for_queue, wait_until, write_transcript)
 
-from moxi_comms import cache, cli, cursors, machine_line, paths, sending
+from moxi_comms import cache, cli, cursors, machine_line, paths
 from moxi_comms.adapters.claude_shim import ClaudeShim
 from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import Daemon
@@ -57,8 +57,8 @@ from test_cold_sends import bind, reboot  # noqa: F401
 
 import shim_drive
 
-PLANNER = dict(slot=1, name="planner", scope="proj-a")
-REVIEWER = dict(slot=2, name="reviewer", scope="proj-a")
+PLANNER = dict(name="planner", scope="proj-a")
+REVIEWER = dict(name="reviewer", scope="proj-a")
 REVIEWER_Q = "reviewer@proj-a"
 HELPER_Q = "helper@proj-a"            # a bare claude-shim binding (`bare_shim`)
 CODER_Q = "coder@proj-a"              # a codex agent
@@ -71,10 +71,9 @@ SESS_BLANK = "eeeeeeee-5555-4555-8555-555555555555"
 
 HOUR = 3600
 
-AS_AGENT = dict(slot=PLANNER["slot"], name=PLANNER["name"], scope=PLANNER["scope"],
-                env=None)
-AS_OPERATOR = dict(slot=None, name=None, scope=None, env={"MOXI_COMMS_OPERATOR": "900001"})
-AS_CONSOLE = dict(slot=None, name="console", scope="acme", env=None)
+AS_AGENT = dict(name=PLANNER["name"], scope=PLANNER["scope"], env=None)
+AS_OPERATOR = dict(name=None, scope=None, env={"MOXI_COMMS_OPERATOR": "900001"})
+AS_CONSOLE = dict(name="console", scope="acme", env=None)
 LANES = [AS_AGENT, AS_OPERATOR, AS_CONSOLE]
 LANE_IDS = ["agent", "operator", "console"]
 
@@ -172,24 +171,13 @@ def nudge(rig):
         rig.gateway.nudge()
 
 
-def post(rig, recipients, text="past the verb", *, next_turn=False, slot=6,
+def post(rig, recipients, text="past the verb", *, next_turn=False,
          display="planner@proj-a", cold_at=None):
-    """A post straight to the record through a slot's webhook, past the verb, then a
-    nudge: what a process that skips `comms send` does. Line zero carries no
+    """A stamped setup row past the verb, then a nudge: what a process that skips
+    `comms send` does. Line zero carries no
     `[cold-at:…]` token unless `cold_at` gives its values."""
-    from moxi_comms import directory
-    from moxi_comms.mock_gateway import NO_MENTIONS
-    from moxi_comms.sender import SenderIdentity, credential_for
-    db = directory.connect(paths.directory_db(), read_only=True)
-    try:
-        cred, _ = credential_for(rig.gateway, db,
-                                 SenderIdentity.for_slot(slot, display, "global"))
-    finally:
-        db.close()
-    msg = rig.gateway.execute_webhook(
-        cred, machine_line.compose(list(recipients), text, next_turn=next_turn,
-                                   cold_at=cold_at),
-        username=display, allowed_mentions=NO_MENTIONS)
+    msg = rig.post_as(display, list(recipients), text, next_turn=next_turn,
+                      cold_at=cold_at)
     nudge(rig)
     return msg
 
@@ -213,8 +201,7 @@ def raw_ready(pushes, q, source):
 
 
 def send(rig, to, text="hello", *flags, who=AS_AGENT):
-    return rig.cli(["send", "--posture", "none", to, text, *flags], slot=who["slot"], name=who["name"],
-                   scope=who["scope"], env=who["env"])
+    return rig.send(to, text, *flags, sender=who)
 
 
 class Pushes:
@@ -259,7 +246,7 @@ def bare_shim(adapters, name="helper", sid=SESS_D, age=None, **kw):
     clock as a shim's, and records what the daemon pushes."""
     if sid and age is not None:
         write_transcript(sid, age)
-    return adapters(slot=kw.get("slot", 3), name=name, scope="proj-a", adapter="claude-shim",
+    return adapters(name=name, scope="proj-a", adapter="claude-shim",
                     session_id=sid or SESS_BLANK, projects_root=str(projects_root()),
                     turned=bool(sid))
 
@@ -325,7 +312,7 @@ def _hold_state(rig, adapters, state, tmp_path=None):
     to."""
     if state in ("codex cold", "opencode cold"):
         kind = state.split()[0]
-        adapters(slot=5, name="coder", scope="proj-a", adapter=kind,
+        adapters(name="coder", scope="proj-a", adapter=kind,
                  report=cold_harness_report(kind, tmp_path))
         return CODER_Q
     if state == "cold":
@@ -349,7 +336,7 @@ def _hold_state(rig, adapters, state, tmp_path=None):
         bare_shim(adapters, sid=SESS_D, age=3 * HOUR)
         return HELPER_Q
     if state in ("codex", "opencode"):
-        adapters(slot=5, name="coder", scope="proj-a", adapter=state)
+        adapters(name="coder", scope="proj-a", adapter=state)
         return CODER_Q
     raise AssertionError(state)
 
@@ -365,7 +352,7 @@ def _bind_lane(bind, who):
     """The console's lane holds a binding of its own, as a send-only console does, so a
     post that goes has a credential to go with."""
     if who is AS_CONSOLE:
-        bind(slot=6, name="console", scope="acme")
+        bind(name="console", scope="acme")
 
 
 @pytest.mark.parametrize("state", HELD_STATES + REFUSED_STATES)
@@ -542,7 +529,7 @@ def test_the_refusal_text_for_an_unreadable_codex_recipient(rig, adapters):
     cold reviewer beside it included; "Nothing was sent." first and last, the way to
     reach the others, the retry, and no `held:` line and no re-run line."""
     shim(rig, SESS_A, age=2 * HOUR)
-    adapters(slot=5, name="coder", scope="proj-a", adapter="codex")
+    adapters(name="coder", scope="proj-a", adapter="codex")
     code, out = send(rig, "reviewer@proj-a,coder@proj-a")
     assert code == cli.EXIT_COLD and posted(rig) == []
     assert out.splitlines() == [
@@ -564,7 +551,7 @@ def test_a_caller_past_the_verb_is_still_held(rig):
                            held=False, standing=False, audience=None,
                            posture="none", new=False, reply_to=None)
     out = io.StringIO()
-    planner = SenderIdentity.for_slot(1, "planner@proj-a", "proj-a", name="planner")
+    planner = SenderIdentity(qualified="planner@proj-a", scope="proj-a", name="planner")
     with rig.session_holding(planner) as claim_socket:
         ctx = cli.Context(gateway=rig.gateway, db_path=paths.directory_db(),
                           socket_path=paths.daemon_socket(),
@@ -602,9 +589,9 @@ def test_reply_cold_is_argparses_error_from_every_sender(rig, bind, who):
     _lane_posts(rig, who)
     _bind_lane(bind, who)
     shim(rig, SESS_A, age=60)
-    ask = rig.post_from_slot(6, ["planner@proj-a"], "q?", display=REVIEWER_Q)
+    ask = rig.post_as(REVIEWER_Q, ["planner@proj-a"], "q?")
     with pytest.raises(SystemExit) as exc:
-        rig.cli(["reply", ask.id, "a.", "--cold"], slot=who["slot"],
+        rig.cli(["reply", ask.id, "a.", "--cold"],
                 name=who["name"], scope=who["scope"], env=who["env"])
     assert exc.value.code == 2
     assert posted(rig) == [ask]
@@ -703,7 +690,7 @@ def cold_harness_report(kind, tmp_path) -> dict:
 def test_a_codex_or_opencode_recipient_is_held(rig, adapters, kind, tmp_path):
     """A cold codex or opencode agent is held like any, a row, not refused. Its
     compaction (`ready source=compact`) releases the row with no read."""
-    coder = adapters(slot=5, name="coder", scope="proj-a", adapter=kind,
+    coder = adapters(name="coder", scope="proj-a", adapter=kind,
                      report=cold_harness_report(kind, tmp_path))
     assert rig.daemon._read(rig.daemon.bindings[CODER_Q]).kind == "cold"
     msg = post(rig, [CODER_Q])
@@ -722,7 +709,7 @@ def test_a_model_with_no_lifetime_row_reads_no_cache_and_goes_live(rig, adapters
     live, never queued for the missing row."""
     from test_cache_clock import BUILD_NULL, SID, real_oc
     db = real_oc(tmp_path, 3 * HOUR, provider="nowhere", model="unlisted-model")
-    coder = adapters(slot=5, name="coder", scope="proj-a", adapter="opencode",
+    coder = adapters(name="coder", scope="proj-a", adapter="opencode",
                      report={"session_id": SID, "cache_source": str(db.path),
                              "turned": True, "agent_model": BUILD_NULL})
     clock = rig.daemon._read(rig.daemon.bindings[CODER_Q])
@@ -754,7 +741,7 @@ def test_held_mail_at_a_codex_bind_waits_for_a_real_boundary(rig, adapters, kind
     opencode register, never refused, and goes at its session start."""
     held = post(rig, [CODER_Q], "later", next_turn=True)
     assert wait_until(lambda: held.id in held_of(rig, CODER_Q))
-    coder = adapters(slot=5, name="coder", scope="proj-a", adapter=kind,
+    coder = adapters(name="coder", scope="proj-a", adapter=kind,
                      report=cold_harness_report(kind, tmp_path))
     time.sleep(0.2)
     assert coder.ids() == [] and held_of(rig, CODER_Q) == {held.id}
@@ -795,7 +782,7 @@ def test_replays_cursor_never_passes_a_cold_held_id(rig):
     pushes = Pushes()
     c = DaemonClient(daemon_socket(), on_push=pushes).connect()
     try:
-        c.register(slot=2, name="reviewer", scope="proj-a", adapter="claude-shim",
+        c.register(name="reviewer", scope="proj-a", adapter="claude-shim",
                    session_id=SESS_A, projects_root=str(projects_root()), turned=True)
         wait_until(lambda: any(f.get("op") == "replay_complete" for f in pushes.frames))
         (done,) = [f for f in pushes.frames if f.get("op") == "replay_complete"]
@@ -850,7 +837,7 @@ def test_a_cold_bare_bindings_row_survives_its_unbind_and_a_restart_and_goes_at_
     write_transcript(SESS_D, 5)                       # warm, for the SESS_D round
     reboot(rig)
     assert held_of(rig, HELPER_Q) == {msg.id}
-    again = bare_shim(adapters, sid=anchor, slot=3)
+    again = bare_shim(adapters, sid=anchor)
     assert wait_until(lambda: again.ids() == [msg.id]), anchor
     assert again.delivered()[0]["held"] is True
 
@@ -998,13 +985,13 @@ def test_checked_warm_and_cold_at_delivery_is_held(rig, monkeypatch):
     """The verb reads warm; the clock crosses the hour before the daemon routes the
     post. The daemon's gate holds it, after the sender was told `sent`."""
     s = shim(rig, SESS_A, age=60)
-    real = sending.post
+    real = DaemonClient.post
 
     def late(*a, **kw):
         write_transcript(SESS_A, HOUR + 5)          # the hour passes in between
         return real(*a, **kw)
 
-    monkeypatch.setattr(sending, "post", late)
+    monkeypatch.setattr(DaemonClient, "post", late)
     code, out = send(rig, REVIEWER_Q, "just in time?")
     assert code == 0 and out.startswith("sent ")
     mid = out.split()[1]
@@ -1045,7 +1032,7 @@ def test_a_fresh_read_passes_at_a_turn(rig):
 def test_a_second_binding_reporting_a_held_session_id_is_refused(rig, caplog):
     first = shim(rig, SESS_A, age=60)
     with caplog.at_level("WARNING", logger="comms.daemon"):
-        other = rig.shim(slot=4, name="main", scope="proj-a", session_id=SESS_A)
+        other = rig.shim(name="main", scope="proj-a", session_id=SESS_A)
     assert rig.daemon.bindings[REVIEWER_Q].session_id == SESS_A, "the first keeps it"
     assert rig.daemon.bindings["main@proj-a"].session_id is None
     assert "held by the live binding reviewer@proj-a" in caplog.text
@@ -1106,7 +1093,7 @@ def _old_shim_register(session_id, **extra):
     """A register as an older shim sends it: a session id, no root."""
     pushes = Pushes()
     c = DaemonClient(daemon_socket(), on_push=pushes).connect()
-    c.register(slot=2, name="reviewer", scope="proj-a", adapter="claude-shim",
+    c.register(name="reviewer", scope="proj-a", adapter="claude-shim",
                session_id=session_id, **extra)
     pushes.client = c
     return pushes

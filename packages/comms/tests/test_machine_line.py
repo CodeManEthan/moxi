@@ -155,8 +155,7 @@ def test_a_malformed_audience_makes_the_whole_line_prose():
         "::to a [audience:operator] re:1400000000001",         # before re: is out of place
         "::to a [reply-once] [audience:operator]",             # after the posture too
         "::to [audience:operator] a",                          # never part of the tag list
-        "::to a, [audience:operator]",
-    )
+        "::to a, [audience:operator]")
     for line in bad:
         assert ml.parse(f"{line}\nhi") is None, line
 

@@ -1,7 +1,7 @@
 """`moxi comms doctor`: read-only, every fact in one place.
 
 It prints the device and comms' five directories under Moxi's roots, the config file,
-the backend and where it came from, the provisioned slots, the secrets chain, the
+the backend and where it came from, the secrets chain, the
 adapter binaries on PATH with their versions, and whether the daemon answers. It writes
 nothing and exits 0 unless the daemon is configured and down.
 """
@@ -58,16 +58,8 @@ def test_a_box_with_its_daemon_up(rig):
     assert r["secrets"] == "env, store (the default)"
     assert r["daemon"].startswith("answers at ")
     assert set(r) == {"device", "DATA", "STATE", "CACHE", "CONFIG", "RUNTIME", "config",
-                      "backend", "slots", "secrets", "cache", "claude", "codex", "opencode",
+                      "backend", "secrets", "cache", "claude", "codex", "opencode",
                       "daemon", "waiting", "turns"}, out
-
-
-def test_the_slots_row_on_an_empty_local_box_names_the_first_start():
-    path = config.config_path()
-    path.parent.mkdir(parents=True)
-    path.write_text("[provision]\nslots = 3\n")
-    _, out = doctor(env={"PATH": ""})
-    assert rows(out)["slots"] == "none yet (the daemon provisions 3 on its first start)"
 
 
 def test_adapter_binaries_and_their_versions(tmp_path):
@@ -130,4 +122,3 @@ def test_a_real_doctor_process_runs_as_moxi_comms(tmp_path):
                            capture_output=True, text=True, timeout=60)
     assert usage.stdout.startswith("usage: moxi comms ")
     assert not (tmp_path / "u").exists()
-

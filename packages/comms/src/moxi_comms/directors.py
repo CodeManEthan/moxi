@@ -12,7 +12,7 @@ exist and nothing else does.
 
   * the DECLARATION -- qualified ONCE, at launch, and stamped into the session
     environment as `MOXI_COMMS_DIRECTORS` (comma-separated, qualified) beside the identity
-    stamp `MOXI_COMMS_NAME` / `MOXI_COMMS_SCOPE` / `MOXI_COMMS_SLOT`;
+    stamp `MOXI_COMMS_NAME` / `MOXI_COMMS_SCOPE`;
   * the RENDERING -- `standing_of()`, which both adapters' frame line asks about every
     delivered payload before it writes the line.
 
@@ -23,7 +23,7 @@ would quietly turn it into something else. One spelling per identity, decided at
 launcher and the roster: a bare director is the global identity, `name@scope` is that
 scope's.
 
-Directive standing requires VERIFIED attribution (webhook_id -> directory row). A
+Directive standing requires VERIFIED attribution. A
 declared director whose message is not verified degrades to information standing and
 the frame line says why (it renders `(unverified)` and the reason; the wire value is
 still `labeled`) -- standing-tier directors are the recommended shape because they stay

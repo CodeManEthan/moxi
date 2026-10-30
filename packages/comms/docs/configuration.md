@@ -17,7 +17,7 @@ comms keeps its files in its own five directories under Moxi's roots:
 | directory | default | holds |
 |---|---|---|
 | DATA/comms | `~/.local/share/moxi/comms/` | `directory.db`, `bindings.db`, `cards/` |
-| STATE/comms | `~/.local/state/moxi/<device>/comms/` | `record.db`, `cursors/`, `tokens/`, `slot-keeps.json`, `cold-gate.json`, `codex/`, `opencode/`, `logs/` |
+| STATE/comms | `~/.local/state/moxi/<device>/comms/` | `record.db`, `cursors/`, `tokens/`, `cold-gate.json`, `codex/`, `opencode/`, `logs/` |
 | CONFIG/comms | `~/.config/moxi/comms/` | `config.toml` |
 | CACHE/comms | `~/.cache/moxi/<device>/comms/` | nothing yet |
 | RUNTIME/comms | `$XDG_RUNTIME_DIR/moxi/comms/` | `moxi-comms-daemon.sock`, session directories, `opencode/` launch files |
@@ -78,7 +78,6 @@ cache_callers = ["operator", "planner@proj"]
 labels = { "notifier@proj" = "the notifier, which only sends" }
 
 [provision]
-slots    = 6                          # slots a first start makes
 operator = "operator"                 # the human's identity name
 
 [replay]
@@ -97,7 +96,6 @@ hours    = 24
 | `[secrets] roles` | `[]` | | role holders this box adds to comms' own four (`reader`, `daemon`, `provisioner`, `operator`). Each keys the token store under its own name; a role not listed is unknown. |
 | `[policy] cache_callers` | `["operator"]` | | the identities `moxi comms cache` answers, by qualified name. The list is whole: a box that adds a caller lists `operator` too. |
 | `[policy] labels` | `{}` | | send-only identities by qualified name, each mapped to the words the send and reply verbs use when they refuse it as a recipient. Without a label it is "a send-only identity". |
-| `[provision] slots` | `6` | | how many slots the daemon's first start provisions in an empty directory |
 | `[provision] operator` | `operator` | | the human's identity name, provisioned at first start |
 | `[replay] messages`, `hours` | `50`, `24` | | a reader with no cursor catches up on at most this many messages, none older than this many hours. The daemon reads them at use, so a change needs no restart. |
 | `[cache] required` | `false` | | makes the daemon refuse to start when the cache module is absent or broken (`moxi install comms --with cache` installs it), so the cold-send hold cannot switch off without a word. With this off, an absent or broken cache makes every agent read as having no cache and get its mail live. Read at the daemon's start. |
@@ -108,7 +106,9 @@ hours    = 24
 Retired keys, still declared so a file that sets one is told what to do: `[claude]
 channel` (comms passes Claude Code no channel),
 `[policy] never_held` (no sender is exempt from the cold-cache hold) and
-`[policy] next_turn_refused` (`--held` is accepted for every recipient). Remove them.
+`[policy] next_turn_refused` (`--held` is accepted for every recipient). The old
+`[provision] slots` key and roster `slot` key are also retired; remove them. Remove
+all retired keys.
 
 ### Choosing the backend
 
@@ -121,29 +121,26 @@ from the one the environment and config resolve, because every other comms proce
 resolves without a flag. The exception is `--gateway mock --gateway-store <file>`.
 
 A daemon on `local` whose directory isn't provisioned provisions it before it listens:
-`[provision] slots` slots, no standing identities, and the operator identity
-`[provision] operator`, which is what `moxi-comms-provision` makes with no flags. A
-directory that already holds slots is left alone. A token store that has lost tokens
+the operator identity `[provision] operator`, which is what
+`moxi-comms-provision` makes with no flags. A token store that has lost tokens
 the record expects is a refusal, not a first start (see [security.md](security.md)).
 
 ### The Codex and OpenCode rosters (experimental)
 
 The Codex and OpenCode adapters each read a roster of the identities they run, from the
-config file's `[codex]` and `[opencode]` tables. Each pins every identity to a slot:
+config file's `[codex]` and `[opencode]` tables:
 
 ```toml
 [codex.defaults]
 sandbox = "workspace-write"
 
 [codex.agents."planner@proj-a"]
-slot = 3
 cwd  = "/home/me/proj-a"
 
 [opencode.defaults]
 model = "opencode/big-pickle"
 
 [opencode.agents."reviewer@proj-a"]
-slot = 4
 cwd  = "/home/me/proj-a"
 ```
 
@@ -156,8 +153,8 @@ is set on each row. The key lists are in `adapters/codex_roster.py` and
 
 | variable | | what it does |
 |---|---|---|
-| `MOXI_COMMS_OPERATOR` | public | set in your own terminal to send as the operator, the human. Its value is the operator's user id, which `moxi-comms-provision` and the daemon's first-start log line print. The lane also needs the `operator` token in the store. A shell that also carries `MOXI_COMMS_NAME` or `MOXI_COMMS_SLOT`, or that runs inside an agent's session, is refused. |
-| `MOXI_COMMS_SECRET_<KEY>` | public | the `env` step of the secrets chain. `<KEY>` is the secret id upper-cased, with every run of non-alphanumerics folded to one underscore: `comms/slot-1/names` reads `MOXI_COMMS_SECRET_COMMS_SLOT_1_NAMES`. |
+| `MOXI_COMMS_OPERATOR` | public | set in your own terminal to send as the operator, the human. Its value is the operator's user id, which `moxi-comms-provision` and the daemon's first-start log line print. The lane also needs the operator token in the store. A shell that also carries `MOXI_COMMS_NAME`, or that runs inside an agent's session, is refused. |
+| `MOXI_COMMS_SECRET_<KEY>` | public | the `env` step of the secrets chain. `<KEY>` is the secret id upper-cased, with every run of non-alphanumerics folded to one underscore: `comms/operator/token` reads `MOXI_COMMS_SECRET_COMMS_OPERATOR_TOKEN`. |
 | `MOXI_COMMS_MOCK_GATEWAY` | test | the JSON store of the `mock` backend |
 | `CLAUDE_CONFIG_DIR` | Claude Code's | where a reader finds Claude Code's transcripts (`projects/` in it); default `~/.claude` |
 
@@ -176,7 +173,6 @@ nothing. You don't set these by hand, except to drive a test identity from a she
 | `MOXI_COMMS_NAME` | the identity's name |
 | `MOXI_COMMS_SCOPE` | its scope (a project name), or `global` |
 | `MOXI_COMMS_GLOBAL` | `1` for a global identity |
-| `MOXI_COMMS_SLOT` | the slot the identity is bound to |
 | `MOXI_COMMS_DIRECTORS` | the identity's declared directors, qualified, comma-separated |
 | `MOXI_COMMS_PROJECT` | the project key the launcher computed; also an override of it |
 

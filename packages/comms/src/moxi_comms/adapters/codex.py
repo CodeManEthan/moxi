@@ -10,9 +10,8 @@ resumes the thread, wires Codex's own hooks (`moxi-turns-ping`) with their per-l
 trust, delivers steer-first, opens the window and reaps every child when the launch ends.
 comms reaches the session only through turns' public API. What this process owns:
 
-  * one registration on the daemon socket, with the slot the roster PINS (never
-    next-free: the session's environment is stamped at launch, before any register
-    could answer), and the claim socket it stamps into that environment;
+  * one registration on the daemon socket for the roster identity, and the claim socket
+    it stamps into that environment;
   * what comms adds to the launch: the identity stamp in the environment, layer one as
     the thread's developer instructions, and the roster's Codex thread options. turns
     passes them on and reads none of them;
@@ -51,7 +50,7 @@ from ..config import ConfigError
 from ..context import BARE_COMMS, MOXI_COMMS_PATH_LINE, own_comms
 from . import codex_roster
 from .harness import (REQUEUE, SOURCE_COMPACT, SOURCE_RESUME, SOURCE_STARTUP,
-                      HarnessAdapter, launch_stamp)
+                      HarnessAdapter, launch_stamp, plan_comms, plan_head)
 
 log = logging.getLogger("comms.codex")
 
@@ -555,14 +554,9 @@ def print_plan(agent, roster, args, *, version, comms_path, write_root,
     def say(text):
         print(text, file=out)
 
-    say(f"identity   {agent.qualified} (slot {agent.slot}, pinned by the roster)")
-    say(f"  roster     {roster.source}")
-    say(f"  cwd        {agent.cwd}")
-    say(f"  thread     {codex_threads.path(agent.qualified)} "
-        "(a new thread at this launch)")
-    if agent.directors:
-        say(f"  directors  {', '.join(agent.directors)} "
-            "(verified messages from these render as directives)")
+    plan_head(agent, roster, say,
+              record=f"  thread     {codex_threads.path(agent.qualified)} "
+                     "(a new thread at this launch)")
     say(f"  sandbox    {agent.permissions or agent.sandbox} "
         f"(network {'on' if agent.network_access else 'OFF'}, approvals never by turns)")
     if not agent.permissions:
@@ -571,7 +565,7 @@ def print_plan(agent, roster, args, *, version, comms_path, write_root,
         if write_root is None:
             say(f"  writable   (nothing added: {write_root_reason})")
     say(f"  codex      {BINARY} on the session's PATH ({version})")
-    say(f"  comms      {comms_path or BARE_COMMS + ' (this environment has no moxi script)'}")
+    plan_comms(comms_path, say)
     say("  host       turns' Codex host (app-server, hooks, steer-first delivery, window)")
     if args.window:
         say(f"  log        {window_log_path(agent.qualified)}")

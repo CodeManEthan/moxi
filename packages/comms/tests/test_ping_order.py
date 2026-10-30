@@ -64,7 +64,7 @@ def settle(conn: LineConn) -> None:
 
 
 def deliver_one(rig, shim, text="for the reviewer"):
-    rig.post_from_slot(6, [IDENTITY], text)
+    rig.post_as("agent-6", [IDENTITY], text)
     wait_for_queue(shim, 1)
     return shim.queue[0]["message_id"]
 
@@ -224,7 +224,7 @@ def test_the_count_dies_with_the_connection_that_fed_it(rig, raw):
 
 def test_the_live_shim_numbers_its_pings(rig):
     """End to end: the guard is armed on the path an actual adapter takes."""
-    shim = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    shim = rig.shim(name="reviewer", scope="proj-a")
     mid = deliver_one(rig, shim)
     shim.on_turn_boundary()
     assert wait_until(lambda: rig.daemon.injected_through.get(IDENTITY) == mid)
@@ -235,7 +235,7 @@ def test_the_live_shim_numbers_its_pings(rig):
 # ------------------------------------------------------- the digest, read at runtime
 
 def test_the_last_injected_digest_is_readable_for_a_live_identity(rig):
-    shim = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    shim = rig.shim(name="reviewer", scope="proj-a")
     mid = deliver_one(rig, shim, "the body an explainer has to be able to show")
     digest = shim.on_turn_boundary()
     assert wait_until(lambda: rig.daemon.injected_digest.get(IDENTITY))
@@ -249,12 +249,12 @@ def test_the_last_injected_digest_is_readable_for_a_live_identity(rig):
 
 
 def test_a_second_injection_replaces_the_first(rig):
-    shim = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    shim = rig.shim(name="reviewer", scope="proj-a")
     deliver_one(rig, shim, "the older one")
     first = shim.on_turn_boundary()
     assert wait_until(lambda: rig.daemon.injected_digest.get(IDENTITY) == first)
 
-    rig.post_from_slot(6, [IDENTITY], "the newer one")
+    rig.post_as("agent-6", [IDENTITY], "the newer one")
     wait_for_queue(shim, 1)
     second = shim.on_turn_boundary()
     assert wait_until(lambda: rig.daemon.injected_digest.get(IDENTITY) == second)
@@ -263,14 +263,14 @@ def test_a_second_injection_replaces_the_first(rig):
 
 
 def test_a_bound_identity_with_nothing_injected_yet_reads_empty(rig):
-    rig.shim(slot=2, name="reviewer", scope="proj-a")
+    rig.shim(name="reviewer", scope="proj-a")
     answer = ask_injected()
     assert (answer["identity"], answer["bound"]) == (IDENTITY, True)
     assert answer["through"] is None and answer["digest"] is None
 
 
 def test_an_unbound_name_answers_rather_than_refusing(rig):
-    rig.shim(slot=2, name="reviewer", scope="proj-a")
+    rig.shim(name="reviewer", scope="proj-a")
     answer = ask_injected("nobody@proj-a")
     assert answer["bound"] is False
     assert answer["digest"] is None and answer["through"] is None
@@ -279,7 +279,7 @@ def test_an_unbound_name_answers_rather_than_refusing(rig):
 def test_the_digest_dies_with_the_binding(rig):
     """Runtime state for a LIVE identity, not a history. When the adapter goes, so does
     the text -- exactly as `injected_through` already behaves."""
-    shim = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    shim = rig.shim(name="reviewer", scope="proj-a")
     deliver_one(rig, shim)
     shim.on_turn_boundary()
     assert wait_until(lambda: rig.daemon.injected_digest.get(IDENTITY))

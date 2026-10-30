@@ -286,10 +286,8 @@ def oc_db(tmp_path, **session) -> OcDb:
 
 
 
-def free_db(tmp_path, *, last=("opencode", "big-pickle"), age=600, model=...,
-            **session) -> OcDb:
-    db = oc_db(tmp_path, model=("opencode", "big-pickle") if model is ... else model,
-               **session)
+def free_db(tmp_path, *, last=("opencode", "big-pickle"), age=600, model=..., **session) -> OcDb:
+    db = oc_db(tmp_path, model=("opencode", "big-pickle") if model is ... else model, **session)
     if last is not None:
         db.request(SID, NOW - age, *last)
     return db
@@ -334,7 +332,7 @@ def codex_bind(adapters, root, *, tid=TID, turned=True, new_session=False, **ext
         report["cache_source"] = str(root)
     if tid:
         report.update(session_id=tid, turned=turned)
-    return adapters(slot=5, name="coder", scope="proj-a", adapter="codex", report=report)
+    return adapters(name="coder", scope="proj-a", adapter="codex", report=report)
 
 
 def oc_bind(adapters, db, *, sid=SID, turned=True, new_session=False,
@@ -344,7 +342,7 @@ def oc_bind(adapters, db, *, sid=SID, turned=True, new_session=False,
         report["cache_source"] = str(db.path)
     if sid:
         report.update(session_id=sid, turned=turned)
-    return adapters(slot=5, name="coder", scope="proj-a", adapter="opencode",
+    return adapters(name="coder", scope="proj-a", adapter="opencode",
                     report=report)
 
 
@@ -432,7 +430,7 @@ def test_a_resumed_identity_on_a_cold_or_unread_session_queues_its_backlog(
 @pytest.mark.parametrize("kind", ["codex", "opencode"])
 def test_a_launcher_that_reports_none_of_the_new_fields_is_queued(rig, adapters,
                                                                       kind):
-    coder = adapters(slot=5, name="coder", scope="proj-a", adapter=kind)
+    coder = adapters(name="coder", scope="proj-a", adapter=kind)
     msg = post(rig, [CODER_Q])
     assert queued(rig, msg)
     assert coder.ids() == []
@@ -455,7 +453,7 @@ def test_the_fields_come_from_the_bindings_own_connection(rig, adapters, tmp_pat
     msg = post(rig, [CODER_Q])
     assert delivered(coder, msg)
     # A thread id another live binding holds is refused.
-    other = adapters(slot=6, name="other", scope="proj-a", adapter="codex",
+    other = adapters(name="other", scope="proj-a", adapter="codex",
                      report={"session_id": TID, "cache_source": str(root), "turned": True})
     assert rig.daemon.bindings["other@proj-a"].session_id is None
     assert other is not None
@@ -530,7 +528,7 @@ def test_an_exception_inside_a_reader_queues(rig, adapters, tmp_path, monkeypatc
 
 def test_went_cold_is_the_age_less_the_lifetime_for_claude_too(rig):
     write_transcript(CLAUDE_SID, 2 * 3600 + 600)
-    rig.shim(slot=2, name="reviewer", scope="proj-a", session_id=CLAUDE_SID)
+    rig.shim(name="reviewer", scope="proj-a", session_id=CLAUDE_SID)
     code, out = send(rig, "reviewer@proj-a")
     assert code == 0, out                  # cold-hold: posted and held
     assert out.splitlines()[1].startswith("held: reviewer@proj-a's cache went cold 1h10m "
@@ -749,7 +747,7 @@ def codex_launcher(rig, tmp_path):
 
     def build(*, session=None, start=True, autoreconnect=False):
         session = session or FakeSession(f"thread-{next(numbers)}")
-        agent = CodexAgent(qualified=CODER_Q, name="coder", scope="proj-a", slot=5,
+        agent = CodexAgent(qualified=CODER_Q, name="coder", scope="proj-a",
                            cwd=str(tmp_path), thread_file=codex_threads.path(CODER_Q))
         adapter = CodexAdapter(
             agent, launch=fake_turns_launcher(session), autoreconnect=autoreconnect,
@@ -788,7 +786,7 @@ def test_a_new_thread_after_no_record(rig, codex_launcher):
     assert [report for register, report in adapter.reports if not register][0] == {
         "session_id": adapter.thread_id, "turned": False,
         "cache_source": adapter.cache_source()}
-    assert binding(rig).session_id == adapter.thread_id
+    assert wait_until(lambda: binding(rig).session_id == adapter.thread_id)
     assert binding(rig).turned is False
 
 
@@ -805,7 +803,7 @@ def test_every_launch_registers_a_new_session_and_starts_unturned(
     assert second.thread_id != old
     assert [report for register, report in second.reports if register][0][
         "new_session"] is True
-    assert binding(rig).session_id == second.thread_id
+    assert wait_until(lambda: binding(rig).session_id == second.thread_id)
     assert binding(rig).turned is False
 
 
@@ -896,7 +894,7 @@ def oc_launcher(rig, tmp_path, monkeypatch):
 
     def build(*, start=True):
         agent = opencode_roster.OpenCodeAgent(
-            qualified=CODER_Q, name="coder", scope="proj-a", slot=5,
+            qualified=CODER_Q, name="coder", scope="proj-a",
             cwd=str(tmp_path / "work"), session_file=opencode_roster.session_path(CODER_Q),
             models=["opencode/minimax-m3.1-flash-free"])
         (tmp_path / "work").mkdir(exist_ok=True)
@@ -1032,7 +1030,7 @@ def test_a_server_restart_after_the_first_turn_keeps_the_session_turned(
     # The turn's end is two events (`session.status` idle, then `session.idle`); both
     # are handled before the restart, so no late idle raises `turned` after it.
     assert wait_until(lambda: len(idles) == 2)
-    assert adapter._turned(sid) and binding(rig).turned
+    assert adapter._turned(sid) and wait_until(lambda: binding(rig).turned)
     first = adapter.generation
     mark = len(adapter.reports)
     restart_oc_server(adapter, oc_launcher, monkeypatch)

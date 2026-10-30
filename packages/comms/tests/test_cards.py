@@ -186,15 +186,14 @@ def test_comms_offline_is_unreachable():
 
 def test_a_malformed_launch_stamp_is_answered_not_tracebacked():
     """`sender_from_env` has three answers and one of them is an exception;
-    this verb never calls it, and never looks at MOXI_COMMS_SLOT at all. The sibling of
+    this verb never calls it. The sibling of
     test_help.py::test_help_needs_no_claim_and_no_environment."""
-    env = {"MOXI_COMMS_NAME": "planner", "MOXI_COMMS_SCOPE": "proj-a", "MOXI_COMMS_SLOT": "not-a-number"}
+    env = {"MOXI_COMMS_NAME": "planner", "MOXI_COMMS_SCOPE": "proj-a"}
     write_card("reviewer@proj-a", "I review things.")
     code, out = run(["whois", "reviewer@proj-a"], env=env)
     assert code == 0 and "I review things." in out
-    # ...and the whole malformed-stamp class is out of scope by construction: the reader
-    # never names the spend-side variable, and never imports the function that raises.
-    assert "MOXI_COMMS_SLOT" not in code_text(Path(cards.__file__))
+    # ...and the whole launch-stamp class is out of scope by construction: the reader
+    # never imports the function that raises.
     assert "moxi_comms.sender" not in module_imports(Path(cards.__file__))
 
 
@@ -610,8 +609,7 @@ def test_only_the_cli_imports_the_card_reader():
     assert reachable == {"moxi_comms.cli"}, "and the whole closure, which is what the " \
                                             "fence claims"
     for module in ("moxi_comms.daemon", "moxi_comms.attribution", "moxi_comms.directors",
-                   "moxi_comms.sender", "moxi_comms.directory", "moxi_comms.routing",
-                   *(m for m in modules if m.startswith("moxi_comms.adapters."))):
+                   "moxi_comms.sender", "moxi_comms.directory", "moxi_comms.routing", *(m for m in modules if m.startswith("moxi_comms.adapters."))):
         if module in modules:
             assert "moxi_comms.cards" not in import_closure(module, modules), module
 
@@ -667,8 +665,7 @@ def test_every_shipped_line_that_names_a_verb_says_moxi_comms():
                     session_id=None)
     texts = [context.layer_one_block(["lead@proj-a"]), glossary.render_terms(),
              glossary.render_unknown("nope"), cards.LIVENESS, stall.STALL_REPORT,
-             owed.reminder_text([debt], 60.0), owed.reminder_text([debt, two], 60.0),
-             *(glossary.render_entry(e) for e in glossary.TERMS)]
+             owed.reminder_text([debt], 60.0), owed.reminder_text([debt, two], 60.0), *(glossary.render_entry(e) for e in glossary.TERMS)]
     bare = re.compile(r"(?<![-\w/.\[])(?<!moxi )comms (send|reply|agents|help|explain|"
                       r"whois|whoami|history|cache|owner|read)\b")
     for text in texts:

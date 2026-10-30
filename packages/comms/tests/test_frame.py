@@ -54,8 +54,8 @@ def test_the_synthetic_payload_really_is_the_delivered_shape(rig):
     added or renamed there would leave every rendering test in this file exercising a
     shape the daemon no longer sends. One real delivery, key sets compared -- the author
     sub-dict included, because that is where the marks are read from."""
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
-    code, _ = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "a real delivery"], slot=1, name="planner",
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
+    code, _ = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "a real delivery"],  name="planner",
                       scope="proj-a")
     assert code == 0
     wait_for_queue(reviewer, 1)
@@ -204,23 +204,6 @@ def test_the_mark_reaches_the_digest():
 # miss a renderer that dropped them somewhere between
 # `render_digest` and the injector, or a suppression rule that reached past
 # `(unverified)`. These go through the whole path instead.
-
-def test_an_ephemeral_sender_is_marked_in_the_digest_an_agent_actually_receives(rig):
-    """End to end, through the real shim: an `agent-N` display on a slot-owned webhook
-    is what an ephemeral author looks like in the record, and the digest the session is
-    handed says so."""
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
-    rig.post_from_slot(6, ["reviewer@proj-a"], "from an ephemeral", display="agent-9")
-    wait_for_queue(reviewer, 1)
-    reviewer.on_turn_boundary()
-
-    lines = reviewer.digests[-1].splitlines()
-    assert lines[0] == "== comms: 1 message =="
-    assert lines[2].startswith("[comms] from agent-9 (ephemeral, unverified) · msg ")
-    assert lines[3] == "  from an ephemeral", "the body renders INSIDE the envelope"
-    assert lines[-1] == f"[comms] end · msg {lines[2].split('msg ')[1]}", \
-        "and the envelope closes on the id it opened with"
-
 
 def test_the_rare_marks_are_not_swallowed_by_a_catch_up_header():
     """The header's note speaks for ATTRIBUTION and nothing else. A tier is a fact about
@@ -680,7 +663,7 @@ def test_a_whole_catch_up_renders_identically_whatever_the_host_timezone(local_t
 # proves nothing about delivery, so these tests pin the HOOK BYTES.
 
 def test_layer_one_leads_with_the_context_block_from_the_one_constant(rig):
-    rig.shim(slot=1, name="planner", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
     envelope, online = shim_roster.snapshot(daemon_socket(), env={})
     assert online
     assert envelope.startswith(CONTEXT_BLOCK + "\n\n")
@@ -691,7 +674,7 @@ def test_layer_one_leads_with_the_context_block_from_the_one_constant(rig):
 
 
 def test_layer_one_is_the_block_the_comms_line_and_the_roster_and_nothing_else(rig):
-    rig.shim(slot=1, name="planner", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
     envelope, _ = shim_roster.snapshot(daemon_socket(), env={})
     block, line, roster = envelope.split("\n\n", 2)
     assert block == CONTEXT_BLOCK
@@ -729,7 +712,7 @@ def _ready(env):
 
 def test_the_block_reaches_the_session_in_the_listeners_answer(rig):
     """Delivery, not text: the context comms' listener hands turns carries the block."""
-    rig.shim(slot=1, name="planner", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
     injected = _ready(_launched_env())
     assert injected.startswith(CONTEXT_BLOCK)
     assert shim_roster.LABEL in injected
@@ -741,7 +724,7 @@ def test_the_block_does_not_ride_the_per_prompt_delta(rig, tmp_path, capsys):
     paragraph repeated every prompt would be the loudest thing in the session."""
     state = tmp_path / "roster.json"
     shim_roster.delta(daemon_socket(), state, env={})       # seed the memory
-    rig.shim(slot=1, name="planner", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
     envelope, online = shim_roster.delta(daemon_socket(), state, env={})
     assert online and envelope is not None
     assert CONTEXT_BLOCK not in envelope
@@ -754,4 +737,3 @@ def test_the_block_still_reaches_the_session_offline(rig, capsys):
     rig.daemon.stop()
     assert CONTEXT_BLOCK in _ready(_launched_env())
     capsys.readouterr()
-

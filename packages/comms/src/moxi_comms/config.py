@@ -23,7 +23,6 @@ line of doc and, for a few, the one variable that overrides it for one process:
     labels = { "notifier@proj" = "the notifier, which only sends" }
 
     [provision]
-    slots = 6                               # what a first start provisions
     operator = "operator"                   # the human's identity name
 
     [replay]
@@ -139,7 +138,6 @@ class PolicyConfig:
 class ProvisionConfig:
     """`[provision]`: what a first start makes in an empty directory."""
 
-    slots: int = _default("provision.slots")
     operator: str = _default("provision.operator")
 
 
@@ -342,9 +340,9 @@ def _typed(settings, path: Path) -> CommsConfig:
     if v["local.retain_days"] < 0:
         raise bad("local.retain_days", f"is {v['local.retain_days']}",
                   "set it to a whole number of days, or 0 to keep every message")
-    for key in ("provision.slots", "replay.messages"):
-        if v[key] < 1:
-            raise bad(key, f"is {v[key]}", "set it to 1 or more")
+    if v["replay.messages"] < 1:
+        raise bad("replay.messages", f"is {v['replay.messages']}",
+                  "set it to 1 or more")
     if v["replay.hours"] < 0:
         raise bad("replay.hours", f"is {v['replay.hours']}", "set it to 0 or more hours")
     operator = v["provision.operator"].strip()
@@ -362,7 +360,7 @@ def _typed(settings, path: Path) -> CommsConfig:
         policy=PolicyConfig(cache_callers=_names(bad, "policy.cache_callers",
                                                  v["policy.cache_callers"]),
                             labels=_labels(bad, v["policy.labels"])),
-        provision=ProvisionConfig(slots=v["provision.slots"], operator=operator),
+        provision=ProvisionConfig(operator=operator),
         replay=ReplayConfig(messages=v["replay.messages"], hours=v["replay.hours"]),
         cache=CacheConfig(required=v["cache.required"]),
         block=v["block"],

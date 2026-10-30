@@ -3,8 +3,7 @@
 **Which app-servers exist is provisioner-configured, never register-triggered.**
 The `moxi-comms-codex` launcher runs an app-server only for an identity named here; an
 inbound `register` on the daemon socket never causes a spawn. The file holds, per
-identity: the pinned slot, the cwd, the sandbox/permission profile, and the thread-id
-file.
+identity: the cwd, the sandbox/permission profile, and the thread-id file.
 
     CONFIG/comms/config.toml
 
@@ -12,7 +11,6 @@ file.
     sandbox        = "workspace-write"
 
     [codex.agents."planner@proj-a"]
-    slot           = 3                 # PINNED. The launcher never registers next-free.
     cwd            = "/home/me/src/proj-a"
     sandbox        = "workspace-write" # or `permissions = "<profile-id>"`, not both
     writable_roots = ["/run/user/1000/moxi"]
@@ -25,8 +23,8 @@ The roster lives by the config file's refusal rule (`config.refuse_secrets`): a
 token-shaped key is a hard stop. A roster is exactly where a credential would go if
 nobody stopped it.
 
-`[codex.defaults]` holds any row key but the ones that name one identity's own things
-(`slot`, `thread_file`). A row that names `sandbox`, `permissions` or
+`[codex.defaults]` holds any row key but the one that names one identity's own things
+(`thread_file`). A row that names `sandbox`, `permissions` or
 `profile` takes none of the three from the defaults: they are one choice, and the
 schema refuses `sandbox` beside `permissions`.
 
@@ -56,10 +54,9 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import directors as directors_mod
 from ..config import ConfigError
 from ..paths import codex_threads_dir
-from ..scoping import GLOBAL, NAME_RE, is_auto_name, qualify, split_tag
+from . import roster_rows
 
 log = logging.getLogger("comms.codex.roster")
 
@@ -68,10 +65,10 @@ SANDBOX_MODES = ("read-only", "workspace-write", "danger-full-access")
 SANDBOX_POLICY_TYPES = {"read-only": "readOnly", "workspace-write": "workspaceWrite",
                         "danger-full-access": "dangerFullAccess"}
 
-_ENTRY_KEYS = {"slot", "cwd", "thread_file", "sandbox", "permissions",
+_ENTRY_KEYS = {"cwd", "thread_file", "sandbox", "permissions",
                "profile", "writable_roots", "network_access", "model", "directors"}
 #: Keys that name one identity's own things, so `[codex.defaults]` may not hold them.
-_OWN_KEYS = {"slot", "thread_file"}
+_OWN_KEYS = {"thread_file"}
 #: What `[codex.defaults]` may hold: the sandbox mode alone. Every other key is set on
 #: each row, `directors` above all, since it is one recipient's authority grant.
 _DEFAULT_KEYS = {"sandbox"}
@@ -86,7 +83,6 @@ class CodexAgent:
     qualified: str
     name: str
     scope: str
-    slot: int
     cwd: str
     thread_file: Path
     sandbox: str | None = DEFAULT_SANDBOX
@@ -102,10 +98,8 @@ class CodexAgent:
         """Identity stamped into the app-server's environment AT SPAWN.
 
         The agent's shell inherits this, with the launcher's claim socket beside it,
-        which is how `moxi comms send` inside the thread knows who it is speaking as (it
-        reads the claim socket; the stamp alone sends nothing). The slot comes from the roster rather than from
-        the register response because the environment is fixed at spawn and the slot
-        would otherwise be decided later -- which is exactly why the roster pins it.
+        which is how `moxi comms send` inside the thread knows who it is speaking as. It
+        reads the claim socket; the stamp alone sends nothing.
 
         **Scrubbed before it is stamped.** Overlaying the stamp onto an inherited
         environment would let any key the roster has no value for keep whatever the
@@ -113,12 +107,7 @@ class CodexAgent:
         which would hand this agent its launcher's authority. `stamped_env` handles it,
         for all three stamp sites at once.
         """
-        from .session import stamped_env           # one implementation of the stamp
-
-        return stamped_env(base, name=self.name, slot=self.slot, scope=self.scope,
-                           global_=self.scope == GLOBAL,
-                           project=None if self.scope == GLOBAL else self.scope,
-                           directors=self.directors)
+        return roster_rows.stamped_env(self, base)
 
     # ---------------------------------------------------------------- containment
     def effective_writable_roots(self, added_root=None) -> list:
@@ -196,21 +185,12 @@ class CodexAgent:
         return None
 
 
-@dataclass
-class Roster:
-    agents: dict = field(default_factory=dict)
-    source: str = "defaults"
-
-    def require(self, qualified: str) -> CodexAgent:
-        agent = self.agents.get(qualified)
-        if agent is None:
-            known = ", ".join(sorted(self.agents)) or "(none)"
-            raise ConfigError(
-                f"{qualified!r} is not in the codex roster ({self.source}). Which "
-                "app-servers exist is provisioner-configured, never register-triggered: "
-                f"registering an identity never starts one -- add a [codex.agents.\"{qualified}\"] "
-                f"section to comms' config file. Known: {known}.")
-        return agent
+class Roster(roster_rows.Roster):
+    MISSING = ("{qualified!r} is not in the codex roster ({source}). Which "
+               "app-servers exist is provisioner-configured, never register-triggered: "
+               "registering an identity never starts one -- add a "
+               "[codex.agents.\"{qualified}\"] section to comms' config file. "
+               "Known: {known}.")
 
 
 def record_write_root(env=None, cwd=None) -> tuple:
@@ -265,10 +245,7 @@ def load(env=None, path=None) -> Roster:
     """The roster from comms' config file (`config.load(env).codex`), or from the comms
     config file `path` when a launch names one (`--config`). A file with no `[codex]`
     table is an empty roster; a bad row is refused, loudly."""
-    from .. import config as config_mod
-
-    cfg = (config_mod.load_file(path, env=env) if path is not None
-           else config_mod.load(env=env))
+    cfg = roster_rows.read_config(env, path)
     return from_table(cfg.codex, cfg.source)
 
 
@@ -276,16 +253,8 @@ def from_table(table: dict, source: str = "defaults") -> Roster:
     """The roster from the raw `[codex]` table, `{"defaults": {...}, "agents": {...}}`.
     `source` is the file the table came from, which every refusal names."""
     defaults = dict((table or {}).get("defaults") or {})
-    where = f"{source}: [codex.defaults]"
-    unknown = sorted(set(defaults) - _ENTRY_KEYS)
-    if unknown:
-        raise ConfigError(f"{where}: unknown key(s) {', '.join(unknown)}; expected "
-                          f"{', '.join(sorted(_DEFAULT_KEYS))}")
-    own = sorted(set(defaults) - _DEFAULT_KEYS)
-    if own:
-        raise ConfigError(f"{where}: {', '.join(own)} name(s) one identity's own; set "
-                          "them on its [codex.agents.\"<name>\"] row (the defaults "
-                          f"hold only {', '.join(sorted(_DEFAULT_KEYS))})")
+    where = roster_rows.check_defaults("codex", source, defaults, _ENTRY_KEYS,
+                                       _DEFAULT_KEYS)
     sandbox = defaults.get("sandbox")
     if "sandbox" in defaults and sandbox not in SANDBOX_MODES:
         raise ConfigError(f"{where}: sandbox {sandbox!r} is not one of "
@@ -307,38 +276,12 @@ def _with_defaults(defaults: dict, section):
 
 
 def _entry(path, qualified: str, section) -> CodexAgent:
-    where = f"{path}: [codex.agents.\"{qualified}\"]"
-    if not isinstance(section, dict):
-        raise ConfigError(f"{where} is not a table")
-    unknown = sorted(set(section) - _ENTRY_KEYS)
-    if unknown:
-        raise ConfigError(f"{where}: unknown key(s) {', '.join(unknown)}; expected "
-                          f"{', '.join(sorted(_ENTRY_KEYS))}")
-    name, scope = split_tag(qualified)
-    scope = scope or GLOBAL
-    # `planner@global` and `planner` are the same identity: a global name renders bare.
-    # Normalising here means the roster key can be written either way and the thread
-    # file, the cursor and the daemon's binding still agree on one string.
-    qualified = qualify(name, scope)
-    if not NAME_RE.match(name):
-        raise ConfigError(f"{where}: {name!r} is not a valid name")
-    if is_auto_name(name):
-        raise ConfigError(
-            f"{where}: the agent-N namespace is reserved for the daemon's auto-namer in "
-            "every scope; a roster identity is chosen or standing, never ephemeral")
-
-    slot = section.get("slot")
-    if slot is None:
-        raise ConfigError(
-            f"{where}: no slot. The roster PINS the slot per identity and the launcher "
-            "registers with it explicitly, never next-free -- the app-server's "
-            "environment is stamped at spawn, before any register could answer.")
-    if isinstance(slot, bool) or not isinstance(slot, int):
-        raise ConfigError(f"{where}: slot must be a number, not {slot!r}")
-
-    cwd = section.get("cwd")
-    if not cwd:
-        raise ConfigError(f"{where}: no cwd (the directory the codex thread works in)")
+    head = roster_rows.parse_head(
+        "codex", path, qualified, section, _ENTRY_KEYS,
+        stamped=" -- the app-server's environment is stamped at spawn, before any "
+                "register could answer.",
+        works_in="the codex thread")
+    where, qualified = head.where, head.qualified
 
     sandbox, permissions = section.get("sandbox"), section.get("permissions")
     if sandbox and permissions:
@@ -352,23 +295,12 @@ def _entry(path, qualified: str, section) -> CodexAgent:
     if profile and not permissions:
         raise ConfigError(f"{where}: `profile` needs the `permissions` id it defines")
 
-    # The recipient's grant, qualified exactly as `moxi-comms-claude --director` qualifies
-    # at launch: a bare name is the global identity, `name@scope` is explicit, a global
-    # one renders bare.
-    declared = section.get("directors", [])
-    if not isinstance(declared, list):
-        raise ConfigError(f"{where}: directors must be a list of names, not "
-                          f"{declared!r} -- authority is declared by the RECIPIENT, one "
-                          "entry per director, no transitivity")
-    try:
-        declared = directors_mod.declare(declared)
-    except directors_mod.BadDirector as e:
-        raise ConfigError(f"{where}: {e}") from e
+    declared = roster_rows.parse_directors(where, section)
 
     network_access = section.get("network_access", True)
     agent = CodexAgent(
-        qualified=qualified, name=name, scope=scope, slot=int(slot), cwd=str(cwd),
-        thread_file=(Path(section["thread_file"]) if section.get("thread_file")
+        qualified=qualified, name=head.name, scope=head.scope,
+        cwd=head.cwd, thread_file=(Path(section["thread_file"]) if section.get("thread_file")
                      else codex_threads_dir() / f"{qualified}.json"),
         sandbox=None if permissions else (sandbox or DEFAULT_SANDBOX),
         permissions=permissions,

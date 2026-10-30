@@ -15,7 +15,7 @@ from conftest import queued, wait_until
 
 import moxi_turns
 from moxi_comms import listener, roster_view, scoping
-from moxi_comms.adapters import session, shim_roster
+from moxi_comms.adapters import claude_shim, session, shim_roster
 from moxi_comms.paths import daemon_socket
 
 
@@ -43,13 +43,13 @@ def test_the_snapshot_body_is_the_verb_output_verbatim(rig):
     """One rendering exists: snapshot body == `moxi comms agents` for the same daemon
     state -- 'verbatim' held by construction. Mail waiting for a name is in neither
     (the default view is the names an agent can message)."""
-    rig.shim(slot=1, name="planner", scope="proj-a")
-    rig.shim(slot=2)
-    rig.cli(["send", "--posture", "none", "curator@proj-a", "waiting"], slot=1,
+    rig.shim(name="planner", scope="proj-a")
+    rig.shim()
+    rig.cli(["send", "--posture", "none", "curator@proj-a", "waiting"],
             name="planner", scope="proj-a")
     wait_until(lambda: waiting_for("curator@proj-a"))
 
-    code, out = rig.cli(["agents"], slot=1)
+    code, out = rig.cli(["agents"])
     assert code == 0
     envelope, online = shim_roster.snapshot(daemon_socket(), env={})
     assert online
@@ -66,28 +66,30 @@ def test_the_snapshot_injects_no_seat_context(rig, capsys):
     """Agents get NO slot/seat context in anything
     injected. The snapshot is the DEFAULT rendering -- it never asks for `--seats` --
     so the guarantee holds through the one renderer, not through a second filter."""
-    rig.shim(slot=1, name="planner", scope="proj-a")
-    rig.shim(slot=2)
-    rig.cli(["send", "--posture", "none", "--new-name", "curator@proj-a", "waiting"], slot=1,
+    rig.shim(name="planner", scope="proj-a")
+    rig.shim()
+    rig.cli(["send", "--posture", "none", "--new-name", "curator@proj-a", "waiting"],
             name="planner", scope="proj-a")
     wait_until(lambda: queued(rig.daemon, "curator@proj-a"))
 
     envelope, online = shim_roster.snapshot(daemon_socket(), env={})
     assert online
-    assert "slot" not in envelope and "seat" not in envelope
-    assert "planner@proj-a" in envelope and "chosen" in envelope, "names and tiers stay"
-    assert "adapter claude-shim" in envelope
+    roster = envelope.split(shim_roster.LABEL + "\n", 1)[1]
+    assert "slot" not in roster and "seat" not in roster
+    assert "planner@proj-a" in roster and "chosen" in roster, "names and tiers stay"
+    assert "adapter claude-shim" in roster
 
     # ...and the same holds of the text the listener hands turns for the session.
     injected = listener.answer(event("ready", env=session_env(name="x")))
-    assert "planner@proj-a" in injected
-    assert "slot" not in injected and "seat" not in injected
+    roster = injected.split(shim_roster.LABEL + "\n", 1)[1]
+    assert "planner@proj-a" in roster
+    assert "slot" not in roster and "seat" not in roster
 
 
 def test_the_verb_output_is_unchanged_by_the_extraction(rig):
     """`test_agents_lists_bindings_and_pending` pins the shape; this pins the empty
     roster's exact line, which the race note keys on."""
-    code, out = rig.cli(["agents"], slot=1)
+    code, out = rig.cli(["agents"])
     assert code == 0
     assert out == f"{roster_view.NO_BINDINGS}\n"
     assert roster_view.NO_BINDINGS == "no live bindings — nothing is addressable right now."
@@ -121,7 +123,7 @@ def test_the_race_line_appears_only_when_stamped_and_empty(rig):
     assert len(envelope.split("\n\n", 2)[2].splitlines()) == 2, \
         "no identity stamp, no race line"
 
-    rig.shim(slot=1, name="planner", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
     envelope, _ = shim_roster.snapshot(daemon_socket(), env={"MOXI_COMMS_NAME": "planner"})
     assert "may not have completed registration" not in envelope, \
         "a non-empty roster needs no caveat -- the staleness label carries it"
@@ -137,7 +139,7 @@ def session_env(name="reviewer", sid="ls1", **extra) -> dict:
 
 
 def test_the_listener_answers_layer_one_at_ready(rig):
-    rig.shim(slot=1, name="planner", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
     env = session_env()
     expected, _ = shim_roster.render_snapshot(shim_roster.fetch(daemon_socket()), env=env)
     assert listener.answer(event("ready", env=env)) == expected
@@ -148,11 +150,11 @@ def test_the_listener_answers_layer_one_at_ready(rig):
 
 
 def test_the_listener_gives_the_joins_at_a_prompt_and_nothing_when_nothing_changed(rig):
-    rig.shim(slot=1, name="planner", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
     env = session_env()
     listener.answer(event("ready", env=env))
     assert listener.answer(event("prompt", env=env)) is None, "most prompts get nothing"
-    rig.shim(slot=3, name="curator", scope="proj-a")
+    rig.shim(name="curator", scope="proj-a")
     delta = listener.answer(event("prompt", env=env))
     assert delta.startswith(shim_roster.DELTA_OPEN) and "curator@proj-a" in delta
     assert listener.answer(event("prompt", env=env)) is None
@@ -187,7 +189,7 @@ def test_a_roster_response_this_build_cannot_RENDER_is_treated_as_offline(
 
 
 def test_a_session_comms_did_not_launch_gets_nothing(rig):
-    rig.shim(slot=1, name="planner", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
     import os
     env = {k: v for k, v in os.environ.items() if not k.startswith("MOXI_COMMS_NAME")}
     assert listener.answer(event("ready", env=env)) is None
@@ -458,9 +460,9 @@ def test_a_nameless_Session_renders_no_native_address():
 
 
 def test_the_identity_is_stamped_where_the_cli_reads_it():
-    s = session.Session("abc127", name="reviewer", slot=2, scope="proj-a", project="proj-a")
+    s = session.Session("abc127", name="reviewer", scope="proj-a", project="proj-a")
     env = s.env(base={})
-    assert env["MOXI_COMMS_NAME"] == "reviewer" and env["MOXI_COMMS_SLOT"] == "2"
+    assert env["MOXI_COMMS_NAME"] == "reviewer" and "MOXI_COMMS_SLOT" not in env
     assert env["MOXI_COMMS_SCOPE"] == "proj-a" and env["MOXI_COMMS_PROJECT"] == "proj-a"
     assert env["MOXI_COMMS_CLAIM_SOCKET"] == str(s.claim_socket)
     assert "MOXI_COMMS_SHIM_SOCKET" not in env, "no hook ping reads a socket now"
@@ -477,18 +479,23 @@ def test_a_nameless_slotless_launch_is_refused_rather_than_guessed(capsys):
 
 
 @pytest.mark.parametrize("slot", ["3", "next-free"])
-def test_a_nameless_SLOT_launch_is_refused_because_a_claim_is_a_name(capsys, slot):
-    """The last route to the fabricated identity. `--comm-slot 3` alone used to launch a
-    session whose environment carried MOXI_COMMS_SLOT and no MOXI_COMMS_NAME, and whose `moxi comms
-    send` then wore `slot-3` on the wire. The refusal says a claim needs a name, and
-    carries no slot vocabulary beyond naming the flag the operator typed."""
+def test_the_retired_comm_slot_flag_is_refused_with_its_fix(capsys, slot):
     assert session.main(["--comm-slot", slot, "--dry-run"]) == 2
     err = capsys.readouterr().err
-    assert "pass --name" in err
-    assert "A claim is a name" in err
+    assert err.strip().endswith("--comm-slot is retired; remove it: comms has no slots.")
 
 
-@pytest.mark.parametrize("name", ["bad name@x!", "main@acme", "has space", "sl/ash"])
+def test_the_shim_refuses_the_retired_comm_slot_before_serving(monkeypatch, capsys):
+    def reached(*_args, **_kwargs):
+        raise AssertionError("the serving path ran")
+
+    monkeypatch.setattr(claude_shim, "_serve_inject_file", reached)
+    assert claude_shim.main(["--comm-slot", "3", "--inject-file", "unused"]) == 2
+    err = capsys.readouterr().err
+    assert err.strip().endswith("--comm-slot is retired; remove it: comms has no slots.")
+
+
+@pytest.mark.parametrize("name", ["bad name@x!", "planner@proj-a", "has space", "sl/ash"])
 def test_a_name_outside_the_grammar_is_refused_at_the_LAUNCHER(capsys, name):
     """`--name 'bad name@x!'` must not be accepted in full, rendered into `-n` and then
     fail at register time inside the session where nobody reads the log. The check
@@ -511,4 +518,3 @@ def test_the_old_slot_spelling_is_gone(capsys):
         session.main(["--name", "reviewer", "--slot", "3", "--dry-run"])
     assert exc.value.code == 2
     assert "unrecognized arguments: --slot" in capsys.readouterr().err
-

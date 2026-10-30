@@ -12,35 +12,36 @@ from conftest import queued, wait_for_queue, wait_until, write_config
 
 from moxi_comms import constants, cursors, daemon as daemon_mod
 from moxi_comms.daemon import Daemon
+from moxi_comms.gateway import RateLimited
 from moxi_comms.mock_gateway import MockGateway
 from moxi_comms.paths import cursors_dir, daemon_socket
 from moxi_comms.protocol import CLI_PROTOCOL, LineConn
-from moxi_comms.sender import SendFailed, post
+from moxi_comms.sender import SendFailed, _bounded
 
 
 # --------------------------------------------------------------------------- block
 
 def test_block_is_symmetric_at_the_routing_point(rig):
-    a = rig.shim(slot=1, name="planner", scope="proj-a")
-    b = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    a = rig.shim(name="planner", scope="proj-a")
+    b = rig.shim(name="reviewer", scope="proj-a")
     write_config(None, "block = true\n")
 
-    rig.post_from_slot(6, ["reviewer@proj-a"], "blocked inbound")
-    rig.cli(["send", "--posture", "none", "reviewer", "blocked outbound"], slot=1, name="planner", scope="proj-a")
-    rig.post_from_slot(6, ["planner@proj-a"], "also blocked")
+    rig.post_as("agent-6", ["reviewer@proj-a"], "blocked inbound")
+    rig.cli(["send", "--posture", "none", "reviewer", "blocked outbound"],  name="planner", scope="proj-a")
+    rig.post_as("agent-6", ["planner@proj-a"], "also blocked")
     wait_until(lambda: False, timeout=0.3)          # give routing a chance to misbehave
     assert a.queue == [] and b.queue == []
 
     write_config(None, "block = false\n")   # read at use time: instant, no restart
-    rig.post_from_slot(6, ["reviewer@proj-a"], "now flowing")
+    rig.post_as("agent-6", ["reviewer@proj-a"], "now flowing")
     wait_for_queue(b, 1)
     assert b.queue[0]["text"] == "now flowing"
 
 
 def test_send_verb_block_check_is_advisory_and_says_so(rig):
-    rig.shim(slot=2, name="reviewer", scope="proj-a")
+    rig.shim(name="reviewer", scope="proj-a")
     write_config(None, "block = true\n")
-    code, out = rig.cli(["send", "--posture", "none", "reviewer", "hi"], slot=1, name="planner", scope="proj-a")
+    code, out = rig.cli(["send", "--posture", "none", "reviewer", "hi"],  name="planner", scope="proj-a")
     assert code == 3
     assert "Advisory" in out and "enforcement is at daemon routing" in out
     assert rig.gateway.history(rig.names_channel) == []
@@ -49,51 +50,50 @@ def test_send_verb_block_check_is_advisory_and_says_so(rig):
 # --------------------------------------------------------------------------- 429
 
 def test_429_is_retried_honouring_retry_after(rig):
-    from moxi_comms import directory
-    from moxi_comms.paths import directory_db
-    from moxi_comms.sender import SenderIdentity, credential_for
-    db = directory.connect(directory_db(), read_only=True)
-    try:
-        cred, _ = credential_for(rig.gateway, db, SenderIdentity.for_slot(1, "x", "global"))
-    finally:
-        db.close()
+    refusals = [0.5, 0.5]
+
+    def send():
+        if refusals:
+            raise RateLimited(refusals.pop(0))
+        return rig.post_as("planner", ["nobody"], "hi")
+
     slept = []
-    rig.gateway.inject_rate_limit(count=2, retry_after=0.5)
-    msg = post(rig.gateway, cred, "::to nobody\nhi", username="x", sleep=slept.append)
+    msg = _bounded(send, as_="planner", attempts=constants.RETRY_ATTEMPTS,
+                   sleep=slept.append)
     assert msg is not None
     assert slept == [0.5, 0.5], "Retry-After is honoured, not guessed"
 
 
 def test_429_exhaustion_is_loud_and_the_message_is_not_in_the_record(rig):
-    from moxi_comms import directory
-    from moxi_comms.paths import directory_db
-    from moxi_comms.sender import SenderIdentity, credential_for
-    db = directory.connect(directory_db(), read_only=True)
-    try:
-        cred, _ = credential_for(rig.gateway, db, SenderIdentity.for_slot(1, "x", "global"))
-    finally:
-        db.close()
-    rig.gateway.inject_rate_limit(count=constants.RETRY_ATTEMPTS, retry_after=0.0)
+    def send():
+        raise RateLimited(0.0)
+
     with pytest.raises(SendFailed, match="SEND FAILED"):
-        post(rig.gateway, cred, "::to nobody\nhi", username="x", sleep=lambda s: None)
+        _bounded(send, as_="planner", attempts=constants.RETRY_ATTEMPTS,
+                 sleep=lambda _seconds: None)
     assert rig.gateway.history(rig.names_channel) == []
 
 
-def test_the_verb_reports_the_loud_failure(rig):
-    rig.shim(slot=2, name="reviewer", scope="proj-a")
-    rig.gateway.inject_rate_limit(count=constants.RETRY_ATTEMPTS, retry_after=0.0)
-    code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "hi"], slot=1, name="planner", scope="proj-a")
+def test_the_verb_reports_the_loud_failure(rig, monkeypatch):
+    rig.shim(name="reviewer", scope="proj-a")
+
+    def fail(*_args, **_kwargs):
+        raise SendFailed("SEND FAILED: the message was NOT posted")
+
+    monkeypatch.setattr(rig.gateway, "post_as_identity", fail)
+    code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "hi"],  name="planner", scope="proj-a")
     assert code == 5
     assert "SEND FAILED" in out and "was NOT posted" in out
+    assert rig.gateway.history(rig.names_channel) == []
 
 
 # --------------------------------------------------------------------------- rescan
 
 def test_gateway_reconnect_without_resume_triggers_a_rescan(rig):
-    b = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    b = rig.shim(name="reviewer", scope="proj-a")
     before = rig.daemon.rescans
     rig.gateway.disconnect()
-    rig.post_from_slot(6, ["reviewer@proj-a"], "posted during the gap")
+    rig.post_as("agent-6", ["reviewer@proj-a"], "posted during the gap")
     wait_until(lambda: False, timeout=0.2)
     assert b.queue == [], "the event never reached the socket"
 
@@ -104,10 +104,10 @@ def test_gateway_reconnect_without_resume_triggers_a_rescan(rig):
 
 
 def test_resume_replays_the_gap_without_a_rescan(rig):
-    b = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    b = rig.shim(name="reviewer", scope="proj-a")
     before = rig.daemon.rescans
     rig.gateway.disconnect()
-    rig.post_from_slot(6, ["reviewer@proj-a"], "gap message")
+    rig.post_as("agent-6", ["reviewer@proj-a"], "gap message")
     rig.gateway.reconnect(resume=True)
     wait_for_queue(b, 1)
     assert b.queue[0]["text"] == "gap message"
@@ -115,7 +115,7 @@ def test_resume_replays_the_gap_without_a_rescan(rig):
 
 
 def test_boot_rescan_rebuilds_the_pending_view(rig):
-    rig.post_from_slot(6, ["curator@proj-a"], "waiting")
+    rig.post_as("agent-6", ["curator@proj-a"], "waiting")
     wait_until(lambda: queued(rig.daemon, "curator@proj-a"))
     fresh = daemon_mod.Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
     rig.daemon.stop()
@@ -133,7 +133,7 @@ def test_rescan_does_not_re_pend_what_an_unbound_name_already_handled(rig):
     the name's cursor. The message is posted while the gateway is down, so only
     the rescan reads it."""
     rig.gateway.disconnect()
-    msg = rig.post_from_slot(6, ["curator@proj-a"], "handled before unbinding")
+    msg = rig.post_as("agent-6", ["curator@proj-a"], "handled before unbinding")
     cursors.advance("curator@proj-a", msg.id)
 
     rig.daemon.rescan()
@@ -142,7 +142,7 @@ def test_rescan_does_not_re_pend_what_an_unbound_name_already_handled(rig):
 
 def test_rescan_still_pends_for_a_name_that_never_bound(rig):
     """No cursor at all means nothing was ever handled: the message stays pending."""
-    rig.post_from_slot(6, ["curator@proj-a"], "nobody has ever held this name")
+    rig.post_as("agent-6", ["curator@proj-a"], "nobody has ever held this name")
     assert cursors.read("curator@proj-a") is None
 
     rig.daemon.rescan()
@@ -153,8 +153,8 @@ def test_rescan_still_pends_for_a_message_past_the_cursor(rig):
     """A cursor BEHIND the message proves only the earlier mail was handled. Both are
     posted while the gateway is down, so only the rescan reads them."""
     rig.gateway.disconnect()
-    first = rig.post_from_slot(6, ["curator@proj-a"], "handled")
-    second = rig.post_from_slot(6, ["curator@proj-a"], "arrived after the cursor")
+    first = rig.post_as("agent-6", ["curator@proj-a"], "handled")
+    second = rig.post_as("agent-6", ["curator@proj-a"], "arrived after the cursor")
     cursors.advance("curator@proj-a", first.id)
 
     rig.daemon.rescan()
@@ -166,7 +166,7 @@ def test_a_corrupt_cursor_file_does_not_stop_the_daemon_from_BOOTING(rig, tmp_pa
     file holding junk used to raise out of `rescan()` and take BOOT with it -- no socket,
     no routing, over one unreadable advisory file. An unreadable cursor is treated as no
     cursor, which degrades toward replay and pending; never toward loss."""
-    rig.post_from_slot(6, ["curator@proj-a"], "waiting behind a corrupt cursor")
+    rig.post_as("agent-6", ["curator@proj-a"], "waiting behind a corrupt cursor")
     wait_until(lambda: queued(rig.daemon, "curator@proj-a"))
     cursors_dir().mkdir(parents=True, exist_ok=True)
     (cursors_dir() / "curator@proj-a.json").write_text('{"cursor": "not-a-number"}')
@@ -205,8 +205,8 @@ def test_a_corrupt_cursor_file_does_not_raise_out_of_the_STOP_HOOK(rig, body):
     cursors_dir().mkdir(parents=True, exist_ok=True)
     (cursors_dir() / "curator@proj-a.json").write_text(body)
 
-    curator = rig.shim(slot=3, name="curator", scope="proj-a")
-    rig.post_from_slot(6, ["curator@proj-a"], "arrives over a corrupt cursor")
+    curator = rig.shim(name="curator", scope="proj-a")
+    rig.post_as("agent-6", ["curator@proj-a"], "arrives over a corrupt cursor")
     wait_for_queue(curator, 1)
     delivered = curator.queue[0]["message_id"]
 
@@ -247,8 +247,8 @@ def test_a_cursor_record_of_the_wrong_shape_reads_as_no_record(rig):
 def test_bind_deliver_unbind_rescan_leaves_the_pending_view_empty(rig):
     """The drain shape end to end: a one-shot drain binding takes the mail, completes the
     turn (cursor advances), unbinds -- and a reconnect rescan must not resurrect it."""
-    rig.post_from_slot(6, ["curator@proj-a"], "drain me")
-    curator = rig.shim(slot=3, name="curator", scope="proj-a")
+    rig.post_as("agent-6", ["curator@proj-a"], "drain me")
+    curator = rig.shim(name="curator", scope="proj-a")
     wait_for_queue(curator, 1)
     wait_until(lambda: curator.replaying is False)
     delivered = curator.queue[0]["message_id"]
@@ -270,7 +270,7 @@ def test_bind_deliver_unbind_rescan_leaves_the_pending_view_empty(rig):
 
 def test_shim_surfaces_comms_offline_and_reconnects(rig):
     from moxi_comms.adapters.claude_shim import OFFLINE_MESSAGE
-    b = rig.shim(slot=2, name="reviewer", scope="proj-a", autoreconnect=True,
+    b = rig.shim(name="reviewer", scope="proj-a", autoreconnect=True,
                  backoff=itertools.repeat(0.02))
     rig.daemon.stop()
     assert wait_until(lambda: b.offline)
@@ -280,7 +280,7 @@ def test_shim_surfaces_comms_offline_and_reconnects(rig):
     rig.daemon = fresh
     assert wait_until(lambda: b.offline is False, timeout=5.0)
     assert wait_until(lambda: any("comms online" in s for s in b.statuses))
-    rig.post_from_slot(6, ["reviewer@proj-a"], "after the outage")
+    rig.post_as("agent-6", ["reviewer@proj-a"], "after the outage")
     assert wait_until(lambda: any(p["text"] == "after the outage" for p in b.queue))
 
 
@@ -361,7 +361,7 @@ def test_a_start_against_a_live_daemon_refuses_and_leaves_it_serving(rig):
     intruder.stop()
     assert path.stat().st_ino == inode, "and the refused daemon's stop takes nothing"
     assert says_ping(path), "the live daemon is still serving through its own name"
-    assert rig.shim(slot=1, name="planner", scope="proj-a").identity == "planner@proj-a"
+    assert rig.shim(name="planner", scope="proj-a").identity == "planner@proj-a"
 
 
 def test_a_stale_socket_file_is_cleared_and_the_daemon_serves(rig, shortdir):
@@ -435,17 +435,6 @@ def test_a_refused_start_has_no_side_effects_at_all(rig, shortdir):
     assert not journal.exists() and not journal.parent.exists()
 
 
-def test_every_post_suppresses_mentions():
-    from moxi_comms.mock_gateway import GatewayError
-    gw = MockGateway()
-    ch = gw.create_channel("#names")
-    cred = gw.create_webhook(ch, "x", "s")
-    with pytest.raises(GatewayError, match="allowed_mentions"):
-        gw.execute_webhook(cred, "hi")
-    with pytest.raises(GatewayError, match="allowed_mentions"):
-        gw.execute_webhook(cred, "hi", allowed_mentions={"parse": ["everyone"]})
-
-
 # --------------------------------------------------------------------------- handing is
 # not handling
 
@@ -454,8 +443,8 @@ def test_mail_handed_to_a_session_that_unbinds_before_its_cursor_moves_is_pendin
     "handled?" fact, and a session that unbinds before it moves leaves the message
     waiting in #names exactly as before -- a re-bind's replay would deliver it again --
     so the pending view must say so without waiting for a rescan."""
-    b = rig.shim(slot=2, name="reviewer", scope="proj-a")
-    msg = rig.post_from_slot(6, ["reviewer@proj-a"], "handed, never handled")
+    b = rig.shim(name="reviewer", scope="proj-a")
+    msg = rig.post_as("agent-6", ["reviewer@proj-a"], "handed, never handled")
     assert wait_until(lambda: msg.id in rig.daemon.bindings["reviewer@proj-a"].delivered)
     assert queued(rig.daemon, "reviewer@proj-a") == set(), \
         "while bound and in the adapter's hands it is not waiting for a bind"
@@ -465,14 +454,14 @@ def test_mail_handed_to_a_session_that_unbinds_before_its_cursor_moves_is_pendin
     assert cursors.read("reviewer@proj-a") is None
     assert queued(rig.daemon, "reviewer@proj-a") == {msg.id}
 
-    code, out = rig.cli(["agents", "--seats"], slot=1)
+    code, out = rig.cli(["agents", "--seats"])
     assert code == 0
     assert "waiting (" in out and "reviewer@proj-a" in out and "1 message(s)" in out, \
         "and comms agents --seats says so"
 
     # ...and a re-bind's release hands it, which is what the view promised; the row
     # goes when the turn holding it completes, not at the hand-off
-    again = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    again = rig.shim(name="reviewer", scope="proj-a")
     assert wait_until(lambda: any(q["message_id"] == msg.id for q in again.queue))
     assert wait_until(lambda: again.replaying is False)
     again.on_turn_boundary()                          # inject
@@ -483,8 +472,8 @@ def test_mail_handed_to_a_session_that_unbinds_before_its_cursor_moves_is_pendin
 
 def test_mail_a_session_handled_before_unbinding_stays_handled(rig):
     """The other half: the cursor passed it, so it is not pending after the unbind."""
-    b = rig.shim(slot=2, name="reviewer", scope="proj-a")
-    msg = rig.post_from_slot(6, ["reviewer@proj-a"], "handled")
+    b = rig.shim(name="reviewer", scope="proj-a")
+    msg = rig.post_as("agent-6", ["reviewer@proj-a"], "handled")
     assert wait_until(lambda: msg.id in rig.daemon.bindings["reviewer@proj-a"].delivered)
     cursors.advance("reviewer@proj-a", msg.id)         # the turn boundary's act
 
@@ -494,9 +483,9 @@ def test_mail_a_session_handled_before_unbinding_stays_handled(rig):
 
 
 def test_a_partial_cursor_re_pends_only_what_it_has_not_passed(rig):
-    b = rig.shim(slot=2, name="reviewer", scope="proj-a")
-    first = rig.post_from_slot(6, ["reviewer@proj-a"], "handled")
-    second = rig.post_from_slot(6, ["reviewer@proj-a"], "handed only")
+    b = rig.shim(name="reviewer", scope="proj-a")
+    first = rig.post_as("agent-6", ["reviewer@proj-a"], "handled")
+    second = rig.post_as("agent-6", ["reviewer@proj-a"], "handed only")
     assert wait_until(lambda: second.id in rig.daemon.bindings["reviewer@proj-a"].delivered)
     cursors.advance("reviewer@proj-a", first.id)
 

@@ -37,12 +37,12 @@ def launch(rig, tmp_path):
     """One launcher for `planner@proj-a` over a fresh `FakeSession`."""
     made: list = []
 
-    def build(*, name="planner", scope="proj-a", slot=3, directors=(), start=True,
+    def build(*, name="planner", scope="proj-a", directors=(), start=True,
               session=None, autoreconnect=False, backoff=None, window=False,
               sandbox="workspace-write", permissions=None, profile=None,
               writable_roots=(), network_access=True, model=None):
         qualified = f"{name}@{scope}" if scope != "global" else name
-        agent = CodexAgent(qualified=qualified, name=name, scope=scope, slot=slot,
+        agent = CodexAgent(qualified=qualified, name=name, scope=scope,
                            cwd=str(tmp_path), thread_file=codex_threads.path(qualified),
                            sandbox=sandbox, permissions=permissions,
                            profile=dict(profile or {}), writable_roots=list(writable_roots),
@@ -68,9 +68,8 @@ def launch(rig, tmp_path):
         adapter.stop()
 
 
-def send(rig, text, *, to=IDENTITY, slot=1, name="main", scope="proj-a"):
-    code, _ = rig.cli(["send", "--posture", "none", to, text], slot=slot, name=name,
-                      scope=scope)
+def send(rig, text, *, to=IDENTITY,  name="main", scope="proj-a"):
+    code, _ = rig.send(to, text, sender=dict(name=name, scope=scope))
     assert code == 0
 
 
@@ -80,10 +79,10 @@ def delivered(session, count=1):
 
 # --------------------------------------------------------------------------- the launch
 
-def test_it_registers_with_the_pinned_slot_and_the_codex_kind(rig, launch):
+def test_it_registers_with_the_codex_kind(rig, launch):
     adapter = launch()
     binding = rig.daemon.bindings[IDENTITY]
-    assert (binding.adapter, binding.slot_id, binding.tier) == ("codex", 3, "chosen")
+    assert (binding.adapter, binding.tier) == ("codex", "chosen")
     assert adapter.identity == IDENTITY
 
 
@@ -102,8 +101,8 @@ def test_the_session_is_launched_through_turns_with_stamp_layer_one_and_options(
     (call,) = adapter._launch.calls
     assert call["cwd"] == str(tmp_path) and call["window"] is True
     env = call["env"]
-    assert (env["MOXI_COMMS_NAME"], env["MOXI_COMMS_SLOT"], env["MOXI_COMMS_SCOPE"]) == \
-        ("planner", "3", "proj-a")
+    assert (env["MOXI_COMMS_NAME"], env["MOXI_COMMS_SCOPE"]) == ("planner", "proj-a")
+    assert "MOXI_COMMS_SLOT" not in env
     assert env[CLAIM_SOCKET_ENV] == str(adapter.claims.socket_path)
     assert "MOXI_COMMS_DIRECTORS" not in env
     assert "moxi comms" in call["instructions"]
@@ -377,7 +376,7 @@ def launcher_main(monkeypatch, tmp_path):
     from moxi_comms.adapters import codex, terminal
 
     config = tmp_path / "roster.toml"
-    config.write_text(f'[codex.agents."{IDENTITY}"]\nslot = 3\ncwd = "{tmp_path}"\n')
+    config.write_text(f'[codex.agents."{IDENTITY}"]\ncwd = "{tmp_path}"\n')
     monkeypatch.setattr(terminal, "in_terminal_foreground", lambda fd: True)
     monkeypatch.setattr(terminal, "terminal_fd", lambda: 0)
     monkeypatch.setattr(codex, "own_comms", lambda: "/env/bin/moxi comms")

@@ -1,4 +1,4 @@
-"""comms' interface 1: the module other code reaches (`moxi_comms.api`).
+"""comms' interface 2: the module other code reaches (`moxi_comms.api`).
 
 Everything named here is public and pinned by comms' own tests; anything else in
 `moxi_comms` is private. A Moxi module reaches only this module (the contract check
@@ -49,7 +49,7 @@ from ..sending import (DELIVERIES, EXIT_CODES, OUTCOMES, Recipient, Refusal, Sen
                        SendResult)
 
 #: The interface this module is.
-INTERFACE = 1
+INTERFACE = 2
 
 #: A read's default wait for the daemon, in seconds.
 READ_DEADLINE = 10.0
@@ -163,7 +163,6 @@ class Agent:
     scope: str
     tier: str | None
     adapter: str | None
-    slot: int | None
     directors: tuple = ()
 
 
@@ -209,7 +208,7 @@ def _declared_directors() -> dict:
 
 
 def roster(*, deadline: float = READ_DEADLINE) -> Roster:
-    """The bound agents with their slots and declared directors, and the standing rows of
+    """The bound agents with their declared directors, and the standing rows of
     the directory. Raises `DaemonOffline` or `DaemonError`."""
     client = _daemon(deadline)
     try:
@@ -218,7 +217,7 @@ def roster(*, deadline: float = READ_DEADLINE) -> Roster:
         client.close()
     directors = _declared_directors()
     bound = tuple(Agent(qualified=b["qualified"], name=b.get("name"), scope=b.get("scope"),
-                        tier=b.get("tier"), adapter=b.get("adapter"), slot=b.get("slot"),
+                        tier=b.get("tier"), adapter=b.get("adapter"),
                         directors=directors.get(b["qualified"], ()))
                   for b in answer.get("bindings") or ())
     conn = _directory.connect(_paths.directory_db(), read_only=True)

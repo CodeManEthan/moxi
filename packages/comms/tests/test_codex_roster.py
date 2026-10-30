@@ -18,7 +18,6 @@ def roster_file(body: str):
 
 GOOD = """
     [agents."planner@proj-a"]
-    slot = 3
     cwd = "/work/proj-a"
     writable_roots = ["/write/one"]
 """
@@ -28,11 +27,11 @@ def test_a_missing_roster_is_empty():
     assert codex_roster.load().agents == {}
 
 
-def test_an_entry_carries_identity_slot_and_thread_file():
+def test_an_entry_carries_identity_and_thread_file():
     roster_file(GOOD)
     row = codex_roster.load().require("planner@proj-a")
-    assert (row.slot, row.name, row.scope, row.cwd) == (3, "planner", "proj-a",
-                                                       "/work/proj-a")
+    assert (row.name, row.scope, row.cwd) == ("planner", "proj-a", "/work/proj-a")
+    assert not hasattr(row, "slot")
     assert row.thread_file == codex_threads.path("planner@proj-a")
     assert not hasattr(row, "socket")
 
@@ -40,7 +39,6 @@ def test_an_entry_carries_identity_slot_and_thread_file():
 def test_socket_is_a_dead_key_and_is_refused():
     roster_file("""
         [agents."planner@proj-a"]
-        slot = 3
         cwd = "/work"
         socket = "/run/old.sock"
     """)
@@ -59,7 +57,6 @@ def test_an_identity_not_in_the_roster_is_refused():
 def test_a_token_shaped_key_is_refused():
     roster_file("""
         [agents."planner@proj-a"]
-        slot = 3
         cwd = "/work"
         openai_api_token = "not-here"
     """)
@@ -68,13 +65,12 @@ def test_a_token_shaped_key_is_refused():
 
 
 @pytest.mark.parametrize(("body", "expected"), [
-    ('cwd = "/work"', "no slot"),
-    ('slot = "next-free"\ncwd = "/work"', "must be a number"),
-    ("slot = 3", "no cwd"),
-    ('slot = 3\ncwd = "/work"\nsandbox = "workspace-write"\npermissions = "p"',
+    ('slot = "next-free"\ncwd = "/work"', "remove it: comms has no slots"),
+    ("", "no cwd"),
+    ('cwd = "/work"\nsandbox = "workspace-write"\npermissions = "p"',
      "cannot be combined"),
-    ('slot = 3\ncwd = "/work"\nsandbox = "wide-open"', "is not one of"),
-    ('slot = 3\ncwd = "/work"\nprofile = {network = {enabled = true}}',
+    ('cwd = "/work"\nsandbox = "wide-open"', "is not one of"),
+    ('cwd = "/work"\nprofile = {network = {enabled = true}}',
      "needs the `permissions`"),
 ])
 def test_roster_refusals(body, expected):
@@ -87,7 +83,6 @@ def test_roster_refusals(body, expected):
 def test_agent_names_reserved_for_the_daemon_are_refused():
     roster_file("""
         [agents."agent-3"]
-        slot = 3
         cwd = "/work"
     """)
     with pytest.raises(ConfigError, match="reserved"):
@@ -99,10 +94,8 @@ def test_a_row_takes_the_default_sandbox_it_does_not_name():
         [codex.defaults]
         sandbox = "read-only"
         [agents."planner@proj-a"]
-        slot = 3
         cwd = "/work"
         [agents."coder@proj-a"]
-        slot = 4
         cwd = "/work"
         sandbox = "workspace-write"
     """)
@@ -116,7 +109,6 @@ def test_permissions_replace_the_default_sandbox():
         [codex.defaults]
         sandbox = "read-only"
         [agents."planner@proj-a"]
-        slot = 3
         cwd = "/work"
         permissions = "comms"
     """)
@@ -125,7 +117,7 @@ def test_permissions_replace_the_default_sandbox():
 
 
 @pytest.mark.parametrize("body", [
-    "slot = 3", 'thread_file = "/tmp/t.json"', 'directors = ["main"]',
+    'thread_file = "/tmp/t.json"', 'directors = ["herald"]',
     'model = "m"', 'cwd = "/work"', "network_access = false",
 ])
 def test_defaults_hold_only_the_sandbox(body):
@@ -134,10 +126,15 @@ def test_defaults_hold_only_the_sandbox(body):
         codex_roster.load()
 
 
+def test_a_slot_in_defaults_is_refused_with_the_removal():
+    roster_file("[codex.defaults]\nslot = 3\n")
+    with pytest.raises(ConfigError, match="remove it: comms has no slots"):
+        codex_roster.load()
+
+
 def test_launch_options_hold_model_sandbox_network_roots_and_agents_switch():
     roster_file("""
         [agents."planner@proj-a"]
-        slot = 3
         cwd = "/work"
         sandbox = "workspace-write"
         writable_roots = ["/write/one"]
@@ -161,7 +158,6 @@ def test_launch_options_hold_model_sandbox_network_roots_and_agents_switch():
 def test_network_off_is_honoured_but_said_out_loud(caplog):
     roster_file("""
         [agents."planner@proj-a"]
-        slot = 3
         cwd = "/work"
         network_access = false
     """)
@@ -173,7 +169,6 @@ def test_network_off_is_honoured_but_said_out_loud(caplog):
 def test_declared_directors_reach_the_session_stamp():
     roster_file("""
         [agents."planner@proj-a"]
-        slot = 3
         cwd = "/work"
         directors = ["main", "reviewer@proj-a"]
     """)

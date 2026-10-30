@@ -26,7 +26,7 @@ send and reply is true whether or not the daemon answered.
 
 The snapshot IS the verb's output: both call `roster_view.render_agents`, so "verbatim"
 holds by construction rather than by a second rendering kept in sync. The delta diffs by
-qualified name alone -- the name is the identity, so slot/adapter churn under an
+qualified name alone -- the name is the identity, so adapter churn under an
 unchanged name is not news -- and shows a join's tier the way the verb shows it.
 Both show the names an agent can message: a send-only binding is in neither, on either
 side of the diff. Waiting mail does not ride deltas: joins and leaves are the signal.
@@ -138,7 +138,7 @@ def roster_of(info: dict) -> dict[str, dict]:
 
     The diff is keyed by qualified name alone, so adapter churn under an unchanged name
     is still not news; the adapter is kept so a remembered send-only row can be told
-    apart. Slots and waiting mail earn no place in memory.
+    apart. Waiting mail earns no place in memory.
     """
     return {b["qualified"]: {"tier": b["tier"], "adapter": b.get("adapter")}
             for b in messageable(info["bindings"])}

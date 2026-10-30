@@ -37,7 +37,7 @@ from moxi_comms.adapters.opencode_roster import OpenCodeAgent
 from moxi_comms.claimhold import ClaimServer
 from fake_turns import FakeSession, launcher
 from fake_opencode import FakeOpenCode
-from test_console_identity import provision_console
+from test_console_identity import CONSOLE, provision_console
 
 FAST = 0.05
 PASSWORD = "test-password"
@@ -103,7 +103,7 @@ class HarnessArm:
 
 
 def codex_arm(rig, tmp_path, request):
-    agent = CodexAgent(qualified="planner@proj-a", name="planner", scope="proj-a", slot=3,
+    agent = CodexAgent(qualified="planner@proj-a", name="planner", scope="proj-a",
                        cwd=str(tmp_path), thread_file=codex_threads.path("planner@proj-a"),
                        directors=[])
     return HarnessArm(rig, CodexAdapter(
@@ -128,7 +128,7 @@ def opencode_arm(rig, tmp_path, request):
     fake = FakeOpenCode(password=PASSWORD, default_model="opencode/minimax-m3.1-flash-free",
                         heartbeat=0.5).start()
     request.addfinalizer(fake.stop)
-    agent = OpenCodeAgent(qualified="coder@proj-a", name="coder", scope="proj-a", slot=5,
+    agent = OpenCodeAgent(qualified="coder@proj-a", name="coder", scope="proj-a",
                           cwd=str(tmp_path),
                           session_file=opencode_roster.session_path("coder@proj-a"),
                           models=["opencode/minimax-m3.1-flash-free"], directors=[])
@@ -141,7 +141,8 @@ def opencode_arm(rig, tmp_path, request):
 
 def send_only_arm(rig, tmp_path, request):
     provision_console(rig)
-    return ServerArm(rig, "console", "acme", "send-only")
+    name, scope = CONSOLE.split("@", 1)
+    return ServerArm(rig, name, scope, "send-only")
 
 
 ARMS = {"send-only": send_only_arm, "codex": codex_arm, "opencode": opencode_arm}

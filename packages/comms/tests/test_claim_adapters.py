@@ -13,7 +13,7 @@ from moxi_comms.claimhold import CLAIM_SOCKET_ENV
 from moxi_comms.membership import TREE, Root
 from fake_turns import FakeSession, launcher
 
-SEAT = "seat@proj-a"
+PLANNER = "planner@proj-a"
 
 
 # --------------------------------------------------------------------------- the Claude shim
@@ -24,17 +24,18 @@ def test_a_respawned_shim_comes_back_holding_its_recorded_claim(rig):
     proc = FakeProc()
     root = proc.spawn()
     roots = [Root(root, f"s{root}", TREE)]
-    first = rig.shim(name="seat", scope="proj-a", slot=3, claim_key="sess-r",
+    first = rig.shim(name="planner", scope="proj-a",  claim_key="sess-r",
                      claim_roots=roots, claim_proc=proc)
-    assert first.identity == SEAT and rig.daemon.bindings[SEAT].slot_id == 3
+    assert first.identity == PLANNER and PLANNER in rig.daemon.bindings
     first.stop()                                  # the file stays; the root still lives
-    assert wait_for(lambda: SEAT not in rig.daemon.bindings)
-    assert claimfile.read("sess-r")["claim"]["qualified"] == SEAT
+    assert wait_for(lambda: PLANNER not in rig.daemon.bindings)
+    assert claimfile.read("sess-r")["claim"]["qualified"] == PLANNER
     again = rig.shim(scope="proj-a", claim_key="sess-r", claim_roots=roots,
-                     claim_proc=proc)             # no name, no slot of its own
-    assert again.identity == SEAT, "the recorded claim, not the respawn's arguments"
-    assert again.claims.state == "bound" and again.claims.claim["qualified"] == SEAT
-    assert rig.daemon.bindings[SEAT].slot_id == 3
+                     claim_proc=proc)             # no name of its own
+    assert again.identity == PLANNER, "the recorded claim, not the respawn's arguments"
+    assert again.claims.state == "bound" and again.claims.claim["qualified"] == PLANNER
+    assert "slot" not in again.claims.claim
+    assert PLANNER in rig.daemon.bindings
     assert claimfile.read("sess-r")["state"] == "bound"
 
 
@@ -47,8 +48,8 @@ def test_a_session_never_inherits_its_launchers_claim_socket():
 # --------------------------------------------------------------------------- codex
 
 def test_the_codex_adapter_stamps_its_own_claim_socket_on_the_app_server(rig, tmp_path):
-    codex = CodexAdapter(CodexAgent(qualified="cx@proj-a", name="cx", scope="proj-a", slot=4,
-                                    cwd=str(tmp_path), thread_file=tmp_path / "cx.json"),
+    codex = CodexAdapter(CodexAgent(qualified="coder@proj-a", name="coder", scope="proj-a",
+                                    cwd=str(tmp_path), thread_file=tmp_path / "coder.json"),
                          launch=launcher(FakeSession()), autoreconnect=False)
     try:
         codex.start()

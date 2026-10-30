@@ -1,4 +1,4 @@
-"""comms' interface 1 (`moxi_comms.api`): the announcement, the pins, and the library's
+"""comms' interface 2 (`moxi_comms.api`): the announcement, the pins, and the library's
 send against a live rig.
 
 The pins hold every public name and the send's signature, so a change to the interface
@@ -35,22 +35,22 @@ def backend():
 
 # --------------------------------------------------------------------------- the pins
 
-def test_the_announcement_offers_interface_1():
-    assert module.INTERFACES == frozenset({1})
+def test_the_announcement_offers_interface_2():
+    assert module.INTERFACES == frozenset({2})
     assert module.API == "moxi_comms.api"
-    assert api.INTERFACE == 1
+    assert api.INTERFACE == 2
 
 
 def test_load_finds_comms_and_its_api():
     modules.reset()
-    found = modules.load("comms", interface=1)
+    found = modules.load("comms", interface=2)
     assert found.ok, found
     assert found.api is api
     modules.reset()
-    assert not modules.load("comms", interface=2).ok
+    assert not modules.load("comms", interface=1).ok
 
 
-def test_interface_1_holds_its_names():
+def test_interface_2_holds_its_names():
     assert set(api.__all__) == {
         "INTERFACE", "send", "check", "Sender", "SendResult", "Recipient", "Refusal",
         "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
@@ -110,7 +110,7 @@ def test_the_reads_and_names_are_pinned():
                          "record_dir": [], "daemon_socket": [], "replay": []}.items():
         assert list(inspect.signature(getattr(api, name)).parameters) == params, name
     assert list(api.Agent.__dataclass_fields__) == ["qualified", "name", "scope", "tier",
-                                                    "adapter", "slot", "directors"]
+                                                    "adapter", "directors"]
     assert list(api.Standing.__dataclass_fields__) == ["qualified", "name", "scope",
                                                        "kind"]
     assert list(api.Roster.__dataclass_fields__) == ["bound", "standing"]
@@ -141,11 +141,12 @@ def test_the_adapter_surface():
     from moxi_comms.adapters import claude_shim
 
     assert set(adapter.__all__) == {
-        "DaemonClient", "DaemonError", "DaemonOffline", "backoff_delays", "cursors",
-        "render_digest", "frame_line", "TIER_EPHEMERAL", "TIER_CHOSEN", "TIER_STANDING",
-        "TIER_OPERATOR", "TIER_UNKNOWN", "VERIFIED", "LABELED", "UNVERIFIED",
-        "parse_machine_line", "MachineLine"}
+        "DaemonClient", "DaemonError", "DaemonOffline", "DaemonNoAnswer",
+        "backoff_delays", "cursors", "render_digest", "frame_line", "TIER_EPHEMERAL",
+        "TIER_CHOSEN", "TIER_STANDING", "TIER_OPERATOR", "TIER_UNKNOWN", "VERIFIED",
+        "LABELED", "UNVERIFIED", "parse_machine_line", "MachineLine"}
     assert adapter.DaemonClient is client.DaemonClient
+    assert adapter.DaemonNoAnswer is client.DaemonNoAnswer
     assert adapter.backoff_delays is client.backoff_delays
     assert adapter.cursors is cursors
     assert adapter.render_digest is claude_shim.render_digest
@@ -203,9 +204,8 @@ def test_the_deadline_reaches_the_daemon_call_and_the_records_busy_timeout(env):
 
 # --------------------------------------------------------------------------- the rig
 
-def _sender(rig, name, slot, scope=None):
-    environ = {"MOXI_COMMS_PROJECT": "proj-a", "MOXI_COMMS_NAME": name,
-               "MOXI_COMMS_SLOT": str(slot)}
+def _sender(rig, name, scope=None):
+    environ = {"MOXI_COMMS_PROJECT": "proj-a", "MOXI_COMMS_NAME": name}
     if scope:
         environ["MOXI_COMMS_SCOPE"] = scope
     from conftest import _stamp_of
@@ -217,12 +217,12 @@ def _ids_out(lines):
 
 
 def test_a_send_returns_its_data_and_the_verbs_lines(rig):
-    rig.shim(slot=1, name="planner")
-    reviewer = rig.shim(slot=2, name="reviewer")
-    code, out = rig.cli(["send", "reviewer", "first", "--posture", "once"], slot=1,
+    rig.shim(name="planner")
+    reviewer = rig.shim(name="reviewer")
+    code, out = rig.cli(["send", "reviewer", "first", "--posture", "once"],
                         name="planner")
     assert code == 0, out
-    with rig.session_holding(_sender(rig, "planner", 1)) as path:
+    with rig.session_holding(_sender(rig, "planner")) as path:
         got = api.send(api.Sender.socket(path), "reviewer", "second", posture="once")
     assert got.outcome == "sent" and got.exit_code == 0 and got.posted, got
     assert got.refusal is None and got.notes == ()
@@ -235,10 +235,10 @@ def test_a_send_returns_its_data_and_the_verbs_lines(rig):
 
 
 def test_a_refusal_is_data_with_a_code(rig):
-    rig.shim(slot=1, name="planner")
-    rig.shim(slot=2, name="reviewer")
+    rig.shim(name="planner")
+    rig.shim(name="reviewer")
     before = len(rig.gateway.history(rig.names_channel))
-    with rig.session_holding(_sender(rig, "planner", 1)) as path:
+    with rig.session_holding(_sender(rig, "planner")) as path:
         got = api.send(api.Sender.socket(path), "reviewer", "x", posture=None)
     assert got.outcome == "refused" and got.exit_code == 2 and not got.posted
     assert got.refusal.code == "posture-required"
@@ -249,9 +249,9 @@ def test_a_refusal_is_data_with_a_code(rig):
 
 
 def test_check_posts_nothing_and_says_what_the_send_would(rig):
-    rig.shim(slot=1, name="planner")
+    rig.shim(name="planner")
     before = len(rig.gateway.history(rig.names_channel))
-    with rig.session_holding(_sender(rig, "planner", 1)) as path:
+    with rig.session_holding(_sender(rig, "planner")) as path:
         got = api.check(api.Sender.socket(path), "later-agent", "x", posture="none",
                         new_name=True)
     assert got.outcome == "would-send" and got.exit_code == 0 and not got.posted
@@ -265,9 +265,9 @@ def test_check_posts_nothing_and_says_what_the_send_would(rig):
 
 
 def test_a_held_send_says_held_flag_per_recipient(rig):
-    rig.shim(slot=1, name="planner")
-    rig.shim(slot=2, name="reviewer")
-    with rig.session_holding(_sender(rig, "planner", 1)) as path:
+    rig.shim(name="planner")
+    rig.shim(name="reviewer")
+    with rig.session_holding(_sender(rig, "planner")) as path:
         got = api.send(api.Sender.socket(path), ["reviewer"], "later", posture="none",
                        held=True)
     assert got.outcome == "sent", got
@@ -277,8 +277,8 @@ def test_a_held_send_says_held_flag_per_recipient(rig):
 
 
 def test_the_never_bound_refusal_and_new_name(rig):
-    rig.shim(slot=1, name="planner")
-    with rig.session_holding(_sender(rig, "planner", 1)) as path:
+    rig.shim(name="planner")
+    with rig.session_holding(_sender(rig, "planner")) as path:
         refused = api.send(api.Sender.socket(path), "nobody-yet", "x", posture="none")
         sent = api.send(api.Sender.socket(path), "nobody-yet", "x", posture="none",
                         new_name=True)
@@ -287,29 +287,27 @@ def test_the_never_bound_refusal_and_new_name(rig):
 
 
 def test_a_reply_by_message_id_goes_to_the_author(rig):
-    planner = rig.shim(slot=1, name="planner")
-    rig.shim(slot=2, name="reviewer")
-    with rig.session_holding(_sender(rig, "reviewer", 2)) as path:
+    planner = rig.shim(name="planner")
+    rig.shim(name="reviewer")
+    with rig.session_holding(_sender(rig, "reviewer")) as path:
         ask = api.send(api.Sender.socket(path), "planner", "q?", posture="once")
-    with rig.session_holding(_sender(rig, "planner", 1)) as path:
+    with rig.session_holding(_sender(rig, "planner")) as path:
         got = api.send(api.Sender.socket(path), None, "a", posture=None,
                        reply_to=ask.message_id)
     assert got.outcome == "sent", got.lines()
     assert got.lines()[0].startswith("replying to reviewer")
     assert [r.qualified for r in got.recipients] == ["reviewer"]
     wait_for_queue(planner, 1)
-    with rig.session_holding(_sender(rig, "planner", 1)) as path:
+    with rig.session_holding(_sender(rig, "planner")) as path:
         missing = api.send(api.Sender.socket(path), None, "a", posture=None,
                            reply_to="4611686018427399999")
     assert (missing.outcome, missing.refusal.code) == ("refused", "no-such-message")
 
 
 def test_a_claim_server_sends_as_its_binding(rig):
-    reviewer = rig.shim(slot=2, name="reviewer")
-    server = ClaimServer("planner", "global", kind="claude-shim", slot=1, global_=True)
-    server.holder.ever_held = True
-    server.set_offline()
-    server.start()
+    reviewer = rig.shim(name="reviewer")
+    server = ClaimServer("planner", "global", kind="claude-shim",
+                         global_=True, arm=True).start()
     try:
         got = api.send(api.Sender.claim(server), "reviewer", "hi", posture="none")
     finally:
@@ -319,18 +317,41 @@ def test_a_claim_server_sends_as_its_binding(rig):
     assert reviewer.queue[0]["author"]["name"] == "planner"
 
 
+def test_a_declared_kind_claim_server_posts_stamped(rig):
+    from moxi_comms import kinds
+
+    class Entry:
+        name = "helper-kind"
+
+        @staticmethod
+        def load():
+            return {"cache": "person"}
+
+    rig.daemon.kinds = kinds.load([Entry()])
+    reviewer = rig.shim(name="reviewer")
+    server = ClaimServer("helper", "global", kind="helper-kind",
+                         global_=True, arm=True).start()
+    try:
+        got = api.send(api.Sender.claim(server), "reviewer", "hi", posture="none")
+    finally:
+        server.stop()
+    assert got.outcome == "sent", got.lines()
+    wait_for_queue(reviewer, 1)
+    assert reviewer.queue[0]["author"]["name"] == "helper"
+
+
 def test_no_identity_and_the_offline_daemon_are_refusals(rig):
     got = api.send(api.Sender.session(), "reviewer", "x", posture="none")
     assert (got.outcome, got.refusal.code) == ("refused", "no-identity")
-    rig.shim(slot=1, name="planner")
-    with rig.session_holding(_sender(rig, "planner", 1)) as path:
+    rig.shim(name="planner")
+    with rig.session_holding(_sender(rig, "planner")) as path:
         rig.daemon.stop()
         got = api.send(api.Sender.socket(path), "reviewer", "x", posture="none")
     assert (got.outcome, got.exit_code, got.refusal.code) == ("offline", 4, "offline")
 
 
 def test_the_operator_lane(rig):
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     got = api.send(api.Sender.operator(rig.prov.operator_user_id), R_SCOPED, "ship it",
                    posture=None)
     assert got.outcome == "sent", got.lines()
@@ -340,9 +361,9 @@ def test_the_operator_lane(rig):
 
 
 def test_a_config_that_does_not_load_is_a_refusal(rig):
-    rig.shim(slot=1, name="planner")
+    rig.shim(name="planner")
     write_config(None, "[threads]\nreply_cap = 0\n")
-    with rig.session_holding(_sender(rig, "planner", 1)) as path:
+    with rig.session_holding(_sender(rig, "planner")) as path:
         got = api.send(api.Sender.socket(path), "reviewer", "x", posture="open")
     assert (got.outcome, got.refusal.code) == ("refused", "config"), got.lines()
 
@@ -350,9 +371,9 @@ def test_a_config_that_does_not_load_is_a_refusal(rig):
 # --------------------------------------------------------------------------- the reads
 
 def test_attributed_and_session(rig):
-    rig.shim(slot=1, name="planner")
-    reviewer = rig.shim(slot=2, name="reviewer")
-    with rig.session_holding(_sender(rig, "planner", 1)) as path:
+    rig.shim(name="planner")
+    reviewer = rig.shim(name="reviewer")
+    with rig.session_holding(_sender(rig, "planner")) as path:
         sent = api.send(api.Sender.socket(path), "reviewer", "hello", posture="none")
     wait_for_queue(reviewer, 1)
     got = api.attributed(sent.message_id)
@@ -365,18 +386,17 @@ def test_attributed_and_session(rig):
 
 
 def test_roster_and_owner_carry_declared_directors(rig):
-    reviewer = rig.shim(slot=2, name="reviewer", directors=("main@proj-a",))
-    with rig.session_holding(_sender(rig, "reviewer", 2)):
+    reviewer = rig.shim(name="reviewer", directors=("planner@proj-a",))
+    with rig.session_holding(_sender(rig, "reviewer")):
         # A live session's claim socket answers, so its claim file is live.
         got = api.roster()
         owner = api.owner(reviewer.session_id)
     (agent,) = [a for a in got.bound if a.qualified == "reviewer"]
-    assert (agent.slot, agent.adapter, agent.directors) == (2, "claude-shim",
-                                                            ("main@proj-a",))
+    assert (agent.adapter, agent.directors) == ("claude-shim", ("planner@proj-a",))
     assert {s.qualified for s in got.standing} >= {"main@proj-a", "main@proj-b",
                                                    "herald"}
     assert (owner.identity, owner.adapter, owner.directors) == (
-        "reviewer", "claude-shim", ("main@proj-a",))
+        "reviewer", "claude-shim", ("planner@proj-a",))
     assert api.owner("no-such-session").identity is None
     with pytest.raises(api.DaemonError):
         api.owner("")

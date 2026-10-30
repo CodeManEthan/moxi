@@ -46,7 +46,7 @@ def seed(path, roster):
 
 def test_a_join_is_announced_with_its_tier(rig, tmp_path):
     state = seed(tmp_path / "roster.json", {})
-    rig.shim(slot=1, name="reviewer", scope="proj-a")
+    rig.shim(name="reviewer", scope="proj-a")
     envelope, online = shim_roster.delta(daemon_socket(), state, env={})
     assert online
     assert envelope == ("(comms roster update: reviewer@proj-a [chosen] is now "
@@ -65,7 +65,7 @@ def test_a_leave_is_just_the_name(rig, tmp_path):
 
 def test_join_and_leave_share_one_line(rig, tmp_path):
     state = seed(tmp_path / "roster.json", {"agent-3": "ephemeral"})
-    rig.shim(slot=1, name="reviewer", scope="proj-a")
+    rig.shim(name="reviewer", scope="proj-a")
     envelope, _ = shim_roster.delta(daemon_socket(), state, env={})
     assert envelope == ("(comms roster update: reviewer@proj-a [chosen] is now "
                         "reachable; agent-3 left — `moxi comms agents` is always current.)")
@@ -75,7 +75,7 @@ def test_self_is_excluded_scoped(rig, tmp_path):
     """The own-binding race: the seed may predate the session's own
     registration, and the first prompt must not announce 'you joined'."""
     state = seed(tmp_path / "roster.json", {})
-    rig.shim(slot=1, name="planner", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
     envelope, online = shim_roster.delta(
         daemon_socket(), state, env={"MOXI_COMMS_NAME": "planner",
                                      "MOXI_COMMS_SCOPE": "proj-a"})
@@ -86,7 +86,7 @@ def test_self_is_excluded_global(rig, tmp_path):
     """Global identities render bare in the roster; the self filter must match
     the bare qualified form, not `name@global`."""
     state = seed(tmp_path / "roster.json", {})
-    rig.shim(slot=1, name="herald", global_=True)
+    rig.shim(name="herald", global_=True)
     envelope, online = shim_roster.delta(
         daemon_socket(), state, env={"MOXI_COMMS_NAME": "herald", "MOXI_COMMS_GLOBAL": "1",
                                      "MOXI_COMMS_SCOPE": "global"})
@@ -102,7 +102,7 @@ def test_self_is_excluded_global(rig, tmp_path):
 def test_ephemerals_are_announced(rig, tmp_path):
     """Every tier, ephemerals included -- an appearing worker is signal."""
     state = seed(tmp_path / "roster.json", {})
-    s = rig.shim(slot=2)
+    s = rig.shim()
     auto = s.identity
     envelope, _ = shim_roster.delta(daemon_socket(), state, env={})
     assert envelope == (f"(comms roster update: {auto} [ephemeral] is now reachable "
@@ -110,7 +110,7 @@ def test_ephemerals_are_announced(rig, tmp_path):
 
 
 def test_no_change_says_nothing(rig, tmp_path):
-    rig.shim(slot=1, name="planner", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
     state = seed(tmp_path / "roster.json", {"planner@proj-a": "chosen"})
     envelope, online = shim_roster.delta(daemon_socket(), state, env={})
     assert online and envelope is None
@@ -120,12 +120,12 @@ def test_slot_change_under_an_unchanged_name_is_not_announced(rig, tmp_path):
     """The name is the identity: the diff is keyed by qualified name alone, so
     slot/adapter churn under an unchanged name cannot even reach it (the memory keeps
     the adapter since reply-enforcement, to render a send-only session's leave)."""
-    s = rig.shim(slot=1, name="planner", scope="proj-a")
+    s = rig.shim(name="planner", scope="proj-a")
     state = tmp_path / "roster.json"
     shim_roster.delta(daemon_socket(), state, env={})       # missing file: seeds
     s.stop()
     wait_until(lambda: "planner@proj-a" not in rig.daemon.bindings)
-    rig.shim(slot=2, name="planner", scope="proj-a")        # same name, new slot
+    rig.shim(name="planner", scope="proj-a")        # same name, new slot
     envelope, online = shim_roster.delta(daemon_socket(), state, env={})
     assert online and envelope is None
 
@@ -137,7 +137,7 @@ def test_a_delta_carries_no_seat_context(rig, tmp_path):
     that no one adds a column later. The state file is checked too: it is written
     into the session's runtime dir, so a seat there would be seat context on disk."""
     state = seed(tmp_path / "roster.json", {})
-    rig.shim(slot=2, name="reviewer", scope="proj-a")
+    rig.shim(name="reviewer", scope="proj-a")
     envelope, online = shim_roster.delta(daemon_socket(), state, env={})
     assert online
     assert "slot" not in envelope and "seat" not in envelope
@@ -149,7 +149,7 @@ def test_a_delta_carries_no_seat_context(rig, tmp_path):
 # ------------------------------------------------------------------------- the seed
 
 def test_the_snapshot_seeds_the_state_file_on_success(rig):
-    rig.shim(slot=1, name="planner", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
     env, state = launched()
     assert ask("ready", env).startswith(shim_roster.BLOCK)
     assert json.loads(state.read_text()) == {"planner@proj-a": CHOSEN_SHIM}
@@ -168,8 +168,8 @@ def test_offline_snapshot_seeds_nothing(rig, capsys):
 
 def test_missing_state_file_seeds_and_announces_nothing(rig, tmp_path):
     """An unknown baseline must not announce the whole world as newly joined."""
-    rig.shim(slot=1, name="planner", scope="proj-a")
-    rig.shim(slot=2, name="reviewer", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
+    rig.shim(name="reviewer", scope="proj-a")
     state = tmp_path / "roster.json"
     envelope, online = shim_roster.delta(daemon_socket(), state, env={})
     assert online and envelope is None
@@ -178,7 +178,7 @@ def test_missing_state_file_seeds_and_announces_nothing(rig, tmp_path):
 
 
 def test_a_corrupt_state_file_is_an_unknown_baseline(rig, tmp_path):
-    rig.shim(slot=1, name="planner", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
     state = tmp_path / "roster.json"
     state.write_text("not json{")
     envelope, online = shim_roster.delta(daemon_socket(), state, env={})
@@ -192,7 +192,7 @@ def test_failed_query_does_not_advance_and_the_next_delta_catches_up(rig, tmp_pa
     """Silent skip, no advance -- at-least-once replayed against a
     roster. The accumulated change arrives on the next successful diff."""
     state = seed(tmp_path / "roster.json", {})
-    rig.shim(slot=1, name="reviewer", scope="proj-a")
+    rig.shim(name="reviewer", scope="proj-a")
 
     envelope, online = shim_roster.delta("/nonexistent/daemon.sock", state, env={})
     assert not online and envelope is None
@@ -209,7 +209,7 @@ def test_failed_advance_emits_nothing(rig, tmp_path, capsys):
     import pytest
 
     state = seed(tmp_path / "roster.json", {})
-    rig.shim(slot=1, name="reviewer", scope="proj-a")
+    rig.shim(name="reviewer", scope="proj-a")
 
     def refuse(src, dst):
         raise OSError("disk says no")
@@ -263,7 +263,7 @@ def test_a_failed_write_leaves_the_old_state_and_no_debris(tmp_path, monkeypatch
 def test_the_prompt_context_is_exactly_the_delta(rig, tmp_path):
     env, state = launched()
     seed(state, {})
-    rig.shim(slot=1, name="reviewer", scope="proj-a")
+    rig.shim(name="reviewer", scope="proj-a")
     expected, _ = shim_roster.delta(daemon_socket(), seed(tmp_path / "twin.json", {}),
                                     env=env)
     assert expected and ask("prompt", env) == expected
@@ -271,7 +271,7 @@ def test_the_prompt_context_is_exactly_the_delta(rig, tmp_path):
 
 def test_no_change_gives_no_context_at_all(rig):
     """None, not an empty text: most prompts get nothing."""
-    rig.shim(slot=1, name="planner", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
     env, state = launched()
     seed(state, {"planner@proj-a": "chosen"})
     assert ask("prompt", env) is None

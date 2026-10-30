@@ -4,6 +4,7 @@ and the shipped text's references."""
 import logging
 import re
 import tokenize
+from collections import Counter
 from pathlib import Path
 
 from conftest import wait_for_queue
@@ -13,9 +14,9 @@ from moxi_comms.context import CONTEXT_BLOCK
 
 def test_logs_carry_ids_never_bodies_or_urls(rig, caplog):
     caplog.set_level(logging.DEBUG)
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     secret_body = "SECRET-BODY-DO-NOT-LOG"
-    code, _ = rig.cli(["send", "--posture", "none", "reviewer@proj-a", secret_body], slot=1, name="planner",
+    code, _ = rig.cli(["send", "--posture", "none", "reviewer@proj-a", secret_body],  name="planner",
                       scope="proj-a")
     assert code == 0
     wait_for_queue(reviewer, 1)
@@ -186,6 +187,126 @@ def test_shipped_strings_and_comments_cite_no_unpublished_references():
     cites a document they don't have, or a bare tag, tells them nothing."""
     hits = unreadable_references()
     assert hits == [], "say the reason in words instead of citing:\n" + "\n".join(hits)
+
+
+_RETIRED_SLOT_SITES = Counter([
+    ("src/moxi_comms/adapters/claude_shim.py",
+     'ap.add_argument("--comm-slot", dest="retired_slot", help=argparse.SUPPRESS)'),
+    ("src/moxi_comms/adapters/claude_shim.py", "if args.retired_slot is not None:"),
+    ("src/moxi_comms/adapters/claude_shim.py",
+     'print("moxi-comms-shim: --comm-slot is retired; remove it: comms has no slots.",'),
+    ("src/moxi_comms/adapters/roster_rows.py", 'if "slot" in defaults:'),
+    ("src/moxi_comms/adapters/roster_rows.py",
+     'raise ConfigError(f"{where}: slot is retired; remove it: comms has no slots")'),
+    ("src/moxi_comms/adapters/roster_rows.py", 'if "slot" in section:'),
+    ("src/moxi_comms/adapters/roster_rows.py",
+     'raise ConfigError(f"{where}: slot is retired; remove it: comms has no slots")'),
+    ("src/moxi_comms/adapters/session.py",
+     'ap.add_argument("--comm-slot", dest="retired_slot", help=argparse.SUPPRESS)'),
+    ("src/moxi_comms/adapters/session.py", "if args.retired_slot is not None:"),
+    ("src/moxi_comms/adapters/session.py",
+     'print(f"{prog}: --comm-slot is retired; remove it: comms has no slots.",'),
+    ("src/moxi_comms/daemon.py", "__slots__ = ()"),
+    ("src/moxi_comms/glossary.py",
+     'snowflake, slot, or channel -- the `id` in the `re:` entry is "the message id shown in'),
+    ("src/moxi_comms/machine_line.py",
+     "slot and parses the same, so old records still read as held (``held``)."),
+    ("src/moxi_comms/machine_line.py",
+     "* the POSTURE slot says what the sender wants back: ``[no reply]`` is ``none``,"),
+    ("src/moxi_comms/machine_line.py",
+     "makes the message the root of a thread with limits. Nothing in the slot is open too,"),
+    ("src/moxi_comms/machine_line.py",
+     "#: The held mark as the verb writes it, in the slot `[next-turn]` had."),
+    ("src/moxi_comms/machine_line.py",
+     "#: What each posture writes in line zero's posture slot. Open writes nothing, except on"),
+    ("src/moxi_comms/machine_line.py",
+     "#: The posture slot's token for open stated on a new send: the root of a thread with"),
+    ("src/moxi_comms/machine_line.py",
+     "to writing nothing. `open_mark` writes `[open]` in the posture slot, and only beside"),
+    ("src/moxi_comms/migration.py", '_RETIRED_FILE = re.compile(r"slot-[0-9]+\\Z")'),
+    ("src/moxi_comms/migration.py", '_RETIRED_KEY = re.compile(r"comms/slot-[0-9]+/[^/]+\\Z")'),
+    ("src/moxi_comms/migration.py", "def _holder_at(conn, slot_id, timestamp: str | None):"),
+    ("src/moxi_comms/migration.py", "if conn is None or slot_id is None or not timestamp:"),
+    ("src/moxi_comms/migration.py",
+     '"SELECT * FROM bindings WHERE slot_id = ? AND bound_at <= ? "'),
+    ("src/moxi_comms/migration.py", "(int(slot_id), timestamp, timestamp)).fetchall()"),
+    ("src/moxi_comms/migration.py", 'row["slot_id"] if "slot_id" in keys else None,'),
+    ("src/moxi_comms/migration.py",
+     'keep = Path(keep_path) if keep_path is not None else state_dir() / "slot-keeps.json"'),
+    ("src/moxi_comms/provision.py",
+     'ap.add_argument("--slots", dest="retired_slots", help=argparse.SUPPRESS)'),
+    ("src/moxi_comms/provision.py", "if args.retired_slots is not None:"),
+    ("src/moxi_comms/provision.py",
+     '"moxi-comms-provision: --slots is retired; remove it: comms has no slots.")'),
+    ("src/moxi_comms/settings.toml", "[provision.slots]"),
+    ("src/moxi_comms/settings.toml", 'retired = "remove it: comms has no slots"'),
+])
+
+
+def retired_slot_vocabulary(repo=REPO):
+    allowed = _RETIRED_SLOT_SITES.copy()
+    hits = []
+    for path in sorted((repo / "src").rglob("*")):
+        if not path.is_file() or "__pycache__" in path.parts:
+            continue
+        relative = str(path.relative_to(repo))
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if "slot" not in line.lower():
+                continue
+            site = (relative, line.strip())
+            if allowed[site]:
+                allowed[site] -= 1
+            else:
+                hits.append(f"{relative}:{line_number}")
+    return hits
+
+
+def test_retired_slot_vocabulary_stays_in_compatibility_sites():
+    hits = retired_slot_vocabulary()
+    assert hits == [], "retired vocabulary outside compatibility sites:\n" + "\n".join(hits)
+
+
+def test_retired_vocabulary_scanner_rejects_an_extra_site_in_an_allowed_file(tmp_path):
+    path = tmp_path / "src/moxi_comms/migration.py"
+    path.parent.mkdir(parents=True)
+    path.write_text('_RETIRED_FILE = re.compile(r"slot-[0-9]+\\Z")\n'
+                    "extra_slot = None\n", encoding="utf-8")
+    assert retired_slot_vocabulary(tmp_path) == ["src/moxi_comms/migration.py:2"]
+
+
+_RETIRED_TEST_SLOT_FILES = {
+    "test_binding_tokens.py",      # protocol frames intentionally exercise the old field
+    "test_codex_roster.py",        # the retired roster-key refusal
+    "test_identity_migration.py",  # old-directory fixtures and conversion assertions
+    "test_opencode_server.py",     # the retired roster-key refusal
+    "test_settings.py",            # the retired config-key refusal
+    "test_hygiene.py",             # this file contains the scanner's mutation sample
+}
+
+
+def retired_test_slot_arguments(repo=REPO):
+    hits = []
+    tests = repo / "tests"
+    if not tests.exists():
+        return hits
+    for path in sorted(tests.glob("test_*.py")):
+        if path.name in _RETIRED_TEST_SLOT_FILES:
+            continue
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(r"(?<![A-Za-z0-9_])slot\s*=", line):
+                hits.append(f"tests/{path.name}:{line_number}")
+    return hits
+
+
+def test_retired_test_slot_arguments_are_gone():
+    assert retired_test_slot_arguments() == []
+
+
+def test_retired_test_slot_argument_scanner_rejects_an_extra_site(tmp_path):
+    path = tmp_path / "tests" / "test_cli.py"
+    path.parent.mkdir()
+    path.write_text("value = dict(slot=1)\n", encoding="utf-8")
+    assert retired_test_slot_arguments(tmp_path) == ["tests/test_cli.py:1"]
 
 
 def test_the_reference_check_sees_strings_comments_and_f_strings(tmp_path):

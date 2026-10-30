@@ -331,13 +331,12 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
 
         # ---- Part one: the documented install, and nothing else -------------------
         # 1. `moxi comms doctor`, before anything touches the home: the local backend
-        #    by default, with no slots yet.
+        #    by default, before first-start provisioning.
         doctor = run(["moxi", "comms", "doctor"], env, cwd=home)
         assert doctor.returncode == 0, doctor.stdout + doctor.stderr
         lines = doctor.stdout.splitlines()
         assert "backend     local (the default)" in lines, doctor.stdout
-        assert ("slots       none yet (the daemon provisions 6 on its first start)"
-                in lines), doctor.stdout
+        assert not any(line.startswith("slots") for line in lines), doctor.stdout
         assert f"{home}/.local/state/moxi/" in doctor.stdout
         assert "acme" not in doctor.stdout
 
@@ -367,30 +366,29 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
         daemon = start(*argv, environ=unit_env)
         wait_for(sock.exists, what="the daemon's socket")
 
-        # 5. The daemon provisioned on its first start: 6 slots, by the one definition
-        #    of provisioned (doctor's slots line), and in the directory itself.
+        # 5. The daemon provisioned the names room and operator on its first start.
         doctor = run(["moxi", "comms", "doctor"], env, cwd=home)
-        assert "slots       6 provisioned" in doctor.stdout.splitlines(), doctor.stdout
+        assert not any(line.startswith("slots") for line in doctor.stdout.splitlines())
         assert "daemon      answers at " in doctor.stdout
         db = home / ".local" / "share" / "moxi" / "comms" / "directory.db"
         conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         try:
-            slots = [row[0] for row in conn.execute("SELECT slot_id FROM slots")]
+            tables = {row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
         finally:
             conn.close()
-        assert sorted(slots) == [1, 2, 3, 4, 5, 6]
+        assert {"slots", "webhooks"}.isdisjoint(tables)
 
         # ---- Part two: the named fixtures the exchange needs ------------------------
-        # The OpenCode roster for two identities on slots 1 and 2, which part one
-        # asserted, and the stub `opencode` on PATH, where the launcher looks for it.
-        # Neither names a backend or makes a slot.
+        # The OpenCode roster for two identities, and the stub `opencode` on PATH,
+        # where the launcher looks for it. Neither names a backend.
         config = home / ".config" / "moxi" / "comms"
         config.mkdir(parents=True, exist_ok=True)
         work = home / "work"
         work.mkdir()
         (config / "config.toml").write_text("".join(
-            f'[opencode.agents."{name}"]\nslot = {slot}\ncwd = "{work}"\n\n'
-            for name, slot in (("alice", 1), ("bob", 2))))
+            f'[opencode.agents."{name}"]\ncwd = "{work}"\n\n'
+            for name in ("alice", "bob")))
         (home / "opencode_stub.py").write_text(STUB_TURN)
         stub = home / "fakebin" / "opencode"
         stub.write_text(f"#!/bin/sh\nexec {sys.executable} {home / 'opencode_stub.py'} "
@@ -402,7 +400,7 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
         #    `moxi comms send` an agent makes runs inside its own session: its launcher spawned
         #    the server with the session's claim socket. The test is the operator at
         #    their own terminal, outside every session, with the id the daemon's first
-        #    start provisioned, read from the directory as step 5 read the slots.
+        #    start provisioned, read from the directory.
         def launch(name):
             records = home / "opencode-records" / name
             proc = OnPty([str(venv / "bin" / "moxi-comms-opencode"), name, "--notice-hold", "0"],
@@ -434,8 +432,8 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
                              if e["event"] in ("serve", "window"))
         # A launch stamp alone is no live session holding a name: refused, nothing sent.
         stamped = run(["moxi", "comms", "send", "bob", "a stamp alone"],
-                      {**env, "MOXI_COMMS_NAME": "alice", "MOXI_COMMS_SLOT": "1",
-                       "MOXI_COMMS_GLOBAL": "1"}, cwd=home)
+                      {**env, "MOXI_COMMS_NAME": "alice", "MOXI_COMMS_GLOBAL": "1"},
+                      cwd=home)
         assert stamped.returncode == 2, stamped.stdout + stamped.stderr
         assert ("this process is not inside the session that holds alice — nothing was "
                 "sent.") in stamped.stdout, stamped.stdout

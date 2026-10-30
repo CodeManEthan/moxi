@@ -15,7 +15,7 @@ from moxi_comms.adapters.codex_roster import CodexAgent, record_write_root
 
 
 def agent(tmp_path, **changes):
-    values = dict(qualified="pilot@proj-a", name="pilot", scope="proj-a", slot=3,
+    values = dict(qualified="pilot@proj-a", name="pilot", scope="proj-a",
                   cwd=str(tmp_path), thread_file=tmp_path / "pilot.json",
                   writable_roots=[tmp_path / "row"], model="gpt-sample")
     values.update(changes)

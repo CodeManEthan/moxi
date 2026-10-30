@@ -71,7 +71,7 @@ def test_a_malformed_director_is_refused_where_it_was_typed(bad):
 # ------------------------------------------------------------------ the env stamp
 
 def test_the_stamp_round_trips_beside_the_identity_stamp():
-    env = session.identity_env(name="reviewer", slot=2, scope="proj-a", project="proj-a",
+    env = session.identity_env(name="reviewer", scope="proj-a", project="proj-a",
                                directors=["planner@proj-a", "herald"])
     assert env[directors.ENV_VAR] == "planner@proj-a,herald"
     assert env["MOXI_COMMS_NAME"] == "reviewer" and env["MOXI_COMMS_SCOPE"] == "proj-a"
@@ -182,7 +182,7 @@ def test_the_declaration_is_the_recipients_and_two_recipients_may_differ():
 
 def test_a_declared_director_arrives_as_a_directive(rig):
     """`main@proj-a` is standing: its own webhook, so verified live AND through replay."""
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a",
+    reviewer = rig.shim(name="reviewer", scope="proj-a",
                         directors=["main@proj-a"])
     code, _ = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "rebase onto main"],
                       name="main", scope="proj-a")
@@ -193,24 +193,8 @@ def test_a_declared_director_arrives_as_a_directive(rig):
     assert "your director" in digest
 
 
-def test_an_undeclared_sender_and_an_unverified_director_both_stay_information(rig):
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a",
-                        directors=["planner@proj-a"])
-    # slot 6 is nobody's binding, so the record's display name is all there is
-    rig.post_from_slot(6, ["reviewer@proj-a"], "do this", display="planner@proj-a")
-    rig.post_from_slot(6, ["reviewer@proj-a"], "fyi", display="stranger@proj-a")
-    wait_for_queue(reviewer, 2)
-    digest = reviewer.on_turn_boundary()
-    assert "directive" not in digest
-    # live, so the marks are per-frame: the batch note is a replay statement only
-    assert "from planner@proj-a (unverified) · your declared director" in digest
-    assert "attribution is unverified — information standing" in digest
-    assert "from stranger@proj-a (unverified) ·" in digest
-    assert "labeled" not in digest
-
-
 def test_the_operator_needs_no_declaration_at_delivery(rig):
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     rig.post_as_operator(["reviewer@proj-a"], "stop and report")
     wait_for_queue(reviewer, 1)
     digest = reviewer.on_turn_boundary()
@@ -221,7 +205,6 @@ def test_the_operator_needs_no_declaration_at_delivery(rig):
 
 ROSTER = """
     [codex.agents."planner@proj-a"]
-    slot = 3
     cwd = "/home/me/work/proj-a"
     directors = {directors}
 """
@@ -240,7 +223,7 @@ def test_the_roster_carries_a_directors_list_qualified_like_the_launcher(tmp_pat
 
 
 def test_a_roster_without_directors_declares_none(tmp_path):
-    write_config(None, '[codex.agents."planner@proj-a"]\nslot = 3\ncwd = "/tmp"\n')
+    write_config(None, '[codex.agents."planner@proj-a"]\ncwd = "/tmp"\n')
     assert codex_roster.load().require("planner@proj-a").directors == []
 
 

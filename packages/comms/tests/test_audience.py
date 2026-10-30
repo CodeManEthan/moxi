@@ -25,8 +25,8 @@ from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.daemon import AUDIENCE_INDEX_SLACK, AUDIENCE_INDEX_UNKNOWN, Daemon
 from moxi_comms.gateway import GatewayError
 
-PLANNER = dict(slot=1, name="planner", scope="proj-a")
-REVIEWER = dict(slot=2, name="reviewer", scope="proj-a")
+PLANNER = dict(name="planner", scope="proj-a")
+REVIEWER = dict(name="reviewer", scope="proj-a")
 
 
 def posted(rig):
@@ -39,8 +39,7 @@ def line_zero(msg):
 
 def ask(rig, audience=None, text="question?"):
     """An ask from planner to reviewer, posted straight into the record."""
-    return rig.post_from_slot(6, ["reviewer@proj-a"], text, display="planner@proj-a",
-                              audience=audience)
+    return rig.post_as("planner@proj-a", ["reviewer@proj-a"], text, audience=audience)
 
 
 @pytest.fixture
@@ -85,8 +84,7 @@ def test_send_writes_the_audience_lowercased_onto_line_zero(rig):
 
 
 def test_send_without_the_flag_is_byte_identical_to_before(rig):
-    code, _ = rig.cli(["send", "reviewer@proj-a", "plain", "--posture", "once", "--new-name"],
-                      **PLANNER)
+    code, _ = rig.cli(["send", "reviewer@proj-a", "plain", "--posture", "once", "--new-name"], **PLANNER)
     assert code == 0
     # The same bytes compose writes with no audience, the send's cold-at included.
     content = posted(rig)[0].content
@@ -117,8 +115,7 @@ def test_reply_table_row_1_none_and_nothing_carries_none(rig):
 def test_reply_table_row_2_a_reply_may_add_an_audience(rig):
     """the ask had none, the replier adds one."""
     original = ask(rig)
-    code, out = rig.cli(["reply", original.id, "answer.", "--audience", "operator"],
-                        **REVIEWER)
+    code, out = rig.cli(["reply", original.id, "answer.", "--audience", "operator"], **REVIEWER)
     assert code == 0, out
     assert line_zero(posted(rig)[-1]).audience == "operator"
 
@@ -134,8 +131,7 @@ def test_reply_table_row_3_the_asks_audience_is_copied(rig):
 
 def test_reply_table_row_4_the_same_audience_is_accepted(rig):
     original = ask(rig, audience="operator")
-    code, out = rig.cli(["reply", original.id, "answer.", "--audience", "OPERATOR"],
-                        **REVIEWER)
+    code, out = rig.cli(["reply", original.id, "answer.", "--audience", "OPERATOR"], **REVIEWER)
     assert code == 0, out
     assert line_zero(posted(rig)[-1]).audience == "operator"
 
@@ -144,8 +140,7 @@ def test_reply_table_row_5_a_different_audience_is_refused(rig):
     """a replier may not change the ask's audience. The refusal names the ask's
     audience, says a reply cannot change it, and names the cure: a new send."""
     original = ask(rig, audience="operator")
-    code, out = rig.cli(["reply", original.id, "answer.", "--audience", "archivist"],
-                        **REVIEWER)
+    code, out = rig.cli(["reply", original.id, "answer.", "--audience", "archivist"], **REVIEWER)
     assert code == 2
     assert "'operator'" in out and "cannot change" in out
     assert "new message" in out and "Nothing was sent" in out
@@ -220,8 +215,7 @@ def test_the_operator_lane_takes_the_same_flag(rig):
 
 def reply_to_planner(rig, referent_id, text="answer.", audience=None):
     """A reply typed by hand: `re:` on line zero, no audience unless one is typed."""
-    return rig.post_from_slot(6, ["planner@proj-a"], text, display="reviewer@proj-a",
-                              reply_to=referent_id, audience=audience)
+    return rig.post_as("reviewer@proj-a", ["planner@proj-a"], text, reply_to=referent_id, audience=audience)
 
 
 def delivered(shim, message_id):
@@ -411,8 +405,7 @@ def test_a_live_reply_racing_the_boot_rescan_delivers_as_unknown(rig, monkeypatc
 
 def ask_re(rig, referent_id, text="follow-up?", audience=None):
     """A hand-typed reply from planner to reviewer: `re:` on line zero, nothing else."""
-    return rig.post_from_slot(6, ["reviewer@proj-a"], text, display="planner@proj-a",
-                              reply_to=referent_id, audience=audience)
+    return rig.post_as("planner@proj-a", ["reviewer@proj-a"], text, reply_to=referent_id, audience=audience)
 
 
 def test_an_ordinary_reply_chain_to_an_unmarked_ask_carries_no_mark_at_every_hop(rig):
@@ -660,8 +653,7 @@ def history_row(out, message_id):
 
 def test_history_spells_out_a_written_audience_beside_re(rig):
     original = ask(rig, audience="operator")
-    reply = rig.post_from_slot(6, ["planner@proj-a"], "answer.", display="reviewer@proj-a",
-                               reply_to=original.id, audience="operator")
+    reply = rig.post_as("reviewer@proj-a", ["planner@proj-a"], "answer.", reply_to=original.id, audience="operator")
     code, out = rig.cli(["history", "planner@proj-a"])
     assert code == 0, out
     assert history_row(out, original.id).endswith("-> reviewer@proj-a audience: operator")
@@ -672,8 +664,7 @@ def test_history_spells_out_a_written_audience_beside_re(rig):
 def test_history_shows_an_audience_inherited_within_the_page(rig):
     original = ask(rig, audience="operator")
     first = reply_to_planner(rig, original.id, "first.")
-    second = rig.post_from_slot(6, ["reviewer@proj-a"], "second.", display="planner@proj-a",
-                                reply_to=first.id)
+    second = rig.post_as("planner@proj-a", ["reviewer@proj-a"], "second.", reply_to=first.id)
     code, out = rig.cli(["history", "planner@proj-a"])
     assert code == 0, out
     assert history_row(out, first.id).endswith(

@@ -44,7 +44,7 @@ def session_env(name="reviewer", sid="pl1", **extra) -> dict:
 # ------------------------------------------------------------------- the listener
 
 def test_the_listener_names_the_stamped_comms_in_a_claude_sessions_layer_one(rig):
-    rig.shim(slot=1, name="planner", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
     text = listener.answer(event("ready", env=session_env(MOXI_COMMS_COMMAND=COMMAND)))
     assert "Run every comms verb with /x/bin/moxi comms" in text
     block, line, roster = text.split("\n\n", 2)
@@ -92,10 +92,10 @@ def test_with_neither_the_line_names_the_bare_verb(rig, capsys, monkeypatch):
 
 
 def test_prompt_deltas_carry_no_path_line(rig):
-    rig.shim(slot=1, name="planner", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
     env = session_env(MOXI_COMMS_COMMAND=COMMAND)
     listener.answer(event("ready", env=env))
-    rig.shim(slot=3, name="curator", scope="proj-a")
+    rig.shim(name="curator", scope="proj-a")
     delta = listener.answer(event("prompt", env=env))
     assert "curator@proj-a" in delta and "Run every comms verb" not in delta
 

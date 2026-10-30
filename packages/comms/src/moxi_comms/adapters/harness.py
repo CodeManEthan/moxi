@@ -30,12 +30,14 @@ import sys
 import threading
 import time
 
-from .. import claimfile, constants, cursors
+from .. import claimfile, cursors
 from .. import owed as owed_mod
 from ..claimhold import CLAIM_SOCKET_ENV, ClaimHolder
 from ..client import DaemonClient, DaemonError, DaemonOffline, backoff_delays
 from ..config import ConfigError
+from ..context import BARE_COMMS
 from ..membership import DEFAULT_PROC, TREE, Root
+from . import binding
 from .claude_shim import OFFLINE_MESSAGE, render_digest, survive_supervisor_error
 
 #: The one value of `deliver` that puts a batch back on the queue.
@@ -70,6 +72,25 @@ def launch_stamp() -> str:
 
     started = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
     return f"{os.getpid()}@{started}"
+
+
+def plan_head(agent, roster, say, *, record: str) -> None:
+    """The head of a launcher's plan: the identity, roster, cwd, `record` (the
+    harness's own line for the thread or session it keeps), and the agent's directors
+    when it declares any."""
+    say(f"identity   {agent.qualified}")
+    say(f"  roster     {roster.source}")
+    say(f"  cwd        {agent.cwd}")
+    say(record)
+    if agent.directors:
+        say(f"  directors  {', '.join(agent.directors)} "
+            "(verified messages from these render as directives)")
+
+
+def plan_comms(comms_path, say) -> None:
+    """The plan's line for the comms an agent's shell runs: the resolved `moxi` script,
+    or the bare command when this environment has none."""
+    say(f"  comms      {comms_path or BARE_COMMS + ' (this environment has no moxi script)'}")
 
 
 class TurnLedger:
@@ -175,7 +196,6 @@ class HarnessAdapter:
         # identity / daemon
         self.identity: str | None = None
         self.tier: str | None = None
-        self.slot_id: int | None = None
         self.offline = True
         self.replaying = False
         self.replay_notice: str | None = None
@@ -226,10 +246,14 @@ class HarnessAdapter:
         #: adapter's own reminders in the running turn (0 or 1); whether a reminder
         #: holds the turn now. `owed_query(identity, authors, referents)` is the
         #: daemon's `owed` query on a short connection of its own; a test may answer it.
-        self.reply_ledger = owed_mod.Ledger()
-        self.turn_blocks = 0
-        self.blocked = False
         self.owed_query = self._query_owed
+        self.replies = owed_mod.ReplyCheck(
+            self._lock, clock=lambda: self.clock(), identity=lambda: self.identity,
+            queued=lambda: bool(self.queue),
+            owed_query=lambda *args: self.owed_query(*args),
+            connection=lambda: self._daemon,
+            stop_facts=lambda fields: self.stop_facts(fields), log=self.log,
+            moment="turn end", check="reply check", start="")
         self.exit_hook = exit_hook or (lambda: os.kill(os.getpid(), signal.SIGTERM))
         self._make_holder()
 
@@ -252,7 +276,7 @@ class HarnessAdapter:
         name, scope = getattr(agent, "name", None), getattr(agent, "scope", None)
         claim = {"name": name, "scope": scope, "global": scope == "global",
                  "qualified": getattr(agent, "qualified", None),
-                 "slot": getattr(agent, "slot", None), "tier": None,
+                 "tier": None,
                  "directors": list(getattr(agent, "directors", []) or [])}
         self._launch_claim = claim
         # Held in memory from construction; the file is written at `start`.
@@ -305,71 +329,47 @@ class HarnessAdapter:
         self._threads.append(t)
 
     def connect_daemon(self) -> None:
-        """Register with the PINNED slot. The connection is the liveness anchor."""
-        with self._lock:
-            self.replaying = True          # armed before the round-trip, as the shim does
-            # `holding`: the ids this adapter already has queued or injected and whose
-            # turn has not ended. The daemon claims them for the new binding at once, so
-            # a reconnect's replay from the unmoved cursor never hands them again.
-            holding = sorted(self.held_ids, key=int)
-        client = DaemonClient(self.socket_path, on_push=self._on_push,
-                              on_close=self._on_daemon_close)
-        client.connect()
-        try:
-            resp = client.register(slot=self.agent.slot, name=self.agent.name,
-                                   scope=self.agent.scope,
+        """Register the roster identity. The connection is the liveness anchor."""
+        def register(client):
+            with self._lock:
+                # `holding`: the ids this adapter already has queued or injected and
+                # whose turn has not ended. The daemon claims them for the new binding at
+                # once, so a reconnect's replay from the unmoved cursor never hands them
+                # again.
+                holding = sorted(self.held_ids, key=int)
+            return client.register(name=self.agent.name, scope=self.agent.scope,
                                    global_=self.agent.scope == "global",
                                    project=self.agent.scope, adapter=self.KIND,
                                    holding=holding,
                                    report=self.session_report(register=True))
-        except BaseException:
-            client.close()                 # a refused claim never leaves a connection
-            raise
-        qualified = resp["identity"]["qualified"]
-        if qualified != self.agent.qualified:
-            client.close()
-            raise ConfigError(
-                f"the daemon bound this registration as {qualified!r} but the roster "
-                f"calls it {self.agent.qualified!r}. The {self.STATE_NOUN} and the cursor "
-                "are both keyed by the qualified name, so a mismatch would split the "
-                "agent in two -- fix the roster key or its scope.")
-        with self._lock:
-            if self._stop.is_set():
-                # A bind must not outlive `stop()`, as the Claude shim declines it: the
-                # daemon would hold it until the process exits, and `bound` would write
-                # back the claim file `stop()` removed.
-                client.close()
-                raise DroppedAfterAnswer("comms offline: the adapter stopped while the "
-                                         "daemon answered register")
-            if not client.connected:
-                # The adapter reads bound only while the connection its register was
-                # answered on is open; a drop at any point after the answer sends it
-                # back to register. The daemon answered and the connection
-                # closed before this thread got here: `_on_daemon_close` has already
-                # run (the reader thread marks the client closed before calling it)
-                # and saw `offline` still True, so nothing will run again for this
-                # client. Taking the binding now would leave `offline` False over a
-                # dead client, and the supervisor, which registers only while it is
-                # True, would never register again. Under `_lock`, which the close
-                # handler takes too, the ordering is total: the close landed first and
-                # this declines, or the handler runs after the assignment below and
-                # reads the binding offline.
-                client.close()
-                raise DroppedAfterAnswer(
-                    "comms offline: the daemon closed the connection after answering "
-                    "register")
+
+        def accept(resp):
+            qualified = resp["identity"]["qualified"]
+            if qualified != self.agent.qualified:
+                raise ConfigError(
+                    f"the daemon bound this registration as {qualified!r} but the roster "
+                    f"calls it {self.agent.qualified!r}. The {self.STATE_NOUN} and the "
+                    "cursor are both keyed by the qualified name, so a mismatch would "
+                    "split the agent in two -- fix the roster key or its scope.")
+
+        def install(client, resp):
             self._daemon = client
-            self.identity = qualified
-            self.tier = resp["identity"]["tier"]
-            self.slot_id = resp["slot"]
-            self.offline = False
-            if self.reply_ledger.hwm is None and resp.get("hwm") is not None:
-                # The first registration's catch-up boundary: a `re:` at or below it
-                # was sent before this adapter could see payments.
-                self.reply_ledger.hwm = str(resp["hwm"])
-            self.claims.bound(resp)
-        self.log.info("registered as %s (tier %s, slot %s, adapter %s%s)",
-                      self.identity, self.tier, self.slot_id, self.KIND,
+
+        # `replaying` stays armed after a failed or declined register: the flush holds
+        # until a register is answered and its replay completes.
+        resp = binding.register_and_install(
+            self, client_type=DaemonClient, on_close=self._on_daemon_close,
+            register=register, accept=accept, install=install, ledger=self.reply_ledger,
+            disarm=False)
+        if resp == binding.STOPPED:
+            raise DroppedAfterAnswer("comms offline: the adapter stopped while the "
+                                     "daemon answered register")
+        if resp == binding.DROPPED:
+            raise DroppedAfterAnswer(
+                "comms offline: the daemon closed the connection after answering "
+                "register")
+        self.log.info("registered as %s (tier %s, adapter %s%s)",
+                      self.identity, self.tier, self.KIND,
                       self.registered_detail())
         with self._lock:
             owed, self._owed_ready = self._owed_ready, None
@@ -651,6 +651,21 @@ class HarnessAdapter:
         return cursor
 
     # ------------------------------------------------------------------ reply enforcement
+    @property
+    def reply_ledger(self) -> owed_mod.Ledger:
+        """The ledger of owed replies (`replies.ledger`)."""
+        return self.replies.ledger
+
+    @property
+    def blocked(self) -> bool:
+        """Whether a reminder holds the turn now."""
+        return self.replies.blocked
+
+    @property
+    def turn_blocks(self) -> int:
+        """This adapter's own reminders in the running turn (0 or 1)."""
+        return self.replies.turn_blocks
+
     def reply_check(self, fields: dict) -> owed_mod.Decision:
         """The Claude shim's steps for one turn end, through the same `owed` query: a
         boundary (`block` None) or a block whose reason is `owed.reminder_text`.
@@ -662,52 +677,7 @@ class HarnessAdapter:
         at this turn end, already recorded with the daemon as `unanswered`. The caller
         delivers the reminder and calls `mark_blocked` once it is in front of the model.
         """
-        try:
-            decision = self._decide_reply(fields if isinstance(fields, dict) else {})
-        except Exception:                                          # noqa: BLE001
-            self.log.exception("the reply check failed; this turn end passes")
-            with self._lock:
-                self.reply_ledger.void_pending()
-            return owed_mod.Decision()
-        for debt in decision.dropped:
-            self._record_unanswered(debt)
-        return decision
-
-    def _decide_reply(self, fields: dict) -> owed_mod.Decision:
-        now = self.clock()
-        with self._lock:
-            self.reply_ledger.expire(now)                         # step 1
-            if not self.reply_ledger.debts:
-                return owed_mod.Decision()
-        fields = self.stop_facts(dict(fields))
-        with self._lock:
-            active = fields.get("stop_hook_active")
-            tasks = fields.get("task_types")
-            crons = fields.get("crons")
-            if (not isinstance(active, bool) or not isinstance(tasks, list)   # step 2
-                    or not isinstance(crons, int) or isinstance(crons, bool)):
-                self.reply_ledger.void_pending()
-                return owed_mod.Decision()
-            authors, referents = self.reply_ledger.query_args()
-            identity = self.identity
-        answer = None
-        if identity is not None:                                  # step 3
-            try:
-                answer = self.owed_query(identity, authors, referents)
-            except Exception as e:                                # noqa: BLE001
-                self.log.info("the owed query failed (%s); this turn end passes", e)
-        if not isinstance(answer, dict):
-            with self._lock:
-                self.reply_ledger.void_pending()
-            return owed_mod.Decision()
-        with self._lock:
-            self.reply_ledger.settle(answer, now)
-            work = owed_mod.is_work(tasks, crons, queued=bool(self.queue),   # step 4
-                                    undelivered=answer.get("undelivered"),
-                                    awaiting=answer.get("awaiting"))
-            return self.reply_ledger.decide(stop_hook_active=active,   # steps 5 to 9
-                                            turn_blocks=self.turn_blocks, work=work,
-                                            floor=answer.get("floor"), now=now)
+        return self.replies.check(fields)
 
     def stop_facts(self, fields: dict) -> dict:
         """The turn end's facts with what the port's harness does not give filled in:
@@ -719,53 +689,26 @@ class HarnessAdapter:
     def _query_owed(self, identity: str, authors: dict, referents: list) -> dict:
         """The daemon's `owed` query on a short connection of its own, with the shim's
         timeout. Raises on any failure."""
-        client = DaemonClient(self.socket_path, timeout=constants.OWED_QUERY_TIMEOUT)
-        client.connect()
-        try:
-            return client.query("owed", identity=identity, authors=authors,
-                                referents=referents)
-        finally:
-            client.close()
-
-    def _record_unanswered(self, debt) -> None:
-        """An ignored reminder: one `unanswered` on the binding's own connection, as the
-        shim sends it."""
-        with self._lock:
-            identity, client = self.identity, self._daemon
-        if identity and client is not None and client.connected:
-            client.notify("unanswered", identity=identity, message_id=debt.message_id,
-                          author=debt.author, at=debt.at)
-        self.log.info("comms: %s ended a turn without answering %s's msg %s", identity,
-                      debt.author, debt.message_id)
+        return binding.query_owed(self.socket_path, identity, authors, referents,
+                                  client_type=DaemonClient)
 
     def mark_blocked(self, names) -> None:
         """The reminder is in front of the model and holds the turn: the named debts
         are pending, and this turn has had its one reminder."""
-        with self._lock:
-            self.blocked = True
-            self.reply_ledger.mark_pending(names)
-            self.turn_blocks += 1
+        self.replies.mark_blocked(names)
 
     def clear_block(self) -> None:
         """A turn end, or what resolves a reminder: every pending mark not already
         settled is voided, and the next turn may be reminded again."""
-        with self._lock:
-            self.reply_ledger.void_pending()
-            self.blocked = False
-            self.turn_blocks = 0
+        self.replies.clear_block()
 
     def owed_session_changed(self, source: str, session_id) -> None:
         """A clear empties the debts; a resume empties those injected into another
         session. While a reminder holds the turn, a startup, resume or clear resolves
         it, as on the shim; a compaction resolves nothing."""
-        with self._lock:
-            gone = self.reply_ledger.session_changed(source, session_id)
-            blocked = self.blocked
-        if gone:
-            self.log.info("%s: %d owed repl(ies) left the ledger with the context",
-                          source, gone)
-        if blocked and source in owed_mod.RESOLVING_SOURCES:
+        if self.replies.session_changed(source, session_id):
             self.clear_block()
+
 
     # ------------------------------------------------------------------ injection
     def _flush_loop(self) -> None:

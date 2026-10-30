@@ -101,7 +101,7 @@ def child_env(**extra) -> dict:
     return env
 
 
-def round_trip(rig, socket_path, sender: str, bob, *, slot=None, tier="chosen"):
+def round_trip(rig, socket_path, sender: str, bob, *, tier="chosen"):
     """The sender, through its claim socket, sends to bob; bob's message to the sender
     is answered with `comms reply` through the same socket. Each prints, delivers and
     attributes as on main."""
@@ -114,12 +114,10 @@ def round_trip(rig, socket_path, sender: str, bob, *, slot=None, tier="chosen"):
     assert (got["author"]["name"], got["author"]["tier"], got["author"]["attribution"]) == (
         sender, tier, "verified")
     posted = message(rig, mid)
-    assert posted.author_display == sender
-    if slot is not None:
-        assert posted.author_id == rig.slot_webhook_id(slot)    # its own slot's bundle
+    assert (posted.author_kind, posted.author_id, posted.author_display) == (
+        "identity", sender, sender)
     # bob writes to the sender; the sender replies to that message
-    bob_slot = rig.daemon.bindings[BOB].slot_id
-    asked = rig.post_from_slot(bob_slot, [sender], "a question", display=BOB)
+    asked = rig.post_as(BOB, [sender], "a question")
     code, out = rig.cli(["reply", str(asked.id), "an answer"], env=claim_env(socket_path))
     assert code == 0, out
     lines = out.splitlines()
@@ -137,9 +135,9 @@ def round_trip(rig, socket_path, sender: str, bob, *, slot=None, tier="chosen"):
 # --------------------------------------------------------------------------- refusals
 
 def test_a_stamp_is_refused_when_a_live_claim_file_names_its_identity(rig, world):
-    world.real("seat", slot=3)
+    world.real("seat")
     before = len(history(rig))
-    code, out = rig.cli(["send", "--posture", "none", "nobody", "hello"], name="seat", slot=3, scope="proj-a",
+    code, out = rig.cli(["send", "--posture", "none", "nobody", "hello"], name="seat",  scope="proj-a",
                         stamp_only=True)
     assert code == cli.EXIT_REFUSED == 2
     assert out.strip() == ("this process is not inside the session that holds "
@@ -151,8 +149,8 @@ def test_a_stamp_is_refused_when_a_live_claim_file_names_its_identity(rig, world
 def test_a_stamp_is_refused_when_no_live_claim_file_names_it(rig):
     """A stamp alone sends nothing now that the env path is closed. The binding
     is there (a shim whose file is not live), the stamp names it, and nothing is sent."""
-    bob = rig.shim(name="bob", scope="proj-a", slot=3)
-    code, out = rig.cli(["send", "--posture", "none", "nobody", "hello"], name="bob", slot=3, scope="proj-a",
+    bob = rig.shim(name="bob", scope="proj-a")
+    code, out = rig.cli(["send", "--posture", "none", "nobody", "hello"], name="bob",  scope="proj-a",
                         stamp_only=True)
     assert code == 2
     assert out.strip() == STAMP_REFUSAL.format(q=BOB)
@@ -161,8 +159,8 @@ def test_a_stamp_is_refused_when_no_live_claim_file_names_it(rig):
 
 
 def test_a_stamped_reply_is_refused_the_same_way(rig):
-    rig.shim(name="bob", scope="proj-a", slot=3)
-    asked = rig.post_from_slot(5, ["bob"], "a question", display="carol@proj-a")
+    rig.shim(name="bob", scope="proj-a")
+    asked = rig.post_as("alice@proj-a", ["bob"], "a question")
     code, out = rig.cli(["reply", str(asked.id), "an answer"], name="bob", scope="proj-a",
                         stamp_only=True)
     assert code == 2
@@ -178,7 +176,7 @@ def test_a_global_stamp_names_its_global_identity(rig):
 
 
 def test_no_stamp_and_no_socket_is_refused(rig):
-    rig.shim(name="bob", scope="proj-a", slot=3)
+    rig.shim(name="bob", scope="proj-a")
     code, out = rig.cli(["send", "--posture", "none", "bob@proj-a", "hi"])
     assert code == 2
     assert out.startswith("comms has no identity for this process: nothing was sent.")
@@ -187,9 +185,9 @@ def test_no_stamp_and_no_socket_is_refused(rig):
 
 def test_a_stamp_with_a_claim_socket_is_not_read(rig, world):
     """With the socket the stamp is not read: the claim is the identity."""
-    s = world.real("alice", slot=1)
-    rig.shim(name="bob", scope="proj-a", slot=3)
-    code, out = rig.cli(["send", "--posture", "none", BOB, "hi"], name="mallory", slot=4,
+    s = world.real("alice")
+    rig.shim(name="bob", scope="proj-a")
+    code, out = rig.cli(["send", "--posture", "none", BOB, "hi"], name="mallory",
                         env=claim_env(s.socket))
     assert code == 0, out
     assert history(rig)[-1].author_display == ALICE
@@ -200,7 +198,7 @@ def test_a_stamp_with_a_claim_socket_is_not_read(rig, world):
 def test_the_operators_lane_outside_every_session_still_sends(rig):
     if rig.backend != "local":
         pytest.skip("the operator's credential is a token-store file, kept on local")
-    bob = rig.shim(name="bob", scope="proj-a", slot=3)
+    bob = rig.shim(name="bob", scope="proj-a")
     code, out = rig.cli(["send", "--posture", "none", "bob@proj-a", "from the terminal"],
                         env={"MOXI_COMMS_OPERATOR": rig.prov.operator_user_id})
     assert code == 0, out
@@ -211,7 +209,7 @@ def test_the_operators_lane_outside_every_session_still_sends(rig):
 
 
 def test_the_operators_lane_inside_a_session_is_refused(rig, world):
-    world.real("alice", slot=1)          # this process is inside alice's session
+    world.real("alice")          # this process is inside alice's session
     code, out = rig.cli(["send", "--posture", "none", "nobody", "hi"],
                         env={"MOXI_COMMS_OPERATOR": rig.prov.operator_user_id})
     assert code == 2 and "operator's lane is its own terminal" in out
@@ -229,14 +227,14 @@ def test_the_operators_stamp_beside_an_agents_stamp_is_refused(rig):
 
 def test_a_claude_shim_session_sends_and_replies_as_on_main(rig):
     me = root_of(os.getpid(), TREE)
-    alice = rig.shim(name="alice", scope="proj-a", slot=1, listen_claims=True,
+    alice = rig.shim(name="alice", scope="proj-a",  listen_claims=True,
                      claim_roots=[me])
-    bob = rig.shim(name="bob", scope="proj-a", slot=3)
-    round_trip(rig, alice.claims.socket_path, ALICE, bob, slot=1)
+    bob = rig.shim(name="bob", scope="proj-a")
+    round_trip(rig, alice.claims.socket_path, ALICE, bob)
 
 
 def test_a_codex_session_sends_and_replies_as_on_main(rig, tmp_path):
-    agent = CodexAgent(qualified=ALICE, name="alice", scope="proj-a", slot=1,
+    agent = CodexAgent(qualified=ALICE, name="alice", scope="proj-a",
                        cwd=str(tmp_path), thread_file=codex_threads.path(ALICE), directors=[])
     adapter = CodexAdapter(agent, launch=launcher(FakeSession()), autoreconnect=False,
                            clock=rig.clock)
@@ -244,8 +242,8 @@ def test_a_codex_session_sends_and_replies_as_on_main(rig, tmp_path):
         adapter.start()
         assert wait_for(lambda: ALICE in rig.daemon.bindings)
         assert rig.daemon.bindings[ALICE].adapter == "codex"
-        bob = rig.shim(name="bob", scope="proj-a", slot=3)
-        round_trip(rig, adapter.claims.socket_path, ALICE, bob, slot=1)
+        bob = rig.shim(name="bob", scope="proj-a")
+        round_trip(rig, adapter.claims.socket_path, ALICE, bob)
     finally:
         adapter.stop()
 
@@ -260,7 +258,7 @@ def test_an_opencode_session_sends_and_replies_as_on_main(rig, tmp_path, monkeyp
     monkeypatch.setattr(oc, "FLUSH_RETRY", 0.05)
     fake = FakeOpenCode(password=OC_PASSWORD, default_model="opencode/minimax-m3.1-flash-free",
                         heartbeat=0.5).start()
-    agent = OpenCodeAgent(qualified=ALICE, name="alice", scope="proj-a", slot=1,
+    agent = OpenCodeAgent(qualified=ALICE, name="alice", scope="proj-a",
                           cwd=str(tmp_path), session_file=session_path(ALICE),
                           models=["opencode/minimax-m3.1-flash-free"])
     adapter = OpenCodeAdapter(agent, spawn=False, server=OcHandle(fake),
@@ -271,8 +269,8 @@ def test_an_opencode_session_sends_and_replies_as_on_main(rig, tmp_path, monkeyp
         adapter.start()
         assert wait_for(lambda: ALICE in rig.daemon.bindings)
         assert rig.daemon.bindings[ALICE].adapter == "opencode"
-        bob = rig.shim(name="bob", scope="proj-a", slot=3)
-        round_trip(rig, adapter.claims.socket_path, ALICE, bob, slot=1)
+        bob = rig.shim(name="bob", scope="proj-a")
+        round_trip(rig, adapter.claims.socket_path, ALICE, bob)
     finally:
         adapter.stop()
         fake.stop()
@@ -287,12 +285,12 @@ class Loop:
     def __init__(self):
         self.clients, self.servers = [], {}
 
-    def hold(self, name, slot, kind):
+    def hold(self, name, kind):
         client = DaemonClient(daemon_socket()).connect()
-        answer = client.register(slot=slot, name=name, scope="proj-a", project="proj-a",
+        answer = client.register(name=name, scope="proj-a", project="proj-a",
                                  adapter=kind)
-        server = ClaimServer(name, "proj-a", kind=kind, slot=slot).start()
-        server.set_bound(answer["slot"])
+        server = ClaimServer(name, "proj-a", kind=kind).start()
+        server.set_bound(token=answer["token"])
         self.clients.append(client)
         self.servers[name] = server
         return server
@@ -312,34 +310,35 @@ def loop(rig):
 
 
 def test_a_loop_holding_two_bindings_sends_as_each_from_its_own_process(rig, loop):
-    speaker = loop.hold("alice", 1, "codex")
-    driver = loop.hold("dora", 2, "opencode")
-    bob = rig.shim(name="bob", scope="proj-a", slot=3)
-    round_trip(rig, speaker.socket_path, ALICE, bob, slot=1)
+    speaker = loop.hold("alice", "codex")
+    driver = loop.hold("coder", "opencode")
+    bob = rig.shim(name="bob", scope="proj-a")
+    round_trip(rig, speaker.socket_path, ALICE, bob)
     code, out = rig.cli(["send", "--posture", "none", BOB, "from the second binding"],
                         env=claim_env(driver.socket_path))
     assert code == 0, out
     mid = sent_line(out, BOB)
-    assert message(rig, mid).author_display == "dora@proj-a"
-    assert message(rig, mid).author_id == rig.slot_webhook_id(2)
+    posted = message(rig, mid)
+    assert (posted.author_kind, posted.author_id, posted.author_display) == (
+        "identity", "coder@proj-a", "coder@proj-a")
 
 
 def test_a_loops_tree_child_is_inside_its_binding_and_no_other(rig, loop):
-    speaker = loop.hold("alice", 1, "codex")
-    driver = loop.hold("dora", 2, "opencode")
+    speaker = loop.hold("alice", "codex")
+    driver = loop.hold("coder", "opencode")
     child = driver.spawn([sys.executable, "-c", CHILD_ASK, str(driver.socket_path),
                           str(speaker.socket_path)], env=child_env(),
                          stdout=subprocess.PIPE, text=True)
     answers = json.loads(child.communicate(timeout=60)[0])
-    assert answers[str(driver.socket_path)] == "dora@proj-a"
+    assert answers[str(driver.socket_path)] == "coder@proj-a"
     assert answers[str(speaker.socket_path)] == NOT_INSIDE      # `self` admits no child
 
 
 def test_a_loops_tree_child_sends_as_its_binding(rig, loop):
     if rig.backend != "local":
         pytest.skip("a child process cannot reach the mock's in-memory record")
-    driver = loop.hold("dora", 2, "opencode")
-    bob = rig.shim(name="bob", scope="proj-a", slot=3)
+    driver = loop.hold("coder", "opencode")
+    bob = rig.shim(name="bob", scope="proj-a")
     child = driver.spawn([sys.executable, "-c", CHILD_SEND, BOB, "from the child"],
                          env=child_env(), stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, text=True)
@@ -347,13 +346,13 @@ def test_a_loops_tree_child_sends_as_its_binding(rig, loop):
     assert child.returncode == 0, out
     mid = sent_line(out, BOB)
     wait_for_queue(bob, 1)
-    assert bob.queue[0]["author"] == {"name": "dora@proj-a", "tier": "chosen",
+    assert bob.queue[0]["author"] == {"name": "coder@proj-a", "tier": "chosen",
                                       "attribution": "verified"}
-    assert message(rig, mid).author_id == rig.slot_webhook_id(2)
+    assert message(rig, mid).author_id == "coder@proj-a"
 
 
 def test_a_process_the_loop_did_not_spawn_is_refused(rig, loop):
-    driver = loop.hold("dora", 2, "opencode")
+    driver = loop.hold("coder", "opencode")
     before = len(history(rig))
     done = subprocess.run([sys.executable, "-c", CHILD_SEND, BOB, "x"],
                           env=child_env(**claim_env(driver.socket_path)),
@@ -367,28 +366,29 @@ def test_a_process_the_loop_did_not_spawn_is_refused(rig, loop):
 def console(rig):
     from test_console_identity import provision_console
     provision_console(rig)
-    srv = ClaimServer("console", "acme", kind="send-only", arm=True).start()
-    assert wait_for(lambda: "console@acme" in rig.daemon.bindings), srv.refusal
+    srv = ClaimServer("relay", "proj-a", kind="send-only", arm=True).start()
+    assert wait_for(lambda: "relay@proj-a" in rig.daemon.bindings), srv.refusal
     yield srv
     srv.stop()
 
 
 def test_the_console_sends_in_process_as_on_main(rig, console):
-    bob = rig.shim(name="bob", scope="proj-a", slot=3)
+    bob = rig.shim(name="bob", scope="proj-a")
     code, out = rig.cli(["send", BOB, "your brief", "--posture", "none"],
-                        env=claim_env(console.socket_path), project="acme")
+                        env=claim_env(console.socket_path), project="proj-a")
     assert code == 0 and out.count("\n") == 1, out
     mid = sent_line(out, BOB)
     wait_for_queue(bob, 1)
-    assert bob.queue[0]["author"] == {"name": "console@acme", "tier": "standing",
+    assert bob.queue[0]["author"] == {"name": "relay@proj-a", "tier": "standing",
                                       "attribution": "verified"}
-    assert message(rig, mid).author_id == rig.agent_webhook_id("console", "acme")
+    posted = message(rig, mid)
+    assert (posted.author_kind, posted.author_id) == ("identity", "relay@proj-a")
 
 
 def test_the_consoles_comms_send_child_sends_as_on_main(rig, console):
     if rig.backend != "local":
         pytest.skip("a child process cannot reach the mock's in-memory record")
-    bob = rig.shim(name="bob", scope="proj-a", slot=3)
+    bob = rig.shim(name="bob", scope="proj-a")
     child = console.spawn([sys.executable, "-c", CHILD_SEND, BOB, "your brief"],
                           env=child_env(MOXI_COMMS_PROJECT="acme"),
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -396,7 +396,7 @@ def test_the_consoles_comms_send_child_sends_as_on_main(rig, console):
     assert child.returncode == 0, out
     mid = sent_line(out, BOB)
     wait_for_queue(bob, 1)
-    assert bob.queue[0]["author"]["name"] == "console@acme"
+    assert bob.queue[0]["author"]["name"] == "relay@proj-a"
     live = rig.daemon.attribute(message(rig, mid), live=True)
     assert live.attribution == attribution.VERIFIED
 
@@ -405,8 +405,8 @@ def test_the_consoles_comms_send_child_sends_as_on_main(rig, console):
 
 def test_third_party_sends_to_a_seat_held_through_a_claim_are_as_on_main(rig, world):
     """carol's shim sends to the seat; the seat's holder is a session of another kind."""
-    world.real("seat", slot=2)
-    carol = rig.shim(name="carol", scope="proj-a", slot=4, listen_claims=True,
+    world.real("seat")
+    carol = rig.shim(name="carol", scope="proj-a",  listen_claims=True,
                      claim_roots=[root_of(os.getpid(), TREE)])
     code, out = rig.cli(["send", "--posture", "none", "seat@proj-a", "for the seat"],
                         env=claim_env(carol.claims.socket_path))
@@ -416,26 +416,19 @@ def test_third_party_sends_to_a_seat_held_through_a_claim_are_as_on_main(rig, wo
     assert message(rig, mid).author_display == "carol@proj-a"
 
 
-def test_a_shim_that_died_sends_by_its_claim_file_as_on_main(rig):
-    """The adapter-died path: the socket does not answer, the claim file holds
-    the name and this process is inside its session; nobody else holds the name, so the
-    post goes out as the claim on its slot. Once another session binds the name, it is
-    refused."""
+def test_a_shim_that_died_cannot_send_by_its_claim_file(rig):
+    """The claim file can name a dead adapter's identity but carries no token."""
     me = root_of(os.getpid(), TREE)
-    alice = rig.shim(name="alice", scope="proj-a", slot=1, listen_claims=True,
+    alice = rig.shim(name="alice", scope="proj-a",  listen_claims=True,
                      claim_roots=[me])
     path = alice.claims.socket_path
-    bob = rig.shim(name="bob", scope="proj-a", slot=3)
+    bob = rig.shim(name="bob", scope="proj-a")
     alice.stop()                                       # the shim dies; its session lives
     assert wait_for(lambda: ALICE not in rig.daemon.bindings)
     code, out = rig.cli(["send", "--posture", "none", BOB, "still here"], env=claim_env(path))
-    assert code == 0 and out.count("\n") == 1, out
-    mid = sent_line(out, BOB)
-    assert message(rig, mid).author_id == rig.slot_webhook_id(1)
-    wait_for_queue(bob, 1)
-    rig.shim(name="alice", scope="proj-a", slot=2)
-    code, out = rig.cli(["send", "--posture", "none", BOB, "again"], env=claim_env(path))
-    assert code == 2 and f"{ALICE} is bound by another session" in out
+    assert code == 4
+    assert "comms adapter is gone" in out and "holds no posting credential" in out
+    assert history(rig) == []
 
 
 # --------------------------------------------------------------------------- a claim with no name
@@ -476,8 +469,8 @@ def refuses_as_no_identity(rig, path, asked_id):
 def test_an_auto_named_session_before_its_first_bind_holds_no_identity(rig):
     """The launch claim of an auto-named session names no one, so it holds
     no identity. Once it binds, it is the name the daemon gave it, as on main."""
-    bob = rig.shim(name="bob", scope="proj-a", slot=3)
-    asked = rig.post_from_slot(3, [BOB], "a question", display=BOB)
+    bob = rig.shim(name="bob", scope="proj-a")
+    asked = rig.post_as(BOB, [BOB], "a question")
     shim = auto_named(rig)
     path = shim.claims.socket_path
     refuses_as_no_identity(rig, path, asked.id)
@@ -488,8 +481,7 @@ def test_an_auto_named_session_before_its_first_bind_holds_no_identity(rig):
     q = shim.claims.claim["qualified"]
     assert q and shim.claims.state == "bound"
     code, out = rig.cli(["whoami"], env=claim_env(path))
-    assert code == 0 and out.splitlines()[0] == (
-        f"{q} (bound, slot {shim.claims.claim['slot']})"), out
+    assert code == 0 and out.splitlines()[0] == f"{q} (bound)", out
     code, out = rig.cli(["send", "--posture", "none", BOB, "hello bob"], env=claim_env(path))
     assert code == 0 and out.count("\n") == 1, out
     mid = sent_line(out, BOB)
@@ -506,8 +498,8 @@ def test_an_auto_named_session_before_its_first_bind_holds_no_identity(rig):
 def test_a_session_that_never_bound_holds_no_identity_through_a_daemon_outage(rig):
     """The same claim, with the daemon down from the launch on: the supervisor retries
     and the session still holds no identity while it does."""
-    rig.shim(name="bob", scope="proj-a", slot=3)
-    asked = rig.post_from_slot(3, [BOB], "a question", display=BOB)
+    rig.shim(name="bob", scope="proj-a")
+    asked = rig.post_as(BOB, [BOB], "a question")
     rig.daemon.stop()
     shim = auto_named(rig, autoreconnect=True, backoff=itertools.repeat(30.0))
     shim.start(tolerate_offline=True)
@@ -518,8 +510,8 @@ def test_a_session_that_never_bound_holds_no_identity_through_a_daemon_outage(ri
 def test_a_dead_adapter_whose_claim_file_names_no_one_is_refused(rig):
     """The adapter-died path reads the claim file: a claim there with no name holds no
     identity either."""
-    rig.shim(name="bob", scope="proj-a", slot=3)
-    asked = rig.post_from_slot(3, [BOB], "a question", display=BOB)
+    rig.shim(name="bob", scope="proj-a")
+    asked = rig.post_as(BOB, [BOB], "a question")
     shim = auto_named(rig)
     path = shim.claims.socket_path
     shim.stop()                                        # the shim dies; its session lives
@@ -531,7 +523,7 @@ def test_a_dead_adapter_whose_claim_file_names_no_one_is_refused(rig):
 
 @pytest.mark.parametrize("state", ["bound", "offline"])
 def test_a_claim_with_no_name_holds_no_identity_in_any_held_state(state):
-    record = {"state": state, "claim": {"name": None, "qualified": None, "slot": None}}
+    record = {"state": state, "claim": {"name": None, "qualified": None}}
     assert claimfile.held_identity(record) is None
     assert claimhold.send_line(record) == NO_IDENTITY
     record["claim"].update(name="alice", qualified=ALICE)
@@ -539,23 +531,20 @@ def test_a_claim_with_no_name_holds_no_identity_in_any_held_state(state):
     assert claimhold.send_line(record) is None
 
 
-def test_a_named_offline_claim_still_sends(rig):
-    """A session holding a named claim `offline` (never bound here) sends as it,
-    on its slot; whoami names it."""
-    bob = rig.shim(name="bob", scope="proj-a", slot=3)
-    server = ClaimServer("alice", "proj-a", kind="claude-shim", slot=1)
+def test_a_named_offline_claim_is_refused(rig):
+    """Whoami still names an offline claim, but it has no posting token."""
+    bob = rig.shim(name="bob", scope="proj-a")
+    server = ClaimServer("alice", "proj-a", kind="claude-shim")
     server.holder.ever_held = True
     server.set_offline()
     server.start()
     try:
         path = server.socket_path
         code, out = rig.cli(["whoami"], env=claim_env(path))
-        assert code == 0 and out.splitlines()[0] == f"{ALICE} (offline, slot 1)", out
+        assert code == 0 and out.splitlines()[0] == f"{ALICE} (offline)", out
         code, out = rig.cli(["send", "--posture", "none", BOB, "from offline"], env=claim_env(path))
-        assert code == 0, out
-        mid = sent_line(out, BOB)
-        assert message(rig, mid).author_id == rig.slot_webhook_id(1)
-        wait_for_queue(bob, 1)
-        assert bob.queue[-1]["author"]["name"] == ALICE
+        assert code == 4
+        assert "holds no posting credential" in out and "nothing was sent" in out
+        assert history(rig) == []
     finally:
         server.stop()

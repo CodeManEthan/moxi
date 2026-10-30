@@ -13,16 +13,13 @@ The interface, in full:
     channels     create_channel(name) -> channel_id        (idempotent by name)
                  channel_by_name(name) -> channel_id | None
                  channel_name(channel_id) -> name | None
-    webhooks     create_webhook(channel_id, name, secret_id) -> Credential
-                 resolve_secret(secret_id, *, owner=None) -> Credential
-                                                           (at USE time; never on disk)
-                 webhook_channel(webhook_id) -> channel_id | None
     principals   register_principal(name) -> principal_id
                  deny_send(principal, channel_id) / can_send(principal, channel_id)
-    posting      execute_webhook(cred, content, username=, allowed_mentions=)
-                 post_as_user(user_id, channel_id, content, *, token=None)
+    posting      post_as_user(user_id, channel_id, content, *, token=None)
                                                            -- operator lane; the local
                                                               backend checks the token
+                 post_as_identity(qualified, channel_id, content)
+                                                           -- daemon-stamped agent post
                  max_content_length -> int   (attribute, not a method)
                  history_bound -> int | None (attribute: the most messages an
                                               unbounded `history(after=)` returns, or
@@ -38,20 +35,6 @@ Events on a Subscription are exactly two shapes, and the second one is load-bear
 
     {"t": "MESSAGE_CREATE", "d": <Message.to_dict()>}
     {"t": "READY", "resumed": bool}          # resumed=False => the daemon MUST rescan
-
-`resolve_secret`'s `owner` is the credential-custody seam, declared here rather than
-snuck in: WHO is spending this secret — a `tokens.TokenOwner`
-for the bundle the sender actually resolved, or None. With no owner reaching the
-boundary, a per-holder credential has nothing to key on. The mock takes it and ignores
-it (it holds no credentials at all); the local record keys its store read by it.
-
-WHERE the value comes from is `secrets.py`'s, not any backend's: `open_gateway` builds the
-box's declared chain from config.toml's `[secrets] chain` and hands it down, and every
-implementation of `resolve_secret` asks it.
-
-`Credential.secret_id` is the pointer that gets RECORDED. The mock hands back the key it
-was given; the local record hands back the row's own key. Callers write
-`cred.secret_id` into `directory.db` and never the token.
 
 `max_content_length` is the seam DECLARING a transport fact, and nothing more: how long
 one post's content may be. Every implementation declares it and enforces it. The send
@@ -74,8 +57,6 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import asdict, dataclass, field
-
-NO_MENTIONS = {"parse": []}  # sends suppress mentions, every post
 
 # The one cap on one message, in characters. Declared here so the local record and the
 # mock name ONE number.
@@ -109,30 +90,13 @@ class Fatal(GatewayError):
     """
 
 
-@dataclass(frozen=True)
-class Credential:
-    """A resolved webhook credential. Lives in memory only; URLs never touch disk."""
-
-    webhook_id: str
-    token: str
-    secret_id: str = ""          # the store key to RECORD (never the token)
-    base: str = "https://discord.invalid/api/webhooks"
-
-    @property
-    def url(self) -> str:
-        return f"{self.base}/{self.webhook_id}/{self.token}"
-
-    def __repr__(self) -> str:      # never let a token reach a log through a repr
-        return f"Credential(webhook_id={self.webhook_id!r}, token=<redacted>)"
-
-
 @dataclass
 class Message:
     id: str
     channel_id: str
-    author_id: str            # webhook_id, or a user id for operator posts
-    author_kind: str          # 'webhook' | 'user'
-    author_display: str       # webhook username override / user display name
+    author_id: str            # webhook id, operator user id, or qualified identity
+    author_kind: str          # 'webhook' | 'user' | 'identity'
+    author_display: str       # webhook override, user display, or qualified identity
     content: str
     timestamp: str
 
@@ -182,8 +146,6 @@ class _State:
 
     seq: int = 0
     channels: dict = field(default_factory=dict)
-    webhooks: dict = field(default_factory=dict)
-    secrets: dict = field(default_factory=dict)
     denied: dict = field(default_factory=dict)
     users: dict = field(default_factory=dict)
     messages: list = field(default_factory=list)
@@ -286,22 +248,15 @@ def open_gateway(explicit: str | None = None, *, role: str = "reader", env=None,
             raise GatewayError(
                 "the mock gateway needs a store: set MOXI_COMMS_MOCK_GATEWAY=<store.json>")
         return MockGateway(store)
-    from . import config, secrets
+    from . import config
     cfg = config.load(env=env)
-    # One chain per process, built HERE from `[secrets] chain` and handed down: the
-    # backends resolve credentials through it and construct no resolver of their own.
-    resolver = secrets.from_config(cfg, env=env)
-    # `role` means nothing on the local backend and is IGNORED, not refused: every
-    # caller opens the seam the same way, and the box's record has no bot
-    # credentials to pick between.
     from .local_gateway import LocalGateway
     local = cfg.local
-    return LocalGateway(local.record or None, retain_days=local.retain_days, role=role,
-                        resolver=resolver, busy_timeout=busy_timeout)
+    return LocalGateway(local.record or None, retain_days=local.retain_days,
+                        busy_timeout=busy_timeout)
 
 
-__all__ = ["NO_MENTIONS", "MAX_CONTENT_LENGTH",
-           "GatewayError", "RateLimited", "Forbidden", "Fatal", "Credential",
+__all__ = ["MAX_CONTENT_LENGTH", "GatewayError", "RateLimited", "Forbidden", "Fatal",
            "Message", "Subscription", "MOCK", "LOCAL", "BACKENDS",
            "BackendChoice", "SOURCE_FLAG", "SOURCE_ENV", "SOURCE_CONFIG", "SOURCE_DEFAULT",
            "backend_choice", "backend_name", "default_backend", "open_gateway"]

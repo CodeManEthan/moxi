@@ -5,18 +5,16 @@ With no flag, environment variable or config naming a backend, the backend is `l
 fallthrough to `mock`.
 
 A daemon on `local` whose directory is not provisioned provisions it before it serves,
-with what `moxi-comms-provision` makes when run with no flags: `[provision] slots` (6),
-no standing identities, the operator `[provision] operator`. It never does so on `mock`,
-and never before its single-instance probe has shown that no other daemon holds the
-socket.
+with what `moxi-comms-provision` makes when run with no flags: the names room, no
+standing identities, and the operator named by `[provision] operator`. It never does so
+on `mock`, and never before its single-instance probe has shown that no other daemon
+holds the socket.
 
 "Provisioned" has one definition (`provision.readiness`), shared by the daemon's check,
-`moxi comms doctor`'s slot count and the clean-home test: the directory holds slots and
-its declared writer, and on `local` every slot's token is in its holder's file and the
-operator's stored token hashes to the hash the record keeps. A directory with slots whose
-operator credential was never minted is an unfinished first start, which the daemon
-finishes; one whose tokens were lost is refused, because re-provisioning cannot recover
-a lost token and a daemon that started anyway would fail at the first send.
+the clean-home test: the directory has its declared writer, and on `local` the operator's
+stored token hashes to the hash the record keeps. A directory whose operator credential
+was never minted is an unfinished first start, which the daemon finishes. One whose
+operator token was lost is refused because provisioning cannot recover it.
 """
 
 from __future__ import annotations
@@ -126,58 +124,55 @@ def _local(tmp_path):
 def test_readiness_of_nothing_is_empty_and_writes_nothing(tmp_path):
     store = tokens.TokenStore(tokens_dir())
     found = provision.readiness(directory_db(), operator_hash=None, store=store)
-    assert (found.state, found.slots) == (provision.EMPTY, 0)
+    assert found.state == provision.EMPTY
     assert not directory_db().exists() and not tokens_dir().exists()
 
 
 def test_readiness_after_the_cli_default_is_complete(tmp_path):
     gateway, store = _local(tmp_path)
     try:
-        provision.provision(gateway, directory_db(), slots=provision.DEFAULT_SLOTS,
-                            store=store)
+        provision.provision(gateway, directory_db(), store=store)
         found = provision.readiness(directory_db(),
                                     operator_hash=gateway.meta_get(META_OPERATOR_TOKEN_HASH),
                                     store=store)
     finally:
         gateway.close()
-    assert (found.state, found.slots) == (provision.COMPLETE, 6)
+    assert found.state == provision.COMPLETE
     assert found.provisioned
 
 
-def test_slots_without_the_operator_credential_are_unfinished(tmp_path):
+def test_a_directory_without_the_operator_credential_is_unfinished(tmp_path):
     """A first start that died after the directory committed and before the operator's
-    credential was minted: slot rows exist, and they are not enough."""
+    credential was minted: the directory alone is not enough."""
     gateway, store = _local(tmp_path)
     try:
-        provision.provision(gateway, directory_db(), slots=2, store=store)
+        provision.provision(gateway, directory_db(), store=store)
         operator_files(store)
         with gateway._write() as conn:
             conn.execute("DELETE FROM meta WHERE key = ?", (META_OPERATOR_TOKEN_HASH,))
         found = provision.readiness(directory_db(), operator_hash=None, store=store)
     finally:
         gateway.close()
-    assert (found.state, found.slots) == (provision.UNFINISHED, 2)
+    assert found.state == provision.UNFINISHED
     assert not found.provisioned
 
 
-@pytest.mark.parametrize("loss", ["the whole store", "the operator's file", "one slot"])
+@pytest.mark.parametrize("loss", ["the whole store", "the operator's file"])
 def test_a_lost_token_store_is_lost_not_a_first_start(tmp_path, loss):
     gateway, store = _local(tmp_path)
     try:
-        provision.provision(gateway, directory_db(), slots=3, store=store)
+        provision.provision(gateway, directory_db(), store=store)
         if loss == "the whole store":
             for path in sorted(tokens_dir().rglob("*"), reverse=True):
                 path.unlink() if path.is_file() else path.rmdir()
         elif loss == "the operator's file":
             operator_files(store)
-        else:
-            store.path_for(tokens.owner_for_slot(2)).unlink()
         found = provision.readiness(
             directory_db(), operator_hash=gateway.meta_get(META_OPERATOR_TOKEN_HASH),
             store=store)
     finally:
         gateway.close()
-    assert (found.state, found.slots) == (provision.LOST, 3)
+    assert found.state == provision.LOST
     assert not found.provisioned
     assert "token" in found.detail
 
@@ -196,11 +191,12 @@ def test_a_daemon_on_an_empty_directory_provisions_before_it_serves(tmp_path):
         daemon.start()
         conn = directory.connect(directory_db(), read_only=True)
         try:
-            assert directory.slot_ids(conn) == [1, 2, 3, 4, 5, 6]
+            tables = {row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+            assert {"slots", "webhooks"}.isdisjoint(tables)
             assert [r["name"] for r in conn.execute("SELECT name FROM operators")] == \
                 ["operator"]
-            assert conn.execute("SELECT COUNT(*) FROM webhooks WHERE agent_name IS NOT "
-                                "NULL").fetchone()[0] == 0, "no standing identities"
+            assert conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0] == 0
         finally:
             conn.close()
         found = provision.readiness(
@@ -214,14 +210,16 @@ def test_a_daemon_on_an_empty_directory_provisions_before_it_serves(tmp_path):
 
 def test_a_complete_directory_is_left_alone(tmp_path):
     gateway, store = _local(tmp_path)
-    provision.provision(gateway, directory_db(), slots=2, store=store)
+    provision.provision(gateway, directory_db(), store=store)
     before = sorted(p.stat().st_mtime_ns for p in tokens_dir().rglob("*") if p.is_file())
     daemon = _daemon(gateway, store)
     try:
         daemon.start()
         conn = directory.connect(directory_db(), read_only=True)
         try:
-            assert directory.slot_ids(conn) == [1, 2], "a user's own count is kept"
+            tables = {row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+            assert {"slots", "webhooks"}.isdisjoint(tables)
         finally:
             conn.close()
         after = sorted(p.stat().st_mtime_ns for p in tokens_dir().rglob("*") if p.is_file())
@@ -231,9 +229,9 @@ def test_a_complete_directory_is_left_alone(tmp_path):
         gateway.close()
 
 
-def test_an_unfinished_first_start_is_finished_with_its_own_slot_count(tmp_path):
+def test_an_unfinished_first_start_is_finished(tmp_path):
     gateway, store = _local(tmp_path)
-    provision.provision(gateway, directory_db(), slots=2, store=store)
+    provision.provision(gateway, directory_db(), store=store)
     operator_files(store)
     with gateway._write() as conn:
         conn.execute("DELETE FROM meta WHERE key = ?", (META_OPERATOR_TOKEN_HASH,))
@@ -243,7 +241,7 @@ def test_an_unfinished_first_start_is_finished_with_its_own_slot_count(tmp_path)
         found = provision.readiness(
             directory_db(), operator_hash=gateway.meta_get(META_OPERATOR_TOKEN_HASH),
             store=store)
-        assert (found.state, found.slots) == (provision.COMPLETE, 2)
+        assert found.state == provision.COMPLETE
     finally:
         daemon.stop()
         gateway.close()
@@ -251,7 +249,7 @@ def test_an_unfinished_first_start_is_finished_with_its_own_slot_count(tmp_path)
 
 def test_a_lost_token_store_refuses_to_start(tmp_path):
     gateway, store = _local(tmp_path)
-    provision.provision(gateway, directory_db(), slots=2, store=store)
+    provision.provision(gateway, directory_db(), store=store)
     operator_files(store)
     daemon = _daemon(gateway, store)
     try:
@@ -268,7 +266,7 @@ def test_a_lost_token_store_refuses_to_start(tmp_path):
 def test_first_start_waits_for_the_single_instance_probe(tmp_path):
     """A second daemon refused by the probe has provisioned nothing."""
     gateway, store = _local(tmp_path)
-    provision.provision(gateway, directory_db(), slots=1, store=store)
+    provision.provision(gateway, directory_db(), store=store)
     first = Daemon(gateway, start_trim_thread=False).start()
     directory_db().unlink()                 # what a first-start provisioning would refill
     second = _daemon(gateway, store)
@@ -311,7 +309,7 @@ def _run_daemon(env, sock: Path, *, expect_socket=True):
     return proc.returncode, out
 
 
-def test_the_daemon_process_provisions_six_slots(tmp_path):
+def test_the_daemon_process_provisions_without_slots(tmp_path):
     home = tmp_path / "solo"
     env = _clean_env(tmp_path, MOXI_COMMS_HOME=str(home),
                      MOXI_COMMS_RUNTIME_DIR=str(tmp_path / "r"), MOXI_COMMS_DEVICE="t")
@@ -320,7 +318,9 @@ def test_the_daemon_process_provisions_six_slots(tmp_path):
     db = home / "data" / "comms" / "directory.db"
     conn = directory.connect(db, read_only=True)
     try:
-        assert directory.slot_ids(conn) == [1, 2, 3, 4, 5, 6]
+        tables = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"slots", "webhooks"}.isdisjoint(tables)
     finally:
         conn.close()
 
@@ -350,25 +350,20 @@ def doctor(env):
                   if line[:1] != " "}
 
 
-def test_doctor_says_where_the_backend_came_from_and_counts_slots(tmp_path):
+def test_doctor_says_where_the_backend_came_from(tmp_path):
     code, rows = doctor(env_of(PATH=""))
     assert code == 0
     assert rows["backend"] == "local (the default)"
-    assert rows["slots"] == "none yet (the daemon provisions 6 on its first start)"
+    assert "slots" not in rows
     assert not directory_db().exists()
 
     gateway, store = _local(tmp_path)
     try:
-        provision.provision(gateway, directory_db(), slots=6, store=store)
+        provision.provision(gateway, directory_db(), store=store)
     finally:
         gateway.close()
     _, rows = doctor(env_of(PATH=""))
-    assert rows["slots"] == "6 provisioned"
-
-    operator_files(store)
-    _, rows = doctor(env_of(PATH=""))
-    assert rows["slots"].startswith("6, but ")
-    assert "token" in rows["slots"]
+    assert "slots" not in rows
 
     _, rows = doctor(env_of(PATH="", MOXI_COMMS_GATEWAY="mock"))
     assert rows["backend"] == "mock (MOXI_COMMS_GATEWAY)"

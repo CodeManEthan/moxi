@@ -11,33 +11,15 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-import pytest
 from conftest import wait_until
 
 from moxi_comms import cache, cli, machine_line
-from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import ADAPTER_KINDS
-from moxi_comms.paths import daemon_socket
 
-PLANNER = dict(slot=1, name="planner", scope="proj-a")
-REVIEWER = dict(slot=2, name="reviewer", scope="proj-a")
-CODER = dict(slot=5, name="coder", scope="proj-a", adapter="opencode")
+PLANNER = dict(name="planner", scope="proj-a")
+REVIEWER = dict(name="reviewer", scope="proj-a")
+CODER = dict(name="coder", scope="proj-a", adapter="opencode")
 AS_OPERATOR = dict(env={"MOXI_COMMS_OPERATOR": "900001"})
-
-
-@pytest.fixture
-def bind():
-    made = []
-
-    def _bind(**kwargs):
-        c = DaemonClient(daemon_socket()).connect()
-        c.register(**kwargs)
-        made.append(c)
-        return c
-
-    yield _bind
-    for c in made:
-        c.close()
 
 
 def test_the_daemon_knows_the_kind_and_binds_a_name_with_it(rig, bind):
@@ -56,8 +38,7 @@ def coder_reads(rig, monkeypatch, **answer):
         if frame.get("identity") == "coder@proj-a":
             return {"identity": "coder@proj-a", "bound": True, "adapter": "opencode",
                     "session_id": "s", "bound_at": 0.0, "bound_for": 60.0,
-                    "cache_reason": None, "cache_key": None, "cache_source": None,
-                    **answer}
+                    "cache_reason": None, "cache_key": None, "cache_source": None, **answer}
         return real(frame)
 
     monkeypatch.setattr(rig.daemon, "_session_query", session)
@@ -69,8 +50,7 @@ def test_held_is_taken_by_an_opencode_name(rig, bind, monkeypatch):
     bind(**CODER)
     coder_reads(rig, monkeypatch, cache_kind="cold", age_seconds=4000, cache_ttl=1800)
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a,coder@proj-a", "later",
-                         "--held"],
-                        **PLANNER)
+                         "--held"], **PLANNER)
     assert code == 0, out
     assert cli.HELD_NOTE.format(name="coder@proj-a") in out.splitlines()
     (msg,) = rig.gateway.history(rig.names_channel)
@@ -109,8 +89,7 @@ def test_a_send_to_an_opencode_name_with_no_session_id_is_refused(rig, bind):
     has reported no session id, so its cache cannot be read."""
     bind(**CODER)
     for flags in ([], ["--held"]):
-        code, out = rig.cli(["send", "--posture", "none", "coder@proj-a", "hello", *flags],
-                            **PLANNER)
+        code, out = rig.cli(["send", "--posture", "none", "coder@proj-a", "hello", *flags], **PLANNER)
         assert code == cli.EXIT_COLD, out
         assert out.splitlines() == [
             "Nothing was sent: comms could not read coder@proj-a's cache (no session id "

@@ -1,30 +1,12 @@
 """bindings.db -- the binding custody journal.
 
-The daemon's routing table is memory only and dies with the socket; that is the
-contract and it is right. But the ONE fact the daemon alone witnesses -- *who held
-seat N over which interval* -- is also the missing half of replay attribution, and
-losing it meant every chosen-tier agent's backlog arrived blanket-unverified. Chosen
-agents hand off across sessions as normal workflow, so "unverified" was the common
-case rather than the exceptional one.
-
-So custody is JOURNALLED, durably, and replay runs the SAME match-gate live delivery
-runs, retroactively:
-
-    a message posted by seat N's webhook at time T
-  + the journal shows exactly one holder of seat N over an interval containing T
-  + that holder's qualified name == the display the record kept
-  --------------------------------------------------------------------------------
-  = VERIFIED. Two independent facts agreeing, exactly as live.
-
-Anything less -- no journal, no interval, more than one interval, a display that does
-not match the holder -- is the display-derived unverified path. Ambiguity
-degrades toward unverified and never toward a false verified.
+The daemon's routing table is memory only and dies with the socket.  This journal keeps
+the binding history used by the never-bound check and its scope hint.  Existing rows
+from older releases also supply evidence to the one-time record conversion; new rows
+have no allocation number.
 
 What this file is NOT: it is never consulted for routing or addressability. A journal
-row is history, not a live seat, and nothing here can make a dead agent addressable. It
-is read for whether an identity has existed, by the send's never-bound check only
-(`ever_bound`, and `known_scopes` for that refusal's hint); it makes nothing
-addressable.
+row is history, not a live binding, and nothing here can make a dead agent addressable.
 
 Posture, mirroring directory.db: DATA (device-agnostic -- the journal interprets the
 record, and the record is not a device's), mode 0600, written by the daemon alone,
@@ -34,9 +16,9 @@ journal would hand a concurrent reader a lock error at exactly the moment a bind
 being written, and an attribution read that fails is an attribution read that lies by
 omission.
 
-Best-effort by construction: every operation here swallows its own failures and says
-so in the log. Custody history is EVIDENCE; delivery is the product. A journal that
-cannot be opened costs verification and nothing else.
+Best-effort by construction after the old record has been converted: every live
+operation here swallows its own failures and says so in the log.  The one-time
+conversion is stricter because it must preserve what an older reader showed.
 """
 
 from __future__ import annotations
@@ -63,13 +45,11 @@ CREATE TABLE IF NOT EXISTS bindings (
     name         TEXT NOT NULL,
     scope        TEXT NOT NULL,
     tier         TEXT NOT NULL,     -- the tier a verified match reports
-    slot_id      INTEGER,           -- the seat; NULL for send-only (no slot), never matched
     adapter      TEXT NOT NULL,
     bound_at     TEXT NOT NULL,     -- %Y-%m-%dT%H:%M:%SZ, UTC
     released_at  TEXT,              -- NULL while the binding is LIVE
     fenced       INTEGER NOT NULL DEFAULT 0   -- closed by a boot fence, not by a release
 );
-CREATE INDEX IF NOT EXISTS bindings_by_slot ON bindings(slot_id, bound_at);
 """
 
 
@@ -101,40 +81,6 @@ def init(path: str | Path) -> sqlite3.Connection:
     conn.executescript(SCHEMA)
     conn.commit()
     return conn
-
-
-# ------------------------------------------------------------------------- the reader
-
-def holder_at(slot_id, timestamp: str, path: str | Path | None = None):
-    """Who held `slot_id` at `timestamp` -- or None, which means "no evidence".
-
-    ONE covering interval or nothing. Two overlapping intervals cannot both be true and
-    the journal cannot say which is, so the answer is no answer: the caller falls back
-    to the display-derived label, which is what it would have had anyway.
-
-    Containment is exact, with NO tolerance window: `bound_at <= T <= released_at`. A
-    message a second outside the interval is unverified and says so. A fudge factor here
-    would be a second, quieter, undeclared rule about who counts as the holder.
-
-    Never raises. A missing or unreadable journal is not an error condition, it is the
-    absence of evidence, and attribution already knows what to do with that.
-    """
-    if slot_id is None or not timestamp:
-        return None
-    try:
-        conn = connect(path or bindings_db(), read_only=True)
-    except (sqlite3.Error, OSError):
-        return None
-    try:
-        rows = conn.execute(
-            "SELECT * FROM bindings WHERE slot_id = ? AND bound_at <= ? "
-            "AND (released_at IS NULL OR released_at >= ?)",
-            (int(slot_id), timestamp, timestamp)).fetchall()
-    except (sqlite3.Error, ValueError, TypeError):
-        return None
-    finally:
-        conn.close()
-    return rows[0] if len(rows) == 1 else None
 
 
 # ------------------------------------------------------------------------- the writer
@@ -192,11 +138,7 @@ class Journal:
         fence records that the interval ENDED without witnessing the release (`fenced=1`)
         rather than pretending the binding ran to now.
 
-        The declared residual: an out-of-band spend of the seat's webhook DURING the gap,
-        wearing the fenced holder's display, verifies against the fenced tail. That is
-        the same trust-local caveat live attribution already carries -- a credential
-        holder who spends it under someone's name is indistinguishable from that someone,
-        and the journal was never going to be the thing that fixed that.
+        A fenced row records only that the daemon did not witness a clean release.
         """
         with self._lock:
             if self._conn is None:
@@ -213,18 +155,17 @@ class Journal:
             return cur.rowcount or 0
 
     # -- the two moments only the daemon witnesses --------------------------
-    def bind(self, *, qualified: str, name: str, scope: str, tier: str, slot_id,
+    def bind(self, *, qualified: str, name: str, scope: str, tier: str,
              adapter: str, at: float | None = None) -> int | None:
-        """Open an interval. Returns the row id to close later, or None if unrecorded."""
+        """Open an interval. Returns its row id, or None if unrecorded."""
         with self._lock:
             if self._conn is None:
                 return None
             try:
                 cur = self._conn.execute(
-                    "INSERT INTO bindings(qualified, name, scope, tier, slot_id, adapter,"
-                    " bound_at) VALUES (?,?,?,?,?,?,?)",
-                    (qualified, name, scope, tier,
-                     None if slot_id is None else int(slot_id), adapter,
+                    "INSERT INTO bindings(qualified, name, scope, tier, adapter, bound_at) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (qualified, name, scope, tier, adapter,
                      stamp(self.clock() if at is None else at)))
                 self._conn.commit()
             except sqlite3.Error:
@@ -250,7 +191,7 @@ class Journal:
                 log.exception("custody journal: failed to record the release of row %s",
                               row_id)
 
-    # -- read-back (the daemon's own view; consumers use `holder_at`) --------
+    # -- read-back for the daemon's never-bound checks -----------------------
     def ever_bound(self, name: str, scope: str) -> bool | None:
         """Has the identity (name, scope) ever been bound on this box? None when the
         journal is not open or the read fails: the caller then does not know, and the
@@ -292,4 +233,4 @@ class Journal:
                 return []
 
 
-__all__ = ["Journal", "SCHEMA", "TIMESTAMP_FMT", "connect", "holder_at", "init", "stamp"]
+__all__ = ["Journal", "SCHEMA", "TIMESTAMP_FMT", "connect", "init", "stamp"]

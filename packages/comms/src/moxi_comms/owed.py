@@ -293,6 +293,147 @@ def is_work(task_types, crons: int, *, queued: bool, undelivered: bool,
             or queued or bool(undelivered) or bool(awaiting))
 
 
+# --------------------------------------------------------------------------- the check
+
+class ReplyCheck:
+    """The steps for one turn end, kept for one adapter: its ledger, whether a reminder
+    holds the running turn (`blocked`), and this turn's reminders (`turn_blocks`, 0 or 1).
+
+    It takes the owner's lock, which guards the owner's identity and queue as well, and
+    reads the owner through callables: `identity()` and `queued()` under the lock,
+    `connection()` (the binding's own daemon connection, for the `unanswered` notify)
+    under the lock beside `identity()`, and `owed_query(identity, authors, referents)`
+    outside it. `stop_facts(fields)`, when given, fills in the facts the owner's harness
+    does not give, outside the lock and only once a debt is open; with none, the facts
+    are read in the same hold of the lock as the expiry.
+
+    `moment` names the turn end in the log ("Stop"), `check` the check itself, and
+    `start` the session change's log prefix.
+    """
+
+    def __init__(self, lock, *, clock, identity, queued, owed_query, connection, log,
+                 stop_facts=None, moment="Stop", check="Stop check",
+                 start="SessionStart "):
+        self.lock = lock
+        self.clock = clock
+        self.identity = identity
+        self.queued = queued
+        self.owed_query = owed_query
+        self.connection = connection
+        self.stop_facts = stop_facts
+        self.log = log
+        self.moment, self.check_name, self.start = moment, check, start
+        self.ledger = Ledger()
+        self.turn_blocks = 0
+        self.blocked = False
+
+    def check(self, fields: dict) -> Decision:
+        """A boundary (`block` None) or a block whose reason is `reminder_text`.
+
+        Every missing or failed fact returns a boundary with every pending mark voided;
+        nothing here raises. `dropped` lists the debts counted and dropped at this turn
+        end, already recorded with the daemon as `unanswered`."""
+        try:
+            decision = self.decide(fields if isinstance(fields, dict) else {})
+        except Exception:                                          # noqa: BLE001
+            self.log.exception("the %s failed; this %s passes", self.check_name,
+                               self.moment)
+            with self.lock:
+                self.ledger.void_pending()
+            return Decision()
+        for debt in decision.dropped:
+            self.record_unanswered(debt)
+        return decision
+
+    def decide(self, fields: dict) -> Decision:
+        now = self.clock()
+        asked = None
+        with self.lock:
+            self.ledger.expire(now)                               # step 1
+            if not self.ledger.debts:
+                return Decision()
+            if self.stop_facts is None:
+                asked = self._read_facts(fields)
+        if self.stop_facts is not None:
+            fields = self.stop_facts(dict(fields))
+            with self.lock:
+                asked = self._read_facts(fields)
+        if asked is None:
+            return Decision()
+        active, tasks, crons, authors, referents, identity = asked
+        answer = None
+        if identity is not None:                                  # step 3
+            try:
+                answer = self.owed_query(identity, authors, referents)
+            except Exception as e:                                # noqa: BLE001
+                self.log.info("the owed query failed (%s); this %s passes", e,
+                              self.moment)
+        if not isinstance(answer, dict):
+            with self.lock:
+                self.ledger.void_pending()
+            return Decision()
+        with self.lock:
+            self.ledger.settle(answer, now)
+            work = is_work(tasks, crons, queued=self.queued(),    # step 4
+                           undelivered=answer.get("undelivered"),
+                           awaiting=answer.get("awaiting"))
+            return self.ledger.decide(stop_hook_active=active,    # steps 5 to 9
+                                      turn_blocks=self.turn_blocks, work=work,
+                                      floor=answer.get("floor"), now=now)
+
+    def _read_facts(self, fields: dict):
+        """Step 2, under the lock: the turn end's facts and the query's arguments, or
+        None (every pending mark voided) when a fact is missing or malformed."""
+        active = fields.get("stop_hook_active")
+        tasks = fields.get("task_types")
+        crons = fields.get("crons")
+        if (not isinstance(active, bool) or not isinstance(tasks, list)
+                or not isinstance(crons, int) or isinstance(crons, bool)):
+            self.ledger.void_pending()
+            return None
+        authors, referents = self.ledger.query_args()
+        return active, tasks, crons, authors, referents, self.identity()
+
+    def record_unanswered(self, debt: Debt) -> None:
+        """An ignored reminder: one `unanswered` notify on the binding's own
+        connection."""
+        with self.lock:
+            identity, client = self.identity(), self.connection()
+        if identity and client is not None and client.connected:
+            client.notify("unanswered", identity=identity, message_id=debt.message_id,
+                          author=debt.author, at=debt.at)
+        self.log.info("comms: %s ended a turn without answering %s's msg %s", identity,
+                      debt.author, debt.message_id)
+
+    def mark_blocked(self, names) -> None:
+        """The reminder is in front of the model and holds the turn: the named debts
+        are pending, and this turn has had its one reminder."""
+        with self.lock:
+            self.blocked = True
+            self.ledger.mark_pending(names)
+            self.turn_blocks += 1
+
+    def clear_block(self) -> None:
+        """A turn end, or what resolves a reminder: every pending mark not already
+        settled is voided, and the next turn may be reminded again."""
+        with self.lock:
+            self.ledger.void_pending()
+            self.blocked = False
+            self.turn_blocks = 0
+
+    def session_changed(self, source, session_id) -> bool:
+        """A clear empties the debts; a resume empties those injected into another
+        session. True when a reminder holds the turn and this start (startup, resume or
+        clear) resolves it; a compaction resolves nothing. The owner ends the turn."""
+        with self.lock:
+            gone = self.ledger.session_changed(source, session_id)
+            blocked = self.blocked
+        if gone:
+            self.log.info("%s%s: %d owed repl(ies) left the ledger with the context",
+                          self.start, source, gone)
+        return blocked and source in RESOLVING_SOURCES
+
+
 # --------------------------------------------------------------------------- the text
 
 def _age(seconds: float) -> str:
@@ -351,5 +492,5 @@ def reminder_text(debts, now: float) -> str:
 
 __all__ = ["BRANCH_DIRECTOR", "BRANCH_OPERATOR", "BRANCH_PEER", "Debt",
            "Decision",
-           "HARNESS_INTERNAL_TASKS", "Ledger", "RESOLVING_SOURCES", "is_work",
+           "HARNESS_INTERNAL_TASKS", "Ledger", "RESOLVING_SOURCES", "ReplyCheck", "is_work",
            "owing_branch", "reminder_text"]

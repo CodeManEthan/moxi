@@ -22,11 +22,11 @@ from conftest import write_config
 
 from moxi_comms import config, secrets
 from moxi_comms.gateway import GatewayError
-from moxi_comms.local_gateway import LocalGateway
-from moxi_comms.tokens import TokenStore, owner_for_slot
+from moxi_comms.sender import operator_credential
+from moxi_comms.tokens import OPERATOR_SECRET_ID, TokenStore, owner_for_role
 
-SECRET_ID = "comms/slot-1/names"
-OWNER = owner_for_slot(1)
+SECRET_ID = OPERATOR_SECRET_ID
+OWNER = owner_for_role("operator")
 
 
 # --------------------------------------------------------------------------- the order
@@ -54,7 +54,7 @@ def test_the_env_step_looks_under_the_stated_key(tmp_path):
     """The env step: `MOXI_COMMS_SECRET_<KEY>`, the id upper-cased with every run of
     non-alphanumerics folded to one underscore. Stated in `env_key` and pinned here, so a
     box's config and its shell agree about the name."""
-    assert secrets.env_key(SECRET_ID) == "MOXI_COMMS_SECRET_COMMS_SLOT_1_NAMES"
+    assert secrets.env_key(SECRET_ID) == "MOXI_COMMS_SECRET_COMMS_OPERATOR_TOKEN"
     assert secrets.env_key("ANTHROPIC_API_KEY") == "MOXI_COMMS_SECRET_ANTHROPIC_API_KEY"
     assert secrets.env_key("1a2b3c4d-5e6f") == "MOXI_COMMS_SECRET_1A2B3C4D_5E6F"
 
@@ -75,7 +75,7 @@ def test_a_store_hit_is_keyed_by_the_holder_and_carries_no_note(tmp_path):
     with pytest.raises(secrets.SecretNotFound):
         chain.get(SECRET_ID)                         # no owner: nothing to key on
     with pytest.raises(secrets.SecretNotFound):
-        chain.get(SECRET_ID, owner=owner_for_slot(2))
+        chain.get(SECRET_ID, owner=owner_for_role("daemon"))
 
 
 # --------------------------------------------------------------- a break is not a miss
@@ -109,9 +109,9 @@ def test_the_all_miss_error_names_the_steps_tried_and_the_holder(tmp_path):
         chain.get(SECRET_ID, owner=OWNER)
     said = str(e.value)
     assert f"cannot resolve the posting credential {SECRET_ID}" in said
-    assert "the environment (MOXI_COMMS_SECRET_COMMS_SLOT_1_NAMES)" in said
+    assert "the environment (MOXI_COMMS_SECRET_COMMS_OPERATOR_TOKEN)" in said
     assert "the holder's token store" in said
-    assert "slot-1" in said                               # the holder
+    assert "operator" in said                              # the holder
     assert "ask the operator" in said
 
 
@@ -141,7 +141,7 @@ store_root, secret_id = sys.argv[1:3]
 cfg = config.load()
 assert list(cfg.secrets.chain) == ["env", "store"], cfg.secrets.chain
 got = secrets.from_config(cfg, env={}, store=store_root).get(
-    secret_id, owner=tokens.owner_for_slot(1))
+    secret_id, owner=tokens.owner_for_role("operator"))
 assert got == {"value": "STORED-TOKEN", "note": ""}, got
 print("ok")
 """
@@ -207,63 +207,49 @@ def test_the_secrets_table_may_not_hold_a_token_like_every_other_table():
 
 # ------------------------------------------------------------------- through the backends
 
-def test_the_local_gateway_resolves_through_the_chain_end_to_end(tmp_path):
-    """The other half: `LocalGateway._read_secret` is the chain now, and its `store`
-    step is the declared read. Mint a row, write the token where provision writes it, and
-    post with what the chain hands back."""
-    from moxi_comms.gateway import NO_MENTIONS
+def test_the_operator_credential_reads_the_store_through_the_default_chain(tmp_path):
+    from moxi_comms import directory
 
+    db = directory.init(tmp_path / "directory.db")
+    db.execute("INSERT INTO rooms VALUES ('names', '#names', 'names', '2026-01-01')")
+    db.commit()
     store = TokenStore(tmp_path / "tokens")
-    chain = secrets.build(["env", "store"], env={}, store=store)
-    gateway = LocalGateway(tmp_path / "record.db", poll_interval=60, resolver=chain)
+    store.write_secret(OWNER, SECRET_ID, "STORED-TOKEN")
     try:
-        channel = gateway.create_channel("#names")
-        cred = gateway.create_webhook(channel, "slot-1", SECRET_ID)
-
-        with pytest.raises(GatewayError) as e:            # nothing written yet
-            gateway.resolve_secret(SECRET_ID, owner=OWNER)
-        assert "the holder's token store" in str(e.value)
-
-        store.write_secret(OWNER, SECRET_ID, cred.token)
-        resolved = gateway.resolve_secret(SECRET_ID, owner=OWNER)
-        assert (resolved.webhook_id, resolved.token) == (cred.webhook_id, cred.token)
-        posted = gateway.execute_webhook(resolved, "through the chain", username="slot-1",
-                                         allowed_mentions=NO_MENTIONS)
-        assert posted.content == "through the chain"
+        assert operator_credential(db, store=store, env=os.environ) == \
+            ("STORED-TOKEN", "names")
     finally:
-        gateway.close()
+        db.close()
 
 
-def test_the_local_gateway_takes_the_env_step_too(tmp_path):
-    """Same seam, first step: a role credential exported into the process resolves with
-    no store file at all, which is what a client box's first run looks like before
-    provision has written anything."""
+def test_the_operator_credential_takes_the_environment_step_first(tmp_path):
+    from moxi_comms import directory
+
+    db = directory.init(tmp_path / "directory.db")
+    db.execute("INSERT INTO rooms VALUES ('names', '#names', 'names', '2026-01-01')")
+    db.commit()
+    env = dict(os.environ, **{secrets.env_key(SECRET_ID): "ENV-TOKEN"})
+    try:
+        assert operator_credential(db, store=TokenStore(tmp_path / "tokens"), env=env) == \
+            ("ENV-TOKEN", "names")
+    finally:
+        db.close()
+
+
+def test_the_operator_credential_store_only_chain_ignores_the_environment(tmp_path):
+    from moxi_comms import directory
+
+    write_config(None, '[secrets]\nchain = ["store"]\n')
+    db = directory.init(tmp_path / "directory.db")
+    db.execute("INSERT INTO rooms VALUES ('names', '#names', 'names', '2026-01-01')")
+    db.commit()
     store = TokenStore(tmp_path / "tokens")
-    env = {}
-    chain = secrets.build(["env", "store"], env=env, store=store)
-    gateway = LocalGateway(tmp_path / "record.db", poll_interval=60, resolver=chain)
+    store.write_secret(OWNER, SECRET_ID, "STORED-TOKEN")
+    env = dict(os.environ, **{secrets.env_key(SECRET_ID): "ENV-TOKEN"})
     try:
-        channel = gateway.create_channel("#names")
-        cred = gateway.create_webhook(channel, "slot-1", SECRET_ID)
-        env[secrets.env_key(SECRET_ID)] = cred.token
-        resolved = gateway.resolve_secret(SECRET_ID, owner=OWNER)
-        assert resolved.token == cred.token
+        assert operator_credential(db, store=store, env=env) == ("STORED-TOKEN", "names")
     finally:
-        gateway.close()
-
-
-def test_open_gateway_hands_the_declared_chain_to_the_backend(tmp_path):
-    """`open_gateway` builds the chain once, from config, and the gateway holds it: no
-    backend constructs a resolver of its own."""
-    from moxi_comms.gateway import open_gateway
-
-    write_config(None, f'backend = "local"\n\n[local]\nrecord = "{tmp_path / "record.db"}"'
-                       '\n\n[secrets]\nchain = ["store"]\n')
-    gateway = open_gateway()
-    try:
-        assert gateway.resolver.names == ("store",)
-    finally:
-        gateway.close()
+        db.close()
 
 
 def test_every_step_returns_one_json_shape(tmp_path):

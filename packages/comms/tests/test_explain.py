@@ -43,7 +43,7 @@ def ask(identity=IDENTITY, message_id=None) -> dict:
 
 
 def deliver_one(rig, shim, text="for the reviewer"):
-    rig.post_from_slot(6, [IDENTITY], text)
+    rig.post_as("agent-6", [IDENTITY], text)
     wait_for_queue(shim, 1)
     return shim.queue[0]["message_id"]
 
@@ -180,7 +180,7 @@ def test_the_four_cases_each_have_a_sentence():
 def test_explain_classifies_with_classify_over_handed_at(rig):
     """Not a second opinion. `_explain_query` calls `classify`, the one
     classifier, and its delivery facts come from `handed_at`."""
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     message_id = deliver_one(rig, reviewer)
     assert (IDENTITY, message_id) in rig.daemon.handed_at
 
@@ -200,7 +200,7 @@ def test_a_hand_over_the_trim_dropped_reads_age_unknown(rig):
     says "age unknown" with no other clause."""
     from moxi_comms import constants
 
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     message_id = deliver_one(rig, reviewer)
     rig.clock.advance(constants.THREAD_IDLE + 1)
     rig.daemon.trim_record()
@@ -209,7 +209,7 @@ def test_a_hand_over_the_trim_dropped_reads_age_unknown(rig):
     info = ask(message_id=message_id)
     assert info["delivery"]["delivered_for"] is None
     assert "alarm_window" not in info
-    code, out = rig.cli(["explain", IDENTITY, message_id], slot=1, name="planner",
+    code, out = rig.cli(["explain", IDENTITY, message_id],  name="planner",
                         scope="proj-a")
     assert code == 0, out
     (line,) = [ln for ln in out.splitlines() if ln.lstrip().startswith("delivered")]
@@ -217,7 +217,7 @@ def test_a_hand_over_the_trim_dropped_reads_age_unknown(rig):
 
 
 def test_delivered_but_the_turn_never_completed(rig):
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     message_id = deliver_one(rig, reviewer)
     reviewer.on_turn_boundary()                 # injects; the turn does not complete
     assert wait_until(lambda: rig.daemon.injected_through.get(IDENTITY))
@@ -234,7 +234,7 @@ def test_delivered_but_the_turn_never_completed(rig):
 
 
 def test_handled_says_so_and_names_the_cursor_reason(rig):
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     message_id = deliver_one(rig, reviewer)
     reviewer.on_turn_boundary()
     reviewer.on_turn_boundary()                 # the turn completes; the cursor moves
@@ -246,7 +246,7 @@ def test_handled_says_so_and_names_the_cursor_reason(rig):
 
 
 def test_delivered_and_ignored(rig):
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     deliver_one(rig, reviewer)
     info = ask()
     assert info["case"] == CASE_IGNORED
@@ -259,7 +259,7 @@ def test_an_unbound_name_is_still_explainable(rig):
     with it and the hand-over time did not, so there is still an answer. The unbind gave
     the handed, unhandled id a row, and a queued id reads `waiting`
     before anything else."""
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     message_id = deliver_one(rig, reviewer)
     reviewer.stop()
     assert wait_until(lambda: IDENTITY not in rig.daemon.bindings)
@@ -277,9 +277,9 @@ def test_a_gone_name_with_nothing_queued_is_not_addressable(rig):
     """An `agent-N` gets no row at its unbind, so the mail it was handed
     and never handled is the not-addressable case: unbound, nothing waiting, the cursor
     below it."""
-    ghost = rig.shim(slot=3)
+    ghost = rig.shim()
     assert ghost.identity == "agent-1"
-    rig.post_from_slot(6, ["agent-1"], "for the ghost")
+    rig.post_as("agent-6", ["agent-1"], "for the ghost")
     wait_for_queue(ghost, 1)
     message_id = ghost.queue[0]["message_id"]
     ghost.stop()
@@ -301,9 +301,9 @@ def test_a_name_nothing_has_ever_happened_to_answers_rather_than_refusing(rig):
 
 
 def test_the_newest_delivery_is_the_default_and_any_id_can_be_asked_for(rig):
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     first = deliver_one(rig, reviewer, "one")
-    rig.post_from_slot(6, [IDENTITY], "two")
+    rig.post_as("agent-6", [IDENTITY], "two")
     wait_for_queue(reviewer, 2)
     second = reviewer.queue[1]["message_id"]
     assert int(second) > int(first)
@@ -318,7 +318,7 @@ def test_the_newest_delivery_is_the_default_and_any_id_can_be_asked_for(rig):
 def test_an_unclassifiable_cursor_answers_instead_of_raising(rig):
     """A cursor that is not a message id reaches `classify`'s int() and raises. The
     command says so and falls back on the cursor's own named reason."""
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     deliver_one(rig, reviewer)
     write_cursor("not-a-message-id")
 
@@ -331,7 +331,7 @@ def test_an_unclassifiable_cursor_answers_instead_of_raising(rig):
 def test_asking_records_nothing(rig):
     """No receipts ledger, ever. Asking twice must leave the
     daemon exactly as the first ask found it."""
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     deliver_one(rig, reviewer)
     before = (dict(rig.daemon.handed_at), dict(rig.daemon.injected_through),
               dict(rig.daemon.activity), {k: dict(v) for k, v in rig.daemon.queue.items()})
@@ -345,12 +345,12 @@ def test_asking_records_nothing(rig):
 # --------------------------------------------------------------------- the rendering
 
 def test_the_verb_prints_the_facts_the_card_asked_for(rig):
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     message_id = deliver_one(rig, reviewer, "the diff needs a second pair of eyes")
     reviewer.on_turn_boundary()
     assert wait_until(lambda: rig.daemon.injected_through.get(IDENTITY))
 
-    code, out = rig.cli(["explain", IDENTITY], slot=1, name="planner", scope="proj-a")
+    code, out = rig.cli(["explain", IDENTITY],  name="planner", scope="proj-a")
     assert code == 0
     assert IDENTITY in out
     assert CASE_TURN_INCOMPLETE in out                         # the verdict
@@ -365,17 +365,17 @@ def test_the_verb_prints_the_facts_the_card_asked_for(rig):
 def test_the_verb_names_the_two_reasons_it_can_never_answer(rig):
     """And only where they are a live hypothesis. A cursor that moved was not declined,
     so in the handled case this block is noise and stays off the page."""
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     deliver_one(rig, reviewer)
 
-    code, out = rig.cli(["explain", IDENTITY], slot=1, name="planner", scope="proj-a")
+    code, out = rig.cli(["explain", IDENTITY],  name="planner", scope="proj-a")
     assert code == 0
     for name in cursors.WRITE_SIDE_REASONS:
         assert name in out, "named, with where to look, rather than quietly missing"
 
     reviewer.on_turn_boundary()
     reviewer.on_turn_boundary()                 # the cursor advances past it
-    code, out = rig.cli(["explain", IDENTITY], slot=1, name="planner", scope="proj-a")
+    code, out = rig.cli(["explain", IDENTITY],  name="planner", scope="proj-a")
     assert code == 0 and CASE_HANDLED in out
     for name in cursors.WRITE_SIDE_REASONS:
         assert name not in out
@@ -383,14 +383,14 @@ def test_the_verb_names_the_two_reasons_it_can_never_answer(rig):
 
 def test_a_long_digest_is_cut_and_says_how_much_it_cut(rig):
     """Never truncate quietly: the cut says how much it cut."""
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     for n in range(20):
-        rig.post_from_slot(6, [IDENTITY], f"message number {n}")
+        rig.post_as("agent-6", [IDENTITY], f"message number {n}")
     wait_for_queue(reviewer, 20)
     reviewer.on_turn_boundary()
     assert wait_until(lambda: rig.daemon.injected_digest.get(IDENTITY))
 
-    code, out = rig.cli(["explain", IDENTITY], slot=1, name="planner", scope="proj-a")
+    code, out = rig.cli(["explain", IDENTITY],  name="planner", scope="proj-a")
     assert code == 0
     assert "more characters" in out and "moxi comms history" in out
 
@@ -401,7 +401,7 @@ def test_explain_with_the_daemon_down_still_prints_the_cursor(rig):
     cursors.advance(IDENTITY, "1500000000000009252")
     rig.daemon.stop()
 
-    code, out = rig.cli(["explain", IDENTITY], slot=1, name="planner", scope="proj-a")
+    code, out = rig.cli(["explain", IDENTITY],  name="planner", scope="proj-a")
     assert code == 4                                            # EXIT_OFFLINE
     assert "comms offline" in out
     assert "1500000000000009252" in out
@@ -410,11 +410,11 @@ def test_explain_with_the_daemon_down_still_prints_the_cursor(rig):
 def test_explain_reaches_no_credential_and_writes_nothing(rig):
     """A READING verb. The fence is the provisioner credential, and this verb
     is on the far side of it: the daemon and one cursor file, nothing else."""
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     deliver_one(rig, reviewer)
     before = rig.gateway.history(rig.names_channel)
 
-    code, _ = rig.cli(["explain", IDENTITY], slot=1, name="planner", scope="proj-a")
+    code, _ = rig.cli(["explain", IDENTITY],  name="planner", scope="proj-a")
     assert code == 0
     assert rig.gateway.history(rig.names_channel) == before
     assert cursors.read(IDENTITY) is None, "explaining a cursor never moves it"
@@ -423,7 +423,7 @@ def test_explain_reaches_no_credential_and_writes_nothing(rig):
 def test_explaining_a_retired_ephemeral_says_so(rig):
     """The daemon already refuses that name for the send verb, and the refusal is the
     whole answer to "why did my message not land". Printed as it came."""
-    code, out = rig.cli(["explain", "agent-99"], slot=1, name="planner", scope="proj-a")
+    code, out = rig.cli(["explain", "agent-99"],  name="planner", scope="proj-a")
     assert code == 2                                            # EXIT_REFUSED
     assert "never reused" in out
 

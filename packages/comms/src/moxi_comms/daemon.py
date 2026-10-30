@@ -56,11 +56,10 @@ Contract anchors:
 
 Routing stays memory-only. What the daemon also does is JOURNAL custody
 (`bindings.py`): the two moments it alone witnesses -- the bind, and the
-connection-close release -- are appended to `DATA/comms/bindings.db` so that replay
-attribution can run the live match-gate against the past. The journal is evidence and
-never a routing input: it is read for whether an identity has existed, by the send's
-never-bound check only, and no lookup in it can make anything addressable. A journal that
-will not open costs verification and that check, and nothing else.
+    connection-close release -- are appended to `DATA/comms/bindings.db`. The journal is
+    evidence and never a routing input: after the old record's one-time conversion it is
+    read only for whether an identity has existed, and no lookup in it can make anything
+    addressable.
 
 The daemon holds no posting credential: it posts nothing to any room.
 """
@@ -69,13 +68,14 @@ from __future__ import annotations
 
 import bisect
 import contextlib
+import hashlib
+import hmac
 import json
 import logging
-import math
 import os
+import secrets
 import signal
 import socket
-import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -89,7 +89,7 @@ from .machine_line import (COLD_AT_LIVE, HELD_TOKEN, NEXT_TURN_TOKEN, POSTURE_NO
                            POSTURE_ONCE, parse as parse_machine_line)
 from .gateway import Message
 from . import kinds as kinds_mod
-from .paths import cold_gate, daemon_socket, directory_db, slot_keeps
+from .paths import cold_gate, daemon_socket, directory_db
 from .protocol import CLI_PROTOCOL, PROTOCOL_VERSION, LineConn
 from .provision import NAMES
 from .scoping import GLOBAL, NAME_RE, is_auto_name, qualify, split_tag, tag_matches
@@ -255,8 +255,8 @@ class Binding:
     scope: str
     tier: str
     adapter: str
-    slot_id: int | None
     bound_at: float
+    token_hash: bytes = b""
     replay_hwm: str = "0"     # the record's high-water mark when this binding was made
     delivered: set = field(default_factory=set)
     journal_id: int | None = None   # the custody interval to close at deregistration
@@ -308,23 +308,6 @@ class Binding:
 
 
 @dataclass
-class Keep:
-    """A slot held for a name until an expiry, so a restart gives it back.
-
-    `expires` is wall-clock epoch seconds, the value the keep mark carries across boots.
-    `deadline` is the same moment on this process's monotonic clock, so a wall clock that
-    steps BACKWARD mid-life cannot stretch a keep: it ends at whichever comes first. A
-    forward step ends it early. Either way a clock jump only shortens a keep. `carried`
-    says the keep came from an earlier boot's unclaimed keep rather than a binding that
-    was live at the stop, for the boot line only.
-    """
-    qualified: str
-    expires: float
-    deadline: float
-    carried: bool = False
-
-
-@dataclass
 class Resolution:
     tag: str
     name: str
@@ -347,8 +330,7 @@ def _config_kept(exc) -> None:
 class Daemon:
     def __init__(self, gateway, *, db_path=None, socket_path=None, clock=time.time,
                  start_trim_thread: bool = True, journal_path=None,
-                 keeps_path=None, monotonic=time.monotonic,
-                 first_start=None, gate_path=None, kinds=None, settings=None,
+                 first_start=None, migrate=None, gate_path=None, kinds=None, settings=None,
                  cache_store=cache.MISSING):
         self.gateway = gateway
         #: The adapter kinds a register may name: the built-in four and each kind the
@@ -366,13 +348,12 @@ class Daemon:
         #: else, given (gateway, db_path): a daemon on the local backend provisions its
         #: directory here (`provision.first_start`). None elsewhere.
         self.first_start = first_start
+        #: The local backend's one-time record conversion and idempotent credential-file
+        #: cleanup.  It runs after the journal's boot fence and before the queue load.
+        self.migrate = migrate
         self.db_path = Path(db_path or directory_db())
         self.socket_path = Path(socket_path or daemon_socket())
         self.clock = clock
-        #: The keep mark. `monotonic` is injectable so a test can step the wall clock
-        #: without the monotonic one and show that a backward jump does not stretch a
-        #: keep.
-        self.keeps_path = Path(keeps_path or slot_keeps())
         #: The cold-cache gate file an older daemon kept (`paths.cold_gate`): read once,
         #: by the queue's migration, and then deleted.
         self.gate_path = Path(gate_path or cold_gate())
@@ -387,7 +368,6 @@ class Daemon:
         #: each is said once.
         self._drift_said: set = set()
         self._drift_lock = threading.Lock()
-        self.monotonic = monotonic
         self._start_trim_thread = start_trim_thread
         # custody, journalled: the daemon is the only writer, and the only witness
         self.journal = bindings.Journal(journal_path, clock=clock)
@@ -398,24 +378,8 @@ class Daemon:
         #: the catch-up boundary exact now that the boundary's gateway read happens
         #: OUTSIDE the lock: see `_register`.
         self._seen_max = "0"
-        self.by_slot: dict[int, str] = {}
-        #: slot -> the Keep held on it for a name that has not come back yet. Read and
-        #: changed under `_lock`, like `by_slot`. A keep
-        #: refuses nobody: it only steers which slot `next-free` picks.
-        self.keeps: dict[int, Keep] = {}
-        #: What `_load_keeps` read at boot, before the socket listens, waiting for the
-        #: listen that starts their clock: a list of
-        #: (kind, slot, qualified, expires-or-None).
-        self._loaded_keeps: list = []
-        #: May this daemon write the mark? Only once it is LISTENING. A daemon whose start
-        #: was refused, or never called, must not write over a live daemon's mark from its
-        #: `stop()`.
-        self._keeps_armed = False
-        #: A write that failed: the file is older than memory, so the next pick tries
-        #: again, and every successful write rewrites the whole file from memory.
-        self._keeps_stale = False
-        #: Set under `_lock` by `stop()` before anything closes. From then on
-        #: deregisters leave the mark alone and a register is answered with a close.
+        #: Set under `_lock` by `stop()` before anything closes. From then on a register
+        #: is answered with a close.
         self._stopping = False
         self._auto_seq = 0
         self.auto_windows: dict[str, list] = {}        # agent-N -> [start, end|None]
@@ -551,24 +515,17 @@ class Daemon:
         # one empty home cannot both provision it. It may refuse (RuntimeError).
         if self.first_start is not None:
             self.first_start(self.gateway, self.db_path)
-        # The fence comes after the probe and still before the bind. Its premise -- that
-        # nothing else holds a seat -- is exactly what the probe just checked, and the
-        # premise is load-bearing: `fence()` is an unscoped `UPDATE ... WHERE released_at
-        # IS NULL`, so run by an intruder it closes a LIVE daemon's open intervals, turns
-        # that daemon's own later release into a silent no-op, and stamps the row
-        # `fenced=1`. `holder_at` then returns None for everything that seat posts
-        # afterwards -- the blanket-unverified attribution the journal exists to prevent,
-        # permanently. Before the bind, because while nothing is bound nothing can open a
-        # new interval, and an interval still open belongs to a daemon that died.
+        # The fence comes after the probe and before the bind. The probe proves no other
+        # daemon can still own an open interval. Live readers use the journal only for
+        # never-bound checks, while the one-time conversion reads older intervals through
+        # its frozen compatibility reader before a new binding can open.
         if self.journal.open():
             fenced = self.journal.fence()
             if fenced:
                 log.warning("boot fence: closed %d custody interval(s) left open by a "
                             "daemon that did not shut down cleanly", fenced)
-        # boot: the keep mark, read after the probe and beside the fence, and only READ
-        # here: a start the probe refused has returned above and has written nothing.
-        # The clock of each keep starts at the listen below.
-        self._load_keeps()
+        if self.migrate is not None:
+            self.migrate(self.gateway, self.db_path, self.journal._resolved())
         # boot: the queue, BEFORE the socket listens, so no register or routing pass can
         # hand a queued id as live mail. The first boot of this daemon moves the mail an
         # older daemon held into it first (`_migrate_queue`). A read that RAISES stops
@@ -593,11 +550,6 @@ class Daemon:
         os.chmod(self.socket_path, 0o600)                  # 0600 in a 0700 dir
         self._server.listen(64)
         self._server.settimeout(0.2)
-        # The keep clock starts HERE, when this daemon is listening, and before the
-        # accept loop can hand any register a slot. A boot that died before this point
-        # wrote nothing, so the next boot still finds the old daemon's `live` entries
-        # and starts their window afresh.
-        self._arm_keeps()
         self._spawn(self._window_loop)
         self._spawn(self._accept_loop)
 
@@ -649,14 +601,8 @@ class Daemon:
         self._threads.append(t)
 
     def stop(self) -> None:
-        # The freeze, before `_stop` and before anything closes: the mark is written one
-        # last time with every binding still live in it, and from here on the stop's own
-        # connection closes cannot empty it. Once only: a second `stop()` would write
-        # the bindings the first one's closes removed.
         with self._lock:
-            if not self._stopping:
-                self._stopping = True
-                self._write_keeps(freeze=True)
+            self._stopping = True
         self._stop.set()
         with self._window_cond:
             self._window_cond.notify_all()
@@ -719,6 +665,8 @@ class Daemon:
                 # passing read. Flagged rows wait for a real boundary.
                 self._replay(bound)
                 self._on_register(bound)
+            elif op == "post":
+                conn.send({"id": rid, "ok": True, **self._post(frame)})
             elif op == "query":
                 conn.send({"id": rid, "ok": True, **self._query(frame)})
             elif op == "injected":
@@ -778,7 +726,7 @@ class Daemon:
             log.info("register turned away: the daemon is stopping")
             conn.close()
         except Refusal as e:
-            # The daemon's own NO: a name or slot somebody else holds, an address that
+            # The daemon's own NO: a name somebody else holds, an address that
             # cannot resolve. `refused` is the word a shim may act on for good.
             if op == "register":
                 # One journal line per refused attempt, naming what was asked. A waiting
@@ -798,6 +746,11 @@ class Daemon:
 
     # ------------------------------------------------------------------ register
     def _register(self, conn: LineConn, frame: dict) -> dict:
+        if frame.get("protocol") != PROTOCOL_VERSION:
+            raise Refusal(
+                "this session's comms adapter is from an older comms release "
+                "(claims protocol 1) and cannot bind to this daemon (protocol 2). "
+                "Relaunch the session to start the current adapter.")
         adapter = frame.get("adapter") or "claude-shim"
         if adapter not in self.kinds:
             raise Refusal(f"unknown adapter kind {adapter!r}; expected one of "
@@ -808,7 +761,7 @@ class Daemon:
         # query wait with them.
         #
         # The read is deferred-raise rather than plain, so the REFUSAL ORDER is unchanged:
-        # a name or slot that is already bound is refused with the daemon's own words even
+        # a name that is already bound is refused with the daemon's own words even
         # when the gateway is also broken, exactly as when the call sat below those checks.
         hwm, hwm_error = self._high_water_mark()
         with self._lock, self._db() as db:
@@ -847,36 +800,11 @@ class Daemon:
                 raise Refusal(
                     f"{q} is a send-only identity and receives no mail: it binds only "
                     f"with the {SEND_ONLY_ADAPTER} adapter kind, never as {adapter}")
-            # The name is resolved FIRST now, because `next-free` gives a name its kept
-            # slot. One consequence: a register wrong in both name and
-            # slot hears about the name first. The pick changes no keep.
-            requested = frame.get("slot", "next-free")
-            if adapter == SEND_ONLY_ADAPTER:
-                # A send-only binding holds no slot, at its register, while it is bound,
-                # at its unbind and across a restart. It posts only from its own
-                # standing bundle and is delivered nothing, so it takes none of the
-                # slots, spends no slot keep (`_keep_on_release`, `_keep_entries` pass
-                # over a null slot) and no free-slot count sees it: slots stay for
-                # agents to take and leave freely.
-                if _is_numbered(requested):
-                    raise Refusal(
-                        f"{q} is a send-only identity and holds no slot: it registers "
-                        f"next-free, never on slot {requested}")
-                slot_id = None
-            else:
-                slot_id = self._pick_slot(db, requested, q)
             if q in self.bindings:
                 held = self.bindings[q]
-                seat = "no slot" if held.slot_id is None else f"slot {held.slot_id}"
                 raise Refusal(
-                    f"{q} is already bound ({seat}, adapter {held.adapter})",
-                    holder={"qualified": q, "slot": held.slot_id, "adapter": held.adapter})
-            if slot_id is not None and slot_id in self.by_slot:
-                held = self.bindings[self.by_slot[slot_id]]
-                raise Refusal(
-                    f"slot {slot_id} is already bound by {held.qualified}",
-                    holder={"qualified": held.qualified, "slot": slot_id,
-                            "adapter": held.adapter})
+                    f"{q} is already bound (adapter {held.adapter})",
+                    holder={"qualified": q, "adapter": held.adapter})
             # The catch-up boundary, FIXED here -- at the same instant the binding becomes
             # visible, and under the same lock. Everything at or below it is replay's
             # business (bounded, possibly dropped); everything above it is live. Without
@@ -901,7 +829,7 @@ class Daemon:
                 raise hwm_error
             hwm = max(hwm, self._seen_max, key=int)
             binding = Binding(conn=conn, qualified=q, name=name, scope=scope, tier=tier,
-                              adapter=adapter, slot_id=slot_id, bound_at=self.clock(),
+                              adapter=adapter, bound_at=self.clock(),
                               replay_hwm=hwm)
             # The session behind the name, from the register itself: this frame is the
             # binding's own connection by construction. With it, the shim's evidence for
@@ -925,28 +853,50 @@ class Daemon:
                     log.info("bind %s: dropped %d message(s) queued for it from before its "
                              "row was send-only, delivered to nobody: %s", q,
                              len(dropped), ", ".join(dropped))
+            token = secrets.token_urlsafe(32)
+            binding.token_hash = hashlib.sha256(token.encode()).digest()
             self.bindings[q] = binding
-            if slot_id is not None:               # a send-only binding is on no slot
-                self.by_slot[slot_id] = q
             if tier == TIER_EPHEMERAL:
                 self.auto_windows[name] = [binding.bound_at, None]
             # custody, journalled at the moment only the daemon sees it. An `agent-N` is
             # a binding like any other and is journalled like any other; a failed write
             # returns None and the binding proceeds regardless (evidence, not product).
             binding.journal_id = self.journal.bind(
-                qualified=q, name=name, scope=scope, tier=tier, slot_id=slot_id,
+                qualified=q, name=name, scope=scope, tier=tier,
                 adapter=adapter, at=binding.bound_at)
-            log.info("bind %s tier=%s slot=%s adapter=%s", q, tier, slot_id, adapter)
-            # Keeps end only now, with the binding installed: a register
-            # refused anywhere above has left every keep as it was.
-            self._end_keeps_on_install(q, slot_id, numbered=_is_numbered(requested))
-            self._write_keeps()
+            log.info("bind %s tier=%s adapter=%s", q, tier, adapter)
         # `hwm`, the catch-up boundary: the shim's registration
         # high-water id. A `re:` below it was sent before that shim could see payments.
         # `protocol`, this daemon's claims-protocol version: a plugin shim ships its own
         # copy of the source and checks it on connect.
         return {"identity": {"name": name, "scope": scope, "tier": tier, "qualified": q},
-                "slot": slot_id, "hwm": hwm, "protocol": PROTOCOL_VERSION}
+                "hwm": hwm, "protocol": PROTOCOL_VERSION,
+                "token": token}
+
+    def _post(self, frame: dict) -> dict:
+        """Write one identity row after checking the live binding's credential."""
+        identity = frame.get("identity")
+        token = frame.get("token")
+        content = frame.get("content")
+        with self._lock, self._db() as db:
+            if self._stopping:
+                raise Refusal("the daemon is stopping")
+            binding = self.bindings.get(identity)
+            given = (hashlib.sha256(token.encode()).digest()
+                     if isinstance(token, str) else b"")
+            if binding is None or not hmac.compare_digest(binding.token_hash, given):
+                raise Refusal("posting credential refused", credential=True)
+            if directory.retired(db, binding.name, binding.scope):
+                raise Refusal(f"{binding.qualified} is retired")
+            if not isinstance(content, str):
+                raise Refusal("post content must be text")
+            if len(content) > self.gateway.max_content_length:
+                raise Refusal(
+                    f"content is {len(content)} characters, over the "
+                    f"{self.gateway.max_content_length}-character cap on one message")
+            qualified = binding.qualified
+        message = self.gateway.post_as_identity(qualified, self._names_channel(), content)
+        return {"message_id": str(message.id)}
 
     def _high_water_mark(self):
         """(hwm, error): the record's high id for a register's catch-up boundary.
@@ -959,228 +909,6 @@ class Daemon:
             return self.gateway.max_message_id(self._names_channel()) or "0", None
         except Exception as e:            # re-raised by the caller, in the old call's place
             return "0", e
-
-    def _pick_slot(self, db, requested, q=None):
-        """The slot a register gets.
-
-        A number is taken as asked when it is provisioned; a keep never refuses one.
-        `next-free`, in order: the slot kept for `q`, if it is provisioned and not
-        bound; the lowest slot neither bound nor kept; the lowest slot not bound though
-        it is kept (the caller logs the give-up once the binding is installed); else
-        "no free slot". Keeps whose time is up are dropped first. Nothing else here
-        changes a keep: a register refused after the pick leaves them all in place.
-        """
-        available = directory.slot_ids(db)
-        self._sweep_keeps()
-        if not _is_numbered(requested):
-            free = [s for s in available if s not in self.by_slot]
-            for s in free:
-                keep = self.keeps.get(s)
-                if keep is not None and q is not None and keep.qualified == q:
-                    return s                                      # 1. its own keep
-            for s in free:
-                if s not in self.keeps:
-                    return s                                      # 2. unbound, unkept
-            if free:
-                return free[0]                                    # 3. a give-up
-            raise Refusal("no free slot")
-        slot_id = int(requested)
-        if slot_id not in available:
-            raise Refusal(f"slot {slot_id} is not provisioned")
-        return slot_id
-
-    # ------------------------------------------------------------------ slot keeps
-    def _load_keeps(self) -> None:
-        """Read the keep mark, before the socket listens.
-
-        Only READS. What it finds waits in `_loaded_keeps` for `_arm_keeps`, which runs
-        at the listen. Everything that can go wrong here only removes keeps, which
-        relaxes slot choice to what it was before keeps existed: a missing file, one
-        that will not parse or has the wrong shape, an entry that is malformed, names an
-        `agent-N`, names a slot no longer provisioned, or carries an expiry that is not a
-        finite number, and every entry of a pair that conflicts (two for one slot, or two
-        for one name). Each drop is logged once.
-        """
-        self._loaded_keeps = []
-        try:
-            raw = self.keeps_path.read_text()
-        except FileNotFoundError:
-            log.info("slot keeps: no mark at %s; no slot is kept this boot",
-                     self.keeps_path)
-            return
-        except OSError as e:
-            log.warning("slot keeps: the mark at %s could not be read (%s); no slot is "
-                        "kept this boot", self.keeps_path, e)
-            return
-        try:
-            entries = json.loads(raw)
-        except ValueError as e:
-            log.warning("slot keeps: the mark at %s does not parse (%s); no slot is kept "
-                        "this boot", self.keeps_path, e)
-            return
-        if not isinstance(entries, list):
-            log.warning("slot keeps: the mark at %s is not a list of entries; no slot is "
-                        "kept this boot", self.keeps_path)
-            return
-        try:
-            with self._db() as db:
-                provisioned = set(directory.slot_ids(db))
-        except Exception as e:                        # noqa: BLE001 -- only removes keeps
-            log.warning("slot keeps: the directory could not be read (%s); no slot is "
-                        "kept this boot", e)
-            return
-        good = []
-        for entry in entries:
-            parsed = _parse_keep_entry(entry)
-            if isinstance(parsed, str):
-                log.warning("slot keeps: dropped an entry (%s): %r", parsed, entry)
-                continue
-            kind, slot, q, expires = parsed
-            if slot not in provisioned:
-                log.warning("slot keeps: dropped %s on slot %s: the slot is no longer "
-                            "provisioned", q, slot)
-                continue
-            good.append(parsed)
-        slots = [p[1] for p in good]
-        names = [p[2] for p in good]
-        for parsed in good:
-            kind, slot, q, expires = parsed
-            if slots.count(slot) > 1 or names.count(q) > 1:
-                log.warning("slot keeps: dropped %s on slot %s: it conflicts with another "
-                            "entry for the same %s", q, slot,
-                            "slot" if slots.count(slot) > 1 else "name")
-                continue
-            self._loaded_keeps.append(parsed)
-
-    def _arm_keeps(self) -> None:
-        """Start the keep clock, at the listen, and write the mark.
-
-        A `live` entry becomes a keep until now + SLOT_KEEP. A carried `keep` entry
-        keeps its own expiry if that is still ahead, clamped to now + SLOT_KEEP so no
-        value in the file (a clock that was wrong at boot, a hand edit) can hold a slot
-        longer than one window. The mark is then rewritten, so the file reflects the
-        loaded keeps and no live bindings.
-        """
-        with self._lock:
-            boot, mono = self.clock(), self.monotonic()
-            window = constants.SLOT_KEEP
-            self.keeps = {}
-            said = []
-            for kind, slot, q, expires in self._loaded_keeps:
-                carried = kind == "keep"
-                until = boot + window if not carried else min(expires, boot + window)
-                if until <= boot:
-                    log.info("slot keeps: %s on slot %s had already lapsed at boot", q, slot)
-                    continue
-                self.keeps[slot] = Keep(qualified=q, expires=until,
-                                        deadline=mono + (until - boot), carried=carried)
-                said.append(f"{slot} {q} ({int(round(until - boot))}s"
-                            f"{', carried' if carried else ''})")
-            self._loaded_keeps = []
-            self._keeps_armed = True
-            if said:
-                log.info("boot: keeping %d slot(s): %s", len(said), ", ".join(said))
-            self._write_keeps()
-
-    def _keep_lapsed(self, keep: Keep, now: float, mono: float) -> bool:
-        return now >= keep.expires or mono >= keep.deadline
-
-    def _sweep_keeps(self) -> None:
-        """Drop the keeps whose time is up, in one journal line, and rewrite the mark."""
-        now, mono = self.clock(), self.monotonic()
-        lapsed = sorted(s for s, k in self.keeps.items() if self._keep_lapsed(k, now, mono))
-        if lapsed:
-            gone = [f"{s} {self.keeps.pop(s).qualified}" for s in lapsed]
-            log.info("slot keep(s) lapsed unclaimed: %s", ", ".join(gone))
-            self._write_keeps()
-        elif self._keeps_stale:
-            self._write_keeps()
-
-    def _end_keeps_on_install(self, q: str, slot_id: int | None, *,
-                              numbered: bool) -> None:
-        """A binding was installed: end its name's keep (claim) and any keep on its slot
-        (a numbered register's takeover, or `next-free`'s give-up at step 3). A binding
-        with no slot (send-only) ends only its own name's keeps."""
-        for s, keep in list(self.keeps.items()):
-            if keep.qualified == q:
-                del self.keeps[s]
-                log.info("slot keep for %s on slot %s ended: claimed", q, s)
-        keep = self.keeps.pop(slot_id, None)
-        if keep is not None:
-            how = "taken by" if numbered else "given up to"
-            tail = "" if numbered else " (no other slot free)"
-            log.warning("slot keep for %s on slot %s ended: %s %s%s",
-                        keep.qualified, slot_id, how, q, tail)
-
-    def _keep_on_release(self, b: Binding) -> None:
-        """A released slot waits for its name: when a chosen or standing binding ends,
-        its slot is kept for that name for `SLOT_KEEP`, the same keep the daemon writes
-        for every live binding at boot, so a launch registering `next-free` in the gap
-        takes another slot while one is free. Not once the daemon is stopping: the
-        freeze writes its own mark. Called under `_lock`; the caller writes the mark."""
-        if (self._stopping or not self._keeps_armed or b.slot_id is None
-                or b.tier not in (TIER_CHOSEN, TIER_STANDING)):
-            return
-        if b.slot_id in self.by_slot:
-            return                            # the slot was taken already
-        for s, keep in list(self.keeps.items()):
-            if keep.qualified == b.qualified:
-                del self.keeps[s]             # a name keeps one slot, its last
-        now, mono = self.clock(), self.monotonic()
-        window = constants.SLOT_KEEP
-        self.keeps[b.slot_id] = Keep(qualified=b.qualified, expires=now + window,
-                                     deadline=mono + window)
-        log.info("slot %s kept for %s for %ss after its unbind", b.slot_id, b.qualified,
-                 int(window))
-
-    def _keep_entries(self) -> list:
-        """The mark's contents, from memory: live chosen and standing bindings, and
-        unclaimed keeps. `agent-N` never enters it: an auto name is never reused, so a
-        keep for one could never be claimed."""
-        entries = [{"kind": "live", "slot": b.slot_id, "qualified": b.qualified}
-                   for b in sorted(self.bindings.values(), key=lambda x: x.qualified)
-                   if b.tier in (TIER_CHOSEN, TIER_STANDING) and b.slot_id is not None]
-        entries += [{"kind": "keep", "slot": s, "qualified": k.qualified,
-                     "expires": k.expires} for s, k in sorted(self.keeps.items())]
-        return entries
-
-    def _write_keeps(self, *, freeze: bool = False) -> None:
-        """Rewrite the whole mark from memory: a temporary file, then a rename. Called
-        under `_lock`. After the freeze only the freeze itself writes; before the listen
-        nothing does. A failed write is logged, the daemon goes on (the journal's own
-        posture), and the file counts as stale: the next pick tries again. Every failure
-        direction relaxes: a lost install costs that name its keep at the next boot, and
-        a stale `live` entry is a false keep for at most one window."""
-        if not self._keeps_armed or (self._stopping and not freeze):
-            return
-        text = json.dumps(self._keep_entries(), indent=1) + "\n"
-        tmp = None
-        try:
-            self.keeps_path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(prefix=".slot-keeps.", suffix=".tmp",
-                                       dir=self.keeps_path.parent)
-            with os.fdopen(fd, "w") as f:
-                f.write(text)
-            os.replace(tmp, self.keeps_path)
-            tmp = None
-            self._keeps_stale = False
-        except OSError as e:
-            self._keeps_stale = True
-            log.warning("slot keeps: the mark at %s could not be written (%s); it is "
-                        "stale until the next write succeeds", self.keeps_path, e)
-        finally:
-            if tmp is not None:
-                with contextlib.suppress(OSError):
-                    os.unlink(tmp)
-
-    def _keeps_view(self) -> dict:
-        """`query kind="agents"`'s keeps: slot -> who it is kept for and the
-        seconds left. Read-only; a keep past its time is left out, not dropped."""
-        now, mono = self.clock(), self.monotonic()
-        return {s: {"qualified": k.qualified,
-                    "expires_in": max(0.0, min(k.expires - now, k.deadline - mono))}
-                for s, k in sorted(self.keeps.items())
-                if not self._keep_lapsed(k, now, mono)}
 
     def _ping_ordered(self, conn: LineConn, frame: dict) -> bool:
         """Is this `activity` / `injected` ping newer than the last from its source?
@@ -1231,8 +959,6 @@ class Daemon:
                 if b.session_id and self.session_owner.get(b.session_id) == b.qualified:
                     del self.session_owner[b.session_id]
                 self.bindings.pop(b.qualified, None)
-                if b.slot_id in self.by_slot and self.by_slot[b.slot_id] == b.qualified:
-                    del self.by_slot[b.slot_id]
                 if b.tier == TIER_EPHEMERAL and b.name in self.auto_windows:
                     self.auto_windows[b.name][1] = self.clock()
                 self.injected_through.pop(b.qualified, None)
@@ -1246,11 +972,6 @@ class Daemon:
                 # signal, so the connection's end is the release, here and nowhere else
                 self.journal.release(b.journal_id)
                 log.info("unbind %s", b.qualified)
-                self._keep_on_release(b)
-            if gone:
-                # The mark follows memory -- except after the freeze, when the
-                # stop's own closes must not empty it (`_write_keeps` says no).
-                self._write_keeps()
         if gone:
             self._queue_flush()
 
@@ -1262,21 +983,18 @@ class Daemon:
         if kind == "agents":
             with self._lock:
                 bindings = [{"qualified": b.qualified, "name": b.name, "scope": b.scope,
-                             "tier": b.tier, "adapter": b.adapter, "slot": b.slot_id,
+                             "tier": b.tier, "adapter": b.adapter,
                              "endpoint": b.endpoint, "endpoint_since": b.endpoint_since}
                             for b in sorted(self.bindings.values(), key=lambda x: x.qualified)]
                 now = self.clock()
                 waiting = self._waiting_view(now)
                 unanswered = self._unanswered_rows(now)
-                # Slot keeps: operator-facing, and printed only by
-                # `moxi comms agents --seats`.
-                keeps = self._keeps_view()
             # `waiting`: what waits in the queue for each name, one count, since one
             # queue holds offline, cold and flagged mail alike and no reason is stored.
             # `pending` stays in the answer, always empty and read by nothing here: an
             # adapter started before the queue checks for it before it renders a roster.
             return {"bindings": bindings, "waiting": waiting, "pending": {},
-                    "unanswered": unanswered, "keeps": keeps}
+                    "unanswered": unanswered}
         if kind == "injected":
             # The LAST DIGEST a live identity was shown. The read surface
             # `moxi comms explain` reads to show the INPUT and not only the
@@ -1505,7 +1223,7 @@ class Daemon:
             b = self.bindings.get(identity)
             binding = None if b is None else {
                 "name": b.name, "scope": b.scope, "tier": b.tier, "adapter": b.adapter,
-                "slot": b.slot_id, "bound_for": now - b.bound_at,
+                "bound_for": now - b.bound_at,
                 "handed": len(b.delivered)}
             # Everything this daemon has seen delivered to the name: what the live
             # binding was handed, plus every hand-over `handed_at` still holds. The two
@@ -2888,37 +2606,9 @@ class Daemon:
 
     # ------------------------------------------------------------------ attribution
     def attribute(self, msg, *, live: bool) -> Author:
-        """What the record proves, plus the one thing only the daemon knows.
-
-        A slot webhook's author is *whoever holds the slot right now*, and that is
-        daemon-authoritative for LIVE delivery, straight out of memory. Replay no longer
-        stops at the display name: `from_record` asks the custody journal who held the
-        seat at the message's timestamp and runs the SAME match-gate. Live is the fast
-        path for the same question, not a different one.
-
-        MATCH-GATED: `verified` takes TWO independent facts
-        agreeing. The live binding proves the SLOT (a credential was spent by its
-        holder); the wire username is the sender's CLAIM about who spoke, and it is
-        what the record will show. When they agree, the binding's identity is
-        verified. When they disagree -- an out-of-band spender of the slot's webhook
-        posting under some other name -- the holder is not the speaker: fall through to
-        `from_record`, which asks the journal the same question about the same instant
-        and gets the same disagreement. A claim never earns verified, live or replayed."""
+        """What the record proves."""
         with self._db() as db:
-            if live and msg.author_kind == "webhook":
-                row = directory.webhook(db, msg.author_id)
-                if row is not None and row["slot_id"] is not None:
-                    with self._lock:
-                        q = self.by_slot.get(row["slot_id"])
-                        if q is not None:
-                            b = self.bindings[q]
-                            # compare fully qualified forms: the wire username IS the
-                            # qualified name (`planner@proj-a`, global renders bare)
-                            if attribution.from_display(
-                                    msg.author_display).qualified == b.qualified:
-                                return Author(b.name, b.scope, b.qualified, b.tier,
-                                              attribution.VERIFIED)
-            return attribution.from_record(db, msg)
+            return attribution.from_record(db, msg, record=self.gateway)
 
     # ------------------------------------------------------------------ catch-up
     def _replay(self, binding: Binding) -> None:
@@ -3072,7 +2762,7 @@ class Daemon:
 
 
 class DaemonStopping(Exception):
-    """A register that arrived after `stop()` froze the keep mark.
+    """A register that arrived after `stop()` began.
 
     Not a refusal and not an accident: the daemon is going away. `_handle` answers it by
     closing the connection with no reply, which the client reads as `DaemonOffline`, and
@@ -3091,44 +2781,12 @@ class Refusal(Exception):
         self.extra = extra
 
 
-def _is_numbered(requested) -> bool:
-    """Did a register ask for a slot by number? `next-free` and None did not."""
-    return not (requested == "next-free" or requested is None)
-
-
 def _asked(frame: dict) -> str:
     """What a register asked for, for the refused-register journal line."""
     name = frame.get("name") or "auto"
     scope = GLOBAL if frame.get("global") else (frame.get("scope") or GLOBAL)
-    return (f"name={name} scope={scope} slot={frame.get('slot', 'next-free')} "
+    return (f"name={name} scope={scope} "
             f"adapter={frame.get('adapter') or 'claude-shim'}")
-
-
-def _parse_keep_entry(entry):
-    """One keep-mark entry as (kind, slot, qualified, expires), or why it is dropped.
-
-    `expires` is None for a `live` entry. For a `keep` entry it must be a finite number:
-    Python's JSON reader takes `NaN` and `Infinity`, and either would make a keep that
-    never ends.
-    """
-    if not isinstance(entry, dict):
-        return "not an object"
-    kind, slot, q = entry.get("kind"), entry.get("slot"), entry.get("qualified")
-    if kind not in ("live", "keep"):
-        return "unknown kind"
-    if not isinstance(slot, int) or isinstance(slot, bool):
-        return "slot is not a number"
-    if not isinstance(q, str) or not q:
-        return "no name"
-    if is_auto_name(split_tag(q)[0]):
-        return "an agent-N name is never kept"
-    if kind == "live":
-        return kind, slot, q, None
-    expires = entry.get("expires")
-    if (not isinstance(expires, (int, float)) or isinstance(expires, bool)
-            or not math.isfinite(expires)):
-        return "expiry is not a finite number"
-    return kind, slot, q, float(expires)
 
 
 def _as_id(message_id: str) -> int:
@@ -3183,7 +2841,7 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
 
     from .gateway import BACKENDS, LOCAL, MOCK, GatewayError, backend_choice, open_gateway
 
-    from . import provision, tokens
+    from . import migration, provision, tokens
 
     ap = argparse.ArgumentParser(prog="moxi-comms-daemon")
     ap.add_argument("--gateway", choices=BACKENDS,
@@ -3234,13 +2892,15 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
     for sig in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, lambda *_: stopping.set())
     # A daemon on the local backend provisions an empty directory itself, so an install
-    # that names nothing ends with a working daemon; a directory that holds slots is
-    # left alone (`provision.first_start`). The mock keeps its own record. Built HERE,
+    # that names nothing ends with a working daemon; an existing directory is left alone
+    # (`provision.first_start`). The mock keeps its own record. Built HERE,
     # in `main`: a Daemon constructed by a test, a smoke script or an embedding caller
     # provisions nothing.
-    first_start = (provision.first_start(tokens.TokenStore(None, env=os.environ))
-                   if (args.gateway or resolved) == LOCAL else None)
-    daemon = Daemon(gateway, first_start=first_start, settings=settings)
+    store = (tokens.TokenStore(None, env=os.environ)
+             if (args.gateway or resolved) == LOCAL else None)
+    first_start = provision.first_start(store) if store is not None else None
+    migrate = migration.startup(store) if store is not None else None
+    daemon = Daemon(gateway, first_start=first_start, migrate=migrate, settings=settings)
     try:
         daemon.start()
     except RuntimeError as e:

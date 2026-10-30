@@ -23,7 +23,9 @@ def test_the_schema_parses_and_its_overrides_are_spelled_with_the_prefix():
 
 def test_the_retired_keys_are_declared():
     retired = {k.name for k in config.schema().keys.values() if k.retired}
-    assert retired == {"claude.channel", "policy.never_held", "policy.next_turn_refused"}
+    assert retired == {"claude.channel", "policy.never_held", "policy.next_turn_refused",
+                       "provision.slots"}
+    assert not retired & {k.name for k in config.schema().live()}
 
 
 def test_cache_required_is_declared_off_by_default_and_read_at_start():
@@ -42,7 +44,7 @@ def test_the_defaults_with_no_file():
     assert (cfg.secrets.store, cfg.secrets.roles) == ("", ())
     assert cfg.policy.cache_callers == ("operator",)
     assert cfg.policy.labels == {}
-    assert (cfg.provision.slots, cfg.provision.operator) == (6, "operator")
+    assert cfg.provision.operator == "operator"
     assert (cfg.replay.messages, cfg.replay.seconds) == \
         (constants.REPLAY_N, constants.REPLAY_T)
     assert cfg.block is False
@@ -76,8 +78,7 @@ cache_callers = ["operator", "herald"]
 labels = { "console@acme" = "the build console's send-only identity" }
 
 [provision]
-slots = 2
-operator = "alex"
+operator = "alice"
 
 [replay]
 messages = 10
@@ -103,7 +104,7 @@ cwd = "/src/x"
     assert cfg.secrets.roles == ("calendar", "pager")
     assert cfg.policy.cache_callers == ("operator", "herald")
     assert cfg.policy.labels == {"console@acme": "the build console's send-only identity"}
-    assert (cfg.provision.slots, cfg.provision.operator) == (2, "alex")
+    assert cfg.provision.operator == "alice"
     assert (cfg.replay.messages, cfg.replay.seconds) == (10, 7200)
     assert cfg.codex["defaults"] == {"sandbox": "workspace-write"}
     assert cfg.codex["agents"]["planner@proj-a"] == {"slot": 3, "cwd": "/src/proj-a"}
@@ -171,6 +172,14 @@ def test_a_retired_key_says_what_to_do():
     write_config(None, '[claude]\nchannel = "plugin"\n')
     with pytest.raises(config.ConfigError, match="turns' plugin delivers"):
         config.load()
+
+
+def test_the_retired_provision_slots_key_says_to_remove_it():
+    write_config(None, "[provision]\nslots = 2\n")
+    with pytest.raises(config.ConfigError) as caught:
+        config.load()
+    assert caught.value.key == "provision.slots"
+    assert caught.value.fix == "remove it: comms has no slots"
 
 
 def test_a_token_shaped_key_is_refused_anywhere_in_the_file():
@@ -243,11 +252,11 @@ def test_a_role_the_box_lists_keys_under_itself_and_an_unlisted_one_is_unknown()
 def test_the_chain_reads_the_configured_store(tmp_path):
     store = tmp_path / "store"
     write_config(None, f'[secrets]\nchain = ["store"]\nstore = "{store}"\n')
-    owner = tokens.owner_for_slot(1)
-    tokens.TokenStore(store).write_secret(owner, "comms/slot-1/names", "tok")
+    owner = tokens.owner_for_role(tokens.ROLE_OPERATOR)
+    tokens.TokenStore(store).write_secret(owner, tokens.OPERATOR_SECRET_ID, "tok")
     chain = secrets.from_config()
     assert chain.names == ("store",)
-    assert chain.get("comms/slot-1/names", owner=owner)["value"] == "tok"
+    assert chain.get(tokens.OPERATOR_SECRET_ID, owner=owner)["value"] == "tok"
 
 
 def test_the_running_reader_refuses_a_bad_start_and_keeps_the_last_good_at_use():

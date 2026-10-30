@@ -28,7 +28,7 @@ import pytest
 from conftest import (record_rows, send_ready, send_turn, wait_for_queue, wait_until,
                       write_transcript)
 
-from moxi_comms import cache, cli, constants, cursors, machine_line, sending
+from moxi_comms import cache, cli, constants, cursors, machine_line
 from moxi_comms.client import DaemonClient, DaemonError
 from moxi_comms.daemon import TIER_EPHEMERAL
 from moxi_comms.paths import daemon_socket
@@ -41,8 +41,8 @@ from test_cold_sends import reboot  # noqa: F401
 
 import shim_drive
 
-PLANNER = dict(slot=1, name="planner", scope="proj-a")
-REVIEWER = dict(slot=2, name="reviewer", scope="proj-a")
+PLANNER = dict(name="planner", scope="proj-a")
+REVIEWER = dict(name="reviewer", scope="proj-a")
 REVIEWER_Q = "reviewer@proj-a"
 MAIN_Q = "main@proj-a"
 HELPER_Q = "helper@proj-a"
@@ -90,7 +90,7 @@ def sent_ids(out):
 
 
 def send(rig, to, text="hello", *flags, sender=PLANNER, env=None):
-    return rig.cli(["send", "--posture", "none", to, text, *flags], **sender, env=env)
+    return rig.send(to, text, *flags, sender=sender, env=env)
 
 
 def cold_shim(rig, sid=SESS_A, age=2 * HOUR, **kw):
@@ -294,7 +294,7 @@ def test_an_unreadable_shim_read_refuses_the_post(rig):
 def test_a_warm_and_a_cold_recipient_the_warm_one_gets_it_now(rig):
     """Per recipient: one post; the warm one has it now, the cold one waits."""
     cold = cold_shim(rig)
-    warm = rig.shim(slot=4, name="main", scope="proj-a")          # a warm transcript
+    warm = rig.shim(name="main", scope="proj-a")          # a warm transcript
     code, out = send(rig, "reviewer@proj-a,main@proj-a")
     assert code == 0, out
     (mid,) = sent_ids(out)
@@ -309,7 +309,7 @@ def test_a_warm_and_a_cold_recipient_the_warm_one_gets_it_now(rig):
 
 def test_reply_to_a_cold_asker_is_held_and_pays_in_the_record(rig):
     cold_shim(rig)
-    ask = rig.post_from_slot(6, ["planner@proj-a"], "q?", display=REVIEWER_Q)
+    ask = rig.post_as(REVIEWER_Q, ["planner@proj-a"], "q?")
     code, out = rig.cli(["reply", ask.id, "a."], **PLANNER)
     assert code == 0, out
     lines = out.splitlines()
@@ -338,13 +338,13 @@ def test_the_verb_reads_cold_and_the_cache_warms_before_routing(rig, monkeypatch
     """A known read at the daemon decides alone. The sender was told held, its
     cold-at is past, and the gate, reading warm, delivers live."""
     s = cold_shim(rig)
-    real = sending.post
+    real = DaemonClient.post
 
     def warmed(*a, **kw):
         write_transcript(SESS_A, 5)               # its own turn lands in between
         return real(*a, **kw)
 
-    monkeypatch.setattr(sending, "post", warmed)
+    monkeypatch.setattr(DaemonClient, "post", warmed)
     code, out = send(rig, REVIEWER_Q, "just in time")
     assert code == 0 and out.splitlines()[-1] == LAST_CHOSEN
     (mid,) = sent_ids(out)
@@ -368,7 +368,7 @@ def test_a_shim_that_reports_no_session_id_refuses_the_post(rig):
 
 def agent_n(rig, sid=SESS_C, age=2 * HOUR, **kw):
     write_transcript(sid, age)
-    s = rig.shim(slot=5, session_id=sid, **kw)
+    s = rig.shim(session_id=sid, **kw)
     assert rig.daemon.bindings[s.identity].tier == TIER_EPHEMERAL
     return s
 
@@ -424,7 +424,7 @@ def test_boot_drops_an_agent_ns_rows_and_the_same_number_gets_nothing(rig, reboo
     assert held_of(rig, q) == set()
     assert record_rows(rig.gateway, q) == set()
     assert held_of(rig) == {kept}, "a chosen name's rows are untouched"
-    later = rig.shim(slot=5, session_id=SESS_B)          # unrelated, numbered the same
+    later = rig.shim(session_id=SESS_B)          # unrelated, numbered the same
     assert later.identity == q
     write_transcript(SESS_B, 2)
     send_turn(later)
@@ -435,7 +435,7 @@ def test_boot_drops_an_agent_ns_rows_and_the_same_number_gets_nothing(rig, reboo
 def test_the_queue_takes_no_row_for_an_unbound_agent_n(rig):
     """A reader that races the unbind puts nothing back for an `agent-N`; a chosen name
     with no binding gets its row, as before."""
-    msg = rig.post_from_slot(6, ["nobody"], "x", display="planner@proj-a")
+    msg = rig.post_as("planner@proj-a", ["nobody"], "x")
     with rig.daemon._lock:
         rig.daemon._queue_add("agent-41", msg.id, None)
         rig.daemon._queue_add(REVIEWER_Q, msg.id, None)
@@ -461,7 +461,7 @@ def test_the_last_line_names_each_tier_present(rig):
 
 def test_a_held_send_to_an_agent_n_says_it_is_session_only(rig):
     """No "with the next other message to it": held mail never rides another message."""
-    s = rig.shim(slot=5)
+    s = rig.shim()
     q = s.identity
     code, out = send(rig, q, "later", "--held")
     assert code == 0, out
@@ -510,7 +510,7 @@ def test_a_cold_shim_beside_a_cold_bare_binding_both_are_held(rig, adapters):
 
 def test_a_cold_shim_beside_a_cold_codex_agent_both_are_held(rig, adapters, tmp_path):
     cold_shim(rig)
-    coder = adapters(slot=5, name="coder", scope="proj-a", adapter="codex",
+    coder = adapters(name="coder", scope="proj-a", adapter="codex",
                      report=cold_harness_report("codex", tmp_path))
     code, out = send(rig, "reviewer@proj-a,coder@proj-a")
     assert code == 0, out
@@ -525,7 +525,7 @@ def test_a_cold_shim_beside_a_cold_codex_agent_both_are_held(rig, adapters, tmp_
 
 
 def test_an_unreadable_codex_agent_refuses_the_post(rig, adapters):
-    adapters(slot=5, name="coder", scope="proj-a", adapter="codex")   # no session id
+    adapters(name="coder", scope="proj-a", adapter="codex")   # no session id
     code, out = send(rig, CODER_Q)
     assert_refused(rig, code, out, f"comms could not read {CODER_Q}'s cache (no thread id "
                                    "reported yet)")
@@ -534,7 +534,7 @@ def test_an_unreadable_codex_agent_refuses_the_post(rig, adapters):
 
 def test_an_unreadable_codex_agent_refuses_a_held_send_too(rig, adapters):
     """`--held` reads the caches like any send; an unknown read refuses it."""
-    adapters(slot=5, name="coder", scope="proj-a", adapter="codex")   # no session id
+    adapters(name="coder", scope="proj-a", adapter="codex")   # no session id
     code, out = send(rig, "reviewer@proj-a,coder@proj-a", "later", "--held", "--new-name")
     assert_refused(rig, code, out, f"comms could not read {CODER_Q}'s cache")
     assert held_of(rig, CODER_Q) == set()
@@ -577,6 +577,7 @@ def test_an_adapter_comms_has_no_clock_for_is_delivered_live(rig, monkeypatch):
     """An adapter with no clock reads `no-cache`; the send writes `-` for it and the mail
     goes live."""
     s = cold_shim(rig)
+    rig.shim(**PLANNER)
     # The daemon's registry with no clock for claude-shim: its read is the no-clock one.
     from moxi_comms import kinds
     monkeypatch.setattr(rig.daemon, "kinds", kinds.Registry(tuple(
@@ -620,7 +621,7 @@ def test_a_held_send_prints_no_note_and_the_outcome_line_is_last(rig, adapters):
 def test_a_refusal_keeps_its_own_line_last(rig, adapters):
     """A refusal (here `--held` to a codex agent with no session
     id) prints no NOTE, so "Nothing was sent." stays last."""
-    adapters(slot=5, name="coder", scope="proj-a", adapter="codex")
+    adapters(name="coder", scope="proj-a", adapter="codex")
     code, out = send(rig, CODER_Q, "later", "--held")
     assert_refused(rig, code, out, f"comms could not read {CODER_Q}'s cache")
     assert "NOTE" not in out

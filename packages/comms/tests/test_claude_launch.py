@@ -319,10 +319,10 @@ def test_a_look_releases_held_mail_on_a_passing_read_and_is_no_turn(rig, monkeyp
     what the daemon holds for the name, as a turn end does, and leaves `turned` alone."""
     from conftest import clock_reads_warm, own_activity, queued
     clock_reads_warm(monkeypatch, "claude-shim")
-    rig.shim(slot=1, name="planner", scope="proj-a")
-    reviewer = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
+    reviewer = rig.shim(name="reviewer", scope="proj-a")
     code, out = rig.cli(["send", "--posture", "none", "--held", "reviewer@proj-a", "later"],
-                        slot=1, name="planner", scope="proj-a")
+                         name="planner", scope="proj-a")
     assert code == 0, out
     assert wait_until(lambda: queued(rig.daemon, "reviewer@proj-a"))
     assert reviewer.queue == [], "a [held] message waits for a release point"

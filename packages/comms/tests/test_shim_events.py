@@ -14,6 +14,7 @@ the frame arrived, and pushes `deliver` frames as the daemon's release would.
 from __future__ import annotations
 
 import itertools
+import os
 import socket
 import threading
 import time
@@ -79,7 +80,7 @@ class FakeDaemon:
                 with self._lock:
                     self.registers.append(frame)
                 try:
-                    conn.send({"id": frame["id"], "ok": True, "slot": 2,
+                    conn.send({"id": frame["id"], "ok": True,
                                "identity": {"qualified": IDENT, "name": NAME,
                                             "scope": SCOPE, "tier": "chosen"}})
                 except OSError:
@@ -192,6 +193,28 @@ def test_a_ready_before_the_bind_is_owed_and_sent_once_after_the_register(
     s.connect()
     assert wait_until(lambda: len(daemon.registers) == 2)
     assert len(daemon.activity("ready")) == 1, "owed once, not at every register"
+
+
+def test_a_failed_claim_file_write_leaves_the_owed_ready_for_the_next_bind(daemon, make_shim, monkeypatch):
+    """The owed `ready` is taken only once the claim file is written. A bind whose claim
+    write raises keeps it, so the next bind sends it."""
+    s = make_shim(start=False)
+    shim_drive.ready(s, "startup", SESSION)
+    real = s.claims.bound
+
+    def failing(resp):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(s.claims, "bound", failing)
+    with pytest.raises(OSError):
+        s._connect_once()
+    assert s.owed_ready == {"source": "startup"}, "still owed"
+    assert daemon.activity("ready") == []
+    monkeypatch.setattr(s.claims, "bound", real)
+    assert s._connect_once()
+    (ready,) = wait_until(lambda: daemon.activity("ready"))
+    assert ready["source"] == "startup"
+    assert s.owed_ready is None
 
 
 def test_a_ready_during_an_outage_is_owed_to_the_next_register(daemon, make_shim):
@@ -474,14 +497,14 @@ def test_a_name_refusal_at_the_initial_bind_waits_and_any_other_is_still_an_exit
     """At the seam tolerate passes through, `start()` itself. An unreachable daemon is swallowed. A daemon that named a holder of THIS
     name leaves the launch waiting for it, holding nothing it can send as; any other
     refusal still raises, and nothing retries it."""
-    rig.shim(slot=1, name="reviewer", scope="proj-a")
-    loser = rig.shim(start=False, slot=2, name="reviewer", scope="proj-a",
+    rig.shim(name="reviewer", scope="proj-a")
+    loser = rig.shim(start=False,  name="reviewer", scope="proj-a",
                      autoreconnect=True, backoff=itertools.repeat(0.02))
     loser.start(tolerate_offline=True)
     assert loser.identity is None and loser.claims.state == "waiting"
     assert loser.statuses == [claude_shim.REFUSED_WAITING]
     assert loser._supervisor is not None, "it polls for the name to free"
-    bad = rig.shim(start=False, slot=3, name="agent-9", scope="proj-a",
+    bad = rig.shim(start=False,  name="agent-9", scope="proj-a",
                    autoreconnect=True, backoff=itertools.repeat(0.02))
     with pytest.raises(DaemonError, match="reserved"):
         bad.start(tolerate_offline=True)
@@ -493,7 +516,7 @@ def test_tolerate_without_autoreconnect_is_refused_at_start(rig):
     """Tolerate and the supervisor are ONE feature. Without the guard a mis-wired shim
     would neither bind, nor retry, nor exit -- strictly worse than the exit it replaces,
     and silent. The daemon is UP here: the refusal is about the wiring, not the daemon."""
-    shim = rig.shim(start=False, slot=2, name="reviewer", scope="proj-a",
+    shim = rig.shim(start=False,  name="reviewer", scope="proj-a",
                     autoreconnect=False)
     with pytest.raises(ValueError, match="tolerate_offline requires autoreconnect"):
         shim.start(tolerate_offline=True)
@@ -509,7 +532,7 @@ def test_the_inject_file_seam_still_exits_offline(rig, tmp_path, capsys):
     rig.daemon.stop()
     args = claude_shim.build_parser().parse_args(
         ["--inject-file", str(tmp_path / "digests.jsonl"), "--name", "reviewer"])
-    common = dict(slot=2, name="reviewer", scope="proj-a", global_=False,
+    common = dict(name="reviewer", scope="proj-a", global_=False,
                   project="proj-a", autoreconnect=True, directors=())
     assert claude_shim._serve_inject_file(args, common) == claude_shim.EXIT_OFFLINE
     err = capsys.readouterr().err
@@ -518,7 +541,7 @@ def test_the_inject_file_seam_still_exits_offline(rig, tmp_path, capsys):
 
 def test_stop_during_a_backoff_wait_ends_the_supervisor_and_binds_nothing(rig, restart):
     rig.daemon.stop()
-    shim = rig.shim(start=False, slot=2, name="reviewer", scope="proj-a",
+    shim = rig.shim(start=False,  name="reviewer", scope="proj-a",
                     autoreconnect=True, backoff=itertools.repeat(30.0))
     shim.start(tolerate_offline=True)
     assert wait_until(lambda: shim._supervisor.is_alive())
@@ -533,7 +556,7 @@ def test_stop_during_a_backoff_wait_ends_the_supervisor_and_binds_nothing(rig, r
     # register that lands after the stop is closed rather than left holding a name that
     # nothing will release until the process exits.
     restart()
-    late = rig.shim(start=False, slot=3, name="planner", scope="proj-a")
+    late = rig.shim(start=False,  name="planner", scope="proj-a")
     late._stop.set()
     late.connect()
     assert late._client is None and late.identity is None and late.offline is True
@@ -551,7 +574,7 @@ def test_a_stop_that_lands_mid_register_never_says_comms_online(rig, monkeypatch
     """
     seeds = gated(monkeypatch)
     rig.daemon.stop()
-    shim = rig.shim(start=False, slot=2, name="reviewer", scope="proj-a",
+    shim = rig.shim(start=False,  name="reviewer", scope="proj-a",
                     autoreconnect=True, backoff=None)
     shim.start(tolerate_offline=True)
     assert wait_until(lambda: seeds and seeds[0].waits >= 1), "parked, unbound"
@@ -597,7 +620,7 @@ def test_a_connection_that_dies_during_register_is_not_a_binding(rig, monkeypatc
             return resp
 
     monkeypatch.setattr(claude_shim, "DaemonClient", DropsAfterRegister)
-    shim = rig.shim(start=False, slot=2, name="reviewer", scope="proj-a",
+    shim = rig.shim(start=False,  name="reviewer", scope="proj-a",
                     autoreconnect=True, backoff=itertools.repeat(0.02))
     inner = shim._on_close
     shim._on_close = lambda: (inner(), closed.set())
@@ -626,7 +649,7 @@ def test_the_inject_file_seam_reports_a_timeout_as_offline_not_refused(
                         lambda *a, **kw: real(*a, **{**kw, "timeout": 0.05}))
     args = claude_shim.build_parser().parse_args(
         ["--inject-file", str(tmp_path / "digests.jsonl"), "--name", "reviewer"])
-    common = dict(slot=2, name="reviewer", scope="proj-a", global_=False,
+    common = dict(name="reviewer", scope="proj-a", global_=False,
                   project="proj-a", autoreconnect=True, directors=())
     assert claude_shim._serve_inject_file(args, common) == claude_shim.EXIT_OFFLINE
     err = capsys.readouterr().err
@@ -640,14 +663,117 @@ def test_a_round_trip_that_never_landed_leaves_no_replay_flag_armed(rig):
     session -- inert on the claude path, and a trap for a test author, since the
     module's own comment calls it test visibility."""
     rig.daemon.stop()
-    plain = rig.shim(start=False, slot=3, name="planner", scope="proj-a")
+    plain = rig.shim(start=False,  name="planner", scope="proj-a")
     with pytest.raises(DaemonOffline):
         plain.connect()
     assert plain.replaying is False, "nothing landed, so nothing is replaying"
 
-    shim = rig.shim(start=False, slot=2, name="reviewer", scope="proj-a",
+    shim = rig.shim(start=False,  name="reviewer", scope="proj-a",
                     autoreconnect=True, backoff=itertools.repeat(30.0))
     shim.start(tolerate_offline=True)
     assert wait_until(lambda: shim.replaying is False)
     assert shim.offline is True and shim.identity is None
 
+
+def test_after_restart_the_first_session_to_register_keeps_the_name(
+        rig, monkeypatch, restart):
+    seeds = gated(monkeypatch)
+    earlier = rig.shim(name="reviewer", scope="proj-a", autoreconnect=True,
+                       backoff=None)
+    rig.daemon.stop()
+    assert wait_until(lambda: seeds and seeds[0].waits >= 1)
+
+    restart()
+    successor = rig.shim(name="reviewer", scope="proj-a")
+    assert successor.identity == IDENT
+    seeds[0].step()
+
+    assert wait_until(lambda: earlier.claims.state == "standby")
+    assert earlier.claims.lost == IDENT and earlier.claims.claim is None
+    assert wait_until(lambda: not earlier._supervisor.is_alive())
+    assert earlier.ended_because.startswith("name held by another session")
+
+
+def test_the_supervisor_survives_an_unexpected_reconnect_exception(
+        rig, monkeypatch, restart):
+    seeds = gated(monkeypatch)
+    shim = rig.shim(name="reviewer", scope="proj-a", autoreconnect=True,
+                    backoff=None)
+    rig.daemon.stop()
+    assert wait_until(lambda: seeds and seeds[0].waits >= 1)
+    restart()
+    real = shim._connect_once
+    calls = []
+
+    def once():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("boom")
+        return real()
+
+    monkeypatch.setattr(shim, "_connect_once", once)
+    seeds[0].step()
+    expected = claude_shim.SUPERVISOR_ERROR.format(error="RuntimeError: boom")
+    assert wait_until(lambda: expected in shim.statuses)
+    assert shim._supervisor.is_alive()
+    assert wait_until(lambda: seeds[0].waits >= 2)
+    seeds[0].step()
+    assert wait_until(lambda: shim.identity == IDENT and not shim.offline)
+
+
+def test_a_finite_reconnect_backoff_falls_back_to_the_default(rig, restart):
+    shim = rig.shim(name="reviewer", scope="proj-a", autoreconnect=True,
+                    backoff=iter([0.01]))
+    rig.daemon.stop()
+    restart()
+    assert wait_until(lambda: not shim.offline, timeout=5.0)
+    assert shim._supervisor.is_alive()
+
+
+def test_the_supervisor_records_running_absent_and_stopped(rig):
+    plain = rig.shim(name="reviewer", scope="proj-a")
+    assert plain._supervisor is None and plain.ended_because is None
+    supervised = rig.shim(name="curator", scope="proj-a", autoreconnect=True,
+                          backoff=itertools.repeat(0.02))
+    assert supervised._supervisor.is_alive() and supervised.ended_because is None
+    supervised.stop()
+    assert wait_until(lambda: not supervised._supervisor.is_alive())
+    assert supervised.ended_because == "stopped"
+
+
+def test_a_transient_failure_on_the_first_bind_is_still_an_exit(
+        rig, monkeypatch):
+    monkeypatch.setattr(rig.daemon, "_high_water_mark",
+                        lambda: ("0", RuntimeError("429 Too Many Requests")))
+    shim = rig.shim(start=False, name="reviewer", scope="proj-a",
+                    autoreconnect=True, backoff=itertools.repeat(0.02))
+    with pytest.raises(DaemonError, match="429 Too Many Requests"):
+        shim.start(tolerate_offline=True)
+    assert shim.identity is None and shim._supervisor is None
+
+
+def test_a_send_waits_for_the_new_token_after_a_restart(rig, monkeypatch, restart):
+    from moxi_comms.claimhold import CLAIM_SOCKET_ENV
+    from moxi_comms.membership import TREE, root_of
+
+    seeds = gated(monkeypatch)
+    planner = rig.shim(name="planner", scope="proj-a", autoreconnect=True,
+                       backoff=None, listen_claims=True,
+                       claim_roots=[root_of(os.getpid(), TREE)])
+    path = planner.claims.socket_path
+    rig.daemon.stop()
+    assert wait_until(lambda: seeds and seeds[0].waits >= 1)
+    restart()
+
+    code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "before"],
+        env={CLAIM_SOCKET_ENV: str(path)})
+    assert code == 4 and "holds no posting credential" in out
+    assert rig.gateway.history(rig.names_channel) == []
+
+    seeds[0].step()
+    assert wait_until(lambda: not planner.offline)
+    code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "after"],
+        env={CLAIM_SOCKET_ENV: str(path)})
+    assert code == 0, out
+    posted = rig.gateway.history(rig.names_channel)[-1]
+    assert (posted.author_kind, posted.author_id) == ("identity", "planner@proj-a")

@@ -20,15 +20,16 @@ from dataclasses import dataclass, field
 from . import (attribution, cache, claimfile, claimhold, config, constants, directory,
                machine_line, policy)
 from .membership import sessions_of
-from .protocol import CLI_PROTOCOL, ProtocolError
-from .client import DaemonClient, DaemonError, DaemonOffline, DaemonTimeout
+from .protocol import CLI_PROTOCOL, PROTOCOL_VERSION, ProtocolError
+from .client import (DaemonClient, DaemonError, DaemonNoAnswer, DaemonOffline,
+                     DaemonTimeout)
 from .gateway import LOCAL, GatewayError
 from .paths import OutsideRuntime, directory_db
 from .provision import NAMES
 from .scoping import (GLOBAL, identity_of, project_key, qualify, tag_matches)
 from .sender import (MalformedStamp, OperatorRefused, SendFailed, SenderIdentity,
-                     credential_for, operator_credential, operator_from_env, post,
-                     post_as_operator, sender_from_env)
+                     operator_credential, operator_from_env, post_as_operator,
+                     sender_from_env)
 
 log = logging.getLogger("comms.send")
 
@@ -389,7 +390,7 @@ def _reply(args, ctx: Context) -> int:
                 f"no message {args.message_id} in the record — nothing to reply to.")
         return EXIT_REFUSED
     with ctx.db() as db:
-        author = attribution.from_record(db, original)
+        author = attribution.from_record(db, original, record=ctx.gateway)
     if author.tier == "unknown":
         _refuse(ctx, "unknown-author",
                 f"message {args.message_id} has an author comms cannot identify — "
@@ -466,8 +467,8 @@ def _inside_a_session() -> bool:
 
 
 def _claim_sender(ctx: Context, path):
-    """The identity this process sends as, read from its session's claim: `(sender,
-    state)`, or an exit code once a refusal is said."""
+    """The identity and answer read from this session's claim, or an exit code once a
+    refusal that leaves no identity is said."""
     try:
         answer = (claimhold.call(path, "claim") if ctx.deadline is None else
                   claimhold.call(path, "claim", timeout=ctx.deadline))
@@ -478,16 +479,50 @@ def _claim_sender(ctx: Context, path):
                     "this session's comms adapter is gone and it holds no comms "
                     "identity — nothing was sent.")
             return EXIT_REFUSED
-    refusal = (answer.get("error") if not answer.get("ok") else answer.get("line"))
-    if refusal:
+    claim = answer.get("claim") or {}
+    refusal = answer.get("error") if not answer.get("ok") else answer.get("line")
+    if refusal and not claim.get("qualified"):
         _refuse(ctx, "claim-refused", f"{refusal} — nothing was sent.")
         return EXIT_REFUSED
-    claim = answer.get("claim") or {}
-    slot = claim.get("slot")
     sender = SenderIdentity(qualified=claim["qualified"], scope=claim["scope"],
-                            slot_id=slot if isinstance(slot, int) else None,
                             name=claim["name"])
-    return sender, answer.get("state")
+    return sender, answer
+
+
+def _claim_token(ctx: Context, sender: SenderIdentity, answer: dict):
+    """Apply every send-time claim check. Return its token or an exit code."""
+    if answer.get("dead_adapter"):
+        _refuse(ctx, "offline",
+                f"{sender.qualified} is offline: this session's comms adapter is gone, "
+                "so it holds no posting credential — nothing was sent. Relaunch the "
+                "session.")
+        return EXIT_OFFLINE
+    if answer.get("protocol") != PROTOCOL_VERSION:
+        _refuse(ctx, "claim-protocol",
+                f"{sender.qualified}: this session's comms adapter is from an older "
+                "comms release and cannot bind to this daemon — nothing was sent. "
+                "Relaunch the session.")
+        return EXIT_REFUSED
+    state = answer.get("state")
+    if state == claimfile.OFFLINE:
+        _refuse(ctx, "offline",
+                f"{sender.qualified} is offline: this session's comms adapter is not "
+                "connected to the daemon, so it holds no posting credential — nothing "
+                "was sent. The adapter reconnects on its own; send again once `moxi "
+                "comms whoami` shows bound.")
+        return EXIT_OFFLINE
+    if state != claimfile.BOUND:
+        refusal = answer.get("line") or f"{sender.qualified} is held by another session"
+        _refuse(ctx, "claim-refused", f"{refusal} — nothing was sent.")
+        return EXIT_REFUSED
+    token = answer.get("token")
+    if not isinstance(token, str) or not token:
+        _refuse(ctx, "claim-credential",
+                f"{sender.qualified} is bound, but this session's adapter handed comms "
+                "no posting credential — nothing was sent. Relaunch the session; if a "
+                "module holds this name, update it.")
+        return EXIT_REFUSED
+    return token
 
 
 def _send(args, ctx: Context, *, tags, reply_to, channel_room, referent=None,
@@ -509,10 +544,11 @@ def _send(args, ctx: Context, *, tags, reply_to, channel_room, referent=None,
         got = _claim_sender(ctx, claim_path)
         if isinstance(got, int):
             return got
-        sender, state = got
+        sender, claim_answer = got
         return _send_resolved(args, ctx, sender=sender, operator_id=None, tags=tags,
                               reply_to=reply_to, channel_room=channel_room,
-                              project=project, referent=referent, claim_state=state,
+                              project=project, referent=referent,
+                              claim_answer=claim_answer, claim_path=claim_path,
                               author=author)
     try:
         operator_id = operator_from_env(ctx.env)
@@ -591,17 +627,16 @@ def _stamped_identity(env, project) -> str | None:
 
 
 def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
-                   channel_room, project, referent=None, claim_state=None,
-                   author=None) -> int:
+                   channel_room, project, referent=None, claim_answer=None,
+                   claim_path=None, author=None) -> int:
     """Everything a send does once it knows WHO is sending: the checks, the machine
     line, the length cap, the post and the nudge.
 
-    Two lanes reach here and they differ in exactly one statement each -- the credential
-    resolved and the door posted through. `operator_id` is None for an agent and the
-    operator's user id for the operator's own terminal. Everything between is shared on
-    purpose: the operator types the same machine line, obeys the same
-    `max_content_length`, prints the same `sent <id>` line and
-    nudges the daemon the same way. A lane with its own copy of that would drift.
+    Two lanes reach here and differ at the posting seam. An agent presents its live
+    claim token to the daemon, whose gateway fanout needs no nudge. The operator posts
+    through its local credential and nudges afterward. Everything around that seam is
+    shared: both lanes type the same machine line, obey the same `max_content_length`,
+    and print the same `sent <id>` line.
 
     Every refusal is made by `_send_checks`, in its one order, before anything is
     posted; this function composes, posts and prints what the checks planned. Two
@@ -623,7 +658,7 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
         ctx.say(line)
     code, plan = _send_checks(args, ctx, sender=sender, operator_id=operator_id, tags=tags,
                               reply_to=reply_to, project=project, referent=referent,
-                              claim_state=claim_state, typed_names=typed_names)
+                              claim_answer=claim_answer, typed_names=typed_names)
     if plan is None:
         return code
     _keep(ctx, plan=plan, operator_lane=operator_id is not None)
@@ -637,20 +672,16 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
                      **plan.marks)
     if bodies is None:
         return EXIT_REFUSED             # over the cap; _bodies said why
-    cred = token = channel_id = None
-    try:
-        with ctx.db() as db:
-            if operator_id is None:
-                cred, _channel = credential_for(ctx.gateway, db, sender, room=channel_room)
-            else:
+    token = channel_id = None
+    if operator_id is not None:
+        try:
+            with ctx.db() as db:
                 # The operator's lane needs a credential like every other lane:
                 # the holder's own token out of the store, read the declared way.
                 token, channel_id = operator_credential(db, room=channel_room, env=ctx.env)
-    except (SendFailed, GatewayError) as e:
-        # a credential that will not resolve is a send that did NOT happen: same exit
-        # code, same loudness. "No credential" must never read as "nothing to say".
-        _refuse(ctx, "credential", str(e))
-        return EXIT_FAILED
+        except (SendFailed, GatewayError) as e:
+            _refuse(ctx, "credential", str(e))
+            return EXIT_FAILED
     if getattr(args, "check", False):
         # `--check` stops here, at the post: every refusal above is send's own, said in
         # send's words with send's exit code, and nothing below has run. No post, no
@@ -658,16 +689,22 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
         _say_would_send(ctx, plan, len(bodies))
         return EXIT_OK
     (body,) = bodies
-    try:
-        msg = (post(ctx.gateway, cred, body, username=sender.qualified)
-               if operator_id is None else
-               post_as_operator(ctx.gateway, operator_id, channel_id, body, token=token))
-    except (SendFailed, GatewayError) as e:
-        _refuse(ctx, "post-failed", str(e))
-        return EXIT_FAILED
-    _keep(ctx, message_id=msg.id)
-    ctx.say(f"sent {msg.id} to {', '.join(plan.resolved)} in {channel_room}")
-    _nudge_daemon(ctx)
+    if operator_id is None:
+        posted = _post_from_claim(ctx, claim_path, sender, claim_answer["token"], body)
+        if isinstance(posted, int):
+            return posted
+        message_id = str(posted)
+    else:
+        try:
+            msg = post_as_operator(ctx.gateway, operator_id, channel_id, body, token=token)
+        except (SendFailed, GatewayError) as e:
+            _refuse(ctx, "post-failed", str(e))
+            return EXIT_FAILED
+        message_id = msg.id
+    _keep(ctx, message_id=message_id)
+    ctx.say(f"sent {message_id} to {', '.join(plan.resolved)} in {channel_room}")
+    if operator_id is not None:
+        _nudge_daemon(ctx)
     held, tiers = plan.held, plan.tiers
     if held:
         # Posted, and queued by the daemon for each cold one's next release point: one
@@ -684,6 +721,55 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
         # each held recipient reads it.
         ctx.say(_held_last_line(held, tiers=tiers, operator=operator_id is not None))
     return EXIT_OK
+
+
+def _post_from_claim(ctx: Context, path, sender: SenderIdentity, token: str,
+                     content: str):
+    """Post with a live claim, retrying once when a re-read finds a new token."""
+    client = None
+    try:
+        client = ctx.daemon()
+        try:
+            answer = client.post(sender.qualified, token, content)
+        except DaemonError as error:
+            if not error.response.get("credential"):
+                raise
+            refreshed = _claim_sender(ctx, path)
+            if isinstance(refreshed, int):
+                return refreshed
+            current_sender, current_answer = refreshed
+            current = _claim_token(ctx, current_sender, current_answer)
+            if isinstance(current, int):
+                return current
+            if current == token:
+                _refuse(ctx, "credential",
+                        "comms refused this session's posting credential — nothing was "
+                        "sent")
+                return EXIT_FAILED
+            try:
+                answer = client.post(current_sender.qualified, current, content)
+            except DaemonError as retry_error:
+                if retry_error.response.get("credential"):
+                    _refuse(ctx, "credential",
+                            "comms refused this session's posting credential — nothing "
+                            "was sent")
+                    return EXIT_FAILED
+                raise
+        return answer["message_id"]
+    except DaemonNoAnswer:
+        _refuse(ctx, "post-no-answer",
+                "the daemon did not answer, so this message may have been sent; check "
+                "`moxi comms history` before sending it again")
+        return EXIT_FAILED
+    except (DaemonOffline, VerbProtocolMismatch) as error:
+        _refuse(ctx, "offline", f"{error} Nothing was sent.")
+        return EXIT_OFFLINE
+    except DaemonError as error:
+        _refuse(ctx, "post-failed", f"{error} Nothing was sent.")
+        return EXIT_FAILED
+    finally:
+        if client is not None:
+            client.close()
 
 
 def _say_would_send(ctx: Context, plan, count: int) -> None:
@@ -760,7 +846,7 @@ class SendPlan:
 
 
 def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, project,
-                 referent=None, claim_state=None, typed_names=True):
+                 referent=None, claim_answer=None, typed_names=True):
     """Every check a send makes before anything is posted, in one order: `(exit code,
     None)` once a refusal is said, or `(None, SendPlan)`.
 
@@ -907,21 +993,10 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
                 t_ask[r["qualified"]] = ctx.clock()
                 if r["bound"]:
                     targets.append(cache.session_target(client, r["qualified"]))
-        if claim_state == claimfile.BOUND:
-            pass             # the claim carries the slot the daemon bound it on
-        elif claim_state == claimfile.OFFLINE:
-            # The adapter holds the claim but is not connected. A binding of the name
-            # the daemon lists belongs to another connection; none, or a lookup that
-            # fails, and the post goes out as the claim on its own slot.
-            try:
-                listed = client.query("agents").get("bindings", [])
-            except (DaemonError, DaemonOffline):
-                listed = []
-            if any(b.get("qualified") == sender.qualified for b in listed):
-                _refuse(ctx, "bound-elsewhere",
-                        f"{sender.qualified} is bound by another session; this one does "
-                        "not hold it — nothing was sent.")
-                return EXIT_REFUSED, None
+        if claim_answer is not None:
+            checked = _claim_token(ctx, sender, claim_answer)
+            if isinstance(checked, int):
+                return checked, None
         # No other agent sender reaches here: with the env path closed, every agent
         # sends as its claim, so the per-send binding lookup a stamped sender needed
         # is gone. The operator spends no bundle.
@@ -1174,7 +1249,7 @@ def _send_posture(typed, kind: str, *, exempt: bool = False) -> str | None:
     (`REF_*`). An exempt sender is never refused: what it passes is written as passed,
     and with nothing passed a reply to a verified `[no reply]` goes out `[no reply]`, a
     reply the closed row would refuse goes out open, and every other reply takes the
-    "nothing passed" column. None is the open posture with nothing in the slot.
+    "nothing passed" column. None is the open posture with no explicit token.
     """
     open_, none, once = (machine_line.POSTURE_OPEN, machine_line.POSTURE_NONE,
                          machine_line.POSTURE_ONCE)
@@ -1220,7 +1295,7 @@ def _reply_checks(args, ctx: Context, *, sender, exempt, typed, cap, no_cap,
     verified = False
     if referent is not None:
         with ctx.db() as db:
-            author = attribution.from_record(db, referent)
+            author = attribution.from_record(db, referent, record=ctx.gateway)
         verified = author.attribution == attribution.VERIFIED
 
     def new_flag() -> str:
@@ -1353,7 +1428,7 @@ def _read_thread(ctx: Context, referent, sender) -> ThreadRead:
             if (rml is None or not rml.open_mark or names_channel is None
                     or root.channel_id != names_channel):
                 return thread
-            root_author = attribution.from_record(db, root)
+            root_author = attribution.from_record(db, root, record=ctx.gateway)
             if root_author.attribution != attribution.VERIFIED:
                 return thread
             after = ctx.gateway.history(names_channel, after=root.id)
@@ -1367,7 +1442,7 @@ def _read_thread(ctx: Context, referent, sender) -> ThreadRead:
                 if mml is None or mml.reply_to not in ids:
                     continue
                 ids.add(m.id)
-                who = attribution.from_record(db, m)
+                who = attribution.from_record(db, m, record=ctx.gateway)
                 if who.attribution == attribution.VERIFIED:
                     members.append((m, mml, who))
         thread.open, thread.root = True, root
@@ -1507,6 +1582,7 @@ def _open_asks(ctx: Context, sender, nominated, resolved) -> tuple[list, list[st
                 try:
                     ask = ctx.gateway.get_message(ask_id)
                     asker = open_for(db, ask, sender, now=now, names_channel=names_channel,
+                                     record=ctx.gateway,
                                      replies=lambda a=ask_id: ctx.gateway.history(
                                          names_channel, after=a))
                 except Exception as e:  # noqa: BLE001 -- every failure here only relaxes
@@ -1525,7 +1601,7 @@ def _open_asks(ctx: Context, sender, nominated, resolved) -> tuple[list, list[st
     return found, notes
 
 
-def open_for(db, ask, sender, *, now: float, names_channel, replies):
+def open_for(db, ask, sender, *, now: float, names_channel, replies, record=None):
     """The asker, when `ask` binds `sender` to a single reply that is still owed; else
     None. Every clause must hold:
 
@@ -1546,7 +1622,7 @@ def open_for(db, ask, sender, *, now: float, names_channel, replies):
     ml = machine_line.parse(ask.content)
     if ml is None or ml.posture != machine_line.POSTURE_ONCE:
         return None                                              # 1
-    asker = attribution.from_record(db, ask)
+    asker = attribution.from_record(db, ask, record=record)
     if asker.attribution != attribution.VERIFIED or asker.qualified == sender.qualified:
         return None                                              # 2
     if not any(_tag_matches(t, sender.qualified) for t in ml.recipients):
@@ -1559,7 +1635,7 @@ def open_for(db, ask, sender, *, now: float, names_channel, replies):
         rml = machine_line.parse(m.content)
         if rml is None or rml.reply_to != ask.id:
             continue
-        if attribution.from_record(db, m).qualified != sender.qualified:
+        if attribution.from_record(db, m, record=record).qualified != sender.qualified:
             continue
         if any(_tag_matches(t, asker.qualified) for t in rml.recipients):
             return None
@@ -1762,7 +1838,7 @@ def _bodies(args, ctx: Context, resolved, reply_to, audience=None, *,
 
     Only `args.text` is read off `args`. `[held]` (`next_turn`), the cold-at, `posture`,
     `[open]`, the cap tokens and the thread mark are keywords the verb decided on its
-    checks; None is the open posture with nothing in the slot, exactly as `format_line`
+    checks; None is the open posture with no explicit token, exactly as `format_line`
     has it.
     """
     line = machine_line.format_line(resolved, reply_to=reply_to, audience=audience,

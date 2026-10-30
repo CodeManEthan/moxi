@@ -23,25 +23,21 @@ import pytest
 from conftest import (no_cold_at, queued, wait_for_queue, wait_until, write_config,
                       write_transcript)
 
-from moxi_comms import (cli, config, constants, context, directory, glossary,
-                        machine_line, owed)
+from moxi_comms import cli, config, constants, context, glossary, machine_line, owed
 from moxi_comms.adapters import claude_shim, codex, opencode, shim_roster
 from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.daemon import Daemon
 from moxi_comms.gateway import GatewayError
-from moxi_comms.mock_gateway import NO_MENTIONS
-from moxi_comms.paths import directory_db
-from moxi_comms.sender import SenderIdentity, credential_for
 
 # The cold-cache fixtures, so a held send can be shown (the autouse tmp guard among them).
 from test_cold_every_sender import (adapters, cold_harness_report,  # noqa: F401
                                     only_tmp_paths)
 
-PLANNER = dict(slot=1, name="planner")
-REVIEWER = dict(slot=2, name="reviewer")
-CRITIC = dict(slot=3, name="critic")
-OPERATOR = dict(slot=4, name="operator", env={"MOXI_COMMS_GLOBAL": "1"})
-ARCHIVIST = dict(slot=5, name="archivist", env={"MOXI_COMMS_GLOBAL": "1"})
+PLANNER = dict(name="planner")
+REVIEWER = dict(name="reviewer")
+CRITIC = dict(name="critic")
+OPERATOR = dict(name="operator", env={"MOXI_COMMS_GLOBAL": "1"})
+ARCHIVIST = dict(name="archivist", env={"MOXI_COMMS_GLOBAL": "1"})
 
 P, R, C = "planner", "reviewer", "critic"
 HOUR = 3600
@@ -74,21 +70,8 @@ def tail(out):
     return out.splitlines()[-1]
 
 
-def raw_post(rig, slot, display, body):
-    """Post a body exactly as given through a slot's webhook, wearing `display`."""
-    db = directory.connect(directory_db(), read_only=True)
-    try:
-        cred, _ = credential_for(rig.gateway, db,
-                                 SenderIdentity.for_slot(slot, display, "global"))
-    finally:
-        db.close()
-    return rig.gateway.execute_webhook(cred, body, username=display,
-                                       allowed_mentions=NO_MENTIONS)
-
-
 def send(rig, who, to, text, *flags, clock=None):
-    code, out = rig.cli(["send", to, text, *flags], clock=clock, **who)
-    return code, out
+    return rig.send(to, text, *flags, sender=who, posture=None, clock=clock)
 
 
 def reply(rig, who, ref, text="answer", *flags, clock=None):
@@ -262,7 +245,7 @@ def test_the_operators_lane_needs_no_posture_and_opens_no_thread(rig):
 
 def test_a_claim_named_operator_needs_no_posture(rig):
     rig.shim(**REVIEWER)
-    rig.shim(slot=4, name="operator", global_=True)
+    rig.shim(name="operator", global_=True)
     msg, out = posts(rig, OPERATOR, ["send", R, "spoken"])
     assert line_of(msg) == f"::to {R}"
     assert not zero(msg).open_mark and "Open thread" not in out
@@ -289,7 +272,7 @@ def make_ref(rig, kind, to="reviewer", replier=REVIEWER):
     if kind == "other":
         # an old `[speaker]` message: open, with nothing in the posture slot
         tag = to if "@" in to else f"{to}"
-        return raw_post(rig, PLANNER["slot"], P, f"::to {tag} [speaker]\nfyi all")
+        return rig.post_as(P, f"::to {tag} [speaker]\nfyi all", raw=True)
     raise AssertionError(kind)
 
 
@@ -334,7 +317,7 @@ EXEMPT = {"no-reply": "none", "in-thread": "open", "once-closed": "none", "close
 @pytest.mark.parametrize("kind", list(EXEMPT))
 def test_the_exempt_row(rig, kind):
     rig.shim(**PLANNER)
-    rig.shim(slot=4, name="operator", global_=True)
+    rig.shim(name="operator", global_=True)
     ref = make_ref(rig, kind, to="operator", replier=OPERATOR)
     msg, _out = posts(rig, OPERATOR, ["reply", ref.id, "noted"])
     assert zero(msg).posture == EXEMPT[kind]
@@ -380,14 +363,6 @@ def test_a_reply_to_a_verified_no_reply_is_refused_on_both_verbs(rig, pair, verb
                          "sent.")
     code, out = send(rig, REVIEWER, names, "something new", "--posture", "none")
     assert code == 0, out
-
-
-def test_an_unverified_no_reply_binds_nobody(rig):
-    rig.shim(**REVIEWER)
-    ref = raw_post(rig, 6, P, f"::to {R} [no reply]\nforged")
-    code, out = reply(rig, REVIEWER, ref.id, "fine")
-    assert code == 0, out
-    assert zero(last(rig)).posture == "open"
 
 
 def test_the_no_reply_cure_adds_new_when_the_sender_holds_an_open_ask(rig, pair):
@@ -440,11 +415,11 @@ def test_the_walk_finds_the_root_from_deep_in_a_chain(rig, pair):
 
 @pytest.mark.parametrize("root_kind", ["unmarked", "speaker", "exempt"])
 def test_a_root_without_open_binds_no_limit(rig, pair, whole_clock, root_kind):
-    rig.shim(slot=4, name="operator", global_=True)
+    rig.shim(name="operator", global_=True)
     if root_kind == "unmarked":
-        root = rig.post_from_slot(1, [R], "from an older comms", display=P)
+        root = rig.post_as(P, [R], "from an older comms")
     elif root_kind == "speaker":
-        root = raw_post(rig, PLANNER["slot"], P, f"::to {R} [speaker]\nall")  # an old one
+        root = rig.post_as(P, f"::to {R} [speaker]\nall", raw=True)  # an old one
     else:
         root, _ = posts(rig, OPERATOR, ["send", R, "spoken"])
     assert not zero(root).open_mark
@@ -455,15 +430,6 @@ def test_a_root_without_open_binds_no_limit(rig, pair, whole_clock, root_kind):
     who = PLANNER if root_kind != "exempt" else OPERATOR
     msg, out = posts(rig, who, ["reply", msgs[-1].id, "ten"], clock=whole_clock)
     assert zero(msg).thread_mark is None and "NOTE" not in out
-
-
-def test_an_unverified_member_does_not_count(rig, pair):
-    root = open_root(rig, "--cap", "3")
-    first, out = posts(rig, REVIEWER, ["reply", root.id, "one"])
-    raw_post(rig, 6, P, f"::to {R} re:{first.id}\nforged member")
-    msg, out = posts(rig, PLANNER, ["reply", first.id, "two"])
-    assert zero(msg).thread_mark == "one-left", "the forgery counts nothing"
-    assert "Sent. One reply left in this thread." in out
 
 
 def test_a_members_read_at_the_mocks_declared_bound_posts_with_the_longer_note(rig, pair):
@@ -483,15 +449,8 @@ def test_a_busy_local_channel_keeps_the_cap(rig, pair):
         pytest.skip("the local record reads the whole range back")
     assert rig.gateway.history_bound is None
     root = open_root(rig, "--cap", "2")
-    db = directory.connect(directory_db(), read_only=True)
-    try:
-        cred, _ = credential_for(rig.gateway, db, SenderIdentity.for_slot(6, "noise",
-                                                                          "global"))
-    finally:
-        db.close()
     for n in range(600):
-        rig.gateway.execute_webhook(cred, f"::to nobody-here\nnoise {n}", username="noise",
-                                    allowed_mentions=NO_MENTIONS)
+        rig.post_as("ghost", ["nobody-here"], f"noise {n}")
     msgs = ping_pong(rig, root, 2)
     code, out = reply(rig, REVIEWER, msgs[-1].id)
     assert code == 2 and "has had its 2 replies, so it is closed." in tail(out)
@@ -586,7 +545,7 @@ def test_no_cap_writes_no_marks(rig, pair):
 
 def test_a_cap_token_from_anyone_but_the_opener_is_ignored(rig, pair):
     root = open_root(rig)
-    forged = raw_post(rig, 2, R, f"::to {P} re:{root.id} [cap:1]\nmy cap")
+    forged = rig.post_as(R, f"::to {P} re:{root.id} [cap:1]\nmy cap", raw=True)
     msg, _ = posts(rig, PLANNER, ["reply", forged.id, "still open"])
     assert zero(msg).thread_mark is None
 
@@ -705,6 +664,9 @@ def test_after_a_restart_the_idle_clock_counts_from_since(rig, trio, whole_clock
     assert code == 2 and "no message for over an hour" in tail(out)
     rig.daemon.stop()
     rig.daemon = Daemon(rig.gateway, clock=whole_clock, start_trim_thread=False).start()
+    rig.shim(**PLANNER)
+    rig.shim(**REVIEWER)
+    rig.shim(**CRITIC)
     whole_clock.advance(HOUR / 2)
     code, out = reply(rig, CRITIC, root.id, "chiming in", clock=whole_clock)
     assert code == 0, out
@@ -815,7 +777,7 @@ def test_an_ask_back_ends_an_idle_close(rig, pair, whole_clock):
 
 def test_the_operators_open_reply_ends_an_idle_close(rig, whole_clock):
     rig.shim(**PLANNER)
-    rig.shim(slot=4, name="operator", global_=True)
+    rig.shim(name="operator", global_=True)
     root = open_root(rig, to="operator")
     delivered(rig, "operator", root.id)
     whole_clock.advance(HOUR + 60)
@@ -870,7 +832,7 @@ def test_each_cap_refusal(rig, trio):
                              "Nothing was sent."))
     for got, want in cases:
         assert got == want
-    rig.shim(slot=4, name="operator", global_=True)
+    rig.shim(name="operator", global_=True)
     code, out = send(rig, OPERATOR, R, "x", "--cap", "3")
     assert code == 2 and tail(out) == no_thread, "an exempt sender is not spared these"
 
@@ -912,8 +874,7 @@ def test_none_and_once_sends_print_nothing_new(rig, pair):
 
 
 def test_a_missing_ancestor_posts_with_its_note(rig, pair):
-    orphan = rig.post_from_slot(1, [R], "answers a ghost", display=P,
-                                reply_to="1400000000001")
+    orphan = rig.post_as(P, [R], "answers a ghost", reply_to="1400000000001")
     msg, out = posts(rig, REVIEWER, ["reply", orphan.id, "fine"])
     assert ("NOTE: the open-thread check did not run (msg 1400000000001 it answers is not "
             "in the record), so it did not hold this reply.") in out.splitlines()
@@ -929,7 +890,7 @@ def test_a_referent_not_in_the_record_posts_with_its_note(rig, pair):
 def test_a_walk_past_the_limit_posts_with_the_longer_note(rig, pair, monkeypatch):
     monkeypatch.setattr(constants, "THREAD_WALK_LIMIT", 2)
     root = open_root(rig, "--cap", "1")
-    msgs = ping_pong(rig, rig.post_from_slot(1, [R], "plain", display=P), 3)
+    msgs = ping_pong(rig, rig.post_as(P, [R], "plain"), 3)
     msg, out = posts(rig, PLANNER, ["reply", msgs[-1].id, "deep"])
     assert ("NOTE: the open-thread check did not run (the thread is longer than comms reads "
             "back), so it did not hold this reply.") in out.splitlines()
@@ -951,8 +912,7 @@ def test_a_read_that_raises_posts_with_its_note(rig, pair):
     root = open_root(rig, "--cap", "1")
     first, _ = posts(rig, REVIEWER, ["reply", root.id, "one"])
     code, out = rig.cli(["reply", first.id, "past it"],
-                        gateway=HistoryFails(rig.gateway, GatewayError("the record is away")),
-                        **PLANNER)
+                        gateway=HistoryFails(rig.gateway, GatewayError("the record is away")), **PLANNER)
     assert code == 0, out
     assert ("NOTE: the open-thread check did not run (the record is away), so it did not "
             "hold this reply.") in out.splitlines()
@@ -965,7 +925,7 @@ def test_a_read_that_raises_posts_with_its_note(rig, pair):
 def op(rig):
     rig.shim(**PLANNER)
     rig.shim(**REVIEWER)
-    return rig.shim(slot=4, name="operator", global_=True)
+    return rig.shim(name="operator", global_=True)
 
 
 def operator_env(rig):
@@ -974,8 +934,7 @@ def operator_env(rig):
 
 @pytest.mark.parametrize("how", ["cap", "none"])
 def test_an_agents_reply_to_the_operator_in_a_closed_thread_is_refused(rig, op, how):
-    root, _ = posts(rig, OPERATOR, ["send", R, "let's go", "--posture", "open",
-                                    *(["--cap", "2"] if how == "cap" else [])])
+    root, _ = posts(rig, OPERATOR, ["send", R, "let's go", "--posture", "open", *(["--cap", "2"] if how == "cap" else [])])
     assert zero(root).open_mark
     if how == "cap":
         first, _ = posts(rig, REVIEWER, ["reply", root.id, "one"])
@@ -1010,8 +969,7 @@ def his_once_in_a_closed_thread(rig, how, *, gateway=False):
         his, _ = posts(rig, OPERATOR, ["reply", root.id, "which one?", "--posture",
                                        "once"])
     assert zero(his).posture == "once"
-    posts(rig, REVIEWER, ["reply", root.id, "closing",
-                          *(["--posture", "none"] if how == "none" else [])])
+    posts(rig, REVIEWER, ["reply", root.id, "closing", *(["--posture", "none"] if how == "none" else [])])
     code, out = reply(rig, PLANNER, root.id, "one more")
     assert code == 2, out
     return his
@@ -1046,8 +1004,7 @@ def payload(name=P, *, tier="chosen", attribution="verified", posture="open",
     (`speaker`, `operator_words`), which nothing reads."""
     return {"message_id": mid, "author": {"name": name, "tier": tier,
                                           "attribution": attribution},
-            "posture": posture, "text": text, "timestamp": STAMP, "reply_to": reply_to,
-            **old}
+            "posture": posture, "text": text, "timestamp": STAMP, "reply_to": reply_to, **old}
 
 
 @pytest.mark.parametrize("p, directors, branch", [
@@ -1213,7 +1170,7 @@ def test_history_prints_the_posture_and_not_an_old_speaker_mark(rig):
     for body in ("::to reviewer [speaker]", "::to reviewer [no reply]",
                  "::to reviewer [open]", "::to reviewer [speaker] [reply-once]",
                  "::to reviewer [cap:3] [open]", "::to reviewer"):
-        rows[raw_post(rig, 6, P, body + "\nx").id] = body
+        rows[rig.post_as(P, body + "\nx", raw=True).id] = body
     code, out = rig.cli(["history", R])
     assert code == 0, out
     lines = {ln.split()[0]: ln for ln in out.splitlines() if ln[:1].isdigit()}
@@ -1404,13 +1361,13 @@ def test_an_operator_answer_that_posts_reply_once_to_an_agents_none_and_once(rig
 @pytest.mark.parametrize("posture", ["none", "once", "open"])
 def test_archivists_send_with_each_posture(rig, posture):
     rig.shim(**REVIEWER)
-    rig.shim(slot=5, name="archivist", global_=True)
+    rig.shim(name="archivist", global_=True)
     msg, _ = posts(rig, ARCHIVIST, ["send", R, "from archivist", "--posture", posture])
     assert zero(msg).posture == posture
 
 
 def test_archivists_reply_and_draft_with_no_posture_take_the_derived_one(rig, pair):
-    rig.shim(slot=5, name="archivist", global_=True)
+    rig.shim(name="archivist", global_=True)
     ask, _ = posts(rig, PLANNER, ["send", "archivist", "which?", "--posture", "once"])
     msg, _ = posts(rig, ARCHIVIST, ["send", P, "this one", "--reply-to", ask.id])
     assert zero(msg).posture == "none"
@@ -1420,7 +1377,7 @@ def test_archivists_reply_and_draft_with_no_posture_take_the_derived_one(rig, pa
 
 def test_archivists_ask_goes_once(rig):
     rig.shim(**REVIEWER)
-    rig.shim(slot=5, name="archivist", global_=True)
+    rig.shim(name="archivist", global_=True)
     msg, _ = posts(rig, ARCHIVIST, ["send", R, "what are you working on?", "--posture",
                                   "once"])
     assert zero(msg).posture == "once"

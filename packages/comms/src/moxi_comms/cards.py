@@ -13,7 +13,7 @@ Four properties this module exists to keep:
     lookup -- one file read, and at most `CARD_READ_LIMIT` bytes of it. `EXIT_OFFLINE` is
     unreachable here by construction, and a process whose launch stamp is broken still
     gets an answer: the claim env is read DIRECTLY (`MOXI_COMMS_NAME`/`MOXI_COMMS_SCOPE`/
-    `MOXI_COMMS_GLOBAL`) and `MOXI_COMMS_SLOT` is never looked at, so `sender_from_env`'s third
+    `MOXI_COMMS_GLOBAL`) and no retired launch stamp is read, so `sender_from_env`'s third
     answer (`MalformedStamp`) is out of this verb's scope by construction. The reader who
     most needs to know who it is about to message is often the one whose environment is
     wrong.
@@ -239,7 +239,7 @@ def _miss(candidates: list[str], env, *, note: str = "") -> Answer:
     me = _own_identity(env)
     if me is not None and me in candidates:
         # Only the caller's own identity is told where to write. Peer-facing output
-        # carries no filesystem plumbing, the same instinct as keeping slots out of it.
+        # carries no filesystem plumbing.
         lines.append(f"You are {me} and have no card. Write up to {CARD_MAX_LINES} lines "
                      f"({CARD_MAX_CHARS} characters) at {card_path(me)} — write the whole "
                      "file and rename it into place, so a peer never reads it "

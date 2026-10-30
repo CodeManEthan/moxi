@@ -55,7 +55,7 @@ class FakeProc(ProcView):
 class Session:
     """One fake adapter process holding one claim."""
 
-    def __init__(self, proc, name, scope="proj-a", slot="next-free", *, kind="codex",
+    def __init__(self, proc, name, scope="proj-a", *, kind="codex",
                  root=None):
         self.proc = proc
         if root is None:
@@ -75,7 +75,7 @@ class Session:
             roots=[root or Root(self.root, f"s{self.root}", TREE)],
             keying="pid", proc=proc)
         claim = {"name": name, "scope": scope, "global": False,
-                 "qualified": qualify(name, scope), "slot": slot, "tier": None,
+                 "qualified": qualify(name, scope), "tier": None,
                  "directors": []}
         self.holder.start_launch(claim)
         self.holder.listen()
@@ -85,8 +85,7 @@ class Session:
         client = DaemonClient(daemon_socket(), on_close=self._closed)
         client.connect()
         try:
-            resp = client.register(slot=claim.get("slot") or "next-free",
-                                   name=claim["name"], scope=claim["scope"],
+            resp = client.register(name=claim["name"], scope=claim["scope"],
                                    project=claim["scope"], adapter="codex")
         except BaseException:
             client.close()
@@ -100,8 +99,7 @@ class Session:
             self.holder.went_offline()
 
     def bind(self):
-        claim, _exact = self.holder.register_claim()
-        return self.register(claim)
+        return self.register(self.holder.register_claim())
 
     @property
     def socket(self) -> str:
@@ -181,10 +179,6 @@ class World:
     def stop(self):
         for s in self.sessions:
             s.stop()
-
-
-def bound_names(rig) -> dict:
-    return {b.qualified: b.slot_id for b in rig.daemon.bindings.values()}
 
 
 def wait_for(pred, timeout=3.0):

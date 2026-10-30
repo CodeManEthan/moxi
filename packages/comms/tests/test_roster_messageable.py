@@ -2,15 +2,14 @@
 
 Against the daemon's `agents` answer:
 `{"bindings": [...], "waiting": {name: {"count", "oldest"}}, "pending": {},
-"unanswered": [...], "keeps": {...}}`. The daemon's half of that answer is tested with
+"unanswered": [...]}`. The daemon's half of that answer is tested with
 the queue; these tests hand the renderers a fake answer of that shape, except the last
 section, which asks the daemon itself.
 
 The default view (the verb and the snapshot) is one row per live binding whose adapter is
-not `send-only`, and nothing else. `--seats` is the operator's view: every binding with
-its slot, one waiting block, the unanswered rows and the slot keeps. The operator is a
-row like any other. The deltas never name a send-only binding, nor announce one leaving
-from a memory written before.
+not `send-only`, and nothing else. `--seats` is the operator's view: every binding, one
+waiting block, and the unanswered rows. The operator is a row like any other. The deltas
+never name a send-only binding, nor announce one leaving from a memory written before.
 """
 
 from __future__ import annotations
@@ -28,26 +27,25 @@ from moxi_comms.paths import daemon_socket
 NOW = 1_800_000_000.0
 DAY, HOUR = 86400, 3600
 
-CONSOLE = {"qualified": "console@acme", "name": "console", "scope": "acme",
-           "tier": "standing", "adapter": "send-only", "slot": None}
+CONSOLE = {"qualified": "relay@proj-a", "name": "relay", "scope": "proj-a",
+           "tier": "standing", "adapter": "send-only"}
 OPERATOR = {"qualified": "operator", "name": "operator", "scope": "global",
-            "tier": "standing", "adapter": "claude-shim", "slot": 4}
+            "tier": "standing", "adapter": "claude-shim"}
 EPHEMERAL = {"qualified": "agent-3", "name": "agent-3", "scope": "global",
-             "tier": "ephemeral", "adapter": "claude-shim", "slot": 3}
-REVIEWER = {"qualified": "reviewer@my-project", "name": "reviewer", "scope": "my-project",
-            "tier": "chosen", "adapter": "codex", "slot": 1}
+             "tier": "ephemeral", "adapter": "claude-shim"}
+REVIEWER = {"qualified": "reviewer@proj-b", "name": "reviewer", "scope": "proj-b",
+            "tier": "chosen", "adapter": "codex"}
 
 
 def answer(bindings=(CONSOLE, OPERATOR, EPHEMERAL, REVIEWER), **over):
     """An `agents` answer in its one shape."""
     info = {
         "bindings": [dict(b) for b in bindings],
-        "waiting": {"reviewer@my-project": {"count": 3, "oldest": NOW - (2 * DAY + 3 * HOUR)},
+        "waiting": {"reviewer@proj-b": {"count": 3, "oldest": NOW - (2 * DAY + 3 * HOUR)},
                     "curator": {"count": 1, "oldest": NOW - 42 * 60}},
         "pending": {},
         "unanswered": [{"owing": "agent-3", "author": "operator", "message_id": "9001",
                         "for": 40 * 60}],
-        "keeps": {"2": {"qualified": "planner", "expires_in": 90.0}},
     }
     info.update(over)
     return info
@@ -55,7 +53,7 @@ def answer(bindings=(CONSOLE, OPERATOR, EPHEMERAL, REVIEWER), **over):
 
 DEFAULT = ("operator                 standing   adapter claude-shim\n"
            "agent-3                  ephemeral  adapter claude-shim\n"
-           "reviewer@my-project      chosen     adapter codex")
+           "reviewer@proj-b          chosen     adapter codex")
 
 
 # ------------------------------------------------------------------- the default view
@@ -95,24 +93,20 @@ def test_the_operator_is_absent_when_unbound():
 # ------------------------------------------------------------------- --seats
 
 SEATS = (
-    "console@acme             standing   no slot  adapter send-only\n"
-    "operator                 standing   slot 4   adapter claude-shim\n"
-    "agent-3                  ephemeral  slot 3   adapter claude-shim\n"
-    "reviewer@my-project      chosen     slot 1   adapter codex\n"
+    "relay@proj-a             standing   adapter send-only\n"
+    "operator                 standing   adapter claude-shim\n"
+    "agent-3                  ephemeral  adapter claude-shim\n"
+    "reviewer@proj-b          chosen     adapter codex\n"
     "\n"
     "waiting (queued for each name until its next session start, /clear, compaction, or "
     "a turn of its own on a warm cache):\n"
     "  curator                  1 message(s), oldest waiting 42m\n"
-    "  reviewer@my-project      3 message(s), oldest waiting 2d 3h\n"
-    "unanswered: agent-3 owes operator msg 9001, 40m\n"
-    "\n"
-    "slot keeps (held for a name a restart has not brought back yet):\n"
-    "  slot 2   planner                  90s left")
+    "  reviewer@proj-b          3 message(s), oldest waiting 2d 3h\n"
+    "unanswered: agent-3 owes operator msg 9001, 40m")
 
 
-def test_seats_is_every_binding_then_one_waiting_block_then_unanswered_then_keeps():
-    """Send-only rows included as `no slot`; the waiting block's rows come from
-    `waiting` (count, and the oldest's wait from `now - oldest`)."""
+def test_seats_is_every_binding_then_one_waiting_block_then_unanswered():
+    """Send-only rows are included; waiting rows show count and oldest wait."""
     assert roster_view.render_agents(answer(), seats=True, now=NOW) == SEATS
 
 
@@ -129,12 +123,12 @@ def test_the_old_headers_and_rows_are_gone():
 
 
 def test_no_waiting_block_when_nothing_waits():
-    out = roster_view.render_agents(answer(waiting={}, unanswered=[], keeps={}),
+    out = roster_view.render_agents(answer(waiting={}, unanswered=[]),
                                     seats=True, now=NOW)
-    assert out == ("console@acme             standing   no slot  adapter send-only\n"
-                   "operator                 standing   slot 4   adapter claude-shim\n"
-                   "agent-3                  ephemeral  slot 3   adapter claude-shim\n"
-                   "reviewer@my-project      chosen     slot 1   adapter codex")
+    assert out == ("relay@proj-a             standing   adapter send-only\n"
+                   "operator                 standing   adapter claude-shim\n"
+                   "agent-3                  ephemeral  adapter claude-shim\n"
+                   "reviewer@proj-b          chosen     adapter codex")
 
 
 def test_now_defaults_to_the_wall_clock(monkeypatch):
@@ -161,7 +155,7 @@ def test_codex_and_opencode_layer_one_carry_the_same_view():
     for module in (codex, opencode):
         text = module.layer_one_text(answer())
         assert text.endswith(f"{shim_roster.LABEL}\n{DEFAULT}"), module.__name__
-        assert "console@acme" not in text
+        assert "relay@proj-a" not in text
 
 
 def test_the_race_line_tests_the_filtered_list():
@@ -183,7 +177,7 @@ def test_the_verb_and_the_snapshot_print_the_same_from_one_answer(rig, monkeypat
         return answer() if kind == "agents" else real(self, kind, **kw)
 
     monkeypatch.setattr(DaemonClient, "query", query)
-    code, out = rig.cli(["agents"], slot=1)
+    code, out = rig.cli(["agents"])
     assert code == 0
     envelope, online = shim_roster.snapshot(daemon_socket(), env={})
     assert online and envelope.split("\n\n", 2)[2] == f"{shim_roster.LABEL}\n{out.rstrip()}"
@@ -228,7 +222,7 @@ def test_roster_of_drops_send_only_bindings():
     assert shim_roster.roster_of(answer()) == {
         "operator": {"tier": "standing", "adapter": "claude-shim"},
         "agent-3": {"tier": "ephemeral", "adapter": "claude-shim"},
-        "reviewer@my-project": {"tier": "chosen", "adapter": "codex"}}
+        "reviewer@proj-b": {"tier": "chosen", "adapter": "codex"}}
 
 
 def fake_fetch(monkeypatch, info):
@@ -241,7 +235,7 @@ def test_a_delta_never_names_a_send_only_join(monkeypatch, tmp_path):
     fake_fetch(monkeypatch, answer(bindings=(CONSOLE, REVIEWER)))
     envelope, online = shim_roster.delta(None, state, env={})
     assert online and envelope == (
-        "(comms roster update: reviewer@my-project [chosen] is now reachable — "
+        "(comms roster update: reviewer@proj-b [chosen] is now reachable — "
         "`moxi comms agents` is always current.)")
     assert "console" not in state.read_text(), "the memory holds messageable names only"
 
@@ -250,8 +244,8 @@ def test_an_older_memory_announces_no_send_only_leave(monkeypatch, tmp_path):
     """The remembered side is filtered too: an old memory holding a send-only row whose
     binding is still live, or gone, announces nothing about it."""
     state = tmp_path / "roster.json"
-    old = {"console@acme": {"tier": "standing", "adapter": "send-only"},
-           "reviewer@my-project": {"tier": "chosen", "adapter": "codex"}}
+    old = {"relay@proj-a": {"tier": "standing", "adapter": "send-only"},
+           "reviewer@proj-b": {"tier": "chosen", "adapter": "codex"}}
     for live in ((CONSOLE, REVIEWER), (REVIEWER,)):
         shim_roster.write_state(state, old)
         fake_fetch(monkeypatch, answer(bindings=live))
@@ -296,8 +290,7 @@ def _agents_help():
 def test_the_agents_help_says_who_you_can_message():
     assert _agents_help() == (
         "who you can message",
-        "operator view: also show send-only identities, each binding's slot, and the mail "
-        "waiting for each name")
+        "operator view: also show send-only identities and the mail waiting for each name")
 
 
 # ------------------------------------------------------------------- the daemon's answer
@@ -305,9 +298,9 @@ def test_the_agents_help_says_who_you_can_message():
 def test_the_daemons_answer_keeps_an_empty_pending_beside_waiting(rig):
     """The daemon itself: with mail waiting for an unbound name, the answer counts it
     under `waiting`, keeps `pending` empty, and an older `usable` accepts it."""
-    rig.shim(slot=1, name="planner", scope="proj-a")
+    rig.shim(name="planner", scope="proj-a")
     code, out = rig.cli(["send", "--posture", "none", "--new-name", "curator@proj-a",
-                         "waiting"], slot=1, name="planner", scope="proj-a")
+                         "waiting"],  name="planner", scope="proj-a")
     assert code == 0, out
 
     def info():

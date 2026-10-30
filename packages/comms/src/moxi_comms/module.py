@@ -4,7 +4,7 @@ Standard library only, and imports nothing of comms: the umbrella reads it to li
 module, dispatch `moxi comms`, offer its extras and check its contract.
 """
 
-INTERFACES = frozenset({1})
+INTERFACES = frozenset({2})
 #: The module other code calls: sending, the reads, the names, `api.tokens`.
 API = "moxi_comms.api"
 #: What `moxi comms` runs, in process, as `main(argv, prog="moxi comms")`.
@@ -22,7 +22,6 @@ GATED = {"moxi-comms-codex": "codex"}
 #: Each variable of comms' prefix it reads outside moxi.paths and moxi.config, and why.
 INTERNAL_ENV = {
     "MOXI_COMMS_NAME": "launcher stamp: the session's chosen identity name",
-    "MOXI_COMMS_SLOT": "launcher stamp: the session's slot",
     "MOXI_COMMS_SCOPE": "launcher stamp: the session's identity scope",
     "MOXI_COMMS_GLOBAL": "launcher stamp: the identity is the global one",
     "MOXI_COMMS_DIRECTORS": "launcher stamp: the directors this launch grants",

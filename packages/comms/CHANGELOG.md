@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.0 (2026-10-27)
+
+- Bindings now receive a fresh token at registration. The adapter keeps it only in
+  memory, the daemon stores only its hash, and a daemon restart requires every adapter
+  to bind again. The operator lane reads its token through the configured resolver
+  chain and keeps that one credential at rest.
+- Existing 0.1.x records are converted on the first start. Retired keep files and old
+  posting-key files in comms' own store are removed when they match the old format;
+  unrelated files are left alone. The old webhook posting path is no longer part of
+  the live seam, and `post_as_identity` is a record write rather than a credential
+  path.
+- The public surfaces advance to interface 2, claims protocol 2 and CLI protocol 3.
+  The old capacity settings, roster pin and keep behavior are retired, and adapters
+  from the older protocol must be relaunched.
+- Going back to 0.1.x after the first 0.2.0 start is not supported: old readers do
+  not understand identity rows, and the old posting keys are no longer available to
+  comms' live path.
+
 ## 0.1.1 (2026-10-22)
 
 - The directory's webhook column that holds a credential's store pointer is named
@@ -29,7 +47,7 @@ machine, delivered into each recipient's session at a turn boundary.
 - The commands run as `moxi comms <verb>`: `send`, `reply`, `agents`, `history`, `help`,
   `whois`, `explain`, `cache`, `doctor` and `service`. `moxi shortcut comms` adds a bare
   `comms` command. `moxi comms service install` runs the daemon as a systemd user unit,
-  and its first start provisions the directory (6 slots and the operator identity).
+  and its first start provisions the directory and the operator identity.
 - Claude Code sessions through Moxi turns: `moxi comms claude` (also
   `moxi-comms-claude`) launches a named session with an adapter process of its own,
   which binds the name, hands each digest to turns at a turn boundary, settles it from

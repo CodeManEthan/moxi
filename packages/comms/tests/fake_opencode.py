@@ -457,8 +457,9 @@ def serve(argv) -> int:
                         auto=os.environ.get("FAKE_OPENCODE_AUTO", "1") != "0",
                         store=(directory / "sessions.json") if directory else None)
     fake.start()
+    stamp_keys = ("MOXI_COMMS_NAME", "MOXI_COMMS_SLOT", "MOXI_COMMS_SCOPE")
     event("serve", argv=argv, url=fake.url, config=config,
-          stamp={k: os.environ.get(k) for k in ("MOXI_COMMS_NAME", "MOXI_COMMS_SLOT", "MOXI_COMMS_SCOPE")},
+          stamp={k: os.environ[k] for k in stamp_keys if k in os.environ},
           password=bool(os.environ.get("OPENCODE_SERVER_PASSWORD")))
     out(f"timestamp=0 level=INFO message=\"opencode server listening on {fake.url}\"\n")
     out(f"opencode server listening on {fake.url}\n")

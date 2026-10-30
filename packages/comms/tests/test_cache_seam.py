@@ -242,7 +242,7 @@ def test_the_daemon_reads_a_declared_kind_through_its_evidence(rig, adapters):
     sid = str(uuid.uuid4())
     write_transcript(sid, age=3 * HOUR)
     ANCHORS[HELPER_Q] = sid
-    helper = adapters(slot=3, name="helper", scope="proj-a", adapter="harness-kind")
+    helper = adapters(name="helper", scope="proj-a", adapter="harness-kind")
     msg = post(rig, [HELPER_Q])
     assert wait_until(lambda: msg.id in held_of(rig, HELPER_Q))
     assert (HELPER_Q, None) in ASKED
@@ -263,7 +263,7 @@ def test_with_cache_absent_a_cold_agent_gets_its_mail_live(rig, adapters, monkey
 
 def test_with_cache_absent_an_unreadable_agent_refuses_nothing(rig, adapters, monkeypatch):
     cache_absent(monkeypatch)
-    adapters(slot=3, name="helper", scope="proj-a", adapter="codex", session_id="t-1")
+    adapters(name="helper", scope="proj-a", adapter="codex", session_id="t-1")
     code, out = send(rig, HELPER_Q)
     assert code == 0, out
     assert "Nothing was sent" not in out

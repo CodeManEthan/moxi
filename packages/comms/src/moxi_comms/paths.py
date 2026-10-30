@@ -117,18 +117,6 @@ def cursors_dir(env=None) -> Path:
     return state_dir(env) / "cursors"
 
 
-def slot_keeps(env=None) -> Path:
-    """STATE/comms/slot-keeps.json -- the daemon's keep mark.
-
-    Which chosen and standing names held which slot, and which slots are still kept for a
-    name that has not come back, so a restart gives each name back the slot it held. Only
-    the daemon writes it. STATE and not DATA: it describes this box's daemon and nothing
-    should sync it. It is rebuildable in the only sense that matters -- losing it costs
-    the keeps and nothing else, and slot choice relaxes to what it was before keeps.
-    """
-    return state_dir(env) / "slot-keeps.json"
-
-
 def cold_gate(env=None) -> Path:
     """STATE/comms/cold-gate.json -- the cold-cache gate file an older daemon kept.
 

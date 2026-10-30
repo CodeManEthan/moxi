@@ -5,7 +5,6 @@ implements the same one on the box's SQLite record. The daemon, the sender and t
 provisioner talk only to these methods and never learn which one they hold:
 
     channels        create_channel / channel_by_name
-    webhooks        create_webhook (id + owner label) / resolve_secret / execute_webhook
     permissions     deny_send / can_send
     the record      history(channel, after=, limit=) / get_message
     the gateway     subscribe() -> Subscription, disconnect(), reconnect(resume=)
@@ -34,8 +33,6 @@ from pathlib import Path
 
 from .gateway import (
     MAX_CONTENT_LENGTH,
-    NO_MENTIONS,
-    Credential,
     Fatal,
     Forbidden,
     GatewayError,
@@ -51,8 +48,7 @@ _EPOCH_BASE = 1_400_000_000_000  # only monotonicity matters
 class MockGateway:
     """In-process record. Pass `store_path` to share the record across processes."""
 
-    # Declared AND enforced (see execute_webhook), as the local record does: the parity
-    # that matters is the parity in the REFUSALS.
+    # Declared and enforced on every posting lane.
     max_content_length = MAX_CONTENT_LENGTH
     #: `history(after=)` with no limit returns the whole range.
     history_bound = None
@@ -150,56 +146,11 @@ class MockGateway:
             ch = st.channels.get(channel_id)
             return ch["name"] if ch else None
 
-    # ------------------------------------------------------------------ webhooks
-    def create_webhook(self, channel_id: str, name: str, secret_id: str) -> Credential:
-        with self._txn(write=True) as st:
-            if channel_id not in st.channels:
-                raise GatewayError(f"unknown channel {channel_id}")
-            wid = self._next_id(st)
-            token = f"tok-{wid}"
-            st.webhooks[wid] = {"channel_id": channel_id, "name": name,
-                                "token": token, "secret_id": secret_id}
-            st.secrets[secret_id] = wid
-            # the mock hands the key back as the pointer. Callers record
-            # `cred.secret_id` whichever backend they hold.
-            return Credential(wid, token, secret_id=secret_id)
-
-    def resolve_secret(self, secret_id: str, *, owner=None) -> Credential:
-        """Resolution at use time: pointer on disk, URL only ever in memory.
-
-        `owner` (the custody seam) is accepted and IGNORED here on purpose: the mock
-        holds no credential store, so there is nothing for a holder key to select.
-        Taking the argument keeps one interface for both implementations — a mock that
-        refused it would make the seam real-backend-only and untestable.
-        """
-        with self._txn() as st:
-            wid = st.secrets.get(secret_id)
-            if wid is None:
-                raise GatewayError(f"unknown secret {secret_id}")
-            return Credential(wid, st.webhooks[wid]["token"], secret_id=secret_id)
-
-    def webhook_channel(self, webhook_id: str) -> str | None:
-        with self._txn() as st:
-            wh = st.webhooks.get(webhook_id)
-            return wh["channel_id"] if wh else None
-
     # ------------------------------------------------------------------ teardown
-    # Operator machinery (a smoke run's teardown). No comms verb deletes anything;
-    # these exist so a spike run can undo itself.
-    def delete_webhook(self, webhook_id: str) -> None:
-        with self._txn(write=True) as st:
-            wh = st.webhooks.pop(str(webhook_id), None)
-            if wh:
-                st.secrets.pop(wh.get("secret_id", ""), None)
-
     def delete_channel(self, channel_id: str) -> None:
         channel_id = str(channel_id)
         with self._txn(write=True) as st:
             st.channels.pop(channel_id, None)
-            for wid in [w for w, wh in st.webhooks.items()
-                        if wh["channel_id"] == channel_id]:
-                st.secrets.pop(st.webhooks[wid].get("secret_id", ""), None)
-                st.webhooks.pop(wid, None)
             st.messages = [m for m in st.messages if m["channel_id"] != channel_id]
 
     # ------------------------------------------------------------------ permissions
@@ -226,34 +177,6 @@ class MockGateway:
         with self._lock:
             self._rate_limits.extend([retry_after] * count)
 
-    def execute_webhook(self, cred: Credential, content: str, *, username: str | None = None,
-                        allowed_mentions: dict | None = None) -> Message:
-        with self._lock:
-            if self._rate_limits:
-                raise RateLimited(self._rate_limits.pop(0))
-        if allowed_mentions is None or allowed_mentions.get("parse") != []:
-            raise GatewayError("allowed_mentions must be {'parse': []} on every post")
-        if len(content) > self.max_content_length:
-            # The record's own refusal: nothing is written, so an over-length post is a
-            # send that did NOT happen here either.
-            raise GatewayError(
-                f"content is {len(content)} characters, "
-                f"over the {self.max_content_length}-character cap on one message")
-        with self._txn(write=True) as st:
-            wh = st.webhooks.get(cred.webhook_id)
-            if wh is None or wh["token"] != cred.token:
-                raise GatewayError("bad webhook credential")
-            if wh["channel_id"] in st.denied.get(cred.webhook_id, []):
-                raise Forbidden(f"Send denied in {wh['channel_id']}")
-            msg = Message(
-                id=self._next_id(st), channel_id=wh["channel_id"], author_id=cred.webhook_id,
-                author_kind="webhook", author_display=username or wh["name"],
-                content=content, timestamp=self._now(),
-            )
-            st.messages.append(msg.to_dict())
-        self._fanout()
-        return msg
-
     def post_as_user(self, user_id: str, channel_id: str, content: str, *,
                      token: str | None = None) -> Message:
         """The operator is a first-class sender in every lane (types the machine line,
@@ -267,8 +190,11 @@ class MockGateway:
         operator case untestable anywhere but on a real record.
 
         The one-message cap applies HERE TOO. It is a property of a message, not of
-        the webhook route.
+        the posting route.
         """
+        with self._lock:
+            if self._rate_limits:
+                raise RateLimited(self._rate_limits.pop(0))
         if len(content) > self.max_content_length:
             raise GatewayError(
                 f"content is {len(content)} characters, "
@@ -279,6 +205,22 @@ class MockGateway:
             msg = Message(
                 id=self._next_id(st), channel_id=channel_id, author_id=user_id,
                 author_kind="user", author_display=st.users.get(user_id, "operator"),
+                content=content, timestamp=self._now(),
+            )
+            st.messages.append(msg.to_dict())
+        self._fanout()
+        return msg
+
+    def post_as_identity(self, qualified: str, channel_id: str, content: str) -> Message:
+        """Write an agent post after the daemon has checked its live binding."""
+        if len(content) > self.max_content_length:
+            raise GatewayError(
+                f"content is {len(content)} characters, "
+                f"over the {self.max_content_length}-character cap on one message")
+        with self._txn(write=True) as st:
+            msg = Message(
+                id=self._next_id(st), channel_id=channel_id, author_id=qualified,
+                author_kind="identity", author_display=qualified,
                 content=content, timestamp=self._now(),
             )
             st.messages.append(msg.to_dict())
@@ -420,5 +362,5 @@ class MockGateway:
         return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.clock()))
 
 
-__all__ = ["MockGateway", "NO_MENTIONS", "Credential", "Message", "Subscription",
+__all__ = ["MockGateway", "Message", "Subscription",
            "GatewayError", "RateLimited", "Forbidden", "Fatal"]

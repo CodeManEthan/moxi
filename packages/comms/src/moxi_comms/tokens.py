@@ -12,14 +12,13 @@ not a reason to read a credential.
 
 What may rest here, and what may not:
 
-  * **may:** posting tokens and role credentials, each under its own key, 0600 in a
+  * **may:** the operator token and role credentials, each under its own key, 0600 in a
     0700 directory;
   * **may not:** the provisioner credential (fenced off, refused in code below).
 
 THE FILE IS A MAP. One holder's file is a flat TOML table of `key = "value"`, written by
 the emitter below (stdlib only; `tomllib` reads, there is no writer in it):
 
-    "comms/slot-3/names" = "…"      a posting token, under its own `secret_id`
     "ANTHROPIC_API_KEY" = "…"       a role credential, under its KEY
 
 A file that does not parse as such a table holds no comms key: a read of it misses,
@@ -33,8 +32,6 @@ store instead of silently finding nothing.
 
 One file per HOLDER:
 
-    slot-3            a slot's bundle       (keys `comms/slot-3/<room>`)
-    proj-a/main       a standing identity   (keys `comms/proj-a/<name>/<room>`)
     daemon            the daemon process    (holds no credential)
     operator          the operator's lane   (the local backend's `post_as_user` token)
 
@@ -42,9 +39,8 @@ and each role holder the box names in config.toml's `[secrets] roles`, under its
 name. A role the config does not list is unknown, with no store path, like any role the
 store has never heard of.
 
-Slot vocabulary in a PATH is operator inventory and stays legal (only agent-facing
-surfaces carry no slots); the refusals raised from here therefore name the path in
-the LOG and never in the sentence an agent reads.
+Old agent posting files are interpreted only by the migration module and are never a
+live owner family here.
 """
 
 from __future__ import annotations
@@ -130,30 +126,6 @@ class TokenOwner:
         return self.key or f"role:{self.role}"
 
 
-def _component(value, *, what: str) -> str:
-    """One path component, validated. `scope` and `name` are ENV-derived: a crafted
-    value must not be able to walk out of the store directory."""
-    text = str(value)
-    if text in (".", "..") or not COMPONENT_RE.match(text):
-        raise TokenStoreError(
-            f"{what} {text!r} is not a token-store name: the store's components are "
-            "letters, digits, dot, dash and underscore, and nothing that could leave the "
-            "store directory.")
-    return text
-
-
-def owner_for_slot(slot_id) -> TokenOwner:
-    try:
-        number = int(slot_id)
-    except (TypeError, ValueError):
-        raise TokenStoreError(f"slot {slot_id!r} is not a slot number") from None
-    return TokenOwner((f"slot-{_component(number, what='slot')}",))
-
-
-def owner_for_standing(name: str, scope: str) -> TokenOwner:
-    return TokenOwner((_component(scope, what="scope"), _component(name, what="name")))
-
-
 def box_roles(env=None) -> tuple[str, ...]:
     """The role holders this box adds, from config.toml's `[secrets] roles`."""
     from . import config
@@ -183,24 +155,10 @@ def owner_for_role(role: str, *, env=None) -> TokenOwner:
     return TokenOwner((), role=str(role))
 
 
-def owner_for_sender(sender) -> TokenOwner | None:
-    """The owner of a sender's OWN bundle. `credential_for` prefers the row it actually
-    resolved (a chosen-tier sender carries both a name and a slot), so this is the
-    fallback shape, not the authority."""
-    slot_id = getattr(sender, "slot_id", None)
-    if slot_id is not None:
-        return owner_for_slot(slot_id)
-    name = getattr(sender, "name", None)
-    if name:
-        return owner_for_standing(name, getattr(sender, "scope", ""))
-    return None
-
-
 # --------------------------------------------------------------------------- keys
 
 def holder_of_key(key: str) -> str | None:
-    """`comms/slot-1/names` -> `comms/slot-1`; `comms/proj-a/main/names` ->
-    `comms/proj-a/main`.
+    """`comms/calendar/bot-token` -> `comms/calendar`.
 
     The key already names the bundle — the room is only its last segment — so the
     holder is the key minus that segment.
@@ -212,26 +170,15 @@ def holder_of_key(key: str) -> str | None:
 
 
 def owner_of_holder(holder: str, *, env=None) -> TokenOwner | None:
-    """`comms/slot-1` -> the slot-1 owner; `comms/daemon` -> the daemon owner;
-    `comms/proj-a/main` -> the standing owner; `comms/<role>` -> that role's owner, for
-    a role the box names in `[secrets] roles`.
-    Anything else: not a holder we know."""
+    """Resolve `comms/daemon` and configured `comms/<role>` holders."""
     parts = [p for p in str(holder).split("/") if p]
     if not parts or parts[0] != KEY_PREFIX:
         return None
     rest = parts[1:]
     if rest == [ROLE_DAEMON]:
         return owner_for_role(ROLE_DAEMON)
-    if len(rest) == 1 and rest[0].startswith("slot-"):
-        try:
-            return owner_for_slot(int(rest[0].removeprefix("slot-")))
-        except (TypeError, ValueError):
-            return None
     if len(rest) == 1 and rest[0] in box_roles(env):
         return owner_for_role(rest[0], env=env)
-    if len(rest) == 2:
-        scope, name = rest
-        return owner_for_standing(name, scope)
     return None
 
 
@@ -344,7 +291,7 @@ class TokenStore:
         holder's file, or None when that holder has no such key.
 
         Every read of a stored value goes through here: the resolver chain's `store`
-        step and the local backend's `resolve_secret`. A file whose permissions are wider than
+        step. A file whose permissions are wider than
         0600 is REFUSED, not read and not warned about: 0600 is the whole mechanism, and
         a store that reads a world-readable credential anyway has only a comment where
         its rule was.
@@ -449,7 +396,5 @@ class TokenStore:
 __all__ = ["TokenOwner", "TokenStore", "TokenStoreError", "STORE_ENV_VAR", "DIR_MODE",
            "FILE_MODE", "PROVISIONER_FENCE", "LOOSE_PERMISSIONS", "NOT_A_MAP",
            "ROLE_READER", "ROLE_DAEMON", "ROLE_PROVISIONER", "ROLE_OPERATOR",
-           "OPERATOR_SECRET_ID", "COMPONENT_RE", "box_roles",
-           "owner_for_slot",
-           "owner_for_standing", "owner_for_role", "owner_for_sender", "holder_of_key",
+           "OPERATOR_SECRET_ID", "COMPONENT_RE", "box_roles", "owner_for_role", "holder_of_key",
            "owner_of_holder", "project_name"]

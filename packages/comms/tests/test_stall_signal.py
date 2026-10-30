@@ -202,7 +202,7 @@ def test_the_two_detectors_have_two_names():
 # ----------------------------------------------------------------------------- the shim
 
 def _deliver_one(rig, shim, text="answer me"):
-    rig.post_from_slot(6, [shim.identity], text)
+    rig.post_as("agent-6", [shim.identity], text)
     wait_until(lambda: len(shim.queue) >= 1)
     return shim.queue[0]["message_id"]
 
@@ -215,7 +215,7 @@ def _manual(adapter):
 
 
 def test_the_shim_arms_at_the_moment_it_injects(rig):
-    b = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    b = rig.shim(name="reviewer", scope="proj-a")
     timers = _manual(b)
     mid = _deliver_one(rig, b)
     assert b.stall.armed is False, "nothing is armed before anything is injected"
@@ -231,7 +231,7 @@ def test_the_shim_arms_at_the_moment_it_injects(rig):
 def test_a_turn_start_is_the_shims_sign_of_life(rig):
     """turns reports a delivered turn's start, so an injection that became a turn lands
     here and one that vanished never does."""
-    b = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    b = rig.shim(name="reviewer", scope="proj-a")
     timers = _manual(b)
     _deliver_one(rig, b)
     b.on_turn_boundary()
@@ -243,7 +243,7 @@ def test_a_turn_start_is_the_shims_sign_of_life(rig):
 
 
 def test_a_typed_turn_disarms_nothing_because_nothing_was_armed(rig):
-    b = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    b = rig.shim(name="reviewer", scope="proj-a")
     shim_drive.turn_started(b)
     assert b.statuses == []
     assert b.stall.last_latency is None
@@ -252,7 +252,7 @@ def test_a_typed_turn_disarms_nothing_because_nothing_was_armed(rig):
 def test_a_turn_boundary_also_answers_it(rig):
     """The idle-flush path and the `--inject-file` double reach a boundary without ever
     passing through a turn's start, and a boundary proves the turn both ran and ended."""
-    b = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    b = rig.shim(name="reviewer", scope="proj-a")
     timers = _manual(b)
     _deliver_one(rig, b)
     b.on_turn_boundary()
@@ -265,7 +265,7 @@ def test_a_turn_boundary_also_answers_it(rig):
 def test_the_shim_report_goes_to_the_status_sink_and_nowhere_else(rig):
     """The whole argument: a detector armed at the injection site depends on no
     socket. Firing it must not touch the daemon."""
-    b = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    b = rig.shim(name="reviewer", scope="proj-a")
     timers = _manual(b)
     mid = _deliver_one(rig, b)
     b.on_turn_boundary()
@@ -280,7 +280,7 @@ def test_the_shim_report_goes_to_the_status_sink_and_nowhere_else(rig):
 
 
 def test_a_shim_that_is_stopping_is_not_a_stalled_one(rig):
-    b = rig.shim(slot=2, name="reviewer", scope="proj-a")
+    b = rig.shim(name="reviewer", scope="proj-a")
     timers = _manual(b)
     _deliver_one(rig, b)
     b.on_turn_boundary()
@@ -292,4 +292,3 @@ def test_a_shim_that_is_stopping_is_not_a_stalled_one(rig):
     timers.made[0].function()
     assert b.statuses == before
     assert not any(stall.STALL_REASON in s for s in b.statuses)
-
