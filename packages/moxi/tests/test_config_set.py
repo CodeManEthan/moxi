@@ -647,3 +647,214 @@ def test_an_untyped_list_tells_one_from_true(demo):
     assert read(demo)["tags"] == [True, 1]
     config.remove_item("demo", "tags", True, by="cli")
     assert read(demo)["tags"] == [1]
+
+
+# -- the module's own check: CONFIG_CHECK ---------------------------------------------------
+
+CHECK = '''
+from moxi.config import ConfigError
+
+#: Each call: the text given, and the config file's text on disk at that moment.
+CALLS = []
+WATCH = []
+
+
+def check(text):
+    on_disk = WATCH[0].read_text() if WATCH and WATCH[0].exists() else None
+    CALLS.append((text, on_disk))
+    if "boom" in text:
+        raise ValueError("boom in the file\\nand a second line")
+    if "quiet" in text:
+        raise RuntimeError()
+    if "kept" in text:
+        raise ConfigError(None, "name", "is a name kept back", "pick another name")
+    if "elsewhere" in text:
+        raise ConfigError("/elsewhere/tmp-copy.toml", "name", "is elsewhere", "move it")
+    return "ignored"
+'''
+
+
+@pytest.fixture
+def checked(demo, site):
+    """Module `demo`, now declaring `CONFIG_CHECK` as `moxi_demo.check:check`. Returns the
+    config file's path; the check's module records each call."""
+    site.write("moxi_demo/check.py", CHECK)
+    site.module("demo", SETTINGS="'settings.toml'", CONFIG_CHECK="'moxi_demo.check:check'")
+    check = _check_module()
+    check.WATCH[:] = [demo]
+    check.CALLS.clear()
+    return demo
+
+
+def _check_module():
+    """The fake module's check, the module `moxi.config` imports to run it."""
+    import importlib
+
+    return importlib.import_module("moxi_demo.check")
+
+
+def calls() -> list:
+    return _check_module().CALLS
+
+
+def test_a_module_with_no_check_sets_as_before(demo):
+    from moxi import modules
+
+    assert modules.load("demo").config_check is None
+    config.set("demo", "name", "boom", by="cli")
+    assert read(demo)["name"] == "boom"
+
+
+def test_the_check_is_given_the_whole_new_text_before_it_is_written(checked):
+    checked.parent.mkdir(parents=True)
+    checked.write_text(COMMENTED)
+    assert config.set("demo", "name", "fine", by="cli") == []
+    (text, on_disk), = calls()
+    assert on_disk == COMMENTED
+    assert text == checked.read_text() and 'name = "fine"' in text
+
+
+@pytest.mark.parametrize("change", [
+    lambda: config.set("demo", "name", "boom", by="cli"),
+    lambda: config.add_item("demo", "tags", "boom", by="cli"),
+])
+def test_a_refusing_check_leaves_the_file_unchanged(checked, change):
+    checked.parent.mkdir(parents=True)
+    checked.write_text(COMMENTED)
+    exc = refused(change)
+    assert checked.read_text() == COMMENTED
+    assert config.history("demo") == []
+    assert exc.file == str(checked)
+
+
+def test_a_new_file_the_check_refuses_is_never_made(checked):
+    refused(config.set, "demo", "name", "boom", by="cli")
+    assert not checked.exists()
+
+
+@pytest.mark.parametrize("op, key, args", [
+    ("set", "block", (True,)),
+    ("unset", "block", ()),
+    ("add_item", "tags", ("y",)),
+    ("remove_item", "tags", ("x",)),
+])
+def test_another_exception_names_the_key_changed_and_its_first_line(checked, op, key,
+                                                                     args):
+    checked.parent.mkdir(parents=True)
+    before = 'name = "boom"\nblock = false\ntags = ["x"]\n'
+    checked.write_text(before)
+    exc = refused(getattr(config, op), "demo", key, *args, by="cli")
+    assert type(exc) is ConfigError and exc.exit_code == 2
+    assert (exc.file, exc.key) == (str(checked), key)
+    assert exc.problem == "demo refuses the file: boom in the file"
+    assert str(exc).startswith(f"{checked}: key {key!r}: demo refuses the file: ")
+    assert checked.read_text() == before
+
+
+def test_an_exception_with_no_text_is_named_by_its_type(checked):
+    exc = refused(config.set, "demo", "name", "quiet", by="cli")
+    assert exc.problem == "demo refuses the file: RuntimeError"
+
+
+def test_a_config_error_from_the_check_keeps_its_key_and_reason(checked):
+    exc = refused(config.set, "demo", "name", "kept", by="cli")
+    assert (exc.key, exc.problem, exc.fix) == ("name", "is a name kept back",
+                                               "pick another name")
+    assert exc.file == str(checked)
+
+
+def test_a_check_s_error_names_the_config_file_never_another_path(checked):
+    exc = refused(config.set, "demo", "name", "elsewhere", by="cli")
+    assert (exc.file, exc.key, exc.problem) == (str(checked), "name", "is elsewhere")
+    assert "/elsewhere" not in str(exc)
+
+
+def test_the_check_runs_after_the_readers_check(checked):
+    checked.parent.mkdir(parents=True)
+    checked.write_text("stray = 1\n")
+    exc = refused(config.set, "demo", "name", "boom", by="cli")
+    assert exc.key == "stray"
+    assert calls() == []
+
+
+def test_a_check_that_cannot_be_imported_refuses_with_exit_3(demo, site):
+    site.module("demo", SETTINGS="'settings.toml'", CONFIG_CHECK="'moxi_demo.gone:check'")
+    exc = refused(config.set, "demo", "name", "x", by="cli")
+    assert exc.exit_code == 3 and "moxi_demo.gone:check" in exc.problem
+    assert not demo.exists()
+
+
+@pytest.mark.parametrize("argv", [("set", "demo", "name", "x"),
+                                  ("unset", "demo", "name"),
+                                  ("demo", "check")])
+def test_a_bad_environment_variable_never_refuses_a_change_or_the_check(checked, capsys,
+                                                                         monkeypatch, argv):
+    checked.parent.mkdir(parents=True)
+    checked.write_text('backend = "local"\nname = "y"\n')
+    monkeypatch.setenv("MOXI_DEMO_BACKEND", "bogus")
+    with pytest.raises(ConfigError):
+        settings()
+    code, _, err = run(capsys, "config", *argv)
+    assert (code, err) == (0, "")
+    assert calls()
+
+
+def test_config_set_and_unset_print_the_refusal_with_the_config_file(checked, capsys):
+    code, out, err = run(capsys, "config", "set", "demo", "name", "boom")
+    assert (code, out) == (2, "")
+    assert f"{checked}: key 'name': demo refuses the file: boom in the file" in err
+    checked.parent.mkdir(parents=True, exist_ok=True)
+    checked.write_text('name = "boom"\ntags = ["x"]\n')
+    code, out, err = run(capsys, "config", "unset", "demo", "block")
+    assert code == 2 and f"{checked}: key 'block': demo refuses the file" in err
+    for flag, item in (("--add", "y"), ("--remove", "x")):
+        code, out, err = run(capsys, "config", "set", "demo", "tags", flag, item)
+        assert code == 2 and f"{checked}: key 'tags': demo refuses the file" in err
+    assert checked.read_text() == 'name = "boom"\ntags = ["x"]\n'
+
+
+def test_config_check_runs_both_checks_over_the_file(checked, capsys):
+    code, out, _ = run(capsys, "config", "demo", "check")
+    assert code == 0 and out == f"ok: {checked} (no file: every key at its default)\n"
+    assert calls()[-1][0] == ""
+    checked.parent.mkdir(parents=True)
+    checked.write_text('name = "boom"\n')
+    code, out, err = run(capsys, "config", "demo", "check")
+    assert (code, out) == (1, "")
+    assert f"{checked}: demo refuses the file: boom in the file" in err
+    checked.write_text('name = "kept"\n')
+    code, _, err = run(capsys, "config", "demo", "check")
+    assert code == 1 and f"{checked}: key 'name': is a name kept back" in err
+    checked.write_text('stray = 1\n')
+    code, _, err = run(capsys, "config", "demo", "check")
+    assert code == 1 and "key 'stray'" in err
+    checked.write_text('name = "fine"\n')
+    assert run(capsys, "config", "demo", "check")[0] == 0
+    assert calls()[-1][0] == 'name = "fine"\n'
+
+
+# -- check_text: the reader over a text alone ------------------------------------------------
+
+def test_check_text_reads_the_text_alone(monkeypatch):
+    schema = Schema.parse(SCHEMA)
+    monkeypatch.setenv("MOXI_DEMO_BACKEND", "bogus")
+    before = dict(config._cache)
+    assert config.check_text("demo", schema, 'backend = "remote"\n[local]\nretain_days = 3\n'
+                             'root = "~/rec"\n') is None
+    assert config.check_text("demo", schema, "") is None
+    assert config._cache == before
+
+
+@pytest.mark.parametrize("text, key, words", [
+    ("stray = 1\n", "stray", "not a setting of this module"),
+    ("old = 1\n", "old", "retired"),
+    ("block = 3\n", "block", "not a bool"),
+    ('backend = "far"\n', "backend", "cannot be"),
+    ('[local]\nroot = "rel/path"\n', "local.root", "relative path"),
+    ("block = \n", None, "not valid TOML"),
+])
+def test_check_text_refuses_as_the_reader_does_naming_no_file(text, key, words):
+    with pytest.raises(ConfigError) as caught:
+        config.check_text("demo", Schema.parse(SCHEMA), text)
+    assert (caught.value.file, caught.value.key) == (None, key)
+    assert words in caught.value.problem

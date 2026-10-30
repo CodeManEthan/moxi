@@ -39,6 +39,9 @@ is checked. A failed check makes the module `broken`, with the reason.
     TEARDOWN        target: SETUP's reverse, run before an uninstall removes anything
     SESSION_ENV     {variable: why}: per-session variables the module stamps; a name
                     ending in `_` is a prefix
+    CONFIG_CHECK    target, `fn(text: str) -> None`: the module's whole loader over its
+                    config file's text alone, raising when it refuses; run by `moxi config
+                    set`, `unset` and `check` (see `moxi.config`)
     QUESTIONS       {settings key: one line}: install questions
 
 A "target" is "package.module:function". An inner key of a `DAEMONS`, `TIMERS` or
@@ -118,6 +121,7 @@ KNOWN: Mapping[str, object] = MappingProxyType({
     "RESERVED_NAMES": (),
     "TEARDOWN": None,
     "SESSION_ENV": _EMPTY,
+    "CONFIG_CHECK": None,
     "QUESTIONS": _EMPTY,
 })
 
@@ -256,7 +260,7 @@ class Found(_Frozen):
         "announces", "interfaces", "api_name", "api", "cli", "summary", "optional", "gated",
         "internal_env", "settings", "setup", "segment", "daemons", "timers", "units_from",
         "health", "doctor", "stores", "budgets", "skills", "page", "components",
-        "reserved_names", "teardown", "session_env", "questions")
+        "reserved_names", "teardown", "session_env", "config_check", "questions")
     _defaults = MappingProxyType({
         "reason": "", "distribution": None, "version": None, "target": None,
         "package": None, "api": None,
@@ -299,6 +303,8 @@ class Found(_Frozen):
     reserved_names: tuple[str, ...]
     teardown: str | None
     session_env: Mapping[str, str]
+    #: The `CONFIG_CHECK` target, `fn(text: str) -> None`; imported only by `moxi.config`.
+    config_check: str | None
     questions: Mapping[str, str]
 
     @property
@@ -1089,6 +1095,7 @@ _CHECKS = {
     "RESERVED_NAMES": _reserved,
     "TEARDOWN": _target,
     "SESSION_ENV": _session_env,
+    "CONFIG_CHECK": _target,
     "QUESTIONS": _questions,
 }
 

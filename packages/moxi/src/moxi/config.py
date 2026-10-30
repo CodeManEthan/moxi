@@ -65,6 +65,9 @@ missing file means every default. A malformed file, an unknown key, a retired ke
 value of the wrong type raises `ConfigError` naming the file, the key and the fix.
 `path=` reads that file in place of the module's own.
 
+`check_text(module, schema, text)` is the same reader over a config file's text alone: no
+path, no environment overrides, no cache. It raises `ConfigError` or returns None.
+
 `Config(module, schema)` is the same reader for a running module: `start()` raises, and
 `use(key)` reads one key at the point of use, keeping the last good settings when the file
 turns bad and reporting the error once per change of the file.
@@ -75,11 +78,17 @@ Changing
 `set`, `unset`, `add_item` and `remove_item` change one key of a module's config file
 (what `moxi config set` and `moxi config unset` run): the key must be declared and live,
 the value is coerced to the key's type, and the file is edited through
-`moxi.files.edit_toml` under its lock, keeping comments and order. The whole new file is
-checked as the reader checks it before anything is written, so the file never turns
-invalid. Every change appends one line, `{module, key, op, by, at}`, to the core's
-settings history (`history()` reads it); the line never holds a value. Each refusal
-raises `ConfigError` with the problem and its fix.
+`moxi.files.edit_toml` under its lock, keeping comments and order. Before anything is
+written, the whole new text is checked twice, each check given the text alone: first by
+`check_text`, then by the module's own loader when its announcement names a
+`CONFIG_CHECK` (`fn(text: str) -> None`). A refusal from either leaves the file as it was,
+so the file never turns invalid and never holds what the module would refuse. A
+`ConfigError` the module's check raises keeps its key and reason; any other exception
+becomes one whose reason is `<module> refuses the file: <its first line>`. Either way the
+error names the module's config file. `moxi config <module> check` runs the same two
+checks over the file as it is. Every change appends one line, `{module, key, op, by,
+at}`, to the core's settings history (`history()` reads it); the line never holds a
+value. Each refusal raises `ConfigError` with the problem and its fix.
 
 This module imports only what is already loaded when Python starts; everything else it
 needs is imported inside the function that needs it, so a hook may read config through it.
@@ -359,6 +368,31 @@ class Settings(_Frozen):
         if self.sources[table] == FILE and entry in self.values[table]:
             return FILE
         return DEFAULT
+
+
+#: The environment `check_text` reads paths with: none of its own, so no override applies
+#: (a `~` still expands to the user's home).
+_NO_ENV = _MappingProxy({})
+
+
+def check_text(module: str, schema: Schema, text: str) -> None:
+    """Check config text `text` of module `module` as `load` would read it, but from the
+    text alone: no path, no environment overrides. Raises `ConfigError`; an error names no
+    file."""
+    _read_text(module, schema, text, None)
+
+
+def _read_text(module, schema, text, path) -> None:
+    """`check_text`, with each error naming `path`."""
+    import tomllib
+
+    schema.check_env(module)
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(path, None, f"is not valid TOML ({exc})",
+                          "correct the file's TOML syntax") from None
+    _walk_file(data, "", schema, path, {}, _NO_ENV)
 
 
 def load(module: str, schema: Schema, *, env=None, path=None) -> Settings:
@@ -796,13 +830,14 @@ def _history_file():
     return core().state_dir() / HISTORY
 
 
-def _schema_of(module: str) -> Schema:
-    """The schema a change of module `module` is checked against: the core's for `moxi`,
-    else the module's own, read through `moxi.modules.load`."""
+def _schema_of(module: str) -> tuple:
+    """The schema a change of module `module` is checked against, with the module's
+    `CONFIG_CHECK` target or None: the core's schema for `moxi`, else the module's own,
+    read through `moxi.modules.load`."""
     from . import modules, names
 
     if module == names.HARNESS:
-        return _core_schema()
+        return _core_schema(), None
     if not names.is_module_name(module):
         raise _refused(module, f"{module!r} is not a module name",
                        "name a module that `moxi modules` lists", 2)
@@ -817,7 +852,7 @@ def _schema_of(module: str) -> Schema:
         raise _refused(exc.file, exc.problem, exc.fix, 3) from None
     if schema is None:
         raise _refused(module, "declares no settings", "nothing to set", 3)
-    return schema
+    return schema, found.config_check
 
 
 def _refused(where, problem, fix, code, key=None) -> ConfigError:
@@ -968,7 +1003,7 @@ def _change(module, key, op, value, *, by, text=False) -> bool:
                           "pass by=, who makes it (cli, ui, moxi install)")
     from . import files
 
-    schema = _schema_of(module)
+    schema, check = _schema_of(module)
     path = _config_file(module)
     target, entry = _resolve(schema, module, key, path)
     if op == "set":
@@ -992,7 +1027,9 @@ def _change(module, key, op, value, *, by, text=False) -> bool:
                 _drop(doc, parts)
             else:
                 _edit_list(doc, parts, target, op, item, path, module, key)
-            _check_text(schema, path, doc)
+            from ._vendor import tomlkit
+
+            _check_file(module, schema, check, tomlkit.dumps(doc), path, key)
     except _Unchanged:
         return False
     except files.LockTimeout as exc:
@@ -1103,21 +1140,63 @@ def _item(value, *, inline=False):
     return tomlkit.item(value)
 
 
-def _check_text(schema, path, doc) -> None:
-    """Check the document as the reader would read it, or raise `ConfigError`."""
-    import tomllib
+def _check_file(module, schema, check, text, path, key) -> None:
+    """The two checks of a config file's text, each given the text alone: `check_text`'s
+    reader, then the module's `CONFIG_CHECK` target `check` when it names one. Raises
+    `ConfigError` naming `path`, the module's config file; `key` is the key being changed
+    (None when the file is checked as it is)."""
+    _read_text(module, schema, text, path)
+    if check is None:
+        return
+    import importlib
 
-    from ._vendor import tomlkit
-
+    target, _, name = check.partition(":")
     try:
-        data = tomllib.loads(tomlkit.dumps(doc))
-    except tomllib.TOMLDecodeError as exc:  # pragma: no cover - tomlkit writes TOML
-        raise ConfigError(path, None, f"would not be valid TOML ({exc})",
-                          "correct the file by hand, then try again") from None
-    _walk_file(data, "", schema, path, {}, os.environ)
+        func = getattr(importlib.import_module(target), name)
+    except Exception as exc:
+        raise _refused(path, f"cannot run {module}'s CONFIG_CHECK {check} "
+                       f"({_first_line(exc)})", "reinstall or repair the module", 3,
+                       key) from None
+    try:
+        func(text)
+    except ConfigError as exc:
+        raise _naming(exc, path)
+    except Exception as exc:
+        raise ConfigError(path, key, f"{module} refuses the file: {_first_line(exc)}",
+                          "give a value the module accepts") from None
+
+
+def _first_line(exc: BaseException) -> str:
+    """The first line of `exc`'s text, or its type's name when the text is empty."""
+    text = str(exc).strip()
+    return text.splitlines()[0].strip() if text else type(exc).__name__
+
+
+def _naming(exc: ConfigError, path) -> ConfigError:
+    """`exc` naming the file `path`, its key and reason kept."""
+    if exc.file != str(path):
+        exc.file = str(path)
+        where = exc.file + (f": key {exc.key!r}" if exc.key else "")
+        exc.args = (f"{where}: {exc.problem}; fix: {exc.fix}",)
+    return exc
+
+
+def _check_config(module: str, schema: Schema, check) -> None:
+    """Module `module`'s config file as it is, through the same two checks a change runs
+    (a missing file is the empty text). Raises `ConfigError` naming the file."""
+    path = _config_file(module)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except FileNotFoundError:
+        text = ""
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ConfigError(path, None, f"cannot be read ({exc})",
+                          "make the file a readable TOML file, or remove it") from None
+    _check_file(module, schema, check, text, path, None)
 
 
 __all__ = ["TYPES", "READS", "FIELDS", "ITEMS", "DEFAULT", "FILE", "ENV", "HISTORY",
            "ConfigError", "SchemaError", "Key", "Schema", "Settings", "is_switch_table",
-           "is_entry_name", "schema_for", "load", "Config", "set", "unset", "add_item",
-           "remove_item", "history"]
+           "is_entry_name", "schema_for", "check_text", "load", "Config", "set", "unset",
+           "add_item", "remove_item", "history"]

@@ -250,7 +250,7 @@ def test_modules_json_describes_each_module(site, capsys):
         "settings": None, "segment": None, "daemons": {}, "timers": {},
         "units_from": None, "health": {}, "doctor": None, "stores": {}, "budgets": {},
         "skills": None, "page": None, "components": {}, "reserved_names": [],
-        "teardown": None, "session_env": {}, "questions": {},
+        "teardown": None, "session_env": {}, "config_check": None, "questions": {},
         "optional": [
             {"extra": "cache", "sentence": "Holds a cold send.", "installed": False,
              "add": "moxi install comms --with cache"},

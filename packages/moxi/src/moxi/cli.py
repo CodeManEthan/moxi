@@ -702,7 +702,8 @@ def _config(argv: list[str]) -> int:
                         choices=("show", "path", "check", "init"),
                         help="show (the default): every key with its value, source, doc, "
                              "when it is read and who last set it; path: the file's path; "
-                             "check: exit non-zero when the file cannot be read; init: "
+                             "check: exit non-zero when the file cannot be read or the "
+                             "module refuses it; init: "
                              "write the file with every key commented out at its default")
     args = parser.parse_args(argv)
     from . import config, modules
@@ -751,15 +752,21 @@ def _config(argv: list[str]) -> int:
             return 1
         print(f"wrote {path}")
         return 0
+    if args.action == "check":
+        try:
+            config._check_config(module, schema, None if found is None
+                                 else found.config_check)
+        except config.ConfigError as exc:
+            _error(str(exc))
+            return 1
+        state = "" if path.exists() else " (no file: every key at its default)"
+        print(f"ok: {path}{state}")
+        return 0
     try:
         settings = config.load(module, schema)
     except config.ConfigError as exc:
         _error(str(exc))
         return 1
-    if args.action == "check":
-        state = "" if path.exists() else " (no file: every key at its default)"
-        print(f"ok: {path}{state}")
-        return 0
     last = _last_set(config.history(module, tail=None), schema.keys)
     print(f"# {path}{'' if path.exists() else '  (no file: every key at its default)'}")
     for key in schema.live():
