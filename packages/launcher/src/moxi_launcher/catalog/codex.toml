@@ -1,0 +1,123 @@
+# The Codex flag catalog. One table per row, keyed by the launcher's name for it;
+# moxi_launcher.catalog documents the fields. Modes: interactive (codex), exec (codex
+# exec) and host (turns' Codex host, whose flags comms' Codex wrapper also takes). The
+# host spellings are turns' host grammar, which is not diffed; `moxi doctor` checks the
+# others against the installed codex --help and codex exec --help.
+
+[model]
+type = "string"
+default = ""
+doc = "The model."
+flag = "-m"
+aliases = ["--model"]
+modes = { interactive = "-m", exec = "-m", host = "--model" }
+
+[sandbox]
+type = "enum"
+default = "workspace-write"
+values = ["read-only", "workspace-write", "danger-full-access"]
+posture = true
+doc = "The sandbox policy for the commands the model runs."
+flag = "-s"
+aliases = ["--sandbox"]
+modes = { interactive = "-s", exec = "-s", host = "--sandbox" }
+
+[approval]
+type = "enum"
+default = "on-request"
+values = ["on-request", "never"]
+posture = true
+doc = "When the model asks before running a command; turns' host owns this itself."
+flag = "-a"
+aliases = ["--ask-for-approval"]
+modes = ["interactive"]
+
+[profile]
+type = "string"
+default = ""
+doc = "A Codex config profile layered on the user's config."
+flag = "-p"
+aliases = ["--profile"]
+modes = ["interactive", "exec"]
+
+[search]
+type = "bool"
+default = false
+doc = "Turn on live web search."
+flag = "--search"
+modes = ["interactive"]
+
+[add_dir]
+type = "list"
+default = []
+items = "path"
+repeatable = true
+doc = "Another directory the session may write to; may be given more than once."
+flag = "--add-dir"
+modes = { interactive = "--add-dir", exec = "--add-dir", host = { flag = "--option", value = "sandbox_workspace_write.writable_roots={toml}" } }
+
+[config]
+type = "list"
+default = []
+repeatable = true
+doc = "A Codex config override, key=value; may be given more than once."
+flag = "-c"
+aliases = ["--config"]
+modes = { interactive = "-c", exec = "-c", host = "--option" }
+
+[cwd]
+type = "path"
+default = ""
+owned = true
+doc = "The directory Codex works in: the launch's own."
+flag = "-C"
+aliases = ["--cd"]
+modes = { interactive = "-C", exec = "-C", host = "--cwd" }
+
+[update_check]
+type = "bool"
+default = true
+owned = true
+doc = "Turn off Codex's update check at startup."
+flag = "-c"
+modes = { interactive = { flag = "-c", value = "check_for_update_on_startup=false" }, exec = { flag = "-c", value = "check_for_update_on_startup=false" }, host = { flag = "--option", value = "check_for_update_on_startup=false" } }
+
+[skip_git_check]
+type = "bool"
+default = false
+owned = true
+doc = "Let codex exec run outside a git repository; set for a scratch launch."
+flag = "--skip-git-repo-check"
+modes = ["exec"]
+
+[trust_cwd]
+type = "bool"
+default = false
+doc = "Trust the launch's directory for this launch only."
+flag = "-c"
+modes = { interactive = { flag = "-c", value = "projects.{cwd_toml}.trust_level=\"trusted\"" }, exec = { flag = "-c", value = "projects.{cwd_toml}.trust_level=\"trusted\"" }, host = { flag = "--option", value = "projects.{cwd_toml}.trust_level=\"trusted\"" } }
+
+[catalog]
+harness = "codex"
+checked = "0.153.0"
+
+[catalog.help.codex]
+command = ["codex", "--help"]
+modes = ["interactive"]
+others = [
+  "--approve-for-me", "--dangerously-bypass-approvals-and-sandbox",
+  "--dangerously-bypass-hook-trust", "--disable", "--enable", "--help", "--image",
+  "--local-provider", "--no-alt-screen", "--oss", "--remote", "--remote-auth-token-env",
+  "--strict-config", "--version", "-V", "-h", "-i",
+]
+
+[catalog.help.exec]
+command = ["codex", "exec", "--help"]
+modes = ["exec"]
+others = [
+  "--approve-for-me", "--color", "--dangerously-bypass-approvals-and-sandbox",
+  "--dangerously-bypass-hook-trust", "--disable", "--enable", "--ephemeral", "--help",
+  "--ignore-rules", "--ignore-user-config", "--image", "--json", "--local-provider",
+  "--oss", "--output-last-message", "--output-schema", "--strict-config",
+  "--thread-source", "--version", "-V", "-h", "-i", "-o",
+]

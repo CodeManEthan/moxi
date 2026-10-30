@@ -41,7 +41,9 @@ def test_its_doctor_target_answers_with_rows(found):
     from moxi_launcher import doctor
 
     assert found.doctor == "moxi_launcher.doctor:rows"
-    assert list(doctor.rows()) == []
+    rows = list(doctor.rows(read=lambda argv: None))
+    assert [(row.name, row.state) for row in rows] == [("catalog.claude", "off"),
+                                                       ("catalog.codex", "off")]
 
 
 def test_session_env_names_the_exact_stamps_not_the_prefix(found):
