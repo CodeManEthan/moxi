@@ -126,12 +126,23 @@ def ui_shell(ui_shells: Callable[..., Any], ui_shell_options: dict[str, Any]) ->
 
 @pytest.fixture(scope="session")
 def ui_browser(request: pytest.FixtureRequest) -> Iterator[Any]:
-    """The Playwright browser, headless; one for the session."""
-    from playwright.sync_api import sync_playwright
+    """The Playwright browser, headless; one for the session. Firefox or WebKit that can't
+    start on this machine skips the browser tests with the reason; Chromium that can't is
+    an error."""
+    from playwright.sync_api import Error, sync_playwright
 
+    name = request.config.getoption("--ui-browser")
     playwright = sync_playwright().start()
     try:
-        browser = getattr(playwright, request.config.getoption("--ui-browser")).launch()
+        try:
+            browser = getattr(playwright, name).launch()
+        except Error as err:
+            if name == "chromium":
+                raise
+            said = next((line.strip() for line in str(err).splitlines()
+                         if "error" in line.lower() and "launch" not in line.lower()),
+                        str(err).splitlines()[0])
+            pytest.skip(f"{name} can't start on this machine: {said}")
         try:
             yield browser
         finally:
