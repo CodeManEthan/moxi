@@ -1,8 +1,10 @@
 """A fake harness: an adapter whose turns the test starts and ends by hand.
 
-With `auto` on, a handed start or deliver enters at once (the gate's re-check, then the
-start's own draft and subagent checks, then the turn starts with the tie); with it off the
-test calls `enter()` itself, so a turn can be typed between the submit and the entry.
+With `auto` on, a handed delivery enters at once (the re-check, then an only-if-idle
+delivery's own draft and subagent checks, then the turn starts with the tie); with it off
+the test calls `enter()` itself, so a turn can be typed between the submit and the entry.
+With `auto_steer` on, a handed steer is confirmed at once (`steered`), or refused `idle`
+when no turn is open; with it off the test calls `take()` or `endpoint.refused` itself.
 """
 
 from __future__ import annotations
@@ -19,12 +21,13 @@ class FakeHarness(Harness):
     name = "fake"
 
     def __init__(self, can=("deliver", "only-if-idle", "steer", "stop-handler", "clear",
-                            "exit"), *, auto=True,
+                            "exit"), *, auto=True, auto_steer=True,
                  pid=None):
         self.can = frozenset(can)
         self.pid = os.getpid() if pid is None else pid
         self.cwd = os.getcwd()
         self.auto = auto
+        self.auto_steer = auto_steer
         self.agents = 0
         self.draft = False
         self.live_fails = False
@@ -51,6 +54,8 @@ class FakeHarness(Harness):
 
     def append(self, delivery: Delivery) -> None:
         self.appended.append(delivery)
+        if self.auto_steer:
+            self.take(delivery)
 
     def command(self, request: CommandRequest) -> None:
         self.commands.append(request)
@@ -71,6 +76,13 @@ class FakeHarness(Harness):
             return reason
         self.start_turn(delivery.id)
         return None
+
+    def take(self, delivery: Delivery) -> None:
+        """The harness's word on a steer: taken into the open turn, else `idle`."""
+        if self.open_turn is None:
+            self.endpoint.refused(delivery.id, "idle")
+        else:
+            self.endpoint.steered(delivery.id)
 
     def start_turn(self, delivery_id: str | None = None) -> str:
         turn_id = f"t{next(self._turns)}"

@@ -34,7 +34,9 @@ Then, in any order:
         minted per window, so no other window of this endpoint or any earlier one names
         it. The endpoint sends the next `submit` only once this one's window has closed.
     {"op": "append", "delivery": id, "text": "…"}
-        `$.session.append` a user-role row into the running turn (a steer).
+        `$.session.append` a user-role row into the running turn (a steer). The runner
+        reports `append.done` when the call resolves without a deny, else
+        `append.failed`.
     {"op": "command", "request": id, "name": "clear" | "exit"}
         `$.command.run` the command; the gate re-checks it (`/gate/command`).
     {"op": "live", "ask": n}
@@ -57,6 +59,8 @@ own count from 1 for this load, and `kind`:
                                                     report too
     submit.bound   {delivery, reason}               the runner's bound: still unsettled
                                                     after 5 s with no main-loop turn open
+    append.done    {delivery}                       a steer appended: `$.session.append`
+                                                    resolved without a deny
     append.failed  {delivery, reason}               a steer the runner could not append
     command.done   {request, state, reason, new_session_id}
                                                     `$.command.run` settled: `state` is
@@ -134,9 +138,10 @@ PATHS = (PATH_REPORT, PATH_LIVE, PATH_STOP, PATH_CONTEXT, PATH_GATE_ENTRY,
 #: The report kinds.
 R_SESSION, R_TURN_START, R_TURN_COMPLETE = "session", "turn.start", "turn.complete"
 R_SUBMIT_CLOSE, R_SUBMIT_BOUND = "submit.close", "submit.bound"
-R_APPEND_FAILED, R_COMMAND_DONE = "append.failed", "command.done"
+R_APPEND_DONE, R_APPEND_FAILED = "append.done", "append.failed"
+R_COMMAND_DONE = "command.done"
 REPORTS = (R_SESSION, R_TURN_START, R_TURN_COMPLETE, R_SUBMIT_CLOSE, R_SUBMIT_BOUND,
-           R_APPEND_FAILED, R_COMMAND_DONE)
+           R_APPEND_DONE, R_APPEND_FAILED, R_COMMAND_DONE)
 
 #: A submit window's three ends.
 END_RESOLVE, END_DROP, END_FAIL = "resolve", "drop", "fail"
@@ -280,7 +285,7 @@ def _handler_for(handle):
 __all__ = ["LEG", "LINE_HELLO", "LINE_FAILED", "LINE_SUBMIT", "LINE_APPEND", "LINE_COMMAND",
            "LINE_LIVE", "PATH_REPORT", "PATH_LIVE", "PATH_STOP", "PATH_CONTEXT",
            "PATH_GATE_ENTRY", "PATH_GATE_COMMAND", "PATHS", "R_SESSION", "R_TURN_START",
-           "R_TURN_COMPLETE", "R_SUBMIT_CLOSE", "R_SUBMIT_BOUND", "R_APPEND_FAILED",
+           "R_TURN_COMPLETE", "R_SUBMIT_CLOSE", "R_SUBMIT_BOUND", "R_APPEND_DONE", "R_APPEND_FAILED",
            "R_COMMAND_DONE", "REPORTS", "END_RESOLVE", "END_DROP", "END_FAIL", "ENDS",
            "GATE_CODES", "NONCE_LINE", "LATE", "MAX_BODY",
            "BadRequest", "LineWriter", "LegServer"]

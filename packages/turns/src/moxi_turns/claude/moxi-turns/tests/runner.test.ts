@@ -332,6 +332,7 @@ describe('the other lines', () => {
     await attached($, w)
     await w.line({ op: 'append', delivery: 'd3', text: 'also this' })
     expect(w.kinds()).not.toContain('append.failed')
+    expect(w.reports().find(r => r.kind === 'append.done')).toEqual({ seq: 2, kind: 'append.done', delivery: 'd3' })
   })
 
   test('command: marked for the gate, run, and reported with the session id', async ($: E, on) => {

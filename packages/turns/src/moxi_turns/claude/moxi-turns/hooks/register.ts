@@ -33,6 +33,7 @@
 //                             fail (reason: words). Sent whenever it settles, after a
 //                             bound's report too.
 //              submit.bound   {delivery, reason}  the runner's bound (below)
+//              append.done    {delivery}  $.session.append resolved without a deny
 //              append.failed  {delivery, reason}
 //              command.done   {request, state: ran|refused|failed, reason, new_session_id}
 //   /ask/context {event: ready|prompt, source, session_id}  -> {context: string | null}
@@ -341,6 +342,7 @@ async function append($: Dollar, delivery: string, text: string): Promise<void> 
     const r = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
     const deny = (r as { deny?: string }).deny
     if (deny !== undefined) void report($, 'append.failed', { delivery, reason: deny })
+    else void report($, 'append.done', { delivery })
   } catch (err) {
     void report($, 'append.failed', { delivery, reason: String(err) })
   }

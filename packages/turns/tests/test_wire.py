@@ -68,6 +68,14 @@ def notes(client, count: int, timeout: float = 5.0) -> list[tuple[str, object]]:
     return out
 
 
+def started(client, answer: dict) -> R.Started:
+    """Wait until the delivery `answer` names has started: the answer comes before the
+    worker hands the delivery to the harness."""
+    got = client.call("wait", {"delivery": answer["delivery"], "until": "started",
+                               "timeout_ms": 5000}, timeout=10)
+    return R.from_wire(got["result"])
+
+
 # -- where the endpoint serves, and what it leaves on disk ------------------------------
 
 def test_the_directory_the_address_and_hello_json(make_endpoint):
@@ -317,16 +325,19 @@ def test_a_watch_gets_its_facts_then_every_notification_in_order(make_endpoint, 
     client = connect(ep)
     ep.ready("startup", "s-1")
     opened = client.call("deliver", {"text": "one", "ref": "r1"}, timeout=5)
+    started(client, opened)
     steered = client.call("steer", {"text": "two", "ref": "r2"}, timeout=5)
+    started(client, steered)
     fake.end_turn("answer")
     fake.start_turn()                             # the person's own turn
     fake.end_turn("aborted")
-    got = notes(watch, 5)
+    got = notes(watch, 6)
     one = R.DeliveryRef(opened["delivery"], "r1", "opened")
     two = R.DeliveryRef(steered["delivery"], "r2", "steered")
     assert [R.from_notification(m, p) for m, p in got] == [
         R.Ready("startup", "s-1"),
         R.TurnStarted("t1", "s-1", 1, (one,)),
+        R.TurnSteered("t1", "s-1", R.DeliveryRef(steered["delivery"], "r2")),
         R.TurnEnded("t1", "s-1", 1, "answer", (one, two)),
         R.TurnStarted("t2", "s-1", 2, ()),
         R.TurnEnded("t2", "s-1", 2, "aborted", ()),
@@ -349,6 +360,7 @@ def test_facts_name_the_open_turn_and_the_last_ready(make_endpoint, connect):
     ep.ready("resume", "s-1")
     before = time.time()
     d = client.call("deliver", {"text": "x", "ref": "r1"}, timeout=5)
+    started(client, d)
     facts = R.from_wire(client.call("facts", {}, timeout=5))
     assert facts.turn_open and facts.turn_number == 1
     assert facts.turn.opening == R.DeliveryRef(d["delivery"], "r1")
@@ -376,10 +388,7 @@ def test_every_delivery_value_names_its_delivery_and_its_ref(make_endpoint, conn
     ep, fake = make_endpoint()
     client = connect(ep)
     d = client.call("deliver", {"text": "x", "ref": "r1"}, timeout=5)
-    started = R.from_wire(client.call("wait", {"delivery": d["delivery"],
-                                               "until": "started", "timeout_ms": 0},
-                                      timeout=5)["result"])
-    assert started == R.Started("t1", d["delivery"], "r1")
+    assert started(client, d) == R.Started("t1", d["delivery"], "r1")
     by_ref = client.call("wait", {"ref": "r1", "until": "ended", "timeout_ms": 0},
                          timeout=5)
     assert by_ref == {"delivery": d["delivery"], "pending": True}
