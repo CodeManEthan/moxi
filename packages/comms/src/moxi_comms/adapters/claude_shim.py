@@ -84,9 +84,11 @@ import sys
 import threading
 import time
 
+from moxi import exit as moxi_exit
+
 from .. import (attribution, cache, claimfile, constants, cursors,
                 directors as directors_mod, envelope, machine_line, owed,
-                stall)
+                stall, wire)
 from ..claimhold import ClaimHolder
 from ..attribution import TIER_CHOSEN, TIER_OPERATOR, VERIFIED
 from ..client import (DaemonClient, DaemonError, DaemonOffline, DaemonTimeout,
@@ -99,11 +101,11 @@ log = logging.getLogger("comms.shim")
 
 #: The `activity` kinds this shim sends (the daemon's `ACTIVITY_READY`, `ACTIVITY_TURN`).
 ACTIVITY_READY, ACTIVITY_TURN = "ready", "turn"
+#: The daemon method each kind is sent as; no kind is a plain `activity`.
+ACTIVITY_METHODS = {ACTIVITY_READY: "ready", ACTIVITY_TURN: "turn_ended", "look": "look"}
 
-#: Exit codes, the CLI's own (`cli.py`): a claim that was refused, and a daemon that was
-#: not there. Spelled here rather than imported because `cli` is the heavy module and the
-#: shim is the thing a harness spawns.
-EXIT_REFUSED, EXIT_OFFLINE = 2, 4
+#: Exit codes, `moxi.exit`'s: a claim that was refused, and a daemon that was not there.
+EXIT_REFUSED, EXIT_OFFLINE = moxi_exit.REFUSED, moxi_exit.TEMPFAIL
 
 #: Said to stderr -- the ONLY thing a refused spawn says, so this is where an operator
 #: reads why comms is absent from a session. One line, no traceback.
@@ -664,7 +666,7 @@ class ClaudeShim:
             # while it waits. Any other refusal ends the adapter, with one line.
             if not self.autoreconnect or self.refusal_kind(e) != NAME_REFUSAL:
                 raise
-            self.claims.name_refused((e.response.get("holder") or {}).get("qualified"))
+            self.claims.name_refused((e.data.get("holder") or {}).get("qualified"))
             self._report("refused", REFUSED_WAITING)
         if self.autoreconnect:
             self._supervisor = threading.Thread(target=self._supervise, daemon=True)
@@ -688,10 +690,10 @@ class ClaudeShim:
         None when it is not a refusal at all (a transient accident, a timeout). A NAME
         refusal names this shim's own identity as the holder. Everything else is OTHER.
         """
-        response = getattr(error, "response", None) or {}
-        if not response.get("refused") or response.get("transient"):
+        if (error.code is None or error.try_again
+                or error.code == wire.INTERNAL_ERROR):
             return None
-        holder = (response.get("holder") or {}).get("qualified")
+        holder = (error.data.get("holder") or {}).get("qualified")
         own = self.own_qualified()
         if own is not None and holder == own:
             return NAME_REFUSAL
@@ -732,11 +734,11 @@ class ClaudeShim:
                 session_id, projects_root, turned = (self.session_id, self.projects_root,
                                                      self.turned)
                 endpoint = self.endpoint
-            return client.register(name=self.name, scope=self.scope,
-                                   global_=self.global_, project=self.project,
-                                   adapter="claude-shim", session_id=session_id,
-                                   holding=holding, projects_root=projects_root,
-                                   turned=turned, endpoint=endpoint)
+            return client.bind(name=self.name, scope=self.scope,
+                               global_=self.global_, project=self.project,
+                               adapter="claude-shim", session_id=session_id,
+                               holding=holding, projects_root=projects_root,
+                               turned=turned, endpoint=endpoint)
 
         owed_ready = None
 
@@ -876,7 +878,7 @@ class ClaudeShim:
             self._stop.wait(next(delays))
             return None
         except DaemonError as e:
-            if e.response.get("transient"):
+            if e.try_again or e.code == wire.INTERNAL_ERROR:
                 # The daemon ANSWERED, but with an accident, not a refusal: a boundary
                 # read that 429'd under a restart burst, a broken record. Nobody holds
                 # the name; keep the backoff going. Falling into the ever-bound arm below
@@ -891,7 +893,7 @@ class ClaudeShim:
                 log.warning("this session's name was claimed by another holder (%s); "
                             "no longer retrying", e)
                 self.ended_because = f"name held by another session: {e}"
-                self.claims.name_refused((e.response.get("holder") or {}).get("qualified"))
+                self.claims.name_refused((e.data.get("holder") or {}).get("qualified"))
                 self._report("refused", REFUSED_TERMINAL)
                 return None
             if kind == NAME_REFUSAL:
@@ -902,7 +904,7 @@ class ClaudeShim:
                 # daemon's one lock); the ceiling is the steady state.
                 log.info("this session's name is held by another session (%s); still "
                          "waiting for it to free", e)
-                self.claims.name_refused((e.response.get("holder") or {}).get("qualified"))
+                self.claims.name_refused((e.data.get("holder") or {}).get("qualified"))
                 self._report("refused", REFUSED_WAITING)
                 self._stop.wait(next(delays))
                 return None
@@ -915,10 +917,9 @@ class ClaudeShim:
             return None
 
     # ------------------------------------------------------------------ daemon pushes
-    def _on_push(self, frame: dict) -> None:
-        op = frame.get("op")
-        if op == "deliver":
-            payload = frame["payload"]
+    def _on_push(self, method: str, params: dict) -> None:
+        if method == "deliver":
+            payload = params["payload"]
             with self._lock:
                 if not self.claims.holds:
                     return       # nothing is injected addressed to a claim not held
@@ -926,13 +927,13 @@ class ClaudeShim:
                     return
                 self.held_ids.add(payload["message_id"])
                 self.queue.append(payload)
-        elif op == "replay_complete":
+        elif method == "replay_complete":
             with self._lock:
                 self.replaying = False
-                if frame.get("truncated"):
-                    self.replay_notice = frame.get("notice")
-            log.info("replay complete for %s at cursor %s", frame.get("identity"),
-                     frame.get("cursor"))
+                if params.get("truncated"):
+                    self.replay_notice = params.get("notice")
+            log.info("replay complete for %s at cursor %s", params.get("identity"),
+                     params.get("cursor"))
 
     # ------------------------------------------------------------------ turn boundary
     def on_turn_boundary(self, *, idle: bool = False, failed: bool = False) -> str | None:
@@ -1052,8 +1053,6 @@ class ClaudeShim:
         fields = {"turned": turned}
         if endpoint is not None:
             fields["endpoint"] = endpoint
-        if kind:
-            fields["kind"] = kind
         if source:
             fields["source"] = source
         if handled is not None:
@@ -1064,7 +1063,7 @@ class ClaudeShim:
             fields["session_id"] = session_id
         if projects_root:
             fields["projects_root"] = projects_root
-        client.notify("activity", identity=identity, **fields)
+        client.notify(ACTIVITY_METHODS.get(kind, "activity"), {"identity": identity, **fields})
         return client.connected
 
     def notify_endpoint(self, present: bool) -> bool:
@@ -1191,8 +1190,8 @@ class ClaudeShim:
             self.awaiting_ids = tuple(str(p["message_id"]) for p in batch)
             self.awaiting_mark = self.claims.hold_mark()
         if self._client:
-            self._client.notify("injected", identity=identity, through=str(high),
-                                digest=text)
+            self._client.notify("injected", {"identity": identity, "through": str(high),
+                                             "text": text})
         log.info("injected %d message(s) for %s through %s", len(batch), identity, high)
         return text
 

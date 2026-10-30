@@ -30,14 +30,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+from moxi import exit as moxi_exit
 from moxi import paths as moxi_paths
 
 from . import release
 
 ACTIONS = ("install", "uninstall", "status")
 
-#: Exit codes, the CLI's: 0 done, 1 systemctl failed, 2 refused before anything ran.
-EXIT_OK, EXIT_FAILED, EXIT_REFUSED = 0, 1, 2
+#: Exit codes, `moxi.exit`'s: done, systemctl failed, refused before anything ran.
+EXIT_OK, EXIT_FAILED, EXIT_REFUSED = moxi_exit.OK, moxi_exit.ERROR, moxi_exit.REFUSED
 
 #: The daemon's console script, which the unit runs.
 DAEMON_SCRIPT = "moxi-comms-daemon"

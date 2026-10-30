@@ -218,7 +218,7 @@ def test_a_record_message_naming_console_is_delivered_to_nobody_and_pended_for_n
     assert nothing_kept_for(console, CONSOLE)
     agents = DaemonClient(daemon_socket()).connect()
     try:
-        view = agents.query("agents")
+        view = agents.call("agents")
     finally:
         agents.close()
     assert CONSOLE not in view["waiting"] and view["pending"] == {}
@@ -524,7 +524,7 @@ def test_a_send_only_register_answer_and_roster_have_no_slot(console, pushes):
     assert pushes.reply["identity"]["qualified"] == CONSOLE
     view = DaemonClient(daemon_socket()).connect()
     try:
-        row = [b for b in view.query("agents")["bindings"] if b["qualified"] == CONSOLE]
+        row = [b for b in view.call("agents")["bindings"] if b["qualified"] == CONSOLE]
     finally:
         view.close()
     assert row == [{"qualified": CONSOLE, "name": "relay", "scope": "proj-a",

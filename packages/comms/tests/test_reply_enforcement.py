@@ -61,8 +61,7 @@ def line_zero(msg):
 def query_owed(identity, authors=None, referents=()):
     client = DaemonClient(daemon_socket()).connect()
     try:
-        return client.query("owed", identity=identity, authors=authors or {},
-                            referents=list(referents))
+        return client.call("owed", {"identity": identity, "authors": authors or {}, "referents": list(referents)})
     finally:
         client.close()
 
@@ -307,7 +306,7 @@ def test_an_unknown_read_is_what_an_old_daemon_answers(rig):
     try:
         from moxi_comms.client import DaemonError
         with pytest.raises(DaemonError, match="method not found: nope") as refused:
-            client.query("nope")
+            client.call("nope")
         assert refused.value.response["refused"] is True
     finally:
         client.close()
@@ -475,8 +474,7 @@ def test_the_delta_announces_the_operator_joining_and_leaving(rig, bind, tmp_pat
 # ------------------------------------------------- the unanswered record
 
 def note_unanswered(shim, message_id, author, at=None):
-    shim._client.notify("unanswered", identity=shim.identity, message_id=message_id,
-                        author=author, **({"at": at} if at is not None else {}))
+    shim._client.notify("unanswered", {"identity": shim.identity, "message_id": message_id, "author": author, **{"at": at} if at is not None else {}})
 
 
 def unanswered(rig):
@@ -497,8 +495,8 @@ def test_a_forged_notify_from_another_connection_is_dropped(rig):
     task = send(rig, "reviewer", "build it")
     forger = DaemonClient(daemon_socket()).connect()
     try:
-        forger.notify("unanswered", identity=R, message_id=task.id, author=P)
-        forger.query("agents")                  # a round trip: the notify has landed
+        forger.notify("unanswered", {"identity": R, "message_id": task.id, "author": P})
+        forger.call("agents")                  # a round trip: the notify has landed
     finally:
         forger.close()
     assert unanswered(rig) == {}
@@ -521,7 +519,7 @@ def test_a_payment_already_in_the_index_records_nothing(rig):
     paid = reply(rig, task.id, "done", who=REVIEWER)
     indexed(rig, paid.id)
     note_unanswered(reviewer, task.id, P)
-    reviewer._client.query("agents")
+    reviewer._client.call("agents")
     assert unanswered(rig) == {}
 
 

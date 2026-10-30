@@ -144,7 +144,7 @@ def test_an_unknown_method_is_refused_and_the_connection_lives_on(rig):
     client = cli.DaemonClient(rig.daemon.socket_path).connect()
     try:
         client.notify("nudge-the-daemon")
-        assert client.request("ping")["ok"] is True
+        assert client.call("max_id")["ok"] is True
     finally:
         client.close()
 

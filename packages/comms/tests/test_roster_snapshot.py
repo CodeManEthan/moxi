@@ -33,7 +33,7 @@ def waiting_for(q) -> bool:
     from moxi_comms.client import DaemonClient
     c = DaemonClient(daemon_socket()).connect()
     try:
-        info = c.query("agents")
+        info = c.call("agents")
     finally:
         c.close()
     return q in (info.get("waiting") or {}) or bool((info.get("pending") or {}).get(q))

@@ -30,7 +30,7 @@ def raw(message_id):
     """The daemon's answer as it comes off the socket, `id` and `ok` taken off."""
     c = DaemonClient(daemon_socket()).connect()
     try:
-        answer = c.query("attributed_message", message_id=str(message_id))
+        answer = c.call("attributed_message", {"message_id": str(message_id)})
     finally:
         c.close()
     answer.pop("id", None)

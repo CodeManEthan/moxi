@@ -183,7 +183,7 @@ def raw_activity(pushes, q, **fields):
     """An `activity` frame on a bare binding's own connection (a bare claude-shim, a codex or an
     opencode agent bound by `adapters`): the release points ride
     these frames, whichever adapter code sends them."""
-    pushes.client.notify("activity", identity=q, **fields)
+    pushes.client.notify("activity", {"identity": q, **fields})
 
 
 def raw_turn(pushes, q, handled=(), unhandled=()):
@@ -234,7 +234,7 @@ def adapters():
         # post was held) and hands a row the test means to keep. If the daemon ever
         # serves a connection's frames out of order, the ping still answers but proves
         # nothing, and this race comes back.
-        c.request("ping")
+        c.call("max_id")
         made.append(c)
         pushes.client = c
         return pushes
@@ -975,7 +975,7 @@ def test_comms_agents_counts_cold_held_mail(rig):
     wait_until(lambda: len(held_of(rig)) == 2)
     c = DaemonClient(daemon_socket()).connect()
     try:
-        view = c.query("agents")
+        view = c.call("agents")
     finally:
         c.close()
     assert view["waiting"][REVIEWER_Q]["count"] == 2
@@ -1260,8 +1260,7 @@ def test_the_daemon_takes_them_only_from_the_bindings_own_connection(rig):
 
 def test_a_kind_turn_sets_turned_whatever_the_frame_says(rig):
     s = shim(rig, SESS_A, age=60)
-    s._client.notify("activity", identity=REVIEWER_Q, session_id=SESS_A, turned=False,
-                     kind="turn")
+    s._client.notify("turn_ended", {"identity": REVIEWER_Q, "session_id": SESS_A, "turned": False})
     wait_until(lambda: rig.daemon.bindings[REVIEWER_Q].turned)
 
 
@@ -1269,7 +1268,7 @@ def test_a_frame_with_neither_field_leaves_projects_root_unset(rig):
     old = _old_shim_register(SESS_A)
     wait_until(lambda: REVIEWER_Q in rig.daemon.bindings)
     assert rig.daemon.bindings[REVIEWER_Q].projects_root is None
-    old.client.notify("activity", identity=REVIEWER_Q, session_id=SESS_A)
+    old.client.notify("activity", {"identity": REVIEWER_Q, "session_id": SESS_A})
     time.sleep(0.1)
     assert rig.daemon.bindings[REVIEWER_Q].projects_root is None
     old.client.close()

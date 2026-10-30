@@ -100,7 +100,7 @@ class Peer:
         self.sync()
 
     def sync(self) -> None:
-        self.client.request("ping")
+        self.client.call("max_id")
 
     def payloads(self) -> list:
         return [f["payload"] for f in self.frames if f.get("op") == "deliver"]
@@ -112,7 +112,7 @@ class Peer:
         return [p["message_id"] for p in self.payloads() if p.get("held") is True]
 
     def activity(self, **fields) -> None:
-        self.client.notify("activity", identity=self.q, **fields)
+        self.client.notify("activity", {"identity": self.q, **fields})
         self.sync()
 
     def turn(self, handled=(), unhandled=()) -> None:
@@ -679,7 +679,7 @@ def test_a_ready_before_the_register_goes_after_it_once(rig, frames):
     shim.notify_ready("startup")
     shim.start()
     assert wait_until(lambda: [p["message_id"] for p in shim.queue] == [held])
-    shim._client.request("ping")
+    shim._client.call("max_id")
     assert len(frames.of(REVIEWER_Q, kind="ready")) == 1
     assert frames.of(REVIEWER_Q, kind="ready")[0]["source"] == "startup"
     assert all(p.get("held") is True for p in shim.queue)

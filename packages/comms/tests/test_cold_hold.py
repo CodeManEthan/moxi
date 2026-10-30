@@ -123,15 +123,14 @@ def stop_shim(rig, s, q=REVIEWER_Q):
 def agents_view():
     c = DaemonClient(daemon_socket()).connect()
     try:
-        return c.query("agents")
+        return c.call("agents")
     finally:
         c.close()
 
 
 def bare_turn(pushes, q, handled=()):
     """`activity kind=turn` with `handled` from a bare binding's own connection."""
-    pushes.client.notify("activity", identity=q, kind="turn", turned=True,
-                         handled=[str(i) for i in handled], unhandled=[])
+    pushes.client.notify("turn_ended", {"identity": q, "turned": True, "handled": [str(i) for i in handled], "unhandled": []})
 
 
 # ================================================================ the held send

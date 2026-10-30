@@ -696,7 +696,7 @@ def own_activity(adapter, **fields) -> None:
             report["session_id"] = adapter.session_id
         if adapter.projects_root:
             report["projects_root"] = adapter.projects_root
-    client.notify("activity", identity=identity, **{**report, **fields})
+    client.notify("activity", {"identity": identity, **{**report, **fields}})
 
 
 def send_turn(adapter, handled=(), unhandled=()) -> None:

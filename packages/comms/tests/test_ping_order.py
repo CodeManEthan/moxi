@@ -60,7 +60,7 @@ def ask_injected(identity=IDENTITY) -> dict:
     """The read surface, taken the way a caller outside the daemon has to take it."""
     client = DaemonClient(daemon_socket()).connect()
     try:
-        return client.query("injected", identity=identity)
+        return client.call("last_digest", {"identity": identity})
     finally:
         client.close()
 
@@ -71,9 +71,9 @@ def test_the_two_ordered_pings_share_one_strictly_increasing_count():
     client = DaemonClient("/nowhere")
     sent = recording(client)
 
-    client.notify("activity", identity=IDENTITY)
-    client.notify("injected", identity=IDENTITY, through="7", digest="hi")
-    client.notify("activity", identity=IDENTITY)
+    client.notify("activity", {"identity": IDENTITY})
+    client.notify("injected", {"identity": IDENTITY, "through": "7", "text": "hi"})
+    client.notify("activity", {"identity": IDENTITY})
 
     assert [f["seq"] for f in sent.frames] == [1, 2, 3], (
         "one counter per source, shared by both kinds -- the daemon keeps one "
@@ -90,9 +90,9 @@ def test_an_unordered_notify_is_not_numbered():
 def test_each_connection_counts_from_one():
     a, b = DaemonClient("/nowhere"), DaemonClient("/nowhere")
     sent_a, sent_b = recording(a), recording(b)
-    a.notify("activity", identity=IDENTITY)
-    a.notify("activity", identity=IDENTITY)
-    b.notify("activity", identity=IDENTITY)
+    a.notify("activity", {"identity": IDENTITY})
+    a.notify("activity", {"identity": IDENTITY})
+    b.notify("activity", {"identity": IDENTITY})
     assert [f["seq"] for f in sent_a.frames] == [1, 2]
     assert [f["seq"] for f in sent_b.frames] == [1], (
         "an adapter builds a fresh client on every reconnect; the count restarts with it")
@@ -103,20 +103,20 @@ def test_each_connection_counts_from_one():
 def test_a_stale_activity_ping_is_dropped(rig):
     client = DaemonClient(daemon_socket()).connect()
     try:
-        client.notify("activity", identity=IDENTITY)          # seq 1
+        client.notify("activity", {"identity": IDENTITY})          # seq 1
         assert wait_until(lambda: rig.daemon.activity.get(IDENTITY))
         first = rig.daemon.activity[IDENTITY]
 
         rig.clock.advance(100)
         client._client.notify("activity", {"identity": IDENTITY, "seq": 1})
-        client.request("ping")                                 # barrier
+        client.call("max_id")                                 # barrier
         assert rig.daemon.activity[IDENTITY] == first, "equal is not greater"
 
         client._client.notify("activity", {"identity": IDENTITY, "seq": 0})
-        client.request("ping")
+        client.call("max_id")
         assert rig.daemon.activity[IDENTITY] == first, "a late ping is not a fresh turn"
 
-        client.notify("activity", identity=IDENTITY)           # seq 2, genuinely newer
+        client.notify("activity", {"identity": IDENTITY})           # seq 2, genuinely newer
         assert wait_until(lambda: rig.daemon.activity[IDENTITY] != first)
     finally:
         client.close()

@@ -446,7 +446,7 @@ def session_target(client, qualified: str) -> Target:
     from .client import DaemonError, DaemonOffline
 
     try:
-        reply = client.query("session", identity=qualified)
+        reply = client.call("session", {"identity": qualified})
     except DaemonOffline as e:
         return target_for_name(qualified, error=f"the comms daemon is offline ({e})")
     except DaemonError as e:

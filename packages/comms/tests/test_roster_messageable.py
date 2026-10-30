@@ -306,7 +306,7 @@ def test_the_daemons_answer_keeps_an_empty_pending_beside_waiting(rig):
     def info():
         c = DaemonClient(daemon_socket()).connect()
         try:
-            return c.query("agents")
+            return c.call("agents")
         finally:
             c.close()
 

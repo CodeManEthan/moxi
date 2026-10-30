@@ -504,10 +504,6 @@ class Daemon:
             "look": self._look,
             "activity": self._activity,
             "unanswered": self._note_unanswered,
-            # Until every operator send goes through `send`: the send verb writes the
-            # operator's message to the local record itself and says so here, so the
-            # record's pump fans it out now rather than at its next poll.
-            "nudge": self._nudge,
         }
 
     # ------------------------------------------------------------------ directory
@@ -762,13 +758,6 @@ class Daemon:
             if named:
                 self._window_take(b, lambda mid: mid in named)
             self._on_turn(b, params)
-        return None
-
-    def _nudge(self, conn, params: dict) -> None:
-        # Only the local record has a `nudge`; the mock fans out in-process, so on the
-        # mock it does nothing.
-        if hasattr(self.record, "nudge"):
-            self.record.nudge()
         return None
 
     # ------------------------------------------------------------------ register
@@ -1084,8 +1073,11 @@ class Daemon:
 
     # --- record reads, for callers outside comms ------------------------------------
     def _message_query(self, frame: dict) -> dict:
-        msg = self.record.get_message(str(frame.get("message_id")))
-        return {"message": msg.to_dict() if msg else None}
+        mid = str(frame.get("message_id"))
+        msg = self.record.get_message(mid)
+        if msg is None:
+            raise _unknown_message(mid)
+        return {"message": msg.to_dict()}
 
     def _history_query(self, frame: dict) -> dict:
         channel_id = frame.get("channel_id") or self._names_channel()
@@ -1187,7 +1179,7 @@ class Daemon:
 
             -> {"op": "query", "kind": "attributed_message",
                 "message_id": "4611686018427387905"}
-            <- {"ok": true, "message_id": "4611686018427387905", "found": true,
+            <- {"message_id": "4611686018427387905",
                 "room": "#names",
                 "author": {"name": "planner@proj-a", "tier": "chosen",
                            "attribution": "verified"},
@@ -1206,8 +1198,8 @@ class Daemon:
         no machine line has no recipients, and its `text` is the whole body. `room` is the
         room's name; only `#names` is routed.
 
-        An id the record does not hold answers `found: false` with every other field
-        null or empty; never a refusal. An id that is not a message id is refused.
+        An id the record does not hold is refused `unknown-message`, naming the id. An
+        id that is not a message id is refused as a bad param.
 
         A READ. It changes no hold, pend, delivery, cursor or ask state. Who may ask:
         any process that can open this socket, as for `record_message`, `session` and
@@ -1221,8 +1213,7 @@ class Daemon:
             raise Refusal("attributed_message: `message_id` must be a message id")
         msg = self.record.get_message(mid)
         if msg is None:
-            return {"message_id": mid, "found": False, "room": None, "author": None,
-                    "recipients": [], "resolved": [], "text": None, "timestamp": None}
+            raise _unknown_message(mid)
         author = self.attribute(msg, live=False)
         ml = parse_machine_line(msg.content)
         tags = list(ml.recipients) if ml is not None else []
@@ -1230,7 +1221,7 @@ class Daemon:
         for tag in tags:
             r = self.resolve(tag)
             resolved.append(r.qualified if r.resolvable else None)
-        return {"message_id": msg.id, "found": True,
+        return {"message_id": msg.id,
                 "room": self.record.channel_name(msg.channel_id) or msg.channel_id,
                 "author": {"name": author.qualified, "tier": author.tier,
                            "attribution": author.attribution},
@@ -2799,6 +2790,12 @@ class Refusal(Exception):
         super().__init__(message)
         self.code = code
         self.extra = extra
+
+
+def _unknown_message(mid: str) -> Refusal:
+    """The refusal for a message id the record doesn't hold."""
+    return Refusal(f"no message {mid} in the record", code=wire.UNKNOWN_MESSAGE,
+                   message_id=mid)
 
 
 def _read(daemon, attr: str):

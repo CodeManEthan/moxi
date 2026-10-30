@@ -26,7 +26,7 @@ from test_reply_enforcement import (PLANNER, REVIEWER, P, R, indexed, query_owed
 def owner(session_id):
     client = DaemonClient(daemon_socket()).connect()
     try:
-        answer = client.query("owner", session_id=session_id)
+        answer = client.call("owner", {"session_id": session_id})
     finally:
         client.close()
     answer.pop("id", None)

@@ -195,8 +195,8 @@ def test_the_shim_starts_from_its_spawn_environment(rig, monkeypatch):
 def test_the_session_query_answers_bound_and_unbound(rig):
     reviewer_with_session(rig)
     with _client() as c:
-        bound = c.query("session", identity=REVIEWER_Q)
-        unbound = c.query("session", identity="nobody@proj-a")
+        bound = c.call("session", {"identity": REVIEWER_Q})
+        unbound = c.call("session", {"identity": "nobody@proj-a"})
     assert bound["bound"] is True and bound["adapter"] == "claude-shim"
     assert bound["session_id"] == SESS_REVIEWER and bound["bound_at"] is not None
     assert bound["bound_for"] >= 0
@@ -653,7 +653,7 @@ def test_a_ready_with_no_source_releases_nothing_and_a_clear_releases(rig):
 def test_an_activity_with_no_kind_releases_nothing(rig):
     reviewer = rig.shim(**REVIEWER)
     mid = next_turn(rig)
-    reviewer._client.notify("activity", identity=REVIEWER_Q)      # an older shim's frame
+    reviewer._client.notify("activity", {"identity": REVIEWER_Q})      # an older shim's frame
     time.sleep(0.2)
     assert reviewer.queue == [] and held_of(rig) == {mid}
 
@@ -808,7 +808,7 @@ def test_the_queue_load_runs_before_any_method_is_answered(rig, monkeypatch):
         early = DaemonClient(daemon_socket(), timeout=0.5).connect()
         try:
             with pytest.raises(DaemonTimeout):
-                early.request("ping")                     # waits for the queue
+                early.call("max_id")                     # waits for the queue
         finally:
             early.close()
         live = rig.post_as("planner@proj-a", [REVIEWER_Q], "live, inside the boot window")
@@ -934,7 +934,7 @@ def test_flagged_mail_waits_at_every_adapters_bind_but_the_operators(
         else:
             time.sleep(0.2)
             assert pushes.delivered() == []
-            c.notify("activity", identity=q, kind="ready", source="startup")
+            c.notify("ready", {"identity": q, "source": "startup"})
             assert wait_until(lambda: pushes.delivered())
         (payload,) = pushes.delivered()
         assert payload["message_id"] == held.id and payload["held"] is True
@@ -953,7 +953,7 @@ def test_comms_agents_and_comms_explain_name_queued_mail(rig):
     rig.clock.advance(2 * 86400 + 3 * HOUR)
     c = DaemonClient(daemon_socket()).connect()
     try:
-        view = c.query("agents")
+        view = c.call("agents")
     finally:
         c.close()
     assert view["pending"] == {} and "held" not in view

@@ -37,7 +37,7 @@ def ask(identity=IDENTITY, message_id=None) -> dict:
     """The daemon's answer, taken the way a caller outside the daemon has to take it."""
     client = DaemonClient(daemon_socket()).connect()
     try:
-        return client.query("explain", identity=identity, message_id=message_id)
+        return client.call("explain", {"identity": identity, "message_id": message_id})
     finally:
         client.close()
 

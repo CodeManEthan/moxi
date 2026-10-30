@@ -282,8 +282,7 @@ def test_a_message_that_lands_during_the_round_trip_is_delivered_not_stranded(ri
             "the message that landed during the round trip was delivered exactly once")
         assert delivered[0]["payload"].get("held") is True, \
             "the register's release owns it (its row), not live routing"
-        client.notify("activity", identity="planner@proj-a", kind="turn", turned=True,
-                      handled=[msg.id], unhandled=[], session_id=warm)
+        client.notify("turn_ended", {"identity": "planner@proj-a", "turned": True, "handled": [msg.id], "unhandled": [], "session_id": warm})
         assert wait_until(lambda: not queued(rig.daemon, "planner@proj-a")), (
             "and it left the queue when its turn completed")
     finally:
