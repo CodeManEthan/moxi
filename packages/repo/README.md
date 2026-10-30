@@ -41,7 +41,9 @@ moxi repo git-hooks list                         # every repo repo has written t
   so it does where an indexed repo is gone and its path is now inside another repo, which
   it leaves alone.
 - `moxi repo git-hooks enable|disable PATH PIECE` turns one piece on or off in one repo. A
-  disabled piece stays registered, with its settings.
+  disabled piece stays registered, with its settings. An event whose pieces are all
+  disabled, or all removed, loses its hook entry or shim, and in shim mode the existing git
+  hook moves back.
 - `moxi repo git-hooks refresh [PATH]` reads the declarations, git's version and the
   interpreter again, and rewrites every hook entry, shim and launcher of one repo or of
   every indexed repo. It keeps each piece's `enabled` key and settings.

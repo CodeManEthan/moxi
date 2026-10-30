@@ -657,11 +657,15 @@ def _status_of(repo: Repo, in_index: bool, version, good: dict) -> dict:
     events = {}
     ours = shim.our_shims(repo.hooks_dir)
     python, runner = gitconf.interpreter(), gitconf.runner_file()
-    for event in sorted(state.events()):
+    running = state.events()
+    for event in sorted({p["event"] for p in listed if p["event"] in EVENTS}):
         info: dict = {"pieces": [p["id"] for p in listed if p["event"] == event],
                       "via": None, "existing": None, "chain_line": None}
         hook = repo.hooks_dir / event
-        if mode == "config":
+        if event not in running:
+            # Every piece of it is disabled, so nothing of repo's is there to check.
+            info["existing"] = str(hook) if _runnable(hook) else None
+        elif mode == "config":
             info["via"] = "config entry"
             command = state.entries.get(event)
             if command is None:

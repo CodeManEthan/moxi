@@ -238,11 +238,12 @@ class State:
         self.sections: set[str] = set()
 
     def events(self) -> dict[str, int]:
-        """Each event with a registered piece -> the guard's exit status for it."""
+        """Each event with an enabled piece -> the guard's exit status for it. An event
+        whose pieces are all disabled has no entry or shim, as one with none."""
         out: dict[str, int] = {}
         for section in self.pieces.values():
             event = last(section, "event")
-            if event not in EVENTS:
+            if event not in EVENTS or not enabled(section):
                 continue
             closed = (enabled(section) and fail_policy(section) == "closed"
                       and can_refuse(event))

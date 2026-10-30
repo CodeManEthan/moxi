@@ -803,3 +803,25 @@ def test_a_shim_left_in_the_default_dir_goes_when_another_inside_dir_takes_over(
 def shim_files(where: Path) -> list[str]:
     from moxi_repo import shim
     return sorted(shim.our_shims(where))
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_an_event_whose_pieces_are_all_disabled_loses_its_entry_or_shim(demo, mode):
+    repo = demo.repo()
+    hooks = repo / ".git" / "hooks"
+    existing_hook(repo, "pre-commit", demo.log)
+    original = (hooks / "pre-commit").read_text()
+    api.add(repo, "demo/gate", "demo/lint", "demo/watch", mode=mode)
+    api.disable(repo, "demo/gate")
+    api.disable(repo, "demo/lint")
+    state = gitconf.read(gitconf.resolve(repo))
+    assert set(state.entries) == ({"post-commit"} if mode == "config" else set())
+    assert (hooks / "pre-commit").read_text() == original
+    assert not (hooks / "pre-commit.local").exists()
+    [listed] = api.status(repo)
+    assert listed["problems"] == [] and problems(f"hooks {repo}") == []
+    assert listed["events"]["pre-commit"]["via"] is None
+    api.enable(repo, "demo/lint")
+    change(repo)
+    assert commit(repo).returncode == 0
+    assert demo.ids() == ["demo/lint", "existing", "demo/watch"]
