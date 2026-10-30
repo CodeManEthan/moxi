@@ -59,6 +59,9 @@ class DaemonNoAnswer(DaemonError):
     """A request left this process, but the daemon did not answer it."""
 
 
+#: The marker `_ping` queues behind the pushes it waits for.
+_BARRIER = object()
+
 #: Each old request op, and each old query kind, as the daemon method that replaced it.
 _REQUESTS = {"register": "bind", "post": "send"}
 _QUERIES = {"record_message": "message", "record_history": "history",
@@ -143,6 +146,9 @@ class DaemonClient:
     def _read_loop(self) -> None:
         try:
             for method, params in self._client.notifications():
+                if method is _BARRIER:
+                    params.set()
+                    continue
                 if self.on_push:
                     self.on_push({"op": method, **(params if isinstance(params, dict)
                                                    else {})})
@@ -159,10 +165,7 @@ class DaemonClient:
 
     def _request(self, op: str, *, no_answer=None, **kwargs) -> dict:
         if op == "ping":
-            # The hello at connect agreed the version; nothing is left to ask.
-            if not self.connected:
-                raise DaemonOffline("comms offline: not connected to the daemon")
-            return {"ok": True}
+            return self._ping()
         method, params = _outbound(op, kwargs)
         if not self.connected:
             raise DaemonOffline("comms offline: not connected to the daemon")
@@ -182,6 +185,30 @@ class DaemonClient:
         if method == "bind" and "high" in answer:
             answer["hwm"] = answer["high"]
         return answer
+
+    def _ping(self) -> dict:
+        """A round trip, answered once the daemon has handled everything sent before
+        it on this connection, and returned once every push the daemon sent before its
+        answer has been handed to `on_push`. The hello at connect agreed the version, so
+        it asks a read that changes nothing."""
+        if not self.connected:
+            raise DaemonOffline("comms offline: not connected to the daemon")
+        try:
+            self._client.call("max_id", {}, timeout=self.timeout)
+        except ipc.RpcError as e:
+            response = _response(e)
+            raise DaemonError(response["error"], response) from None
+        except ipc.Timeout:
+            raise DaemonTimeout("timeout waiting for ping") from None
+        except (ipc.IpcError, OSError) as e:
+            raise DaemonOffline(f"comms offline: {e}") from e
+        # Every push sent before the answer is queued by now; one more item behind them
+        # says when the read loop has handed them all on. The queue is the client's own.
+        passed = threading.Event()
+        self._client._notes.put((_BARRIER, passed))
+        if self._reader is not threading.current_thread():
+            passed.wait(self.timeout)
+        return {"ok": True}
 
     def notify(self, op: str, **kwargs) -> None:
         """Fire-and-forget notification (activity and its kinds, injected, unanswered).
