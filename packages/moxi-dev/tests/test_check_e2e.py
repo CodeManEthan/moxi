@@ -77,7 +77,10 @@ def last_line(capsys) -> str:
     return capsys.readouterr().out.strip().splitlines()[-1]
 
 
-def test_the_check_syncs_its_own_env_and_runs_the_picked_suites(workspace, capsys):
+def test_the_check_syncs_its_own_env_and_runs_the_picked_suites(workspace, capsys,
+                                                                monkeypatch):
+    # Inherited, this would make `-n auto` serial; the suites still run under workers.
+    monkeypatch.setenv("PYTEST_XDIST_AUTO_NUM_WORKERS", "0")
     (workspace / "packages/low/tests/test_more.py").write_text(UNDER_WORKERS)
     assert check.main([]) == 0
     line = last_line(capsys)

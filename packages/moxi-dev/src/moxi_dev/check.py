@@ -1,7 +1,9 @@
 """`moxi-dev check`: the checks a change must pass before it merges.
 
 Run from the repository's root as `uv run --locked moxi-dev check [--full] [--base REV]`.
-In order, each step only once the ones before it have passed:
+It first reads the workspace, the worker count and the changed paths; a bad workspace,
+worker count or base stops it there, before any step runs. Then, in order, each step
+only once the ones before it have passed:
 
 1. `uv lock --check`: the committed `uv.lock` matches every package's declarations.
 2. Pick the packages. The changed paths are the commits since the branch left `main`
@@ -17,13 +19,19 @@ In order, each step only once the ones before it have passed:
    `.venv` is never touched.
 4. Run each picked package's tests in a pytest session of its own, from the package's
    directory (each has its own conftest, and test names repeat across packages), always
-   spread over workers: `-n auto`, at most `MOXI_TEST_WORKERS` of them when that is set.
-   A serial run is not a pass.
+   spread over workers: `-n N`, where N is the CPUs this process may run on, at most
+   `MOXI_TEST_WORKERS` when that is set, and never less than one. A serial run is not a
+   pass, so N is passed explicitly: pytest-xdist's `PYTEST_XDIST_AUTO_NUM_WORKERS` (which
+   can turn `-n auto` into a serial run) and the caller's `PYTEST_ADDOPTS` are dropped
+   from the suites' environment, and an option that would undo the workers (`--pdb`)
+   makes pytest refuse the run.
 5. Print one summary line, the last line of the output: the commit, the packages, each
    package's result and seconds, the total and the exit code.
 
 The exit code is 0 only when every step passed, 1 when one failed, and 2 when the check
-could not start (not in a workspace, no merge base, a bad `MOXI_TEST_WORKERS`).
+could not start or a step could not be run (not in a workspace, a member with no readable
+`pyproject.toml` or no project name, no merge base, a bad `MOXI_TEST_WORKERS`, `uv` not on
+PATH). The summary line is printed in every case.
 """
 
 from __future__ import annotations
@@ -94,9 +102,16 @@ def load_workspace(root: Path) -> list[Package]:
     loaded = []
     for member in members:
         path = root / member
-        package_data = tomllib.loads((path / "pyproject.toml").read_text())
-        loaded.append((path, normalize(package_data["project"]["name"]),
-                       _requirements(package_data)))
+        try:
+            package_data = tomllib.loads((path / "pyproject.toml").read_text())
+            name = package_data["project"]["name"]
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise CheckError(f"workspace member {member}: no readable pyproject.toml "
+                             f"({exc})") from exc
+        except (KeyError, TypeError) as exc:
+            raise CheckError(f"workspace member {member}: its pyproject.toml names no "
+                             f"project") from exc
+        loaded.append((path, normalize(name), _requirements(package_data)))
     dists = {dist for _, dist, _ in loaded}
     return [Package(dir=path.name, dist=dist, path=path,
                     requires=frozenset((requires & dists) - {dist}))
@@ -149,26 +164,44 @@ def changed_paths(root: Path, base: str = "main") -> list[str]:
     return sorted(paths)
 
 
-def worker_args(environ: Mapping[str, str]) -> list[str]:
-    """pytest-xdist's arguments: `-n auto`, capped by MOXI_TEST_WORKERS when it is set."""
-    args = ["-n", "auto"]
+def cpu_count() -> int:
+    """The CPUs this process may run on, as pytest-xdist's `-n auto` counts them; at least 1."""
+    try:
+        return len(os.sched_getaffinity(0)) or 1
+    except (AttributeError, OSError):
+        return os.cpu_count() or 1
+
+
+def worker_args(environ: Mapping[str, str], cpus: int | None = None) -> list[str]:
+    """pytest-xdist's arguments: `-n N`, N the CPU count capped by MOXI_TEST_WORKERS.
+
+    N is never 0, which would run the suite serially."""
+    count = max(1, cpu_count() if cpus is None else cpus)
     cap = environ.get(WORKERS_VAR, "").strip()
     if cap:
         if not cap.isdigit() or int(cap) < 1:
             raise CheckError(f"{WORKERS_VAR} must be a whole number of workers, 1 or more; "
                              f"it is {cap!r}")
-        args += ["--maxprocesses", str(int(cap))]
-    return args
+        count = min(count, int(cap))
+    return ["-n", str(count)]
 
 
 def _run(cmd: Sequence[str], cwd: Path, env: Mapping[str, str]) -> int:
-    return subprocess.run(list(cmd), cwd=cwd, env=dict(env)).returncode
+    try:
+        return subprocess.run(list(cmd), cwd=cwd, env=dict(env)).returncode
+    except OSError as exc:
+        raise CheckError(f"could not run {cmd[0]} ({exc})") from exc
 
 
 def _base_env(environ: Mapping[str, str]) -> dict[str, str]:
     # `uv run` points VIRTUAL_ENV at the root's .venv; no step here may use or change it.
     return {key: value for key, value in environ.items()
             if key not in ("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT")}
+
+
+#: Dropped from the suites' environment: either can make the run serial, or run less
+#: than the package's own configuration says.
+SUITE_DROPPED_ENV = ("PYTEST_XDIST_AUTO_NUM_WORKERS", "PYTEST_ADDOPTS")
 
 
 @dataclass
@@ -208,14 +241,19 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
         packages = load_workspace(root)
         workers = worker_args(environ)
         chosen = list(packages) if full else pick(packages, changed_paths(root, base or "main"))
+        result.packages = [package.dir for package in chosen]
+        result.code = 0 if _steps(root, chosen, workers, environ, run, result) else 1
     except CheckError as exc:
         print(f"moxi-dev check: {exc}", file=sys.stderr, flush=True)
         result.code = 2
-        result.seconds = time.monotonic() - started
-        return result
-    result.packages = [package.dir for package in chosen]
-    env = _base_env(environ)
+    result.seconds = time.monotonic() - started
+    return result
 
+
+def _steps(root: Path, chosen: Sequence[Package], workers: Sequence[str],
+           environ: Mapping[str, str], run: Run, result: Result) -> bool:
+    """The lock, the sync and the suites, recorded in `result`; True when all passed."""
+    env = _base_env(environ)
     ok = run(["uv", "lock", "--check"], root, env) == 0
     result.lock = "pass" if ok else "fail"
     if ok and chosen:
@@ -225,7 +263,9 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
                  root, {**env, "UV_PROJECT_ENVIRONMENT": str(venv)}) == 0
         result.sync = "pass" if ok else "fail"
         if ok:
-            suite_env = {**env, "VIRTUAL_ENV": str(venv),
+            suite_env = {key: value for key, value in env.items()
+                         if key not in SUITE_DROPPED_ENV}
+            suite_env = {**suite_env, "VIRTUAL_ENV": str(venv),
                          "PATH": os.pathsep.join(filter(None, [str(venv / "bin"),
                                                                env.get("PATH")]))}
             for package in chosen:
@@ -236,9 +276,7 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
                 ok = ok and passed
     elif ok:
         result.sync = "skipped"
-    result.code = 0 if ok else 1
-    result.seconds = time.monotonic() - started
-    return result
+    return ok
 
 
 def _parser() -> argparse.ArgumentParser:

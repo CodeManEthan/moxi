@@ -8,6 +8,7 @@ real thing once.
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -258,20 +259,45 @@ def test_no_step_sets_a_pytest_tmp_root_or_basetemp(repo):
         assert env.get("PYTEST_DEBUG_TEMPROOT") == "/var/tmp"
 
 
-def test_every_suite_runs_under_workers(repo):
+def test_every_suite_runs_under_an_explicit_worker_count(repo, monkeypatch):
+    monkeypatch.setattr(check, "cpu_count", lambda: 6)
     runs = Runs()
     run_check(repo, runs, full=True)
     suites = runs.suites()
     assert len(suites) == len(LAYOUT)
     for _, cmd in suites:
-        assert cmd[3:] == ["-n", "auto"]
+        assert cmd[3:] == ["-n", "6"]
 
 
-def test_the_worker_count_is_capped_by_the_variable(repo):
+def test_the_worker_count_is_capped_by_the_variable(repo, monkeypatch):
+    monkeypatch.setattr(check, "cpu_count", lambda: 6)
     runs = Runs()
     run_check(repo, runs, full=True, environ={"PATH": "/usr/bin", "MOXI_TEST_WORKERS": "3"})
     for _, cmd in runs.suites():
-        assert cmd[3:] == ["-n", "auto", "--maxprocesses", "3"]
+        assert cmd[3:] == ["-n", "3"]
+
+
+@pytest.mark.parametrize("cpus, cap, want", [(0, "", "1"), (1, "", "1"), (2, "9", "2"),
+                                             (8, "1", "1")])
+def test_the_worker_count_is_never_zero(cpus, cap, want):
+    environ = {"MOXI_TEST_WORKERS": cap} if cap else {}
+    assert check.worker_args(environ, cpus=cpus) == ["-n", want]
+
+
+def test_the_cpu_count_is_a_whole_number_of_one_or_more():
+    assert check.cpu_count() >= 1
+
+
+def test_the_suites_drop_what_could_make_them_serial(repo):
+    runs = Runs()
+    environ = {"PATH": "/usr/bin", "PYTEST_XDIST_AUTO_NUM_WORKERS": "0",
+               "PYTEST_ADDOPTS": "--pdb", "PYTEST_DEBUG_TEMPROOT": "/var/tmp"}
+    run_check(repo, runs, full=True, environ=environ)
+    lock, sync, *suites = runs.calls
+    assert suites
+    for _, _, env in suites:
+        assert "PYTEST_XDIST_AUTO_NUM_WORKERS" not in env and "PYTEST_ADDOPTS" not in env
+        assert env["PYTEST_DEBUG_TEMPROOT"] == "/var/tmp"
 
 
 @pytest.mark.parametrize("value", ["0", "-2", "two", "1.5"])
@@ -361,6 +387,35 @@ def test_main_prints_the_line_last_and_returns_its_code(repo, monkeypatch, capsy
     assert check.main([]) == 1
     out = capsys.readouterr().out.splitlines()
     assert LINE.match(out[-1]) and out[-1].endswith("exit 1")
+
+
+@pytest.mark.parametrize("text, why", [(None, "no readable pyproject.toml"),
+                                       ("[tool.x]\n", "names no project"),
+                                       ("[project\n", "no readable pyproject.toml")])
+def test_a_bad_member_stops_the_check_with_a_line(repo, monkeypatch, capsys, text, why):
+    pyproject = repo / "packages" / "turns" / "pyproject.toml"
+    if text is None:
+        pyproject.unlink()
+    else:
+        pyproject.write_text(text)
+    runs = Runs()
+    monkeypatch.setattr(check, "_run", runs)
+    monkeypatch.chdir(repo)
+    assert check.main(["--full"]) == 2
+    out, err = capsys.readouterr()
+    assert out.splitlines()[-1].endswith("exit 2") and runs.calls == []
+    assert "workspace member packages/turns:" in err and why in err, err
+
+
+def test_uv_missing_stops_the_check_with_a_line(repo, monkeypatch, capsys):
+    bin_dir = repo.parent / "bin"            # git, and no uv
+    bin_dir.mkdir()
+    (bin_dir / "git").symlink_to(shutil.which("git"))
+    monkeypatch.setenv("PATH", str(bin_dir))
+    result = check.check(repo, full=True)
+    assert result.code == 2 and result.lock == "not run"
+    assert "could not run uv" in capsys.readouterr().err
+    assert result.line().endswith("exit 2")
 
 
 def test_main_outside_a_checkout_still_prints_a_line(tmp_path, monkeypatch, capsys):
