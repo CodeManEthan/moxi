@@ -29,13 +29,11 @@ def by_name() -> dict[str, doctor.Row]:
     return {row.name: row for row in doctor.rows()}
 
 
-def test_the_row_has_the_core_rows_fields():
-    row = doctor.Row("sessions", "claude", "ok", "fine")
-    assert row._fields == ("module", "name", "state", "detail", "fix")
-    assert row.fix is None
-    assert doctor.STATES == ("ok", "warn", "fail", "off")
-    with pytest.raises(ValueError):
-        doctor.Row("sessions", "claude", "maybe", "?")
+def test_the_rows_are_the_cores_doctor_rows():
+    import moxi.doctor
+
+    assert doctor.Row is moxi.doctor.Row
+    assert all(isinstance(row, moxi.doctor.Row) for row in doctor.rows())
 
 
 def test_one_row_per_harness_off_when_no_root_is_there(home):

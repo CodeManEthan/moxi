@@ -15,38 +15,17 @@ sessions writes nothing, so no check changes anything.
 from __future__ import annotations
 
 import os
-from collections import namedtuple
 from collections.abc import Iterator
 from pathlib import Path
 
 from moxi.config import ConfigError
+from moxi.doctor import Row
 
 from .shape import CLAUDE, CODEX, HARNESSES, OPENCODE
+
 from .source import ROOT_KEYS, root_origin
 
 MODULE = "sessions"
-
-#: A row's states. `off` is a check that does not apply here.
-STATES = ("ok", "warn", "fail", "off")
-
-
-class Row(namedtuple("Row", ("module", "name", "state", "detail", "fix"), defaults=(None,))):
-    """One line of the doctor's report: `module`, `name`, `state` (one of `STATES`),
-    `detail` in words, and `fix`, what to run, when there is one.
-
-    It has the fields, order and states of the core's doctor row. The core this package
-    is built against does not offer that row yet; once it does, this class gives way to
-    it."""
-
-    __slots__ = ()
-
-    def __new__(cls, module: str, name: str, state: str, detail: str,
-                fix: str | None = None):
-        if state not in STATES:
-            raise ValueError(f"a doctor row's state is one of {', '.join(STATES)}, "
-                             f"not {state!r}")
-        return super().__new__(cls, module, name, state, detail, fix)
-
 
 #: Each row's name and what it calls the root.
 NAMES = {CLAUDE: ("claude", "Claude Code projects root"),
@@ -139,4 +118,4 @@ def rows() -> Iterator[Row]:
         yield check(harness)
 
 
-__all__ = ["rows", "check", "Row", "STATES", "MODULE"]
+__all__ = ["rows", "check", "MODULE"]
