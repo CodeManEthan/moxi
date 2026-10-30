@@ -622,7 +622,9 @@ def test_status_reads_marked_tasks_by_position_and_the_runtime_file(w):
         "active", me.pid, me.started, True, "schtasks")
     assert r.log == str(moxi.paths.Layout("demo").state_dir() / "logs" / "relay.log")
     s = states["snap"]
-    assert s.state == "failed" and s.last["exit"] == 2 and s.enabled is True
+    # The run line decides `failed`; `last` carries only the supervisor's result, and the
+    # PowerShell read gives a marked task none.
+    assert s.state == "failed" and s.last is None and s.enabled is True
     g = states["gone"]
     assert (g.state, g.enabled, g.log) == ("missing", None, None)
 
@@ -631,7 +633,7 @@ def test_a_listed_daemon_without_a_live_runtime_file_is_inactive(w):
     relay = registered(w)
     run_line("demo", "relay", 0)
     [state] = w.backend.status([relay], w.fence)
-    assert state.state == "inactive" and state.pid is None and state.last["exit"] == 0
+    assert state.state == "inactive" and state.pid is None and state.last is None
 
 
 def test_a_disabled_marked_task_reads_enabled_false(w):
@@ -715,6 +717,129 @@ def test_marked_and_foreign_share_one_powershell_call(w):
                               w.fence)
     assert [s.state for s in states] == ["inactive", "active"]
     assert w.sup.calls == [("/query",), ("tasks",)]
+
+
+# -- foreign with no fence, ids, wraps, and a read that fails --------------------------------
+
+def test_foreign_with_no_fence_is_the_same_ref_and_makes_no_call(w):
+    for ref in ("\\Backups\\Daily", "Daily"):
+        assert w.backend.foreign(ref, None) == w.backend.foreign(ref, w.fence)
+    assert w.sup.calls == []
+
+
+def test_ids_is_the_task_path_whether_or_not_it_is_registered(w):
+    assert w.backend.ids("demo", "relay", "daemon") == ("\\Moxi\\demo-relay",)
+    assert w.backend.ids("demo", "snap", "timer") == ("\\Moxi\\demo-snap",)
+    w.module(DAEMONS=DAEMON)
+    w.apply(w.plan().values())
+    [ref] = w.backend.marked("demo")
+    assert ref.ids == w.backend.ids("demo", "relay", "daemon")
+    assert SchtasksBackend(folder="\\MoxiTest\\").ids("demo", "relay", "daemon") == (
+        "\\MoxiTest\\demo-relay",)
+
+
+def test_wraps_is_empty_on_task_scheduler(w):
+    assert w.backend.wraps("demo") == () and w.sup.calls == []
+
+
+@pytest.mark.parametrize("bad", ["folder", "not json", "no pid"])
+def test_running_raises_on_a_runtime_file_it_cannot_read(w, bad):
+    path = SchtasksBackend.runtime_file("demo", "relay")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if bad == "folder":
+        path.mkdir()
+    else:
+        path.write_text("{not json" if bad == "not json" else json.dumps({"started": 1.0}))
+    with pytest.raises(_backend.ReadError) as raised:
+        w.backend.running(["\\Moxi\\demo-relay"], w.fence)
+    assert raised.value.ran.argv == ("read", str(path)) and not raised.value.ran.ok
+    assert str(path) in str(raised.value)
+    # A task with no runtime file, or outside the folder, is simply not running.
+    assert w.backend.running(["\\Moxi\\demo-none", "\\Other\\x"], w.fence) == frozenset()
+    assert w.sup.calls == []
+
+
+def test_status_reads_an_unreadable_runtime_file_as_not_running(w):
+    relay = registered(w)
+    path = SchtasksBackend.runtime_file("demo", "relay")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json")
+    [state] = w.backend.status([relay], w.fence)
+    assert state.state == "inactive" and state.pid is None
+
+
+def test_restart_after_upgrade_fails_its_daemons_when_a_runtime_file_cannot_be_read(w):
+    w.module(DAEMONS=DAEMON)
+    w.apply(w.plan().values())
+    path = SchtasksBackend.runtime_file("demo", "relay")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json")
+    [keep] = w.plan().values()
+    [done] = w.apply([keep], restart=True)
+    assert not done.ok and w.sup.calls == []
+    assert any(str(path) in line for line in done.lines)
+
+
+def test_a_failed_runtime_read_stops_nothing_and_records_nothing(w):
+    w.module(DAEMONS=DAEMON)
+    w.apply(w.plan().values())
+    w.sup.tasks["\\Moxi\\demo-relay"]["running"] = True
+    path = SchtasksBackend.runtime_file("demo", "relay")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json")
+    w.sup.calls.clear()
+    record: list = []
+    [done] = units.stop("demo", record=record, runner=w.sup)
+    assert not done.ok and done.lines[0].startswith("cannot tell which units of demo run")
+    assert record == [] and w.sup.calls == []
+
+
+def test_stop_with_replace_ends_an_unmarked_task_by_its_path_and_resume_runs_it(w):
+    w.module(DAEMONS=DAEMON)
+    task = "\\Moxi\\demo-relay"
+    w.sup.tasks[task] = {"enabled": True, "running": True}
+    live_runtime("demo", "relay")
+    record: list = []
+    [done] = units.stop("demo", replace=True, record=record, runner=w.sup)
+    assert done.ok and done.lines == (f"{task} stopped",)
+    assert [(e.unit, e.marked, e.backend) for e in record] == [(task, False, "schtasks")]
+    assert w.sup.calls == [("/end", task)] and not w.sup.tasks[task]["running"]
+    [started] = units.resume(record, runner=w.sup)
+    assert started.ok and w.sup.tasks[task]["running"]
+
+
+def test_status_gives_one_state_per_unit_in_order_with_only_the_supervisors_result(w):
+    relay = registered(w, running=True)
+    snap = registered(w, "timer")
+    info = {"state": "Ready", "last_run": "2026-01-01T00:00:00", "last_result": 1}
+    w.sup.foreign["\\Backups\\Daily"] = info
+    run_line("demo", "snap", 2)
+    refs = [w.backend.foreign("\\Backups\\Daily", None), snap, relay,
+            w.backend.foreign("\\Backups\\Gone", None)]
+    states = w.backend.status(refs, w.fence)
+    assert w.sup.calls == [("/query",), ("tasks",)]
+    assert [(s.module, s.name, s.kind) for s in states] == [
+        (r.module, r.name, r.kind) for r in refs]
+    assert [s.state for s in states] == ["failed", "failed", "inactive", "missing"]
+    assert states[0].last == {"last_run": info["last_run"], "last_result": 1}
+    assert [s.last for s in states[1:]] == [None, None, None]
+
+
+def test_status_through_the_core_adds_the_run_line(w):
+    w.module(DAEMONS=DAEMON)
+    w.apply(w.plan().values())
+    run_line("demo", "relay", 3)
+    w.sup.foreign["\\Backups\\Daily"] = {"state": "Ready", "last_run": None,
+                                             "last_result": 0}
+    w.sup.calls.clear()
+    rows = units.status("demo", foreign=["\\Backups\\Daily"], runner=w.sup)
+    assert w.sup.calls == [("/query",), ("tasks",)]
+    assert [(r.module, r.name) for r in rows] == [("demo", "relay"),
+                                                  (None, "\\Backups\\Daily")]
+    relay, daily = rows
+    assert relay.state == "failed" and relay.last["exit"] == 3
+    assert "supervisor" not in relay.last
+    assert daily.last == {"supervisor": {"last_run": None, "last_result": 0}}
 
 
 # -- python -m moxi ----------------------------------------------------------------------

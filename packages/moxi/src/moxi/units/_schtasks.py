@@ -31,9 +31,9 @@ from dataclasses import replace as _replaced
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-from ._backend import ApplyIO, Rendered, RenderError, Spec, UnitRef
+from ._backend import ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef
 from ._fence import Fence, Ran, task_refs_env
-from ._types import Acted, UnitChange, UnitState
+from ._types import Acted, UnitChange, UnitState, Wrapped
 
 #: The task folder that is moxi's namespace on this backend.
 FOLDER = "\\Moxi\\"
@@ -199,18 +199,26 @@ class SchtasksBackend:
             if change.action in ("add", "change"):
                 self._write(change, io)
         if restart:
-            for change in changes:
-                if (change.action == "keep" and change.kind == "daemon" and change.enabled
-                        and change.entry.get("upgrade", "restart") == "restart"
-                        and self._live(change.module, change.name)):
-                    task = self.task(change.module, change.name)
-                    ran = self._end(task, fence)
-                    if not ran.ok:
-                        io.fail(change, ran)
-                        continue
-                    ran = fence.run("/run", task)
-                    if not ran.ok:
-                        io.fail(change, ran)
+            daemons = [c for c in changes if c.action == "keep" and c.kind == "daemon"
+                       and c.enabled and c.entry.get("upgrade", "restart") == "restart"]
+            try:
+                running = self.running([self.task(c.module, c.name) for c in daemons],
+                                       fence)
+            except ReadError as exc:
+                for change in daemons:
+                    io.fail(change, exc.ran)
+                return
+            for change in daemons:
+                task = self.task(change.module, change.name)
+                if task not in running:
+                    continue
+                ran = self._end(task, fence)
+                if not ran.ok:
+                    io.fail(change, ran)
+                    continue
+                ran = fence.run("/run", task)
+                if not ran.ok:
+                    io.fail(change, ran)
 
     def _remove(self, change: UnitChange, io: ApplyIO) -> None:
         task = self.task(change.module, change.name)
@@ -267,10 +275,16 @@ class SchtasksBackend:
         path = _path(ref).casefold()
         return path.startswith(FOLDER.casefold()) or path.startswith(self.folder.casefold())
 
-    def foreign(self, ref: str, fence: Fence) -> UnitRef:
-        # A foreign task is read and acted on as a timer: services adopts scheduled tasks,
-        # and a timer's acts never end a run the user started.
+    def foreign(self, ref: str, fence: Fence | None) -> UnitRef:
+        """The task `ref` (a leading `\\` added when it has none), read and acted on as a
+        timer: services adopts scheduled tasks, and a timer's acts never end a run the user
+        started. No supervisor call, with a fence or without one."""
         return UnitRef(None, ref, "timer", (_path(ref),))
+
+    def ids(self, module: str, name: str, kind: str) -> tuple[str, ...]:
+        """The task path `\\Moxi\\<module>-<name>`, for a daemon and a timer alike, whether
+        or not the task is registered. No supervisor call."""
+        return (self.task(module, name),)
 
     def act(self, act: str, unit: UnitRef, fence: Fence) -> Acted:
         task = unit.ids[0]
@@ -291,13 +305,25 @@ class SchtasksBackend:
         return Acted(unit.module, unit.name, act, True)
 
     def running(self, ids: Sequence[str], fence: Fence) -> frozenset[str]:
+        """The tasks of `ids` whose gate's runtime file names a live process, read from the
+        files (no supervisor call). A task outside the folder has no runtime file and is
+        not running. A runtime file that is there and cannot be read, or holds no
+        `{"pid", "started"}`, raises `ReadError`: it may name a daemon that runs."""
         out = set()
         for task in ids:
             path = _path(task)
             if not path.casefold().startswith(self.folder.casefold()):
                 continue
             module, dash, name = path[len(self.folder):].partition("-")
-            if dash and self._live(module, name):
+            if not dash:
+                continue
+            file = self.runtime_file(module, name)
+            try:
+                live = self._live_file(file, strict=True)
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                raise ReadError(Ran(False, None, "", "", ("read", str(file)),
+                                    f"{type(exc).__name__}: {exc}")) from None
+            if live is not None:
                 out.add(task)
         return frozenset(out)
 
@@ -337,6 +363,8 @@ class SchtasksBackend:
             return UnitState(state="missing", detail=f"{task} is not registered", **common)
         enabled = None if tasks is None else (
             None if info is None else info.get("state") != "Disabled")
+        # The newest run line decides `failed`; it is the core's to show in `last`, and
+        # the PowerShell read gives a marked task only `enabled`, so `last` is None.
         last = _newest_run(unit.module, unit.name)
         live = self._runtime(unit.module, unit.name) if unit.kind == "daemon" else None
         if live is not None:
@@ -346,7 +374,7 @@ class SchtasksBackend:
             state, detail, more = "failed", f"its last run exited {last.get('exit')}", {}
         else:
             state, detail, more = "inactive", "not running", {}
-        return UnitState(state=state, detail=detail, last=last, enabled=enabled,
+        return UnitState(state=state, detail=detail, enabled=enabled,
                          log=self.log(unit), **more, **common)
 
     def _foreign_state(self, unit: UnitRef, tasks, info, why) -> UnitState:
@@ -378,6 +406,10 @@ class SchtasksBackend:
 
     def wrap(self, ref: str, *, module: str, key: str, name: str, fence: Fence) -> Acted:
         return Acted(None, ref, "wrap", False, (f"wrap is systemd only; {ref} runs as it is",))
+
+    def wraps(self, module: str) -> tuple[tuple[str, str, Wrapped], ...]:
+        """Empty: Task Scheduler has no wraps."""
+        return ()
 
     def unwrap(self, ref: str, *, module: str, fence: Fence) -> Acted:
         return Acted(None, ref, "unwrap", True, (f"{ref} is not wrapped by {module}",))
@@ -432,19 +464,21 @@ class SchtasksBackend:
     def _runtime(self, module: str, name: str) -> tuple[int, float] | None:
         return self._live_file(self.runtime_file(module, name))
 
-    def _live(self, module: str, name: str) -> bool:
-        return self._runtime(module, name) is not None
-
     @staticmethod
-    def _live_file(path: Path | None) -> tuple[int, float] | None:
+    def _live_file(path: Path | None, *, strict: bool = False) -> tuple[int, float] | None:
         """`(pid, started)` from a runtime file whose process is still the one it names
-        (same pid, same start time), else None."""
+        (same pid, same start time), else None. With `strict`, a file that is there and
+        cannot be read or parsed raises instead of reading as None."""
         if path is None:
             return None
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             pid, started = int(data["pid"]), float(data["started"])
+        except FileNotFoundError:
+            return None
         except (OSError, ValueError, KeyError, TypeError):
+            if strict:
+                raise
             return None
         from .. import proc
 
