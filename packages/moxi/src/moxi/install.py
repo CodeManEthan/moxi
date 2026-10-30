@@ -100,21 +100,21 @@ def union(base: list[Req], added: list[Req]) -> list[Req]:
 
 def parse_from(spec: str) -> Req:
     """A `--from` value: one Moxi distribution's requirement with a direct URL."""
-    from .cli import _Requirement
+    from ._vendor.packaging.requirements import Requirement
 
     try:
-        req = _Requirement(spec)
+        req = Requirement(spec)
     except ValueError:
         raise InstallError(f"--from {spec!r} is not a requirement") from None
     if not req.url:
         raise InstallError(f"--from {spec!r} names no URL; write it as "
                            f"'<distribution> @ git+https://...'")
-    if req.extra is not None or ";" in spec:
+    if req.marker is not None or ";" in spec:
         raise InstallError(f"--from {spec!r} carries a marker; give the requirement alone")
     if not _is_moxi_distribution(req.name):
         raise InstallError(f"--from {spec!r} is not a Moxi distribution (moxi or "
                            f"moxi-<module>)")
-    return Req(req.name, list(req.extras), url=req.url)
+    return Req(normalize(req.name), sorted(normalize(e) for e in req.extras), url=req.url)
 
 
 def _is_moxi_distribution(name: str) -> bool:

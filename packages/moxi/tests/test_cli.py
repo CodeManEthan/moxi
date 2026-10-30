@@ -151,6 +151,39 @@ def test_the_install_line_ignores_a_feature_extra_of_the_same_name(site):
     assert cli.install_hint("codex") == "install it: moxi install codex"
 
 
+def test_requirements_evaluate_every_marker_and_skip_a_line_that_does_not_parse(site):
+    """A requirement whose marker leaves this environment out is not one of its
+    requirements; a Requires-Dist line that is not a requirement is skipped."""
+    site.module("turns")
+    site.module("cache")
+    site.module("comms", requires=("moxi-turns>=0.1", 'moxi-cache; python_version < "3"',
+                                   "not a requirement !"),
+                extras={"cache": ['Moxi_Cache>=0.1; python_version < "3"']})
+    assert [r.name for r in cli.requirements("moxi-comms")] == ["moxi-turns"]
+    assert cli.required_modules("moxi-comms") == ["turns"]
+    assert cli.requirements("moxi-comms", "cache") == []
+    assert cli.users_of("cache") == []
+
+
+def test_a_user_through_an_extra_counts_only_when_that_extra_is_installed(site):
+    site.module("cache")
+    site.module("comms", extras={"cache": ["moxi-cache>=0.1", "websockets>=13"]})
+    assert not cli.extra_installed("moxi-comms", "cache")
+    assert cli.users_of("cache") == []
+    site.distribution("websockets", "13.1")
+    assert cli.extra_installed("moxi-comms", "cache")
+    assert cli.users_of("cache") == ["comms (through its extra cache)"]
+
+
+def test_a_requirement_is_shown_lower_bound_first_without_its_marker():
+    from moxi._vendor.packaging.requirements import Requirement
+
+    req = Requirement('Moxi_Cache[B,a] (<0.2, >=0.1) ; extra == "cache"')
+    assert cli.requirement_text(req) == "moxi-cache[a,b]>=0.1,<0.2"
+    assert cli.requirement_text(Requirement("moxi @ file:///w/m.whl")) == (
+        "moxi @ file:///w/m.whl")
+
+
 def test_broken_module_prints_reason_and_exits_2(site, capsys):
     site.module("alpha", SUMMARY="''")
     code, _, err = run(capsys, "alpha")

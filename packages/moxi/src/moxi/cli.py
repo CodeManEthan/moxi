@@ -232,39 +232,6 @@ def install_hint(name: str) -> str:
 
 # -- what the environment holds ----------------------------------------------------------
 
-class _Requirement:
-    """One Requires-Dist line, read with the standard library alone."""
-
-    __slots__ = ("name", "extras", "specifier", "url", "extra")
-
-    _HEAD = re.compile(r"\s*([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\s*"
-                       r"(?:\[([^\]]*)\])?\s*(.*)$", re.S)
-    _EXTRA = re.compile(r"""\bextra\s*==\s*(['"])([^'"]+)\1""")
-
-    def __init__(self, line: str):
-        body, _, marker = line.partition(";")
-        match = self._HEAD.match(body)
-        if match is None:
-            raise ValueError(f"cannot read the requirement {line!r}")
-        self.name = normalize(match.group(1))
-        self.extras = tuple(normalize(e) for e in (match.group(2) or "").split(",")
-                            if e.strip())
-        tail = match.group(3).strip()
-        self.url = None
-        if tail.startswith("@"):
-            self.url = tail[1:].strip()
-            tail = ""
-        self.specifier = tail.strip("() ").replace(" ", "")
-        found = self._EXTRA.search(marker)
-        self.extra = normalize(found.group(2)) if found else None
-
-    def __str__(self) -> str:
-        extras = f"[{','.join(self.extras)}]" if self.extras else ""
-        if self.url:
-            return f"{self.name}{extras} @ {self.url}"
-        return f"{self.name}{extras}{self.specifier}"
-
-
 def normalize(name: str) -> str:
     """A distribution or extra name in its normalized form (PEP 503, PEP 685)."""
     return re.sub(r"[-_.]+", "-", name.strip()).lower()
@@ -279,18 +246,57 @@ def _distribution(name: str):
         return None
 
 
-def requirements(dist_name: str) -> list[_Requirement]:
-    """The requirements a distribution's metadata declares, extras' included."""
+def _applies(req, extra: str) -> bool:
+    """True when `req` is installed here with extra `extra` asked for ("" for none)."""
+    if req.marker is None:
+        return not extra
+    try:
+        return req.marker.evaluate({"extra": extra})
+    except (ValueError, KeyError):
+        return False
+
+
+def requirements(dist_name: str, extra: str | None = None) -> list:
+    """The requirements a distribution's metadata declares that apply in this environment,
+    each a vendored `packaging` Requirement.
+
+    With no `extra`, the ones it always installs; with one, the ones that extra adds. Every
+    marker is evaluated here, `extra == ...` included. A line that does not parse, or whose
+    marker cannot be evaluated, is skipped.
+    """
+    from ._vendor.packaging.requirements import Requirement
+
     dist = _distribution(dist_name)
     if dist is None:
         return []
+    wanted = normalize(extra) if extra else ""
     out = []
     for line in dist.requires or ():
         try:
-            out.append(_Requirement(line))
+            req = Requirement(line)
         except ValueError:
             continue
+        if not _applies(req, wanted):
+            continue
+        if wanted and _applies(req, ""):
+            continue
+        out.append(req)
     return out
+
+
+_BOUND_ORDER = (">=", ">", "==", "===", "~=", "!=", "<=", "<")
+
+
+def requirement_text(req) -> str:
+    """A requirement as `moxi` shows it: normalized name, sorted extras, then the lower
+    bounds before the upper ones (`moxi-cache>=0.1,<0.2`), or the URL. No marker."""
+    name = normalize(req.name)
+    extras = sorted(normalize(e) for e in req.extras)
+    shown = f"{name}[{','.join(extras)}]" if extras else name
+    if req.url:
+        return f"{shown} @ {req.url}"
+    specs = sorted(req.specifier, key=lambda s: (_BOUND_ORDER.index(s.operator), s.version))
+    return shown + ",".join(str(s) for s in specs)
 
 
 def provided_extras(dist_name: str) -> list[str]:
@@ -304,15 +310,15 @@ def extra_installed(dist_name: str, extra: str, _seen: set | None = None) -> boo
     """True when every requirement extra `extra` of `dist_name` adds is installed.
 
     A requirement is installed when its distribution is, and every extra it names is in
-    turn. Version ranges and markers other than `extra == ...` are not evaluated.
+    turn. Version ranges are not checked; a requirement whose marker excludes this
+    environment is not asked for.
     """
     seen = set() if _seen is None else _seen
     key = (normalize(dist_name), normalize(extra))
     if key in seen:
         return True
     seen.add(key)
-    wanted = [r for r in requirements(dist_name) if r.extra == key[1]]
-    for req in wanted:
+    for req in requirements(dist_name, key[1]):
         if _distribution(req.name) is None:
             return False
         if not all(extra_installed(req.name, e, seen) for e in req.extras):
@@ -347,11 +353,12 @@ def speakers_of(name: str) -> list[Speaker]:
             continue
         if normalize(name) not in provided_extras(entry.distribution):
             continue
-        own = [r for r in requirements(entry.distribution)
-               if r.extra == normalize(name) and r.name == wanted]
+        own = [r for r in requirements(entry.distribution, name)
+               if normalize(r.name) == wanted]
         if not own:
             continue
-        out.append(Speaker(entry.name, entry.distribution, ", ".join(str(r) for r in own)))
+        out.append(Speaker(entry.name, entry.distribution,
+                           ", ".join(requirement_text(r) for r in own)))
     return out
 
 
@@ -366,13 +373,15 @@ def required_modules(dist_name: str, by_dist: dict[str, str] | None = None) -> l
     by_dist = _module_of_distribution() if by_dist is None else by_dist
     out = []
     for req in requirements(dist_name):
-        if req.extra is None and req.name in by_dist and by_dist[req.name] not in out:
-            out.append(by_dist[req.name])
+        module = by_dist.get(normalize(req.name))
+        if module is not None and module not in out:
+            out.append(module)
     return out
 
 
 def users_of(name: str) -> list[str]:
-    """Installed modules that require module `name`, or take it through an extra."""
+    """Installed modules that require module `name`, or take it through an installed
+    extra."""
     from . import modules
 
     wanted = normalize(names.distribution(name))
@@ -380,14 +389,15 @@ def users_of(name: str) -> list[str]:
     for entry in modules.installed():
         if entry.name == name or not entry.distribution:
             continue
-        for req in requirements(entry.distribution):
-            if req.name != wanted:
-                continue
-            if req.extra is None:
-                out.append(entry.name)
-            elif extra_installed(entry.distribution, req.extra):
-                out.append(f"{entry.name} (through its extra {req.extra})")
-            break
+        dist = entry.distribution
+        if any(normalize(r.name) == wanted for r in requirements(dist)):
+            out.append(entry.name)
+            continue
+        for extra in provided_extras(dist):
+            if (any(normalize(r.name) == wanted for r in requirements(dist, extra))
+                    and extra_installed(dist, extra)):
+                out.append(f"{entry.name} (through its extra {extra})")
+                break
     return out
 
 

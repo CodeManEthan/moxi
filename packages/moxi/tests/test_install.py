@@ -47,10 +47,13 @@ def test_parse_from():
     req = install.parse_from("moxi-turns @ git+https://github.com/o/turns@v0.1.0")
     assert (req.name, req.url) == ("moxi-turns", "git+https://github.com/o/turns@v0.1.0")
     assert install.parse_from("moxi @ file:///w/moxi.whl").url == "file:///w/moxi.whl"
+    req = install.parse_from("Moxi_Comms[Codex,cache] @ file:///w/c.whl")
+    assert (req.name, req.extras) == ("moxi-comms", ["cache", "codex"])
     for bad, why in [("moxi-turns", "names no URL"),
                      ("requests @ git+https://h/r", "not a Moxi distribution"),
                      ("moxi-Bad_Name2x @ git+https://h", "not a Moxi distribution"),
-                     ("moxi-turns @ git+https://h ; python_version>'3'", "marker")]:
+                     ("moxi-turns @ git+https://h ; python_version>'3'", "marker"),
+                     ("moxi-turns @ git+https://h junk", "not a requirement")]:
         with pytest.raises(InstallError, match=why):
             install.parse_from(bad)
 
@@ -214,6 +217,16 @@ CATALOG = {
 }
 
 
+def _requirement(text):
+    """A requirement as the fake uv reads it, its name and extras normalized."""
+    from moxi._vendor.packaging.requirements import Requirement
+
+    req = Requirement(text)
+    req.name = cli.normalize(req.name)
+    req.extras = {cli.normalize(e) for e in req.extras}
+    return req
+
+
 class Fake:
     """A fake uv and a fake environment over the `site` fixture."""
 
@@ -270,10 +283,10 @@ class Fake:
             self.receipt = []
             for text in texts:
                 req = install.parse_from(text) if " @ " in text else None
-                head = cli._Requirement(text)
+                head = _requirement(text)
                 entry = {"name": head.name}
                 if head.extras:
-                    entry["extras"] = list(head.extras)
+                    entry["extras"] = sorted(head.extras)
                 if req is not None:
                     entry["url"] = req.url
                 self.receipt.append(entry)
@@ -281,7 +294,7 @@ class Fake:
         else:
             texts = argv[5:] if argv[1:3] == ["pip", "install"] else argv[4:]
         for text in texts:
-            self._install(cli._Requirement(text))
+            self._install(_requirement(text))
         return 0
 
     def _install(self, req):
@@ -299,10 +312,10 @@ class Fake:
             else:
                 self.site.distribution(name, "13.1")
         for dep in spec.get("requires", ()):
-            self._install(cli._Requirement(dep))
+            self._install(_requirement(dep))
         for extra in extras:
             for dep in spec.get("extras", {}).get(extra, ()):
-                self._install(cli._Requirement(dep))
+                self._install(_requirement(dep))
 
     def _write_receipt(self):
         lines = ["[tool]", "requirements = ["]
