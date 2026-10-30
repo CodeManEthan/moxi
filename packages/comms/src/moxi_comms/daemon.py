@@ -682,11 +682,15 @@ class Daemon:
             mine = [b for b in self.bindings.values() if b.conn is conn]
         return mine[0] if len(mine) == 1 else None
 
-    def _bound(self, conn, params: dict) -> Binding:
-        b = self._own_binding(conn, params)
+    @staticmethod
+    def _not_bound(b: Binding | None) -> None:
+        """An adapter's method answers `not-bound` when its connection holds no binding
+        it speaks for. A notification's answer is never written, so an adapter that
+        notifies sees nothing; what the method keeps from an unbound connection, it has
+        kept before this."""
         if b is None:
             raise Refusal("this connection holds no binding", code=wire.NOT_BOUND)
-        return b
+        return None
 
     def _bind(self, conn, params: dict):
         """`bind`: the binding, answered with its identity, token and catch-up boundary.
@@ -706,19 +710,17 @@ class Daemon:
         every pushed id up to `through` has left the binding's window."""
         b = self._own_binding(conn, params)
         identity = b.qualified if b is not None else str(params.get("identity") or "")
-        if not identity or not self._ping_ordered(conn, identity, "injected",
-                                                  params.get("seq")):
-            return None
-        through = params.get("through")
-        with self._lock:
-            if through is not None:
-                self.injected_through[identity] = str(through)
-            text = params.get("text")
-            if text is not None:
-                self.injected_digest[identity] = str(text)
-        if b is not None and through is not None:
-            self._window_take(b, lambda mid: _as_id(mid) <= _as_id(str(through)))
-        return None
+        if identity and self._ping_ordered(conn, identity, "injected", params.get("seq")):
+            through = params.get("through")
+            with self._lock:
+                if through is not None:
+                    self.injected_through[identity] = str(through)
+                text = params.get("text")
+                if text is not None:
+                    self.injected_digest[identity] = str(text)
+            if b is not None and through is not None:
+                self._window_take(b, lambda mid: _as_id(mid) <= _as_id(str(through)))
+        return self._not_bound(b)
 
     def _ready(self, conn, params: dict) -> None:
         return self._activity(conn, params, kind=ACTIVITY_READY)
@@ -737,7 +739,7 @@ class Daemon:
         method = kind or "activity"
         if not identity or not self._ping_ordered(conn, identity, method,
                                                   params.get("seq")):
-            return None
+            return self._not_bound(b)
         turn = kind == ACTIVITY_TURN
         with self._lock:
             self.activity[identity] = self.clock()
@@ -749,7 +751,7 @@ class Daemon:
             if b is not None:
                 self._take_session(b, params, at=self.clock(), turn=turn)
         if b is None:
-            return None
+            return self._not_bound(b)
         if kind == ACTIVITY_READY:
             self._on_ready(b, params.get("source"))
         elif kind == ACTIVITY_LOOK:
@@ -1704,7 +1706,7 @@ class Daemon:
             if b is None or b.conn is not conn:
                 log.info("dropped an unanswered notify for %s from a connection that does "
                          "not hold it", identity)
-                return
+                return self._not_bound(None)
             if any(self._pays(e, identity, author, message_id)
                    for e in self.sent.get(identity, ())):
                 return          # paid already, between the shim's query and this notify

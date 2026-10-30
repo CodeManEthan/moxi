@@ -12,6 +12,8 @@ import os
 import shutil
 import socket
 import sqlite3
+import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -40,8 +42,21 @@ def zero_two_home():
         conn.executescript((FIXTURE / dump).read_text())
         conn.close()
     shutil.copytree(FIXTURE / "cursors", paths.cursors_dir())
-    shutil.copytree(FIXTURE / "tokens", paths.tokens_dir())
+    lay_tokens(FIXTURE / "tokens", paths.tokens_dir())
     return upgrade_0_2_paths()
+
+
+def lay_tokens(source: Path, dest: Path) -> None:
+    """0.2's token store as 0.2 left it: the directory 0700 and each file 0600, set here
+    rather than taken from the checkout. git keeps no mode but the execute bit, so a
+    fresh checkout has the fixture's files at whatever its umask gave them."""
+    dest.mkdir(parents=True, exist_ok=True)
+    os.chmod(dest, tokens.DIR_MODE)
+    for f in source.iterdir():
+        fd = os.open(dest / f.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, tokens.FILE_MODE)
+        with os.fdopen(fd, "wb") as out:
+            out.write(f.read_bytes())
+        os.chmod(dest / f.name, tokens.FILE_MODE)
 
 
 def upgrade_0_2_paths():
@@ -112,11 +127,27 @@ def test_the_move_carries_every_row_and_makes_rows_for_row_less_mail(soon):
     assert not Path(f"{store.path()}.new").exists()
 
 
-def test_the_operator_token_and_provisioning_carry_over(soon):
+@pytest.fixture(params=["as-checked-out", "checked-out-wide"])
+def checkout(request, monkeypatch, tmp_path):
+    """The fixture as this checkout has it, and a copy whose token files are as wide as
+    a checkout under umask 022 leaves them, so the lay-out is tested whatever the
+    checkout's modes are."""
+    if request.param == "checked-out-wide":
+        wide = tmp_path / "fixture"
+        shutil.copytree(FIXTURE, wide)
+        os.chmod(wide / "tokens", 0o755)
+        for f in (wide / "tokens").iterdir():
+            os.chmod(f, 0o644)
+        monkeypatch.setattr(sys.modules[__name__], "FIXTURE", wide)
+
+
+def test_the_operator_token_and_provisioning_carry_over(soon, checkout):
     zero_two_home()
     record = LocalRecord()
     try:
-        held = (paths.tokens_dir() / "operator").read_text().split('"')[3]
+        token = paths.tokens_dir() / "operator"
+        assert stat.S_IMODE(token.stat().st_mode) == tokens.FILE_MODE, "left as 0.2 left it"
+        held = token.read_text().split('"')[3]
         assert record.meta_get(META_OPERATOR_TOKEN_HASH) == token_hash(held)
         before = rows("SELECT * FROM identities ORDER BY name")
         # The daemon's start runs provisioning's step after the move; it finds the
