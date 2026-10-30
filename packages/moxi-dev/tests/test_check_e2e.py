@@ -1,11 +1,13 @@
 """`moxi-dev check` run for real on a two-package workspace: the lock, the sync, the suites.
 
 One real `uv lock` and `uv sync` (a few seconds from uv's cache), and real pytest
-sessions under xdist workers.
+sessions under xdist workers. uv runs only in child processes, with the kit's `uv_env`:
+the fenced environment plus uv's real cache and installed Pythons.
 """
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -42,11 +44,16 @@ def package(root: Path, name: str, deps: str) -> None:
 
 
 @pytest.fixture
-def workspace(tmp_path, monkeypatch):
+def workspace(tmp_path, monkeypatch, uv_env):
     """`low` and `high` (which depends on `low`), locked and committed on main."""
     for var in ("PYTEST_XDIST_WORKER", "PYTEST_XDIST_WORKER_COUNT",
                 "PYTEST_XDIST_TESTRUNUID", "PYTEST_ADDOPTS"):
         monkeypatch.delenv(var, raising=False)
+        uv_env.pop(var, None)
+    # check.main hands its own environment to the uv and pytest it starts, so uv's
+    # settings go there; HOME and the XDG homes stay the fenced ones.
+    for var in ("UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "UV_PYTHON_DOWNLOADS"):
+        monkeypatch.setenv(var, uv_env[var])
     monkeypatch.setenv("MOXI_TEST_WORKERS", "2")
     root = tmp_path / "w"
     root.mkdir()
@@ -56,7 +63,8 @@ def workspace(tmp_path, monkeypatch):
     (root / ".gitignore").write_text(".moxi-dev/\n.venv/\n__pycache__/\n.pytest_cache/\n")
     package(root, "low", "[]")
     package(root, "high", '["low"]')
-    subprocess.run(["uv", "lock", "--quiet"], cwd=root, check=True, timeout=120)
+    subprocess.run(["uv", "lock", "--quiet"], cwd=root, env=uv_env, check=True,
+                   timeout=120)
     git(root, "init", "-q", "-b", "main")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "start")
@@ -77,6 +85,7 @@ def test_the_check_syncs_its_own_env_and_runs_the_picked_suites(workspace, capsy
     assert ", high pass " in line and line.endswith("exit 0")
     assert (workspace / ".moxi-dev/env-3.12/bin/python").exists()
     assert not (workspace / ".venv").exists()
+    assert not (Path(os.environ["HOME"]) / ".cache" / "uv").exists()  # the real cache served
 
     git(workspace, "add", "-A")
     git(workspace, "commit", "-q", "-m", "more")

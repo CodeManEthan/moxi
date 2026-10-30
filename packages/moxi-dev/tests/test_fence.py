@@ -8,6 +8,7 @@ import shutil
 import socket
 import socketserver
 import sqlite3
+import subprocess
 import tempfile
 import threading
 import uuid
@@ -78,6 +79,75 @@ def test_the_fence_clears_everything_else():
         "XDG_CACHE_HOME": "/t/home/.cache", "CLAUDE_CONFIG_DIR": "/t/home/.claude",
         "CODEX_HOME": "/t/home/.codex", "XDG_RUNTIME_DIR": "/s/run",
         "MOXI_COMMS_HOME": "/s/comms"}
+
+
+# --- uv in a child ---------------------------------------------------------------------
+
+def test_uv_finds_its_directories_as_uv_does():
+    dirs = testing._uv_dirs
+    assert dirs({}, "/h", windows=False) == {
+        "UV_CACHE_DIR": "/h/.cache/uv", "UV_PYTHON_INSTALL_DIR": "/h/.local/share/uv/python"}
+    assert dirs({"XDG_CACHE_HOME": "/c", "XDG_DATA_HOME": "/d"}, "/h", windows=False) == {
+        "UV_CACHE_DIR": "/c/uv", "UV_PYTHON_INSTALL_DIR": "/d/uv/python"}
+    assert dirs({"UV_CACHE_DIR": "/uc", "UV_PYTHON_INSTALL_DIR": "/up", "XDG_CACHE_HOME": "/c",
+                 "XDG_DATA_HOME": "/d"}, "/h", windows=False) == {
+        "UV_CACHE_DIR": "/uc", "UV_PYTHON_INSTALL_DIR": "/up"}
+    # An empty value is unset, as uv reads it.
+    assert dirs({"UV_CACHE_DIR": "", "XDG_DATA_HOME": ""}, "/h", windows=False) == \
+        dirs({}, "/h", windows=False)
+    win = dirs({"LOCALAPPDATA": "L", "APPDATA": "R"}, "H", windows=True)
+    assert win == {"UV_CACHE_DIR": os.path.join("L", "uv", "cache"),
+                   "UV_PYTHON_INSTALL_DIR": os.path.join("R", "uv", "data", "python")}
+
+
+def test_uv_env_carries_the_real_uv_and_leaves_this_process_fenced(fence, uv_env):
+    real = testing._SESSION["uv"]
+    assert {k: uv_env[k] for k in real} == real
+    assert not Path(real["UV_CACHE_DIR"]).is_relative_to(fence.home)
+    assert not Path(real["UV_PYTHON_INSTALL_DIR"]).is_relative_to(fence.home)
+    assert uv_env["UV_PYTHON_DOWNLOADS"] == "never"
+    assert uv_env["HOME"] == str(fence.home)
+    added = {*real, "UV_PYTHON_DOWNLOADS", "PYTEST_CURRENT_TEST"}
+    assert {k: v for k, v in uv_env.items() if k not in added} == \
+        {k: v for k, v in os.environ.items() if k not in added}
+    for key in (*real, "UV_PYTHON_DOWNLOADS"):
+        assert key not in os.environ
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv")
+def test_uv_reads_the_real_cache_only_through_uv_env(fence, uv_env):
+    def cache_dir(env):
+        return subprocess.run(["uv", "cache", "dir"], env=env, capture_output=True,
+                              text=True, check=True, timeout=60).stdout.strip()
+
+    assert cache_dir(uv_env) == uv_env["UV_CACHE_DIR"]
+    assert Path(cache_dir(dict(os.environ))) == fence.home / ".cache" / "uv"
+
+
+UV_PROBE = '''
+import os
+
+CACHE, DATA = {cache!r}, {data!r}
+
+
+def test_uv_env_is_read_at_the_start(uv_env):
+    assert uv_env["UV_CACHE_DIR"] == CACHE
+    assert uv_env["UV_PYTHON_INSTALL_DIR"] == os.path.join(DATA, "uv", "python")
+    assert "UV_CACHE_DIR" not in os.environ
+    assert os.environ["XDG_DATA_HOME"] != DATA
+'''
+
+
+def test_uv_env_reads_uv_before_the_fence_empties_the_environment(pytester, monkeypatch,
+                                                                    tmp_path):
+    cache, data = str(tmp_path / "cache"), str(tmp_path / "data")
+    monkeypatch.setenv("UV_CACHE_DIR", cache)
+    monkeypatch.setenv("XDG_DATA_HOME", data)
+    monkeypatch.delenv("UV_PYTHON_INSTALL_DIR", raising=False)
+    pytester.makeconftest('pytest_plugins = ["moxi_dev.testing"]\n')
+    pytester.makepyfile(test_uv_probe=UV_PROBE.format(cache=cache, data=data))
+    result = pytester.runpytest_subprocess("-p", "no:cacheprovider")
+    result.assert_outcomes(passed=1)
 
 
 # --- writes ----------------------------------------------------------------------------

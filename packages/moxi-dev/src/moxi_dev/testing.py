@@ -50,6 +50,15 @@ only: a subprocess gets the fenced environment but not the hook. Paths are judge
 symlinks resolve (a link inside tmp to a place outside is outside); a name relative to a
 `dir_fd` is resolved through `/proc/self/fd` and let through where that can't be read.
 
+uv in a child: a test whose subprocess runs uv asks for the `uv_env` fixture and passes
+it as that child's environment. It is the fenced environment plus uv's real cache
+(`UV_CACHE_DIR`) and installed Pythons (`UV_PYTHON_INSTALL_DIR`), read when pytest
+starts, before any test empties the environment; where neither is set, uv's own default
+under the real home (`$XDG_CACHE_HOME/uv` or `~/.cache/uv`, `$XDG_DATA_HOME/uv/python`
+or `~/.local/share/uv/python`; on Windows under `%LOCALAPPDATA%` and `%APPDATA%`). It
+also sets `UV_PYTHON_DOWNLOADS=never`, so a child finds the Pythons already installed
+and never adds one to the real directory. The test's own process stays fenced.
+
 The fsync seam: `os.fsync` (and `os.fdatasync`) is a no-op in every test that is not
 marked `honest_fsync`; the no-op still refuses a closed descriptor. Code must call
 `os.fsync(...)` through the module for the seam to reach it.
@@ -117,6 +126,9 @@ HARNESS_HOMES = {
 #: Variables carried into the fence unchanged, when set.
 KEPT_ENV = ("PATH", "LANG", "LANGUAGE", "TMPDIR", "PYTEST_CURRENT_TEST", "PYTEST_VERSION",
             "PYTEST_XDIST_WORKER", "PYTEST_XDIST_WORKER_COUNT", "PYTEST_XDIST_TESTRUNUID")
+
+#: What `uv_env` adds to the fenced environment, besides uv's two directories.
+_UV_NO_DOWNLOADS = {"UV_PYTHON_DOWNLOADS": "never"}
 
 _KEPT_PREFIXES = ("LC_",)
 _GROUP = "moxi.modules"
@@ -385,6 +397,25 @@ def _fenced_env(source: Mapping[str, str], home: Path, runtime: Path, short: Pat
     return env
 
 
+def _uv_dirs(environ: Mapping[str, str], home: str, *,
+             windows: bool = os.name == "nt") -> dict[str, str]:
+    """uv's cache and installed-Python directories, as uv finds them from `environ`."""
+    def given(key: str) -> str | None:
+        return environ.get(key) or None
+
+    if windows:
+        local = given("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
+        roaming = given("APPDATA") or os.path.join(home, "AppData", "Roaming")
+        cache = os.path.join(local, "uv", "cache")
+        pythons = os.path.join(roaming, "uv", "data", "python")
+    else:
+        cache = os.path.join(given("XDG_CACHE_HOME") or os.path.join(home, ".cache"), "uv")
+        pythons = os.path.join(given("XDG_DATA_HOME")
+                               or os.path.join(home, ".local", "share"), "uv", "python")
+    return {"UV_CACHE_DIR": given("UV_CACHE_DIR") or cache,
+            "UV_PYTHON_INSTALL_DIR": given("UV_PYTHON_INSTALL_DIR") or pythons}
+
+
 def _quiet_fsync(fd: Any) -> None:
     """The fsync seam's stand-in: refuses a closed descriptor, syncs nothing."""
     os.fstat(fd if isinstance(fd, int) else fd.fileno())
@@ -396,6 +427,9 @@ def pytest_configure(config: pytest.Config) -> None:
     _SESSION["live"] = os.environ.get(LIVE_ENV) == "1"
     _SESSION["temproot"] = os.environ.get("PYTEST_DEBUG_TEMPROOT") or tempfile.gettempdir()
     _SESSION["modules"] = _modules()
+    # Read once, from the environment this process started with: a pytest run inside a
+    # test (pytester's in-process run) already sees the fenced one.
+    _SESSION.setdefault("uv", _uv_dirs(os.environ, os.path.expanduser("~")))
     _install()
 
 
@@ -466,6 +500,14 @@ def fence(request: pytest.FixtureRequest, tmp_path: Path,
     if late:
         pytest.fail("the test fence refused, outside the test's call:\n  "
                     + "\n  ".join(late), pytrace=False)
+
+
+@pytest.fixture
+def uv_env(fence: Fence) -> dict[str, str]:
+    """An environment for a child process that runs uv (module doc): the fenced one, with
+    uv's real cache and installed Pythons and no Python downloads. Pass it as the child's
+    `env`; this process's own environment is left as the fence made it."""
+    return {**os.environ, **_SESSION["uv"], **_UV_NO_DOWNLOADS}
 
 
 # --- helpers ---------------------------------------------------------------------------
@@ -603,4 +645,4 @@ def _statements(script: str) -> Iterator[str]:
 
 __all__ = ["Fence", "FenceError", "HARNESS_HOMES", "KEPT_ENV", "LIVE_ENV", "MARKERS",
            "SHUTDOWN_POLL", "TIERS", "fence", "param_id", "served", "short_dir",
-           "wait_for", "write_sqlite"]
+           "uv_env", "wait_for", "write_sqlite"]
