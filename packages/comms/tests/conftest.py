@@ -165,6 +165,7 @@ def env(monkeypatch, tmp_path):
 BOTH_BACKENDS = (
     "test_cli.py",                  # the CLI verbs, and the sender through them
     "test_delivery.py",             # the daemon's routing, delivery and replay
+    "test_digests.py",              # the delivery books' methods on the daemon socket
     "test_claims.py",               # claim / release, through the daemon
     "test_directory_provision.py",  # provision against the seam
     "test_local_record.py",        # its rig tests state the no-op half on the mock too

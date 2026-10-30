@@ -74,6 +74,7 @@ import logging
 import os
 import secrets
 import signal
+import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field
@@ -247,6 +248,9 @@ class SettleWindow:
     def due(self) -> float:
         return self.opened + self.steps[self.taken]
 
+
+#: The most bytes of an `injected` digest's text the daemon keeps.
+INJECTED_CAP = 64 * 1024
 
 #: The most `deliver` frames one binding may have out that its adapter hasn't yet taken
 #: into a digest. A push past it waits in the binding's overflow and goes out, by id, as
@@ -496,6 +500,7 @@ class Daemon:
                 "resolve", "agents", "session", "owner", "asks", "owed", "readable",
                 "explain", "binding_window", "attributed_message", "rooms", "message",
                 "history", "max_id", "last_digest")},
+            "open_digest": self._open_digest,
             "turn_ended": self._turn_ended,
             "injected": self._injected,
             "ready": self._ready,
@@ -660,6 +665,13 @@ class Daemon:
         except DaemonStopping:
             raise wire.error(wire.STOPPING, "the comms daemon is stopping; try again in "
                              "a moment") from None
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) and "busy" not in str(e):
+                log.exception("%s failed", method)
+                raise wire.error(wire.FAILED, f"{type(e).__name__}: {e}") from None
+            # comms.db's busy timeout passed: nothing of this method was committed.
+            raise wire.error(wire.STORE_BUSY, "comms' store is busy; try again in a "
+                             "moment") from None
         except Refusal as e:
             if method == "bind":
                 # One journal line per refused attempt, naming what was asked. A waiting
@@ -709,19 +721,51 @@ class Daemon:
 
         return wire.Then(result, catch_up)
 
+    def _open_digest(self, conn, params: dict) -> dict:
+        """`open_digest`: the adapter is about to put `ids` in one digest. The rows it
+        may still deliver go in a new digest, whose id the adapter hands turns as the
+        delivery's ref; withdrawn and expired ones are dropped and named. The ids leave
+        the binding's window, which is topped up."""
+        b = self._own_binding(conn, params)
+        self._not_bound(b)
+        ids = params.get("ids")
+        if not isinstance(ids, list):
+            raise Refusal("open_digest: `ids` lists the message ids of the digest",
+                          code=wire.INVALID_PARAMS)
+        asked = {str(i) for i in ids}
+        opened = self.books.open_digest(b.qualified, b.history_id,
+                                        list(dict.fromkeys(str(i) for i in ids)))
+        if opened.dropped:
+            with self._lock:
+                rows = self.queue.get(b.qualified, {})
+                for gone in opened.dropped:
+                    rows.pop(gone["id"], None)
+                    b.delivered.discard(gone["id"])
+                if not rows:
+                    self.queue.pop(b.qualified, None)
+        self._window_take(b, lambda mid: mid in asked)
+        return {"digest": opened.digest, "ids": opened.ids, "dropped": opened.dropped}
+
     def _injected(self, conn, params: dict) -> None:
-        """`injected`: the adapter put a digest in. The text is kept for `last_digest`;
-        every pushed id up to `through` has left the binding's window."""
+        """`injected`: the adapter put a digest in. The text is kept for `last_digest`,
+        and on the digest `digest` names; every pushed id up to `through` (an adapter
+        that names no digest) has left the binding's window."""
         b = self._own_binding(conn, params)
         identity = b.qualified if b is not None else str(params.get("identity") or "")
         if identity and self._ping_ordered(conn, identity, "injected", params.get("seq")):
             through = params.get("through")
+            text = params.get("text")
+            if isinstance(text, str) and len(text.encode()) > INJECTED_CAP:
+                text = text.encode()[:INJECTED_CAP].decode(errors="ignore")
             with self._lock:
                 if through is not None:
                     self.injected_through[identity] = str(through)
-                text = params.get("text")
                 if text is not None:
                     self.injected_digest[identity] = str(text)
+            digest = params.get("digest")
+            if b is not None and digest is not None and text is not None:
+                self._book("keep the digest text of", identity,
+                           lambda: self.books.injected(identity, int(digest), str(text)))
             if b is not None and through is not None:
                 self._window_take(b, lambda mid: _as_id(mid) <= _as_id(str(through)))
         return self._not_bound(b)
@@ -756,6 +800,12 @@ class Daemon:
                 self._take_session(b, params, at=self.clock(), turn=turn)
         if b is None:
             return self._not_bound(b)
+        ref = params.get("ref")
+        if ref is not None:
+            # A turn took this digest: it started, or a steer went in. Not an ack.
+            refs = ref if isinstance(ref, list) else [ref]
+            self._book("mark the digest started of", identity,
+                       lambda: self.books.started(identity, refs))
         if kind == ACTIVITY_READY:
             self._on_ready(b, params.get("source"))
         elif kind == ACTIVITY_LOOK:
