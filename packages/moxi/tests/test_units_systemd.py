@@ -1145,6 +1145,7 @@ def test_status_reads_a_daemon_from_recorded_show_output(unit_root):
     assert state.detail == "active (running), enabled, restarted 2 times"
     assert state.log == "journalctl --user -u moxi-demo-relay.service"
     assert state.backend == "systemd" and state.wrapped is None and state.last is None
+    assert state.triggers is None
 
 
 @pytest.mark.parametrize("active, raw, state, enabled", [
@@ -1190,6 +1191,7 @@ def test_status_of_a_marked_timer_reads_its_service_result(unit_root):
     assert (read.state, read.enabled) == ("active", True)
     assert read.last == {"result": "exit-code", "status": "3"}
     assert read.log == "journalctl --user -u moxi-a-snap.service"
+    assert read.triggers == "moxi-a-snap.service"
     assert len(run.calls) == 1
 
 
@@ -1209,7 +1211,27 @@ def test_status_of_a_foreign_timer_reads_the_unit_its_triggers_names(unit_root):
                                               ("backup.timer",))], Fence("systemd", run))
     assert read.module is None and read.last == {"result": "success", "status": "0"}
     assert read.log == "journalctl --user -u backup-run.service"
+    assert read.triggers == "backup-run.service"
     assert len(run.calls) == 2 and not any("backup.service" in c for c in run.calls)
+
+
+def test_a_timer_the_manager_does_not_hold_or_that_names_nothing_has_no_triggers(unit_root):
+    """`not-found` shows an empty `Triggers`, and so does a masked timer; neither names a
+    unit. A socket's `Triggers` names its service, but only a timer's is carried."""
+    show = _shown(
+        _block(Id="gone.timer", LoadState="not-found", ActiveState="inactive", Triggers=""),
+        _block(Id="masked.timer", LoadState="masked", ActiveState="inactive",
+               SubState="dead", UnitFileState="masked", Triggers=""),
+        _socket_block(SOCK))
+    run = Recorder(show=show)
+    gone, masked, socket = SystemdBackend().status(
+        [UnitRef(None, "gone.timer", "timer", ("gone.timer",)),
+         UnitRef(None, "masked.timer", "timer", ("masked.timer",)),
+         UnitRef("demo", "relay", "socket", (SOCK,))], Fence("systemd", run))
+    assert (gone.state, gone.triggers) == ("missing", None)
+    assert (masked.state, masked.triggers) == ("inactive", None)
+    assert (socket.state, socket.triggers) == ("active", None)
+    assert len(run.calls) == 1
 
 
 def test_status_reads_wrapped_from_the_drop_in_paths(unit_root):
@@ -1256,6 +1278,7 @@ def test_a_set_whose_units_are_all_active_reads_active_with_its_epoch(unit_root)
     assert (state.kind, state.state, state.pid, state.enabled) == ("socket", "active",
                                                                     None, True)
     assert state.epoch == f"{SOCK}=3f0c,{SOCK_1}=9a41"
+    assert state.triggers is None  # its units' Triggers name the service; only a timer's counts
     assert abs(state.since - (time.time() - 10)) < 2
     assert state.log == f"journalctl --user -u {SOCK} -u {SOCK_1}"
 
@@ -1304,6 +1327,32 @@ def test_status_gives_the_daemon_its_sockets_enabled_and_an_idle_service_inactiv
     assert socket.epoch == ",".join(f"{u}={w.sup.invocations[u]}" for u in (SOCK, SOCK_1))
 
 
+def test_status_gives_each_timer_the_unit_it_triggers_and_no_other_kind_one(w, v6):
+    """With the fake runner: a marked timer, a foreign timer, a daemon and its socket.
+    The field comes out of the reads status makes anyway, one `show` and one more for
+    the foreign timer's service."""
+    w.script("moxi-demo-relay")
+    w.script("moxi-demo-snap")
+    w.module(DAEMONS=shell("127.0.0.1"), TIMERS=TIMER)
+    changes = units.plan("demo")
+    for change in changes:
+        if change.kind == "timer":
+            units._state.record("demo", change.name, change.digest)
+    w.apply(changes)
+    w.sup.extra |= {"backup.timer", "backup-run.service"}
+    w.sup.triggers["backup.timer"] = "backup-run.service"
+    w.sup.reload()
+    w.sup.calls.clear()
+    read = {(s.name, s.kind): s for s in units.status(["demo"], foreign=["backup.timer"],
+                                                      runner=w.sup)}
+    assert read[("snap", "timer")].triggers == "moxi-demo-snap.service"
+    assert read[("backup.timer", "timer")].triggers == "backup-run.service"
+    assert read[("relay", "daemon")].triggers is None
+    assert read[("relay", "socket")].triggers is None
+    shows = [c for c in w.sup.calls if c[0] == "show"]
+    assert len(shows) == 2 and shows[1][2:] == ("backup-run.service",)
+
+
 def test_a_failed_show_reads_unknown_with_the_supervisors_text(unit_root):
     def fail(cmd, *, env=None, timeout=None):
         return subprocess.CompletedProcess(cmd, 1, "", "Failed to connect to bus\n")
@@ -1330,7 +1379,7 @@ def test_a_failed_show_makes_every_unit_it_covers_unknown(unit_root):
     states = SystemdBackend().status(units_, Fence("systemd", fail))
     assert [s.state for s in states] == ["unknown"] * 4 and len(calls) == 1
     assert all("Failed to connect to bus" in s.detail and s.enabled is None
-               and s.last is None for s in states)
+               and s.last is None and s.triggers is None for s in states)
 
 
 @pytest.mark.parametrize("service_state", ["failed", "inactive", "activating"])
@@ -1374,6 +1423,7 @@ def test_a_foreign_timer_whose_service_read_fails_keeps_its_timers_state(unit_ro
     [read] = SystemdBackend().status([UnitRef(None, "backup.timer", "timer",
                                               ("backup.timer",))], Fence("systemd", run))
     assert read.state == "active" and read.last is None
+    assert read.triggers == "backup-run.service"  # from the first show, which answered
     assert "its triggered unit could not be read" in read.detail
     assert "Connection timed out" in read.detail
 
