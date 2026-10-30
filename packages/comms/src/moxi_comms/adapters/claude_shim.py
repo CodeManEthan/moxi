@@ -24,9 +24,11 @@ the daemon, the payload or the record. `frame_line` / `render_digest` are the sh
 seam -- `adapters/codex` renders through the same two functions.
 
 Injection seam: `injector(text)` is the ONE place the harness is touched. In a session
-`moxi comms claude` launches it is the session's adapter process (`claude_adapter`), which
-hands the digest to turns (`deliver`) and settles it from the turn's outcome; `--inject-file`
-fills it with a file writer, which the tests read. While bound, the shim holds the
+`moxi comms claude` launches, the session's adapter process (`claude_adapter`) sets
+`handover(text, digest, steer=)` in its place, which hands the digest to turns with the
+digest's id as its ref (`deliver`, or `steer` for interrupt mail into a running turn) and
+settles it from the turn's outcome; `--inject-file` fills `injector` with a file writer,
+which the tests read. While bound, the shim holds the
 binding's posting credential in memory and hands it only to sends inside its session.
 
 The frame line carries only what the reader cannot get anywhere else. The default room
@@ -226,7 +228,7 @@ def frame_marks(author: dict, *, suppress_unverified: bool = False) -> str:
 
 
 def frame_line(payload: dict, directors=(), *, suppress_unverified: bool = False,
-               now: float | None = None) -> str:
+               now: float | None = None, steered: bool = False) -> str:
     """ONE attributed frame line per message: who is speaking is never inferred.
 
     `directors` is the RECIPIENT's launch-time declaration, already qualified. A verified
@@ -236,6 +238,9 @@ def frame_line(payload: dict, directors=(), *, suppress_unverified: bool = False
 
     Silence is the common case and it is load-bearing: no parenthetical means chosen
     and verified, both of which the machinery guarantees rather than guesses.
+
+    `steered` is a digest handed into a running turn: a message whose sender asked to
+    interrupt says so (`[interrupt]`), so the reader knows why mail came mid-turn.
     """
     a = payload["author"]
     standing = standing_of(a, directors)
@@ -280,6 +285,8 @@ def frame_line(payload: dict, directors=(), *, suppress_unverified: bool = False
         bits.append(machine_line.POSTURE_TOKENS[posture])
     elif payload.get("open_mark"):
         bits.append(machine_line.OPEN_TOKEN)
+    if steered and payload.get("interrupt"):
+        bits.append(machine_line.INTERRUPT_TOKEN)
     return " · ".join(bits)
 
 
@@ -320,7 +327,8 @@ def end_line(payload: dict) -> str:
 
 
 def render_message(payload: dict, directors=(), *,
-                   suppress_unverified: bool = False, now: float | None = None) -> str:
+                   suppress_unverified: bool = False, now: float | None = None,
+                   steered: bool = False) -> str:
     """ONE delivered message: the frame line, the body inside it, the closing line.
 
     The body is somebody else's prose arriving in a context comms does not own, so it gets
@@ -329,7 +337,8 @@ def render_message(payload: dict, directors=(), *,
     positional, which is why it holds for text nobody anticipated.
     """
     return "\n".join([
-        frame_line(payload, directors, suppress_unverified=suppress_unverified, now=now),
+        frame_line(payload, directors, suppress_unverified=suppress_unverified, now=now,
+                   steered=steered),
         *envelope.body(str(payload.get("text") or "")),
         end_line(payload),
     ])
@@ -426,7 +435,7 @@ def digest_header(payloads: list, *, clock=time.time) -> str | None:
 
 
 def render_digest(payloads: list, notice: str | None = None, directors=(), *,
-                  clock=time.time) -> str:
+                  clock=time.time, steered: bool = False) -> str:
     # The header's attribution note and the per-frame `(unverified)` marks are ONE
     # statement: whichever place says it, the other stays quiet. The note only ever
     # speaks for the REPLAYED frames (`replay_is_unverified`), so it can only silence
@@ -447,7 +456,7 @@ def render_digest(payloads: list, notice: str | None = None, directors=(), *,
     for p in payloads:
         suppress = note and bool(p.get("backlog"))
         parts.append(render_message(p, directors, suppress_unverified=suppress,
-                                    now=clock()))
+                                    now=clock(), steered=steered))
     return "\n\n".join(parts)
 
 
@@ -495,6 +504,10 @@ class ClaudeShim:
         # the recipient's grant, qualified at launch and never re-qualified here
         self.directors = tuple(directors or ())
         self.injector = injector or (lambda text: None)
+        #: `handover(text, digest, *, steer)`: when set, a flush hands its digest here
+        #: instead of to `injector`, with the digest's id, so the caller can name it to
+        #: the harness. The Claude adapter sets it.
+        self.handover = None
         self.socket_path = socket_path
         self.status_sink = status_sink or (lambda text: log.warning("%s", text))
         self.autoreconnect = autoreconnect
@@ -525,6 +538,10 @@ class ClaudeShim:
         #: `answer`.
         self.unreported_handled: list[int] = []
         self.unreported_unhandled: list[int] = []
+        #: The digests handed apart from the boundary digest above (interrupt mail steered into
+        #: a running turn), by digest id: their message ids and the hold they went in
+        #: under. Each settles on its own, from its own outcome.
+        self.steered: dict[int, tuple[tuple[str, ...], object]] = {}
         #: A SessionStart that came while this shim was not bound: `{"source": ...}`,
         #: sent once right after the next register answer. None when nothing is
         #: owed.
@@ -724,6 +741,7 @@ class ClaudeShim:
                 self.queue = []
                 self.held_ids = set()
                 self.awaiting_digest = None
+                self.steered = {}
                 self._forget_turns()
                 session_id, projects_root, turned = (self.session_id, self.projects_root,
                                                      self.turned)
@@ -1025,12 +1043,14 @@ class ClaudeShim:
         with self._lock:
             self.turned = True
 
-    def notify_activity(self, kind: str | None, *, source: str | None = None) -> bool:
+    def notify_activity(self, kind: str | None, *, source: str | None = None,
+                        ref=None) -> bool:
         """Tell the daemon the harness is alive, which session it is, and what kind of
         moment this is: `ready` (a SessionStart, with its `source`) or `look`. None
         sends no `kind`, which releases nothing. Every notify carries the session id, `projects_root` and
-        `turned`, read together under the lock. True when the frame went out on a
-        connection that is still open."""
+        `turned`, read together under the lock. `ref` names the digests a turn took
+        (one, or a list): the daemon marks them started, which is not an ack. True when
+        the frame went out on a connection that is still open."""
         with self._lock:
             identity, client = self.identity, self._client
             session_id, projects_root, turned = (self.session_id, self.projects_root,
@@ -1047,6 +1067,8 @@ class ClaudeShim:
             fields["session_id"] = session_id
         if projects_root:
             fields["projects_root"] = projects_root
+        if ref is not None:
+            fields["ref"] = ref
         client.notify(ACTIVITY_METHODS.get(kind, "activity"), {"identity": identity, **fields})
         return client.connected
 
@@ -1085,6 +1107,12 @@ class ClaudeShim:
         """End the turn that was running: its digest is handled, or `unhandled` when
         `failed` (its turn did not end `answer`), and `turn_ended` tells the daemon,
         which keeps the books."""
+        self._settle_awaiting(failed=failed)
+        self._send_turn()
+
+    def _settle_awaiting(self, *, failed: bool = False) -> None:
+        """The boundary digest's turn ended: put it on the next `turn_ended`, handled, or
+        unhandled when `failed`. Sends nothing."""
         # A boundary proves the turn both started and ended, so it answers the timer too.
         self.stall.witness()
         with self._lock:
@@ -1106,7 +1134,25 @@ class ClaudeShim:
             elif digest is not None:
                 if digest not in self.unreported_handled:
                     self.unreported_handled.append(digest)
-        self._send_turn()
+
+    def settle_steered(self, digest, *, handled: bool) -> bool:
+        """A digest handed apart from the boundary digest settled: put it on the next
+        `turn_ended`, `handled` or not. False when this shim holds no such digest (a
+        new binding forgot it, or it settled already). Sends nothing."""
+        with self._lock:
+            entry = self.steered.pop(digest, None)
+            if entry is None:
+                return False
+            ids, mark = entry
+            self.held_ids.difference_update(ids)
+            if not self.claims.may_advance(mark):
+                log.info("a steered digest settled after %s was released; it is not "
+                         "reported", self.identity)
+                return True
+            target = self.unreported_handled if handled else self.unreported_unhandled
+            if digest not in target:
+                target.append(digest)
+        return True
 
     def _send_turn(self) -> None:
         """`turn_ended`, carrying every digest that ended since the last one went out.
@@ -1184,7 +1230,10 @@ class ClaudeShim:
         if not batch:
             return None
         text = render_digest(batch, notice, self.directors, clock=self.clock)
-        self.injector(text)
+        if self.handover is not None:
+            self.handover(text, digest, steer=False)
+        else:
+            self.injector(text)
         high = max(int(p["message_id"]) for p in batch)
         with self._lock:
             # The ledger opens at injection, after the injector returned: the
@@ -1208,6 +1257,50 @@ class ClaudeShim:
                                        "text": text})
         log.info("injected %d message(s) for %s through %s (digest %s)", len(batch),
                  identity, high, digest)
+        return text
+
+    def has_interrupt(self) -> bool:
+        """Whether a queued message carries the sender's interrupt mark."""
+        with self._lock:
+            return any(p.get("interrupt") for p in self.queue)
+
+    def flush_interrupt(self) -> str | None:
+        """Interrupt mail into the running turn: one digest of the queued messages whose
+        sender asked to interrupt, and only those, rendered with `[interrupt]` on their
+        frame lines and handed with `steer`. The rest of the queue waits for the
+        boundary. Returns the digest text, or None when nothing went.
+
+        It arms no stall timer: a steer starts no turn, so no turn start would answer
+        it. The digest settles on its own (`settle_steered`)."""
+        with self._lock:
+            batch = [p for p in self.queue if p.get("interrupt")]
+            if not batch:
+                return None
+            self.queue = [p for p in self.queue if not p.get("interrupt")]
+            batch.sort(key=lambda p: int(p["message_id"]))
+            identity = self.identity
+        batch, digest = self._open(batch)
+        if not batch:
+            return None
+        text = render_digest(batch, None, self.directors, clock=self.clock, steered=True)
+        if self.handover is not None:
+            self.handover(text, digest, steer=True)
+        else:
+            self.injector(text)
+        with self._lock:
+            now = self.clock()
+            for p in batch:
+                self.ledger.open(p, self.directors, self.session_id, now)
+            self.injected.append(text)
+            if digest is not None:
+                self.steered[digest] = (tuple(str(p["message_id"]) for p in batch),
+                                        self.claims.hold_mark())
+            client = self._client
+        if client:
+            client.notify("injected", {"identity": identity, "digest": digest,
+                                       "text": text})
+        log.info("steered %d interrupt message(s) for %s (digest %s)", len(batch),
+                 identity, digest)
         return text
 
     # ------------------------------------------------------------------ helpers

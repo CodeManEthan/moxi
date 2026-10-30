@@ -199,6 +199,18 @@ def test_the_mark_reaches_the_digest():
     assert "· audience: operator" in digest
 
 
+def test_interrupt_mail_says_so_only_when_it_was_steered_into_a_turn():
+    """`[interrupt]` tells the reader why mail came mid-turn: it is on a steered
+    digest's interrupt mail, and on nothing that came at a boundary."""
+    mail = payload(interrupt=True)
+    assert frame_line(mail, steered=True) == \
+        "[comms] from planner@proj-a · msg 101 · [interrupt]"
+    assert frame_line(mail) == "[comms] from planner@proj-a · msg 101"
+    assert frame_line(payload(), steered=True) == "[comms] from planner@proj-a · msg 101"
+    assert "· [interrupt]" in render_digest([mail], steered=True)
+    assert "[interrupt]" not in render_digest([mail])
+
+
 # --------------------------------------------- the rarer marks, in a REAL digest
 #
 # Pinning `(ephemeral)` and `(standing)` only through direct `frame_line` calls would

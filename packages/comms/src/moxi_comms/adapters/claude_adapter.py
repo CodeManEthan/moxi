@@ -3,46 +3,67 @@
 `moxi comms claude` forks it before it execs `claude` (`session.launch`), one per session
 it launches, and it lives as long as the session's `claude` process. It holds what the
 claude-shim held when Claude Code spawned it as an MCP server: the session's daemon
-binding, the claim socket, the `turned` and root evidence, and the queue, digest, cursor
-and owed ledger (`ClaudeShim`, which this process runs). What it no longer holds is any
-way into the session: turns is the one interface to a harness session, so this adapter
-is a turns caller. It finds the session's endpoint, becomes its holder, watches its turn
-events and hands each digest to it with `deliver`.
+binding, the claim socket, the `turned` and root evidence, and the queue, digests and owed
+ledger (`ClaudeShim`, which this process runs). What it no longer holds is any way into
+the session: turns is the one interface to a harness session, so this adapter is a turns
+caller. It finds the session's endpoint, becomes its stop handler, watches its turn
+events and hands each digest to it, named by the digest's id as its `ref`.
 
     the binding        ClaudeShim.start(): registered before `claude` starts
     the claim socket   ClaudeShim's ClaimHolder, rooted at the `claude` process
     finding            turns.find(pid=<claude>), once a second until an endpoint answers
-    the holder         Session.hold(on_stop): the Stop decision is ClaudeShim.on_stop
+    the stop handler   Session.handle_stops(on_stop): the decision is ClaudeShim.on_stop
     release points     each TurnEnded, and an idle session (no turn open, mail queued)
-    a digest           Session.deliver(text), settled from its turn's outcome
+    a digest           Session.deliver(text, ref=<digest>), settled from its turn's end
+    interrupt mail     Session.steer(text, ref=<digest>) into the running turn
 
 **Finding the endpoint.** Turns' Claude runner starts the endpoint at the session's
 start, and it answers once it has its session id. Until this adapter has found it, mail
 stays in the shim's queue and the daemon is told the session has no endpoint
-(`ClaudeShim.notify_endpoint`), which a sender reads as `waiting`. The first look is a
+(`ClaudeShim.notify_endpoint`), which a sender reads as `waiting`. A look takes the stop
+handler, then the watch, whose facts are read at the subscription: no turn event falls
+between what the look read and the first event the watch gives. The first look is a
 release point when the session is idle (a `look` frame: no turn, nothing settled), so mail
 the daemon held for a `ready` raised before the look is not left waiting. A look also
-learns the session id and reads `turned` from the epoch: a session that has had a turn
-has `turned` set.
+learns the session id and reads `turned` from the turn number: a session that has had a
+turn has `turned` set.
 
-**Delivery.** One digest at a time, at turn boundaries only. A digest goes in when a turn
+**Delivery.** Plain mail goes one digest at a time, at turn boundaries only: when a turn
 ends (any turn: the person's, or the one that took the digest before it) or when the
 session is idle with mail queued and the queue has stopped growing. turns' `deliver`
-starts the turn now if the session is idle and else when the running turn ends. Each
-digest is settled once, from what turns says of it:
+starts the turn now if the session is idle and else when the running turn ends.
 
-    Ended(answer)                      handled: the cursor may pass it
-    Ended(aborted | error | refusal)   unhandled: the daemon hands it again later
-    Refused(reason)                    unhandled; it never went in
-    Lost, untied                       unhandled; the endpoint is still there
-    Lost (any other), or unreachable   unhandled, and the endpoint is gone
+**Interrupt mail.** A queued message whose sender asked to interrupt, while a turn runs
+on a session that offers `steer`, goes at once: the shim opens a digest of the interrupt
+mail alone, marks its frames `[interrupt]`, and the adapter steers it into the turn. A
+steer refused `idle` (the turn ended between the check and the call) or `loading` falls
+back to `deliver` with the same text and ref, once; turns runs the text once whichever
+way the race went. A session without `steer` takes interrupt mail at the boundary like
+any other.
 
-A `Lost` whose reason starts `untied` or `expired` (`Lost.untied`) was decided by an
-endpoint that lives on: one delivery is unaccounted for and the endpoint is kept. Any
-other `Lost`, a watch that ends, or an endpoint that cannot be reached means the
-endpoint went away (a plugin reload, a crash): the adapter settles its open digest
-`unhandled`, tells the daemon the session has no endpoint, and looks again. A Stop in
-that gap is not held, and ends the turn.
+**Settling.** The ack is the end of the turn that took the digest. turns' `turn.ended`
+names every delivery the turn took, the opening one and each steered one, by ref, so each
+digest settles from its own turn:
+
+    turn ended answer                  handled: the daemon deletes its rows
+    turn ended otherwise               unhandled: the daemon hands it again later
+
+What a hand-in's own outcome does before a turn names it:
+
+    taken (an id, no value)            nothing yet: its turn's end settles it
+    Refused idle/loading, a steer      one `deliver` with the same text and ref
+    Refused gone                       unhandled at once; the endpoint is gone
+    Refused (any other reason)         unhandled at once: the text never went in
+    unknown (no id, no value)          waited on: the library resolves it by ref; a
+                                       timeout keeps the digest open and waits again
+    Lost, untied or expired            unhandled at once; the endpoint is kept
+    Lost (any other)                   unhandled at once; the endpoint is looked for again
+
+**The endpoint's loss.** A watch that ends, a `Lost` that isn't untied or expired, or a
+refusal `gone` means the endpoint went away (a plugin reload, a crash): the adapter
+settles every open digest `unhandled`, tells the daemon the session has no endpoint, and
+looks again, which finds the same endpoint when it still serves. A Stop in that gap is
+not held, and ends the turn.
 
 **Esc.** turns reports an interrupted turn as `aborted`, so the turn's outcome says
 whether the digest was handled.
@@ -69,14 +90,18 @@ log = logging.getLogger("comms.claude.adapter")
 #: How often the adapter looks for its session's endpoint while it has none: once
 #: a second.
 LOOK_INTERVAL = 1.0
-#: While mail waits and the watch says a turn runs, how often the adapter reads the
-#: ledger (`facts()`) to check it: a turn end the watch missed between the look's read and
-#: the watch's start would otherwise hold the mail until the next turn ends.
-RECHECK_INTERVAL = 5.0
+#: How long a wait that timed out pauses before it asks again, in seconds. The digest
+#: stays open meanwhile.
+WAIT_RETRY = 0.5
 #: The `activity` kind of a first look at an idle session (the daemon's `ACTIVITY_LOOK`).
 LOOK = "look"
 #: The outcome that settles a digest `handled`.
 ANSWER = "answer"
+#: The steer refusals that fall back to `deliver`: no turn runs to take the text, or the
+#: host has no accepted load.
+STEER_FALLBACK = ("idle", "loading")
+#: The library's refusal for a hand-in it never wrote, or the endpoint's `gone` error.
+GONE = "gone"
 
 
 def _turns_api():
@@ -86,16 +111,40 @@ def _turns_api():
 
 
 class _Unsent:
-    """A digest that could not be handed to an endpoint (it went away under the flush):
-    its wait answers `Refused("gone")` at once, so it settles `unhandled`."""
+    """A digest that could not be handed to an endpoint (it went away under the flush,
+    or the hand-in failed): both waits answer `value` at once."""
 
     id = None
 
-    def __init__(self, refused):
-        self._refused = refused
+    def __init__(self, value, ref=None):
+        self._value = value
+        self.ref = ref
+
+    def wait_started(self, timeout):
+        return self._value
 
     def wait_ended(self, timeout):
-        return self._refused
+        return self._value
+
+
+class Hand:
+    """One digest handed to turns: its `ref` (the digest's id as a string), the
+    `digest`, the `text`, whether it went by `steer`, and the library's `delivery`.
+    `boundary` is the shim's one boundary digest; a steered digest is not, nor is its
+    fallback `deliver`."""
+
+    def __init__(self, ref, digest, text: str, delivery, *, steer: bool):
+        self.ref = ref
+        self.digest = digest
+        self.text = text
+        self.delivery = delivery
+        self.steer = steer
+        self.boundary = not steer
+        self.fell_back = False
+
+    def __repr__(self) -> str:
+        how = "steer" if self.steer else "deliver"
+        return f"Hand({self.ref!r}, {how}, {self.delivery!r})"
 
 
 class ClaudeAdapter:
@@ -107,26 +156,27 @@ class ClaudeAdapter:
 
     def __init__(self, shim: ClaudeShim, harness_pid: int, *, turns=None,
                  look_interval: float = LOOK_INTERVAL,
-                 recheck_interval: float = RECHECK_INTERVAL,
                  idle_poll: float = constants.IDLE_POLL,
-                 idle_settle: float = constants.IDLE_SETTLE, clock=time.monotonic):
+                 idle_settle: float = constants.IDLE_SETTLE,
+                 wait_retry: float = WAIT_RETRY, clock=time.monotonic):
         self.shim = shim
         self.harness_pid = int(harness_pid)
         self.turns = turns if turns is not None else _turns_api()
         self.look_interval = look_interval
-        self.recheck_interval = recheck_interval
         self.idle_poll = idle_poll
         self.idle_settle = idle_settle
+        self.wait_retry = wait_retry
         self._clock = clock
         #: The endpoint (`moxi_turns.Session`), or None while the session has none.
         self.session = None
-        #: The delivery whose digest awaits its outcome, or None.
-        self.delivery = None
-        #: Whether a turn runs, as the watch last said (and the look's `facts()`).
+        #: Every digest handed and not settled, by ref.
+        self.hands: dict[str, Hand] = {}
+        #: Whether a turn runs, as the watch last said (and the look's facts).
         self.turn_open = False
         #: Endpoints found (test and log visibility).
         self.looks = 0
-        self._hold = None
+        self._stops = None
+        self._watch_handle = None
         #: Bumped at each look and each loss, so a watch or a wait of an endpoint that is
         #: gone changes nothing.
         self._generation = 0
@@ -137,12 +187,16 @@ class ClaudeAdapter:
         self._threads: list[threading.Thread] = []
         self._seen = 0
         self._settled_at: float | None = None
-        self._checked_at: float | None = None
-        shim.injector = self._inject
+        shim.handover = self._handover
         shim.endpoint = False
 
+    @property
+    def boundary(self) -> Hand | None:
+        """The boundary digest's hand, or None."""
+        return next((h for h in self.hands.values() if h.boundary), None)
+
     # ------------------------------------------------------------------ lifecycle
-    def start(self, *, tolerate_offline: bool = True) -> "ClaudeAdapter":
+    def start(self, *, tolerate_offline: bool = True) -> ClaudeAdapter:
         """Bind (the shim's register, which needs no endpoint), then look and tick."""
         self.shim.start(tolerate_offline=tolerate_offline)
         for target, name in ((self._look_loop, "look"), (self._idle_loop, "idle")):
@@ -152,18 +206,23 @@ class ClaudeAdapter:
         return self
 
     def stop(self, *, remove_claim_file: bool = True) -> None:
-        """The session ended: give up the hold, close the binding (the name deregisters)
-        and remove the claim socket and, by default, the claim file."""
+        """The session ended: give up the stop handler and the watch, close the binding
+        (the name deregisters) and remove the claim socket and, by default, the claim
+        file."""
         self._stop.set()
         with self._lock:
-            hold, self._hold = self._hold, None
-            self.session = None
-            self._generation += 1
-        if hold is not None:
-            hold.close()
+            held = self._drop_endpoint()
+        _close(*held)
         for t in self._threads:
             t.join(timeout=2.0)
         self.shim.stop(remove_claim_file=remove_claim_file)
+
+    def _drop_endpoint(self) -> tuple:
+        """Forget the endpoint, under the lock; what to close outside it."""
+        held = (self._stops, self._watch_handle, self.session)
+        self._stops = self._watch_handle = self.session = None
+        self._generation += 1
+        return held
 
     # ------------------------------------------------------------------ finding
     def _look_loop(self) -> None:
@@ -176,43 +235,41 @@ class ClaudeAdapter:
             self._stop.wait(self.look_interval)
 
     def look(self) -> bool:
-        """One look for the session's endpoint. True when one was found and held."""
+        """One look for the session's endpoint. True when one was found, its stops
+        handled and its watch begun."""
         T = self.turns
         s = T.find(pid=self.harness_pid)
         if s is None:
             return False
         try:
-            hold = s.hold(self._on_stop)
+            stops = s.handle_stops(self._on_stop)
         except T.TurnsError as e:
-            log.info("the session's endpoint did not take this adapter as its holder "
-                     "(%s); looking again", e)
+            log.info("the session's endpoint did not take this adapter as its stop "
+                     "handler (%s); looking again", e)
+            _close(s)
             return False
         try:
-            facts = s.facts()
+            watch = s.watch()
         except T.TurnsError as e:
-            log.info("the session's endpoint did not answer facts (%s); looking again", e)
-            hold.close()
+            log.info("the session's endpoint did not start a watch (%s); looking again", e)
+            _close(stops, s)
             return False
+        facts = watch.facts
         with self._lock:
             if self._stop.is_set():
-                hold.close()
+                _close(stops, watch, s)
                 return False
             self._generation += 1
             generation = self._generation
-            self.session, self._hold = s, hold
+            self.session, self._stops, self._watch_handle = s, stops, watch
             self.turn_open = bool(facts.turn_open)
-            self._checked_at = self._clock()
             self.looks += 1
             first = self.looks == 1
             self._learn_session(facts.session_id or s.session_id)
-            if facts.epoch > 0:
+            if facts.turn_number > 0:
                 self.shim.note_turned()
             self.shim.notify_endpoint(True)
-        # The watch starts after the ledger is read. The library gives no sign of the
-        # watch's subscription, so a turn event in the milliseconds between the read and
-        # the subscription can be missed: the delivery's own end still reaches its wait,
-        # and `tick` reads the ledger again while mail waits behind a turn or a block.
-        threading.Thread(target=self._watch, args=(s, generation), daemon=True,
+        threading.Thread(target=self._watch, args=(watch, generation), daemon=True,
                          name="comms-claude-watch").start()
         log.info("found the session's endpoint at %s (session %s, %s)", s.dir,
                  facts.session_id or s.session_id, "a turn runs" if facts.turn_open
@@ -239,12 +296,21 @@ class ClaudeAdapter:
         if not first:
             self.shim.note_session(session_id)
 
+    def _can_steer(self) -> bool:
+        s = self.session
+        if s is None:
+            return False
+        try:
+            return "steer" in s.capabilities
+        except self.turns.TurnsError:
+            return False
+
     # ------------------------------------------------------------------ events
-    def _watch(self, s, generation: int) -> None:
+    def _watch(self, watch, generation: int) -> None:
         T = self.turns
         reason = "the watch ended"
         try:
-            for event in s.watch():
+            for event in watch:
                 if self._stop.is_set() or generation != self._generation:
                     return
                 if isinstance(event, T.Gone):
@@ -277,109 +343,191 @@ class ClaudeAdapter:
         elif isinstance(event, T.TurnStarted):
             with self._lock:
                 self.turn_open = True
-                self._checked_at = self._clock()
+                refs = [self.hands[r.ref].digest for r in event.deliveries
+                        if r.ref in self.hands]
             if self._current(event.session_id):
                 self.shim.note_turned()
             latency = self.shim.stall.witness()
             if latency is not None:
-                log.info("turn %s started %.2fs after the hand-over (delivery %s)",
-                         event.turn_id, latency, event.delivery_id)
-            self.shim.notify_activity(None)
-        elif isinstance(event, T.TurnEnded):
+                log.info("turn %s started %.2fs after the hand-over (%s)", event.turn_id,
+                         latency, ", ".join(f"ref {r.ref}" for r in event.deliveries)
+                         or "no delivery")
+            self.shim.notify_activity(None, ref=refs or None)
+        elif isinstance(event, T.TurnSteered):
             with self._lock:
-                self.turn_open = False
-                self._checked_at = self._clock()
-                d = self.delivery
-                if d is not None and event.delivery_id is not None \
-                        and event.delivery_id == d.id:
-                    self._settle_ended(d, event.outcome)
-                elif d is not None:
-                    # Another turn ended (the person's, or one the digest waits behind):
-                    # the digest still awaits its own. The turn's block is over, and the
-                    # daemon hears of the boundary, which releases its held mail.
-                    self.shim._clear_block()
-                    if self._current(event.session_id):
-                        self.shim.note_turned()
-                    self.shim._send_turn()
+                hand = self.hands.get(event.delivery.ref)
+            if hand is not None:
+                log.info("turn %s took the steered digest %s", event.turn_id, hand.digest)
+                self.shim.notify_activity(None, ref=[hand.digest])
+        elif isinstance(event, T.TurnEnded):
+            self._turn_ended(event)
+
+    def _turn_ended(self, event) -> None:
+        """A turn ended: each digest it names settles from its outcome, and the end is a
+        boundary, unless the boundary digest still waits behind it."""
+        handled = event.outcome == ANSWER
+        with self._lock:
+            self.turn_open = False
+            boundary_named = False
+            for r in event.deliveries:
+                hand = self.hands.pop(r.ref, None)
+                if hand is None:
+                    continue
+                log.info("digest %s: its turn ended %s; it is %s", hand.digest,
+                         event.outcome, "handled" if handled else "unhandled")
+                if hand.boundary:
+                    boundary_named = True
                 else:
-                    # A boundary with no digest awaiting: it completes nothing, tells the
-                    # daemon, and hands over what is queued.
-                    self.shim.on_turn_boundary()
+                    self.shim.settle_steered(hand.digest, handled=handled)
+            if boundary_named:
+                # The boundary digest's own turn: it settles, and the next one goes in.
+                self.shim.on_turn_boundary(failed=not handled)
+            elif self.boundary is not None:
+                # Another turn ended (the person's, or one the digest waits behind): the
+                # digest still awaits its own. The turn's block is over, and the daemon
+                # hears of the boundary, which releases its held mail.
+                self.shim._clear_block()
+                if self._current(event.session_id):
+                    self.shim.note_turned()
+                self.shim._send_turn()
+            else:
+                # A boundary with no digest awaiting: it reports what settled, tells the
+                # daemon, and hands over what is queued.
+                self.shim.on_turn_boundary()
 
     # ------------------------------------------------------------------ delivery
-    def _inject(self, text: str) -> None:
-        """The shim's injector: hand one digest to the endpoint. Called from a flush,
-        under the adapter's lock. Never raises."""
+    def _handover(self, text: str, digest, *, steer: bool = False) -> None:
+        """The shim's hand-over: one digest to the endpoint, named by its id. Called from
+        a flush, under the adapter's lock. Never raises."""
+        T = self.turns
         s = self.session
+        ref = None if digest is None else str(digest)
         if s is None:
-            d = _Unsent(self.turns.Refused("gone"))
+            d = _Unsent(T.Refused(GONE), ref)
         else:
-            d = s.deliver(text)
-        log.info("handed a digest to turns as delivery %s", d.id)
-        self.delivery = d
-        threading.Thread(target=self._wait, args=(d,), daemon=True,
+            try:
+                if steer and self._can_steer():
+                    d = s.steer(text, ref=ref)
+                else:
+                    d = s.deliver(text, ref=ref)
+            except Exception as e:                                 # noqa: BLE001
+                log.warning("the hand-in of digest %s failed: %s", digest, e)
+                d = _Unsent(T.Lost(f"the hand-in failed: {type(e).__name__}: {e}"), ref)
+        hand = Hand(ref, digest, text, d, steer=steer)
+        log.info("handed digest %s to turns by %s as delivery %s", digest,
+                 "steer" if steer else "deliver", d.id)
+        self.hands[ref] = hand
+        threading.Thread(target=self._wait, args=(hand, self._generation), daemon=True,
                          name="comms-claude-wait").start()
 
-    def _wait(self, d) -> None:
-        try:
-            result = d.wait_ended(None)
-        except Exception as e:                                     # noqa: BLE001
-            log.exception("waiting on a delivery failed")
-            result = self.turns.Lost(f"the wait failed: {type(e).__name__}: {e}")
-        self._on_result(d, result)
+    def _live(self, hand: Hand, generation: int) -> bool:
+        return (not self._stop.is_set() and generation == self._generation
+                and self.hands.get(hand.ref) is hand)
 
-    def _on_result(self, d, result) -> None:
+    def _wait(self, hand: Hand, generation: int) -> None:
+        """Wait for a hand-in's value on its own thread. A steer waits for its start
+        first: refused `idle` or `loading` it falls back to `deliver`, once; taken, it
+        waits for its turn's end. An unknown outcome is waited on, never replayed; a
+        timeout keeps the digest open and waits again."""
+        T = self.turns
+        while True:
+            d = hand.delivery
+            try:
+                if hand.steer and not hand.fell_back:
+                    value = d.wait_started(None)
+                    if isinstance(value, T.Refused) and value.reason in STEER_FALLBACK:
+                        if self._fall_back(hand, generation, value.reason):
+                            continue
+                        return
+                    if isinstance(value, T.Started):
+                        value = d.wait_ended(None)
+                else:
+                    value = d.wait_ended(None)
+            except TimeoutError:
+                if not self._live(hand, generation):
+                    return
+                self._stop.wait(self.wait_retry)
+                continue
+            except Exception as e:                                 # noqa: BLE001
+                log.exception("waiting on digest %s failed", hand.digest)
+                value = T.Lost(f"the wait failed: {type(e).__name__}: {e}")
+            break
+        self._on_result(hand, value, generation)
+
+    def _fall_back(self, hand: Hand, generation: int, reason: str) -> bool:
+        """A steer refused `idle` or `loading`: `deliver` the same text with the same
+        ref, once. False when the hand settled or the endpoint went meanwhile."""
         T = self.turns
         with self._lock:
-            if self.delivery is not d:
-                return                 # settled already, by its turn's end on the watch
-            if isinstance(result, T.Ended):
-                self._settle_ended(d, result.outcome)
-                return
-            self.delivery = None
-            gone = ((isinstance(result, T.Lost) and not result.untied)
-                    or (isinstance(result, T.Refused) and d.id is None))
-            log.info("delivery %s %s (%s): its digest is unhandled",
-                     d.id, "was refused" if isinstance(result, T.Refused) else "was lost",
-                     getattr(result, "reason", result))
-            self.shim._complete_turn(failed=True)
-            generation = self._generation
-        if gone:
-            self._endpoint_gone(generation, f"delivery {d.id}: {getattr(result, 'reason', '')}")
+            if not self._live(hand, generation):
+                return False
+            s = self.session
+            log.info("the steer of digest %s was refused %s; delivering it instead",
+                     hand.digest, reason)
+            try:
+                hand.delivery = s.deliver(hand.text, ref=hand.ref)
+            except Exception as e:                                 # noqa: BLE001
+                hand.delivery = _Unsent(T.Lost(f"the hand-in failed: {type(e).__name__}: "
+                                               f"{e}"), hand.ref)
+            hand.fell_back = True
+        return True
 
-    def _settle_ended(self, d, outcome: str) -> None:
-        """The digest's turn ended: handled on `answer`, unhandled on any other outcome.
-        The turn end is a boundary, so the next digest goes in. Under the lock."""
-        self.delivery = None
-        log.info("delivery %s: its turn ended %s; the digest is %s", d.id, outcome,
-                 "handled" if outcome == ANSWER else "unhandled")
-        self.shim.on_turn_boundary(failed=outcome != ANSWER)
+    def _on_result(self, hand: Hand, result, generation: int) -> None:
+        T = self.turns
+        with self._lock:
+            if self.hands.get(hand.ref) is not hand:
+                return                 # settled already, by its turn's end on the watch
+            del self.hands[hand.ref]
+            if isinstance(result, T.Ended):
+                handled = result.outcome == ANSWER
+                log.info("digest %s: its turn ended %s; it is %s", hand.digest,
+                         result.outcome, "handled" if handled else "unhandled")
+                if hand.boundary:
+                    self.shim.on_turn_boundary(failed=not handled)
+                else:
+                    self.shim.settle_steered(hand.digest, handled=handled)
+                    self.shim._send_turn()
+                return
+            reason = getattr(result, "reason", "")
+            gone = ((isinstance(result, T.Lost) and not result.untied)
+                    or (isinstance(result, T.Refused) and reason == GONE))
+            log.info("digest %s %s (%s): it is unhandled", hand.digest,
+                     "was refused" if isinstance(result, T.Refused) else "was lost", reason)
+            if hand.boundary:
+                self.shim._complete_turn(failed=True)
+            else:
+                self.shim.settle_steered(hand.digest, handled=False)
+                self.shim._send_turn()
+        if gone:
+            self._endpoint_gone(generation, f"digest {hand.digest}: {reason}")
 
     def _endpoint_gone(self, generation: int, reason: str) -> None:
-        """The endpoint went away while `claude` may live (a reload, a crash): settle the
-        open digest `unhandled`, tell the daemon, and look again."""
+        """The endpoint went away while `claude` may live (a reload, a crash): settle
+        every open digest `unhandled`, tell the daemon, and look again."""
         with self._lock:
             if generation != self._generation or self.session is None:
                 return
-            self._generation += 1
-            hold, self._hold = self._hold, None
-            self.session = None
+            held = self._drop_endpoint()
             self.turn_open = False
-            d, self.delivery = self.delivery, None
-            if d is not None:
-                self.shim._complete_turn(failed=True)
+            hands, self.hands = list(self.hands.values()), {}
+            for hand in hands:
+                if hand.boundary:
+                    self.shim._settle_awaiting(failed=True)
+                else:
+                    self.shim.settle_steered(hand.digest, handled=False)
+            if hands:
+                self.shim._send_turn()
             self.shim._clear_block()
             self.shim.notify_endpoint(False)
-        if hold is not None:
-            hold.close()
+        _close(*held)
         if not self._stop.is_set():
             log.info("the session's endpoint went away (%s); looking again", reason)
 
-    # ------------------------------------------------------------------ holding
+    # ------------------------------------------------------------------ the stop handler
     def _on_stop(self, facts) -> str | None:
-        """The holder's answer at a Stop: the shim's reply check. A reminder holds the
-        turn open; None lets it end. A fact the harness did not give stays missing, and
-        a missing fact lets the turn end (`ClaudeShim.on_stop`)."""
+        """The stop handler's answer at a Stop: the shim's reply check. A reminder holds
+        the turn open; None lets it end. A fact the harness did not give stays missing,
+        and a missing fact lets the turn end (`ClaudeShim.on_stop`)."""
         fields = {}
         if facts.stop_hook_active is not None:
             fields["stop_hook_active"] = facts.stop_hook_active
@@ -402,54 +550,50 @@ class ClaudeAdapter:
                 log.exception("the idle check failed")
 
     def tick(self) -> bool:
-        """One idle check. True when it handed a digest over.
+        """One check. True when it handed a digest over.
+
+        Interrupt mail while a turn runs, on a session that can steer, goes into that
+        turn at once (`ClaudeShim.flush_interrupt`).
 
         An idle session with mail queued is standing at a boundary: once the queue has
         stopped growing for `idle_settle`, the queue goes in as one digest, through the
         same flush a turn end uses. It is not a turn end: it sets no `turned` and its
         notify carries no `kind`, so it releases nothing held."""
-        recheck = None
         with self._lock:
             shim = self.shim
-            if (self.session is None or self.delivery is not None or not shim.queue
-                    or shim.awaiting_completion):
+            if self.session is None or not shim.queue:
                 self._settled_at = None
                 self._seen = len(shim.queue)
                 return False
-            if self.turn_open or shim.blocked:
+            if self.turn_open and shim.has_interrupt() and self._can_steer():
+                return shim.flush_interrupt() is not None
+            if (self.boundary is not None or shim.awaiting_completion
+                    or self.turn_open or shim.blocked):
                 self._settled_at = None
-                now = self._clock()
-                if self._checked_at is None or now - self._checked_at >= self.recheck_interval:
-                    self._checked_at = now
-                    recheck = self.session
-                else:
-                    return False
-            else:
-                queued = len(shim.queue)
-                now = self._clock()
-                if queued != self._seen or self._settled_at is None:
-                    self._seen, self._settled_at = queued, now
-                    return False
-                if now - self._settled_at < self.idle_settle:
-                    return False
-                self._settled_at = None
-                shim.on_turn_boundary(idle=True)
-                return self.delivery is not None
-        # Mail waits behind a turn the watch says runs, or a block on it: read the ledger,
-        # outside the lock. No turn open means the watch missed that turn's end, which
-        # also ended any block on it.
+                self._seen = len(shim.queue)
+                return False
+            queued = len(shim.queue)
+            now = self._clock()
+            if queued != self._seen or self._settled_at is None:
+                self._seen, self._settled_at = queued, now
+                return False
+            if now - self._settled_at < self.idle_settle:
+                return False
+            self._settled_at = None
+            shim.on_turn_boundary(idle=True)
+            return self.boundary is not None
+
+
+def _close(*things) -> None:
+    """Close each of a stop handler, a watch and a session that is not None; a close
+    that fails changes nothing."""
+    for thing in things:
+        if thing is None:
+            continue
         try:
-            facts = recheck.facts()
-        except self.turns.TurnsError:
-            return False
-        with self._lock:
-            if self.session is recheck and not facts.turn_open:
-                if self.turn_open or self.shim.blocked:
-                    log.info("the ledger says no turn runs; the watch missed a turn end")
-                self.turn_open = False
-                self.shim._clear_block()
-                self._learn_session(facts.session_id)
-        return False
+            thing.close()
+        except Exception:                                          # noqa: BLE001
+            log.debug("closing %r failed", thing, exc_info=True)
 
 
 # --------------------------------------------------------------------------- the process
@@ -494,4 +638,4 @@ def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, ready=None,
     return 0
 
 
-__all__ = ["ClaudeAdapter", "LOOK_INTERVAL", "RECHECK_INTERVAL", "serve", "wait_for_exit"]
+__all__ = ["ClaudeAdapter", "Hand", "LOOK_INTERVAL", "WAIT_RETRY", "serve", "wait_for_exit"]
