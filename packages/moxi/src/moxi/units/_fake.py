@@ -21,9 +21,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from ._backend import ApplyIO, Rendered, Spec, UnitRef
+from ._backend import ApplyIO, ReadError, Rendered, Spec, UnitRef
 from ._fence import Fence, Ran
-from ._types import Acted, UnitChange, UnitState
+from ._types import Acted, UnitChange, UnitState, Wrapped
 
 MARK = "# moxi unit: "
 DISABLED = "# moxi: enabled = false"
@@ -37,9 +37,12 @@ class FakeSupervisor:
     `units` maps a unit id to `{"active", "enabled"}`; `loaded` is what the last
     `daemon-reload` found in `root` (plus `extra`, units a test declares outside it, such
     as a foreign timer's service). `triggers` maps a timer id to the unit it triggers
-    (default `<stem>.service`). `fail` maps `(verb, unit)` (or `(verb, None)` for
-    `daemon-reload`) to the stderr that command fails with. `calls` lists every command
-    as a tuple of its arguments after `systemctl --user`.
+    (default `<stem>.service`; several separated by spaces, or none). `props` maps a unit
+    id to properties `show` prints for it (`Type`, and `ExecStart` as the number of its
+    command lines), and `version` is the manager's `Version`. `fail` maps `(verb, unit)`
+    (or `(verb, None)` for `daemon-reload` and `show`) to the stderr that command fails
+    with. `calls` lists every command as a tuple of its arguments after `systemctl
+    --user`.
     """
 
     def __init__(self, root: Path, *, linger: bool = True):
@@ -48,6 +51,8 @@ class FakeSupervisor:
         self.loaded: set[str] = set()
         self.extra: set[str] = set()
         self.triggers: dict[str, str] = {}
+        self.props: dict[str, dict] = {}
+        self.version = "256.7-1"
         self.fail: dict[tuple[str, str | None], str] = {}
         self.calls: list[tuple[str, ...]] = []
         self.linger = linger
@@ -75,6 +80,8 @@ class FakeSupervisor:
             self.reload()
             return subprocess.CompletedProcess(cmd, 0, "", "")
         if verb == "show":
+            if (verb, None) in self.fail:
+                return subprocess.CompletedProcess(cmd, 1, "", self.fail[(verb, None)])
             return subprocess.CompletedProcess(cmd, 0, self._show(rest), "")
         now = bool(rest) and rest[0] == "--now"
         names = rest[1:] if now else rest
@@ -98,6 +105,8 @@ class FakeSupervisor:
 
     def _show(self, rest: list[str]) -> str:
         names = [a for a in rest if not a.startswith("--")]
+        if not names:
+            return f"Version={self.version}\n"
         blocks = []
         for unit in names:
             state = self.units.get(unit, {"active": False, "enabled": False})
@@ -105,6 +114,9 @@ class FakeSupervisor:
             trigger = self.triggers.get(unit, unit.rsplit(".", 1)[0] + ".service"
                                         if unit.endswith(".timer") else "")
             dropins = sorted(str(p) for p in (self.root / f"{unit}.d").glob("*.conf"))
+            props = self.props.get(unit, {})
+            execs = [f"ExecStart={{ path=/bin/true ; argv[]=/bin/true {i} }}"
+                     for i in range(props.get("ExecStart", 1 if loaded else 0))]
             blocks.append("\n".join([
                 f"Id={unit}",
                 f"LoadState={'loaded' if loaded else 'not-found'}",
@@ -117,6 +129,8 @@ class FakeSupervisor:
                 f"UnitFileState={'enabled' if state['enabled'] else 'disabled'}",
                 f"Triggers={trigger}",
                 f"DropInPaths={' '.join(dropins)}",
+                f"Type={props.get('Type', 'simple')}",
+                *execs,
             ]))
         return "\n\n".join(blocks) + "\n"
 
@@ -244,7 +258,12 @@ class FakeBackend:
         if restart:
             daemons = [c for c in keeps if c.kind == "daemon" and c.enabled
                        and c.entry.get("upgrade", "restart") == "restart"]
-            running = self.running([self._enable_id(c) for c in daemons], fence)
+            try:
+                running = self.running([self._enable_id(c) for c in daemons], fence)
+            except ReadError as exc:
+                for change in daemons:
+                    io.fail(change, exc.ran)
+                return
             for change in daemons:
                 if self._enable_id(change) in running:
                     self._run(io, change, "restart", self._enable_id(change))
@@ -260,12 +279,20 @@ class FakeBackend:
     def own(self, ref: str) -> bool:
         return ref.startswith("moxi-")
 
-    def foreign(self, ref: str, fence: Fence) -> UnitRef:
+    def foreign(self, ref: str, fence: Fence | None) -> UnitRef:
         if ref.endswith(".timer"):
+            if fence is None:
+                return UnitRef(None, ref, "timer", (ref,))
             ran = fence.run("show", "--property=Triggers", ref)
             trigger = _blocks(ran.stdout)[0].get("Triggers", "") if ran.ok else ""
             return UnitRef(None, ref, "timer", (ref,) + ((trigger,) if trigger else ()))
         return UnitRef(None, ref, "daemon", (ref,))
+
+    def ids(self, module: str, name: str, kind: str) -> tuple[str, ...]:
+        stem = self._stem(module, name)
+        if kind == "timer":
+            return (f"{stem}.timer", f"{stem}.service")
+        return (f"{stem}.socket", f"{stem}.service")
 
     def _socket_of(self, unit: UnitRef) -> tuple[str, ...]:
         if unit.kind != "daemon" or not unit.marked:
@@ -309,6 +336,8 @@ class FakeBackend:
         if not ids:
             return frozenset()
         ran = fence.run("show", "--property=Id,ActiveState", *ids)
+        if not ran.ok:
+            raise ReadError(ran)
         return frozenset(b.get("Id", "") for b in _blocks(ran.stdout)
                          if b.get("ActiveState") in ("active", "activating", "reloading"))
 
@@ -322,13 +351,26 @@ class FakeBackend:
         ids = sorted({i for u in units for i in u.ids})
         if not ids:
             return []
-        ran = fence.run("show", "--property=Id,LoadState,ActiveState,MainPID,Result,"
-                                "ExecMainStatus,UnitFileState,Triggers,DropInPaths", *ids)
+        props = ("--property=Id,LoadState,ActiveState,MainPID,Result,ExecMainStatus,"
+                 "UnitFileState,Triggers,DropInPaths")
+        ran = fence.run("show", props, *ids)
         shown = {b.get("Id"): b for b in _blocks(ran.stdout)} if ran.ok else {}
+        # A foreign timer given by its .timer alone: the unit its Triggers names, read in
+        # one more call for all of them.
+        triggered: dict[str, str] = {}
+        for unit in units:
+            if unit.kind == "timer" and not unit.marked and len(unit.ids) == 1:
+                trigger = shown.get(unit.ids[0], {}).get("Triggers", "").split()
+                if len(trigger) == 1:
+                    triggered[unit.ids[0]] = trigger[0]
+        if triggered:
+            more = fence.run("show", props, *sorted(set(triggered.values())))
+            if more.ok:
+                shown.update({b.get("Id"): b for b in _blocks(more.stdout)})
         out = []
         for unit in units:
             head = shown.get(unit.ids[0], {})
-            service = shown.get(unit.ids[-1], {})
+            service = shown.get(triggered.get(unit.ids[0], unit.ids[-1]), {})
             if not ran.ok:
                 state, detail = "unknown", ran.failure()
             elif head.get("LoadState") == "not-found":
@@ -373,24 +415,86 @@ class FakeBackend:
                 return Wrapped(module, key, name)
         return None
 
+    def dropin_text(self, ref: str, *, module: str, key: str, name: str) -> str:
+        record = f"{module}/{name}"
+        return _text([f"{WRAP_MARK}{record}",
+                      f"# moxi: timer = {ref}, if = {module}.{key}",
+                      "[Service]",
+                      f"ExecCondition={self.gate} run --if {module}.{key} --record {record} "
+                      "--condition",
+                      f"ExecStopPost={self.gate} run --record {record} --result"])
+
     def wrap(self, ref: str, *, module: str, key: str, name: str, fence: Fence) -> Acted:
         from .. import files
 
-        unit = self.foreign(ref, fence)
-        if len(unit.ids) != 2:
-            return Acted(None, ref, "wrap", False, (f"{ref} triggers no one service",))
-        path = self._dropin(unit.ids[1], module)
-        files.atomic_write(path, _text([f"{WRAP_MARK}{module}/{name}",
-                                        f"# moxi: timer = {ref}, if = {module}.{key}"]),
-                           mode=0o644)
+        def no(line: str) -> Acted:
+            return Acted(None, ref, "wrap", False, (line,))
+
+        ran = fence.run("show", "--property=Version")
+        if not ran.ok:
+            return no(ran.failure())
+        version = _blocks(ran.stdout)[0].get("Version", "") if ran.stdout.strip() else ""
+        major = int(version.split(".")[0].split("-")[0] or 0) if version[:1].isdigit() else 0
+        if major < 243:
+            return no(f"systemd {major} has no ExecCondition= (it needs 243); not wrapped")
+        ran = fence.run("show", "--property=LoadState,Triggers", ref)
+        if not ran.ok:
+            return no(ran.failure())
+        timer = _blocks(ran.stdout)[0] if ran.stdout.strip() else {}
+        if timer.get("LoadState") != "loaded":
+            return no(f"{ref} is not loaded ({timer.get('LoadState', 'unknown')}); "
+                      "not wrapped")
+        triggers = timer.get("Triggers", "").split()
+        if len(triggers) != 1 or not triggers[0].endswith(".service"):
+            return no(f"{ref} triggers {' '.join(triggers) or 'nothing'}; wrap needs "
+                      "exactly one service")
+        service = triggers[0]
+        ran = fence.run("show", "--property=Type,ExecStart,DropInPaths", service)
+        if not ran.ok:
+            return no(ran.failure())
+        shown = _blocks(ran.stdout)[0] if ran.stdout.strip() else {}
+        execs = sum(line.startswith("ExecStart=") for line in ran.stdout.splitlines())
+        if execs != 1:
+            return no(f"{service} has {execs} ExecStart lines; wrap needs exactly one")
+        if shown.get("Type") not in ("oneshot", "simple", "exec"):
+            return no(f"{service} is Type={shown.get('Type')}; wrap needs oneshot, simple "
+                      "or exec")
+        for other in shown.get("DropInPaths", "").split():
+            mark = _first_line(Path(other))
+            if mark.startswith(WRAP_MARK):
+                owner = mark[len(WRAP_MARK):].partition("/")[0]
+                if owner != module:
+                    return no(f"{service} is wrapped by {owner}")
+        path = self._dropin(service, module)
+        if path.exists() and not _first_line(path).startswith(f"{WRAP_MARK}{module}/"):
+            return no(f"{path} exists and was not written by moxi; not wrapped")
+        files.atomic_write(path, self.dropin_text(ref, module=module, key=key,
+                                                  name=name).encode("utf-8"), mode=0o644)
         ran = fence.run("daemon-reload")
         return Acted(None, ref, "wrap", ran.ok, () if ran.ok else (ran.failure(),))
+
+    def wraps(self, module: str) -> tuple[tuple[str, str, Wrapped], ...]:
+        out = []
+        for path in sorted(self.root.glob(f"*.d/50-moxi-{module}.conf")):
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                continue
+            if len(lines) < 2 or not lines[0].startswith(f"{WRAP_MARK}{module}/"):
+                continue
+            name = lines[0][len(f"{WRAP_MARK}{module}/"):].strip()
+            ref = lines[1].partition("timer = ")[2].partition(",")[0].strip()
+            key = lines[1].partition(f"if = {module}.")[2].strip()
+            out.append((ref, path.parent.name.removesuffix(".d"),
+                        Wrapped(module, key, name)))
+        return tuple(out)
 
     def unwrap(self, ref: str, *, module: str, fence: Fence) -> Acted:
         for path in self.root.glob(f"*.d/50-moxi-{module}.conf"):
             lines = path.read_text(encoding="utf-8").splitlines()
-            if len(lines) > 1 and f"timer = {ref}," in lines[1]:
-                path.unlink()
+            if len(lines) > 1 and lines[0].startswith(f"{WRAP_MARK}{module}/") \
+                    and f"timer = {ref}," in lines[1]:
+                _unlink(path)
                 ran = fence.run("daemon-reload")
                 return Acted(None, ref, "unwrap", ran.ok, () if ran.ok else (ran.failure(),))
         return Acted(None, ref, "unwrap", True, (f"{ref} is not wrapped by {module}",))
@@ -402,7 +506,7 @@ class FakeBackend:
             if not lines or not lines[0].startswith(f"{WRAP_MARK}{module}/"):
                 continue
             ref = lines[1].partition("timer = ")[2].partition(",")[0]
-            path.unlink()
+            _unlink(path)
             out.append(Acted(None, ref, "unwrap", True))
         if out:
             ran = fence.run("daemon-reload")
@@ -413,6 +517,23 @@ class FakeBackend:
 
 def _text(lines: list[str]) -> str:
     return "\n".join(lines) + "\n"
+
+
+def _unlink(path: Path) -> None:
+    """Delete a drop-in, and its folder when that leaves it empty."""
+    path.unlink()
+    try:
+        path.parent.rmdir()
+    except OSError:
+        pass
+
+
+def _first_line(path: Path) -> str:
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return fh.readline().rstrip("\n")
+    except OSError:
+        return ""
 
 
 def _blocks(text: str) -> list[dict[str, str]]:

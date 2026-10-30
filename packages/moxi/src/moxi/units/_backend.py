@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from ._fence import Fence, Ran
-from ._types import Acted, Applied, UnitChange, UnitState
+from ._types import Acted, Applied, UnitChange, UnitState, Wrapped
 
 # The paths `backend()` reads. Tests point them into their tmp.
 _SYSTEMD_INIT = "/run/systemd/system"
@@ -209,6 +209,14 @@ class UnitRef:
         return self.module is not None
 
 
+class ReadError(RuntimeError):
+    """A supervisor read that failed (`Backend.running`). `ran` is the call."""
+
+    def __init__(self, ran: Ran):
+        super().__init__(ran.failure())
+        self.ran = ran
+
+
 class RenderError(Exception):
     """A unit the backend cannot write; `plan` refuses it with `cause` and the text."""
 
@@ -351,10 +359,23 @@ class Backend(Protocol):
         launchd `moxi.*`, a task under `\\Moxi\\`), marked or not."""
         ...
 
-    def foreign(self, ref: str, fence: Fence) -> UnitRef:
+    def foreign(self, ref: str, fence: Fence | None) -> UnitRef:
         """The `UnitRef` of the foreign unit `ref` (a systemd unit name, a launchd label, a
         task path), `module` None. A foreign systemd timer's ids are its `.timer` and the
-        unit its `Triggers` names, read with one `show`."""
+        unit its `Triggers` names, read with one `show`.
+
+        With `fence` None it makes no supervisor call and gives what the name and the files
+        tell: a foreign systemd timer's ids are then its `.timer` alone, and `status`
+        reads the unit its `Triggers` names in its own calls. `status` passes None, so
+        its foreign units cost no call of their own."""
+        ...
+
+    def ids(self, module: str, name: str, kind: str) -> tuple[str, ...]:
+        """The backend ids the writer gives unit `<module>/<name>` of `kind` (`daemon` or
+        `timer`), whether or not a file is there, in the order `stop` takes them: a
+        systemd daemon's `.socket` then its `.service`, a timer's `.timer` then its
+        `.service`; a launchd label; a task path. No supervisor call. `stop(...,
+        replace=True)` stops the unmarked unit of a declared daemon by these ids."""
         ...
 
     def act(self, act: str, unit: UnitRef, fence: Fence) -> Acted:
@@ -368,7 +389,8 @@ class Backend(Protocol):
     def running(self, ids: Sequence[str], fence: Fence) -> frozenset[str]:
         """Which of the backend ids `ids` are running now, read in one supervisor call
         (systemd `ActiveState` active, activating or reloading; launchd loaded; Task
-        Scheduler a live runtime file)."""
+        Scheduler a live runtime file). Raises `ReadError` when the read fails, so a
+        failed read is never taken for "nothing runs"."""
         ...
 
     def stop_id(self, unit: str, fence: Fence) -> Ran:
@@ -385,7 +407,13 @@ class Backend(Protocol):
         """The state of every unit in `units`, marked and foreign together, in as few
         supervisor calls as the backend allows (one, plus one for the units foreign timers
         trigger): `state`, `pid`, `since`, `enabled`, the supervisor's last result in
-        `last`, the `log` hint, and `wrapped` for a foreign timer a module wrapped."""
+        `last`, the `log` hint, and `wrapped` for a foreign timer a module wrapped.
+
+        One `UnitState` per unit, in the order of `units`, with the unit's `module`,
+        `name` and `kind`. A foreign timer may come with its `.timer` id alone (`foreign`
+        with no fence): its state is the timer's, and its `last`, `pid` and `wrapped` come
+        from the unit its `Triggers` names, read in the second call. `last` holds only
+        the supervisor's own result (or None); the core adds the gate's run line."""
         ...
 
     def log(self, unit: UnitRef) -> str | None:
@@ -397,7 +425,21 @@ class Backend(Protocol):
 
     def wrap(self, ref: str, *, module: str, key: str, name: str, fence: Fence) -> Acted:
         """Write `module`'s marked drop-in on the service the foreign timer `ref` triggers
-        and reload; `ok=False` with one line on a backend that has no wraps."""
+        and reload; `ok=False` with one line on a backend that has no wraps.
+
+        The core has already checked `ref` as a foreign name, `key` as a switch, `name`,
+        and that no other wrap of `module` conflicts (`wraps`). The backend refuses, with
+        one line naming what it found: a manager older than 243; a timer not loaded or
+        not triggering exactly one service; a service without exactly one `ExecStart` or
+        with a `Type` other than `oneshot`, `simple` or `exec`; a drop-in on that service
+        marked for another module; an unmarked file at the drop-in's path. A drop-in there
+        with `module`'s mark is rewritten."""
+        ...
+
+    def wraps(self, module: str) -> tuple[tuple[str, str, Wrapped], ...]:
+        """Every drop-in carrying `module`'s wrap mark, read from the files (no supervisor
+        call), as `(timer ref, service, Wrapped)`: the timer its mark line names, the
+        service whose drop-in folder holds it. Empty on a backend with no wraps."""
         ...
 
     def unwrap(self, ref: str, *, module: str, fence: Fence) -> Acted:

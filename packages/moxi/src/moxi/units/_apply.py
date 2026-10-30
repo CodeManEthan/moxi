@@ -29,14 +29,17 @@ from ._types import Applied, UnitChange
 
 @contextmanager
 def core_lock():
-    """The core lock, held for `apply`, `remove`, the acts, `wrap` and `unwrap`.
+    """The core lock, held for `apply`, `remove`, the acts, `resume`, `wrap` and `unwrap`.
 
-    Every unit call that writes or acts takes it here, and only here, so the one place
-    to make it yield inside an install is this function.
+    Every unit call that writes or acts takes it here, and only here. It is taken with
+    `nested=True`: under an install (its own process, or a settle child that adopted
+    the install's claim) it yields at once, and so does a call made inside another
+    `core_lock()` block, or inside `lock(core_lock(), nested=True)`, on the same
+    thread; every other caller takes the lock and waits for it.
     """
     from .. import files, paths
 
-    with files.lock(paths.core_lock()):
+    with files.lock(paths.core_lock(), nested=True):
         yield
 
 
@@ -64,7 +67,9 @@ def apply(changes: Iterable[UnitChange], *, replace: bool = False, restart: bool
 def apply_held(changes: Sequence[UnitChange], *, replace: bool = False,
                restart: bool = False, runner=None,
                say: Callable[[str], object] = print) -> list[Applied]:
-    """`apply` for a caller that already holds the core lock."""
+    """`apply` without taking the core lock, for a caller that holds it. Since the lock
+    is taken with `nested=True`, `apply` itself yields inside such a caller's block, so
+    callers use `apply`; `apply` is built on this."""
     done: dict[int, Applied] = {}
     order: list[UnitChange] = []
     act: list[UnitChange] = []

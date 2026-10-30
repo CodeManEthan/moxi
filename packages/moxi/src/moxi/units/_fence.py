@@ -10,7 +10,7 @@ The closed sets:
 
 - systemd: `systemctl --user` (always `--user`) with `daemon-reload`; `enable` and
   `disable`, each with or without `--now`; `start`, `stop`, `restart`; and `show` with
-  `--property=<names>`. Also `loginctl show-user <user> -p Linger`, read only.
+  `--property=<names>` (with no unit, only `--property=Version`: the manager's version). Also `loginctl show-user <user> -p Linger`, read only.
 - launchd: `launchctl` with `bootstrap gui/<uid> <plist>`, `bootout gui/<uid>/<label>`,
   `enable` and `disable` of `gui/<uid>/<label>`, `kickstart -k gui/<uid>/<label>`,
   `kill SIGTERM gui/<uid>/<label>` and `print gui/<uid>`.
@@ -230,6 +230,9 @@ def _systemctl(verb: str, *, now: bool = False, properties: bool = False):
             if not _PROPERTIES.fullmatch(args[0].removeprefix("--property=")):
                 raise _refuse(verb, args, "--property=<Name,Name...>")
             head, args = [args[0]], args[1:]
+            if not args and head == ["--property=Version"]:
+                # The manager's own version, read before a wrap.
+                return [SYSTEMCTL, "--user", verb, *head]
         return [SYSTEMCTL, "--user", verb, *head, *_units(verb, args)]
     return build
 
