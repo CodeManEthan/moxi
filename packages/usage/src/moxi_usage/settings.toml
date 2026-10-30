@@ -3,9 +3,8 @@
 
 [claude.archive_roots]
 type = "list"
-items = "str"
 default = []
-doc = "More Claude Code projects roots to index besides the live one, each an absolute path, such as a backup of an older machine's transcripts."
+doc = "More Claude Code trees to index besides the live one, each a [[claude.archive_roots]] row with path (a directory holding a projects/ tree, such as a backup of an older machine's ~/.claude) and id (letters, digits, _ or -, unique; its lane is archive:<id>), in the order they rank."
 read = "use"
 
 [model]
