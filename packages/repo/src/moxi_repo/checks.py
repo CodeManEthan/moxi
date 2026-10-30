@@ -22,6 +22,7 @@ each. The rows here, in order:
 from __future__ import annotations
 
 import os
+import posixpath
 import shlex
 import shutil
 import sys
@@ -224,8 +225,14 @@ def _spec_rows(repo: gitconf.Repo) -> list[Row]:
 
 
 def _covers(spec_path: str, path: str) -> bool:
-    spec_path = spec_path.rstrip("/")
-    return spec_path in (".", "") or path == spec_path or path.startswith(spec_path + "/")
+    """Whether a spec's path takes `path`, both read as git reads them from the top:
+    `./notes`, `notes//` and `notes/./` are `notes`, and `.` is the whole tree."""
+    spec_path, path = _normal(spec_path), _normal(path)
+    return spec_path == "." or path == spec_path or path.startswith(spec_path + "/")
+
+
+def _normal(path: str) -> str:
+    return posixpath.normpath(path) if path else "."
 
 
 def _changed(top: Path) -> list[str]:
