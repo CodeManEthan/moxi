@@ -569,6 +569,82 @@ def test_resume_records_clear_only_when_the_step_ends_clean(w, capsys, monkeypat
     assert set(json.loads(path.read_text())) == {"other"}
 
 
+def resume_records():
+    path = moxi.paths.Layout("demo").state_dir() / "doctor.json"
+    return {k: v for k, v in json.loads(path.read_text()).items()
+            if k.startswith("resume:")}
+
+
+def test_a_resume_record_survives_a_clean_rerun_while_its_unit_is_down(
+        w, capsys, monkeypatch):
+    w.installed(DAEMONS=ONE)
+    w.legacy()
+    w.sup.fail[("start", SERVICE)] = "Unit is masked."
+    code, _ = settle(w, capsys, monkeypatch)
+    assert code == 1 and not w.active(SERVICE)
+    fix = resume_records()[f"resume:{SERVICE}"]["fix"]
+    # The re-run the failure line advises: nothing to move, the daemon planned keep.
+    del w.sup.fail[("start", SERVICE)]
+    code, _ = settle(w, capsys, monkeypatch)
+    assert code == 0 and not w.active(SERVICE)
+    assert resume_records()[f"resume:{SERVICE}"]["fix"] == fix
+    # Started by hand: the next clean step clears it.
+    w.sup.state(SERVICE)["active"] = True
+    code, _ = settle(w, capsys, monkeypatch)
+    assert code == 0 and resume_records() == {}
+
+
+def test_a_failed_status_read_at_the_end_leaves_the_resume_record(w, capsys, monkeypatch):
+    w.installed(DAEMONS=ONE)
+    doctor.record("demo", "old failure", key=f"resume:{SERVICE}", fix="x")
+    real = units.status
+
+    def broken(*a, **k):
+        raise RuntimeError("the supervisor did not answer")
+
+    monkeypatch.setattr(units, "status", broken)
+    code, _ = settle(w, capsys, monkeypatch)
+    assert code == 0 and f"resume:{SERVICE}" in resume_records()
+    monkeypatch.setattr(units, "status", real)
+    code, _ = settle(w, capsys, monkeypatch)
+    assert code == 0 and resume_records() == {}
+
+
+def test_a_socket_s_resume_record_reads_the_socket_s_own_state(w, capsys, monkeypatch):
+    w.installed(DAEMONS=SOCKET)
+    sock = "moxi-demo-relay.socket"
+    doctor.record("demo", "old failure", key=f"resume:{sock}", fix="x")
+    w.sup.state(sock)["active"] = False
+    code, _ = settle(w, capsys, monkeypatch)
+    assert code == 0 and w.active(SERVICE)
+    assert set(resume_records()) == {f"resume:{sock}"}
+    w.sup.state(sock)["active"] = True
+    code, _ = settle(w, capsys, monkeypatch)
+    assert code == 0 and resume_records() == {}
+
+
+@pytest.mark.parametrize("how", ["dropped", "switched off", "enabled false"])
+def test_a_resume_record_for_a_unit_the_step_removed_or_disabled_clears(
+        w, capsys, monkeypatch, tmp_path, how):
+    tool = tmp_path / "tool"
+    tool.write_text("")
+    body = ("def units():\n    return {'daemons': {'aux': {'argv': [%r]%s}}}\n")
+    w.installed(DAEMONS=ONE, units_from=body % (str(tool), ""))
+    aux = "moxi-demo-aux.service"
+    w.sup.state(aux)["active"] = False
+    doctor.record("demo", "old failure", key=f"resume:{aux}", fix="x")
+    if how == "dropped":
+        w.module(DAEMONS=ONE)
+    elif how == "switched off":
+        w.module(DAEMONS=ONE,
+                 units_from=body % (str(tool), ", 'switch': 'snapshot.enabled'"))
+    else:
+        w.module(DAEMONS=ONE, units_from=body % (str(tool), ", 'enabled': False"))
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert resume_records() == {}
+
+
 def test_setup_json_holds_the_version_and_a_new_version_restarts(w, capsys, monkeypatch):
     w.installed(DAEMONS=ONE)
     code, _ = settle(w, capsys, monkeypatch)
