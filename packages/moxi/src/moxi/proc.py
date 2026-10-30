@@ -7,7 +7,8 @@
   a pipe the parent keeps open, and the child ends when the parent goes. With
   `detached=True` it starts a child that is meant to outlive it, logging to a file.
 - `lifeline` is what a Moxi child started with `lifeline="fd"` (or a plain stdin
-  lifeline) calls to stop when its parent goes.
+  lifeline) calls to stop when its parent goes, and `lifeline_kind` tells such a child
+  which lifeline it holds, without reading stdin.
 - `identity` and `alive` name a process by its pid and start time, so a pid the system
   has given to another process since never matches.
 - `environ` reads another process's environment as it was started, where the system
@@ -31,8 +32,9 @@ from dataclasses import dataclass
 
 _WINDOWS = sys.platform == "win32"
 
-#: The variable that names the lifeline's read end in a child started with
-#: `lifeline="fd"`: a file descriptor on POSIX, a handle on Windows.
+#: The variable that names a child's lifeline: `0` for stdin (`lifeline="stdin"`), else
+#: the read end of the pipe `lifeline="fd"` passes, a file descriptor on POSIX and a
+#: handle on Windows. Only this module reads it; a child asks `lifeline_kind()`.
 LIFELINE_ENV = "MOXI_LIFELINE_FD"
 #: How long a timed-out `run` waits between SIGTERM and SIGKILL (POSIX), and the
 #: watchdog between the two when a lifeline closes.
@@ -545,29 +547,77 @@ def _env(env: Mapping[str, str] | None) -> dict[str, str] | None:
 
 # -- in a child --------------------------------------------------------------------------
 
+# What `lifeline()` read from `MOXI_LIFELINE_FD` (None: it was unset), kept from its first
+# call; `_UNREAD` until then.
+_UNREAD = object()
+_lifeline_value: object = _UNREAD
+
+
+def _lifeline_number(value: str | None) -> int | None:
+    """The number a `MOXI_LIFELINE_FD` value names: a non-negative decimal integer in
+    ASCII digits, nothing around it. None for anything else."""
+    if value is None or not (value.isascii() and value.isdigit()):
+        return None
+    return int(value)
+
+
+def lifeline_kind() -> str | None:
+    """Which lifeline `spawn` gave this process: `"stdin"`, `"fd"`, or None.
+
+    It reads `MOXI_LIFELINE_FD` and nothing else, never stdin, and checks no file
+    descriptor is open: `0` is `"stdin"`, any other non-negative decimal integer `"fd"`,
+    and an unset or malformed value None. None means no lifeline this process can know
+    of: its parent is outside Moxi, or started it with `lifeline="watch"` or
+    `detached=True`, or is a Moxi from before the stdin lifeline set the variable (its
+    stdin child reads None). Once `lifeline()` has run it answers from what that call
+    read, since `lifeline()` takes the variable out of the environment, so a call after
+    `lifeline()` gives the same answer as one before. A module that wants to know reads
+    this, not the variable.
+    """
+    value = os.environ.get(LIFELINE_ENV) if _lifeline_value is _UNREAD else _lifeline_value
+    number = _lifeline_number(value)
+    if number is None:
+        return None
+    return "stdin" if number == 0 else "fd"
+
+
 def lifeline(on_close: Callable[[], None] | None = None) -> None:
     """Stop this process when its parent goes: call this once, early, in a Moxi child.
 
     The lifeline is the pipe named by `MOXI_LIFELINE_FD` (a child started with
-    `spawn(..., lifeline="fd")`), else stdin. A daemon thread reads it until EOF, which
-    comes when the parent closes it or dies. Then it calls `on_close`; by default it
-    interrupts the main thread (SIGINT on POSIX, so a `KeyboardInterrupt` there unless
-    SIGINT is ignored) and, if the process is still running five seconds later, ends it
-    with exit status 1. The variable is removed from
-    this process's environment, so a process it starts in turn does not take the pipe for
-    its own.
+    `spawn(..., lifeline="fd")`), else stdin: stdin when the variable is unset, empty or
+    `0`, on every OS (on Windows `0` is never taken for a handle; any other value is
+    one). A daemon thread reads it until EOF, which comes when the parent closes it or
+    dies. Then it calls `on_close`; by default it interrupts the main thread (SIGINT on
+    POSIX, so a `KeyboardInterrupt` there unless SIGINT is ignored) and, if the process
+    is still running five seconds later, ends it with exit status 1.
+
+    The variable is removed from this process's environment, so a process it starts in
+    turn does not take the pipe for its own. What the first call read is kept:
+    `lifeline_kind()` answers from it, and a later call holds the same lifeline again
+    rather than stdin. A value that is not a non-negative decimal integer raises
+    `ValueError`, since no lifeline can be held by it.
     """
-    value = os.environ.pop(LIFELINE_ENV, "")
-    if value:
-        number = int(value)
-        if _WINDOWS:
+    global _lifeline_value
+    value = os.environ.pop(LIFELINE_ENV, None)
+    if _lifeline_value is _UNREAD:
+        _lifeline_value = value
+    value = _lifeline_value
+    if not value:
+        fd = 0
+    else:
+        number = _lifeline_number(value)
+        if number is None:
+            raise ValueError(f"{LIFELINE_ENV} is {value!r}, not a file descriptor or "
+                             "handle")
+        if number == 0:
+            fd = 0
+        elif _WINDOWS:
             import msvcrt
 
             fd = msvcrt.open_osfhandle(number, os.O_RDONLY)
         else:
             fd = number
-    else:
-        fd = 0
     thread = threading.Thread(target=_hold, args=(fd, on_close), name="moxi-lifeline",
                               daemon=True)
     thread.start()
@@ -923,5 +973,5 @@ def _pairs(entries) -> dict[str, str]:
     return env
 
 
-__all__ = ["LIFELINE_ENV", "CODES_KEPT", "ProcId", "run", "spawn", "lifeline", "identity",
-           "alive", "environ", "status", "parent"]
+__all__ = ["LIFELINE_ENV", "CODES_KEPT", "ProcId", "run", "spawn", "lifeline",
+           "lifeline_kind", "identity", "alive", "environ", "status", "parent"]

@@ -411,6 +411,100 @@ def test_spawn_passes_env_as_given_and_cwd(tmp_path):
     assert Path(cwd).resolve() == tmp_path.resolve()
 
 
+# -- what a child knows of its lifeline ----------------------------------------------------
+
+@pytest.fixture
+def unread(monkeypatch):
+    """This process as a child that has not called `lifeline()`, whose parent set no
+    `MOXI_LIFELINE_FD`, with the lifeline's thread never started."""
+    monkeypatch.setattr(proc, "_lifeline_value", proc._UNREAD)
+    monkeypatch.delenv(proc.LIFELINE_ENV, raising=False)
+    held = []
+    monkeypatch.setattr(proc, "_hold", lambda fd, on_close: held.append(fd))
+    return held
+
+
+@pytest.mark.parametrize("value, kind", [
+    ("0", "stdin"), ("00", "stdin"), ("3", "fd"), ("1234", "fd"), ("-1", None), ("x", None),
+    ("", None), (" 3", None), ("3.0", None), ("٣", None), ("+3", None)])
+def test_lifeline_kind_reads_the_variable_and_nothing_else(unread, monkeypatch, value, kind):
+    monkeypatch.setenv(proc.LIFELINE_ENV, value)
+    assert proc.lifeline_kind() == kind
+
+
+def test_lifeline_kind_with_the_variable_unset_is_none(unread):
+    assert proc.lifeline_kind() is None
+
+
+def test_lifeline_kind_checks_no_descriptor_is_open(unread, monkeypatch):
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    os.close(write_end)
+    monkeypatch.setenv(proc.LIFELINE_ENV, str(read_end))
+    assert proc.lifeline_kind() == "fd"
+
+
+@pytest.mark.parametrize("value, kind", [("0", "stdin"), ("5", "fd"), (None, None)])
+def test_lifeline_kind_after_lifeline_answers_what_it_read(unread, monkeypatch, value, kind):
+    if value is not None:
+        monkeypatch.setenv(proc.LIFELINE_ENV, value)
+    assert proc.lifeline_kind() == kind
+    proc.lifeline(on_close=lambda: None)
+    assert proc.LIFELINE_ENV not in os.environ
+    assert proc.lifeline_kind() == kind
+    proc.lifeline(on_close=lambda: None)
+    assert proc.lifeline_kind() == kind
+    monkeypatch.setenv(proc.LIFELINE_ENV, "9")  # set again after: the first read stands
+    assert proc.lifeline_kind() == kind
+
+
+def test_a_second_lifeline_holds_what_the_first_read(unread, monkeypatch):
+    monkeypatch.setenv(proc.LIFELINE_ENV, "5")
+    proc.lifeline(on_close=lambda: None)
+    proc.lifeline(on_close=lambda: None)
+    assert unread == [5, 5]
+
+
+@pytest.mark.parametrize("value", [None, "", "0"], ids=["unset", "empty", "zero"])
+def test_lifeline_holds_stdin_when_the_variable_is_unset_empty_or_0(unread, monkeypatch,
+                                                                     value):
+    if value is not None:
+        monkeypatch.setenv(proc.LIFELINE_ENV, value)
+    proc.lifeline(on_close=lambda: None)
+    assert unread == [0]
+
+
+@pytest.mark.parametrize("value", ["-1", "x", " 3"])
+def test_lifeline_refuses_a_malformed_value_and_kind_stays_none(unread, monkeypatch, value):
+    monkeypatch.setenv(proc.LIFELINE_ENV, value)
+    with pytest.raises(ValueError, match=proc.LIFELINE_ENV):
+        proc.lifeline(on_close=lambda: None)
+    assert unread == []
+    assert proc.LIFELINE_ENV not in os.environ
+    assert proc.lifeline_kind() is None
+
+
+class _FakeMsvcrt:
+    def __init__(self):
+        self.opened = []
+
+    def open_osfhandle(self, handle, flags):
+        self.opened.append(handle)
+        return 99
+
+
+@pytest.mark.parametrize("value, opened, held", [("0", [], [0]), ("1234", [1234], [99])],
+                         ids=["stdin", "handle"])
+def test_on_windows_0_is_stdin_and_never_a_handle(unread, monkeypatch, value, opened, held):
+    msvcrt = _FakeMsvcrt()
+    monkeypatch.setitem(sys.modules, "msvcrt", msvcrt)
+    monkeypatch.setattr(proc, "_WINDOWS", True)
+    monkeypatch.setenv(proc.LIFELINE_ENV, value)
+    proc.lifeline(on_close=lambda: None)
+    assert msvcrt.opened == opened
+    assert unread == held
+
+
 # -- spawn detached ------------------------------------------------------------------------
 
 DETACHED = """
