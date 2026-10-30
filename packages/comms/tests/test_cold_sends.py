@@ -777,6 +777,11 @@ def test_the_trim_keeps_held_mail_past_retention(rig):
     if rig.backend != "local":
         pytest.skip("only the local record trims")
     mid = next_turn(rig)
+    assert wait_until(lambda: mid in held_of(rig, REVIEWER_Q))
+    # Stopped before `ancient` is posted: a live daemon would route it to the unbound
+    # name and give it a row whenever its pass beat the trim below, and the trim keeps
+    # every queued id. The stopped daemon still trims with the queue it loaded.
+    rig.daemon.stop()
     old = rig.post_as("agent-6", ["main@proj-b"], "ancient")
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(rig.clock() - 200 * 86400))
     rig.age_message(mid, stamp)

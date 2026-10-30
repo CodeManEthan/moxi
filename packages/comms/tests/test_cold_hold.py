@@ -190,11 +190,24 @@ def test_the_shims_stop_on_a_warm_read_releases_the_row(rig, monkeypatch):
     handed), and on a warm read that releases the row. A `turn` with no `handled` (an
     older adapter's) releases nothing: `test_queue.py` tests that with raw
     frames."""
-    s = cold_shim(rig)
+    s = cold_shim(rig, start=False)
+    # The release is pushed while the boundary runs. It lands in the shim's queue, or
+    # the same boundary's flush injects it and empties the queue, as the two threads
+    # fall; so the payloads are read as they arrive, not from the queue.
+    pushed, on_push = [], s._on_push
+
+    def record(frame):
+        if frame.get("op") == "deliver":
+            pushed.append(frame["payload"])
+        on_push(frame)
+
+    monkeypatch.setattr(s, "_on_push", record)
+    s.start()
     _out, mid = cold_send(rig)
     write_transcript(SESS_A, 3)
     hook(monkeypatch, s, "turn-boundary", SESS_A)
-    (payload,) = wait_for_queue(s, 1)
+    assert wait_until(lambda: pushed)
+    (payload,) = pushed
     assert payload["message_id"] == mid and payload["held"] is True
 
 

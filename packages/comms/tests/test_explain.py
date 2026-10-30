@@ -45,7 +45,11 @@ def ask(identity=IDENTITY, message_id=None) -> dict:
 def deliver_one(rig, shim, text="for the reviewer"):
     rig.post_as("agent-6", [IDENTITY], text)
     wait_for_queue(shim, 1)
-    return shim.queue[0]["message_id"]
+    message_id = shim.queue[0]["message_id"]
+    # The daemon records the hand-over time after the send, so the shim can hold the
+    # payload a moment before `handed_at` names it.
+    assert wait_until(lambda: (IDENTITY, message_id) in rig.daemon.handed_at)
+    return message_id
 
 
 def cursor_file(qualified=IDENTITY):

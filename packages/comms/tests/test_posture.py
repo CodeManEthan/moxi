@@ -366,7 +366,10 @@ def test_the_asker_itself_and_other_recipients_are_not_bound_to_each_other(rig, 
     for a recipient binds that recipient only once a release point hands it over."""
     rig.shim(**CRITIC)
     ask = open_ask(rig, to="reviewer,critic")
-    assert indexed(rig, ask.id)["open"] == {R, C}
+    # The ask's entry is made at its first recipient's routing and each recipient joins
+    # `open` as the daemon routes to it, so the entry can name one before the other.
+    assert wait_until(lambda: indexed(rig, ask.id)["open"] == {R, C}), \
+        indexed(rig, ask.id)["open"]
     code, out = rig.cli(["send", "--posture", "none", "reviewer", "more context"], **PLANNER)
     assert code == 0, out
     code, out = rig.cli(["send", "--posture", "none", "planner", "answer?"], **CRITIC)
