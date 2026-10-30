@@ -4,6 +4,7 @@
 import dataclasses
 import subprocess
 import sys
+from pathlib import Path
 from types import MappingProxyType
 
 import pytest
@@ -304,16 +305,18 @@ def test_every_bad_name_is_named_in_the_reason(site):
 
 def test_run_time_entries_take_their_own_forms():
     unit = modules._unit
-    unit("daemon", "row", {"argv": ["/usr/bin/backup", "--all"], "cwd": "/srv",
-                           "enabled": False}, runtime=True)
-    unit("timer", "row", {"argv": ["/usr/bin/backup"], "every": "1h"}, runtime=True)
+    exe = sys.executable  # an absolute path on every system
+    here = str(Path(exe).parent)
+    unit("daemon", "row", {"argv": [exe, "--all"], "cwd": here, "enabled": False},
+         runtime=True)
+    unit("timer", "row", {"argv": [exe], "every": "1h"}, runtime=True)
     unit("timer", "row", {"command": "moxi-alpha-x", "at": ["03:00"]}, runtime=True)
     for kind, entry, words in [
         ("daemon", {"argv": ["backup"]}, "absolute path"),
         ("daemon", {"argv": []}, "absolute path"),
-        ("daemon", {"argv": ["/bin/x"], "command": "x"}, "both command and argv"),
-        ("daemon", {"argv": ["/bin/x"], "cwd": "srv"}, "cwd"),
-        ("daemon", {"argv": ["/bin/x"], "enabled": "no"}, "enabled"),
+        ("daemon", {"argv": [exe], "command": "x"}, "both command and argv"),
+        ("daemon", {"argv": [exe], "cwd": "srv"}, "cwd"),
+        ("daemon", {"argv": [exe], "enabled": "no"}, "enabled"),
     ]:
         with pytest.raises(modules._Bad, match=words):
             unit(kind, "row", entry, runtime=True)
