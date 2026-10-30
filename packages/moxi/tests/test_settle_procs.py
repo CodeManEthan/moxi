@@ -484,6 +484,9 @@ def ended_interrupted(job: Job, box: Box, starts: list[str]) -> None:
     sent the child only the signals it caught itself, each once."""
     assert job.ended() == 1, job.screen
     assert box.value("child", "exit") == _settle.INTERRUPTED, job.screen
+    # The parent's forwarded copy of a signal the child already had can come after the
+    # child is done; ignored then, it never replaces the exit code with the signal.
+    assert box.value("child", "ignored") == [int(s) for s in _settle.signals()]
     assert box.value("parent", "outcome") == _settle.INTERRUPTED
     assert [e["settle"] for e in box.events("parent", "settle")] == ["demo"]
     assert [c[1] for c in box.calls("start")] == starts
@@ -667,6 +670,7 @@ def test_ctrl_c_during_teardown_abandons_it_and_its_finally_runs(box, job):
     j.type(b"\x03")
     assert j.ended() == 1, j.screen
     assert box.value("child", "exit") == _settle.INTERRUPTED
+    assert box.value("child", "ignored") == [int(s) for s in _settle.signals()]
     assert box.events("teardown", "ran_finally") != []
     assert box.events("sup") == []
     assert [e["sent"] for e in box.events("parent", "sent")] == [signal.SIGINT]

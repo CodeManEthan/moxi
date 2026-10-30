@@ -39,7 +39,12 @@ so a program the child starts gets default dispositions. In the steps, a signal 
 its entry, `apply`), which are marked `held()`: there it only sets the request, and the
 write finishes before the request is obeyed. In the `finally` it only sets the request,
 so `resume` and its reports always run. Then the child prints how many units it started
-again and exits 130, the pair's private "interrupted" code.
+again and exits 130, the pair's private "interrupted" code. Once the step or the teardown
+has returned, the child ignores these signals until it exits: a terminal's signal reaches
+the child twice, from the terminal and forwarded by the parent, and the forwarded copy can
+come late, after Python has put the default dispositions back while it shuts down, where
+it would kill the child and the parent would read the signal in place of the exit code.
+Nothing is started after that point, so the ignored dispositions reach no program.
 
 The parent never kills the child. It waits with `Popen.wait()` and no timeout, under
 handlers that record each signal and, on POSIX, forward it to the child; on Windows the
@@ -869,9 +874,20 @@ def main(argv: list[str] | None = None,
     args = _parse(sys.argv[1:] if argv is None else argv)
     if before is not None:
         before()
-    if args.teardown:
-        return teardown(args.module)
-    return settle(args.module, replace=args.replace)
+    try:
+        if args.teardown:
+            return teardown(args.module)
+        return settle(args.module, replace=args.replace)
+    finally:
+        _ignore_signals()
+
+
+def _ignore_signals() -> None:
+    """Ignore `signals()` from here to the process's end: the child's last act, once its
+    exit code is decided, so a late copy of a signal it already counted can't kill it as
+    the interpreter shuts down."""
+    for signum in signals():
+        signal.signal(signum, signal.SIG_IGN)
 
 
 if __name__ == "__main__":
