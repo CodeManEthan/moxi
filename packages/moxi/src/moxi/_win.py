@@ -6,6 +6,8 @@ calls it needs when first called, so importing this module costs nothing anywher
 
 - `private_dir(path)` makes a directory whose access list grants only the current user,
   and checks it by reading the list back.
+- `make_private_dir(path)` creates one such directory and leaves an existing one alone;
+  `private_file(path)` creates a new file whose access list grants only the current user.
 - `user_sid()` is the current user's SID as text, `S-1-5-21-...`.
 - `Job` is a Job Object: the processes put in it can be ended together, and, made with
   `kill_on_close=True`, they end when the job's last handle closes, which happens when
@@ -18,7 +20,11 @@ import os
 from pathlib import Path
 
 # Win32 constants.
+_ERROR_FILE_EXISTS = 80
 _ERROR_ALREADY_EXISTS = 183
+_GENERIC_WRITE = 0x40000000
+_CREATE_NEW = 1
+_FILE_ATTRIBUTE_NORMAL = 0x80
 _SE_FILE_OBJECT = 1
 _OWNER_SECURITY_INFORMATION = 0x1
 _DACL_SECURITY_INFORMATION = 0x4
@@ -34,6 +40,7 @@ _PROCESS_SET_QUOTA = 0x0100
 _PROCESS_TERMINATE = 0x0001
 _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+_JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x0800
 
 _api = None
 
@@ -107,6 +114,8 @@ def _bind():
     api.LocalFree = bind(kernel32, "LocalFree", P, P)
     api.CreateDirectoryW = bind(kernel32, "CreateDirectoryW", w.BOOL, w.LPCWSTR,
                                 ctypes.POINTER(SECURITY_ATTRIBUTES))
+    api.CreateFileW = bind(kernel32, "CreateFileW", w.HANDLE, w.LPCWSTR, w.DWORD, w.DWORD,
+                           ctypes.POINTER(SECURITY_ATTRIBUTES), w.DWORD, w.DWORD, w.HANDLE)
     api.OpenProcess = bind(kernel32, "OpenProcess", w.HANDLE, w.DWORD, w.BOOL, w.DWORD)
     api.CreateJobObjectW = bind(kernel32, "CreateJobObjectW", w.HANDLE, P, w.LPCWSTR)
     api.SetInformationJobObject = bind(kernel32, "SetInformationJobObject", w.BOOL,
@@ -209,33 +218,86 @@ def private_dir(path: str | os.PathLike) -> None:
     `PermissionError`. Either way the list is then read back, and `PermissionError` is
     raised unless it grants only this user.
     """
-    api = _bind()
-    ctypes = api.ctypes
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     user = _token_sid(_TOKEN_USER)
     sid = user.text()
-    descriptor = ctypes.c_void_p()
-    sddl = f"O:{sid}D:P(A;OICI;FA;;;{sid})"
-    if not api.ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            sddl, _SDDL_REVISION_1, ctypes.byref(descriptor), None):
-        raise _error("ConvertStringSecurityDescriptorToSecurityDescriptorW")
+    descriptor = _descriptor(f"O:{sid}D:P(A;OICI;FA;;;{sid})")
     try:
-        attributes = api.SECURITY_ATTRIBUTES(ctypes.sizeof(api.SECURITY_ATTRIBUTES),
-                                             descriptor, False)
-        if not api.CreateDirectoryW(str(path), ctypes.byref(attributes)):
-            code = ctypes.get_last_error()
-            if code != _ERROR_ALREADY_EXISTS:
-                raise _error(f"creating {path}", code)
+        if not _create_dir(path, descriptor):
             if not path.is_dir():
                 raise NotADirectoryError(f"{path} is not a directory")
             if not _only_user(path, user):
                 _take(path, user, descriptor)
     finally:
-        api.LocalFree(descriptor)
+        _bind().LocalFree(descriptor)
     if not _only_user(path, user):
         raise PermissionError(f"{path} grants access to others than {sid}, and its access "
                               "list could not be set")
+
+
+def make_private_dir(path: str | os.PathLike) -> bool:
+    """Create directory `path`, whose parent must exist, with `private_dir`'s access list,
+    and return True. When something is already at `path`, return False and change
+    nothing: an existing directory keeps its owner and its list."""
+    user = _token_sid(_TOKEN_USER)
+    sid = user.text()
+    descriptor = _descriptor(f"O:{sid}D:P(A;OICI;FA;;;{sid})")
+    try:
+        return _create_dir(Path(path), descriptor)
+    finally:
+        _bind().LocalFree(descriptor)
+
+
+def private_file(path: str | os.PathLike) -> None:
+    """Create the empty file `path`, which must not exist, owned by this user and with a
+    protected access list that grants only this user. Raises `FileExistsError` when
+    something is already at `path`; the directory it is in is not changed."""
+    import errno
+
+    api = _bind()
+    ctypes = api.ctypes
+    user = _token_sid(_TOKEN_USER)
+    sid = user.text()
+    descriptor = _descriptor(f"O:{sid}D:P(A;;FA;;;{sid})")
+    try:
+        attributes = api.SECURITY_ATTRIBUTES(ctypes.sizeof(api.SECURITY_ATTRIBUTES),
+                                             descriptor, False)
+        handle = api.CreateFileW(str(path), _GENERIC_WRITE, 0, ctypes.byref(attributes),
+                                 _CREATE_NEW, _FILE_ATTRIBUTE_NORMAL, None)
+        if handle is None or handle == ctypes.c_void_p(-1).value:
+            code = ctypes.get_last_error()
+            if code in (_ERROR_FILE_EXISTS, _ERROR_ALREADY_EXISTS):
+                raise FileExistsError(errno.EEXIST, "the file exists", str(path))
+            raise _error(f"creating {path}", code)
+        api.CloseHandle(handle)
+    finally:
+        api.LocalFree(descriptor)
+
+
+def _descriptor(sddl: str):
+    """A security descriptor made from `sddl`; the caller frees it with `LocalFree`."""
+    api = _bind()
+    ctypes = api.ctypes
+    descriptor = ctypes.c_void_p()
+    if not api.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl, _SDDL_REVISION_1, ctypes.byref(descriptor), None):
+        raise _error("ConvertStringSecurityDescriptorToSecurityDescriptorW")
+    return descriptor
+
+
+def _create_dir(path: Path, descriptor) -> bool:
+    """Create directory `path` with `descriptor`; False when something is already there."""
+    api = _bind()
+    ctypes = api.ctypes
+    attributes = api.SECURITY_ATTRIBUTES(ctypes.sizeof(api.SECURITY_ATTRIBUTES),
+                                         descriptor, False)
+    if api.CreateDirectoryW(str(path), ctypes.byref(attributes)):
+        return True
+    code = ctypes.get_last_error()
+    if code != _ERROR_ALREADY_EXISTS:
+        raise _error(f"creating {path}", code)
+    return False
 
 
 def _take(path: Path, user: _Sid, descriptor) -> None:
@@ -335,17 +397,21 @@ class Job:
 
     With `kill_on_close=True` every process in the job is ended when the job's last handle
     closes: on `close()`, when this object is garbage collected, or when this process dies.
+    With `breakaway=True` a process in the job may start a child outside it
+    (`CREATE_BREAKAWAY_FROM_JOB`, which `moxi.proc.spawn(detached=True)` asks for).
     """
 
-    def __init__(self, *, kill_on_close: bool = False):
+    def __init__(self, *, kill_on_close: bool = False, breakaway: bool = False):
         api = _bind()
         handle = api.CreateJobObjectW(None, None)
         if not handle:
             raise _error("CreateJobObjectW")
         self._handle = handle
-        if kill_on_close:
+        flags = ((_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE if kill_on_close else 0)
+                 | (_JOB_OBJECT_LIMIT_BREAKAWAY_OK if breakaway else 0))
+        if flags:
             info = api.JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-            info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            info.BasicLimitInformation.LimitFlags = flags
             if not api.SetInformationJobObject(handle, _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
                                                api.ctypes.byref(info),
                                                api.ctypes.sizeof(info)):

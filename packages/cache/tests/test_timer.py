@@ -382,14 +382,47 @@ def test_requires_env_not_met_is_checked_again_at_the_next_tick(tmp_path, exe):
     assert asks(t, {A: record()}, T0 + TTL + 10) == [("r", A)]
 
 
-def test_proc_environ_reads_a_process_and_none_for_a_gone_one(tmp_path):
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no environment reader")
+def test_proc_environ_reads_a_process_and_none_for_a_gone_one():
     env = timer.proc_environ(os.getpid())
     assert env is not None and env.get("PATH") == os.environ.get("PATH")
-    fake = tmp_path / "proc" / "12"
-    fake.mkdir(parents=True)
-    (fake / "environ").write_bytes(b"A=1\0B=x=y\0junk\0C=\0")
-    assert timer.proc_environ(12, tmp_path / "proc") == {"A": "1", "B": "x=y", "C": ""}
-    assert timer.proc_environ(13, tmp_path / "proc") is None
+    import subprocess
+
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()
+    assert timer.proc_environ(gone.pid) is None
+
+
+def test_proc_environ_is_moxi_procs_reader(monkeypatch):
+    from moxi import proc
+
+    monkeypatch.setattr(proc, "environ", lambda pid: {"PID": str(pid)})
+    assert timer.proc_environ(7) == {"PID": "7"}
+    monkeypatch.setattr(proc, "environ", lambda pid: None)
+    assert timer.proc_environ(7) is None
+
+
+@pytest.mark.parametrize("platform, expected",
+                         [("linux", True), ("darwin", True), ("win32", False)])
+def test_env_checkable_asks_the_platform_and_reads_no_process(monkeypatch, platform,
+                                                              expected):
+    from moxi import proc
+
+    def refuse(*_):
+        raise AssertionError("env_checkable read a process")
+
+    monkeypatch.setattr(proc, "environ", refuse)
+    monkeypatch.setattr(timer, "proc_environ", refuse)
+    monkeypatch.setattr(sys, "platform", platform)
+    assert timer.env_checkable() is expected
+
+
+def test_a_subscription_needing_env_never_asks_where_env_cannot_be_read(tmp_path, exe):
+    t, spawner, _ = make_timer(tmp_path, [raw_sub(exe, name="r", at=0,
+                                                  requires_env={"V": "on"})],
+                               environ=lambda pid: None)
+    assert asks(t, {A: record()}, T0 + TTL) == []
+    assert spawner.argvs == []
 
 
 # --- the log ------------------------------------------------------------------------------------
@@ -407,7 +440,8 @@ def test_one_line_per_ask_when_the_process_exits(tmp_path, exe):
     (line,) = logged(t)
     assert line == {"v": 1, "at": T0 + TTL + 2, "subscriber": "r", "source": "config",
                     "session": A, "pid": 55, "age": TTL + 2, "last_request": T0,
-                    "child": 1000, "exit": 3, "ended": T0 + TTL + 12, "error": None}
+                    "child": 1000, "exit": 3, "ended": T0 + TTL + 12, "error": None,
+                    "output": None}
 
 
 def test_a_start_that_fails_is_logged_at_once(tmp_path, exe):
@@ -476,6 +510,254 @@ def test_the_run_starts_detached_with_no_shell(tmp_path):
     assert got["stdin"] == got["stdout"] == "/dev/null"
     (line,) = timer.read_log(tmp_path / "timer.jsonl")
     assert line["exit"] == 0 and line["child"] == entry["child"]
+
+
+def test_on_windows_an_ask_starts_through_moxi_procs_detached_spawn(tmp_path, exe,
+                                                                     monkeypatch):
+    from moxi import proc
+
+    started, codes = [], {4242: None}
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(proc, "spawn",
+                        lambda argv, **kw: started.append((argv, kw)) or 4242)
+    monkeypatch.setattr(proc, "status", lambda pid: codes[pid])
+    t = Timer(config_entries=lambda: [], modules=[raw_sub(exe, name="r", at=0)],
+              environ=lambda pid: {}, log_file=tmp_path / "timer.jsonl")
+    (entry,) = t.tick({A: record(pid=31)}, T0 + TTL)
+    output = tmp_path / "asks" / f"{int((T0 + TTL) * 1000)}-1-r.log"
+    assert started == [([str(exe), "--session", A], {"detached": True, "output": output})]
+    assert entry["child"] == 4242 and entry["output"] == str(output)
+    t.reap(T0 + TTL + 1)
+    assert logged(t) == []                       # still running: nothing written yet
+    codes[4242] = 3
+    t.reap(T0 + TTL + 2)
+    (line,) = logged(t)
+    assert line["child"] == 4242 and line["exit"] == 3 and line["ended"] == T0 + TTL + 2
+    assert line["error"] is None
+    assert line["output"] is None                # no file was made, so none is named
+
+
+def test_a_windows_ask_whose_status_is_no_longer_held_logs_no_exit(tmp_path, exe,
+                                                                     monkeypatch):
+    from moxi import proc
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(proc, "spawn", lambda argv, **kw: 4242)
+
+    def dropped(pid):
+        raise LookupError(pid)
+
+    monkeypatch.setattr(proc, "status", dropped)
+    t = Timer(config_entries=lambda: [], modules=[raw_sub(exe, name="r", at=0)],
+              environ=lambda pid: {}, log_file=tmp_path / "timer.jsonl")
+    t.tick({A: record(pid=31)}, T0 + TTL)
+    t.reap(T0 + TTL + 1)
+    (line,) = logged(t)
+    assert line["exit"] is None and line["ended"] == T0 + TTL + 1
+    assert line["error"] == "its exit status is not known: it was no longer held"
+
+
+def test_a_posix_ask_logs_no_output_file(tmp_path, exe):
+    t, spawner, _ = make_timer(tmp_path, [raw_sub(exe, name="r", at=0)])
+    (entry,) = t.tick({A: record()}, T0 + TTL)
+    assert entry["output"] is None and not (tmp_path / "state" / "asks").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a POSIX start of moxi.proc's own")
+def test_a_detached_asks_poll_reads_its_exit_status(tmp_path):
+    from moxi import proc
+
+    pid = proc.spawn([sys.executable, "-c", "import sys; sys.exit(4)"], detached=True)
+    ask = timer.Detached(pid)
+    deadline = time.time() + 10
+    code = ask.poll()
+    while code is None and time.time() < deadline:
+        time.sleep(0.05)
+        code = ask.poll()
+    assert code == 4
+    with pytest.raises(LookupError):
+        ask.poll()
+
+
+# --- Windows asks, run here with the platform patched, so the real detached spawn runs ------
+
+def py_sub(name: str, code: str, **fields) -> Subscription:
+    return checked({"name": name, "at": 0, "run": [sys.executable, "-c", code], **fields})
+
+
+@pytest.fixture
+def as_windows(monkeypatch):
+    if sys.platform == "win32":
+        return
+    monkeypatch.setattr(sys, "platform", "win32")
+
+
+def reap_all(t: Timer, timeout: float = 30.0) -> None:
+    deadline = time.time() + timeout
+    while t.pending and time.time() < deadline:
+        time.sleep(0.05)
+        t.reap()
+    assert t.pending == []
+
+
+def test_a_windows_ask_logs_its_exit_and_keeps_what_it_wrote(tmp_path, as_windows):
+    t = Timer(config_entries=lambda: [], log_file=tmp_path / "timer.jsonl",
+              modules=[py_sub("err", "import sys; sys.stderr.write('it broke\\n'); "
+                                     "print('and said so'); sys.exit(3)")])
+    (entry,) = t.tick({A: record(pid=31)}, T0 + TTL)
+    output = tmp_path / "asks" / f"{int((T0 + TTL) * 1000)}-1-err.log"
+    assert entry["output"] == str(output)
+    reap_all(t)
+    (line,) = logged(t)
+    assert line["exit"] == 3 and line["error"] is None and line["output"] == str(output)
+    assert sorted(output.read_text().splitlines()) == ["and said so", "it broke"]
+
+
+def test_a_windows_ask_that_writes_nothing_leaves_no_file(tmp_path, as_windows):
+    t = Timer(config_entries=lambda: [], log_file=tmp_path / "timer.jsonl",
+              modules=[py_sub("quiet", "pass")])
+    t.tick({A: record(pid=31)}, T0 + TTL)
+    reap_all(t)
+    (line,) = logged(t)
+    assert line["exit"] == 0 and line["output"] is None
+    assert list((tmp_path / "asks").iterdir()) == []
+
+
+def test_a_windows_asks_file_keeps_its_last_256_kib(tmp_path, as_windows):
+    lines = 40_000  # 8 bytes each: 320,000 bytes, past the 262,144 kept
+    t = Timer(config_entries=lambda: [], log_file=tmp_path / "timer.jsonl",
+              modules=[py_sub("loud", "import sys\n"
+                                      f"for i in range({lines}): "
+                                      "sys.stdout.write('%07d\\n' % i)")])
+    t.tick({A: record(pid=31)}, T0 + TTL)
+    reap_all(t)
+    (line,) = logged(t)
+    whole = b"".join(b"%07d\n" % i for i in range(lines))
+    kept = Path(line["output"]).read_bytes()
+    assert len(kept) == timer.ASK_OUTPUT_LIMIT == 256 * 1024
+    assert kept == whole[-timer.ASK_OUTPUT_LIMIT:]
+
+
+def _old_files(asks: Path, count: int, first_ms: int) -> list[Path]:
+    asks.mkdir(parents=True, exist_ok=True)
+    made = []
+    for i in range(count):
+        path = asks / f"{first_ms + i}-{i}-old.log"
+        path.write_text("x")
+        made.append(path)
+    return made
+
+
+def test_a_windows_ask_keeps_the_newest_32_files(tmp_path, as_windows):
+    asks = tmp_path / "asks"
+    old = _old_files(asks, 32, 1_000_000_000_000)
+    other = asks / "notes.txt"            # not an ask's file: never touched
+    other.write_text("mine")
+    t = Timer(config_entries=lambda: [], log_file=tmp_path / "timer.jsonl",
+              modules=[py_sub("r", "print('hi')")])
+    t.tick({A: record(pid=31)}, T0 + TTL)
+    assert not old[0].exists() and all(p.exists() for p in old[1:])
+    assert other.exists()
+    reap_all(t)
+    assert len([p for p in asks.iterdir() if p.suffix == ".log"]) == 32
+
+
+def test_files_sort_by_time_then_count_not_by_name(tmp_path, as_windows):
+    asks = tmp_path / "asks"
+    asks.mkdir()
+    early = asks / "1000000000000-9-old.log"   # sorts after the next one by name
+    late = asks / "1000000000000-10-old.log"
+    for path in (early, late, *_old_files(asks, 30, 1_000_000_000_001)):
+        path.write_text("x")
+    t = Timer(config_entries=lambda: [], log_file=tmp_path / "timer.jsonl",
+              modules=[py_sub("r", "pass")])
+    t.tick({A: record(pid=31)}, T0 + TTL)
+    assert not early.exists() and late.exists()
+    reap_all(t)
+
+
+def test_a_pending_asks_file_is_never_deleted(tmp_path, as_windows):
+    gate = tmp_path / "go"
+    wait = (f"import os, time\nwhile not os.path.exists({str(gate)!r}): time.sleep(0.02)\n"
+            "print('done')")
+    t = Timer(config_entries=lambda: [], log_file=tmp_path / "timer.jsonl",
+              modules=[py_sub("slow", wait, every=10)])
+    now = T0 + TTL
+    (first,) = t.tick({A: record(pid=31)}, now)
+    held = Path(first["output"])
+    old = _old_files(tmp_path / "asks", 31, int(now * 1000) + 1)
+    t.tick({A: record(pid=31)}, now + 10)    # 32 files: the oldest is pending, kept
+    assert held.exists() and all(p.exists() for p in old)
+    t.tick({A: record(pid=31)}, now + 20)    # 33: the pending one is skipped, the next goes
+    assert held.exists() and not old[0].exists() and all(p.exists() for p in old[1:])
+    gate.touch()
+    reap_all(t)
+    assert [line["exit"] for line in logged(t)] == [0, 0, 0]
+    assert held.read_text().strip() == "done"
+
+
+def test_a_failed_delete_is_tried_again_at_the_next_ask(tmp_path, as_windows, monkeypatch):
+    old = _old_files(tmp_path / "asks", 32, 1_000_000_000_000)
+    real = timer._remove
+    refused = []
+
+    def remove(path):
+        if path == old[0] and not refused:
+            refused.append(path)
+            return False                   # held open by an ask from before a restart
+        return real(path)
+
+    monkeypatch.setattr(timer, "_remove", remove)
+    t = Timer(config_entries=lambda: [], log_file=tmp_path / "timer.jsonl",
+              modules=[py_sub("r", "print('x')", every=10)])
+    t.tick({A: record(pid=31)}, T0 + TTL)
+    assert refused == [old[0]] and old[0].exists()
+    reap_all(t)
+    t.tick({A: record(pid=31)}, T0 + TTL + 10)
+    assert not old[0].exists()
+    reap_all(t)
+
+
+def test_a_windows_ask_still_running_at_the_stop_keeps_its_file(tmp_path, as_windows):
+    gate = tmp_path / "go"
+    wait = (f"import os, time\nprint('started', flush=True)\n"
+            f"while not os.path.exists({str(gate)!r}): time.sleep(0.02)")
+    t = Timer(config_entries=lambda: [], log_file=tmp_path / "timer.jsonl",
+              modules=[py_sub("slow", wait)])
+    (entry,) = t.tick({A: record(pid=31)}, T0 + TTL)
+    try:
+        t.close(T0 + TTL + 1)
+        (line,) = logged(t)
+        assert line["exit"] is None and line["error"] == "still running when the watcher stopped"
+        assert line["output"] == entry["output"] and Path(line["output"]).exists()
+    finally:
+        gate.touch()
+
+
+def test_a_windows_ask_that_cannot_start_leaves_no_file(tmp_path, as_windows):
+    def start(argv, output=None):
+        return timer.spawn([str(tmp_path / "missing")], output=output)
+
+    t = Timer(config_entries=lambda: [], log_file=tmp_path / "timer.jsonl",
+              modules=[py_sub("r", "pass")], spawn=start)
+    (entry,) = t.tick({A: record(pid=31)}, T0 + TTL)
+    assert entry["error"].startswith(f"could not start {sys.executable}")
+    (line,) = logged(t)
+    assert line["output"] is None and line["child"] is None
+    assert list((tmp_path / "asks").iterdir()) == []
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows only; owed to Windows")
+def test_on_windows_a_real_ask_logs_its_exit_and_its_output(tmp_path):
+    t = Timer(config_entries=lambda: [], log_file=tmp_path / "timer.jsonl",
+              modules=[py_sub("probe", "import sys; sys.stderr.write('on windows'); "
+                                       "sys.exit(3)")])
+    (entry,) = t.tick({A: record(pid=31)}, T0 + TTL)
+    reap_all(t)
+    (line,) = timer.read_log(tmp_path / "timer.jsonl")
+    assert line["child"] == entry["child"] and line["exit"] == 3
+    assert Path(line["output"]).parent == tmp_path / "asks"
+    assert Path(line["output"]).read_text() == "on windows"
 
 
 # --- loading: the same check at each tick as `timers` and doctor run ------------------------
@@ -772,3 +1054,35 @@ run = ["bin/verb"]
     assert "timer: 1 subscription(s), 0 from modules, 1 from your config: ok" in out
     assert "timer: refused rel (config): run[0] 'bin/verb' is not an absolute path" in out
     assert "timer log: " in out and "(no ask yet)" in out
+
+
+# --- cache's doctor rows ---------------------------------------------------------------------
+
+def test_the_doctor_warns_where_requires_env_cannot_be_checked(own_roots, exe, monkeypatch):
+    from moxi_cache import doctor
+
+    write_cache_config(own_roots, f"""
+[[timer.subscriber]]
+name = "warm"
+at = 0
+run = ["{exe}"]
+requires_env = {{ V = "on" }}
+
+[[timer.subscriber]]
+name = "plain"
+at = 0
+run = ["{exe}"]
+""")
+    monkeypatch.setattr(timer, "env_checkable", lambda: True)
+    assert list(doctor.rows()) == []
+    monkeypatch.setattr(timer, "env_checkable", lambda: False)
+    (row,) = doctor.rows()
+    assert (row.module, row.state) == ("cache", "warn")
+    assert row.detail.endswith("never ask: warm") and "requires_env" in row.detail
+
+
+def test_the_doctor_says_nothing_with_no_subscription_needing_env(own_roots, monkeypatch):
+    from moxi_cache import doctor
+
+    monkeypatch.setattr(timer, "env_checkable", lambda: False)
+    assert list(doctor.rows()) == []
