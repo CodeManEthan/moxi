@@ -400,5 +400,5 @@ def test_specs_lists_saved_and_unsaved_specs_with_their_last_result(demo, capsys
     out = capsys.readouterr().out
     assert "demo/snap  saved  last: committed" in out and "demo/loose  not saved" in out
     assert cli.main(["specs", "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == [listed]
+    assert json.loads(capsys.readouterr().out) == [dict(listed, project=None)]
     assert AUTHOR == tuple(by_name["demo/snap"]["spec"]["author"])

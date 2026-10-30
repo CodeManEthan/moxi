@@ -1,6 +1,6 @@
 """`moxi repo`: the git hooks of the repos you name, and the committer's specs.
 
-    moxi repo git-hooks [list] [PATH] [--json]
+    moxi repo git-hooks [list] [PATH] [--projects] [--json]
     moxi repo git-hooks available [--json]
     moxi repo git-hooks add PATH [PIECE...] [--mode auto|config|shim] [--set KEY=VALUE]...
     moxi repo git-hooks remove PATH [PIECE...]
@@ -9,6 +9,9 @@
     moxi repo commit PATH [--spec NAME] [--wait SECONDS] [--json]
     moxi repo specs [PATH] [--json]
     moxi repo specs remove PATH NAME
+
+PATH is a path inside the repo. With the projects module installed it may also be a
+project key, and listings show each repo's key.
 """
 
 from __future__ import annotations
@@ -18,27 +21,43 @@ import json
 import sys
 from collections.abc import Sequence
 
-from moxi_repo import api
+from moxi_repo import api, projects
 
 GIT_HOOK_VERBS = ("list", "available", "add", "remove", "enable", "disable", "refresh")
 
 
+def _path_note() -> str:
+    """What PATH may be, said by whether projects is installed and offers what repo
+    reads."""
+    if projects.api() is not None:
+        return ("PATH is a path inside the repo, or a project key (matched ignoring case); "
+                "listings show each repo's project key.")
+    return (f"PATH is a path inside the repo. With projects installed ({projects.INSTALL}) "
+            "it may also be a project key, and listings show each repo's key.")
+
+
 def _parser(prog: str) -> argparse.ArgumentParser:
+    note = _path_note()
     parser = argparse.ArgumentParser(
-        prog=prog, description="Run other modules' git hook pieces in the repos you name.")
+        prog=prog, description="Run other modules' git hook pieces in the repos you name.",
+        epilog=note)
     verbs = parser.add_subparsers(dest="verb", metavar="VERB")
     verbs.required = True
     hooks = verbs.add_parser(
         "git-hooks", help="the git hook pieces registered in your repos",
-        description="The git hook pieces registered in your repos. With no verb, list them.")
+        description="The git hook pieces registered in your repos. With no verb, list them.",
+        epilog=note)
     sub = hooks.add_subparsers(dest="action", metavar="ACTION")
     sub.required = True
 
     ls = sub.add_parser("list", help="each indexed repo's git hooks, or one repo's",
                         description="Each indexed repo, or the one at PATH: git version and "
                                     "mode; per event, its pieces in order, the existing git "
-                                    "hook, and problems.")
+                                    "hook, and problems.", epilog=note)
     ls.add_argument("path", nargs="?", metavar="PATH")
+    ls.add_argument("--projects", action="store_true",
+                    help="add every project's repo, including those repo hasn't touched "
+                         f"(needs projects: {projects.INSTALL})")
     ls.add_argument("--json", action="store_true", help="print one JSON array")
 
     av = sub.add_parser("available", help="the pieces installed modules declare",
@@ -82,7 +101,7 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     cm = verbs.add_parser(
         "commit", help="run a repo's saved committer specs",
         description="Run one pass of the spec saved as NAME in the repo at PATH, or of every "
-                    "spec saved there, and print each pass's line.")
+                    "spec saved there, and print each pass's line.", epilog=note)
     cm.add_argument("path", metavar="PATH")
     cm.add_argument("--spec", metavar="NAME", help="the saved spec to run")
     cm.add_argument("--wait", type=float, default=0, metavar="SECONDS",
@@ -93,9 +112,12 @@ def _parser(prog: str) -> argparse.ArgumentParser:
         "specs", help="the committer's specs, and forgetting one",
         description="List each repo's saved specs, and the specs that ran without being "
                     "saved, with their last result. 'specs remove PATH NAME' forgets one: its "
-                    "saved section, its state and its doctor records.")
+                    "saved section, its state and its doctor records.", epilog=note)
     sp.add_argument("args", nargs="*", metavar="PATH | remove PATH NAME")
     sp.add_argument("--json", action="store_true", help="print one JSON array")
+    for name, verb in sub.choices.items():
+        if name != "available":
+            verb.epilog = note
     return parser
 
 
@@ -115,12 +137,75 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi repo") -> int:
             parser.error("specs takes one PATH, or: remove PATH NAME")
     action = args.action if args.verb == "git-hooks" else args.verb
     try:
+        _resolve_paths(args, action)
         return _ACTIONS[action](args)
+    except projects.Unavailable as exc:
+        print(f"repo: {exc.text}", file=sys.stderr)
+        return exc.code
     except api.Failure as exc:
         print(f"repo: {exc.text}", file=sys.stderr)
         for line in exc.lines:
             print(f"  {line}", file=sys.stderr)
         return exc.code
+
+
+def _resolve_paths(args, action: str) -> None:
+    """Turn a project key given for PATH into its root. A path that no longer exists but
+    is in repo's index stays a path, so `remove` can drop it."""
+    def one(arg):
+        if arg is None or (action == "remove" and api.indexed_at(arg)):
+            return arg
+        return projects.resolve(arg)
+
+    if action == "specs":
+        if args.args[:1] == ["remove"]:
+            args.args[1] = one(args.args[1])
+        elif args.args:
+            args.args[0] = one(args.args[0])
+    elif hasattr(args, "path"):
+        args.path = one(args.path)
+
+
+def _with_keys(repos: list[dict], *, add_projects: bool = False) -> list[dict]:
+    """Each listed repo with its project key (`project`, None when it is in no project or
+    projects is off); with `add_projects`, every project's repo not listed yet, marked not
+    indexed. A projects error leaves the key empty and prints one line."""
+    from moxi_repo import gitconf
+
+    found = projects.api()
+    for repo in repos:
+        repo["project"] = None
+    if found is None:
+        if add_projects:
+            print(f"repo: projects isn't installed, so --projects adds nothing; run: "
+                  f"{projects.INSTALL}", file=sys.stderr)
+        return repos
+    said = set()
+
+    def say(line):
+        if line and line not in said:
+            said.add(line)
+            print(f"repo: {line}", file=sys.stderr)
+
+    for repo in repos:
+        repo["project"], why = projects.key_for(found, repo["root"])
+        say(why)
+    if add_projects:
+        listed, why = projects.project_roots(found)
+        say(why)
+        seen = {gitconf.key_of(r["common_dir"]) for r in repos if r.get("common_dir")}
+        for key, root in listed:
+            try:
+                where = gitconf.resolve(root)
+            except gitconf.NotARepo:
+                continue
+            if where.key in seen:
+                continue
+            seen.add(where.key)
+            for repo in api.status(where.root):
+                repo["project"] = key
+                repos.append(repo)
+    return repos
 
 
 def _print_report(report: api.Report) -> int:
@@ -138,7 +223,7 @@ def _print_report(report: api.Report) -> int:
 
 
 def _list(args) -> int:
-    repos = api.status(args.path)
+    repos = _with_keys(api.status(args.path), add_projects=args.projects)
     if args.json:
         print(json.dumps(repos, indent=2, sort_keys=True))
         return 0
@@ -148,7 +233,10 @@ def _list(args) -> int:
     for repo in repos:
         mode = repo.get("mode") or "none yet"
         pin = repo.get("mode_set")
-        print(f"{repo['root']}  git {repo.get('git_version', 'unknown')}, {mode} mode"
+        print(f"{repo['root']}"
+              + (f"  project {repo['project']}" if repo.get("project") else "")
+              + ("" if repo.get("indexed", True) else "  (not indexed)")
+              + f"  git {repo.get('git_version', 'unknown')}, {mode} mode"
               + (f" (pinned {pin})" if pin in ("config", "shim") else ""))
         by_event: dict[str, list] = {}
         for piece in repo["pieces"]:
@@ -254,14 +342,14 @@ def _commit(args) -> int:
 def _specs(args) -> int:
     if args.args[:1] == ["remove"]:
         return _print_report(api.forget_spec(args.args[1], args.args[2]))
-    repos = api.specs(args.args[0] if args.args else None)
+    repos = _with_keys(api.specs(args.args[0] if args.args else None))
     if args.json:
         print(json.dumps(repos, indent=2, sort_keys=True))
         return 0
     if not any(repo["specs"] for repo in repos):
         print("no committer spec has been saved or run yet")
     for repo in repos:
-        print(repo["root"])
+        print(repo["root"] + (f"  project {repo['project']}" if repo.get("project") else ""))
         for item in repo["specs"]:
             last = item.get("last") or {}
             print(f"  {item['name']}  {'saved' if item['saved'] else 'not saved'}"

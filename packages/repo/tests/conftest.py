@@ -315,3 +315,89 @@ def commit(repo: Path, *flags: str, pre: tuple[str, ...] = (), message: str = "a
 
 def head(repo: Path) -> str:
     return git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+# -- a site of fake distributions, for the optional modules repo reads ----------------------
+
+class Site:
+    """A directory on `sys.path` where a test installs fake distributions.
+
+    The same shape as the core's own test site: while it is active, `importlib.metadata`
+    and `moxi.modules.load` find only its distributions, plus `moxi`, `moxi-repo` and the
+    demo pieces' distribution, so a module installed in the workspace can't stand in for
+    the fake one, nor hide that it is absent.
+    """
+
+    def __init__(self, root: Path):
+        self.root = root
+        self.packages: set[str] = set()
+
+    def write(self, relpath: str, text: str) -> Path:
+        import textwrap
+
+        path = self.root / relpath
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(textwrap.dedent(text), encoding="utf-8")
+        top = relpath.split("/")[0].removesuffix(".py")
+        if not top.endswith(".dist-info"):
+            self.packages.add(top)
+        return path
+
+    def module(self, name: str, *, version: str = "0.1.0", **names: str) -> str:
+        """A whole fake module: its distribution, package and announcement. Each keyword
+        is an announcement name's Python expression."""
+        package = f"moxi_{name}"
+        fields = {"INTERFACES": "frozenset({1})", "API": "None",
+                  "SUMMARY": "'A module made for a test.'", **names}
+        self.write(f"{package}/__init__.py", "")
+        self.write(f"{package}/module.py", "".join(f"{k} = {v}\n" for k, v in fields.items()))
+        info = f"moxi_{name}-{version}.dist-info"
+        self.write(f"{info}/METADATA",
+                   f"Metadata-Version: 2.1\nName: moxi-{name}\nVersion: {version}\n")
+        self.write(f"{info}/entry_points.txt", f"[moxi.modules]\n{name} = {package}.module\n")
+        return package
+
+
+def see_only(root: Path, keep: tuple[Path, ...], monkeypatch) -> None:
+    """Let `importlib.metadata` and `moxi.modules.load` find only the distributions under
+    `root`, `moxi`, `moxi-repo` and those under `keep`."""
+    from importlib.metadata import Distribution
+
+    import moxi.modules
+
+    roots = {root, *keep}
+    discover = Distribution.discover
+
+    def seen(dist) -> bool:
+        return (dist.name in ("moxi", "moxi-repo")
+                or Path(dist.locate_file("")) in roots)
+
+    def filtered(cls, **kwargs):
+        return (d for d in discover(**kwargs) if seen(d))
+
+    monkeypatch.setattr(Distribution, "discover", classmethod(filtered))
+    find = moxi.modules._DistInfo.find.__func__
+
+    def find_seen(cls, module):
+        dist = find(cls, module)
+        return dist if dist is not None and Path(dist.path).parent == root else None
+
+    monkeypatch.setattr(moxi.modules._DistInfo, "find", classmethod(find_seen))
+
+
+@pytest.fixture
+def site(demo, tmp_path, monkeypatch):
+    """A fresh site on `sys.path` for the test's fake distributions, beside the demo."""
+    import moxi.modules
+
+    root = tmp_path / "site"
+    root.mkdir()
+    see_only(root, (demo.hook_env["site"],), monkeypatch)
+    monkeypatch.syspath_prepend(str(root))
+    moxi.modules.reset()
+    s = Site(root)
+    yield s
+    moxi.modules.reset()
+    for mod in list(sys.modules):
+        if mod.split(".")[0] in s.packages:
+            del sys.modules[mod]
