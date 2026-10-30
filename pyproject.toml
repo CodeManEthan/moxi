@@ -13,8 +13,10 @@ members = [
     "packages/cache",
     "packages/comms",
     "packages/moxi-dev",
+    "packages/secrets",
     "packages/projects",
     "packages/loopback",
+    "packages/slots",
     "packages/services",
 ]
 
@@ -25,8 +27,10 @@ moxi-turns = { workspace = true }
 moxi-cache = { workspace = true }
 moxi-comms = { workspace = true }
 moxi-dev = { workspace = true }
+moxi-secrets = { workspace = true }
 moxi-projects = { workspace = true }
 moxi-loopback = { workspace = true }
+moxi-slots = { workspace = true }
 moxi-services = { workspace = true }
 
 # The contributor's tools: `uv sync` installs moxi-dev, whose `moxi-dev check` runs the

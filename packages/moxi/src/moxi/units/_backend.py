@@ -20,13 +20,26 @@ own.
 The values passed across:
 
 - `Spec`, one declared unit resolved for writing: the command as an absolute argv, its
-  schedule, its socket's port, and the rest of its entry. `render(spec)` turns it into one
-  or more `Rendered` groups of files.
+  schedule, its sockets (the port, and the addresses to write), and the rest of its
+  entry. `render(spec)` turns it into one or more `Rendered` groups of files.
 - `UnitRef`, one unit as the supervisor knows it, marked (`module` set) or foreign
   (`module` None): its name, its kind, the backend's ids for it and its files.
 - `ApplyIO`, given to `apply`: the fence, file writes and deletes that move a foreign file
   aside first when told to, and `fail` and `say` for the lines and the result of each
   change.
+
+A daemon's `socket`: one listening socket per address, each named by its address's place
+in the declared `addresses` (`socket_name`), so one name always holds one address. How a
+backend holds them is its `sockets` attribute:
+
+- `"units"` (systemd): one socket unit per address, `<stem>.socket` for the first and
+  `<stem>-<k>.socket` for the k-th after it, rendered as one `Rendered` of kind `socket`
+  and planned as one `socket` change over the set; the service names them all and has no
+  install section, so the sockets start it, never a login.
+- `"job"` (launchd): the sockets are keys of the daemon's own file, so there is no
+  `socket` change; `status` reads the socket from the daemon's job.
+- `"none"` (Task Scheduler): the socket is skipped, the daemon binds its own, and
+  `status` gives the socket `off`.
 
 Marks: a backend writes the mark `moxi unit: <module>/<name>` into every file of a unit
 (systemd a first line `# moxi unit: ...`, launchd an XML comment, Task Scheduler the
@@ -134,12 +147,83 @@ class Schedule:
 
 @dataclass(frozen=True)
 class Socket:
-    """A daemon's one listening socket: the addresses and the port read from its setting
-    when the unit is written."""
+    """A daemon's listening sockets: the addresses as declared, the port read from its
+    setting when the unit is written, and the IPv6 addresses `plan` left out because the
+    system has no IPv6 loopback.
+
+    A backend writes `listens`, never `addresses` whole: each kept address with its place
+    in `addresses`, which names its socket (`socket_name`). An address left out keeps its
+    place, so the others keep their names.
+    """
 
     setting: str
     addresses: tuple[str, ...]
     port: int
+    left_out: tuple[str, ...] = ()
+
+    @property
+    def listens(self) -> tuple[tuple[int, str], ...]:
+        """`(place, address)` for each address to write, in declared order."""
+        return tuple((place, address) for place, address in enumerate(self.addresses)
+                     if address not in self.left_out)
+
+
+def socket_name(base: str, place: int) -> str:
+    """The name of the socket for the address at `place` in a daemon's `addresses`:
+    `base` for the first, `<base>-<k>` for the k-th after it (systemd's unit stem
+    `moxi-ui-shell` gives `moxi-ui-shell` and `moxi-ui-shell-1`; launchd's key
+    `Listeners` gives `Listeners` and `Listeners-1`)."""
+    return base if place == 0 else f"{base}-{place}"
+
+
+def socket_place(base: str, name: str) -> int | None:
+    """The place `socket_name(base, place)` gives `name`, or None when it is no socket
+    name of `base` (k is a number from 1 with no leading zero)."""
+    if name == base:
+        return 0
+    head, dash, k = name.rpartition("-")
+    if head != base or not dash or not k.isdigit() or not k.isascii() or k[0] == "0":
+        return None
+    return int(k)
+
+
+def socket_state(unit: UnitRef, backend: str,
+                 reads: Sequence[tuple[str, str, bool | None, float | None, str]],
+                 log: str | None) -> UnitState:
+    """The `socket` state of a daemon whose sockets are units of their own (`sockets ==
+    "units"`), from one read of each unit: `reads` is `(id, state, enabled, since,
+    invocation)` per unit of `unit.ids`, in unit order, with `state` the unit's own
+    (`active`, `inactive`, `failed`, or `missing` for one the supervisor has not loaded),
+    `enabled` its unit file state (True, False, or None), `since` its activation's wall
+    time and `invocation` its `InvocationID` (empty when it has none).
+
+    `active` when every unit is active, with the epoch `<id>=<invocation>,...`; `failed`
+    when one has failed, naming each failed unit; else `inactive`, naming the units not
+    active. The epoch is read from the state, never from an id being there, since a
+    stopped unit can still show its last one; an active unit with no id leaves it None.
+    `missing` when `unit` names no socket unit. A backend whose read failed gives
+    `unknown` itself, as for any unit.
+    """
+    if not reads:
+        return UnitState(unit.module, unit.name, "socket", backend, "missing",
+                         detail="no socket unit is written", log=None)
+    failed = [r[0] for r in reads if r[1] == "failed"]
+    idle = [r[0] for r in reads if r[1] != "active"]
+    if failed:
+        state, detail = "failed", "failed: " + ", ".join(failed)
+    elif idle:
+        state, detail = "inactive", "not active: " + ", ".join(idle)
+    else:
+        state, detail = "active", "listening"
+    enabled = (False if any(r[2] is False for r in reads)
+               else True if all(r[2] is True for r in reads) else None)
+    times = [r[3] for r in reads if r[3] is not None]
+    epoch = None
+    if state == "active" and all(r[4] for r in reads):
+        epoch = ",".join(f"{r[0]}={r[4]}" for r in reads)
+    return UnitState(unit.module, unit.name, "socket", backend, state,
+                     since=max(times) if times else None, detail=detail, log=log,
+                     enabled=enabled, epoch=epoch)
 
 
 @dataclass(frozen=True)
@@ -176,9 +260,9 @@ class Spec:
 
 @dataclass(frozen=True)
 class Rendered:
-    """One unit's new files: `kind` `daemon`, `timer` or `socket` (a daemon's socket the
-    backend writes as its own unit), and each file's path and text, in the order the
-    backend writes them."""
+    """One unit's new files: `kind` `daemon`, `timer` or `socket` (a daemon's sockets
+    where the backend writes them as units of their own: every socket unit, in unit
+    order), and each file's path and text, in the order the backend writes them."""
 
     kind: str
     files: tuple[tuple[Path, str], ...]
@@ -192,7 +276,9 @@ class UnitRef:
     `daemon`, `timer` or `socket`. `ids` are the backend's exact ids for it (systemd unit
     names, a launchd label, a task path), in the order `stop` takes them: a systemd timer
     `(<stem>.timer, <service>)`, where a foreign timer's service is the unit its `Triggers`
-    names. `paths` are its files (a unit with none, a registered task, has `()`).
+    names; a daemon's `socket` its socket units in unit order (on a `"job"` backend, the
+    daemon's own label). `paths` are its files (a unit with none, a registered task, has
+    `()`).
     `enabled` is what its text says (`enabled = false` written in it), True when it says
     nothing or is foreign.
     """
@@ -236,7 +322,7 @@ class ApplyIO:
     `fail(change, ran, remedy=None)` records a failed step: it prints the command with the
     supervisor's text, then one remedy line, and makes that change's result `ok=False`.
     `say(change, line)` prints a line and keeps it in the change's result; with `change`
-    None it is printed only.
+    None it is printed only. `drop(change)` removes the files of the change's `dropped`.
     """
 
     def __init__(self, fence: Fence, *, say: Callable[[str], object] = print,
@@ -268,6 +354,13 @@ class ApplyIO:
 
     def delete(self, change: UnitChange) -> None:
         for path in change.paths:
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+
+    def drop(self, change: UnitChange) -> None:
+        for path in change.dropped:
             try:
                 os.unlink(path)
             except FileNotFoundError:
@@ -312,13 +405,22 @@ class Backend(Protocol):
     #: The encoding of the unit files: `"utf-8"`, or `"utf-16"` (with its byte-order mark)
     #: for Task Scheduler's XML.
     encoding: str
+    #: How a daemon's `socket` is held (the module docstring): `"units"` (socket units of
+    #: their own, a `socket` change in a plan), `"job"` (keys of the daemon's own file) or
+    #: `"none"` (skipped; the daemon binds its own). `plan` probes for IPv6 loopback only
+    #: on `"units"` and `"job"`.
+    sockets: str
 
     # -- writing ---------------------------------------------------------------------------
 
     def render(self, spec: Spec) -> tuple[Rendered, ...]:
         """The files of `spec`, marked, as one `Rendered` per unit the backend writes for
-        it: a daemon's own, then its `socket` where the backend writes one apart (systemd);
-        a timer's (systemd's `.service` and `.timer` in one group). Paths are absolute and
+        it: a daemon's own, then its `socket` where the backend writes one apart (systemd:
+        one socket unit per entry of `spec.socket.listens`, named by its place, in unit
+        order, all in one group); a timer's (systemd's `.service` and `.timer` in one
+        group). A daemon's sockets are what start it: on systemd its service names every
+        socket unit and has no install section, on launchd its file has no `RunAtLoad` and
+        no `KeepAlive`. Paths are absolute and
         fixed by the unit's module and name; the text uses absolute paths resolved now,
         copies no variable of this shell, and carries `# moxi: enabled = false` (or the
         backend's form of it) only when `spec.enabled` is False. Raises `RenderError` for a
@@ -336,7 +438,11 @@ class Backend(Protocol):
     def marked(self, module: str) -> tuple[UnitRef, ...]:
         """Every unit on this system that carries `module`'s mark, read from the files (no
         supervisor call): one `UnitRef` per unit `render` would give, a daemon's `socket`
-        apart where it is a unit of its own. A wrap's drop-in is never one of them."""
+        apart where it is a unit of its own. That `socket` ref is the whole set: every
+        file carrying the daemon's mark at a socket name of its stem (`<stem>.socket`, or
+        `<stem>-<k>.socket` by `socket_place`), `ids` and `paths` in unit order, so `plan`
+        can tell which written units a new render drops. A wrap's drop-in is never one of
+        them."""
         ...
 
     def apply(self, changes: Sequence[UnitChange], *, restart: bool, io: ApplyIO) -> None:
@@ -351,7 +457,21 @@ class Backend(Protocol):
         `enabled` is False is written and never enabled or started; a change whose
         `enabled` flipped enables or disables the unit now. A daemon with `upgrade =
         "keep"` whose text changed is rewritten without a restart, with the line "<unit
-        id> rewritten; the new code runs from its next start"."""
+        id> rewritten; the new code runs from its next start".
+
+        A `socket` change (`sockets == "units"`) is applied before its daemon's change, in
+        unit order: a new socket unit `enable --now`, a changed one `enable` then
+        `restart`, an unchanged one in a changed set left as it is, and each of `dropped`
+        disabled with `--now` beside the removes and deleted with `io.drop` beside the
+        removed files. A daemon with a socket has a service with no install section, which
+        is never enabled or disabled: where another daemon's service gets `enable --now`
+        it gets `start`, `restart` alone where another gets `enable` then `restart`, and
+        nothing where another gets `enable` alone. The supervisor refuses to start a
+        socket while its service runs, so a set added to a running daemon, or changed in
+        any way (a unit added, changed or dropped), is applied between one `stop` and one
+        `start` of the service, whatever `upgrade` says; a new daemon with a new set gets
+        no stop. A service that had an install section before it gained a socket is
+        disabled, so its old login link goes."""
         ...
 
     # -- acting and reading ----------------------------------------------------------------
@@ -374,25 +494,30 @@ class Backend(Protocol):
 
     def ids(self, module: str, name: str, kind: str) -> tuple[str, ...]:
         """The backend ids the writer gives unit `<module>/<name>` of `kind` (`daemon` or
-        `timer`), whether or not a file is there, in the order `stop` takes them: a
-        systemd daemon's `.socket` then its `.service`, a timer's `.timer` then its
-        `.service`; a launchd label; a task path. No supervisor call. `stop(...,
+        `timer`), in the order `stop` takes them: a systemd daemon's socket units
+        (`<stem>.socket`, whether or not its file is there, then each `<stem>-<k>.socket`
+        whose file is there, in unit order) then its `.service`, a timer's `.timer` then
+        its `.service`; a launchd label; a task path. No supervisor call. `stop(...,
         replace=True)` stops the unmarked unit of a declared daemon by these ids."""
         ...
 
     def files(self, module: str, name: str, kind: str) -> tuple[Path, ...]:
         """The files the writer gives unit `<module>/<name>` of `kind` (`daemon` or
-        `timer`), whether or not they are there: a systemd daemon's `.service` and
-        `.socket`, a timer's `.service` and `.timer`; a launchd plist; a task's kept XML.
-        No supervisor call. The home move reads them for a file moxi did not write."""
+        `timer`): a systemd daemon's `.service` and `.socket` whether or not they are
+        there, then each `<stem>-<k>.socket` that is there, in unit order; a timer's
+        `.service` and `.timer`; a launchd plist; a task's kept XML. No supervisor call.
+        The home move reads them for a file moxi did not write."""
         ...
 
     def act(self, act: str, unit: UnitRef, fence: Fence) -> Acted:
         """One of `start`, `stop`, `restart`, `enable`, `disable` on one unit, by the verb
         table of the design: after `enable` a daemon runs and a timer's schedule is armed,
         after `disable` both are off. Starting a running unit and stopping a stopped one
-        are not failures. On systemd a daemon's `.socket` goes with it (first for `stop`
-        and `disable`, first for `start` and `enable`)."""
+        are not failures. On systemd a daemon's socket units go with it, in unit order and
+        before its service, for every act but `restart`, which restarts the service alone;
+        its service has no install section, so `enable` and `disable` give it `start` and
+        `stop`. On launchd a daemon with a socket counts as started once its job is
+        loaded, with or without a process."""
         ...
 
     def running(self, ids: Sequence[str], fence: Fence) -> frozenset[str]:
@@ -422,7 +547,15 @@ class Backend(Protocol):
         `name` and `kind`. A foreign timer may come with its `.timer` id alone (`foreign`
         with no fence): its state is the timer's, and its `last`, `pid` and `wrapped` come
         from the unit its `Triggers` names, read in the second call. `last` holds only
-        the supervisor's own result (or None); the core adds the gate's run line."""
+        the supervisor's own result (or None); the core adds the gate's run line.
+
+        A `socket` ref is a daemon's sockets, read in the same call. On a `"units"`
+        backend its ids are its socket units, and its state follows `socket_state`, with
+        `epoch` from each unit's `InvocationID`. On a `"job"` backend the core passes the
+        daemon's own ids and paths under kind `socket`: `active` while the job is loaded,
+        `inactive` with its file there and not loaded, `missing` without, `enabled` the
+        job's, `epoch` None, and never `failed`. `epoch` is None on every other state.
+        The core sets a `"units"` daemon's own `enabled` from its socket's afterwards."""
         ...
 
     def log(self, unit: UnitRef) -> str | None:

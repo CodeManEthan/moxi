@@ -82,6 +82,18 @@ def test_run_uses_env_as_given_and_cwd(tmp_path):
     assert Path(cwd).resolve() == tmp_path.resolve()
 
 
+@pytest.mark.parametrize("stale", ["inherited", "env-given"])
+def test_a_run_child_sees_no_lifeline_variable(monkeypatch, stale):
+    code = "import os; print(os.environ.get(%r))" % proc.LIFELINE_ENV
+    env = None
+    if stale == "inherited":
+        monkeypatch.setenv(proc.LIFELINE_ENV, "7")
+    else:
+        monkeypatch.delenv(proc.LIFELINE_ENV, raising=False)
+        env = child_env(**{proc.LIFELINE_ENV: "7"})
+    assert proc.run([PY, "-c", code], timeout=30, env=env).stdout.strip() == b"None"
+
+
 def test_run_without_capture_leaves_output_alone(tmp_path):
     done = proc.run([PY, "-c", "pass"], timeout=30, capture=False)
     assert (done.stdout, done.stderr) == (None, None)
@@ -411,6 +423,227 @@ def test_spawn_passes_env_as_given_and_cwd(tmp_path):
     assert Path(cwd).resolve() == tmp_path.resolve()
 
 
+# -- what a child knows of its lifeline ----------------------------------------------------
+
+KIND = """
+    import os
+    from moxi import proc
+    print(proc.lifeline_kind(), os.environ.get(proc.LIFELINE_ENV), flush=True)
+"""
+
+
+@pytest.fixture
+def unread(monkeypatch):
+    """This process as a child that has not called `lifeline()`, whose parent set no
+    `MOXI_LIFELINE_FD`, with the lifeline's thread never started."""
+    monkeypatch.setattr(proc, "_lifeline_value", proc._UNREAD)
+    monkeypatch.delenv(proc.LIFELINE_ENV, raising=False)
+    held = []
+    monkeypatch.setattr(proc, "_hold", lambda fd, on_close: held.append(fd))
+    return held
+
+
+def _said(child: subprocess.Popen) -> str:
+    out, _ = child.communicate(timeout=30)
+    return out.decode().strip()
+
+
+@pytest.mark.parametrize("given", [False, True], ids=["inherited", "env-given"])
+def test_a_stdin_child_sees_the_variable_at_0_and_reads_stdin(tmp_path, monkeypatch, given):
+    monkeypatch.delenv(proc.LIFELINE_ENV, raising=False)
+    env = child_env(ONLY="yes") if given else None
+    child = proc.spawn([PY, script(tmp_path, "kind.py", KIND)], env=env,
+                       stdout=subprocess.PIPE)
+    assert _said(child) == "stdin 0"
+
+
+def test_a_stdin_child_of_a_child_sees_0_not_its_parents_value(tmp_path, monkeypatch):
+    monkeypatch.setenv(proc.LIFELINE_ENV, "7")
+    child = proc.spawn([PY, script(tmp_path, "kind.py", KIND)],
+                       env=child_env(**{proc.LIFELINE_ENV: "9"}), stdout=subprocess.PIPE)
+    assert _said(child) == "stdin 0"
+
+
+def test_a_stdin_child_of_a_parent_that_sets_no_variable_reads_none(tmp_path, monkeypatch):
+    # A parent built before stdin lifelines named themselves: stdin is a pipe it holds,
+    # and the environment says nothing, so the child can't know of the lifeline.
+    monkeypatch.delenv(proc.LIFELINE_ENV, raising=False)
+    child = subprocess.Popen([PY, script(tmp_path, "kind.py", KIND)], env=child_env(),
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    try:
+        assert _said(child) == "None None"
+    finally:
+        child.stdin.close()
+
+
+def test_an_fd_child_reads_fd(tmp_path, monkeypatch):
+    monkeypatch.setenv(proc.LIFELINE_ENV, "7")
+    child = proc.spawn([PY, script(tmp_path, "kind.py", KIND)], lifeline="fd",
+                       stdout=subprocess.PIPE)
+    kind, value = _said(child).split()
+    assert kind == "fd"
+    assert value not in ("0", "7")
+    child.lifeline.close()
+
+
+@POSIX
+@pytest.mark.parametrize("stale", ["none", "inherited", "env-given"])
+def test_a_watched_child_reads_none(tmp_path, monkeypatch, stale):
+    monkeypatch.delenv(proc.LIFELINE_ENV, raising=False)
+    env = None
+    if stale == "inherited":
+        monkeypatch.setenv(proc.LIFELINE_ENV, "7")
+    elif stale == "env-given":
+        env = child_env(**{proc.LIFELINE_ENV: "7"})
+    child = proc.spawn([PY, script(tmp_path, "kind.py", KIND)], lifeline="watch", env=env,
+                       stdout=subprocess.PIPE)
+    assert _said(child) == "None None"
+    child.lifeline.close()
+    assert child.watchdog.wait(timeout=30) == 0
+
+
+@pytest.mark.parametrize("stale", ["none", "inherited", "env-given"])
+def test_a_detached_child_reads_none(tables, tmp_path, monkeypatch, stale):
+    monkeypatch.delenv(proc.LIFELINE_ENV, raising=False)
+    env = None
+    if stale == "inherited":
+        monkeypatch.setenv(proc.LIFELINE_ENV, "7")
+    elif stale == "env-given":
+        env = child_env(**{proc.LIFELINE_ENV: "7"})
+    log = tmp_path / "kind.log"
+    pid = proc.spawn([PY, script(tmp_path, "kind.py", KIND)], detached=True, output=log,
+                     env=env)
+    assert _until_ended(pid) == 0
+    assert log.read_text().strip() == "None None"
+
+
+def test_a_plain_child_reads_none(tmp_path, monkeypatch):
+    monkeypatch.delenv(proc.LIFELINE_ENV, raising=False)
+    child = subprocess.Popen([PY, script(tmp_path, "kind.py", KIND)], stdout=subprocess.PIPE)
+    assert _said(child) == "None None"
+
+
+@pytest.mark.parametrize("value, kind", [
+    ("0", "stdin"), ("00", "stdin"), ("3", "fd"), ("1234", "fd"), ("-1", None), ("x", None),
+    ("", None), (" 3", None), ("3.0", None), ("٣", None), ("+3", None)])
+def test_lifeline_kind_reads_the_variable_and_nothing_else(unread, monkeypatch, value, kind):
+    monkeypatch.setenv(proc.LIFELINE_ENV, value)
+    assert proc.lifeline_kind() == kind
+
+
+def test_lifeline_kind_with_the_variable_unset_is_none(unread):
+    assert proc.lifeline_kind() is None
+
+
+def test_lifeline_kind_checks_no_descriptor_is_open(unread, monkeypatch):
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    os.close(write_end)
+    monkeypatch.setenv(proc.LIFELINE_ENV, str(read_end))
+    assert proc.lifeline_kind() == "fd"
+
+
+@pytest.mark.parametrize("value, kind", [("0", "stdin"), ("5", "fd"), (None, None)])
+def test_lifeline_kind_after_lifeline_answers_what_it_read(unread, monkeypatch, value, kind):
+    if value is not None:
+        monkeypatch.setenv(proc.LIFELINE_ENV, value)
+    assert proc.lifeline_kind() == kind
+    proc.lifeline(on_close=lambda: None)
+    assert proc.LIFELINE_ENV not in os.environ
+    assert proc.lifeline_kind() == kind
+    proc.lifeline(on_close=lambda: None)
+    assert proc.lifeline_kind() == kind
+    monkeypatch.setenv(proc.LIFELINE_ENV, "9")  # set again after: the first read stands
+    assert proc.lifeline_kind() == kind
+
+
+def test_a_second_lifeline_holds_what_the_first_read(unread, monkeypatch):
+    monkeypatch.setenv(proc.LIFELINE_ENV, "5")
+    proc.lifeline(on_close=lambda: None)
+    proc.lifeline(on_close=lambda: None)
+    assert unread == [5, 5]
+
+
+@pytest.mark.parametrize("value", [None, "", "0"], ids=["unset", "empty", "zero"])
+def test_lifeline_holds_stdin_when_the_variable_is_unset_empty_or_0(unread, monkeypatch,
+                                                                     value):
+    if value is not None:
+        monkeypatch.setenv(proc.LIFELINE_ENV, value)
+    proc.lifeline(on_close=lambda: None)
+    assert unread == [0]
+
+
+@pytest.mark.parametrize("value", ["-1", "x", " 3"])
+def test_lifeline_refuses_a_malformed_value_and_kind_stays_none(unread, monkeypatch, value):
+    monkeypatch.setenv(proc.LIFELINE_ENV, value)
+    with pytest.raises(ValueError, match=proc.LIFELINE_ENV):
+        proc.lifeline(on_close=lambda: None)
+    assert unread == []
+    assert proc.LIFELINE_ENV not in os.environ
+    assert proc.lifeline_kind() is None
+
+
+class _FakeMsvcrt:
+    def __init__(self):
+        self.opened = []
+
+    def open_osfhandle(self, handle, flags):
+        self.opened.append(handle)
+        return 99
+
+
+@pytest.mark.parametrize("value, opened, held", [("0", [], [0]), ("1234", [1234], [99])],
+                         ids=["stdin", "handle"])
+def test_on_windows_0_is_stdin_and_never_a_handle(unread, monkeypatch, value, opened, held):
+    msvcrt = _FakeMsvcrt()
+    monkeypatch.setitem(sys.modules, "msvcrt", msvcrt)
+    monkeypatch.setattr(proc, "_WINDOWS", True)
+    monkeypatch.setenv(proc.LIFELINE_ENV, value)
+    proc.lifeline(on_close=lambda: None)
+    assert msvcrt.opened == opened
+    assert unread == held
+
+
+def test_on_windows_every_spelling_of_the_variable_is_taken_out(monkeypatch):
+    monkeypatch.setattr(proc, "_WINDOWS", True)
+    given = {"PATH": "p", "moxi_lifeline_fd": "7", "Moxi_Lifeline_Fd": "8",
+             proc.LIFELINE_ENV: "9"}
+    assert proc._lifeline_env(given, None) == {"PATH": "p"}
+    assert proc._lifeline_env(given, "0") == {"PATH": "p", proc.LIFELINE_ENV: "0"}
+    assert given["moxi_lifeline_fd"] == "7"  # the caller's mapping is left alone
+
+
+AFTER = """
+    import os, subprocess, sys, threading
+    from moxi import proc
+    value = os.environ.get(proc.LIFELINE_ENV)
+    before = proc.lifeline_kind()
+    closed = threading.Event()
+    proc.lifeline(on_close=closed.set)
+    after = proc.lifeline_kind()
+    plain = subprocess.run(
+        [sys.executable, "-c", "import os; print(os.environ.get(%r))" % proc.LIFELINE_ENV],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, text=True).stdout.strip()
+    print(value != "0", before, after, plain, flush=True)
+    print("closed", closed.wait(30), flush=True)
+"""
+
+
+@pytest.mark.parametrize("kind", ["stdin", "fd"])
+def test_in_a_child_lifeline_keeps_the_kind_and_passes_no_variable_on(tmp_path, kind):
+    child = proc.spawn([PY, script(tmp_path, "after.py", AFTER)], lifeline=kind,
+                       stdout=subprocess.PIPE)
+    named, before, after, plain = child.stdout.readline().decode().split()
+    assert named == str(kind == "fd")  # stdin's value is 0, fd's another number
+    assert (before, after, plain) == (kind, kind, "None")
+    time.sleep(0.2)
+    assert child.poll() is None
+    child.lifeline.close()
+    assert child.stdout.readline() == b"closed True\n"
+    assert child.wait(timeout=30) == 0
+    child.stdout.close()
+
+
 # -- spawn detached ------------------------------------------------------------------------
 
 DETACHED = """
@@ -445,6 +678,21 @@ def test_a_detached_output_file_is_created_0600(tmp_path):
     proc.spawn([PY, "-c", "print('done', flush=True)"], detached=True, output=log)
     assert wait_for(lambda: log.exists() and "done" in log.read_text(), 30)
     assert stat.S_IMODE(log.stat().st_mode) == 0o600
+
+
+@POSIX
+def test_each_directory_a_detached_output_file_needs_is_made_0700(tmp_path):
+    log = tmp_path / "a" / "b" / "child.log"
+    before = stat.S_IMODE(tmp_path.stat().st_mode)
+    old = os.umask(0)
+    try:
+        proc.spawn([PY, "-c", "print('done', flush=True)"], detached=True, output=log)
+    finally:
+        os.umask(old)
+    assert wait_for(lambda: log.exists() and "done" in log.read_text(), 30)
+    for level in (tmp_path / "a", tmp_path / "a" / "b"):
+        assert stat.S_IMODE(level.stat().st_mode) == 0o700
+    assert stat.S_IMODE(tmp_path.stat().st_mode) == before
 
 
 def test_a_detached_child_without_output_writes_nowhere(tmp_path):
