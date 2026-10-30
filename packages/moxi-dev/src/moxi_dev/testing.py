@@ -138,7 +138,9 @@ MARKERS = {
     "live": "reaches real services; deselected by a plain pytest run, and runs only "
             "with MOXI_TEST_LIVE=1",
     "slow": "takes long; deselected by a plain pytest run",
-    "build": "builds a distribution or an environment; deselected by a plain pytest run",
+    "build": "builds and installs distributions end to end, past what every run can "
+             "afford (minutes, uv's warm cache); a quick offline build stays in the "
+             "plain run; deselected by a plain pytest run",
     "touches(*globs)": "the repository paths whose change puts this test back in "
                        "moxi-dev check",
     "finding(tag)": "the finding this test holds",
