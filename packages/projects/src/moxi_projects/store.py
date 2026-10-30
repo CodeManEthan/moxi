@@ -123,6 +123,47 @@ def write(fn: Callable[[sqlite3.Connection], T], where: str | None = None) -> T:
         return fn(conn)
 
 
+def setup() -> int:
+    """The announcement's `SETUP`, which `moxi install projects` runs again on every
+    upgrade: migrate an existing store to this code's schema. It never makes a store: a
+    missing one is made by the first write. Returns the exit code, and prints why on a
+    failure."""
+    import sys
+
+    where = path()
+    try:
+        if os.path.getsize(where) == 0:
+            return 0  # created a moment ago by a write that will migrate it
+    except FileNotFoundError:
+        return 0
+    except OSError as exc:
+        return _say(api._unreadable(where, exc), sys.stderr)
+    try:
+        conn = moxi.store.connect(where, create=False, timeout=TIMEOUT)
+    except moxi.store.StoreError as exc:
+        if not os.path.exists(where):
+            return 0
+        return _say(api._unreadable(where, exc), sys.stderr)
+    except (sqlite3.Error, OSError) as exc:
+        return _say(api._unreadable(where, exc), sys.stderr)
+    try:
+        moxi.store.migrate(conn, STEPS)
+    except moxi.store.StoreTooNew as exc:
+        return _say(TooNew(where, exc.version, exc.known), sys.stderr)
+    except (sqlite3.Error, OSError) as exc:
+        return _say(api._unreadable(where, exc), sys.stderr)
+    finally:
+        conn.close()
+    return 0
+
+
+def _say(exc: api.ProjectsError, stream) -> int:
+    print(f"moxi-projects: {exc.reason}", file=stream)
+    if exc.fix:
+        print(f"  fix: {exc.fix}", file=stream)
+    return exc.exit_code
+
+
 # --- reading inside a write -------------------------------------------------------------
 
 _COLUMNS = "key, root, kind, lead, notes_root, created"
@@ -146,9 +187,24 @@ def _root_owner(conn: sqlite3.Connection, root: str, besides: str | None = None)
     return None
 
 
-def _refuse_root(root: str, owner: str) -> Refused:
+def refuse_root(root: str, owner: str) -> Refused:
+    """The refusal of a root project `owner` already has."""
     return Refused(f"the root {root} is already project {owner!r}'s",
                    f"`moxi projects show {owner}` shows it; one directory is one project")
+
+
+def refuse_key(key: str, stored: str) -> Refused:
+    """The refusal of a key taken by the project stored as `stored`."""
+    same = "" if stored == key else f" (as {stored!r}; keys ignore case)"
+    return Refused(f"the key {key!r} is taken{same}",
+                   f"`moxi projects show {stored}` shows it; pick another key")
+
+
+def refuse_held_by_agents(current: Project) -> Refused:
+    """The refusal to remove a project that still has associated agents."""
+    names = " ".join(current.associated)
+    return Refused(f"project {current.key!r} still has associated agents: {names}",
+                   f"remove each with `moxi projects agents remove {current.key} NAME`")
 
 
 def _refuse_lead_in_set(key: str, name: str) -> Refused:
@@ -169,12 +225,10 @@ def insert(conn: sqlite3.Connection, *, key: str, root: str, kind: str = DEFAULT
     notes_root = None if notes_root is None else check_root(notes_root, "notes_root")
     taken = conn.execute("SELECT key FROM projects WHERE key = ?", (key,)).fetchone()
     if taken is not None:
-        same = "" if taken[0] == key else f" (as {taken[0]!r}; keys ignore case)"
-        raise Refused(f"the key {key!r} is taken{same}",
-                      f"`moxi projects show {taken[0]}` shows it; pick another key")
+        raise refuse_key(key, taken[0])
     owner = _root_owner(conn, root)
     if owner is not None:
-        raise _refuse_root(root, owner)
+        raise refuse_root(root, owner)
     try:
         conn.execute("INSERT INTO projects (key, root, root_real, kind, lead, notes_root, "
                      "created) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -207,7 +261,7 @@ def update(conn: sqlite3.Connection, key: str, *, root=_UNSET, kind=_UNSET, lead
         changes["root"] = check_root(changes["root"])
         owner = _root_owner(conn, changes["root"], besides=key)
         if owner is not None:
-            raise _refuse_root(changes["root"], owner)
+            raise refuse_root(changes["root"], owner)
     if "kind" in changes:
         changes["kind"] = check_kind_name(changes["kind"])
     if changes.get("lead") is not None:
@@ -232,9 +286,7 @@ def delete(conn: sqlite3.Connection, key: str) -> Project:
     agents."""
     current = project(conn, key)
     if current.associated:
-        names = " ".join(current.associated)
-        raise Refused(f"project {current.key!r} still has associated agents: {names}",
-                      f"remove each with `moxi projects agents remove {current.key} NAME`")
+        raise refuse_held_by_agents(current)
     conn.execute("DELETE FROM projects WHERE key = ?", (current.key,))
     return current
 
@@ -268,5 +320,6 @@ def remove_agent(conn: sqlite3.Connection, key: str, name: str) -> Project:
     return project(conn, current.key)
 
 
-__all__ = ["STEPS", "FIELDS", "path", "now", "writing", "write", "project", "insert",
-           "update", "delete", "add_agent", "remove_agent"]
+__all__ = ["STEPS", "FIELDS", "TIMEOUT", "path", "now", "writing", "write", "project",
+           "refuse_root", "refuse_key", "refuse_held_by_agents", "insert", "update",
+           "delete", "add_agent", "remove_agent", "setup"]

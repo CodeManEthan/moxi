@@ -250,6 +250,17 @@ class Contributions:
                 broken.extend((module, reason) for module in modules if module != OWN)
         return Kinds(found=found, broken=tuple(broken))
 
+    def names(self) -> frozenset[str]:
+        """Every kind name some module declares, usable or blocked."""
+        return frozenset(self._table)
+
+    def blocked(self) -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+        """Each blocked kind as `(name, reason, modules)`, by name; `modules` leaves out
+        projects itself."""
+        return tuple((name, reason, tuple(m for m in modules if m != OWN))
+                     for name, (declared, reason, modules) in sorted(self._table.items())
+                     if declared is None)
+
     def require_loaded(self, act: str) -> None:
         """`Broken` when any entry won't load: `add` and `remove` stop past it, since it
         could bear on either."""
@@ -430,9 +441,16 @@ class Planned:
         except Refused as exc:
             if not self.supplied:
                 raise
-            by = "".join(f" ({field} supplied by {module})"
-                         for field, (_value, module) in sorted(self.supplied.items()))
-            raise Refused(exc.reason + by, exc.fix) from exc
+            raise self.annotate(exc) from exc
+
+    def annotate(self, exc: Refused) -> Refused:
+        """`exc` with the module that supplied each defaulted field named, or `exc`
+        itself when no field was defaulted."""
+        if not self.supplied:
+            return exc
+        by = "".join(f" ({field} supplied by {module})"
+                     for field, (_value, module) in sorted(self.supplied.items()))
+        return Refused(exc.reason + by, exc.fix)
 
 
 def plan_add(key: str, *, kind: str = DEFAULT_KIND, root: str | None = None,

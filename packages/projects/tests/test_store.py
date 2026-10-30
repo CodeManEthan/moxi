@@ -90,16 +90,6 @@ def test_a_read_leaves_the_files_bytes_unchanged(golden_copy, store_path):
     assert _bytes(store_path) == before
 
 
-@pytest.fixture
-def next_version(monkeypatch):
-    """This code as if it were one schema version on: a second step it reads and writes,
-    and version 1 still read as it is."""
-    monkeypatch.setattr(store, "STEPS", (*store.STEPS,
-                                         "ALTER TABLE projects ADD COLUMN extra TEXT;"))
-    monkeypatch.setattr(api, "_VERSION", 2)
-    monkeypatch.setattr(api, "_READS", frozenset({1, 2}))
-
-
 def test_a_read_of_an_older_store_answers_and_leaves_it_as_it_was(golden_copy, store_path,
                                                                   next_version):
     before = _bytes(store_path)

@@ -8,6 +8,9 @@ Each is a `moxi_projects.api.ProjectsError`, carrying `reason`, `fix` and `exit_
   answers out of shape. `modules` names the modules at fault.
 - `Usage` (exit 2): the act was asked wrongly, such as an add with no root and nothing to
   supply one.
+- `MintFailed` (exit 1): `add --create` could not make the root: the directory could not
+  be made, or `git init` failed or timed out. No row was written; `left` is the directory
+  left behind, or None.
 
 The read API's `NotFound` (3), `Unreadable` (1), `TooNew` (3) and `Busy` (75) are raised
 by the acts too.
@@ -41,5 +44,16 @@ class Usage(ProjectsError):
     exit_code = 2
 
 
+class MintFailed(ProjectsError):
+    """`add --create` could not make the root. No row was written. `left` is the
+    directory left behind, or None when nothing was."""
+
+    exit_code = 1
+
+    def __init__(self, reason: str, fix: str | None = None, left: str | None = None):
+        self.left = left
+        super().__init__(reason, fix)
+
+
 __all__ = ["ProjectsError", "NotFound", "Unreadable", "TooNew", "Busy", "Refused", "Broken",
-           "Usage"]
+           "Usage", "MintFailed"]

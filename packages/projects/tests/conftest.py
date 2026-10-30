@@ -60,6 +60,16 @@ def golden_copy(golden, store_path) -> str:
     return base
 
 
+@pytest.fixture
+def next_version(monkeypatch):
+    """This code as if it were one schema version on: a second step it reads and writes,
+    and version 1 still read as it is."""
+    monkeypatch.setattr(store, "STEPS", (*store.STEPS,
+                                         "ALTER TABLE projects ADD COLUMN extra TEXT;"))
+    monkeypatch.setattr(api, "_VERSION", 2)
+    monkeypatch.setattr(api, "_READS", frozenset({1, 2}))
+
+
 # --- fake distributions ------------------------------------------------------------------
 
 class Site:

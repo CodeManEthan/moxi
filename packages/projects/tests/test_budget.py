@@ -27,7 +27,9 @@ ALLOWED = frozenset({
     "_py_warnings",
     "moxi.store", "typing", "_typing", "typing.io", "typing.re",
 })
-BUDGET_MS = 2.0
+#: What projects adds over the core's hook path, in milliseconds: its import and a read.
+#: A hook that reads projects budgets this cost itself.
+BUDGET_MS = 4.0
 RUNS = 15
 
 READS = ("f = modules.load('projects', interface=1); assert f.ok, f.reason; "
