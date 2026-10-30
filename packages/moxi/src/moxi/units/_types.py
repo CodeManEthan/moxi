@@ -12,8 +12,10 @@ ACTIONS = ("add", "change", "keep", "remove", "refuse", "skip")
 #: The causes a `refuse`, `skip` or `remove` carries.
 CAUSES = ("editable", "foreign", "command", "switch", "socket", "declaration", "nobackend",
           "platform")
-#: A unit's kinds. A `socket` is a daemon's listening socket where the backend writes it
-#: as a unit of its own (systemd's `.socket`); it carries its daemon's name.
+#: A unit's kinds. A `socket` is a daemon's listening sockets, under its daemon's name. In
+#: a plan it is the socket units a backend writes apart from the daemon's own file
+#: (systemd's, one per address); in `status` every daemon with a `socket` has one, on every
+#: backend.
 KINDS = ("daemon", "timer", "socket")
 #: What `status` may read for one unit.
 STATES = ("active", "inactive", "failed", "missing", "nobackend", "off", "unknown")
@@ -34,6 +36,13 @@ class UnitChange:
     `reason` is one line for a person. `foreign` is the unmarked file in the way of a
     `refuse` with cause `foreign`, which `apply(..., replace=True)` moves aside.
 
+    A `socket` change is a daemon's whole set of socket units, `paths` in unit order (the
+    first address's unit, then `-1`, `-2`, ...): `add` when none is written, `keep` when
+    the written set names the same files and each is byte-equal, else `change`.
+    `dropped` lists the written socket units the new render no longer names (an address
+    taken out, or left out for want of IPv6), in unit order; `apply` disables each with
+    `--now` and deletes it, as it does a `remove`. It is empty for every other change.
+
     The fields after `foreign` are for `apply` and the backends: `entry` is the
     declaration the unit was rendered from, `enabled_before` whether the written unit
     said it is enabled (None when no marked file was there), and `digest` the
@@ -49,6 +58,7 @@ class UnitChange:
     text: str | None
     reason: str
     foreign: Path | None = None
+    dropped: tuple[Path, ...] = ()
     texts: tuple[str, ...] = field(default=(), repr=False)
     entry: Mapping = field(default=_EMPTY, repr=False, compare=False)
     enabled_before: bool | None = field(default=None, repr=False)
@@ -115,6 +125,28 @@ class UnitState:
     `enabled` is whether it starts at login or on schedule, None when the backend cannot
     say. `wrapped` is set only for a foreign timer that a module wrapped.
 
+    A daemon with a `socket` has a second state, kind `socket`, under its name, right
+    after its own, on every backend. On systemd it reads the daemon's socket units:
+    `active` when every one is active, `failed` when one has failed (each failed unit
+    named in `detail`), else `inactive` (naming the units not active), and `missing` when
+    none is written; `since` is the latest of their activation times, `pid` None, and
+    `enabled` True when every unit is enabled, False when one is disabled, else None. Such
+    a daemon's service has no install section and reads `static`, so its own `enabled`
+    is its socket's. On launchd the socket state is the daemon's job's: `active` while it
+    is loaded (launchd then holds its sockets, with the daemon running or not), else
+    `inactive` with its plist there and `missing` without; launchd says nothing of a
+    socket it could not bind, so it is never `failed` there. On Task Scheduler it is
+    `off`: the socket is skipped on Windows and the daemon binds its own. Wherever the
+    daemon is `off` or `nobackend`, so is its socket. A daemon's own state is its
+    process's, so one idle under a listening socket reads `inactive`: read its socket
+    state beside it before calling it down.
+
+    `epoch` is set on a systemd socket state only, and only while it is `active`:
+    `<unit>=<InvocationID>` for each socket unit, in unit order, joined by `,`. systemd
+    gives a unit a new `InvocationID` each time it starts, so the epoch changes exactly
+    when a socket unit starts again. It is None for every other state and kind, and on
+    launchd and Task Scheduler.
+
     `last` is how the unit's last run went, None when nothing is known. Its keys at the top
     level are the gate's newest run line (`unit`, `at`, `seconds`, `result`, `exit`), the
     same on every backend, present for a marked unit (and a wrapped foreign timer) once
@@ -145,6 +177,7 @@ class UnitState:
     log: str | None = None
     enabled: bool | None = None
     wrapped: Wrapped | None = None
+    epoch: str | None = None
 
 
 @dataclass(frozen=True)
