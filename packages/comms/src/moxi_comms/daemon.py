@@ -909,7 +909,11 @@ class Daemon:
                 f"content is {len(content)} characters, over the "
                 f"{self.record.max_content_length}-character cap on one message",
                 code=wire.TOO_LONG)
-        if who == OPERATOR_NAME:
+        with self._lock:
+            # Until the operator's name is reserved, an agent may hold a binding under
+            # it: a live binding of that name sends as itself, with its binding's token.
+            operator = who == OPERATOR_NAME and who not in self.bindings
+        if operator:
             return self._send_as_operator(params, token, content)
         with self._lock, self._db() as db:
             if self._stopping:
