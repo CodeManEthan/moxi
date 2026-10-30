@@ -1,0 +1,14 @@
+# The slots module's config schema. The file it governs is CONFIG/slots/config.toml;
+# `moxi config slots` shows every key.
+
+[tmux]
+type = "string"
+default = "tmux"
+doc = "The tmux binary. `moxi install slots` looks a bare name up on your PATH and writes the absolute path back here; an absolute path you set is kept. The server, every tmux call and the doctor use only this path."
+read = "use"
+
+[tmux_conf]
+type = "path"
+default = ""
+doc = "A tmux config file for the slots server. Empty means your own usual tmux config, so your bindings work when you attach."
+read = "start"
