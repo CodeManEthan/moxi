@@ -1,10 +1,12 @@
-"""Windows calls the core makes through ctypes: private directories and Job Objects.
+"""Windows calls the core makes through ctypes: the user's SID, private directories and Job
+Objects.
 
 Nothing here runs on another system; every function imports ctypes and binds the Win32
 calls it needs when first called, so importing this module costs nothing anywhere.
 
 - `private_dir(path)` makes a directory whose access list grants only the current user,
   and checks it by reading the list back.
+- `user_sid()` is the current user's SID as text, `S-1-5-21-...`.
 - `Job` is a Job Object: the processes put in it can be ended together, and, made with
   `kill_on_close=True`, they end when the job's last handle closes, which happens when
   the process holding it dies.
@@ -176,6 +178,11 @@ def _token_sid(kind: int) -> _Sid:
     # TOKEN_USER and TOKEN_OWNER both start with a pointer to the SID, inside the buffer.
     pointer = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p))[0]
     return _Sid(buffer, pointer)
+
+
+def user_sid() -> str:
+    """The current user's SID as text, read from this process's token."""
+    return _token_sid(_TOKEN_USER).text()
 
 
 def _sid_text(pointer: int) -> str:
