@@ -612,6 +612,35 @@ def test_the_daemon_takes_a_flag_that_agrees_and_mock_with_a_scratch_store(monke
         assert reached, f"{argv} should have got past the flag check"
 
 
+@pytest.mark.parametrize("has_sighup", [True, False])
+def test_the_daemon_stops_on_sigterm_and_on_sighup_where_there_is_one(monkeypatch, tmp_path,
+                                                                    has_sighup):
+    """Windows has no SIGHUP; the daemon starts there all the same."""
+    import signal
+
+    installed: list = []
+
+    class Refusing:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError("stop here")
+
+    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "mock")
+    monkeypatch.setenv("MOXI_COMMS_MOCK_GATEWAY", str(tmp_path / "store.json"))
+    monkeypatch.setattr(gateway_mod, "open_gateway",
+                        lambda *a, **k: MockGateway(tmp_path / "store.json"))
+    monkeypatch.setattr(daemon_mod, "Daemon", Refusing)
+    monkeypatch.setattr(signal, "signal", lambda sig, handler: installed.append(sig))
+    if not has_sighup:
+        monkeypatch.delattr(signal, "SIGHUP", raising=False)
+    with pytest.raises(SystemExit, match="stop here"):
+        daemon_mod.main([])
+    expected = [signal.SIGTERM] + ([signal.SIGHUP] if has_sighup else [])
+    assert installed == expected
+
+
 def test_a_local_gateway_the_daemon_opens_delivers_through_the_seam(rig):
     """The whole point, said once on both backends: a post through the seam reaches the
     daemon's subscription and comes back out of the record."""

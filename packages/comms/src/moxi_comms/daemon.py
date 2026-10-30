@@ -2892,8 +2892,10 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
     # before `start()` binds the socket, so no stop can land in a window the handler
     # does not cover.
     stopping = threading.Event()
-    for sig in (signal.SIGTERM, signal.SIGHUP):
-        signal.signal(sig, lambda *_: stopping.set())
+    # SIGHUP does not exist on Windows.
+    for sig in (signal.SIGTERM, getattr(signal, "SIGHUP", None)):
+        if sig is not None:
+            signal.signal(sig, lambda *_: stopping.set())
     # A daemon on the local backend provisions an empty directory itself, so an install
     # that names nothing ends with a working daemon; an existing directory is left alone
     # (`provision.first_start`). The mock keeps its own record. Built HERE,
