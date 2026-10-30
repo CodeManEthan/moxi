@@ -93,6 +93,11 @@ LAUNCHER = "launcher"
 #: The launcher row that holds the flags passed on to the harness, last on its argv.
 #: The parser fills it from unknown flags and the words after `--`.
 EXTRA = "extra_flags"
+#: Flags with no row of their own that set what a posture row sets, per harness: the
+#: posture row each one stands in for. Passed on, each would change the posture without
+#: the posture check, so each is refused like that row. Codex's host takes a permissions
+#: profile in place of a sandbox mode.
+POSTURE_FLAGS = {"claude": {}, "codex": {"--permissions": "sandbox"}}
 
 TYPES = ("bool", "int", "float", "string", "enum", "path", "list")
 KEY_FIELDS = ("type", "default", "doc", "values", "env", "retired")
@@ -168,6 +173,17 @@ class Owned(Refused):
             problem = f"{token} sets {row.name}, a permission posture row"
             hint = f"set it with {row.option}, so the posture check sees it"
         super().__init__(row.name, problem, hint)
+
+
+class PostureFlag(Owned):
+    """A pass-through flag with no row that sets what a posture row sets."""
+
+    def __init__(self, row: str, token: str):
+        self.token = token
+        Refused.__init__(self, row, f"{token} sets what the posture row {row} sets, and "
+                                    "has no row of its own for the posture check to see",
+                         f"leave {token} out; a permission profile needs a catalog row, "
+                         f"which this launcher does not have yet, so set {row} instead")
 
 
 class NeedsModule(Refused):
@@ -801,14 +817,19 @@ def typed_harness(argv: Sequence[str]) -> str | None:
 
 def refuse_passthrough(harness: str, tokens: Sequence[str]) -> None:
     """Raise `Owned` when a token of `tokens`, flags passed on to `harness`, spells an
-    owned or a posture row in any of its modes. A templated spelling (Codex's
-    `-c check_for_update_on_startup=false`) matches only when the value's key does."""
+    owned or a posture row in any of its modes, or `PostureFlag` when it is a flag with
+    no row that sets what a posture row sets (`POSTURE_FLAGS`). A templated spelling
+    (Codex's `-c check_for_update_on_startup=false`) matches only when the value's key
+    does."""
     rows = [r for r in load(harness) if r.owned or r.posture]
+    standing_in = POSTURE_FLAGS.get(harness, {})
     tokens = list(tokens)
     for i, token in enumerate(tokens):
         flag, attached = _split_flag(token)
         if flag is None:
             continue
+        if flag in standing_in:
+            raise PostureFlag(standing_in[flag], flag)
         value = attached if attached is not None else (
             tokens[i + 1] if i + 1 < len(tokens) else None)
         for row_ in rows:

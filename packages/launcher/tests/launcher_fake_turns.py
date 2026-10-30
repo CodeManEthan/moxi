@@ -1,6 +1,7 @@
-"""A stand-in for turns' API, as the first-turn sender calls it: `wait_ready`, a `Session`
-with a plain `deliver(text, ref=)`, and the `Delivery` whose `wait_started` gives
-`Started`, `Refused` or `Lost`, or raises `TimeoutError`.
+"""A stand-in for turns' API, as the launcher calls it: `launch_additions` for the
+composer, and for the first-turn sender `wait_ready`, a `Session` with a plain
+`deliver(text, ref=)`, and the `Delivery` whose `wait_started` gives `Started`, `Refused`
+or `Lost`, or raises `TimeoutError`.
 
 The launcher reaches it through its test seam, `MOXI_LAUNCHER_TURNS=launcher_fake_turns`.
 What it does is scripted by `script.json` in the directory `LAUNCHER_FAKE_TURNS` names, read
@@ -79,6 +80,26 @@ def calls(directory: Path) -> list[dict]:
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text().splitlines() if line]
+
+
+#: The words `launch_additions` gives a Claude launch's command line.
+ADDITIONS = ("--plugin-dir", "/fake/turns/runner")
+
+
+@dataclass(frozen=True)
+class LaunchAdditions:
+    harness: str
+    argv: tuple
+    env: dict
+    options: dict
+    notes: tuple
+
+
+def launch_additions(harness, *, cwd, env, session_id=None, commands=()):
+    record("launch_additions", harness=harness, cwd=cwd, session_id=session_id,
+           commands=list(commands))
+    return LaunchAdditions(harness, ADDITIONS, {"MOXI_TURNS_COMMANDS": ",".join(commands)},
+                           {}, ())
 
 
 def wait_ready(*, session_id=None, pid=None, timeout):

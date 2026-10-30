@@ -163,9 +163,11 @@ def ref(request_id: str) -> str:
 # -- turns --------------------------------------------------------------------------------
 
 
-def turns_api() -> Any | None:
+def turns_api(*, quiet: bool = False) -> Any | None:
     """turns' API, or None when turns is not installed or does not speak the interface the
-    sender needs.
+    sender needs. The composer asks the same question, so composing and sending agree on
+    whether a launch goes through turns. `quiet` leaves out the warning logged when an
+    older turns is installed.
 
     When `MOXI_LAUNCHER_TURNS` names a module, that module stands in for turns' API: the
     seam a test uses to give the launcher a fake turns.
@@ -177,8 +179,9 @@ def turns_api() -> Any | None:
         return None
     found = modules.load("turns", interface=TURNS_INTERFACE)
     if not found.ok:
-        log.warning("turns is installed but can't be used for the first turn: %s",
-                    found.reason)
+        if not quiet:
+            log.warning("turns is installed but can't be used for the first turn: %s",
+                        found.reason)
         return None
     return found.api
 

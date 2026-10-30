@@ -1,0 +1,418 @@
+"""Where a launch starts its session: this terminal, headless, or a tmux slot.
+
+A target is looked up by the name the launch's `target` row holds (`get`), and is asked
+three things, in this order:
+
+1. `check(resolved)`: the live state it needs, before anything is composed or written. A
+   refusal here writes nothing.
+2. `prepare(composition, env)`: the command it will run, found before the launch row is
+   written, so a harness that is not installed is refused with nothing written.
+3. `start(launch)`: after the row is written (`spawning`), start the session, record the
+   process and move the row to `started`, or end it `failed` with a reason.
+
+**This terminal** (`terminal`, the default). The launcher becomes the harness. It writes
+its own pid to the row (exec keeps it) and `started`, starts the detached deliverer when a
+first turn is owed, then execs the harness in the launch's directory. On Windows, where
+there is no exec, the harness starts as a child with this terminal, its pid is recorded,
+the deliverer is given that pid, and the launcher waits and exits with the child's code.
+
+**Headless** (`headless`). The harness's non-interactive mode, with the brief as its
+prompt, started detached and left: a session of its own (a detached process group on
+Windows), stdin closed, its output appended to the run log `STATE/runs/<request id>.log`.
+The pid and its start time are recorded, and the launch returns at once.
+
+**A tmux slot** (`slot`) is refused as not built yet.
+
+**The sweep.** A launch's run files (its run log and its system prompt file) are kept for
+`runs.keep_days` and then removed, and a run log past `LOG_CAP` is cut from the front to
+fit, by the sweep each launch runs before it starts its session. A file whose launch is
+still running is left for a later sweep, since its process is still writing to it.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import sqlite3
+import subprocess
+import sys
+import time
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from moxi import exit as exits
+from moxi import files, proc
+from moxi.paths import Layout
+
+from . import catalog, first, store
+from .compose import Composition
+
+MODULE = "launcher"
+#: The folder under the launcher's state root that holds every launch's run files.
+RUNS = "runs"
+#: The largest a run log is kept, in bytes; the sweep cuts a longer one from the front.
+LOG_CAP = 8 * 1024 * 1024
+#: The line a cut run log starts with.
+CUT_LINE = "[the launcher cut {size} bytes from the front of this log]\n"
+#: The suffixes of a launch's run files, after its request id.
+RUN_FILES = (".log", ".prompt.md")
+#: Reasons a row ends `failed` with when a start fails outright (exit 1).
+SPAWN_FAILED = "spawn-failed"
+NO_DELIVERER = "no-deliverer"
+#: Reasons a failed row exits 1 with; any other failed reason is a refusal (3), except
+#: `TRY_AGAIN` (75).
+FAILED_ERRORS = frozenset({SPAWN_FAILED, NO_DELIVERER, first.NO_READY,
+                           first.HANDOFF_UNREADABLE, first.NO_TURNS, "exited",
+                           "screen-mismatch"})
+TRY_AGAIN = "try-again"
+
+WINDOWS = sys.platform == "win32"
+
+# The calls a target starts processes through, named here so a test can stand in for
+# them.
+_execve = os.execve
+_popen = subprocess.Popen
+_spawn = proc.spawn
+
+
+# -- refusals ---------------------------------------------------------------------------
+
+class NoCommand(catalog.Refused):
+    """The command a launch runs is not found. Nothing is written."""
+
+    code = "not-found"
+    exit_code = exits.ERROR
+
+    def __init__(self, command: str, what: str = "the harness"):
+        self.command = command
+        super().__init__(None, f"{command} is not found on PATH; {what} can't be started",
+                         f"install {command}, or put it on PATH")
+
+
+class NotBuilt(catalog.Refused):
+    """A target this launcher does not start sessions in yet."""
+
+    code = "not-built"
+
+
+# -- the shapes -------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Launch:
+    """What a target is handed to start: one launch, composed and in the launch log.
+
+    `argv` is the composition's, as `preview` shows it; `command` the executable found for
+    its first word, which the target runs it as. `env` is the child's whole environment,
+    `cwd` its directory. `deliverer_env` is the environment the detached deliverer runs
+    in, the launcher's own."""
+
+    conn: sqlite3.Connection
+    request_id: str
+    composition: Composition
+    argv: tuple[str, ...]
+    command: str
+    env: Mapping[str, str]
+    cwd: str
+    deliverer_env: Mapping[str, str] | None = None
+
+    @property
+    def first_owed(self) -> bool:
+        """Whether the session is owed a first turn that the sender delivers."""
+        return self.composition.first is not None
+
+
+@dataclass(frozen=True)
+class Started:
+    """What a target did: the state it left the row in, the reason with a `failed`, the
+    process it started, the code the launch exits with, a line for the caller, and the
+    first turn's outcome when the target sent it itself."""
+
+    state: str
+    exit_code: int
+    reason: str | None = None
+    pid: int | None = None
+    pane_id: str | None = None
+    slot: str | None = None
+    line: str = ""
+    outcome: first.Outcome | None = None
+
+
+class Target:
+    """One place a session starts. A subclass sets `name` and overrides what it needs."""
+
+    name = ""
+
+    def check(self, resolved: Any) -> list[catalog.Refused]:
+        """The refusals of the live state this target needs; writes nothing."""
+        return []
+
+    def prepare(self, composition: Composition, env: Mapping[str, str]) -> str:
+        """The command the launch's argv runs as. Raises a refusal (`NoCommand`) before
+        anything is written."""
+        return composition.argv[0]
+
+    def start(self, launch: Launch) -> Started:
+        raise NotImplementedError
+
+
+# -- the targets ------------------------------------------------------------------------
+
+class Terminal(Target):
+    """This terminal: exec on Linux and macOS, a waited-for child on Windows."""
+
+    name = "terminal"
+
+    def prepare(self, composition: Composition, env: Mapping[str, str]) -> str:
+        command = find(composition.argv[0], env)
+        if composition.first is not None:
+            try:
+                first.deliverer_argv("-", 0)
+            except FileNotFoundError:
+                raise NoCommand("moxi", "the first turn's deliverer") from None
+        return command
+
+    def start(self, launch: Launch) -> Started:
+        if WINDOWS:
+            return self._start_child(launch)
+        rid = launch.request_id
+        pid = os.getpid()
+        _started(launch.conn, rid, pid)
+        if launch.first_owed:
+            failed = _start_deliverer(launch, pid)
+            if failed is not None:
+                return failed
+        here = os.getcwd()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        try:
+            os.chdir(launch.cwd)
+            _execve(launch.command, list(launch.argv), dict(launch.env))
+        except OSError as error:
+            os.chdir(here)
+            return fail(launch.conn, rid, SPAWN_FAILED,
+                           f"{launch.argv[0]} could not be started: {error}")
+        # Only a stand-in for exec returns.
+        return Started("started", exits.OK, pid=pid)
+
+    def _start_child(self, launch: Launch) -> Started:
+        rid = launch.request_id
+        try:
+            child = _popen([launch.command, *launch.argv[1:]], env=dict(launch.env),
+                           cwd=launch.cwd)
+        except OSError as error:
+            return fail(launch.conn, rid, SPAWN_FAILED,
+                           f"{launch.argv[0]} could not be started: {error}")
+        _started(launch.conn, rid, child.pid)
+        if launch.first_owed:
+            _start_deliverer(launch, child.pid)
+        while True:
+            try:
+                code = child.wait()
+                break
+            except KeyboardInterrupt:
+                # The harness has the terminal and takes its own Ctrl-C.
+                continue
+        return Started("started", code, pid=child.pid)
+
+
+class Headless(Target):
+    """Headless: started detached, its output in the run log, and left."""
+
+    name = "headless"
+
+    def prepare(self, composition: Composition, env: Mapping[str, str]) -> str:
+        return find(composition.argv[0], env)
+
+    def start(self, launch: Launch) -> Started:
+        rid = launch.request_id
+        output = run_log(rid)
+        argv = [launch.command, *launch.argv[1:]] if WINDOWS else list(launch.argv)
+        try:
+            pid = _spawn(argv, detached=True, output=output, env=dict(launch.env),
+                         cwd=launch.cwd)
+        except OSError as error:
+            return fail(launch.conn, rid, SPAWN_FAILED,
+                           f"{launch.argv[0]} could not be started: {error}")
+        _started(launch.conn, rid, pid)
+        return Started("started", exits.OK, pid=pid,
+                       line=f"launch {rid} started headless, pid {pid}; its output goes "
+                            f"to {output}")
+
+
+class Unbuilt(Target):
+    """A target this launcher does not start sessions in yet: every launch is refused,
+    before anything is written."""
+
+    def __init__(self, name: str, problem: str, hint: str):
+        self.name, self.problem, self.hint = name, problem, hint
+
+    def check(self, resolved: Any) -> list[catalog.Refused]:
+        return [NotBuilt("target", self.problem, self.hint)]
+
+    def start(self, launch: Launch) -> Started:
+        raise NotBuilt("target", self.problem, self.hint)
+
+
+#: The targets by the `target` row's values.
+TARGETS: dict[str, Target] = {
+    "terminal": Terminal(),
+    "headless": Headless(),
+    "slot": Unbuilt("slot", "the slot target is not built in this launcher yet",
+                    "launch with --target terminal or --target headless"),
+}
+
+
+def get(name: str) -> Target:
+    """The target `name`; a `catalog.BadValue` for a name no target has."""
+    try:
+        return TARGETS[name]
+    except KeyError:
+        raise catalog.BadValue("target", f"there is no target {name!r}",
+                               "use one of " + ", ".join(TARGETS)) from None
+
+
+# -- what the targets share -------------------------------------------------------------
+
+def find(command: str, env: Mapping[str, str]) -> str:
+    """`command` as the child's PATH finds it; `NoCommand` when it is not there."""
+    found = shutil.which(command, path=env.get("PATH", os.defpath))
+    if found is None:
+        raise NoCommand(command)
+    return found
+
+
+def run_log(request_id: str, env: Mapping[str, str] | None = None) -> Path:
+    """A launch's run log, `STATE/runs/<request id>.log`: a headless session's output,
+    and the deliverer's line for a launch in this terminal."""
+    return first.run_log(request_id, env)
+
+
+def runs_dir(env: Mapping[str, str] | None = None) -> Path:
+    return Layout(MODULE).state_dir(env) / RUNS
+
+
+def exit_of(row: store.LaunchRow) -> int:
+    """The code a launch exits with for its stored row: 0 unless it ended `failed`; then
+    1 for a start or boot that failed, 75 for a lock held too long, and 3 for a refusal."""
+    if row.state != "failed":
+        return exits.OK
+    if row.reason == TRY_AGAIN:
+        return exits.TEMPFAIL
+    return exits.ERROR if row.reason in FAILED_ERRORS else exits.REFUSED
+
+
+def _started(conn: sqlite3.Connection, request_id: str, pid: int) -> None:
+    ident = proc.identity(pid)
+    store.set_state(conn, request_id, "started", leaving=("spawning",), pid=pid,
+                    pid_started=ident.started if ident is not None else None)
+
+
+def fail(conn: sqlite3.Connection, request_id: str, reason: str, why: str) -> Started:
+    """End a launch's row `failed` with `reason` from before or just after its start, and
+    record why as a `start-failed` event."""
+    store.set_state(conn, request_id, "failed", reason=reason,
+                    leaving=("spawning", "started"))
+    store.add_event(conn, "start-failed", {"reason": reason, "why": why},
+                    request_id=request_id)
+    return Started("failed", exits.ERROR, reason=reason,
+                   line=f"launch {request_id} failed: {why}")
+
+
+def _start_deliverer(launch: Launch, pid: int) -> Started | None:
+    try:
+        first.start_deliverer(launch.request_id, pid=pid, env=launch.deliverer_env)
+    except OSError as error:
+        return fail(launch.conn, launch.request_id, NO_DELIVERER,
+                       f"the first turn's deliverer could not be started: {error}")
+    return None
+
+
+# -- the sweep --------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Swept:
+    """What one sweep did: the run files it removed and the run logs it cut."""
+
+    removed: tuple[str, ...] = ()
+    cut: tuple[str, ...] = ()
+
+
+def sweep(conn: sqlite3.Connection | None = None, *, env: Mapping[str, str] | None = None,
+          keep_days: float | None = None, cap: int = LOG_CAP,
+          now: float | None = None) -> Swept:
+    """Remove the run files older than `keep_days` (`runs.keep_days`) and cut each run log
+    past `cap` bytes from the front, keeping its newest lines. A file whose launch is
+    still running (its row's process alive, by pid and start time) is left alone. A file
+    that can't be read or removed is left for the next sweep."""
+    folder = runs_dir(env)
+    if not folder.is_dir():
+        return Swept()
+    if keep_days is None:
+        from . import settings
+
+        keep_days = float(settings.current()["runs.keep_days"])
+    now = time.time() if now is None else now
+    removed: list[str] = []
+    cut: list[str] = []
+    for path in sorted(folder.iterdir()):
+        request_id = _request_of(path.name)
+        if request_id is None or not path.is_file():
+            continue
+        try:
+            info = path.stat()
+        except OSError:
+            continue
+        old = now - info.st_mtime > keep_days * 86400
+        if not old and not (path.name.endswith(".log") and info.st_size > cap):
+            continue
+        if _running(conn, request_id):
+            continue
+        try:
+            if old:
+                path.unlink()
+                removed.append(path.name)
+            else:
+                _cut(path, info.st_size, cap)
+                cut.append(path.name)
+        except OSError:
+            continue
+    return Swept(tuple(removed), tuple(cut))
+
+
+def _request_of(name: str) -> str | None:
+    for suffix in RUN_FILES:
+        if name.endswith(suffix) and len(name) > len(suffix):
+            return name[:-len(suffix)]
+    return None
+
+
+def _running(conn: sqlite3.Connection | None, request_id: str) -> bool:
+    if conn is None:
+        return False
+    row = store.get(conn, request_id)
+    if row is None or row.pid is None or row.pid_started is None:
+        return False
+    return proc.alive(proc.ProcId(row.pid, row.pid_started))
+
+
+def _cut(path: Path, size: int, cap: int) -> None:
+    """Keep the newest part of the log at `path`, from a line's start, with the cut line
+    first, so the whole fits in `cap` bytes."""
+    head = CUT_LINE.format(size=size).encode("utf-8")
+    keep = max(cap - len(head) - 32, 0)
+    with open(path, "rb") as log:
+        log.seek(max(size - keep, 0))
+        tail = log.read(keep)
+    newline = tail.find(b"\n")
+    if 0 <= newline < len(tail) - 1:
+        tail = tail[newline + 1:]
+    head = CUT_LINE.format(size=size - len(tail)).encode("utf-8")
+    files.atomic_write(path, head + tail, mode=0o600)
+
+
+__all__ = ["CUT_LINE", "FAILED_ERRORS", "LOG_CAP", "NO_DELIVERER", "RUNS", "RUN_FILES",
+           "SPAWN_FAILED", "TARGETS", "TRY_AGAIN", "Headless", "Launch", "NoCommand",
+           "NotBuilt", "Started", "Swept", "Target", "Terminal", "Unbuilt", "exit_of",
+           "fail", "find", "get", "run_log", "runs_dir", "sweep"]

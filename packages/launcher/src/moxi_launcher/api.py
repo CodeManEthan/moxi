@@ -1,20 +1,197 @@
 """The launcher's Python API: what the CLI calls, and what any other caller may.
 
-`preview(request)` resolves one launch (`presets.resolve`) and composes it, and starts
-nothing. It composes
-through `compose.build`, the same call the launch makes, with the request's ids, so for one
-request it shows the argv that runs. Two limits: composing a Claude launch without comms
-asks turns for its launch additions, which writes turns' own endpoint file, so `preview` is
-not free of side effects outside the launcher; and for a Codex launch under turns' host it
-shows the host's command, not the `codex` command the host builds.
+    launch(request) -> LaunchResult     # resolve, check, compose, log, start
+    check(request) -> list[Refusal]     # the live-state checks; writes nothing
+    preview(request) -> Composition     # resolve and compose; starts nothing
+
+`launch` runs one launch in this order: resolve its values (`presets.resolve`), check the
+live state (`check`), compose it (`compose.build`, the call `preview` makes), find the
+command its target runs, write its row to the launch log (state `spawning`), then start it
+in its target (`targets`), which records the process and moves the row on. The session's
+readiness and its first turn come after, from the ready recorder and the first-turn
+sender.
+
+**A refusal before the row is written writes nothing**: `launch` raises it, a
+`catalog.Refused` (or one of the launch log's own, `store.TooLarge`, `store.SessionTaken`,
+`store.Busy`), each with the `exit_code` the command exits with (`exit_code` reads it).
+**After the row is written the row says what happened**: `launch` returns a
+`LaunchResult` whose `state`, `reason` and `exit_code` are the row's.
+
+**A request id is a launch's idempotency key.** A request whose id is already in the
+launch log starts nothing: `launch` returns the stored row's outcome, `duplicate` set.
+
+`preview` composes through the same `compose.build`, with the request's ids, so for one
+request it shows the argv the launch hands its target. Two limits: composing a Claude
+launch without comms asks turns for its launch additions, which writes turns' own endpoint
+file, so `preview` is not free of side effects outside the launcher; and for a Codex launch
+under turns' host it shows the host's command, not the `codex` command the host builds.
+
+A launch in this terminal does not return on Linux and macOS: the process becomes the
+harness. On Windows it returns when the harness exits, with the harness's exit code.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import logging
+import os
+import uuid
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from types import SimpleNamespace
 
-from . import compose, presets
-from .compose import Composition
+from moxi import exit as exits
+from moxi import files
+from moxi import modules as moxi_modules
+
+from . import catalog, compose, first, handoffs, presets, store, targets
+from .compose import Composition, common
+
+log = logging.getLogger("moxi.launcher.api")
+
+#: A refusal: what `check` lists and `launch` raises, with `code`, `problem`, `hint` and
+#: `exit_code`.
+Refusal = catalog.Refused
+#: The comms identity states a launch is refused in: the name is someone else's, or not
+#: anyone's to take. `free` and `offline` (comms' daemon can't be asked) pass, and the
+#: wrapper's own bind decides.
+TAKEN = ("held", "standing", "reserved", "retired")
+
+
+class NoDirectory(Refusal):
+    """The directory a launch starts in does not exist."""
+
+    code = "no-cwd"
+
+
+class IdentityTaken(Refusal):
+    """The comms name a launch asks for is held or not free to take."""
+
+    code = "identity-taken"
+
+    def __init__(self, name: str, state: str, holder: str | None):
+        self.name, self.state, self.holder = name, state, holder
+        by = f" by {holder}" if holder else ""
+        super().__init__("identity", f"identity {name} is {state}{by}",
+                         "pick another identity, or wait until it is free")
+
+
+@dataclass(frozen=True)
+class LaunchRequest:
+    """One launch asked for: at most one preset (`seat` or `project_preset`), the flags
+    typed (`typed`, as `catalog.parse(...).values` gives them) and passed on (`extra`),
+    `--off-posture`, the caller's directory, and the request id, Claude session id and
+    actor, each minted or read from the environment when left None."""
+
+    seat: str | None = None
+    project_preset: str | None = None
+    typed: Mapping[str, object] = field(default_factory=dict)
+    extra: Sequence[str] = ()
+    off_posture: bool = False
+    cwd: str | None = None
+    request_id: str | None = None
+    session_id: str | None = None
+    actor: str | None = None
+
+
+@dataclass(frozen=True)
+class LaunchResult:
+    """What one launch did, as its row in the launch log says.
+
+    `state` and `reason` are the row's; `exit_code` is what the command exits with. `pid`
+    is the process started. `duplicate` is set when the request id was already in the
+    launch log, so nothing was started and this is the stored row's outcome. `warnings`
+    are one line each, `line` one line for the caller. `outcome` is the first turn's, when
+    the launch sent it itself."""
+
+    request_id: str
+    harness: str
+    target: str
+    state: str
+    exit_code: int
+    session_id: str | None = None
+    mode: str | None = None
+    reason: str | None = None
+    pid: int | None = None
+    duplicate: bool = False
+    argv: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+    line: str = ""
+    outcome: first.Outcome | None = None
+
+
+def launch(request, *, environ: Mapping[str, str] | None = None,
+           warn: Callable[[str], None] | None = None) -> LaunchResult:
+    """Launch what `request` asks for. Raises a refusal, with nothing written, before the
+    row; returns the row's outcome after it. See the module's text for the order.
+
+    `warn` is called with each warning line just before the session starts, the last
+    moment a launch in this terminal can show one; the result carries them too."""
+    caller = dict(os.environ if environ is None else environ)
+    resolved = _resolve(request, environ)
+    refusals = _check(resolved, caller)
+    if refusals:
+        raise refusals[0]
+
+    ids = _with_ids(request, resolved.harness)
+    composition = compose.build(ids, resolved, environ=environ, create=True)
+    target = targets.get(composition.target)
+    env = common.environment(caller, composition, moxi_modules.session_env())
+    command = target.prepare(composition, env)
+    values = composition.values
+    session_id = ids.session_id if composition.harness == "claude" else None
+
+    conn = store.connect(env=environ)
+    try:
+        inserted = store.insert(
+            conn, request_id=ids.request_id, actor=_actor(ids, caller),
+            harness=composition.harness, target=composition.target,
+            cwd=str(values["cwd"]), values=values, argv=composition.argv,
+            env=composition.env, posture=str(resolved.posture or ""),
+            session_id=session_id, preset_kind=resolved.preset_kind,
+            preset_name=resolved.preset_name, project_key=resolved.project_key,
+            identity=resolved.identity, scope=resolved.scope, brief=composition.brief,
+            handoff_path=str(values.get("handoff") or "") or None,
+            handoff_key=handoffs.key_of_row(SimpleNamespace(
+                identity=resolved.identity, preset_kind=resolved.preset_kind,
+                preset_name=resolved.preset_name, project_key=resolved.project_key)))
+        if not inserted.new:
+            return _stored(inserted.row)
+
+        rid = ids.request_id
+        warnings = tuple(resolved.warnings) + tuple(
+            w for w in composition.warnings if w not in resolved.warnings)
+        try:
+            _make_files(composition)
+        except OSError as error:
+            failed = targets.fail(conn, rid, targets.SPAWN_FAILED,
+                                   f"the launch's files could not be made: {error}")
+            return _result(composition, rid, session_id, failed, warnings)
+        try:
+            targets.sweep(conn, env=environ)
+        except Exception as error:  # noqa: BLE001  (the sweep never stops a launch)
+            log.warning("the run-file sweep stopped: %s", error)
+        for line in warnings if warn is not None else ():
+            warn(line)
+        started = target.start(targets.Launch(
+            conn=conn, request_id=rid, composition=composition, argv=composition.argv,
+            command=command, env=env, cwd=str(values["cwd"]), deliverer_env=caller))
+        return _result(composition, rid, session_id, started, warnings)
+    finally:
+        conn.close()
+
+
+def check(request, *, environ: Mapping[str, str] | None = None) -> list[Refusal]:
+    """The refusals `launch` would meet in the live state, without composing or writing
+    anything: the resolver's own (an unknown preset or project, projects unreadable or
+    busy, a posture off its default), a directory that does not exist, a comms name that
+    is held or not free, and the target's (a slot launch, not built yet)."""
+    caller = dict(os.environ if environ is None else environ)
+    try:
+        resolved = _resolve(request, environ)
+    except Refusal as refusal:
+        return [refusal]
+    return _check(resolved, caller)
 
 
 def preview(request, *, environ: Mapping[str, str] | None = None) -> Composition:
@@ -23,8 +200,99 @@ def preview(request, *, environ: Mapping[str, str] | None = None) -> Composition
     return compose.build(request, _resolve(request, environ), environ=environ)
 
 
+def exit_code(error: BaseException) -> int:
+    """The code a command exits with for an error `launch`, `check` or `preview` raised:
+    its own `exit_code`, else 1."""
+    return int(getattr(error, "exit_code", exits.ERROR))
+
+
+# -- the parts ----------------------------------------------------------------------------
+
+
 def _resolve(request, environ: Mapping[str, str] | None = None):
     return presets.resolve(request, env=environ)
 
 
-__all__ = ["preview"]
+def _check(resolved, caller: Mapping[str, str]) -> list[Refusal]:
+    found: list[Refusal] = []
+    if not resolved.scratch and resolved.cwd and not os.path.isdir(resolved.cwd):
+        found.append(NoDirectory("cwd", f"the directory {resolved.cwd} does not exist",
+                                 "make it, or launch from another directory"))
+    if resolved.identity:
+        taken = _identity_taken(resolved.identity, resolved.scope)
+        if taken is not None:
+            found.append(taken)
+    found += targets.get(resolved.target).check(resolved)
+    return found
+
+
+def _identity_taken(name: str, scope: str | None) -> IdentityTaken | None:
+    """comms' word on whether `name` is free, or None when it is, or when comms can't be
+    asked (the wrapper's bind then decides)."""
+    api = _comms_api()
+    ask = getattr(api, "identity_state", None) if api is not None else None
+    if ask is None:
+        return None
+    state = ask(name, scope=scope)
+    if state.state not in TAKEN:
+        return None
+    holder = getattr(state, "holder", None) or getattr(state, "module", None)
+    return IdentityTaken(name, state.state, str(holder) if holder else None)
+
+
+def _comms_api():
+    if not moxi_modules.available("comms"):
+        return None
+    found = moxi_modules.load("comms")
+    return found.api if found.ok else None
+
+
+def _with_ids(request, harness: str) -> SimpleNamespace:
+    """`request` with its request id, and a Claude launch's session id, minted when it
+    gives none."""
+    names = ("seat", "project_preset", "typed", "extra", "off_posture", "cwd", "actor")
+    given = {name: getattr(request, name, None) for name in names}
+    request_id = getattr(request, "request_id", None) or str(uuid.uuid4())
+    session_id = getattr(request, "session_id", None)
+    if harness == "claude" and not session_id:
+        session_id = str(uuid.uuid4())
+    return SimpleNamespace(**given, request_id=request_id, session_id=session_id)
+
+
+def _actor(request, caller: Mapping[str, str]) -> str:
+    return getattr(request, "actor", None) or first.actor(caller)
+
+
+def _make_files(composition: Composition) -> None:
+    """What a launch makes before its start: Claude's system prompt file, and a scratch
+    launch's directory (0700, never removed by the launcher)."""
+    if composition.values.get("scratch"):
+        files.private_dir(Path(str(composition.values["cwd"])))
+    if composition.prompt_file is not None:
+        common.write_prompt(composition.prompt_file)
+
+
+def _result(composition: Composition, request_id: str, session_id: str | None,
+            started: targets.Started, warnings: tuple[str, ...]) -> LaunchResult:
+    return LaunchResult(
+        request_id=request_id, harness=composition.harness, target=composition.target,
+        state=started.state, exit_code=started.exit_code, session_id=session_id,
+        mode=composition.mode, reason=started.reason, pid=started.pid,
+        argv=composition.argv, warnings=warnings,
+        line=started.line or f"launch {request_id} {started.state}",
+        outcome=started.outcome)
+
+
+def _stored(row: store.LaunchRow) -> LaunchResult:
+    reason = f" ({row.reason})" if row.reason else ""
+    return LaunchResult(
+        request_id=row.request_id, harness=row.harness, target=row.target,
+        state=row.state, exit_code=targets.exit_of(row), session_id=row.session_id,
+        mode=row.values.get("mode"), reason=row.reason, pid=row.pid, duplicate=True,
+        argv=tuple(row.argv),
+        line=f"launch {row.request_id} was already made; it is {row.state}{reason}, and "
+             "nothing was started again")
+
+
+__all__ = ["TAKEN", "IdentityTaken", "LaunchRequest", "LaunchResult", "NoDirectory",
+           "Refusal", "check", "exit_code", "launch", "preview"]

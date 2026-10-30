@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,8 +11,10 @@ from types import SimpleNamespace
 import pytest
 from moxi import modules
 from moxi.paths import Layout
+from moxi_dev.testing import wait_for
 
-from moxi_launcher import api, compose, handoffs, presets
+from launcher_fake_harness import Harness, run_child
+from moxi_launcher import api, compose, first, handoffs, presets
 from moxi_launcher.compose import Additions, common
 
 SID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
@@ -52,13 +55,16 @@ class FakeTurns:
 def turns(monkeypatch) -> FakeTurns:
     fake = FakeTurns()
     real = modules.load
+    real_available = modules.available
 
     def load(name, *, interface=None):
         if name == "turns" and interface == compose.TURNS_INTERFACE:
-            return SimpleNamespace(state=modules.PRESENT, api=fake, reason="")
+            return SimpleNamespace(state=modules.PRESENT, ok=True, api=fake, reason="")
         return real(name, interface=interface)
 
     monkeypatch.setattr(modules, "load", load)
+    monkeypatch.setattr(modules, "available", lambda name: True if name == "turns"
+                        else real_available(name))
     return fake
 
 
@@ -245,12 +251,52 @@ def test_preview_shows_the_argv_build_composes_for_the_launch(monkeypatch, value
     assert shown.values == composed.values
 
 
-@pytest.mark.skip(reason="the launch half: launch(request) hands its target the argv; "
-                         "written with the launch and its targets")
-def test_preview_argv_is_the_argv_launch_hands_the_target():
-    """For each target, with fakes for the harness, slots, comms and turns, the argv the
-    launch hands the target equals `preview(request).argv` for the same request, its
-    request id and session id given."""
+#: Launches for the contract: each target this launcher starts, each harness, with and
+#: without turns, and the comms wrapper.
+LAUNCHES = [
+    ("claude in this terminal", {"brief": "b", "model": "opus"}, False),
+    ("claude in this terminal, with turns", {"brief": "b", "effort": "high"}, True),
+    ("claude headless", {"target": "headless", "brief": "b"}, True),
+    ("codex in this terminal", {"harness": "codex", "brief": "b", "search": True}, False),
+    ("codex headless, scratch", {"harness": "codex", "target": "headless", "brief": "b",
+                                 "scratch": True}, False),
+    ("claude under comms", {"identity": "planner", "brief": "b"}, True),
+]
+
+
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="the fake harness is a script run by its #! line")
+@pytest.mark.parametrize("name, typed, with_turns", LAUNCHES, ids=[c[0] for c in LAUNCHES])
+def test_preview_argv_is_the_argv_launch_hands_the_target(tmp_path, monkeypatch, name,
+                                                          typed, with_turns):
+    """For each target, with a fake harness on PATH, turns faked on its seam
+    (`MOXI_LAUNCHER_TURNS`) and comms' wrapper stood in for, the argv the launch hands
+    the target equals `preview(request).argv` for the same request, its request id and
+    session id given. The launch runs in a process of its own, as `moxi launcher run`
+    does, since a launch in this terminal becomes the harness."""
+    if "identity" in typed and not modules.available("comms"):
+        pytest.skip("comms is not installed")
+    rig = Harness.on_path(tmp_path, monkeypatch)
+    if with_turns:
+        fake = tmp_path / "fake-turns"
+        fake.mkdir()
+        monkeypatch.setenv(first.TURNS_SEAM, "launcher_fake_turns")
+        monkeypatch.setenv("LAUNCHER_FAKE_TURNS", str(fake))
+    work = tmp_path / "work"
+    work.mkdir()
+    sid = None if typed.get("harness") == "codex" else SID
+    req = {"typed": typed, "cwd": str(work), "request_id": "r1", "session_id": sid,
+           "actor": "ann"}
+    code, seen = run_child(tmp_path, req, moxi="moxi-comms-fake")
+    assert code == 0, seen["stderr"]
+    run = rig.one()
+    handed = [Path(run["argv"][0]).name, *run["argv"][1:]]
+    assert handed == seen["preview"]
+    assert run["env"]["MOXI_LAUNCHER_REQUEST"] == "r1"
+    if with_turns and typed.get("target") != "headless":
+        # The detached deliverer sends the first turn; let it finish inside the test.
+        log = first.run_log("r1")
+        wait_for(lambda: log.exists() and log.read_text().strip(), timeout=60)
 
 
 def test_a_scratch_launch_works_in_a_folder_named_by_its_request_id(tmp_path):

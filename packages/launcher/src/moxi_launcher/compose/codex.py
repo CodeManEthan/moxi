@@ -28,9 +28,10 @@ the launcher's `start` listener, never on the argv. Without turns, or in `exec` 
 gets neither, and a seat with instructions says so in one warning line; the posture line
 then goes on the opening prompt's second line.
 
-Extra flags in `host` mode go to the host's command line as given, `--permissions PROFILE`
-among them. The host takes `--sandbox` or `--permissions`, not both, so a `--permissions`
-there leaves out the `sandbox` default (and refuses a chosen `sandbox`).
+Extra flags in `host` mode go to the host's command line as given. The host's
+`--permissions PROFILE` is not among them: it sets the sandbox, as the posture row
+`sandbox` does, so passed on it is refused like that row, until a permission profile has
+a row of its own.
 """
 
 from __future__ import annotations
@@ -46,8 +47,6 @@ HARNESS = "codex"
 ORDER = ("update_check", "cwd", "model", "sandbox", "approval", "skip_git_check",
          "profile", "search", "add_dir", "config", "trust_cwd")
 HOST_ORDER = ("cwd", "model", "sandbox", "update_check", "add_dir", "config", "trust_cwd")
-#: The host's other sandbox spelling, a permissions profile, which has no row.
-PERMISSIONS = "--permissions"
 
 
 def comms_identity(values: Mapping[str, object], ctx: Context) -> str | None:
@@ -122,19 +121,8 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
              "skip_git_check": bool(values.get("scratch")) and mode_ == "exec"}
     extra = [str(token) for token in values.get(catalog.EXTRA) or ()]
     catalog.refuse_passthrough(HARNESS, extra)
-    fit_values = {**values, **owned}
-    dropped: list[str] = []
-    if host and _names_permissions(extra):
-        if "sandbox" in ctx.chosen:
-            raise catalog.Refused("sandbox", "sandbox and --permissions are both given; "
-                                  "turns' Codex host takes one of them",
-                                  "leave sandbox or --permissions out")
-        if catalog.is_set(fit_values.get("sandbox")):
-            fit_values["sandbox"] = ""
-            dropped.append("sandbox")
-            warnings.append("sandbox is left out: --permissions sets the host's sandbox")
-    fit = catalog.fit(HARNESS, mode_, fit_values, ctx.chosen)
-    not_applied = tuple(dropped) + fit.not_applied
+    fit = catalog.fit(HARNESS, mode_, {**values, **owned}, ctx.chosen)
+    not_applied = fit.not_applied
 
     rows = catalog.load(HARNESS).rows
     flags: list[str] = []
@@ -164,13 +152,8 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     return Composition(harness=HARNESS, mode=mode_,
                        target=str(values.get("target") or "terminal"), argv=tuple(argv),
                        env=env, values=recorded, prompt=prompt, first=first,
-                       not_applied=not_applied, warnings=tuple(warnings))
+                       brief=ctx.brief, not_applied=not_applied,
+                       warnings=tuple(warnings))
 
 
-def _names_permissions(tokens: list[str]) -> bool:
-    return any(token == PERMISSIONS or token.startswith(PERMISSIONS + "=")
-               for token in tokens)
-
-
-__all__ = ["HARNESS", "HOST_ORDER", "ORDER", "PERMISSIONS", "comms_identity", "compose",
-           "mode"]
+__all__ = ["HARNESS", "HOST_ORDER", "ORDER", "comms_identity", "compose", "mode"]
