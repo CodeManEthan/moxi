@@ -19,7 +19,7 @@ import pytest
 import moxi.modules
 import moxi.paths
 from moxi import files, units
-from moxi.units import _backend, _launchd, _state
+from moxi.units import _backend, _launchd, _plan, _state
 from moxi.units._backend import Backend, RenderError, Schedule, Socket, Spec, UnitRef
 from moxi.units._fence import Fence
 from moxi.units._launchd import LaunchdBackend
@@ -268,12 +268,65 @@ def test_a_daemon_without_process_stop_does_not_abandon_its_group(mac):
     assert body["StandardOutPath"].endswith("/demo/logs/relay.log")
 
 
-def test_a_socket_is_one_listener_per_address(mac):
-    [group] = mac.backend.render(spec(socket=Socket("port", ("127.0.0.1", "::1"), 8470)))
+GOLDEN_SOCKET = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- moxi unit: ui/shell -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>moxi.ui.shell</string>
+  <key>ProgramArguments</key>
+  <array><string>/Users/ana/.local/share/uv/tools/moxi/bin/moxi-ui-shell</string></array>
+  <key>ThrottleInterval</key><integer>2</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>/Users/ana/.local/state/moxi/ui/logs/shell.log</string>
+  <key>StandardErrorPath</key><string>/Users/ana/.local/state/moxi/ui/logs/shell.log</string>
+  <key>EnvironmentVariables</key>
+  <dict><key>MOXI_LOG_FILE</key><string>/Users/ana/.local/state/moxi/ui/logs/shell.log</string></dict>
+  <key>Sockets</key>
+  <dict><key>Listeners</key><dict><key>SockNodeName</key><string>127.0.0.1</string><key>SockServiceName</key><string>8470</string><key>SockType</key><string>stream</string></dict><key>Listeners-1</key><dict><key>SockNodeName</key><string>::1</string><key>SockServiceName</key><string>8470</string><key>SockType</key><string>stream</string></dict></dict>
+</dict>
+</plist>
+"""
+
+
+def listener(address, port="8470"):
+    return {"SockNodeName": address, "SockServiceName": port, "SockType": "stream"}
+
+
+def test_a_socket_daemon_plist_is_the_golden_text(ana):
+    """One key per address, `Listeners` then `Listeners-1`, one dict each; no RunAtLoad
+    and no KeepAlive, so the sockets start it and a login does not."""
+    [group] = ana.render(spec(module="ui", name="shell", command=(f"{BIN}/moxi-ui-shell",),
+                              socket=Socket("port", ("127.0.0.1", "::1"), 8470)))
+    assert group.kind == "daemon"
+    [(path, text)] = group.files
+    assert path.name == "moxi.ui.shell.plist" and text == GOLDEN_SOCKET
+    body = plistlib.loads(text.encode())
+    assert "RunAtLoad" not in body and "KeepAlive" not in body
+    assert body["ThrottleInterval"] == 2
+    assert list(body["Sockets"]) == ["Listeners", "Listeners-1"]
+    assert body["Sockets"] == {"Listeners": listener("127.0.0.1"),
+                               "Listeners-1": listener("::1")}
+
+
+def test_a_socket_key_follows_its_address_place_when_one_is_left_out(mac):
+    def keys(addresses, left_out=()):
+        [group] = mac.backend.render(spec(socket=Socket("port", addresses, 8470, left_out)))
+        return plistlib.loads(group.files[0][1].encode())["Sockets"]
+
+    assert keys(("127.0.0.1", "::1"), ("::1",)) == {"Listeners": listener("127.0.0.1")}
+    assert keys(("::1", "127.0.0.1", "10.0.0.2"), ("::1",)) == {
+        "Listeners-1": listener("127.0.0.1"), "Listeners-2": listener("10.0.0.2")}
+    with pytest.raises(RenderError) as refused:
+        keys(("::1",), ("::1",))
+    assert refused.value.cause == "socket"
+
+
+def test_a_daemon_without_a_socket_keeps_run_at_load_and_keep_alive(mac):
+    [group] = mac.backend.render(spec())
     body = plistlib.loads(group.files[0][1].encode())
-    assert body["Sockets"] == {"Listeners": [
-        {"SockNodeName": "127.0.0.1", "SockServiceName": "8470", "SockType": "stream"},
-        {"SockNodeName": "::1", "SockServiceName": "8470", "SockType": "stream"}]}
+    assert body["RunAtLoad"] is True and body["KeepAlive"] == {"SuccessfulExit": False}
 
 
 def test_run_time_forms_cwd_and_enabled_false(mac):
@@ -579,14 +632,63 @@ def test_a_switched_timer_is_written_after_the_settle_step_records_it(mac):
     assert mac.backend.marked("demo")[0].kind == "timer"
 
 
-def test_a_socket_setting_is_written_into_the_plist(mac):
+def shell(*addresses):
+    return ("{'relay': {'command': 'moxi-demo-relay', "
+            f"'socket': {{'setting': 'port', 'addresses': {list(addresses)!r}}}}}}}")
+
+
+def test_a_socket_daemon_is_one_daemon_change_and_loads_idle(mac, monkeypatch):
+    """The sockets are keys of the daemon's plist, so a plan has no `socket` change; the
+    job is enabled and bootstrapped as any daemon, and with no RunAtLoad it is loaded
+    with no pid until a connection starts it."""
+    monkeypatch.setattr(_plan, "ipv6_loopback", lambda: True)
     mac.script("moxi-demo-relay")
-    mac.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', "
-                       "'socket': {'setting': 'port', 'addresses': ['127.0.0.1']}}}")
+    mac.module(DAEMONS=shell("127.0.0.1", "::1"))
     [change] = units.plan("demo")
-    assert change.kind == "daemon" and change.action == "add"
-    mac.apply([change])
-    assert mac.plist(RELAY)["Sockets"]["Listeners"][0]["SockServiceName"] == "8470"
+    assert (change.kind, change.action) == ("daemon", "add")
+    [done] = mac.apply([change])
+    assert done.ok, done.lines
+    plist = str(mac.agents / f"{RELAY}.plist")
+    assert mac.ctl.calls == [("enable", f"{DOMAIN}/{RELAY}"), ("bootstrap", DOMAIN, plist)]
+    assert mac.plist(RELAY)["Sockets"] == {"Listeners": listener("127.0.0.1"),
+                                           "Listeners-1": listener("::1")}
+    assert mac.ctl.loaded[RELAY] == [None, None]
+    again = mac.plan()
+    assert list(again) == [("relay", "daemon")] and again[("relay", "daemon")].action == "keep"
+
+
+def test_no_ipv6_loopback_leaves_listeners_1_out_until_it_can_be_bound(mac, monkeypatch):
+    monkeypatch.setattr(_plan, "ipv6_loopback", lambda: False)
+    mac.script("moxi-demo-relay")
+    mac.module(DAEMONS=shell("127.0.0.1", "::1"))
+    [change] = units.plan("demo")
+    assert "::1 left out: no IPv6 loopback on this system" in change.reason
+    assert mac.apply([change])[0].ok
+    assert mac.plist(RELAY)["Sockets"] == {"Listeners": listener("127.0.0.1")}
+    monkeypatch.setattr(_plan, "ipv6_loopback", lambda: True)
+    [change] = units.plan("demo")
+    assert (change.kind, change.action) == ("daemon", "change")
+    assert mac.apply([change])[0].ok
+    assert list(mac.plist(RELAY)["Sockets"]) == ["Listeners", "Listeners-1"]
+
+
+def test_a_daemon_that_gains_a_socket_is_booted_out_and_loads_idle(mac):
+    """Booting out the old job ends its process; the new one has no RunAtLoad, so the
+    daemon stays down until a connection, and its sockets hold the port meanwhile."""
+    mac.script("moxi-demo-relay")
+    mac.module(DAEMONS=DAEMON)
+    mac.apply(units.plan("demo"))
+    assert mac.ctl.loaded[RELAY][0]
+    mac.module(DAEMONS=shell("127.0.0.1"))
+    [change] = units.plan("demo")
+    assert (change.kind, change.action) == ("daemon", "change")
+    mac.ctl.calls.clear()
+    assert mac.apply([change])[0].ok
+    assert [c[0] for c in mac.ctl.calls] == ["bootout", "enable", "bootstrap"]
+    assert mac.ctl.loaded[RELAY] == [None, None]
+    body = mac.plist(RELAY)
+    assert "RunAtLoad" not in body and "KeepAlive" not in body
+    assert body["Sockets"]["Listeners"]["SockServiceName"] == "8470"
 
 
 def test_remove_of_a_module_takes_its_plists_and_wraps_nothing(mac):

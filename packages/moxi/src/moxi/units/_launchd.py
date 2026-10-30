@@ -11,9 +11,20 @@ A daemon:
     RunAtLoad, KeepAlive {SuccessfulExit: false}, ThrottleInterval 2,
     ProcessType Background, StandardOutPath and StandardErrorPath (the unit's log file,
     `STATE/<module>/logs/<name>.log`), EnvironmentVariables {MOXI_LOG_FILE: that file},
-    AbandonProcessGroup (only with `stop = "process"`), and a `socket` as
-    Sockets {Listeners: [{SockNodeName, SockServiceName, SockType: stream}, ...]}, one
-    listener per address, which the daemon takes with `launch_activate_socket`.
+    and AbandonProcessGroup (only with `stop = "process"`).
+
+A daemon with a `socket` adds Sockets, one key per address written: `Listeners` for the
+first address in `addresses` and `Listeners-<k>` for the k-th after it, each one
+{SockNodeName, SockServiceName (the port), SockType: stream} dict. The daemon takes each by
+its key with `launch_activate_socket`, so it can tell which addresses it holds. Such a
+daemon has no RunAtLoad and no KeepAlive: RunAtLoad would start it at every login, and
+KeepAlive's SuccessfulExit makes launchd run the job once at load to learn an exit status.
+With neither, launchd holds the sockets from the job's load and starts the job at a
+connection on any of them; after any exit, a crash included, the next connection starts it
+again, with ThrottleInterval still spacing those starts. Its sockets are the job's, so
+there is no `socket` change in a plan, and `status` reads the socket from the job (see
+`status`): launchd never reports a socket it could not bind, so the socket is never
+`failed` here.
 
 A timer has no RunAtLoad and no KeepAlive. Its ProgramArguments is the gate's argv,
 `<scripts>/moxi run [--if <module>.<switch>] --record <module>/<name> -- <command>`;
@@ -42,7 +53,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace as _replaced
 from pathlib import Path
 
-from ._backend import ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef
+from ._backend import ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef, socket_name
 from ._fence import Fence, Ran
 from ._fence import argv as _argv
 from ._types import Acted, UnitChange, UnitState, Wrapped
@@ -125,8 +136,9 @@ class LaunchdBackend:
             body["ProgramArguments"] = list(spec.command)
             if spec.cwd:
                 body["WorkingDirectory"] = spec.cwd
-            body["RunAtLoad"] = True
-            body["KeepAlive"] = {"SuccessfulExit": False}
+            if spec.socket is None:
+                body["RunAtLoad"] = True
+                body["KeepAlive"] = {"SuccessfulExit": False}
             body["ThrottleInterval"] = 2
         else:
             gate = [self.gate(), "run"]
@@ -143,10 +155,7 @@ class LaunchdBackend:
         if spec.kind == "daemon" and spec.stop == "process":
             body["AbandonProcessGroup"] = True
         if spec.kind == "daemon" and spec.socket is not None:
-            port = str(spec.socket.port)
-            body["Sockets"] = {"Listeners": [
-                {"SockNodeName": address, "SockServiceName": port, "SockType": "stream"}
-                for address in spec.socket.addresses]}
+            body["Sockets"] = _sockets(spec)
         head = [MARK.format(spec.unit)] + ([DISABLED] if not spec.enabled else [])
         try:
             text = _document(head, body)
@@ -489,6 +498,22 @@ class LaunchdBackend:
 
 
 # -- the plist text ---------------------------------------------------------------------------
+
+#: The base of a daemon's socket keys: `Listeners`, then `Listeners-<k>`.
+LISTENERS = "Listeners"
+
+
+def _sockets(spec: Spec) -> dict:
+    """The `Sockets` dict: one key per address written, `socket_name(LISTENERS, place)`,
+    each one listener dict, so the daemon tells its addresses apart by key."""
+    socket = spec.socket
+    if not socket.listens:
+        raise RenderError("socket", f"{spec.unit}: its socket has no address to listen on")
+    port = str(socket.port)
+    return {socket_name(LISTENERS, place): {"SockNodeName": address,
+                                            "SockServiceName": port, "SockType": "stream"}
+            for place, address in socket.listens}
+
 
 def _schedule(spec: Spec) -> dict:
     schedule = spec.schedule
