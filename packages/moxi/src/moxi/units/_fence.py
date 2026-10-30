@@ -10,8 +10,7 @@ The closed sets:
 
 - systemd: `systemctl --user` (always `--user`) with `daemon-reload`; `enable` and
   `disable`, each with or without `--now`; `start`, `stop`, `restart`; and `show` with
-  `--property=<names>` of one or more units, or `show --property=Version` of the manager
-  itself. Also `loginctl show-user <user> -p Linger`, read only.
+  `--property=<names>` (with no unit, only `--property=Version`: the manager's version). Also `loginctl show-user <user> -p Linger`, read only.
 - launchd: `launchctl` with `bootstrap gui/<uid> <plist>`, `bootout gui/<uid>/<label>`,
   `enable` and `disable` of `gui/<uid>/<label>`, `kickstart -k gui/<uid>/<label>`,
   `kill SIGTERM gui/<uid>/<label>` and `print gui/<uid>`.
@@ -57,10 +56,14 @@ POWERSHELL = "powershell.exe"
 
 #: The fixed PowerShell script of the foreign task read. It reads its refs from
 #: `$env:MOXI_TASK_REFS`, lists the tasks once, keeps those whose folder and name equal a
-#: ref's (`-eq`, never a wildcard or a parsed string) and prints one JSON array.
+#: ref's (`-eq`, never a wildcard or a parsed string) and prints one JSON array, in UTF-8
+#: without a byte-order mark whatever the console's code page. The refs are parsed with
+#: `-InputObject` and enumerated by `foreach`: Windows PowerShell 5.1 emits a parsed JSON
+#: array as one object, so wrapping it in `@(...)` would give a list of one list.
 TASKS_SCRIPT = (
     "$ErrorActionPreference = 'Stop'; "
-    "$refs = @($env:MOXI_TASK_REFS | ConvertFrom-Json); "
+    "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; "
+    "$refs = ConvertFrom-Json -InputObject $env:MOXI_TASK_REFS; "
     "$out = @(); "
     "foreach ($t in @(Get-ScheduledTask)) { "
     "foreach ($r in $refs) { "
@@ -227,8 +230,8 @@ def _systemctl(verb: str, *, now: bool = False, properties: bool = False):
             if not _PROPERTIES.fullmatch(args[0].removeprefix("--property=")):
                 raise _refuse(verb, args, "--property=<Name,Name...>")
             head, args = [args[0]], args[1:]
-            # The manager's own version, which a wrap reads: the one `show` of no unit.
-            if head == ["--property=Version"] and not args:
+            if not args and head == ["--property=Version"]:
+                # The manager's own version, read before a wrap.
                 return [SYSTEMCTL, "--user", verb, *head]
         return [SYSTEMCTL, "--user", verb, *head, *_units(verb, args)]
     return build

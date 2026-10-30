@@ -10,10 +10,22 @@ file it did not mark unless told to move it aside (`replace=True`).
     plan(module, only=None)        what writing them would change (`UnitChange` per unit)
     apply(changes, replace=False, restart=False)   carry a plan out (`Applied` per change)
     remove(module)                 remove every unit the module's mark is on (uninstall)
+    start|stop|restart|enable|disable(module, names, foreign=False)
+                                   act on named units now (`Acted` per name)
+    stop(module, names, record=[]) and resume(record)
+                                   stop what runs, with a record, and start exactly that
+    status(modules, foreign=())    what the supervisor says (`UnitState` per unit)
+    last_runs(module, timer, n=1)  the gate's newest run lines of a timer
+    wrap(ref, module=, key=, name=) and unwrap(ref, module=)
+                                   a foreign systemd timer's runs behind a switch
+    wraps(module)                  the module's wraps, read back
 
-`plan` reads and takes no lock. `apply` and `remove` take the core lock, so a module or
-services may call them alone. To plan and apply as one step outside an install, hold the
-core lock around both, so a plan is never applied after an install changed the files.
+`plan`, `status`, `last_runs` and `wraps` only read and take no lock. `apply`, `remove`,
+the acts, `resume`, `wrap` and `unwrap` take the core lock with `nested=True`, so a module
+or services may call them alone and the settle step calls them under its install. To plan
+and apply as one step outside an install, hold
+`moxi.files.lock(moxi.paths.core_lock(), nested=True)` around both, so a plan is never
+applied after an install changed the files.
 
 What `plan` decides for a unit (`UnitChange.action`, with `cause` for the last three):
 
@@ -36,13 +48,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from ._act import disable, enable, restart, resume, start, stop
 from ._apply import apply, apply_held, core_lock, remove
 from ._backend import Backend, backend
 from ._declare import UNITS_FROM_SECONDS, declarations, digest, switch_problem
 from ._plan import plan
+from ._status import last_runs, status
 from ._types import (
     Acted, Applied, DeclarationError, Declarations, Stopped, UnitChange, UnitState,
     Wrapped)
+from ._wrap import unwrap, wrap, wraps
 
 
 def switched_daemons(module: str, key: str) -> list[str] | DeclarationError:
@@ -85,7 +100,7 @@ def apply_switch(module: str, key: str, *, runner=None,
         return []
     say(f"{module}: applying units for {key}")
     with core_lock():
-        applied = apply_held(plan(module, only=names), runner=runner, say=say)
+        applied = apply(plan(module, only=names), runner=runner, say=say)
     if any(not a.ok for a in applied):
         say(f"{module}: {key} stays set; `moxi install {module}` retries the units")
     return applied
@@ -94,5 +109,6 @@ def apply_switch(module: str, key: str, *, runner=None,
 __all__ = [
     "Acted", "Applied", "Backend", "DeclarationError", "Declarations", "Stopped",
     "UNITS_FROM_SECONDS", "UnitChange", "UnitState", "Wrapped", "apply", "apply_switch",
-    "backend", "core_lock", "declarations", "digest", "plan", "remove", "switch_problem",
-    "switched_daemons"]
+    "backend", "core_lock", "declarations", "digest", "disable", "enable", "last_runs",
+    "plan", "remove", "restart", "resume", "start", "status", "stop", "switch_problem",
+    "switched_daemons", "unwrap", "wrap", "wraps"]
