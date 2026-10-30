@@ -73,10 +73,46 @@ filled that way.
 A session's context window is the one the harness reported for the request when it gave
 one, else the table's, else unknown.
 
+## The token index
+
+Every request every harness wrote is kept in one SQLite file, `STATE/usage/index.db`, so a
+report never reads the harnesses' files itself. A pass brings it up to date: it lists each
+lane's sources through sessions and reads only what changed since the last pass, from the
+cursor it stored for each source.
+
+The lanes, in the order a copy of the same request is claimed when two files hold it:
+
+- `claude`: the live Claude Code transcripts, their subagent files and workflow agent files;
+- `codex`: the Codex rollouts;
+- `opencode`: OpenCode's database, one source, its requests filed under one row per
+  session;
+- `archive:<id>`: each archive root in the config, in config order: a directory holding a
+  `projects/` tree, such as a backup of an older machine's Claude Code files.
+
+```toml
+[[claude.archive_roots]]
+path = "/mnt/backup/old-laptop/.claude"
+id = "old-laptop"
+```
+
+A pass never deletes rows on a listing that came back empty or unreadable. An unplugged
+archive drive, an emptied or remounted projects directory, a directory the pass can't
+read, or a rollout Codex compressed after a week idle keeps its rows, marked held with the
+reason, and they still count. They clear the next time the source is listed and readable.
+An archive copy of a session that still has a live transcript is not read. A Codex rollout
+that Codex imported from elsewhere (its turn ids, or the imports file, say so) is skipped,
+so it is not counted twice. A rollout whose only mark is the desktop app's originator is
+counted.
+
+With Moxi's projects module installed, the pass records each session's project key while
+its directory exists, so a build worktree's sessions keep their project after the worktree
+is removed. A directory that no longer exists is never looked up.
+
 ## Commands
 
     moxi usage prices [MODEL] [--provider P] [--json]
     moxi usage prices update [--dry-run] [--revert] [--json]
+    moxi usage index [--rebuild] [--force] [--no-wait] [--check] [--json]
 
 `prices` with a model prints its facts and where each came from; without one, it prints
 the layers in effect. `prices update` is the only thing in usage that reaches the network,
@@ -85,6 +121,14 @@ a result with under half the shipped table's rows, prints which models were adde
 or repriced, and writes the snapshot layer. `--dry-run` prints and writes nothing.
 `--revert` removes the snapshot layer, so the shipped table rules again. A fetch that fails
 exits 75.
+
+`index` runs a pass and prints what it did. Only one pass writes at a time: another waits
+up to `index.wait_seconds` (30) and then exits 75; `--no-wait` exits 75 at once.
+`--rebuild` reads every source again from its start, in `index.workers` processes (0 picks
+one per core, up to 8). A schema change that would drop the rows of an archive lane whose
+drive is offline is refused (exit 3) until the drive is back, or until `--rebuild --force`
+drops them. `--check` compares the stored claims with the claimed view and exits 1 naming
+the keys that differ.
 
 ## From Python
 

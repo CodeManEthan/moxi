@@ -97,17 +97,20 @@ POLL = 0.05
 IMPORTED = "imported"
 
 #: `meta` name for what the last pass learnt about each lane, as JSON (`store.META_LANES`).
-#: Each lane's entry: `harness`, `rank`, `root`, `state` (`online`, `offline` or
-#: `held`), `reason`, `listed`, `held`, `compressed`, `unreadable` (up to
+#: Each lane's entry: `harness`, `rank`, `root`, `state` (`online`, `offline`, `held`
+#: or `absent`), `reason`, `listed`, `held`, `compressed`, `unreadable` (up to
 #: `UNREADABLE_SHOWN` `[path, why]` pairs), `checked_at`; Codex adds `imports_path`,
 #: `imports_reason` (None, "imports file not found" or "imports file unreadable: ..."),
 #: `imported` and `originator_only` (rollouts whose only import mark is the desktop app's
 #: `originator`, counted).
 UNREADABLE_SHOWN = 20
 
+#: A lane's state: listed; not listed, its rows kept; listed empty, its rows kept; or
+#: not listed and holding nothing (a harness this machine doesn't have).
 ONLINE = "online"
 OFFLINE = "offline"
 HELD = "held"
+ABSENT = "absent"
 
 
 # --- lanes ------------------------------------------------------------------------------
@@ -536,6 +539,8 @@ def _hold_all(run: _Pass, lane: Lane, rows: Iterable[dict], reason: str,
 
     rows = [row for row in rows if row["held"] != reason]
     state["held"] += _count_rows(run.conn, lane.id)
+    if not state["held"] and state["state"] == OFFLINE and not lane.archive:
+        state["state"] = ABSENT
     run.result.held += state["held"]
     if not rows:
         return
@@ -756,12 +761,15 @@ def _read_pooled(run: _Pass, tasks: list, count: int) -> None:
     """Read `tasks` in `count` worker processes; this process writes each result as it
     comes, all in one transaction that ends with the claim (over every key for a
     rebuild)."""
+    import multiprocessing
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
     import moxi.store
 
     touched: set[int] = set()
-    with ProcessPoolExecutor(max_workers=count) as pool, \
+    # spawn: a worker starts clean, whatever threads this process runs
+    context = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=count, mp_context=context) as pool, \
             moxi.store.transaction(run.conn):
         futures = {pool.submit(read_source, _task(lane, entry, cursor)):
                    (lane, entry, row, cursor) for lane, entry, row, cursor in tasks}

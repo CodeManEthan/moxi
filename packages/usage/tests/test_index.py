@@ -553,3 +553,302 @@ def test_an_opencode_database_with_no_sessions_left_keeps_its_rows_held(readings
     [row] = files("opencode")
     assert "listed no sessions" in row["held"] and result.lanes["opencode"]["state"] == "held"
     assert [r["output"] for r in won()] == [40]
+
+
+# --- project keys -----------------------------------------------------------------------
+
+def test_a_key_recorded_while_a_worktree_exists_survives_its_removal_and_a_rebuild(
+        readings, roots, tmp_path):
+    worktree = tmp_path / "wt" / "build-1"
+    (worktree / "src").mkdir(parents=True)
+    projects = Projects({str(worktree): "moxi"})
+    transcript(roots["claude"], SESSION_A, cwd=str(worktree / "src")).write()
+    result = run(readings, projects=projects)
+    assert result.projects_recorded == 1
+    assert [row["project"] for row in files("claude")] == ["moxi"]
+
+    shutil.rmtree(worktree)
+    run(readings, projects=projects)
+    run(readings, projects=projects, rebuild=True)
+    assert [row["project"] for row in files("claude")] == ["moxi"]
+    assert projects.asked == [str(worktree / "src")]
+
+
+def test_a_cwd_that_no_longer_exists_is_never_looked_up_and_stays_without_a_key(
+        readings, roots, tmp_path):
+    projects = Projects({str(tmp_path / "gone"): "moxi"})
+    transcript(roots["claude"], SESSION_A, cwd=str(tmp_path / "gone" / "src")).write()
+    run(readings, projects=projects)
+    assert [row["project"] for row in files("claude")] == [None]
+    assert projects.asked == []
+
+
+def test_a_session_whose_worktree_went_takes_its_key_from_the_sessions_start(
+        readings, roots, tmp_path):
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    projects = Projects({str(worktree): "moxi"})
+    t = transcript(roots["claude"], SESSION_A, cwd=str(worktree))
+    t.write()
+    run(readings, projects=projects)
+
+    shutil.rmtree(worktree)
+    agent = t.subagent("a01")                       # written after the worktree went
+    agent.user("look")
+    agent.assistant("found", usage=usage(output=5), request_id="req_agent_1")
+    t.write()
+    transcript(roots["claude"], SESSION_B, project="-work-other",
+               cwd=str(worktree)).write()           # another session, same dead path
+    result = run(readings, projects=projects)
+
+    keys = {(row["session_id"], row["kind"]): row["project"] for row in files("claude")}
+    assert keys == {(SESSION_A, "main"): "moxi", (SESSION_A, "subagent"): "moxi",
+                    (SESSION_B, "main"): None}
+    assert result.projects_recorded == 1 and projects.asked == [str(worktree)]
+
+
+def test_without_projects_no_key_is_recorded(readings, roots, tmp_path, monkeypatch):
+    import moxi.modules
+
+    monkeypatch.setattr(moxi.modules, "available", lambda name: False)
+    transcript(roots["claude"], SESSION_A, cwd=str(tmp_path)).write()
+    result = index.pass_(readings=readings, now=NOW, workers=1)
+    assert result.projects_recorded == 0
+    assert [row["project"] for row in files("claude")] == [None]
+
+
+def test_a_lookup_that_fails_leaves_the_row_for_a_later_pass(readings, roots, tmp_path):
+    class Busy(Projects):
+        def for_path(self, path):
+            self.asked.append(path)
+            raise self.Unreadable("locked")
+
+    busy = Busy({})
+    transcript(roots["claude"], SESSION_A, cwd=str(tmp_path)).write()
+    run(readings, projects=busy)
+    assert [row["project"] for row in files("claude")] == [None]
+    projects = Projects({str(tmp_path): "moxi"})
+    run(readings, projects=projects)
+    assert [row["project"] for row in files("claude")] == ["moxi"]
+
+
+# --- the lock ---------------------------------------------------------------------------
+
+HOLD = textwrap.dedent("""
+    import sys
+    import moxi.files
+    with moxi.files.lock(sys.argv[1]):
+        print("held", flush=True)
+        sys.stdin.readline()
+""")
+
+
+@pytest.fixture
+def held_lock():
+    """Another process holding the index's lock until the test ends."""
+    path = store.lock_path()
+    proc = subprocess.Popen([sys.executable, "-c", HOLD, str(path)], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, text=True)
+    try:
+        assert proc.stdout.readline().strip() == "held"
+        yield proc
+    finally:
+        proc.stdin.close()
+        proc.wait(timeout=30)
+
+
+def test_a_held_lock_makes_no_wait_exit_75(readings, roots, held_lock, monkeypatch,
+                                           capsys):
+    monkeypatch.setitem(sys.modules, "moxi_usage.readings", readings)
+    assert cli.main(["index", "--no-wait"]) == 75
+    assert "another pass holds the index" in capsys.readouterr().err
+    with pytest.raises(moxi.files.LockTimeout):
+        index.pass_(readings=readings, wait=0, projects=None)
+
+
+def test_the_wait_for_the_lock_runs_on_the_injected_clock(readings, held_lock):
+    ticks = []
+    clock = iter(range(1000)).__next__
+
+    def sleep(seconds):
+        ticks.append(seconds)
+
+    with pytest.raises(moxi.files.LockTimeout):
+        index.pass_(readings=readings, wait=5, clock=lambda: float(clock()), sleep=sleep,
+                    projects=None)
+    assert len(ticks) == 4 and set(ticks) == {index.POLL}     # the fifth look is at 5
+
+
+CONCURRENT = textwrap.dedent("""
+    import sys, types
+    readings = types.ModuleType("moxi_usage.readings")
+    readings.add_codex = lambda records, *, now, env=None: len(list(records))
+    readings.prune = lambda *, now, env=None: 0
+    sys.modules["moxi_usage.readings"] = readings
+    from moxi_usage import cli
+    raise SystemExit(cli.main(["index", "--no-wait", "--json"]))
+""")
+
+
+def test_two_passes_at_once_never_both_write_and_leave_the_index_whole(readings, roots):
+    for n in range(12):
+        session = f"0190b000-0000-7000-8000-0000000001{n:02d}"
+        t = ClaudeTranscript(roots["claude"], session_id=session, project=f"-p{n}")
+        for m in range(20):
+            t.user("go")
+            t.assistant("ok", usage=usage(output=m + 1), request_id=f"req_{n}_{m}")
+        t.write()
+    procs = [subprocess.Popen([sys.executable, "-c", CONCURRENT], stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE) for _ in range(2)]
+    codes = sorted(proc.wait(timeout=120) for proc in procs)
+    for proc in procs:
+        proc.stdout.close()
+        proc.stderr.close()
+    assert codes in ([0, 0], [0, 75])
+    conn = store.connect()
+    try:
+        assert store.check(conn) == []
+        assert conn.execute("SELECT count(*) FROM requests WHERE won = 1").fetchone()[0] \
+            == 240
+    finally:
+        conn.close()
+    assert run(readings).read == 0                  # the index was whole: nothing left
+
+
+# --- rebuilds, workers, cancellation ----------------------------------------------------
+
+def corpus(roots, sessions_count=6):
+    for n in range(sessions_count):
+        session = f"0190b000-0000-7000-8000-0000000002{n:02d}"
+        t = ClaudeTranscript(roots["claude"], session_id=session, project=f"-p{n}")
+        for m in range(5):
+            t.user("go")
+            t.assistant("ok", usage=usage(output=10 * n + m), request_id=f"req_{n}_{m}")
+        t.write()
+    for n in range(3):
+        thread = f"0190c000-0000-7000-8000-0000000003{n:02d}"
+        rollout(roots["codex"], thread, output=500 + n)
+
+
+def test_a_rebuild_in_worker_processes_gives_the_index_a_pass_gave(readings, roots):
+    corpus(roots)
+    run(readings)
+    before = requests()
+    result = run(readings, rebuild=True, workers=2)
+    assert result.workers == 2 and result.read == 9
+    assert requests() == before
+
+
+def test_many_fresh_sources_are_read_in_workers(readings, roots, monkeypatch):
+    corpus(roots)
+    monkeypatch.setattr(index, "POOL_ABOVE", 2)
+    result = run(readings, workers=2)
+    assert result.workers == 2 and result.read == 9 and len(won()) == 33
+    assert len(readings.added) >= 3
+
+
+def test_a_cancelled_pass_keeps_what_it_read(readings, roots):
+    corpus(roots)
+    asked = []
+
+    def cancel():
+        asked.append(1)
+        return len(asked) > 6         # three lanes, the reads, then two sources
+
+    result = run(readings, cancel=cancel)
+    assert result.cancelled and 0 < result.read < 9
+    assert rows("SELECT value FROM meta WHERE key = 'last_pass'") == []
+    assert run(readings).read == 9 - result.read
+
+
+def test_a_readings_store_that_fails_does_not_stop_the_index(roots):
+    class Broken(Readings):
+        def add_codex(self, records, *, now, env=None):
+            raise OSError("disk full")
+
+    rollout(roots["codex"], THREAD_A)
+    result = run(Broken())
+    assert "disk full" in result.readings_error and len(won()) == 1
+
+
+def test_a_harness_this_machine_does_not_have_is_absent_not_offline(readings, tmp_path):
+    archive = tmp_path / "unplugged"
+    write_config(f'[[claude.archive_roots]]\npath = "{archive}"\nid = "usb"\n')
+    result = run(readings)
+    assert {lane: state["state"] for lane, state in result.lanes.items()} == {
+        "claude": "absent", "codex": "absent", "opencode": "absent",
+        "archive:usb": "offline"}
+
+
+def test_an_unknown_lane_is_refused(readings):
+    with pytest.raises(ValueError, match="no such lane"):
+        index.pass_(readings=readings, lanes=["nowhere"], projects=None)
+
+
+def test_one_lane_runs_alone(readings, roots):
+    transcript(roots["claude"], SESSION_A).write()
+    rollout(roots["codex"], THREAD_A)
+    result = run(readings, lanes=["codex"])
+    assert set(result.lanes) == {"codex"} and [r["lane"] for r in requests()] == ["codex"]
+
+
+# --- the verb ---------------------------------------------------------------------------
+
+def test_the_index_verb_runs_the_pass_and_checks_the_claims(readings, roots, monkeypatch,
+                                                            capsys):
+    monkeypatch.setitem(sys.modules, "moxi_usage.readings", readings)
+    transcript(roots["claude"], SESSION_A).write()
+    assert cli.main(["index", "--check"]) == 0
+    out = capsys.readouterr().out
+    assert "1 read" in out and "agree" in out
+
+    conn = store.connect()
+    try:
+        conn.execute("UPDATE requests SET won = 0")          # by hand, past the claim
+    finally:
+        conn.close()
+    assert cli.main(["index", "--check", "--json"]) == 1
+    doc = index.json.loads(capsys.readouterr().out)
+    assert doc["check"]["agree"] is False and len(doc["check"]["keys"]) == 2
+
+
+def test_the_index_verb_maps_a_refused_schema_to_3(readings, monkeypatch, capsys):
+    def refuse(**kw):
+        raise store.MigrationRefused(["archive:old"], 1, 2)
+
+    monkeypatch.setattr(index, "pass_", refuse)
+    assert cli.main(["index"]) == 3
+    assert "archive:old" in capsys.readouterr().err
+
+
+# --- the archive roots in the config ----------------------------------------------------
+
+def test_archive_roots_are_read_in_config_order(tmp_path):
+    from moxi_usage import settings
+
+    write_config('[[claude.archive_roots]]\npath = "~/old"\nid = "b"\n'
+                 '[[claude.archive_roots]]\npath = "/mnt/usb/"\nid = "a"\n')
+    roots = settings.archive_roots(settings.current())
+    assert [(r.id, r.lane, r.number) for r in roots] == [("b", "archive:b", 1),
+                                                         ("a", "archive:a", 2)]
+    assert roots[0].path == os.path.expanduser("~/old") and roots[1].path == "/mnt/usb"
+    assert [lane.id for lane in index.configured_lanes()] == [
+        "claude", "codex", "opencode", "archive:b", "archive:a"]
+
+
+@pytest.mark.parametrize("rows, problem", [
+    ('[claude]\narchive_roots = ["/mnt/old"]\n', "not a table"),
+    ('[[claude.archive_roots]]\nid = "a"\n', "has no path"),
+    ('[[claude.archive_roots]]\npath = "/x"\n', "has id None"),
+    ('[[claude.archive_roots]]\npath = "/x"\nid = "a b"\n', "has id 'a b'"),
+    ('[[claude.archive_roots]]\npath = "x"\nid = "a"\n', "relative path"),
+    ('[[claude.archive_roots]]\npath = "/x"\nid = "a"\nwhere = 1\n', "unknown keys"),
+    ('[[claude.archive_roots]]\npath = "/x"\nid = "a"\n'
+     '[[claude.archive_roots]]\npath = "/y"\nid = "a"\n', "repeats the id"),
+])
+def test_the_config_check_refuses_an_archive_root_usage_could_not_read(rows, problem):
+    from moxi.config import ConfigError
+    from moxi_usage import settings
+
+    with pytest.raises(ConfigError, match=problem):
+        settings.check(rows)
