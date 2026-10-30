@@ -21,6 +21,15 @@ Limits (`moxi_usage.limits`):
   `limits.codex_pull_after` is refreshed through turns when turns is installed. Returns
   `Limits`, whose `pull` says what the pull did.
 
+Reports (`moxi_usage.reports`):
+
+* `report(kind, *, since=None, until=None, harness=None, project=None, model=None,
+  tz=None, fresh=True)`: tokens and cost from the token index, `kind` one of `KINDS`
+  (`daily`, `monthly`, `sessions`, `models`, `projects`), as a `Report`. With `fresh` the
+  index's pass runs first. `tz` is the zone days are cut in, local time when None.
+  Cost is worked out when the report runs; tokens the table cannot price are counted in
+  `unpriced_tokens`, never as $0.
+
 `UNKNOWN` is sessions' sentinel: a fact the table does not know. It is neither None nor
 0, and refuses to be read as true or false, so an unknown price never turns into $0.
 Every result has `as_dict()` for JSON, where an unknown fact is left out and named in the
@@ -39,6 +48,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("model_facts", "models", "context_window", "table", "ModelFacts",
                      "Provenance", "Table", "STEPS"), "models"),
     **dict.fromkeys(("limits", "Limits", "Row", "Pull"), "limits"),
+    **dict.fromkeys(("report", "Report", "ReportError", "KINDS"), "reports"),
 }
 
 __all__ = [*_HOMES, "UNKNOWN"]

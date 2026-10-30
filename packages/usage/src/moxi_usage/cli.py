@@ -3,6 +3,8 @@
     moxi usage prices [MODEL] [--provider P] [--json]
     moxi usage prices update [--dry-run] [--revert] [--json]
     moxi usage limits [--harness H] [--no-pull] [--json]
+    moxi usage daily|monthly|sessions|models|projects [--since DATE] [--until DATE]
+        [--harness H] [--project P] [--model M] [--utc] [--no-pass] [--json]
 
 `prices MODEL` prints the model's facts and where each came from, and exits 1 when the
 table does not know the model; `prices` alone prints the layers in effect. `prices update`
@@ -13,6 +15,11 @@ JSON object.
 `limits` prints one line per harness: each window's percent used, when it resets and,
 when it is filling, when it reaches 100% at the recent rate, then the age of the oldest
 reading on the line. A window it cannot state says why. It exits 0 whatever the states.
+
+The report verbs run the index's pass first, unless `--no-pass`, and print tokens and cost
+from the index (`moxi_usage.reports`). Days are local time, or UTC with `--utc`; `--since`
+and `--until` are dates (`YYYY-MM-DD`), both included. A cost the model table cannot give
+is never printed as $0: the row is marked and the tokens are counted as unpriced.
 """
 
 from __future__ import annotations
@@ -56,10 +63,13 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi usage") -> int:
                         help="never ask Codex for a new reading, even when the newest is "
                              "stale")
     limits.add_argument("--json", action="store_true", help="print one JSON object")
+    _report_verbs(verbs)
     parsed = parser.parse_args(args)
     try:
         if parsed.verb == "limits":
             return _limits(parsed, prog)
+        if parsed.verb in REPORT_VERBS:
+            return _report(parsed, prog)
         return _prices(parsed)
     except ConfigError as exc:
         print(f"{prog}: {exc}", file=sys.stderr)
@@ -306,8 +316,161 @@ def _update(args: argparse.Namespace, prog: str, *, fetcher: Any = None,
         shown = ", ".join(ids[:SHOWN])
         more = f" and {len(ids) - SHOWN} more" if len(ids) > SHOWN else ""
         print(f"  {name:<9} {len(ids)}{': ' if ids else ''}{shown}{more}")
+    _print_in_index(result.in_index)
     if result.written:
         print(f"wrote {result.path}")
     else:
         print("dry run: nothing written")
     return codes.OK
+
+
+def _print_in_index(found: Any) -> None:
+    if found is None:
+        print("  no token index yet, so no models seen in use to name")
+        return
+    print(f"  of the {found.models} models in the token index:")
+    for name, ids in (("repriced", found.repriced), ("priced", found.priced),
+                      ("unpriced", found.unpriced)):
+        shown = ", ".join(ids[:SHOWN])
+        more = f" and {len(ids) - SHOWN} more" if len(ids) > SHOWN else ""
+        print(f"    {name:<9} {len(ids)}{': ' if ids else ''}{shown}{more}")
+
+
+# --- reports ----------------------------------------------------------------------------
+
+REPORT_VERBS = {
+    "daily": "tokens and cost by day and model",
+    "monthly": "tokens and cost by month and model",
+    "sessions": "tokens and cost by session, its subagents included",
+    "models": "tokens and cost by model, with where each price came from",
+    "projects": "tokens and cost by project, or by directory where no project is known",
+}
+
+
+def _report_verbs(verbs: Any) -> None:
+    for verb, text in REPORT_VERBS.items():
+        parser = verbs.add_parser(verb, help=text, description=f"Print {text}, from the "
+                                  "token index. The index's pass runs first.")
+        parser.add_argument("--since", metavar="DATE",
+                            help="the first day to count (YYYY-MM-DD)")
+        parser.add_argument("--until", metavar="DATE",
+                            help="the last day to count (YYYY-MM-DD), included")
+        parser.add_argument("--harness", choices=("claude", "codex", "opencode"),
+                            help="count one harness only")
+        parser.add_argument("--project", metavar="KEY",
+                            help="count one project: its key, or the directory a row "
+                                 "with no project shows")
+        parser.add_argument("--model", metavar="MODEL", help="count one model only")
+        parser.add_argument("--utc", action="store_true",
+                            help="cut days in UTC, not local time")
+        parser.add_argument("--no-pass", action="store_true",
+                            help="read the index as it is, without running its pass")
+        parser.add_argument("--json", action="store_true", help="print one JSON object")
+
+
+def _report(args: argparse.Namespace, prog: str) -> int:
+    from moxi.files import LockTimeout
+    from moxi.store import StoreError
+
+    from . import reports
+
+    try:
+        found = reports.report(args.verb, since=args.since, until=args.until,
+                               harness=args.harness, project=args.project,
+                               model=args.model, tz="UTC" if args.utc else None,
+                               fresh=not args.no_pass)
+    except reports.ReportError as exc:
+        print(f"{prog} {args.verb}: {exc}", file=sys.stderr)
+        return codes.USAGE
+    except LockTimeout as exc:
+        print(f"{prog} {args.verb}: {exc}", file=sys.stderr)
+        return codes.TEMPFAIL
+    except StoreError as exc:
+        print(f"{prog} {args.verb}: {exc}", file=sys.stderr)
+        return getattr(exc, "exit_code", codes.ERROR)
+    if args.json:
+        print(json.dumps(found.as_dict(), indent=2))
+    else:
+        _print_report(found)
+    return codes.OK
+
+
+#: Each report's label columns: (heading, how to read the row, width).
+_LABELS: dict[str, list[tuple[str, Any, int]]] = {
+    "daily": [("day", lambda r: r["day"], 10), ("model", lambda r: _model(r["model"]), 28)],
+    "monthly": [("month", lambda r: r["month"], 7),
+                ("model", lambda r: _model(r["model"]), 28)],
+    "sessions": [("session", lambda r: _session(r), 40)],
+    "models": [("model", lambda r: _model(r["model"]), 32)],
+    "projects": [("project", lambda r: r["project"] or r["cwd"] or "(no directory)", 40)],
+}
+
+
+def _model(model: Any) -> str:
+    return model if isinstance(model, str) and model else "(no model)"
+
+
+def _session(row: dict[str, Any]) -> str:
+    sid = row["session_id"] or "(no session id)"
+    title = row.get("title")
+    return f"{row['harness']} {sid[:8]}" + (f" {title}" if title else "")
+
+
+def _tokens(value: int) -> str:
+    for size, unit in ((1e9, "B"), (1e6, "M"), (1e3, "k")):
+        if value >= size:
+            return f"{value / size:.1f}{unit}"
+    return str(value)
+
+
+def _cost(row: dict[str, Any]) -> str:
+    from moxi_sessions.api import UNKNOWN
+
+    if row["cost"] is UNKNOWN:
+        return "unpriced"
+    value = row["cost"]
+    return f"${value:,.2f}" if value >= 1 or value == 0 else f"${value:.4f}"
+
+
+def _marks(row: dict[str, Any]) -> str:
+    return ("u" if row["unpriced_tokens"] else "") + ("?" if row["unknown_rows"] else "")
+
+
+def _print_report(found: Any) -> None:
+    labels = _LABELS[found.kind]
+    head = [f"{name:<{width}}" for name, _, width in labels]
+    numbers = ("requests", "input", "cache_read", "cache_write", "output")
+    print("  ".join([*head, *(f"{name:>11}" for name in numbers), f"{'cost':>12}"]))
+    for row in found.rows:
+        cells = [f"{_cut(str(read(row)), width):<{width}}" for _, read, width in labels]
+        cells += [f"{_tokens(row[name]):>11}" for name in numbers]
+        cells.append(f"{_cost(row):>12} {_marks(row)}".rstrip())
+        print("  ".join(cells))
+    total = found.total
+    if found.rows:
+        width = sum(w for _, _, w in labels) + 2 * (len(labels) - 1)
+        cells = [f"{'total':<{width}}"]
+        cells += [f"{_tokens(total[name]):>11}" for name in numbers]
+        cells.append(f"{_cost(total):>12} {_marks(total)}".rstrip())
+        print("  ".join(cells))
+    else:
+        print("no requests in range")
+    if total.get("unpriced_tokens"):
+        print(f"u: {_tokens(total['unpriced_tokens'])} tokens are unpriced and not in the "
+              f"cost; the model table has no price for {', '.join(found.unpriced_models)}. "
+              "Add a [[model]] row to usage's config to price them.")
+    if total.get("unknown_rows"):
+        print(f"?: {total['unknown_rows']} requests had a token count their harness did "
+              "not report; those totals are at least the sums shown.")
+    for rule in found.rules:
+        print(f"rule: {rule}")
+    zone = "local time" if found.tz == "local" else found.tz
+    where = f"days in {zone}" if found.kind in ("daily", "monthly") else None
+    note = found.index.get("note")
+    for line in (where, note):
+        if line:
+            print(line)
+
+
+def _cut(text: str, width: int) -> str:
+    return text if len(text) <= width else text[:width - 1] + "~"
