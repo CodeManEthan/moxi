@@ -652,6 +652,9 @@ class Daemon:
         finally:
             self._deregister(conn)
             conn.close()
+            # This thread ends here: close its record connection, or every client
+            # served would leave one open for the daemon's life.
+            self.gateway.release()
 
     def _handle(self, conn: LineConn, frame: dict) -> None:
         op = frame.get("op")

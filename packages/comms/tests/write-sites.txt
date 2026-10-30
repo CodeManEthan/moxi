@@ -24,7 +24,6 @@ src/moxi_comms/cursors.py advance os.fdopen
 src/moxi_comms/cursors.py advance os.replace
 src/moxi_comms/directory.py connect sqlite3.connect
 src/moxi_comms/directory.py connect sqlite3.connect
-src/moxi_comms/local_gateway.py LocalGateway._conn sqlite3.connect
 src/moxi_comms/migration.py _open_journal sqlite3.connect
 src/moxi_comms/migration.py stamp_record sqlite3.connect
 src/moxi_comms/mock_gateway.py MockGateway._save os.fdopen
