@@ -378,6 +378,27 @@ def test_a_live_message_with_rows_waiting_hands_only_itself(rig, reads, peers):
     assert rows(rig, REVIEWER_Q) == {cold, flagged}
 
 
+def test_a_live_message_behind_a_row_left_unhandled_waits_and_goes_after_it(
+        rig, reads, peers):
+    """A turn leaves a digest unhandled and its row waits for the next release point. A
+    live message to the name meanwhile gets a row, not a push, so it never overtakes the
+    older one; the next turn end hands both, oldest first."""
+    reads[REVIEWER_Q] = cache.WARM
+    peer = peers()
+    first = post(rig, [REVIEWER_Q], "first")
+    assert wait_until(lambda: first in peer.handed())
+    peer.turn(unhandled=[first])
+    assert rows(rig, REVIEWER_Q) == {first}
+    live = post(rig, [REVIEWER_Q], "live, behind it")
+    row_for(rig, REVIEWER_Q, live)
+    peer.sync()
+    assert peer.handed() == [first], "a row, not a push"
+    assert rows(rig, REVIEWER_Q) == {first, live}
+    peer.turn()
+    assert peer.handed() == [first, first, live], "after the older row, by id"
+    assert all(p.get("held") is True for p in peer.payloads()[1:])
+
+
 # ============================================================ (c) the release table
 
 #: The release table, one row each: (event, the read at it, what it releases).

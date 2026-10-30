@@ -326,6 +326,9 @@ class Binding:
     #: `deliver` frame needs.
     window: set = field(default_factory=set)
     overflow: dict = field(default_factory=dict)
+    #: The ids a turn of this binding left unhandled, back to `waiting` until the next
+    #: release point. A live send above one waits with them (`_behind_returned`).
+    returned: set = field(default_factory=set)
 
 
 @dataclass
@@ -1623,6 +1626,12 @@ class Daemon:
                         if backlog or not self._past_cursor(q, msg.id, memo):
                             self._queue_add(q, msg.id, _epoch(msg.timestamp))
                         live = False
+                    elif not backlog and self._behind_returned(r.binding, msg.id):
+                        # Rows a turn of this binding left unhandled wait below this
+                        # one: it waits with them for the next release point, and goes
+                        # out after them by id.
+                        self._queue_add(q, msg.id, _epoch(msg.timestamp))
+                        live = False
                     else:
                         live = self._claim(r.binding, msg.id)
                 break
@@ -2100,6 +2109,7 @@ class Daemon:
             if message_id in binding.delivered:
                 return False
             binding.delivered.add(message_id)
+            binding.returned.discard(message_id)
             if _as_id(message_id) > _as_id(binding.handed_max):
                 binding.handed_max = message_id      # the `owed` query's `undelivered`
             # Its row, handed to this binding: made for a live send, taken from
@@ -2447,6 +2457,18 @@ class Daemon:
                  self._describe(clock))
         return False
 
+    def _behind_returned(self, binding: Binding, message_id: str) -> bool:
+        """Whether a row this binding's turns left unhandled still waits below
+        `message_id`. A live send behind one gets a row instead of a push, so it never
+        overtakes mail already handed to the name once. Rows that never went out (a
+        `[held]` message's, one queued while the cache was cold) don't hold it back:
+        those wait for their own release point while live mail goes alone. Under the
+        lock."""
+        rows = self.queue.get(binding.qualified, {})
+        binding.returned &= rows.keys()
+        mid = _as_id(message_id)
+        return any(_as_id(m) < mid for m in binding.returned)
+
     def _release(self, binding: Binding, *, flagged: bool, exclude=()) -> int:
         """Hand the name's rows this binding was not handed already, oldest first, each
         with `held: true`. `flagged=False` leaves the rows of `[held]` messages; ids in
@@ -2596,6 +2618,7 @@ class Daemon:
                 binding.delivered.discard(mid)
                 if self.bindings.get(q) is binding:
                     self.queue.setdefault(q, {}).setdefault(mid, None)
+                    binding.returned.add(mid)
         if unhandled:
             self._queue_flush()
 
