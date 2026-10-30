@@ -1268,3 +1268,160 @@ def test_proof_the_real_launchctl_on_a_test_label(tmp_path, monkeypatch):
         for ref in refs.values():
             backend.stop_id(ref.ids[0], fence)
             fence.run("enable", backend.target(ref.ids[0]))
+
+
+# A socket daemon for the proof rows: it takes `Listeners` and `Listeners-1` by name,
+# appends one line per start to the file in its first argument (its pid, then how many fds
+# each key gave it), answers each connection `ok`, and exits 0 on a line `exit` or after
+# 20 idle seconds.
+SOCKET_DAEMON = '''\
+import ctypes, os, select, socket, sys, time
+lib = ctypes.CDLL(None)
+lib.launch_activate_socket.argtypes = [
+    ctypes.c_char_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_int)),
+    ctypes.POINTER(ctypes.c_size_t)]
+held = {}
+for key in ("Listeners", "Listeners-1"):
+    fds = ctypes.POINTER(ctypes.c_int)()
+    count = ctypes.c_size_t()
+    err = lib.launch_activate_socket(key.encode(), ctypes.byref(fds), ctypes.byref(count))
+    held[key] = [] if err else [fds[i] for i in range(count.value)]
+with open(sys.argv[1], "a") as out:
+    out.write(f"{os.getpid()} " + " ".join(f"{k}={len(v)}" for k, v in held.items()) + "\\n")
+socks = [socket.socket(fileno=fd) for fds in held.values() for fd in fds]
+deadline = time.monotonic() + 20
+while socks and time.monotonic() < deadline:
+    ready, _, _ = select.select(socks, [], [], 1)
+    for sock in ready:
+        conn, _ = sock.accept()
+        with conn:
+            line = conn.recv(64).strip()
+            conn.sendall(b"ok\\n")
+        if line == b"exit":
+            sys.exit(0)
+'''
+
+
+def _free_port() -> int:
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def _ask(host: str, port: int, line: bytes) -> bytes:
+    import socket
+
+    with socket.create_connection((host, port), timeout=10) as conn:
+        conn.sendall(line + b"\n")
+        return conn.recv(64).strip()
+
+
+def _until(read, check, seconds=15.0):
+    import time
+
+    deadline = time.monotonic() + seconds
+    while True:
+        value = read()
+        if check(value) or time.monotonic() > deadline:
+            return value
+        time.sleep(0.2)
+
+
+def _socket_label(tmp_path, monkeypatch, addresses):
+    """A throwaway socket daemon under a test label, its plist in tmp."""
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path / "home"))
+    module = f"proof{os.urandom(4).hex()}"
+    script = tmp_path / "shell.py"
+    script.write_text(SOCKET_DAEMON)
+    starts = tmp_path / "starts.txt"
+    port = _free_port()
+    backend = LaunchdBackend(agents=tmp_path / "agents", gate="/usr/bin/true")
+    [group] = backend.render(spec(module=module, name="shell",
+                                  command=(sys.executable, "-I", str(script), str(starts)),
+                                  socket=Socket("port", addresses, port)))
+    path, text = group.files[0]
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(text)
+    [ref] = backend.marked(module)
+    sock = UnitRef(module, "shell", "socket", ref.ids, ref.paths)
+    return backend, ref, sock, port, starts
+
+
+@darwin
+def test_proof_a_socket_daemon_starts_at_a_connection_on_either_address(tmp_path,
+                                                                        monkeypatch):
+    """Not started by its bootstrap; a connection to either address starts it and it holds
+    both keys; after `kill -9` it reads `failed` and stays down until the next connection;
+    its socket reads `active` throughout."""
+    import signal
+    import time
+
+    if os.environ.get("MOXI_TEST_REAL_SUPERVISOR") != "1":
+        pytest.skip("a proof row: set MOXI_TEST_REAL_SUPERVISOR=1 on a Mac")
+    backend, ref, sock, port, starts = _socket_label(tmp_path, monkeypatch,
+                                                     ("127.0.0.1", "::1"))
+    fence = Fence("launchd")
+
+    def read():
+        return backend.status([ref, sock], fence)
+
+    try:
+        assert backend.act("enable", ref, fence).ok
+        daemon, socket_state = read()
+        assert (daemon.state, daemon.pid) == ("inactive", None)
+        assert (socket_state.state, socket_state.epoch) == ("active", None)
+        assert not starts.exists()
+        assert _ask("127.0.0.1", port, b"hi") == b"ok"
+        daemon, socket_state = _until(read, lambda s: s[0].pid)
+        assert daemon.state == "active" and socket_state.state == "active"
+        [line] = starts.read_text().splitlines()
+        assert line.split()[1:] == ["Listeners=1", "Listeners-1=1"]
+        os.kill(daemon.pid, signal.SIGKILL)
+        daemon, socket_state = _until(read, lambda s: not s[0].pid)
+        assert daemon.state == "failed" and socket_state.state == "active"
+        time.sleep(5)  # past ThrottleInterval: launchd must not start it on its own
+        daemon, _ = read()
+        assert daemon.pid is None and len(starts.read_text().splitlines()) == 1
+        assert _ask("::1", port, b"exit") == b"ok"
+        daemon, socket_state = _until(read, lambda s: s[0].state == "inactive")
+        assert len(starts.read_text().splitlines()) == 2
+        assert (daemon.state, daemon.pid, socket_state.state) == ("inactive", None, "active")
+    finally:
+        backend.stop_id(ref.ids[0], fence)
+        fence.run("enable", backend.target(ref.ids[0]))
+
+
+@darwin
+def test_proof_record_what_launchd_shows_for_an_address_it_cannot_bind(tmp_path,
+                                                                     monkeypatch, capsys):
+    """`Listeners-1` on 192.0.2.1, which the Mac doesn't have. A record row: it prints the
+    bootstrap's result and `launchctl print` of the label for the report, and holds only
+    that the socket read is never `failed`."""
+    if os.environ.get("MOXI_TEST_REAL_SUPERVISOR") != "1":
+        pytest.skip("a proof row: set MOXI_TEST_REAL_SUPERVISOR=1 on a Mac")
+    backend, ref, sock, port, _ = _socket_label(tmp_path, monkeypatch,
+                                                ("127.0.0.1", "192.0.2.1"))
+    fence = Fence("launchd")
+    try:
+        acted = backend.act("enable", ref, fence)
+        shown = fence.run("print", backend.domain)
+        job = subprocess.run(["launchctl", "print", backend.target(ref.ids[0])],
+                             capture_output=True, text=True)
+        daemon, socket_state = backend.status([ref, sock], fence)
+        try:
+            answer = _ask("127.0.0.1", port, b"exit")
+        except OSError as exc:
+            answer = f"no answer: {exc}"
+        with capsys.disabled():
+            print(f"\nenable: ok={acted.ok} {acted.lines}")
+            print(f"services line: {[l for l in shown.stdout.splitlines() if ref.ids[0] in l]}")
+            print(f"print of the label (exit {job.returncode}):\n{job.stdout}{job.stderr}")
+            print(f"status: daemon {daemon.state} {daemon.detail!r}; "
+                  f"socket {socket_state.state} {socket_state.detail!r}")
+            print(f"a connection to 127.0.0.1: {answer!r}")
+        assert socket_state.state != "failed"
+    finally:
+        backend.stop_id(ref.ids[0], fence)
+        fence.run("enable", backend.target(ref.ids[0]))
