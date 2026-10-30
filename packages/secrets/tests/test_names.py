@@ -3,14 +3,19 @@ engines alike, the worked cases, linear time, and reading the list from the conf
 
 from __future__ import annotations
 
+import importlib.util
 import random
 import re
 import time
+import unicodedata
+from pathlib import Path
 
 import pytest
 
-from moxi_secrets import PrivateNames, SetUnavailable, engine, private_names, redact, scan
+from moxi_secrets import PrivateNames, SetUnavailable, _folds, engine, private_names, redact
 from moxi_secrets import names as names_mod
+from moxi_secrets import scan
+from moxi_secrets._folds import FOLDS
 
 RE2 = engine.Re2Engine(engine.re2_module())
 PY = engine.ReEngine()
@@ -92,7 +97,10 @@ def test_the_case_folds_agree_on_both_engines():
 
 # -- the property test ----------------------------------------------------------------------
 
+# Unicode 16 letters (U+A7CB with U+0264, Garay), the Greek and ligature pairs Go folds
+# apart and Python together, the i family, the long s and the Kelvin sign.
 ALPHABET = ("abcXYZ" + "İıſK" + "éßσж" + "019" +
+            "\ua7cb\u0264\U00010d50\U00010d70" + "\u0390\u1fd3\u03b0\u1fe3\ufb05\ufb06" +
             "-_ ./~+'@")
 NEIGHBOURS = "aZé0 ._-/\nж'"
 
@@ -178,6 +186,89 @@ def test_the_rule_covers_todays_guards_and_both_engines_agree():
             for entry in entries:
                 assert covered(hits(text, [entry], eng=RE2)) <= cover, (entries, text)
     assert checked > 1000
+
+
+# -- case, written out ----------------------------------------------------------------------
+
+def test_no_entry_pattern_carries_a_case_insensitive_flag():
+    for entry in ("alexa quill", "İstanbul", "kelvin", "ſome", "Ɤ\U00010d50", "c++"):
+        norm = names_mod.normalise(entry)
+        py, r2 = names_mod.python_pattern(norm), names_mod.re2_pattern(norm)
+        assert "(?i" not in py and "(?i" not in r2
+        assert not re.compile(py).flags & re.IGNORECASE
+
+
+def _foldable() -> set[int]:
+    """Every character this Python could fold to another, and the single characters its
+    case mappings give, closed under one case-insensitive pass over every code point."""
+    pool = set()
+    for c in range(0x110000):
+        if 0xD800 <= c <= 0xDFFF:
+            continue
+        ch = chr(c)
+        for mapped in (ch.lower(), ch.upper(), ch.casefold(), ch.title()):
+            if mapped != ch:
+                pool.add(c)
+                if len(mapped) == 1:
+                    pool.add(ord(mapped))
+    everything = "".join(chr(c) for c in range(0x110000) if not 0xD800 <= c <= 0xDFFF)
+    while True:
+        rx = re.compile("(?i)[" + "".join(re.escape(chr(c)) for c in sorted(pool)) + "]")
+        more = {ord(m.group()) for m in rx.finditer(everything)} - pool
+        if not more:
+            return pool
+        pool |= more
+
+
+def test_this_python_folds_no_character_outside_its_set():
+    """On a Python whose Unicode is newer than the table's this fails first: regenerate
+    `_folds.py` with tools/name_folds.py on that Python."""
+    pool = sorted(_foldable())
+    text = "".join(chr(c) for c in pool)
+    outside = []
+    for c in pool:
+        held = set(FOLDS.get(chr(c), chr(c)))
+        for form in ("(?i)" + re.escape(chr(c)), "(?i)[" + re.escape(chr(c)) + "]"):
+            if not {m.group() for m in re.finditer(form, text)} <= held:
+                outside.append(f"U+{c:04X}")
+    assert outside == [], (unicodedata.unidata_version, _folds.UNICODE, outside[:20])
+
+
+def test_each_fold_set_is_one_class_shared_by_its_members():
+    for c, group in FOLDS.items():
+        assert c in group and all(FOLDS[x] == group for x in group)
+        assert len(set(group)) == len(group) > 1
+
+
+def test_a_one_character_entry_matches_exactly_its_set_on_both_engines():
+    r = random.Random(32)
+    pool = set(FOLDS) | {chr(c) for c in range(0x21, 0x7F)} | set(ALPHABET)
+    while len(pool) < len(FOLDS) + 1500:
+        c = r.randrange(0x110000)
+        if not 0xD800 <= c <= 0xDFFF:
+            pool.add(chr(c))
+    pool -= SEPS
+    t = engine.Text("".join(sorted(pool)))
+    for eng, pattern in ((RE2, names_mod.re2_pattern), (PY, names_mod.python_pattern)):
+        target = eng.target(t)
+        for c in sorted(pool):
+            rx = eng.compile(pattern(c))
+            got = {t.text[eng.to_str(t, m.start())] for m in rx.finditer(target)}
+            assert got == set(FOLDS.get(c, c)), (f"U+{ord(c):04X}", eng.name)
+
+
+def test_the_fold_table_equals_a_fresh_generation():
+    tool = Path(__file__).resolve().parent.parent / "tools" / "name_folds.py"
+    if not tool.exists():
+        pytest.skip("tools/name_folds.py is not in this tree (an sdist leaves it out)")
+    if unicodedata.unidata_version != _folds.UNICODE:
+        pytest.skip(f"the table is generated on Unicode {_folds.UNICODE}, this Python has "
+                    f"{unicodedata.unidata_version}")
+    spec = importlib.util.spec_from_file_location("name_folds", tool)
+    name_folds = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(name_folds)
+    fresh = name_folds.render(name_folds.groups(name_folds.python_folds()), _folds.UNICODE)
+    assert fresh == Path(_folds.__file__).read_text("utf-8")
 
 
 # -- the config -----------------------------------------------------------------------------

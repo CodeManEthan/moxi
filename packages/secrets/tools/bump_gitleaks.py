@@ -23,7 +23,10 @@ these steps in order and stops at the first that fails:
    names the slowest rules where a text goes over it.
 6. Runs the gitleaks binary of the tag on the package's own directory with
    `credentials.toml`, from `rules/`, and expects no hit.
-7. Runs the package's tests.
+7. Checks the private names' fold table, then runs the package's tests. When the running
+   Python's re folds a character under IGNORECASE outside its set in `_folds.py` (a newer
+   Unicode adds case pairs), it regenerates the table with `name_folds.py` where this
+   Python's Unicode is newer than the table's, and stops either way.
 8. Reads google-re2's newest release on PyPI, prints its wheel tags, and checks
    `engine.re2_wheel_fits()` and the `re2` extra's bound against them.
 
@@ -49,6 +52,7 @@ import subprocess
 import sys
 import time
 import tomllib
+import unicodedata
 import urllib.request
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -519,7 +523,46 @@ def own_tree(tag: str) -> bool:
     return False
 
 
-# -- step 7: the package's tests ------------------------------------------------------------
+# -- step 7: the private names' fold table, and the package's tests --------------------------
+
+def name_folds():
+    """tools/name_folds.py, the fold table's generator, as a module."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("name_folds", TOOLS / "name_folds.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _unicode_version(text: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in text.split("."))
+
+
+def fold_table() -> bool:
+    """True when every IGNORECASE fold of the running Python lies inside its set in
+    `_folds.py`. Otherwise it regenerates the table where this Python's Unicode is newer
+    than the table's, and stops either way."""
+    tool = name_folds()
+    here, held = unicodedata.unidata_version, tool.table_unicode()
+    out = tool.outside(tool.python_folds(), tool.table())
+    if not out:
+        say(f"this Python's folds (Unicode {here}) lie inside _folds.py (Unicode {held})")
+        return True
+    shown = " ".join(f"U+{c:04X}" for c in out[:12]) + (" ..." if len(out) > 12 else "")
+    say(f"{len(out)} characters fold outside their set in _folds.py on this Python "
+        f"(Unicode {here}; the table is Unicode {held}): {shown}")
+    if _unicode_version(here) > _unicode_version(held):
+        if tool.main([]) != 0:
+            raise Stop("name_folds.py could not write _folds.py")
+        say("Regenerated _folds.py from this Python. Read its diff, run the bump again, and "
+            "commit the table with the rules.")
+    else:
+        say("This Python's Unicode is not newer than the table's, so the table is not "
+            "rewritten from it: run tools/name_folds.py on the newest CPython and read why "
+            "the folds moved.")
+    return False
+
 
 def package_tests() -> bool:
     try:
@@ -750,7 +793,8 @@ def main(argv: list[str] | None = None) -> int:
              lambda: compare(data, args.samples, args.seed, args.show)),
             ("5. cost on RE2", lambda: cost(args.cost_mb, args.cost_factor)),
             (f"6. gitleaks {args.tag} on the package's own files", lambda: own_tree(args.tag)),
-            ("7. the package's tests", package_tests),
+            ("7. the fold table and the package's tests",
+             lambda: fold_table() and package_tests()),
             ("8. google-re2's wheels", wheels),
         )
         for title, step in steps:

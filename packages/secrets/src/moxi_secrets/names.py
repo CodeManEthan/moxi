@@ -6,11 +6,15 @@ No exception or message here carries an entry's text: each names the key and pos
 
 The rule: an entry matches a span when the span matches the entry's normalised form
 character for character (a space matches a run of separators, `-` and `_` match either
-one, other characters match what Python's re treats as equal under IGNORECASE) and, for
-a `words` entry, no letter or digit stands outside an end of the entry that is a letter
-or digit. Every such span is a match. Then a match inside an occurrence of an `allowed`
+one, every other character matches its fold set) and, for a `words` entry, no letter or
+digit stands outside an end of the entry that is a letter or digit. Every such span is a match. Then a match inside an occurrence of an `allowed`
 entry or of the author name or email is cut, and a match inside another remaining match
 is cut.
+
+Case is written out, never left to an engine: no pattern carries a case-insensitive flag.
+Each character in `_folds.FOLDS` (the sets CPython's re treats as equal under IGNORECASE)
+is written as the class of its set, the same class on RE2 and on re, so both engines match
+an entry at the same places on every Python version. Any other character matches itself.
 
 Standard library only at import; `moxi.config` is imported at first use.
 """
@@ -21,14 +25,13 @@ import re
 from bisect import bisect_right
 
 from . import engine as _engine
+from ._folds import FOLDS
 from .scan import SetUnavailable
 
 #: Every character `str.isspace()` is true for (checked against Python's tables by a test).
 WHITESPACE = ("\t\n\x0b\x0c\r\x1c\x1d\x1e\x1f \x85\xa0     "
               "           　")
 SEPARATORS = WHITESPACE + "-_"
-#: Python's re and RE2 fold these four differently, so each is written as all four.
-_I_FAMILY = "iIİı"
 
 _RUN = re.compile("[" + re.escape(SEPARATORS) + "]+")
 _TRIM = SEPARATORS
@@ -50,28 +53,28 @@ def normalise(entry: str) -> str:
 
 
 def python_pattern(norm: str) -> str:
-    out = ["(?i)"]
+    out = []
     for c in norm:
         if c == " ":
             out.append(_PY_RUN)
         elif c in "-_":
             out.append("[-_]")
-        elif c in _I_FAMILY:
-            out.append("[" + _I_FAMILY + "]")
+        elif c in FOLDS:
+            out.append("[" + "".join(re.escape(f) for f in FOLDS[c]) + "]")
         else:
             out.append(re.escape(c))
     return "".join(out)
 
 
 def re2_pattern(norm: str) -> str:
-    out = ["(?i)"]
+    out = []
     for c in norm:
         if c == " ":
             out.append(_RE2_RUN)
         elif c in "-_":
             out.append("[\\x{2d}\\x{5f}]")
-        elif c in _I_FAMILY:
-            out.append("[" + "".join("\\x{%x}" % ord(i) for i in _I_FAMILY) + "]")
+        elif c in FOLDS:
+            out.append("[" + "".join("\\x{%x}" % ord(f) for f in FOLDS[c]) + "]")
         else:
             out.append(_engine.re2_literal(c))
     return "".join(out)

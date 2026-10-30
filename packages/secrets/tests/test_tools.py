@@ -230,6 +230,65 @@ def test_the_cost_shapes_have_the_asked_size_and_repeat_from_the_seed():
     assert first == bump.shapes(["alpha", "beta", "alpha"], 50_000)
 
 
+# -- step 7: the private names' fold table -------------------------------------------------
+
+class FakeFolds:
+    """name_folds as the step sees it: this Python's folds against a table."""
+
+    def __init__(self, outside, table_unicode):
+        self._outside, self._unicode = outside, table_unicode
+        self.wrote = False
+
+    def table_unicode(self):
+        return self._unicode
+
+    def python_folds(self):
+        return {}
+
+    def table(self):
+        return {}
+
+    def outside(self, folds, held):
+        return self._outside
+
+    def main(self, argv):
+        self.wrote = True
+        return 0
+
+
+@pytest.mark.parametrize("outside, table_unicode, passes, writes", [
+    ([], "16.0.0", True, False),
+    ([0xA7CE], "0.1.0", False, True),       # this Python's Unicode is newer: regenerate
+    ([0xA7CE], "99.0.0", False, False),     # older: never rewrite the table from it
+])
+def test_the_fold_table_step(monkeypatch, capsys, outside, table_unicode, passes, writes):
+    fake = FakeFolds(outside, table_unicode)
+    monkeypatch.setattr(bump, "name_folds", lambda: fake)
+    assert bump.fold_table() is passes
+    assert fake.wrote is writes
+    if outside:
+        assert "U+A7CE" in capsys.readouterr().out
+
+
+def test_outside_names_each_fold_that_reaches_past_its_set():
+    tool = bump.name_folds()
+    held = {"a": "Aa", "A": "Aa"}
+    folds = {ord("a"): frozenset({0x61, 0x41}), ord("b"): frozenset({0x62, 0x42}),
+             ord("A"): frozenset({0x41, 0x61, 0x212B})}
+    assert tool.outside(folds, held) == [ord("A"), ord("b")]
+
+
+def test_the_table_renders_to_source_that_reads_back():
+    tool = bump.name_folds()
+    groups = [(0x41, 0x61), (0x4B, 0x6B, 0x212A), (0x10D50, 0x10D70)]
+    scope: dict = {}
+    exec(tool.render(groups, "16.0.0"), scope)
+    assert scope["UNICODE"] == "16.0.0"
+    assert scope["FOLDS"]["k"] == "Kk\u212a" and scope["FOLDS"]["\U00010d70"] == \
+        "\U00010d50\U00010d70"
+    assert len(scope["FOLDS"]) == 7
+
+
 # -- the Go sampler -------------------------------------------------------------------------
 
 @pytest.mark.slow

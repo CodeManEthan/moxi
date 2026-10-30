@@ -32,7 +32,11 @@ A caller always names the sets it wants. There is no default set.
   is cheap.
 - **private-names** matches plain text, never a regex. A `words` entry hits unless a letter
   or digit stands right next to one of its letter-or-digit ends, so `alexa` hits
-  `alexa-quill` and `Alexa's`, not `alexa2000`. Case is ignored. A space in an entry
+  `alexa-quill` and `Alexa's`, not `alexa2000`. Case is ignored: each letter matches the
+  letters Python's `re` treats as its case variants on Unicode 16.0, from a table shipped
+  with the package, so RE2 and the fallback match an entry at the same places on every
+  Python. On a Python with a newer Unicode, a letter that version first gives a case pair
+  matches only itself until a moxi-secrets release regenerates the table. A space in an entry
   matches any run of whitespace, `-` and `_`, and `-` and `_` match each other. Whether an
   entry matches never depends on the other entries. An `anywhere` entry or an email hits
   even glued to other text. An `allowed` entry, and the author name and email, are never
@@ -188,7 +192,10 @@ prints the rules added, removed, changed and dropped. Next it has Go generate sa
 every pattern and compares Go's matches and secrets with RE2's and the fallback's, then
 the in-process hit lists of both engines. After that it times RE2 on large adversarial
 texts, runs the gitleaks binary of the tag over the package's own files expecting no hit,
-and runs the package's tests. Last it prints google-re2's newest wheels, so the `re2`
+checks the private names' case table against the running Python, and runs the package's
+tests. When that Python folds a letter the table lacks, the bump regenerates the table with
+`tools/name_folds.py` (on a Python with a newer Unicode than the table's) and stops for a
+review. Run it on the newest CPython. Last it prints google-re2's newest wheels, so the `re2`
 extra's bound and the wheel check move with them. A rule that fails the comparison or the
 time budget is fixed in the translator or added to `rules/drop.txt`, and the bump runs
 again. `tools/` is not in the wheel or the sdist.
