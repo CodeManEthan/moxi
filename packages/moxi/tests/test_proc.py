@@ -473,6 +473,19 @@ def test_a_different_start_time_is_not_alive():
     assert not proc.alive(proc.ProcId(me.pid, me.started - 10))
 
 
+@pytest.mark.parametrize("shift, expected", [(0.5, True), (-0.5, True), (1.5, False),
+                                             (-1.5, False)])
+def test_a_start_time_moved_by_a_clock_adjustment_is_still_alive(monkeypatch, shift,
+                                                                  expected):
+    """The start time psutil reads moves when the wall clock is adjusted; under a second
+    of difference is still the same process."""
+    import psutil
+
+    me = proc.identity(os.getpid())
+    monkeypatch.setattr(psutil.Process, "create_time", lambda self: me.started + shift)
+    assert proc.alive(me) is expected
+
+
 def test_an_ended_process_has_no_identity():
     child = subprocess.Popen([PY, "-c", "pass"])
     ident = proc.identity(child.pid)

@@ -34,6 +34,9 @@ KILL_GRACE = 2.0
 #: How long `lifeline`'s default stop waits after interrupting the main thread before it
 #: ends the process.
 EXIT_GRACE = 5.0
+# How far apart, in seconds, two reads of one process's start time may be for `alive`
+# to take them as one process. A pid is not given to another process within a second.
+_START_TOLERANCE = 1.0
 #: The lifeline kinds `spawn` takes.
 LIFELINES = ("stdin", "fd", "watch")
 
@@ -435,14 +438,19 @@ def identity(pid: int) -> ProcId | None:
 def alive(proc: ProcId) -> bool:
     """Whether the process `proc` names is still running: its pid exists, started at the
     same time (so a pid given to another process since never matches) and has not ended
-    (a child that ended and was not yet reaped by its parent is not alive)."""
+    (a child that ended and was not yet reaped by its parent is not alive).
+
+    "The same time" is within a second: a start time is the boot time plus the
+    ticks since, and the boot time read moves when the wall clock is adjusted (NTP), so
+    two reads of one process's start time can differ.
+    """
     if proc.pid <= 0:
         return False
     import psutil
 
     try:
         found = psutil.Process(proc.pid)
-        return (abs(found.create_time() - proc.started) < 0.001
+        return (abs(found.create_time() - proc.started) < _START_TOLERANCE
                 and found.status() != psutil.STATUS_ZOMBIE)
     except psutil.Error:
         return False
