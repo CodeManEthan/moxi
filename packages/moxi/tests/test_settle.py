@@ -645,6 +645,93 @@ def test_a_resume_record_for_a_unit_the_step_removed_or_disabled_clears(
     assert resume_records() == {}
 
 
+# -- a switch key other units also use ---------------------------------------------------
+
+SHARED = ("{'relay': {'command': 'moxi-demo-relay', 'doc': 'the relay', "
+          "'switch': 'snapshot.enabled'}}")
+TIMER_TOO = ("{'snapshot': {'command': 'moxi-demo-relay', 'every': '5m', "
+             "'doc': 'take a snapshot', 'switch': 'snapshot.enabled'}, "
+             "'prune': {'command': 'moxi-demo-relay', 'every': '1h', "
+             "'doc': 'prune', 'switch': 'snapshot.enabled'}}")
+TIMER_FILE = "moxi-demo-snapshot.timer"
+
+
+def shared_running(w, **names):
+    """`relay` installed and running under switch snapshot.enabled, which reads on."""
+    w.installed(DAEMONS=SHARED, **names)
+    config.set("demo", "snapshot.enabled", True, by="test")
+    assert w.active(SERVICE)
+    w.sup.calls.clear()
+
+
+def test_a_new_timer_sharing_a_running_daemon_s_switch_leaves_both_and_is_held(
+        w, capsys, monkeypatch):
+    shared_running(w)
+    w.module(DAEMONS=SHARED, TIMERS=TIMER)
+    before = moxi.paths.Layout("demo").config_file().read_bytes()
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert moxi.paths.Layout("demo").config_file().read_bytes() == before
+    assert w.active(SERVICE) and w.calls("stop", "disable") == []
+    assert not (w.root / TIMER_FILE).exists()
+    assert _state.recorded("demo", "snapshot") is None
+    line = ("demo/snapshot: snapshot.enabled is also demo/relay's switch; set it with "
+            "moxi config set demo snapshot.enabled; it is installed off at the next moxi "
+            "install once snapshot.enabled is false")
+    assert out.count(line) == 1, out
+    assert "applies it and asks" not in out
+    from moxi.doctor import _run
+
+    row = {r.name: r for r in _run.run(["demo"])}["timer snapshot"]
+    assert (row.state, row.detail) == ("warn", "not installed")
+    assert row.fix == ("moxi config set demo snapshot.enabled false, then: moxi install "
+                       "demo, then: moxi config set demo snapshot.enabled true")
+
+
+def test_with_the_shared_key_off_the_timer_is_installed_off_and_the_key_left(
+        w, capsys, monkeypatch):
+    w.installed(DAEMONS=SHARED)
+    w.module(DAEMONS=SHARED, TIMERS=TIMER)
+    config_file = moxi.paths.Layout("demo").config_file()
+    before = config_file.read_bytes() if config_file.exists() else None
+    monkeypatch.setattr(_settle, "_ask", lambda q: pytest.fail("asked"))
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    after = config_file.read_bytes() if config_file.exists() else None
+    assert after == before
+    assert (w.root / TIMER_FILE).exists()
+    assert _state.recorded("demo", "snapshot") is not None
+    assert ("demo/snapshot: snapshot.enabled is also demo/relay's switch; set it with "
+            "moxi config set demo snapshot.enabled\n") in out
+    assert "installed off at the next" not in out
+
+
+def test_a_changed_timer_sharing_the_key_is_held_while_it_reads_on(w, capsys, monkeypatch):
+    shared_running(w, TIMERS=TIMER)
+    assert (w.root / TIMER_FILE).exists()
+    text = (w.root / TIMER_FILE).read_text()
+    w.module(DAEMONS=SHARED, TIMERS=TIMER.replace("'5m'", "'10m'"))
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert (w.root / TIMER_FILE).read_text() == text
+    assert w.active(SERVICE) and w.calls("stop", "disable") == []
+    assert "is installed off at the next moxi install" in out
+
+
+def test_two_timers_on_one_key_never_reset_each_other(w, capsys, monkeypatch):
+    one = ("{'snapshot': {'command': 'moxi-demo-relay', 'every': '5m', "
+           "'doc': 'take a snapshot', 'switch': 'snapshot.enabled'}}")
+    w.installed(TIMERS=one)
+    config.set("demo", "snapshot.enabled", True, by="test")
+    w.module(TIMERS=TIMER_TOO)
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert config.load("demo", config.schema_for(moxi.modules.load("demo")))[
+        "snapshot.enabled"] is True
+    assert not (w.root / "moxi-demo-prune.timer").exists()
+    assert "demo/prune: snapshot.enabled is also demo/snapshot's switch" in out
+
+
 def test_setup_json_holds_the_version_and_a_new_version_restarts(w, capsys, monkeypatch):
     w.installed(DAEMONS=ONE)
     code, _ = settle(w, capsys, monkeypatch)

@@ -526,8 +526,15 @@ def _units(step: Settle) -> bool:
 def _switches(step: Settle, changes) -> bool:
     """Each switched timer `plan` will write or keep: a new one is asked about (off with
     nobody at the keyboard), a changed one is set off, an unchanged one is left. The
-    switch is written first and its `units.json` entry second."""
+    switch is written first and its `units.json` entry second.
+
+    A switch key another daemon or timer of the module also uses is never written here:
+    writing it would turn that unit on or off too. The key is left as the file has it.
+    While it reads off, the timer's entry is written and the timer installed, off; while
+    it reads on, no entry is written, so `apply` holds the timer and says how it gets
+    installed. One line names the key either way."""
     from . import config
+    from .units import _apply
     from .units import _state as recorded
 
     module, ok = step.module, True
@@ -539,6 +546,10 @@ def _switches(step: Settle, changes) -> bool:
         if before == change.digest:
             continue
         switch = change.switch
+        others = _apply.sharers(change, changes)
+        if others:
+            ok = _shared(step, change, others) and ok
+            continue
         turn_on = f"moxi config set {module} {switch} true"
         on = False
         if before is None:
@@ -558,6 +569,29 @@ def _switches(step: Settle, changes) -> bool:
         if line:
             say(line)
     return ok
+
+
+def _shared(step: Settle, change, others: list[str]) -> bool:
+    """A new or changed timer whose switch other units also use: the key is read, never
+    written. Off: the entry is written, so the timer is installed off. On: nothing is
+    written, and `apply` holds the timer (it prints the line for an `add` or `change`)."""
+    from . import config
+    from .units import _apply
+    from .units import _state as recorded
+
+    module, switch = step.module, change.switch
+    try:
+        on = bool(config.load(module, config.schema_for(step.found))[switch])
+    except (config.ConfigError, KeyError, TypeError) as exc:
+        say(f"{change.unit}: its switch {switch} cannot be read: {_one_line(exc)}", err=True)
+        return False
+    if not on:
+        with held():
+            recorded.record(module, change.name, change.digest)
+        say(_apply.shared_line(change, others, held=False))
+    elif change.action == "keep":
+        say(_apply.shared_line(change, others, held=True))
+    return True
 
 
 def _ask(question: str) -> bool:

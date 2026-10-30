@@ -301,7 +301,7 @@ def _module_units(found, by_unit: Mapping) -> list[Row]:
     daemons = decl.daemons if decl is not None else found.daemons
     for change in changes:
         state = by_unit.get((module, change.name, change.kind))
-        rows.append(_unit_row(change, state))
+        rows.append(_unit_row(change, state, _shared_fix(found, change, changes)))
         if change.kind == "timer" and change.action in ("keep", "change"):
             label = f"timer {change.name}"
             if change.switch is not None:
@@ -314,12 +314,35 @@ def _module_units(found, by_unit: Mapping) -> list[Row]:
     return rows
 
 
-def _unit_row(change, state) -> Row:
+def _shared_fix(found, change, changes) -> str | None:
+    """The fix for a new or changed switched timer whose switch other units also use, when
+    that switch reads on: an install holds it then, so the fix turns the key off for the
+    install and on again after. None for every other unit."""
+    from .. import config
+    from ..units import _apply
+
+    if change.kind != "timer" or change.action not in ("add", "change"):
+        return None
+    if not _apply.sharers(change, changes):
+        return None
+    module, switch = found.name, change.switch
+    try:
+        on = bool(config.load(module, config.schema_for(found))[switch])
+    except (config.ConfigError, KeyError, TypeError):
+        return None
+    if not on:
+        return None
+    return (f"moxi config set {module} {switch} false, then: moxi install {module}, then: "
+            f"moxi config set {module} {switch} true")
+
+
+def _unit_row(change, state, install: str | None = None) -> Row:
     """The row for one planned unit, with the supervisor's state folded in where a unit
-    is written."""
+    is written. `install` replaces the plain `moxi install <module>` fix of a unit that is
+    not installed or stale."""
     module = change.module
     label = f"{change.kind} {change.name}"
-    install = f"moxi install {module}"
+    install = install or f"moxi install {module}"
     action, cause = change.action, change.cause
     if action == "keep":
         planned = ("ok", "up to date", None)
