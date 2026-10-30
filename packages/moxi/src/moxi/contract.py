@@ -1101,6 +1101,20 @@ def _mode_writes(node: ast.AST | None) -> bool | None:
     return None
 
 
+#: The letters of an `open` mode; a path's `.open` reads its first argument as a mode only
+#: when it is made of these alone.
+_MODE_LETTERS = frozenset("rwxab+t")
+
+
+def _path_mode_writes(node: ast.AST | None) -> bool:
+    """True when a path's `.open` argument is a mode that writes: a string literal of mode
+    letters alone with a writing letter among them. A URL or a member name is not a mode."""
+    if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+        return False
+    letters = set(node.value)
+    return bool(letters) and letters <= _MODE_LETTERS and bool(letters & _WRITE_MODE)
+
+
 def _flags_write(node: ast.AST | None) -> bool:
     if node is None:
         return False
@@ -1163,8 +1177,9 @@ def _write_call(call: ast.Call) -> str | None:
         return f"{owner}.{attr}" if _mode_writes(_arg(call, 1, "mode")) is not False else None
     if attr == "open":
         # A path's open(mode): only a mode the check can read as writing counts, since
-        # many other objects have an `open` (a browser, an archive) taking other things.
-        return ".open" if _mode_writes(_arg(call, 0, "mode")) else None
+        # many other objects have an `open` (a browser, an archive) taking other things,
+        # such as `webbrowser.open("https://...")` or `zf.open("data.txt")`.
+        return ".open" if _path_mode_writes(_arg(call, 0, "mode")) else None
     return None
 
 

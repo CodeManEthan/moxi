@@ -768,6 +768,7 @@ class Store:
 READS = '''\
 import os
 import webbrowser
+import zipfile
 from pathlib import Path
 
 
@@ -780,6 +781,8 @@ def read(path, mode):
         fh.read()
     os.open(path, os.O_RDONLY)
     webbrowser.open(path)
+    webbrowser.open("https://example.org/")
+    zipfile.ZipFile(path).open("data.txt")
     "a.b".replace(".", "/")
 '''
 
