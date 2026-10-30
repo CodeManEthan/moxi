@@ -350,9 +350,11 @@ def test_everywhere_leaves_a_disabled_piece_and_a_repos_own_settings_alone(demo,
     assert run(capsys, "git-hooks", "disable", str(beta), PIECE)[0] == 0
     write_config("[commit_rules]\neverywhere = true\n"
                  "tag_patterns = ['\\bTAG-[0-9]+\\b']\n")
-    assert run(capsys, "git-hooks", "refresh")[0] == 0
-    assert run(capsys, "git-hooks", "refresh", str(alpha))[0] == 0
-    assert run(capsys, "git-hooks", "add", str(alpha), "demo/gate")[0] == 0
+    # Each repo has the piece, so no verb says it added it.
+    for argv in (("refresh",), ("refresh", str(alpha)), ("add", str(alpha), "demo/gate"),
+                 ("add", str(beta))):
+        code, out, _ = run(capsys, "git-hooks", *argv)
+        assert code == 0 and "commit_rules.everywhere" not in out, (argv, out)
     assert piece_config(alpha)["refused-trailer"] == ["Co-Authored-By", "Round"]
     assert "tag-pattern" not in piece_config(alpha)
     assert piece_config(beta)["enabled"] == ["false"]
