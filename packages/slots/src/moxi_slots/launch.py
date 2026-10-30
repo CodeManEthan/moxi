@@ -215,9 +215,12 @@ def respawn(slot: int | str, argv: Sequence[str], *, env: Mapping[str, str],
             cwd: str | PathLike, label: str, meta: dict | None = None,
             hold: str | None = None) -> Placed:
     """Run the next launch in a slot's ended run pane, keeping its pane id (relaunch's
-    call). Refuses `no-slot`, `missing` (no session, or no run pane to reuse: `start`
-    places a first launch), `live-pane` (the run pane is live; nothing kills it) and
-    `held` (another holder's live hold). The rest is as `start`."""
+    call). Refuses `no-slot`, `missing`, `live-pane` (the run pane is live; nothing kills
+    it) and `held` (another holder's live hold). The rest is as `start`.
+
+    `missing` from `respawn` has two causes, told apart by `Slot.state` (from `show`):
+    `missing`, the slot has no session, and `create(n)` makes it again; `free`, the
+    session is there but has no run pane to reuse, and `start` places a first launch."""
     if slot is None:
         raise UsageError("respawn names the slot whose run pane it reuses")
     argv, env, cwd, meta = _checked(argv, env, cwd, label, meta, hold)
