@@ -57,8 +57,8 @@ def test_one_owner_of_the_retention():
         config.schema().keys["local.retain_days"].default
 
 
-def test_the_file_sets_every_table():
-    path = write_config(None, """
+#: A file that sets every table.
+EVERY_TABLE = """
 backend = "mock"
 block = true
 
@@ -94,7 +94,11 @@ cwd = "/src/proj-a"
 [opencode.agents.reviewer]
 slot = 4
 cwd = "/src/x"
-""")
+"""
+
+
+def test_the_file_sets_every_table():
+    path = write_config(None, EVERY_TABLE)
     cfg = config.load()
     assert cfg.source == str(path) == str(config.config_path())
     assert cfg.backend == "mock" and cfg.block is True
@@ -141,7 +145,8 @@ def test_a_given_environment_is_read_instead_of_the_process(tmp_path):
     assert config.load().replay.messages == 50
 
 
-@pytest.mark.parametrize("text, key", [
+#: Files comms' loader refuses, each with the key the refusal names.
+BAD_FILES = [
     ('backend = "remote"\n', "backend"),
     ("[threads]\nreply_cap = 0\n", "threads.reply_cap"),
     ("[threads]\nreply_cap = true\n", "threads.reply_cap"),
@@ -158,7 +163,12 @@ def test_a_given_environment_is_read_instead_of_the_process(tmp_path):
     ('[claude]\nchannel = "server"\n', "claude.channel"),
     ('[policy]\nnever_held = []\n', "policy.never_held"),
     ("[discord]\nguild = 1\n", "discord"),
-])
+    ('[codex.agents.planner]\nslot = 1\napi_token = "x"\n',
+     "codex.agents.planner.api_token"),
+]
+
+
+@pytest.mark.parametrize("text, key", BAD_FILES)
 def test_a_bad_file_is_refused_naming_the_key(text, key):
     write_config(None, text)
     with pytest.raises(config.ConfigError) as caught:
@@ -325,3 +335,98 @@ def test_a_named_file_s_errors_name_that_file(tmp_path, text, key):
 def test_a_named_file_that_does_not_exist_is_refused(tmp_path):
     with pytest.raises(config.ConfigError, match="is not a file"):
         config.load_file(tmp_path / "missing.toml")
+
+
+# -- the text entry: the announcement's CONFIG_CHECK ---------------------------------------
+
+def test_the_announcement_names_the_whole_loader_over_the_text():
+    from moxi import modules
+
+    assert module.CONFIG_CHECK == "moxi_comms.config:check_text"
+    assert modules.load("comms").config_check == module.CONFIG_CHECK
+
+
+@pytest.mark.parametrize("text", ["", EVERY_TABLE])
+def test_the_text_entry_passes_what_the_loader_passes(text):
+    write_config(None, text)
+    config.load()
+    assert config.check_text(text) is None
+
+
+@pytest.mark.parametrize("text, key", BAD_FILES + [("backend = \n", None)])
+def test_the_text_entry_refuses_every_file_the_loader_refuses(text, key):
+    with pytest.raises(config.ConfigError) as caught:
+        config.check_text(text)
+    assert (caught.value.key, caught.value.file) == (key, None)
+    write_config(None, text)
+    with pytest.raises(config.ConfigError) as loaded:
+        config.load()
+    assert (loaded.value.key, loaded.value.problem) == (key, caught.value.problem)
+
+
+def test_the_text_entry_reads_no_environment(monkeypatch):
+    write_config(None, 'backend = "local"\n')
+    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "bogus")
+    with pytest.raises(config.ConfigError):
+        config.load()
+    assert config.check_text('backend = "local"\n') is None
+    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "mock")
+    with pytest.raises(config.ConfigError):
+        config.check_text('backend = "remote"\n')
+
+
+def test_the_text_entry_leaves_no_cache_entry():
+    checked, cached = dict(config._checked), dict(moxi_config._cache)
+    config.check_text(EVERY_TABLE)
+    with pytest.raises(config.ConfigError):
+        config.check_text('[secrets]\nchain = []\n')
+    assert (config._checked, moxi_config._cache) == (checked, cached)
+
+
+@pytest.fixture
+def core_state(monkeypatch, tmp_path):
+    """The core's own roots (the settings history) under the test's tmp."""
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path / "core"))
+
+
+@pytest.mark.parametrize("argv, value, key, words", [
+    (("codex.agents", '{"p@x" = {api_token = "sk-secret"}}'),
+     {"p@x": {"api_token": "sk-secret"}}, "codex.agents.p@x.api_token",
+     "looks like a secret"),
+    (("secrets.chain", '["env", "vault"]'), ["env", "vault"], "secrets.chain",
+     "not a resolver"),
+    (("secrets.chain", "[]"), [], "secrets.chain", "is empty"),
+    (("secrets.roles", "--add", "reader"), None, "secrets.roles",
+     "one of comms' own roles"),
+])
+def test_config_set_refuses_what_comms_refuses(core_state, capsys, argv, value, key,
+                                               words):
+    from moxi import cli
+
+    path = write_config(None, "block = true\n")
+    assert cli.main(["config", "set", "comms", *argv]) == 2
+    out, err = capsys.readouterr()
+    assert out == "" and f"{path}: key {key!r}: " in err and words in err
+    assert path.read_text() == "block = true\n"
+    assert moxi_config.history("comms") == []
+    with pytest.raises(config.ConfigError) as caught:
+        if value is None:
+            moxi_config.add_item("comms", argv[0], argv[-1], by="ui")
+        else:
+            moxi_config.set("comms", argv[0], value, by="ui")
+    assert caught.value.file == str(path) and caught.value.key == key
+    assert path.read_text() == "block = true\n"
+
+
+def test_config_set_and_check_pass_a_good_file_under_a_bad_variable(core_state, capsys,
+                                                                    monkeypatch):
+    from moxi import cli
+
+    path = write_config(None, "block = true\n")
+    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "bogus")
+    assert cli.main(["config", "set", "comms", "secrets.roles", "--add", "pager"]) == 0
+    assert cli.main(["config", "unset", "comms", "block"]) == 0
+    assert cli.main(["config", "comms", "check"]) == 0
+    assert capsys.readouterr().err == ""
+    assert config.check_text(path.read_text()) is None
+    assert "pager" in path.read_text() and "block" not in path.read_text()
