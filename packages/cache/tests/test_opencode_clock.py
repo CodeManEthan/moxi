@@ -1,185 +1,123 @@
 """The OpenCode clock: a session's rows in `opencode.db`, the next pair first, free models,
-the authorizer, and `fresh` on every witness of a new session.
+and `fresh` on every witness of a new session.
 
-The fixture database is built from OpenCode 1.18.34's schema, not copied from a live one;
-every read is against tmp paths.
+Every database is written by sessions' builder (`OpenCodeDb`, through
+`moxi_sessions.api.testing`) in OpenCode 1.18.34's columns, not copied from a live one;
+every read is against tmp paths. One builder per database: its ids grow in the order rows
+are added, as OpenCode's do, so a test adds each session's rows in time order.
 """
 
 from __future__ import annotations
 
-import contextlib
 import json
 import sqlite3
 import time
-from pathlib import Path
 
 import pytest
 
 from moxi_cache import api, opencode, table
+from moxi_sessions.api import opencode as reader
+from moxi_sessions.api import testing
 
 NOW = 1_791_300_000.0                    # a fixed "now" for the pure reads
-SID = "ses_0000000000000TestSessionA"
-SID_B = "ses_0000000000000TestSessionB"
+SID_B = "ses_0000000000000TestSessionB"  # a session no database here holds
+
+OpenCodeDb = testing.OpenCodeDb
 
 
 # ================================================================ opencode fixtures
-
-#: OpenCode 1.18.34's schema for the three tables the reader reads, as read on
-#: 2026-10-05, and the two it must never read.
-SCHEMA = """
-CREATE TABLE `session` (
-  `id` text PRIMARY KEY, `project_id` text NOT NULL, `workspace_id` text, `parent_id` text,
-  `slug` text NOT NULL, `directory` text NOT NULL, `path` text, `title` text NOT NULL,
-  `version` text NOT NULL, `share_url` text, `summary_additions` integer,
-  `summary_deletions` integer, `summary_files` integer, `summary_diffs` text,
-  `metadata` text, `cost` real DEFAULT 0 NOT NULL,
-  `tokens_input` integer DEFAULT 0 NOT NULL, `tokens_output` integer DEFAULT 0 NOT NULL,
-  `tokens_reasoning` integer DEFAULT 0 NOT NULL,
-  `tokens_cache_read` integer DEFAULT 0 NOT NULL,
-  `tokens_cache_write` integer DEFAULT 0 NOT NULL, `revert` text, `permission` text,
-  `agent` text, `model` text, `time_created` integer NOT NULL,
-  `time_updated` integer NOT NULL, `time_compacting` integer, `time_archived` integer);
-CREATE TABLE `message` (
-  `id` text PRIMARY KEY, `session_id` text NOT NULL, `time_created` integer NOT NULL,
-  `time_updated` integer NOT NULL, `data` text NOT NULL);
-CREATE TABLE `part` (
-  `id` text PRIMARY KEY, `message_id` text NOT NULL, `session_id` text NOT NULL,
-  `time_created` integer NOT NULL, `time_updated` integer NOT NULL, `data` text NOT NULL);
-CREATE INDEX `message_session_time_created_id_idx` ON `message` (`session_id`,`time_created`,`id`);
-CREATE INDEX `part_message_id_id_idx` ON `part` (`message_id`,`id`);
-CREATE INDEX `part_session_idx` ON `part` (`session_id`);
-CREATE TABLE `account` (`id` text PRIMARY KEY, `email` text);
-CREATE TABLE `credential` (`id` text PRIMARY KEY, `secret` text);
-INSERT INTO `account` VALUES ('acc', 'someone@example.invalid');
-INSERT INTO `credential` VALUES ('cred', 'SECRET-DO-NOT-READ');
-"""
 
 BUILD_NULL = {"agent": "build", "model": None}
 FREE_AGENT = {"agent": "build", "model": "opencode/big-pickle"}
 
 
-class OcDb:
-    """A fixture `opencode.db` in the 1.18.34 schema."""
+def oc_db(tmp_path, *steps, wal=True, totals=None, **session):
+    """A builder for `<tmp_path>/opencode/opencode.db` holding one session, with `steps`
+    applied to it (see `add`). Returns the session's handle; its builder is `.db`.
+    `totals` sets every token and cost total of the session row to that number."""
+    db = OpenCodeDb(tmp_path / "opencode", wal=wal)
+    if totals is not None:
+        session["totals"] = dict.fromkeys(reader.TOTALS, totals)
+    return add(db.session(**session), *steps)
 
-    def __init__(self, path: Path, schema: str = SCHEMA):
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.n = 0
-        with self.conn() as c:
-            c.executescript(schema)
 
-    def conn(self):
-        """A connection in autocommit, closed when the `with` block ends."""
-        c = sqlite3.connect(self.path)
-        c.isolation_level = None
-        return contextlib.closing(c)
+def add(s, *steps):
+    """Apply each step (`user`, `request`) to the session `s`, in order."""
+    for step in steps:
+        step(s)
+    return s
 
-    def mint(self, prefix):
-        self.n += 1
-        return f"{prefix}_{self.n:026d}"
 
-    def session(self, sid=SID, *, model=("opencode", "big-pickle"), version="1.18.34",
-                totals=0, revert=None, parent=None, raw_model=...):
-        if raw_model is ...:
-            raw_model = None if model is None else json.dumps(
-                {"id": model[1], "providerID": model[0], "variant": "default"})
-        with self.conn() as c:
-            c.execute("INSERT INTO session (id, project_id, parent_id, slug, directory, "
-                      "title, version, cost, tokens_input, tokens_output, "
-                      "tokens_reasoning, tokens_cache_read, tokens_cache_write, revert, "
-                      "model, time_created, time_updated) VALUES "
-                      "(?, 'global', ?, 's', '/tmp', 't', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)",
-                      (sid, parent, version, totals, totals, totals, totals, totals, totals,
-                       revert, raw_model))
+def user(t, *, model=("opencode", "big-pickle"), raw_model=...):
+    """A user message at `t` with one text part, as a step. `model` is the pair it asks
+    for (None for none); `raw_model` writes its `model` key as given."""
+    return lambda s: s.user("hello", model=model, raw_model=raw_model, at=t)
 
-    def message(self, sid, created_s, data, *, raw=None):
-        mid = self.mint("msg")
-        with self.conn() as c:
-            c.execute("INSERT INTO message VALUES (?, ?, ?, ?, ?)",
-                      (mid, sid, int(created_s * 1000), int(created_s * 1000),
-                       raw if raw is not None else json.dumps(data)))
-        return mid
 
-    def part(self, sid, mid, created_s, data):
-        with self.conn() as c:
-            c.execute("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)",
-                      (self.mint("prt"), mid, sid, int(created_s * 1000),
-                       int(created_s * 1000), json.dumps(data)))
-
-    def user(self, sid, t, *, model=("opencode", "big-pickle"), raw_model=...):
-        data = {"role": "user", "time": {"created": int(t * 1000)}, "agent": "build",
-                "summary": {"diffs": []}}
-        if raw_model is not ...:
-            data["model"] = raw_model
-        elif model is not None:
-            data["model"] = {"providerID": model[0], "modelID": model[1]}
-        mid = self.message(sid, t, data)
-        self.part(sid, mid, t + 0.01, {"type": "text", "text": "hello"})
-        return mid
-
-    def request(self, sid, t, provider, model, *, steps=((0.0, 3.0),), agent="build",
-                summary=None, created=None, user=True):
-        """A user message and its assistant reply whose first step starts at `t`, each
-        step `(start offset, end offset)` from `t`. The message is created at
-        `created` (default `t`)."""
+def request(t, provider, model, *, steps=((0.0, 3.0),), agent="build", summary=None,
+            created=None, user=True):
+    """A user message and its assistant reply whose first step starts at `t`, each step
+    `(start offset, end offset)` from `t` (end None for a step still open), as a step.
+    The reply is created at `created` (default `t`)."""
+    def step(s):
         if user:
-            self.user(sid, (created or t) - 0.5, model=(provider, model))
-        data = {"role": "assistant", "agent": agent, "mode": agent, "providerID": provider,
-                "modelID": model, "time": {"created": int((created or t) * 1000)},
-                "finish": "stop"}
-        if summary is not None:
-            data["summary"] = summary
-        mid = self.message(sid, created or t, data)
+            s.user("hello", model=(provider, model), at=(created or t) - 0.5)
+        reply = s.assistant(model=(provider, model), agent=agent, summary=summary,
+                            at=created or t)
         for start, end in steps:
-            self.part(sid, mid, t + start, {"type": "step-start"})
+            reply.step_start(at=t + start)
             if end is not None:
-                self.part(sid, mid, t + end, {"type": "step-finish", "reason": "stop"})
-        return mid
+                reply.step_finish(at=t + end)
+        return reply
+    return step
 
 
-def oc_db(tmp_path, **session) -> OcDb:
-    db = OcDb(tmp_path / "opencode" / "opencode.db")
-    db.session(**session)
-    return db
+def change(s, sql):
+    """Write the session's database, then run `sql` on it: a column or table taken away."""
+    path = s.db.write()
+    with sqlite3.connect(path) as c:
+        c.execute(sql)
+    c.close()
+    return path
 
 
-def oc_read(db, sid=SID, *, turned=True, new_session=False, agent_model=BUILD_NULL,
+def oc_read(s, sid=..., *, turned=True, new_session=False, agent_model=BUILD_NULL,
             now=NOW, source=...):
-    path = str(db.path) if source is ... else source
-    return api.read("opencode", sid, cache_source=path, turned=turned,
-                    new_session=new_session, agent_model=agent_model, now=now)
-
+    """`s`'s clock: its database written first, unless `source` names the path to read."""
+    path = str(s.db.write()) if source is ... else source
+    return api.read("opencode", s.id if sid is ... else sid, cache_source=path,
+                    turned=turned, new_session=new_session, agent_model=agent_model,
+                    now=now)
 
 
 # ================================================================ the opencode reader
 
 def test_anthropic_counts_5_minutes(tmp_path):
-    db = oc_db(tmp_path, model=("anthropic", "claude-sonnet-4"))
-    db.request(SID, NOW - 299, "anthropic", "claude-sonnet-4")
-    clock = oc_read(db)
+    s = oc_db(tmp_path, request(NOW - 299, "anthropic", "claude-sonnet-4"),
+              model=("anthropic", "claude-sonnet-4"))
+    clock = oc_read(s)
     assert (clock.kind, clock.ttl_seconds, clock.key) == (
         "warm", 300, "opencode anthropic/claude-sonnet-4")
-    db2 = oc_db(tmp_path / "b", model=("anthropic", "claude-sonnet-4"))
-    db2.request(SID, NOW - 300, "anthropic", "claude-sonnet-4")
-    assert oc_read(db2).kind == "cold"
+    s2 = oc_db(tmp_path / "b", request(NOW - 300, "anthropic", "claude-sonnet-4"),
+               model=("anthropic", "claude-sonnet-4"))
+    assert oc_read(s2).kind == "cold"
 
 
 @pytest.mark.parametrize("model", ["gpt-5.6-sol", "gpt-6-astra", "gpt-5.6-terra",
                                    "gpt-5.6-luna"])
 def test_openai_counts_30_minutes_and_no_drift_lowers_it(tmp_path, model):
     for age, kind in ((1799, "warm"), (1800, "cold")):
-        db = oc_db(tmp_path / str(age), model=("openai", model))
-        db.request(SID, NOW - age, "openai", model)
-        clock = oc_read(db)
+        s = oc_db(tmp_path / str(age), request(NOW - age, "openai", model),
+                  model=("openai", model))
+        clock = oc_read(s)
         assert (clock.kind, clock.ttl_seconds) == (kind, 1800)
 
 
 @pytest.mark.parametrize("model", ["big-pickle", "space-bunny-free"])
 @pytest.mark.parametrize("age", [0, 30 * 86400])
 def test_a_free_next_pair_is_no_cache_at_any_age(tmp_path, model, age):
-    db = oc_db(tmp_path, model=("opencode", model))
-    db.request(SID, NOW - age, "opencode", model)
-    clock = oc_read(db)
+    s = oc_db(tmp_path, request(NOW - age, "opencode", model), model=("opencode", model))
+    clock = oc_read(s)
     assert clock.kind == "no-cache" and clock.ttl_seconds is None
     assert clock.reason == (f"opencode/{model} is a free model, so a cold cache costs "
                             "nothing and is not counted")
@@ -188,155 +126,171 @@ def test_a_free_next_pair_is_no_cache_at_any_age(tmp_path, model, age):
 
 def test_an_unknown_provider_reads_no_cache(tmp_path):
     """No lifetime row for the pair: no clock, `no-cache`."""
-    db = oc_db(tmp_path, model=("deepseek", "deepseek-chat"))
-    db.request(SID, NOW - 5, "deepseek", "deepseek-chat")
-    clock = oc_read(db)
+    s = oc_db(tmp_path, request(NOW - 5, "deepseek", "deepseek-chat"),
+              model=("deepseek", "deepseek-chat"))
+    clock = oc_read(s)
     assert clock.kind == "no-cache" and clock.reason == opencode.no_row(
         "deepseek", "deepseek-chat")
 
 
 def test_the_stamp_errs_old(tmp_path):
+    claude_x = ("anthropic", "claude-x")
     # First step: the message's creation, not the step-start 3 s later.
-    db = oc_db(tmp_path / "a", model=("anthropic", "claude-x"))
-    db.request(SID, NOW - 297, "anthropic", "claude-x", created=NOW - 300)
-    assert oc_read(db).kind == "cold"
+    s = oc_db(tmp_path / "a", request(NOW - 297, *claude_x, created=NOW - 300),
+              model=claude_x)
+    assert oc_read(s).kind == "cold"
     # A later step reads from the step-finish before it.
-    db = oc_db(tmp_path / "b", model=("anthropic", "claude-x"))
-    db.request(SID, NOW - 1000, "anthropic", "claude-x",
-               steps=((0, 10), (700, 710)))            # second step starts at NOW-300
-    clock = oc_read(db)
+    s = oc_db(tmp_path / "b", request(NOW - 1000, *claude_x,
+                                      steps=((0, 10), (700, 710))),   # starts at NOW-300
+              model=claude_x)
+    clock = oc_read(s)
     assert clock.age_seconds == pytest.approx(990, abs=0.01)
     # A step that started 6 minutes ago and finished 2 minutes ago is cold on 300 s.
-    db = oc_db(tmp_path / "c", model=("anthropic", "claude-x"))
-    db.request(SID, NOW - 360, "anthropic", "claude-x", steps=((0, 240),))
-    assert oc_read(db).kind == "cold"
+    s = oc_db(tmp_path / "c", request(NOW - 360, *claude_x, steps=((0, 240),)),
+              model=claude_x)
+    assert oc_read(s).kind == "cold"
     # A request in flight reads by its start.
-    db = oc_db(tmp_path / "d", model=("anthropic", "claude-x"))
-    db.request(SID, NOW - 100, "anthropic", "claude-x", steps=((0, None),))
-    clock = oc_read(db)
+    s = oc_db(tmp_path / "d", request(NOW - 100, *claude_x, steps=((0, None),)),
+              model=claude_x)
+    clock = oc_read(s)
     assert clock.kind == "warm" and clock.age_seconds == pytest.approx(100, abs=0.01)
 
 
 def test_a_compaction_and_a_child_session_do_not_move_the_clock(tmp_path):
-    db = oc_db(tmp_path, model=("anthropic", "claude-x"))
-    db.request(SID, NOW - 400, "anthropic", "claude-x")
-    db.request(SID, NOW - 10, "anthropic", "claude-x", agent="compaction", user=False)
-    db.request(SID, NOW - 9, "anthropic", "claude-x", summary=True, user=False)
-    db.session(SID_B, model=("anthropic", "claude-x"), parent=SID)
-    db.request(SID_B, NOW - 5, "anthropic", "claude-x")
-    clock = oc_read(db)
+    claude_x = ("anthropic", "claude-x")
+    s = oc_db(tmp_path, request(NOW - 400, *claude_x),
+              request(NOW - 10, *claude_x, agent="compaction", user=False),
+              request(NOW - 9, *claude_x, summary=True, user=False), model=claude_x)
+    add(s.child(model=claude_x), request(NOW - 5, *claude_x))
+    clock = oc_read(s)
     assert clock.kind == "cold" and clock.age_seconds == pytest.approx(400, abs=0.01)
 
 
-def fresh_session(tmp_path, **kw) -> OcDb:
-    db = oc_db(tmp_path, model=("openai", "gpt-5.6-sol"), **kw)
-    db.user(SID, NOW - 5, model=("openai", "gpt-5.6-sol"))
-    return db
+def fresh_session(tmp_path, **kw):
+    return oc_db(tmp_path, user(NOW - 5, model=("openai", "gpt-5.6-sol")),
+                 model=("openai", "gpt-5.6-sol"), **kw)
 
 
 def test_the_launchers_own_new_session_is_fresh(tmp_path):
-    db = fresh_session(tmp_path)
-    assert oc_read(db, turned=False).kind == "fresh"
-    assert oc_read(db, turned=True).kind == "unknown"
+    s = fresh_session(tmp_path)
+    assert oc_read(s, turned=False).kind == "fresh"
+    assert oc_read(s, turned=True).kind == "unknown"
 
 
-@pytest.mark.parametrize("case", ["assistant-no-step", "bad-role", "bad-data",
-                                  "file-part", "step-on-user", "totals", "version",
-                                  "missing-column", "no-session", "missing-db",
-                                  "unreadable-db", "locked-db", "no-part-table",
-                                  "no-source"])
+#: Each failed witness's code. A schema change, the sign of an OpenCode upgrade, is
+#: `unrecognised`; a database that opened but could not be read is `unreadable`; one that
+#: is missing or cannot be opened is `source-unreadable`.
+WITNESS_CODES = {
+    "assistant-no-step": "unrecognised", "bad-role": "unrecognised",
+    "bad-data": "unrecognised", "file-part": "no-request", "step-on-user": "no-request",
+    "totals": "no-request", "version": "no-request", "missing-column": "unrecognised",
+    "no-session": "no-record", "missing-db": "source-unreadable",
+    "unreadable-db": "source-unreadable", "locked-db": "unreadable",
+    "not-a-database": "unreadable", "no-part-table": "unrecognised",
+    "no-source": "no-source",
+}
+
+
+@pytest.mark.parametrize("case", list(WITNESS_CODES))
 def test_each_witness_that_fails_is_unknown(tmp_path, case):
     if case == "missing-column":
-        db = OcDb(tmp_path / "db" / "o.db",
-                  SCHEMA.replace("`tokens_cache_write` integer DEFAULT 0 NOT NULL,", ""))
-        db.session = None
-        with db.conn() as c:
-            c.execute("INSERT INTO session (id, project_id, slug, directory, title, "
-                      "version, time_created, time_updated) VALUES (?, 'g', 's', '/', "
-                      "'t', '1.18.34', 0, 0)", (SID,))
+        s = oc_db(tmp_path)
+        change(s, "ALTER TABLE session DROP COLUMN tokens_cache_write")
     elif case == "no-part-table":
-        db = OcDb(tmp_path / "db" / "o.db",
-                  SCHEMA.split("CREATE TABLE `part`")[0]
-                  + "CREATE TABLE `account` (`id` text); CREATE TABLE `credential` (`id` text);")
-        OcDb.session(db, model=("openai", "gpt-5.6-sol"))
+        s = oc_db(tmp_path, model=("openai", "gpt-5.6-sol"))
+        change(s, "DROP TABLE part")
     else:
-        db = fresh_session(tmp_path,
-                           totals=5 if case == "totals" else 0,
-                           version="1.18.35" if case == "version" else "1.18.34")
-    source = ...
+        # A writer's exclusive lock blocks a reader only outside WAL mode.
+        s = fresh_session(tmp_path, wal=case != "locked-db",
+                          totals=5 if case == "totals" else None,
+                          version="1.18.35" if case == "version" else "1.18.34")
     if case == "assistant-no-step":
-        db.message(SID, NOW - 4, {"role": "assistant", "agent": "build",
-                                  "providerID": "openai", "modelID": "gpt-5.6-sol"})
+        s.message({"role": "assistant", "agent": "build", "providerID": "openai",
+                   "modelID": "gpt-5.6-sol"}, at=NOW - 4)
     elif case == "bad-role":
-        db.message(SID, NOW - 4, {"role": "system"})
+        s.message({"role": "system"}, at=NOW - 4)
     elif case == "bad-data":
-        db.message(SID, NOW - 4, None, raw="{not json")
+        s.message("{not json", at=NOW - 4)
     elif case == "file-part":
-        mid = db.user(SID, NOW - 3)
-        db.part(SID, mid, NOW - 3, {"type": "file", "url": "x"})
+        user(NOW - 3)(s).part({"type": "file", "url": "x"}, at=NOW - 3)
     elif case == "step-on-user":
-        mid = db.user(SID, NOW - 3)
-        db.part(SID, mid, NOW - 3, {"type": "step-start"})
-    elif case == "no-session":
-        source = str(db.path)
-        clock = oc_read(db, sid=SID_B, turned=False, source=source)
+        user(NOW - 3)(s).part({"type": "step-start"}, at=NOW - 3)
+    path = s.db.write()
+    source = str(path)
+    if case == "no-session":
+        clock = oc_read(s, sid=SID_B, turned=False, source=source)
         assert clock.kind == "unknown" and "no session" in clock.reason
+        assert clock.code == WITNESS_CODES[case]
         return
     elif case == "missing-db":
         source = str(tmp_path / "nowhere.db")
     elif case == "unreadable-db":
-        db.path.chmod(0)
+        path.chmod(0)
+    elif case == "not-a-database":
+        source = str(tmp_path / "not-a.db")
+        (tmp_path / "not-a.db").write_bytes(b"this is not a database at all" * 100)
     elif case == "no-source":
         source = None
     try:
         if case == "locked-db":
-            holder = sqlite3.connect(db.path)
+            holder = sqlite3.connect(path)
             holder.execute("BEGIN EXCLUSIVE")
             try:
                 start = time.monotonic()
-                clock = oc_read(db, turned=False)
+                clock = oc_read(s, turned=False, source=source)
                 assert time.monotonic() - start < 2
             finally:
                 holder.rollback()
                 holder.close()
         else:
-            clock = oc_read(db, turned=False, source=source)
+            clock = oc_read(s, turned=False, source=source)
     finally:
         if case == "unreadable-db":
-            db.path.chmod(0o600)
+            path.chmod(0o600)
     assert clock.kind == "unknown", (case, clock)
+    assert clock.code == WITNESS_CODES[case], (case, clock)
     if case == "assistant-no-step":
         assert clock.reason == opencode.UNSHAPED_ROWS
+    elif case == "missing-column":
+        assert clock.reason == ("the OpenCode database's `session` table has no "
+                                "`tokens_cache_write` column")
+    elif case == "no-part-table":
+        assert clock.reason == "the OpenCode database has no `part` table"
+    elif case == "missing-db":
+        assert clock.reason == f"the OpenCode database {source} is missing"
+    elif case == "unreadable-db":
+        assert clock.reason == f"the OpenCode database {source} cannot be read"
+    elif case in ("locked-db", "not-a-database"):
+        assert clock.reason.startswith("the OpenCode database could not be read (")
 
 
 def test_the_session_rows_step_needs_only_the_session_tables_shape(tmp_path):
     """A free next pair from the session row's model needs the shape of `session`, not
     of `message` or `part`; the full read needs all three."""
-    schema = SCHEMA.split("CREATE TABLE `part`")[0] + \
-        "CREATE TABLE `account` (`id` text); CREATE TABLE `credential` (`id` text);"
-    db = OcDb(tmp_path / "free" / "o.db", schema)
-    OcDb.session(db, model=("opencode", "big-pickle"))
-    assert oc_read(db).kind == "no-cache"
-    db = OcDb(tmp_path / "paid" / "o.db", schema)
-    OcDb.session(db, model=("anthropic", "claude-A"))
-    clock = oc_read(db)
+    s = oc_db(tmp_path / "free", model=("opencode", "big-pickle"))
+    change(s, "DROP TABLE part")
+    assert oc_read(s).kind == "no-cache"
+    s = oc_db(tmp_path / "paid", model=("anthropic", "claude-A"))
+    change(s, "DROP TABLE part")
+    clock = oc_read(s)
     assert clock.kind == "unknown" and "no `part` table" in clock.reason
+    assert clock.code == "unrecognised"
 
 
 def test_the_pairs_under_the_wildcard_row(tmp_path):
     def read(**kw):
-        return oc_read(db, **kw)
+        return oc_read(s, **kw)
     # A last request on claude-A with the session's model now claude-B: cold.
-    db = oc_db(tmp_path / "a", model=("anthropic", "claude-B"))
-    db.request(SID, NOW - 10, "anthropic", "claude-A")
+    s = oc_db(tmp_path / "a", request(NOW - 10, "anthropic", "claude-A"),
+              model=("anthropic", "claude-B"))
     assert read().reason == opencode.CHANGED
     # A provider change: cold.
-    db = oc_db(tmp_path / "b", model=("bedrock", "claude-A"))
-    db.request(SID, NOW - 10, "anthropic", "claude-A")
+    s = oc_db(tmp_path / "b", request(NOW - 10, "anthropic", "claude-A"),
+              model=("bedrock", "claude-A"))
     assert read().reason == opencode.CHANGED
     # The default agent's model differs from the session's: cold.
-    db = oc_db(tmp_path / "c", model=("anthropic", "claude-A"))
-    db.request(SID, NOW - 10, "anthropic", "claude-A")
+    s = oc_db(tmp_path / "c", request(NOW - 10, "anthropic", "claude-A"),
+              model=("anthropic", "claude-A"))
     assert read().kind == "warm"
     assert read(agent_model={"agent": "build", "model": "anthropic/claude-B"}).reason == \
         opencode.CHANGED
@@ -349,42 +303,25 @@ def test_the_pairs_under_the_wildcard_row(tmp_path):
     clock = read(agent_model=api.MISSING)
     assert clock.kind == "unknown" and clock.reason == opencode.NO_AGENT
     # No session model and no user model: unknown (no server default is read).
-    db = oc_db(tmp_path / "d", model=None)
-    db.request(SID, NOW - 10, "anthropic", "claude-A", user=False)
+    s = oc_db(tmp_path / "d", request(NOW - 10, "anthropic", "claude-A", user=False),
+              model=None)
     assert read().kind == "unknown"
     # A session model that will not parse, and a latest user model that will not.
-    db = oc_db(tmp_path / "e", raw_model="{not json")
-    db.request(SID, NOW - 10, "anthropic", "claude-A")
+    s = oc_db(tmp_path / "e", request(NOW - 10, "anthropic", "claude-A"),
+              raw_model="{not json")
     assert read().kind == "unknown"
-    db = oc_db(tmp_path / "f", model=None)
-    db.request(SID, NOW - 10, "anthropic", "claude-A")
-    db.user(SID, NOW - 5, raw_model="anthropic/claude-A")
+    s = oc_db(tmp_path / "f", request(NOW - 10, "anthropic", "claude-A"),
+              user(NOW - 5, raw_model="anthropic/claude-A"), model=None)
     assert read().kind == "unknown"
     # The latest user model, when the session has none, gives the next pair.
-    db = oc_db(tmp_path / "g", model=None)
-    db.request(SID, NOW - 10, "anthropic", "claude-A")
+    s = oc_db(tmp_path / "g", request(NOW - 10, "anthropic", "claude-A"), model=None)
     assert read().kind == "warm"
     # A last assistant message with no providerID: unknown.
-    db = oc_db(tmp_path / "h", model=("anthropic", "claude-A"))
-    mid = db.message(SID, NOW - 10, {"role": "assistant", "agent": "build",
-                                     "modelID": "claude-A"})
-    db.part(SID, mid, NOW - 9, {"type": "step-start"})
+    s = oc_db(tmp_path / "h", model=("anthropic", "claude-A"))
+    s.message({"role": "assistant", "agent": "build", "modelID": "claude-A"},
+              at=NOW - 10).part({"type": "step-start"}, at=NOW - 9)
     clock = read()
     assert clock.kind == "unknown" and clock.reason == opencode.NO_PAIR
-
-
-def test_the_authorizer_refuses_account_and_credential(tmp_path):
-    db = oc_db(tmp_path)
-    conn = opencode.connect(db.path)
-    try:
-        for table in ("account", "credential"):
-            with pytest.raises(sqlite3.DatabaseError):
-                conn.execute(f"SELECT * FROM {table}").fetchall()
-        with pytest.raises(sqlite3.DatabaseError):
-            conn.execute("PRAGMA table_info(credential)").fetchall()
-        assert conn.execute("SELECT id FROM session").fetchall() == [(SID,)]
-    finally:
-        conn.close()
 
 
 def test_a_revert_pending_is_unknown_with_and_without_a_request(tmp_path):
@@ -401,22 +338,21 @@ def test_a_revert_pending_is_unknown_with_and_without_a_request(tmp_path):
     fresh check still needs `turned` false, which no session that has had a turn has."""
     revert = json.dumps({"messageID": "msg_000000000000000TestRevert"},
                         separators=(",", ":"))
-    db = oc_db(tmp_path / "a", model=("anthropic", "claude-A"), revert=revert)
-    db.request(SID, NOW - 10, "anthropic", "claude-A")
-    clock = oc_read(db)
+    s = oc_db(tmp_path / "a", request(NOW - 10, "anthropic", "claude-A"),
+              model=("anthropic", "claude-A"), revert=revert)
+    clock = oc_read(s)
     assert clock.kind == "unknown" and clock.reason == opencode.REVERT
-    db = fresh_session(tmp_path / "b", revert=revert)
-    assert oc_read(db, turned=False).reason == opencode.REVERT
+    s = fresh_session(tmp_path / "b", revert=revert)
+    assert oc_read(s, turned=False).reason == opencode.REVERT
 
 # ====================================================================== free models
 
-def free_db(tmp_path, *, last=("opencode", "big-pickle"), age=600, model=...,
-            **session) -> OcDb:
-    db = oc_db(tmp_path, model=("opencode", "big-pickle") if model is ... else model,
-               **session)
+def free_db(tmp_path, *, last=("opencode", "big-pickle"), age=600, model=..., **session):
+    s = oc_db(tmp_path, model=("opencode", "big-pickle") if model is ... else model,
+              **session)
     if last is not None:
-        db.request(SID, NOW - age, *last)
-    return db
+        add(s, request(NOW - age, *last))
+    return s
 
 
 @pytest.mark.parametrize("case", [
@@ -427,27 +363,27 @@ def free_db(tmp_path, *, last=("opencode", "big-pickle"), age=600, model=...,
 def test_a_known_free_next_pair_is_no_cache_at_any_age(tmp_path, case):
     agent = BUILD_NULL
     source = ...
-    sid = SID
+    sid = ...
     kw = {}
     if case == "last-big-pickle":
-        db = free_db(tmp_path, age=40 * 86400)
+        s = free_db(tmp_path, age=40 * 86400)
     elif case == "last-space-bunny":
-        db = free_db(tmp_path, last=("opencode", "space-bunny-free"))
+        s = free_db(tmp_path, last=("opencode", "space-bunny-free"))
     elif case == "change-onto-free":
-        db = free_db(tmp_path, last=("anthropic", "claude-A"))
+        s = free_db(tmp_path, last=("anthropic", "claude-A"))
     elif case == "no-request-turned":
-        db = free_db(tmp_path, last=None)
+        s = free_db(tmp_path, last=None)
         kw["turned"] = True
     elif case == "no-request-fresh":
-        db = free_db(tmp_path, last=None)
+        s = free_db(tmp_path, last=None)
         kw["turned"] = False
     elif case == "revert-by-session-row":
-        db = free_db(tmp_path, revert=json.dumps({"messageID": "msg_x"}))
+        s = free_db(tmp_path, revert=json.dumps({"messageID": "msg_x"}))
     elif case == "unshaped-row-by-session-row":
-        db = free_db(tmp_path)
-        db.message(SID, NOW - 1, {"role": "tool"})
+        s = free_db(tmp_path)
+        s.message({"role": "tool"}, at=NOW - 1)
     else:
-        db = free_db(tmp_path)
+        s = free_db(tmp_path)
         agent = FREE_AGENT
         if case == "agent-no-source":
             source = None
@@ -461,7 +397,7 @@ def test_a_known_free_next_pair_is_no_cache_at_any_age(tmp_path, case):
             sid, kw["new_session"] = None, True
         elif case == "no-id-no-new-session":
             sid = None
-    clock = oc_read(db, sid=sid, agent_model=agent, source=source, **kw)
+    clock = oc_read(s, sid, agent_model=agent, source=source, **kw)
     assert clock.kind == "no-cache", (case, clock)
     assert clock.key in ("opencode opencode/big-pickle (free)",)
 
@@ -471,66 +407,64 @@ def test_a_known_free_next_pair_is_no_cache_at_any_age(tmp_path, case):
 def test_a_free_model_that_cannot_be_read_as_next_is_unknown(tmp_path, case):
     agent, source = BUILD_NULL, ...
     if case == "no-agent-model":
-        db, agent = free_db(tmp_path), api.MISSING
+        s, agent = free_db(tmp_path), api.MISSING
     elif case == "null-model-no-db":
-        db, source = free_db(tmp_path), None
+        s, source = free_db(tmp_path), None
     elif case == "bad-session-model":
-        db = free_db(tmp_path, model=None, raw_model="{nope")
+        s = free_db(tmp_path, model=None, raw_model="{nope")
     elif case in ("user-model-revert", "user-model-unshaped"):
-        db = free_db(tmp_path, model=None,
-                     revert=json.dumps({"messageID": "m"}) if case == "user-model-revert"
-                     else None)
+        s = free_db(tmp_path, model=None,
+                    revert=json.dumps({"messageID": "m"}) if case == "user-model-revert"
+                    else None)
         if case == "user-model-unshaped":
-            db.message(SID, NOW - 1, {"role": "tool"})
+            s.message({"role": "tool"}, at=NOW - 1)
     else:
-        db = free_db(tmp_path)
+        s = free_db(tmp_path)
         agent = FREE_AGENT
         table.TABLE_PATH.write_text("not = [toml")
-    clock = oc_read(db, agent_model=agent, source=source)
+    clock = oc_read(s, agent_model=agent, source=source)
     assert clock.kind == "unknown", (case, clock)
 
 
 def test_a_paid_next_pair_after_a_free_one_reads_by_the_pair_rule(tmp_path):
-    db = free_db(tmp_path, model=("anthropic", "claude-A"))
-    clock = oc_read(db)
+    s = free_db(tmp_path, model=("anthropic", "claude-A"))
+    clock = oc_read(s)
     assert clock.kind == "cold" and clock.reason == opencode.CHANGED
-    db = free_db(tmp_path / "b", last=("opencode", "gpt-5.5"), model=("opencode", "gpt-5.5"))
-    clock = oc_read(db)
+    s = free_db(tmp_path / "b", last=("opencode", "gpt-5.5"), model=("opencode", "gpt-5.5"))
+    clock = oc_read(s)
     assert clock.kind == "no-cache" and clock.reason == opencode.no_row("opencode",
-                                                                              "gpt-5.5")
+                                                                         "gpt-5.5")
 
 
 def test_the_rule_reads_only_the_next_pair(tmp_path, monkeypatch):
     """Mutation guards: a free next pair never needs the last request, and an unknown
     next pair never falls through to the last one."""
-    db = free_db(tmp_path, last=("opencode", "big-pickle"), model=None)
-    db.user(SID, NOW - 1, model=("anthropic", "claude-A"))
-    clock = oc_read(db)
+    s = free_db(tmp_path, last=("opencode", "big-pickle"), model=None)
+    add(s, user(NOW - 1, model=("anthropic", "claude-A")))
+    clock = oc_read(s)
     assert clock.kind == "cold", "the next pair is the latest user model, not the last"
-    db = free_db(tmp_path / "b", last=("opencode", "big-pickle"))
-    assert oc_read(db, agent_model=api.MISSING).kind == "unknown"
+    s = free_db(tmp_path / "b", last=("opencode", "big-pickle"))
+    assert oc_read(s, agent_model=api.MISSING).kind == "unknown"
 
 
 # ============================================================================ drift
 
 
-
 def test_a_stamp_in_the_future_is_unknown(tmp_path):
-    db = OcDb(tmp_path / "oc.db")
-    db.session(SID, model=("opencode", "gpt-5.6-sol"))
-    db.request(SID, NOW + 6, "openai", "gpt-5.6-sol")
-    clock = oc_read(db, agent_model=BUILD_NULL)
+    s = oc_db(tmp_path, request(NOW + 6, "openai", "gpt-5.6-sol"),
+              model=("opencode", "gpt-5.6-sol"))
+    clock = oc_read(s, agent_model=BUILD_NULL)
     assert (clock.kind, clock.code) == ("unknown", "future-stamp")
     assert "stamped in the future" in clock.reason
 
 
 def test_every_unknown_and_no_cache_carries_a_code(tmp_path):
     """A caller branches on the code, never on the reason's words."""
-    db = oc_db(tmp_path, model=("deepseek", "deepseek-chat"))
-    db.request(SID, NOW - 5, "deepseek", "deepseek-chat")
-    assert oc_read(db).code == "no-row"
-    assert oc_read(db, agent_model=api.MISSING).code == "no-pair"
-    assert oc_read(db, source=None).code in ("no-source", "no-pair")
-    assert oc_read(db, sid=SID_B, turned=False).code == "no-record"
+    s = oc_db(tmp_path, request(NOW - 5, "deepseek", "deepseek-chat"),
+              model=("deepseek", "deepseek-chat"))
+    assert oc_read(s).code == "no-row"
+    assert oc_read(s, agent_model=api.MISSING).code == "no-pair"
+    assert oc_read(s, source=None).code in ("no-source", "no-pair")
+    assert oc_read(s, sid=SID_B, turned=False).code == "no-record"
     free = oc_db(tmp_path / "free")
     assert oc_read(free, agent_model=FREE_AGENT).code == "free"

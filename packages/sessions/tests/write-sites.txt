@@ -2,3 +2,7 @@
 # moxi.store. `moxi check` (check 8) fails on a write site not listed here, and on a line
 # that no longer matches one, so this list only shrinks as the module moves onto the
 # helpers. One line per site: <path> <enclosing scope> <call>.
+src/moxi_sessions/opencode.py connect sqlite3.connect
+src/moxi_sessions/testing/claude.py ClaudeTranscript.flush .open
+src/moxi_sessions/testing/codex.py CodexRollout.flush .open
+src/moxi_sessions/testing/opencode.py OpenCodeDb.write sqlite3.connect

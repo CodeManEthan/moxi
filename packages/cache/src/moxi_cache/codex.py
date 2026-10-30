@@ -5,30 +5,35 @@ rollout recognised line by line, in the format of the Codex version the reader w
 against. Anything it does not recognise is `unknown`. Recognition is a whitelist, never a
 deny-list.
 
-* **Finding it.** sessions lists every file under `<cache_source>/*/*/*/` whose name
-  parses by Codex's own rule as `rollout-<timestamp>-<thread>[_<rollout id>].jsonl[.zst]`
-  for this thread (`find_rollout`), at every read. None: no rollout. One `.jsonl`: read.
-  One `.jsonl.zst`: Codex compressed it after 7 idle days, so `cold` with no age. More than
-  one: the thread's history is split (a revert, or one rollout in two states), `unknown`.
-* **The whole-history check, on line 1.** Line 1 is the file's one `session_meta`, its
-  `id` and `session_id` are the thread id, its `history_mode` is `legacy` or `paginated`,
-  and every payload key is on `META_KEYS`. A key that refers to history kept elsewhere
-  (`history_base`, `forked_from_id`, ...) is not on it, and neither is any key not seen.
-* **Reading it.** Backwards through sessions' `read_back` in 64 KB blocks, to the earliest
-  line the verdict needs, and line 1 (`head=True`), with a 64 MB limit. Every line covered
-  must parse as a JSON object with a `timestamp` and a `type` on `TOP_KINDS`, and an
-  `event_msg` or `response_item` must carry a `payload.type` on its list. The one
-  exception is a last line with no newline that does not parse: Codex is writing it, and
-  it is skipped.
-* **The last request** is the last `token_usage_record` whose `thread_id` and
-  `session_id` are both the thread id: the thread's own cache key. Its `timestamp`, the
-  end of the response, is the clock's stamp. A guardian review or an internal child uses
+* **Finding it.** sessions' `find` lists every file under `<cache_source>/*/*/*/` whose
+  name parses by Codex's own rule as `rollout-<timestamp>-<thread>[_<rollout id>].jsonl[.zst]`
+  for this thread, at every read. A root that holds none (`miss`): no rollout. A root it
+  cannot list: `unknown`. One `.jsonl`: read. One `.jsonl.zst`: Codex compressed it after
+  7 idle days, so `cold` with no age. More than one: the thread's history is split (a
+  revert, or one rollout in two states), `unknown`.
+* **The whole-history check, on line 1.** Line 1's records are one `session_meta` marker,
+  its `id` and `session_id` are the thread id, its `history_mode` is `legacy` or
+  `paginated`, and it has no payload key off sessions' `META_KEYS` (`unlisted_keys` is
+  empty). A key that refers to history kept elsewhere (`history_base`, `forked_from_id`,
+  ...) is not on that list, and neither is any key not seen.
+* **Reading it.** Backwards through sessions' `records_back` in 64 KB blocks, to the
+  earliest record the verdict needs, and line 1 (`head=True`), with a 64 MB limit. The
+  read asks for every kind of record, because the evidence rule must see every line. A
+  `malformed` record, or an `other` record sessions' lists do not recognise, is `unknown`.
+  The one exception is a last line with no newline that does not decode: Codex is writing
+  it, and it is skipped.
+* **The last request** is the newest request from a `token_usage_record` whose `thread_id`
+  and `session_id` are both the thread id: the thread's own cache key. Its time, the end
+  of the response, is the clock's stamp. A guardian review or an internal child uses
   another key and never moves the clock.
 * **The two pairs.** The last model is the `model` of the record's own turn's
   `turn_context`; the last provider is the latest `thread_settings_applied` of this thread
-  at or before the record, else line 1's `model_provider`. The next model and provider are
-  the latest of each in the whole file. Pairs that differ read `cold`; equal pairs are
-  looked up in the lifetime table.
+  at or before the record, else line 1's `model_provider`. Both are read from the settings
+  markers the read covered, not from the request's own model and provider: a backward
+  read sees no settings line older than what it covered, so line 1's provider is used only
+  when the read reached line 1. The next model and provider are the latest of each in the
+  whole file. Pairs that differ read `cold`; equal pairs are looked up in the lifetime
+  table.
 * **`fresh`** only for a thread the launcher's own start attempt created after a read
   that found no record (`turned` false), with no rollout yet or a whole-history rollout of
   fresh kinds alone, made by a Codex version the reader was checked against; or, with no
@@ -43,13 +48,13 @@ learning drift store writes it before the read returns.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from moxi_sessions.api import claude as transcripts
 from moxi_sessions.api import codex as rollouts
-from moxi_sessions.api import read_back
+from moxi_sessions.api import find, records_back
 
 from . import clock as _clock
 from . import table as _table
@@ -59,47 +64,16 @@ from .drift import DriftView
 
 HARNESS = "codex"
 
-#: The Codex versions whose new threads read as `fresh`. A thread made by any other
-#: version reads `unknown` until its first request completes.
-CHECKED_VERSIONS = ("0.153.0",)
-
-#: Every top-level line kind recognised in a rollout. Codex 0.153.0 can also write
-#: `inter_agent_communication`, `security_risk_score` and `realtime_item`; none has been
-#: seen, so each stays unrecognised until the reader is checked against one.
-TOP_KINDS = ("session_meta", "turn_context", "world_state", "token_usage_record",
-             "compacted", "event_msg", "response_item")
-
-#: `event_msg` payload types Codex 0.153.0 persists in a rollout (its rollout policy's
-#: `should_persist_event_msg`), by their serialized names.
-EVENT_KINDS = ("item_completed", "token_count", "thread_goal_updated", "thread_rolled_back",
-               "turn_aborted", "task_started", "task_complete", "thread_settings_applied",
-               "user_message", "agent_message", "agent_reasoning",
-               "agent_reasoning_raw_content", "entered_review_mode", "exited_review_mode",
-               "patch_apply_end", "context_compacted", "mcp_tool_call_end", "web_search_end",
-               "image_generation_end", "sub_agent_activity")
-
-#: `response_item` payload types Codex 0.153.0 persists (`should_persist_response_item`).
-RESPONSE_KINDS = ("message", "agent_message", "reasoning", "local_shell_call",
-                  "function_call", "tool_search_call", "function_call_output",
-                  "tool_search_output", "custom_tool_call", "custom_tool_call_output",
-                  "web_search_call", "image_generation_call", "compaction",
-                  "context_compaction")
-
-#: The `session_meta` payload keys of a whole-history rollout: every key on the rollouts
-#: of 0.153.0 the reader was checked against. A key that refers to history kept elsewhere
-#: is not here.
-META_KEYS = ("session_id", "id", "timestamp", "cwd", "originator", "cli_version", "source",
-             "thread_source", "model_provider", "base_instructions", "history_mode",
-             "multi_agent_version", "context_window", "git")
-
-HISTORY_MODES = ("legacy", "paginated")
-
 #: Drift: the smallest previous prompt an observation is made from, and the share of it a
 #: request must read from the cache to count as warm.
 DRIFT_MIN_INPUT = 16_384
 DRIFT_SHARE = 0.5
 #: A cold landing sets the lifetime to this share of the gap, rounded down to the minute.
 DRIFT_LOWER_TO = 0.8
+
+#: Why a malformed record is skipped when it is the last line, unterminated: one that does
+#: not decode is the line Codex is still writing.
+BEING_WRITTEN = "undecodable"
 
 # The reasons.
 NO_SESSION_YET = "no thread id reported yet"
@@ -120,109 +94,73 @@ NO_STAMP = "the rollout's last request has no readable time"
 NO_DRIFT = ("no cache drift record was given, so the measured lifetime cannot be read")
 
 
-# --------------------------------------------------------------------------- lines
+# --------------------------------------------------------------------------- records
 
-@dataclass
-class Line:
-    """What the reader keeps of one rollout line."""
-    kind: str
-    sub: str | None
-    ts: float | None
-    raw_ts: object
-    payload: dict
+def _turn(rec):
+    """The turn a record names, or None."""
+    return rec.turn_id if isinstance(rec.turn_id, str) else None
 
 
-class Unrecognised(Exception):
-    pass
+def _ts(rec) -> float | None:
+    t = rec.time
+    if isinstance(t, (int, float)) and not isinstance(t, bool):
+        return float(t)
+    return None
 
 
-def judge_line(raw: bytes) -> Line:
-    """One complete line -> Line, or Unrecognised."""
-    try:
-        obj = json.loads(raw)
-    except ValueError as e:
-        raise Unrecognised("will not parse") from e
-    if not isinstance(obj, dict):
-        raise Unrecognised("not an object")
-    kind = obj.get("type")
-    stamp = obj.get("timestamp")
-    if kind not in TOP_KINDS or not isinstance(stamp, str):
-        raise Unrecognised(f"kind {kind!r}")
-    payload = obj.get("payload")
-    if not isinstance(payload, dict):
-        raise Unrecognised("no payload")
-    sub = None
-    if kind == "event_msg":
-        sub = payload.get("type")
-        if sub not in EVENT_KINDS:
-            raise Unrecognised(f"event {sub!r}")
-    elif kind == "response_item":
-        sub = payload.get("type")
-        if sub not in RESPONSE_KINDS:
-            raise Unrecognised(f"response item {sub!r}")
-    return Line(kind=kind, sub=sub, ts=transcripts.parse_timestamp(stamp), raw_ts=stamp,
-                payload=_slim(kind, sub, payload))
+def _iso(t: float | None) -> str | None:
+    if t is None:
+        return None
+    moment = datetime.fromtimestamp(t, timezone.utc)
+    return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
 
 
-def _slim(kind, sub, payload: dict) -> dict:
-    """The fields the clock reads; the rest of a line (prompts, outputs) is dropped."""
-    if kind == "token_usage_record":
-        usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
-        return {"thread_id": payload.get("thread_id"),
-                "session_id": payload.get("session_id"),
-                "turn_id": payload.get("turn_id"),
-                "response_id": payload.get("response_id"),
-                "input": usage.get("input_tokens"),
-                "cached": usage.get("cached_input_tokens")}
-    if kind == "turn_context":
-        return {"turn_id": payload.get("turn_id"), "model": payload.get("model")}
-    if kind == "session_meta":
-        return dict(payload)
-    if sub == "thread_settings_applied":
-        settings = payload.get("thread_settings")
-        settings = settings if isinstance(settings, dict) else {}
-        return {"thread_id": payload.get("thread_id"),
-                "model": settings.get("model"),
-                "provider": settings.get("model_provider_id")}
-    if sub in ("task_started", "task_complete", "turn_aborted"):
-        return {"turn_id": payload.get("turn_id")}
-    if sub == "item_completed":
-        item = payload.get("item") if isinstance(payload.get("item"), dict) else {}
-        return {"item_type": item.get("type")}
-    if kind == "response_item" and sub == "message":
-        return {"role": payload.get("role")}
-    return {}
+def _marker(rec, *names) -> bool:
+    return rec.kind == "marker" and rec.marker in names
 
 
-def _is_tsa(line: Line) -> bool:
-    return line.kind == "event_msg" and line.sub == "thread_settings_applied"
+def _is_tsa(rec) -> bool:
+    return _marker(rec, "settings") and rec.raw_kind == "event_msg/thread_settings_applied"
 
 
-def _is_record(line: Line) -> bool:
-    return line.kind == "token_usage_record"
+def _is_context(rec) -> bool:
+    return _marker(rec, "settings") and rec.raw_kind == "turn_context"
 
 
-def _own(line: Line, thread_id: str) -> bool:
-    return (_is_record(line) and line.payload.get("thread_id") == thread_id
-            and line.payload.get("session_id") == thread_id)
+def _is_record(rec) -> bool:
+    """A request from a `token_usage_record`. An older Codex's request, read from a
+    `token_count` event, is not one."""
+    return rec.kind == "request" and rec.raw_kind == "token_usage_record"
 
 
-def _is_start(line: Line) -> bool:
-    return line.kind == "event_msg" and line.sub == "task_started"
+def _own(rec, thread_id: str) -> bool:
+    return (_is_record(rec) and rec.extra.get("thread_id") == thread_id
+            and rec.extra.get("session_id") == thread_id)
 
 
-def _breaks_continuation(line: Line) -> bool:
+def _is_start(rec) -> bool:
+    return _marker(rec, "turn_start")
+
+
+def _is_token_count(rec) -> bool:
+    return rec.raw_kind == "event_msg/token_count"
+
+
+def _breaks_continuation(rec) -> bool:
     """A line after which the next request may read a low cache for a reason other than
     expiry: a compaction, a rollback, an aborted turn."""
-    return (line.kind == "compacted"
-            or (line.kind == "event_msg"
-                and line.sub in ("context_compacted", "thread_rolled_back", "turn_aborted")))
+    return _marker(rec, "compaction", "rollback", "turn_aborted")
+
+
+def _unrecognised(rec) -> bool:
+    return (rec.kind == "malformed"
+            or (rec.kind == "other" and not rec.recognised))
 
 
 @dataclass
 class Scan:
-    """What one read covered: line 1, and the covered lines oldest first."""
-    meta: Line | None = None
+    """What one read covered: line 1's marker, and the covered records oldest first."""
+    meta: object = None
     lines: list = field(default_factory=list)
     reached_start: bool = False
     hit_limit: bool = False
@@ -249,42 +187,52 @@ def read(thread_id, *, cache_source, turned, new_session, now, drift=MISSING,
     if not cache_source:
         return unknown(_clock.NO_SOURCE, NO_ROOT)
     root = Path(cache_source)
-    try:
-        found = rollouts.find_rollout(root, thread_id)
-    except OSError:
+    found = find(HARNESS, thread_id, root=root)
+    if not found.found:
+        if found.probes and found.probes[0].outcome == transcripts.MISS:
+            if not turned:
+                return Clock(FRESH)      # the launcher's own new thread: no rollout yet
+            return unknown(_clock.NO_RECORD, f"no rollout for thread {thread_id} under "
+                                             f"{root}, and nothing shows it has made no "
+                                             "request")
         return unknown(_clock.SOURCE_UNREADABLE,
                        f"the Codex sessions directory {root} is missing or unreadable")
-    if not found:
-        if not turned:
-            return Clock(FRESH)          # the launcher's own new thread: no rollout yet
-        return unknown(_clock.NO_RECORD, f"no rollout for thread {thread_id} under {root}, "
-                                         "and nothing shows it has made no request")
-    if len(found) > 1:
+    hits = found.hits
+    if len(hits) > 1:
         return unknown(_clock.SPLIT, SPLIT)
-    path = found[0]
-    if path.name.endswith(".zst"):
+    if hits[0].compressed:
         return Clock(COLD, reason=COMPRESSED, code=_clock.COMPRESSED)
     limit = _clock.CLOCK_SCAN_LIMIT if limit is None else limit
     try:
-        with read_back(path, block=_clock.CLOCK_BLOCK, limit=limit, head=True) as reader:
-            return _read_open(reader, thread_id, table=table, turned=turned, now=now,
+        with records_back(hits[0].source, head=True, block=_clock.CLOCK_BLOCK,
+                          limit=limit) as back:
+            return _read_open(back, thread_id, table=table, turned=turned, now=now,
                               drift=drift, bound_at=bound_at, judged=judged)
     except OSError as e:
-        return unknown(_clock.UNREADABLE, f"the rollout could not be read ({e.strerror or e})")
+        cause = e.__cause__ if isinstance(e.__cause__, OSError) else e
+        return unknown(_clock.UNREADABLE,
+                       f"the rollout could not be read ({cause.strerror or cause})")
 
 
-def _whole_history(meta: Line | None, thread_id: str) -> bool:
-    if meta is None or meta.kind != "session_meta":
-        return False
-    p = meta.payload
-    if set(p) - set(META_KEYS):
-        return False
-    return (p.get("id") == thread_id and p.get("session_id") == thread_id
-            and p.get("history_mode") in HISTORY_MODES)
+def _whole_history(first, thread_id: str):
+    """Line 1's `session_meta` marker when it shows the thread's whole history, else
+    None."""
+    if not first or len(first) != 1:
+        return None
+    meta = first[0]
+    if not _marker(meta, "session_meta"):
+        return None
+    if meta.fields.get("unlisted_keys"):
+        return None
+    if meta.extra.get("id") != thread_id or meta.extra.get("session_id") != thread_id:
+        return None
+    if meta.fields.get("history_mode") not in rollouts.HISTORY_MODES:
+        return None
+    return meta
 
 
 class _Need:
-    """When the backwards scan has covered every line the verdict needs: the last own
+    """When the backwards scan has covered every record the verdict needs: the last own
     record, its turn's `turn_context`, and a settings line at or before it (else the scan
     runs to line 1). With drift on, also the previous own record of the oldest turn to
     judge, that record's turn start, and a settings line at or before it."""
@@ -302,35 +250,34 @@ class _Need:
         self.prev_start = False
         self.prev_settings = False
 
-    def feed(self, line: Line) -> None:
+    def feed(self, rec) -> None:
         if self.record is None:
-            if _own(line, self.thread_id):
-                self.record = line
+            if _own(rec, self.thread_id):
+                self.record = rec
             return
-        if (line.kind == "turn_context"
-                and line.payload.get("turn_id") == self.record.payload.get("turn_id")):
+        if _is_context(rec) and _turn(rec) == _turn(self.record):
             self.context = True
-        if _is_tsa(line):
+        if _is_tsa(rec):
             self.settings_before = True
         if self.drift:
-            self.feed_drift(line)
+            self.feed_drift(rec)
 
-    def feed_drift(self, line: Line) -> None:
-        turn = line.payload.get("turn_id")
+    def feed_drift(self, rec) -> None:
+        turn = _turn(rec)
         if self.prev_record is None:
             if not self.boundary_seen:
                 if self.judged is None:
-                    if _is_start(line) and turn == self.newest_turn:
+                    if _is_start(rec) and turn == self.newest_turn:
                         self.boundary_seen = True
                     return
                 if turn is not None and turn == self.judged:
                     self.boundary_seen = True
-            if self.boundary_seen and _own(line, self.thread_id):
-                self.prev_record = line
+            if self.boundary_seen and _own(rec, self.thread_id):
+                self.prev_record = rec
             return
-        if _is_start(line) and turn == self.prev_record.payload.get("turn_id"):
+        if _is_start(rec) and turn == _turn(self.prev_record):
             self.prev_start = True
-        if _is_tsa(line):
+        if _is_tsa(rec):
             self.prev_settings = True
 
     def done(self) -> bool:
@@ -345,46 +292,37 @@ def _limit_mb() -> int:
     return _clock.CLOCK_SCAN_LIMIT // (1024 * 1024)
 
 
-def _read_open(reader, thread_id, *, table, turned, now, drift, bound_at, judged) -> Clock:
-    head = reader.first
-    try:
-        meta = judge_line(head) if head is not None else None
-    except Unrecognised:
-        meta = None
-    if meta is None or not _whole_history(meta, thread_id):
+def _read_open(back, thread_id, *, table, turned, now, drift, bound_at, judged) -> Clock:
+    meta = _whole_history(back.first, thread_id)
+    if meta is None:
         return unknown(_clock.NOT_WHOLE, NOT_WHOLE)
     need = _Need(thread_id, judged)
     newest_first: list = []
     measured_checked = False
-    for raw, last in reader:
-        try:
-            line = judge_line(raw)
-        except Unrecognised:
-            if last:
-                try:
-                    json.loads(raw)
-                except ValueError:
-                    continue             # the line Codex is writing as the read runs
+    for rec in back:
+        if _unrecognised(rec):
+            if rec.kind == "malformed" and rec.unterminated and rec.why == BEING_WRITTEN:
+                continue                 # the line Codex is writing as the read runs
             return unknown(_clock.UNRECOGNISED, UNRECOGNISED)
-        if line.kind == "session_meta":
+        if _marker(rec, "session_meta"):
             return unknown(_clock.NOT_WHOLE, NOT_WHOLE)
-        if _is_tsa(line) and line.payload.get("thread_id") != thread_id:
+        if _is_tsa(rec) and rec.extra.get("thread_id") != thread_id:
             return unknown(_clock.OTHER_THREAD, OTHER_THREAD)
-        newest_first.append(line)
-        need.feed(line)
+        newest_first.append(rec)
+        need.feed(rec)
         if (need.record is not None and need.context and need.settings_before
                 and not measured_checked):
             measured_checked = True
-            need.newest_turn = need.record.payload.get("turn_id")
+            need.newest_turn = _turn(need.record)
             if _last_pair_measured(newest_first, meta, thread_id, table):
                 need.drift = True
                 _refeed_for_drift(need, newest_first)
         if need.done():
             break
-    reached_start = reader.ended == "start"
+    reached_start = back.ended == "start"
     lines = list(reversed(newest_first))
     scan = Scan(meta=meta, lines=lines, reached_start=reached_start,
-                hit_limit=reader.ended == "limit")
+                hit_limit=back.ended == "limit")
     if need.record is None:
         if not reached_start:
             return unknown(_clock.SCAN_LIMIT, f"no request found in the last {_limit_mb()} MB "
@@ -398,94 +336,100 @@ def _read_open(reader, thread_id, *, table, turned, now, drift, bound_at, judged
 
 
 def _refeed_for_drift(need: _Need, newest_first: list) -> None:
-    """Drift was switched on mid-scan: replay the lines already read past the record."""
+    """Drift was switched on mid-scan: replay the records already read past the record."""
     past = False
-    for line in newest_first:
+    for rec in newest_first:
         if past:
-            need.feed_drift(line)
-        elif line is need.record:
+            need.feed_drift(rec)
+        elif rec is need.record:
             past = True
 
 
 def _no_record(scan: Scan, thread_id, turned) -> Clock:
     """The whole file read and no record of the thread's own."""
-    records = [ln for ln in scan.lines if _is_record(ln)]
-    if records:
+    if any(_is_record(rec) for rec in scan.lines):
         return unknown(_clock.NOT_OWN, NOT_OWN)
-    if any(ln.kind == "event_msg" and ln.sub == "token_count" for ln in scan.lines):
+    if any(_is_token_count(rec) for rec in scan.lines):
         return unknown(_clock.OLDER_HARNESS, OLDER_CODEX)
     if turned:
         return unknown(_clock.NO_REQUEST, NO_REQUEST)
-    if scan.meta.payload.get("cli_version") not in CHECKED_VERSIONS:
+    # The Codex versions sessions' mapping was checked against are the ones whose new
+    # threads read as `fresh`.
+    if scan.meta.fields.get("cli_version") not in rollouts.CHECKED_VERSIONS:
         return unknown(_clock.NO_REQUEST, NO_REQUEST)
-    if all(_fresh_kind(ln, thread_id) for ln in scan.lines):
+    if all(_fresh_kind(rec, thread_id) for rec in scan.lines):
         return Clock(FRESH)
     return unknown(_clock.NO_REQUEST, NO_REQUEST)
 
 
-def _fresh_kind(line: Line, thread_id) -> bool:
-    """A line a new thread writes before its first response."""
-    if line.kind in ("turn_context", "world_state"):
+#: The lines a new thread writes before its first response, by sessions' `raw_kind`, that
+#: are fresh whatever they hold.
+FRESH_KINDS = ("turn_context", "world_state", "event_msg/task_started",
+               "event_msg/user_message")
+
+
+def _fresh_kind(rec, thread_id) -> bool:
+    """A record of a line a new thread writes before its first response."""
+    if rec.raw_kind in FRESH_KINDS:
         return True
-    if line.kind == "event_msg":
-        if line.sub in ("task_started", "user_message"):
-            return True
-        if line.sub == "thread_settings_applied":
-            return line.payload.get("thread_id") == thread_id
-        if line.sub == "item_completed":
-            return line.payload.get("item_type") == "UserMessage"
-        return False
-    if line.kind == "response_item" and line.sub == "message":
-        return line.payload.get("role") in ("user", "developer")
+    if _is_tsa(rec):
+        return rec.extra.get("thread_id") == thread_id
+    if rec.raw_kind == "event_msg/item_completed":
+        item = rec.extra.get("item")
+        return isinstance(item, dict) and item.get("type") == "UserMessage"
+    if rec.kind == "message" and rec.raw_kind == "response_item/message":
+        return rec.role in ("user", "developer")
     return False
 
 
-def _pair_at(lines: list, index: int, meta: Line, whole: bool) -> tuple:
+def _text(value):
+    return value if isinstance(value, str) and value else None
+
+
+def _pair_at(lines: list, index: int, meta, whole: bool) -> tuple:
     """The (provider, model) the record at `lines[index]` used, by the last-pair rule: the
     model of its own turn's `turn_context`, the provider of the latest settings line at
     or before it, else line 1's. A half that cannot be read is None; so is line 1's
     provider when the covered lines do not reach back to it."""
     record = lines[index]
-    turn = record.payload.get("turn_id")
+    turn = _turn(record)
     model = None
-    for ln in reversed(lines[:index]):
-        if ln.kind == "turn_context" and ln.payload.get("turn_id") == turn:
-            model = ln.payload.get("model")
+    for rec in reversed(lines[:index]):
+        if _is_context(rec) and _turn(rec) == turn:
+            model = rec.fields.get("model")
             break
     provider = None
-    for ln in reversed(lines[:index]):
-        if _is_tsa(ln):
-            provider = ln.payload.get("provider")
+    for rec in reversed(lines[:index]):
+        if _is_tsa(rec):
+            provider = rec.fields.get("provider")
             break
     else:
-        provider = meta.payload.get("model_provider") if whole else None
-    return (provider if isinstance(provider, str) and provider else None,
-            model if isinstance(model, str) and model else None)
+        provider = meta.fields.get("model_provider") if whole else None
+    return _text(provider), _text(model)
 
 
-def _next_pair(lines: list, meta: Line, whole: bool) -> tuple:
+def _next_pair(lines: list, meta, whole: bool) -> tuple:
     """The pair the thread's next request will use: the model of the latest
     `turn_context` or settings line, the provider of the latest settings line, else line
     1's."""
     model = provider = None
-    for ln in reversed(lines):
-        if model is None and (ln.kind == "turn_context" or _is_tsa(ln)):
-            model = ln.payload.get("model")
-            if not isinstance(model, str) or not model:
+    for rec in reversed(lines):
+        if model is None and (_is_context(rec) or _is_tsa(rec)):
+            model = rec.fields.get("model")
+            if _text(model) is None:
                 return None, None
-        if provider is None and _is_tsa(ln):
-            provider = ln.payload.get("provider")
-            if not isinstance(provider, str) or not provider:
+        if provider is None and _is_tsa(rec):
+            provider = rec.fields.get("provider")
+            if _text(provider) is None:
                 return None, None
         if model is not None and provider is not None:
             break
     if provider is None and whole:
-        provider = meta.payload.get("model_provider")
-    return (provider if isinstance(provider, str) and provider else None,
-            model if isinstance(model, str) and model else None)
+        provider = meta.fields.get("model_provider")
+    return _text(provider), _text(model)
 
 
-def _last_pair_measured(newest_first: list, meta: Line, thread_id, table) -> bool:
+def _last_pair_measured(newest_first: list, meta, thread_id, table) -> bool:
     lines = list(reversed(newest_first))
     index = next(i for i in range(len(lines) - 1, -1, -1) if _own(lines[i], thread_id))
     provider, model = _pair_at(lines, index, meta, False)
@@ -495,7 +439,7 @@ def _last_pair_measured(newest_first: list, meta: Line, thread_id, table) -> boo
     return row is not None and row.measured
 
 
-def _clock_from(scan: Scan, record: Line, thread_id, *, table, now, drift, bound_at,
+def _clock_from(scan: Scan, record, thread_id, *, table, now, drift, bound_at,
                 judged) -> Clock:
     lines = scan.lines
     index = next(i for i in range(len(lines) - 1, -1, -1) if lines[i] is record)
@@ -510,7 +454,7 @@ def _clock_from(scan: Scan, record: Line, thread_id, *, table, now, drift, bound
     last_provider, last_model = _pair_at(lines, index, scan.meta, whole)
     if last_provider is None or last_model is None:
         return unknown(_clock.NO_PAIR, NO_PAIR)
-    ts = record.ts
+    ts = _ts(record)
     if ts is None:
         return unknown(_clock.NO_STAMP, NO_STAMP)
     skew = future_stamp(ts, now)
@@ -582,34 +526,33 @@ def lower_to(gap: float, floor: int) -> int:
     return max(int(floor), int(gap * DRIFT_LOWER_TO) // 60 * 60)
 
 
-def judge_drift(lines: list, meta: Line, thread_id, *, row, pair, lifetime, bound_at,
+def judge_drift(lines: list, meta, thread_id, *, row, pair, lifetime, bound_at,
                 judged, whole: bool) -> Judged:
-    """The drift scan over the covered lines: each turn newer than `judged` (the newest
+    """The drift scan over the covered records: each turn newer than `judged` (the newest
     turn alone when None), oldest first, against the lifetime in force."""
     out = Judged()
-    starts = [i for i, ln in enumerate(lines) if _is_start(ln)]
-    own = [i for i, ln in enumerate(lines) if _own(ln, thread_id)]
+    starts = [i for i, rec in enumerate(lines) if _is_start(rec)]
+    own = [i for i, rec in enumerate(lines) if _own(rec, thread_id)]
     if not own:
         return out
     # turn id -> index of its first own record
     first_of: dict = {}
     for i in own:
-        first_of.setdefault(lines[i].payload.get("turn_id"), i)
+        first_of.setdefault(_turn(lines[i]), i)
     turns = []                           # (start index, first record index), oldest first
     for s in starts:
-        turn = lines[s].payload.get("turn_id")
-        r = first_of.get(turn)
+        r = first_of.get(_turn(lines[s]))
         if r is not None and r > s:
             turns.append((s, r))
     if not turns:
         return out
-    out.newest = lines[turns[-1][1]].payload.get("turn_id")
+    out.newest = _turn(lines[turns[-1][1]])
     if judged is None:
         todo = turns[-1:]
     else:
         newer = []
         for s, r in reversed(turns):
-            if lines[s].payload.get("turn_id") == judged:
+            if _turn(lines[s]) == judged:
                 break
             newer.append((s, r))
         todo = list(reversed(newer))
@@ -624,8 +567,8 @@ def judge_drift(lines: list, meta: Line, thread_id, *, row, pair, lifetime, boun
             out.notes.append(
                 f"cache clock: {pair[1]} on codex found its cache cold {span(gap)} after "
                 f"the request before, under the documented {span(row.floor)}; not counted "
-                f"(thread {thread_id}, cached {rec.payload.get('cached')} of "
-                f"{prev.payload.get('input')} tokens)")
+                f"(thread {thread_id}, cached {rec.cache_read_input_tokens} of "
+                f"{prev.input_tokens} tokens)")
             continue
         if gap >= in_force:
             continue
@@ -636,12 +579,16 @@ def judge_drift(lines: list, meta: Line, thread_id, *, row, pair, lifetime, boun
         out.lowered = {
             "harness": HARNESS, "provider": pair[0], "model": pair[1], "lifetime": new,
             "from": lifetime if out.lowered is None else out.lowered["from"],
-            "gap": gap, "thread": thread_id, "response_id": rec.payload.get("response_id"),
-            "at": rec.ts, "at_iso": rec.raw_ts, "prev_at": prev.ts,
-            "prev_at_iso": prev.raw_ts,
-            "cached": rec.payload.get("cached"), "input": prev.payload.get("input"),
+            "gap": gap, "thread": thread_id, "response_id": rec.request_id,
+            "at": _ts(rec), "at_iso": _iso(_ts(rec)), "prev_at": _ts(prev),
+            "prev_at_iso": _iso(_ts(prev)),
+            "cached": rec.cache_read_input_tokens, "input": prev.input_tokens,
             "row_seconds": row.seconds, "row_checked": row.checked}
     return out
+
+
+def _count(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _observe(lines, meta, thread_id, s, r, *, row, pair, bound_at, whole):
@@ -656,39 +603,38 @@ def _observe(lines, meta, thread_id, s, r, *, row, pair, bound_at, whole):
             break
     if prev is None:
         return None
-    rec_line, prev_line, start_line = lines[r], lines[prev], lines[s]
-    if None in (rec_line.ts, prev_line.ts, start_line.ts):
+    rec, prev_rec, start = lines[r], lines[prev], lines[s]
+    if None in (_ts(rec), _ts(prev_rec), _ts(start)):
         return None
     if _pair_at(lines, r, meta, whole) != tuple(pair):
         return None
     if _pair_at(lines, prev, meta, whole) != tuple(pair):
         return None
-    prev_turn = prev_line.payload.get("turn_id")
+    prev_turn = _turn(prev_rec)
     prev_start = None
     for i in range(prev, -1, -1):
-        if _is_start(lines[i]) and lines[i].payload.get("turn_id") == prev_turn:
+        if _is_start(lines[i]) and _turn(lines[i]) == prev_turn:
             prev_start = i
             break
     if prev_start is None:
         return None
-    for ln in lines[prev_start:r]:
-        if _breaks_continuation(ln):
+    for each in lines[prev_start:r]:
+        if _breaks_continuation(each):
             return None
-    for ln in lines[prev + 1:s]:
-        if _is_tsa(ln):
+    for each in lines[prev + 1:s]:
+        if _is_tsa(each):
             return None                   # a resume, or a settings change
-    if prev_line.ts < bound_at:
+    if _ts(prev_rec) < bound_at:
         return None                       # the launcher registered after R_prev: a resume
-    inp, cached = prev_line.payload.get("input"), rec_line.payload.get("cached")
-    if not isinstance(inp, int) or not isinstance(cached, int) or isinstance(inp, bool):
+    inp, cached = prev_rec.input_tokens, rec.cache_read_input_tokens
+    if not _count(inp) or not _count(cached):
         return None
     if inp < DRIFT_MIN_INPUT:
         return None
     if cached >= inp * DRIFT_SHARE:
         return None                       # warm
-    gap = start_line.ts - prev_line.ts
-    return gap, prev_line, rec_line
+    gap = _ts(start) - _ts(prev_rec)
+    return gap, prev_rec, rec
 
 
-__all__ = ["HARNESS", "CHECKED_VERSIONS", "TOP_KINDS", "EVENT_KINDS", "RESPONSE_KINDS",
-           "META_KEYS", "read", "judge_line", "judge_drift", "lower_to"]
+__all__ = ["HARNESS", "read", "judge_drift", "lower_to"]

@@ -9,7 +9,8 @@ import threading
 from pathlib import Path
 
 import pytest
-from conftest import assistant_line, write_cache_config, write_transcript
+from conftest import (add_lines, assistant_line, transcript, write_cache_config,
+                      write_transcript)
 
 from moxi_cache import api, records, watch
 from moxi_cache.clock import Clock
@@ -197,8 +198,9 @@ def test_write_record_refuses_an_id_that_cannot_name_a_file(tmp_path, session):
 
 
 def test_seen_at_moves_every_tick_and_read_at_only_when_the_transcript_changes(root, sessions):
-    path = write_transcript(A, root=root,
-                            lines=[assistant_line(60, now=1_800_000_000.0, tier="1h")])
+    t = add_lines(transcript(A, root=root),
+                  [assistant_line(60, now=1_800_000_000.0, tier="1h")])
+    t.write()
     fake = Fake([entry(11, A)])
     w = make(fake, sessions)
     w.tick()
@@ -207,8 +209,7 @@ def test_seen_at_moves_every_tick_and_read_at_only_when_the_transcript_changes(r
     first = rec(A)
     assert first["seen_at"] == fake.t and first["read_at"] == fake.t - 10
     assert fake.reads == [A]
-    with path.open("a") as fh:
-        fh.write(json.dumps(assistant_line(0, now=fake.t, tier="1h")) + "\n")
+    add_lines(t, [assistant_line(0, now=fake.t, tier="1h")]).flush()
     fake.t += 10
     w.tick()
     second = rec(A)

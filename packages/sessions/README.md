@@ -1,23 +1,97 @@
 # moxi-sessions
 
-Moxi's sessions module reads the records Claude Code and Codex keep of their own
-sessions. It finds a session's file: a Claude Code transcript under the projects root
-(`${CLAUDE_CONFIG_DIR:-~/.claude}/projects`), or every rollout file of a Codex thread
-under `${CODEX_HOME:-~/.codex}/sessions`. It decodes a transcript's lines, yielding a line
-that will not decode as a marked entry rather than dropping it, and reads a record
-backwards from the end in blocks up to a byte limit, saying how the read ended. It only
-reads: it writes nothing to a record and leaves what a line or a miss means to the
-caller. Other Moxi modules import it through `moxi_sessions.api` (cache reads its
-transcripts this way), and it adds two commands:
+Moxi's sessions module reads the records Claude Code, Codex and OpenCode keep of their
+own sessions, and turns each into one set of record kinds with one set of field names. It
+only reads: it writes nothing to a record, keeps no state of its own, and leaves what a
+record or a miss means to the caller.
 
-- `moxi sessions find SESSION [--harness claude|codex] [--root PATH] [--json]` prints
-  where a session's record is, or every root it looked in and why each held none, and
-  exits 1 then.
-- `moxi sessions root [--json]` prints the Claude Code projects root read for a session
-  that stated none, and where that root came from.
+It reads from three roots, one per harness:
 
-Its one setting, `claude.projects`, names that root when it is not the usual one;
-`moxi config sessions` shows it.
+- Claude Code's projects root, `${CLAUDE_CONFIG_DIR:-~/.claude}/projects`, where each
+  session is a transcript and each subagent a file beside it;
+- Codex's sessions root, `${CODEX_HOME:-~/.codex}/sessions`, where each thread is one or
+  more rollout files (a compressed `.jsonl.zst` one is found and marked, but not read);
+- OpenCode's database, `${XDG_DATA_HOME:-~/.local/share}/opencode/opencode.db`, which it
+  opens read only and reads only the session, message and part tables of.
+
+It finds a session's records, asking each root in turn and saying for each whether it held
+the session, held none, could not be read, or was not asked because the id is not one; only
+a root that was read and held none counts as a miss. It lists every source under a root with
+the keys a caller needs to tell what changed, and lists a session's subagents: Claude Code's
+subagent files, OpenCode's child sessions. It cannot yet find a Codex thread's subagents,
+and says so rather than reporting none.
+
+## The records
+
+Every harness's lines and rows map into the same eight kinds of record:
+
+- `request`, one model request: its id, model, provider, token counts (the whole prompt
+  in `input_tokens`, with cache reads and cache writes also counted apart), cost where the
+  harness gives one, and whether more of it can still arrive (`final`);
+- `message`, a user, assistant, system or developer message, or a thinking item;
+- `tool_call` and `tool_result`;
+- `marker`, a point in a session such as a compaction, the start or end of a turn, or a
+  change of settings;
+- `limits`, a rate-limit reading;
+- `malformed`, a line or row that could not be read;
+- `other`, a line or row no other kind maps, with whether the harness's kind is one the
+  mapping knows.
+
+Nothing is dropped: a line sessions cannot map still comes back, as `malformed` or
+`other`, so a caller never takes a gap for nothing there. Every record says which harness
+and session it came from, where in the source it sits, its time, its turn, and the
+harness's own name for the line. A field the harness did not write is `UNKNOWN`, which is
+neither None nor 0 and refuses to be read as true or false or added to a number, so an
+unknown never turns into a zero by accident.
+
+The record fields follow the OpenTelemetry GenAI semantic conventions where those have a
+name: `session_id`, `model`, `provider`, `request_id`, the token counts and a tool's
+`name` and `call_id` are the tails of the `gen_ai.*` attributes. They were checked
+against the conventions' 1.41.0 release (`OTEL_CONVENTIONS`). The conventions are still
+experimental; if one of these names changes there, sessions raises its shape version
+rather than renaming the field quietly.
+
+`SHAPE` is that shape version, an integer, now 1. It is the first key of every JSON
+document sessions writes, `{"shape": 1, ...}`. Adding a field or a kind keeps the number;
+renaming or removing one, or changing what a field means, raises it. A reader takes a kind
+it does not know as `other` and skips fields it does not know.
+
+## Reading a session
+
+Five reads take a source (a file, or a session in OpenCode's database) and return its
+records with the session's header, all from one snapshot of the source:
+
+- `records` reads every record, oldest first, holding one line at a time.
+- `records_back` reads from the end, newest first, for a question about how a session
+  ends, without reading the whole file.
+- `last_request` is the source's own newest request: on a main session, its own and not
+  a subagent's. Its input tokens are the size of the session's current prompt.
+- `records_since` reads what was written since a cursor it handed back last time.
+  sessions stores nothing; the caller keeps the cursor. A cursor it cannot trust starts
+  the read over, and says so.
+- `window` reads the last few turns, and pages back from there.
+
+A read that cannot open or read its source raises `Unreadable`, never an empty read. A
+read backward gives each field the value a forward read gives it, or `UNKNOWN` where it
+cannot know it from the lines it read: a Codex request's provider, for one, when the
+setting that names it was written before the turn the read reached.
+
+## Use
+
+Other Moxi modules use it through `moxi_sessions.api` (cache reads its transcripts this
+way), and it adds two commands:
+
+- `moxi sessions find SESSION [--harness claude|codex|opencode] [--root PATH] [--json]`
+  prints where a session's records are, or every root it looked in and why each held none,
+  and exits 1 then. `--root` adds a root to look in after the usual one (for OpenCode, a
+  database).
+- `moxi sessions root [--json]` prints the root each harness is read from and where that
+  root came from: a config key, an environment variable, or the harness's default.
+
+With `--json`, each command prints one JSON object that starts with the shape version.
+
+Three settings name a root when it is not the usual one: `claude.projects`,
+`codex.sessions` and `opencode.database`. `moxi config sessions` shows them.
 
 ## Install
 

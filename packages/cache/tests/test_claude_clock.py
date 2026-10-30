@@ -12,6 +12,7 @@ from conftest import (HOUR, assistant_line, user_line, write_cache_config,
                       write_sessions_config, write_transcript)
 
 from moxi_cache import api, claude, clock
+from moxi_sessions.api import Request
 
 SESS_A = "aaaaaaaa-1111-4111-8111-111111111111"
 SESS_B = "bbbbbbbb-2222-4222-8222-222222222222"
@@ -207,11 +208,10 @@ def test_an_unterminated_last_line_is_judged_like_any_other(tmp_path):
 def test_a_last_request_with_no_readable_stamp_is_unknown(tmp_path, stamp):
     """An older stamped request behind it does not stand in for it: unknown, not cold
     and not warm."""
-    last = assistant_line(10)
     if stamp is None:
-        del last["timestamp"]
+        last = assistant_line(10, without=("timestamp",))
     else:
-        last["timestamp"] = stamp
+        last = assistant_line(10, timestamp=stamp)
     write_transcript(SESS_A, root=tmp_path, lines=[assistant_line(2 * HOUR), last])
     got = read(SESS_A, tmp_path)
     assert (got.kind, got.code) == ("unknown", "no-stamp")
@@ -333,13 +333,14 @@ def test_a_config_that_cannot_be_read_holds_only_the_reads_that_need_it(tmp_path
 
 
 def test_tier_of_reads_counts_above_zero():
-    assert claude.tier_of({"usage": {"cache_creation": {
-        "ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 0}}}) is None
-    assert claude.tier_of({"usage": {"cache_creation": {
-        "ephemeral_1h_input_tokens": 3}}}) == 3600
-    assert claude.tier_of({"usage": {"cache_creation": {
-        "ephemeral_1h_input_tokens": True}}}) is None
-    assert claude.tier_of({"usage": {}}) is None
+    def request(**counts):
+        return Request(harness="claude", **counts)
+
+    assert claude.tier_of(request(cache_creation_1h_input_tokens=0,
+                                  cache_creation_5m_input_tokens=0)) is None
+    assert claude.tier_of(request(cache_creation_1h_input_tokens=3)) == 3600
+    assert claude.tier_of(request(cache_creation_1h_input_tokens=True)) is None
+    assert claude.tier_of(request()) is None
 
 
 # ============================================================ never raises
@@ -348,7 +349,7 @@ def test_the_read_never_raises(monkeypatch):
     def boom(*a, **k):
         raise ZeroDivisionError("division by zero")
 
-    monkeypatch.setattr(claude.transcripts, "probe_root", boom)
+    monkeypatch.setattr(claude, "find", boom)
     got = api.read("claude", SESS_A, projects_root="/tmp", turned=False)
     assert (got.kind, got.code) == ("unknown", "read-failed")
     assert "ZeroDivisionError" in got.reason

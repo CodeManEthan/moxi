@@ -115,5 +115,5 @@ def test_the_schema_holds_the_first_releases_keys():
 
 
 def test_the_tiers_are_one_hour_and_five_minutes():
-    assert claude.TIER_1H == ("ephemeral_1h_input_tokens", 3600)
-    assert claude.TIER_5M == ("ephemeral_5m_input_tokens", 300)
+    assert claude.TIER_1H == ("cache_creation_1h_input_tokens", 3600)
+    assert claude.TIER_5M == ("cache_creation_5m_input_tokens", 300)

@@ -339,3 +339,15 @@ def test_parity_with_the_walk_that_reads_line_1_first(tmp_path, seed):
             ended = reader.ended
         assert got == pairs, (seed, case, block, limit)
         assert (ended == START) == reached_start and (ended == LIMIT) == hit_limit
+
+
+def test_offsets_and_end_name_each_lines_start_and_stop_the_read(tmp_path):
+    path = tmp_path / "t.jsonl"
+    path.write_bytes(b'{"a":1}\n{"b":22}\n{"c":333}\n')
+    from moxi_sessions.reader import read_back as back
+
+    with back(path, block=4, limit=1000, offsets=True) as reader:
+        assert list(reader) == [(b'{"c":333}', False, 17), (b'{"b":22}', False, 8),
+                                (b'{"a":1}', False, 0)]
+    with back(path, block=4, limit=1000, end=17) as reader:
+        assert list(reader) == [(b'{"b":22}', False), (b'{"a":1}', False)]

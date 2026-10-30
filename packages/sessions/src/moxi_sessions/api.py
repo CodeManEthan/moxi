@@ -1,21 +1,103 @@
-"""sessions' interface 1, the module other Moxi modules import (`moxi_sessions.api`).
+"""sessions' interface 2, the module other Moxi modules import (`moxi_sessions.api`).
+
+The one shape (`moxi_sessions.shape`):
+
+* `SHAPE`, the shape version written at the top of every JSON document sessions writes.
+* The record kinds: `Record`, `Request`, `Message`, `ToolCall`, `ToolResult`, `Marker`
+  (with `MARKERS`), `Limits` (with `LimitWindow`), `Malformed` and `Other`, by name in
+  `KINDS`; `UNKNOWN` and `known`; `to_json`, `from_json` and `document`.
+
+Finding sessions:
+
+* `find(harness, session_id, *, root=None)`: where a harness keeps a session's records,
+  with every root asked and its outcome (`Found`, `Probe`, `Hit`).
+* `sources(harness, *, root=None, modified_since=None, heads=True)`: every source under a
+  root, with its reuse keys (`Listing`, `Listed`).
+* `subagents(source)`: a session's subagents, `listed`, `none`, `unreadable` or
+  `unsupported` (`SubagentListing`, `Subagent`).
+* `Source`, `Header`, `Unreadable`; `root(harness, environ)` and `root_origin(harness)`,
+  each harness's root and where it came from.
+
+Reading one source (`Read`, `Back`, `LastRequest`, `Batch`, `Window`):
+
+* `records(source, *, kinds=None, keep_raw=False)`: every record, forward.
+* `records_back(source, *, kinds=None, block=BLOCK, limit=BACK_LIMIT, head=False)`: the
+  records newest first.
+* `last_request(source, *, synthetic=False, limit=BACK_LIMIT)`: the newest request on the
+  source's own chain.
+* `records_since(source, cursor=None, *, kinds=None, max_bytes=None)`: the records
+  written since a cursor (`CURSOR_VERSION`), and the cursor to hand back.
+* `window(source, *, turns=5, before=None, limit=WINDOW_LIMIT)`: the last turns, with a
+  position to page back.
+
+Writing records for tests:
+
+* `testing`: the builders other modules' tests write harness records with
+  (`ClaudeTranscript`, `CodexRollout`, `OpenCodeDb`; see `moxi_sessions.testing`). A test
+  reaches them through this module, as it reaches every other name sessions offers.
+
+Each harness's mapping, and the line reads under the records:
 
 * `claude`: `parse_line`, `iter_entries`, `stream_entries`, `parse_timestamp` and
-  `MALFORMED` (the one decoder); `probe_root`, `find_for_session`, `search_roots` and
-  `RootProbe` (finding a session's transcript).
-* `codex`: `find_rollout` (every rollout file of a thread) and `stream_rollout` (one
-  rollout's entries, forward, through the same decoder), with `NAME_RE`.
+  `MALFORMED` (the one decoder); `SAFE_ID_RE`, the session ids a search accepts, and
+  `MISS`, a probe's outcome when a root holds no such session.
+* `codex`: the lists a rollout is recognised by (`TOP_KINDS`, `EVENT_KINDS`,
+  `RESPONSE_KINDS`, `META_KEYS`, `HISTORY_MODES`) and the versions the mapping was checked
+  against (`CHECKED_VERSIONS`).
+* `opencode`: OpenCode's database reader, with the errors a failed read raises
+  (`MissingSession`, `UnknownSchema`, `QueryFailed`, each an `Unreadable`), the versions
+  the mapping was checked against (`CHECKED_VERSIONS`) and the session row's totals
+  (`TOTALS`).
 * `read_back(path, *, block, limit, head=False)`: a record read backwards, its lines
   newest first with the unterminated flag, line 1 when asked, and how the read ended.
 * `projects_root(environ)`: Claude Code's projects root in an environment; with None, the
   root for a session that stated none (config `claude.projects`).
 
+Every name is imported on first use, so importing this module costs next to nothing, and a
+caller that never reads OpenCode never imports `sqlite3`.
+
 sessions decides nothing about a session: which lines count and what a miss or an ending
 means are the caller's.
 """
 
-from . import claude, codex
-from .claude import projects_root
-from .reader import read_back
+from __future__ import annotations
 
-__all__ = ["claude", "codex", "read_back", "projects_root"]
+import importlib
+from typing import Any
+
+#: Each name's home module, under this package. A name whose home is itself a module
+#: (`claude`, `codex`, `opencode`, `testing`) is that module.
+_HOMES: dict[str, str] = {
+    **dict.fromkeys(("claude", "codex", "opencode", "testing"), ""),
+    **dict.fromkeys(("projects_root",), "claude"),
+    **dict.fromkeys(("read_back",), "reader"),
+    **dict.fromkeys(("Unreadable",), "errors"),
+    **dict.fromkeys(("Source", "Header", "root", "root_origin"), "source"),
+    **dict.fromkeys(("find", "sources", "subagents", "Found", "Probe", "Hit", "Listing",
+                     "Listed", "SubagentListing", "Subagent"), "find"),
+    **dict.fromkeys(("records", "records_back", "last_request", "records_since",
+                     "window", "Read", "Back", "LastRequest", "Batch", "Window",
+                     "CURSOR_VERSION", "BLOCK", "BACK_LIMIT", "WINDOW_LIMIT"), "read"),
+    **dict.fromkeys(("SHAPE", "UNKNOWN", "known", "Record", "Request", "Message",
+                     "ToolCall", "ToolResult", "Marker", "MARKERS", "LimitWindow",
+                     "Limits", "Malformed", "Other", "KINDS", "to_json", "from_json",
+                     "document"), "shape"),
+}
+
+__all__ = list(_HOMES)
+
+
+def __getattr__(name: str) -> Any:
+    home = _HOMES.get(name)
+    if home is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    if home == "":
+        value = importlib.import_module(f"{__package__}.{name}")
+    else:
+        value = getattr(importlib.import_module(f"{__package__}.{home}"), name)
+    globals()[name] = value              # later lookups find it without coming here
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))
