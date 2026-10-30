@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en" data-theme="system">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moxi</title>
+<link rel="stylesheet" href="/m/ui/theme.css">
+<link rel="stylesheet" href="/m/ui/shell.css">
+<script type="module" src="/m/ui/client.js"></script>
+</head>
+<body>
+<div id="moxi-shell">
+<header class="moxi-bar">
+<a class="moxi-brand" href="/m/ui/" data-module="ui" data-route="">Moxi</a>
+<button id="moxi-menu-button" class="moxi-menu-button" type="button" aria-expanded="false" aria-controls="moxi-menu">Menu</button>
+<nav id="moxi-menu" class="moxi-menu" aria-label="Panels"><ul></ul></nav>
+</header>
+<p id="moxi-notice" class="moxi-notice" role="alert" hidden>This browser is signed out of Moxi. Run <code>moxi ui open</code> to sign in again.</p>
+<p id="moxi-status" class="moxi-status" role="status" hidden></p>
+<main id="moxi-panel" class="moxi-panel"></main>
+<noscript><p class="moxi-notice">Moxi's pages need JavaScript.</p></noscript>
+</div>
+</body>
+</html>

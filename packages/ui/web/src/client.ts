@@ -1,0 +1,283 @@
+// /m/ui/client.js: the component contract's one shared script.
+//
+// Every component imports it by that absolute URL, which every build leaves external, so
+// one copy runs in the shell's one document and every module's components share it. It
+// holds no Lit. Within contract 1 its exports only grow: a new export, a new theme token
+// or a new optional declaration field. Removing or renaming one is contract 2.
+//
+// A component reaches data only through `api` and `subscribe`, for its own module, and
+// links to another module only through `navigate` or `place`, and only while
+// `installed` says that module is there.
+
+import { fetchOpener, TabPush } from "./push.ts";
+import { apiTarget, checkAttributes, checkName, panelTarget, scriptUrl } from "./rules.ts";
+import { boot } from "./shell.ts";
+
+/** The component contract version this script speaks. */
+export const CONTRACT: number = 1;
+
+/** One attribute a component declares; a host passes it as an HTML attribute. */
+export interface AttributeInfo {
+  name: string;
+  type: "string" | "int" | "bool" | "enum";
+  /** An enum's words; empty for the other types. */
+  values: string[];
+  required: boolean;
+  doc: string;
+}
+
+/** One component a module declares, as the shell checked it. */
+export interface ComponentInfo {
+  name: string;
+  /** The custom element's name, `moxi-<module>-<name>`. */
+  element: string;
+  /** The asset that defines the element. */
+  script: string;
+  /** The script's URL, `/m/<module>/<script>`. */
+  url: string;
+  title: string;
+  doc: string;
+  contract: number;
+  place: "page" | "block" | "inline";
+  /** Whether the shell's home view may place it. */
+  home: boolean;
+  attributes: AttributeInfo[];
+}
+
+/** An answer from `api`. `status` is 0 when no answer came (a network failure). `data`
+ * is the parsed JSON body, or null when the body is empty or not JSON. */
+export interface ApiResult {
+  status: number;
+  data: any;
+}
+
+/** The theme modes: `system` follows the browser's colour scheme. */
+export type ThemeMode = "system" | "light" | "dark";
+
+/** The `localStorage` item that holds the session key the sign-in page stored. */
+const KEY_STORAGE = "moxi-ui-key";
+const DEFINE_MS = 5_000;
+const MODES: readonly string[] = ["system", "light", "dark"];
+
+interface ModuleRow {
+  name: string;
+  state: string;
+  page: boolean;
+  components: ComponentInfo[];
+  refused: Array<{ name: string; reason: string }>;
+}
+
+interface ModulesValue {
+  contracts: number[];
+  modules: ModuleRow[];
+}
+
+let view: ModulesValue = { contracts: [CONTRACT], modules: [] };
+let signedOut = false;
+const watchers = new Set<() => void>();
+const sessionWatchers = new Set<(signedIn: boolean) => void>();
+
+function key(): string | null {
+  try {
+    return localStorage.getItem(KEY_STORAGE);
+  } catch {
+    return null;
+  }
+}
+
+function setSignedOut(out: boolean): void {
+  if (signedOut === out) return;
+  signedOut = out;
+  for (const fn of [...sessionWatchers]) fn(!out);
+}
+
+function markSignedOut(): void {
+  setSignedOut(true);
+}
+
+function row(module: string): ModuleRow | undefined {
+  return view.modules.find((item) => item.name === module);
+}
+
+function take(value: unknown): void {
+  if (typeof value !== "object" || value === null) return;
+  const { contracts, modules } = value as Partial<ModulesValue>;
+  if (!Array.isArray(modules)) return;
+  view = {
+    contracts: Array.isArray(contracts) && contracts.length ? contracts : [CONTRACT],
+    modules: modules.filter((item) => typeof item?.name === "string"),
+  };
+  for (const fn of [...watchers]) fn();
+}
+
+const push = new TabPush(fetchOpener(key), markSignedOut);
+
+// --- the contract -----------------------------------------------------------------------
+
+/** Whether `module` is installed and present. */
+export function installed(module: string): boolean {
+  return row(module)?.state === "present";
+}
+
+/** The components `module` declares that the shell can place; empty when it is not
+ * installed. */
+export function components(module: string): ComponentInfo[] {
+  if (!installed(module)) return [];
+  return (row(module)?.components ?? []).map((item) => ({
+    ...item,
+    attributes: item.attributes.map((attr) => ({ ...attr, values: [...attr.values] })),
+  }));
+}
+
+/**
+ * A request to `module`'s page, `path` relative to `/m/<module>/` (`"api/items?x=1"`).
+ * With `body` it is a POST of that object as JSON; without, a GET. It sends the session
+ * key, never retries, and never throws for an answer: a refusal is its status, and a
+ * network failure is status 0. It throws a TypeError for a path that leaves
+ * `/m/<module>/` or a body that is not an object.
+ */
+export async function api(module: string, path: string, body?: object): Promise<ApiResult> {
+  const target = apiTarget(module, path, location.origin);
+  if (body !== undefined && (typeof body !== "object" || body === null)) {
+    throw new TypeError("api body is an object, sent as JSON");
+  }
+  const value = key();
+  if (!value) {
+    markSignedOut();
+    return { status: 403, data: null };
+  }
+  const headers: Record<string, string> = { "X-Moxi-Key": value, Accept: "application/json" };
+  const init: RequestInit = { headers, credentials: "same-origin", cache: "no-store" };
+  if (body !== undefined) {
+    init.method = "POST";
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
+  let answer: Response;
+  let text: string;
+  try {
+    answer = await fetch(target, init);
+    text = await answer.text();
+  } catch {
+    return { status: 0, data: null };
+  }
+  // The shell's refusal of the cookie or the key is an empty 403.
+  if (answer.status === 403 && text === "") markSignedOut();
+  let data: any = null;
+  if (text !== "" && (answer.headers.get("Content-Type") ?? "").includes("json")) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+  }
+  return { status: answer.status, data };
+}
+
+/**
+ * Calls `fn` with each value of `module`'s topic `topic`: first its current value, then
+ * each value that replaces it. Returns the function that ends the subscription; call it
+ * in `disconnectedCallback`.
+ */
+export function subscribe(module: string, topic: string, fn: (data: any) => void): () => void {
+  checkName("module", module);
+  checkName("topic", topic);
+  if (typeof fn !== "function") throw new TypeError("subscribe takes a function");
+  return push.hub.add(`${module}.${topic}`, fn);
+}
+
+/**
+ * Places `module`'s component `name` at the end of `host`, with `attrs` as its HTML
+ * attributes, once its script has defined it. Gives the element, or null when the
+ * module is not installed, does not declare the component, asks for a contract this
+ * shell does not place, or its script fails to load or to define the element. Throws a
+ * TypeError for an attribute the component does not declare, a value not of its type,
+ * or a required one left out. A page also takes `route`, its part of the URL after
+ * `/m/<module>/`, which the shell gives it.
+ */
+export async function place(host: Element, module: string, name: string,
+                            attrs: Record<string, string> = {}): Promise<Element | null> {
+  checkName("module", module);
+  checkName("component", name);
+  const info = components(module).find((item) => item.name === name);
+  if (info === undefined || !view.contracts.includes(info.contract)) return null;
+  checkAttributes(info, attrs);
+  const url = scriptUrl(info, module, location.origin);
+  if (url === null) return null;
+  try {
+    await import(url);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), DEFINE_MS); });
+    const defined = await Promise.race([customElements.whenDefined(info.element).then(() => true), late]);
+    clearTimeout(timer);
+    if (!defined) return null;
+  } catch (err) {
+    console.error(`moxi: ${module}'s ${name} could not load`, err);
+    return null;
+  }
+  const element = document.createElement(info.element);
+  for (const [attr, value] of Object.entries(attrs)) element.setAttribute(attr, value);
+  host.append(element);
+  return element;
+}
+
+let showPanel: ((module: string, route: string) => void) | null = null;
+
+/** Shows `module`'s panel at `route` (relative to `/m/<module>/`) in the shell's one
+ * document, with a new history entry. */
+export function navigate(module: string, route = ""): void {
+  const target = panelTarget(module, route, location.origin);
+  if (showPanel === null) {
+    location.assign(target.url);
+    return;
+  }
+  history.pushState(null, "", target.url);
+  showPanel(module, target.route);
+}
+
+/** Sets the shell document's theme mode until it is next loaded, when the shell sets it
+ * from the `ui` setting `theme.mode`. For the settings view, after it writes that
+ * setting. */
+export function setTheme(mode: ThemeMode): void {
+  if (!MODES.includes(mode)) throw new TypeError(`theme mode ${JSON.stringify(mode)} is not system, light or dark`);
+  document.documentElement.dataset.theme = mode;
+}
+
+// --- start ------------------------------------------------------------------------------
+
+push.start();
+addEventListener("storage", (event) => {
+  // A sign-in in another tab of this browser stores a new key.
+  if (event.key === KEY_STORAGE && event.newValue) {
+    setSignedOut(false);
+    push.reset();
+  }
+});
+// Read the modules once before any component runs, so `installed` and `components`
+// answer from the first call; the topic keeps them current.
+{
+  const first = await api("ui", "api/modules");
+  if (first.status === 200) take(first.data);
+  push.hub.add("ui.modules", take);
+}
+
+if (document.getElementById("moxi-shell") !== null) {
+  boot({
+    installed,
+    place,
+    modules: () => view.modules.filter((item) => item.state === "present").map((item) => ({
+      name: item.name,
+      page: components(item.name).find((comp) => comp.name === "page") ?? null,
+      refused: item.refused.find((comp) => comp.name === "page")?.reason ?? null,
+    })),
+    known: (module) => row(module) !== undefined,
+    onModules: (fn) => watchers.add(fn),
+    onSession: (fn) => {
+      sessionWatchers.add(fn);
+      if (signedOut) fn(false);
+    },
+    onState: (fn) => push.hub.onState(fn),
+    state: (module) => push.hub.state(module),
+    setNavigator: (fn) => { showPanel = fn; },
+  });
+}

@@ -1,0 +1,32 @@
+/* The shared theme, written by `npm run build` from packages/ui/web/tokens.json. */
+:root {
+  color-scheme: light dark;
+  --moxi-bg: light-dark(#ffffff, #14171c);
+  --moxi-bg-sunken: light-dark(#f6f7f9, #0f1216);
+  --moxi-bg-raised: light-dark(#ffffff, #1a1e25);
+  --moxi-bg-hover: light-dark(#eef0f4, #232833);
+  --moxi-border: light-dark(#d9dde3, #2b313b);
+  --moxi-border-strong: light-dark(#b8c0cc, #3c4450);
+  --moxi-text: light-dark(#14181f, #e6e9ee);
+  --moxi-text-dim: light-dark(#5b6472, #a0a9b6);
+  --moxi-text-faint: light-dark(#8b95a3, #6d7684);
+  --moxi-accent: light-dark(#2f6fd0, #6ea8ff);
+  --moxi-accent-soft: light-dark(#dbe7fa, #1e2b40);
+  --moxi-error: light-dark(#c0392b, #ff8a7a);
+  --moxi-error-soft: light-dark(#fbe4e1, #3a1f1c);
+  --moxi-warn: light-dark(#a86b00, #e0b45f);
+  --moxi-warn-soft: light-dark(#fdf0d8, #3a2f18);
+  --moxi-ok: light-dark(#1f7a4d, #5fd39b);
+  --moxi-live: light-dark(#1f9d55, #4fd18b);
+  --moxi-add-soft: light-dark(#e2f5e8, #16301f);
+  --moxi-del-soft: light-dark(#fbe6e6, #35191a);
+  --moxi-radius: 6px;
+  --moxi-radius-lg: 10px;
+  --moxi-gap: 12px;
+  --moxi-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --moxi-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --moxi-font-size: 14px;
+  --moxi-font-size-sm: 12px;
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
