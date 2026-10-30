@@ -1,10 +1,11 @@
 """turns' checks for the front door's doctor: the announcement's `DOCTOR`.
 
 `check()` yields `moxi.doctor.Row`s of module `turns`: its config, the start list, the
-registered listeners, the live endpoints (dead ones are swept on the way) and any
-version 1 endpoint directory left behind, the hook times, and each harness adapter's
-rows (`ADAPTER_ROWS`: the Claude plugins, `endpoint.json` and the Claude Code version;
-Codex; the OpenCode host's binary). turns has no doctor command of its own.
+registered listeners, the launch-additions contributors, the live endpoints (dead ones
+are swept on the way) and any version 1 endpoint directory left behind, the hook times,
+and each harness adapter's rows (`ADAPTER_ROWS`: the Claude plugins, `endpoint.json`
+and the Claude Code version; Codex; the OpenCode host's binary). turns has no doctor
+command of its own.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ def check() -> Iterator[moxi_doctor.Row]:
     registry = listeners.load()
     yield from _start_list(registry)
     yield from _listener_rows(registry)
+    yield from _additions_rows()
     yield from _endpoint_rows()
     yield from _hook_rows()
     for target in ADAPTER_ROWS:
@@ -97,6 +99,15 @@ def _listener_rows(registry: listeners.Registry) -> Iterator[moxi_doctor.Row]:
         yield Row(f"listener {b.module}", False, b.reason)
     for n in registry.notices:
         yield moxi_doctor.Row(MODULE, f"listener {n.module}", "warn", n.reason)
+
+
+def _additions_rows() -> list[moxi_doctor.Row]:
+    from . import additions
+
+    try:
+        return additions.rows()
+    except Exception as exc:  # noqa: BLE001 - a doctor reports, it does not raise
+        return [Row("additions", False, f"could not be checked: {type(exc).__name__}: {exc}")]
 
 
 def _endpoint_rows() -> Iterator[moxi_doctor.Row]:
