@@ -8,6 +8,7 @@ members = [
     "moxi-cache",
     "moxi-comms",
     "moxi-dev",
+    "moxi-launcher",
     "moxi-sessions",
     "moxi-turns",
 ]
@@ -154,6 +155,42 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest" }]
+
+[[package]]
+name = "moxi-launcher"
+version = "0.1.0"
+source = { editable = "packages/launcher" }
+dependencies = [
+    { name = "moxi" },
+]
+
+[package.optional-dependencies]
+comms = [
+    { name = "moxi-comms" },
+]
+turns = [
+    { name = "moxi-turns" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "moxi-dev" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-comms", marker = "extra == 'comms'", editable = "packages/comms" },
+    { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
+]
+provides-extras = ["turns", "comms"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "pytest" },
+]
 
 [[package]]
 name = "moxi-sessions"

@@ -1,0 +1,52 @@
+[project]
+name = "moxi-launcher"
+version = "0.1.0"
+description = "Launch Claude Code and Codex sessions from presets over a per-harness flag catalog, in this terminal, headless or in a tmux slot, and log every launch."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
+# The launcher requires the core only. Every other module it works with (turns, comms,
+# slots, projects, notes, usage, loadout) is an optional link it reaches through
+# moxi.modules.load where a feature needs it, and never imports.
+dependencies = ["moxi>=0.1,<0.2"]
+
+[project.optional-dependencies]
+# The first turn, readiness, Codex ids, and the start listeners.
+turns = ["moxi-turns>=0.1,<0.2"]
+# Identities, scopes, directors, the with: posture and the console name.
+comms = ["moxi-comms>=0.2,<0.3"]
+
+[project.urls]
+Homepage = "https://github.com/moxihq/moxi"
+Repository = "https://github.com/moxihq/moxi"
+Issues = "https://github.com/moxihq/moxi/issues"
+
+# The module's one announcement, read by moxi.modules.
+[project.entry-points."moxi.modules"]
+launcher = "moxi_launcher.module"
+
+# No console script: only the core declares `moxi`, and the launcher's commands run as
+# `moxi launcher <verb>`, the detached first-turn sender (`moxi launcher deliver`) among
+# them.
+
+[dependency-groups]
+dev = ["pytest", "moxi-dev"]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/moxi_launcher"]
+
+[tool.hatch.build.targets.sdist]
+# A source distribution holds these paths and nothing else.
+only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_launcher", "tests"]
+
+# A plain `pytest` runs the units and contract seams, and so does `moxi-dev check`: the
+# tiers are deselected here. Run one by hand with `pytest -m <tier>` (a live test also
+# needs MOXI_TEST_LIVE=1).
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not browser and not slow and not build and not live'"

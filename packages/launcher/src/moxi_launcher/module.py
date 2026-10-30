@@ -1,0 +1,64 @@
+"""The announcement of Moxi's launcher module, which moxi.modules reads.
+
+Standard library only, and imports nothing of the launcher. The launcher is a library
+with a command: `moxi launcher <verb>` runs `cli.main` in its own process, with no
+service and no socket. Every other Moxi module it works with is an optional link, asked
+through `moxi.modules.load` where the feature needs it.
+"""
+
+#: No interface is offered yet: the API module comes with the launch call.
+INTERFACES = frozenset()
+API = None
+#: What `moxi launcher` runs, in process, as `main(argv, prog="moxi launcher")`.
+CLI = "moxi_launcher.cli:main"
+SUMMARY = ("Launch Claude Code and Codex sessions from presets over a per-harness flag "
+           "catalog, in this terminal, headless or in a tmux slot, and log every launch.")
+OPTIONAL = {
+    "turns": "Readiness and the first turn: the brief or handoff is delivered as the "
+             "session's first turn once it is ready, Codex session ids are learned, a Codex "
+             "seat gets its instructions in start context and a seat's waiting handoff is "
+             "pointed to at its start. Without it the brief is the harness's opening prompt.",
+    "comms": "Identities: a launch may take a comms name, a scope, directors and the "
+             "with: posture, and the launcher's console name is reserved. Without it every "
+             "launch is a plain harness launch.",
+}
+GATED = {}
+#: Each variable of the launcher's prefix it reads outside moxi.paths and moxi.config,
+#: and why. Both are stamps the launcher sets on the sessions it starts.
+INTERNAL_ENV = {
+    "MOXI_LAUNCHER_REQUEST": "launcher stamp: the request id of the launch that started "
+                             "this session",
+    "MOXI_LAUNCHER_RELAUNCH": "launcher stamp: the session is a relaunch, whose handoff "
+                              "comes in its first turn",
+}
+SETTINGS = "settings.toml"
+SETUP = None
+SEGMENT = None
+
+# The announcement's version, and the optional names it declares.
+ANNOUNCES = 1
+#: The launch log, the per-launch run files (prompt files and headless logs) and the
+#: handoff folder used when notes is absent. Each is made at its first write.
+STORES = {
+    "launches": {"root": "state", "path": "launcher.db", "kind": "sqlite",
+                 "private": True, "retention": "keep", "rebuildable": False,
+                 "lazy": True},
+    "runs": {"root": "state", "path": "runs", "kind": "dir",
+             "private": True, "retention": "30d", "rebuildable": True, "lazy": True},
+    "handoffs": {"root": "data", "path": "handoffs", "kind": "dir",
+                 "private": True, "retention": "keep", "rebuildable": False,
+                 "lazy": True},
+}
+#: The shipped skills, one subfolder each, placed for each harness at install.
+SKILLS = "skills"
+#: The send-only comms name the launcher's notices go out under.
+RESERVED_NAMES = ["console"]
+DOCTOR = "moxi_launcher.doctor:rows"
+#: The exact stamps the launcher sets on a session, so a launch from inside one scrubs
+#: them. Named one by one, not by prefix, so the launcher's own configuration variables
+#: are never scrubbed.
+SESSION_ENV = {
+    "MOXI_LAUNCHER_REQUEST": "the request id of the launch that started the session",
+    "MOXI_LAUNCHER_RELAUNCH": "set on a relaunch, so the session's start shows no handoff "
+                              "pointer",
+}
