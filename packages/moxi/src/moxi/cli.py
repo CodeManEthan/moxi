@@ -840,7 +840,9 @@ def _config_change(op: str, argv: list[str]) -> int:
     except config.ConfigError as exc:
         _error(str(exc))
         return exc.exit_code
-    if not changed:
+    if not changed and op == "unset":
+        print(f"{args.module}: {args.key} is not set in the file; nothing changed")
+    elif not changed:
         print(f"{args.module}: {args.key} already holds that item; nothing changed")
     elif op in ("add", "remove"):
         done = "added" if op == "add" else "removed"

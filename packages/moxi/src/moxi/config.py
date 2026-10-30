@@ -793,7 +793,9 @@ def set(module: str, key: str, value, *, by: str) -> list:
 
 def unset(module: str, key: str, *, by: str) -> list:
     """Remove `key` from module `module`'s config file, so it reads its default (a switch
-    table's entry then reads false). Returns the units applied, as `set` does."""
+    table's entry then reads false). Returns the units applied, as `set` does. A key the
+    file does not hold changes nothing: no file is made or written and no history line is
+    added, though the file is still checked as it is (a missing one as the empty text)."""
     _change(module, key, "unset", None, by=by)
     return []
 
@@ -1018,6 +1020,11 @@ def _change(module, key, op, value, *, by, text=False) -> bool:
             raise ConfigError(path, key, "is a switch, not a list",
                               "set it to true or false")
         item = _coerce_item(target, key, value, path, text)
+    if op == "unset" and not os.path.lexists(path):
+        # Nothing to remove and no file to make: the text is still checked, as the empty
+        # text `config check` reads for a missing file.
+        _check_file(module, schema, check, "", path, key)
+        return False
     try:
         with files.edit_toml(path, timeout=LOCK_TIMEOUT) as doc:
             parts = target.name.split(".")
@@ -1027,12 +1034,14 @@ def _change(module, key, op, value, *, by, text=False) -> bool:
                 node = _container(doc, parts[:-1], path, create=True)
                 node[parts[-1]] = _item(new)
             elif op == "unset":
-                _drop(doc, parts)
+                dropped = _drop(doc, parts)
             else:
                 _edit_list(doc, parts, target, op, item, path, module, key)
             from ._vendor import tomlkit
 
             _check_file(module, schema, check, tomlkit.dumps(doc), path, key)
+            if op == "unset" and not dropped:
+                raise _Unchanged
     except _Unchanged:
         return False
     except files.LockTimeout as exc:
@@ -1073,14 +1082,17 @@ def _container(doc, parts, path, *, create):
     return node
 
 
-def _drop(doc, parts) -> None:
+def _drop(doc, parts) -> bool:
+    """Delete the dotted key `parts` from `doc`; False when `doc` does not hold it."""
     node = doc
     for part in parts[:-1]:
         if not isinstance(node, dict) or part not in node:
-            return
+            return False
         node = node[part]
     if isinstance(node, dict) and parts[-1] in node:
         del node[parts[-1]]
+        return True
+    return False
 
 
 def _plain(value):

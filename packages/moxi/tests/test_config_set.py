@@ -263,9 +263,19 @@ def test_unset_removes_the_key_so_it_reads_its_default(demo):
     assert settings().source("local.retain_days") == "default"
 
 
-def test_unset_of_a_key_the_file_lacks_changes_nothing(demo):
-    config.unset("demo", "block", by="cli")
-    assert demo.read_text() == ""
+def test_unset_of_a_key_the_file_lacks_changes_nothing(demo, capsys):
+    assert config.unset("demo", "block", by="cli") == []
+    assert not demo.parent.exists()
+    config.set("demo", "name", "x", by="cli")
+    before, stamp = demo.read_text(), os.stat(demo).st_mtime_ns
+    assert config.unset("demo", "block", by="cli") == []
+    assert config.unset("demo", "local.retain_days", by="cli") == []
+    assert (demo.read_text(), os.stat(demo).st_mtime_ns) == (before, stamp)
+    assert [r["op"] for r in config.history("demo")] == ["set"]
+    code, out, err = run(capsys, "config", "unset", "demo", "block")
+    assert (code, out, err) == (0, "demo: block is not set in the file; nothing changed\n",
+                                "")
+    assert [r["op"] for r in config.history("demo")] == ["set"]
 
 
 # -- the key, the module, the file ---------------------------------------------------------
