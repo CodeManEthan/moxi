@@ -42,11 +42,18 @@ an upgrade that changes them is read when the watcher restarts.
 **How it fires.** At each tick the watcher hands the timer the clock records it wrote. For
 each live session whose record has a last request and a lifetime, the timer compares the
 session's age with each subscription. On the first tick at or past `at`, then each
-`every` after the last ask, until `until`, it checks `requires_env` against
-`/proc/<pid>/environ` and starts `run` detached: a session of its own (`setsid`), stdin and
-stdout on `/dev/null`, stderr where the watcher's goes. It does not wait. The started
-process outlives the watcher: a stop or restart of the watcher's unit ends the watcher
-only (`KillMode=process`, see `service`), and the asks it started keep running. It stops
+`every` after the last ask, until `until`, it checks `requires_env` against the
+environment the session's process started with (`moxi.proc.environ`) and starts `run`
+detached. On Linux and macOS that is a session of its own (`setsid`), stdin and stdout on
+`/dev/null`, stderr where the watcher's goes. On Windows it is `moxi.proc.spawn`'s detached
+child, a process outside any job the watcher runs in, with no console and its output on
+the null device. It does not wait. The started process outlives the watcher: a stop or
+restart of the watcher's unit ends the watcher only (`KillMode=process`, see `service`),
+and the asks it started keep running.
+
+A process's environment can't be read on Windows (`env_checkable` says so), so there a
+subscription with `requires_env` never asks: the requirement counts as not met, as it
+does for any process whose environment can't be read. It stops
 asking a session when its clock moves (a new request, which opens a new window), when the
 session leaves the live list, or when `until` passes. It keeps no memory across a restart:
 after one it asks on the next tick inside a window, and not for a crossing whose window has
@@ -59,7 +66,8 @@ runs (`exit` null). Each line holds `at` (when it was asked), `subscriber`, `sou
 `session`, `pid`, `age` (seconds since the last request, at the ask), `last_request`,
 `child` (the started process's id), `exit` (its exit status; minus a signal's number when
 a signal ended it), `ended`, and `error` (why it could not be started, or why there is no
-status). Past `LOG_LIMIT` bytes the log moves to `timer.jsonl.1`, replacing the one before.
+status). On Windows only the started process's id is held, so its line is written when the
+process is seen gone, with `exit` null. Past `LOG_LIMIT` bytes the log moves to `timer.jsonl.1`, replacing the one before.
 """
 
 from __future__ import annotations
@@ -70,12 +78,14 @@ import math
 import os
 import re
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
 
+from moxi import proc as _proc
 from moxi.paths import Layout, script
 
 from .settings import MODULE
@@ -347,18 +357,20 @@ def load(config_entries, *, modules: Iterable[Subscription | Refusal] | None = N
 
 # --- the process's environment -----------------------------------------------------------
 
-def proc_environ(pid: int, proc: Path = Path("/proc")) -> dict[str, str] | None:
-    """A process's environment as it was started, or None when it cannot be read."""
-    try:
-        raw = (proc / str(pid) / "environ").read_bytes()
-    except OSError:
-        return None
-    env: dict[str, str] = {}
-    for item in raw.split(b"\0"):
-        key, sep, value = item.partition(b"=")
-        if sep:
-            env[key.decode("utf-8", "replace")] = value.decode("utf-8", "replace")
-    return env
+def proc_environ(pid: int) -> dict[str, str] | None:
+    """A process's environment as it was started, or None when it cannot be read: always
+    on Windows, and for a process that is gone or another user's (`moxi.proc.environ`)."""
+    return _proc.environ(pid)
+
+
+def env_checkable() -> bool:
+    """Whether a process's environment can be read on this system, so a subscription's
+    `requires_env` can be checked: True on Linux and macOS, False on Windows.
+
+    It asks the platform, not a process, so it costs no read. Where it is False, a
+    subscription with `requires_env` never asks.
+    """
+    return sys.platform.startswith("linux") or sys.platform == "darwin"
 
 
 def env_met(sub: Subscription, environ: Mapping[str, str] | None) -> bool:
@@ -442,12 +454,40 @@ class Track:
 class Pending:
     """A started process not yet reaped, and its log line so far."""
 
-    proc: subprocess.Popen
+    proc: subprocess.Popen | Detached
     entry: dict = field(default_factory=dict)
 
 
-def spawn(argv: list[str]) -> subprocess.Popen:
-    """Start `argv` detached: its own session, stdin and stdout on /dev/null."""
+class Detached:
+    """An ask started by `moxi.proc.spawn(..., detached=True)`, which gives back only a
+    pid: `poll` says whether it still runs, by pid and start time, and never knows how it
+    ended."""
+
+    def __init__(self, pid: int):
+        self.pid = pid
+        self._id = _proc.identity(pid)
+
+    def poll(self) -> int | None:
+        """None while the process runs, else `GONE`."""
+        if self._id is not None and _proc.alive(self._id):
+            return None
+        return GONE
+
+
+#: What `Detached.poll` answers for an ask that has ended: its exit status is not known.
+GONE = object()
+
+
+def spawn(argv: list[str]) -> subprocess.Popen | Detached:
+    """Start `argv` detached, so it outlives the watcher.
+
+    Linux and macOS: its own session, stdin and stdout on /dev/null, stderr where the
+    watcher's goes; the `Popen` is returned, so its exit status is logged. Windows: a
+    detached process outside any job the watcher runs in (`moxi.proc.spawn(...,
+    detached=True)`), so a stop of the watcher's job does not end it; only its pid is held.
+    """
+    if sys.platform == "win32":
+        return Detached(_proc.spawn(argv, detached=True))
     return subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                             start_new_session=True, close_fds=True)
 
@@ -477,7 +517,7 @@ class Timer:
                  modules: Callable[[], Iterable[Subscription | Refusal]]
                  | Iterable[Subscription | Refusal] | None = None,
                  environ: Callable[[int], Mapping[str, str] | None] = proc_environ,
-                 spawn: Callable[[list[str]], subprocess.Popen] = spawn,
+                 spawn: Callable[[list[str]], subprocess.Popen | Detached] = spawn,
                  log_file: Path | None = None, now: Callable[[], float] = time.time):
         self.config_entries = config_entries or (lambda: [])
         if modules is None:
@@ -588,6 +628,9 @@ class Timer:
             if code is None:
                 still.append(p)
                 continue
+            if code is GONE:
+                code = None
+                p.entry["error"] = "its exit status is not known (only its pid was kept)"
             p.entry["exit"], p.entry["ended"] = code, now
             self._write(p.entry)
         self.pending = still
@@ -652,6 +695,7 @@ def plan(sub: Subscription, record: Mapping, now: float, environ, asks: list[dic
 
 __all__ = ["GROUP", "ATTRIBUTE", "CONFIG_KEY", "CONFIG", "FIELDS", "LOG_NAME", "LOG_LIMIT",
            "Subscription", "Refusal", "Loaded", "Timer", "Track", "check", "from_config",
-           "from_modules", "combine", "load", "proc_environ", "env_met", "missing_env",
+           "from_modules", "combine", "load", "proc_environ", "env_checkable", "env_met",
+           "missing_env", "Detached", "GONE",
            "append_log", "read_log", "log_path", "spawn", "due", "plan",
            "resolve_config_argv0", "module_argv0_resolver"]

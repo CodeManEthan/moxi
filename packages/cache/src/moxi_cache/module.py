@@ -10,3 +10,5 @@ INTERNAL_ENV = {}
 SETTINGS = "settings.toml"
 SETUP = None
 SEGMENT = "moxi_cache.segment"
+# Its doctor rows: what `moxi doctor` adds for cache.
+DOCTOR = "moxi_cache.doctor:rows"
