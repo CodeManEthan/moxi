@@ -823,6 +823,8 @@ def _across(values: Mapping[str, object], fields: dict, module: str | None) -> l
     for both in sorted(set(daemons) & set(timers)):
         problems.append(f"declares {both!r} as both a daemon and a timer; a module's "
                         "daemons and timers each need their own name")
+    for daemon, kind, other in stem_clashes(daemons, timers):
+        problems.append(clash_line(daemon, kind, other))
     # With UNITS_FROM, a HEALTH key may name a daemon declared only at run time; those
     # are read through `moxi.units.declarations`, never here, so the key is judged there.
     if fields["units_from"] is None:
@@ -1036,6 +1038,48 @@ def _daemon(where: str, entry: Mapping) -> None:
             raise _Bad(f"has {where} socket = {socket!r}; it must be a table of exactly "
                        "setting (a settings key) and addresses (a non-empty list of IP "
                        "addresses)")
+        # One socket is written per address, so the same address twice (in any spelling
+        # of it) would be two sockets on one address.
+        seen: dict[object, str] = {}
+        for address in socket["addresses"]:
+            ip = _ip_of(address)
+            if ip in seen:
+                same = seen[ip]
+                twice = address if same == address else f"{same} and {address}"
+                raise _Bad(f"has {where} socket addresses {list(socket['addresses'])!r} "
+                           f"with {twice} given twice; give each address once")
+            seen[ip] = address
+
+
+def stem_clashes(daemons: Mapping, timers: Mapping) -> list[tuple[str, str, str]]:
+    """The pairs of units whose systemd files would share a name, as `(daemon, kind,
+    other)`: a daemon with a `socket` of n addresses writes a socket unit per address,
+    named for the daemon and for `<daemon>-1` to `<daemon>-<n-1>`, so another daemon or
+    timer named `<daemon>-<k>`, k below n, would write the same socket unit (with its
+    own socket) or the service systemd pairs by name with it (without one). `kind` is
+    `daemon` or `timer`, the other unit's. Sorted, so callers refuse them in one order."""
+    out = []
+    for name, entry in daemons.items():
+        socket = entry.get("socket") if isinstance(entry, Mapping) else None
+        if not isinstance(socket, Mapping):
+            continue
+        addresses = socket.get("addresses")
+        count = len(addresses) if isinstance(addresses, (list, tuple)) else 0
+        for k in range(1, count):
+            other = f"{name}-{k}"
+            if other in daemons:
+                out.append((name, "daemon", other))
+            if other in timers:
+                out.append((name, "timer", other))
+    return sorted(out)
+
+
+def clash_line(daemon: str, kind: str, other: str) -> str:
+    """The reason a unit pair of `stem_clashes` is refused, for a line."""
+    k = int(other.rpartition("-")[2])
+    return (f"declares {kind} {other!r} beside daemon {daemon!r}, whose socket for its "
+            f"address {k + 1} is a unit named for {other!r}; the two would share that "
+            "name, so give one of them another name")
 
 
 def _timer(where: str, entry: Mapping, *, runtime: bool) -> None:
@@ -1185,13 +1229,17 @@ def _absolute(value: str) -> bool:
 
 
 def _ip(value: str) -> bool:
+    return _ip_of(value) is not None
+
+
+def _ip_of(value: str):
+    """`value` as an `ipaddress` address, or None when it is not an IP literal."""
     import ipaddress
 
     try:
-        ipaddress.ip_address(value)
+        return ipaddress.ip_address(value)
     except ValueError:
-        return False
-    return True
+        return None
 
 
 def _freeze(value):

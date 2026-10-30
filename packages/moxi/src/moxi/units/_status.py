@@ -11,6 +11,14 @@ What it gives a unit that has no unit file to read:
     off         not on this platform, or a daemon whose switch is off
     missing     declared, and no unit is written for it
 
+A daemon with a `socket` has a second state, kind `socket`, right after its own, on every
+backend (`UnitState` says what each backend reads for it). Where the sockets are units of
+their own, the backend reads the daemon's marked set; where they are keys of the daemon's
+own file, it reads the daemon's job under kind `socket`; where the socket is skipped
+(Task Scheduler), it is `off` with no read. A daemon that is `off` or `nobackend` has its
+socket the same, and a socket with nothing written for it is `missing`. On a backend whose sockets are units of their own,
+such a daemon's service has no install section, so its own `enabled` is its socket's.
+
 `last` is the newest run line the gate wrote for the unit (`STATE/<module>/runs.jsonl`),
 with the supervisor's own last result beside it under `"supervisor"`; with no run line it
 is `{"supervisor": ...}`, and None when there is neither. A foreign timer a module wrapped
@@ -61,6 +69,7 @@ def status(modules: Iterable[str] | str | None = None, *, foreign: Iterable[str]
     rows: list[UnitState | None] = []
     refs: list[UnitRef] = []
     slots: list[int] = []
+    socketed: set[tuple[str, str]] = set()
 
     def read(ref: UnitRef) -> None:
         slots.append(len(rows))
@@ -68,7 +77,7 @@ def status(modules: Iterable[str] | str | None = None, *, foreign: Iterable[str]
         refs.append(ref)
 
     for module in names:
-        for row in _module_rows(module, impl):
+        for row in _module_rows(module, impl, socketed):
             if isinstance(row, UnitRef):
                 read(row)
             else:
@@ -105,7 +114,26 @@ def status(modules: Iterable[str] | str | None = None, *, foreign: Iterable[str]
         runs = _Runs()
         for slot, ref, state in zip(slots, refs, read_states):
             rows[slot] = _with_last(state, ref, runs)
-    return [row for row in rows if row is not None]
+    out = [row for row in rows if row is not None]
+    if socketed and not isinstance(impl, str) and impl.sockets == "units":
+        out = _enabled_by_socket(out, socketed)
+    return out
+
+
+def _enabled_by_socket(rows: list[UnitState], socketed: set[tuple[str, str]]
+                       ) -> list[UnitState]:
+    """A daemon whose sockets are units of their own takes its `enabled` from its socket
+    state: its service has no install section and reads `static`."""
+    sockets = {(r.module, r.name): r for r in rows
+               if r.kind == "socket" and (r.module, r.name) in socketed}
+    out = []
+    for row in rows:
+        socket = sockets.get((row.module, row.name)) if row.kind == "daemon" else None
+        if socket is not None and row.state not in ("missing", "unknown", "nobackend",
+                                                    "off"):
+            row = replace(row, enabled=socket.enabled)
+        out.append(row)
+    return out
 
 
 def _refused(impl, unit: UnitRef) -> str | None:
@@ -145,9 +173,11 @@ def _implementation():
     return "no supervisor on this system (no systemd user manager)" if impl is None else impl
 
 
-def _module_rows(module: str, impl) -> list[UnitState | UnitRef]:
+def _module_rows(module: str, impl, socketed: set[tuple[str, str]]
+                 ) -> list[UnitState | UnitRef]:
     """One entry per unit of `module`: a `UnitState` decided without the supervisor, or
-    the `UnitRef` the backend reads."""
+    the `UnitRef` the backend reads. Each daemon that declares a `socket` gets its socket
+    entry right after its own, and is added to `socketed`."""
     from .. import modules as _modules
 
     found = _modules.load(module)
@@ -165,34 +195,74 @@ def _module_rows(module: str, impl) -> list[UnitState | UnitRef]:
         declared += [(kind, name, None) for kind, name in decl.rejected
                      if kind in ("daemon", "timer")]
     if isinstance(impl, str):
-        return [UnitState(module, name, kind, None, "nobackend", detail=impl)
-                for kind, name, _ in declared]
+        out: list[UnitState | UnitRef] = []
+        for kind, name, entry in declared:
+            out.append(UnitState(module, name, kind, None, "nobackend", detail=impl))
+            if _has_socket(kind, entry):
+                socketed.add((module, name))
+                out.append(UnitState(module, name, "socket", None, "nobackend",
+                                     detail=impl))
+        return out
     by_name: dict[str, list[UnitRef]] = {}
     for ref in impl.marked(module):
         by_name.setdefault(ref.name, []).append(ref)
-    out: list[UnitState | UnitRef] = []
+    out = []
     settings = _Switches(found)
     for kind, name, entry in declared:
         refs = by_name.pop(name, [])
-        if refs:
-            out += refs
-            continue
+        own = [ref for ref in refs if ref.kind != "socket"]
+        sockets = [ref for ref in refs if ref.kind == "socket"]
+        state: UnitState | None = None
         unit = f"{module}/{name}"
-        here = _platform()
-        if entry is not None and "platforms" in entry and here not in entry["platforms"]:
-            out.append(UnitState(module, name, kind, impl.name, "off",
-                                 detail=f"{unit} is not on this system ({here})"))
-        elif entry is not None and kind == "daemon" and settings.off(entry.get("switch")):
-            out.append(UnitState(module, name, kind, impl.name, "off",
-                                 detail=f"{unit} is switched off; turn it on with: moxi "
-                                        f"config set {module} {entry['switch']} true"))
+        if own:
+            out += own
         else:
-            out.append(UnitState(module, name, kind, impl.name, "missing",
-                                 detail=f"{unit} is not installed; `moxi install {module}` "
-                                        "writes it"))
+            here = _platform()
+            if entry is not None and "platforms" in entry and here not in entry["platforms"]:
+                state = UnitState(module, name, kind, impl.name, "off",
+                                  detail=f"{unit} is not on this system ({here})")
+            elif (entry is not None and kind == "daemon"
+                  and settings.off(entry.get("switch"))):
+                state = UnitState(module, name, kind, impl.name, "off",
+                                  detail=f"{unit} is switched off; turn it on with: moxi "
+                                         f"config set {module} {entry['switch']} true")
+            else:
+                state = UnitState(module, name, kind, impl.name, "missing",
+                                  detail=f"{unit} is not installed; `moxi install "
+                                         f"{module}` writes it")
+            out.append(state)
+        if not _has_socket(kind, entry):
+            out += sockets
+            continue
+        socketed.add((module, name))
+        out.append(_socket_row(impl, module, name, state, own, sockets))
     for refs in by_name.values():
         out += refs
     return out
+
+
+def _has_socket(kind: str, entry: Mapping | None) -> bool:
+    return kind == "daemon" and entry is not None and "socket" in entry
+
+
+def _socket_row(impl, module: str, name: str, daemon: UnitState | None,
+                own: list[UnitRef], sockets: list[UnitRef]) -> UnitState | UnitRef:
+    """The socket entry of a daemon that declares a `socket`. `daemon` is the daemon's
+    state when it was decided without the supervisor (`off`, `missing`), else None."""
+    if daemon is not None and daemon.state == "off":
+        return replace(daemon, kind="socket")
+    if impl.sockets == "none":
+        return UnitState(module, name, "socket", impl.name, "off",
+                         detail="the socket is skipped on Windows; the daemon binds its own")
+    if impl.sockets == "job":
+        if own:
+            ref = own[0]
+            return UnitRef(module, name, "socket", ref.ids, ref.paths, ref.enabled)
+    elif sockets:
+        return sockets[0]
+    return UnitState(module, name, "socket", impl.name, "missing",
+                     detail=f"{module}/{name}'s socket is not installed; `moxi install "
+                            f"{module}` writes it")
 
 
 class _Switches:

@@ -11,12 +11,15 @@ its arguments to a file there.
 The rows that run the gate's wrap forms (`moxi run --condition` and `--result`) need the
 gate; on a tree without it they are skipped with that reason.
 
-The socket row writes a throwaway daemon with a socket through the core's own `plan` and
-`apply`: module `moxitest`, unit `socket-<8 hex>`, so the files are
-`moxi-moxitest-socket-<8 hex>.socket` and `.service`, listening on a free port of
-127.0.0.1, with a command that only sleeps. At its end it disables and stops both, deletes
-them, removes any `.wants` link left, and reloads, and it fails if the unit directory
-listing changed.
+The socket rows write throwaway daemons with sockets through the core's own `plan`,
+`apply`, acts and `status`, under a fixture module named `t<8 hex>`, so every file is
+`moxi-t<8 hex>-<name>.*`, listening on free ports of the loopback. The shell row's command
+is a script in the row's tmp that records the sockets it was handed, answers one
+connection on each and exits. One row also writes a hand-made socket unit,
+`moxitest-bind-<8 hex>.socket`, with its service. At its end each row removes its module's
+units with `units.remove`, then stops and deletes anything left under its names, takes any
+`.wants` link to them, resets the failure of every unit under its names, a dropped one
+included, and reloads, and it fails if the unit directory listing changed.
 """
 
 from __future__ import annotations
@@ -28,6 +31,8 @@ import shlex
 import shutil
 import socket
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -241,15 +246,42 @@ def test_wrap_on_this_boxs_user_manager(tmp_path, monkeypatch, capsys):
                     "this tree; the drop-in, status and unwrap rows passed")
 
 
-# -- a changed socket restarts its daemon ----------------------------------------------------
+# -- sockets ----------------------------------------------------------------------------------
 
-SOCKET_MODULE = "moxitest"
 SOCKET_SETTINGS = """
 [port]
 type = "int"
 default = {port}
 doc = "The throwaway socket's port."
 read = "start"
+"""
+
+#: An address of the documentation range, which no interface of this box holds.
+UNBINDABLE = "192.0.2.1"
+
+#: The shell row's command: it records the sockets it was handed, answers one connection
+#: on each, and exits 0. Handed none, it only sleeps.
+SHELL = """#!{python}
+import json, os, selectors, socket, sys, time
+ours = os.environ.get("LISTEN_PID") == str(os.getpid())
+count = int(os.environ.get("LISTEN_FDS", "0")) if ours else 0
+with open({record!r}, "a") as out:
+    out.write(json.dumps({{"pid": os.getpid(), "fds": count,
+                          "names": os.environ.get("LISTEN_FDNAMES", "")}}) + "\\n")
+if not count:
+    time.sleep(300)
+    sys.exit(0)
+chosen = selectors.DefaultSelector()
+for fd in range(3, 3 + count):
+    chosen.register(socket.socket(fileno=fd), selectors.EVENT_READ)
+left, deadline = count, time.time() + 120
+while left and time.time() < deadline:
+    for key, _ in chosen.select(timeout=1):
+        conn, _ = key.fileobj.accept()
+        conn.sendall(b"ok\\n")
+        conn.close()
+        chosen.unregister(key.fileobj)
+        left -= 1
 """
 
 
@@ -265,114 +297,489 @@ def _free_ports(count: int) -> list[int]:
             s.close()
 
 
-class SocketRow:
-    """The throwaway daemon with a socket, declared by a fake module, and its cleanup."""
+def _known(stems: list[str]) -> list[str]:
+    """The units the user manager still holds under `stems`, file or not."""
+    patterns = [p for stem in stems for p in (f"{stem}.*", f"{stem}-*")]
+    listed = subprocess.run(["systemctl", "--user", "list-units", "--all", "--plain",
+                             "--no-legend", "--no-pager", "--", *patterns],
+                            capture_output=True, text=True, timeout=30)
+    return [line.split()[0] for line in listed.stdout.splitlines() if line.strip()]
+
+
+def _scrub(directory: Path, stems: list[str], fence: Fence) -> None:
+    """Stop and delete every unit file under `stems` and every `.wants` link to one, then
+    forget the failure of every unit under `stems` and reload. That takes in a unit whose
+    file the row already deleted, such as a dropped socket unit that failed: the manager
+    keeps it, `not-found failed`, until its failure is reset. Cleanup only: names nothing
+    else."""
+    def ours(name: str) -> bool:
+        return any(name.startswith((stem + ".", stem + "-")) for stem in stems)
+
+    found = [p for p in directory.iterdir() if ours(p.name)]
+    for path in sorted(found, key=lambda p: not p.name.endswith(".socket")):
+        fence.run("stop", path.name)
+    for wants in directory.glob("*.wants"):
+        for link in wants.iterdir():
+            if ours(link.name) and link.is_symlink():
+                link.unlink()
+    for path in found:
+        if path.is_file() or path.is_symlink():
+            path.unlink()
+    # Cleanup only: forget a failed run of the throwaway units, one at a time, so a name
+    # the manager no longer holds doesn't keep the others failed.
+    for name in sorted({p.name for p in found} | {u for u in _known(stems) if ours(u)}):
+        subprocess.run(["systemctl", "--user", "reset-failed", "--", name],
+                       capture_output=True, timeout=30)
+    fence.run("daemon-reload")
+
+
+class SocketModule:
+    """A throwaway fixture module `t<8 hex>` whose daemons have sockets, and its cleanup."""
 
     def __init__(self, site, tmp: Path, monkeypatch):
         self.site = site
-        self.name = f"socket-{os.urandom(4).hex()}"
-        stem = f"moxi-{SOCKET_MODULE}-{self.name}"
-        self.service, self.socket = f"{stem}.service", f"{stem}.socket"
+        self.module = f"t{os.urandom(4).hex()}"
         self.dir = _systemd.unit_dir()
         self.fence = Fence("systemd")
         self.lines: list[str] = []
-        scripts = tmp / "bin"
-        scripts.mkdir()
-        relay = scripts / "moxi-moxitest-relay"
-        relay.write_text("#!/bin/sh\nexec sleep 300\n")
-        relay.chmod(0o755)
-        monkeypatch.setattr(moxi.paths, "_scripts", lambda: scripts)
-        self.old, self.new = _free_ports(2)
-        site.write(f"moxi_{SOCKET_MODULE}/settings.toml", SOCKET_SETTINGS.format(port=self.old))
+        self.scripts = tmp / "bin"
+        self.scripts.mkdir()
+        monkeypatch.setattr(moxi.paths, "_scripts", lambda: self.scripts)
+        self.port, self.other = _free_ports(2)
+        site.write(f"moxi_{self.module}/settings.toml",
+                   SOCKET_SETTINGS.format(port=self.port))
 
-    def declare(self, doc: str) -> None:
-        daemons = {self.name: {"command": "moxi-moxitest-relay", "doc": doc,
-                               "upgrade": "keep",
-                               "socket": {"setting": "port", "addresses": ["127.0.0.1"]}}}
+    def stem(self, name: str) -> str:
+        return f"moxi-{self.module}-{name}"
+
+    def script(self, name: str, body: str) -> None:
+        path = self.scripts / f"moxi-{self.module}-{name}"
+        path.write_text(body)
+        path.chmod(0o755)
+
+    def declare(self, daemons: dict) -> None:
         # A second declaration is read anew, not from the first one's import.
-        drop_modules({f"moxi_{SOCKET_MODULE}"})
-        self.site.module(SOCKET_MODULE, SETTINGS="'settings.toml'", DAEMONS=repr(daemons))
+        drop_modules({f"moxi_{self.module}"})
+        self.site.module(self.module, SETTINGS="'settings.toml'", DAEMONS=repr(daemons))
         moxi.modules.reset()
+
+    def plan(self):
+        from moxi import units
+
+        return units.plan(self.module)
 
     def apply(self):
         from moxi import units
 
-        done = units.apply(units.plan(SOCKET_MODULE), say=self.lines.append)
-        assert all(a.ok for a in done), self.lines
-        return done
+        self.lines.clear()
+        return units.apply(self.plan(), say=self.lines.append)
 
-    def plan(self) -> set[tuple[str, str]]:
+    def status(self, name: str):
         from moxi import units
 
-        return {(c.kind, c.action) for c in units.plan(SOCKET_MODULE)}
+        rows = {r.kind: r for r in units.status([self.module]) if r.name == name}
+        return rows["daemon"], rows["socket"]
 
-    def daemon(self) -> dict[str, str]:
-        return _show(self.fence, self.service, "ActiveState", "SubState", "MainPID")
+    def show(self, unit: str, *props: str) -> dict[str, str]:
+        return _show(self.fence, unit, *props)
 
-    def listens(self) -> str:
-        return _show(self.fence, self.socket, "ActiveState", "Listen")
+    def wait(self, unit: str, state: str, seconds: float = 15) -> str:
+        """Wait for `unit`'s `ActiveState` to read `state`; the last one read."""
+        deadline = time.monotonic() + seconds
+        while True:
+            now = self.show(unit, "ActiveState")["ActiveState"]
+            if now == state or time.monotonic() > deadline:
+                return now
+            time.sleep(0.1)
 
-    def clean(self) -> None:
-        for unit in (self.socket, self.service):
-            self.fence.run("disable", "--now", unit)
-        for path in (self.dir / self.socket, self.dir / self.service,
-                     self.dir / "sockets.target.wants" / self.socket,
-                     self.dir / "default.target.wants" / self.service):
+    def remove(self):
+        from moxi import units
+
+        return units.remove(self.module, say=self.lines.append)
+
+
+def _ask(address: str, port: int) -> bytes:
+    family = socket.AF_INET6 if ":" in address else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as conn:
+        conn.settimeout(10)
+        conn.connect((address, port))
+        return conn.recv(16)
+
+
+def _records(path: Path) -> list[dict]:
+    return ([json.loads(line) for line in path.read_text().splitlines()]
+            if path.exists() else [])
+
+
+def _doctor_rows(module: str) -> list[tuple[str, str, str]]:
+    """The doctor's rows of `module`, for the report (the rows are the doctor's own)."""
+    from moxi.doctor import _run
+
+    return [(r.name, r.state, r.detail) for r in _run.run([module]) if r.module == module]
+
+
+def test_sockets_on_this_boxs_user_manager(site, tmp_path, monkeypatch, capsys):
+    """One socket unit per address on the real user manager: the units, the service
+    they start, the state and its epoch, a bad bind failing one unit alone (and, in a
+    hand-made unit with two listen lines, failing the whole unit), an address taken out
+    again, and a home move's stop and resume around a changed daemon."""
+    from moxi import units
+    from moxi.units import _backend, _plan
+
+    row = SocketModule(site, tmp_path, monkeypatch)
+    record = tmp_path / "handed.jsonl"
+    row.script("shell", SHELL.format(python=sys.executable, record=str(record)))
+    stem = row.stem("shell")
+    service = f"{stem}.service"
+    bind = f"moxitest-bind-{os.urandom(4).hex()}"
+    before = _listing(row.dir)
+    assert not any(k.startswith((f"moxi-{row.module}-", "moxitest-")) for k in before)
+    report: list[str] = []
+
+    def declare(*addresses, doc="the throwaway shell"):
+        row.declare({"shell": {"command": f"moxi-{row.module}-shell", "doc": doc,
+                               "socket": {"setting": "port",
+                                          "addresses": list(addresses)}}})
+
+    try:
+        with _backend.use(SystemdBackend()):
+            v6 = _plan.ipv6_loopback()
+            declare("127.0.0.1", "::1")
+            plan = {c.kind: c for c in row.plan()}
+            held = [f"{stem}.socket"] + ([f"{stem}-1.socket"] if v6 else [])
+            addresses = ["127.0.0.1"] + (["::1"] if v6 else [])
+            assert [p.name for p in plan["socket"].paths] == held
+            if v6:
+                report.append("IPv6 loopback: yes; ::1 is written")
+            else:
+                note = "::1 left out: no IPv6 loopback on this system"
+                assert note in plan["socket"].reason and note in plan["daemon"].reason
+                report.append(f"IPv6 loopback: no; the plan says {note!r} and writes "
+                              f"{held} alone")
+            assert f"\nSockets={' '.join(held)}\n" in plan["daemon"].text
+            assert "[Install]" not in plan["daemon"].text
+
+            done = row.apply()
+            assert all(a.ok for a in done), row.lines
+            shown = {u: row.show(u, "ActiveState", "UnitFileState", "Listen") for u in held}
+            first = row.show(service, "ActiveState", "UnitFileState")
+            report.append(f"after apply: {shown}; service {first}")
+            assert all(s["ActiveState"] == "active" for s in shown.values())
+            assert all(s["UnitFileState"] == "enabled" for s in shown.values())
+            # The service has no install section, so it reads static; install starts it
+            # after its sockets, before any connection.
+            assert first["UnitFileState"] == "static"
+
+            daemon, sock = row.status("shell")
+            ids = {u: row.show(u, "InvocationID")["InvocationID"] for u in held}
+            epoch = ",".join(f"{u}={ids[u]}" for u in held)
+            report.append(f"status: daemon {daemon.state}, socket {sock.state}, "
+                          f"enabled {sock.enabled}, epoch {sock.epoch}")
+            assert (sock.state, sock.epoch, sock.enabled) == ("active", epoch, True)
+            assert daemon.enabled is True
+
+            # A connection to each address is answered; the script then exits, and the
+            # service reads inactive under its listening sockets.
+            assert [_ask(a, row.port) for a in addresses] == [b"ok\n"] * len(addresses)
+            assert row.wait(service, "inactive") == "inactive"
+            handed = _records(record)
+            report.append(f"handed to the service: {handed}")
+            assert handed[-1]["names"] == ":".join(held)
+            assert handed[-1]["fds"] == len(held)
+            daemon, sock = row.status("shell")
+            doctor = {name: (state, detail) for name, state, detail
+                      in _doctor_rows(row.module)}
+            report.append(f"idle: daemon {daemon.state}, socket {sock.state}, epoch "
+                          f"{sock.epoch}; doctor {doctor}")
+            assert (daemon.state, sock.state, sock.epoch) == ("inactive", "active", epoch)
+            # The doctor reads a daemon idle under its listening socket as healthy.
+            assert doctor["daemon shell"][0] == "ok"
+            assert doctor["daemon shell"][1].endswith("idle, socket listening")
+
+            # The next connection starts it again, by socket activation alone.
+            assert [_ask(a, row.port) for a in addresses] == [b"ok\n"] * len(addresses)
+            assert row.wait(service, "inactive") == "inactive"
+            assert len(_records(record)) == len(handed) + 1
+            assert _records(record)[-1]["names"] == ":".join(held)
+            assert row.status("shell")[1].epoch == epoch
+
+            # A socket unit started again gets a new id in the epoch.
+            assert row.fence.run("restart", held[0]).ok
+            again = row.status("shell")[1].epoch
+            report.append(f"after restart of {held[0]}: epoch {again}")
+            assert again != epoch and again.split(",")[1:] == epoch.split(",")[1:]
+            epoch = again
+
+            # The premise of one unit per address: a hand-made unit with two listen
+            # lines, one of them an address this box doesn't hold, fails as a whole,
+            # and its good address doesn't listen either.
+            (row.dir / f"{bind}.service").write_text(
+                "[Unit]\nDescription=moxi test: a throwaway service for the bind proof\n\n"
+                "[Service]\nExecStart=/bin/true\n")
+            (row.dir / f"{bind}.socket").write_text(
+                "[Unit]\nDescription=moxi test: two listen lines, one unbindable\n\n"
+                f"[Socket]\nListenStream=127.0.0.1:{row.other}\n"
+                f"ListenStream={UNBINDABLE}:{row.other}\n")
+            assert row.fence.run("daemon-reload").ok
+            started = row.fence.run("start", f"{bind}.socket")
+            whole = row.show(f"{bind}.socket", "ActiveState", "Result")
             try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
-        # Cleanup only: forget a failed run of the throwaway units.
-        subprocess.run(["systemctl", "--user", "reset-failed", self.socket, self.service],
-                       capture_output=True, timeout=30)
-        self.fence.run("daemon-reload")
+                _ask("127.0.0.1", row.other)
+                good = "listening"
+            except OSError as exc:
+                good = f"not listening ({type(exc).__name__})"
+            report.append(f"two listen lines, one on {UNBINDABLE}: start ok={started.ok} "
+                          f"{started.stderr.strip()!r}; unit {whole}; 127.0.0.1:{row.other} "
+                          f"{good}")
+            assert not started.ok and whole["ActiveState"] == "failed"
+            assert good.startswith("not listening")
+
+            # One unit per address: the unbindable address fails its own unit alone.
+            declare("127.0.0.1", "::1", UNBINDABLE)
+            third = f"{stem}-2.socket"
+            plan = {c.kind: c for c in row.plan()}
+            assert [p.name for p in plan["socket"].paths] == held + [third]
+            done = {a.change.kind: a for a in row.apply()}
+            states = {u: row.show(u, "ActiveState")["ActiveState"] for u in held + [third]}
+            daemon, sock = row.status("shell")
+            doctor = {name: (state, detail) for name, state, detail
+                      in _doctor_rows(row.module)}
+            report.append(f"with {UNBINDABLE}: socket apply ok={done['socket'].ok} "
+                          f"{done['socket'].lines}; units {states}; socket {sock.state} "
+                          f"{sock.detail!r} epoch {sock.epoch}; service "
+                          f"{row.show(service, 'ActiveState')}; doctor {doctor}")
+            assert not done["socket"].ok
+            assert states == {**{u: "active" for u in held}, third: "failed"}
+            assert (sock.state, sock.epoch) == ("failed", None)
+            assert third in sock.detail
+            # The doctor fails the socket row and names the unit that failed.
+            assert doctor["socket shell"][0] == "fail"
+            assert f"failed: {third}" in doctor["socket shell"][1]
+
+            # Taken out again: the unit is disabled and deleted, the rest listen.
+            declare("127.0.0.1", "::1")
+            plan = {c.kind: c for c in row.plan()}
+            assert plan["socket"].dropped == (row.dir / third,)
+            done = row.apply()
+            assert all(a.ok for a in done), row.lines
+            assert not (row.dir / third).exists()
+            daemon, sock = row.status("shell")
+            report.append(f"{UNBINDABLE} taken out: {third} deleted, socket {sock.state}")
+            assert sock.state == "active"
+
+            # A home move: every unit stopped with a record, the daemon changed, the
+            # unit step applied, then resume. The sockets start before the service, so
+            # resume finds them running and is done.
+            stops: list = []
+            stopped = units.stop(row.module, ["shell"], record=stops)
+            assert all(a.ok for a in stopped)
+            declare("127.0.0.1", "::1", doc="the throwaway shell, rewritten")
+            done = row.apply()
+            resumed = units.resume(stops)
+            report.append(f"home move: stopped {[e.unit for e in stops]}; apply "
+                          f"ok={all(a.ok for a in done)} {row.lines}; resume "
+                          f"{[(a.ok, a.lines) for a in resumed]}")
+            assert all(a.ok for a in done), row.lines
+            assert [e.unit for e in stops][:len(held)] == held
+            assert all(a.ok for a in resumed), resumed
+            assert row.status("shell")[1].state == "active"
+
+            removed = row.remove()
+            report.append(f"remove: {[(a.change.kind, a.ok, a.lines) for a in removed]}")
+            assert all(a.ok for a in removed)
+    finally:
+        _scrub(row.dir, [row.stem("")[:-1], bind], row.fence)
+        after = _listing(row.dir)
+        with capsys.disabled():
+            print("\n" + "\n".join(f"  {line}" for line in report))
+            print(f"  unit directory unchanged: {after == before}")
+    assert after == before
+
+
+def test_a_service_that_gains_a_socket_loses_its_login_link_on_this_boxs_user_manager(
+        site, tmp_path, monkeypatch, capsys):
+    """A daemon first written without a socket is enabled, linked from
+    `default.target.wants`; given a socket, its service loses its install section and
+    the writer takes the link away, so a login no longer starts it."""
+    from moxi.units import _backend
+
+    row = SocketModule(site, tmp_path, monkeypatch)
+    row.script("relay", f"#!{sys.executable}\nimport time\ntime.sleep(300)\n")
+    service = f"{row.stem('relay')}.service"
+    link = row.dir / "default.target.wants" / service
+    before = _listing(row.dir)
+    report: list[str] = []
+    try:
+        with _backend.use(SystemdBackend()):
+            entry = {"command": f"moxi-{row.module}-relay", "doc": "the throwaway relay"}
+            row.declare({"relay": entry})
+            assert all(a.ok for a in row.apply()), row.lines
+            report.append(f"no socket: link {link.is_symlink()}, "
+                          f"{row.show(service, 'UnitFileState', 'ActiveState')}")
+            assert link.is_symlink()
+            row.declare({"relay": {**entry, "socket": {"setting": "port",
+                                                        "addresses": ["127.0.0.1"]}}})
+            done = row.apply()
+            shown = row.show(service, "UnitFileState", "ActiveState")
+            report.append(f"with a socket: link {link.is_symlink()}, {shown}, "
+                          f"lines {row.lines}")
+            assert all(a.ok for a in done), row.lines
+            assert not link.is_symlink() and not link.exists()
+            assert shown == {"UnitFileState": "static", "ActiveState": "active"}
+            assert all(a.ok for a in row.remove())
+    finally:
+        _scrub(row.dir, [row.stem("")[:-1]], row.fence)
+        after = _listing(row.dir)
+        with capsys.disabled():
+            print("\n" + "\n".join(f"  {line}" for line in report))
+            print(f"  unit directory unchanged: {after == before}")
+    assert after == before
 
 
 @pytest.mark.parametrize("service_too", [False, True],
                          ids=["socket only", "socket and service"])
 def test_a_changed_socket_restarts_a_keep_daemon_on_this_boxs_user_manager(
         site, tmp_path, monkeypatch, capsys, service_too):
-    """A changed `.socket` restarts its daemon whatever `upgrade` says: a running
+    """A changed socket restarts its daemon whatever `upgrade` says: a running
     `upgrade = "keep"` daemon whose port changed ends running, as a new process, behind a
     socket on the new port, with or without a change to its own `.service`."""
     from moxi import config
     from moxi.units import _backend
 
-    row = SocketRow(site, tmp_path, monkeypatch)
+    row = SocketModule(site, tmp_path, monkeypatch)
+    row.script("relay", "#!/bin/sh\nexec sleep 300\n")
+    stem = row.stem("relay")
+    service, sock = f"{stem}.service", f"{stem}.socket"
     before = _listing(row.dir)
-    assert not any(Path(k).name.startswith(f"moxi-{SOCKET_MODULE}-") for k in before)
     report: list[str] = []
+
+    def declare(doc):
+        row.declare({"relay": {"command": f"moxi-{row.module}-relay", "doc": doc,
+                               "upgrade": "keep",
+                               "socket": {"setting": "port", "addresses": ["127.0.0.1"]}}})
+
     try:
         with _backend.use(SystemdBackend()):
-            row.declare("a throwaway daemon for the socket proof")
-            row.apply()
-            first = row.daemon()
-            report.append(f"first apply: {first} {row.listens()}")
+            declare("a throwaway daemon for the socket proof")
+            assert all(a.ok for a in row.apply()), row.lines
+            first = row.show(service, "ActiveState", "SubState", "MainPID")
+            report.append(f"first apply: {first} {row.show(sock, 'ActiveState', 'Listen')}")
             assert first["ActiveState"] == "active" and first["MainPID"] not in ("", "0")
-            assert row.listens()["Listen"] == f"127.0.0.1:{row.old} (Stream)"
+            assert row.show(sock, "Listen")["Listen"] == f"127.0.0.1:{row.port} (Stream)"
 
-            config.set(SOCKET_MODULE, "port", str(row.new), by="test")
+            config.set(row.module, "port", str(row.other), by="test")
             if service_too:
-                row.declare("a throwaway daemon for the socket proof, rewritten")
-            assert row.plan() == {("daemon", "change" if service_too else "keep"),
-                                  ("socket", "change")}
-            row.lines.clear()
-            row.apply()
-            then = row.daemon()
-            listens = row.listens()
-            report.append(f"port {row.old} -> {row.new}: {then} {listens} "
+                declare("a throwaway daemon for the socket proof, rewritten")
+            assert {(c.kind, c.action) for c in row.plan()} == {
+                ("daemon", "change" if service_too else "keep"), ("socket", "change")}
+            done = row.apply()
+            then = row.show(service, "ActiveState", "SubState", "MainPID")
+            listens = row.show(sock, "ActiveState", "Listen")
+            report.append(f"port {row.port} -> {row.other}: {then} {listens} "
                           f"lines={row.lines}")
+            assert all(a.ok for a in done), row.lines
             assert then["ActiveState"] == "active", (then, row.lines)
             assert then["MainPID"] not in ("", "0", first["MainPID"])
             assert listens == {"ActiveState": "active",
-                               "Listen": f"127.0.0.1:{row.new} (Stream)"}
+                               "Listen": f"127.0.0.1:{row.other} (Stream)"}
             if service_too:
-                assert (f"{row.service} rewritten and restarted, since its socket changed"
+                assert (f"{service} rewritten and restarted, since its socket changed"
                         in row.lines)
-            with socket.create_connection(("127.0.0.1", row.new), timeout=5):
+            with socket.create_connection(("127.0.0.1", row.other), timeout=5):
                 pass
+            assert all(a.ok for a in row.remove())
     finally:
-        row.clean()
+        _scrub(row.dir, [row.stem("")[:-1]], row.fence)
+        after = _listing(row.dir)
+        with capsys.disabled():
+            print("\n" + "\n".join(f"  {line}" for line in report))
+            print(f"  unit directory unchanged: {after == before}")
+    assert after == before
+
+
+def test_a_failed_read_after_a_home_move_starts_the_sockets_then_the_service(
+        site, tmp_path, monkeypatch, capsys):
+    """After a home move stopped the socket unit and the service, the unit step's read of
+    whether the service runs fails (patched to raise, as a lost bus would), so the
+    service is counted running: `stop`, the socket unit's `start`, then `start`, never a
+    `restart`. `resume`'s starts are then no-ops the manager refuses none of. The row also
+    records whether this manager starts a stopped socket unit by itself when only the
+    service is started (its `Sockets=` pulls them in with `Wants=`)."""
+    from moxi import units
+    from moxi.units import _backend
+    from moxi.units._backend import ReadError
+    from moxi.units._fence import Ran
+
+    row = SocketModule(site, tmp_path, monkeypatch)
+    row.script("relay", "#!/bin/sh\nexec sleep 300\n")
+    row.script("relay-next", "#!/bin/sh\nexec sleep 300\n")
+    stem = row.stem("relay")
+    service, sock = f"{stem}.service", f"{stem}.socket"
+    before = _listing(row.dir)
+    report: list[str] = []
+    calls: list[tuple[str, ...]] = []
+
+    def declare(command):
+        # Only the command changes, so the service's text changes and the socket's not.
+        row.declare({"relay": {"command": f"moxi-{row.module}-{command}",
+                               "doc": "a throwaway daemon for the start rule",
+                               "socket": {"setting": "port", "addresses": ["127.0.0.1"]}}})
+
+    def lost_bus(self, ids, fence):
+        raise ReadError(Ran(False, 1, "", "Failed to connect to bus",
+                            ("systemctl", "--user", "show"), None))
+
+    try:
+        with _backend.use(SystemdBackend()):
+            declare("relay")
+            assert all(a.ok for a in row.apply()), row.lines
+            assert row.show(service, "ActiveState")["ActiveState"] == "active"
+
+            stops: list = []
+            assert all(a.ok for a in units.stop(row.module, ["relay"], record=stops))
+            assert [e.unit for e in stops] == [sock, service]
+            down = (row.show(sock, "ActiveState"), row.show(service, "ActiveState"))
+            declare("relay-next")
+            assert {(c.kind, c.action) for c in row.plan()} == {("daemon", "change"),
+                                                                 ("socket", "keep")}
+            real_run, real_running = Fence.run, SystemdBackend.running
+
+            def watched(self, verb, *args, **kw):
+                calls.append((verb, *args))
+                return real_run(self, verb, *args, **kw)
+
+            monkeypatch.setattr(SystemdBackend, "running", lost_bus)
+            monkeypatch.setattr(Fence, "run", watched)
+            try:
+                done = row.apply()
+            finally:
+                monkeypatch.setattr(Fence, "run", real_run)
+                monkeypatch.setattr(SystemdBackend, "running", real_running)
+            steps = [c for c in calls if c[0] in ("stop", "start", "restart")]
+            after_apply = (row.show(sock, "ActiveState"), row.show(service, "ActiveState"))
+            resumed = units.resume(stops)
+            report.append(f"after the move: {down}; apply under a failed read: "
+                          f"ok={all(a.ok for a in done)} steps={steps} {row.lines}; "
+                          f"then {after_apply}; resume "
+                          f"{[(a.ok, a.lines) for a in resumed]}")
+            assert all(a.ok for a in done), row.lines
+            assert steps == [("stop", service), ("start", sock), ("start", service)]
+            assert after_apply == ({"ActiveState": "active"}, {"ActiveState": "active"})
+            assert all(a.ok for a in resumed), [a.lines for a in resumed]
+            with socket.create_connection(("127.0.0.1", row.port), timeout=5):
+                pass
+
+            # A fact, recorded and not asserted: does starting the service alone start
+            # its stopped socket unit?
+            row.fence.run("stop", sock)
+            row.fence.run("stop", service)
+            ran = row.fence.run("start", service)
+            report.append(f"start of the service alone, socket stopped: ok={ran.ok} "
+                          f"{ran.stderr.strip()!r}; socket then "
+                          f"{row.show(sock, 'ActiveState')['ActiveState']}")
+            assert all(a.ok for a in row.remove())
+    finally:
+        _scrub(row.dir, [row.stem("")[:-1]], row.fence)
         after = _listing(row.dir)
         with capsys.disabled():
             print("\n" + "\n".join(f"  {line}" for line in report))

@@ -11,6 +11,7 @@ import sys
 import textwrap
 import time
 import types
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +20,7 @@ from moxi import cli, doctor, files, modules, strays, units
 from moxi.doctor import Row, _run
 from moxi.units import _backend, _state
 from moxi.units._fake import FakeBackend, FakeSupervisor
+from moxi.units._launchd import LaunchdBackend
 from moxi.units._types import UnitChange, UnitState, Wrapped
 
 SETTINGS = """
@@ -504,6 +506,227 @@ def test_a_disabled_timer_warns_unless_declared_disabled(enabled, state):
                                                              "enabled": False}
     change = UnitChange("demo", "snap", "timer", "keep", None, (), None, "r", entry=entry)
     assert _run._unit_row(change, read).state == state
+
+
+# -- a daemon's sockets ------------------------------------------------------------------------
+
+STEM = "moxi-demo-relay"
+
+
+def sockets(*addresses):
+    return ("{'relay': {'command': 'moxi-demo-relay', 'socket': {'setting': 'port', "
+            f"'addresses': {list(addresses)!r}}}}}}}")
+
+
+@pytest.fixture
+def ipv6(monkeypatch):
+    """This box has no IPv6 loopback, so a test that renders `::1` says whether one is
+    there."""
+    held = {"loopback": True}
+    monkeypatch.setattr(units._plan, "ipv6_loopback", lambda: held["loopback"])
+    return held
+
+
+def test_an_idle_daemon_under_a_listening_socket_is_ok_with_no_health_row(d, ipv6):
+    d.installed(DAEMONS=sockets("127.0.0.1", "::1"),
+                HEALTH="{'relay': 'moxi_demo.health:ok'}",
+                files_={"health.py": """\
+                    from moxi.doctor import Row
+                    def ok():
+                        return Row("demo", "x", "ok", "fine")
+                    """})
+    # The install started the service; it exits and waits on its sockets.
+    d.sup.state(f"{STEM}.service")["active"] = False
+    got = d.rows("demo")
+    relay = got[("demo", "daemon relay")]
+    assert (relay.state, relay.detail, relay.fix) == (
+        "ok", "up to date; idle, socket listening", None)
+    sock = got[("demo", "socket relay")]
+    assert sock.state == "ok" and sock.detail.startswith("up to date; active")
+    assert ("demo", "daemon relay health") not in got
+    # A connection starts it: active, with its health row.
+    d.sup.state(f"{STEM}.service")["active"] = True
+    got = d.rows("demo")
+    assert got[("demo", "daemon relay")].detail.startswith("up to date; active")
+    assert got[("demo", "daemon relay health")].detail == "fine"
+    assert cli.main(["doctor", "demo"]) == 0
+
+
+def test_a_failed_socket_unit_is_a_fail_socket_row_naming_it(d, ipv6):
+    d.installed(DAEMONS=sockets("127.0.0.1", "::1"))
+    d.sup.state(f"{STEM}.service")["active"] = False
+    d.sup.props[f"{STEM}-1.socket"] = {"ActiveState": "failed"}
+    got = d.rows("demo")
+    sock = got[("demo", "socket relay")]
+    assert (sock.state, sock.detail) == ("fail", f"up to date; failed: {STEM}-1.socket")
+    assert sock.fix == f"journalctl --user -u {STEM}.socket -u {STEM}-1.socket"
+    # Its service is inactive under a socket that isn't active: still warn.
+    relay = got[("demo", "daemon relay")]
+    assert relay.state == "warn" and relay.detail.startswith("up to date; inactive")
+    assert cli.main(["doctor", "demo"]) == 1
+
+
+def test_an_inactive_socket_names_the_units_not_active(d, ipv6):
+    d.installed(DAEMONS=sockets("127.0.0.1", "::1"))
+    d.sup.state(f"{STEM}-1.socket")["active"] = False
+    sock = d.rows("demo")[("demo", "socket relay")]
+    assert (sock.state, sock.detail) == (
+        "warn", f"up to date; inactive (not active: {STEM}-1.socket)")
+
+
+def test_a_daemon_failed_under_a_listening_socket_still_fails(d, ipv6):
+    d.installed(DAEMONS=sockets("127.0.0.1"))
+    d.sup.props[f"{STEM}.service"] = {"ActiveState": "failed"}
+    got = d.rows("demo")
+    relay = got[("demo", "daemon relay")]
+    assert relay.state == "fail" and relay.detail.startswith("up to date; failed")
+    assert got[("demo", "socket relay")].state == "ok"
+
+
+def test_an_address_taken_out_names_the_unit_the_set_drops(d, ipv6):
+    d.installed(DAEMONS=sockets("127.0.0.1", "::1"))
+    d.module(DAEMONS=sockets("127.0.0.1"))
+    got = d.rows("demo")
+    sock = got[("demo", "socket relay")]
+    assert sock.state == "warn" and sock.fix == "moxi install demo"
+    assert sock.detail.startswith(f"stale (drops {STEM}-1.socket); active")
+    assert got[("demo", "daemon relay")].detail.startswith("stale; ")
+
+
+def test_a_changed_port_and_a_dropped_unit_in_one_row(d, ipv6):
+    d.installed(DAEMONS=sockets("127.0.0.1", "::1"))
+    path = moxi.paths.Layout("demo").config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("port = 8471\n")
+    d.module(DAEMONS=sockets("127.0.0.1"))
+    sock = d.rows("demo")[("demo", "socket relay")]
+    assert sock.detail.startswith(
+        f"port 8470 written, setting says 8471 (drops {STEM}-1.socket); active")
+
+
+def test_an_ipv6_address_left_out_says_so_in_each_row(d, ipv6):
+    ipv6["loopback"] = False
+    note = "; ::1 left out: no IPv6 loopback on this system"
+    d.script("moxi-demo-relay")
+    d.module(DAEMONS=sockets("127.0.0.1", "::1"))
+    got = d.rows("demo")
+    for label in ("daemon relay", "socket relay"):
+        assert (got[("demo", label)].state, got[("demo", label)].detail) == (
+            "warn", "not installed" + note)
+    d.installed(DAEMONS=sockets("127.0.0.1", "::1"))
+    assert [p.name for p in units.plan("demo")[1].paths] == [f"{STEM}.socket"]
+    got = d.rows("demo")
+    for label in ("daemon relay", "socket relay"):
+        assert got[("demo", label)].state == "ok"
+        assert got[("demo", label)].detail.startswith("up to date" + note + "; active")
+    # The loopback back: the set grows by the unit for ::1, and the note goes.
+    ipv6["loopback"] = True
+    sock = d.rows("demo")[("demo", "socket relay")]
+    assert sock.state == "warn" and sock.detail.startswith("stale; active")
+
+
+def test_a_daemon_left_with_no_address_fails(d, ipv6):
+    ipv6["loopback"] = False
+    d.script("moxi-demo-relay")
+    d.module(DAEMONS=sockets("::1"))
+    got = d.rows("demo")
+    relay = got[("demo", "daemon relay")]
+    assert relay.state == "fail" and relay.fix is None
+    assert relay.detail == ("demo/relay: its socket has no address left to listen on "
+                            "(::1 left out: no IPv6 loopback on this system)")
+    assert ("demo", "socket relay") not in got
+
+
+def launchd_rows(d, monkeypatch, daemon: UnitState, socket: UnitState) -> dict:
+    """The doctor's rows for a socket daemon whose plan and status are launchd's: one
+    `daemon` change and no `socket` change, and the two states its print gives."""
+    d.script("moxi-demo-relay")
+    d.module(DAEMONS=sockets("127.0.0.1", "::1"))
+    keep = UnitChange("demo", "relay", "daemon", "keep", None, (), None, "up to date",
+                      entry={"argv": ["/x"], "socket": {"setting": "port",
+                                                        "addresses": ["127.0.0.1"]}})
+    monkeypatch.setattr(units, "plan", lambda module: [keep])
+    monkeypatch.setattr(units, "status", lambda *a, **k: [daemon, socket])
+    return {k: r for k, r in d.rows("demo").items() if k[1].startswith(("daemon", "socket"))}
+
+
+def launchd(kind, state, **kw):
+    return UnitState("demo", "relay", kind, "launchd", state,
+                     log="/state/logs/relay.log", **kw)
+
+
+def test_on_launchd_a_loaded_idle_label_is_ok_and_there_is_no_socket_row(d, monkeypatch):
+    got = launchd_rows(d, monkeypatch, launchd("daemon", "inactive", detail="loaded"),
+                       launchd("socket", "active", detail="loaded"))
+    assert set(got) == {("demo", "daemon relay")}
+    assert (got[("demo", "daemon relay")].state, got[("demo", "daemon relay")].detail) == (
+        "ok", "up to date; idle, socket listening")
+
+
+def test_on_launchd_a_socket_daemon_whose_last_exit_was_not_zero_fails(d, monkeypatch):
+    # No KeepAlive: killed, it stays so until its next connection starts it.
+    got = launchd_rows(d, monkeypatch,
+                       launchd("daemon", "failed", detail="loaded, last exit 9"),
+                       launchd("socket", "active", detail="loaded"))
+    row = got[("demo", "daemon relay")]
+    assert (row.state, row.fix) == ("fail", "/state/logs/relay.log")
+    assert set(got) == {("demo", "daemon relay")}
+
+
+def test_on_launchd_a_label_not_loaded_shows_its_socket_in_the_daemon_row(d, monkeypatch):
+    got = launchd_rows(d, monkeypatch,
+                       launchd("daemon", "inactive", detail="not loaded"),
+                       launchd("socket", "inactive", detail="not loaded"))
+    row = got[("demo", "daemon relay")]
+    assert (row.state, row.detail) == (
+        "warn", "up to date; inactive; its socket: inactive (not loaded)")
+
+
+def test_on_launchd_the_recorded_print_of_an_idle_label_gives_the_same_rows(d, tmp_path,
+                                                                           monkeypatch):
+    """The launchd backend's own plan and status, its `status` reading the recorded
+    print of a loaded socket daemon that has not run yet: the daemon row is `ok`, idle
+    with its socket listening, and there is no socket row."""
+    monkeypatch.syspath_prepend(str(Path(__file__).parent))
+    from test_units_launchd import SOCKETS_PRINTED, UID
+
+    calls = []
+
+    def run(cmd, *, env=None, timeout=None):
+        calls.append(cmd)
+        assert cmd == ["launchctl", "print", f"gui/{UID}"]
+        return subprocess.CompletedProcess(cmd, 0, SOCKETS_PRINTED, "")
+
+    agents = tmp_path / "LaunchAgents"
+    agents.mkdir()
+    d.script("moxi-demo-relay")
+    d.module(DAEMONS="{'idle': {'command': 'moxi-demo-relay', 'socket': {'setting': 'port', "
+                     "'addresses': ['127.0.0.1']}}}")
+    with _backend.use(LaunchdBackend(agents=agents, uid=UID, runner=run)):
+        [change] = units.plan("demo")
+        assert (change.kind, change.action) == ("daemon", "add")
+        files.atomic_write(change.paths[0], change.text)
+        got = {k: r for k, r in d.rows("demo", runner=run).items()
+               if k[1].startswith(("daemon", "socket"))}
+    assert set(got) == {("demo", "daemon idle")}
+    assert (got[("demo", "daemon idle")].state, got[("demo", "daemon idle")].detail) == (
+        "ok", "up to date; idle, socket listening")
+    assert calls == [["launchctl", "print", f"gui/{UID}"]]
+
+
+@pytest.mark.parametrize("seen, state", [("inactive", "warn"), ("active", "ok"),
+                                         ("failed", "fail")])
+def test_on_task_scheduler_the_daemon_row_is_any_daemon_s(seen, state):
+    """The socket is `off` there (the daemon binds its own) and has no row; the daemon's
+    row reads as if it had no socket."""
+    off = UnitState("demo", "relay", "socket", "schtasks", "off",
+                    detail="the socket is skipped on Windows; the daemon binds its own")
+    read = UnitState("demo", "relay", "daemon", "schtasks", seen, log="C:/logs/relay.log")
+    change = unit_change(entry={"argv": ["/x"], "socket": {"setting": "port",
+                                                           "addresses": ["127.0.0.1"]}})
+    with_socket = _run._unit_row(change, read, socket=off, socket_row=False)
+    assert with_socket == _run._unit_row(change, read)
+    assert with_socket.state == state
 
 
 # -- HEALTH ------------------------------------------------------------------------------------
