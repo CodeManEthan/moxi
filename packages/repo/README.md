@@ -334,6 +334,10 @@ of it. Without projects, paths work as before. The git hooks never ask projects 
   macOS also `/usr/bin/git`: when it is below 2.54 and a repo uses config mode, a commit
   it makes runs no piece there, and the row says to pin that repo to shim mode
   (`moxi repo git-hooks add PATH --mode shim`).
+- **The index** (`index`): a `fail` row when repo's index of repos can't be read. Nothing
+  overwrites it then, and the verbs that need it refuse, since it is the one list of the
+  repos repo has written to; fix or remove the file named, then index each repo again with
+  `moxi repo git-hooks add PATH`.
 - **Each indexed repo** (`hooks PATH`): every event's hook entry, shim or launcher is
   there and is repo's; the interpreter and runner it names exist (a `fail` row when one is
   missing; a `warn` row when it names another environment's); a shim another tool moved
@@ -368,8 +372,8 @@ environment rewrites every hook entry, shim and launcher to name the new interpr
 doctor flags repo when its setup last ran at another version, with `moxi install repo` as
 the fix. One repo's problem, such as a repo that no longer exists, is printed with its
 fix and stays as a doctor row; the install still finishes. The setup fails only when it
-can't run at all: no git 2.39 or later while repos are indexed, or repo's config can't be
-read.
+can't run at all: no git 2.39 or later while repos are indexed, or repo's config or its
+index can't be read.
 
 `refresh` stays for what an install doesn't see: a git upgrade or downgrade, or a change
 of `git_hooks.mode`.

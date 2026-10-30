@@ -15,14 +15,14 @@ import sys
 def setup() -> int:
     """`refresh` over every indexed repo; prints what it did. 0 once it ran, whatever one
     repo's problem (each stays a doctor row, with its fix); 1 when it can't run at all: no
-    usable git while repos are indexed, or repo's config can't be read."""
+    usable git while repos are indexed, repo's config can't be read, or its index can't."""
     from moxi_repo import api
     from moxi_repo.cli import print_report
 
-    if not api.indexed():
-        print("repo: no repo is indexed yet, so there is nothing to rewrite")
-        return 0
     try:
+        if not api.indexed():
+            print("repo: no repo is indexed yet, so there is nothing to rewrite")
+            return 0
         report = api.refresh()
     except api.Failure as exc:
         print(f"repo: {exc.text}", file=sys.stderr)

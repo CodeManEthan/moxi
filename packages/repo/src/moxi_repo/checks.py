@@ -47,7 +47,13 @@ _now = time.time
 
 def rows() -> list[Row]:
     """Every row repo adds to `moxi doctor`."""
-    index = api.indexed()
+    try:
+        index, unreadable = api.indexed(), []
+    except api.IndexUnreadable as exc:
+        index = {}
+        unreadable = [Row(MODULE, "index", "fail", exc.detail,
+                          f"fix or remove {exc.path}, then index each repo again: "
+                          "moxi repo git-hooks add PATH")]
     version = gitconf.git_version()
     good, _ = pieces.declared()
     out: list[Row] = []
@@ -69,7 +75,7 @@ def rows() -> list[Row]:
             continue
         statuses.append(status)
         out += _hook_rows(status)
-    out = _git_rows(version, index, statuses) + out
+    out = _git_rows(version, index, statuses) + unreadable + out
     for root, repo, _ in repos:
         if repo is not None:
             out += _spec_rows(repo)

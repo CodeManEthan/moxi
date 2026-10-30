@@ -153,31 +153,66 @@ def index_path() -> Path:
     return paths.Layout(MODULE).state_dir() / INDEX
 
 
-def indexed() -> dict[str, dict]:
-    """The index: repo key -> {"root", "common_dir"}."""
+class IndexUnreadable(Failure):
+    """The index file is there and can't be read as an index. Nothing overwrites it, since
+    the repos it names can't be found again from anywhere else. `detail` is what is wrong,
+    without the fix."""
+
+    def __init__(self, path: Path, why: str, *, writing: bool = False):
+        self.path, self.why = path, why
+        self.detail = f"repo's index {path} can't be read ({why})"
+        super().__init__(self.detail + ("; the index was not changed" if writing else "")
+                         + "; fix or remove it, then index each repo again with: "
+                         "moxi repo git-hooks add PATH")
+
+
+def _unreadable(path: Path, why: str) -> IndexUnreadable:
+    return IndexUnreadable(path, why)
+
+
+def _parse_index(path: Path, raw: bytes | None) -> dict:
+    """The index file's data, `{"repos": {key: entry}}`; raises `IndexUnreadable` when it
+    is there and isn't that. No file, or an empty one, is an empty index."""
+    if not raw or not raw.strip():
+        return {"repos": {}}
     try:
-        data = json.loads(index_path().read_bytes())
-    except (OSError, ValueError):
-        return {}
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise _unreadable(path, f"not JSON: {exc}") from None
     repos = data.get("repos") if isinstance(data, dict) else None
-    return repos if isinstance(repos, dict) else {}
+    if not isinstance(repos, dict) or not all(isinstance(v, dict) for v in repos.values()):
+        raise _unreadable(path, 'not {"repos": {key: entry}}')
+    return data
+
+
+def indexed() -> dict[str, dict]:
+    """The index: repo key -> {"root", "common_dir"}. Raises `IndexUnreadable` when the
+    file is there and can't be read."""
+    path = index_path()
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return {}
+    except OSError as exc:
+        raise _unreadable(path, exc.strerror or str(exc)) from None
+    return _parse_index(path, raw)["repos"]
 
 
 def _index_change(fn: Callable[[dict], None]) -> None:
     from moxi import files
 
+    path = index_path()
+
     def edit(old: bytes | None) -> bytes:
         try:
-            data = json.loads(old) if old else {}
-        except ValueError:
-            data = {}
-        if not isinstance(data, dict) or not isinstance(data.get("repos"), dict):
-            data = {"repos": {}}
+            data = _parse_index(path, old)
+        except IndexUnreadable as exc:
+            raise IndexUnreadable(path, exc.why, writing=True) from None
         fn(data["repos"])
         return (json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False)
                 + "\n").encode()
 
-    files.update(index_path(), edit)
+    files.update(path, edit)
 
 
 def indexed_at(path: str | os.PathLike) -> list[str]:
@@ -765,7 +800,7 @@ def _guard_problems(event: str, text: str, python: str, runner: str,
     return out
 
 
-__all__ = ["Failure", "Usage", "Refused", "Busy", "Report", "Problem", "SEEDS", "SETTING_CHECKS",
+__all__ = ["Failure", "Usage", "Refused", "Busy", "IndexUnreadable", "Report", "Problem", "SEEDS", "SETTING_CHECKS",
            "available", "add", "remove", "enable", "disable", "refresh", "status",
            "indexed", "indexed_repos", "open_indexed", "default_mode", "everywhere", "specs",
            "forget_spec"]
