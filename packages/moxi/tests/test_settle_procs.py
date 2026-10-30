@@ -731,3 +731,87 @@ def test_ctrl_c_during_teardown_abandons_it_and_its_finally_runs(box, job):
     assert box.events("parent", "ran") == []                # no package step
     assert (box.root / SERVICE).exists()                    # nor the units
     assert box.events(key="raised") == []
+
+
+# -- the placer under the lock -----------------------------------------------------------------
+
+#: An install listener that hands the module's placements to `loadout`, and a `TEARDOWN`
+#: that hands them back: the placer's own lock, taken nested with no timeout, would wait
+#: for the install forever if it didn't yield on the claim.
+PLACING = """
+from moxi import place
+from settle_procs import note
+
+def on_install(module, found):
+    moved = place.adopt(module, "loadout", place.status(module), say=lambda line: None)
+    note("listener", adopted=sorted(str(p.path) for p in moved))
+
+def on_uninstall(module):
+    note("listener", uninstalled=module)
+"""
+
+HANDBACK = """
+from moxi import place
+from settle_procs import note
+
+def run():
+    back = place.adopt("loadout", "demo", place.status("loadout"), say=lambda line: None)
+    note("teardown", back=sorted(str(p.path) for p in back))
+"""
+
+
+@pytest.fixture
+def placing(box, monkeypatch):
+    """`box` with module demo shipping skill `demo-send`, and the home the real processes
+    run under also this process's, so the harness folders are one place under tmp."""
+    from moxi import place
+
+    user = box.tmp / "user"
+    user.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(user))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    box.env.pop("CLAUDE_CONFIG_DIR", None)
+    box.site.write("moxi_demo/skills/demo-send/SKILL.md", "# send\n")
+    box.site.write("moxi_demo/handback.py", HANDBACK)
+    box.place = place
+    box.targets = sorted(str(user / folder / "skills" / "demo-send")
+                         for folder in (".claude", ".agents"))
+    return box
+
+
+def test_the_settle_child_places_skills_and_a_listener_adopts_them_under_the_claim(placing):
+    box = placing
+    box.module(DAEMONS=ONE, SKILLS="'skills'", listener=True)
+    box.site.write("moxi_demo/installs.py", PLACING)
+    box.env["MOXITEST_LATER"] = "1"
+    done = parent_run(box, "demo", "--skills", timeout=30)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert box.events(key="raised") == []
+    assert box.value("listener", "adopted") == box.targets
+    src = box.site.root / "moxi_demo" / "skills" / "demo-send"
+    assert all(os.readlink(t) == str(src) for t in box.targets)
+    assert box.place.status("demo") == []
+    assert sorted(str(p.path) for p in box.place.status("loadout")) == box.targets
+
+
+def test_uninstall_hands_back_in_the_teardown_child_and_removes_in_the_parent(placing):
+    """The hand-back runs in the teardown child, where `adopt` finds the claim; the
+    parent's `place.remove` yields on its own hold and removes what came back."""
+    box = placing
+    box.installed(DAEMONS=ONE, SKILLS="'skills'", TEARDOWN="'moxi_demo.handback:run'")
+    place = box.place
+    src = box.site.root / "moxi_demo" / "skills" / "demo-send"
+    items = [place.Item(src, h, "demo-send") for h in ("claude", "codex")]
+    place.apply(place.plan("demo", items), say=lambda line: None)
+    place.adopt("demo", "loadout", place.status("demo"), say=lambda line: None)
+    done = parent_run(box, "demo", "--teardown", timeout=30)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert box.events(key="raised") == []
+    assert box.value("teardown", "back") == box.targets
+    assert box.events("child", "started")[0]["claim"] is True
+    assert not any(os.path.lexists(t) for t in box.targets)
+    ledger = place._read_ledger()
+    assert not ledger.get("demo", {}).get("placed") and not ledger.get("demo", {}).get("handed")
+    assert not ledger["loadout"].get("placed")
+    assert sorted(ledger["loadout"]["handed"]) == box.targets
+    assert "removed skill demo-send for claude" in done.stdout

@@ -10,6 +10,7 @@ returns the outcome a test sets; `test_settle_procs.py` runs the real child.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 
@@ -441,3 +442,108 @@ def test_uninstall_is_in_the_usage_and_help(capsys):
     assert "uninstall <module> [--skip-teardown]" in cli.USAGE
     assert cli.main(["help", "uninstall"]) == 0
     assert "--skip-teardown" in capsys.readouterr().out
+
+
+# -- step 5: the placements --------------------------------------------------------------------
+
+@pytest.fixture
+def skilled(fake, capsys, monkeypatch, tmp_path):
+    """turns installed, declaring a `TEARDOWN` and shipping skill `turns-send`, placed for
+    claude and codex under a home of its own."""
+    from moxi import place
+
+    user = tmp_path / "user"
+    user.mkdir()
+    monkeypatch.setenv("HOME", str(user))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.setitem(CATALOG, "moxi-turns",
+                        {**CATALOG["moxi-turns"], "TEARDOWN": "'moxi_turns.down:run'",
+                         "SKILLS": "'skills'"})
+    moxi_install(capsys, "turns", "--none")
+    for name in ("turns-send", "turns-read"):
+        fake.site.write(f"moxi_turns/skills/{name}/SKILL.md", f"# {name}\n")
+    source = fake.site.root / "moxi_turns" / "skills"
+    items = [place.Item(source / name, harness, name)
+             for name in ("turns-read", "turns-send") for harness in ("claude", "codex")]
+    place.apply(place.plan("turns", items), say=lambda line: None)
+    fake.runs.clear()
+    fake.place = place
+    fake.claude = lambda name: user / ".claude" / "skills" / name
+    fake.codex = lambda name: user / ".agents" / "skills" / name
+    return fake
+
+
+def test_uninstall_removes_the_placements_after_the_units_and_before_the_package(
+        skilled, capsys, monkeypatch):
+    place = skilled.place
+    order: list[str] = []
+    real_remove, real_units, real_run = place.remove, units.remove, skilled.run
+    monkeypatch.setattr(units, "remove",
+                        lambda m, **k: order.append("units") or real_units(m, **k))
+
+    def remove(owner, **k):
+        order.append("placements")
+        return real_remove(owner, **k)
+    monkeypatch.setattr(place, "remove", remove)
+    monkeypatch.setattr(install, "run", lambda argv, env=None: order.append("package")
+                        or real_run(argv, env))
+    code, out, err = moxi_uninstall(capsys, "turns")
+    assert code == 0, err
+    assert order == ["units", "placements", "package"]
+    for name in ("turns-read", "turns-send"):
+        assert not os.path.lexists(skilled.claude(name))
+        assert not os.path.lexists(skilled.codex(name))
+    assert (f"turns: removed skill turns-send for claude ({skilled.claude('turns-send')})"
+            in out)
+    assert place.status("turns") == []
+
+
+def test_a_skill_handed_over_stays_and_a_hand_back_in_teardown_is_removed(
+        skilled, capsys, monkeypatch):
+    """Two skills handed to loadout: its teardown hands one back, and the uninstall
+    removes that one with the rest; the one loadout keeps stays where it is."""
+    place = skilled.place
+    turns = {p.name + "/" + p.harness: p for p in place.status("turns")}
+    place.adopt("turns", "loadout", [turns["turns-send/claude"], turns["turns-read/claude"]],
+                say=lambda line: None)
+
+    def teardown(python, module):
+        back = [p for p in place.status("loadout") if p.name == "turns-send"]
+        place.adopt("loadout", module, back, say=lambda line: None)
+        return _settle.Outcome(0)
+    monkeypatch.setattr(uninstall, "run_teardown", teardown)
+    code, out, err = moxi_uninstall(capsys, "turns")
+    assert code == 0, err
+    assert not os.path.lexists(skilled.claude("turns-send"))
+    assert os.path.islink(skilled.claude("turns-read"))
+    assert [p.name for p in place.status("loadout")] == ["turns-read"]
+    ledger = place._read_ledger()
+    send = str(skilled.claude("turns-send"))
+    read = str(skilled.claude("turns-read"))
+    # The hand-back drops the target from turns' handed map and adds it to loadout's,
+    # naming turns; turns keeps the entry for what loadout still holds.
+    assert ledger["turns"]["placed"] == {}
+    assert set(ledger["turns"]["handed"]) == {read}
+    assert ledger["loadout"]["handed"][send]["to"] == "turns"
+    assert send not in ledger["loadout"]["placed"]
+
+
+def test_a_placement_that_cannot_go_fails_the_step_and_the_package_still_goes(
+        skilled, capsys, monkeypatch):
+    place = skilled.place
+    monkeypatch.setattr(place, "remove",
+                        lambda owner, **k: (_ for _ in ()).throw(ValueError("bad ledger")))
+    code, out, err = moxi_uninstall(capsys, "turns")
+    assert code == 1
+    assert "turns: placements not removed: ValueError: bad ledger" in err
+    assert "the placements step failed" in err and "moxi-turns" not in skilled.installed
+
+
+def test_a_placement_left_behind_by_the_placer_fails_the_step(skilled, capsys, monkeypatch):
+    place = skilled.place
+    monkeypatch.setattr(place, "remove", lambda owner, **k: [])
+    code, out, err = moxi_uninstall(capsys, "turns")
+    assert code == 1
+    assert (f"turns: skill turns-send for claude was not removed "
+            f"({skilled.claude('turns-send')})") in err
+    assert "the placements step failed" in err

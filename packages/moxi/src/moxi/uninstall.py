@@ -245,9 +245,27 @@ class Uninstaller:
 
     # step 5 ----------------------------------------------------------------------
     def _placements(self, module: str) -> None:
-        """The module's placements: its skills and agent files, which the placer
-        (`moxi.place.remove`) removes. This step doesn't call the placer yet, so it
-        removes nothing."""
+        """The module's placements, removed by the placer (`moxi.place.remove`) in this
+        process, where its lock yields on the uninstall's own hold. What the module
+        handed to another owner stays. One line per placement removed; a placement that
+        couldn't be removed is printed by the placer and fails the step."""
+        from . import place
+        from ._settle import _one_line, say
+
+        try:
+            gone = place.remove(module, say=lambda line: say(f"{module}: {line}"))
+            left = place.status(module)
+        except Exception as exc:  # noqa: BLE001 - the later steps still run
+            say(f"{module}: placements not removed: {_one_line(exc)}", err=True)
+            self.failed.append("placements")
+            return
+        for p in gone:
+            say(f"{module}: removed {p.kind} {p.name} for {p.harness} ({p.path})")
+        if left:
+            for p in left:
+                say(f"{module}: {p.kind} {p.name} for {p.harness} was not removed "
+                    f"({p.path})", err=True)
+            self.failed.append("placements")
 
     # step 6 ----------------------------------------------------------------------
     def _package(self, module: str, dist: str, pulled: list[str]) -> None:
