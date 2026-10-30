@@ -52,7 +52,7 @@ from moxi.config import ConfigError, Schema
 from moxi.config import load as load_config
 from moxi.paths import Layout
 
-from . import catalog
+from . import catalog, slots
 from .catalog import BadValue, NeedsModule, Owned, Refused
 
 MODULE = "launcher"
@@ -975,7 +975,7 @@ def _fresh(value):
 
 
 def _avail(available: Callable[[str], bool] | None) -> Callable[[str], bool]:
-    return available if available is not None else modules.available
+    return available if available is not None else slots.links
 
 
 def _show(value: object) -> str:

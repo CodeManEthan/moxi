@@ -34,9 +34,12 @@ INTERNAL_ENV = {
                               "comes in its first turn",
     "MOXI_LAUNCHER_TURNS": "test seam: the import name of a module that stands in for "
                            "turns' API in the first-turn sender",
+    "MOXI_LAUNCHER_SLOTS": "test seam: the import name of a module that stands in for "
+                           "slots' API in the slot target",
 }
 SETTINGS = "settings.toml"
-SETUP = None
+#: Asks the two startup-screen questions when slots is installed.
+SETUP = "moxi_launcher.startup:setup"
 SEGMENT = None
 
 # The announcement's version, and the optional names it declares.

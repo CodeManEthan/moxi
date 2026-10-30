@@ -28,7 +28,7 @@ from moxi import modules as moxi_modules
 from moxi import paths
 from moxi.paths import Layout
 
-from .. import first, handoffs, presets
+from .. import first, handoffs, presets, slots
 from . import claude, codex, common
 from .common import (Additions, Composition, Context, NoBrief, NotYet, PromptFile,
                      TooLong, Unreadable, environment, first_turn, identity_block,
@@ -57,7 +57,7 @@ def installed() -> frozenset[str]:
     """The optional links installed here. turns counts only when it offers the interface
     the launcher calls, the first-turn sender's answer (`first.turns_api`), so a launch
     composed with turns is one the sender reaches."""
-    found = {name for name in LINKS if name != "turns" and moxi_modules.available(name)}
+    found = {name for name in LINKS if name != "turns" and slots.links(name)}
     if first.turns_api(quiet=True) is not None:
         found.add("turns")
     return frozenset(found)
