@@ -126,6 +126,9 @@ def _parent(path: Path) -> None:
 # The lock files this process holds through `lock`: absolute path -> the holding thread.
 _held: dict[str, int] = {}
 _held_guard = threading.Lock()
+# One in-process gate per lock file that `update`, `edit_toml` and `append_record` take,
+# so their callers' threads queue for the lock file instead of being refused.
+_gates: dict[str, threading.Lock] = {}
 
 
 @contextmanager
@@ -138,26 +141,58 @@ def lock(path: str | os.PathLike, *, timeout: float | None = None) -> Iterator[N
     The lock file is created (0600) and never removed. Once the lock is taken, the
     holder's pid is written at the start of the file, so a waiting process can name it.
     The lock belongs to the process: it is freed when the block ends, and also when the
-    process dies, however it dies. It is not re-entrant: taking a path the same thread
-    already holds raises `RuntimeError` instead of waiting for itself. Another thread of
-    this process waits for the lock like another process does.
+    process dies, however it dies. It is not re-entrant: taking a path this process
+    already holds, from any of its threads, raises `RuntimeError` instead of waiting for
+    itself. Threads of one process that share a lock file queue for it with a lock of
+    their own; `update`, `edit_toml` and `append_record` already do.
     """
     path = Path(path)
     key = os.path.abspath(path)
     me = threading.get_ident()
     with _held_guard:
-        if _held.get(key) == me:
-            raise RuntimeError(f"{path} is already locked by this thread; "
+        holder = _held.get(key)
+        if holder is not None:
+            who = "this thread" if holder == me else "another thread of this process"
+            raise RuntimeError(f"{path} is already locked by {who}; "
                                "moxi.files.lock is not re-entrant")
-    fd = _acquire(path, timeout)
-    with _held_guard:
         _held[key] = me
+    try:
+        fd = _acquire(path, timeout)
+    except BaseException:
+        with _held_guard:
+            _held.pop(key, None)
+        raise
     try:
         yield
     finally:
         with _held_guard:
             _held.pop(key, None)
         _release(fd)
+
+
+@contextmanager
+def _gated_lock(path: Path, *, timeout: float | None = None) -> Iterator[None]:
+    """`lock`, after this process's other threads that go through here are done with
+    `path`. A thread that already holds `path` gets `RuntimeError` at once, as from
+    `lock`, rather than waiting on the gate for itself."""
+    key = os.path.abspath(path)
+    with _held_guard:
+        if _held.get(key) == threading.get_ident():
+            raise RuntimeError(f"{path} is already locked by this thread; "
+                               "moxi.files.lock is not re-entrant")
+        gate = _gates.setdefault(key, threading.Lock())
+    if timeout is None:
+        gate.acquire()
+    else:
+        deadline = time.monotonic() + timeout
+        if not gate.acquire(timeout=max(timeout, 0)):
+            raise LockTimeout(path, os.getpid())
+        timeout = max(0.0, deadline - time.monotonic())
+    try:
+        with lock(path, timeout=timeout):
+            yield
+    finally:
+        gate.release()
 
 
 def _acquire(path: Path, timeout: float | None) -> int:
@@ -245,10 +280,11 @@ def update(path: str | os.PathLike, fn: Callable[[bytes | None], bytes], *,
     """Change file `path` under its lock, `<path>.lock`, and return what was written.
 
     `fn` gets the file's bytes (None when it is missing) and returns the new bytes,
-    which are written with `atomic_write`.
+    which are written with `atomic_write`. Threads of this process that update the same
+    file take turns.
     """
     path = Path(path)
-    with lock(_lock_path(path)):
+    with _gated_lock(_lock_path(path)):
         try:
             old = path.read_bytes()
         except FileNotFoundError:
@@ -278,7 +314,7 @@ def edit_toml(path: str | os.PathLike, *, timeout: float | None = 10.0) -> Itera
     from ._vendor import tomlkit
 
     path = Path(path)
-    with lock(_lock_path(path), timeout=timeout):
+    with _gated_lock(_lock_path(path), timeout=timeout):
         target = Path(os.path.realpath(path))
         try:
             text = target.read_text(encoding="utf-8")
@@ -302,8 +338,9 @@ def append_record(path: str | os.PathLike, record: dict, *,
     The line is written with one `write` on a descriptor opened for appending (the file
     is created 0600), so lines from several writers never interleave. When the file and
     the line together would pass `max_bytes`, the file first moves to `<path>.1` (one
-    older generation is kept) and the line starts a new file. A line longer than
-    `max_bytes` raises `ValueError`.
+    older generation is kept; on Windows a move that meets a sharing violation is tried
+    again for up to a second, as `atomic_write`'s replace is) and the line starts a new
+    file. A line longer than `max_bytes` raises `ValueError`.
     """
     import json
 
@@ -315,11 +352,11 @@ def append_record(path: str | os.PathLike, record: dict, *,
     if _size(path) + len(line) <= max_bytes:
         _append(path, line)
         return
-    with lock(_lock_path(path)):
+    with _gated_lock(_lock_path(path)):
         # Another writer may have rolled the file while this one waited for the lock.
         if _size(path) + len(line) > max_bytes:
             try:
-                os.replace(path, _older(path))
+                _replace(path, _older(path))
             except FileNotFoundError:
                 pass
         _append(path, line)
@@ -421,10 +458,11 @@ def _lines_backwards(path: Path) -> Iterator[bytes]:
 def private_dir(path: str | os.PathLike) -> Path:
     """Make directory `path` (and its parents) so that only its owner can use it.
 
-    POSIX: created 0700; an existing directory owned by another user raises
-    `PermissionError` naming the owner, and an existing one of ours loses any group or
-    other permission bits. Windows: created with an access list that grants only the
-    current user, and checked by reading it back.
+    POSIX: created 0700; a symbolic link at `path` raises `PermissionError` and is never
+    followed; an existing directory owned by another user raises `PermissionError` naming
+    the owner, and an existing one of ours loses any group or other permission bits.
+    Windows: created with an access list that grants only the current user, and checked
+    by reading it back.
     """
     path = Path(path)
     if _WINDOWS:
@@ -432,16 +470,35 @@ def private_dir(path: str | os.PathLike) -> Path:
 
         _win.private_dir(path)
         return path
+    import errno
     import stat
 
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    st = os.stat(path)
-    if not stat.S_ISDIR(st.st_mode):
-        raise NotADirectoryError(f"{path} is not a directory")
-    if st.st_uid != os.getuid():
-        raise PermissionError(f"{path} is owned by {_owner(st.st_uid)}, not by this user")
-    if st.st_mode & 0o077:
-        os.chmod(path, stat.S_IMODE(st.st_mode) & 0o700)
+    if os.path.islink(path):
+        raise PermissionError(f"{path} is a symbolic link; a private directory must not be")
+    # The checks and the chmod go through a descriptor opened without following a link,
+    # so a link swapped in after the check above is refused too.
+    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_DIRECTORY", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise PermissionError(
+                f"{path} is a symbolic link; a private directory must not be") from None
+        if exc.errno == errno.ENOTDIR:
+            raise NotADirectoryError(f"{path} is not a directory") from None
+        raise
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISDIR(st.st_mode):
+            raise NotADirectoryError(f"{path} is not a directory")
+        if st.st_uid != os.getuid():
+            raise PermissionError(
+                f"{path} is owned by {_owner(st.st_uid)}, not by this user")
+        if st.st_mode & 0o077:
+            os.fchmod(fd, stat.S_IMODE(st.st_mode) & 0o700)
+    finally:
+        os.close(fd)
     return path
 
 

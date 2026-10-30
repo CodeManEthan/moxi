@@ -17,6 +17,10 @@ one name. It registers with the daemon as one of the daemon's adapter **kinds**:
 | `opencode` | `moxi-comms-opencode` | an OpenCode session, through `opencode serve` (see [OpenCode](#opencode)) |
 | `send-only` | | a module's own process holding a name that sends and receives nothing (see [Send-only identities](#send-only-identities)) |
 
+`moxi install comms` puts the launchers in the `moxi` tool's environment, and uv puts none
+of them on PATH, so run one by its path: `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <identity>`. The
+Claude launcher also runs as `moxi comms claude`.
+
 A kind decides two things. One is the **wire**: how the adapter talks to its CLI, and so
 how mail gets into a turn and how the adapter learns the turn ended. The other is the
 **cache clock keyed to the kind's name**: how `moxi comms send` and the daemon read the
@@ -214,8 +218,8 @@ a loop while supervision brings it back.
 | harness | kind | how a person sits in the session | what ends a turn | status |
 |---|---|---|---|---|
 | Claude Code | `claude-shim` | `moxi comms claude --name <name>`: the session is the terminal it runs in; the launcher forks the session's adapter process | the turn's end as Moxi turns reports it: a digest is handled when its turn ends with an answer, and handed again when it was interrupted (Esc), ended in an error or refusal, refused, or lost | supported through Moxi turns; the session must load turns' Claude plugin |
-| Codex | `codex` | `moxi-comms-codex <identity> --window` opens the Codex window on a new thread for each launch | the turn's end as Moxi turns' Codex host reports it: handled on an answer, handed again otherwise | experimental; through Moxi turns |
-| OpenCode | `opencode` | `moxi-comms-opencode <identity>` opens `opencode attach` on a new session for each launch | the first idle after the model saw the digest, when the turn ended with `finish=stop` | experimental |
+| Codex | `codex` | `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <identity> --window` opens the Codex window on a new thread for each launch | the turn's end as Moxi turns' Codex host reports it: handled on an answer, handed again otherwise | experimental; through Moxi turns |
+| OpenCode | `opencode` | `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <identity>` opens `opencode attach` on a new session for each launch | the first idle after the model saw the digest, when the turn ended with `finish=stop` | experimental |
 
 comms reads a cache clock for both. A Codex thread's clock is the end of its last
 request in its rollout, under the sessions root its launcher reports; an OpenCode
@@ -251,7 +255,7 @@ launch and launch again.
 
 ## OpenCode
 
-`moxi-comms-opencode <identity>` runs an [OpenCode](https://opencode.ai) session you sit in,
+`"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <identity>` runs an [OpenCode](https://opencode.ai) session you sit in,
 in the terminal you start it from. It is experimental. It was built and tested on
 OpenCode 1.18.34, with OpenCode Zen's free models (no account and no key) and with a
 local model through Ollama.
@@ -375,7 +379,7 @@ the launcher cannot know, and mail still goes to the old session.
 ## Send-only identities
 
 A send-only identity is a standing row whose directory `kind` is `send-only`, made with
-`moxi-comms-provision send-only NAME@SCOPE`. Its holder is a module's own process (a
+`"$(uv tool dir)/moxi/bin/moxi-comms-provision" send-only NAME@SCOPE`. Its holder is a module's own process (a
 `ClaimServer` with a daemon arm), which binds it
 with the `send-only` adapter kind. The daemon accepts that kind only for such a row, and
 such a row only with that kind, so no agent session can bind the name and take mail in

@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -19,12 +20,23 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32",
 PYVER = f"python{sys.version_info.major}.{sys.version_info.minor}"
 
 
+def dist_info(site: Path, dist: str) -> Path:
+    """`<dist>.dist-info` in `site`; a `moxi_<m>` one declares its module's entry point."""
+    info = site / f"{dist}.dist-info"
+    info.mkdir(parents=True)
+    if dist.startswith("moxi_"):
+        module = dist.split("-")[0].removeprefix("moxi_")
+        (info / "entry_points.txt").write_text(
+            f"[moxi.modules]\n{module} = moxi_{module}.module\n")
+    return info
+
+
 def env_with(root: Path, *dists: str) -> Path:
     """A fake environment at `root` whose site-packages holds each `moxi_<m>-<v>`."""
     site = root / "lib" / PYVER / "site-packages"
     site.mkdir(parents=True, exist_ok=True)
     for dist in dists:
-        (site / f"{dist}.dist-info").mkdir()
+        dist_info(site, dist)
     return site
 
 
@@ -75,7 +87,7 @@ def test_this_environment_s_own_tool_is_not_a_stray(box, monkeypatch):
 
 def test_the_user_site_holding_a_module_is_a_stray(box):
     box.user.mkdir()
-    (box.user / "moxi_turns-0.2.0.dist-info").mkdir()
+    dist_info(box.user, "moxi_turns-0.2.0")
     (found,) = strays.scan(box.env)
     assert (found.module, found.kind, found.where) == ("turns", "user", str(box.user))
     assert "(the user site " in found.line()
@@ -175,13 +187,39 @@ def test_each_stray_is_told_once(box):
 def test_a_stray_that_goes_and_comes_back_is_told_again(box):
     tool = env_with(box.tools / "moxi-cache", "moxi_cache-0.1.0")
     strays.tell(io.StringIO(), box.env)
-    (tool / "moxi_cache-0.1.0.dist-info").rmdir()
+    shutil.rmtree(tool / "moxi_cache-0.1.0.dist-info")
     os.utime(box.tools, ns=(2, 2))
     strays.tell(io.StringIO(), box.env)
-    (tool / "moxi_cache-0.1.0.dist-info").mkdir()
+    dist_info(tool, "moxi_cache-0.1.0")
     os.utime(box.tools, ns=(3, 3))
     assert [s.module for s in strays.tell(io.StringIO(), box.env)] == ["cache"]
 
+
+
+def test_each_environment_tells_a_stray_once(box, monkeypatch, tmp_path):
+    """Runs that alternate between two environments, each seeing other strays, don't
+    wipe each other's record."""
+    venv, tool = tmp_path / "venv", box.tools / "moxi"
+    env_with(venv)
+    env_with(tool, "moxi_cache-0.1.0")
+    (tool / "uv-receipt.toml").write_text("[tool]\n")
+    told = []
+    for prefix in (venv, tool, venv, tool, venv):
+        monkeypatch.setattr(sys, "prefix", str(prefix))
+        out = io.StringIO()
+        strays.tell(out, box.env)
+        told.append(out.getvalue().count("\n"))
+    # From the venv, the tool's cache is a stray; from the tool, nothing is.
+    assert told == [1, 0, 0, 0, 0]
+
+
+def test_a_moxi_distribution_that_is_no_module_is_no_stray(box):
+    site = env_with(box.tools / "moxi-dev")
+    info = site / "moxi_dev-0.1.0.dist-info"
+    info.mkdir()
+    (info / "entry_points.txt").write_text("[console_scripts]\nmoxi-dev = moxi_dev:main\n")
+    (site / "moxi_bare-0.1.0.dist-info").mkdir()
+    assert strays.scan(box.env) == []
 
 # -- the commands ------------------------------------------------------------------------
 

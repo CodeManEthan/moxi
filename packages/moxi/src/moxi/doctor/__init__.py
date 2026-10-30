@@ -82,7 +82,8 @@ def _check(module: str, key: str) -> None:
 def _path(module: str):
     from .. import paths
 
-    return paths.Layout(module).state_dir() / RECORDS_FILE
+    # The core's own records (module `moxi`) go by the core's layout, not a module's.
+    return paths._layout(module).state_dir() / RECORDS_FILE
 
 
 def _change(module: str, fn) -> None:

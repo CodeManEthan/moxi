@@ -194,24 +194,73 @@ def test_the_lock_is_not_reentrant(tmp_path):
         pass
 
 
-def test_another_thread_waits_for_the_lock(tmp_path):
+def test_another_thread_of_this_process_is_refused(tmp_path):
+    """The lock is the process's: a second thread taking a held path raises at once
+    rather than waiting for its own process."""
     path = tmp_path / "x.lock"
-    order = []
-    entered = threading.Event()
+    seen = []
 
     def other():
-        entered.set()
-        with files.lock(path, timeout=5):
-            order.append("other")
+        try:
+            with files.lock(path, timeout=5):
+                seen.append("took it")
+        except RuntimeError as exc:
+            seen.append(str(exc))
 
     with files.lock(path):
         thread = threading.Thread(target=other)
+        started = time.monotonic()
         thread.start()
-        entered.wait()
-        time.sleep(0.2)
-        order.append("first")
-    thread.join(5)
-    assert order == ["first", "other"]
+        thread.join(10)
+        waited = time.monotonic() - started
+    assert len(seen) == 1 and "another thread of this process" in seen[0]
+    assert waited < 2
+    with files.lock(path, timeout=0):
+        pass
+
+
+def test_threads_updating_one_file_take_turns(tmp_path):
+    """update, edit_toml and append_record queue this process's threads for the lock."""
+    target = tmp_path / "n"
+    log = tmp_path / "r.jsonl"
+    toml = tmp_path / "c.toml"
+    errors = []
+
+    def bump(old):
+        return str(int(old or b"0") + 1).encode()
+
+    def work(w):
+        try:
+            for i in range(20):
+                files.update(target, bump)
+                files.append_record(log, {"w": w, "i": i}, max_bytes=200)
+                with files.edit_toml(toml) as doc:
+                    doc[f"w{w}"] = doc.get(f"w{w}", 0) + 1
+        except Exception as exc:  # noqa: BLE001 - collected for the assertion
+            errors.append(exc)
+
+    threads = [threading.Thread(target=work, args=(w,)) for w in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(60)
+    assert errors == []
+    assert target.read_text() == "120"
+    assert len(files.read_records(log)) > 0
+
+
+def test_update_inside_its_own_lock_is_refused_not_hung(tmp_path):
+    target = tmp_path / "n"
+    with files.lock(tmp_path / "n.lock"):
+        with pytest.raises(RuntimeError, match="this thread"):
+            files.update(target, lambda old: b"x")
+
+    def nested(old):
+        files.update(target, lambda inner: b"y")
+        return b"x"
+
+    with pytest.raises(RuntimeError, match="this thread"):
+        files.update(target, nested)
 
 
 def test_an_error_in_the_block_releases_the_lock(tmp_path):
@@ -394,6 +443,42 @@ def test_append_record_rolls_to_one_older_generation(tmp_path):
                                                           "r.jsonl.lock"]
 
 
+def test_the_roll_goes_through_the_retrying_replace(tmp_path, monkeypatch):
+    """The roll moves the log the way atomic_write replaces a file, so on Windows it
+    retries a sharing violation rather than losing the record."""
+    log = tmp_path / "r.jsonl"
+    moves = []
+    real = files._replace
+
+    def spy(src, dst):
+        moves.append((Path(src).name, Path(dst).name))
+        real(src, dst)
+
+    monkeypatch.setattr(files, "_replace", spy)
+    for i in range(3):
+        files.append_record(log, {"i": i}, max_bytes=20)
+    assert ("r.jsonl", "r.jsonl.1") in moves
+
+
+@WINDOWS
+def test_the_roll_retries_a_sharing_violation(tmp_path, monkeypatch):
+    log = tmp_path / "r.jsonl"
+    files.append_record(log, {"i": 0}, max_bytes=20)
+    calls = []
+    real = os.replace
+
+    def flaky(src, dst):
+        calls.append(1)
+        if len(calls) < 3:
+            raise PermissionError("in use")
+        real(src, dst)
+
+    monkeypatch.setattr(os, "replace", flaky)
+    files.append_record(log, {"i": 1}, max_bytes=20)
+    assert len(calls) == 3
+    assert [r["i"] for r in files.read_records(log)] == [0, 1]
+
+
 def test_a_line_longer_than_the_cap_is_refused(tmp_path):
     log = tmp_path / "r.jsonl"
     with pytest.raises(ValueError, match="longer than"):
@@ -523,6 +608,18 @@ def test_private_dir_refuses_a_file(tmp_path):
     (tmp_path / "f").write_text("")
     with pytest.raises((NotADirectoryError, FileExistsError)):
         files.private_dir(tmp_path / "f")
+
+
+@POSIX
+def test_private_dir_refuses_a_symbolic_link_and_leaves_its_target(tmp_path):
+    target = tmp_path / "target"
+    target.mkdir()
+    os.chmod(target, 0o755)
+    link = tmp_path / "link"
+    link.symlink_to(target)
+    with pytest.raises(PermissionError, match="symbolic link"):
+        files.private_dir(link)
+    assert mode_of(target) == 0o755
 
 
 @WINDOWS

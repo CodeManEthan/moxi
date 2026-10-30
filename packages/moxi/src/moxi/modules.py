@@ -27,7 +27,8 @@ is checked. A failed check makes the module `broken`, with the reason.
     TIMERS          {name: entry}: scheduled commands the core installs, each behind a switch
     UNITS_FROM      target returning run-time declarations; kept as a string, never called
                     here
-    HEALTH          {daemon: target}: one health check per declared daemon
+    HEALTH          {daemon: target}: one health check per declared daemon; with UNITS_FROM
+                    a key may name a daemon declared only at run time
     DOCTOR          target: the module's own doctor checks
     STORES          {name: entry}: the stores the module keeps
     BUDGETS         {key: limit}: what the module may cost at idle
@@ -781,8 +782,11 @@ def _across(values: Mapping[str, object], fields: dict, module: str | None) -> l
     for both in sorted(set(daemons) & set(timers)):
         problems.append(f"declares {both!r} as both a daemon and a timer; a module's "
                         "daemons and timers each need their own name")
-    for key in sorted(set(fields["health"]) - set(daemons)):
-        problems.append(f"has HEALTH for {key!r}, which is no daemon in DAEMONS")
+    # With UNITS_FROM, a HEALTH key may name a daemon declared only at run time; those
+    # are read through `moxi.units.declarations`, never here, so the key is judged there.
+    if fields["units_from"] is None:
+        for key in sorted(set(fields["health"]) - set(daemons)):
+            problems.append(f"has HEALTH for {key!r}, which is no daemon in DAEMONS")
     if module and names.is_module_name(module):
         prefix = names.env_prefix(module)
         internal = fields["internal_env"]

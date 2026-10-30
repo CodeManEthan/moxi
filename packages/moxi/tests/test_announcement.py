@@ -289,6 +289,9 @@ def test_a_new_name_of_the_wrong_shape_is_broken(site, names, words):
     {"BUDGETS": "{'idle_cpu': 1, 'hook_ms': 3}"},
     {"RESERVED_NAMES": "('bot',)"},
     {"DAEMONS": "{'relay': {%s, 'platforms': []}}" % DAEMON},
+    # A HEALTH key may name a daemon only UNITS_FROM declares, at run time.
+    {"UNITS_FROM": "'moxi_alpha.units:rows'",
+     "HEALTH": "{'gateway': 'moxi_alpha.health:gateway'}"},
 ])
 def test_these_shapes_keep_the_contract(site, names):
     site.module("alpha", **names)

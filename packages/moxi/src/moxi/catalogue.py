@@ -167,6 +167,7 @@ def load(env=None) -> Catalogue:
 
 def _fetch(url: str) -> bytes:
     """GET `url` within `TIMEOUT`, reading at most `CAP` bytes. Raises `CatalogueError`."""
+    import http.client
     import urllib.error
     import urllib.request
 
@@ -178,7 +179,8 @@ def _fetch(url: str) -> bytes:
         if exc.code == 404:
             raise CatalogueError(f"{url} is not published yet (404)") from None
         raise CatalogueError(f"{url} answered HTTP {exc.code}") from None
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+    except (urllib.error.URLError, http.client.HTTPException, OSError,
+            ValueError) as exc:
         reason = getattr(exc, "reason", exc)
         raise CatalogueError(f"cannot fetch {url}: {reason}") from None
     if len(body) > CAP:
