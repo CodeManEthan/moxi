@@ -34,6 +34,7 @@ _PROCESS_SET_QUOTA = 0x0100
 _PROCESS_TERMINATE = 0x0001
 _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+_JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x0800
 
 _api = None
 
@@ -335,17 +336,21 @@ class Job:
 
     With `kill_on_close=True` every process in the job is ended when the job's last handle
     closes: on `close()`, when this object is garbage collected, or when this process dies.
+    With `breakaway=True` a process in the job may start a child outside it
+    (`CREATE_BREAKAWAY_FROM_JOB`, which `moxi.proc.spawn(detached=True)` asks for).
     """
 
-    def __init__(self, *, kill_on_close: bool = False):
+    def __init__(self, *, kill_on_close: bool = False, breakaway: bool = False):
         api = _bind()
         handle = api.CreateJobObjectW(None, None)
         if not handle:
             raise _error("CreateJobObjectW")
         self._handle = handle
-        if kill_on_close:
+        flags = ((_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE if kill_on_close else 0)
+                 | (_JOB_OBJECT_LIMIT_BREAKAWAY_OK if breakaway else 0))
+        if flags:
             info = api.JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-            info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            info.BasicLimitInformation.LimitFlags = flags
             if not api.SetInformationJobObject(handle, _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
                                                api.ctypes.byref(info),
                                                api.ctypes.sizeof(info)):

@@ -42,10 +42,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace as _replaced
 from pathlib import Path
 
-from ._backend import ApplyIO, Rendered, RenderError, Spec, UnitRef
+from ._backend import ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef
 from ._fence import Fence, Ran
 from ._fence import argv as _argv
-from ._types import Acted, UnitChange, UnitState
+from ._types import Acted, UnitChange, UnitState, Wrapped
 
 #: The mark's comment, around `<module>/<name>`.
 MARK = "<!-- moxi unit: {} -->"
@@ -280,15 +280,20 @@ class LaunchdBackend:
     def own(self, ref: str) -> bool:
         return ref.startswith("moxi.")
 
-    def foreign(self, ref: str, fence: Fence) -> UnitRef:
+    def foreign(self, ref: str, fence: Fence | None) -> UnitRef:
         """A foreign label, its plist read from `~/Library/LaunchAgents/<label>.plist`
         when there is one (a timer when it has a StartInterval or StartCalendarInterval).
-        No supervisor call."""
+        No supervisor call, with a fence or without one."""
         path = self.plist(ref)
         body = _load(path)
         kind = "timer" if body and ("StartInterval" in body
                                     or "StartCalendarInterval" in body) else "daemon"
         return UnitRef(None, ref, kind, (ref,), (path,) if path.is_file() else ())
+
+    def ids(self, module: str, name: str, kind: str) -> tuple[str, ...]:
+        """The label `moxi.<module>.<name>`, for a daemon and a timer alike, whether or
+        not its plist is there. No supervisor call."""
+        return (self.label(module, name),)
 
     def files(self, module: str, name: str, kind: str) -> tuple[Path, ...]:
         return (self.plist(self.label(module, name)),)
@@ -339,12 +344,13 @@ class LaunchdBackend:
 
     def running(self, ids: Sequence[str], fence: Fence) -> frozenset[str]:
         """The labels of `ids` loaded in the domain, with a pid or not: a loaded job with
-        `Sockets` or `KeepAlive` can start on its own."""
+        `Sockets` or `KeepAlive` can start on its own. One `print gui/<uid>`; `ReadError`
+        when it fails."""
         if not ids:
             return frozenset()
         read = self._services(fence)
         if isinstance(read, Ran):
-            return frozenset()
+            raise ReadError(read)
         return frozenset(label for label in ids if label in read)
 
     def stop_id(self, unit: str, fence: Fence) -> Ran:
@@ -359,7 +365,11 @@ class LaunchdBackend:
         `inactive`; a loaded timer is `active` (its schedule is armed), its last exit
         status in `last`. A label that is not loaded is `inactive` ("not loaded") when its
         plist is there, else `missing`. `enabled` is False for a label the `disabled
-        services` block lists disabled, True otherwise, None when `missing`."""
+        services` block lists disabled, True otherwise, None when `missing`.
+
+        One state per unit, in the order of `units`. `last` is launchd's own result only,
+        a timer's last exit status (None for a daemon); the core adds the gate's run line.
+        A foreign label from `foreign(ref, None)` is read in the same call."""
         if not units:
             return []
         ran = fence.run("print", self.domain)
@@ -406,6 +416,10 @@ class LaunchdBackend:
 
     def wrap(self, ref: str, *, module: str, key: str, name: str, fence: Fence) -> Acted:
         return Acted(None, ref, "wrap", False, (f"wrap is systemd only; {ref} runs as it is",))
+
+    def wraps(self, module: str) -> tuple[tuple[str, str, Wrapped], ...]:
+        """Empty: launchd has no wraps."""
+        return ()
 
     def unwrap(self, ref: str, *, module: str, fence: Fence) -> Acted:
         return Acted(None, ref, "unwrap", True, (f"{ref} is not wrapped by {module}",))
