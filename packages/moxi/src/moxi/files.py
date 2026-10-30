@@ -628,6 +628,10 @@ def private_dir(path: str | os.PathLike) -> Path:
     the owner, and an existing one of ours loses any group or other permission bits.
     Windows: created with an access list that grants only the current user, and checked
     by reading it back.
+
+    It changes an existing directory, so it is for directories the core owns or creates;
+    a directory the user may have chosen (a configured store's, say) is never given to it
+    unless the core made it.
     """
     path = Path(path)
     if _WINDOWS:
