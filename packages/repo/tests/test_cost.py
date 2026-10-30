@@ -41,6 +41,17 @@ def test_the_runner_imports_only_its_own_two_modules_and_the_standard_library(de
 
 def test_the_runner_imports_in_under_10_ms(demo):
     python = str(demo.hook_env["python"])
+    # The suite's other workers can load the machine (eight parallel committer passes, a
+    # pass over thousands of files), so a median over the bound is measured again, twice.
+    for attempt in range(3):
+        times = _import_times(python)
+        if statistics.median(times) < 10_000:
+            break
+        time.sleep(1)
+    assert statistics.median(times) < 10_000, times
+
+
+def _import_times(python: str) -> list[int]:
     times = []
     for _ in range(5):
         done = subprocess.run([python, "-I", "-X", "importtime", "-c",
@@ -53,7 +64,7 @@ def test_the_runner_imports_in_under_10_ms(demo):
                                                         "moxi_repo.pieces"):
                 total = max(total, int(parts[1]))
         times.append(total)
-    assert statistics.median(times) < 10_000, times
+    return times
 
 
 def test_a_git_hook_costs_under_twice_a_bare_interpreter(demo):
