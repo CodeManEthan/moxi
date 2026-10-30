@@ -362,14 +362,18 @@ class LaunchdBackend:
     def status(self, units: Sequence[UnitRef], fence: Fence) -> list[UnitState]:
         """One `launchctl print gui/<uid>` for all of `units`. A loaded daemon with a pid
         is `active`, without one `failed` when its last exit status is not zero, else
-        `inactive`; a loaded timer is `active` (its schedule is armed), its last exit
-        status in `last`. A label that is not loaded is `inactive` ("not loaded") when its
-        plist is there, else `missing`. `enabled` is False for a label the `disabled
-        services` block lists disabled, True otherwise, None when `missing`.
+        `inactive`. A timer reads its schedule, never its runs: loaded and not listed
+        disabled is `active` (with a pid or not), loaded and listed disabled `inactive`;
+        its last exit status goes in `last`, so a timer whose last run failed still reads
+        `active`. A label that is not loaded is `inactive` ("not loaded") when its plist is
+        there, else `missing`. `enabled` is False for a label the `disabled services` block
+        lists disabled, True otherwise, None when `missing`. When the print fails, every
+        unit is `unknown` with the failure in `detail`.
 
         One state per unit, in the order of `units`. `last` is launchd's own result only,
-        a timer's last exit status (None for a daemon); the core adds the gate's run line.
-        A foreign label from `foreign(ref, None)` is read in the same call."""
+        `{"status": <last exit status>}` for a timer (None for a daemon); the core adds the
+        gate's run line. A foreign label from `foreign(ref, None)` is read in the same
+        call."""
         if not units:
             return []
         ran = fence.run("print", self.domain)
@@ -384,13 +388,14 @@ class LaunchdBackend:
             elif label in services:
                 pid, code = services[label]
                 if unit.kind == "timer":
-                    state = "active"
+                    state = "inactive" if disabled.get(label) is False else "active"
                     last = {"status": code}
                 elif pid:
                     state = "active"
                 else:
                     state = "failed" if code not in (None, 0) else "inactive"
                 detail = (f"loaded, pid {pid}" if pid else "loaded") + (
+                    ", disabled" if unit.kind == "timer" and state == "inactive" else "") + (
                     f", last exit {code}" if code is not None else "")
                 since = _started(pid) if pid else None
             elif path.is_file():

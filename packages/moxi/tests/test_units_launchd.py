@@ -813,7 +813,7 @@ def test_status_from_recorded_print(mac, monkeypatch):
     assert got == {"relay": ("active", 4242, True), "idle": ("inactive", None, True),
                    "broken": ("failed", None, True), "killed": ("failed", None, True),
                    "unloaded": ("inactive", None, True), "oldform": ("inactive", None, False),
-                   "snap": ("active", None, False), "absent": ("missing", None, None),
+                   "snap": ("inactive", None, False), "absent": ("missing", None, None),
                    "com.example.agent": ("active", 612, True)}
     assert states["relay"].since == 1700000000.0 and states["idle"].since is None
     assert states["unloaded"].detail == "not loaded"
@@ -825,13 +825,49 @@ def test_status_from_recorded_print(mac, monkeypatch):
     assert all(s.backend == "launchd" and s.wrapped is None for s in states.values())
 
 
+TIMERS_PRINTED = """\
+gui/501 = {
+	services = {
+		       0      3 	moxi.demo.failing
+		     777      0 	moxi.demo.running
+		       0      0 	moxi.demo.off
+	}
+
+	disabled services = {
+		"moxi.demo.off" => disabled
+	}
+}
+"""
+
+
+def test_a_timer_reads_its_schedule_never_its_last_run(mac, monkeypatch):
+    """A loaded timer not listed disabled is `active` whatever its last exit, with a pid
+    or not; loaded and listed disabled is `inactive`; its last exit is in `last`."""
+    monkeypatch.setattr(_launchd, "_started", lambda pid: 1700000000.0)
+    for name in ("failing", "running", "off"):
+        [group] = mac.backend.render(spec("timer", name=name, schedule=Schedule(every=5)))
+        group.files[0][0].write_text(group.files[0][1])
+    refs = {r.name: r for r in mac.backend.marked("demo")}
+    states = {s.name: s for s in mac.backend.status(list(refs.values()),
+                                                    recorded(TIMERS_PRINTED))}
+    got = {n: (s.state, s.enabled, s.last) for n, s in states.items()}
+    assert got == {"failing": ("active", True, {"status": 3}),
+                   "running": ("active", True, {"status": 0}),
+                   "off": ("inactive", False, {"status": 0})}
+    assert states["running"].pid == 777 and "disabled" in states["off"].detail
+
+
 def test_status_when_the_print_fails_is_unknown(mac):
+    """Every unit the one print covers, daemon, timer and foreign label alike."""
     def run(cmd, *, env=None, timeout=None):
         return subprocess.CompletedProcess(cmd, 113, "", "Could not find domain for gui: 501")
-    [state] = mac.backend.status([UnitRef("demo", "relay", "daemon", (RELAY,))],
-                                 Fence("launchd", run))
-    assert state.state == "unknown" and "Could not find domain" in state.detail
-    assert state.enabled is None
+    refs = [UnitRef("demo", "relay", "daemon", (RELAY,)),
+            UnitRef("demo", "snap", "timer", ("moxi.demo.snap",)),
+            mac.backend.foreign("com.example.agent", None)]
+    states = mac.backend.status(refs, Fence("launchd", run))
+    assert [s.state for s in states] == ["unknown"] * 3
+    assert all("Could not find domain" in s.detail and s.enabled is None
+               and s.last is None for s in states)
 
 
 def test_since_reads_the_process_start_time():

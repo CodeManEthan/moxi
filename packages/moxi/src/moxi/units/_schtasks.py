@@ -39,10 +39,6 @@ from ._types import Acted, UnitChange, UnitState, Wrapped
 FOLDER = "\\Moxi\\"
 #: The XML's namespace.
 NS = "http://schemas.microsoft.com/windows/2004/02/mit/task"
-#: `LastTaskResult` codes that name a state, not a failure: Task Scheduler's own status
-#: codes (`SCHED_S_TASK_READY` and the rest, from 0x00041300). A task that never ran, has
-#: no valid trigger or is running reports one of these.
-STATE_CODES = frozenset(range(0x00041300, 0x00041307))
 #: The schedule's anchor: a fixed day in the past, local time.
 ANCHOR = "2000-01-01"
 
@@ -352,12 +348,18 @@ class SchtasksBackend:
             task = unit.ids[0]
             info = None if tasks is None else tasks.get(task.casefold())
             if unit.marked:
-                out.append(self._marked_state(unit, listed, query, tasks, info))
+                out.append(self._marked_state(unit, listed, query, tasks, info, why))
             else:
                 out.append(self._foreign_state(unit, tasks, info, why))
         return out
 
-    def _marked_state(self, unit: UnitRef, listed, query, tasks, info) -> UnitState:
+    def _marked_state(self, unit: UnitRef, listed, query, tasks, info, why) -> UnitState:
+        """A task in moxi's folder. Not listed by `/query`, `missing`; the query failed,
+        `unknown`. A timer reads its schedule: `active` unless the PowerShell read gives its
+        `State` as `Disabled` (`inactive`); without that read, `active` with `enabled` None
+        and a `detail` saying the disabled check could not run. A daemon reads its gate's
+        runtime file: a live `ProcId` is `active`; none, `inactive`, or `failed` when its
+        newest run line has a non-zero exit. `last` is None: the core adds the run line."""
         task = unit.ids[0]
         common = dict(module=unit.module, name=unit.name, kind=unit.kind, backend=self.name)
         if listed is None:
@@ -366,10 +368,19 @@ class SchtasksBackend:
             return UnitState(state="missing", detail=f"{task} is not registered", **common)
         enabled = None if tasks is None else (
             None if info is None else info.get("state") != "Disabled")
-        # The newest run line decides `failed`; it is the core's to show in `last`, and
-        # the PowerShell read gives a marked task only `enabled`, so `last` is None.
+        if unit.kind == "timer":
+            if enabled is False:
+                state, detail = "inactive", "disabled"
+            elif enabled is True:
+                state, detail = "active", info.get("state") or "listed"
+            else:
+                state = "active"
+                detail = ("listed; whether it is disabled could not be checked: "
+                          + (why if tasks is None else f"the task read did not find {task}"))
+            return UnitState(state=state, detail=detail, enabled=enabled,
+                             log=self.log(unit), **common)
         last = _newest_run(unit.module, unit.name)
-        live = self._runtime(unit.module, unit.name) if unit.kind == "daemon" else None
+        live = self._runtime(unit.module, unit.name)
         if live is not None:
             pid, since = live
             state, detail, more = "active", f"running (pid {pid})", dict(pid=pid, since=since)
@@ -381,6 +392,12 @@ class SchtasksBackend:
                          log=self.log(unit), **more, **common)
 
     def _foreign_state(self, unit: UnitRef, tasks, info, why) -> UnitState:
+        """A task outside moxi's folder, read as a timer from the PowerShell read: `State`
+        `Disabled` is `inactive`, any other `active` with the raw `State` in `detail` (so a
+        run in progress still shows). `last` holds `LastRunTime` and `LastTaskResult` as
+        they came; whether that result is a failure is the caller's to judge, and no state
+        here is `failed`. A ref the read doesn't find is `missing`; no PowerShell, or a
+        failed read, `unknown`."""
         common = dict(module=None, name=unit.name, kind=unit.kind, backend=self.name)
         if tasks is None:
             return UnitState(state="unknown", detail=why or "the task read failed", **common)
@@ -390,12 +407,7 @@ class SchtasksBackend:
         raw = info.get("state") or ""
         code = info.get("last_result")
         last = {"last_run": info.get("last_run"), "last_result": code}
-        if raw == "Running":
-            state = "active"
-        elif isinstance(code, int) and code != 0 and code not in STATE_CODES:
-            state = "failed"
-        else:
-            state = "inactive"
+        state = "inactive" if raw == "Disabled" else "active"
         detail = raw if not isinstance(code, int) else f"{raw}, last result 0x{code:08X}"
         return UnitState(state=state, detail=detail, last=last, enabled=raw != "Disabled",
                          **common)
@@ -424,15 +436,24 @@ class SchtasksBackend:
 
     def _end(self, task: str, fence: Fence) -> Ran:
         """`schtasks /end`, where a task that was not running is no failure: when `/end`
-        fails, the task read says whether the task is running, and a task that isn't has
-        nothing left to end."""
+        fails, the PowerShell read says whether the task is running, and a task it finds
+        and that isn't `Running` has nothing left to end.
+
+        Without PowerShell, or when that read fails, `/end`'s failure stands, with a note
+        that the check could not run: so stopping an already stopped task may read as
+        failed there. That stays until a Windows host records what `/end` of an idle task
+        exits with; if that code names the idle state, it can be read as done here."""
         ran = fence.run("/end", task)
         if ran.ok:
             return ran
-        tasks, _ = self._read_tasks([task], fence)
+        tasks, why = self._read_tasks([task], fence)
         info = None if tasks is None else tasks.get(task.casefold())
         if info is not None and info.get("state") != "Running":
             return _replaced(ran, ok=True)
+        if tasks is None:
+            said = ran.stderr.strip() or ran.stdout.strip() or f"exit {ran.returncode}"
+            return _replaced(ran, stderr=f"{said} (whether {task} was already stopped "
+                                         f"could not be checked: {why})")
         return ran
 
     def _listed(self, task: str, fence: Fence) -> bool | None:
