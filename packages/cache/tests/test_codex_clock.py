@@ -413,6 +413,23 @@ def test_a_line_the_reader_does_not_recognise_is_unknown(tmp_path, bad, where):
         assert clock.kind == "unknown", (where, turned)
 
 
+def test_a_token_usage_record_with_no_usage_is_unrecognised(tmp_path):
+    """A `token_usage_record` with no `usage` object is malformed to sessions, so the
+    clock cannot read it as a request with no counts: it is `unknown`, `unrecognised`,
+    as the newest line or behind a whole turn."""
+    for name, r in (("alone", Rollout()), ("behind-a-turn", one_turn(600))):
+        root = sessions_root(tmp_path / name)
+        r.record("t2", NOW - 60)
+        line = json.loads(r.b.lines[-1])
+        del line["payload"]["usage"]
+        r.b.lines[-1] = json.dumps(line)
+        r.write(root)
+        for turned in (True, False):
+            clock = codex_read(root, turned=turned)
+            assert (clock.kind, clock.code) == ("unknown", "unrecognised"), (name, clock)
+            assert clock.reason == codex.UNRECOGNISED
+
+
 def test_a_last_line_being_written_is_skipped_but_a_whole_one_is_judged(tmp_path):
     root = sessions_root(tmp_path)
     r = one_turn(60)
