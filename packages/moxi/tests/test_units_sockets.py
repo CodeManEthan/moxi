@@ -5,6 +5,7 @@ state with its epoch on every backend."""
 from __future__ import annotations
 
 import errno
+import re
 import socket as _socket
 import types
 
@@ -176,6 +177,39 @@ def test_a_set_changed_under_a_running_daemon_is_applied_between_one_stop_and_st
     service = [c for c in w.sup.calls if f"{STEM}.service" in c and c[0] != "show"]
     assert service == [("stop", f"{STEM}.service"), ("start", f"{STEM}.service")]
     assert w.sup.units[f"{STEM}.service"]["active"]
+
+
+def test_a_failed_stop_names_the_steps_left_undone_and_they_work(w):
+    """A `stop` of the running service fails, so its new unit is only enabled and nothing
+    starts. A second `moxi install` finds the files up to date and does nothing, so the
+    remedy names the steps instead: stop the service, restart each new or changed unit,
+    start the rest, start the service. Run on the supervisor in that order, they bring
+    the new address up behind a running service."""
+    service, added = f"{STEM}.service", f"{STEM}-2.socket"
+    w.module(shell("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    assert w.sup.units[service]["active"]
+    w.module(shell("127.0.0.1", "::1", "10.0.0.1"))
+    w.sup.fail[("stop", service)] = "Access denied"
+    done = {a.change.kind: a for a in units.apply(units.plan("demo"), say=w.lines.append)}
+    assert not done["daemon"].ok
+    assert done["daemon"].lines == (
+        f"`systemctl --user stop -- {service}` failed: Access denied",
+        "the unit files are written, and `moxi install demo` again finds them up to date; "
+        f"fix the cause, then run `systemctl --user stop {service}`, "
+        f"`systemctl --user restart {added}`, "
+        f"`systemctl --user start {STEM}.socket {STEM}-1.socket` and "
+        f"`systemctl --user start {service}`")
+    assert not w.sup.units[added]["active"]
+    assert {(c.name, c.kind): c.action for c in units.plan("demo")} == {
+        ("shell", "daemon"): "keep", ("shell", "socket"): "keep"}
+
+    del w.sup.fail[("stop", service)]
+    steps = re.findall(r"`systemctl --user ([^`]+)`", done["daemon"].lines[1])
+    ran = [w.sup(["systemctl", "--user", *step.split()]) for step in steps]
+    assert [r.returncode for r in ran] == [0] * 4, [r.stderr for r in ran]
+    assert all(w.sup.units[u]["active"] for u in (f"{STEM}.socket", f"{STEM}-1.socket",
+                                                  added, service))
 
 
 def test_the_stop_record_takes_every_socket_unit_first_in_unit_order(w):

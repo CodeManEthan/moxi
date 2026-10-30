@@ -925,7 +925,9 @@ class SocketStarts:
       down does nothing.
 
     A `stop` that fails starts nothing more of that daemon: its new and changed units
-    are only enabled, so no socket start meets a service that may still run. A unit
+    are only enabled, so no socket start meets a service that may still run. Its remedy
+    line names the `systemctl --user` steps left undone, since a second `moxi install`
+    finds the files up to date. A unit
     start that fails is a failed step, and the service is still started after the other
     units: it serves on the addresses that bound.
 
@@ -1055,7 +1057,7 @@ class SocketStarts:
             ran = io.fence.run("stop", service)
             if not ran.ok and not _not_loaded(ran):
                 self._ok = False
-                io.fail(owner, ran)
+                io.fail(owner, ran, self._after_failed_stop(key))
                 if sockets is not None:
                     for path in sockets.paths:
                         if self._news.get(path) in ("new", "changed"):
@@ -1074,6 +1076,24 @@ class SocketStarts:
         if self._run(io, owner, "start", service) and daemon is not None \
                 and _keeps(daemon) and sockets is not None and found != "down":
             io.say(daemon, f"{service} rewritten and restarted, since its socket changed")
+
+    def _after_failed_stop(self, key) -> str:
+        """The remedy for a failed `stop` of the service. The files are written, so a
+        second `moxi install` finds them up to date and runs none of the steps; the
+        remedy names them, in the order the rule runs them."""
+        service = self._service(key)
+        paths = self._units(key)
+        fresh = [p.name for p in paths if self._news.get(p, "same") != "same"]
+        same = [p.name for p in paths if self._news.get(p, "same") == "same"]
+        steps = [f"`systemctl --user stop {service}`"]
+        if fresh:
+            steps.append(f"`systemctl --user restart {' '.join(fresh)}`")
+        if same:
+            steps.append(f"`systemctl --user start {' '.join(same)}`")
+        steps.append(f"`systemctl --user start {service}`")
+        return (f"the unit files are written, and `moxi install {key[0]}` again finds "
+                f"them up to date; fix the cause, then run {', '.join(steps[:-1])} and "
+                f"{steps[-1]}")
 
     def _units(self, key) -> tuple[Path, ...]:
         """The daemon's socket units: its written set's, or, when the set is unchanged

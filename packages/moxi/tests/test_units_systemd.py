@@ -915,8 +915,11 @@ def test_a_stop_that_fails_starts_nothing_more_of_that_daemon(w, v6):
     w.sup.calls.clear()
     done = {a.change.kind: a for a in w.apply(units.plan("demo"))}
     assert not done["socket"].ok
-    assert done["socket"].lines[0] == (f"`systemctl --user stop -- {SERVICE}` failed: "
-                                       "Access denied")
+    assert done["socket"].lines == (
+        f"`systemctl --user stop -- {SERVICE}` failed: Access denied",
+        "the unit files are written, and `moxi install demo` again finds them up to date; "
+        f"fix the cause, then run `systemctl --user stop {SERVICE}`, "
+        f"`systemctl --user restart {SOCK} {SOCK_1}` and `systemctl --user start {SERVICE}`")
     assert w.sup.calls == [RUNNING, ("daemon-reload",), ("stop", SERVICE),
                            ("enable", SOCK), ("enable", SOCK_1)]
     assert w.sup.units[SERVICE]["active"]
