@@ -4,14 +4,16 @@ One lock serialises the frames written. One reader thread reads every line the s
 sends, hands each answer to the call waiting on its id and queues each notification, so
 the server's answers and its pushed notifications share the one connection in any order.
 A call waits on its own event; one that runs out of time raises `Timeout`, and its late
-answer is dropped.
+answer is dropped. A call's time limit holds while its request waits to be written too.
 """
 
 from __future__ import annotations
 
 import errno
 import itertools
+import math
 import queue
+import select
 import socket
 import sys
 import threading
@@ -66,6 +68,13 @@ def connect(address: str, *, timeout: float = 5.0, max_line: int = _wire.MAX_LIN
             continue
         sock.settimeout(None)
         return Client(sock, address, timeout=timeout, max_line=max_line)
+
+
+def _writable(sock: socket.socket, seconds: float) -> bool:
+    """Whether `sock` can take more bytes within `seconds`."""
+    poller = select.poll()
+    poller.register(sock.fileno(), select.POLLOUT)
+    return bool(poller.poll(max(math.ceil(seconds * 1000), 1)))
 
 
 class _Call:
@@ -129,7 +138,10 @@ class Client:
         """Send request `method` and return its result. Raises `RpcError` when the
         server answers with an error, `Timeout` past `timeout` seconds (None waits with
         no limit), `NotRpc` when the server sends a line that isn't JSON-RPC, and
-        `IpcError` when the connection ends first."""
+        `IpcError` when the connection ends first. `timeout` covers the whole call:
+        the wait to write the request as well as the wait for its answer. A request
+        the timeout cuts off partway ends the connection."""
+        deadline = None if timeout is None else time.monotonic() + timeout
         call = _Call()
         with self._lock:
             if self._failure is not None:
@@ -137,8 +149,11 @@ class Client:
             id = next(self._ids)
             self._calls[id] = call
         try:
-            self._send(_wire.request(id, method, params))
-            if not call.done.wait(timeout):
+            if not self._send(_wire.request(id, method, params), deadline):
+                raise Timeout(f"no answer to {method} in {timeout} s: its request could "
+                              f"not be written in that time")
+            left = None if deadline is None else max(deadline - time.monotonic(), 0.0)
+            if not call.done.wait(left):
                 raise Timeout(f"no answer to {method} in {timeout} s")
         finally:
             with self._lock:
@@ -177,15 +192,52 @@ class Client:
 
     # -- the wire -----------------------------------------------------------------------
 
-    def _send(self, message: dict) -> None:
+    def _send(self, message: dict, deadline: float | None = None) -> bool:
+        """Write one frame, holding the write lock. With a `deadline` (a
+        `time.monotonic()` time), the wait for the lock and for the socket to take the
+        frame both end then, and False says the time ran out: nothing was written, or
+        the frame was cut partway and the connection is ended, since the server can
+        no longer tell where the next frame starts."""
         frame = _wire.encode(message)
-        with self._write_lock:
-            try:
+        if deadline is None:
+            self._write_lock.acquire()
+        elif not self._write_lock.acquire(timeout=max(deadline - time.monotonic(), 0.0)):
+            return False
+        try:
+            if deadline is None:
                 self._sock.sendall(frame)
-            except OSError as exc:
-                failure = self._fail(IpcError(f"the connection to {self.address} "
-                                              f"broke: {exc}"))
-                raise failure from None
+                return True
+            return self._send_by(frame, deadline)
+        except OSError as exc:
+            failure = self._fail(IpcError(f"the connection to {self.address} "
+                                          f"broke: {exc}"))
+            raise failure from None
+        finally:
+            self._write_lock.release()
+
+    def _send_by(self, frame: bytes, deadline: float) -> bool:
+        """Write `frame` without blocking past `deadline`, waiting for the socket to
+        take more between writes. The caller holds the write lock."""
+        view = memoryview(frame)
+        sent = 0
+        while sent < len(frame):
+            try:
+                sent += self._sock.send(view[sent:], socket.MSG_DONTWAIT)
+                continue
+            except BlockingIOError:
+                pass
+            left = deadline - time.monotonic()
+            if left <= 0 or not _writable(self._sock, left):
+                if sent:
+                    self._fail(IpcError(f"the connection to {self.address} is ended: a "
+                                        f"request was cut off when its call ran out of "
+                                        f"time"))
+                    try:
+                        self._sock.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                return False
+        return True
 
     def _read(self) -> None:
         failure: BaseException = IpcError(

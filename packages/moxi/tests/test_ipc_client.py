@@ -233,6 +233,50 @@ def test_a_call_past_its_timeout_raises_and_its_late_answer_is_dropped(serving):
         assert client.call("echo", ["next"], timeout=10) == ["next"]
 
 
+#: Far more than a socket pair buffers, so a write of it blocks while nobody reads.
+BIG = "x" * (16 << 20)
+
+
+def test_a_call_whose_request_cannot_be_written_times_out_and_ends_the_connection(fake):
+    f = fake()
+    start = time.monotonic()
+    with pytest.raises(ipc.Timeout):
+        bounded(lambda: f.client.call("echo", [BIG], timeout=0.3))
+    assert 0.3 <= time.monotonic() - start < 3
+    # Part of the request was written, so the connection can't carry another frame.
+    with pytest.raises(ipc.IpcError) as caught:
+        bounded(lambda: f.client.call("echo", [1], timeout=1))
+    assert not isinstance(caught.value, ipc.Timeout)
+
+
+def test_a_call_waiting_on_another_calls_blocked_write_times_out(fake):
+    f = fake()
+    stuck = threading.Thread(target=lambda: pytest.raises(ipc.IpcError, f.client.call,
+                                                          "echo", [BIG]), daemon=True)
+    stuck.start()
+    time.sleep(0.2)  # the untimed call holds the write lock, blocked in its write
+    start = time.monotonic()
+    with pytest.raises(ipc.Timeout):
+        bounded(lambda: f.client.call("echo", [1], timeout=0.3))
+    assert 0.3 <= time.monotonic() - start < 3
+    f.client.close()
+    stuck.join(10)
+    assert not stuck.is_alive()
+
+
+def test_a_timed_call_writes_a_large_request_the_server_reads(fake):
+    f = fake()
+    payload = "y" * (4 << 20)
+    got = {}
+    reader = threading.Thread(target=lambda: got.update(f.request()), daemon=True)
+    reader.start()
+    answer = threading.Thread(target=lambda: (reader.join(20), f.answer(got["id"], "ok")),
+                              daemon=True)
+    answer.start()
+    assert bounded(lambda: f.client.call("echo", [payload], timeout=20)) == "ok"
+    assert got["params"] == [payload]
+
+
 def test_hello_agrees_a_version(serving):
     srv = serving(handler, hello=ipc.Hello((1, 3), {"watch", "steer"}))
     with ipc.connect(srv.address) as client:
