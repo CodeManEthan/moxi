@@ -519,11 +519,12 @@ MACOS = pytest.mark.skipif(sys.platform != "darwin",
 WINDOWS = pytest.mark.skipif(sys.platform != "win32", reason="Windows only; owed to Windows")
 
 
-def _child_with(env: dict[str, str]) -> subprocess.Popen:
+def _child_with(env: dict[str, str], argv0: str = PY) -> subprocess.Popen:
     """A child started with `env` as its whole environment, which waits on its stdin. It
     has said it is running, so its environment is its own and not this process's."""
-    child = subprocess.Popen([PY, "-c", "import sys; print('up', flush=True); sys.stdin.read()"],
-                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env)
+    child = subprocess.Popen([argv0, "-c", "import sys; print('up', flush=True); sys.stdin.read()"],
+                             executable=PY, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             env=env)
     assert child.stdout.readline() == b"up\n"
     return child
 
@@ -562,6 +563,34 @@ def test_environ_of_a_gone_process_is_none():
     assert proc.environ(child.pid) is None
 
 
+@LINUX
+def test_environ_of_a_zombie_is_none():
+    # This kernel may refuse the read or return nothing; either way the answer is None.
+    child = subprocess.Popen([PY, "-c", "pass"])
+    try:
+        deadline = time.monotonic() + 10
+        while _state(child.pid) != "Z" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert _state(child.pid) == "Z"
+        assert proc.environ(child.pid) is None
+    finally:
+        child.wait()
+
+
+def _state(pid: int) -> str:
+    with open(f"/proc/{pid}/stat") as f:
+        return f.read().rpartition(")")[2].split()[0]
+
+
+@LINUX
+def test_the_linux_reader_reads_an_empty_environment_of_a_running_process_as_empty():
+    child = _child_with({})
+    try:
+        assert proc.environ(child.pid) == {}
+    finally:
+        _end(child)
+
+
 @pytest.mark.parametrize("pid", [0, -1, True])
 def test_environ_of_no_pid_is_none(pid):
     assert proc.environ(pid) is None
@@ -586,8 +615,28 @@ def test_the_linux_reader_splits_entries_and_skips_what_is_not_one(tmp_path):
     assert proc._linux_environ(13, str(tmp_path)) is None
 
 
+@LINUX
+@pytest.mark.parametrize("stat, read", [
+    (b"12 (a) b) Z 1 12", None),            # a zombie: some kernels read it as empty
+    (b"12 (a) b) X 1 12", None),            # dead
+    (b"12 (a) Z) S 1 12", {}),              # asleep, its name holding ") Z"
+    (None, None),                           # gone before its state was read
+])
+def test_the_linux_reader_reads_an_empty_environment_by_the_process_state(tmp_path, stat,
+                                                                          read):
+    fake = tmp_path / "12"
+    fake.mkdir()
+    (fake / "environ").write_bytes(b"")
+    if stat is not None:
+        (fake / "stat").write_bytes(stat)
+    assert proc._linux_environ(12, str(tmp_path)) == read
+
+
 def _procargs(argc: int, path: bytes, argv: list[bytes], env: list[bytes],
-              apple: list[bytes], pad: int = 3) -> bytes:
+              apple: list[bytes], pad: int | None = None) -> bytes:
+    """A `KERN_PROCARGS2` answer; the path is padded to 8 bytes unless `pad` says how."""
+    if pad is None:
+        pad = -(len(path) + 1) % 8
     out = argc.to_bytes(4, sys.byteorder, signed=True) + path + b"\0" * (1 + pad)
     out += b"".join(a + b"\0" for a in argv)
     out += b"".join(e + b"\0" for e in env) + b"\0"
@@ -608,6 +657,20 @@ def test_a_procargs2_answer_with_no_environment_is_empty():
     assert proc._procargs2(raw) == {}
 
 
+@pytest.mark.parametrize("path", [b"/bin/x", b"/usr/bin/python"], ids=["padded", "unpadded"])
+def test_a_procargs2_answer_keeps_an_empty_first_argument(path):
+    # "/usr/bin/python" and its NUL fill 16 bytes; "/bin/x" and its NUL need one more.
+    raw = _procargs(2, path, [b"", b"-c"], [b"A=1"], [b"apple=1"])
+    assert proc._procargs2(raw) == {"A": "1"}
+    raw = _procargs(1, b"/usr/bin/python3", [b""], [b"A=1"], [b"apple=1"])
+    assert proc._procargs2(raw) == {"A": "1"}
+
+
+def test_a_procargs2_answer_padded_short_of_a_pointer_skips_every_nul():
+    raw = _procargs(1, b"/usr/bin/python3", [b"python3"], [b"A=1"], [], pad=3)
+    assert proc._procargs2(raw) == {"A": "1"}
+
+
 def test_a_procargs2_answer_cut_short_is_none():
     assert proc._procargs2(b"\x01") is None
     assert proc._procargs2(2 .to_bytes(4, sys.byteorder) + b"/bin/x") is None
@@ -623,6 +686,18 @@ def test_environ_on_macos_reads_a_same_user_process_through_the_kernel():
     finally:
         _end(child)
     assert read is not None and read["MOXI_TEST_MAC"] == "here"
+
+
+@MACOS
+def test_environ_on_macos_reads_a_process_whose_first_argument_is_empty():
+    child = _child_with({"PATH": "/usr/bin:/bin", "MOXI_TEST_MAC": "here"}, argv0="")
+    try:
+        read = proc._mac_environ(child.pid)
+    finally:
+        _end(child)
+    # Read one argument short, PATH (the first entry) would be taken for an argument.
+    assert read is not None
+    assert read.get("PATH") == "/usr/bin:/bin" and read.get("MOXI_TEST_MAC") == "here"
     assert "executable_path" not in read  # the system's own strings are not the environment
 
 

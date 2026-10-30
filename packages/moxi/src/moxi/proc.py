@@ -601,7 +601,22 @@ def _linux_environ(pid: int, root: str = "/proc") -> dict[str, str] | None:
             raw = f.read()
     except OSError:
         return None
+    # A zombie reads as an empty environment; it has ended, so it is gone.
+    if not raw and _linux_ended(pid, root):
+        return None
     return _pairs(raw.split(b"\0"))
+
+
+def _linux_ended(pid: int, root: str) -> bool:
+    """Whether `pid` has ended (a zombie, or gone) by its `stat` file's state."""
+    try:
+        with open(os.path.join(root, str(pid), "stat"), "rb") as f:
+            stat = f.read()
+    except OSError:
+        return True
+    # The state follows the command name, which is in parentheses and may hold any byte.
+    state = stat[stat.rfind(b")") + 1:].split()[:1]
+    return state in ([b"Z"], [b"X"], [b"x"])
 
 
 def _mac_environ(pid: int) -> dict[str, str] | None:
@@ -636,15 +651,18 @@ def _mac_environ(pid: int) -> dict[str, str] | None:
 _CTL_KERN = 1
 _KERN_ARGMAX = 8
 _KERN_PROCARGS2 = 49
+#: The size of a pointer in a 64-bit process, the boundary the path is padded to.
+_POINTER = 8
 
 
 def _procargs2(raw: bytes) -> dict[str, str] | None:
     """The environment in a `KERN_PROCARGS2` answer.
 
     Its layout: `argc` as a C int; the executable's path, NUL-terminated, then NUL
-    padding; the `argc` arguments, each NUL-terminated; the environment's entries, each
-    NUL-terminated, ended by an empty string; then strings the system keeps for itself,
-    which are not the environment.
+    padding to a pointer-size boundary counted from the path's start; the `argc`
+    arguments, each NUL-terminated; the environment's entries, each NUL-terminated, ended
+    by an empty string; then strings the system keeps for itself, which are not the
+    environment.
     """
     width = 4
     if len(raw) < width:
@@ -655,8 +673,14 @@ def _procargs2(raw: bytes) -> dict[str, str] | None:
     at = raw.find(b"\0", width)
     if at < 0:
         return None
-    while at < len(raw) and raw[at] == 0:
-        at += 1
+    # The path is padded with NULs to a pointer-size boundary from its start; only that
+    # padding is skipped, so an empty argv[0] after it is still read as an argument. Fewer
+    # NULs than that rule asks for means another layout: then every NUL is padding.
+    nuls = 0
+    while at + nuls < len(raw) and raw[at + nuls] == 0:
+        nuls += 1
+    padded = width + _round_up(at + 1 - width, _POINTER)
+    at = padded if at + nuls >= padded else at + nuls
     for _ in range(argc):
         end = raw.find(b"\0", at)
         if end < 0:
@@ -672,6 +696,10 @@ def _procargs2(raw: bytes) -> dict[str, str] | None:
         entries.append(raw[at:end])
         at = end + 1
     return _pairs(entries)
+
+
+def _round_up(n: int, to: int) -> int:
+    return -(-n // to) * to
 
 
 def _pairs(entries) -> dict[str, str]:
