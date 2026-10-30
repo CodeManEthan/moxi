@@ -500,7 +500,8 @@ def test_an_interrupt_during_setup_starts_the_old_unmarked_unit_again(box, job, 
     box.module(DAEMONS=ONE)
     box.unmarked()
     box.legacy()
-    box.supervisor(probe=["start"])
+    if sys.platform.startswith("linux"):
+        box.supervisor(probe=["start"])
     box.env["MOXITEST_SETUP"] = "sleep"
     j = job("demo", "later", "--replace")
     j.wait("setup", "begin")
@@ -524,9 +525,11 @@ def test_an_interrupt_during_setup_starts_the_old_unmarked_unit_again(box, job, 
                       "sigterm to the child": [],
                       "sigquit to the group": [signal.SIGQUIT]}[how]
     assert b"interrupted in demo's settle step; no later step ran" in j.screen
-    # The supervisor call `resume` makes runs with no signal ignored.
-    ignored = box.value("sup", "ignored")
-    assert ignored is not None and not {1, 2, 3, 15} & set(ignored), ignored
+    # The supervisor call `resume` makes runs with no signal ignored (read from
+    # /proc, so on Linux only).
+    if sys.platform.startswith("linux"):
+        ignored = box.value("sup", "ignored")
+        assert ignored is not None and not {1, 2, 3, 15} & set(ignored), ignored
 
 
 def test_a_hang_up_during_setup_ends_the_same_and_keeps_the_failure_record(box, job):
