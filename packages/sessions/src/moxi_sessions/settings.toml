@@ -1,0 +1,8 @@
+# The sessions module's config schema. The file it governs is CONFIG/sessions/config.toml;
+# `moxi config sessions` shows every key and `moxi config sessions init` writes the file.
+
+[claude.projects]
+type = "path"
+default = ""
+doc = "Where Claude Code transcripts are read for a session that stated no root of its own; unset, it is ${CLAUDE_CONFIG_DIR:-~/.claude}/projects in the reading process's environment."
+read = "use"
