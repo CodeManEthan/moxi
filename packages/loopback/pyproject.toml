@@ -1,10 +1,28 @@
 [project]
 name = "moxi-loopback"
 version = "0.1.0"
-description = "The page-server base every Moxi page is built on: the request check, runtime files and route tables."
+description = "The base every Moxi page server is built on: the request check, the route table, the runtime file and the server."
+readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
+keywords = ["agents", "harness", "loopback", "asgi", "local-server"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Software Development :: Libraries",
+]
+# All four are required: every page server runs on them, so an extra would enable nothing.
+# h11 is named for its floor, 0.16, which fixed a request-smuggling bug; uvicorn alone
+# allows older ones.
 dependencies = [
     "moxi>=0.1.1,<0.2",
     "starlette>=1.10,<2",
