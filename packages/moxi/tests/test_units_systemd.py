@@ -968,6 +968,26 @@ def test_wrap_writes_the_marked_drop_in_and_reloads_once(unit_root, bin_dir):
     assert acted.lines[-1] == "turn them on with: moxi config set services backup.enabled true"
 
 
+def test_the_wrap_forms_in_the_drop_in_parse_in_the_gate(unit_root, bin_dir):
+    import re
+    import shlex
+
+    from moxi import run
+
+    _wrap(unit_root)
+    text = (unit_root / "backup-run.service.d" / "50-moxi-services.conf").read_text()
+    forms = {}
+    for key in ("ExecCondition", "ExecStopPost"):
+        words = shlex.split(re.search(rf"^{key}=(.*)$", text, re.M)[1])
+        assert words[:2] == [str(bin_dir / "moxi"), "run"]
+        forms[key] = run.parse(words[2:])
+    condition, result = forms["ExecCondition"], forms["ExecStopPost"]
+    assert (condition.condition, condition.switch, condition.module, condition.name) == (
+        True, ("services", "backup.enabled"), "services", "backup")
+    assert (result.result, result.switch, result.module, result.name) == (
+        True, None, "services", "backup")
+
+
 def test_a_second_wrap_with_the_same_key_and_name_rewrites_the_drop_in(unit_root, bin_dir):
     _wrap(unit_root)
     path = unit_root / "backup-run.service.d" / "50-moxi-services.conf"

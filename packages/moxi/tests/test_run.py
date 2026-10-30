@@ -567,6 +567,164 @@ def test_an_on_run_is_counted_once_as_systemd_runs_the_pair(demo):
     assert (line["unit"], line["result"], line["exit"]) == ("demo/backup", "ran", 4)
 
 
+# -- the gate's joins with the backends ------------------------------------------------------
+# Each backend writes the gate's command line into its unit, and the Task Scheduler backend
+# reads the runtime file the gate writes. These tests read one side through the other, so a
+# change on either side alone fails here.
+
+#: A command whose words each need quoting somewhere.
+ODD = ("/opt/env/bin/moxi-demo-snap", "a b", "50%", "$HOME", 'q"x', "back\\slash", "it's")
+
+
+def _windows_split(line: str) -> list[str]:
+    """A command line split by `CommandLineToArgvW`'s rules, as far as `list2cmdline`
+    output needs them."""
+    out, word, have, quoted, i = [], [], False, False, 0
+    while i < len(line):
+        ch = line[i]
+        if ch == "\\":
+            j = i
+            while j < len(line) and line[j] == "\\":
+                j += 1
+            count = j - i
+            if j < len(line) and line[j] == '"':
+                word.append("\\" * (count // 2))
+                if count % 2:
+                    word.append('"')
+                    j += 1
+                i, have = j, True
+                continue
+            word.append("\\" * count)
+            i, have = j, True
+            continue
+        if ch == '"':
+            quoted, have = not quoted, True
+        elif ch in " \t" and not quoted:
+            if have:
+                out.append("".join(word))
+            word, have = [], False
+        else:
+            word.append(ch)
+            have = True
+        i += 1
+    if have:
+        out.append("".join(word))
+    return out
+
+
+def _systemd_split(line: str) -> list[str]:
+    """An `Exec*=` value split back into its words (no C escapes in these lines)."""
+    import shlex
+
+    return [w.replace("$$", "$").replace("%%", "%") for w in shlex.split(line)]
+
+
+@pytest.fixture
+def scripts(demo, tmp_path, monkeypatch):
+    """A scripts directory holding the `moxi` gate, `python` and `pythonw.exe`, with a space
+    in its path."""
+    where = tmp_path / "bin with space"
+    where.mkdir()
+    for name in ("moxi", "moxi.exe", "python", "pythonw.exe"):
+        (where / name).write_text("")
+        (where / name).chmod(0o755)
+    monkeypatch.setattr(paths, "_scripts", lambda: where)
+    monkeypatch.setattr(paths, "python", lambda: where / "python")
+    return where
+
+
+def _gate_words(backend: str, spec) -> list[str]:
+    """The gate's own arguments, after `moxi run`, as `backend` writes them for `spec`."""
+    import plistlib
+    import re
+    import xml.etree.ElementTree as ET
+
+    from moxi.units._launchd import LaunchdBackend
+    from moxi.units._schtasks import NS, SchtasksBackend
+    from moxi.units._systemd import SystemdBackend
+
+    if backend == "systemd":
+        [group] = SystemdBackend(root=paths.core().state_dir() / "units").render(spec)
+        service = dict((p.suffix, text) for p, text in group.files)[".service"]
+        words = _systemd_split(re.search(r"^ExecStart=(.*)$", service, re.M)[1])
+        assert words[:2] == [str(paths.script("moxi")), "run"]
+        return words[2:]
+    if backend == "launchd":
+        [group] = LaunchdBackend(agents=paths.core().state_dir() / "agents",
+                                 uid=501).render(spec)
+        words = plistlib.loads(group.files[0][1].encode())["ProgramArguments"]
+        assert words[:2] == [str(paths.script("moxi")), "run"]
+        return words[2:]
+    [group] = SchtasksBackend(user="PC\\ana").render(spec)
+    root = ET.fromstring(group.files[0][1].encode("utf-16"))
+    words = _windows_split(root.find(f"{{{NS}}}Actions/{{{NS}}}Exec/{{{NS}}}Arguments").text)
+    assert words[:3] == ["-m", "moxi", "run"]
+    return words[3:]
+
+
+def _spec(kind: str, command=ODD, **kw):
+    from moxi.units._backend import Schedule, Spec
+
+    if kind == "timer":
+        kw.setdefault("schedule", Schedule(every=5))
+        kw.setdefault("switch", "rows.backup")
+    return Spec(module="demo", name="snap" if kind == "timer" else "relay", kind=kind,
+                command=tuple(command), doc=kind, entry={}, **kw)
+
+
+@pytest.mark.parametrize("backend", ["systemd", "launchd", "schtasks"])
+def test_each_backends_timer_line_parses_in_the_gate(scripts, backend):
+    from moxi.units._schtasks import SchtasksBackend
+
+    args = run.parse(_gate_words(backend, _spec("timer")))
+    log = str(SchtasksBackend.log_path("demo", "snap")) if backend == "schtasks" else None
+    assert (args.switch, args.module, args.name, args.argv, args.log) == (
+        ("demo", "rows.backup"), "demo", "snap", ODD, log)
+    assert (args.restart, args.runtime, args.stop, args.condition, args.result) == (
+        False, False, "group", False, False)
+
+
+@pytest.mark.parametrize("stop", ["group", "process"])
+def test_the_task_scheduler_daemon_line_parses_in_the_gate(scripts, stop):
+    from moxi.units._schtasks import SchtasksBackend
+
+    args = run.parse(_gate_words("schtasks", _spec("daemon", stop=stop)))
+    assert (args.switch, args.module, args.name, args.argv) == (None, "demo", "relay", ODD)
+    assert (args.log, args.restart, args.runtime, args.stop) == (
+        str(SchtasksBackend.log_path("demo", "relay")), True, True, stop)
+
+
+def test_the_runtime_file_the_gate_writes_reads_live_in_the_task_scheduler_backend(
+        scripts, tmp_path):
+    from moxi.units._schtasks import SchtasksBackend
+
+    backend = SchtasksBackend(user="PC\\ana")
+    task = backend.task("demo", "relay")
+    pid_file, stop_file = tmp_path / "pid", tmp_path / "stop"
+    child = (f"import os, pathlib, time; pathlib.Path({str(pid_file)!r})"
+             f".write_text(str(os.getpid())); p = pathlib.Path({str(stop_file)!r}); "
+             "[time.sleep(0.05) for _ in range(600) if not p.exists()]")
+    words = _gate_words("schtasks", _spec("daemon", command=(PY, "-c", child)))
+    runtime = backend.runtime_file("demo", "relay")
+    proc = subprocess.Popen([PY, "-m", "moxi", "run", *words])
+    try:
+        for _ in range(400):
+            if pid_file.exists() and pid_file.read_text() and runtime.exists():
+                break
+            time.sleep(0.025)
+        assert backend.running([task], None) == frozenset({task})
+        assert backend._runtime("demo", "relay")[0] == int(pid_file.read_text())
+        stop_file.write_text("")
+        assert proc.wait(timeout=30) == 0
+    finally:
+        stop_file.write_text("")
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    assert not runtime.exists()
+    assert backend.running([task], None) == frozenset()
+
+
 # -- the core's stores, and the import cost ----------------------------------------------
 
 def test_the_core_store_names_agree():
