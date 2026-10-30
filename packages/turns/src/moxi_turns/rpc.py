@@ -28,20 +28,15 @@ from typing import TYPE_CHECKING, Any
 
 from moxi import ipc
 
-from .results import (CAPABILITIES, COMMANDS, ERROR_CAPABILITY, ERROR_GONE,
-                      ERROR_STOP_HANDLER_TAKEN, REFUSED_GONE, Refused, check_ref)
+from .results import (CAPABILITIES, COMMAND_WAIT_S, COMMANDS, ERROR_CAPABILITY,
+                      ERROR_GONE, ERROR_STOP_HANDLER_TAKEN, REFUSED_GONE,
+                      STOP_SHELLS_WAIT_S, Refused, check_ref)
 
 if TYPE_CHECKING:
     from .endpoint import Endpoint
 
 METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
-
-#: How long a `command` call waits for its settle when the caller gives no `timeout_ms`,
-#: in seconds: a compaction often outlasts 30 s.
-COMMAND_WAIT_S = {"clear": 30.0, "exit": 30.0, "compact": 330.0}
-#: What `stop_shells` adds to that wait, in seconds.
-STOP_SHELLS_WAIT_S = 10.0
 
 
 def gone(reason: str | None) -> ipc.RpcError:

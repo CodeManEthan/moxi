@@ -14,7 +14,9 @@ import pytest
 import fake_opencode
 from fake_opencode import DROP_ADMITTED, DROP_UNADMITTED, FakeOpenCode
 from moxi_turns import opencode
+from moxi_turns.client import TurnsError
 from moxi_turns.results import Ended, Lost, Refused, Started, TurnEnded
+from conftest import bare, opener
 
 
 def until(pred, timeout=5.0):
@@ -172,30 +174,32 @@ def test_no_instructions_lays_the_options_alone(host):
 def test_the_host_is_an_endpoint_that_can_only_start(host):
     s, h, world = host()
     assert s.harness == "opencode"
-    assert s.can == frozenset({"start"})
+    assert s.capabilities == frozenset({"deliver", "only-if-idle"})
     assert s.session_id == h.session_id and h.session_id.startswith("ses_")
-    assert s.steer("x").wait_started(5) == Refused("unsupported")
-    assert s.command("clear").reason == "unsupported"
+    for call in (lambda: s.steer("x"), lambda: s.command("clear")):
+        with pytest.raises(TurnsError) as caught:
+            call()
+        assert caught.value.code == 1002
 
 
 def test_a_start_posts_under_a_minted_id_and_the_reply_ties_it(host):
     s, h, world = host()
-    d = s.start("hello")
+    d = s.deliver("hello", only_if_idle=True)
     started = d.wait_started(5)
     assert isinstance(started, Started)
     [post] = world.posts()
     assert post["parts"] == [{"type": "text", "text": "hello"}]
     assert post["messageID"].startswith("msg_")
     assert started.turn_id == post["messageID"]
-    assert d.wait_ended(5) == Ended(post["messageID"], "answer")
-    assert s.facts().epoch == 1 and not s.facts().turn_open
+    assert bare(d.wait_ended(5)) == Ended(post["messageID"], "answer")
+    assert s.facts().turn_number == 1 and not s.facts().turn_open
 
 
 def test_a_deliver_during_a_turn_goes_in_at_its_end_and_two_are_two_turns(host):
     s, h, world = host(auto=False)
     world.fake.type(h.session_id)
     assert until(lambda: s.facts().turn_open)
-    a, b = s.deliver("one"), s.deliver("two", steer=True)
+    a, b = s.deliver("one"), s.deliver("two")
     time.sleep(0.2)
     assert world.posts() == []
     world.fake.finish(h.session_id)
@@ -211,7 +215,7 @@ def test_a_start_meets_a_busy_status_at_the_post_and_refuses(host):
     s, h, world = host()
     busy = (200, json.dumps({h.session_id: {"type": "busy"}}))
     world.fake.status_answers += [busy, busy]    # the start's live facts, then the post
-    assert s.start("x").wait_started(5) == Refused("busy-turn")
+    assert bare(s.deliver("x", only_if_idle=True).wait_started(5)) == Refused("busy-turn")
     assert world.posts() == []
 
 
@@ -228,7 +232,7 @@ def test_the_persons_turn_is_reported_with_no_delivery(host):
     events = watching(s)
     world.fake.type(h.session_id)
     started = events.get(timeout=5)
-    assert started.delivery_id is None
+    assert opener(started) is None
     world.fake.finish(h.session_id)
     ended = events.get(timeout=5)
     assert (ended.turn_id, ended.outcome) == (started.turn_id, "answer")
@@ -237,7 +241,7 @@ def test_the_persons_turn_is_reported_with_no_delivery(host):
 @pytest.mark.parametrize("end,outcome", [("abort", "aborted"), ("error", "error")])
 def test_esc_and_an_error_are_outcomes(host, end, outcome):
     s, h, world = host(auto=False)
-    d = s.start("x")
+    d = s.deliver("x", only_if_idle=True)
     assert isinstance(d.wait_started(5), Started)
     getattr(world.fake, end)(h.session_id)
     assert d.wait_ended(5).outcome == outcome
@@ -248,7 +252,7 @@ def test_esc_and_an_error_are_outcomes(host, end, outcome):
     ("other", "answer"), ("stop", "answer")])
 def test_a_reply_with_no_error_reads_its_finish(host, finish, outcome):
     s, h, world = host(auto=False)
-    d = s.start("x")
+    d = s.deliver("x", only_if_idle=True)
     assert isinstance(d.wait_started(5), Started)
     world.fake.finish(h.session_id, finish=finish)
     assert d.wait_ended(5).outcome == outcome
@@ -256,20 +260,20 @@ def test_a_reply_with_no_error_reads_its_finish(host, finish, outcome):
 
 def test_a_finished_replys_late_update_opens_no_turn(host):
     s, h, world = host()
-    assert s.start("x").wait_ended(5).outcome == "answer"
+    assert s.deliver("x", only_if_idle=True).wait_ended(5).outcome == "answer"
     msgs = world.fake.control("sessions", {})["sessions"][h.session_id]["messages"]
     reply = next(m for m in msgs if m["role"] == "assistant")
     h.on_event({"type": "message.updated",
                 "properties": {"sessionID": h.session_id, "info": reply}})
     assert not s.facts().turn_open
-    assert s.start("y").wait_ended(5).outcome == "answer"
+    assert s.deliver("y", only_if_idle=True).wait_ended(5).outcome == "answer"
 
 
 def test_a_user_message_sent_again_in_its_turn_gives_no_later_turn_its_id(host):
     # The live server sends a turn's user message again mid-turn (a `summary` update).
     s, h, world = host(auto=False)
     events = watching(s)
-    d = s.start("x")
+    d = s.deliver("x", only_if_idle=True)
     first = d.wait_started(5)
     assert isinstance(first, Started)
     msgs = world.fake.control("sessions", {})["sessions"][h.session_id]["messages"]
@@ -277,14 +281,14 @@ def test_a_user_message_sent_again_in_its_turn_gives_no_later_turn_its_id(host):
     h.on_event({"type": "message.updated",
                 "properties": {"sessionID": h.session_id, "info": dict(user, summary={})}})
     world.fake.finish(h.session_id)
-    assert d.wait_ended(5) == Ended(first.turn_id, "answer")
+    assert bare(d.wait_ended(5)) == Ended(first.turn_id, "answer")
     while not isinstance(events.get(timeout=5), TurnEnded):
         pass
     # A loop that opens with no new user message seen (a cut stream, say).
     h.on_event({"type": "session.status",
                 "properties": {"sessionID": h.session_id, "status": {"type": "busy"}}})
     started = events.get(timeout=5)
-    assert started.delivery_id is None and started.turn_id != first.turn_id
+    assert opener(started) is None and started.turn_id != first.turn_id
 
 
 def test_a_user_message_the_reconcile_found_sent_again_gives_no_later_turn_its_id(host):
@@ -294,7 +298,7 @@ def test_a_user_message_the_reconcile_found_sent_again_gives_no_later_turn_its_i
     events = watching(s)
     with world.fake.lock:
         world.fake.stalled = True
-    d = s.start("x")
+    d = s.deliver("x", only_if_idle=True)
     assert until(lambda: len(world.posts()) == 1)
     mid = world.posts()[0]["messageID"]
     with world.fake.lock:
@@ -307,13 +311,13 @@ def test_a_user_message_the_reconcile_found_sent_again_gives_no_later_turn_its_i
     h.on_event({"type": "message.updated",
                 "properties": {"sessionID": h.session_id, "info": dict(user, summary={})}})
     world.fake.finish(h.session_id)
-    assert d.wait_ended(5) == Ended(first.turn_id, "answer")
+    assert bare(d.wait_ended(5)) == Ended(first.turn_id, "answer")
     while not isinstance(events.get(timeout=5), TurnEnded):
         pass
     h.on_event({"type": "session.status",
                 "properties": {"sessionID": h.session_id, "status": {"type": "busy"}}})
     started = events.get(timeout=5)
-    assert started.delivery_id is None and started.turn_id != mid
+    assert opener(started) is None and started.turn_id != mid
 
 
 def test_a_compaction_is_ready_compact(host):
@@ -352,7 +356,8 @@ def test_running_child_sessions_are_subagents(host):
     assert s.facts().agents == 0 and s.facts().draft is False
     world.fake.set_status(child, "busy")
     assert s.facts().agents == 1
-    assert s.start("x", refuse_agents=True).wait_started(5) == Refused("busy-agents")
+    d = s.deliver("x", only_if_idle=True, refuse_agents=True)
+    assert bare(d.wait_started(5)) == Refused("busy-agents")
 
 
 # -- posts that fail -----------------------------------------------------------------------
@@ -369,7 +374,10 @@ def test_a_5xx_post_is_tried_again(host, monkeypatch):
 def test_a_4xx_post_refuses_gone_and_ends_the_endpoint(host):
     s, h, world = host()
     world.fake.post_answers.append((400, {"name": "BadRequest"}))
-    assert s.start("x").wait_started(5) == Refused("gone")
+    # The endpoint ends with the delivery: its own word if it answers first, else the
+    # wait finds nothing serving.
+    got = bare(s.deliver("x", only_if_idle=True).wait_started(5))
+    assert got in (Refused("gone"), Lost("gone"), Lost("unanswered"))
     assert until(lambda: h.endpoint.is_gone)
     assert "400" in h.endpoint._gone
 
@@ -377,7 +385,7 @@ def test_a_4xx_post_refuses_gone_and_ends_the_endpoint(host):
 def test_an_unanswered_post_that_was_admitted_settles_once(host):
     s, h, world = host()
     world.fake.post_answers.append(DROP_ADMITTED)
-    d = s.start("x")
+    d = s.deliver("x", only_if_idle=True)
     assert d.wait_ended(5).outcome == "answer"
     assert len(world.posts()) == 1
 
@@ -401,7 +409,7 @@ def test_an_idle_with_no_reply_to_the_post_releases_the_turn_and_reads_lost(host
     lost = d.wait_started(5)
     assert isinstance(lost, Lost) and lost.reason.startswith("untied")
     started, ended = events.get(timeout=5), events.get(timeout=5)
-    assert started.delivery_id is None and ended.outcome == "error"
+    assert opener(started) is None and ended.outcome == "error"
     assert not s.facts().turn_open
 
 
@@ -409,16 +417,16 @@ def test_an_idle_with_no_reply_to_the_post_releases_the_turn_and_reads_lost(host
 
 def test_a_dead_server_ends_its_turn_error_and_comes_back_on_the_same_session(host):
     s, h, world = host(auto=False)
-    d = s.start("x")
+    d = s.deliver("x", only_if_idle=True)
     assert isinstance(d.wait_started(5), Started)
     sid = h.session_id
     world.servers[-1].kill()
-    assert d.wait_ended(5) == Ended(d.wait_started(1).turn_id, "error")
+    assert bare(d.wait_ended(5)) == Ended(d.wait_started(1).turn_id, "error")
     assert until(lambda: len(world.servers) == 2 and h._ready)
     assert h.session_id == sid
     world.auto = True
     world.fake.auto = True
-    assert s.start("again").wait_ended(5).outcome == "answer"
+    assert s.deliver("again", only_if_idle=True).wait_ended(5).outcome == "answer"
 
 
 def test_a_post_a_dead_server_took_unseen_goes_in_again_on_the_new_server(host):
@@ -436,7 +444,7 @@ def test_a_post_a_dead_server_took_unseen_goes_in_again_on_the_new_server(host):
 
 def test_a_cut_stream_is_reopened_and_a_turn_that_ended_meanwhile_is_reported(host):
     s, h, world = host(auto=False)
-    d = s.start("x")
+    d = s.deliver("x", only_if_idle=True)
     assert isinstance(d.wait_started(5), Started)
     with world.fake.lock:
         world.fake.stalled = True
@@ -458,13 +466,14 @@ def test_a_session_gone_from_the_server_ends_the_endpoint(host):
 
 def test_a_dead_hosts_directory_is_swept_with_its_instructions(turns_env):
     import moxi_turns
-    from moxi_turns import client
-    root = client.runtime_dir()
+    from moxi_turns import client, protocol
+    root = protocol.v2_root(client.runtime_dir())
     root.mkdir(parents=True, exist_ok=True)
     dead = root / "opencode-dead"
     dead.mkdir()
-    (dead / "hello.json").write_text(json.dumps({"harness": "opencode", "pid": os.getpid(),
-                                                 "session_id": "s-1", "started": 9e12}))
+    (dead / "hello.json").write_text(json.dumps({
+        "address": protocol.address("opencode-dead"), "protocol": 2, "harness": "opencode",
+        "pid": os.getpid(), "session_id": "s-1", "started": 9e12}))
     (dead / opencode.INSTRUCTIONS_FILE).write_text("layer one")
     assert moxi_turns.sessions() == []
     assert not dead.exists()
@@ -487,7 +496,7 @@ def test_launch_spawns_opencode_serve_from_path_and_stops_it(turns_env, tmp_path
         assert serve["password"] and serve["cwd"] == str(tmp_path.resolve())
         assert serve["config"]["model"] == "p/m"
         assert open(serve["config"]["instructions"][0]).read() == "be brief"
-        assert s.start("hi").wait_ended(10).outcome == "answer"
+        assert s.deliver("hi", only_if_idle=True).wait_ended(10).outcome == "answer"
     finally:
         with opencode._HOSTS_LOCK:
             endpoint, harness = opencode._HOSTS.pop()

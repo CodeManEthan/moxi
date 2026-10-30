@@ -14,8 +14,8 @@ from fake_harness import FakeHarness
 
 def _watch(s):
     events: queue.Queue = queue.Queue()
-    threading.Thread(target=lambda: [events.put(e) for e in s.watch()], daemon=True).start()
-    time.sleep(0.1)
+    w = s.watch()                       # subscribed once it returns
+    threading.Thread(target=lambda: [events.put(e) for e in w], daemon=True).start()
     return events
 
 
@@ -35,15 +35,16 @@ def test_the_ledger_opens_a_held_turn_at_once_and_the_tie_raises_its_events(make
     d = s.deliver("x")
     ep.turn_started("T", held=True)
     f = s.facts()
-    assert f.turn_open and f.epoch == 1
-    assert s.start("y").wait_started(1) == turns.Refused("busy-turn")
+    assert f.turn_open and f.turn_number == 1 and f.turn is None    # held: not yet tied
+    assert s.deliver("y", only_if_idle=True).wait_started(1).reason == "busy-turn"
     ep.turn_ended("T", "answer")
     assert not s.facts().turn_open
     assert _drain(events) == []
     assert ep.turn_tied("T", d.id) is True
-    assert d.wait_ended(1) == turns.Ended("T", "answer")
-    assert [(type(e).__name__, e.delivery_id) for e in _drain(events)] == [
-        ("TurnStarted", d.id), ("TurnEnded", d.id)]
+    assert d.wait_ended(1) == turns.Ended("T", "answer", d.id)
+    assert [(type(e).__name__, e.deliveries) for e in _drain(events)] == [
+        ("TurnStarted", (turns.DeliveryRef(d.id, None, "opened"),)),
+        ("TurnEnded", (turns.DeliveryRef(d.id, None, "opened"),))]
 
 
 def test_a_released_turn_is_the_person_and_the_delivery_waits_on(make_endpoint):
@@ -53,8 +54,8 @@ def test_a_released_turn_is_the_person_and_the_delivery_waits_on(make_endpoint):
     d = s.deliver("x")
     ep.turn_started("P", held=True)
     ep.turn_released("P")
-    assert [(type(e).__name__, e.delivery_id) for e in _drain(events)] == [
-        ("TurnStarted", None)]
+    assert [(type(e).__name__, e.deliveries) for e in _drain(events)] == [
+        ("TurnStarted", ())]
     ep.lost(d.id, "untied: test")
     result = d.wait_started(1)
     assert isinstance(result, turns.Lost) and result.untied
@@ -63,11 +64,11 @@ def test_a_released_turn_is_the_person_and_the_delivery_waits_on(make_endpoint):
 def test_a_tie_to_a_delivery_no_longer_waiting_releases_the_turn(make_endpoint):
     ep, fake = make_endpoint(FakeHarness(auto=False))
     s = turns.find(session_id="s-1")
-    d = s.start("x")
+    d = s.deliver("x", only_if_idle=True)
     ep.refused(d.id, "stale-turn")
     ep.turn_started("T", held=True)
     assert ep.turn_tied("T", d.id) is False
-    assert d.wait_ended(1) == turns.Refused("stale-turn")
+    assert d.wait_ended(1) == turns.Refused("stale-turn", d.id)
 
 
 def test_the_held_slot_frees_only_at_the_decision(make_endpoint):
