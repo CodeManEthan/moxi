@@ -16,6 +16,10 @@ Issues = "https://github.com/moxihq/moxi/issues"
 [project.entry-points."moxi.modules"]
 repo = "moxi_repo.module"
 
+# repo's own git hook piece, declared the way any module declares one.
+[project.entry-points."moxi.repo.git_hooks"]
+"repo.commit-rules" = "moxi_repo.commit_rules:COMMIT_RULES"
+
 [dependency-groups]
 dev = ["pytest", "moxi-dev"]
 

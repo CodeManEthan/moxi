@@ -7,3 +7,16 @@ values = ["auto", "config", "shim"]
 default = "auto"
 doc = "How repo reaches the git hook runner in a repo that pins no mode: auto picks config entries on git 2.54 and later and shims below; config or shim picks that one. A repo's own pin (git-hooks add --mode) wins."
 read = "use"
+
+[commit_rules.everywhere]
+type = "bool"
+default = false
+doc = "Make git-hooks add and refresh register the commit-rules piece in every repo they touch that lacks it; disable it in a repo to keep it off there."
+read = "use"
+
+[commit_rules.tag_patterns]
+type = "list"
+items = "str"
+default = []
+doc = "Regular expressions copied into a repo as the commit-rules piece's tag-pattern setting when the piece is first registered there and no tag-pattern is given; later changes reach no repo that already has the piece."
+read = "use"

@@ -15,6 +15,8 @@ INTERNAL_ENV = {
                            "knows which spec is committing",
 }
 SETTINGS = "settings.toml"
+# The schema can't tell a regular expression that won't compile; this loader can.
+CONFIG_CHECK = "moxi_repo.settings:check_text"
 SETUP = None
 SEGMENT = None
 STORES = {
