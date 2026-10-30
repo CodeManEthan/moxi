@@ -1,7 +1,6 @@
 """The announcement's optional names, the load fast path, and the light helpers of
 `moxi.modules`: `available`, `session_env`, `extensions` and `Refused`."""
 
-import dataclasses
 import subprocess
 import sys
 from pathlib import Path
@@ -66,7 +65,7 @@ def test_known_holds_every_name_once_in_order():
         "INTERNAL_ENV", "SETTINGS", "SETUP", "SEGMENT"]
     assert len(modules.KNOWN) == 25
     assert isinstance(modules.KNOWN, MappingProxyType)
-    found_fields = {f.name for f in dataclasses.fields(modules.Found)}
+    found_fields = set(modules.Found._fields)
     for name in modules.KNOWN:
         assert ("api_name" if name == "API" else name.lower()) in found_fields
 
@@ -130,7 +129,7 @@ def test_tables_are_read_only_all_the_way_down(site):
         found.daemons["relay"]["command"] = "other"
     with pytest.raises(TypeError):
         found.components["panel"]["title"] = "x"
-    with pytest.raises(dataclasses.FrozenInstanceError):
+    with pytest.raises(AttributeError):
         found.page = "x"
 
 
@@ -348,10 +347,10 @@ def test_load_reads_only_the_module_s_own_distribution(site, monkeypatch):
     site.module("alpha")
 
     def no_scan(*args, **kwargs):
-        raise AssertionError("load scanned every distribution")
+        raise AssertionError("load went through importlib.metadata")
 
-    monkeypatch.setattr(importlib.metadata, "entry_points", no_scan)
-    monkeypatch.setattr(importlib.metadata, "distributions", no_scan)
+    for name in ("entry_points", "distributions", "distribution"):
+        monkeypatch.setattr(importlib.metadata, name, no_scan)
     assert modules.load("alpha").state == PRESENT
     assert modules.load("beta").state == ABSENT
 

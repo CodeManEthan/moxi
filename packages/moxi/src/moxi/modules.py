@@ -44,12 +44,16 @@ A "target" is "package.module:function". An inner key of a `DAEMONS`, `TIMERS` o
 `STORES` entry that this moxi does not know makes the module broken: a new inner key comes
 with a raised `ANNOUNCES`, so a typo is never read as "not set".
 
-`installed`, `present` and `scan` read every distribution's entry-point metadata. `load`
-reads only the distribution `moxi-<name>`, imports the announcement and the `API` module,
-and returns a frozen `Found` whose state is `present`, `absent` or `broken`; it never
-raises. `scan` is the full scan, which also finds two distributions claiming one name and
-a module declared by a distribution not named `moxi-<name>`; `moxi modules`, the doctor
-and the installer use it. A feature that needs an optional module asks `available` (a
+`installed`, `present` and `scan` read every distribution's entry-point metadata through
+`importlib.metadata`. `load` reads only the distribution `moxi-<name>`, imports the
+announcement and the `API` module, and returns a frozen `Found` whose state is `present`,
+`absent` or `broken`; it never raises. It reads that distribution's `.dist-info` directory
+straight off the `sys.path` directories, and finds there what
+`importlib.metadata.distribution("moxi-<name>")` would; a distribution installed any other
+way (an `.egg-info`, a zip, a custom finder) is `absent` to it. `scan` is the full scan,
+which also finds two distributions claiming one name, a module declared by a distribution
+not named `moxi-<name>`, and one `load` cannot see; `moxi modules`, the doctor and the
+installer use it. A feature that needs an optional module asks `available` (a
 cheap import check) or `load` where it needs it, and is off when the answer is not
 `present`.
 
@@ -57,15 +61,20 @@ cheap import check) or `load` where it needs it, and is off when the answer is n
 named `moxi.<module>` or `moxi.<module>.<part>`. `session_env()` collects every present
 module's `SESSION_ENV`. A `TEARDOWN` raises `Refused` to stop an uninstall.
 
-This module imports nothing heavy at module level, so a hook may import it.
+A hook may import this module and call `available` and `load`: neither they nor the
+import load `importlib.metadata`, `dataclasses`, `inspect`, `typing`, `zipfile` or `json`
+(beyond what the announcement's own package imports). So the record types are plain
+frozen classes, not dataclasses, and `importlib.metadata` is imported only inside the
+functions off that path.
 """
 
 from __future__ import annotations
 
+import os
 import re
+import sys
 import threading
 from collections.abc import Mapping
-from dataclasses import dataclass, field
 from types import MappingProxyType, ModuleType
 
 from . import names
@@ -145,9 +154,87 @@ _STORE_KINDS = ("sqlite", "jsonl", "file", "dir")
 _BUDGET_KEYS = ("idle_cpu", "rss", "fds", "hook_ms")
 
 
-@dataclass(frozen=True)
-class Entry:
+class _Frozen:
+    """A record whose fields are set once, at construction.
+
+    It gives what a frozen dataclass gives (the same attributes, keyword or positional
+    construction with defaults, equality, hash and repr; setting or deleting a field
+    raises) without importing `dataclasses`, which a hook should not pay for. Each subclass
+    names its fields once, as `__slots__` and `_fields`, gives defaults in `_defaults`, and
+    names in `_hidden` the fields left out of equality, hash and repr. `_replace` returns a
+    copy with some fields changed.
+    """
+
+    __slots__ = ()
+    _fields: tuple[str, ...] = ()
+    _defaults: Mapping[str, object] = _EMPTY
+    _hidden: frozenset[str] = frozenset()
+
+    def __init__(self, *args, **kwargs):
+        cls = type(self)
+        if len(args) > len(cls._fields):
+            raise TypeError(f"{cls.__name__}() takes {len(cls._fields)} positional "
+                            f"arguments but {len(args)} were given")
+        values = dict(zip(cls._fields, args))
+        for key, value in kwargs.items():
+            if key not in cls._fields:
+                raise TypeError(f"{cls.__name__}() got an unexpected keyword argument "
+                                f"{key!r}")
+            if key in values:
+                raise TypeError(f"{cls.__name__}() got multiple values for argument "
+                                f"{key!r}")
+            values[key] = value
+        for name in cls._fields:
+            if name in values:
+                value = values[name]
+            elif name in cls._defaults:
+                value = cls._defaults[name]
+            else:
+                raise TypeError(f"{cls.__name__}() missing required argument: {name!r}")
+            object.__setattr__(self, name, value)
+
+    def __setattr__(self, name, value):
+        raise AttributeError(f"cannot assign to field {name!r}")
+
+    def __delattr__(self, name):
+        raise AttributeError(f"cannot delete field {name!r}")
+
+    def _compared(self) -> tuple:
+        return tuple(getattr(self, name) for name in self._fields
+                     if name not in self._hidden)
+
+    def __eq__(self, other):
+        if other.__class__ is not self.__class__:
+            return NotImplemented
+        return self._compared() == other._compared()
+
+    def __hash__(self):
+        return hash(self._compared())
+
+    def __repr__(self):
+        inner = ", ".join(f"{name}={getattr(self, name)!r}" for name in self._fields
+                          if name not in self._hidden)
+        return f"{type(self).__qualname__}({inner})"
+
+    def __reduce__(self):
+        return (type(self), tuple(getattr(self, name) for name in self._fields))
+
+    def _replace(self, **changes):
+        """A copy with the fields in `changes` replaced."""
+        values = {name: getattr(self, name) for name in self._fields}
+        for key in changes:
+            if key not in values:
+                raise TypeError(f"{type(self).__name__} has no field {key!r}")
+        values.update(changes)
+        return type(self)(**values)
+
+    __replace__ = _replace
+
+
+class Entry(_Frozen):
     """One `moxi.modules` entry point, as the environment's metadata declares it."""
+
+    __slots__ = _fields = ("name", "distribution", "version", "target")
 
     name: str
     distribution: str
@@ -155,50 +242,63 @@ class Entry:
     target: str
 
 
-@dataclass(frozen=True)
-class Found:
+class Found(_Frozen):
     """What `load` found for one module name.
 
     Every announcement name is a field (`API` is `api_name`); a name the announcement
     leaves out holds its default. Tables are read-only mappings and lists are tuples.
+    `api`, the imported `API` module, is left out of equality and repr.
     """
+
+    __slots__ = _fields = (
+        "name", "state", "reason", "distribution", "version", "target", "package",
+        "announces", "interfaces", "api_name", "api", "cli", "summary", "optional", "gated",
+        "internal_env", "settings", "setup", "segment", "daemons", "timers", "units_from",
+        "health", "doctor", "stores", "budgets", "skills", "page", "components",
+        "reserved_names", "teardown", "session_env", "questions")
+    _defaults = MappingProxyType({
+        "reason": "", "distribution": None, "version": None, "target": None,
+        "package": None, "api": None,
+        **{_FIELD[name]: default for name, default in KNOWN.items()},
+    })
+    _hidden = frozenset({"api"})
 
     name: str
     state: str
-    reason: str = ""
-    distribution: str | None = None
-    version: str | None = None
-    target: str | None = None
+    reason: str
+    distribution: str | None
+    version: str | None
+    target: str | None
     #: The package the announcement lives in; `SETTINGS` and `SKILLS` name resources in it.
-    package: str | None = None
-    announces: int = 1
-    interfaces: frozenset[int] = frozenset()
-    api_name: str | None = None
+    package: str | None
+    announces: int
+    interfaces: frozenset[int]
+    api_name: str | None
     #: The imported `API` module, when the state is `present` and `API` is not None.
-    api: ModuleType | None = field(default=None, repr=False, compare=False)
-    cli: str | None = None
-    summary: str = ""
-    optional: Mapping[str, str] = _EMPTY
-    gated: Mapping[str, str] = _EMPTY
-    internal_env: Mapping[str, str] = _EMPTY
-    settings: str | None = None
-    setup: str | None = None
-    segment: str | None = None
-    daemons: Mapping[str, Mapping] = _EMPTY
-    timers: Mapping[str, Mapping] = _EMPTY
-    units_from: str | None = None
-    health: Mapping[str, str] = _EMPTY
-    doctor: str | None = None
-    stores: Mapping[str, Mapping] = _EMPTY
-    budgets: Mapping[str, object] = _EMPTY
-    skills: str | None = None
+    api: ModuleType | None
+    cli: str | None
+    summary: str
+    optional: Mapping[str, str]
+    gated: Mapping[str, str]
+    internal_env: Mapping[str, str]
+    settings: str | None
+    setup: str | None
+    segment: str | None
+    daemons: Mapping[str, Mapping]
+    timers: Mapping[str, Mapping]
+    units_from: str | None
+    health: Mapping[str, str]
+    doctor: str | None
+    stores: Mapping[str, Mapping]
+    budgets: Mapping[str, object]
+    skills: str | None
     #: The raw `"package.module:NAME"`; never imported here.
-    page: str | None = None
-    components: Mapping[str, Mapping] = _EMPTY
-    reserved_names: tuple[str, ...] = ()
-    teardown: str | None = None
-    session_env: Mapping[str, str] = _EMPTY
-    questions: Mapping[str, str] = _EMPTY
+    page: str | None
+    components: Mapping[str, Mapping]
+    reserved_names: tuple[str, ...]
+    teardown: str | None
+    session_env: Mapping[str, str]
+    questions: Mapping[str, str]
 
     @property
     def ok(self) -> bool:
@@ -222,9 +322,10 @@ class ExtensionError(Exception):
         self.reason = reason
 
 
-@dataclass(frozen=True)
-class Extension:
+class Extension(_Frozen):
     """One entry of an extension group: behaviour one module offers another."""
+
+    __slots__ = _fields = ("module", "name", "target", "distribution")
 
     #: The offering module: the entry's name up to its first ".".
     module: str
@@ -308,8 +409,9 @@ def scan() -> list[Found]:
     """Every module this environment declares, by the full scan, sorted by name.
 
     Besides what `load` finds, a name two distributions claim is `broken` naming both,
-    and so is a module declared by a distribution not named `moxi-<name>`, or under a name
-    that is not a module name. Never raises.
+    and so is a module declared by a distribution not named `moxi-<name>`, under a name
+    that is not a module name, or by a distribution `load` cannot see (one not installed as
+    a `.dist-info` directory on a `sys.path` directory). Never raises.
     """
     try:
         from importlib.metadata import entry_points
@@ -341,6 +443,11 @@ def scan() -> list[Found]:
             out.append(Found(state=BROKEN, **where,
                              reason=f"{_dist_label(ep)} declares the Moxi module {name!r}; "
                                     f"its distribution must be {wanted}"))
+            continue
+        if not _seen_by_load(dist):
+            out.append(Found(state=BROKEN, **where,
+                             reason="not installed as a .dist-info directory on a sys.path "
+                                    "directory; reinstall with pip or uv"))
             continue
         out.append(load(name))
     return out
@@ -423,23 +530,18 @@ class _Record:
     def _read(cls, name: str) -> _Record:
         if not names.is_module_name(name):
             return cls(Found(name=name, state=ABSENT, reason=_not_a_name(name)))
-        from importlib.metadata import PackageNotFoundError, distribution
-
         wanted = names.distribution(name)
-        try:
-            dist = distribution(wanted)
-        except PackageNotFoundError:
+        dist = _DistInfo.find(name)
+        if dist is None:
             return cls(Found(name=name, state=ABSENT,
                              reason=f"no distribution in this environment declares the "
                                     f"Moxi module {name!r} ({wanted} is not installed)"))
-        claims = list(dist.entry_points.select(group=GROUP, name=name))
-        if not claims:
+        value = dist.entry(name)
+        if value is None:
             return cls(Found(name=name, state=ABSENT,
                              reason=f"{wanted} is installed but declares no {GROUP} entry "
                                     f"point named {name!r}"))
-        ep = claims[0]
-        where = dict(name=name, distribution=_dist_name(dist) or None,
-                     version=getattr(dist, "version", None), target=ep.value)
+        where = dict(name=name, distribution=dist.name, version=dist.version, target=value)
         if name in names.VERBS:
             return cls(Found(state=BROKEN, **where,
                              reason=f"{name!r} is one of the umbrella's own verbs, so "
@@ -449,15 +551,15 @@ class _Record:
             return cls(Found(state=BROKEN, **where,
                              reason=f"{name!r} is a name the core keeps for itself; the "
                                     "module needs another name"))
-        if ":" in ep.value:
+        if ":" in value:
             return cls(Found(state=BROKEN, **where,
-                             reason=f"the entry point {ep.value!r} names an attribute; "
+                             reason=f"the entry point {value!r} names an attribute; "
                                     "it must name the announcement module alone"))
         try:
-            module = ep.load()
+            module = _import_entry(value)
         except Exception as exc:  # noqa: BLE001
             return cls(Found(state=BROKEN, **where,
-                             reason=f"importing its announcement {ep.value} failed: "
+                             reason=f"importing its announcement {value} failed: "
                                     f"{_describe(exc)}"))
         try:
             fields, problems = _check(module.__dict__, name)
@@ -465,11 +567,11 @@ class _Record:
             return cls(Found(state=BROKEN, **where, reason=str(exc)))
         except Exception as exc:  # noqa: BLE001
             return cls(Found(state=BROKEN, **where,
-                             reason=f"reading its announcement {ep.value} failed: "
+                             reason=f"reading its announcement {value} failed: "
                                     f"{_describe(exc)}"))
         if problems:
             return cls(Found(state=BROKEN, **where,
-                             reason=f"its announcement {ep.value} " + "; ".join(problems)))
+                             reason=f"its announcement {value} " + "; ".join(problems)))
         package = module.__name__ if hasattr(module, "__path__") else module.__package__
         return cls(Found(state=PRESENT, **where, package=package or None, **fields),
                    fields["api_name"])
@@ -480,9 +582,10 @@ class _Record:
             return base
         if interface is not None and interface not in base.interfaces:
             offered = ", ".join(map(str, sorted(base.interfaces))) or "none"
-            return _replace(base, state=BROKEN,
-                            reason=f"{base.distribution} {base.version} offers interfaces "
-                                   f"{{{offered}}}; the caller speaks {interface}")
+            return base._replace(state=BROKEN,
+                                 reason=f"{base.distribution} {base.version} offers "
+                                        f"interfaces {{{offered}}}; the caller speaks "
+                                        f"{interface}")
         if self.api_name is None:
             return base
         if not self.api_tried:
@@ -495,8 +598,136 @@ class _Record:
                 self.api_error = (f"importing its API module {self.api_name} failed: "
                                   f"{_describe(exc)}")
         if self.api_error is not None:
-            return _replace(base, state=BROKEN, reason=self.api_error)
-        return _replace(base, api=self.api)
+            return base._replace(state=BROKEN, reason=self.api_error)
+        return base._replace(api=self.api)
+
+
+# --- load's direct read of one distribution -----------------------------------------------
+#
+# `load` reads the `moxi-<name>` distribution's own `.dist-info` directory rather than
+# importing `importlib.metadata`, whose import costs a hook more than the rest of its path.
+# It looks where `importlib.metadata` looks, in the same order, so for a distribution
+# installed as a `.dist-info` directory on a `sys.path` directory it finds the same
+# distribution, version and entry. One installed any other way is absent here, and the full
+# scan reads it broken.
+
+#: A run of "-", "_" and "." in a distribution's name, which name normalization makes one.
+_RUNS = re.compile(r"[-_.]+")
+#: An entry point's value: a module, an optional ":attr" and optional "[extras]".
+_ENTRY = re.compile(r"(?P<module>[\w.]+)\s*(:\s*(?P<attr>[\w.]+)\s*)?"
+                    r"((?P<extras>\[.*\])\s*)?$")
+
+
+class _DistInfo:
+    """One distribution's `.dist-info` directory: its path, name and version."""
+
+    __slots__ = ("path", "name", "version")
+
+    def __init__(self, path: str, name: str, version: str | None):
+        self.path = path
+        self.name = name
+        self.version = version
+
+    @classmethod
+    def find(cls, module: str) -> _DistInfo | None:
+        """The `moxi-<module>` distribution `importlib.metadata.distribution` would find,
+        when it is a `.dist-info` directory on a `sys.path` directory; otherwise None.
+
+        Each `sys.path` entry that is a directory is listed once, in order, `""` as the
+        current directory, and the first metadata directory there whose name, normalized,
+        is the distribution's is the one. The suffix matches in any case. An `.egg-info`
+        found first is None, as is a distribution only a zip or a custom finder holds.
+        """
+        wanted = "moxi_" + module
+        for entry in sys.path:
+            try:
+                root = os.fspath(entry) or "."
+                children = os.listdir(root) if isinstance(root, str) else ()
+            except Exception:  # noqa: BLE001 - not a directory: a zip, or nothing there
+                continue
+            for child in children:
+                low = child.lower()
+                if not low.endswith((".dist-info", ".egg-info")):
+                    continue
+                stem = child[:low.rindex(".")]
+                dist, _, version = stem.partition("-")
+                if _RUNS.sub("_", dist).lower() != wanted:
+                    continue
+                if low.endswith(".egg-info"):
+                    return None
+                return cls._read(os.path.join(root, child), dist, version)
+        return None
+
+    @classmethod
+    def _read(cls, path: str, dist: str, version: str) -> _DistInfo:
+        """Name and version from METADATA, as `importlib.metadata` reads them; the
+        directory's own name gives either one that METADATA lacks."""
+        text = _read_text(path, "METADATA") or _read_text(path, "PKG-INFO") or ""
+        headers: dict[str, str] = {}
+        for line in text.splitlines():
+            if not line:
+                break
+            key, sep, value = line.partition(":")
+            key = key.lower()
+            if sep and key in ("name", "version") and key not in headers:
+                headers[key] = value.lstrip(" \t")
+        return cls(path, headers.get("name") or dist,
+                   headers.get("version") or version or None)
+
+    def entry(self, name: str) -> str | None:
+        """The value of this distribution's `moxi.modules` entry point `name`, or None."""
+        text = _read_text(self.path, "entry_points.txt") or ""
+        section = None
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("[") and line.endswith("]"):
+                section = line.strip("[]")
+                continue
+            key, sep, value = line.partition("=")
+            if section == GROUP and sep and key.strip() == name:
+                return value.strip()
+        return None
+
+
+def _read_text(directory: str, name: str) -> str | None:
+    try:
+        with open(os.path.join(directory, name), encoding="utf-8") as file:
+            return file.read()
+    except OSError:
+        return None
+
+
+def _import_entry(value: str) -> ModuleType:
+    """Import an entry point's module, as `EntryPoint.load` does for one with no attr."""
+    import importlib
+
+    match = _ENTRY.match(value)
+    if match is None:
+        raise ValueError(f"{value!r} is not an entry point's value")
+    return importlib.import_module(match.group("module"))
+
+
+def _seen_by_load(dist) -> bool:
+    """True when `dist`'s metadata is a `.dist-info` directory directly in a `sys.path`
+    directory, so `load`'s direct read sees it: not an `.egg-info`, a zip member, or one
+    a finder supplies with no path."""
+    from pathlib import Path
+
+    # A distribution found on a path keeps its metadata directory here; the class has no
+    # public name for it.
+    path = getattr(dist, "_path", None)
+    if (not isinstance(path, Path) or not path.name.lower().endswith(".dist-info")
+            or not path.is_dir()):
+        return False
+    for entry in sys.path:
+        try:
+            if Path(os.fspath(entry) or ".") == path.parent:
+                return True
+        except TypeError:
+            continue
+    return False
 
 
 # --- the announcement's checks ------------------------------------------------------------
@@ -913,12 +1144,6 @@ def _freeze(value):
 def _not_a_name(name: object) -> str:
     return (f"{name!r} is not a Moxi module name: lower-case ASCII letters and digits "
             "only")
-
-
-def _replace(found: Found, **changes) -> Found:
-    from dataclasses import replace
-
-    return replace(found, **changes)
 
 
 def _normalize(name: str) -> str:

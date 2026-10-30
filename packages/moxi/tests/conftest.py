@@ -90,7 +90,8 @@ def metadata(name: str, version: str, *, requires: tuple[str, ...] = (),
 
 
 def see_only(root: Path, monkeypatch) -> None:
-    """Let `importlib.metadata` find only the distributions under `root`, and `moxi` itself.
+    """Let `importlib.metadata` and `load` find only the distributions under `root`, and
+    `moxi` itself.
 
     A test of discovery or install sees exactly the distributions its site installs. The
     environment may hold real modules and their dependencies (a workspace installs every
@@ -108,6 +109,16 @@ def see_only(root: Path, monkeypatch) -> None:
         return (d for d in discover(**kwargs) if seen(d))
 
     monkeypatch.setattr(Distribution, "discover", classmethod(filtered))
+
+    # `load` reads a distribution's .dist-info directly, without `importlib.metadata`, so
+    # it is held to the same view: what it finds outside `root` reads as not found.
+    find = moxi.modules._DistInfo.find.__func__
+
+    def find_seen(cls, module):
+        dist = find(cls, module)
+        return dist if dist is not None and Path(dist.path).parent == root else None
+
+    monkeypatch.setattr(moxi.modules._DistInfo, "find", classmethod(find_seen))
 
 
 @pytest.fixture
