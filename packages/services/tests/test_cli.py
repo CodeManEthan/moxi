@@ -345,6 +345,29 @@ def test_watch_runs_health_every_30_seconds(fake, no_modules, capsys, monkeypatc
     assert len(ran) == 3  # at 0, 30 and 60 s
 
 
+def test_watch_says_a_modules_declaration_problem_once_and_when_it_changes(
+        fake, capsys, monkeypatch):
+    problems = [("notes", "UNITS_FROM failed: boom")]
+    monkeypatch.setattr(rows, "module_rows", lambda modules=None: ([], list(problems)))
+
+    def between(i):
+        if i == 3:
+            problems[:] = [("notes", "UNITS_FROM failed: bang")]
+        elif i == 4:
+            problems.clear()
+        elif i == 5:
+            problems[:] = [("notes", "UNITS_FROM failed: bang")]
+
+    rounds(monkeypatch, 7, between)
+    code, _, err = run(capsys, "watch")
+    notes = [line for line in err.splitlines() if line.startswith("note:")]
+    assert code == 0
+    assert notes == [
+        "note: UNITS_FROM failed: boom; notes's static daemons and timers are listed",
+        "note: UNITS_FROM failed: bang; notes's static daemons and timers are listed",
+        "note: UNITS_FROM failed: bang; notes's static daemons and timers are listed"]
+
+
 def test_watch_refuses_an_unknown_id_before_reading(fake, no_modules, capsys):
     code, _, err = run(capsys, "watch", "nope")
     assert code == 3 and fake.calls == []

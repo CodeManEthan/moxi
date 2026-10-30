@@ -318,16 +318,23 @@ def _add(args, out) -> int:
 
 # --- the reads --------------------------------------------------------------------------
 
-def _all_rows(project: str | None = None, kind: str | None = None) -> list:
+def _all_rows(project: str | None = None, kind: str | None = None, *,
+              noted: dict[str, str] | None = None) -> list:
     """Every row: the user's rows, then every installed module's daemons and timers.
-    A module whose run-time declarations failed is said on stderr."""
+    A module whose run-time declarations failed is said on stderr. With `noted` (the
+    problems said before, by module, kept up to date here), a problem is said only when
+    it is new or has changed."""
     user = store.read_rows()
     found: list = list(user)
     if project is None:
         modules, problems = rows.module_rows()
         for module, reason in problems:
-            print(f"note: {reason}; {module}'s static daemons and timers are listed",
-                  file=sys.stderr)
+            if noted is None or noted.get(module) != reason:
+                print(f"note: {reason}; {module}'s static daemons and timers are listed",
+                      file=sys.stderr)
+        if noted is not None:
+            noted.clear()
+            noted.update(problems)
         found += modules
     else:
         wanted = project.casefold()
@@ -563,10 +570,11 @@ def _schedule(row: UserRow) -> str | None:
 
 # --- watch ------------------------------------------------------------------------------
 
-def _watch_rows(idents: Sequence[str]) -> tuple[list, list[str]]:
-    """The rows to watch this round, and the ids asked for that are gone."""
+def _watch_rows(idents: Sequence[str], noted: dict[str, str]) -> tuple[list, list[str]]:
+    """The rows to watch this round, and the ids asked for that are gone. A module's
+    problem with its declarations is said once, and again only when it changes."""
     if not idents:
-        return _all_rows(), []
+        return _all_rows(noted=noted), []
     found, gone = [], []
     for ident in idents:
         try:
@@ -586,10 +594,11 @@ def _watch(args, out) -> int:
     seen: dict[str, tuple[str, str]] = {}
     checked: dict[str, tuple[str, str]] = {}
     last_health: float | None = None
+    noted: dict[str, str] = {}
     try:
         while True:
             try:
-                found, gone = _watch_rows(args.ids)
+                found, gone = _watch_rows(args.ids, noted)
                 now = _clock()
                 fresh = last_health is None or now - last_health >= WATCH_HEALTH
                 current = views(found, health=fresh, known_health=None if fresh
