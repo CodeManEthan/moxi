@@ -7,8 +7,12 @@ No line a builder writes is cut from a real record.
 
 * `ClaudeTranscript`: a Claude Code session's transcript, its subagent files with their
   sidecars, and workflow agent files.
+* `CodexRollout`: a Codex rollout, legacy versions and imported threads included, with
+  `write_imports` for the imports file beside the sessions root.
 """
 
 from .claude import ClaudeRequest, ClaudeTranscript, usage
+from .codex import CodexRollout, rate_limits, token_usage, write_imports
 
 __all__ = ["ClaudeTranscript", "ClaudeRequest", "usage"]
+__all__ += ["CodexRollout", "token_usage", "rate_limits", "write_imports"]
