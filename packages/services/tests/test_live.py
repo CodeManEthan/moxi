@@ -279,6 +279,7 @@ def test_services_on_this_systems_user_manager(box):
     # A foreign timer adopted, so wrapped; its key off, a run held off; unwrapped.
     said = box.moxi("services", "add", box.wrap, "--unit", box.timer, "--enable")
     assert "runs are off until" not in said
+    assert "turn them on with" not in said
     shown = box.show(box.wrap)
     assert shown["wrapped"] == {"module": "services", "key": f"adopted.{box.wrap}",
                                 "name": box.wrap}

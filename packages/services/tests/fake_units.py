@@ -243,9 +243,11 @@ class FakeUnits:
         self.wrapped[ref] = Wrapped(module, key, name)
         if self.wrap_fails:
             return Acted(module, ref, "wrap", False, (f"{ref}: daemon-reload failed",))
-        # As the core's: on a success its last line says how the key stands.
+        # As the core's over systemd: the backend's two lines, the second telling the
+        # user to set the key, then the core's own line saying how the key stands.
         return Acted(module, ref, "wrap", True,
-                     (f"{ref}: drop-in written",
+                     (f"{ref}: its runs are behind the switch",
+                      f"turn them on with: moxi config set {module} {key} true",
                       f"{ref} wrapped; its runs are off until: moxi config set {module} "
                       f"{key} true"))
 

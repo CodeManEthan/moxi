@@ -457,10 +457,13 @@ def _set_key(row: UserRow, on: bool, by: str, lines: list[str]) -> bool:
 
 def _wrap(row: UserRow, lines: list[str]) -> bool:
     """Wrap an adopted Linux timer. Every caller sets its key right after, and says how
-    the key now stands, so the core's last line on a success (how the key stood before
-    it was set) is left out."""
-    acted = units.wrap(row.unit, module=MODULE, key=state.key(row.name), name=row.name)
-    lines.extend(acted.lines[:-1] if acted.ok and acted.lines else acted.lines)
+    the key now stands, so on a success the core's lines telling the user to set that
+    key (the backend's and the core's own) are left out."""
+    key = state.key(row.name)
+    acted = units.wrap(row.unit, module=MODULE, key=key, name=row.name)
+    told = f"moxi config set {MODULE} {key} "
+    lines.extend([line for line in acted.lines if told not in line] if acted.ok
+                 else acted.lines)
     return acted.ok
 
 
