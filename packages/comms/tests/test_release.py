@@ -88,7 +88,7 @@ def test_the_public_identity_is_one_everywhere():
 def test_the_package_requires_the_core_and_turns_and_codex_is_an_extra():
     """turns is required: it is the one way into a harness session."""
     project = PYPROJECT["project"]
-    assert project["dependencies"] == ["moxi>=0.1,<0.2", "moxi-turns>=0.1,<0.2"]
+    assert project["dependencies"] == ["moxi>=0.1,<0.2", "moxi-turns>=0.2,<0.3"]
     assert [d.split(">")[0] for d in project["optional-dependencies"]["codex"]] == \
         ["moxi-turns[codex]"]
     dev = PYPROJECT["dependency-groups"]["dev"]

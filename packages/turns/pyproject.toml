@@ -1,6 +1,6 @@
 [project]
 name = "moxi-turns"
-version = "0.1.1"
+version = "0.2.0"
 description = "Drive a coding-agent session's turns: start, hold, steer and read a turn on any harness."
 readme = "README.md"
 requires-python = ">=3.12"

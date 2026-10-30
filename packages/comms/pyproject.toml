@@ -19,12 +19,12 @@ classifiers = [
 ]
 # turns is required: it is the one way into a harness session (a Claude session's
 # delivery, its Stop hold and its context all go through it).
-dependencies = ["moxi>=0.1,<0.2", "moxi-turns>=0.1,<0.2"]
+dependencies = ["moxi>=0.1,<0.2", "moxi-turns>=0.2,<0.3"]
 
 [project.optional-dependencies]
 # `moxi-comms-codex` launches each Codex session through turns' Codex host, whose
 # app-server link needs `websockets`: turns' own `codex` extra, which this one installs.
-codex = ["moxi-turns[codex]>=0.1,<0.2"]
+codex = ["moxi-turns[codex]>=0.2,<0.3"]
 # The cold-send hold reads each agent's prompt cache through the cache module, an
 # optional Moxi module comms reaches only through moxi.modules.load("cache").
 cache = ["moxi-cache>=0.1,<0.2"]

@@ -50,9 +50,11 @@ def fake_claude(tmp_path):
 
 
 def test_the_launch_forks_a_bound_adapter_before_claude_and_it_ends_with_claude(
-        rig, fake_claude):
+        rig, fake_claude, turns_plugins):
+    from conftest import TURNS_PLUGINS_PATCH
     script, out, release = fake_claude
-    code = ("from moxi_comms.adapters import session; raise SystemExit(session.main("
+    code = (TURNS_PLUGINS_PATCH.format(root=str(turns_plugins))
+            + "from moxi_comms.adapters import session; raise SystemExit(session.main("
             f"['--name', {NAME!r}, '--session-id', {SID!r}, '--claude', {str(script)!r}, "
             "'--', '--model', 'haiku']))")
     proc = subprocess.Popen([sys.executable, "-c", code], env=dict(os.environ),
@@ -63,8 +65,11 @@ def test_the_launch_forks_a_bound_adapter_before_claude_and_it_ends_with_claude(
         assert lines[0] == "socket-ready", "the claim socket listened before claude started"
         pid = int(lines[1].split()[1])
         assert pid == proc.pid, "claude keeps the wrapper's pid"
-        assert lines[2] == f"args --session-id {SID} --model haiku -n {NAME}", \
-            "the launch names its id to claude"
+        plugins = (f"--plugin-dir {turns_plugins / 'moxi-turns'} "
+                   f"--plugin-dir {turns_plugins / 'moxi-turns-gate'}")
+        assert lines[2] == f"args --session-id {SID} {plugins} --model haiku -n {NAME}", \
+            "the launch names its id to claude, then turns' plugins, then the passthrough"
+        assert (turns_plugins / "moxi-turns" / "endpoint.json").exists()
         b = binding(rig)
         assert b is not None, "bound before claude started"
         assert b.endpoint is False, "the session has no turns endpoint"
@@ -157,7 +162,19 @@ def dry_run(capsys, *passthrough, own=None) -> tuple[int, str, list[str], str]:
     sid = lines[0].split()[1]
     launch = next(ln for ln in lines if ln.startswith("  launch")).split()[1:]
     assert launch[0] == "claude" and launch[-2:] == ["-n", NAME]
-    return code, sid, launch[1:-2], cap.err
+    return code, sid, without_plugins(launch[1:-2]), cap.err
+
+
+def without_plugins(argv: list[str]) -> list[str]:
+    """`argv` less turns' `--plugin-dir DIR` pairs, which every launch carries."""
+    out, i = [], 0
+    while i < len(argv):
+        if argv[i] == "--plugin-dir":
+            i += 2
+            continue
+        out.append(argv[i])
+        i += 1
+    return out
 
 
 def is_uuid(value: str) -> bool:
@@ -284,6 +301,145 @@ def test_the_adapter_states_the_named_id_from_its_bind():
             shim.stop(remove_claim_file=True)
 
 
+# ------------------------------------------------------------ turns' launch additions
+
+def fake_additions(monkeypatch, *, argv=(), env=None, notes=(), raises=None) -> list:
+    """`moxi_turns.launch_additions` answering these additions (or raising), and the
+    calls it was given."""
+    import moxi_turns
+    calls = []
+
+    def additions(harness, *, cwd, env: dict, session_id=None, commands=()):
+        calls.append({"harness": harness, "cwd": cwd, "env": dict(env),
+                      "session_id": session_id, "commands": tuple(commands)})
+        if raises is not None:
+            raise raises
+        return moxi_turns.LaunchAdditions(harness, tuple(argv), dict(env_out),
+                                          {}, tuple(notes))
+
+    env_out = env or {}
+    monkeypatch.setattr(moxi_turns, "launch_additions", additions)
+    return calls
+
+
+@pytest.fixture
+def launched(monkeypatch, tmp_path):
+    """Run the wrapper to its exec and keep what it would exec: (main, the captures)."""
+    binary = tmp_path / "claude"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    seen = {}
+
+    def launch(s, found, cmd, env, *, prog="moxi-comms-claude", **_):
+        seen.update(session=s, binary=found, cmd=cmd, env=env)
+        return 0
+
+    monkeypatch.setattr(session, "launch", launch)
+
+    def run(*passthrough, own=SID):
+        code = session.main(["--name", NAME, "--session-id", own, "--claude", str(binary),
+                             "--", *passthrough])
+        return code, seen
+    return run
+
+
+def test_the_additions_follow_the_wrappers_flags_and_come_before_the_passthrough(
+        capsys, monkeypatch):
+    calls = fake_additions(monkeypatch, argv=("--plugin-dir", "/p/runner",
+                                              "--plugin-dir", "/p/gate",
+                                              "--allowedTools=Bash(git:*)"))
+    assert session.main(["--name", NAME, "--session-id", SID, "--dry-run", "--",
+                         "--model", "haiku"]) == 0
+    launch = next(ln for ln in capsys.readouterr().out.splitlines()
+                  if ln.startswith("  launch"))
+    # One word per argv item here: no word of this launch holds a space.
+    assert launch.split()[1:] == ["claude", "--session-id", SID,
+                                  "--plugin-dir", "/p/runner", "--plugin-dir", "/p/gate",
+                                  "--allowedTools=Bash(git:*)",
+                                  "--model", "haiku", "-n", NAME]
+    (call,) = calls
+    assert call["harness"] == "claude" and call["session_id"] == SID
+    assert call["cwd"] == os.getcwd() and call["commands"] == ()
+    assert call["env"]["MOXI_COMMS_NAME"] == NAME, "asked with the stamped environment"
+
+
+def test_the_dry_run_prints_the_whole_line_additions_included(capsys, monkeypatch):
+    fake_additions(monkeypatch, argv=("--plugin-dir", "/p/runner", "--plugin-dir", "/p/gate"))
+    assert session.main(["--name", NAME, "--session-id", SID, "--dry-run", "--",
+                         "--model", "haiku"]) == 0
+    out = capsys.readouterr().out
+    assert (f"  launch     claude --session-id {SID} --plugin-dir /p/runner --plugin-dir "
+            f"/p/gate --model haiku -n {NAME}") in out
+
+
+@pytest.mark.parametrize("passthrough,kept", [
+    (["--plugin-dir", "/p/runner"], ["--plugin-dir", "/p/gate", "--allowedTools=Read"]),
+    (["--plugin-dir=/p/gate"], ["--plugin-dir", "/p/runner", "--allowedTools=Read"]),
+    (["--allowedTools", "Read"], ["--plugin-dir", "/p/runner", "--plugin-dir", "/p/gate"]),
+    (["--allowedTools=Read", "--plugin-dir", "/p/runner", "--plugin-dir", "/p/gate"], []),
+    (["--plugin-dir", "/elsewhere"],
+     ["--plugin-dir", "/p/runner", "--plugin-dir", "/p/gate", "--allowedTools=Read"]),
+    (["-p", "--", "--plugin-dir", "/p/runner"],
+     ["--plugin-dir", "/p/runner", "--plugin-dir", "/p/gate", "--allowedTools=Read"]),
+], ids=["pair", "joined", "rule-as-pair", "all-given", "other-dir", "after-claudes-dash"])
+def test_an_addition_the_passthrough_already_gives_is_not_added_again(passthrough, kept):
+    additions = ("--plugin-dir", "/p/runner", "--plugin-dir", "/p/gate",
+                 "--allowedTools=Read")
+    assert session.not_given(additions, passthrough) == kept
+
+
+def test_the_additions_env_is_merged_and_a_launchers_grant_survives_the_scrub(
+        monkeypatch, launched):
+    """`stamped_env` scrubs comms' own variables only: a `MOXI_TURNS_COMMANDS` grant the
+    launcher put in the wrapper's environment reaches the session, and an inherited comms
+    stamp does not."""
+    monkeypatch.setenv("MOXI_TURNS_COMMANDS", "exit,compact")
+    monkeypatch.setenv("MOXI_COMMS_DIRECTORS", "someone-else")
+    calls = fake_additions(monkeypatch, argv=("--plugin-dir", "/p/runner"),
+                           env={"MOXI_TURNS_EXTRA": "1"})
+    code, seen = launched("--model", "haiku")
+    assert code == 0
+    env = seen["env"]
+    assert env["MOXI_TURNS_COMMANDS"] == "exit,compact", "the launcher's grant survives"
+    assert env["MOXI_TURNS_EXTRA"] == "1", "the additions' env is merged"
+    assert env["MOXI_COMMS_NAME"] == NAME and "MOXI_COMMS_DIRECTORS" not in env
+    assert calls[0]["env"]["MOXI_TURNS_COMMANDS"] == "exit,compact"
+    assert seen["cmd"][1:] == ["--session-id", SID, "--plugin-dir", "/p/runner",
+                               "--model", "haiku", "-n", NAME]
+
+
+def test_the_additions_env_goes_over_the_launchers(monkeypatch, launched):
+    monkeypatch.setenv("MOXI_TURNS_COMMANDS", "exit")
+    fake_additions(monkeypatch, env={"MOXI_TURNS_COMMANDS": "clear"})
+    code, seen = launched()
+    assert code == 0 and seen["env"]["MOXI_TURNS_COMMANDS"] == "clear"
+
+
+@pytest.mark.parametrize("error", ["turns", "value"])
+def test_additions_turns_cannot_give_refuse_the_launch_before_anything_starts(
+        capsys, monkeypatch, launched, error):
+    import moxi_turns
+    from moxi import exit as moxi_exit
+    raised = (moxi_turns.TurnsError("the Claude plugin cannot be set up: no folder")
+              if error == "turns" else ValueError("harness 'claude' is not one of x"))
+    fake_additions(monkeypatch, raises=raised)
+    code, seen = launched()
+    assert code == moxi_exit.ERROR
+    err = capsys.readouterr().err
+    assert err.startswith("moxi-comms-claude: turns cannot give this launch its additions, "
+                          "so claude was not started: ") and str(raised) in err, err
+    assert "Traceback" not in err
+    assert seen == {}, "nothing was launched"
+    assert not (session.sessions_dir() / SID).exists(), "no session directory was made"
+
+
+def test_the_additions_notes_are_said_on_stderr(capsys, monkeypatch):
+    fake_additions(monkeypatch, notes=("additions of tools skipped: it raised boom",))
+    code, _, _, err = dry_run(capsys, own=SID)
+    assert code == 0
+    assert "moxi-comms-claude: additions of tools skipped: it raised boom" in err
+
+
 # --------------------------------------------------------------------------- the daemon
 
 def test_the_session_query_and_the_roster_carry_the_endpoint_state(rig):
@@ -310,7 +466,9 @@ def test_the_session_query_and_the_roster_carry_the_endpoint_state(rig):
     assert unbound["endpoint"] is None and unbound["endpoint_for"] is None
 
 
-def test_the_doctor_names_a_bound_session_with_no_endpoint_and_turns_rows(rig):
+def test_the_doctor_names_a_bound_session_with_no_endpoint_and_leaves_turns_rows(rig):
+    """comms' doctor keeps its own row for a bound session with no endpoint; turns'
+    rows are turns' declared checks, which the front door's doctor runs."""
     from moxi_comms.adapters.claude_adapter import ClaudeAdapter
     shim = rig.shim(name="reviewer", scope="proj-a", start=False)
     a = ClaudeAdapter(shim, 1, look_interval=60).start(tolerate_offline=False)
@@ -323,9 +481,7 @@ def test_the_doctor_names_a_bound_session_with_no_endpoint_and_turns_rows(rig):
     waiting = [ln for ln in out.splitlines() if ln.startswith("waiting")]
     assert len(waiting) == 1 and "reviewer@proj-a: bound, no turns endpoint for" in \
         waiting[0], out
-    turns = [ln for ln in out.splitlines() if ln.startswith("turns")]
-    assert any("listener comms: registered for ready, prompt" in ln for ln in turns), out
-    assert any("endpoints: 0 live" in ln for ln in turns), out
+    assert not [ln for ln in out.splitlines() if ln.startswith("turns")], out
 
 
 def test_the_doctor_says_none_are_waiting(rig):

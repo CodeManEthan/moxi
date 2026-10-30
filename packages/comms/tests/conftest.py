@@ -115,8 +115,8 @@ def env(monkeypatch, tmp_path):
     # RUNTIME/comms exists, as a login's runtime directory does: a rig's fake daemon
     # binds in it directly.
     (runtime / "comms").mkdir()
-    # turns' roots too: a Claude adapter looks for endpoints under RUNTIME/turns, and the
-    # doctor's turns rows sweep dead endpoints there, so neither may reach the box's own.
+    # turns' roots too: a Claude adapter looks for endpoints under RUNTIME/turns, and
+    # turns' library sweeps dead endpoints there, so neither may reach the box's own.
     monkeypatch.setenv("MOXI_TURNS_RUNTIME_DIR", str(runtime))
     monkeypatch.setenv("MOXI_TURNS_CONFIG_HOME", str(home / "config"))
     for var in ("MOXI_TURNS_HOME", "MOXI_TURNS_COMMANDS"):
@@ -160,6 +160,35 @@ def env(monkeypatch, tmp_path):
     yield
     shutil.rmtree(runtime, ignore_errors=True)
     shutil.rmtree(claude_home, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def turns_plugins(monkeypatch, tmp_path_factory) -> Path:
+    """turns' Claude plugins as a folder marketplace of the test's own. The Claude
+    wrapper asks turns for its launch additions, which write `endpoint.json` into the
+    plugins' folder; no test may rewrite the one in the package the suite runs from. A
+    test that runs the wrapper in a child process patches the child the same way
+    (`TURNS_PLUGINS_PATCH`)."""
+    from moxi_turns import claude_setup
+
+    root = tmp_path_factory.mktemp("turns-plugins")
+    (root / ".claude-plugin").mkdir()
+    (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps({
+        "name": "moxi-turns",
+        "plugins": [{"name": "moxi-turns", "source": "./moxi-turns"},
+                    {"name": "moxi-turns-gate", "source": "./moxi-turns-gate"}]}))
+    for name in ("moxi-turns", "moxi-turns-gate"):
+        (root / name / ".claude-plugin").mkdir(parents=True)
+        (root / name / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": name, "version": "0.0.0"}))
+    monkeypatch.setattr(claude_setup, "claude_root", lambda: root)
+    return root
+
+
+#: Python a child process runs first, with the folder `turns_plugins` gave, so the
+#: wrapper's launch additions in the child write their files there too.
+TURNS_PLUGINS_PATCH = ("import pathlib, moxi_turns.claude_setup as _cs; "
+                       "_cs.claude_root = lambda: pathlib.Path({root!r}); ")
 
 
 #: Suites that run on both backends. A module here has every one of its rig-using tests

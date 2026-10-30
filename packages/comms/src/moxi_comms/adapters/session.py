@@ -13,18 +13,28 @@ directory, forks the session's adapter, and execs `claude`:
     most `READY_WAIT` seconds, so an in-session `moxi comms send` is answered from the
     session's first command. It then finds the session's turns endpoint and delivers
     through it, and ends when `claude` exits.
-  * **No hooks, no settings file, no plugin.** turns is the one interface to the session:
-    its plugin is the one a session loads, and comms' context (layer one, the roster and
-    its deltas) reaches the session through comms' listener, which turns asks
-    (`moxi_comms.listener`). This wrapper writes no `--settings` file, passes no
-    `--mcp-config`, and adds no plugin flag of its own. A session that is to load turns'
-    plugin for one launch passes `--plugin-dir` itself, after `--`.
+  * **No hooks, no settings file, no plugin of comms' own.** turns is the one interface
+    to the session: its plugins are the ones a session loads, and comms' context (layer
+    one, the roster and its deltas) reaches the session through comms' listener, which
+    turns asks (`moxi_comms.listener`). This wrapper writes no `--settings` file and
+    passes no `--mcp-config`.
+  * **turns' launch additions.** The wrapper is the one caller of
+    `moxi_turns.launch_additions("claude", ...)` on this launch path: a launcher that
+    goes through it adds none itself. Their words (turns' plugins as `--plugin-dir DIR`,
+    and any module's tool permissions) go after the wrapper's own `--session-id` and
+    before the passthrough, less any flag and value the passthrough already gives; their
+    variables go over the stamped environment. When turns cannot give them (its Claude
+    plugin cannot be set up), the launch is refused before anything starts, with
+    `moxi.exit.ERROR`.
 
 It also passes the session's NATIVE LABEL: `-n`, rendered here by `native_name()`
 (see there for the spelling). Two flags, two namespaces -- `--agent` carries a ROLE file
 and is whoever launches the session's to pass, `-n` carries the label and is comms' to
 render, because only this process knows both halves of the identity. See
 `Session.claude_argv`. Everything after `--` reaches `claude` exactly as given.
+
+`stamped_env` scrubs only comms' own variables, so whatever else the caller's environment
+carries reaches the session: a `MOXI_TURNS_COMMANDS` grant a launcher stamps, for one.
 
 The identity is stamped into the session's environment at launch (`MOXI_COMMS_NAME` /
 `MOXI_COMMS_SCOPE` / `MOXI_COMMS_GLOBAL`, and `MOXI_COMMS_PROJECT`),
@@ -52,6 +62,8 @@ import select
 import shutil
 import sys
 from pathlib import Path
+
+from moxi import exit as moxi_exit
 
 from .. import directors as directors_mod
 from ..context import COMMAND_ENV, own_comms
@@ -375,6 +387,58 @@ def launch_session_id(passthrough, own=None):
     return named, ["--session-id", named]
 
 
+def additions_for(session: Session, env: dict, cwd=None):
+    """turns' launch additions for this Claude launch: `moxi_turns.launch_additions` with
+    the stamped environment, the launch's working directory and the id it names to
+    `claude` (None for an unnamed resume). It grants no session command: a launcher
+    that grants one stamps `MOXI_TURNS_COMMANDS` in the wrapper's environment, which
+    reaches the session. Raises what that call raises (`moxi_turns.TurnsError`,
+    `ValueError`)."""
+    import moxi_turns
+    return moxi_turns.launch_additions("claude", cwd=os.getcwd() if cwd is None else cwd,
+                                       env=env, session_id=session.stated_id)
+
+
+def not_given(additions, passthrough) -> list[str]:
+    """The additions' words less those the passthrough already gives.
+
+    The words are read as flags, each with its value when the next word is not a flag
+    (`--plugin-dir DIR`) or joined to it (`--allowedTools=RULE`). A flag and value are
+    already given when the passthrough, before any `--` of claude's own, carries the same
+    pair in either spelling; a bare flag, when it carries the flag."""
+    given = list(passthrough)
+    if "--" in given:
+        given = given[:given.index("--")]
+    pairs = set()
+    for i, tok in enumerate(given):
+        if tok.startswith("-") and "=" in tok:
+            pairs.add(tuple(tok.split("=", 1)))
+            pairs.add((tok.split("=", 1)[0], None))
+        elif tok.startswith("-"):
+            nxt = given[i + 1] if i + 1 < len(given) else None
+            pairs.add((tok, None))
+            if nxt is not None and not nxt.startswith("-"):
+                pairs.add((tok, nxt))
+    words = list(additions)
+    out: list[str] = []
+    i = 0
+    while i < len(words):
+        tok = words[i]
+        if tok.startswith("-") and "=" in tok:
+            unit, key = [tok], tuple(tok.split("=", 1))
+            i += 1
+        elif (tok.startswith("-") and i + 1 < len(words)
+              and not words[i + 1].startswith("-")):
+            unit, key = [tok, words[i + 1]], (tok, words[i + 1])
+            i += 2
+        else:
+            unit, key = [tok], (tok, None)
+            i += 1
+        if key not in pairs:
+            out += unit
+    return out
+
+
 def main(argv=None, prog: str = "moxi-comms-claude") -> int:
     own, passthrough = split_passthrough(argv)
     ap = argparse.ArgumentParser(
@@ -462,10 +526,23 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
         print(f"{prog}: session {session.id} is already running under comms; "
               "its claim socket answers", file=sys.stderr)
         return 2
-    session.write()
     env = session.env()
-    # The named id goes first, ahead of any `--` in the passthrough.
-    cmd = session.claude_argv([*named_argv, *passthrough], claude=args.claude)
+    import moxi_turns
+    try:
+        additions = additions_for(session, env)
+    except (moxi_turns.TurnsError, ValueError) as e:
+        # Before the session directory, the adapter and `claude`: nothing has started.
+        print(f"{prog}: turns cannot give this launch its additions, so claude was not "
+              f"started: {e}", file=sys.stderr)
+        return moxi_exit.ERROR
+    for note in additions.notes:
+        print(f"{prog}: {note}", file=sys.stderr)
+    env.update(additions.env)
+    session.write()
+    # The named id goes first, ahead of any `--` in the passthrough; turns' additions
+    # follow the wrapper's own flags and come before the passthrough.
+    cmd = session.claude_argv([*named_argv, *not_given(additions.argv, passthrough),
+                               *passthrough], claude=args.claude)
 
     print(f"session {session.id}")
     print(f"  identity   {session.name} @ {session.scope}")
