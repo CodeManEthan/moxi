@@ -14,6 +14,7 @@
     moxi comms explain <identity> [<message-id>]
     moxi comms cache [<name> | <session-id>] ...   (the policy's cache callers only)
     moxi comms doctor
+    moxi comms migrate [--dry-run]
 
 The fence the verbs keep: nothing agent-facing reaches the provisioner credential, and
 the verbs that ACT stay four (`send`, `reply`, `agents`, `history`).
@@ -238,7 +239,7 @@ def cmd_history(args, ctx: Context) -> int:
                 continue
             effective[m.id] = ml.audience or (effective.get(ml.reply_to)
                                               if ml.reply_to else None)
-            author = attribution.from_record(db, m, record=ctx.record)
+            author = attribution.from_record(db, m)
             if window is not None and not _in_window(m, window):
                 continue
             addressed = any(_tag_matches(t, identity) for t in ml.recipients)
@@ -647,6 +648,8 @@ def cmd_doctor(args, ctx: Context) -> int:
     if daemon_up:
         for line in _waiting_rows(socket_path):
             row("waiting", line)
+    for line in _store_rows(ctx.env):
+        row("store", line)
     # Can comms reach a session? turns answers: its config, the listeners registered with
     # it (comms' among them), the live endpoints, and its Claude plugins.
     for found in _turns_rows():
@@ -654,6 +657,50 @@ def cmd_doctor(args, ctx: Context) -> int:
     if configured and not daemon_up:
         return EXIT_OFFLINE
     return EXIT_OK
+
+
+def cmd_migrate(args, ctx: Context) -> int:
+    """Move comms 0.2's files into comms.db now, through the store's one opener, or with
+    `--dry-run` say what that would do and write nothing."""
+    from moxi import exit as moxi_exit
+    from moxi.files import LockTimeout
+    from moxi.store import StoreError
+
+    from .store import StoreRefused, open_write, upgrade_0_2, zero_two_files
+
+    try:
+        if args.dry_run:
+            lines = upgrade_0_2.dry_run(env=ctx.env)
+        elif not zero_two_files(ctx.env):
+            lines = upgrade_0_2.dry_run(env=ctx.env)
+        else:
+            lines = []
+            open_write(env=ctx.env, report=lines.extend).close()
+    except StoreRefused as e:
+        ctx.say(f"refused: {e}")
+        return e.exit_code
+    except LockTimeout as e:
+        ctx.say(f"another comms process holds the store's lock ({e}); nothing was "
+                "moved. Try again in a moment")
+        return moxi_exit.TEMPFAIL
+    except StoreError as e:
+        ctx.say(f"refused: {e}")
+        return getattr(e, "exit_code", moxi_exit.ERROR)
+    for line in lines:
+        ctx.say(line)
+    return moxi_exit.OK
+
+
+def _store_rows(env) -> list[str]:
+    """The store's doctor rows: the move of comms 0.2's files and what it left."""
+    from .store import upgrade_0_2
+
+    try:
+        found = upgrade_0_2.doctor_rows(env)
+    except Exception as e:                                     # noqa: BLE001
+        return [f"NOT OK  could not be checked: {type(e).__name__}: {e}"]
+    return [f"{'ok' if r.state == 'ok' else 'NOT OK'}  {r.detail}"
+            + (f" (fix: {r.fix})" if r.fix else "") for r in found]
 
 
 def _waiting_rows(socket_path) -> list[str]:
@@ -969,6 +1016,13 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
                        help="this box's comms: directories, config, backend, "
                             "daemon (read-only)")
     d.set_defaults(func=cmd_doctor)
+
+    m = sub.add_parser("migrate",
+                       help="move comms 0.2's files into comms.db now (the daemon's start "
+                            "does it too)")
+    m.add_argument("--dry-run", dest="dry_run", action="store_true",
+                   help="say what would move, and write nothing")
+    m.set_defaults(func=cmd_migrate)
 
     wh = sub.add_parser("whoami", help="what comms identity this session holds")
     wh.set_defaults(func=cmd_whoami)

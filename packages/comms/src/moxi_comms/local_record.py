@@ -323,18 +323,6 @@ class LocalRecord:
             "ORDER BY id", (str(channel_id), str(timestamp))).fetchall()
         return [self._message(r) for r in rows]
 
-    # ------------------------------------------------------------------ retention
-    def marked(self, channel_id: str, token: str) -> list[Message]:
-        """Every message in `channel_id` whose content contains `token`, compared
-        lowercased, ascending by id, with no age or count bound. The queue migration's read
-        of `[held]` and `[next-turn]` mail: the same shape as
-        `history`, one scan of the channel."""
-        rows = self._conn().execute(
-            f"SELECT {self._COLUMNS} FROM messages WHERE room_id = ? "
-            "AND instr(lower(content), ?) > 0 ORDER BY id",
-            (str(channel_id), token.lower())).fetchall()
-        return [self._message(r) for r in rows]
-
     # ------------------------------------------------------------------ the queue
     def queue_add(self, name: str, ids) -> None:
         """Rows: each of `ids` waits for `name`. A row that exists stays as it is. Raises
@@ -361,11 +349,7 @@ class LocalRecord:
             "SELECT message_id, name FROM queue ORDER BY message_id, name").fetchall()
         return [(str(r[0]), r[1]) for r in rows]
 
-    def drop_refusals(self) -> None:
-        """The queue's migration: the cold-refusals table an older daemon kept goes."""
-        with self._write() as conn:
-            conn.execute("DROP TABLE IF EXISTS cold_refusals")
-
+    # ------------------------------------------------------------------ retention
     def trim(self, retain_days: int | None = None, *, keep=()) -> int:
         """Delete messages older than `retain_days`; `0` disables.
 

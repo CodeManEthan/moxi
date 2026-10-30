@@ -390,7 +390,7 @@ def _reply(args, ctx: Context) -> int:
                 f"no message {args.message_id} in the record — nothing to reply to.")
         return EXIT_REFUSED
     with ctx.db() as db:
-        author = attribution.from_record(db, original, record=ctx.record)
+        author = attribution.from_record(db, original)
     if author.tier == "unknown":
         _refuse(ctx, "unknown-author",
                 f"message {args.message_id} has an author comms cannot identify — "
@@ -1295,7 +1295,7 @@ def _reply_checks(args, ctx: Context, *, sender, exempt, typed, cap, no_cap,
     verified = False
     if referent is not None:
         with ctx.db() as db:
-            author = attribution.from_record(db, referent, record=ctx.record)
+            author = attribution.from_record(db, referent)
         verified = author.attribution == attribution.VERIFIED
 
     def new_flag() -> str:
@@ -1428,7 +1428,7 @@ def _read_thread(ctx: Context, referent, sender) -> ThreadRead:
             if (rml is None or not rml.open_mark or names_channel is None
                     or root.channel_id != names_channel):
                 return thread
-            root_author = attribution.from_record(db, root, record=ctx.record)
+            root_author = attribution.from_record(db, root)
             if root_author.attribution != attribution.VERIFIED:
                 return thread
             after = ctx.record.history(names_channel, after=root.id)
@@ -1442,7 +1442,7 @@ def _read_thread(ctx: Context, referent, sender) -> ThreadRead:
                 if mml is None or mml.reply_to not in ids:
                     continue
                 ids.add(m.id)
-                who = attribution.from_record(db, m, record=ctx.record)
+                who = attribution.from_record(db, m)
                 if who.attribution == attribution.VERIFIED:
                     members.append((m, mml, who))
         thread.open, thread.root = True, root
@@ -1622,7 +1622,7 @@ def open_for(db, ask, sender, *, now: float, names_channel, replies, record=None
     ml = machine_line.parse(ask.content)
     if ml is None or ml.posture != machine_line.POSTURE_ONCE:
         return None                                              # 1
-    asker = attribution.from_record(db, ask, record=record)
+    asker = attribution.from_record(db, ask)
     if asker.attribution != attribution.VERIFIED or asker.qualified == sender.qualified:
         return None                                              # 2
     if not any(_tag_matches(t, sender.qualified) for t in ml.recipients):
@@ -1635,7 +1635,7 @@ def open_for(db, ask, sender, *, now: float, names_channel, replies, record=None
         rml = machine_line.parse(m.content)
         if rml is None or rml.reply_to != ask.id:
             continue
-        if attribution.from_record(db, m, record=record).qualified != sender.qualified:
+        if attribution.from_record(db, m).qualified != sender.qualified:
             continue
         if any(_tag_matches(t, asker.qualified) for t in rml.recipients):
             return None

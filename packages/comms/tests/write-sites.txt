@@ -20,9 +20,10 @@ src/moxi_comms/codex_threads.py write os.fdopen
 src/moxi_comms/codex_threads.py write os.replace
 src/moxi_comms/cursors.py advance os.fdopen
 src/moxi_comms/cursors.py advance os.replace
-src/moxi_comms/migration.py _open_history sqlite3.connect
-src/moxi_comms/migration.py stamp_record sqlite3.connect
 src/moxi_comms/mock_record.py MockRecord._save os.fdopen
 src/moxi_comms/mock_record.py MockRecord._save os.replace
 src/moxi_comms/service.py Service.install .write_text
+src/moxi_comms/store/upgrade_0_2.py _rename os.replace
+src/moxi_comms/store/upgrade_0_2.py _rename os.replace
+src/moxi_comms/store/upgrade_0_2.py move os.replace
 src/moxi_comms/tokens.py TokenStore.write_secret os.open

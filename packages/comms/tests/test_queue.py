@@ -1,5 +1,5 @@
 """The one queue: rows, release points, settle, the readers' rules, the
-migration, the trim, and the send's cold-at at the daemon.
+trim, and the send's cold-at at the daemon.
 
 Every rig test here runs on both backends. The daemon's cache read is set per name by the
 `reads` fixture (it stands in for `cache.clock_state`, so the daemon's own read, its
@@ -10,7 +10,7 @@ Claude shim's own frames are tested in `test_shim_events.py`, and against this d
 section (h), which needs the current shim.
 
 Sections: (a) a held id survives, and settle, (b) no piggyback, (c) the release table, (d) re-hand,
-(e) the readers, (f) failed hand-off, (g) migration and trim, (h) the Claude shim end to
+(e) the readers, (f) failed hand-off, (g) the trim, (h) the Claude shim end to
 end, (j) the send's cold-at at the daemon, (k) adapters started before the deploy, (l) a
 row whose message the record lost.
 """
@@ -26,7 +26,7 @@ from conftest import projects_root, queued, record_rows, wait_until, write_confi
 
 from moxi_comms import cache, constants, cursors, machine_line
 from moxi_comms.client import DaemonClient
-from moxi_comms.daemon import META_QUEUE_MIGRATED, Daemon
+from moxi_comms.daemon import Daemon
 from moxi_comms.paths import daemon_socket
 
 
@@ -564,70 +564,7 @@ def test_a_failed_hand_off_to_an_agent_n_writes_no_row(rig, reads, peers, monkey
         auto.client.close()
 
 
-# ============================================================ (g) migration and trim
-
-def _forget_migration(rig) -> None:
-    gw = rig.record
-    if rig.backend == "local":
-        with gw._write() as conn:
-            conn.execute("DELETE FROM meta WHERE key = ?", (META_QUEUE_MIGRATED,))
-            conn.execute("CREATE TABLE IF NOT EXISTS cold_refusals("
-                         "message_id INTEGER NOT NULL, name TEXT NOT NULL)")
-            conn.execute("INSERT INTO cold_refusals VALUES (1, 'reviewer@proj-a')")
-    else:
-        with gw._txn(write=True) as st:
-            st.meta.pop(META_QUEUE_MIGRATED, None)
-
-
-def _has_refusals_table(rig) -> bool:
-    row = rig.record._conn().execute(
-        "SELECT name FROM sqlite_master WHERE name = 'cold_refusals'").fetchone()
-    return row is not None
-
-
-def test_the_migration_moves_held_mail_into_the_queue_once(rig, monkeypatch):
-    """A gate file with held and refused ids and a `[next-turn]`
-    record: the first boot makes rows for the held ones (not past the cursor, still in
-    the record) and the `[next-turn]` one, none for refused and none for `[held]` or
-    `[next-turn]` mail at or below its recipient's cursor, deletes the file, drops
-    `cold_refusals` and sets the meta key; a second boot changes nothing."""
-    import json
-    monkeypatch.setattr(constants, "RESCAN_LIMIT", 1)     # the boot rescan reads past none
-    rig.daemon.stop()
-    # Old flagged mail the cursor has passed: handled long ago, it gets no row.
-    old_held = post(rig, [REVIEWER_Q], "held, handled before", held=True)
-    old_next_turn = post(rig, [], raw="::to reviewer@proj-a [next-turn]\nhandled too")
-    passed = post(rig, [REVIEWER_Q], "cold-held, then handled")
-    held = post(rig, [REVIEWER_Q], "cold-held by the old daemon")
-    refused = post(rig, [CODER_Q], "refused by the old daemon")
-    next_turn = post(rig, [], raw="::to planner@proj-a [next-turn]\nwhen you are next about")
-    gone = "4611686018427399999"                        # no such message in the record
-    post(rig, [], raw="prose, the last thing in the record")
-    cursors.advance(REVIEWER_Q, passed)
-    gate = rig.daemon.gate_path
-    gate.parent.mkdir(parents=True, exist_ok=True)
-    gate.write_text(json.dumps({"held": {REVIEWER_Q: [passed, held, gone],
-                                         "agent-3@global": [held]},
-                                "refused": {CODER_Q: [refused]}}))
-    _forget_migration(rig)
-    rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
-    assert queued(rig.daemon, REVIEWER_Q) == {held}
-    assert not {old_held, old_next_turn} & record_rows(rig.record, REVIEWER_Q)
-    assert queued(rig.daemon, "planner@proj-a") == {next_turn}
-    assert queued(rig.daemon, CODER_Q) == set()
-    assert not gate.exists()
-    assert rig.record.meta_get(META_QUEUE_MIGRATED) is not None
-    if rig.backend == "local":
-        assert not _has_refusals_table(rig)
-    before = record_rows(rig.record)
-    stamp = rig.record.meta_get(META_QUEUE_MIGRATED)
-    gate.write_text(json.dumps({"held": {CODER_Q: [refused]}}))
-    rig.daemon.stop()
-    rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
-    assert record_rows(rig.record) == before
-    assert rig.record.meta_get(META_QUEUE_MIGRATED) == stamp
-    assert gate.exists(), "the second boot runs no migration"
-
+# ============================================================ (g) the trim
 
 def _age(rig, mid, days) -> None:
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(rig.clock() - days * 86400))

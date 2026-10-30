@@ -70,7 +70,6 @@ import bisect
 import contextlib
 import hashlib
 import hmac
-import json
 import logging
 import os
 import secrets
@@ -85,11 +84,11 @@ from pathlib import Path
 from . import (attribution, bindings, cache, config, constants, cursors, directory,
                protocol)
 from .attribution import Author
-from .machine_line import (COLD_AT_LIVE, HELD_TOKEN, NEXT_TURN_TOKEN, POSTURE_NONE,
+from .machine_line import (COLD_AT_LIVE, POSTURE_NONE,
                            POSTURE_ONCE, parse as parse_machine_line)
 from .record import Message
 from . import kinds as kinds_mod
-from .paths import cold_gate, comms_db, daemon_socket
+from .paths import comms_db, daemon_socket
 from .protocol import CLI_PROTOCOL, PROTOCOL_VERSION, LineConn
 from .provision import NAMES
 from .scoping import GLOBAL, NAME_RE, is_auto_name, qualify, split_tag, tag_matches
@@ -184,8 +183,9 @@ RELEASE_SETTLE_STEPS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
 #: mail otherwise.
 OPERATOR_NAME = "operator"
 
-#: The record's meta key that says the queue's one-time migration has run.
-META_QUEUE_MIGRATED = "queue_migrated"
+#: The doctor record a daemon that can't open comms.db leaves, and a start that opens it
+#: clears.
+STORE_RECORD = "store"
 
 #: The key a routing pass keeps in its memo beside the cursors: the cache's one read per
 #: binding per pass.
@@ -330,7 +330,7 @@ def _config_kept(exc) -> None:
 class Daemon:
     def __init__(self, record, *, db_path=None, socket_path=None, clock=time.time,
                  start_trim_thread: bool = True, history_path=None,
-                 first_start=None, migrate=None, gate_path=None, kinds=None, settings=None,
+                 first_start=None, kinds=None, settings=None,
                  cache_store=cache.MISSING):
         self.record = record
         #: The adapter kinds a register may name: the built-in four and each kind the
@@ -348,15 +348,9 @@ class Daemon:
         #: else, given (record, db_path): a daemon on the local backend provisions its
         #: directory here (`provision.first_start`). None elsewhere.
         self.first_start = first_start
-        #: The local backend's one-time record conversion and idempotent credential-file
-        #: cleanup.  It runs after the binding history's boot fence and before the queue load.
-        self.migrate = migrate
         self.db_path = Path(db_path or comms_db())
         self.socket_path = Path(socket_path or daemon_socket())
         self.clock = clock
-        #: The cold-cache gate file an older daemon kept (`paths.cold_gate`): read once,
-        #: by the queue's migration, and then deleted.
-        self.gate_path = Path(gate_path or cold_gate())
         #: cache's drift store (`cache.open_store(learn=True)`), opened at `start()`:
         #: the daemon is the learner in practice, and cache writes a lowering before the
         #: read that found it returns. None while not started, and when cache is not
@@ -524,13 +518,9 @@ class Daemon:
             if fenced:
                 log.warning("boot fence: closed %d custody interval(s) left open by a "
                             "daemon that did not shut down cleanly", fenced)
-        if self.migrate is not None:
-            self.migrate(self.record, self.db_path, self.binding_history._resolved())
         # boot: the queue, BEFORE the socket listens, so no register or routing pass can
-        # hand a queued id as live mail. The first boot of this daemon moves the mail an
-        # older daemon held into it first (`_migrate_queue`). A read that RAISES stops
-        # the start here: routing without the queue would hand queued mail as if it
-        # were new.
+        # hand a queued id as live mail. A read that RAISES stops the start here: routing
+        # without the queue would hand queued mail as if it were new.
         self._load_queue()
         # boot: cache's drift store, opened to learn; every lowering is written by it.
         if self._own_store:
@@ -2388,11 +2378,9 @@ class Daemon:
 
     # ------------------------------------------------------------------ boot
     def _load_queue(self) -> None:
-        """Boot, before the socket listens: the migration once, then every row. A row
-        for an `agent-N` is dropped: its numbering restarts with the daemon, so the name
-        would be a later, unrelated session's. A read that RAISES stops the start."""
-        if self.record.meta_get(META_QUEUE_MIGRATED) is None:
-            self._migrate_queue()
+        """Boot, before the socket listens: every row. A row for an `agent-N` is
+        dropped: its numbering restarts with the daemon, so the name would be a later,
+        unrelated session's. A read that RAISES stops the start."""
         rows = list(self.record.queue_rows())
         dropped = []
         with self._lock:
@@ -2413,64 +2401,6 @@ class Daemon:
         if dropped:
             log.info("boot: %d queue row(s) for agent-N names dropped: an agent-N ends "
                      "with its binding", len(dropped))
-
-    def _migrate_queue(self) -> None:
-        """Once, at the first boot of a daemon with the queue: the mail an older daemon
-        held moves into it. The gate file's `held` ids, past neither the cursor nor gone
-        from the record, become rows (its `refused` half is dropped: refused mail was
-        never to be delivered). Every `[held]` or `[next-turn]` message gets a row for
-        each recipient that resolves, is not an `agent-N` or send-only, and has not
-        passed it. Then the gate file goes, the refusals table goes, and the record
-        says it is done. No row is written for an id at or below a name's cursor."""
-        memo: dict = {}
-        rows: dict[str, set] = {}
-        try:
-            raw = json.loads(self.gate_path.read_text())
-        except FileNotFoundError:
-            raw = {}
-        except (OSError, ValueError) as e:
-            log.warning("queue migration: %s could not be read (%s); read as empty",
-                        self.gate_path, e)
-            raw = {}
-        held = raw.get("held") if isinstance(raw, dict) else None
-        for q, ids in (held.items() if isinstance(held, dict) else ()):
-            if not isinstance(ids, list) or is_auto_name(split_tag(str(q))[0]):
-                continue
-            for mid in (str(i) for i in ids):
-                if not mid.isdigit() or self._past_cursor(str(q), mid, memo):
-                    continue
-                if self.record.get_message(mid) is None:
-                    continue
-                rows.setdefault(str(q), set()).add(mid)
-        # A box with no #names room has never routed a message: there is nothing to scan.
-        channel_id = None
-        if self.db_path.exists():
-            with self._db() as conn:
-                room = directory.room_by_name(conn, NAMES)
-            channel_id = room["room_id"] if room is not None else None
-        found = {m.id: m for token in (HELD_TOKEN, NEXT_TURN_TOKEN)
-                 for m in (self.record.marked(channel_id, token) if channel_id else ())}
-        for m in sorted(found.values(), key=lambda m: int(m.id)):
-            ml = parse_machine_line(m.content)
-            if ml is None or not ml.held:
-                continue                     # the token in prose, not on line zero
-            for tag in ml.recipients:
-                r = self.resolve(tag)
-                if not r.resolvable or r.tier == TIER_EPHEMERAL or r.send_only:
-                    continue
-                if not _flagged(ml, r.qualified):
-                    continue
-                if not self._past_cursor(r.qualified, m.id, memo):
-                    rows.setdefault(r.qualified, set()).add(m.id)
-        for q, ids in rows.items():
-            self.record.queue_add(q, sorted(ids, key=_as_id))
-        self.gate_path.unlink(missing_ok=True)
-        drop = getattr(self.record, "drop_refusals", None)
-        if drop is not None:
-            drop()
-        self.record.meta_set(META_QUEUE_MIGRATED, str(int(self.clock())))
-        log.info("boot: queue migration made %d row(s) from held mail",
-                 sum(len(v) for v in rows.values()))
 
     def _name_lock(self, qualified: str) -> threading.RLock:
         with self._lock:
@@ -2612,7 +2542,7 @@ class Daemon:
     def attribute(self, msg, *, live: bool) -> Author:
         """What the record proves."""
         with self._db() as db:
-            return attribution.from_record(db, msg, record=self.record)
+            return attribution.from_record(db, msg)
 
     # ------------------------------------------------------------------ catch-up
     def _replay(self, binding: Binding) -> None:
@@ -2843,9 +2773,14 @@ def _epoch(timestamp: str) -> float:
 def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
     import argparse
 
-    from .record import BACKENDS, LOCAL, MOCK, RecordError, backend_choice, open_record
+    from moxi import doctor as moxi_doctor
+    from moxi.files import LockTimeout
+    from moxi.store import StoreError
 
-    from . import migration, provision, tokens
+    from .record import BACKENDS, LOCAL, MOCK, RecordError, backend_choice, open_record
+    from .release import MODULE
+
+    from . import provision, tokens
 
     ap = argparse.ArgumentParser(prog="moxi-comms-daemon")
     ap.add_argument("--backend", choices=BACKENDS,
@@ -2887,6 +2822,17 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
         record = open_record(args.backend, role="reader")
     except RecordError as e:
         raise SystemExit(str(e)) from None
+    except (StoreError, LockTimeout) as e:
+        # The store's gate refused (comms 0.2's files can't be moved, or a store sits
+        # beside them that the move didn't make): the daemon doesn't start. The log has
+        # it, and so does the next doctor run, until a start opens the store.
+        log.error("comms.db can't be opened, so the daemon doesn't start: %s", e)
+        with contextlib.suppress(Exception):
+            moxi_doctor.record(MODULE, f"the daemon didn't start: {e}", key=STORE_RECORD,
+                               fix="moxi comms migrate --dry-run")
+        raise SystemExit(f"moxi-comms-daemon: {e}") from None
+    with contextlib.suppress(Exception):
+        moxi_doctor.clear(MODULE, STORE_RECORD)
     # systemd stops the unit with SIGTERM. Without a handler the process died before the
     # `finally`, every restart left its custody intervals open for the next boot's
     # fence, and the fence's warning could not tell a crash from a restart. Installed
@@ -2903,8 +2849,7 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
     store = (tokens.TokenStore(None, env=os.environ)
              if (args.backend or resolved) == LOCAL else None)
     first_start = provision.first_start(store) if store is not None else None
-    migrate = migration.startup(store) if store is not None else None
-    daemon = Daemon(record, first_start=first_start, migrate=migrate, settings=settings)
+    daemon = Daemon(record, first_start=first_start, settings=settings)
     try:
         daemon.start()
     except RuntimeError as e:

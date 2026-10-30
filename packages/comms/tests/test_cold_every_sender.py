@@ -95,7 +95,6 @@ def _live_paths():
         "store": paths.comms_db(),
         "tokens": paths.tokens_dir(),
         "cursors": paths.cursors_dir(),
-        "cold gate": paths.cold_gate(),
         "claude projects": Path(cache_api().projects_root(None)),
         "shim root": Path(cache_api().projects_root(os.environ)),
     }
@@ -808,7 +807,6 @@ def test_a_cold_row_survives_a_restart_and_a_shim_that_registers_at_once(rig, re
     msg = post(rig, [REVIEWER_Q])
     assert wait_until(lambda: msg.id in held_of(rig))
     assert wait_until(lambda: record_rows(rig.record, REVIEWER_Q) == {msg.id})
-    assert not paths.cold_gate().exists()
     daemon = reboot(rig)
     assert held_of(rig) == {msg.id}, "loaded before the socket listened"
     wait_until(lambda: REVIEWER_Q in daemon.bindings and not s.offline)

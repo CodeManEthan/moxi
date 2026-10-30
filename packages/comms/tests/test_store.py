@@ -198,12 +198,12 @@ def test_with_no_0_2_files_the_opener_creates_then_reopens_the_store():
 @pytest.mark.parametrize("which", [("record",), ("directory",), ("bindings",),
                                    ("record", "directory", "bindings")])
 def test_0_2_files_without_a_store_are_not_written_over(which):
-    """Until the move of 0.2's files is built, the opener refuses, and writes nothing."""
+    """An empty stand-in isn't a 0.2 database: the move refuses, and writes nothing."""
     made = zero_two(*which)
     with pytest.raises(store.StoreRefused) as e:
         store.open_write()
     assert e.value.path == made[0]
-    assert "nothing was written" in str(e.value)
+    assert "is empty" in str(e.value) and "nothing was moved" in str(e.value)
     assert not store.path().exists()
     assert all(p.read_bytes() == b"" for p in made)
 
@@ -223,7 +223,7 @@ def test_a_store_without_the_marker_beside_0_2_files_is_refused():
 def test_a_marked_store_beside_0_2_files_goes_to_the_finishing_step():
     mark(store.path())
     zero_two("bindings")
-    with pytest.raises(store.StoreRefused, match="can't finish the move"):
+    with pytest.raises(store.StoreRefused, match="changed after they were moved"):
         store.open_write()
 
 

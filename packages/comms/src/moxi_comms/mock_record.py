@@ -238,12 +238,6 @@ class MockRecord:
             out = out[-limit:]
         return out
 
-    def marked(self, channel_id: str, token: str) -> list[Message]:
-        """Every message in `channel_id` containing `token` (lowercased compare), no
-        bound: the local record's boot read, on the in-memory double."""
-        token = token.lower()
-        return [m for m in self.history(channel_id) if token in m.content.lower()]
-
     def queue_add(self, name: str, ids) -> None:
         """The local record's queue rows, on the double: [message id, name] pairs."""
         with self._txn(write=True) as st:
@@ -263,12 +257,6 @@ class MockRecord:
         with self._txn() as st:
             return sorted(((str(m), str(n)) for m, n in st.queue),
                           key=lambda p: (int(p[0]), p[1]))
-
-    def drop_refusals(self) -> None:
-        """The queue's migration: the refusals an older store kept go."""
-        with self._txn(write=True) as st:
-            if hasattr(st, "cold_refusals"):
-                del st.cold_refusals
 
     def meta_get(self, key: str) -> str | None:
         with self._txn() as st:

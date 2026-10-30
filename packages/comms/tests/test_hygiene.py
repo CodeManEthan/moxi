@@ -80,23 +80,30 @@ def test_the_verbs_that_act_stay_four():
 
     `claude` is the WRAPPER: it starts a Claude Code session with a comms identity and
     forks the session's adapter, which binds the name as any session binds it. The verb
-    itself posts nothing and reaches no credential, so the acting four are still four."""
+    itself posts nothing and reaches no credential, so the acting four are still four.
+
+    `migrate` is the STORE verb: it moves comms 0.2's files into comms.db through the
+    store's one opener, as the daemon's start does, or with `--dry-run` says what that
+    would do. It posts nothing and reaches no credential, so the acting four are still
+    four."""
     from moxi_comms import cli
 
     sub = [a for a in cli.build_parser()._actions if hasattr(a, "choices") and a.dest
            == "verb"][0]
     assert set(sub.choices) == {"send", "reply", "agents", "history", "help", "whois",
                                 "explain", "cache", "doctor", "owner", "service",
-                                "whoami", "claude"}
+                                "whoami", "claude", "migrate"}
     acting = {"send", "reply", "agents", "history"}
     reading = {"help", "whois", "explain", "cache", "doctor", "owner"}
     machine = {"service"}
     claim = {"whoami"}
     wrapper = {"claude"}
-    assert acting | reading | machine | claim | wrapper == set(sub.choices) \
+    store_verb = {"migrate"}
+    assert acting | reading | machine | claim | wrapper | store_verb == set(sub.choices) \
         and len(acting) == 4
     assert sub.choices["whoami"].get_default("func") is cli.cmd_whoami
     assert sub.choices["service"].get_default("func") is cli.cmd_service
+    assert sub.choices["migrate"].get_default("func") is cli.cmd_migrate
     assert {sub.choices[v].get_default("func") for v in reading} == {cli.cmd_help,
                                                                     cli.cmd_whois,
                                                                     cli.cmd_explain,
@@ -223,16 +230,6 @@ _RETIRED_SLOT_SITES = Counter([
      "#: The posture slot's token for open stated on a new send: the root of a thread with"),
     ("src/moxi_comms/machine_line.py",
      "to writing nothing. `open_mark` writes `[open]` in the posture slot, and only beside"),
-    ("src/moxi_comms/migration.py", '_RETIRED_FILE = re.compile(r"slot-[0-9]+\\Z")'),
-    ("src/moxi_comms/migration.py", '_RETIRED_KEY = re.compile(r"comms/slot-[0-9]+/[^/]+\\Z")'),
-    ("src/moxi_comms/migration.py", "def _holder_at(conn, slot_id, timestamp: str | None):"),
-    ("src/moxi_comms/migration.py", "if conn is None or slot_id is None or not timestamp:"),
-    ("src/moxi_comms/migration.py",
-     '"SELECT * FROM bindings WHERE slot_id = ? AND bound_at <= ? "'),
-    ("src/moxi_comms/migration.py", "(int(slot_id), timestamp, timestamp)).fetchall()"),
-    ("src/moxi_comms/migration.py", 'row["slot_id"] if "slot_id" in keys else None,'),
-    ("src/moxi_comms/migration.py",
-     'keep = Path(keep_path) if keep_path is not None else state_dir() / "slot-keeps.json"'),
     ("src/moxi_comms/provision.py",
      'ap.add_argument("--slots", dest="retired_slots", help=argparse.SUPPRESS)'),
     ("src/moxi_comms/provision.py", "if args.retired_slots is not None:"),
@@ -267,17 +264,16 @@ def test_retired_slot_vocabulary_stays_in_compatibility_sites():
 
 
 def test_retired_vocabulary_scanner_rejects_an_extra_site_in_an_allowed_file(tmp_path):
-    path = tmp_path / "src/moxi_comms/migration.py"
+    path = tmp_path / "src/moxi_comms/provision.py"
     path.parent.mkdir(parents=True)
-    path.write_text('_RETIRED_FILE = re.compile(r"slot-[0-9]+\\Z")\n'
+    path.write_text("if args.retired_slots is not None:\n"
                     "extra_slot = None\n", encoding="utf-8")
-    assert retired_slot_vocabulary(tmp_path) == ["src/moxi_comms/migration.py:2"]
+    assert retired_slot_vocabulary(tmp_path) == ["src/moxi_comms/provision.py:2"]
 
 
 _RETIRED_TEST_SLOT_FILES = {
     "test_binding_tokens.py",      # protocol frames intentionally exercise the old field
     "test_codex_roster.py",        # the retired roster-key refusal
-    "test_identity_migration.py",  # old-directory fixtures and conversion assertions
     "test_opencode_server.py",     # the retired roster-key refusal
     "test_settings.py",            # the retired config-key refusal
     "test_hygiene.py",             # this file contains the scanner's mutation sample
