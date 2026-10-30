@@ -377,3 +377,23 @@ def test_preview_of_a_scratch_codex_launch_names_the_scratch_folder():
     got = api.preview(request)
     assert str(common.scratch_dir("r9")) in got.argv
     assert not common.scratch_dir("r9").exists()
+
+
+def test_preview_gives_the_resolvers_warnings_as_launch_does(tmp_path, monkeypatch):
+    """An identity without comms is dropped with a warning from the resolver; `preview`
+    carries it, as `launch` does, so the CLI shows it before anything runs."""
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "comms" and real(name))
+    rig = Harness.on_path(tmp_path, monkeypatch)
+    work = tmp_path / "work"
+    work.mkdir()
+    req = api.LaunchRequest(typed={"identity": "planner", "target": "headless",
+                                   "brief": "b"}, cwd=str(work), request_id="r1",
+                            session_id=SID, actor="ann")
+    line = "identity planner is ignored: comms is not installed"
+    shown = api.preview(req)
+    assert line in shown.warnings
+    monkeypatch.setattr("moxi_launcher.targets._spawn", lambda argv, **kw: 99)
+    launched = api.launch(req)
+    assert shown.warnings == launched.warnings
+    assert rig.runs() == []

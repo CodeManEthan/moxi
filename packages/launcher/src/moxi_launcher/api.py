@@ -32,6 +32,7 @@ harness. On Windows it returns when the harness exits, with the harness's exit c
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 import uuid
@@ -162,8 +163,7 @@ def launch(request, *, environ: Mapping[str, str] | None = None,
             return _stored(inserted.row)
 
         rid = ids.request_id
-        warnings = tuple(resolved.warnings) + tuple(
-            w for w in composition.warnings if w not in resolved.warnings)
+        warnings = _warnings(resolved, composition)
         try:
             _make_files(composition)
         except OSError as error:
@@ -200,8 +200,12 @@ def check(request, *, environ: Mapping[str, str] | None = None) -> list[Refusal]
 
 def preview(request, *, environ: Mapping[str, str] | None = None) -> Composition:
     """The composition `request` would launch: argv, the stamped environment, target and
-    mode. Starts nothing and writes nothing of the launcher's."""
-    return compose.build(request, _resolve(request, environ), environ=environ)
+    mode. Starts nothing and writes nothing of the launcher's. Its `warnings` are the
+    ones `launch` gives: the resolver's, then the composer's."""
+    resolved = _resolve(request, environ)
+    composition = compose.build(request, resolved, environ=environ)
+    return dataclasses.replace(composition,
+                               warnings=_warnings(resolved, composition))
 
 
 def exit_code(error: BaseException) -> int:
@@ -261,6 +265,12 @@ def _with_ids(request, harness: str) -> SimpleNamespace:
     if harness == "claude" and not session_id:
         session_id = str(uuid.uuid4())
     return SimpleNamespace(**given, request_id=request_id, session_id=session_id)
+
+
+def _warnings(resolved, composition: Composition) -> tuple[str, ...]:
+    """A launch's warning lines: the resolver's, then the composer's not already given."""
+    given = tuple(getattr(resolved, "warnings", ()) or ())
+    return given + tuple(w for w in composition.warnings if w not in given)
 
 
 def _slot_named(values: Mapping[str, object]) -> str | None:
