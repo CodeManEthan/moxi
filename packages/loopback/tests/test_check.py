@@ -18,8 +18,10 @@ from moxi_loopback.check import (
 )
 from moxi_loopback.routes import Entry, Field, Out, Page, Route, Table, build_table, export
 
-TOKEN = secrets.token_urlsafe(32)
-OTHER = secrets.token_urlsafe(32)
+# Fixed, not minted: both appear in parametrized test ids, which every pytest-xdist worker
+# must collect alike.
+TOKEN = "Tk0_" + "t" * 35 + "-Tk0"
+OTHER = "Ot1-" + "o" * 35 + "_Ot1"
 PORT = 41000
 SHELL_PORT = 8440
 JSON = (b"content-type", b"application/json")
