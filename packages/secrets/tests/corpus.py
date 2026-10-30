@@ -2,7 +2,9 @@
 
 No test file holds a secret-shaped literal: every token here is built from short pieces
 and seeded random characters, so the repo's own guards and the gitleaks binary never meet
-one in the tree.
+one in the tree. Where the fixed part alone would match a rule, the pieces are joined at
+run time with `"".join`, because Python folds `"a" + "b"` into one constant and the
+compiled file in `__pycache__` would hold the whole match.
 """
 
 from __future__ import annotations
@@ -78,7 +80,7 @@ def url_credential(r, user: str = "") -> str:
 
 
 def password_assignment(r) -> str:
-    return "pass" + "word = " + '"' + chars(r, 14) + '"'
+    return "".join(("pass", "word = \"")) + chars(r, 14) + '"'
 
 
 def ntfy(r) -> str:
@@ -90,12 +92,12 @@ def bearer(r) -> str:
 
 
 def key_header() -> str:
-    return "-----BEGIN " + "RSA PRIVATE KEY-----"
+    return "".join(("-----BEGIN RSA PRIV", "ATE KEY-----"))
 
 
 def curl_user(r) -> str:
-    return "curl -u " + chars(r, 6, string.ascii_lowercase) + ":" + chars(r, 12) + \
-        " https://api.example.test"
+    user = chars(r, 6, string.ascii_lowercase) + ":" + chars(r, 12)
+    return " ".join(("curl", "-u", user, "https://api.example.test"))
 
 
 def luhn_complete(digits: str) -> str:
