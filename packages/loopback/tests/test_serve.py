@@ -420,7 +420,8 @@ def test_the_protocol_counts_each_request_in_the_step_that_hands_it_off(pages):
             assert [raw for raw, _, _ in proto.handed] == [b"/api/prove", b"/api/summary"]
             assert all(task is None for _, task, _ in proto.handed)
             wait_for(lambda: proto.inner.activity.pending == 0, 2, what="the hand-offs settled")
-            assert proto.inner.activity.quiet() is not None
+            wait_for(lambda: proto.inner.activity.quiet() is not None, 2,
+                     what="the quiet run restarted")
             conn.close()
         finally:
             proto.stop.request("the test ended")
