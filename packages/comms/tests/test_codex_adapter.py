@@ -19,7 +19,7 @@ from moxi_comms.adapters.codex_roster import CodexAgent
 from moxi_comms.adapters.session import INHERITED_COMMS_ENV
 from moxi_comms.claimhold import CLAIM_SOCKET_ENV
 
-from fake_turns import FakeSession, fake_launch as fake_wrapper
+from fake_turns import FakeSession, fake_launch
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +50,7 @@ def launch(rig, tmp_path):
                            directors=list(directors))
         session = session or FakeSession()
         exits: list = []
-        adapter = CodexAdapter(agent, launch=fake_wrapper(session), window=window,
+        adapter = CodexAdapter(agent, launch=fake_launch(session), window=window,
                                autoreconnect=autoreconnect, backoff=backoff,
                                clock=rig.clock, started_wait=0.2,
                                status_sink=lambda text: adapter.statuses.append(text),
