@@ -391,8 +391,6 @@ def describe() -> dict:
 
 def _found_json(found) -> dict:
     """A `Found`'s fields as JSON values: tables as objects, sets and tuples as lists."""
-    import dataclasses
-
     def plain(value):
         if isinstance(value, Mapping):
             return {k: plain(v) for k, v in value.items()}
@@ -402,8 +400,7 @@ def _found_json(found) -> dict:
             return [plain(v) for v in value]
         return value
 
-    return {f.name: plain(getattr(found, f.name)) for f in dataclasses.fields(found)
-            if f.name != "api"}
+    return {name: plain(getattr(found, name)) for name in found._fields if name != "api"}
 
 
 def _modules(argv: list[str]) -> int:
