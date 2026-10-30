@@ -89,6 +89,8 @@ VENDORED = "src/moxi/_vendor/"
 CORE_SCRIPT = ("moxi", "moxi.cli:main")
 #: Inside these core modules check 5 does not apply.
 CORE_ENV_READERS = frozenset({"moxi.paths", "moxi.config", "moxi.log", "moxi.proc"})
+#: The core's own plumbing variables, which the core reads where check 5 applies.
+CORE_INTERNAL_ENV = frozenset({"MOXI_CORE_LOCK_FD"})
 #: What a segment's closure may not import (top-level package names), besides turns.
 SEGMENT_IMPORTS = frozenset({"subprocess", "socket", "multiprocessing", "ctypes", "http",
                              "urllib"})
@@ -830,6 +832,8 @@ class _Repo:
     def check_environment(self) -> None:
         internal = self.ann_map("INTERNAL_ENV")
         exact = {k for k in internal if not k.endswith("_")}
+        if self.core:
+            exact |= CORE_INTERNAL_ENV
         prefixes = tuple(k for k in internal if k.endswith("_"))
         for source in self.sources.values():
             if not source.in_src:

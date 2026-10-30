@@ -6,7 +6,10 @@ imports nothing heavy at module level, so a hook can import `moxi.files` cheaply
 - `atomic_write` replaces a file in one step: a reader sees the old text or the new,
   never half of either.
 - `lock` holds an exclusive lock on a lock file for the length of a `with` block. The
-  lock dies with its process, so a crashed holder frees it at once.
+  lock dies with its process, so a crashed holder frees it at once. With `nested=True`
+  it serves the core lock, which code under an install finds already held.
+- `adopt_core_claim` lets an install's settle or teardown child keep the claim on the
+  core lock that its parent handed it.
 - `update` reads a file, changes it and writes it back under that file's lock.
 - `edit_toml` does the same for a TOML file, keeping its comments and order (it imports
   the core's vendored tomlkit inside the call).
@@ -22,7 +25,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 
 _WINDOWS = sys.platform == "win32"
@@ -125,14 +128,30 @@ def _parent(path: Path) -> None:
 
 # The lock files this process holds through `lock`: absolute path -> the holding thread.
 _held: dict[str, int] = {}
+# The descriptor of each lock file in `_held`, for the install's hand-off to its child.
+_fds: dict[str, int] = {}
+# The paths in `_held` that a `nested=True` call took itself: a standalone caller's hold
+# of the core lock, which covers only its own thread. A core lock held without
+# `nested` is the install's hold, which covers every thread of the process.
+_nested_takes: set[str] = set()
 _held_guard = threading.Lock()
 # One in-process gate per lock file that `update`, `edit_toml` and `append_record` take,
 # so their callers' threads queue for the lock file instead of being refused.
 _gates: dict[str, threading.Lock] = {}
 
+#: The variable through which an install's parent names, to a settle or teardown child,
+#: the descriptor (on Windows the handle) of the core lock it holds. Only
+#: `adopt_core_claim` reads it; `lock` never reads the environment.
+CLAIM_VARIABLE = "MOXI_CORE_LOCK_FD"
+# The install's claim this process adopted: a descriptor open on the core lock file, or
+# None. Kept here, never in the environment, for the process's whole life.
+_claim: int | None = None
+_adopted = False
+_claim_guard = threading.Lock()
 
-@contextmanager
-def lock(path: str | os.PathLike, *, timeout: float | None = None) -> Iterator[None]:
+
+def lock(path: str | os.PathLike, *, timeout: float | None = None,
+         nested: bool = False) -> AbstractContextManager[None]:
     """Hold an exclusive lock on the lock file `path` for the length of the block.
 
     `timeout=None` waits as long as it takes; `timeout=0` tries once; a number waits that
@@ -145,8 +164,37 @@ def lock(path: str | os.PathLike, *, timeout: float | None = None) -> Iterator[N
     already holds, from any of its threads, raises `RuntimeError` instead of waiting for
     itself. Threads of one process that share a lock file queue for it with a lock of
     their own; `update`, `edit_toml` and `append_record` already do.
+
+    `nested=True` is for the core lock alone (`moxi.paths.core_lock()`); any other path
+    raises `ValueError` before anything is taken. Code that runs under an install never
+    waits for that install and never raises on its lock, and every other caller takes the
+    lock. So a nested call yields at once, taking and releasing nothing, when
+
+    - this process holds the core lock without `nested` (the install's own hold, in the
+      install's process): from any of its threads;
+    - this thread took the core lock with an outer `nested=True` call (a standalone
+      caller holding it around several core calls that take it themselves);
+    - this process adopted its install's claim (`adopt_core_claim`) and the claim's
+      descriptor is still open on the lock file, checked again on every call.
+
+    Otherwise it takes the lock as a call without `nested` does, with the same timeout,
+    first waiting its turn behind this process's other threads that took it with
+    `nested=True`, so two threads of a standalone caller never share the lock's span. A
+    claim whose descriptor no longer checks is dropped with one warning line, and the
+    lock is then taken in the same way.
     """
     path = Path(path)
+    if not nested:
+        return _lock(path, timeout)
+    from .paths import core_lock
+
+    if os.path.abspath(path) != os.path.abspath(core_lock()):
+        raise ValueError(f"lock(nested=True) is for the core lock alone, not {path}")
+    return _nested_lock(path, timeout)
+
+
+@contextmanager
+def _lock(path: Path, timeout: float | None, *, nested_take: bool = False) -> Iterator[None]:
     key = os.path.abspath(path)
     me = threading.get_ident()
     with _held_guard:
@@ -156,22 +204,45 @@ def lock(path: str | os.PathLike, *, timeout: float | None = None) -> Iterator[N
             raise RuntimeError(f"{path} is already locked by {who}; "
                                "moxi.files.lock is not re-entrant")
         _held[key] = me
+        if nested_take:
+            _nested_takes.add(key)
     try:
         fd = _acquire(path, timeout)
     except BaseException:
         with _held_guard:
             _held.pop(key, None)
+            _nested_takes.discard(key)
         raise
+    with _held_guard:
+        _fds[key] = fd
     try:
         yield
     finally:
         with _held_guard:
             _held.pop(key, None)
+            _fds.pop(key, None)
+            _nested_takes.discard(key)
         _release(fd)
 
 
 @contextmanager
-def _gated_lock(path: Path, *, timeout: float | None = None) -> Iterator[None]:
+def _nested_lock(path: Path, timeout: float | None) -> Iterator[None]:
+    key = os.path.abspath(path)
+    me = threading.get_ident()
+    with _held_guard:
+        # Only a hold already taken counts: a thread still waiting to take it covers none.
+        holder = _held.get(key) if key in _fds else None
+        covered = holder is not None and (holder == me or key not in _nested_takes)
+    if covered or _claim_checks(path):
+        yield
+        return
+    with _gated_lock(path, timeout=timeout, nested_take=True):
+        yield
+
+
+@contextmanager
+def _gated_lock(path: Path, *, timeout: float | None = None,
+                nested_take: bool = False) -> Iterator[None]:
     """`lock`, after this process's other threads that go through here are done with
     `path`. A thread that already holds `path` gets `RuntimeError` at once, as from
     `lock`, rather than waiting on the gate for itself."""
@@ -189,10 +260,103 @@ def _gated_lock(path: Path, *, timeout: float | None = None) -> Iterator[None]:
             raise LockTimeout(path, os.getpid())
         timeout = max(0.0, deadline - time.monotonic())
     try:
-        with lock(path, timeout=timeout):
+        with _lock(path, timeout, nested_take=nested_take):
             yield
     finally:
         gate.release()
+
+
+def _descriptor(path: str | os.PathLike) -> int:
+    """The descriptor through which this process holds the lock file `path` with `lock`.
+
+    For the install's hand-off of the core lock to the child it starts; the descriptor
+    stays this process's, and is closed when its `lock` block ends. Raises
+    `RuntimeError` when this process does not hold `path`.
+    """
+    key = os.path.abspath(path)
+    with _held_guard:
+        fd = _fds.get(key)
+    if fd is None:
+        raise RuntimeError(f"{path} is not locked by this process")
+    return fd
+
+
+# -- the install's claim -----------------------------------------------------------------
+
+def adopt_core_claim(path: str | os.PathLike) -> bool:
+    """Take over the claim on the core lock `path` that an install's parent handed this
+    process, and say whether this process now holds one.
+
+    The settle and teardown child calls it once, first. It reads `MOXI_CORE_LOCK_FD`,
+    deletes it from `os.environ` whatever it held, and checks that the descriptor it names
+    (on Windows a handle) is open on `path`: `(st_dev, st_ino)` of the descriptor equal
+    those of `path`. On a pass the descriptor is kept in this module, made
+    non-inheritable, for the process's whole life, and every `lock(path, nested=True)`
+    then yields; nothing this process spawns inherits the claim, neither the variable nor
+    the descriptor. A missing variable, or one that names a closed descriptor or another
+    file, keeps nothing and returns False. A later call reads nothing and returns whether
+    a claim is still held.
+    """
+    global _adopted, _claim
+    with _claim_guard:
+        if _adopted:
+            return _claim is not None
+        _adopted = True
+        value = os.environ.pop(CLAIM_VARIABLE, None)
+        if value is None:
+            return False
+        fd = _claim_descriptor(value)
+        if fd is None or not _same_file(fd, path):
+            return False
+        os.set_inheritable(fd, False)
+        _claim = fd
+        return True
+
+
+def _claim_descriptor(value: str) -> int | None:
+    """The descriptor the variable's text names, or None when it names none."""
+    value = value.strip()
+    if not value.isdigit():
+        return None
+    number = int(value)
+    if not _WINDOWS:
+        return number
+    import msvcrt
+
+    try:
+        return msvcrt.open_osfhandle(number, os.O_RDWR)
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def _same_file(fd: int, path: str | os.PathLike) -> bool:
+    """Whether `fd` is open on the file at `path` (on Windows the volume serial and the
+    file index, which `os.stat` reports as `st_dev` and `st_ino`)."""
+    try:
+        held = os.fstat(fd)
+        there = os.stat(path)
+    except (OSError, OverflowError, ValueError):
+        return False
+    return (held.st_dev, held.st_ino) == (there.st_dev, there.st_ino)
+
+
+def _claim_checks(path: Path) -> bool:
+    """Whether this process holds the install's claim and it still checks against `path`.
+    A claim that no longer checks is dropped, with one warning line."""
+    global _claim
+    with _claim_guard:
+        if _claim is None:
+            return False
+        if _same_file(_claim, path):
+            return True
+        _claim = None
+    try:
+        sys.stderr.write(f"moxi: the install's lock claim is no longer open on {path}; "
+                         "taking the lock as a standalone caller\n")
+        sys.stderr.flush()
+    except (OSError, ValueError, AttributeError):
+        pass  # no terminal to warn on; the lock is taken all the same
+    return False
 
 
 def _acquire(path: Path, timeout: float | None) -> int:
@@ -516,5 +680,5 @@ def _owner(uid: int) -> str:
         return f"uid {uid}"
 
 
-__all__ = ["LockTimeout", "atomic_write", "lock", "update", "edit_toml", "append_record",
-           "read_records", "private_dir"]
+__all__ = ["LockTimeout", "atomic_write", "lock", "adopt_core_claim", "update", "edit_toml",
+           "append_record", "read_records", "private_dir"]
