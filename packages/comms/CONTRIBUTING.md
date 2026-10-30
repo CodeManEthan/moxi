@@ -24,7 +24,8 @@ The suite runs every test in a temporary home, against fakes: no real daemon, no
 Claude Code, no network. Moxi's test kit fences each test in (`conftest.py` at the
 package root loads `moxi_dev.testing`): an emptied environment with every home in the
 test's tmp, and a write outside tmp or a connect off the machine fails the test. A plain
-run leaves out the slow, browser, build and live tiers; name one with `-m` to run it.
+run leaves out the slow, browser, build and live tiers; name one with `-m` to run it
+(a `live` test also needs `MOXI_TEST_LIVE=1` in the environment, or it is skipped).
 `moxi-dev check --full`, from the repository root, runs every tier but live.
 
 ```sh
