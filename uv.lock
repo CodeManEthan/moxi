@@ -10,6 +10,7 @@ members = [
     "moxi-dev",
     "moxi-launcher",
     "moxi-loopback",
+    "moxi-projects",
     "moxi-sessions",
     "moxi-turns",
 ]
@@ -257,6 +258,29 @@ requires-dist = [
     { name = "starlette", specifier = ">=1.10,<2" },
     { name = "uvicorn", specifier = ">=0.54,<1" },
 ]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "pytest" },
+]
+
+[[package]]
+name = "moxi-projects"
+version = "0.1.0"
+source = { editable = "packages/projects" }
+dependencies = [
+    { name = "moxi" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "moxi-dev" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "moxi", editable = "packages/moxi" }]
 
 [package.metadata.requires-dev]
 dev = [
