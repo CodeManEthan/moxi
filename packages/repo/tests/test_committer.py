@@ -798,3 +798,36 @@ def test_the_sha_is_our_commit_even_when_head_moves_right_after(demo, monkeypatc
     assert result.status == "committed" and result.sha == ours
     assert result.files == ("notes/a.md",) and result.unjudged == ()
 
+
+
+# -- ssh -------------------------------------------------------------------------------------
+
+def _ssh_script(path: Path, marker: Path) -> Path:
+    path.write_text(f"#!/bin/sh\necho \"$@\" > '{marker}'\nexit 1\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+@pytest.mark.parametrize("how", ["core.sshCommand", "GIT_SSH", "none"])
+def test_git_keeps_the_users_own_ssh_and_else_runs_ssh_in_batch_mode(demo, tmp_path,
+                                                                    monkeypatch, how):
+    repo = demo.repo()
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    default = tmp_path / "default-ssh-ran"
+    _ssh_script(fake_bin / "ssh", default)
+    monkeypatch.setenv("PATH", f"{fake_bin}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.delenv("GIT_SSH_COMMAND", raising=False)
+    monkeypatch.delenv("GIT_SSH", raising=False)
+    mine = tmp_path / "mine-ran"
+    user_ssh = _ssh_script(tmp_path / "user-ssh", mine)
+    if how == "core.sshCommand":
+        git(repo, "config", "core.sshCommand", str(user_ssh))
+    elif how == "GIT_SSH":
+        monkeypatch.setenv("GIT_SSH", str(user_ssh))
+    moxi_repo.git(repo, "ls-remote", "ssh://example.invalid/x.git")
+    if how == "none":
+        assert not mine.exists() and "BatchMode=yes" in default.read_text()
+    else:
+        assert mine.exists() and not default.exists()
+

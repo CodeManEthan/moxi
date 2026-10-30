@@ -3,8 +3,11 @@
 
 `git(root, *args)` runs `git -C <root> <args>` through `moxi.proc.run`, so a git that
 hangs is killed with everything it started. It never waits on a person: the terminal
-prompt is off (`GIT_TERMINAL_PROMPT=0`) and ssh runs in batch mode, unless the caller's
-environment already sets `GIT_SSH_COMMAND`. With `clean_env` (the default) it first drops
+prompt is off (`GIT_TERMINAL_PROMPT=0`) and ssh runs in batch mode
+(`GIT_SSH_COMMAND="ssh -o BatchMode=yes"`), unless the user set their own ssh: the
+environment's `GIT_SSH_COMMAND` or `GIT_SSH`, or, for a command that reaches a remote
+(`push`, `fetch`, `ls-remote` and the like), the repo's `core.sshCommand`, read with one
+`git config` call before it. With `clean_env` (the default) it first drops
 git's local variables (`GIT_DIR`, `GIT_INDEX_FILE` and the rest that
 `git rev-parse --local-env-vars` lists) and the four global pathspec variables, so a call
 made from inside a git hook acts on the repo it names, and pathspecs read as git's
@@ -55,15 +58,29 @@ def local_env_vars() -> tuple[str, ...]:
     return _local_vars
 
 
+#: The ssh command git runs when the user set none of their own.
+BATCH_SSH = "ssh -o BatchMode=yes"
+#: git commands that can reach a remote, so ssh; before one, `git()` reads
+#: `core.sshCommand`. (`remote` only with one of `_REMOTE_VERBS`.)
+_REMOTE_COMMANDS = frozenset({"push", "fetch", "pull", "ls-remote", "clone", "archive",
+                              "submodule", "remote"})
+_REMOTE_VERBS = frozenset({"update", "prune", "show", "set-head"})
+#: git's own options that take their value as the next argument.
+_VALUED = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"})
+
+
 def environment(*, clean_env: bool = True, author: tuple[str, str] | None = None,
-                extra: dict[str, str] | None = None) -> dict[str, str]:
-    """The environment `git()` gives git."""
+                extra: dict[str, str] | None = None,
+                batch_ssh: bool = True) -> dict[str, str]:
+    """The environment `git()` gives git. `GIT_SSH_COMMAND` is set to `BATCH_SSH` only
+    with `batch_ssh` and when the environment sets neither it nor `GIT_SSH`."""
     env = dict(os.environ)
     if clean_env:
         for name in (*local_env_vars(), *PATHSPEC_VARS):
             env.pop(name, None)
     env["GIT_TERMINAL_PROMPT"] = "0"
-    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+    if batch_ssh and not env.get("GIT_SSH_COMMAND") and not env.get("GIT_SSH"):
+        env["GIT_SSH_COMMAND"] = BATCH_SSH
     if author is not None:
         name, email = author
         env.update(GIT_AUTHOR_NAME=name, GIT_AUTHOR_EMAIL=email,
@@ -89,13 +106,52 @@ def git(root: str | os.PathLike, *args: str, timeout: float = DEFAULT_TIMEOUT,
     from moxi import proc
 
     data = input.encode("utf-8") if isinstance(input, str) else input
+    batch = not _users_ssh(root, args, clean_env, timeout)
     done = proc.run(["git", "-C", os.fspath(Path(root)), *args], timeout=timeout,
                     input=data, env=environment(clean_env=clean_env, author=author,
-                                                extra=extra_env))
+                                                extra=extra_env, batch_ssh=batch))
     out = done.stdout or b""
     return subprocess.CompletedProcess(
         done.args, done.returncode, out if binary else out.decode("utf-8", "surrogateescape"),
         (done.stderr or b"").decode("utf-8", "surrogateescape"))
+
+
+def _split(args) -> tuple[list[str], str | None, list[str]]:
+    """git's own options, the command, and the command's arguments."""
+    args = list(args)
+    i = 0
+    while i < len(args) and args[i].startswith("-"):
+        i += 2 if args[i] in _VALUED else 1
+    if i >= len(args):
+        return args, None, []
+    return args[:i], args[i], args[i + 1:]
+
+
+def _users_ssh(root, args, clean_env: bool, timeout: float) -> bool:
+    """True when the command can reach a remote and the user set their own ssh in git's
+    config: a `-c core.sshCommand=...` in `args`, or the repo's `core.sshCommand`. The
+    environment's own variables are `environment()`'s to see."""
+    lead, command, rest = _split(args)
+    if command not in _REMOTE_COMMANDS:
+        return False
+    if command == "remote" and not (_REMOTE_VERBS & set(rest[:1])):
+        return False
+    env = os.environ
+    if env.get("GIT_SSH_COMMAND") or env.get("GIT_SSH"):
+        return False
+    for i, arg in enumerate(lead):
+        if arg == "-c" and i + 1 < len(lead):
+            if lead[i + 1].partition("=")[0].lower() == "core.sshcommand":
+                return True
+    from moxi import proc
+
+    try:
+        done = proc.run(["git", "-C", os.fspath(Path(root)), *lead, "config", "--get",
+                         "core.sshCommand"], timeout=timeout,
+                        env=environment(clean_env=clean_env))
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return done.returncode == 0 and bool((done.stdout or b"").strip())
 
 
 def literal_pathspec(path: str | os.PathLike) -> str:
