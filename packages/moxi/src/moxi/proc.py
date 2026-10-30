@@ -12,6 +12,7 @@
   has given to another process since never matches.
 - `environ` reads another process's environment as it was started, where the system
   lets one: Linux and macOS.
+- `status` says how a detached child this process started ended.
 
 psutil is imported only inside the functions that use it, so importing this module is
 cheap.
@@ -23,6 +24,7 @@ import os
 import subprocess
 import sys
 import threading
+from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
@@ -216,7 +218,8 @@ def spawn(argv: Argv, *, lifeline: str | None = None,
     With `detached=True` the child is meant to outlive this process: it starts in a new
     session (POSIX) or as a detached process in a new process group outside any job
     (Windows), its stdin is `/dev/null`, and its stdout and stderr are appended to
-    `output` (created 0600; `/dev/null` when None). The child's pid is returned at once.
+    `output` (created 0600; `/dev/null` when None). The child's pid is returned at once;
+    its `Popen` is kept in this process, so `status(pid)` can read how it ended.
     A lifeline, `stdout` or `stderr` with `detached=True` raises `ValueError`.
 
     `env` is the child's whole environment, used as given (None: this process's); the
@@ -441,16 +444,91 @@ def _spawn_detached(argv: Argv, *, env, cwd, output) -> int:
                 proc = subprocess.Popen(_argv(argv), creationflags=flags, **common)
     finally:
         os.close(out)
+    # The new child is started before the old ones are polled: a pid is free for reuse
+    # only once its child is reaped, and the reap below keeps that child's code, so a new
+    # child can only get a pid whose earlier code is already kept.
     with _detached_guard:
-        _detached[:] = [child for child in _detached if child.poll() is None]
-        _detached.append(proc)
+        still = []
+        for child in _detached:
+            code = child.poll()
+            if code is None:
+                still.append(child)
+            else:
+                _keep_code(child.pid, code)
+        still.append(proc)
+        _detached[:] = still
     return proc.pid
 
 
-# Detached children this process started and has not yet seen end. Each `spawn(...,
-# detached=True)` polls them, so one that has ended is reaped (no zombie is left) without
-# this process ever waiting for one.
+def _keep_code(pid: int, code: int) -> None:
+    """Keep an ended detached child's code until `status` reads it. Past the bound the
+    oldest unread code is dropped. The caller holds `_detached_guard`."""
+    _codes.append((pid, code))
+    while len(_codes) > CODES_KEPT:
+        _codes.popleft()
+
+
+def status(pid: int) -> int | None:
+    """How a child this process started with `spawn(..., detached=True)` ended.
+
+    None while it runs; its exit code once it has ended, read by `Popen.poll()` on the
+    `Popen` `spawn` kept, which also reaps it. On POSIX a negative code -N means signal N
+    ended it; on Windows the code is the process's own exit code. The first call that
+    returns a code forgets the child: a later call for that pid raises `LookupError`
+    (unless a later detached child has the pid by then, below), and so does a call for
+    any pid this process did not start detached. For another process's liveness use
+    `identity` and `alive`.
+
+    An ended child's code is kept until `status` returns it, and no ended child stays a
+    zombie past this process's next detached `spawn`, which reaps every ended one and
+    keeps its code. For one pid, children are answered in the order they were started: a
+    reaped child's pid is free, so a later detached child can get it while the earlier
+    code is unread; the earlier code comes first, then the later child's state. A caller
+    that reads its children oldest first, or each before it starts the next, always
+    reads its own child's end.
+
+    The kept codes are one table for the whole process, shared by every caller of
+    `spawn(..., detached=True)` in it, and the order holds only among the children one
+    caller reads. A caller that shares the process with another user of detached
+    children must read every child it starts, or a later child of the other caller that
+    gets the same pid is answered with its unread code first.
+
+    At most `CODES_KEPT` (1024) unread codes are held, oldest dropped first. A dropped
+    code is lost: its `status` answers as if it never existed, or by the pid's later
+    child when one is kept. A caller that reads each child it starts never reaches the
+    bound.
+
+    The code is `Popen`'s own. In a process that reaps its children itself
+    (`os.waitpid(-1, ...)`, or SIGCHLD ignored), a child it took reads 0. With SIGCHLD
+    ignored a pid can come back while its earlier `Popen` is still kept; the pid's oldest
+    kept `Popen` is polled first.
+    """
+    if isinstance(pid, int) and not isinstance(pid, bool):
+        with _detached_guard:
+            for at, (kept, code) in enumerate(_codes):
+                if kept == pid:
+                    del _codes[at]
+                    return code
+            for at, child in enumerate(_detached):
+                if child.pid == pid:
+                    code = child.poll()
+                    if code is not None:
+                        del _detached[at]
+                    return code
+    raise LookupError(f"process {pid!r} is not a detached child of this process whose "
+                      f"status is still unread")
+
+
+#: The most unread exit codes of ended detached children `status` keeps.
+CODES_KEPT = 1024
+
+# Detached children this process started and has not yet seen end, oldest first. Each
+# `spawn(..., detached=True)` polls them, so one that has ended is reaped (no zombie is
+# left) without this process ever waiting for one, and its code moves to `_codes`.
 _detached: list[subprocess.Popen] = []
+# The codes of ended detached children no `status` call has returned yet, as (pid, code),
+# in the order they were seen to end, which for one pid is the order they were started.
+_codes: deque[tuple[int, int]] = deque()
 _detached_guard = threading.Lock()
 
 
@@ -711,5 +789,5 @@ def _pairs(entries) -> dict[str, str]:
     return env
 
 
-__all__ = ["LIFELINE_ENV", "ProcId", "run", "spawn", "lifeline", "identity", "alive",
-           "environ"]
+__all__ = ["LIFELINE_ENV", "CODES_KEPT", "ProcId", "run", "spawn", "lifeline", "identity",
+           "alive", "environ", "status"]
