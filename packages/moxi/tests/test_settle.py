@@ -148,6 +148,8 @@ def settle(w, capsys, monkeypatch, *, setup="ok", replace=False):
 
 
 SERVICE = "moxi-demo-relay.service"
+POSIX = pytest.mark.skipif(sys.platform == "win32",
+                           reason="symbolic links need a privilege on Windows")
 
 
 # -- the move ----------------------------------------------------------------------------------
@@ -199,14 +201,15 @@ def test_each_refusal_comes_before_any_stop(w, monkeypatch, case):
     if case == "unmarked":
         (w.root / SERVICE).write_text("[Service]\nExecStart=/bin/true\n")
     if case == "device":
-        real = os.stat
+        for name in ("stat", "lstat"):
+            real = getattr(os, name)
 
-        def stat(path, *a, **k):
-            st = real(path, *a, **k)
-            if Path(path) == old:
-                return os.stat_result((*st[:2], st.st_dev + 1, *st[3:]))
-            return st
-        monkeypatch.setattr(os, "stat", stat)
+            def stat(path, *a, real=real, **k):
+                st = real(path, *a, **k)
+                if Path(path) == old:
+                    return os.stat_result((*st[:2], st.st_dev + 1, *st[3:]))
+                return st
+            monkeypatch.setattr(os, name, stat)
     record: list = []
     with pytest.raises(home.MoveError) as caught:
         home.move("demo", record)
@@ -257,6 +260,95 @@ def test_an_empty_new_directory_is_replaced_and_an_empty_old_one_tidied(w):
     w.sup.calls.clear()
     assert home.move("demo", []) == [] and w.sup.calls == []
     assert not old.exists()
+
+
+# -- an old directory that is a symbolic link ---------------------------------------------
+
+def home_rows(module="demo"):
+    from moxi.doctor import _run
+
+    return {r.name: r for r in _run.run([module]) if r.name.startswith("home ")}
+
+
+def linked_legacy(w, *, relative=False, label="oldbox"):
+    """The old state folder as a link to data kept elsewhere."""
+    elsewhere = w.tmp / "disk" / "demo-state"
+    elsewhere.mkdir(parents=True)
+    (elsewhere / "data.txt").write_text("live")
+    link = w.home / "state" / label / "demo"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(os.path.relpath(elsewhere, link.parent) if relative else elsewhere)
+    return link, elsewhere
+
+
+@POSIX
+def test_an_absolute_legacy_link_is_read_named_and_moved_as_the_link(w):
+    w.installed(DAEMONS=ONE)
+    link, elsewhere = linked_legacy(w)
+    new = w.home / "state" / "demo"
+    assert moxi.paths.Layout("demo").state_dir() == link
+    row = home_rows()["home state"]
+    assert (row.state, row.fix) == ("warn", "moxi install demo")
+    assert str(link) in row.detail
+    record = home.move("demo", [])
+    assert [s.unit for s in record] == [SERVICE]
+    assert new.is_symlink() and new.resolve() == elsewhere.resolve()
+    assert (new / "data.txt").read_text() == "live"
+    assert not os.path.lexists(link) and not link.parent.exists()
+    assert moxi.paths.Layout("demo").state_dir() == new
+    assert "home state" not in home_rows()
+
+
+@POSIX
+def test_a_relative_legacy_link_refuses_the_move_before_any_stop(w):
+    w.installed(DAEMONS=ONE)
+    link, elsewhere = linked_legacy(w, relative=True)
+    new = w.home / "state" / "demo"
+    assert moxi.paths.Layout("demo").state_dir() == link
+    record: list = []
+    with pytest.raises(home.MoveError) as caught:
+        home.move("demo", record)
+    assert caught.value.refused and caught.value.only_move and record == []
+    assert w.calls("stop") == []
+    assert caught.value.line == (
+        f"demo: {link} is a link to a relative path; make {link} an absolute link, or "
+        f"move the folder to {new} by hand, then run `moxi install demo` again")
+    assert link.is_symlink() and (link / "data.txt").read_text() == "live"
+    row = home_rows()["home state"]
+    assert row.fix == home.link_fix("demo", link, new)
+
+
+@POSIX
+def test_with_two_labels_whose_first_is_a_link_all_three_take_the_first(w, monkeypatch):
+    monkeypatch.setattr(moxi.paths, "_host_name", lambda: "thishost")
+    w.installed(DAEMONS=ONE)
+    link, elsewhere = linked_legacy(w)
+    second = w.home / "state" / "thishost" / "demo"
+    second.mkdir(parents=True)
+    (second / "other.txt").write_text("other")
+    assert moxi.paths.Layout("demo").state_dir() == link
+    assert str(link) in home_rows()["home state"].detail
+    assert [old for _, old, _ in home.legacy("demo")] == [link]
+    home.move("demo", [])
+    new = w.home / "state" / "demo"
+    assert new.is_symlink() and (new / "data.txt").read_text() == "live"
+    assert (second / "other.txt").exists()
+
+
+@POSIX
+def test_a_relative_legacy_link_lets_the_rest_of_the_install_run_and_exits_1(
+        w, capsys, monkeypatch):
+    w.installed(DAEMONS=ONE)
+    link, _ = linked_legacy(w, relative=True)
+    w.module(DAEMONS=ONE, version="0.2.0")
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 1
+    assert "is a link to a relative path" in out
+    assert "setup demo: done" in out
+    assert _settle.setup_version("demo") == "0.2.0"
+    assert w.calls("stop") == []                     # the move stopped nothing
+    assert w.active(SERVICE)
+    assert moxi.paths.Layout("demo").state_dir() == link
 
 
 def test_the_move_takes_the_core_lock_nested(w, monkeypatch):

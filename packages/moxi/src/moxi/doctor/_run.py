@@ -651,17 +651,22 @@ def _tree_size(path: Path) -> int:
 # -- 6. home, 7. strays, 8. setup versions, 9. records -------------------------------------------
 
 def _check_home(ctx: _Context) -> list[Row]:
-    from .. import paths
+    from .. import home, paths
 
     rows = []
     for found in ctx.present:
         layout = paths.Layout(found.name)
         for kind, root, where in (("state", layout.state_root(), layout.state_dir()),
                                   ("cache", layout.cache_root(), layout.cache_dir())):
-            if where != root / found.name:
-                rows.append(Row(found.name, f"home {kind}", "warn",
-                                f"its {kind} is read in place under a host folder: "
-                                f"{where}", f"moxi install {found.name}"))
+            new = root / found.name
+            if where == new:
+                continue
+            # The move refuses a link to a relative path, so its fix is the link's own.
+            fix = (home.link_fix(found.name, where, new) if home.relative_link(where)
+                   else f"moxi install {found.name}")
+            rows.append(Row(found.name, f"home {kind}", "warn",
+                            f"its {kind} is read in place under a host folder: {where}",
+                            fix))
     return rows
 
 

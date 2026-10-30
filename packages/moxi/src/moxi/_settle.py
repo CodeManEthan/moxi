@@ -376,6 +376,9 @@ class Settle:
     #: The stop record the move fills and the `finally` starts again.
     record: list = field(default_factory=list)
     failed: bool = False
+    #: The move refused in a way that leaves the rest of the step to run (an old
+    #: directory that is a link to a relative path): the step goes on, and exits 1.
+    moved: bool = True
 
     @property
     def restart(self) -> bool:
@@ -417,7 +420,7 @@ def settle(module: str, *, replace: bool = False) -> int:
         say(f"{module}: interrupted; started again {started} of the {len(step.record)} "
             f"units the move stopped", err=True)
         return INTERRUPTED
-    if step.failed or problems:
+    if step.failed or problems or not step.moved:
         return 1
     code = _later_steps(step)
     if code == 0:
@@ -448,6 +451,11 @@ def _move(step: Settle) -> bool:
             home.move(step.module, step.record, replace=step.replace, say=say)
     except home.MoveError as exc:
         say(exc.line, err=True)
+        if exc.only_move:
+            # Nothing was stopped or moved, and the old directory is still read in
+            # place, so setup and the units go on; the install still exits 1.
+            step.moved = False
+            return True
         return False
     return True
 
