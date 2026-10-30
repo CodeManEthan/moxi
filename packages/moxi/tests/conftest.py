@@ -89,10 +89,38 @@ def metadata(name: str, version: str, *, requires: tuple[str, ...] = (),
     return "\n".join(lines) + "\n"
 
 
+def see_only(root: Path, monkeypatch) -> None:
+    """Let `importlib.metadata` find only the distributions under `root`, and `moxi` itself.
+
+    A test of discovery or install sees exactly the distributions its site installs. The
+    environment may hold real modules and their dependencies (a workspace installs every
+    module), so the rest is filtered out of `Distribution.discover`, which entry points,
+    `distributions()` and `distribution(name)` all go through.
+    """
+    from importlib.metadata import Distribution
+
+    discover = Distribution.discover
+
+    def seen(dist) -> bool:
+        return dist.name == "moxi" or Path(dist.locate_file("")) == root
+
+    def filtered(cls, **kwargs):
+        return (d for d in discover(**kwargs) if seen(d))
+
+    monkeypatch.setattr(Distribution, "discover", classmethod(filtered))
+
+
 @pytest.fixture
 def site(tmp_path, monkeypatch):
+    """A fresh site on `sys.path` for the test's fake distributions.
+
+    While it is active, `importlib.metadata` finds only the site's distributions and `moxi`
+    itself: every other real distribution in the environment is hidden, so a test that uses
+    this fixture cannot look one up by name, entry point or listing.
+    """
     root = tmp_path / "site"
     root.mkdir()
+    see_only(root, monkeypatch)
     monkeypatch.syspath_prepend(str(root))
     moxi.modules.reset()
     s = Site(root)
