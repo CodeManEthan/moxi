@@ -1,0 +1,56 @@
+# Model facts LiteLLM's price file lacks, laid over it when the model table is made
+# (tools/models_from_litellm.py, and `moxi usage prices update`).
+#
+# Every row says where its facts came from (`source`) and when they were read (`as_of`).
+# Prices are dollars per million tokens. A `[[model]]` row is laid over the LiteLLM row of
+# the same id field by field (a tier by its name); `match = "prefix"` makes it a prefix
+# row, looked up only after every other step fails, and its id must carry a digit.
+
+schema = 1
+as_of = "2026-10-30"
+
+# Cache prices as multiples of the input price, by LiteLLM provider. They fill a cache
+# price only where a model's row gives an input price and not that cache price.
+
+[defaults.anthropic]
+cache_read = 0.1
+cache_write_5m = 1.25
+cache_write_1h = 2.0
+source = "Anthropic prompt caching pricing: cache reads 0.1x the base input price, 5-minute cache writes 1.25x, 1-hour cache writes 2x"
+as_of = "2026-09-25"
+
+[defaults.openai]
+cache_write_5m = 1.0
+cache_write_1h = 1.0
+source = "OpenAI API pricing (developers.openai.com/api/docs/pricing): no separate cache-write price for these models; tokens written to the cache bill as input"
+as_of = "2026-10-04"
+
+# Bracket suffixes a harness adds to a model id. A variant's facts are laid over the base
+# model's.
+
+[variants."[1m]"]
+window = 1000000
+source = "Claude Code's [1m] model suffix names the 1M-token long-context variant, whatever window the base model's row gives"
+as_of = "2026-08-14"
+
+# Fast mode: the same model at a higher output speed, at premium prices. A request
+# carries `speed = "fast"`. Cache prices take the provider's multipliers over the fast
+# input price.
+
+[[model]]
+id = "claude-opus-5-5"
+tiers.fast = { speed = "fast", input = 8.0, output = 40.0 }
+source = "Anthropic API pricing, fast mode (research preview, Claude API only): Claude Opus 5.5 at $8 / $40 per million tokens, 2x standard"
+as_of = "2026-09-25"
+
+[[model]]
+id = "claude-opus-5"
+tiers.fast = { speed = "fast", input = 10.0, output = 50.0 }
+source = "Anthropic API pricing, fast mode (research preview, Claude API only): Claude Opus 5 at $10 / $50 per million tokens"
+as_of = "2026-09-25"
+
+[[model]]
+id = "claude-opus-4-8"
+tiers.fast = { speed = "fast", input = 10.0, output = 50.0 }
+source = "Anthropic API pricing, fast mode (research preview, Claude API only): Claude Opus 4.8 at $10 / $50 per million tokens"
+as_of = "2026-06-24"

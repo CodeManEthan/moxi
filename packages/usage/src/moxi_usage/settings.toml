@@ -1,0 +1,158 @@
+# The usage module's config schema. The file it governs is CONFIG/usage/config.toml;
+# `moxi config usage` shows every key and `moxi config usage init` writes the file.
+
+[claude.archive_roots]
+type = "list"
+items = "str"
+default = []
+doc = "More Claude Code projects roots to index besides the live one, each an absolute path, such as a backup of an older machine's transcripts."
+read = "use"
+
+[model]
+type = "list"
+default = []
+doc = "Your own [[model]] rows over the shipped model table: id, match (exact or prefix), any of input, output, cache_read, cache_write_5m, cache_write_1h (dollars per million tokens), window, max_output, tiers, provider, from and to (a price period, matched on the request's own time) and note."
+read = "use"
+
+[prices.url]
+type = "string"
+default = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+doc = "Where `moxi usage prices update` fetches LiteLLM's model price file from."
+read = "use"
+
+[prices.max_age_days]
+type = "int"
+default = 120
+doc = "The doctor warns when the model table in effect is older than this many days."
+read = "use"
+
+[index.workers]
+type = "int"
+default = 0
+doc = "Processes a full rebuild of the token index reads sources with; 0 picks one per core."
+read = "use"
+
+[index.wait_seconds]
+type = "float"
+default = 30.0
+doc = "How long a pass waits for another pass to finish before it exits 75."
+read = "use"
+
+[limits.codex_pull_after]
+type = "int"
+default = 600
+doc = "Seconds after which the newest Codex limits reading counts as stale, so limits asks the Codex app-server for a new one (needs turns)."
+read = "use"
+
+[limits.history_days]
+type = "int"
+default = 8
+doc = "Days of limits readings kept."
+read = "use"
+
+[limits.projection_minutes]
+type = "int"
+default = 60
+doc = "Minutes of readings a window's burn-rate projection fits."
+read = "use"
+
+[marks.default]
+type = "enum"
+values = ["off", "1x", "1.5x", "2x"]
+default = "off"
+doc = "The warn-at mark for a session its launch stamped none for."
+read = "use"
+
+[marks.max_age_days]
+type = "int"
+default = 7
+doc = "Days a fired mark's record is kept after its session was last seen."
+read = "use"
+
+[marks.handler_wait_ms]
+type = "int"
+default = 200
+doc = "Milliseconds usage waits for a crossing handler's line before it answers without it."
+read = "use"
+
+[restart_point.days]
+type = "int"
+default = 21
+doc = "Days of indexed sessions the restart-point measure reads."
+read = "use"
+
+[restart_point.interactive_only]
+type = "bool"
+default = true
+doc = "Measure the restart point from sessions a person ran at the keyboard only."
+read = "use"
+
+[restart_point.interactive_originators]
+type = "list"
+items = "str"
+default = ["codex-tui", "Codex Desktop"]
+doc = "Codex originators that count as a person at the keyboard, besides a cli source."
+read = "use"
+
+[restart_point.measure_weekly]
+type = "bool"
+default = false
+doc = "Measure the restart point once a week on a timer."
+read = "use"
+
+[ceiling.warn_tokens]
+type = "int"
+default = 0
+doc = "Context growth in tokens at which a subagent is warned once; the ceiling is off unless this and hard_tokens are both above 0."
+read = "use"
+
+[ceiling.hard_tokens]
+type = "int"
+default = 0
+doc = "Context growth in tokens past which a subagent's tools are refused, except handing off; the ceiling is off unless this and warn_tokens are both above 0."
+read = "use"
+
+[ceiling.return_tools]
+type = "list"
+items = "str"
+default = ["StructuredOutput"]
+doc = "Tools a subagent may always call, before any measurement, to return its result."
+read = "use"
+
+[ceiling.warning_text]
+type = "string"
+default = "Your context has grown by {growth} tokens since you started (now {current}). Past {hard} tokens of growth your tools will be refused except to hand off. Finish the step you are on, save your work and write a short hand-off soon."
+doc = "The line added once when a subagent passes warn_tokens; {growth}, {current} and {hard} are filled in."
+read = "use"
+
+[ceiling.deny_text]
+type = "string"
+default = "This subagent has passed its context ceiling, so the tool call was refused. Save your work, write a short hand-off and return your result."
+doc = "The reason given for each tool call refused past hard_tokens."
+read = "use"
+
+[ceiling.handoff_roots]
+type = "list"
+items = "str"
+default = []
+doc = "Directories under which a subagent past its ceiling may still read and write Markdown files, each an absolute path."
+read = "use"
+
+[ceiling.work_roots]
+type = "list"
+items = "str"
+default = []
+doc = "Directories, besides the subagent's own working directory, in which a subagent past its ceiling may still run git status, diff, add and commit."
+read = "use"
+
+[ceiling.allow_commands]
+type = "list"
+default = []
+doc = "More commands a subagent past its ceiling may run, each a list of the argument words a command must start with."
+read = "use"
+
+[ceiling.max_age_days]
+type = "int"
+default = 7
+doc = "Days a subagent's ceiling markers are kept."
+read = "use"

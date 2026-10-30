@@ -10,6 +10,7 @@ members = [
     "moxi-dev",
     "moxi-sessions",
     "moxi-turns",
+    "moxi-usage",
 ]
 
 [manifest.dependency-groups]
@@ -205,6 +206,36 @@ dev = [
     { name = "pytest" },
     { name = "websockets", specifier = ">=17.0.1" },
 ]
+
+[[package]]
+name = "moxi-usage"
+version = "0.1.0"
+source = { editable = "packages/usage" }
+dependencies = [
+    { name = "moxi" },
+    { name = "moxi-sessions" },
+]
+
+[package.optional-dependencies]
+turns = [
+    { name = "moxi-turns" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-sessions", editable = "packages/sessions" },
+    { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
+]
+provides-extras = ["turns"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest" }]
 
 [[package]]
 name = "packaging"
