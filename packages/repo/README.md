@@ -317,13 +317,60 @@ of it. Without projects, paths work as before. The git hooks never ask projects 
 
 ## Doctor checks, upgrades and uninstall
 
-> **Not written yet.** This section will cover the checks repo adds to `moxi doctor`
-> (hook entries, shims, launchers and their interpreter; git versions; saved specs and
-> files no spec covers; open doctor records), what `moxi install repo` does on an upgrade,
-> how other modules' upgrades and uninstalls reach their registered pieces, and what
-> `moxi uninstall repo` removes. Until then: `moxi repo git-hooks refresh` rewrites every
-> entry, shim and launcher after an upgrade, and `moxi repo git-hooks remove PATH` takes
-> everything repo wrote out of one repo.
+### What `moxi doctor` shows
+
+`moxi doctor repo` adds these rows. They only read: nothing is written or cleared.
+
+- **git**: the git on `PATH` against 2.39, and the mode a repo that isn't pinned gets. On
+  macOS also `/usr/bin/git`: when it is below 2.54 and a repo uses config mode, a commit
+  it makes runs no piece there, and the row says to pin that repo to shim mode
+  (`moxi repo git-hooks add PATH --mode shim`).
+- **Each indexed repo** (`hooks PATH`): every event's hook entry, shim or launcher is
+  there and is repo's; the interpreter and runner it names exist (a `fail` row when one is
+  missing; a `warn` row when it names another environment's); a shim another tool moved
+  aside (`<event>.legacy`, which that tool runs, is fine; any other name means the pieces
+  don't run); a chain line still needed, with the line to add; a launcher missing where
+  the chain line is in place, which makes the pieces skip quietly; a registered piece that
+  no installed module declares (a `fail` row when it is enabled and closed, since it then
+  refuses every commit). With nothing wrong, one `ok` row gives the mode and each event's
+  pieces. Most fixes are `moxi repo git-hooks refresh PATH`.
+- **Each spec** (`spec PATH NAME`): changed paths that have waited more than an hour past
+  the spec's interval; commits not pushed to its remote, with the last push error; paths
+  left out for over an hour, with why and since when (a path someone else staged that no
+  commit takes, a file over `max_bytes`); and a push record no pass will clear by itself,
+  for a spec that isn't saved or a branch no pass pushes any more.
+- **Uncovered files** (`uncovered PATH`): in a repo with a saved spec, changed or
+  untracked files, not ignored, that no saved spec's paths cover. Up to ten are named,
+  with the count.
+- **The ledger** (`ledger KEY`): a `warn` row for each open doctor record whose subject is
+  gone (its repo, piece, spec or branch), or whose piece lacks its `recorded` flag. The
+  next `refresh`, `git-hooks` or `specs` verb on that repo, or the repo's next committer
+  pass, clears it.
+
+The core shows the records repo leaves as `fail` rows of their own (`record KEY`): a piece
+that broke or returned `record`, a refused or failed commit pass, a failed push. Each goes
+when its condition ends; `moxi doctor --clear repo KEY` removes one by hand.
+
+### Upgrades
+
+Running `moxi install repo` again is how you upgrade repo, and each run runs repo's
+setup: `refresh` over every indexed repo, so an install that moved the
+environment rewrites every hook entry, shim and launcher to name the new interpreter. The
+doctor flags repo when its setup last ran at another version, with `moxi install repo` as
+the fix. One repo's problem, such as a repo that no longer exists, is printed with its
+fix and stays as a doctor row; the install still finishes. The setup fails only when it
+can't run at all: no git 2.39 or later while repos are indexed, or repo's config can't be
+read.
+
+`refresh` stays for what an install doesn't see: a git upgrade or downgrade, or a change
+of `git_hooks.mode`.
+
+### Other modules' upgrades, and uninstall
+
+> **Not written yet.** This part will cover how another module's upgrade or uninstall
+> reaches the pieces it registered, and what `moxi uninstall repo` removes. Until then,
+> `moxi repo git-hooks refresh` re-reads every declaration, and `moxi repo git-hooks remove
+> PATH` takes everything repo wrote out of one repo.
 
 ## Install
 
