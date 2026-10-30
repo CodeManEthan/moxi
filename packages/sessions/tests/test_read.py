@@ -42,6 +42,20 @@ def requests(recs) -> list:
     return [r for r in recs if r.kind == "request"]
 
 
+def agree_but_provider(back, forward) -> None:
+    """A backward read's records are the forward read's, except that a request's provider
+    may be `UNKNOWN` where the backward read cannot know it; a provider it gives is the
+    forward read's."""
+    given = {r.request_id: r.provider for r in requests(forward)}
+    for r in requests(back):
+        assert r.provider is UNKNOWN or r.provider == given[r.request_id], r
+    blank = [replace(r, provider=UNKNOWN) if r.kind == "request" else r
+             for r in back]
+    blank_forward = [replace(r, provider=UNKNOWN) if r.kind == "request" else r
+                     for r in forward]
+    assert sorted(plains(blank, line=False)) == sorted(plains(blank_forward, line=False))
+
+
 def claude_source(t: ClaudeTranscript) -> Source:
     return Source("claude", str(t.path), t.session_id, t.agent_id)
 
@@ -273,7 +287,7 @@ def test_a_backward_codex_read_maps_each_turn_from_its_own_start(codex_root):
         back = records_back(src)
         got = list(back)
         assert back.ended == "start"
-        assert sorted(plains(got, line=False)) == sorted(plains(forward, line=False))
+        agree_but_provider(got, forward)
         assert [r.request_id for r in requests(got)] == \
             [r.request_id for r in reversed(requests(forward))]
         with_head = records_back(src, head=True)
@@ -405,8 +419,47 @@ def test_codex_last_request_carries_its_turns_model_and_provider(codex_root):
     r.write()
     got = last_request(codex_source(r))
     assert got.request.request_id == newest
-    assert got.request.model == "model-b" and got.request.provider == "first"
-    assert got.request.context_window == CONTEXT_WINDOW
+    assert got.request.model == "model-b" and got.request.context_window == CONTEXT_WINDOW
+    # A settings line before the newest turn is out of the backward read's reach, so the
+    # provider is not known; a settings line in the newest turn names it.
+    assert got.request.provider is UNKNOWN
+    r.turn(model="model-c")
+    r.settings(provider="second")
+    newest = r.request()
+    r.write()
+    got = last_request(codex_source(r))
+    assert got.request.request_id == newest and got.request.provider == "second"
+
+
+def test_codex_last_request_in_the_first_turn_carries_line_1s_provider(codex_root):
+    r = CodexRollout(codex_root, provider="first")
+    r.turn(model="model-a")
+    newest = r.request()
+    r.write()
+    got = last_request(codex_source(r))
+    assert got.request.request_id == newest and got.request.provider == "first"
+
+
+def test_a_backward_codex_read_never_gives_a_provider_the_forward_read_does_not(
+        codex_root):
+    """A settings line in an earlier turn sets the provider of every later request. A
+    backward read that has not met it in order gives `UNKNOWN`, never line 1's."""
+    r = CodexRollout(codex_root, provider="first")
+    r.turn()
+    r.settings(provider="azure")
+    r.request()
+    r.turn()                     # a new turn; its run starts after the settings line
+    newest = r.request()
+    r.write()
+    src = codex_source(r)
+    forward = requests(records(src))
+    back = requests(records_back(src, kinds={"request"}))
+    assert [q.provider for q in forward] == ["azure", "azure"]
+    assert [(q.request_id, q.provider) for q in back] == [
+        (newest, UNKNOWN), (forward[0].request_id, "azure")]
+    agree_but_provider(back, forward)
+    got = last_request(src)
+    assert got.request.request_id == newest and got.request.provider is UNKNOWN
 
 
 def test_opencode_last_request_leaves_an_open_step_out(db):
@@ -885,7 +938,7 @@ def test_window_pages_back_through_every_turn_once(projects, codex_root):
         assert [len({x.turn_id for x in page if x.turn_id is not UNKNOWN})
                 for page in pages] == [2, 2, 1]
         flat = [x for page in reversed(pages) for x in page]
-        assert sorted(plains(flat, line=False)) == sorted(plains(whole, line=False))
+        agree_but_provider(flat, whole)
         # Oldest record first within a page.
         offsets = [x.at["offset"] for x in pages[0]]
         assert offsets == sorted(offsets)

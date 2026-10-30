@@ -19,9 +19,11 @@ meets those lines last. So the backward read collects lines back to the line tha
 turn (a Claude line that writes its own `promptId`, a Codex `task_started`), maps that run
 forward, and hands its records on newest first. A Codex run starts from the state after
 line 1, which the read always takes. Two facts stay out of reach of a run: a Codex
-`thread_settings_applied` written before the request's turn (the provider is then line
-1's), and, for lines the byte limit cut off from their turn, the turn itself (their
-`turn_id` and model are unknown). A backward read counts no lines, so its records' `at` is
+`thread_settings_applied` written before the run, and, for lines the byte limit cut off
+from their turn, the turn itself (their `turn_id` and model are unknown). So a Codex run
+that does not start at line 2 starts with its provider unknown, until a settings line in
+the run names it: a backward read gives a request the provider a forward read gives, or
+none, never another. A backward read counts no lines, so its records' `at` is
 `{"line": None, "offset": b}`, except where a request's key is its line number (a Claude
 request with no id of any kind, a legacy Codex request): that line is numbered, so its
 `request_id` is the one a forward read gives.
@@ -486,6 +488,11 @@ class _Pushback:
     def push(self, items: list) -> None:
         self.back.extendleft(reversed(items))
 
+    def at_start(self) -> bool:
+        """True when no line is left: none taken back, and the read under it reached
+        the line it stops at (`ended` is set one line early, as `read_back` does)."""
+        return not self.back and getattr(self.items, "ended", None) == START
+
 
 def _claude_anchor(raw: bytes) -> bool:
     """A line that writes its own `promptId`: the turn of every line after it, up to the
@@ -587,7 +594,15 @@ class _ClaudeBack:
 
 class _CodexBack:
     """Codex lines, newest first, to records, newest first, each run mapped forward from
-    the state after line 1."""
+    the state after line 1.
+
+    The rule: a backward read gives a request the provider a forward read gives it, or
+    `UNKNOWN`, never another. A `thread_settings_applied` line sets the provider for every
+    line after it, and a run that does not start right after line 1 may have one before
+    it that the read has not met. So line 1's provider holds only for the run that starts
+    at line 2; any other run starts with the provider unknown, and learns it from a
+    settings line inside the run.
+    """
 
     def __init__(self, source: Source, wanted: frozenset[str] | None, keep_raw: bool,
                  numbers: _LineNumbers, start: codex.State):
@@ -596,6 +611,7 @@ class _CodexBack:
         self.keep_raw = keep_raw
         self.numbers = numbers
         self.start = start
+        self.cut = replace(start, provider=UNKNOWN)
 
     def _map(self, raw: bytes, at_line: int | None, offset: int, state: codex.State,
              unterminated: bool):
@@ -632,7 +648,7 @@ class _CodexBack:
                     break
             if not segment:
                 return
-            state = self.start
+            state = self.start if pending.at_start() else self.cut
             if anchored and state.legacy:
                 # A legacy request skips a repeat of the previous `token_count`, which can
                 # sit before the turn: read back to it for the state, and hand the lines
@@ -641,7 +657,7 @@ class _CodexBack:
                 for item in pending:
                     looked.append(item)
                     if _codex_token_count(item[0]):
-                        _, state = self._map(item[0], None, item[2], self.start, False)
+                        _, state = self._map(item[0], None, item[2], state, False)
                         break
                 pending.push(looked)
             yield from self.run(segment, state)
