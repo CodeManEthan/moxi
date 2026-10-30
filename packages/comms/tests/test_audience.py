@@ -326,13 +326,24 @@ def test_rescan_deliveries_carry_the_fill_in(rig, reboot):
     planner = rig.shim(**PLANNER)
     payload = wait_for_payload(planner, reply.id)
     assert (payload["audience"], payload["audience_source"]) == ("operator", "inherited")
-    # and the rescan pass itself, against a bound identity past nothing
+    # and the rescan pass itself, against a bound identity past nothing. The reply
+    # went out from its row at the bind, and the row stays until the shim reports it
+    # handled; the shim takes an id it holds only once. With the row, the hand-over and
+    # the index all gone, the rescan is the one pass that can deliver it again.
     with daemon._lock:
         daemon.audiences.clear()
         daemon.bindings["planner@proj-a"].delivered.clear()
+        daemon._queue_drop("planner@proj-a", [reply.id])
+    with planner._lock:
+        planner.held_ids.discard(reply.id)
     daemon.rescan()
-    wait_until(lambda: len([p for p in planner.queue if p["message_id"] == reply.id]) >= 2)
-    again = [p for p in planner.queue if p["message_id"] == reply.id]
+
+    def twice():
+        handed = [p for p in planner.queue if p["message_id"] == reply.id]
+        return handed if len(handed) >= 2 else None
+
+    again = wait_until(twice)
+    assert again, [p["message_id"] for p in planner.queue]
     assert (again[-1]["audience"], again[-1]["audience_source"]) == \
         ("operator", "inherited")
 
