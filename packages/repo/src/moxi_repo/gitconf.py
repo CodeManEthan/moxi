@@ -98,8 +98,7 @@ def key_of(common_dir: str | os.PathLike) -> str:
     return os.path.normcase(os.path.abspath(os.fspath(common_dir)))
 
 
-def resolve(path: str | os.PathLike) -> Repo:
-    """The repo at or above `path`; raises `NotARepo`."""
+def _rev_parse(path: str | os.PathLike) -> Repo:
     where = Path(path)
     if not where.is_dir():
         raise NotARepo(f"{path} is not a directory")
@@ -113,6 +112,43 @@ def resolve(path: str | os.PathLike) -> Repo:
         raise NotARepo(f"{path}: {why}")
     git_dir, common, hooks, top = (Path(p) for p in lines[:4])
     return Repo(top, git_dir, common, hooks)
+
+
+def resolve(path: str | os.PathLike) -> Repo:
+    """The repo at or above `path`; raises `NotARepo`.
+
+    Its `root` is the repo's main work tree, from whichever of its work trees `path` is
+    in, so a repo has one root however it is named; a linked worktree's own top is the
+    root only when the main work tree is bare or gone.
+    """
+    repo = _rev_parse(path)
+    if key_of(repo.git_dir) == repo.key:
+        return repo
+    for top, bare in worktrees(repo.common_dir)[:1]:
+        if bare or not top.is_dir() or key_of(top) == key_of(repo.root):
+            break
+        try:
+            main = _rev_parse(top)
+        except NotARepo:
+            break
+        if main.key == repo.key and key_of(main.git_dir) == main.key:
+            return main
+    return repo
+
+
+def worktrees(common_dir: str | os.PathLike) -> list[tuple[Path, bool]]:
+    """Each work tree git lists for a common git dir, main first: (its top, bare)."""
+    cgd = os.fspath(common_dir)
+    done = git(cgd, f"--git-dir={cgd}", "worktree", "list", "--porcelain", "-z")
+    if done.returncode != 0:
+        return []
+    out: list[tuple[Path, bool]] = []
+    for field in done.stdout.split("\0"):
+        if field.startswith("worktree "):
+            out.append((Path(field[len("worktree "):]), False))
+        elif field == "bare" and out:
+            out[-1] = (out[-1][0], True)
+    return out
 
 
 # -- git's version ------------------------------------------------------------------------
@@ -446,4 +482,4 @@ def remove_all(repo: Repo, state: State | None = None) -> list[str]:
 __all__ = ["Repo", "State", "Sync", "NotARepo", "GitError", "FLOOR", "CONFIG_FROM",
            "resolve", "read", "register", "set_enabled", "clear_recorded", "apply_settings", "remove_piece",
            "set_mode", "sync", "remove_all", "pick_mode", "git_version", "parse_version",
-           "interpreter", "runner_file", "chain_state", "check_shims", "key_of"]
+           "interpreter", "runner_file", "chain_state", "check_shims", "key_of", "worktrees"]

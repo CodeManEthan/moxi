@@ -51,19 +51,14 @@ def rows() -> list[Row]:
     version = gitconf.git_version()
     good, _ = pieces.declared()
     out: list[Row] = []
-    repos: list[tuple[str, gitconf.Repo | None]] = []
-    for key, entry in sorted(index.items()):
-        root = entry.get("root", "")
-        try:
-            repos.append((root, gitconf.resolve(root)))
-        except gitconf.NotARepo:
-            repos.append((root, None))
+    repos: list[tuple[str, gitconf.Repo | None, str | None]] = []
+    for key, entry, repo, why in api.indexed_repos(index):
+        repos.append((str(repo.root) if repo else entry.get("root") or key, repo, why))
     statuses = []
-    for root, repo in repos:
+    for root, repo, why in repos:
         name = f"hooks {root}"
         if repo is None:
-            out.append(Row(MODULE, name, "warn", f"{root} is no longer a git work tree",
-                           f"moxi repo git-hooks remove {root}"))
+            out.append(Row(MODULE, name, "warn", why, f"moxi repo git-hooks remove {root}"))
             continue
         try:
             status = api._status_of(repo, True, version, good)
@@ -74,7 +69,7 @@ def rows() -> list[Row]:
         statuses.append(status)
         out += _hook_rows(status)
     out = _git_rows(version, index, statuses) + out
-    for root, repo in repos:
+    for root, repo, _ in repos:
         if repo is not None:
             out += _spec_rows(repo)
     out += _ledger_rows(index)

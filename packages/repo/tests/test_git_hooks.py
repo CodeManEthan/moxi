@@ -620,3 +620,75 @@ def test_add_and_remove_take_piece_ids_as_arguments_or_as_a_list(demo):
     api.remove(repo, piece="demo/first")
     assert registered() == set()
     assert gitconf.resolve(repo).key in api.indexed()
+
+
+# -- the index: a repo is its common git dir -------------------------------------------------
+
+def _entries_name(repo: Path, python: str) -> bool:
+    return python in gitconf.read(gitconf.resolve(repo)).entries["pre-commit"]
+
+
+def test_a_repo_added_through_a_linked_worktree_outlives_that_worktree(demo):
+    repo = demo.repo()
+    wt = demo.tmp / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), "-b", "side")
+    api.add(wt, "demo/gate", "demo/watch", mode="config")
+    [entry] = api.indexed().values()
+    assert entry["root"] == str(repo)
+    # The guard's fallback names the main work tree, not the linked one.
+    assert f"remove {repo})" in gitconf.read(gitconf.resolve(repo)).entries["pre-commit"]
+    git(repo, "worktree", "remove", str(wt))
+    [listed] = api.status()
+    assert listed["root"] == str(repo) and listed["problems"] == []
+    moved = str(demo.hook_env["python"]) + "-moved"
+    demo.mp.setattr(gitconf, "interpreter", lambda: moved)
+    report = api.refresh()
+    assert report.ok and f"refreshed {repo}" in report.lines
+    assert _entries_name(repo, moved)
+    # Its old path is not the repo: remove there refuses and leaves the repo alone.
+    with pytest.raises(api.Usage):
+        api.remove(wt)
+    assert set(gitconf.read(gitconf.resolve(repo)).pieces) == {"demo/gate", "demo/watch"}
+
+
+def test_an_index_entry_that_names_a_removed_linked_worktree_finds_the_repo(demo):
+    repo = demo.repo()
+    wt = demo.tmp / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), "-b", "side")
+    api.add(repo, "demo/gate", mode="config")
+    # An index written with the linked worktree as the repo's root.
+    key = gitconf.resolve(repo).key
+    api._index_change(lambda repos: repos[key].update(root=str(wt)))
+    git(repo, "worktree", "remove", str(wt))
+    assert [s["problems"] for s in api.status()] == [[]]
+    assert problems(f"hooks {repo}") == [] and problems(f"hooks {wt}") == []
+    moved = str(demo.hook_env["python"]) + "-moved"
+    demo.mp.setattr(gitconf, "interpreter", lambda: moved)
+    assert api.refresh().ok and _entries_name(repo, moved)
+    assert api.indexed()[key]["root"] == str(repo)
+    # remove on the old path names the live repo and leaves it alone.
+    api._index_change(lambda repos: repos[key].update(root=str(wt)))
+    report = api.remove(wt)
+    assert not report.ok and f"moxi repo git-hooks remove {repo}" in report.problems[0]
+    assert set(gitconf.read(gitconf.resolve(repo)).pieces) == {"demo/gate"}
+    assert api.indexed()[key]["root"] == str(repo)
+
+
+def test_an_indexed_path_now_inside_another_repo_is_that_repo_gone(demo):
+    outer = demo.repo("outer")
+    inner = demo.repo("outer/inner")
+    api.add(outer, "demo/gate")
+    api.add(inner, "demo/lint")
+    inner_key = gitconf.resolve(inner).key
+    import shutil
+    shutil.rmtree(inner / ".git")
+    listed = {s["root"]: s for s in api.status()}
+    assert set(listed) == {str(outer), str(inner)}
+    assert "no longer a git work tree" in listed[str(inner)]["problems"][0]
+    assert listed[str(outer)]["problems"] == []
+    with pytest.raises(api.Usage):
+        api.remove(inner, "demo/gate")
+    report = api.remove(inner)
+    assert report.ok and inner_key not in api.indexed()
+    assert set(gitconf.read(gitconf.resolve(outer)).pieces) == {"demo/gate"}
+    assert gitconf.resolve(outer).key in api.indexed()

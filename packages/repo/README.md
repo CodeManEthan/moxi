@@ -37,7 +37,9 @@ moxi repo git-hooks list                         # every repo repo has written t
   together give that key's whole list of values, replacing what the repo had; `--set KEY=`
   alone removes the key; keys you don't name are kept. The key is matched ignoring case.
 - `moxi repo git-hooks remove PATH [PIECE...]` removes pieces; with none, everything repo
-  wrote to that repo. On a path that no longer exists it drops the repo from the index.
+  wrote to that repo. On a path that no longer exists it drops the repo from the index, and
+  so it does where an indexed repo is gone and its path is now inside another repo, which
+  it leaves alone.
 - `moxi repo git-hooks enable|disable PATH PIECE` turns one piece on or off in one repo. A
   disabled piece stays registered, with its settings.
 - `moxi repo git-hooks refresh [PATH]` reads the declarations, git's version and the
@@ -70,7 +72,9 @@ worktree of the repo shares it, and `git config --get-regexp '^moxi-repo\.'` sho
 So the git hook needs nothing outside the repo to run its pieces: an editor or a GUI
 committing with another environment runs the same ones. repo also keeps an index of the
 repos it has written to, for listings and `refresh`; the git config is the truth, and
-`moxi repo git-hooks add PATH` puts a repo back in the index.
+`moxi repo git-hooks add PATH` puts a repo back in the index. The index knows a repo by its
+common git dir and lists it by its main work tree, whichever worktree you named it from, so
+removing a linked worktree doesn't lose it; a repo is gone only when its git dir is.
 
 ### How pieces run
 

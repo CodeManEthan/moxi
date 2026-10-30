@@ -6,10 +6,12 @@ modules.
 `Failure` whose `code` is the exit code (`Usage` 2, `Refused` 3, else 1) and whose text
 says what to do.
 
-A repo is named by a path inside it; repo keeps an index of the repos it has written to
-(the `repos` store), which `refresh` and listings walk. The git config is the truth: a repo
-missing from the index still runs its pieces, and `add PATH` with no piece indexes it
-again.
+A repo is named by a path inside any of its work trees; repo keeps an index of the repos it
+has written to (the `repos` store), which `refresh` and listings walk. An indexed repo is
+keyed by its common git dir, and its `root` is its main work tree; it is gone only when its
+common git dir is gone, so removing a linked worktree, or the work tree it was added
+through, leaves it indexed. The git config is the truth: a repo missing from the index
+still runs its pieces, and `add PATH` with no piece indexes it again.
 """
 
 from __future__ import annotations
@@ -188,7 +190,7 @@ def indexed_at(path: str | os.PathLike) -> list[str]:
 def _index_put(repo: Repo) -> None:
     def put(repos: dict) -> None:
         entry = repos.setdefault(repo.key, {})
-        entry.setdefault("root", str(repo.root))
+        entry["root"] = str(repo.root)
         entry["common_dir"] = str(repo.common_dir)
 
     _index_change(put)
@@ -199,6 +201,43 @@ def _index_drop(key: str) -> None:
         repos.pop(key, None)
 
     _index_change(drop)
+
+
+def gone_text(root: str) -> str:
+    return f"{root} is no longer a git work tree"
+
+
+def open_indexed(key: str, entry: dict) -> tuple[Repo | None, str | None]:
+    """An index entry's repo, or (None, why it can't be opened).
+
+    The repo is found through its common git dir: from its stored root, else from any
+    work tree git lists for that dir, so a removed linked worktree doesn't lose it. A
+    path that now resolves to another repo is not this one.
+    """
+    common = entry.get("common_dir") or key
+    root = entry.get("root") or common
+    if not os.path.isdir(common):
+        return None, gone_text(root)
+    tried = [root] + [str(top) for top, bare in gitconf.worktrees(common) if not bare]
+    for where in dict.fromkeys(tried):
+        if not os.path.isdir(where):
+            continue
+        try:
+            repo = gitconf.resolve(where)
+        except gitconf.NotARepo:
+            continue
+        if repo.key == key:
+            return repo, None
+    return None, (f"{gone_text(root)}, and git lists no other work tree of its git dir "
+                  f"{common}")
+
+
+def indexed_repos(index: dict | None = None) -> list[tuple[str, dict, Repo | None,
+                                                           str | None]]:
+    """Each index entry, sorted by key: (key, entry, its repo or None, why it is None)."""
+    index = indexed() if index is None else index
+    return [(key, entry, *open_indexed(key, entry))
+            for key, entry in sorted(index.items())]
 
 
 # -- helpers ------------------------------------------------------------------------------
@@ -374,12 +413,21 @@ def remove(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...
         if piece_ids:
             raise Usage(f"{path} doesn't exist; remove the whole repo with: "
                         f"moxi repo git-hooks remove {path}")
-        for key in gone:
-            _records.close_repo(key)
-            _index_drop(key)
-            report.lines.append(f"dropped {path} from the index; it no longer exists")
+        _drop_stale(path, gone, report, why="it no longer exists")
         return report
     repo = _resolve(path)
+    stale = [key for key in indexed_at(where) if key != repo.key]
+    if stale:
+        # An indexed repo was here and is gone; the path is now inside another repo,
+        # which this call leaves alone.
+        if piece_ids:
+            raise Usage(f"{path} is indexed as a repo that is no longer there, and is now "
+                        f"inside {repo.root}; drop it first with: "
+                        f"moxi repo git-hooks remove {path}")
+        _drop_stale(path, stale, report,
+                    why=f"that repo is gone and {repo.root}, which was left as it is, "
+                    "holds the path now")
+        return report
     state = _state(repo)
     try:
         if piece_ids:
@@ -400,6 +448,24 @@ def remove(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...
     _index_drop(repo.key)
     report.lines.append(f"removed repo's git hooks from {repo.root}")
     return report
+
+
+def _drop_stale(path, keys: list[str], report: Report, *, why: str) -> None:
+    """Drop index entries whose repo is gone, with their records; an entry whose repo is
+    still there elsewhere gets its root corrected and a problem naming it."""
+    index = indexed()
+    for key in keys:
+        repo, _ = open_indexed(key, index.get(key, {}))
+        if repo is not None:
+            _index_put(repo)
+            report.problems.append(
+                f"{path} is not where its repo is: the repo indexed there is at "
+                f"{repo.root}; to remove repo's git hooks from it run: "
+                f"moxi repo git-hooks remove {repo.root}")
+            continue
+        _records.close_repo(index.get(key, {}).get("common_dir") or key)
+        _index_drop(key)
+        report.lines.append(f"dropped {path} from the index; {why}")
 
 
 def enable(path: str | os.PathLike, piece_id: str) -> Report:
@@ -439,13 +505,12 @@ def refresh(path: str | os.PathLike | None = None) -> Report:
         repos = [_resolve(path)]
     else:
         repos = []
-        for key, entry in sorted(indexed().items()):
-            root = entry.get("root", "")
-            try:
-                repos.append(gitconf.resolve(root))
-            except gitconf.NotARepo:
-                report.problems.append(f"{root} is no longer a git work tree; run: "
-                                       f"moxi repo git-hooks remove {root}")
+        for key, entry, repo, why in indexed_repos():
+            if repo is None:
+                report.problems.append(f"{why}; run: moxi repo git-hooks remove "
+                                       f"{entry.get('root') or key}")
+            else:
+                repos.append(repo)
     good, bad = pieces.declared()
     default = default_mode()
     for repo in repos:
@@ -500,12 +565,7 @@ def specs(path: str | os.PathLike | None = None) -> list[dict]:
     if path is not None:
         repos = [_resolve(path)]
     else:
-        repos = []
-        for key, entry in sorted(indexed().items()):
-            try:
-                repos.append(gitconf.resolve(entry.get("root", "")))
-            except gitconf.NotARepo:
-                continue
+        repos = [repo for _, _, repo, _ in indexed_repos() if repo is not None]
     out = []
     for repo in repos:
         _sweep(repo)
@@ -551,23 +611,17 @@ def status(path: str | os.PathLike | None = None) -> list[dict]:
     version = _version(need=False)
     index = indexed()
     if path is not None:
-        targets = [(None, _resolve(path))]
+        targets = [(None, _resolve(path), None)]
     else:
-        targets = []
-        for key, entry in sorted(index.items()):
-            try:
-                targets.append((key, gitconf.resolve(entry.get("root", ""))))
-            except gitconf.NotARepo:
-                targets.append((key, None))
+        targets = [(key, repo, why) for key, _, repo, why in indexed_repos(index)]
     good, _ = pieces.declared()
     out = []
-    for key, repo in targets:
+    for key, repo, why in targets:
         if repo is None:
-            root = index[key].get("root", "")
+            root = index[key].get("root") or key
             out.append({"root": root, "common_dir": index[key].get("common_dir"),
                         "indexed": True, "pieces": [], "events": {},
-                        "problems": [Problem(f"{root} is no longer a git work tree",
-                                             f"moxi repo git-hooks remove {root}",
+                        "problems": [Problem(why, f"moxi repo git-hooks remove {root}",
                                              state="warn")]})
             continue
         out.append(_status_of(repo, repo.key in index, version, good))
@@ -690,4 +744,5 @@ def _guard_problems(event: str, text: str, python: str, runner: str,
 
 __all__ = ["Failure", "Usage", "Refused", "Busy", "Report", "Problem", "SEEDS", "SETTING_CHECKS",
            "available", "add", "remove", "enable", "disable", "refresh", "status",
-           "indexed", "default_mode", "everywhere", "specs", "forget_spec"]
+           "indexed", "indexed_repos", "open_indexed", "default_mode", "everywhere", "specs",
+           "forget_spec"]

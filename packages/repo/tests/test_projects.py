@@ -252,8 +252,8 @@ def test_a_subdirectory_and_a_linked_worktree_take_their_main_repos_key(demo, pr
     git(alpha, "worktree", "add", "-q", "-b", "feature", str(worktree))
     assert run(capsys, "git-hooks", "add", str(worktree), "demo/gate")[0] == 0
 
-    # The key as projects stores it, for the worktree it was never given.
-    assert keys_listed(capsys) == {str(worktree): "Alpha"}
+    # The repo is listed by its main work tree, with the key projects stores for it.
+    assert keys_listed(capsys) == {str(alpha): "Alpha"}
     code, out, _ = run(capsys, "specs", str(worktree))
     assert code == 0 and "project Alpha" in out
     # A subdirectory, and the same place inside the worktree, resolve to alpha too.
