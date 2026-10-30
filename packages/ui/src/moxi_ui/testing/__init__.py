@@ -1,0 +1,204 @@
+"""`moxi_ui.testing`: the pytest plugin a module's own tests use to run its pages in a real
+shell and check its components against the component contract.
+
+moxi-ui installs it as a `pytest11` plugin, so every pytest run in an environment that
+holds moxi-ui loads it. Loading it imports only the standard library and pytest; the shell
+and Playwright load only when a test uses one of its fixtures. The browser fixtures need
+the `testing` extra (`moxi-ui[testing]`, which brings Playwright); a browser is installed
+once with `playwright install chromium`.
+
+A module whose `ui` is an optional extra uses these fixtures by name and never imports
+`moxi_ui`. Every fixture is named `ui_*`:
+
+`ui_shell` (module scope)
+    A `TestShell`: a real shell in a process of its own, over this environment's installed
+    modules, its files under a temporary home. Its options come from `ui_shell_options`.
+`ui_shell_options` (module scope)
+    The `ui_shell`'s options, `{}` by default. Override it in a test module or a
+    `conftest.py` to give `site` (directories put on the shell's `PYTHONPATH`, holding
+    distributions a test installs), `child_args` (for every page server the shell starts,
+    such as `["--idle-s", "0.5"]`) or `leave_out` (installed modules the shell's snapshot
+    leaves out, such as `["cache"]`). No setting or variable reaches these.
+`ui_shells` (module scope)
+    `ui_shells(**options)` starts one more test shell with those options; each is stopped
+    when the test module ends.
+`ui_browser` (session scope)
+    The Playwright browser, headless: Chromium, or the one `--ui-browser` names
+    (`chromium`, `firefox` or `webkit`).
+`ui_contexts`
+    `ui_contexts(shell=None, *, sign_in=True, **context_args)` opens a fresh browser
+    context on `shell` (`ui_shell` by default), its waits 5 s, signed in with its first
+    page on the shell's document at `/m/ui/`. A trace is kept for a failed test, in
+    `--ui-traces` (`<pytest's temp root>/ui-traces` by default). Each context closes when
+    the test ends.
+`ui_context`, `ui_page`
+    One `ui_contexts()` context, and its first page, signed in on `ui_shell`.
+`ui_component_check`
+    `check(page, module, name, attrs=None, *, tokens=("accent",), allow=(), keep=False)`:
+    the contract check on one component (see `moxi_ui.testing.browser.check_component`).
+    The shell places it, it renders into an open shadow root, adds no style sheet to the
+    document, takes each of `tokens` as a colour, and requests only under `/m/<module>/`.
+`ui_width_check`
+    `check(page, *, module=None, name="page", attrs=None, route="", width=360)`: the
+    document has no horizontal scroll at 360 CSS px, with the module's panel open or its
+    component placed (see `moxi_ui.testing.browser.check_width`).
+
+A module's browser test, for example:
+
+    import pytest
+
+    pytestmark = pytest.mark.browser
+
+    def test_the_chip_keeps_the_contract(ui_page, ui_component_check):
+        ui_component_check(ui_page, "cache", "chip", {"session": "s1"}, tokens=("accent", "warn"))
+
+    def test_the_page_fits_a_phone(ui_page, ui_width_check):
+        ui_width_check(ui_page, module="cache")
+
+Without a browser, `ui_shell.session()` is a signed-in session over plain HTTP, and
+`ui_shell.servers()` and `ui_shell.kill(module)` reach the page servers the shell runs.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from collections.abc import Callable, Iterator
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+#: Milliseconds a browser action or wait may take before it fails.
+WAIT_MS = 5000
+
+_REPORTS = pytest.StashKey[dict[str, Any]]()
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    group = parser.getgroup("moxi-ui", "moxi_ui.testing")
+    group.addoption("--ui-browser", default="chromium", choices=("chromium", "firefox", "webkit"),
+                    help="the browser moxi_ui.testing's browser fixtures run (default chromium)")
+    group.addoption("--ui-traces", default=None, metavar="DIR",
+                    help="where a failed browser test's Playwright trace goes (default "
+                         "<pytest's temp root>/ui-traces)")
+
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo) -> Iterator[Any]:
+    report = yield
+    item.stash.setdefault(_REPORTS, {})[report.when] = report
+    return report
+
+
+@pytest.fixture(scope="module")
+def ui_shell_options() -> dict[str, Any]:
+    """The `ui_shell`'s options: `site`, `child_args` and `leave_out` (see the module
+    doc). Override it to give them."""
+    return {}
+
+
+@pytest.fixture(scope="module")
+def ui_shells(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Callable[..., Any]]:
+    """`ui_shells(**options)`: one more test shell; each is stopped at the module's end."""
+    from .shell import TestShell
+
+    started: list[TestShell] = []
+
+    def start(**options: Any) -> TestShell:
+        shell = TestShell(tmp_path_factory.mktemp("ui-shell"), **options)
+        started.append(shell)
+        return shell.start()
+
+    try:
+        yield start
+    finally:
+        for shell in reversed(started):
+            shell.stop()
+
+
+@pytest.fixture(scope="module")
+def ui_shell(ui_shells: Callable[..., Any], ui_shell_options: dict[str, Any]) -> Any:
+    """A test shell over this environment's modules, with `ui_shell_options`."""
+    return ui_shells(**ui_shell_options)
+
+
+@pytest.fixture(scope="session")
+def ui_browser(request: pytest.FixtureRequest) -> Iterator[Any]:
+    """The Playwright browser, headless; one for the session."""
+    from playwright.sync_api import sync_playwright
+
+    playwright = sync_playwright().start()
+    try:
+        browser = getattr(playwright, request.config.getoption("--ui-browser")).launch()
+        try:
+            yield browser
+        finally:
+            browser.close()
+    finally:
+        playwright.stop()
+
+
+@pytest.fixture
+def ui_contexts(ui_browser: Any, request: pytest.FixtureRequest,
+                tmp_path_factory: pytest.TempPathFactory) -> Iterator[Callable[..., Any]]:
+    """`ui_contexts(shell=None, *, sign_in=True, **context_args)`: a fresh browser context
+    on `shell` (`ui_shell` by default), signed in unless `sign_in` is false. Closed when
+    the test ends, its trace kept when the test failed."""
+    opened: list[Any] = []
+
+    def open_context(shell: Any = None, *, sign_in: bool = True, **context_args: Any) -> Any:
+        shell = shell if shell is not None else request.getfixturevalue("ui_shell")
+        context = ui_browser.new_context(base_url=shell.url, **context_args)
+        context.set_default_timeout(WAIT_MS)
+        context.tracing.start(screenshots=True, snapshots=True)
+        opened.append(context)
+        if sign_in:
+            shell.sign_in(context.new_page())
+        return context
+
+    try:
+        yield open_context
+    finally:
+        reports = request.node.stash.get(_REPORTS, {})
+        failed = any(report.failed for report in reports.values())
+        name = re.sub(r"[^A-Za-z0-9_.-]+", "-", request.node.nodeid).strip("-")
+        for n, context in enumerate(opened):
+            try:
+                if failed:
+                    given = request.config.getoption("--ui-traces")
+                    where = Path(given) if given else tmp_path_factory.getbasetemp() / "ui-traces"
+                    os.makedirs(where, exist_ok=True)
+                    context.tracing.stop(path=str(where / f"{name}-{n}.zip"))
+                else:
+                    context.tracing.stop()
+            finally:
+                context.close()
+
+
+@pytest.fixture
+def ui_context(ui_contexts: Callable[..., Any]) -> Any:
+    """A fresh browser context signed in on `ui_shell`."""
+    return ui_contexts()
+
+
+@pytest.fixture
+def ui_page(ui_context: Any) -> Any:
+    """`ui_context`'s first page, on the shell's document at `/m/ui/`."""
+    return ui_context.pages[0]
+
+
+@pytest.fixture
+def ui_component_check() -> Callable[..., Any]:
+    """The contract check on one component (`browser.check_component`)."""
+    from .browser import check_component
+
+    return check_component
+
+
+@pytest.fixture
+def ui_width_check() -> Callable[..., Any]:
+    """The 360 px width check (`browser.check_width`)."""
+    from .browser import check_width
+
+    return check_width

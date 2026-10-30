@@ -6,7 +6,9 @@ INTERFACES = frozenset({1})
 API = None
 CLI = "moxi_ui.cli:main"
 SUMMARY = "The browser shell: one origin for every module's page"
-OPTIONAL = {}
+#: The `testing` extra brings only what moxi_ui.testing's browser fixtures need.
+OPTIONAL = {"testing": "Playwright and pytest for moxi_ui.testing, the plugin a module's "
+                       "own tests use to run its pages in a test shell and a browser."}
 GATED = {}
 INTERNAL_ENV = {}
 SETTINGS = "settings.toml"
