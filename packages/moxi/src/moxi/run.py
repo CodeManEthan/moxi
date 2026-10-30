@@ -559,7 +559,7 @@ class _Log:
 
     def _open(self) -> int:
         if self._fd is None:
-            self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            files._make_dirs(self.path.parent)
             self._fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND
                                | getattr(os, "O_BINARY", 0), 0o600)
         return self._fd

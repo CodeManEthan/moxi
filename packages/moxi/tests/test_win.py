@@ -45,6 +45,25 @@ def test_private_dir_makes_a_directory_only_this_user_can_use(tmp_path):
 
 
 @WINDOWS
+def test_each_missing_parent_of_a_private_dir_is_private_too(tmp_path):
+    before = icacls(tmp_path)
+    target = tmp_path / "a" / "b" / "c"
+    _win.private_dir(target)
+    for each in (tmp_path / "a", tmp_path / "a" / "b", target):
+        assert _win._only_user(each, user()), each
+    assert icacls(tmp_path) == before
+
+
+@WINDOWS
+def test_the_directories_made_on_the_way_to_a_file_are_private(tmp_path):
+    before = icacls(tmp_path)
+    files.atomic_write(tmp_path / "a" / "b" / "f", "x")
+    for each in (tmp_path / "a", tmp_path / "a" / "b"):
+        assert _win._only_user(each, user()), each
+    assert icacls(tmp_path) == before
+
+
+@WINDOWS
 def test_what_is_made_inside_a_private_dir_is_private_too(tmp_path):
     target = tmp_path / "p"
     _win.private_dir(target)

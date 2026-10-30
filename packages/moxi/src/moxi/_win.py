@@ -216,10 +216,13 @@ def private_dir(path: str | os.PathLike) -> None:
     by its token's default owner, the Administrators group for an elevated process) whose
     list grants anyone else is given that list. One owned by anyone else raises
     `PermissionError`. Either way the list is then read back, and `PermissionError` is
-    raised unless it grants only this user.
+    raised unless it grants only this user. Each missing parent is created with the same
+    list; a parent that exists is left as it is.
     """
+    from .files import _make_dirs
+
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _make_dirs(path.parent)
     user = _token_sid(_TOKEN_USER)
     sid = user.text()
     descriptor = _descriptor(f"O:{sid}D:P(A;OICI;FA;;;{sid})")
