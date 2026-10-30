@@ -76,12 +76,12 @@ def test_the_held_slot_frees_only_at_the_decision(make_endpoint):
     s = turns.find(session_id="s-1")
     d1 = s.deliver("one")
     d2 = s.deliver("two")
-    assert [x.id for x in fake.submitted] == [d1.id]
+    assert [x.id for x in fake.handed(1)] == [d1.id]
     ep.turn_started("T1", held=True)
     ep.turn_ended("T1", "answer")
-    assert [x.id for x in fake.submitted] == [d1.id]       # not decided yet
+    assert [x.id for x in fake.handed(2, timeout=0.2)] == [d1.id]   # not decided yet
     ep.turn_tied("T1", d1.id)
-    assert [x.id for x in fake.submitted] == [d1.id, d2.id]
+    assert [x.id for x in fake.handed(2)] == [d1.id, d2.id]
 
 
 def test_stop_releases_a_held_turn_before_gone(make_endpoint):

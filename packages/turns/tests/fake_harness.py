@@ -12,6 +12,7 @@ from __future__ import annotations
 import itertools
 import os
 import threading
+import time
 
 from moxi_turns.harness import CommandRequest, Delivery, Harness, Live
 from moxi_turns.results import Ran
@@ -67,15 +68,30 @@ class FakeHarness(Harness):
     def enter(self, delivery: Delivery) -> str | None:
         """The prompt enters the session: the re-check, then the start's own checks."""
         reason = self.endpoint.entering(delivery.id)
-        if reason is None and delivery.refuse_draft and self.draft:
-            reason = "draft"
-        if reason is None and delivery.refuse_agents and self.agents:
-            reason = "busy-agents"
+        live = self._entry_live() if delivery.refuse_draft or delivery.refuse_agents else None
+        if reason is None and delivery.refuse_draft and (live is None or live.draft):
+            reason = "draft"            # an unreadable box holds
+        if reason is None and delivery.refuse_agents and (
+                live is None or live.agents is None or live.agents):
+            reason = "busy-agents"      # an unknown count never reads as 0
         if reason is not None:
             self.endpoint.refused(delivery.id, reason)
             return reason
         self.start_turn(delivery.id)
         return None
+
+    def _entry_live(self) -> Live | None:
+        """What the harness reads where the prompt enters (not `live`, which a test may
+        slow down): None when `live_fails`, an unreadable read."""
+        return None if self.live_fails else Live(self.agents, self.draft)
+
+    def handed(self, count: int, timeout: float = 5.0) -> list[Delivery]:
+        """The deliveries submitted so far, once there are `count` of them or the timeout
+        has passed. The endpoint's worker hands them over after the call has answered."""
+        deadline = time.monotonic() + timeout
+        while len(self.submitted) < count and time.monotonic() < deadline:
+            time.sleep(0.01)
+        return list(self.submitted)
 
     def take(self, delivery: Delivery) -> None:
         """The harness's word on a steer: taken into the open turn, else `idle`."""

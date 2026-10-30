@@ -47,34 +47,6 @@ def opener(event):
     return None
 
 
-class CoreDelivery:
-    """A delivery made on the endpoint core rather than through the client, with the
-    client's two waits. The steering `deliver` (a steer with a deliver to fall back on)
-    has no wire method, so its tests drive the core."""
-
-    def __init__(self, endpoint, handed):
-        self.endpoint = endpoint
-        self.id = handed.id
-        self.ref = handed.ref
-
-    def wait_started(self, timeout):
-        return self._wait("started", timeout)
-
-    def wait_ended(self, timeout):
-        return self._wait("ended", timeout)
-
-    def _wait(self, until, timeout):
-        value = self.endpoint.wait(self.id, until, timeout)
-        if value is None:
-            raise TimeoutError(f"delivery {self.id} has not {until} after {timeout} s")
-        return value
-
-
-def steer_first(endpoint, text: str) -> CoreDelivery:
-    """The core's steering deliver: into the running turn, or a new turn when none runs."""
-    return CoreDelivery(endpoint, endpoint.deliver(text, steer=True))
-
-
 def write_config(root: Path, text: str) -> None:
     (root / "cfg" / "turns").mkdir(parents=True, exist_ok=True)
     (root / "cfg" / "turns" / "config.toml").write_text(text)

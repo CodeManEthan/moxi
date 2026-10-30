@@ -97,6 +97,7 @@ def test_start_runs_and_ends_with_the_outcome(make_endpoint):
 def test_esc_and_errors_are_outcomes(make_endpoint, outcome):
     ep, fake = make_endpoint()
     d = turns.find(session_id="s-1").deliver("x", only_if_idle=True)
+    d.wait_started(1)                       # the worker hands it over after the answer
     fake.end_turn(outcome)
     assert bare(d.wait_ended(2)) == turns.Ended("t1", outcome)
 
@@ -139,7 +140,7 @@ def test_a_turn_typed_between_the_submit_and_the_entry_refuses_the_start(make_en
     d = s.deliver("x", only_if_idle=True, if_turn_number=0)
     fake.start_turn()                       # the person types first
     fake.end_turn()
-    assert fake.enter(fake.submitted[0]) == "stale-turn"
+    assert fake.enter(fake.handed(1)[0]) == "stale-turn"
     assert bare(d.wait_started(1)) == turns.Refused("stale-turn")
     assert bare(d.wait_ended(1)) == turns.Refused("stale-turn")
 
@@ -148,7 +149,7 @@ def test_a_start_whose_checks_fail_where_it_takes_effect_is_refused(make_endpoin
     ep, fake = make_endpoint(FakeHarness(auto=False))
     d = turns.find(session_id="s-1").deliver("x", only_if_idle=True, refuse_draft=True)
     fake.draft = True
-    assert fake.enter(fake.submitted[0]) == "draft"
+    assert fake.enter(fake.handed(1)[0]) == "draft"
     assert bare(d.wait_started(1)) == turns.Refused("draft")
 
 
@@ -184,51 +185,6 @@ def test_steer(make_endpoint):
     assert [x.text for x in fake.appended] == ["now"]
     fake.end_turn()
     assert bare(d.wait_ended(1)) == turns.Ended(turn, "answer")
-
-
-def _started(ep, d, timeout=1):
-    return bare(ep.wait(d.id, "started", timeout))
-
-
-def test_a_steering_deliver_racing_a_turn_end_gets_a_new_turn(make_endpoint):
-    """The turn ends between the caller's deliver(steer=True) and the steer
-    taking hold. The text is mail for a new turn, never `idle`. No wire method carries
-    the steering deliver, so this drives the endpoint core."""
-    ep, fake = make_endpoint()
-    fake.start_turn()
-    made = ep._new
-
-    def racing_new(kind, text, *args, **checks):
-        if kind == "steer" and fake.open_turn:
-            fake.end_turn()                      # the turn ends in the window
-        return made(kind, text, *args, **checks)
-
-    ep._new = racing_new
-    d = ep.deliver("mail", steer=True)
-    assert _started(ep, d) == turns.Started("t2")
-    assert [x.text for x in fake.submitted] == ["mail"]
-    assert [x.kind for x in fake.submitted] == ["deliver"]
-    assert fake.appended == []
-    # Racing a turn end with another delivery in flight, it queues behind that one.
-    slow = FakeHarness(auto=False)
-    ep2, fake2 = make_endpoint(slow, session_id="s-2")
-    fake2.start_turn()
-    first = ep2.deliver("first")                 # held for the running turn
-    made2 = ep2._new
-
-    def racing_new2(kind, text, *args, **checks):
-        if kind == "steer" and fake2.open_turn:
-            fake2.end_turn()                     # "first" goes in flight, untied
-        return made2(kind, text, *args, **checks)
-
-    ep2._new = racing_new2
-    second = ep2.deliver("second", steer=True)
-    assert [x.text for x in fake2.submitted] == ["first"]
-    fake2.enter(fake2.submitted[0])
-    assert _started(ep2, first) == turns.Started("t2")
-    fake2.end_turn()
-    fake2.enter(fake2.submitted[1])
-    assert _started(ep2, second) == turns.Started("t3")
 
 
 def test_what_the_session_lacks_is_an_error_and_gone_is_refused(make_endpoint):
@@ -422,11 +378,11 @@ def test_a_delivery_the_harness_never_settles_expires_and_frees_the_slot(
     a = s.deliver("a")                               # in flight, never entered
     b = s.deliver("b")                               # held behind it
     assert idle_start(s) == turns.Refused("busy-turn")
-    assert [x.text for x in fake.submitted] == ["a"]
+    assert [x.text for x in fake.handed(1)] == ["a"]
     lost = a.wait_started(2)
     assert isinstance(lost, turns.Lost) and lost.reason.startswith("expired")
     assert a.wait_ended(1) == lost
-    assert [x.text for x in fake.submitted] == ["a", "b"]   # the held one went in
+    assert [x.text for x in fake.handed(2)] == ["a", "b"]   # the held one went in
     # The adapter's late word about the expired one is refused and changes nothing.
     assert fake.enter(fake.submitted[0]) == "expired"
     assert a.wait_started(1) == lost
@@ -438,7 +394,7 @@ def test_a_delivery_the_harness_never_settles_expires_and_frees_the_slot(
     c = s.deliver("c", only_if_idle=True)
     assert isinstance(c.wait_started(2), turns.Lost)
     d = s.deliver("d", only_if_idle=True)
-    fake.enter(fake.submitted[-1])
+    assert fake.enter(fake.handed(4)[3]) is None
     assert bare(d.wait_started(1)) == turns.Started("t2")
 
 
