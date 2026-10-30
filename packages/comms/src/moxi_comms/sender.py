@@ -120,7 +120,7 @@ def operator_credential(db, room: str = NAMES, *, store=None, env=None):
     holder = tokens.owner_for_role(tokens.ROLE_OPERATOR)
     chain = secrets.from_config(env=env, store=store)
     token = chain.get(tokens.OPERATOR_SECRET_ID, owner=holder)["value"]
-    return token, room_row["channel_id"]
+    return token, room_row["room_id"]
 
 
 def post_as_operator(record, user_id: str, channel_id: str, content: str, *, token: str,

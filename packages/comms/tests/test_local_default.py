@@ -36,7 +36,7 @@ from conftest import write_config
 from moxi_comms import cli, config, directory, record as gw, provision, tokens
 from moxi_comms.daemon import Daemon
 from moxi_comms.local_record import META_OPERATOR_TOKEN_HASH, LocalRecord
-from moxi_comms.paths import daemon_socket, directory_db, record_db, tokens_dir
+from moxi_comms.paths import comms_db, daemon_socket, tokens_dir
 
 
 def env_of(**extra) -> dict:
@@ -125,16 +125,16 @@ def _local(tmp_path):
 
 def test_readiness_of_nothing_is_empty_and_writes_nothing(tmp_path):
     store = tokens.TokenStore(tokens_dir())
-    found = provision.readiness(directory_db(), operator_hash=None, store=store)
+    found = provision.readiness(comms_db(), operator_hash=None, store=store)
     assert found.state == provision.EMPTY
-    assert not directory_db().exists() and not tokens_dir().exists()
+    assert not comms_db().exists() and not tokens_dir().exists()
 
 
 def test_readiness_after_the_cli_default_is_complete(tmp_path):
     record, store = _local(tmp_path)
     try:
-        provision.provision(record, directory_db(), store=store)
-        found = provision.readiness(directory_db(),
+        provision.provision(record, comms_db(), store=store)
+        found = provision.readiness(comms_db(),
                                     operator_hash=record.meta_get(META_OPERATOR_TOKEN_HASH),
                                     store=store)
     finally:
@@ -148,11 +148,11 @@ def test_a_directory_without_the_operator_credential_is_unfinished(tmp_path):
     credential was minted: the directory alone is not enough."""
     record, store = _local(tmp_path)
     try:
-        provision.provision(record, directory_db(), store=store)
+        provision.provision(record, comms_db(), store=store)
         operator_files(store)
         with record._write() as conn:
             conn.execute("DELETE FROM meta WHERE key = ?", (META_OPERATOR_TOKEN_HASH,))
-        found = provision.readiness(directory_db(), operator_hash=None, store=store)
+        found = provision.readiness(comms_db(), operator_hash=None, store=store)
     finally:
         record.close()
     assert found.state == provision.UNFINISHED
@@ -163,14 +163,14 @@ def test_a_directory_without_the_operator_credential_is_unfinished(tmp_path):
 def test_a_lost_token_store_is_lost_not_a_first_start(tmp_path, loss):
     record, store = _local(tmp_path)
     try:
-        provision.provision(record, directory_db(), store=store)
+        provision.provision(record, comms_db(), store=store)
         if loss == "the whole store":
             for path in sorted(tokens_dir().rglob("*"), reverse=True):
                 path.unlink() if path.is_file() else path.rmdir()
         elif loss == "the operator's file":
             operator_files(store)
         found = provision.readiness(
-            directory_db(), operator_hash=record.meta_get(META_OPERATOR_TOKEN_HASH),
+            comms_db(), operator_hash=record.meta_get(META_OPERATOR_TOKEN_HASH),
             store=store)
     finally:
         record.close()
@@ -191,18 +191,18 @@ def test_a_daemon_on_an_empty_directory_provisions_before_it_serves(tmp_path):
     daemon = _daemon(record, store)
     try:
         daemon.start()
-        conn = directory.connect(directory_db(), read_only=True)
+        conn = directory.connect(comms_db(), read_only=True)
         try:
             tables = {row[0] for row in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'")}
             assert {"slots", "webhooks"}.isdisjoint(tables)
             assert [r["name"] for r in conn.execute("SELECT name FROM operators")] == \
                 ["operator"]
-            assert conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM identities").fetchone()[0] == 0
         finally:
             conn.close()
         found = provision.readiness(
-            directory_db(), operator_hash=record.meta_get(META_OPERATOR_TOKEN_HASH),
+            comms_db(), operator_hash=record.meta_get(META_OPERATOR_TOKEN_HASH),
             store=store)
         assert found.state == provision.COMPLETE
     finally:
@@ -212,12 +212,12 @@ def test_a_daemon_on_an_empty_directory_provisions_before_it_serves(tmp_path):
 
 def test_a_complete_directory_is_left_alone(tmp_path):
     record, store = _local(tmp_path)
-    provision.provision(record, directory_db(), store=store)
+    provision.provision(record, comms_db(), store=store)
     before = sorted(p.stat().st_mtime_ns for p in tokens_dir().rglob("*") if p.is_file())
     daemon = _daemon(record, store)
     try:
         daemon.start()
-        conn = directory.connect(directory_db(), read_only=True)
+        conn = directory.connect(comms_db(), read_only=True)
         try:
             tables = {row[0] for row in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'")}
@@ -233,7 +233,7 @@ def test_a_complete_directory_is_left_alone(tmp_path):
 
 def test_an_unfinished_first_start_is_finished(tmp_path):
     record, store = _local(tmp_path)
-    provision.provision(record, directory_db(), store=store)
+    provision.provision(record, comms_db(), store=store)
     operator_files(store)
     with record._write() as conn:
         conn.execute("DELETE FROM meta WHERE key = ?", (META_OPERATOR_TOKEN_HASH,))
@@ -241,7 +241,7 @@ def test_an_unfinished_first_start_is_finished(tmp_path):
     try:
         daemon.start()
         found = provision.readiness(
-            directory_db(), operator_hash=record.meta_get(META_OPERATOR_TOKEN_HASH),
+            comms_db(), operator_hash=record.meta_get(META_OPERATOR_TOKEN_HASH),
             store=store)
         assert found.state == provision.COMPLETE
     finally:
@@ -251,7 +251,7 @@ def test_an_unfinished_first_start_is_finished(tmp_path):
 
 def test_a_lost_token_store_refuses_to_start(tmp_path):
     record, store = _local(tmp_path)
-    provision.provision(record, directory_db(), store=store)
+    provision.provision(record, comms_db(), store=store)
     operator_files(store)
     daemon = _daemon(record, store)
     try:
@@ -268,14 +268,14 @@ def test_a_lost_token_store_refuses_to_start(tmp_path):
 def test_first_start_waits_for_the_single_instance_probe(tmp_path):
     """A second daemon refused by the probe has provisioned nothing."""
     record, store = _local(tmp_path)
-    provision.provision(record, directory_db(), store=store)
+    provision.provision(record, comms_db(), store=store)
     first = Daemon(record, start_trim_thread=False).start()
-    directory_db().unlink()                 # what a first-start provisioning would refill
+    comms_db().unlink()                 # what a first-start provisioning would refill
     second = _daemon(record, store)
     try:
         with pytest.raises(RuntimeError, match="live comms daemon"):
             second.start()
-        assert not directory_db().exists()
+        assert not comms_db().exists()
     finally:
         second.stop()
         first.stop()
@@ -326,19 +326,21 @@ def test_the_daemon_process_provisions_without_slots(tmp_path, runtime_dir):
                      MOXI_COMMS_RUNTIME_DIR=str(runtime_dir), MOXI_COMMS_DEVICE="t")
     code, out = _run_daemon(env, runtime_dir / "comms" / "moxi-comms-daemon.sock")
     assert code == 0, out
-    db = home / "data" / "comms" / "directory.db"
+    db = home / "state" / "comms" / "comms.db"
     conn = directory.connect(db, read_only=True)
     try:
         tables = {row[0] for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"slots", "webhooks"}.isdisjoint(tables)
+        assert directory.meta_get(conn, directory.META_WRITER) == "provisioner"
     finally:
         conn.close()
+    assert not (home / "data" / "comms" / "directory.db").exists()
 
 
 def test_a_daemon_process_on_mock_never_provisions(tmp_path, runtime_dir):
     """`mock` is a test seam: a daemon on it with no directory starts and mints
-    nothing."""
+    nothing. comms.db holds its binding history, and no directory rows."""
     home = tmp_path / "mocked"
     env = _clean_env(tmp_path, MOXI_COMMS_HOME=str(home),
                      MOXI_COMMS_RUNTIME_DIR=str(runtime_dir), MOXI_COMMS_DEVICE="t",
@@ -346,6 +348,13 @@ def test_a_daemon_process_on_mock_never_provisions(tmp_path, runtime_dir):
                      MOXI_COMMS_MOCK_BACKEND=str(tmp_path / "mock.json"))
     code, out = _run_daemon(env, runtime_dir / "comms" / "moxi-comms-daemon.sock")
     assert code == 0, out
+    conn = directory.connect(home / "state" / "comms" / "comms.db", read_only=True)
+    try:
+        assert directory.meta_get(conn, directory.META_WRITER) is None
+        assert conn.execute("SELECT COUNT(*) FROM operators").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM rooms").fetchone()[0] == 0
+    finally:
+        conn.close()
     assert not (home / "data" / "comms" / "directory.db").exists()
     assert not (home / "state" / "t" / "comms" / "tokens").exists()
 
@@ -366,11 +375,11 @@ def test_doctor_says_where_the_backend_came_from(tmp_path):
     assert code == 0
     assert rows["backend"] == "local (the default)"
     assert "slots" not in rows
-    assert not directory_db().exists()
+    assert not comms_db().exists()
 
     record, store = _local(tmp_path)
     try:
-        provision.provision(record, directory_db(), store=store)
+        provision.provision(record, comms_db(), store=store)
     finally:
         record.close()
     _, rows = doctor(env_of(PATH=""))

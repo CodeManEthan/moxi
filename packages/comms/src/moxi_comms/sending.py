@@ -24,7 +24,7 @@ from .protocol import CLI_PROTOCOL, PROTOCOL_VERSION, ProtocolError
 from .client import (DaemonClient, DaemonError, DaemonNoAnswer, DaemonOffline,
                      DaemonTimeout)
 from .record import LOCAL, RecordError
-from .paths import OutsideRuntime, directory_db
+from .paths import OutsideRuntime, comms_db
 from .provision import NAMES
 from .scoping import (GLOBAL, identity_of, project_key, qualify, tag_matches)
 from .sender import (MalformedStamp, OperatorRefused, SendFailed, SenderIdentity,
@@ -258,7 +258,7 @@ class Context:
         #: The verb's clock: the single-reply check reads an ask's age against it.
         #: Injectable, so a rig can age an ask.
         self.clock = clock or time.time
-        self.db_path = db_path or directory_db()
+        self.db_path = db_path or comms_db()
         self.socket_path = socket_path
         self.out = out or sys.stdout
         self.backend = backend
@@ -1407,7 +1407,7 @@ def _read_thread(ctx: Context, referent, sender) -> ThreadRead:
     try:
         with ctx.db() as db:
             room = directory.room_by_name(db, NAMES)
-            names_channel = room["channel_id"] if room else None
+            names_channel = room["room_id"] if room else None
             cur = referent
             hops = 0
             while True:
@@ -1577,7 +1577,7 @@ def _open_asks(ctx: Context, sender, nominated, resolved) -> tuple[list, list[st
         db_context = ctx.db()
         with db_context as db:
             room = directory.room_by_name(db, NAMES)
-            names_channel = room["channel_id"] if room else None
+            names_channel = room["room_id"] if room else None
             for ask_id in nominated:
                 try:
                     ask = ctx.record.get_message(ask_id)

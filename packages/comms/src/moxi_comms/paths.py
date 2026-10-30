@@ -87,17 +87,26 @@ def refuse_outside_runtime(path, variable: str, env=None) -> Path:
         f"or unset {variable}.")
 
 
+def comms_db(env=None) -> Path:
+    """STATE/comms/comms.db -- comms' one store (`store/`): the record, the delivery
+    books, the binding history, the directory and the reserved names.
+
+    STATE and deliberately not DATA: DATA is the sync surface, and a live database is
+    never continuous-file-synced. Open it only through `store.open_write` or
+    `store.open_read`.
+    """
+    return state_dir(env) / "comms.db"
+
+
 def directory_db(env=None) -> Path:
+    """DATA/comms/directory.db -- comms 0.2's directory, which comms.db replaces. Read
+    only by the move of 0.2's files into comms.db."""
     return data_dir(env) / "directory.db"
 
 
 def bindings_db(env=None) -> Path:
-    """DATA/comms/bindings.db -- the binding history, beside directory.db.
-
-    DATA and deliberately not STATE, though a binding is a live-session fact: what the
-    binding history records is used to INTERPRET the record, and the record is device-agnostic.
-    An attribution answer must not depend on which box is asking.
-    """
+    """DATA/comms/bindings.db -- comms 0.2's binding history, which comms.db replaces.
+    Read only by the move of 0.2's files into comms.db."""
     return data_dir(env) / "bindings.db"
 
 
@@ -105,8 +114,7 @@ def cards_dir(env=None) -> Path:
     """DATA/comms/cards -- holder-authored peer-facing agent cards, one per identity.
 
     DATA and deliberately not STATE: a card is durable user data and device-agnostic --
-    who someone IS does not depend on which box is asking, the same argument
-    `bindings_db()` makes above. It is not derived (nothing can regenerate a card; only
+    who someone IS does not depend on which box is asking. It is not derived (nothing can regenerate a card; only
     its holder can write one), so it is not CACHE; it is content, not config; and it
     outlives a login, so it is not RUNTIME. comms creates nothing here: the reader is
     read-only and the first holder to write a card makes the directory.
@@ -144,13 +152,8 @@ def tokens_dir(env=None) -> Path:
 
 
 def record_db(env=None) -> Path:
-    """STATE/comms/record.db -- the local backend's record, beside the cursors and tokens.
-
-    STATE and deliberately not DATA: DATA is the sync surface, and a live database is
-    never continuous-file-synced. The record is the BOX's, one file per device, the same
-    reasoning as for per-device credentials.
-    `[local] record` in config.toml and `MOXI_COMMS_LOCAL_RECORD` override it.
-    """
+    """STATE/comms/record.db -- comms 0.2's local record, which comms.db replaces. Read
+    only by the move of 0.2's files into comms.db."""
     return state_dir(env) / "record.db"
 
 

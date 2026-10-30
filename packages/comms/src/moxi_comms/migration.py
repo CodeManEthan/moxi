@@ -174,7 +174,7 @@ def stamp_record(record, directory_path, *, history_path=None) -> tuple[int, boo
             if marker is not None:
                 return 0, False
             rows = conn.execute(
-                "SELECT id, channel_id, author_id, author_kind, author_display, content, "
+                "SELECT id, room_id, author_id, author_kind, author_display, content, "
                 "timestamp FROM messages WHERE author_kind = 'webhook' ORDER BY id"
             ).fetchall()
             for row in rows:

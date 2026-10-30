@@ -102,10 +102,10 @@ def provision_home(env, store: Path) -> None:
     os.environ.update({key: value for key, value in env.items()
                        if key.startswith(("MOXI_COMMS_", "MOXI_TURNS_"))})
     from moxi_comms.mock_record import MockRecord
-    from moxi_comms.paths import directory_db
+    from moxi_comms.paths import comms_db
     from moxi_comms.provision import provision
 
-    provision(MockRecord(store), directory_db(), slots=3,
+    provision(MockRecord(store), comms_db(), slots=3,
               operator=("900001", "operator"))
 
 

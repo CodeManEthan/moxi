@@ -128,9 +128,9 @@ def test_the_daemon_holds_no_posting_credential(rig):
 
     from moxi_comms import daemon as daemon_mod
     from moxi_comms import directory
-    from moxi_comms.paths import directory_db
+    from moxi_comms.paths import comms_db
 
-    db = directory.connect(directory_db(), read_only=True)
+    db = directory.connect(comms_db(), read_only=True)
     try:
         assert directory.meta_get(db, "machinery_webhook_id") is None
         assert directory.meta_get(db, "machinery_webhook_secret_id") is None

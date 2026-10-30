@@ -54,8 +54,8 @@ def test_both_backends_expose_the_remaining_posting_contract():
 
 def test_the_record_lives_in_state_beside_the_cursors_and_tokens():
     """STATE, per box, and not DATA."""
-    assert paths.record_db() == paths.cursors_dir().parent / "record.db"
-    assert paths.record_db().parent == paths.tokens_dir().parent
+    assert paths.comms_db() == paths.cursors_dir().parent / "comms.db"
+    assert paths.comms_db().parent == paths.tokens_dir().parent
 
 
 def test_the_file_is_wal_with_its_pragmas(gw):
@@ -69,11 +69,12 @@ def test_the_schema_has_no_retired_credential_table_or_reply_column(gw):
     conn = gw._conn()
     tables = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert {"channels", "principals", "denied", "messages", "meta", "queue"} == tables
+    assert {"rooms", "principals", "denied", "messages", "meta", "queue"} <= tables
+    assert not {"webhooks", "slots", "channels"} & tables
     columns = [r[1] for r in conn.execute("PRAGMA table_info(messages)")]
-    # `Message`'s seven fields and nothing else
-    assert columns == ["id", "channel_id", "author_id", "author_kind", "author_display",
-                       "content", "timestamp"]
+    # `Message`'s seven fields, then what the store keeps about delivery
+    assert columns == ["id", "room_id", "author_id", "author_kind", "author_display",
+                       "content", "timestamp", "interrupt", "expires_at", "withdrawn_at"]
     assert "reply_to" not in columns
 
 
@@ -371,10 +372,10 @@ def test_the_daemons_two_hot_reads_stay_cheap_on_a_full_record(gw):
 
     for sql, params in (
             ("SELECT MAX(id) FROM messages", ()),
-            ("SELECT MAX(id) FROM messages WHERE channel_id = ?", (channel,)),
-            ("SELECT id FROM messages WHERE channel_id = ? ORDER BY id DESC LIMIT ?",
+            ("SELECT MAX(id) FROM messages WHERE room_id = ?", (channel,)),
+            ("SELECT id FROM messages WHERE room_id = ? ORDER BY id DESC LIMIT ?",
              (channel, 500)),
-            ("SELECT id FROM messages WHERE channel_id = ? AND id > ? "
+            ("SELECT id FROM messages WHERE room_id = ? AND id > ? "
              "ORDER BY id DESC LIMIT ?", (channel, 0, 500))):
         plan = " ".join(row[3] for row in
                         gw._conn().execute("EXPLAIN QUERY PLAN " + sql, params))
@@ -417,7 +418,7 @@ def fill(record, channel_id, count):
         conn.execute(
             "WITH RECURSIVE seq(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM seq "
             "                          WHERE n + 1 < ?) "
-            "INSERT INTO messages(id, channel_id, author_id, author_kind, author_display, "
+            "INSERT INTO messages(id, room_id, author_id, author_kind, author_display, "
             "                     content, timestamp) "
             "SELECT ? + n, ?, 'wh-filler', 'webhook', 'filler', 'line ' || n, ? FROM seq",
             (count, start, channel_id, "2026-09-12T00:00:00Z"))

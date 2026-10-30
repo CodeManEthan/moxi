@@ -160,14 +160,15 @@ def test_reply_to_a_missing_message(rig):
 def _old_conference_room(rig):
     """What an install from before one room still carries: a `#conference` rooms row."""
     from moxi_comms import directory
-    from moxi_comms.paths import directory_db
+    from moxi_comms.paths import comms_db
 
     channel_id = rig.record.create_channel("#conference")
-    conn = directory.connect(directory_db())
+    conn = directory.connect(comms_db())
     try:
         conn.execute("PRAGMA ignore_check_constraints = ON")
-        conn.execute("INSERT INTO rooms(channel_id, name, kind, created_at) "
-                     "VALUES (?, '#conference', 'conference', ?)",
+        conn.execute("INSERT INTO rooms(room_id, name, kind, created_at) "
+                     "VALUES (?, '#conference', 'conference', ?) "
+                     "ON CONFLICT(room_id) DO UPDATE SET kind = excluded.kind",
                      (channel_id, directory.now()))
         conn.commit()
     finally:

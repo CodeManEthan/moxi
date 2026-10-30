@@ -17,7 +17,7 @@ from moxi_comms import attribution, cli, directory, machine_line, provision
 from moxi_comms.claimhold import CLAIM_SOCKET_ENV, NOT_INSIDE, ClaimServer, call
 from moxi_comms.client import DaemonClient, DaemonError
 from moxi_comms.record import Message
-from moxi_comms.paths import daemon_socket, directory_db
+from moxi_comms.paths import daemon_socket, comms_db
 
 HOUR = 3600
 CONSOLE = "relay@proj-a"
@@ -311,7 +311,7 @@ def test_a_send_from_inside_the_claimservers_session_is_verified_as_console(cons
     live = console.daemon.attribute(msg, live=True)
     assert (live.qualified, live.tier, live.attribution) == (CONSOLE, "standing",
                                                              attribution.VERIFIED)
-    db = directory.connect(directory_db(), read_only=True)
+    db = directory.connect(comms_db(), read_only=True)
     try:
         assert attribution.from_record(db, msg).attribution == attribution.VERIFIED
     finally:
@@ -386,7 +386,7 @@ def test_the_console_sends_to_a_fresh_session_and_is_held_by_a_cold_one(console,
 
 def test_the_provisioning_adds_a_send_only_row_without_credentials(rig):
     lines = provision_console(rig)
-    db = directory.connect(directory_db(), read_only=True)
+    db = directory.connect(comms_db(), read_only=True)
     try:
         row = directory.standing_row(db, "relay", "proj-a")
         assert directory.kind_of(row) == "send-only"
@@ -402,7 +402,7 @@ def test_the_provisioning_adds_a_send_only_row_without_credentials(rig):
         assert "proj-a/relay" not in rig.store.owners_present()
     # A re-run converges: still no webhooks or stored credentials.
     provision_console(rig)
-    db = directory.connect(directory_db(), read_only=True)
+    db = directory.connect(comms_db(), read_only=True)
     try:
         tables = {r[0] for r in db.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
@@ -416,7 +416,7 @@ def test_the_provisioning_refuses_to_convert_an_agent_row(rig):
         provision.send_only_main(["herald"], record=rig.record, store=rig.store,
                                  out=lambda _l: None)
     assert "already provisioned as a standing row of kind 'agent'" in str(e.value)
-    db = directory.connect(directory_db(), read_only=True)
+    db = directory.connect(comms_db(), read_only=True)
     try:
         assert directory.kind_of(directory.standing_row(db, "herald", "global")) == "agent"
     finally:
@@ -431,30 +431,16 @@ def test_the_provisioning_refuses_a_name_live_as_a_chosen_binding(rig):
     assert "currently live as a chosen binding" in str(e.value)
 
 
-def test_a_directory_from_before_the_kind_column_reads_agent_and_migrates(tmp_path):
-    path = tmp_path / "directory.db"
-    old = sqlite3.connect(path)
-    old.executescript("""
-        CREATE TABLE agents (name TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'global',
-            status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','retired')),
-            created_at TEXT NOT NULL, PRIMARY KEY (name, scope));
-        INSERT INTO agents VALUES ('planner', 'proj-a', 'active', '2026-01-01');
-    """)
-    old.commit()
-    old.close()
-    ro = directory.connect(path, read_only=True)
-    try:
-        # The daemon's read-only view of an unmigrated file: every row is an agent.
-        assert directory.kind_of(directory.standing_row(ro, "planner", "proj-a")) == "agent"
-        assert not directory.is_send_only(ro, "planner", "proj-a")
-    finally:
-        ro.close()
+def test_an_identity_row_reads_agent_by_default_and_takes_no_other_kind(tmp_path):
+    path = tmp_path / "comms.db"
     conn = directory.init(path)
     try:
+        conn.execute("INSERT INTO identities(name, scope, created_at) "
+                     "VALUES ('planner', 'proj-a', '2026-01-01')")
         assert directory.kind_of(directory.standing_row(conn, "planner", "proj-a")) == "agent"
-        assert directory.migrate(conn) is False                # once is enough
+        assert not directory.is_send_only(conn, "planner", "proj-a")
         with pytest.raises(sqlite3.IntegrityError):
-            conn.execute("UPDATE agents SET kind='inbox' WHERE name='planner'")
+            conn.execute("UPDATE identities SET kind='inbox' WHERE name='planner'")
     finally:
         conn.close()
 
@@ -510,9 +496,9 @@ def test_the_bind_logs_what_it_dropped(rig, caplog):
 
 
 def test_the_provisioning_refuses_a_retired_send_only_row(console):
-    db = directory.connect(directory_db())
+    db = directory.connect(comms_db())
     try:
-        db.execute("UPDATE agents SET status='retired' WHERE name='relay' "
+        db.execute("UPDATE identities SET status='retired' WHERE name='relay' "
                    "AND scope='proj-a'")
         db.commit()
     finally:
@@ -523,9 +509,9 @@ def test_the_provisioning_refuses_a_retired_send_only_row(console):
                                  store=console.store, out=lines.append)
     assert f"{CONSOLE} is provisioned but retired; nothing was changed" in str(e.value)
     assert lines == []
-    db = directory.connect(directory_db(), read_only=True)
+    db = directory.connect(comms_db(), read_only=True)
     try:
-        row = db.execute("SELECT status FROM agents WHERE name='relay'").fetchone()
+        row = db.execute("SELECT status FROM identities WHERE name='relay'").fetchone()
         assert row["status"] == "retired"
     finally:
         db.close()

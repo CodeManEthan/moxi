@@ -92,8 +92,7 @@ HELD_LAST = held_last()
 def _live_paths():
     return {
         "socket": paths.daemon_socket(),
-        "record": paths.record_db(),
-        "directory": paths.directory_db(),
+        "store": paths.comms_db(),
         "tokens": paths.tokens_dir(),
         "cursors": paths.cursors_dir(),
         "cold gate": paths.cold_gate(),
@@ -561,7 +560,7 @@ def test_a_caller_past_the_verb_is_still_held(rig):
     out = io.StringIO()
     planner = SenderIdentity(qualified="planner@proj-a", scope="proj-a", name="planner")
     with rig.session_holding(planner) as claim_socket:
-        ctx = cli.Context(record=rig.record, db_path=paths.directory_db(),
+        ctx = cli.Context(record=rig.record, db_path=paths.comms_db(),
                           socket_path=paths.daemon_socket(),
                           env={"MOXI_COMMS_PROJECT": "proj-a",
                                "MOXI_COMMS_CLAIM_SOCKET": claim_socket}, out=out)

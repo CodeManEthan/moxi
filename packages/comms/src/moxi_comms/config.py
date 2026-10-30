@@ -7,7 +7,7 @@ line of doc and, for a few, the one variable that overrides it for one process:
     block = false                           # read at each use
 
     [local]
-    record      = "/var/lib/.../record.db"  # empty: STATE/comms/record.db
+    record      = "/var/lib/.../comms.db"   # empty: STATE/comms/comms.db
     retain_days = 90                        # 0 disables the trim
 
     [threads]
@@ -106,7 +106,7 @@ LOCAL_RETAIN_DAYS = _default("local.retain_days")
 
 @dataclass
 class LocalConfig:
-    """`[local]`. An empty `record` means `paths.record_db()`."""
+    """`[local]`. An empty `record` means `paths.comms_db()`."""
 
     record: str = ""
     retain_days: int = LOCAL_RETAIN_DAYS
