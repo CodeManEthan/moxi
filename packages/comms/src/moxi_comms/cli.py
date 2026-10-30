@@ -534,7 +534,7 @@ def cmd_cache(args, ctx: Context) -> int:
             ctx.say(cache.spoken_line(cache.kind_of(cache.target_for_session_id(i))))
         return _offline(e)
     targets = []
-    refused = False         # a name resolution refused (retired): exit 2
+    refused = False         # a name resolution refused (retired): exit 3
     try:
         wanted = list(args.targets)
         if not wanted:

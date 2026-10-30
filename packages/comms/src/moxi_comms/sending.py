@@ -313,7 +313,7 @@ class Context:
     def daemon(self) -> DaemonClient:
         """A connection to the daemon, once its hello has agreed a comms wire version.
         A version it refuses raises `VersionMismatch`, and a daemon that doesn't answer
-        `DaemonOffline`, which every verb answers with exit 4, so no verb writes a token
+        `DaemonOffline`, which every verb answers with exit 75, so no verb writes a token
         or reads an answer its daemon does not speak."""
         return (DaemonClient(self.socket_path) if self.deadline is None else
                 DaemonClient(self.socket_path, timeout=self.deadline)).connect()
@@ -972,7 +972,7 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
         resolved, deferred = [], []
         for tag in tags:
             try:
-                r = client.query("resolve", name=tag)
+                r = client.call("resolve", {"name": tag})
             except DaemonError as e:
                 _refuse(ctx, "resolve-refused", _refused_tag(tag, e))
                 return _REFUSED, None
@@ -1087,7 +1087,7 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
         notes += reply_notes
 
     # ---- 5. the cache reads ---------------------------------------------------------
-    # A read comms cannot make refuses the WHOLE post, exit 6, nothing posted:
+    # A read comms cannot make refuses the WHOLE post, exit 75, nothing posted:
     # an `unknown` verdict, a name that unbound while comms checked it, a failed query.
     # The sender sends again in a moment. A `cold` read posts and the message waits in
     # the queue (every adapter); a passing read delivers. `--held` reads like any
@@ -1521,8 +1521,8 @@ def _thread_idle(ctx: Context, items, sender, epoch) -> tuple[bool, str | None]:
         try:
             client = ctx.daemon()
             try:
-                answer = client.query("readable", identity=sender.qualified,
-                                      ids=[m.id for m in theirs])
+                answer = client.call("readable", {"identity": sender.qualified,
+                                                  "ids": [m.id for m in theirs]})
             finally:
                 client.close()
         except Exception as e:  # noqa: BLE001 -- a failed read lets the reply through
@@ -1574,12 +1574,13 @@ ASK_CHECK_NO_ANSWER = "NOTE: the single-reply check did not run (the daemon did 
 def _nominated_asks(client, sender, resolved) -> tuple[list[str], str | None]:
     """(the ask ids the daemon nominates, or a NOTE saying the check did not run).
 
-    `DaemonOffline` cannot reach here in the ordinary way -- the verb exits 4 before
+    `DaemonOffline` cannot reach here in the ordinary way -- the verb exits 75 before
     resolution when the daemon is down -- but a daemon that closes the connection in
     between is a daemon that did not answer, and it lets the send through like one.
     """
     try:
-        answer = client.query("asks", sender=sender.qualified, recipients=list(resolved))
+        answer = client.call("asks", {"sender": sender.qualified,
+                                     "recipients": list(resolved)})
     except (DaemonTimeout, DaemonOffline):
         return [], ASK_CHECK_NO_ANSWER
     except DaemonError as e:
@@ -1594,7 +1595,7 @@ def _open_asks(ctx: Context, sender, nominated, resolved) -> tuple[list, list[st
     the record the verb already holds. ANY error there -- `RecordError`,
     `DaemonOffline`, the local backend's own `sqlite3.Error`, or anything else the check
     cannot finish -- treats that ask as not open and says so; if the record is truly
-    broken the post itself fails, with exit 5.
+    broken the post itself fails, with exit 1.
     """
     now = ctx.clock()
     found, notes = [], []
@@ -1739,7 +1740,7 @@ def _refusal_reason(state) -> str:
 
 
 def _hold_text(refused, *, others: bool = False) -> str:
-    """The refusal for reads comms cannot make: exit 6, nothing posted.
+    """The refusal for reads comms cannot make: exit 75, nothing posted.
     It opens with "Nothing was sent:" and each refused recipient's reason, says how to
     reach the others when the post had others, tells the sender to send it again, and
     closes with "Nothing was sent." -- so the first line and the last both say it."""
