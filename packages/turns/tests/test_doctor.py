@@ -161,6 +161,13 @@ def test_the_floor_is_not_measured_without_enough_samples():
     assert [r.state for r in rows] == ["ok", "ok"]
 
 
+def test_the_floor_is_the_cores(monkeypatch):
+    monkeypatch.setattr(moxi_doctor, "floor_ms", lambda: 12.5)
+    assert hooktimes.floor_ms() == 12.5
+    rows = hooktimes.rows(samples("claude", "turn.start", [30] * 20), budget=2.0)
+    assert rows[0].state == "warn" and "floor 12.5 ms" in rows[0].detail
+
+
 def test_a_recorder_writes_once_a_flush_and_the_reader_keeps_the_window(tmp_path):
     path = tmp_path / "hook-times.jsonl"
     rec = hooktimes.Recorder("claude", path=path)
