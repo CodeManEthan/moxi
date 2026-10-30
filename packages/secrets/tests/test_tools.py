@@ -113,6 +113,17 @@ def test_the_pin_the_tool_writes_is_the_committed_layout():
     assert isinstance(data["fetched"], datetime.date)
 
 
+def test_the_rule_files_are_fetched_at_the_commit_the_tag_resolved_to(monkeypatch, tmp_path):
+    commit = "0123456789abcdef0123456789abcdef01234567"
+    fetched = []
+    monkeypatch.setattr(bump, "tag_commit", lambda tag: commit)
+    monkeypatch.setattr(bump, "fetch", lambda url: fetched.append(url) or b"x")
+    monkeypatch.setattr(bump, "RULES", tmp_path)
+    bump.write_upstream("v8.31.0")
+    assert fetched and all(f"/{commit}/" in url and "v8.31.0" not in url for url in fetched)
+    assert f'commit = "{commit}"' in (tmp_path / "upstream" / "PIN").read_text()
+
+
 def test_rule_changes_name_added_removed_and_changed_ids():
     def sets(rules):
         return {"sets": {"credentials": {"rules": rules}, "broad": {"rules": []}}}

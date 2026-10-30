@@ -5,7 +5,9 @@
 Dev-only: it needs the network and Go, and it is not in the wheel or the sdist. It runs
 these steps in order and stops at the first that fails:
 
-1. Fetches `config/gitleaks.toml` and `LICENSE` at the tag and resolves the tag's commit.
+1. Resolves the tag's commit with `git ls-remote`, then fetches `config/gitleaks.toml` and
+   `LICENSE` at that commit, so the files are the commit the pin records even if the tag
+   moves between the two.
 2. Writes the three files of `rules/upstream/`: the two fetched files byte for byte and
    `PIN` (tag, commit, sha256 of gitleaks.toml, today's date).
 3. Regenerates `sets.json` and prints the added, removed and changed rule ids, and every
@@ -67,7 +69,7 @@ RULES = PACKAGE / "src" / "moxi_secrets" / "rules"
 SAMPLER = TOOLS / "re2_samples"
 
 UPSTREAM_GIT = "https://github.com/gitleaks/gitleaks"
-UPSTREAM_RAW = "https://raw.githubusercontent.com/gitleaks/gitleaks/{tag}/{path}"
+UPSTREAM_RAW = "https://raw.githubusercontent.com/gitleaks/gitleaks/{commit}/{path}"
 GO_MODULE = "github.com/zricethezav/gitleaks/v8"
 PYPI = "https://pypi.org/pypi/google-re2/json"
 TAG = re.compile(r"v\d+\.\d+\.\d+")
@@ -130,8 +132,8 @@ def write_upstream(tag: str) -> None:
     from moxi import files
 
     commit = tag_commit(tag)
-    toml = fetch(UPSTREAM_RAW.format(tag=tag, path="config/gitleaks.toml"))
-    licence = fetch(UPSTREAM_RAW.format(tag=tag, path="LICENSE"))
+    toml = fetch(UPSTREAM_RAW.format(commit=commit, path="config/gitleaks.toml"))
+    licence = fetch(UPSTREAM_RAW.format(commit=commit, path="LICENSE"))
     digest = hashlib.sha256(toml).hexdigest()
     upstream = RULES / "upstream"
     files.atomic_write(upstream / "gitleaks.toml", toml, mode=0o644)
