@@ -547,7 +547,8 @@ def test_full_hands_the_suites_every_tier(repo):
 
 class Timed(Runs):
     """A step runner whose suites write the kit's durations file: `seconds` maps a
-    package to its tests' call seconds."""
+    package to its tests' call seconds, each a number or (seconds, the tiers of a test
+    the kit put back)."""
 
     def __init__(self, seconds, codes=None, write=True):
         super().__init__(codes)
@@ -557,9 +558,12 @@ class Timed(Runs):
     def __call__(self, cmd, cwd, env):
         code = super().__call__(cmd, cwd, env)
         if "pytest" in cmd and self.write and Path(cwd).name in self.seconds:
-            tests = {f"tests/test_it.py::test_{i}": {"setup": 0.0, "call": secs,
-                                                    "teardown": 0.0, "outcome": "passed"}
-                     for i, secs in enumerate(self.seconds[Path(cwd).name])}
+            tests = {}
+            for i, secs in enumerate(self.seconds[Path(cwd).name]):
+                secs, lifted = secs if isinstance(secs, tuple) else (secs, None)
+                tests[f"tests/test_it.py::test_{i}"] = {
+                    "setup": 0.0, "call": secs, "teardown": 0.0, "outcome": "passed",
+                    **({"lifted": lifted} if lifted else {})}
             Path(env[testing.DURATIONS_ENV]).write_text(json.dumps({"tests": tests}))
         return code
 
@@ -635,10 +639,12 @@ def test_a_dirty_tree_or_a_finding_keeps_no_record(ignoring):
 
 
 def on_main(repo, rel, seconds, full=True):
-    """Commit `rel` on main and keep a record for it there."""
+    """Commit `rel` on main and keep a record for it there (a plain run, picked by that
+    commit, when not `full`)."""
     git(repo, "switch", "-q", "main")
     commit_file(repo, rel)
-    result = run_check(repo, Timed(seconds), full=full)
+    result = run_check(repo, Timed(seconds), full=full,
+                       **({} if full else {"base": "HEAD~1"}))
     assert result.kept is not None
     git(repo, "switch", "-q", "work")
     git(repo, "rebase", "-q", "main")
@@ -671,6 +677,23 @@ def test_the_delta_compares_only_packages_run_the_same_way(ignoring):
     assert result.delta.commit == first and not result.delta.whole
     assert result.delta.packages == ("cache", "comms")
     assert f", delta -5.0s vs {first[:12]} (cache, comms) |" in result.line()
+
+
+def test_a_plain_run_that_put_tier_tests_back_is_kept_and_compared_apart(ignoring):
+    first = on_main(ignoring, "packages/moxi/a.py", {"cache": [5.0], "comms": [5.0]},
+                    full=False)
+    commit_file(ignoring, "packages/cache/x.py")
+    result = run_check(ignoring, Timed({"cache": [5.0, (40.0, ["slow"])],
+                                        "comms": [6.0, (1.0, ["build", "slow"])]}))
+    record = json.loads((records(ignoring) / f"{head(ignoring)}.json").read_text())
+    assert {name: entry["tiers"] for name, entry in record["packages"].items()} == {
+        "cache": "plain+slow", "comms": "plain+build+slow"}
+    # neither is compared with main's plain record, so no slowdown is reported
+    assert result.delta is None
+    result = run_check(ignoring, Timed({"cache": [5.5],
+                                        "comms": [6.0, (1.0, ["build", "slow"])]}))
+    assert result.delta.commit == first and result.delta.packages == ("cache",)
+    assert result.delta.seconds == pytest.approx(0.5)
 
 
 def test_head_s_own_record_is_not_its_ancestor(ignoring):

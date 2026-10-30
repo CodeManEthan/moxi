@@ -227,6 +227,22 @@ def test_selection_holds_under_workers_and_the_controller_writes_the_durations(
     assert {nodeid.rsplit("::", 1)[1] for nodeid in tests} == PLAIN | {
         "test_slow", "test_build", "test_browser", "test_slow_touches",
         "test_slow_holds_l7"}
+    lifted = {nodeid.rsplit("::", 1)[1]: entry.get("lifted")
+              for nodeid, entry in tests.items()}
+    assert lifted["test_build"] == ["build"] and lifted["test_browser"] == ["browser"]
+    assert lifted["test_slow"] == ["slow"] and lifted["test_unit"] is None
+
+
+def test_the_durations_name_the_tiers_a_changed_path_put_back(package, monkeypatch):
+    out = package.path / "durations.json"
+    monkeypatch.setenv(testing.DURATIONS_ENV, str(out))
+    monkeypatch.setenv(testing.CHANGED_ENV, changed(package, "packages/p/src/p/claude/x"))
+    package.runpytest("-p", "no:cacheprovider")
+    tests = {nodeid.rsplit("::", 1)[1]: entry
+             for nodeid, entry in json.loads(out.read_text())["tests"].items()}
+    assert {name for name, entry in tests.items() if "lifted" in entry} == {
+        "test_slow_touches"}
+    assert tests["test_slow_touches"]["lifted"] == ["slow"]
 
 
 # --- durations ---------------------------------------------------------------------------

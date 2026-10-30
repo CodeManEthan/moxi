@@ -93,8 +93,8 @@ A test put back gets the marker `lifted`, and the run's `-m` expression becomes
 `(<expression>) or lifted`, so pytest's own deselection keeps it and `-k` still applies.
 
 Durations. Each run writes `durations.json`: every test's seconds by phase (`setup`,
-`call`, `teardown`) and its outcome, from the reports the main process sees (under
-xdist, the controller's). It goes to the path in `MOXI_TEST_DURATIONS`, else to
+`call`, `teardown`), its outcome and, for a test this run put back, `lifted` with its
+tiers, from the reports the main process sees (under xdist, the controller's). It goes to the path in `MOXI_TEST_DURATIONS`, else to
 `moxi-dev/durations.json` in pytest's cache directory; with neither (the cache plugin
 off) nothing is written.
 
@@ -656,6 +656,8 @@ class _Durations:
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
         entry = self.tests.setdefault(report.nodeid, {})
         entry[report.when] = round(entry.get(report.when, 0.0) + report.duration, 6)
+        if LIFTED in report.keywords:
+            entry["lifted"] = [tier for tier in LIFTABLE if tier in report.keywords]
         if report.failed:
             entry["outcome"] = "failed"
         elif report.skipped and entry.get("outcome") != "failed":

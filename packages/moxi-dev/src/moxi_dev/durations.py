@@ -4,8 +4,10 @@ Each suite `moxi-dev check` runs writes the kit's `durations.json` (`moxi_dev.te
 every test's seconds by phase. The check reads them back and keeps one record per
 commit at `<git common dir>/moxi-dev/durations/<sha>.json`, inside git's own directory,
 so it is never tracked and every worktree of the clone shares it. A record holds, for
-each package whose suite passed, whether every tier ran (`--full`) and each test's
-seconds. A later run at the same commit replaces the packages it ran and keeps the rest.
+each package whose suite passed, the tiers it ran and each test's seconds. The tiers are
+`all` for `--full`, `plain` for a run that put no tier test back, and `plain+<tier>...`
+for one whose changed paths put some back (`plain+slow`), from the tests the kit marks
+`lifted`. A later run at the same commit replaces the packages it ran and keeps the rest.
 A run on a tree with changes of its own, or one that ran a finding's tests only, keeps
 no record: its times are not the commit's.
 
@@ -17,7 +19,8 @@ win.
 
 The comparison is with the newest record for a commit on `main` that is an ancestor of
 HEAD (the commits from the merge base back), HEAD itself left out, over the packages
-both ran the same way (every tier, or not).
+both ran with the same tiers, so a tier test a change put back is not read as a
+slowdown.
 """
 
 from __future__ import annotations
@@ -47,7 +50,7 @@ PHASES = ("setup", "call", "teardown")
 class PackageRun:
     """One package's suite in one run: whether every tier ran, and each test's phases."""
 
-    tiers: str                          # "all" (--full) or "plain"
+    tiers: str                          # "all" (--full), "plain" or "plain+<tier>..."
     tests: Mapping[str, Mapping[str, Any]]
 
     def seconds(self) -> float:
@@ -71,6 +74,16 @@ class Delta:
 
 def test_seconds(entry: Mapping[str, Any]) -> float:
     return sum(float(entry.get(phase) or 0.0) for phase in PHASES)
+
+
+def tiers_of(tests: Mapping[str, Mapping[str, Any]], *, full: bool) -> str:
+    """The tiers a run ran: `all` under `--full`, else `plain` and the tiers of every test
+    the kit put back (module doc)."""
+    if full:
+        return "all"
+    lifted = {tier for entry in tests.values() if isinstance(entry, Mapping)
+              for tier in entry.get("lifted") or () if isinstance(tier, str)}
+    return "+".join(["plain", *sorted(lifted)])
 
 
 def load_run(path: Path) -> dict[str, dict[str, Any]] | None:

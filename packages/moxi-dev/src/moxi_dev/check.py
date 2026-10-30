@@ -411,7 +411,8 @@ class _Steps:
             ran = ran or passed is True
             if tests is not None:
                 timed[package.dir] = (passed, durations.PackageRun(
-                    tiers="all" if self.changed is None else "plain", tests=tests))
+                    tiers=durations.tiers_of(tests, full=self.changed is None),
+                    tests=tests))
         if self.findings and not ran and ok:
             print(f"moxi-dev check: no test in {', '.join(p.dir for p in chosen)} carries "
                   f"{', '.join(self.findings)}", flush=True)
