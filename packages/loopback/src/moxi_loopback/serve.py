@@ -661,6 +661,7 @@ def _start(args: Any, stop: _Stop, log: logging.Logger) -> int:
         should_exit = asyncio.Event()
         stop.activity = inner.activity
         stop.attach(loop, should_exit)
+        inner.activity.restart()
         idle = loop.create_task(_idle(inner.activity, idle_s, stop))
         code = codes.OK
         try:

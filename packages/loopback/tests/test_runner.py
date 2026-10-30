@@ -392,6 +392,28 @@ def test_idle_exit_at_idle_s_unlinks_both_files(spawn):
 
 
 @posix
+def test_the_idle_run_starts_when_serving_starts_not_while_the_lock_is_awaited(spawn):
+    from moxi import files
+
+    runtime = Layout(MODULE).runtime_dir(create=True)
+    with files.lock(runtime / "page.lock"):
+        runner = spawn("--idle-s", "0.5")
+        time.sleep(2.0)
+        freed = time.monotonic()
+    assert runner.ready(LOCK_WAIT + 5)
+    ready = time.monotonic()
+    assert ready >= freed
+    info = read_runtime(MODULE)
+    # The 2 s spent waiting for the lock count for nothing: half the idle run after the
+    # ready line, the server still takes a connection.
+    time.sleep(max(0.0, ready + 0.25 - time.monotonic()))
+    assert not refused(info), "the server stopped before its idle run was out"
+    code, t = runner.exit(5)
+    assert code == 0 and t - ready >= 0.5 - SLACK
+    assert "stopping: idle for 0.5 s" in runner.stderr()
+
+
+@posix
 def test_a_print_from_a_handler_after_the_ready_line_goes_to_stderr(served):
     runner, info = served
     assert call(info, "GET", "/api/print") == (200, {})

@@ -230,6 +230,11 @@ class Activity:
         self.pending = 0
         self._quiet_since = time.monotonic()
 
+    def restart(self) -> None:
+        """Start the quiet run again from now. The runner calls it when it begins to
+        serve, so the time spent before that, waiting for the lock, is not idle time."""
+        self._quiet_since = time.monotonic()
+
     def hand_off(self, scope: dict[str, Any]) -> None:
         """Count a request the protocol is handing to the app, until `guard` settles it.
 
