@@ -243,6 +243,17 @@ TIMER = "'command': 'moxi-alpha-sweep', 'every': '5m', 'switch': 'sweep.on'"
                 "'owner': 'me'}}"}, "key 'owner', which this moxi does not know"),
     ({"STORES": "{'Record': {'root': 'state', 'path': 'r.db', 'kind': 'sqlite'}}"},
      "STORES name"),
+    # the core's own stores in a module's state directory
+    ({"STORES": "{'runs': {'root': 'state', 'path': 'runs.jsonl', 'kind': 'jsonl'}}"},
+     "that path is the core's"),
+    ({"STORES": "{'runs': {'root': 'state', 'path': './Runs.jsonl.1', 'kind': 'jsonl'}}"},
+     "that path is the core's"),
+    ({"STORES": "{'doc': {'root': 'state', 'path': 'doctor.json', 'kind': 'file'}}"},
+     "that path is the core's"),
+    ({"STORES": "{'logs': {'root': 'state', 'path': 'logs', 'kind': 'dir'}}"},
+     "that path is the core's"),
+    ({"STORES": "{'log': {'root': 'state', 'path': 'logs\\\\relay.log', "
+                "'kind': 'file'}}"}, "that path is the core's"),
     ({"BUDGETS": "{'import_ms': 3}"}, "BUDGETS key 'import_ms'"),
     ({"BUDGETS": "{'idle_cpu': 0}"}, "idle_cpu"),
     ({"BUDGETS": "{'idle_cpu': 1.5}"}, "idle_cpu"),
@@ -287,6 +298,10 @@ def test_a_new_name_of_the_wrong_shape_is_broken(site, names, words):
     {"SESSION_ENV": "{'CLAUDE_X': 'the harness', 'MOXI_BETA_Y': 'beta'}"},
     {"STORES": "{'record': {'root': 'runtime', 'path': 'r', 'kind': 'file', "
                "'retention': '512K'}}"},
+    # the core's store names are only the core's in the state root, and only there
+    {"STORES": "{'runs': {'root': 'data', 'path': 'runs.jsonl', 'kind': 'jsonl'}}"},
+    {"STORES": "{'runs': {'root': 'state', 'path': 'sub/runs.jsonl', 'kind': 'jsonl'}}"},
+    {"STORES": "{'logs': {'root': 'state', 'path': 'mylogs', 'kind': 'dir'}}"},
     {"TIMERS": "{'sweep': {'command': 'x', 'switch': 's', 'every': '24h'}}"},
     {"TIMERS": "{'sweep': {'command': 'x', 'switch': 's', 'every': '1m'}}"},
     {"TIMERS": "{'sweep': {'command': 'x', 'switch': 's', 'at': ['00:00', '23:59']}}"},

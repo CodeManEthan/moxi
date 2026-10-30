@@ -194,6 +194,13 @@ def args(root: ET.Element) -> list[str]:
 
 # -- rendering ---------------------------------------------------------------------------
 
+def test_a_stop_process_daemon_tells_the_gate(w):
+    _path, _text, root = render(w, spec(stop="process"))
+    assert "--restart --runtime --stop process -- " in args(root)
+    _path, _text, root = render(w, spec())
+    assert "--stop" not in args(root)
+
+
 def test_a_daemon_renders_the_designs_task(w):
     path, text, root = render(w, spec())
     pythonw = w.scripts / "pythonw.exe"
