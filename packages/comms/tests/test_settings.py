@@ -451,6 +451,21 @@ def test_the_text_entry_logs_no_roster_warning(caplog, capsys):
     assert roster.agents["p@x"].thread_file.name == "p@x.json"
 
 
+def test_the_text_entry_types_the_values_as_the_loader_does(monkeypatch):
+    seen = []
+    typed = config._typed
+
+    def spy(settings, path):
+        seen.append((dict(settings.values), dict(settings.sources)))
+        return typed(settings, path)
+
+    monkeypatch.setattr(config, "_typed", spy)
+    write_config(None, EVERY_TABLE)
+    config.load()
+    config.check_text(EVERY_TABLE)
+    assert len(seen) == 2 and seen[0] == seen[1]
+
+
 def test_the_text_entry_leaves_no_cache_entry():
     checked, cached = dict(config._checked), dict(moxi_config._cache)
     config.check_text(EVERY_TABLE)

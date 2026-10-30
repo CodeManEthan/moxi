@@ -66,7 +66,9 @@ value of the wrong type raises `ConfigError` naming the file, the key and the fi
 `path=` reads that file in place of the module's own.
 
 `check_text(module, schema, text)` is the same reader over a config file's text alone: no
-path, no environment overrides, no cache. It raises `ConfigError` or returns None.
+path, no environment overrides, no cache. It raises `ConfigError`, or returns the
+`Settings` the text gives (no path; each key the text sets, typed as `load` types it, else
+its default), so a module's own check can read the same values its loader reads.
 
 `Config(module, schema)` is the same reader for a running module: `start()` raises, and
 `use(key)` reads one key at the point of use, keeping the last good settings when the file
@@ -375,14 +377,15 @@ class Settings(_Frozen):
 _NO_ENV = _MappingProxy({})
 
 
-def check_text(module: str, schema: Schema, text: str) -> None:
+def check_text(module: str, schema: Schema, text: str) -> Settings:
     """Check config text `text` of module `module` as `load` would read it, but from the
     text alone: no path, no environment overrides. Raises `ConfigError`; an error names no
-    file."""
-    _read_text(module, schema, text, None)
+    file. Returns the `Settings` the text gives: `file` None, each key the text sets as
+    `load` types it (a path's `~` expanded to the user's home), else its default."""
+    return _read_text(module, schema, text, None)
 
 
-def _read_text(module, schema, text, path) -> None:
+def _read_text(module, schema, text, path) -> Settings:
     """`check_text`, with each error naming `path`."""
     import tomllib
 
@@ -392,7 +395,7 @@ def _read_text(module, schema, text, path) -> None:
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(path, None, f"is not valid TOML ({exc})",
                           "correct the file's TOML syntax") from None
-    _walk_file(data, "", schema, path, {}, _NO_ENV)
+    return _settings(module, schema, path, data, _NO_ENV)
 
 
 def load(module: str, schema: Schema, *, env=None, path=None) -> Settings:
