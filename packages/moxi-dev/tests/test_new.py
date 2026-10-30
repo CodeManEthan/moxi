@@ -35,8 +35,12 @@ moxi-other = { workspace = true }
 dev = ["moxi-dev"]
 """
 
-FILES = [".gitignore", "conftest.py", "pyproject.toml", "src/moxi_sample/__init__.py",
-         "src/moxi_sample/module.py", "tests/test_contract.py"]
+FILES = [".gitignore", "LICENSE", "README.md", "conftest.py", "pyproject.toml",
+         "src/moxi_sample/__init__.py", "src/moxi_sample/module.py",
+         "tests/test_contract.py"]
+
+#: The repository's own LICENSE, which every package carries byte for byte.
+LICENSE = Path(__file__).resolve().parents[3] / "LICENSE"
 
 
 @pytest.fixture
@@ -77,6 +81,9 @@ def test_it_writes_the_package_and_nothing_else(workspace, capsys):
     assert run("sample") == 0
     assert rendered(workspace) == FILES
     assert not (workspace / "packages" / "sample" / ".public-paths").exists()
+    package = workspace / "packages" / "sample"
+    assert (package / "LICENSE").read_bytes() == LICENSE.read_bytes()
+    assert (package / "README.md").read_text().startswith("# moxi-sample\n")
     out = capsys.readouterr().out.splitlines()
     assert sorted(out[:-1]) == [f"packages/sample/{f}" for f in FILES]
     assert out[-1] == ("pyproject.toml: packages/sample added to the workspace members "

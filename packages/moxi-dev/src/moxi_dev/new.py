@@ -12,7 +12,7 @@ declares `[tool.uv.workspace]`). It writes `packages/<module>/`:
   inside its fence;
 - `src/moxi_<module>/` with an announcement that offers nothing yet;
 - `tests/test_contract.py`, the contract check over the package;
-- `.gitignore`.
+- `LICENSE` (the repository's MIT text), a one-line `README.md` and `.gitignore`.
 
 Then it adds `packages/<module>` to the root's workspace `members` and `moxi-<module>`
 to its `[tool.uv.sources]` (editing the text, so comments stay) and runs `uv lock` at
@@ -20,8 +20,8 @@ the root. It refuses a name that is not a module name or is one of the core's ve
 module the workspace already has, and any file that already exists: it overwrites
 nothing.
 
-The templates are `templates/**.tmpl` beside this file: `$module`, `$summary_py`,
-`$summary_toml` and `$core_range` are substituted in their text, and the directory
+The templates are `templates/**.tmpl` beside this file: `$module`, `$summary`,
+`$summary_py`, `$summary_toml` and `$core_range` are substituted in their text, and the directory
 `__import__` becomes the module's import package `moxi_<module>`. A rendered package
 imports only names that keep their place: `moxi_dev.contract` and `moxi_dev.testing`.
 """
@@ -55,6 +55,7 @@ def plan(module: str, summary: str, core_range: str) -> dict[Path, str]:
     """Each file to write, relative to the package's directory, with its rendered text."""
     values = {
         "module": module,
+        "summary": summary,
         "summary_py": repr(summary),
         "summary_toml": json.dumps(summary),
         "core_range": core_range,
