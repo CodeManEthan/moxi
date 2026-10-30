@@ -4,6 +4,7 @@ import stat
 import subprocess
 import sys
 import sysconfig
+import time
 from pathlib import Path
 
 import pytest
@@ -227,6 +228,37 @@ def test_two_first_runs_agree_on_one_device_id(home):
                               stdout=subprocess.PIPE, text=True) for _ in range(6)]
     ids = {p.communicate(timeout=60)[0].strip() for p in procs}
     assert len(ids) == 1 and ids == {paths.device_id(home)}
+
+
+def test_two_threads_of_one_process_agree_on_one_device_id(home, monkeypatch):
+    """The second thread waits for the first one's lock instead of being refused by it."""
+    import threading
+
+    from moxi import files
+
+    barrier = threading.Barrier(2)
+    real_write = files.atomic_write
+
+    def slow_write(*args, **kwargs):
+        time.sleep(0.3)             # the other thread has read no id and reached the lock
+        return real_write(*args, **kwargs)
+
+    monkeypatch.setattr(files, "atomic_write", slow_write)
+    found, failed = [], []
+
+    def first_run():
+        barrier.wait()
+        try:
+            found.append(paths.device_id(home))
+        except Exception as e:  # noqa: BLE001 - the test reports it
+            failed.append(e)
+
+    threads = [threading.Thread(target=first_run) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    assert failed == [] and len(found) == 2 and len(set(found)) == 1
 
 
 def test_the_device_label(home):

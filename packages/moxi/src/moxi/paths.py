@@ -222,8 +222,8 @@ DEVICE_ID = "device-id"
 def device_id(env: Mapping[str, str] | None = None) -> str:
     """This device's id: a UUID (32 hex digits) written once in the core's state directory.
 
-    Two first runs at once agree on one id: the file is written under a lock, and only
-    when it is still missing once the lock is held.
+    Two first runs at once, in two processes or two threads of one, agree on one id: the
+    file is written under a lock, and only when it is still missing once the lock is held.
     """
     path = core().state_dir(env) / DEVICE_ID
     if found := _read_id(path):
@@ -233,7 +233,8 @@ def device_id(env: Mapping[str, str] | None = None) -> str:
     from . import files
 
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with files.lock(path.with_name(f"{DEVICE_ID}.lock")):
+    # This process's threads queue for the lock rather than being refused by it.
+    with files._gated_lock(path.with_name(f"{DEVICE_ID}.lock")):
         if found := _read_id(path):
             return found
         fresh = uuid.uuid4().hex
