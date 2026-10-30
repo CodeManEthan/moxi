@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import os
 import posixpath
-import shlex
 import shutil
 import sys
 import time
@@ -33,6 +32,7 @@ from moxi.doctor import Row
 
 from moxi_repo import _records, api, committer, gitconf, pieces
 from moxi_repo.gitrun import git
+from moxi_repo.run import quote_arg
 
 MODULE = "repo"
 #: A path left out longer than this many seconds is shown.
@@ -67,7 +67,7 @@ def rows() -> list[Row]:
         name = f"hooks {root}"
         if repo is None:
             out.append(Row(MODULE, name, "warn", why,
-                           f"moxi repo git-hooks remove {api._arg(root)}"))
+                           f"moxi repo git-hooks remove {quote_arg(root)}"))
             continue
         try:
             status = api._status_of(repo, True, version, good)
@@ -129,7 +129,7 @@ def _git_rows(version, index: dict, statuses: list[dict]) -> list[Row]:
             out.append(Row(MODULE, f"git {other}", "ok", f"git {text} runs no config "
                            "entries, and no indexed repo uses config mode"))
             continue
-        fix = (f"moxi repo git-hooks add {config_roots[0]} --mode shim"
+        fix = (f"moxi repo git-hooks add {quote_arg(config_roots[0])} --mode shim"
                if len(config_roots) == 1 else
                "moxi repo git-hooks add PATH --mode shim, for each of them")
         out.append(Row(MODULE, f"git {other}", "warn",
@@ -215,7 +215,8 @@ def _spec_rows(repo: gitconf.Repo) -> list[Row]:
         spec = item["spec"]
         if item["saved"] and spec is None:
             out.append(Row(MODULE, label, "warn", f"the saved spec can't be read: "
-                           f"{item['problem']}", f"moxi repo specs remove {root} {name}"))
+                           f"{item['problem']}",
+                           f"moxi repo specs remove {quote_arg(root)} {name}"))
         if spec is not None:
             out += _cadence_rows(repo, label, name, spec, item, changed, now)
             out += _push_rows(repo, label, name, spec, item, head)
@@ -279,7 +280,7 @@ def _cadence_rows(repo, label: str, name: str, spec: dict, item: dict, changed: 
                     f"{len(waiting)} changed {'path' if len(waiting) == 1 else 'paths'} "
                     f"waiting ({_named(waiting)}); the last commit by {spec['author'][0]} "
                     f"was at {_stamp(since)}, interval {committer._plain(interval)} s"
-                    + passed, f"moxi repo commit {root} --spec {name}")]
+                    + passed, f"moxi repo commit {quote_arg(root)} --spec {name}")]
     return [Row(MODULE, label, "ok", f"last commit at {_stamp(since)}, interval "
                 f"{committer._plain(interval)} s" + passed)]
 
@@ -308,7 +309,7 @@ def _push_rows(repo, label: str, name: str, spec: dict, item: dict,
         error = (item["push"].get(branch) or {}).get("error")
         out.append(Row(MODULE, f"{label} push", "warn",
                        what + (f"; the last push failed: {error}" if error else ""),
-                       f"moxi repo commit {repo.root} --spec {name}"))
+                       f"moxi repo commit {quote_arg(repo.root)} --spec {name}"))
     return out
 
 
@@ -344,7 +345,7 @@ def _stray_push_rows(repo, label: str, item: dict, head: str | None,
             out.append(Row(MODULE, f"{label} push", "warn",
                            f"the spec isn't saved, so only its caller's passes retry the "
                            f"push of {branch}; if nothing runs it any more, forget it",
-                           f"moxi repo specs remove {root} {item['name']}"))
+                           f"moxi repo specs remove {quote_arg(root)} {item['name']}"))
         elif branch != head and branch not in item["push"]:
             if git(repo.root, "rev-parse", "-q", "--verify",
                    f"refs/heads/{branch}").returncode != 0:
@@ -352,9 +353,9 @@ def _stray_push_rows(repo, label: str, item: dict, head: str | None,
             out.append(Row(MODULE, f"{label} push", "warn",
                            f"no pass retries the push of {branch}: it isn't checked out, and "
                            "the repo's state file holds no failed push of it",
-                           f"git -C {shlex.quote(root)} switch {branch}, then: moxi repo "
-                           f"commit {root} --spec {item['name']}; or: moxi doctor --clear "
-                           f"repo {shlex.quote(key)}"))
+                           f"git -C {quote_arg(root)} switch {quote_arg(branch)}, then: moxi repo "
+                           f"commit {quote_arg(root)} --spec {item['name']}; or: moxi doctor "
+                           f"--clear repo {quote_arg(key)}"))
     return out
 
 
@@ -377,16 +378,16 @@ def _ledger_rows(index: dict) -> list[Row]:
     for found in _records.judge():
         root = (index.get(found.cgd) or {}).get("root")
         if found.reason == _records.GONE:
-            fix = (f"moxi repo git-hooks remove {root}" if root
+            fix = (f"moxi repo git-hooks remove {quote_arg(root)}" if root
                    else "moxi repo git-hooks refresh")
             detail = (f"its repo {root or found.cgd} is gone; the next sweep clears its "
                       "record")
         elif found.action == "flag":
-            fix = f"moxi repo git-hooks refresh {root}" if root else \
+            fix = f"moxi repo git-hooks refresh {quote_arg(root)}" if root else \
                 "moxi repo git-hooks refresh"
             detail = "its piece has no recorded flag; the next sweep sets it"
         else:
-            fix = f"moxi repo git-hooks refresh {root}" if root else \
+            fix = f"moxi repo git-hooks refresh {quote_arg(root)}" if root else \
                 "moxi repo git-hooks refresh"
             detail = f"{found.reason}; the next sweep clears its record"
         out.append(Row(MODULE, f"ledger {found.key}", "warn", detail, fix))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -14,10 +15,10 @@ import pytest
 import moxi.modules
 import moxi_repo
 from moxi import paths
-from moxi_repo import api, checks, committer, gitconf
+from moxi_repo import _records, api, checks, committer, gitconf
 from moxi_repo import install as repo_install
 from tests.conftest import POSIX_ONLY, change, commit, doctor, git, problems
-from tests.test_commit_records import failed_push, push_key
+from tests.test_commit_records import doctor_records, failed_push, push_key
 from tests.test_committer import AUTHOR, deny, spec, write
 
 pytestmark = POSIX_ONLY
@@ -303,6 +304,79 @@ def test_a_saved_specs_push_record_on_a_branch_no_pass_pushes(demo, clock):
     assert row.detail == ("no pass retries the push of a: it isn't checked out, and the "
                           "repo's state file holds no failed push of it")
     assert row.fix.endswith(f"moxi doctor --clear repo {push_key(repo, 'a')}")
+
+
+# -- a root with a space ----------------------------------------------------------------------
+
+def pasted(*words) -> str:
+    """A command as a person pastes it: each word quoted only where it needs quoting."""
+    return shlex.join(str(w) for w in words)
+
+
+def test_git_and_spec_fix_lines_quote_a_root_with_a_space(demo, clock):
+    other = fake_git(demo.tmp, "2.43.0")
+    demo.mp.setattr(checks, "OTHER_GITS", {sys.platform: (str(other),)})
+    repo = demo.repo("my notes")
+    api.add(repo, ["demo/gate"], mode="config")
+    [row] = rows_named(f"git {other}")
+    assert row.fix == pasted("moxi", "repo", "git-hooks", "add", repo, "--mode", "shim")
+
+    # A spec that ran without being saved, whose push failed: its row and its record.
+    failed_push(demo, repo, clock)
+    [row] = problems(f"spec {repo} demo/snap push")
+    assert row.fix == pasted("moxi", "repo", "specs", "remove", repo, "demo/snap")
+    fix = doctor_records()[push_key(repo)]["fix"]
+    assert fix.endswith(f"({pasted('moxi', 'repo', 'commit', repo)})")
+
+    # Saved, with changed paths waiting past the interval and commits not pushed.
+    moxi_repo.save_spec(spec(repo, push="origin", min_interval=600))
+    write(repo, "notes/waiting.md")
+    now = checks._now
+    demo.mp.setattr(checks, "_now", lambda: time.time() + 600 + 3601 + 5)
+    retry = pasted("moxi", "repo", "commit", repo, "--spec", "demo/snap")
+    assert {r.fix for r in problems(f"spec {repo} demo/snap")} == {retry}
+    demo.mp.setattr(checks, "_now", now)
+
+    # A saved push on a branch no pass pushes: every command in the line pastes whole.
+    git(repo, "switch", "-q", "-c", "side")
+    failed_push(demo, repo, clock, branch="side")
+    git(repo, "switch", "-q", "main")
+    (repo / ".git" / "moxi-repo" / "state.json").unlink()
+    [row] = [r for r in problems(f"spec {repo}") if "no pass retries" in r.detail]
+    switch, rest = row.fix.split(", then: ")
+    again, clear = rest.split("; or: ")
+    assert shlex.split(switch) == ["git", "-C", str(repo), "switch", "side"]
+    assert shlex.split(again) == ["moxi", "repo", "commit", str(repo), "--spec", "demo/snap"]
+    assert shlex.split(clear) == ["moxi", "doctor", "--clear", "repo", push_key(repo, "side")]
+
+    # A saved spec that can't be read.
+    git(repo, "config", "moxi-repo.spec.demo/snap.min-interval", "soon")
+    [row] = [r for r in problems(f"spec {repo} demo/snap") if "can't be read" in r.detail]
+    assert row.fix == pasted("moxi", "repo", "specs", "remove", repo, "demo/snap")
+
+
+def test_ledger_and_commit_record_fix_lines_quote_a_root_with_a_space(demo):
+    repo, gone = demo.repo("my notes"), demo.repo("old notes")
+    api.add(repo, ["demo/gate", "demo/lint", "demo/watch"])
+    api.add(gone, ["demo/lint"])
+    demo.act(gate="refuse", lint="raise", watch="record")
+    write(repo, "notes/a.md")
+    assert moxi_repo.commit(spec(repo)).status == "refused"
+    fix = doctor_records()[_records.commit_key(repo / ".git", "demo/snap")]["fix"]
+    assert fix.endswith(pasted("moxi", "repo", "specs", "remove", repo, "demo/snap"))
+    demo.act(gate="ok")
+    for r in (repo, gone):
+        change(r)
+        commit(r)
+    shutil.rmtree(gone)
+    git(repo, "config", "moxi-repo.piece.demo/lint.enabled", "false")
+    git(repo, "config", "--unset-all", "moxi-repo.piece.demo/watch.recorded")
+    refresh = pasted("moxi", "repo", "git-hooks", "refresh", repo)
+    assert {row.name: row.fix for row in problems("ledger ")} == {
+        f"ledger {_records.piece_key(repo / '.git', 'demo/lint')}": refresh,
+        f"ledger {_records.piece_key(repo / '.git', 'demo/watch')}": refresh,
+        f"ledger {_records.piece_key(gone / '.git', 'demo/lint')}":
+            pasted("moxi", "repo", "git-hooks", "remove", gone)}
 
 
 # -- the doctor only reads --------------------------------------------------------------------

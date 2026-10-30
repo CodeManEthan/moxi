@@ -134,3 +134,13 @@ def test_commit_takes_a_path_inside_the_repo(demo, capsys):
     code, out, err = run(capsys, "commit", str(repo / "notes"))
     assert code == 0, err
     assert "repo: demo/snap committed" in out
+
+
+def test_the_specs_fix_line_quotes_a_root_with_a_space(demo, capsys):
+    import shlex
+
+    repo = demo.repo("my notes")
+    code, _, err = run(capsys, "commit", str(repo), "--spec", "demo/snap")
+    assert code == 2
+    command = err.rstrip("\n").rsplit("; see: ", 1)[1]
+    assert shlex.split(command) == ["moxi", "repo", "specs", str(repo)]

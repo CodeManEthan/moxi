@@ -54,7 +54,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from moxi_repo import _records
-from moxi_repo.run import COMMITTER_ENV
+from moxi_repo.run import COMMITTER_ENV, quote_arg
 from moxi_repo.gitrun import (DEFAULT_TIMEOUT, Change, GitFailed, changes, empty_tree, git,
                               head_commit, literal_pathspec, parse_raw, paths_problem)
 
@@ -1159,7 +1159,7 @@ def _push_one(spec: Spec, p: _Pass, remote: str, branch: str, tip: str) -> None:
         f"repo: {spec.name} push of {branch} to {remote} failed: {error}"
         + "".join(f"\n  {x}" for x in lines[-20:]),
         f"fix the remote or what refused the push; the first pass after "
-        f"{_plain(spec.push_backoff)} s tries again (moxi repo commit {p.where.top})")
+        f"{_plain(spec.push_backoff)} s tries again (moxi repo commit {quote_arg(p.where.top)})")
 
 
 def _push_reason(lines: list[str], code: int) -> str:
@@ -1277,7 +1277,7 @@ def _commit_fix(p: _Pass, stale: bool) -> str:
         return (f"if no git is running in {p.where.top}, remove "
                 f"{p.where.git_dir / 'index.lock'}")
     return (f"the spec's next pass that commits cleanly clears this; to forget the spec: "
-            f"moxi repo specs remove {p.where.top} {p.name}")
+            f"moxi repo specs remove {quote_arg(p.where.top)} {p.name}")
 
 
 def _index(where: _Where) -> None:

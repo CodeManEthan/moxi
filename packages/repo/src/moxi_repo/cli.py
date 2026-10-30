@@ -23,6 +23,7 @@ import sys
 from collections.abc import Sequence
 
 from moxi_repo import api, projects
+from moxi_repo.run import quote_arg
 
 GIT_HOOK_VERBS = ("list", "available", "add", "remove", "enable", "disable", "refresh")
 
@@ -316,7 +317,7 @@ def _commit(args) -> int:
     saved = committer.saved_names(where.cgd)
     if args.spec and args.spec not in saved:
         raise api.Usage(f"no spec named {args.spec} is saved in {where.top}; see: "
-                        f"moxi repo specs {where.top}")
+                        f"moxi repo specs {quote_arg(where.top)}")
     names = [args.spec] if args.spec else saved
     if not names:
         if args.json:
