@@ -827,12 +827,15 @@ def test_the_trim_waits_for_the_queue_load(rig, monkeypatch, reboot):
     if rig.backend != "local":
         pytest.skip("only the local record trims")
     mid = next_turn(rig)
+    assert wait_until(lambda: (mid, REVIEWER_Q) in rig.gateway.queue_rows())
+    # Stopped before `ancient` is posted: a live daemon would route it to the unbound
+    # name and give it a row whenever its pass beat the cursor below.
+    rig.daemon.stop()
     ancient = rig.post_as("agent-6", ["main@proj-b"], "ancient")
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(rig.clock() - 200 * 86400))
     rig.age_message(mid, stamp)
     rig.age_message(ancient.id, stamp)
-    cursors.advance("main@proj-b", ancient.id)     # handled: no row for it at the boot
-    rig.daemon.stop()
+    cursors.advance("main@proj-b", ancient.id)     # handled: the boot rescan gives no row
     unloaded = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
     assert unloaded._queue_loaded is False
     unloaded.trim_record()
