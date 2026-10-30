@@ -136,8 +136,7 @@ def test_no_verb_says_it_is_not_built(capsys):
 @pytest.mark.parametrize("error, code, short", [
     (catalog.BadValue("model", "bad model", "pick another"), codes.USAGE, "bad-value"),
     (catalog.NeedsModule(catalog.row("launcher", "slot")), codes.REFUSED, "needs-module"),
-    (targets.NotBuilt("target", "no slots yet", "use terminal"), codes.REFUSED,
-     "not-built"),
+    (targets.NoSlots(), codes.REFUSED, "no-slots"),
     (targets.NoCommand("claude"), codes.ERROR, "not-found"),
     (presets.ProjectsBusy("locked", "try again"), codes.TEMPFAIL, "busy"),
     (store.Busy("the launch log is locked"), codes.TEMPFAIL, "busy"),
@@ -267,7 +266,7 @@ def test_run_whose_start_fails_exits_1_and_the_row_says_why(work, harness, monke
     (["run", "--", "--session-id", "x"], codes.REFUSED, "owned"),
     (["run", "--cwd", "/no/such/place"], codes.REFUSED, "no-cwd"),
     (["run", "--target", "headless"], codes.REFUSED, "no-brief"),
-    (["run", "--target", "slot"], codes.REFUSED, "not-built"),
+    (["run", "--target", "slot"], codes.REFUSED, "no-slots"),
     (["run", "--project", "moxi"], codes.REFUSED, "needs-module"),
     (["run", "--harness", "codex", "--", "--permissions", "p"], codes.REFUSED, "owned"),
 ])
