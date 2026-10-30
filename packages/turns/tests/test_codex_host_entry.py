@@ -125,6 +125,30 @@ def test_an_option_value_is_read_as_codex_reads_a_config_override(tmp_path, text
     assert got == {"config": {"a": {"b": value}}}
 
 
+@pytest.mark.parametrize(("key", "path"), [
+    ('projects."/home/x/my dir.d".trust_level',
+     ["projects", "/home/x/my dir.d", "trust_level"]),
+    ("sandbox_workspace_write.network_access", ["sandbox_workspace_write", "network_access"]),
+    ("projects.'/srv/a.b'.trust_level", ["projects", "/srv/a.b", "trust_level"]),
+    ('a . "b.c" . d', ["a", "b.c", "d"]),
+    ('"x=y".z', ["x=y", "z"]),
+    ("model", ["model"]),
+])
+def test_an_option_key_is_read_as_a_toml_dotted_key(tmp_path, key, path):
+    config = _args(tmp_path, "--option", f'{key}="trusted"')["options"]["config"]
+    for part in path:
+        assert list(config) == [part]
+        config = config[part]
+    assert config == "trusted"
+
+
+def test_options_under_one_quoted_key_share_its_table(tmp_path):
+    cwd = "/home/x/my.dir"
+    got = _args(tmp_path, "--option", f'projects."{cwd}".trust_level="trusted"',
+                "--option", f'projects."{cwd}".note=1')["options"]
+    assert got == {"config": {"projects": {cwd: {"trust_level": "trusted", "note": 1}}}}
+
+
 def test_the_rest_of_the_flags(tmp_path):
     text = "You are the planner.\n"
     path = tmp_path / "instructions.md"
@@ -141,6 +165,12 @@ def test_the_rest_of_the_flags(tmp_path):
     (["--sandbox", "open"], "invalid choice"),
     (["--option", "no-equals"], "KEY=VALUE"),
     (["--option", "a..b=1"], "KEY=VALUE"),
+    (["--option", "=1"], "KEY=VALUE"),
+    (["--option", 'projects."/open.trust_level=1'], "KEY=VALUE"),
+    (["--option", "projects./home/x.trust_level=1"], "KEY=VALUE"),
+    (["--option", "a.=1"], "KEY=VALUE"),
+    (["--option", "[t]\nb=1"], "KEY=VALUE"),
+    (["--option", '"a\nb"=1'], "KEY=VALUE"),
     (["--option", "when=1979-05-27"], "date"),
     (["--resume", " "], "thread id"),
     (["--surprise"], "unrecognized"),

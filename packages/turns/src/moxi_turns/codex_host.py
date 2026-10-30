@@ -14,9 +14,10 @@ returns the `Session` once the first load is accepted, with Codex's thread id as
 
 The flags build the thread parameters each `thread/start` and `thread/resume` sends:
 top-level `sandbox` or `permissions` (one or the other) and `model`, and a nested
-`config` of Codex config overrides. `--option KEY=VALUE` sets one entry of `config`;
-each dot in `KEY` is a nesting level, and `VALUE` is read as TOML, as `codex -c` reads
-it (text that is not TOML is a string). `--options-file` holds those parameters whole
+`config` of Codex config overrides. `--option KEY=VALUE` sets one entry of `config`:
+`KEY` is a TOML dotted key, each dot outside quotes a nesting level, so a quoted part
+keeps its dots and loses its quotes (`projects."/home/x/my.dir".trust_level`); `VALUE`
+is read as TOML, as `codex -c` reads it (text that is not TOML is a string). `--options-file` holds those parameters whole
 as one JSON object; flags beside it replace its keys, and `--sandbox` or
 `--permissions` replaces the file's choice of either. The sandbox has one spelling,
 `--sandbox` (or the file's `sandbox`), so `sandbox_mode` in `config` is refused; a
@@ -81,7 +82,7 @@ def _parser() -> _Parser:
     choice.add_argument("--permissions", metavar="PROFILE",
                         help="a named permission profile, in place of a sandbox mode")
     parser.add_argument("--option", action="append", default=[], metavar="KEY=VALUE",
-                        help="one Codex config override (KEY dotted, VALUE TOML)")
+                        help="one Codex config override (KEY a TOML dotted key, VALUE TOML)")
     parser.add_argument("--options-file", metavar="F",
                         help="a JSON object of thread parameters")
     parser.add_argument("--instructions-file", metavar="F",
@@ -165,11 +166,37 @@ def _options_file(name: str) -> dict:
 
 
 def _option(item: str) -> tuple[list[str], object]:
-    key, sep, text = item.partition("=")
-    parts = [part.strip() for part in key.split(".")]
-    if not sep or not all(parts):
-        raise UsageError(f"--option {item!r}: expected KEY=VALUE, KEY dotted")
-    return parts, _toml_value(text, item)
+    # The key ends at the first `=` outside quotes: the first `=` whose text before it
+    # reads as a whole dotted key.
+    at = item.find("=")
+    while at != -1:
+        parts = _key_parts(item[:at])
+        if parts is not None:
+            return parts, _toml_value(item[at + 1:], item)
+        at = item.find("=", at + 1)
+    raise UsageError(f"--option {item!r}: expected KEY=VALUE, KEY a TOML dotted key")
+
+
+def _key_parts(key: str) -> list[str] | None:
+    """The parts of `key` read as a TOML dotted key, quotes taken off, or None when it
+    is not one."""
+    if "\n" in key or "\r" in key:
+        return None
+    try:
+        table = tomllib.loads(f"{key} = 0")
+    except tomllib.TOMLDecodeError:
+        return None
+    parts = []
+    node = table
+    while isinstance(node, dict):
+        if len(node) != 1:
+            return None
+        (part, node), = node.items()
+        parts.append(part)
+    # One chain of single-key tables ending at the placeholder, or not a bare key.
+    if node != 0 or isinstance(node, bool) or not parts:
+        return None
+    return parts
 
 
 def _toml_value(text: str, item: str):
