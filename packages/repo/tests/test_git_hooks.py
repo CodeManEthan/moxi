@@ -825,3 +825,21 @@ def test_an_event_whose_pieces_are_all_disabled_loses_its_entry_or_shim(demo, mo
     change(repo)
     assert commit(repo).returncode == 0
     assert demo.ids() == ["demo/lint", "existing", "demo/watch"]
+
+
+def test_fix_lines_quote_a_root_with_a_space(demo):
+    import shlex
+    repo = demo.repo("my notes")
+    quoted = shlex.quote(str(repo))
+    api.add(repo, "demo/gate", mode="shim")
+    demo.act(gate="raise")
+    change(repo)
+    done = commit(repo)
+    assert f"fix it or run: moxi repo git-hooks disable {quoted} demo/gate" in done.stderr
+    demo.mp.setattr(gitconf, "interpreter", lambda: str(demo.tmp / "gone" / "python"))
+    api.refresh(repo)
+    done = commit(repo)
+    assert done.returncode != 0
+    assert f"(or: moxi repo git-hooks remove {quoted})" in done.stderr
+    [problem] = api.status(repo)[0]["problems"]
+    assert problem.fix == f"moxi repo git-hooks refresh {quoted}"

@@ -24,6 +24,8 @@ import os
 import re
 from pathlib import Path
 
+from moxi_repo.run import quote_arg
+
 #: The shim's second line starts with this, then `(<event>).`
 SHIM_MARK = "# moxi-repo shim ("
 _SHIM_LINE = re.compile(r"# moxi-repo shim \(([a-z-]+)\)\.")
@@ -47,12 +49,12 @@ def sh_path(path: str | os.PathLike) -> str:
 
 def _missing_python(python: str, root: str) -> str:
     return (f"repo: git hooks can't run here: {python} is missing; run: moxi install repo "
-            f"(or: moxi repo git-hooks remove {root})")
+            f"(or: moxi repo git-hooks remove {quote_arg(root)})")
 
 
 def _missing_runner(python: str, root: str) -> str:
     return (f"repo: git hooks can't run here: the environment of {python} has no moxi_repo; "
-            f"run: moxi install repo (or: moxi repo git-hooks remove {root})")
+            f"run: moxi install repo (or: moxi repo git-hooks remove {quote_arg(root)})")
 
 
 def entry_command(event: str, python: str, runner: str, root: str, code: int) -> str:

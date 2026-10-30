@@ -58,7 +58,8 @@ def rows() -> list[Row]:
     for root, repo, why in repos:
         name = f"hooks {root}"
         if repo is None:
-            out.append(Row(MODULE, name, "warn", why, f"moxi repo git-hooks remove {root}"))
+            out.append(Row(MODULE, name, "warn", why,
+                           f"moxi repo git-hooks remove {api._arg(root)}"))
             continue
         try:
             status = api._status_of(repo, True, version, good)
