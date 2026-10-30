@@ -7,16 +7,17 @@ No line a builder writes is cut from a real record.
 
 * `ClaudeTranscript`: a Claude Code session's transcript, its subagent files with their
   sidecars, and workflow agent files.
-* `CodexRollout`: a Codex rollout, legacy versions and imported threads included, with
-  `write_imports` for the imports file beside the sessions root.
+* `CodexRollout`: a Codex rollout, legacy versions, imported threads and spawned threads
+  included, with `write_imports` for the imports file beside the sessions root and
+  `spawn_meta` for a spawned thread's line 1.
 * `OpenCodeDb`: an OpenCode database with the columns OpenCode writes, written in one
   transaction.
 """
 
 from .claude import ClaudeRequest, ClaudeTranscript, usage
-from .codex import CodexRollout, rate_limits, token_usage, write_imports
+from .codex import CodexRollout, rate_limits, spawn_meta, token_usage, write_imports
 from .opencode import OpenCodeDb
 
 __all__ = ["ClaudeTranscript", "ClaudeRequest", "usage"]
-__all__ += ["CodexRollout", "token_usage", "rate_limits", "write_imports"]
+__all__ += ["CodexRollout", "token_usage", "rate_limits", "write_imports", "spawn_meta"]
 __all__ += ["OpenCodeDb"]

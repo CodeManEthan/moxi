@@ -421,6 +421,16 @@ def test_install_all_and_none(fake, capsys):
     assert "now on: comms[cache]: Holds a cold send." in out
 
 
+def test_install_all_names_the_extras_in_sorted_order(fake, capsys, monkeypatch):
+    # The module declares codex before cache; the requirement is the same either way.
+    spec = dict(CATALOG["moxi-comms"],
+                OPTIONAL="{'codex': 'Delivers to Codex.', 'cache': 'Holds a cold send.'}")
+    monkeypatch.setitem(CATALOG, "moxi-comms", spec)
+    code, _, err = moxi_install(capsys, "comms", "--all")
+    assert code == 0, err
+    assert fake.runs[-1][3:6] == ["moxi", "--with", "moxi-comms[cache,codex]"]
+
+
 def test_install_asks_at_a_terminal(fake, capsys, monkeypatch):
     class Tty(io.StringIO):
         def isatty(self):
