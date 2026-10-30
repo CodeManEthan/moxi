@@ -240,8 +240,9 @@ def test_the_default_close_interrupts_the_main_thread(tmp_path):
         from moxi import proc
         signal.signal(signal.SIGINT, signal.default_int_handler)  # even if inherited ignored
         proc.lifeline()
-        print("ready", flush=True)
         try:
+            # Inside the try: the interrupt can come as soon as the parent reads this.
+            print("ready", flush=True)
             time.sleep(60)
         except KeyboardInterrupt:
             sys.exit(7)

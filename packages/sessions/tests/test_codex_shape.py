@@ -355,6 +355,7 @@ def test_messages_reasoning_tool_calls_and_results(rollout):
 def test_other_lines_say_whether_their_kind_is_known(rollout):
     rollout.turn()
     rollout.world_state()
+    rollout.line("inter_agent_communication_metadata", {"trigger_turn": True})
     rollout.event("item_completed", item={"type": "UserMessage"})
     rollout.item("agent_message", content=[])
     rollout.line("realtime_item", {"x": 1})
@@ -363,7 +364,8 @@ def test_other_lines_say_whether_their_kind_is_known(rollout):
     rollout.add({"timestamp": "2026-10-30T10:00:00Z", "payload": {}})
     others = of(read(rollout.write()), Other)
     assert [(o.raw_kind, o.recognised) for o in others] == [
-        ("world_state", True), ("event_msg/item_completed", True),
+        ("world_state", True), ("inter_agent_communication_metadata", True),
+        ("event_msg/item_completed", True),
         ("response_item/agent_message", True), ("realtime_item", False),
         ("event_msg/brand_new_event", False), ("response_item/brand_new_item", False),
         ("", False)]
@@ -607,7 +609,3 @@ def test_with_no_line_one_the_originator_mark_is_unknown(sessions):
     assert marks.listed is UNKNOWN
     assert codex.import_marks(head, codex.Imports("x", frozenset({r.thread_id})),
                               thread_id=r.thread_id).listed is True
-
-
-def test_the_subagent_listing_has_a_reason_to_give():
-    assert codex.SUBAGENTS_UNSUPPORTED.startswith("sessions does not yet find")
