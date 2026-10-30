@@ -464,6 +464,186 @@ def test_an_ended_detached_child_is_reaped_by_the_next_spawn(tmp_path):
     assert not psutil.pid_exists(first) or psutil.Process(first).ppid() != os.getpid()
 
 
+# -- status --------------------------------------------------------------------------------
+
+@pytest.fixture
+def tables(monkeypatch):
+    """Fresh tables of kept detached children and unread codes, so what other tests left
+    in them neither answers here nor counts toward the bound."""
+    from collections import deque
+
+    monkeypatch.setattr(proc, "_detached", [])
+    monkeypatch.setattr(proc, "_codes", deque())
+
+
+def _ended_unreaped(pid: int) -> bool:
+    """Whether `pid` has ended and is still waiting to be reaped (Linux: a zombie)."""
+    if not sys.platform.startswith("linux"):
+        import psutil
+
+        try:
+            return psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
+        except psutil.Error:
+            return False
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().rpartition(")")[2].split()[0] == "Z"
+    except OSError:
+        return False
+
+
+def _until_ended(pid: int, timeout: float = 30.0) -> int:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        code = proc.status(pid)
+        if code is not None:
+            return code
+        time.sleep(0.02)
+    raise AssertionError(f"detached child {pid} did not end in {timeout} s")
+
+
+def test_status_reads_a_running_child_as_none_then_its_code_once(tables, tmp_path):
+    gate = tmp_path / "go"
+    pid = proc.spawn([PY, "-c", textwrap.dedent(f"""
+        import os, sys, time
+        while not os.path.exists({str(gate)!r}):
+            time.sleep(0.02)
+        sys.exit(3)
+        """)], detached=True)
+    assert proc.status(pid) is None
+    assert proc.status(pid) is None  # a running child is answered as often as asked
+    gate.touch()
+    assert _until_ended(pid) == 3
+    with pytest.raises(LookupError):
+        proc.status(pid)
+
+
+@POSIX
+def test_status_of_a_killed_child_is_minus_its_signal(tables):
+    import signal
+
+    pid = proc.spawn([PY, "-c", "import time; time.sleep(60)"], detached=True)
+    assert proc.status(pid) is None
+    os.kill(pid, signal.SIGKILL)
+    assert _until_ended(pid) == -signal.SIGKILL
+
+
+@pytest.mark.parametrize("pid", [0, -1, True, "1", None])
+def test_status_of_what_is_not_a_pid_raises_lookup_error(tables, pid):
+    with pytest.raises(LookupError):
+        proc.status(pid)
+
+
+def test_status_of_a_process_not_started_detached_raises_lookup_error(tables):
+    with pytest.raises(LookupError):
+        proc.status(os.getpid())
+    child = subprocess.Popen([PY, "-c", "import sys; sys.stdin.read()"],
+                             stdin=subprocess.PIPE)
+    try:
+        with pytest.raises(LookupError):
+            proc.status(child.pid)
+    finally:
+        child.stdin.close()
+        child.wait(timeout=10)
+
+
+@POSIX
+def test_an_ended_childs_code_is_kept_across_the_next_spawn_that_reaps_it(tables):
+    first = proc.spawn([PY, "-c", "import sys; sys.exit(3)"], detached=True)
+    assert wait_for(lambda: _ended_unreaped(first), 30)
+    second = proc.spawn([PY, "-c", "import time; time.sleep(60)"], detached=True)
+    try:
+        # Reaped by the spawn: no zombie is left, whatever has the pid now is not ours.
+        assert not _ended_unreaped(first)
+        import psutil
+
+        assert not psutil.pid_exists(first) or psutil.Process(first).ppid() != os.getpid()
+        assert proc.status(first) == 3
+        with pytest.raises(LookupError):
+            proc.status(first)
+    finally:
+        os.kill(second, 9)
+        _until_ended(second)
+
+
+@POSIX
+def test_past_the_bound_the_oldest_unread_code_is_dropped(tables, monkeypatch):
+    monkeypatch.setattr(proc, "CODES_KEPT", 2)
+    pids = []
+    for code in (1, 2, 3):
+        pids.append(proc.spawn([PY, "-c", f"import sys; sys.exit({code})"], detached=True))
+        assert wait_for(lambda: _ended_unreaped(pids[-1]), 30)
+    proc.spawn([PY, "-c", "pass"], detached=True)  # reaps the three into a table of two
+    with pytest.raises(LookupError):
+        proc.status(pids[0])
+    assert [proc.status(pids[1]), proc.status(pids[2])] == [2, 3]
+
+
+@POSIX
+def test_two_threads_reading_one_ended_child_get_its_code_once(tables):
+    import threading
+
+    pid = proc.spawn([PY, "-c", "import sys; sys.exit(3)"], detached=True)
+    assert wait_for(lambda: _ended_unreaped(pid), 30)
+    start = threading.Barrier(2)
+    got: list = []
+
+    def read() -> None:
+        start.wait()
+        try:
+            got.append(proc.status(pid))
+        except LookupError:
+            got.append("LookupError")
+
+    threads = [threading.Thread(target=read) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(30)
+    assert sorted(got, key=str) == [3, "LookupError"]
+
+
+class _FakePopen:
+    """A kept detached child whose `poll` answers in turn from `answers`."""
+
+    def __init__(self, pid: int, answers: list):
+        self.pid = pid
+        self.answers = answers
+
+    def poll(self):
+        return self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+
+
+def test_a_reused_pids_children_are_answered_oldest_first(tables):
+    # An earlier child with pid 4321 ended with 5 and was reaped, its code unread; a
+    # later detached child got the same pid and is running, then ends with 7.
+    with proc._detached_guard:
+        proc._keep_code(4321, 5)
+    proc._detached.append(_FakePopen(4321, [None, 7]))
+    assert proc.status(4321) == 5
+    assert proc.status(4321) is None
+    assert proc.status(4321) == 7
+    with pytest.raises(LookupError):
+        proc.status(4321)
+
+
+def test_a_reused_pids_oldest_kept_popen_is_polled_first(tables):
+    # With SIGCHLD ignored a pid can come back while its earlier Popen is still kept.
+    proc._detached.extend([_FakePopen(4321, [0]), _FakePopen(4321, [None])])
+    assert proc.status(4321) == 0
+    assert proc.status(4321) is None
+
+
+def test_a_dropped_code_is_answered_by_the_pids_later_child(tables, monkeypatch):
+    monkeypatch.setattr(proc, "CODES_KEPT", 1)
+    with proc._detached_guard:
+        proc._keep_code(4321, 5)
+        proc._keep_code(4322, 6)  # drops 4321's code
+    proc._detached.append(_FakePopen(4321, [None]))
+    assert proc.status(4321) is None
+    assert proc.status(4322) == 6
+
+
 # -- identity ------------------------------------------------------------------------------
 
 def test_identity_names_this_process_by_its_start_time():
@@ -712,6 +892,126 @@ def test_environ_on_macos_of_another_users_process_is_none():
 @WINDOWS
 def test_environ_on_windows_is_none():
     assert proc.environ(os.getpid()) is None
+
+
+# -- parent --------------------------------------------------------------------------------
+
+def test_parent_of_this_process_is_its_parent():
+    assert proc.parent(os.getpid()) == os.getppid()
+
+
+def test_parent_of_a_child_is_this_process():
+    child = subprocess.Popen([PY, "-c", "import sys; sys.stdin.read()"],
+                             stdin=subprocess.PIPE)
+    try:
+        assert proc.parent(child.pid) == os.getpid()
+    finally:
+        child.stdin.close()
+        child.wait(timeout=10)
+
+
+@pytest.mark.parametrize("pid", [0, -1, True, 2.0, "1"])
+def test_parent_of_what_is_not_a_pid_is_none(pid):
+    assert proc.parent(pid) is None
+
+
+def test_parent_of_a_gone_process_is_none():
+    child = subprocess.Popen([PY, "-c", "pass"])
+    child.wait()
+    assert proc.parent(child.pid) is None
+
+
+@POSIX
+def test_parent_of_pid_1_is_zero():
+    assert proc.parent(1) == 0
+
+
+def _stat(root: Path, pid: int, text: bytes) -> None:
+    (root / str(pid)).mkdir(parents=True)
+    (root / str(pid) / "stat").write_bytes(text)
+
+
+@pytest.mark.parametrize("name", [b"python3", b"a b", b"x) (y", b") S 99 (", b"(", b""])
+def test_the_linux_reader_counts_fields_from_the_last_parenthesis(tmp_path, name):
+    _stat(tmp_path, 42, b"42 (" + name + b") S 7 42 42 0 -1 4194560 100 0 0 0\n")
+    assert proc._linux_parent(42, str(tmp_path)) == 7
+
+
+def test_the_linux_reader_of_a_short_or_unreadable_stat_is_none(tmp_path):
+    _stat(tmp_path, 42, b"42 (x) S")
+    _stat(tmp_path, 43, b"43 (x) S q 1")
+    assert proc._linux_parent(42, str(tmp_path)) is None
+    assert proc._linux_parent(43, str(tmp_path)) is None
+    assert proc._linux_parent(44, str(tmp_path)) is None
+
+
+def _kinfo(pid: int, ppid: int, size: int = 648) -> bytes:
+    raw = bytearray(size)
+    for at, value in ((40, pid), (560, ppid)):
+        if at + 4 <= size:
+            raw[at:at + 4] = value.to_bytes(4, sys.byteorder, signed=True)
+    return bytes(raw)
+
+
+def test_a_kinfo_proc_answer_gives_the_parent_at_its_offset():
+    assert proc._kinfo_parent(_kinfo(42, 7), 42) == 7
+    assert proc._kinfo_parent(_kinfo(1, 0), 1) == 0
+
+
+@pytest.mark.parametrize("raw", [b"", _kinfo(42, 7, 492), _kinfo(42, 7, 656),
+                                 _kinfo(43, 7)], ids=["gone", "short", "long", "other pid"])
+def test_a_kinfo_proc_answer_of_another_size_or_pid_is_none(raw):
+    assert proc._kinfo_parent(raw, 42) is None
+
+
+@MACOS
+def test_parent_on_macos_matches_ps():
+    child = subprocess.Popen([PY, "-c", "import sys; sys.stdin.read()"],
+                             stdin=subprocess.PIPE)
+    try:
+        for pid in (os.getpid(), child.pid, 1):
+            ps = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True,
+                                text=True, check=True)
+            assert proc.parent(pid) == int(ps.stdout)
+        assert proc.parent(child.pid) == os.getpid()
+    finally:
+        child.stdin.close()
+        child.wait(timeout=10)
+
+
+@MACOS
+def test_parent_on_macos_reads_another_users_process():
+    ps = subprocess.run(["ps", "-A", "-o", "pid=,uid=,ppid="], capture_output=True,
+                        text=True, check=True)
+    for line in ps.stdout.splitlines():
+        pid, uid, ppid = map(int, line.split())
+        if uid != os.getuid() and pid != 1:
+            assert proc.parent(pid) == ppid
+            return
+    pytest.skip("no other user's process to read")
+
+
+@WINDOWS
+def test_parent_on_windows_names_a_dead_parent_whose_pid_identity_may_not_match(tmp_path):
+    # A middle process starts a grandchild and exits: Windows does not reparent, so the
+    # grandchild still names the middle's pid, and whatever holds that pid now (if any)
+    # started after the grandchild.
+    out = tmp_path / "pid"
+    middle = subprocess.run([PY, "-c", textwrap.dedent(f"""
+        import subprocess, sys
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        open({str(out)!r}, "w").write(str(child.pid))
+        """)], timeout=30)
+    assert middle.returncode == 0
+    grandchild = int(out.read_text())
+    try:
+        named = proc.parent(grandchild)
+        assert named is not None and named != os.getpid()
+        holder = proc.identity(named)
+        mine = proc.identity(grandchild)
+        assert holder is None or holder.started > mine.started
+    finally:
+        subprocess.run(["taskkill", "/F", "/PID", str(grandchild)], capture_output=True)
 
 
 # -- import weight -------------------------------------------------------------------------

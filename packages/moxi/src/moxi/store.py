@@ -70,6 +70,14 @@ def connect(path: str | os.PathLike, *, private: bool = True, create: bool = Tru
     follows it. So a store placed in a shared or linked directory the user chose opens
     there, private as a file, and the directory stays as the user set it.
 
+    SQLite makes the store's `-wal` and `-shm` files itself. On POSIX they take the store
+    file's mode, so they are 0600 too. On Windows they take the access list their
+    directory passes down: in a directory this call creates that list is owner-only, so
+    they are owner-only as well, but in an existing directory whose list lets others read,
+    those others can read them, and the `-wal` holds the latest writes until a checkpoint
+    moves them into the owner-only store file. Nothing here changes that: a store placed
+    in a shared Windows directory takes that directory's list for these two files.
+
     An existing store is opened as it is: nothing is written to it. Its journal mode is
     read, and one warning is logged when it is not `wal`. With `create=True`, an empty
     file (another process created it a moment ago and has not yet opened it) counts as

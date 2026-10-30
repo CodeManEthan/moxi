@@ -183,6 +183,64 @@ def test_on_windows_each_directory_connect_makes_grants_only_this_user(tmp_path)
     assert _win._only_user(path, user)
 
 
+def _with_wal(path: Path) -> sqlite3.Connection:
+    """A store at `path` with a write not yet checkpointed, so its -wal and -shm exist."""
+    conn = store.connect(path)
+    conn.execute("PRAGMA wal_autocheckpoint = 0")
+    conn.execute("CREATE TABLE t (x)")
+    conn.execute("INSERT INTO t VALUES (1)")
+    for side in ("-wal", "-shm"):
+        assert Path(str(path) + side).exists()
+    return conn
+
+
+@POSIX
+def test_the_wal_and_shm_take_the_store_files_mode(tmp_path):
+    path = tmp_path / "record.db"
+    conn = _with_wal(path)
+    try:
+        for side in ("-wal", "-shm"):
+            assert mode_of(Path(str(path) + side)) == 0o600
+    finally:
+        conn.close()
+
+
+@WINDOWS
+def test_on_windows_the_wal_and_shm_in_a_directory_connect_makes_grant_only_this_user(
+        tmp_path):
+    from moxi import _win
+
+    path = tmp_path / "made" / "record.db"
+    conn = _with_wal(path)
+    try:
+        user = _win._token_sid(_win._TOKEN_USER)
+        for side in ("-wal", "-shm"):
+            assert _win._only_user(Path(str(path) + side), user)
+    finally:
+        conn.close()
+
+
+@WINDOWS
+def test_on_windows_the_wal_and_shm_in_a_shared_directory_take_its_list(tmp_path):
+    # A residual the store does not change: SQLite makes these two files itself, with
+    # the list their directory passes down.
+    from moxi import _win
+
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    subprocess.run(["icacls", str(shared), "/grant", "*S-1-5-32-545:(OI)(CI)R"],
+                   capture_output=True, check=True)  # Users, by its well-known SID
+    path = shared / "record.db"
+    conn = _with_wal(path)
+    try:
+        assert _win._only_user(path, _win._token_sid(_win._TOKEN_USER))
+        for side in ("-wal", "-shm"):
+            entries = _icacls_entries(Path(str(path) + side))
+            assert any("Users" in line for line in entries), entries
+    finally:
+        conn.close()
+
+
 def test_create_false_refuses_a_missing_store_and_makes_nothing(tmp_path):
     path = tmp_path / "s" / "record.db"
     with pytest.raises(store.StoreError, match="does not exist"):
