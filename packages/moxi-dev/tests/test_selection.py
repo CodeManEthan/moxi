@@ -154,6 +154,48 @@ def test_a_bad_selection_is_a_usage_error(package, monkeypatch, var, value, says
     assert says in "\n".join(result.errlines)
 
 
+LIVE_AND_TIERED = """\
+import pytest
+
+def test_unit():
+    pass
+
+@pytest.mark.live
+@pytest.mark.slow
+@pytest.mark.touches("packages/p/**")
+@pytest.mark.finding("L7")
+def test_live_and_slow():
+    pass
+
+@pytest.mark.live
+@pytest.mark.build
+@pytest.mark.touches("packages/p/**")
+@pytest.mark.finding("L7")
+def test_live_and_build():
+    pass
+"""
+
+
+@pytest.mark.parametrize("var, value", [(testing.TIERS_ENV, "all"),
+                                        (testing.CHANGED_ENV, "packages/p/src/p/x.py"),
+                                        (testing.FINDING_ENV, "L7")])
+def test_a_live_test_in_another_tier_is_never_put_back_even_with_live_on(
+        pytester, monkeypatch, var, value):
+    pytester.makeconftest('pytest_plugins = ["moxi_dev.testing"]\n')
+    pytester.makeini(INI)
+    pytester.makepyfile(test_live=LIVE_AND_TIERED)
+    # as if this pytest had started with MOXI_TEST_LIVE=1, which an in-process run
+    # reads from the outer one
+    monkeypatch.setitem(testing._SESSION, "live", True)
+    live = pytester.runpytest("-p", "no:cacheprovider", "-m", "live")
+    live.assert_outcomes(passed=2)
+    if var == testing.CHANGED_ENV:
+        value = changed(pytester, value)
+    monkeypatch.setenv(var, value)
+    result = pytester.runpytest("-p", "no:cacheprovider")
+    assert ran(result) == (set() if var == testing.FINDING_ENV else {"test_unit"})
+
+
 def test_selection_holds_under_workers_and_the_controller_writes_the_durations(
         package, monkeypatch):
     out = package.path / "out" / "durations.json"
