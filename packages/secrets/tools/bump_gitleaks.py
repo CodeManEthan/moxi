@@ -21,9 +21,10 @@ these steps in order and stops at the first that fails:
    i for each i and a dotted I for each i and I as on any other: the translator writes
    Go's case folds out. A rule also fails where the secret the scan takes from a match,
    on RE2 or on the fallback, differs from the one gitleaks takes (its group from the
-   regex run again on the match with newlines trimmed). The step also checks Go's fold
-   orbit (unicode.SimpleFold) of every ASCII character against the translator's. No
-   sample is stored.
+   regex run again on the match with newlines trimmed), and where the line the scan reads
+   for `gitleaks:allow` and a "line" allowlist differs from the one gitleaks bounds (its
+   finding's Line). The step also checks Go's fold orbit (unicode.SimpleFold) of every
+   ASCII character against the translator's. No sample is stored.
 5. Times the scan on RE2 over generated adversarial texts against the cost budget, and
    names the slowest rules where a text goes over it.
 6. Runs the gitleaks binary of the tag on the package's own directory with
@@ -265,6 +266,19 @@ def scan_secret(scan, rx, target, start: int, end: int, group: int):
     return None if span is None or span[1] <= span[0] else span
 
 
+def scan_line(scan, t, start: int, end: int):
+    """The line the scan reads for the match at UTF-8 byte offsets `start:end` of `t`, as
+    [lo, hi] in UTF-8 byte offsets, from `scan.gitleaks_line`; None where the trimmed
+    match is empty (the scan drops it). The line is taken on `str` offsets, the same on
+    either engine."""
+    first = t.str_pos(start)
+    s, e = scan.trimmed(t.etext, first, t.str_pos(end))
+    if s == e:
+        return None
+    lo, hi, cut = scan.gitleaks_line(t, first, s, e)
+    return [t.byte_pos(lo), t.byte_pos(hi - 1) + cut if cut else t.byte_pos(hi)]
+
+
 def hit_list(found: dict) -> list:
     return sorted((name, rule, s, e) for name, hits in found.items() for rule, s, e in hits)
 
@@ -280,6 +294,7 @@ class Comparison:
         self.rows = Counter()
         self.hit_lists = 0
         self.secrets_compared = 0
+        self.lines_compared = 0
         self.orbits_checked = 0
         self.go_unicode = ""
         self.orbit_faults: list[str] = []
@@ -336,6 +351,7 @@ class Comparison:
                 self.hits(self.Text("x"), text, p["owner"], text)
         elif p["kind"] == "rule":
             self.secrets(row, p, t)
+            self.lines(row, p, t)
             path = self.paths.get(p["owner"])
             if path is None and (p["owner"] + ".path") in self.pats:
                 self.no_path.add(p["owner"])
@@ -365,6 +381,22 @@ class Comparison:
                 if got != want:
                     self.fail(owner, f"{name} secret against gitleaks' {row['kind']}", text)
 
+    def lines(self, row: dict, p: dict, t) -> None:
+        """Each of Go's matches: the line the scan reads against the one gitleaks bounds."""
+        owner, text = p["owner"], t.text
+        theirs = row.get("lines")
+        if theirs is None or len(theirs) != len(row["matches"]):
+            self.fail(owner, "lines: the sampler sent no lines for the matches", text)
+            return
+        scan = scan_module()
+        for (ms, me, _, _), want in zip(row["matches"], theirs):
+            got = scan_line(scan, t, ms, me)
+            if got is None:
+                continue   # the secret's comparison already fails an empty trimmed match
+            self.lines_compared += 1
+            if got != list(want):
+                self.fail(owner, f"line against gitleaks' {row['kind']}", text)
+
     def hits(self, t, path, owner, shown) -> None:
         self.hit_lists += 1
         r2 = hit_list(self.run_gitleaks(t, SETS, path, self.re2))
@@ -382,6 +414,8 @@ class Comparison:
             f"{self.hit_lists} hit lists on each engine")
         say(f"{self.secrets_compared} rule matches: the secret the scan takes, on RE2 and "
             "on the fallback, against gitleaks' (the regex run again on the trimmed match)")
+        say(f"{self.lines_compared} rule matches: the line the scan reads for "
+            "gitleaks:allow and a line allowlist against gitleaks' (its finding's Line)")
         if self.orbits_checked:
             say(f"Go's fold orbits (Unicode {self.go_unicode}) of {self.orbits_checked} ASCII "
                 f"characters: {len(self.orbit_faults)} differ from the translator's")

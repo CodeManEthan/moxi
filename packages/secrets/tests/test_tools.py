@@ -182,12 +182,13 @@ def test_a_row_where_go_differs_fails_both_engines_for_the_owner():
     assert set(c.failures["some-rule"]) == {"re2 allow plain", "fallback allow plain"}
 
 
-def _rule_row(text: str, secrets: list) -> tuple:
+def _rule_row(text: str, secrets: list, lines: list | None = None) -> tuple:
     c = _comparison(r"k(e+)y")
     c.pats["p"]["kind"] = "rule"
     c.run_gitleaks = lambda *args: {}   # no hits on either engine: only the secrets differ
     row = go_row(r"k(e+)y", text)
     row["secrets"] = secrets
+    row["lines"] = [[0, len(text.encode())]] if lines is None else lines
     return c, row
 
 
@@ -208,6 +209,22 @@ def test_a_rule_whose_secret_differs_from_gitleaks_fails(secrets):
     if secrets:
         assert failed == {"re2 secret against gitleaks' plain",
                           "fallback secret against gitleaks' plain"}
+
+
+@pytest.mark.parametrize("lines", [[[1, 5]], [[0, 4]], []])
+def test_a_rule_whose_line_differs_from_gitleaks_fails(lines):
+    c, row = _rule_row("a key", [[3, 4]], lines)
+    c.row(row)
+    assert {what for what in c.failures["some-rule"]} == (
+        {"line against gitleaks' plain"} if lines
+        else {"lines: the sampler sent no lines for the matches"})
+
+
+def test_the_scan_line_is_in_utf8_bytes():
+    scan = bump.scan_module()
+    t = engine.Text("é\n\ntok\n€")             # bytes: é 0-1, newlines 2 and 3, € 8-10
+    assert bump.scan_line(scan, t, 2, 11) == [2, 9]   # ends one byte into the €
+    assert bump.scan_line(scan, t, 2, 4) is None
 
 
 def test_the_scan_secret_is_the_one_run_gitleaks_reports():

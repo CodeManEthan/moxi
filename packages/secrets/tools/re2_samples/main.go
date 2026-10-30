@@ -15,7 +15,7 @@
 // and then, for each text, one JSON line,
 //
 //	{"id": "...", "kind": "plain", "text": "...", "found": true, "matches": [[ms, me, ss, se]],
-//	 "secrets": [[gs, ge]]}
+//	 "secrets": [[gs, ge]], "lines": [[ls, le]]}
 //
 // where `found` is MatchString, and `matches` lists every non-empty match of
 // FindAllStringSubmatchIndex with its secret group's span in context: the group `group`
@@ -26,7 +26,11 @@
 // match with its leading and trailing newlines trimmed, FindStringSubmatch run again on
 // that alone, its group, else the trimmed match. A group with no span is the empty secret
 // at the trimmed match's start; [-1, -1] is a match gitleaks drops (a secret group past
-// the pattern's last). Offsets are UTF-8 byte offsets into the text.
+// the pattern's last). `lines` gives each match's line as gitleaks bounds it, the Line its
+// finding carries for `gitleaks:allow` and a "line" allowlist: it keeps the match's start,
+// ends the match at the start plus the trimmed match's length, and bounds it with
+// location(), copied below from location.go at the pin. Offsets are UTF-8 byte offsets
+// into the text.
 //
 // Nothing is stored: the caller reads the lines as they come and keeps none.
 package main
@@ -63,6 +67,7 @@ type sample struct {
 	Found   bool    `json:"found"`
 	Matches [][]int `json:"matches"`
 	Secrets [][]int `json:"secrets"`
+	Lines   [][]int `json:"lines"`
 }
 
 var rng *rand.Rand
@@ -250,6 +255,91 @@ func gitleaksSecret(compiled *regexp.Regexp, text string, span []int, group int)
 	return []int{gs, ge}
 }
 
+// Location and location are gitleaks' (detect/location.go at the pin): the code unchanged,
+// its comments left out.
+type Location struct {
+	startLine      int
+	endLine        int
+	startColumn    int
+	endColumn      int
+	startLineIndex int
+	endLineIndex   int
+}
+
+func location(newlineIndices [][]int, raw string, matchIndex []int) Location {
+	var (
+		prevNewLine int
+		location    Location
+		lineSet     bool
+		_lineNum    int
+	)
+
+	start := matchIndex[0]
+	end := matchIndex[1]
+
+	location.startLineIndex = 0
+
+	if len(newlineIndices) == 0 {
+		newlineIndices = [][]int{
+			{len(raw), len(raw) + 1},
+		}
+	}
+
+	for lineNum, pair := range newlineIndices {
+		_lineNum = lineNum
+		newLineByteIndex := pair[0]
+		if prevNewLine <= start && start < newLineByteIndex {
+			lineSet = true
+			location.startLine = lineNum
+			location.endLine = lineNum
+			location.startColumn = (start - prevNewLine) + 1
+			location.startLineIndex = prevNewLine
+			location.endLineIndex = newLineByteIndex
+		}
+		if prevNewLine < end && end <= newLineByteIndex {
+			location.endLine = lineNum
+			location.endColumn = (end - prevNewLine)
+			location.endLineIndex = newLineByteIndex
+		}
+
+		prevNewLine = pair[0]
+	}
+
+	if !lineSet {
+		location.startColumn = (start - prevNewLine) + 1
+		location.endColumn = (end - prevNewLine)
+		location.startLine = _lineNum + 1
+		location.endLine = _lineNum + 1
+
+		i := 0
+		for end+i < len(raw) {
+			if raw[end+i] == '\n' {
+				break
+			}
+			if raw[end+i] == '\r' {
+				break
+			}
+			i++
+		}
+		location.endLineIndex = end + i
+	}
+	return location
+}
+
+var newLineRegexp = regexp.MustCompile("\n")
+
+// gitleaksLine is one match's line as gitleaks bounds it (detect.go at the pin), as
+// [lo, hi].
+func gitleaksLine(text string, newlines [][]int, span []int) []int {
+	secret := strings.Trim(text[span[0]:span[1]], "\n")
+	matchIndex := []int{span[0], span[0] + len(secret)}
+	loc := location(newlines, text, matchIndex)
+	if matchIndex[1] > loc.endLineIndex {
+		loc.endLineIndex = matchIndex[1]
+	}
+	return []int{loc.startLineIndex, loc.endLineIndex}
+}
+
 func run() error {
 	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
@@ -280,7 +370,8 @@ func run() error {
 			var b strings.Builder
 			gen(tree, &b)
 			for _, v := range variants(b.String()) {
-				matches, both := [][]int{}, [][]int{}
+				matches, both, lines := [][]int{}, [][]int{}, [][]int{}
+				newlines := newLineRegexp.FindAllStringIndex(v[1], -1)
 				for _, span := range compiled.FindAllStringSubmatchIndex(v[1], -1) {
 					if span[1] == span[0] {
 						continue
@@ -288,8 +379,10 @@ func run() error {
 					ss, se := secret(span, p.Group)
 					matches = append(matches, []int{span[0], span[1], ss, se})
 					both = append(both, gitleaksSecret(compiled, v[1], span, p.Group))
+					lines = append(lines, gitleaksLine(v[1], newlines, span))
 				}
-				row := sample{p.ID, v[0], v[1], compiled.MatchString(v[1]), matches, both}
+				row := sample{p.ID, v[0], v[1], compiled.MatchString(v[1]), matches, both,
+					lines}
 				if err := enc.Encode(row); err != nil {
 					return err
 				}

@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 
 from . import engine as _engine
 
@@ -354,6 +354,62 @@ def secret_span(rx, target, start: int, end: int, group: int):
     return start, end
 
 
+def _utf8_size(c: str) -> int:
+    code = ord(c)
+    return 1 if code < 0x80 else 2 if code < 0x800 else 3 if code < 0x10000 else 4
+
+
+def gitleaks_line(t, start: int, s: int, e: int) -> tuple[int, int, int]:
+    """The line gitleaks reads for a match (its finding's Line, which `gitleaks:allow`
+    and a "line" allowlist read), as (lo, hi, cut) in `str` offsets of `t.etext`.
+
+    `start` is the match's start and `s:e` the match with its newlines trimmed. gitleaks
+    keeps the untrimmed start and ends the match at the start plus the trimmed match's
+    length in bytes, so a match with leading newlines ends that many bytes early, perhaps
+    inside a character. It then bounds the line by the newlines (location.go):
+    - from the last newline at or before the start, that newline included (from 0 on the
+      first line), to the first newline at or after the end, or to the end itself where
+      that is further;
+    - where the start is past the last newline, from the start of the text to the first
+      newline or carriage return at or after the end;
+    - with no newline at all, the whole text.
+    The line is `etext[lo:hi]`, except that when `cut` is above zero it ends inside the
+    character at `hi - 1`, after its first `cut` bytes (see `line_text`).
+    """
+    etext = t.etext
+    end, cut, back = e, 0, s - start
+    while back > 0:
+        size = _utf8_size(etext[end - 1])
+        if back < size:
+            cut = size - back
+            break
+        back -= size
+        end -= 1
+    marks = t.newlines or [len(etext)]
+    k = bisect_right(marks, start)
+    if k < len(marks):
+        lo, hi = (marks[k - 1] if k else 0), marks[k]
+        j = bisect_left(marks, end)
+        if j < len(marks):
+            hi = marks[j]
+        if end > hi:
+            return lo, end, cut
+        return lo, hi, 0
+    hi, size = end, len(etext)
+    while hi < size and etext[hi] not in "\n\r":
+        hi += 1
+    return 0, hi, 0
+
+
+def line_text(t, bounds) -> str:
+    """The text of a `gitleaks_line` span. A line that ends inside a character keeps a
+    U+FFFD for each of its bytes, as Go's regexp reads each byte of a cut character."""
+    lo, hi, cut = bounds
+    if not cut:
+        return t.etext[lo:hi]
+    return t.etext[lo:hi - 1] + "\ufffd" * cut
+
+
 def run_gitleaks(t, set_names, path, eng) -> dict:
     """The gitleaks-format sets' hits on `t`, as gitleaks' detector finds them.
 
@@ -394,11 +450,12 @@ def run_gitleaks(t, set_names, path, eng) -> dict:
                 if bs == be:
                     continue
                 s, e = conv(t, bs), conv(t, be)
-                bounds = t.line_bounds(s, e)
+                bounds = gitleaks_line(t, conv(t, m.start()), s, e)
                 marked = allowed_lines.get(bounds)
                 if marked is None:
+                    lo, hi, cut = bounds
                     marked = allowed_lines[bounds] = (
-                        _ALLOW_MARK in etext[bounds[0]:bounds[1]])
+                        etext.find(_ALLOW_MARK, lo, hi - 1 if cut else hi) >= 0)
                 if marked:
                     continue
                 span = secret_span(rx, target, bs, be, rule.group)
@@ -412,7 +469,7 @@ def run_gitleaks(t, set_names, path, eng) -> dict:
                 match = etext[s:e]
 
                 def line(bounds=bounds):
-                    return etext[bounds[0]:bounds[1]]
+                    return line_text(t, bounds)
 
                 if _finding_allowed(sets.allowlists, secret, match, line, path, eng):
                     continue

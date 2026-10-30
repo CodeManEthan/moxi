@@ -20,7 +20,7 @@ import platform
 import re
 import struct
 import sys
-from bisect import bisect_left, bisect_right
+from bisect import bisect_left
 
 #: The first CPython minor version google-re2 ships no wheel for. The `re2` extra's
 #: marker in pyproject.toml carries the same bound; raise both together.
@@ -313,17 +313,6 @@ class Text:
     def line(self, pos: int) -> int:
         """The 1-based line of `str` offset `pos`."""
         return bisect_left(self.newlines, pos) + 1 if pos else 1
-
-    def line_bounds(self, start: int, end: int) -> tuple[int, int]:
-        """From the start of `start`'s line to the end of the line `end - 1` is on (the
-        newline left out); the lines a span touches."""
-        nl = self.newlines
-        k = bisect_right(nl, start - 1)
-        begin = nl[k - 1] + 1 if k else 0
-        last = max(start, end - 1)
-        j = bisect_left(nl, last)
-        finish = nl[j] if j < len(nl) else len(self.etext)
-        return begin, max(finish, end)
 
     @property
     def lower(self) -> str:

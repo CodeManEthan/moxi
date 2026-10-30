@@ -189,6 +189,35 @@ def test_the_secret_comes_from_the_regex_run_again_on_the_trimmed_match(small):
     assert run("qbcde") == []                 # found again: a secret group past the last
 
 
+def test_the_line_is_bounded_as_gitleaks_bounds_it(small):
+    # Each case is what the gitleaks v8.30.1 binary reports on the same rule and text.
+    run = small([rule("r", r"\n*tok_\w+(?:\nb)?"),
+                 rule("anch", r"zed_\w+", allowlists=[allowlist(target="line",
+                                                                regexes=[r"^zed_"])])])
+    # A match that starts with newlines ends that many bytes early, so its line stops
+    # before "b" and the mark after it is not on the line.
+    assert run("x\n\ntok_abc\nb # gitleaks:allow") == [("r", "tok_abc\nb")]
+    # Past the last newline the line runs from the start of the text.
+    assert run("# gitleaks:allow\ntok_abcdef") == []
+    assert run("# gitleaks:allow\ntok_abcdef\n") == [("r", "tok_abcdef")]
+    # A line after the first starts with the newline before it, so `^` does not meet it.
+    assert run("zed_one\nzed_two\nq") == [("anch", "zed_two")]
+
+
+def test_gitleaks_line_spans():
+    def line(text, start, s, e):
+        t = eng_mod.Text(text)
+        bounds = scan_mod.gitleaks_line(t, start, s, e)
+        return bounds, scan_mod.line_text(t, bounds)
+
+    assert line("ab tok cd", 3, 3, 6) == ((0, 9, 0), "ab tok cd")      # no newline
+    assert line("a\nb tok\nc", 4, 4, 7) == ((1, 7, 0), "\nb tok")
+    assert line("a\nb\ntok", 4, 4, 7) == ((0, 7, 0), "a\nb\ntok")      # past the last
+    assert line("a\nb\ntok\rz", 4, 4, 7) == ((0, 7, 0), "a\nb\ntok")
+    # "\n\ntok\n€" trimmed ends two bytes early: inside the euro sign, after one byte.
+    assert line("x\n\ntok\n€", 1, 3, 8) == ((1, 8, 1), "\n\ntok\n�")
+
+
 def test_a_jwt_takes_the_secret_gitleaks_takes(engine_name):
     # gitleaks v8.30.1 reports this jwt's secret with the literal \r after it: in the text
     # the group stops before it (Go's \s does not match the vertical tab), but run again on
