@@ -262,7 +262,9 @@ def check_text(text: str) -> None:
     """comms' whole read over config text `text` alone: the token refusal, the schema's
     checks and comms' own, as `load` makes them, then the codex and opencode roster
     parsers' checks of their rows, as a launcher makes them, but with no path, no
-    environment overrides and no cache. Raises `ConfigError`, naming no file."""
+    environment and no cache: nothing is read but the text (a path's `~` still expands to
+    the user's home, as `moxi.config.check_text` expands it), and nothing is logged.
+    Raises `ConfigError`, naming no file."""
     try:
         raw = tomllib.loads(text)
     except tomllib.TOMLDecodeError as e:
@@ -285,12 +287,14 @@ _TEXT = "the config text"
 
 def _check_rosters(typed: CommsConfig) -> None:
     """The roster parsers over the text's `[codex]` and `[opencode]` tables, each refusal
-    raised as a `ConfigError` naming no file."""
+    raised as a `ConfigError` naming no file. They check the rows only: no default path is
+    built from the environment, and a row's warning (codex's `network_access = false`) is
+    left for a launch to log."""
     from .adapters import codex_roster, opencode_roster
 
     try:
-        codex_roster.from_table(typed.codex, _TEXT)
-        opencode_roster.from_table(typed.opencode, _TEXT)
+        codex_roster.from_table(typed.codex, _TEXT, check=True)
+        opencode_roster.from_table(typed.opencode, _TEXT, check=True)
     except ConfigError as e:
         if e.file is not None or e.key is not None:
             raise

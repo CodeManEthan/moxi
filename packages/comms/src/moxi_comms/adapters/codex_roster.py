@@ -84,7 +84,7 @@ class CodexAgent:
     name: str
     scope: str
     cwd: str
-    thread_file: Path
+    thread_file: Path | None        # None only in a roster built to check rows
     sandbox: str | None = DEFAULT_SANDBOX
     permissions: str | None = None
     profile: dict = field(default_factory=dict)
@@ -249,9 +249,14 @@ def load(env=None, path=None) -> Roster:
     return from_table(cfg.codex, cfg.source)
 
 
-def from_table(table: dict, source: str = "defaults") -> Roster:
+def from_table(table: dict, source: str = "defaults", *, check: bool = False) -> Roster:
     """The roster from the raw `[codex]` table, `{"defaults": {...}, "agents": {...}}`.
-    `source` is the file the table came from, which every refusal names."""
+    `source` is the file the table came from, which every refusal names.
+
+    `check=True` checks the rows and nothing more, for a check of config text: it reads
+    no environment, so a row with no `thread_file` of its own gets None in place of its
+    default under STATE, and it logs no warning, which a launch logs instead. The roster
+    it returns is not one to launch from."""
     defaults = dict((table or {}).get("defaults") or {})
     where = roster_rows.check_defaults("codex", source, defaults, _ENTRY_KEYS,
                                        _DEFAULT_KEYS)
@@ -261,7 +266,7 @@ def from_table(table: dict, source: str = "defaults") -> Roster:
                           f"{', '.join(SANDBOX_MODES)}")
     agents = {}
     for qualified, section in ((table or {}).get("agents") or {}).items():
-        agent = _entry(source, qualified, _with_defaults(defaults, section))
+        agent = _entry(source, qualified, _with_defaults(defaults, section), check=check)
         agents[agent.qualified] = agent
     return Roster(agents=agents, source=source)
 
@@ -275,7 +280,7 @@ def _with_defaults(defaults: dict, section):
     return {**taken, **section}
 
 
-def _entry(path, qualified: str, section) -> CodexAgent:
+def _entry(path, qualified: str, section, *, check: bool = False) -> CodexAgent:
     head = roster_rows.parse_head(
         "codex", path, qualified, section, _ENTRY_KEYS,
         stamped=" -- the app-server's environment is stamped at spawn, before any "
@@ -301,7 +306,7 @@ def _entry(path, qualified: str, section) -> CodexAgent:
     agent = CodexAgent(
         qualified=qualified, name=head.name, scope=head.scope,
         cwd=head.cwd, thread_file=(Path(section["thread_file"]) if section.get("thread_file")
-                     else codex_threads_dir() / f"{qualified}.json"),
+                     else None if check else codex_threads_dir() / f"{qualified}.json"),
         sandbox=None if permissions else (sandbox or DEFAULT_SANDBOX),
         permissions=permissions,
         profile=dict(profile),
@@ -310,7 +315,7 @@ def _entry(path, qualified: str, section) -> CodexAgent:
         model=section.get("model"),
         directors=declared,
     )
-    if not permissions and not agent.network_access:
+    if not permissions and not agent.network_access and not check:
         # Honored, but said out loud: with networkAccess off the agent cannot reach the
         # daemon socket at all, so `moxi comms reply` inside the thread fails (verified).
         log.warning("%s: network_access is off, so this agent cannot reach the daemon "
