@@ -473,9 +473,14 @@ def test_sockets_on_this_boxs_user_manager(site, tmp_path, monkeypatch, capsys):
             assert handed[-1]["names"] == ":".join(held)
             assert handed[-1]["fds"] == len(held)
             daemon, sock = row.status("shell")
+            doctor = {name: (state, detail) for name, state, detail
+                      in _doctor_rows(row.module)}
             report.append(f"idle: daemon {daemon.state}, socket {sock.state}, epoch "
-                          f"{sock.epoch}; doctor {_doctor_rows(row.module)}")
+                          f"{sock.epoch}; doctor {doctor}")
             assert (daemon.state, sock.state, sock.epoch) == ("inactive", "active", epoch)
+            # The doctor reads a daemon idle under its listening socket as healthy.
+            assert doctor["daemon shell"][0] == "ok"
+            assert doctor["daemon shell"][1].endswith("idle, socket listening")
 
             # The next connection starts it again, by socket activation alone.
             assert [_ask(a, row.port) for a in addresses] == [b"ok\n"] * len(addresses)
@@ -523,15 +528,19 @@ def test_sockets_on_this_boxs_user_manager(site, tmp_path, monkeypatch, capsys):
             done = {a.change.kind: a for a in row.apply()}
             states = {u: row.show(u, "ActiveState")["ActiveState"] for u in held + [third]}
             daemon, sock = row.status("shell")
+            doctor = {name: (state, detail) for name, state, detail
+                      in _doctor_rows(row.module)}
             report.append(f"with {UNBINDABLE}: socket apply ok={done['socket'].ok} "
                           f"{done['socket'].lines}; units {states}; socket {sock.state} "
                           f"{sock.detail!r} epoch {sock.epoch}; service "
-                          f"{row.show(service, 'ActiveState')}; doctor "
-                          f"{_doctor_rows(row.module)}")
+                          f"{row.show(service, 'ActiveState')}; doctor {doctor}")
             assert not done["socket"].ok
             assert states == {**{u: "active" for u in held}, third: "failed"}
             assert (sock.state, sock.epoch) == ("failed", None)
             assert third in sock.detail
+            # The doctor fails the socket row and names the unit that failed.
+            assert doctor["socket shell"][0] == "fail"
+            assert f"failed: {third}" in doctor["socket shell"][1]
 
             # Taken out again: the unit is disabled and deleted, the rest listen.
             declare("127.0.0.1", "::1")
