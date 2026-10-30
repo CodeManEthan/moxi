@@ -10,7 +10,6 @@ Standard library only at import.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -120,6 +119,9 @@ class SetInfo:
 
 
 def fingerprint(secret: str) -> str:
+    # hashlib loads here, at the first fingerprint, to keep it off the import's cost.
+    import hashlib
+
     try:
         raw = secret.encode("utf-8", "surrogateescape")
     except UnicodeEncodeError:

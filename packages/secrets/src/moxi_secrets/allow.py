@@ -15,8 +15,10 @@ line's text: an allowlist that half-parses is a gate that half-opens.
 from __future__ import annotations
 
 import re
-from datetime import date
-from pathlib import Path
+TYPE_CHECKING = False  # typing itself costs more at import than the hint is worth
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _SETS = ("credentials", "broad", "private-names", "personal-data")
 _DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
@@ -109,6 +111,8 @@ def _parse(raw: str, where: str, n: int, public: bool) -> _Line | None:
         raise refuse("the match is not *, sha256:<16 hex>, or text:<text>")
     if not _DATE.fullmatch(day):
         raise refuse("the date is not YYYY-MM-DD")
+    from datetime import date
+
     try:
         date.fromisoformat(day)
     except ValueError:
@@ -126,6 +130,8 @@ def _parse(raw: str, where: str, n: int, public: bool) -> _Line | None:
 def private_place_ok(path: Path) -> bool:
     """True when `path`, resolved, lies inside a `.git` directory or secrets' config
     directory."""
+    from pathlib import Path
+
     resolved = Path(path).resolve()
     if ".git" in resolved.parent.parts:
         return True
@@ -153,6 +159,8 @@ class Allowlist:
     @classmethod
     def read(cls, public: Path | None = None, private: Path | None = None) -> Allowlist:
         """Read either file or both. A file that does not exist adds no line."""
+        from pathlib import Path
+
         lines = []
         own_text = None
         for path, is_public in ((public, True), (private, False)):

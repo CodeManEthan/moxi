@@ -307,3 +307,29 @@ def test_the_import_pulls_in_no_engine_config_or_stdnum():
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                          check=True)
     assert out.stdout.strip() == "[]"
+
+
+#: Every module `import moxi_secrets` may load beyond what the interpreter already has.
+#: The import's cost is these modules; one more here is a cost someone chose. hashlib,
+#: pathlib, datetime and typing load at first use instead.
+IMPORT_LOADS = frozenset({
+    "moxi_secrets", "moxi_secrets._folds", "moxi_secrets.allow", "moxi_secrets.engine",
+    "moxi_secrets.names", "moxi_secrets.paths", "moxi_secrets.scan",
+    "__future__", "bisect", "_bisect", "copyreg", "enum", "fnmatch", "json",
+    "json.decoder", "json.encoder", "json.scanner", "_json", "platform", "re",
+    "re._casefix", "re._compiler", "re._constants", "re._parser", "_sre", "struct",
+    "_struct",
+})
+
+
+def test_the_import_loads_only_the_modules_it_names():
+    code = ("import sys\nbefore = set(sys.modules)\nimport moxi_secrets\n"
+            "print('\\n'.join(sorted(set(sys.modules) - before)))\n")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         check=True)
+    loaded = set(out.stdout.split())
+    # The interpreter may have some of these already at startup, so a module may be
+    # missing from what the import loads, but none may be added.
+    assert loaded - IMPORT_LOADS == set()
+    assert {m for m in loaded if m.startswith("moxi_secrets")} == {
+        m for m in IMPORT_LOADS if m.startswith("moxi_secrets")}

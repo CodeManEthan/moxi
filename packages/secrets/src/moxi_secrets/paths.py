@@ -10,8 +10,12 @@ never opened.
 from __future__ import annotations
 
 import os
+import sys
 from fnmatch import fnmatchcase
-from pathlib import PurePath
+TYPE_CHECKING = False  # typing itself costs more at import than the hint is worth
+
+if TYPE_CHECKING:
+    from pathlib import PurePath
 
 _FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rules",
                      "secret-paths.txt")
@@ -41,9 +45,14 @@ def globs() -> tuple:
 
 def is_secret_path(path: str | PurePath) -> bool:
     """True when `path` names a file whose content must not be read."""
-    text = os.fspath(path) if isinstance(path, PurePath) else path
-    if not isinstance(text, str):
-        raise TypeError("path is a str or a PurePath")
+    if isinstance(path, str):
+        text = path
+    else:
+        # A PurePath exists only once pathlib has loaded, so the import doesn't need it.
+        pathlib = sys.modules.get("pathlib")
+        if pathlib is None or not isinstance(path, pathlib.PurePath):
+            raise TypeError("path is a str or a PurePath")
+        text = os.fspath(path)
     parts = [p for p in text.replace("\\", "/").lower().split("/") if p]
     if not parts:
         return False
