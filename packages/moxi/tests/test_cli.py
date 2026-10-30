@@ -152,9 +152,9 @@ def test_the_install_line_ignores_a_feature_extra_of_the_same_name(site):
 
 
 def test_broken_module_prints_reason_and_exits_2(site, capsys):
-    site.module("alpha", drop=("SUMMARY",))
+    site.module("alpha", SUMMARY="''")
     code, _, err = run(capsys, "alpha")
-    assert code == 2 and "does not define SUMMARY" in err
+    assert code == 2 and "SUMMARY = ''" in err
     assert "moxi install alpha" in err
 
 
@@ -212,6 +212,12 @@ def test_modules_json_describes_each_module(site, capsys):
         "state": "present", "reason": "", "summary": "Messages between sessions.",
         "cli": "moxi_comms.cli:main", "setup": "moxi_comms.cli:main",
         "shortcut": False, "requires": ["turns"],
+        "target": "moxi_comms.module", "package": "moxi_comms", "announces": 1,
+        "interfaces": [1], "api_name": None, "gated": {}, "internal_env": {},
+        "settings": None, "segment": None, "daemons": {}, "timers": {},
+        "units_from": None, "health": {}, "doctor": None, "stores": {}, "budgets": {},
+        "skills": None, "page": None, "components": {}, "reserved_names": [],
+        "teardown": None, "session_env": {}, "questions": {},
         "optional": [
             {"extra": "cache", "sentence": "Holds a cold send.", "installed": False,
              "add": "moxi install comms --with cache"},
@@ -232,7 +238,8 @@ def test_modules_text_lists_state_shortcut_and_extras(site, capsys):
     site.write("moxi_comms/cli.py", CLI_SOURCE)
     site.module("comms", CLI="'moxi_comms.cli:main'", SUMMARY="'Messages.'",
                 extras={"cache": ["moxi-cache"]}, OPTIONAL="{'cache': 'Holds a send.'}")
-    site.module("broken", drop=("API",))
+    site.module("broken", API="'not a name'")
+    site.module("quiet", drop=("SUMMARY",))
     code, out, _ = run(capsys, "modules")
     assert code == 0
     assert "comms  moxi-comms 0.1.0  present  shortcut off" in out
@@ -240,7 +247,8 @@ def test_modules_text_lists_state_shortcut_and_extras(site, capsys):
     assert ("    [cache] not installed: Holds a send.  (moxi install comms --with cache)"
             in out)
     assert "broken  moxi-broken 0.1.0  broken" in out
-    assert "does not define API" in out
+    assert "API = 'not a name'" in out
+    assert "quiet  moxi-quiet 0.1.0  present\n    (no summary)\n" in out
 
 
 # -- moxi shortcut -----------------------------------------------------------------------

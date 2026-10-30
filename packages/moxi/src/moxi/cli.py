@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from collections.abc import Mapping
 
 from . import names
 
@@ -138,7 +139,7 @@ def dispatch(name: str, argv: list[str]) -> int:
         print(install_hint(name), file=sys.stderr)
         return 2
     if found.cli is None:
-        print(f"{name}: {found.summary}", file=sys.stderr)
+        print(f"{name}: {found.summary or '(no summary)'}", file=sys.stderr)
         print(f"{name} has no command of its own; other modules call it.", file=sys.stderr)
         users = users_of(name)
         if users:
@@ -343,45 +344,61 @@ def users_of(name: str) -> list[str]:
 # -- moxi modules -------------------------------------------------------------------------
 
 def describe() -> dict:
-    """Everything `moxi modules --json` prints: one object for this environment."""
+    """Everything `moxi modules --json` prints: one object for this environment.
+
+    It reads every module by the full scan, so a name two distributions claim, or a module
+    whose distribution is not named for it, shows as broken. Each module's object carries
+    every field of its `Found` but the imported API module, under the field's name;
+    `optional` is the richer list of its extras.
+    """
     from . import modules
 
     shortcut_dir = _shortcut_dir()
     by_dist = _module_of_distribution()
     listed = []
-    for entry in modules.installed():
-        if any(item["name"] == entry.name for item in listed):
-            continue
-        found = modules.load(entry.name)
-        dist = found.distribution or entry.distribution
+    for found in modules.scan():
+        dist = found.distribution or ""
         optional = []
         for extra, sentence in found.optional.items():
             optional.append({
                 "extra": extra,
                 "sentence": sentence,
                 "installed": bool(dist) and extra_installed(dist, extra),
-                "add": f"moxi install {entry.name} --with {extra}",
+                "add": f"moxi install {found.name} --with {extra}",
             })
-        listed.append({
-            "name": entry.name,
+        item = _found_json(found)
+        item.update({
             "distribution": dist,
-            "version": found.version or entry.version,
-            "state": found.state,
-            "reason": found.reason,
-            "summary": found.summary,
-            "cli": found.cli,
-            "setup": found.setup,
+            "version": found.version or "",
             "shortcut": shortcut_dir is not None and _is_shortcut(
-                os.path.join(shortcut_dir, entry.name), entry.name),
+                os.path.join(shortcut_dir, found.name), found.name),
             "requires": required_modules(dist, by_dist) if dist else [],
             "optional": optional,
         })
+        listed.append(item)
     return {
         "moxi": _version_of("moxi"),
         "python": sys.executable,
         "prefix": sys.prefix,
         "modules": listed,
     }
+
+
+def _found_json(found) -> dict:
+    """A `Found`'s fields as JSON values: tables as objects, sets and tuples as lists."""
+    import dataclasses
+
+    def plain(value):
+        if isinstance(value, Mapping):
+            return {k: plain(v) for k, v in value.items()}
+        if isinstance(value, frozenset):
+            return sorted(value)
+        if isinstance(value, (list, tuple)):
+            return [plain(v) for v in value]
+        return value
+
+    return {f.name: plain(getattr(found, f.name)) for f in dataclasses.fields(found)
+            if f.name != "api"}
 
 
 def _modules(argv: list[str]) -> int:
@@ -407,6 +424,8 @@ def _modules(argv: list[str]) -> int:
             print(f"    {item['reason']}")
         if item["summary"]:
             print(f"    {item['summary']}")
+        elif item["state"] == "present":
+            print("    (no summary)")
         for opt in item["optional"]:
             mark = "installed" if opt["installed"] else "not installed"
             line = f"    [{opt['extra']}] {mark}: {opt['sentence']}"

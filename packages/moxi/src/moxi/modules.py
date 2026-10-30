@@ -7,24 +7,57 @@ library:
     [project.entry-points."moxi.modules"]
     cache = "moxi_cache.module"
 
-The announcement defines every name in `ANNOUNCEMENT`:
+The announcement may define any name in `KNOWN`. Every name is optional: a missing name
+takes its default, a name this moxi does not know is ignored, and a name that is present
+is checked. A failed check makes the module `broken`, with the reason.
 
-    INTERFACES    frozenset of int: the versions of what the module offers others
-    API           dotted name of the module other modules call, or None
-    CLI           "package.module:function" that `moxi <module>` runs, or None
-    SUMMARY       one line, for `moxi modules`
-    OPTIONAL      {extra: one sentence saying what installing it enables}
-    GATED         {console script: the extra it needs}
-    INTERNAL_ENV  {variable: why the module reads it}; a name ending in `_` is a prefix
-    SETTINGS      resource name of the config schema in the announcement's package, or None
-    SETUP         "package.module:function" the installer runs after installing, or None
-    SEGMENT       dotted name of a module whose `segment` renders a status line segment,
-                  or None
+    ANNOUNCES       int, default 1: the announcement schema the module is written to. A
+                    schema newer than `ANNOUNCES` here makes the module broken.
+    INTERFACES      frozenset of int: the versions of what the module offers others
+    API             dotted name of the module other modules call, or None
+    CLI             "package.module:function" that `moxi <module>` runs, or None
+    SUMMARY         one line, for `moxi modules`
+    OPTIONAL        {extra: one sentence saying what installing it enables}
+    GATED           {console script: the extra it needs}
+    INTERNAL_ENV    {variable: why the module reads it}; a name ending in `_` is a prefix
+    SETTINGS        resource name of the config schema in the announcement's package
+    SETUP           "package.module:function" the installer runs after installing
+    SEGMENT         dotted name of a module whose `segment` renders a status line segment
+    DAEMONS         {name: entry}: long-running processes the core installs as units
+    TIMERS          {name: entry}: scheduled commands the core installs, each behind a switch
+    UNITS_FROM      target returning run-time declarations; kept as a string, never called
+                    here
+    HEALTH          {daemon: target}: one health check per declared daemon
+    DOCTOR          target: the module's own doctor checks
+    STORES          {name: entry}: the stores the module keeps
+    BUDGETS         {key: limit}: what the module may cost at idle
+    SKILLS          a folder in the announcement's package, one subfolder per skill
+    PAGE            "package.module:NAME": the module's page value, checked as syntax only
+    COMPONENTS      {name: table}: components the module offers
+    RESERVED_NAMES  [str]: send-only names the module needs reserved
+    TEARDOWN        target: SETUP's reverse, run before an uninstall removes anything
+    SESSION_ENV     {variable: why}: per-session variables the module stamps; a name
+                    ending in `_` is a prefix
+    QUESTIONS       {settings key: one line}: install questions
 
-`present` and `installed` read entry-point metadata and import nothing. `load` imports
-the announcement and the `API` module and returns a frozen `Found` whose state is
-`present`, `absent` or `broken`; it never raises. A feature that needs an optional module
-asks `load` where it needs it and is off when the answer is not `present`.
+A "target" is "package.module:function". An inner key of a `DAEMONS`, `TIMERS` or
+`STORES` entry that this moxi does not know makes the module broken: a new inner key comes
+with a raised `ANNOUNCES`, so a typo is never read as "not set".
+
+`installed`, `present` and `scan` read every distribution's entry-point metadata. `load`
+reads only the distribution `moxi-<name>`, imports the announcement and the `API` module,
+and returns a frozen `Found` whose state is `present`, `absent` or `broken`; it never
+raises. `scan` is the full scan, which also finds two distributions claiming one name and
+a module declared by a distribution not named `moxi-<name>`; `moxi modules`, the doctor
+and the installer use it. A feature that needs an optional module asks `available` (a
+cheap import check) or `load` where it needs it, and is off when the answer is not
+`present`.
+
+`extensions(group)` reads the behaviour one module offers another, an entry-point group
+named `moxi.<module>` or `moxi.<module>.<part>`. `session_env()` collects every present
+module's `SESSION_ENV`. A `TEARDOWN` raises `Refused` to stop an uninstall.
+
+This module imports nothing heavy at module level, so a hook may import it.
 """
 
 from __future__ import annotations
@@ -44,13 +77,72 @@ PRESENT = "present"
 ABSENT = "absent"
 BROKEN = "broken"
 
-#: The names an announcement defines.
-ANNOUNCEMENT = ("INTERFACES", "API", "CLI", "SUMMARY", "OPTIONAL", "GATED", "INTERNAL_ENV",
-                "SETTINGS", "SETUP", "SEGMENT")
+#: The newest announcement schema this moxi reads.
+ANNOUNCES = 1
 
-_EMPTY: Mapping[str, str] = MappingProxyType({})
+_EMPTY: Mapping = MappingProxyType({})
+
+#: Every name an announcement may define, with the default a missing one takes.
+KNOWN: Mapping[str, object] = MappingProxyType({
+    "ANNOUNCES": 1,
+    "INTERFACES": frozenset(),
+    "API": None,
+    "CLI": None,
+    "SUMMARY": "",
+    "OPTIONAL": _EMPTY,
+    "GATED": _EMPTY,
+    "INTERNAL_ENV": _EMPTY,
+    "SETTINGS": None,
+    "SETUP": None,
+    "SEGMENT": None,
+    "DAEMONS": _EMPTY,
+    "TIMERS": _EMPTY,
+    "UNITS_FROM": None,
+    "HEALTH": _EMPTY,
+    "DOCTOR": None,
+    "STORES": _EMPTY,
+    "BUDGETS": _EMPTY,
+    "SKILLS": None,
+    "PAGE": None,
+    "COMPONENTS": _EMPTY,
+    "RESERVED_NAMES": (),
+    "TEARDOWN": None,
+    "SESSION_ENV": _EMPTY,
+    "QUESTIONS": _EMPTY,
+})
+
+#: The `Found` field each announcement name is read into.
+_FIELD = {name: name.lower() for name in KNOWN}
+_FIELD["API"] = "api_name"
+
 _DOTTED = re.compile(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)*")
 _TARGET = re.compile(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)*:[A-Za-z_]\w*")
+_GROUP = re.compile(r"moxi\.[a-z0-9]+(\.[a-z0-9_]+)?")
+#: A daemon, timer or command name: lower-case words joined by single hyphens.
+_UNIT_NAME = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
+#: A store's name: lower-case words joined by single hyphens or underscores.
+_STORE_NAME = re.compile(r"[a-z0-9]+([-_][a-z0-9]+)*")
+#: A settings key, dotted for a key inside a table.
+_KEY = re.compile(r"[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*")
+_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_SIZE = re.compile(r"[0-9]+[KMG]?")
+_AGE = re.compile(r"[0-9]+d")
+_EVERY = re.compile(r"([0-9]+)([mh])")
+_AT = re.compile(r"([01][0-9]|2[0-3]):[0-5][0-9]")
+
+_PLATFORMS = ("linux", "darwin", "win32")
+_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+_DAEMON_KEYS = frozenset({"command", "args", "doc", "stop", "upgrade", "memory_high",
+                          "memory_swap_max", "platforms", "switch", "socket"})
+_TIMER_KEYS = frozenset({"command", "args", "doc", "every", "at", "days", "switch",
+                         "platforms"})
+#: Keys a run-time declaration (from `UNITS_FROM`) may carry beside the others.
+_RUNTIME_KEYS = frozenset({"argv", "cwd", "enabled"})
+_STORE_KEYS = frozenset({"root", "path", "kind", "private", "retention", "rebuildable",
+                         "lazy"})
+_STORE_ROOTS = ("data", "state", "cache", "runtime")
+_STORE_KINDS = ("sqlite", "jsonl", "file", "dir")
+_BUDGET_KEYS = ("idle_cpu", "rss", "fds", "hook_ms")
 
 
 @dataclass(frozen=True)
@@ -65,7 +157,11 @@ class Entry:
 
 @dataclass(frozen=True)
 class Found:
-    """What `load` found for one module name."""
+    """What `load` found for one module name.
+
+    Every announcement name is a field (`API` is `api_name`); a name the announcement
+    leaves out holds its default. Tables are read-only mappings and lists are tuples.
+    """
 
     name: str
     state: str
@@ -73,8 +169,9 @@ class Found:
     distribution: str | None = None
     version: str | None = None
     target: str | None = None
-    #: The package the announcement lives in; `SETTINGS` names a resource in it.
+    #: The package the announcement lives in; `SETTINGS` and `SKILLS` name resources in it.
     package: str | None = None
+    announces: int = 1
     interfaces: frozenset[int] = frozenset()
     api_name: str | None = None
     #: The imported `API` module, when the state is `present` and `API` is not None.
@@ -87,10 +184,69 @@ class Found:
     settings: str | None = None
     setup: str | None = None
     segment: str | None = None
+    daemons: Mapping[str, Mapping] = _EMPTY
+    timers: Mapping[str, Mapping] = _EMPTY
+    units_from: str | None = None
+    health: Mapping[str, str] = _EMPTY
+    doctor: str | None = None
+    stores: Mapping[str, Mapping] = _EMPTY
+    budgets: Mapping[str, object] = _EMPTY
+    skills: str | None = None
+    #: The raw `"package.module:NAME"`; never imported here.
+    page: str | None = None
+    components: Mapping[str, Mapping] = _EMPTY
+    reserved_names: tuple[str, ...] = ()
+    teardown: str | None = None
+    session_env: Mapping[str, str] = _EMPTY
+    questions: Mapping[str, str] = _EMPTY
 
     @property
     def ok(self) -> bool:
         return self.state == PRESENT
+
+
+class Refused(Exception):
+    """What a `TEARDOWN` raises to stop an uninstall; `reason` says why, for the user."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+class ExtensionError(Exception):
+    """An extension entry whose target could not be loaded."""
+
+    def __init__(self, name: str, reason: str):
+        super().__init__(f"{name}: {reason}")
+        self.name = name
+        self.reason = reason
+
+
+@dataclass(frozen=True)
+class Extension:
+    """One entry of an extension group: behaviour one module offers another."""
+
+    #: The offering module: the entry's name up to its first ".".
+    module: str
+    #: The entry's full name, such as "comms" or "comms.kinds".
+    name: str
+    #: "package.module:attr" or "package.module".
+    target: str
+    distribution: str
+
+    def load(self) -> object:
+        """Import the target and return it; raises `ExtensionError` when that fails."""
+        import importlib
+
+        module_name, _, attr = self.target.partition(":")
+        try:
+            obj = importlib.import_module(module_name.strip())
+            for part in (p.strip() for p in attr.split(".")) if attr else ():
+                obj = getattr(obj, part)
+        except Exception as exc:  # noqa: BLE001 - every failure is the entry's
+            raise ExtensionError(self.name, f"loading {self.target} failed: "
+                                            f"{_describe(exc)}") from exc
+        return obj
 
 
 def installed() -> list[Entry]:
@@ -115,6 +271,19 @@ def present(name: str) -> bool:
     return any(entry.name == name for entry in installed())
 
 
+def available(name: str) -> bool:
+    """True when module `name`'s package can be imported. Reads no metadata and imports
+    nothing, so a hook can ask it before paying for `load`."""
+    if not names.is_module_name(name):
+        return False
+    from importlib.util import find_spec
+
+    try:
+        return find_spec(names.import_name(name)) is not None
+    except (ImportError, ValueError):
+        return False
+
+
 # One record per name per process: the announcement is imported once, the API module at
 # most once. The interface check runs on every call against the record.
 _records: dict[str, "_Record"] = {}
@@ -124,13 +293,105 @@ _lock = threading.RLock()
 def load(name: str, *, interface: int | None = None) -> Found:
     """Load module `name` and, when `interface` is given, check that it offers it.
 
-    Never raises: anything that goes wrong is a `broken` `Found` with the reason.
+    Reads only the distribution `moxi-<name>`: that distribution missing, or declaring no
+    `moxi.modules` entry named `name`, is `absent`. Never raises: anything that goes
+    wrong is a `broken` `Found` with the reason.
     """
     with _lock:
         record = _records.get(name)
         if record is None:
             record = _records[name] = _Record.read(name)
         return record.found(interface)
+
+
+def scan() -> list[Found]:
+    """Every module this environment declares, by the full scan, sorted by name.
+
+    Besides what `load` finds, a name two distributions claim is `broken` naming both,
+    and so is a module declared by a distribution not named `moxi-<name>`, or under a name
+    that is not a module name. Never raises.
+    """
+    try:
+        from importlib.metadata import entry_points
+
+        claims: dict[str, list] = {}
+        for ep in entry_points(group=GROUP):
+            claims.setdefault(ep.name, []).append(ep)
+    except Exception as exc:  # noqa: BLE001 - scan never raises
+        _debug(f"reading the environment's modules failed: {_describe(exc)}")
+        return []
+    out = []
+    for name in sorted(claims):
+        eps = claims[name]
+        if len(eps) > 1:
+            who = ", ".join(sorted(_dist_label(ep) for ep in eps))
+            out.append(Found(name=name, state=BROKEN,
+                             reason=f"{len(eps)} distributions declare the Moxi module "
+                                    f"{name!r} ({who}); uninstall all but one"))
+            continue
+        ep = eps[0]
+        dist = getattr(ep, "dist", None)
+        where = dict(name=name, distribution=_dist_name(dist) or None,
+                     version=getattr(dist, "version", None), target=ep.value)
+        if not names.is_module_name(name):
+            out.append(Found(state=BROKEN, **where, reason=_not_a_name(name)))
+            continue
+        wanted = names.distribution(name)
+        if _normalize(where["distribution"] or "") != wanted:
+            out.append(Found(state=BROKEN, **where,
+                             reason=f"{_dist_label(ep)} declares the Moxi module {name!r}; "
+                                    f"its distribution must be {wanted}"))
+            continue
+        out.append(load(name))
+    return out
+
+
+def extensions(group: str) -> list[Extension]:
+    """The entries of extension group `group`, sorted by name. Imports none of them.
+
+    A group is named `moxi.<module>` or `moxi.<module>.<part>`, owned by its second
+    segment; any other name has no entries. Never raises: a metadata read that fails
+    returns what was read before it and logs one line at debug level.
+    """
+    if not isinstance(group, str) or not _GROUP.fullmatch(group):
+        _debug(f"{group!r} is not an extension group name: moxi.<module> or "
+               "moxi.<module>.<part>")
+        return []
+    out: list[Extension] = []
+    try:
+        from importlib.metadata import distributions
+
+        seen: set[str] = set()
+        for dist in distributions():
+            dist_name = _dist_name(dist)
+            key = _normalize(dist_name)
+            if key in seen:
+                continue
+            seen.add(key)
+            for ep in dist.entry_points.select(group=group):
+                out.append(Extension(module=ep.name.split(".")[0], name=ep.name,
+                                     target=ep.value, distribution=dist_name))
+    except Exception as exc:  # noqa: BLE001 - extensions never raises
+        _debug(f"reading the extension group {group} failed: {_describe(exc)}")
+    return sorted(out, key=lambda e: (e.name, e.distribution))
+
+
+def session_env() -> frozenset[str]:
+    """The `SESSION_ENV` keys of every present module, read through `load`.
+
+    A broken module contributes nothing. Never raises.
+    """
+    try:
+        found_names = sorted({entry.name for entry in installed()})
+    except Exception as exc:  # noqa: BLE001
+        _debug(f"reading the environment's modules failed: {_describe(exc)}")
+        return frozenset()
+    keys: set[str] = set()
+    for name in found_names:
+        found = load(name)
+        if found.state == PRESENT:
+            keys.update(found.session_env)
+    return frozenset(keys)
 
 
 def reset() -> None:
@@ -160,30 +421,33 @@ class _Record:
 
     @classmethod
     def _read(cls, name: str) -> _Record:
-        from importlib.metadata import entry_points
+        if not names.is_module_name(name):
+            return cls(Found(name=name, state=ABSENT, reason=_not_a_name(name)))
+        from importlib.metadata import PackageNotFoundError, distribution
 
-        claims = [ep for ep in entry_points(group=GROUP) if ep.name == name]
-        if not claims:
+        wanted = names.distribution(name)
+        try:
+            dist = distribution(wanted)
+        except PackageNotFoundError:
             return cls(Found(name=name, state=ABSENT,
                              reason=f"no distribution in this environment declares the "
-                                    f"Moxi module {name!r}"))
-        if len(claims) > 1:
-            who = ", ".join(sorted(_dist_label(ep) for ep in claims))
-            return cls(Found(name=name, state=BROKEN,
-                             reason=f"{len(claims)} distributions declare the Moxi module "
-                                    f"{name!r} ({who}); uninstall all but one"))
+                                    f"Moxi module {name!r} ({wanted} is not installed)"))
+        claims = list(dist.entry_points.select(group=GROUP, name=name))
+        if not claims:
+            return cls(Found(name=name, state=ABSENT,
+                             reason=f"{wanted} is installed but declares no {GROUP} entry "
+                                    f"point named {name!r}"))
         ep = claims[0]
-        dist = getattr(ep, "dist", None)
         where = dict(name=name, distribution=_dist_name(dist) or None,
                      version=getattr(dist, "version", None), target=ep.value)
-        if not names.is_module_name(name):
-            return cls(Found(state=BROKEN, **where,
-                             reason=f"{name!r} is not a Moxi module name: lower-case "
-                                    "ASCII letters and digits only"))
         if name in names.VERBS:
             return cls(Found(state=BROKEN, **where,
                              reason=f"{name!r} is one of the umbrella's own verbs, so "
                                     f"`moxi {name}` can never reach this module; the "
+                                    "module needs another name"))
+        if name in names.RESERVED:
+            return cls(Found(state=BROKEN, **where,
+                             reason=f"{name!r} is a name the core keeps for itself; the "
                                     "module needs another name"))
         if ":" in ep.value:
             return cls(Found(state=BROKEN, **where,
@@ -196,18 +460,19 @@ class _Record:
                              reason=f"importing its announcement {ep.value} failed: "
                                     f"{_describe(exc)}"))
         try:
-            fields = _announcement(module)
-        except _Bad as exc:
-            return cls(Found(state=BROKEN, **where,
-                             reason=f"its announcement {ep.value} {exc}"))
+            fields, problems = _check(module.__dict__, name)
+        except _TooNew as exc:
+            return cls(Found(state=BROKEN, **where, reason=str(exc)))
         except Exception as exc:  # noqa: BLE001
             return cls(Found(state=BROKEN, **where,
                              reason=f"reading its announcement {ep.value} failed: "
                                     f"{_describe(exc)}"))
+        if problems:
+            return cls(Found(state=BROKEN, **where,
+                             reason=f"its announcement {ep.value} " + "; ".join(problems)))
         package = module.__name__ if hasattr(module, "__path__") else module.__package__
-        api_name = fields.pop("api_name")
-        return cls(Found(state=PRESENT, **where, package=package or None,
-                         api_name=api_name, **fields), api_name)
+        return cls(Found(state=PRESENT, **where, package=package or None, **fields),
+                   fields["api_name"])
 
     def found(self, interface: int | None) -> Found:
         base = self.base
@@ -234,56 +499,430 @@ class _Record:
         return _replace(base, api=self.api)
 
 
+# --- the announcement's checks ------------------------------------------------------------
+#
+# The contract check runs these same checks over the literals it reads from an
+# announcement's source, so a module is held to one set of rules whether it is loaded or
+# checked.
+
 class _Bad(Exception):
-    """An announcement that does not hold to the contract."""
+    """An announcement name that does not hold to the contract."""
 
 
-def _announcement(module: ModuleType) -> dict:
-    missing = [n for n in ANNOUNCEMENT if not hasattr(module, n)]
-    if missing:
-        raise _Bad("does not define " + ", ".join(missing))
-    get = module.__dict__.get
-
-    interfaces = get("INTERFACES")
-    if not isinstance(interfaces, frozenset) or not all(
-            isinstance(i, int) and not isinstance(i, bool) for i in interfaces):
-        raise _Bad(f"has INTERFACES = {interfaces!r}; it must be a frozenset of integers")
-    summary = get("SUMMARY")
-    if not isinstance(summary, str) or not summary.strip() or "\n" in summary:
-        raise _Bad(f"has SUMMARY = {summary!r}; it must be one non-empty line")
-    return dict(
-        interfaces=interfaces,
-        api_name=_optional(get("API"), "API", _DOTTED, "a dotted module name"),
-        cli=_optional(get("CLI"), "CLI", _TARGET, '"package.module:function"'),
-        summary=summary,
-        optional=_mapping(get("OPTIONAL"), "OPTIONAL"),
-        gated=_mapping(get("GATED"), "GATED"),
-        internal_env=_mapping(get("INTERNAL_ENV"), "INTERNAL_ENV"),
-        settings=_optional(get("SETTINGS"), "SETTINGS", None, "a resource name"),
-        setup=_optional(get("SETUP"), "SETUP", _TARGET, '"package.module:function"'),
-        segment=_optional(get("SEGMENT"), "SEGMENT", _DOTTED, "a dotted module name"),
-    )
+class _TooNew(Exception):
+    """An announcement written to a newer schema than this moxi reads."""
 
 
-def _optional(value, label: str, pattern: re.Pattern | None, what: str) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, str) and value and (pattern is None or pattern.fullmatch(value)):
-        return value
-    raise _Bad(f"has {label} = {value!r}; it must be {what} or None")
+def _check(values: Mapping[str, object], module: str | None = None
+           ) -> tuple[dict[str, object], list[str]]:
+    """Read the announcement names in `values`: the `Found` fields, and the problems.
+
+    Each name in `KNOWN` that `values` holds is checked; a missing one takes its default
+    and a name not in `KNOWN` is ignored. `module` is the module's name, for the rules that
+    depend on its environment prefix. Each problem reads after "its announcement" or "the
+    announcement". Raises `_TooNew` when `ANNOUNCES` is newer than this moxi reads, since
+    the rest of such an announcement may use names and keys this moxi does not know.
+    """
+    announces = values.get("ANNOUNCES", KNOWN["ANNOUNCES"])
+    if (isinstance(announces, int) and not isinstance(announces, bool)
+            and announces > ANNOUNCES):
+        raise _TooNew(f"announces schema {announces}; this moxi knows up to {ANNOUNCES}; "
+                      "upgrade moxi")
+    fields: dict[str, object] = {}
+    problems: list[str] = []
+    for name, default in KNOWN.items():
+        if name not in values:
+            fields[_FIELD[name]] = default
+            continue
+        try:
+            fields[_FIELD[name]] = _CHECKS[name](values[name], name)
+        except _Bad as exc:
+            problems.append(str(exc))
+            fields[_FIELD[name]] = default
+    problems += _across(values, fields, module)
+    return fields, problems
 
 
-def _mapping(value, label: str) -> Mapping[str, str]:
+def _across(values: Mapping[str, object], fields: dict, module: str | None) -> list[str]:
+    """The rules that tie one name to another."""
+    problems = []
+    daemons, timers = fields["daemons"], fields["timers"]
+    for both in sorted(set(daemons) & set(timers)):
+        problems.append(f"declares {both!r} as both a daemon and a timer; a module's "
+                        "daemons and timers each need their own name")
+    for key in sorted(set(fields["health"]) - set(daemons)):
+        problems.append(f"has HEALTH for {key!r}, which is no daemon in DAEMONS")
+    if module and names.is_module_name(module):
+        prefix = names.env_prefix(module)
+        internal = fields["internal_env"]
+        for key in sorted(fields["session_env"]):
+            if not key.startswith(prefix):
+                continue
+            if not any(have == key or (have.endswith("_") and key.startswith(have))
+                       for have in internal):
+                problems.append(f"has SESSION_ENV {key!r}, under the module's own prefix "
+                                f"{prefix}, and INTERNAL_ENV does not declare it")
+    return problems
+
+
+def _shape(name: str, value: object, what: str) -> _Bad:
+    return _Bad(f"has {name} = {value!r}; it must be {what}")
+
+
+def _announces(value, name):
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise _shape(name, value, "an integer of 1 or more")
+    return value
+
+
+def _interfaces(value, name):
+    if not isinstance(value, frozenset) or not all(
+            isinstance(i, int) and not isinstance(i, bool) for i in value):
+        raise _shape(name, value, "a frozenset of integers")
+    return value
+
+
+def _summary(value, name):
+    if not _one_line(value):
+        raise _shape(name, value, "one non-empty line")
+    return value
+
+
+def _pattern(pattern: re.Pattern | None, what: str):
+    def check(value, name):
+        if value is None:
+            return None
+        if isinstance(value, str) and value and (pattern is None
+                                                 or pattern.fullmatch(value)):
+            return value
+        raise _shape(name, value, f"{what} or None")
+    return check
+
+
+def _strings(value, name):
     if not isinstance(value, Mapping) or not all(
             isinstance(k, str) and k and isinstance(v, str) for k, v in value.items()):
-        raise _Bad(f"has {label} = {value!r}; it must map names to strings")
+        raise _Bad(f"has {name} = {value!r}; it must map names to strings")
     return MappingProxyType(dict(value))
+
+
+def _skills(value, name):
+    if value is None:
+        return None
+    if not _relative(value):
+        raise _shape(name, value, "a relative folder in the announcement's package, with "
+                                  "no '..', or None")
+    return value
+
+
+def _reserved(value, name):
+    if not isinstance(value, (list, tuple)) or not all(
+            isinstance(v, str) and v for v in value):
+        raise _shape(name, value, "a list of non-empty strings")
+    if len(set(value)) != len(value):
+        raise _shape(name, value, "a list with no name twice")
+    return tuple(value)
+
+
+def _health(value, name):
+    if not isinstance(value, Mapping) or not all(
+            isinstance(k, str) and isinstance(v, str) and _TARGET.fullmatch(v)
+            for k, v in value.items()):
+        raise _shape(name, value, 'a table of daemon names to "package.module:function"')
+    return MappingProxyType(dict(value))
+
+
+def _components(value, name):
+    if not isinstance(value, Mapping) or not all(
+            isinstance(k, str) and k and isinstance(v, Mapping) for k, v in value.items()):
+        raise _shape(name, value, "a table of tables")
+    return _freeze(value)
+
+
+def _session_env(value, name):
+    if not isinstance(value, Mapping) or not all(
+            isinstance(k, str) and _ENV_NAME.fullmatch(k) and isinstance(v, str)
+            for k, v in value.items()):
+        raise _shape(name, value, "a table of variable names (or prefixes ending in _) to "
+                                  "the reason each is stamped")
+    return MappingProxyType(dict(value))
+
+
+def _questions(value, name):
+    if not isinstance(value, Mapping) or not all(
+            isinstance(k, str) and _KEY.fullmatch(k) and _one_line(v)
+            for k, v in value.items()):
+        raise _shape(name, value, "a table of settings keys to one non-empty line each")
+    return MappingProxyType(dict(value))
+
+
+def _budgets(value, name):
+    if not isinstance(value, Mapping):
+        raise _shape(name, value, "a table")
+    for key, limit in value.items():
+        if key not in _BUDGET_KEYS:
+            raise _Bad(f"has BUDGETS key {key!r}; the keys are "
+                       f"{', '.join(_BUDGET_KEYS)}")
+        ok = {"idle_cpu": _number(limit) and 0 < limit <= 1,
+              "rss": _size(limit),
+              "fds": isinstance(limit, int) and not isinstance(limit, bool) and limit > 0,
+              "hook_ms": _number(limit) and limit > 0}[key]
+        if not ok:
+            what = {"idle_cpu": "a number above 0 and at most 1",
+                    "rss": "a size: digits with an optional K, M or G",
+                    "fds": "an integer above 0",
+                    "hook_ms": "a number above 0"}[key]
+            raise _Bad(f"has BUDGETS[{key!r}] = {limit!r}; it must be {what}")
+    return MappingProxyType(dict(value))
+
+
+def _units(kind: str):
+    def check(value, name):
+        if not isinstance(value, Mapping):
+            raise _shape(name, value, f"a table of {kind} names to entries")
+        for unit, entry in value.items():
+            _unit(kind, unit, entry, label=name)
+        return _freeze(value)
+    return check
+
+
+def _unit(kind: str, name: object, entry: object, *, runtime: bool = False,
+          label: str | None = None) -> None:
+    """Check one daemon or timer entry; raises `_Bad`. `kind` is "daemon" or "timer".
+
+    `runtime` allows the forms only a run-time declaration may use: `argv` and `cwd`,
+    `enabled`, and a timer with no `switch`.
+    """
+    label = label or ("DAEMONS" if kind == "daemon" else "TIMERS")
+    if not isinstance(name, str) or not _UNIT_NAME.fullmatch(name):
+        raise _Bad(f"has {label} name {name!r}; a name is lower-case letters and digits, "
+                   "in words joined by single hyphens")
+    where = f"{label}[{name!r}]"
+    if not isinstance(entry, Mapping):
+        raise _Bad(f"has {where} = {entry!r}; an entry is a table")
+    known = _DAEMON_KEYS if kind == "daemon" else _TIMER_KEYS
+    if runtime:
+        known = known | _RUNTIME_KEYS
+    for key in entry:
+        if key not in known:
+            raise _Bad(f"has {where} key {key!r}, which this moxi does not know; a new key "
+                       "comes with a raised ANNOUNCES")
+    get = entry.get
+    if runtime and "argv" in entry:
+        if "command" in entry:
+            raise _Bad(f"has {where} with both command and argv; it takes one of the two")
+        argv = get("argv")
+        if not _str_list(argv) or not argv or not _absolute(argv[0]):
+            raise _Bad(f"has {where} argv = {argv!r}; it must be a list of strings whose "
+                       "first is an absolute path")
+    elif not isinstance(get("command"), str) or not _UNIT_NAME.fullmatch(get("command")):
+        raise _Bad(f"has {where} command = {get('command')!r}; it must be a console script's "
+                   "name, not a path")
+    if "cwd" in entry and not (isinstance(get("cwd"), str) and _absolute(get("cwd"))):
+        raise _Bad(f"has {where} cwd = {get('cwd')!r}; it must be an absolute directory")
+    if "enabled" in entry and not isinstance(get("enabled"), bool):
+        raise _Bad(f"has {where} enabled = {get('enabled')!r}; it must be true or false")
+    if "args" in entry and not _str_list(get("args")):
+        raise _Bad(f"has {where} args = {get('args')!r}; it must be a list of strings")
+    if "doc" in entry and not _one_line(get("doc")):
+        raise _Bad(f"has {where} doc = {get('doc')!r}; it must be one non-empty line")
+    if "platforms" in entry and not (_str_list(get("platforms"))
+                                     and set(get("platforms")) <= set(_PLATFORMS)):
+        raise _Bad(f"has {where} platforms = {get('platforms')!r}; it must be a list drawn "
+                   f"from {', '.join(_PLATFORMS)}")
+    if "switch" in entry and not (isinstance(get("switch"), str)
+                                  and _KEY.fullmatch(get("switch"))):
+        raise _Bad(f"has {where} switch = {get('switch')!r}; it must be a settings key")
+    if kind == "daemon":
+        _daemon(where, entry)
+    else:
+        _timer(where, entry, runtime=runtime)
+
+
+def _daemon(where: str, entry: Mapping) -> None:
+    get = entry.get
+    if "stop" in entry and get("stop") not in ("group", "process"):
+        raise _Bad(f"has {where} stop = {get('stop')!r}; it must be 'group' or 'process'")
+    if "upgrade" in entry and get("upgrade") not in ("restart", "keep"):
+        raise _Bad(f"has {where} upgrade = {get('upgrade')!r}; it must be 'restart' or "
+                   "'keep'")
+    for key in ("memory_high", "memory_swap_max"):
+        if key in entry and not _size(get(key)):
+            raise _Bad(f"has {where} {key} = {get(key)!r}; it must be a size: digits with "
+                       "an optional K, M or G")
+    if "socket" in entry:
+        socket = get("socket")
+        if (not isinstance(socket, Mapping) or set(socket) != {"setting", "addresses"}
+                or not isinstance(socket["setting"], str)
+                or not _KEY.fullmatch(socket["setting"])
+                or not _str_list(socket["addresses"]) or not socket["addresses"]
+                or not all(_ip(a) for a in socket["addresses"])):
+            raise _Bad(f"has {where} socket = {socket!r}; it must be a table of exactly "
+                       "setting (a settings key) and addresses (a non-empty list of IP "
+                       "addresses)")
+
+
+def _timer(where: str, entry: Mapping, *, runtime: bool) -> None:
+    get = entry.get
+    if "switch" not in entry and not runtime:
+        raise _Bad(f"has {where} with no switch; a timer starts behind a switch")
+    if ("every" in entry) == ("at" in entry):
+        raise _Bad(f"has {where} with {'both' if 'every' in entry else 'neither'} every "
+                   "and at; a timer takes exactly one")
+    if "every" in entry:
+        every = get("every")
+        match = _EVERY.fullmatch(every) if isinstance(every, str) else None
+        minutes = (int(match.group(1)) * (60 if match.group(2) == "h" else 1)
+                   if match else 0)
+        if not 1 <= minutes <= 24 * 60:
+            raise _Bad(f"has {where} every = {every!r}; it must be '<n>m' or '<n>h', from "
+                       "1m to 24h")
+        if "days" in entry:
+            raise _Bad(f"has {where} with every and days; days goes with at")
+    else:
+        at = get("at")
+        if not _str_list(at) or not at or not all(_AT.fullmatch(t) for t in at):
+            raise _Bad(f"has {where} at = {at!r}; it must be a non-empty list of 'HH:MM' "
+                       "times (24-hour)")
+    if "days" in entry:
+        days = get("days")
+        if not _str_list(days) or not days or not set(days) <= set(_DAYS):
+            raise _Bad(f"has {where} days = {days!r}; it must be a non-empty list drawn "
+                       f"from {', '.join(_DAYS)}")
+
+
+def _stores(value, name):
+    if not isinstance(value, Mapping):
+        raise _shape(name, value, "a table of store names to entries")
+    for store, entry in value.items():
+        if not isinstance(store, str) or not _STORE_NAME.fullmatch(store):
+            raise _Bad(f"has STORES name {store!r}; a name is lower-case letters and "
+                       "digits, in words joined by single hyphens or underscores")
+        where = f"STORES[{store!r}]"
+        if not isinstance(entry, Mapping):
+            raise _Bad(f"has {where} = {entry!r}; an entry is a table")
+        for key in entry:
+            if key not in _STORE_KEYS:
+                raise _Bad(f"has {where} key {key!r}, which this moxi does not know; a new "
+                           "key comes with a raised ANNOUNCES")
+        get = entry.get
+        if get("root") not in _STORE_ROOTS:
+            raise _Bad(f"has {where} root = {get('root')!r}; it must be one of "
+                       f"{', '.join(_STORE_ROOTS)}")
+        if not _relative(get("path")):
+            raise _Bad(f"has {where} path = {get('path')!r}; it must be a relative path "
+                       "with no '..'")
+        if get("kind") not in _STORE_KINDS:
+            raise _Bad(f"has {where} kind = {get('kind')!r}; it must be one of "
+                       f"{', '.join(_STORE_KINDS)}")
+        for key in ("private", "rebuildable", "lazy"):
+            if key in entry and not isinstance(get(key), bool):
+                raise _Bad(f"has {where} {key} = {get(key)!r}; it must be true or false")
+        if "retention" in entry:
+            retention = get("retention")
+            if not (retention == "keep" or _size(retention)
+                    or (isinstance(retention, str) and _AGE.fullmatch(retention))):
+                raise _Bad(f"has {where} retention = {retention!r}; it must be 'keep', a "
+                           "size (digits with an optional K, M or G) or an age '<n>d'")
+    return _freeze(value)
+
+
+_target = _pattern(_TARGET, '"package.module:function"')
+
+_CHECKS = {
+    "ANNOUNCES": _announces,
+    "INTERFACES": _interfaces,
+    "API": _pattern(_DOTTED, "a dotted module name"),
+    "CLI": _target,
+    "SUMMARY": _summary,
+    "OPTIONAL": _strings,
+    "GATED": _strings,
+    "INTERNAL_ENV": _strings,
+    "SETTINGS": _pattern(None, "a resource name"),
+    "SETUP": _target,
+    "SEGMENT": _pattern(_DOTTED, "a dotted module name"),
+    "DAEMONS": _units("daemon"),
+    "TIMERS": _units("timer"),
+    "UNITS_FROM": _target,
+    "HEALTH": _health,
+    "DOCTOR": _target,
+    "STORES": _stores,
+    "BUDGETS": _budgets,
+    "SKILLS": _skills,
+    "PAGE": _pattern(_TARGET, '"package.module:NAME"'),
+    "COMPONENTS": _components,
+    "RESERVED_NAMES": _reserved,
+    "TEARDOWN": _target,
+    "SESSION_ENV": _session_env,
+    "QUESTIONS": _questions,
+}
+
+
+def _one_line(value) -> bool:
+    return isinstance(value, str) and bool(value.strip()) and "\n" not in value
+
+
+def _number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _size(value) -> bool:
+    return isinstance(value, str) and _SIZE.fullmatch(value) is not None
+
+
+def _str_list(value) -> bool:
+    return isinstance(value, (list, tuple)) and all(isinstance(v, str) for v in value)
+
+
+def _relative(value) -> bool:
+    """A non-empty relative path, read with either separator, with no '..' and no drive."""
+    if not isinstance(value, str) or not value.strip():
+        return False
+    if value.startswith(("/", "\\")) or re.match(r"[A-Za-z]:", value):
+        return False
+    return ".." not in re.split(r"[\\/]", value)
+
+
+def _absolute(value: str) -> bool:
+    import os.path
+
+    return os.path.isabs(value)
+
+
+def _ip(value: str) -> bool:
+    import ipaddress
+
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _freeze(value):
+    """Tables as read-only mappings and lists as tuples, all the way down."""
+    if isinstance(value, Mapping):
+        return MappingProxyType({k: _freeze(v) for k, v in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(v) for v in value)
+    return value
+
+
+# --- small helpers ------------------------------------------------------------------------
+
+def _not_a_name(name: object) -> str:
+    return (f"{name!r} is not a Moxi module name: lower-case ASCII letters and digits "
+            "only")
 
 
 def _replace(found: Found, **changes) -> Found:
     from dataclasses import replace
 
     return replace(found, **changes)
+
+
+def _normalize(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
 
 
 def _dist_name(dist) -> str:
@@ -307,5 +946,12 @@ def _describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
 
 
-__all__ = ["GROUP", "PRESENT", "ABSENT", "BROKEN", "ANNOUNCEMENT", "Entry", "Found",
-           "installed", "present", "load", "reset"]
+def _debug(line: str) -> None:
+    import logging
+
+    logging.getLogger(__name__).debug("%s", line)
+
+
+__all__ = ["GROUP", "PRESENT", "ABSENT", "BROKEN", "ANNOUNCES", "KNOWN", "Entry", "Found",
+           "Refused", "Extension", "ExtensionError", "installed", "present", "available",
+           "load", "scan", "extensions", "session_env", "reset"]
