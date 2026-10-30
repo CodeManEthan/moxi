@@ -9,7 +9,12 @@
     "isolatedModules": true,
     "skipLibCheck": true,
     "experimentalDecorators": true,
-    "useDefineForClassFields": false
+    "useDefineForClassFields": false,
+    "paths": {
+      "/m/ui/client.js": [
+        "./client.d.ts"
+      ]
+    }
   },
   "files": ["client.d.ts"]
 }
