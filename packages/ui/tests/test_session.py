@@ -12,7 +12,6 @@ import stat
 import threading
 
 import pytest
-
 from moxi_ui import session
 from moxi_ui.serve import may_exit_idle
 from moxi_ui.session import (

@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from moxi_loopback.api import Page, app, guard, prove
-
 from moxi_ui.router import Router, shell_profile, shell_table, worker_layer
 from moxi_ui.session import OwnerCheck, Sessions, Tickets, open_store
 

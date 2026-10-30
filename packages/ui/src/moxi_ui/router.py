@@ -31,17 +31,24 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from typing import Any
 
 from moxi.names import is_module_name
-from moxi_loopback.api import Entry, Profile, RequestView, Table, browser, response_headers
+from moxi_loopback.api import (
+    Entry,
+    Profile,
+    RequestView,
+    Table,
+    browser,
+    response_headers,
+)
 
 from . import session as _session
 from .session import (
+    HEALTH_PATH,
     PROVE_PATH,
     PUSH_PATH,
     SIGNIN_API,
     SIGNIN_PATH,
     SIGNOUT_API,
     WORKER_PATH,
-    HEALTH_PATH,
     Sessions,
     Static,
 )

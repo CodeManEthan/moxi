@@ -50,8 +50,6 @@ MODULE = "ui"
 DAEMON = "shell"
 LOCK_FILE = "page.lock"
 LOG_FILE = "shell.log"
-#: The log rolls to `.1` past this size when `open` starts a shell.
-LOG_ROLL = 5 * 1024 * 1024
 #: Seconds `open` waits for a shell that is starting, or that it started.
 UP_WAIT = 5.0
 #: Seconds `open` waits for the logon task's gate to restart a shell that failed.
@@ -110,10 +108,10 @@ def _units_start() -> list[Any]:
     return list(units.start(MODULE, [DAEMON]))
 
 
-def _spawn(argv: list[str], *, cwd: Path, output: Path) -> Any:
+def _spawn(argv: list[str], *, cwd: Path, output: Path, env: Mapping[str, str]) -> Any:
     from moxi import proc
 
-    return proc.spawn(argv, detached=True, cwd=cwd, output=output)
+    return proc.spawn(argv, detached=True, cwd=cwd, output=output, env=env)
 
 
 def _open_browser(url: str) -> bool:
@@ -305,16 +303,13 @@ def _shell_argv() -> list[str]:
 
 def spawn_shell() -> None:
     """Start the shell as a detached child, from its own runtime dir, appending to its
-    log, which rolls to `.1` past 5 MiB first."""
+    log. The log is named to the child in `MOXI_LOG_FILE`, so the core's logging rolls it
+    to `.1` past 5 MiB."""
     cwd = layout().runtime_dir(create=True)
     log = log_path()
     files.private_dir(log.parent)
-    try:
-        if log.stat().st_size > LOG_ROLL:
-            os.replace(log, log.with_name(LOG_FILE + ".1"))
-    except FileNotFoundError:
-        pass
-    _spawn(_shell_argv(), cwd=cwd, output=log)
+    env = {**os.environ, "MOXI_LOG_FILE": str(log)}
+    _spawn(_shell_argv(), cwd=cwd, output=log, env=env)
 
 
 def _run_line_at(last: Any) -> float | None:

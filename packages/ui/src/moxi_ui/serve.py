@@ -43,8 +43,7 @@ from moxi_loopback.api import (
 from . import config, listen
 from .listen import Listeners
 from .router import ASGIApp, Router, shell_profile, shell_table, worker_layer
-from .session import OwnerCheck, Sessions, Tickets, open_store
-from .session import TICKETS_DIR
+from .session import TICKETS_DIR, OwnerCheck, Sessions, Tickets, open_store
 
 MODULE = "ui"
 #: The most bytes of an unfinished request head the shell's listener buffers. Above the
@@ -213,10 +212,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="moxi-ui-serve", description="Run Moxi's browser shell in the foreground.")
     parser.parse_args(argv)
-    if not logging.getLogger().handlers:
-        logging.basicConfig(stream=sys.stderr, level=logging.WARNING,
-                            format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    _log.setLevel(logging.INFO)
+    from moxi import log
+
+    log.setup(MODULE, "info")
     return run()
 
 
