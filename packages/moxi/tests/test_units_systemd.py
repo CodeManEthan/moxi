@@ -179,25 +179,74 @@ def test_a_timer_without_the_gate_script_cannot_be_written(unit_root, tmp_path,
     assert SystemdBackend().render(spec())  # a daemon needs no gate
 
 
-def test_a_socket_is_a_unit_of_its_own_with_one_listen_line_per_address(unit_root):
+def test_a_socket_is_one_unit_per_address_and_its_service_has_no_install(unit_root):
     daemon, socket = SystemdBackend().render(spec(
-        module="ui", name="shell", doc="the shell",
+        module="ui", name="shell", doc="the shell", command=("/opt/ana/bin/moxi-ui-shell",),
         socket=Socket("port", ("127.0.0.1", "::1"), 8470)))
     assert daemon.kind == "daemon" and socket.kind == "socket"
-    [(path, text)] = socket.files
-    assert path == unit_root / "moxi-ui-shell.socket"
-    assert text == textwrap.dedent("""\
+    (first, ftext), (second, stext) = socket.files
+    assert (first, second) == (unit_root / "moxi-ui-shell.socket",
+                               unit_root / "moxi-ui-shell-1.socket")
+    assert ftext == textwrap.dedent("""\
         # moxi unit: ui/shell
         [Unit]
-        Description=Moxi ui: the shell (socket)
+        Description=Moxi ui: the shell (socket 127.0.0.1)
 
         [Socket]
         ListenStream=127.0.0.1:8470
-        ListenStream=[::1]:8470
+        Service=moxi-ui-shell.service
 
         [Install]
         WantedBy=sockets.target
         """)
+    assert stext == textwrap.dedent("""\
+        # moxi unit: ui/shell
+        [Unit]
+        Description=Moxi ui: the shell (socket ::1)
+
+        [Socket]
+        ListenStream=[::1]:8470
+        BindIPv6Only=ipv6-only
+        Service=moxi-ui-shell.service
+
+        [Install]
+        WantedBy=sockets.target
+        """)
+    [(path, text)] = daemon.files
+    assert path == unit_root / "moxi-ui-shell.service"
+    assert text == textwrap.dedent("""\
+        # moxi unit: ui/shell
+        [Unit]
+        Description=Moxi ui: the shell
+
+        [Service]
+        Type=simple
+        ExecStart=/opt/ana/bin/moxi-ui-shell
+        Sockets=moxi-ui-shell.socket moxi-ui-shell-1.socket
+        Restart=on-failure
+        RestartSec=2
+        """)
+
+
+def test_an_address_left_out_keeps_the_others_names_and_leaves_the_service_its_set(
+        unit_root):
+    """`::1` left out (no IPv6 loopback) writes no `-1`, and an address after it keeps its
+    place's name; the service names only what is written."""
+    daemon, socket = SystemdBackend().render(spec(
+        module="ui", name="shell", doc="the shell",
+        socket=Socket("port", ("127.0.0.1", "::1", "10.0.0.7"), 8470, left_out=("::1",))))
+    assert [p.name for p, _ in socket.files] == ["moxi-ui-shell.socket",
+                                                 "moxi-ui-shell-2.socket"]
+    assert "ListenStream=10.0.0.7:8470\nService=" in socket.files[1][1]
+    assert "\nSockets=moxi-ui-shell.socket moxi-ui-shell-2.socket\n" in daemon.files[0][1]
+    assert "[Install]" not in daemon.files[0][1]
+
+
+def test_a_scoped_ipv6_address_has_its_percent_doubled(unit_root):
+    _, socket = SystemdBackend().render(spec(
+        socket=Socket("port", ("fe80::1%eth0",), 8470)))
+    assert "ListenStream=[fe80::1%%eth0]:8470\nBindIPv6Only=ipv6-only\n" in (
+        socket.files[0][1])
 
 
 def test_a_unit_declared_disabled_says_so_under_the_mark_in_each_file(unit_root, bin_dir):
@@ -275,7 +324,7 @@ def test_systemd_analyze_verifies_every_generated_file(tmp_path, unit_root, bin_
                               capture_output=True, text=True, timeout=60)
     finally:
         shutil.rmtree(runtime, ignore_errors=True)
-    assert len(paths) == 6
+    assert len(paths) == 7
     assert (done.returncode, done.stdout, done.stderr) == (0, "", "")
 
 
@@ -498,21 +547,47 @@ def test_a_failed_reload_fails_every_written_unit(w):
     assert w.sup.calls == [("daemon-reload",)]
 
 
-def test_a_new_daemon_with_a_socket_starts_the_socket_first(w):
-    w.script("moxi-demo-relay")
-    w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', "
-                     "'socket': {'setting': 'port', 'addresses': ['127.0.0.1']}}}")
-    w.apply(units.plan("demo"))
-    assert w.sup.calls[:3] == [("daemon-reload",),
-                               ("enable", "--now", "moxi-demo-relay.socket"),
-                               ("enable", "--now", "moxi-demo-relay.service")]
-    assert "ListenStream=127.0.0.1:8470" in (w.root / "moxi-demo-relay.socket").read_text()
+def shell(*addresses, more=""):
+    """The `relay` daemon with a socket on `addresses`."""
+    return (f"{{'relay': {{'command': 'moxi-demo-relay', 'socket': {{'setting': 'port', "
+            f"'addresses': {list(addresses)!r}}}{more}}}}}")
 
 
-def test_a_changed_port_stops_the_service_restarts_the_socket_and_starts_it_again(w):
+SOCK, SOCK_1, SOCK_2 = (
+    "moxi-demo-relay.socket", "moxi-demo-relay-1.socket", "moxi-demo-relay-2.socket")
+SERVICE = "moxi-demo-relay.service"
+RUNNING = ("show", "--property=Id,ActiveState", SERVICE)
+
+
+@pytest.fixture
+def v6(monkeypatch):
+    """This box may have no IPv6 loopback; the plan is told it has one."""
+    monkeypatch.setattr(units._plan, "ipv6_loopback", lambda: True)
+
+
+def _service_verbs(calls) -> list[tuple[str, ...]]:
+    return [c for c in calls if c[0] in ("enable", "disable") and SERVICE in c]
+
+
+def test_a_new_daemon_enables_each_socket_in_unit_order_then_starts_its_service(w, v6):
     w.script("moxi-demo-relay")
-    w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', "
-                     "'socket': {'setting': 'port', 'addresses': ['127.0.0.1']}}}")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    plan = units.plan("demo")
+    assert [(c.kind, c.action) for c in plan] == [("daemon", "add"), ("socket", "add")]
+    done = w.apply(plan)
+    assert all(a.ok for a in done)
+    assert w.sup.calls[:4] == [("daemon-reload",), ("enable", "--now", SOCK),
+                               ("enable", "--now", SOCK_1), ("start", SERVICE)]
+    assert _service_verbs(w.sup.calls) == []
+    assert "ListenStream=127.0.0.1:8470" in (w.root / SOCK).read_text()
+    assert "ListenStream=[::1]:8470" in (w.root / SOCK_1).read_text()
+    assert {(c.kind, c.action) for c in units.plan("demo")} == {("daemon", "keep"),
+                                                                 ("socket", "keep")}
+
+
+def test_a_changed_port_stops_the_service_restarts_each_socket_and_starts_it_again(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
     w.apply(units.plan("demo"))
     from moxi import config
 
@@ -520,15 +595,13 @@ def test_a_changed_port_stops_the_service_restarts_the_socket_and_starts_it_agai
     plan = {(c.kind, c.action) for c in units.plan("demo")}
     assert plan == {("daemon", "keep"), ("socket", "change")}
     w.sup.calls.clear()
-    w.apply(units.plan("demo"))
-    assert w.sup.calls == [("daemon-reload",), ("stop", "moxi-demo-relay.service"),
-                           ("enable", "moxi-demo-relay.socket"),
-                           ("restart", "moxi-demo-relay.socket"),
-                           ("start", "moxi-demo-relay.service")]
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("stop", SERVICE),
+                           ("enable", SOCK), ("restart", SOCK), ("enable", SOCK_1), ("restart", SOCK_1),
+                           ("start", SERVICE)]
 
 
-KEEP_SOCKET = ("{'relay': {'command': 'moxi-demo-relay', 'upgrade': 'keep', "
-               "'socket': {'setting': 'port', 'addresses': ['127.0.0.1']}}}")
+KEEP_SOCKET = shell("127.0.0.1", more=", 'upgrade': 'keep'")
 
 
 @pytest.mark.parametrize("service_too", [False, True])
@@ -539,56 +612,377 @@ def test_a_changed_socket_of_a_running_keep_daemon_ends_with_it_running(w, servi
     w.script("moxi-demo-relay")
     w.module(DAEMONS=KEEP_SOCKET)
     w.apply(units.plan("demo"))
-    assert w.sup.units["moxi-demo-relay.service"]["active"]
+    assert w.sup.units[SERVICE]["active"]
     from moxi import config
 
     config.set("demo", "port", "9000", by="test")
     if service_too:
-        (w.root / "moxi-demo-relay.service").write_text("# moxi unit: demo/relay\nold\n")
+        service = w.root / SERVICE
+        service.write_text(service.read_text() + "# an older text\n")
     plan = {(c.kind, c.action) for c in units.plan("demo")}
     assert plan == {("daemon", "change" if service_too else "keep"), ("socket", "change")}
     w.sup.calls.clear()
     done = w.apply(units.plan("demo"))
     assert all(a.ok for a in done)
-    assert w.sup.calls[:5] == [("daemon-reload",), ("stop", "moxi-demo-relay.service"),
-                               ("enable", "moxi-demo-relay.socket"),
-                               ("restart", "moxi-demo-relay.socket"),
-                               ("start", "moxi-demo-relay.service")]
-    assert w.sup.calls[5:] == ([("enable", "moxi-demo-relay.service")] if service_too
-                               else [])
-    assert w.sup.units["moxi-demo-relay.service"]["active"]
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("stop", SERVICE), ("enable", SOCK),
+                           ("restart", SOCK), ("start", SERVICE)]
+    assert w.sup.units[SERVICE]["active"]
     if service_too:
         [line] = [line for a in done if a.change.kind == "daemon" for line in a.lines]
-        assert line == "moxi-demo-relay.service rewritten and restarted, since its socket changed"
+        assert line == f"{SERVICE} rewritten and restarted, since its socket changed"
 
 
-def test_a_new_socket_of_a_restart_daemon_is_started_by_the_services_own_restart(w):
-    """With `upgrade = "restart"` the service's own change starts it after the socket, so
-    the socket step does not start it as well."""
+@pytest.mark.parametrize("running", [True, False])
+def test_a_keep_daemon_rewritten_under_an_unchanged_socket_is_left_as_it_is(w, running):
+    """`apply` starts nothing for it and reads nothing: a running service keeps its old
+    code, and one that is down stays down until its next connection."""
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=KEEP_SOCKET)
+    w.apply(units.plan("demo"))
+    w.sup.units[SERVICE]["active"] = running
+    service = w.root / SERVICE
+    service.write_text(service.read_text() + "# an older text\n")
+    w.sup.calls.clear()
+    done = w.apply(units.plan("demo"))
+    assert w.sup.calls == [("daemon-reload",)]
+    assert w.sup.units[SERVICE]["active"] is running
+    [line] = [line for a in done for line in a.lines]
+    assert line == f"{SERVICE} rewritten; the new code runs from its next start"
+
+
+def test_a_restart_daemon_rewritten_under_an_unchanged_socket_is_restarted_alone(w):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1"))
+    w.apply(units.plan("demo"))
+    service = w.root / SERVICE
+    service.write_text(service.read_text() + "# an older text\n")
+    w.sup.calls.clear()
+    w.apply(units.plan("demo"))
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("restart", SERVICE)]
+
+
+def test_a_third_address_writes_its_unit_and_changes_the_service_under_one_stop(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    w.module(DAEMONS=shell("127.0.0.1", "::1", "10.0.0.7"))
+    plan = {c.kind: c for c in units.plan("demo")}
+    assert (plan["daemon"].action, plan["socket"].action) == ("change", "change")
+    assert [p.name for p in plan["socket"].paths] == [SOCK, SOCK_1, SOCK_2]
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("stop", SERVICE),
+                           ("enable", "--now", SOCK_2), ("start", SOCK), ("start", SOCK_1),
+                           ("start", SERVICE)]
+    assert f"Sockets={SOCK} {SOCK_1} {SOCK_2}\n" in (w.root / SERVICE).read_text()
+
+
+def test_an_address_taken_out_is_disabled_with_the_removes_and_deleted(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    w.module(DAEMONS=shell("127.0.0.1"))
+    plan = {c.kind: c for c in units.plan("demo")}
+    assert plan["socket"].dropped == (w.root / SOCK_1,)
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    assert w.sup.calls == [("disable", "--now", SOCK_1), RUNNING, ("daemon-reload",),
+                           ("stop", SERVICE), ("start", SOCK), ("start", SERVICE)]
+    assert not (w.root / SOCK_1).exists() and (w.root / SOCK).exists()
+    assert {(c.kind, c.action) for c in units.plan("demo")} == {("daemon", "keep"),
+                                                                 ("socket", "keep")}
+
+
+def test_a_dropped_unit_the_supervisor_refuses_keeps_its_file(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    w.module(DAEMONS=shell("127.0.0.1"))
+    w.sup.fail[("disable", SOCK_1)] = "Access denied"
+    done = {a.change.kind: a for a in w.apply(units.plan("demo"))}
+    assert not done["socket"].ok
+    assert done["socket"].lines[0] == (f"`systemctl --user disable --now -- {SOCK_1}` failed: "
+                                       "Access denied")
+    assert (w.root / SOCK_1).exists()
+    assert units.plan("demo")[1].dropped == (w.root / SOCK_1,)
+
+
+def test_a_service_that_gains_a_socket_loses_its_login_link(w):
+    """The service's old text had an install section, so `enable` linked it to the
+    login; it now has none, so `disable` (without `--now`) takes the link away, and the
+    socket's stop and start do the rest. It is never enabled again."""
     w.script("moxi-demo-relay")
     w.module(DAEMONS=DAEMON)
     w.apply(units.plan("demo"))
-    w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', "
-                     "'socket': {'setting': 'port', 'addresses': ['127.0.0.1']}}}")
+    assert w.sup.units[SERVICE] == {"active": True, "enabled": True}
+    w.module(DAEMONS=shell("127.0.0.1"))
+    plan = {(c.kind, c.action) for c in units.plan("demo")}
+    assert plan == {("daemon", "change"), ("socket", "add")}
     w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    assert w.sup.calls == [("disable", SERVICE), RUNNING, ("daemon-reload",),
+                           ("stop", SERVICE), ("enable", "--now", SOCK), ("start", SERVICE)]
+    assert w.sup.units[SERVICE] == {"active": True, "enabled": False}
+    w.sup.calls.clear()
+    service = w.root / SERVICE
+    service.write_text(service.read_text() + "# an older text\n")
     w.apply(units.plan("demo"))
-    assert w.sup.calls == [("daemon-reload",), ("stop", "moxi-demo-relay.service"),
-                           ("enable", "--now", "moxi-demo-relay.socket"),
-                           ("enable", "moxi-demo-relay.service"),
-                           ("restart", "moxi-demo-relay.service")]
-    assert w.sup.units["moxi-demo-relay.service"]["active"]
+    assert _service_verbs(w.sup.calls) == []
 
 
-def test_dropping_a_socket_disables_it_before_the_service_is_restarted(w):
+def test_a_daemon_that_loses_its_socket_removes_the_set_and_is_enabled_again(w, v6):
     w.script("moxi-demo-relay")
-    w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', "
-                     "'socket': {'setting': 'port', 'addresses': ['127.0.0.1']}}}")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
     w.apply(units.plan("demo"))
     w.module(DAEMONS=DAEMON)
+    plan = {(c.kind, c.action) for c in units.plan("demo")}
+    assert plan == {("daemon", "change"), ("socket", "remove")}
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    assert w.sup.calls == [("disable", "--now", SOCK), ("disable", "--now", SOCK_1),
+                           ("daemon-reload",), ("enable", SERVICE), ("restart", SERVICE)]
+    assert not (w.root / SOCK).exists() and not (w.root / SOCK_1).exists()
+    assert "[Install]" in (w.root / SERVICE).read_text()
+
+
+def test_after_a_home_move_a_changed_daemon_starts_its_sockets_so_resume_can(w, v6):
+    """The move stops every socket unit and the service; the unit step then starts the
+    changed service, after its sockets; `resume` then finds each running and is done.
+    Without the sockets' start first, systemd refuses `resume`'s start of a socket unit
+    under the running service, and the install exits 1."""
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    record: list = []
+    stopped = units.stop("demo", ["relay"], record=record, runner=w.sup)
+    assert stopped[0].ok and [e.unit for e in record] == [SOCK, SOCK_1, SERVICE]
+    assert not any(w.sup.units[u]["active"] for u in (SOCK, SOCK_1, SERVICE))
+    service = w.root / SERVICE
+    service.write_text(service.read_text() + "# an older text\n")
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("start", SOCK), ("start", SOCK_1),
+                           ("start", SERVICE)]
+    resumed = units.resume(record, runner=w.sup)
+    assert [(a.ok, a.lines) for a in resumed] == [
+        (True, (f"{u} started",)) for u in (SOCK, SOCK_1, SERVICE)]
+    # What resume would have met had the sockets not started first.
+    w.sup.units[SOCK_1]["active"] = False
+    assert "already active, refusing" in w.sup(["systemctl", "--user", "start", SOCK_1]).stderr
+
+
+# The start rule, in each order of the home move's stop, the unit step's apply and resume.
+
+NO_BUS = "Failed to connect to bus: No such file or directory"
+
+
+def _moved(w):
+    """The home move's stop of the relay: every socket unit, then the service."""
+    record: list = []
+    assert all(a.ok for a in units.stop("demo", ["relay"], record=record, runner=w.sup))
+    assert record[-1].unit == SERVICE and all(e.unit.endswith(".socket")
+                                              for e in record[:-1])
+    assert not any(w.sup.units[e.unit]["active"] for e in record)
+    return record
+
+
+def _resumed(w, record):
+    """`resume` of the record: every start ok, none refused."""
+    resumed = units.resume(record, runner=w.sup)
+    assert [a.ok for a in resumed] == [True] * len(record), [a.lines for a in resumed]
+    return resumed
+
+
+def _rewrite_service(w):
+    service = w.root / SERVICE
+    service.write_text(service.read_text() + "# an older text\n")
+
+
+def test_after_a_home_move_a_keep_daemon_with_its_set_unchanged_is_left_to_resume(w, v6):
+    """`apply` starts nothing for it and reads nothing; `resume` then starts the socket
+    units while the service is still down, then the service."""
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1", more=", 'upgrade': 'keep'"))
+    w.apply(units.plan("demo"))
+    record = _moved(w)
+    _rewrite_service(w)
+    w.sup.calls.clear()
+    done = w.apply(units.plan("demo"))
+    assert all(a.ok for a in done)
+    assert w.sup.calls == [("daemon-reload",)]
+    assert not any(w.sup.units[u]["active"] for u in (SOCK, SOCK_1, SERVICE))
+    w.sup.calls.clear()
+    _resumed(w, record)
+    assert w.sup.calls == [("start", SOCK), ("start", SOCK_1), ("start", SERVICE)]
+    assert all(w.sup.units[u]["active"] for u in (SOCK, SOCK_1, SERVICE))
+
+
+def test_without_a_move_an_idle_daemon_is_started_with_its_units_left_listening(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    w.sup.units[SERVICE]["active"] = False          # idle under its listening units
+    ids = (w.sup.invocations[SOCK], w.sup.invocations[SOCK_1])
+    _rewrite_service(w)
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("start", SOCK), ("start", SOCK_1),
+                           ("start", SERVICE)]
+    assert (w.sup.invocations[SOCK], w.sup.invocations[SOCK_1]) == ids
+    assert w.sup.units[SERVICE]["active"]
+
+
+def test_a_failed_read_after_a_move_stops_starts_the_units_then_the_service(w, v6):
+    """The read fails, so the service is counted running: `stop` (which does nothing, the
+    move stopped it), `start` of each socket unit, then `start`, never a `restart`; and
+    `resume`'s starts of the same ids are no-ops the supervisor refuses none of."""
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    record = _moved(w)
+    _rewrite_service(w)
+    w.sup.fail[("show", None)] = NO_BUS
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("stop", SERVICE), ("start", SOCK),
+                           ("start", SOCK_1), ("start", SERVICE)]
+    assert not any(c[0] == "restart" for c in w.sup.calls)
+    resumed = _resumed(w, record)
+    assert [a.lines for a in resumed] == [(f"{u} started",) for u in (SOCK, SOCK_1, SERVICE)]
+
+
+def test_a_failed_read_before_a_changed_set_starts_its_unchanged_unit_too(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1"))
+    w.apply(units.plan("demo"))
+    record = _moved(w)
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.sup.fail[("show", None)] = NO_BUS
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("stop", SERVICE),
+                           ("enable", "--now", SOCK_1), ("start", SOCK), ("start", SERVICE)]
+    _resumed(w, record)
+    assert all(w.sup.units[u]["active"] for u in (SOCK, SOCK_1, SERVICE))
+
+
+@pytest.mark.parametrize("read", ["running", "down", "failed"])
+def test_restart_after_an_upgrade_meets_a_socket_daemon_by_the_start_rule(w, v6, read):
+    """An unchanged `upgrade = "restart"` daemon: `restart` alone when the read finds it
+    running, nothing when it finds it down, and under a failed read `stop`, its units'
+    starts and `start`."""
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    if read == "down":
+        w.sup.units[SERVICE]["active"] = False
+    if read == "failed":
+        w.sup.fail[("show", None)] = NO_BUS
+    w.sup.calls.clear()
+    done = w.apply(units.plan("demo"), restart=True)
+    assert all(a.ok for a in done)
+    assert w.sup.calls == {
+        "running": [RUNNING, ("restart", SERVICE)],
+        "down": [RUNNING],
+        "failed": [RUNNING, ("stop", SERVICE), ("start", SOCK), ("start", SOCK_1),
+                   ("start", SERVICE)]}[read]
+
+
+def test_a_failed_read_leaves_a_keep_daemon_with_its_set_unchanged_alone(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1", more=", 'upgrade': 'keep'"))
+    w.apply(units.plan("demo"))
+    record = _moved(w)
+    _rewrite_service(w)
+    w.sup.fail[("show", None)] = NO_BUS
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo"), restart=True))
+    assert w.sup.calls == [("daemon-reload",)]
+    del w.sup.fail[("show", None)]
+    w.sup.calls.clear()
+    _resumed(w, record)
+    assert w.sup.calls == [("start", SOCK), ("start", SOCK_1), ("start", SERVICE)]
+
+
+def test_a_stop_that_fails_starts_nothing_more_of_that_daemon(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    from moxi import config
+
+    config.set("demo", "port", "9000", by="test")
+    w.sup.fail[("stop", SERVICE)] = "Access denied"
+    w.sup.calls.clear()
+    done = {a.change.kind: a for a in w.apply(units.plan("demo"))}
+    assert not done["socket"].ok
+    assert done["socket"].lines == (
+        f"`systemctl --user stop -- {SERVICE}` failed: Access denied",
+        "the unit files are written, and `moxi install demo` again finds them up to date; "
+        f"fix the cause, then run `systemctl --user stop {SERVICE}`, "
+        f"`systemctl --user restart {SOCK} {SOCK_1}` and `systemctl --user start {SERVICE}`")
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("stop", SERVICE),
+                           ("enable", SOCK), ("enable", SOCK_1)]
+    assert w.sup.units[SERVICE]["active"]
+
+
+def test_a_unit_start_that_fails_is_a_failed_step_and_the_service_still_starts(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    _moved(w)
+    _rewrite_service(w)
+    w.sup.fail[("start", SOCK_1)] = "Address already in use"
+    w.sup.calls.clear()
+    done = {a.change.kind: a for a in w.apply(units.plan("demo"))}
+    assert not done["daemon"].ok
+    assert done["daemon"].lines[0] == (f"`systemctl --user start -- {SOCK_1}` failed: "
+                                       "Address already in use")
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("start", SOCK), ("start", SOCK_1),
+                           ("start", SERVICE)]
+    assert w.sup.units[SOCK]["active"] and w.sup.units[SERVICE]["active"]
+
+
+def test_a_socket_set_declared_disabled_is_written_and_never_started(w, tmp_path, v6):
+    tool = _script(tmp_path / "tool")
+    source = """
+             def units():
+                 return {{"daemons": {{"row": {{"argv": [{tool!r}], "enabled": {flag},
+                     "socket": {{"setting": "port", "addresses": ["127.0.0.1", "::1"]}}}}}}}}
+             """
+
+    def declare(flag):
+        w.site.write("moxi_demo/runtime.py",
+                     textwrap.dedent(source.format(tool=str(tool), flag=flag)))
+        __import__("sys").modules.pop("moxi_demo.runtime", None)
+
+    row0, row1, row = "moxi-demo-row.socket", "moxi-demo-row-1.socket", "moxi-demo-row.service"
+    declare(False)
+    w.module(UNITS_FROM="'moxi_demo.runtime:units'")
+    w.apply(units.plan("demo"))
+    assert w.sup.calls == [("daemon-reload",)]
+    declare(True)
     w.sup.calls.clear()
     w.apply(units.plan("demo"))
-    assert w.sup.calls[0] == ("disable", "--now", "moxi-demo-relay.socket")
-    assert not (w.root / "moxi-demo-relay.socket").exists()
+    assert w.sup.calls == [("show", "--property=Id,ActiveState", row), ("daemon-reload",),
+                           ("enable", "--now", row0), ("enable", "--now", row1),
+                           ("start", row)]
+    declare(False)
+    w.sup.calls.clear()
+    w.apply(units.plan("demo"))
+    assert w.sup.calls == [("daemon-reload",), ("disable", "--now", row0),
+                           ("disable", "--now", row1), ("stop", row)]
+
+
+def test_uninstall_takes_every_socket_unit_then_stops_the_static_service(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    w.sup.calls.clear()
+    applied = units.remove("demo", runner=w.sup, say=w.lines.append)
+    assert all(a.ok for a in applied) and len(applied) == 2
+    assert w.sup.calls == [("disable", "--now", SOCK), ("disable", "--now", SOCK_1),
+                           ("stop", SERVICE), ("daemon-reload",)]
+    assert list(w.root.glob("moxi-*")) == []
 
 
 def test_an_enabled_flip_disables_or_enables_now(w, tmp_path):
@@ -682,9 +1076,9 @@ def _marked_daemon(root: Path, socket: bool = False) -> UnitRef:
     ("start", [("start", "moxi-demo-relay.socket"), ("start", "moxi-demo-relay.service")]),
     ("stop", [("stop", "moxi-demo-relay.socket"), ("stop", "moxi-demo-relay.service")]),
     ("enable", [("enable", "--now", "moxi-demo-relay.socket"),
-                ("enable", "--now", "moxi-demo-relay.service")]),
+                ("start", "moxi-demo-relay.service")]),
     ("disable", [("disable", "--now", "moxi-demo-relay.socket"),
-                 ("disable", "--now", "moxi-demo-relay.service")]),
+                 ("stop", "moxi-demo-relay.service")]),
     ("restart", [("restart", "moxi-demo-relay.service")]),
 ])
 def test_a_daemon_with_a_socket_is_acted_on_socket_first(unit_root, act, calls):
@@ -701,6 +1095,77 @@ def test_a_socket_marked_for_another_unit_is_not_taken_with_the_daemon(unit_root
     run = Recorder()
     SystemdBackend().act("stop", unit, Fence("systemd", run))
     assert run.calls == [("stop", "moxi-demo-relay.service")]
+
+
+def _socket_set(root: Path, places=(0, 1, 2)) -> UnitRef:
+    """A marked daemon with a socket unit at each place, written as the backend writes
+    them, plus files that are not of its set."""
+    _, sockets = SystemdBackend(root).render(spec(
+        module="demo", name="relay", socket=Socket("port", ("127.0.0.1", "::1", "10.0.0.7"),
+                                                   8470)))
+    (root / SERVICE).write_text("# moxi unit: demo/relay\n[Service]\n")
+    for place, (path, text) in enumerate(sockets.files):
+        if place in places:
+            path.write_text(text)
+    (root / "moxi-demo-relay-01.socket").write_text("# moxi unit: demo/relay\n")
+    (root / "moxi-demo-relay-3.socket").write_text("[Socket]\n")
+    (root / "moxi-demo-relay-4.socket").write_text("# moxi unit: demo/other\n")
+    return UnitRef("demo", "relay", "daemon", (SERVICE,), (root / SERVICE,))
+
+
+@pytest.mark.parametrize("act, calls", [
+    ("start", [("start", SOCK), ("start", SOCK_1), ("start", SOCK_2), ("start", SERVICE)]),
+    ("stop", [("stop", SOCK), ("stop", SOCK_1), ("stop", SOCK_2), ("stop", SERVICE)]),
+    ("enable", [("enable", "--now", SOCK), ("enable", "--now", SOCK_1), ("enable", "--now", SOCK_2),
+                ("start", SERVICE)]),
+    ("disable", [("disable", "--now", SOCK), ("disable", "--now", SOCK_1),
+                 ("disable", "--now", SOCK_2), ("stop", SERVICE)]),
+    ("restart", [("restart", SERVICE)]),
+])
+def test_every_socket_unit_of_the_set_goes_first_in_unit_order(unit_root, act, calls):
+    run = Recorder()
+    acted = SystemdBackend().act(act, _socket_set(unit_root), Fence("systemd", run))
+    assert acted.ok and run.calls == calls
+
+
+def test_the_marked_set_is_the_files_at_its_socket_names_with_its_mark(unit_root):
+    _socket_set(unit_root, places=(0, 2))
+    refs = {(r.name, r.kind): r for r in SystemdBackend().marked("demo")}
+    sockets = refs[("relay", "socket")]
+    assert sockets.ids == (SOCK, SOCK_2)
+    assert sockets.paths == (unit_root / SOCK, unit_root / SOCK_2)
+    assert set(refs) == {("relay", "daemon"), ("relay", "socket")}
+
+
+def test_a_set_whose_first_unit_is_gone_is_still_read_in_unit_order(unit_root):
+    _socket_set(unit_root, places=(2, 1))
+    [ref] = [r for r in SystemdBackend().marked("demo") if r.kind == "socket"]
+    assert ref.ids == (SOCK_1, SOCK_2)
+
+
+def test_ids_and_files_take_each_numbered_socket_unit_that_is_there(unit_root):
+    _socket_set(unit_root, places=(0, 2))
+    backend = SystemdBackend()
+    assert backend.ids("demo", "relay", "daemon") == (SOCK, SOCK_2, "moxi-demo-relay-3.socket",
+                                                      "moxi-demo-relay-4.socket", SERVICE)
+    assert backend.files("demo", "relay", "daemon") == tuple(
+        unit_root / u for u in (SERVICE, SOCK, SOCK_2, "moxi-demo-relay-3.socket",
+                                "moxi-demo-relay-4.socket"))
+    assert backend.ids("demo", "none", "daemon") == ("moxi-demo-none.socket",
+                                                     "moxi-demo-none.service")
+
+
+def test_the_stop_record_lists_every_socket_unit_first_in_unit_order(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1", "10.0.0.7"))
+    w.apply(units.plan("demo"))
+    record: list = []
+    w.sup.calls.clear()
+    [acted] = units.stop("demo", ["relay"], record=record, runner=w.sup)
+    assert acted.ok and [(e.unit, e.marked) for e in record] == [
+        (SOCK, True), (SOCK_1, True), (SOCK_2, True), (SERVICE, True)]
+    assert w.sup.calls == [("show", "--property=Id,ActiveState", SOCK, SOCK_1, SOCK_2, SERVICE),
+                           ("stop", SOCK), ("stop", SOCK_1), ("stop", SOCK_2), ("stop", SERVICE)]
 
 
 @pytest.mark.parametrize("act, calls", [
@@ -857,6 +1322,7 @@ def test_status_reads_a_daemon_from_recorded_show_output(unit_root):
     assert state.detail == "active (running), enabled, restarted 2 times"
     assert state.log == "journalctl --user -u moxi-demo-relay.service"
     assert state.backend == "systemd" and state.wrapped is None and state.last is None
+    assert state.triggers is None
 
 
 @pytest.mark.parametrize("active, raw, state, enabled", [
@@ -902,6 +1368,7 @@ def test_status_of_a_marked_timer_reads_its_service_result(unit_root):
     assert (read.state, read.enabled) == ("active", True)
     assert read.last == {"result": "exit-code", "status": "3"}
     assert read.log == "journalctl --user -u moxi-a-snap.service"
+    assert read.triggers == "moxi-a-snap.service"
     assert len(run.calls) == 1
 
 
@@ -921,7 +1388,42 @@ def test_status_of_a_foreign_timer_reads_the_unit_its_triggers_names(unit_root):
                                               ("backup.timer",))], Fence("systemd", run))
     assert read.module is None and read.last == {"result": "success", "status": "0"}
     assert read.log == "journalctl --user -u backup-run.service"
+    assert read.triggers == "backup-run.service"
     assert len(run.calls) == 2 and not any("backup.service" in c for c in run.calls)
+
+
+def test_a_timer_the_manager_does_not_hold_or_that_names_nothing_has_no_triggers(unit_root):
+    """`not-found` shows an empty `Triggers`, and so does a masked timer; neither names a
+    unit. A socket's `Triggers` names its service, but only a timer's is carried."""
+    show = _shown(
+        _block(Id="gone.timer", LoadState="not-found", ActiveState="inactive", Triggers=""),
+        _block(Id="masked.timer", LoadState="masked", ActiveState="inactive",
+               SubState="dead", UnitFileState="masked", Triggers=""),
+        _socket_block(SOCK))
+    run = Recorder(show=show)
+    gone, masked, socket = SystemdBackend().status(
+        [UnitRef(None, "gone.timer", "timer", ("gone.timer",)),
+         UnitRef(None, "masked.timer", "timer", ("masked.timer",)),
+         UnitRef("demo", "relay", "socket", (SOCK,))], Fence("systemd", run))
+    assert (gone.state, gone.triggers) == ("missing", None)
+    assert (masked.state, masked.triggers) == ("inactive", None)
+    assert (socket.state, socket.triggers) == ("active", None)
+    assert len(run.calls) == 1
+
+
+def test_a_foreign_socket_read_as_a_daemon_carries_no_triggers(unit_root):
+    """A foreign `.socket` ref is read as a daemon, and its block's `Triggers` names the
+    service it starts. Only a timer's `Triggers` is carried, so a unit a `.socket` starts
+    is never taken for one a timer runs."""
+    show = _shown(_block(Id="watch.socket", LoadState="loaded", ActiveState="active",
+                         SubState="listening", UnitFileState="enabled",
+                         Triggers="watch-run.service"))
+    run = Recorder(show=show)
+    backend = SystemdBackend()
+    ref = backend.foreign("watch.socket", None)
+    [read] = backend.status([ref], Fence("systemd", run))
+    assert (ref.kind, read.state) == ("daemon", "active")
+    assert read.triggers is None
 
 
 def test_status_reads_wrapped_from_the_drop_in_paths(unit_root):
@@ -940,6 +1442,107 @@ def test_status_reads_wrapped_from_the_drop_in_paths(unit_root):
     [read] = SystemdBackend().status([unit], Fence("systemd", run))
     assert read.wrapped == Wrapped("services", "rows.backup", "backup")
     assert len(run.calls) == 1
+
+
+def _socket_block(unit, active="active", file="enabled", invocation="", mono="0"):
+    return _block(Id=unit, LoadState="loaded", ActiveState=active, SubState="listening",
+                  MainPID="0", ActiveEnterTimestampMonotonic=mono, Result="success",
+                  ExecMainStatus="0", NRestarts="0", ControlGroup="", UnitFileState=file,
+                  Triggers=SERVICE, DropInPaths="", InvocationID=invocation)
+
+
+SOCKETS = UnitRef("demo", "relay", "socket", (SOCK, SOCK_1))
+
+
+def test_the_status_read_asks_for_each_units_invocation_id(unit_root):
+    assert "InvocationID" in _systemd.STATUS_PROPERTIES.split(",")
+    run = Recorder(show=_socket_block(SOCK))
+    SystemdBackend().status([UnitRef("demo", "relay", "socket", (SOCK,))],
+                            Fence("systemd", run))
+    assert run.calls == [("show", f"--property={_systemd.STATUS_PROPERTIES}", SOCK)]
+
+
+def test_a_set_whose_units_are_all_active_reads_active_with_its_epoch(unit_root):
+    old, new = int((time.monotonic() - 60) * 1e6), int((time.monotonic() - 10) * 1e6)
+    run = Recorder(show=_shown(_socket_block(SOCK, invocation="3f0c", mono=str(old)),
+                               _socket_block(SOCK_1, invocation="9a41", mono=str(new))))
+    [state] = SystemdBackend().status([SOCKETS], Fence("systemd", run))
+    assert (state.kind, state.state, state.pid, state.enabled) == ("socket", "active",
+                                                                    None, True)
+    assert state.epoch == f"{SOCK}=3f0c,{SOCK_1}=9a41"
+    assert state.triggers is None  # its units' Triggers name the service; only a timer's counts
+    assert abs(state.since - (time.time() - 10)) < 2
+    assert state.log == f"journalctl --user -u {SOCK} -u {SOCK_1}"
+
+
+def test_a_failed_unit_fails_the_set_naming_it_with_no_epoch(unit_root):
+    run = Recorder(show=_shown(_socket_block(SOCK, invocation="3f0c"),
+                               _socket_block(SOCK_1, active="failed", invocation="9a41")))
+    [state] = SystemdBackend().status([SOCKETS], Fence("systemd", run))
+    assert (state.state, state.detail, state.epoch) == ("failed", f"failed: {SOCK_1}", None)
+
+
+def test_a_stopped_unit_that_still_shows_its_last_id_gives_no_epoch(unit_root):
+    run = Recorder(show=_shown(_socket_block(SOCK, invocation="3f0c"),
+                               _socket_block(SOCK_1, active="inactive", file="disabled",
+                                             invocation="9a41")))
+    [state] = SystemdBackend().status([SOCKETS], Fence("systemd", run))
+    assert (state.state, state.detail, state.epoch, state.enabled) == (
+        "inactive", f"not active: {SOCK_1}", None, False)
+
+
+def test_a_socket_unit_the_manager_does_not_hold_reads_missing_in_the_set(unit_root):
+    run = Recorder(show=_shown(_socket_block(SOCK, invocation="3f0c"),
+                               _block(Id=SOCK_1, LoadState="not-found", ActiveState="inactive")))
+    [state] = SystemdBackend().status([SOCKETS], Fence("systemd", run))
+    assert (state.state, state.detail, state.epoch) == ("inactive", f"not active: {SOCK_1}",
+                                                        None)
+
+
+def test_a_failed_read_makes_the_socket_unknown(unit_root):
+    def fail(cmd, *, env=None, timeout=None):
+        return subprocess.CompletedProcess(cmd, 1, "", "Failed to connect to bus\n")
+
+    [state] = SystemdBackend().status([SOCKETS], Fence("systemd", fail))
+    assert state.state == "unknown" and "Failed to connect to bus" in state.detail
+
+
+def test_status_gives_the_daemon_its_sockets_enabled_and_an_idle_service_inactive(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=shell("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    w.sup.units[SERVICE]["active"] = False
+    daemon, socket = units.status(["demo"], runner=w.sup)
+    assert (daemon.kind, daemon.state, daemon.enabled) == ("daemon", "inactive", True)
+    assert "static" in daemon.detail
+    assert (socket.kind, socket.state, socket.enabled) == ("socket", "active", True)
+    assert socket.epoch == ",".join(f"{u}={w.sup.invocations[u]}" for u in (SOCK, SOCK_1))
+
+
+def test_status_gives_each_timer_the_unit_it_triggers_and_no_other_kind_one(w, v6):
+    """With the fake runner: a marked timer, a foreign timer, a daemon and its socket.
+    The field comes out of the reads status makes anyway, one `show` and one more for
+    the foreign timer's service."""
+    w.script("moxi-demo-relay")
+    w.script("moxi-demo-snap")
+    w.module(DAEMONS=shell("127.0.0.1"), TIMERS=TIMER)
+    changes = units.plan("demo")
+    for change in changes:
+        if change.kind == "timer":
+            units._state.record("demo", change.name, change.digest)
+    w.apply(changes)
+    w.sup.extra |= {"backup.timer", "backup-run.service"}
+    w.sup.triggers["backup.timer"] = "backup-run.service"
+    w.sup.reload()
+    w.sup.calls.clear()
+    read = {(s.name, s.kind): s for s in units.status(["demo"], foreign=["backup.timer"],
+                                                      runner=w.sup)}
+    assert read[("snap", "timer")].triggers == "moxi-demo-snap.service"
+    assert read[("backup.timer", "timer")].triggers == "backup-run.service"
+    assert read[("relay", "daemon")].triggers is None
+    assert read[("relay", "socket")].triggers is None
+    shows = [c for c in w.sup.calls if c[0] == "show"]
+    assert len(shows) == 2 and shows[1][2:] == ("backup-run.service",)
 
 
 def test_a_failed_show_reads_unknown_with_the_supervisors_text(unit_root):
@@ -968,7 +1571,7 @@ def test_a_failed_show_makes_every_unit_it_covers_unknown(unit_root):
     states = SystemdBackend().status(units_, Fence("systemd", fail))
     assert [s.state for s in states] == ["unknown"] * 4 and len(calls) == 1
     assert all("Failed to connect to bus" in s.detail and s.enabled is None
-               and s.last is None for s in states)
+               and s.last is None and s.triggers is None for s in states)
 
 
 @pytest.mark.parametrize("service_state", ["failed", "inactive", "activating"])
@@ -1012,6 +1615,7 @@ def test_a_foreign_timer_whose_service_read_fails_keeps_its_timers_state(unit_ro
     [read] = SystemdBackend().status([UnitRef(None, "backup.timer", "timer",
                                               ("backup.timer",))], Fence("systemd", run))
     assert read.state == "active" and read.last is None
+    assert read.triggers == "backup-run.service"  # from the first show, which answered
     assert "its triggered unit could not be read" in read.detail
     assert "Connection timed out" in read.detail
 

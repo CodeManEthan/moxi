@@ -15,8 +15,6 @@ GATED = {"moxi-turns-ping": "codex", "moxi-turns-codex-host": "codex"}
 INTERNAL_ENV = {
     "MOXI_TURNS_COMMANDS": "a launcher's grant of session commands (clear, exit, compact) "
                            "to the one launch it stamps",
-    "MOXI_LIFELINE_FD": "the core's lifeline pipe: the Codex host entry ends on it only "
-                        "when a Moxi parent gave it one, and never reads its stdin",
 }
 #: A per-launch stamp turns' launch additions render, so a launcher scrubs it from what
 #: it inherits and stamps its own. turns also reads it, so it stays in INTERNAL_ENV.

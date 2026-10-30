@@ -245,7 +245,7 @@ def device_id(env: Mapping[str, str] | None = None) -> str:
 
     from . import files
 
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    files._make_dirs(path.parent)
     # This process's threads queue for the lock rather than being refused by it.
     with files._gated_lock(path.with_name(f"{DEVICE_ID}.lock")):
         if found := _read_id(path):

@@ -1,0 +1,38 @@
+[project]
+name = "moxi-projects"
+version = "0.1.0"
+description = "Moxi's list of named places: projects, their roots, kinds and agents."
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
+dependencies = ["moxi>=0.1,<0.2"]
+
+[project.urls]
+Homepage = "https://github.com/moxihq/moxi"
+Repository = "https://github.com/moxihq/moxi"
+Issues = "https://github.com/moxihq/moxi/issues"
+
+# The module's one announcement, read by moxi.modules.
+[project.entry-points."moxi.modules"]
+projects = "moxi_projects.module"
+
+[dependency-groups]
+dev = ["pytest", "moxi-dev"]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/moxi_projects"]
+
+[tool.hatch.build.targets.sdist]
+# A source distribution holds these paths and nothing else.
+only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_projects", "tests"]
+
+# A plain `pytest` runs the units and contract seams, and so does `moxi-dev check`: the
+# tiers are deselected here. Run one by hand with `pytest -m <tier>` (a live test also
+# needs MOXI_TEST_LIVE=1).
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not browser and not slow and not build and not live'"

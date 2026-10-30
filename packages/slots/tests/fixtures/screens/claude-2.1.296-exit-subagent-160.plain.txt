@@ -1,0 +1,18 @@
+❯ /exit
+
+› Message from @general-purpose (ctrl+o to expand)
+Background task update waiting while this panel is open
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Background work is running
+  The following will stop when you exit:
+
+  subagent · Run sleep 90 in background
+
+  ❯ 1. Exit and stop tasks
+    2. Move to background and exit
+    3. Stay
+
+  Enter to confirm · Esc to cancel
+
+
