@@ -56,10 +56,14 @@ POWERSHELL = "powershell.exe"
 
 #: The fixed PowerShell script of the foreign task read. It reads its refs from
 #: `$env:MOXI_TASK_REFS`, lists the tasks once, keeps those whose folder and name equal a
-#: ref's (`-eq`, never a wildcard or a parsed string) and prints one JSON array.
+#: ref's (`-eq`, never a wildcard or a parsed string) and prints one JSON array, in UTF-8
+#: without a byte-order mark whatever the console's code page. The refs are parsed with
+#: `-InputObject` and enumerated by `foreach`: Windows PowerShell 5.1 emits a parsed JSON
+#: array as one object, so wrapping it in `@(...)` would give a list of one list.
 TASKS_SCRIPT = (
     "$ErrorActionPreference = 'Stop'; "
-    "$refs = @($env:MOXI_TASK_REFS | ConvertFrom-Json); "
+    "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; "
+    "$refs = ConvertFrom-Json -InputObject $env:MOXI_TASK_REFS; "
     "$out = @(); "
     "foreach ($t in @(Get-ScheduledTask)) { "
     "foreach ($r in $refs) { "
