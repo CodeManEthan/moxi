@@ -9,10 +9,14 @@ No line a builder writes is cut from a real record.
   sidecars, and workflow agent files.
 * `CodexRollout`: a Codex rollout, legacy versions and imported threads included, with
   `write_imports` for the imports file beside the sessions root.
+* `OpenCodeDb`: an OpenCode database with the columns OpenCode writes, written in one
+  transaction.
 """
 
 from .claude import ClaudeRequest, ClaudeTranscript, usage
 from .codex import CodexRollout, rate_limits, token_usage, write_imports
+from .opencode import OpenCodeDb
 
 __all__ = ["ClaudeTranscript", "ClaudeRequest", "usage"]
 __all__ += ["CodexRollout", "token_usage", "rate_limits", "write_imports"]
+__all__ += ["OpenCodeDb"]
