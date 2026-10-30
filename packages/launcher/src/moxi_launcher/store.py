@@ -17,8 +17,8 @@ Later versions add tables through `migrate`; the columns here are read unchanged
 `spawning`, `started`, `ready`, `sending`, `first-sent`, and `failed` ends any of the first
 four. Every state write is one conditional update naming the states it may leave, so a
 write that comes late matches no row and changes nothing, whatever order the writes land
-in. Facts that are not the state (the pid, the pane, session ids, events) are written
-whatever the state.
+in. Facts that are not the state (the pid, the pane, session ids, events, the claim) are
+written whatever the state.
 
 **A value is never cut to fit.** A brief, `values_json` or `argv_json` past `CAP` bytes is
 refused with `TooLarge`, naming the field.
@@ -484,6 +484,32 @@ def learn_session(conn: sqlite3.Connection, request_id: str, session_id: str,
         return added
 
 
+def claim(conn: sqlite3.Connection, request_id: str, *, harness: str,
+          session_id: str | None, endpoint: str, at: str | None = None) -> LaunchRow | None:
+    """Claim a launch for the turns endpoint `endpoint`, and return the row when the launch
+    is that endpoint's, else None.
+
+    A launch belongs to the one session process the launcher started for it. The first
+    endpoint whose event matches the row claims it: the same harness, and for Claude the
+    session id minted for the launch; for Codex a launch composed for turns' host whose id
+    is not known yet, or is the id the sender learned. One conditional update writes the
+    claim, so of two endpoints only the first wins, and a claimed launch is never claimed
+    again. Any other endpoint carrying the launch's stamp (a session started from inside
+    the launched one) gets None.
+    """
+    if harness not in HARNESSES:
+        return None
+    with _writing(conn):
+        conn.execute(
+            "UPDATE launches SET endpoint = ?, updated_at = ? "
+            "WHERE request_id = ? AND harness = ? AND endpoint IS NULL "
+            "AND (harness <> 'codex' OR json_extract(values_json, '$.mode') = 'host') "
+            "AND (session_id = ? OR (session_id IS NULL AND harness = 'codex'))",
+            (endpoint, at or now(), request_id, harness, session_id))
+        row = get(conn, request_id)
+    return row if row is not None and row.endpoint == endpoint else None
+
+
 def add_event(conn: sqlite3.Connection, kind: str, detail: Mapping[str, Any] | None = None,
               *, request_id: str | None = None, session_id: str | None = None,
               at: str | None = None) -> int:
@@ -627,6 +653,6 @@ def log_lines(*, limit: int | None = None, before: str | datetime | None = None,
 
 __all__ = ["CAP", "COLUMNS", "FACTS", "HARNESSES", "HOWS", "LEAVES", "SOURCES", "STATES",
            "STEPS", "TARGETS", "Busy", "Event", "Inserted", "LaunchRow", "SessionTaken",
-           "TooLarge", "add_event", "add_pick", "connect", "events", "get", "insert",
+           "TooLarge", "add_event", "add_pick", "claim", "connect", "events", "get", "insert",
            "learn_session", "log", "log_lines", "now", "parse_time", "path", "picked",
            "resolve", "session_ids", "set_facts", "set_state", "stale_after_s", "stamp"]

@@ -23,9 +23,11 @@ OPTIONAL = {
              "launch is a plain harness launch.",
 }
 GATED = {}
-#: Each variable of the launcher's prefix it reads outside moxi.paths and moxi.config,
-#: and why. Both are stamps the launcher sets on the sessions it starts.
+#: Each Moxi variable the launcher reads outside moxi.paths and moxi.config, and why: the
+#: two stamps it sets on the sessions it starts, and comms' identity stamp.
 INTERNAL_ENV = {
+    "MOXI_COMMS_NAME": "comms stamp: the session's comms name, the handoff key of a "
+                       "session the launcher did not start",
     "MOXI_LAUNCHER_REQUEST": "launcher stamp: the request id of the launch that started "
                              "this session",
     "MOXI_LAUNCHER_RELAUNCH": "launcher stamp: the session is a relaunch, whose handoff "

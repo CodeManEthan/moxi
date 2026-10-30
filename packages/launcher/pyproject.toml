@@ -26,6 +26,11 @@ Issues = "https://github.com/moxihq/moxi/issues"
 [project.entry-points."moxi.modules"]
 launcher = "moxi_launcher.module"
 
+# The ready recorder, the Codex seat listener and the handoff pointer, called by turns in
+# a session's endpoint process.
+[project.entry-points."moxi.turns.listeners"]
+launcher = "moxi_launcher.listeners"
+
 # No console script: only the core declares `moxi`, and the launcher's commands run as
 # `moxi launcher <verb>`, the detached first-turn sender (`moxi launcher deliver`) among
 # them.
