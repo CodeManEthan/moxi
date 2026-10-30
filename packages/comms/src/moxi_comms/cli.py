@@ -571,27 +571,17 @@ def _binary_version(path: str) -> str:
 
 
 def _device_label() -> str:
-    """This box's device label for comms, read without writing anything.
-
-    `LAYOUT.device()` would write the device id when there is none yet, and a state root
-    this process can't write would make it raise; the doctor only reads. So the label
-    variables come first, as there, then the id file if it holds one.
-    """
+    """This box's device label for comms, read without writing the device id."""
     from moxi import paths as moxi_paths
 
     from .paths import LAYOUT
 
-    label = os.environ.get(f"{LAYOUT.prefix}DEVICE") or os.environ.get(moxi_paths.DEVICE)
-    if label:
-        return label
-    id_file = moxi_paths.core().state_dir() / moxi_paths.DEVICE_ID
+    where = moxi_paths.core().state_dir() / moxi_paths.DEVICE_ID
     try:
-        found = id_file.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        found = ""
+        label = LAYOUT.device(create=False)
     except OSError as e:
-        return f"ERROR: {id_file} cannot be read ({e.strerror or e})"
-    return found or f"none set yet (no id in {id_file})"
+        return f"ERROR: {where} cannot be read ({e.strerror or e})"
+    return f"none set yet (no id in {where})" if label is None else label
 
 
 #: The directories `moxi comms doctor` prints: comms' own under each of Moxi's roots.

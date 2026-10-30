@@ -108,9 +108,10 @@ class Layout:
         own = tuple(f"{self.prefix}{suffix}" for suffix in LOCATORS) if self.prefix else ()
         return (*own, HOME)
 
-    def device(self, env: Mapping[str, str] | None = None) -> str:
-        """This device's label for the module (`device_label`)."""
-        return _label(self.prefix, _environ(env))
+    def device(self, env: Mapping[str, str] | None = None, *,
+               create: bool = True) -> str | None:
+        """This device's label for the module (`device_label`, with its `create`)."""
+        return _label(self.prefix, _environ(env), create)
 
     # -- the roots ---------------------------------------------------------------------
 
@@ -242,17 +243,27 @@ def device_id(env: Mapping[str, str] | None = None) -> str:
     return fresh
 
 
-def device_label(module: str | None = None, env: Mapping[str, str] | None = None) -> str:
+def device_label(module: str | None = None, env: Mapping[str, str] | None = None, *,
+                 create: bool = True) -> str | None:
     """This device's label: `MOXI_<M>_DEVICE` when `module` is given and that is set, else
     `MOXI_DEVICE`, else `device_id()`. The variables name the device only; neither moves
-    a root."""
+    a root.
+
+    `create=False` only reads, for a reader such as a doctor: it gives None where
+    `device_id()` would write the first id, and a state root it can't read raises
+    `OSError`.
+    """
     prefix = names.env_prefix(module) if module is not None else ""
-    return _label(prefix, _environ(env))
+    return _label(prefix, _environ(env), create)
 
 
-def _label(prefix: str, environ: Mapping[str, str]) -> str:
+def _label(prefix: str, environ: Mapping[str, str], create: bool = True) -> str | None:
     own = environ.get(f"{prefix}DEVICE") if prefix else None
-    return own or environ.get(DEVICE) or device_id(environ)
+    if label := own or environ.get(DEVICE):
+        return label
+    if create:
+        return device_id(environ)
+    return _read_id(core().state_dir(environ) / DEVICE_ID)
 
 
 def _read_id(path: Path) -> str | None:

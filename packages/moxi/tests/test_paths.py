@@ -230,6 +230,17 @@ def test_two_first_runs_agree_on_one_device_id(home):
     assert len(ids) == 1 and ids == {paths.device_id(home)}
 
 
+def test_a_label_read_without_create_never_writes_the_id(home):
+    where = Path(home["MOXI_HOME"], "state", "moxi", "device-id")
+    assert paths.device_label("cache", home, create=False) is None
+    assert Layout("cache").device(home, create=False) is None
+    assert not Path(home["MOXI_HOME"]).exists()
+    assert paths.device_label("cache", {**home, "MOXI_DEVICE": "all"}, create=False) == "all"
+    me = paths.device_id(home)
+    assert where.is_file()
+    assert Layout("cache").device(home, create=False) == me == Layout("cache").device(home)
+
+
 def test_two_threads_of_one_process_agree_on_one_device_id(home, monkeypatch):
     """The second thread waits for the first one's lock instead of being refused by it."""
     import threading
