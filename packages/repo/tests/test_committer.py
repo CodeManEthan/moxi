@@ -800,7 +800,7 @@ def test_the_sha_is_our_commit_even_when_head_moves_right_after(demo, monkeypatc
 
 
 
-# -- ssh -------------------------------------------------------------------------------------
+# -- ssh, and the lock across threads ------------------------------------------------------
 
 def _ssh_script(path: Path, marker: Path) -> Path:
     path.write_text(f"#!/bin/sh\necho \"$@\" > '{marker}'\nexit 1\n", encoding="utf-8")
@@ -831,3 +831,63 @@ def test_git_keeps_the_users_own_ssh_and_else_runs_ssh_in_batch_mode(demo, tmp_p
     else:
         assert mine.exists() and not default.exists()
 
+
+def test_wait_queues_behind_another_thread_of_this_process(demo):
+    import threading
+
+    repo = demo.repo()
+    write(repo, "notes/a.md")
+    where = committer._where(repo)
+    taken, release = threading.Event(), threading.Event()
+
+    def hold():
+        with committer._locked(where, 0) as held:
+            assert held
+            taken.set()
+            release.wait(10)
+
+    thread = threading.Thread(target=hold)
+    thread.start()
+    try:
+        assert taken.wait(10)
+        assert moxi_repo.commit(spec(repo)).status == "busy"
+        threading.Timer(0.3, release.set).start()
+        assert moxi_repo.commit(spec(repo), wait=10).status == "committed"
+    finally:
+        release.set()
+        thread.join(10)
+    taken.clear()
+    release.clear()
+    thread = threading.Thread(target=hold)
+    thread.start()
+    try:
+        assert taken.wait(10)
+        with pytest.raises(files.LockTimeout):
+            moxi_repo.save_spec(spec(repo), wait=0.2)
+        threading.Timer(0.3, release.set).start()
+        moxi_repo.save_spec(spec(repo), wait=10)
+    finally:
+        release.set()
+        thread.join(10)
+    assert committer.saved_names(repo / ".git") == ["demo/snap"]
+
+
+def test_save_spec_tries_again_while_another_git_holds_the_config_lock(demo, monkeypatch):
+    repo = demo.repo()
+    moxi_repo.save_spec(spec(repo, paths=("notes",)))
+    real = committer.git
+    failed = []
+
+    def flaky(root, *args, **kw):
+        verb = next((a for a in args if a in ("--remove-section", "--add")), None)
+        if verb and verb not in failed:
+            failed.append(verb)
+            return subprocess.CompletedProcess(args, 255, "",
+                                               "error: could not lock config file")
+        return real(root, *args, **kw)
+
+    monkeypatch.setattr(committer, "git", flaky)
+    moxi_repo.save_spec(spec(repo, paths=("other",)))
+    assert failed == ["--remove-section", "--add"]
+    monkeypatch.setattr(committer, "git", real)
+    assert committer.saved_spec(repo, "demo/snap").paths == ("other",)

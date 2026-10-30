@@ -311,6 +311,47 @@ def _held_here() -> set[str]:
     return _held.dirs
 
 
+# One gate per lock file, so this process's threads queue for the committer's lock (the
+# lock file itself refuses a second thread of the same process at once).
+_gates: dict[str, threading.Lock] = {}
+_gates_guard = threading.Lock()
+
+
+@contextlib.contextmanager
+def _take(where: _Where, wait: float | None):
+    """Hold the committer's lock for the block, waiting up to `wait` seconds (None: as
+    long as it takes; 0: try once) behind other processes and this process's other
+    threads alike. Raises `moxi.files.LockTimeout` when the wait runs out, and
+    `RuntimeError` when this thread already holds it."""
+    from moxi import files
+
+    path = where.own / LOCK
+    key = _records.key_of(where.cgd)
+    if key in _held_here():
+        raise RuntimeError(f"{path} is already held by this thread")
+    with _gates_guard:
+        gate = _gates.setdefault(os.path.abspath(path), threading.Lock())
+    deadline = None if wait is None else time.monotonic() + wait
+    if wait is None:
+        got = gate.acquire()
+    elif wait > 0:
+        got = gate.acquire(timeout=wait)
+    else:
+        got = gate.acquire(blocking=False)
+    if not got:
+        raise files.LockTimeout(path, os.getpid())
+    try:
+        left = None if deadline is None else max(0.0, deadline - time.monotonic())
+        with files.lock(path, timeout=left):
+            _held_here().add(key)
+            try:
+                yield
+            finally:
+                _held_here().discard(key)
+    finally:
+        gate.release()
+
+
 @contextlib.contextmanager
 def _locked(where: _Where, wait: float | None):
     """Hold the committer's lock for the block; yields False, holding nothing, when another
@@ -319,16 +360,11 @@ def _locked(where: _Where, wait: float | None):
 
     with contextlib.ExitStack() as stack:
         try:
-            stack.enter_context(files.lock(where.own / LOCK, timeout=wait))
+            stack.enter_context(_take(where, wait))
         except (files.LockTimeout, RuntimeError):
             yield False
             return
-        key = _records.key_of(where.cgd)
-        _held_here().add(key)
-        try:
-            yield True
-        finally:
-            _held_here().discard(key)
+        yield True
 
 
 # -- the state file -----------------------------------------------------------------------
@@ -462,8 +498,6 @@ def save_spec(spec: Spec, *, wait: float = 30) -> None:
     it is. Raises SpecError for a spec that can't be saved, and `moxi.files.LockTimeout`
     when a pass holds the committer's lock past `wait` seconds.
     """
-    from moxi import files
-
     problem = spec_problem(spec)
     if problem:
         raise SpecError(problem)
@@ -473,26 +507,43 @@ def save_spec(spec: Spec, *, wait: float = 30) -> None:
             raise SpecError(f"{label} is a callable; a saved spec takes a 'pkg.mod:fn' "
                             "string" + (" (or a summary line)" if label == "message" else ""))
     where = _where(spec.root)
-    with files.lock(where.own / LOCK, timeout=wait):
+    with _take(where, wait):
         section = f"{SPEC_PREFIX}{spec.name}"
-        git(where.top, "config", "--local", "--remove-section", section)
+        if spec.name in _config_specs(where.cgd):
+            done = _config_write(where.top, "--remove-section", section)
+            if done.returncode != 0:
+                raise SpecError(f"git config could not replace the saved spec: "
+                                f"{done.stderr.strip()}")
         for var, value in _fields(spec):
-            done = git(where.top, "config", "--local", "--add", f"{section}.{var}", value)
+            done = _config_write(where.top, "--add", f"{section}.{var}", value)
             if done.returncode != 0:
                 raise SpecError(f"git config could not save {var}: {done.stderr.strip()}")
     _index(where)
 
 
+def _config_write(top: Path, *args: str):
+    """One `git config --local` write; while another git holds the config lock, it is
+    tried twice more, 20 ms and 50 ms later."""
+    for delay in (0, 0.02, 0.05):
+        if delay:
+            time.sleep(delay)
+        done = git(top, "config", "--local", *args)
+        if done.returncode == 0:
+            break
+    return done
+
+
 def remove_spec(root, name: str, *, wait: float = 30) -> list[str]:
     """Forget a spec, saved or not: its saved section, its state-file entry and its doctor
     records. Returns a line for each thing removed (none when there was nothing)."""
-    from moxi import files
-
     where = _where(root)
     lines: list[str] = []
-    with files.lock(where.own / LOCK, timeout=wait):
+    with _take(where, wait):
         if name in _config_specs(where.cgd):
-            git(where.top, "config", "--local", "--remove-section", f"{SPEC_PREFIX}{name}")
+            done = _config_write(where.top, "--remove-section", f"{SPEC_PREFIX}{name}")
+            if done.returncode != 0:
+                raise SpecError(f"git config could not remove the saved spec {name}: "
+                                f"{done.stderr.strip()}")
             lines.append(f"removed the saved spec {name} from {where.top}")
         if name in read_state(where.cgd)["specs"]:
             _change_state(where.cgd, lambda specs: specs.pop(name, None))
