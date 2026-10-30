@@ -675,6 +675,16 @@ def test_a_marked_timer_reads_its_schedule_never_its_runs(w, enabled, running, c
     assert (read.state, read.enabled, read.pid, read.last) == (state, enabled, None, None)
 
 
+def test_no_task_names_a_triggered_unit(w):
+    """A task is its own job: a marked timer and a foreign task carry no `triggers`."""
+    snap = registered(w, "timer")
+    w.sup.foreign["\\Backups\\Daily"] = {"state": "Ready", "last_run": None,
+                                         "last_result": 0}
+    states = w.backend.status([snap, w.backend.foreign("\\Backups\\Daily", w.fence)],
+                              w.fence)
+    assert [(s.kind, s.state, s.triggers) for s in states] == [("timer", "active", None)] * 2
+
+
 def test_a_marked_timer_without_powershell_reads_active_and_says_why(w):
     snap = registered(w, "timer", enabled=False)
     run_line("demo", "snap", 2)

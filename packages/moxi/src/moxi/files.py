@@ -121,7 +121,7 @@ def _fsync_dir(directory: Path) -> None:
 
 
 def _parent(path: Path) -> None:
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _make_dirs(path.parent)
 
 
 # -- locks -------------------------------------------------------------------------------
@@ -623,7 +623,8 @@ def _lines_backwards(path: Path) -> Iterator[bytes]:
 def private_dir(path: str | os.PathLike) -> Path:
     """Make directory `path` (and its parents) so that only its owner can use it.
 
-    POSIX: created 0700; a symbolic link at `path` raises `PermissionError` and is never
+    Each missing parent is created private too, and a parent that exists is left as it
+    is. POSIX: created 0700; a symbolic link at `path` raises `PermissionError` and is never
     followed; an existing directory owned by another user raises `PermissionError` naming
     the owner, and an existing one of ours loses any group or other permission bits.
     Windows: created with an access list that grants only the current user, and checked
@@ -642,12 +643,13 @@ def private_dir(path: str | os.PathLike) -> Path:
     import errno
     import stat
 
+    _make_dirs(path.parent)
     try:
-        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.mkdir(path, 0o700)
     except FileExistsError:
-        if not os.path.islink(path):
+        if not (os.path.isdir(path) or os.path.islink(path)):
             raise
-        # A link whose target does not exist: refused as any link at `path` is.
+        # A link whose target does not exist is refused below, as any link at `path` is.
     if os.path.islink(path):
         raise PermissionError(f"{path} is a symbolic link; a private directory must not be")
     # The checks and the chmod go through a descriptor opened without following a link,
@@ -674,6 +676,38 @@ def private_dir(path: str | os.PathLike) -> Path:
     finally:
         os.close(fd)
     return path
+
+
+def _make_dirs(directory: str | os.PathLike, *, private: bool = True) -> None:
+    """Make each missing directory down to `directory`, outermost first.
+
+    With `private` each one is made 0700 (on Windows with the access list that grants only
+    the current user); without it, with the default mode. A directory that already exists
+    (a link to one counts) is left exactly as it is, its mode, owner and access list
+    unchanged, and so is one another process makes a moment before this call would: only
+    a directory this call creates is made private. `Path.mkdir(mode=..., parents=True)`
+    would not do: it gives the mode to the last directory alone and makes every missing
+    parent with the default mode.
+    """
+    directory = Path(directory)
+    missing = []
+    while not os.path.isdir(directory):
+        missing.append(directory)
+        if directory.parent == directory:
+            break
+        directory = directory.parent
+    for each in reversed(missing):
+        if private and _WINDOWS:
+            from . import _win
+
+            if not _win.make_private_dir(each) and not os.path.isdir(each):
+                raise FileExistsError(f"{each} exists and is not a directory")
+            continue
+        try:
+            os.mkdir(each, 0o700 if private else 0o777)
+        except FileExistsError:
+            if not os.path.isdir(each):
+                raise
 
 
 def _owner(uid: int) -> str:

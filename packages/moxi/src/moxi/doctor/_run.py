@@ -15,7 +15,7 @@
      4. units: `moxi.units.plan` against what is written, the supervisor's state from one
         `moxi.units.status` call, each timer's switch and newest run line, each active
         daemon's `HEALTH`, a `HEALTH` key that names no daemon, and each wrap the module
-        holds on a foreign timer;
+        holds on a foreign timer (a daemon with a `socket`: see `_daemon_seen`);
      5. stores: each declared store's existence, mode and size cap, and the core's own
         stores in the module's state directory (`runs.jsonl`, `logs/`, `doctor.json`);
      6. home: a state or cache directory still read in place under a host folder;
@@ -299,15 +299,21 @@ def _module_units(found, by_unit: Mapping) -> list[Row]:
                                                  f"{_describe(exc)}"))
         return rows
     daemons = decl.daemons if decl is not None else found.daemons
+    socket_rows = {change.name for change in changes if change.kind == "socket"}
     for change in changes:
         state = by_unit.get((module, change.name, change.kind))
-        rows.append(_unit_row(change, state, _shared_fix(found, change, changes)))
+        socket = (by_unit.get((module, change.name, "socket"))
+                  if change.kind == "daemon" else None)
+        rows.append(_unit_row(change, state, _shared_fix(found, change, changes),
+                              socket=socket, socket_row=change.name in socket_rows))
         if change.kind == "timer" and change.action in ("keep", "change"):
             label = f"timer {change.name}"
             if change.switch is not None:
                 rows.append(_switch_row(found, label, change.switch))
             rows.append(_last_row(module, label, _run_line(state, module, change.name),
                                   state.log if state is not None else None))
+        # Only a running daemon's HEALTH runs, so a daemon idle under its listening socket
+        # has no health row until a connection starts it.
         if (change.kind == "daemon" and state is not None and state.state == "active"
                 and change.name in daemons):
             rows.append(_health_row(module, change.name, found.health.get(change.name)))
@@ -336,20 +342,30 @@ def _shared_fix(found, change, changes) -> str | None:
             f"moxi config set {module} {switch} true")
 
 
-def _unit_row(change, state, install: str | None = None) -> Row:
+def _unit_row(change, state, install: str | None = None, *, socket=None,
+              socket_row: bool = True) -> Row:
     """The row for one planned unit, with the supervisor's state folded in where a unit
     is written. `install` replaces the plain `moxi install <module>` fix of a unit that is
-    not installed or stale."""
+    not installed or stale. `socket` is a daemon's socket state, None for a daemon with
+    no `socket` and for every other kind; `socket_row` is False where the plan gives the
+    socket no change of its own (launchd), so its state shows in the daemon's row
+    (`_daemon_seen`).
+
+    A change whose IPv6 addresses `plan` left out keeps that note in its row, and a
+    socket change names the units it drops."""
     module = change.module
     label = f"{change.kind} {change.name}"
     install = install or f"moxi install {module}"
     action, cause = change.action, change.cause
+    note = _left_out(change)
     if action == "keep":
-        planned = ("ok", "up to date", None)
+        planned = ("ok", "up to date" + note, None)
     elif action == "add":
-        planned = ("warn", "not installed", install)
+        planned = ("warn", "not installed" + note, install)
     elif action == "change":
-        planned = ("warn", _stale(change), install)
+        drops = (f" (drops {', '.join(path.name for path in change.dropped)})"
+                 if change.dropped else "")
+        planned = ("warn", _stale(change) + drops + note, install)
     elif action == "remove":
         planned = ("warn", "switched off, unit still installed" if cause == "switch"
                    else "no longer declared", install)
@@ -369,9 +385,59 @@ def _unit_row(change, state, install: str | None = None) -> Row:
         planned = ("off", change.reason, None)
     if state is None or action not in ("keep", "change", "remove"):
         return Row(module, label, *planned)
-    seen = _state_of(change, state)
+    if change.kind == "daemon" and socket is not None:
+        seen = _daemon_seen(change, state, socket, socket_row)
+    else:
+        seen = _state_of(change, state)
     worse = seen if _RANK[seen[0]] > _RANK[planned[0]] else planned
     return Row(module, label, worse[0], f"{planned[1]}; {seen[1]}", worse[2])
+
+
+#: The end of the note `plan` adds to each change of a daemon whose IPv6 addresses it left
+#: out, after "; " and the addresses.
+LEFT_OUT = "left out: no IPv6 loopback on this system"
+
+
+def _left_out(change) -> str:
+    """`plan`'s note on a change whose IPv6 addresses were left out, with its "; ", or
+    the empty string."""
+    _, sep, tail = change.reason.rpartition("; ")
+    return f"; {tail}" if sep and tail.endswith(LEFT_OUT) else ""
+
+
+def _daemon_seen(change, state, socket, socket_row: bool) -> tuple[str, str, str | None]:
+    """A daemon with a `socket`, read beside its socket's state. Like a timer between
+    runs, a daemon whose socket listens is waiting, not down: its process `inactive`
+    under a socket `active` is `ok`, "idle, socket listening". Every other pair reads the
+    daemon by `_state_of`, so a daemon `failed` under a listening socket is still `fail`,
+    and one `inactive` under a socket that isn't `active` is still `warn`.
+
+    Where the socket has a row of its own (systemd, which plans its socket units as one
+    `socket` change), its state shows there: a `failed` socket is a `fail` row naming
+    each failed unit, with its `journalctl` line. Where it has none (launchd, which holds
+    the sockets in the daemon's own job), its state shows here, folded in when it isn't
+    `active`. On launchd that state is the job's: `active` while the label is loaded,
+    since launchd then holds its sockets whether the daemon runs or not. launchd says
+    nothing of a socket it could not bind, so its socket is never `failed` and no row
+    reads a failed socket there. A socket daemon's label that is loaded with no pid and a
+    non-zero last exit (killed, or crashed) reads `failed`, so this row is `fail`, and it
+    stays so until its next connection starts it again. On Task Scheduler the socket is
+    `off` (the daemon binds its own), and the daemon's row is any daemon's.
+
+    On systemd, `moxi install` starts a socket daemon's service each time it writes it (a
+    new daemon, a set that gains or loses a unit), idle or not, and stops and starts a
+    running one around a changed set, so after an install the daemon can read `active`
+    until it exits; on launchd it stays idle until a connection. Only an active daemon's
+    `HEALTH` runs, so one idle under its socket has no health row.
+    """
+    if state.state == "inactive" and socket.state == "active":
+        return "ok", "idle, socket listening", None
+    seen = _state_of(change, state)
+    if socket_row or socket.state in ("active", "off", "nobackend"):
+        return seen
+    held = _state_of(change, socket)
+    worse = held if _RANK[held[0]] > _RANK[seen[0]] else seen
+    return worse[0], f"{seen[1]}; its socket: {held[1]}", worse[2]
 
 
 def _state_of(change, state) -> tuple[str, str, str | None]:
@@ -379,8 +445,17 @@ def _state_of(change, state) -> tuple[str, str, str | None]:
     `active` ok, `failed` fail, `inactive` warn (ok for a unit declared `enabled = false`),
     `missing` warn with the install line, `unknown` warn. A timer's state is its schedule
     on every backend, so a timer whose last run failed is `active` here; that run shows
-    only in its run-line row."""
+    only in its run-line row. A systemd socket's `failed` and `inactive` name the units
+    that are so, from its `detail`, and `failed` gives its `journalctl` line."""
     what = state.state
+    if state.kind == "socket" and what in ("failed", "inactive") and state.detail:
+        if what == "failed":
+            return "fail", state.detail, state.log
+        if not change.enabled:
+            return "ok", f"inactive: declared enabled = false ({state.detail})", None
+        detail = f"inactive ({state.detail})" + (
+            ", not enabled" if state.enabled is False else "")
+        return "warn", detail, state.log
     if what == "active":
         detail = "active"
         if state.since:

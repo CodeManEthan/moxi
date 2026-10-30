@@ -145,10 +145,12 @@ def test_a_daemons_socket_goes_first_with_it(w):
     units.stop("demo", ["relay"])
     units.disable("demo", ["relay"])
     units.enable("demo", ["relay"])
+    # The service has no install section: the socket carries the enable, and the
+    # service is only stopped and started.
     assert w.sup.calls == [
         ("stop", "moxi-demo-relay.socket", "moxi-demo-relay.service"),
-        ("disable", "--now", "moxi-demo-relay.socket", "moxi-demo-relay.service"),
-        ("enable", "--now", "moxi-demo-relay.socket", "moxi-demo-relay.service")]
+        ("disable", "--now", "moxi-demo-relay.socket"), ("stop", "moxi-demo-relay.service"),
+        ("enable", "--now", "moxi-demo-relay.socket"), ("start", "moxi-demo-relay.service")]
 
 
 def test_a_timers_start_and_stop_act_on_its_service_and_enable_on_its_timer(w):
@@ -613,6 +615,45 @@ def test_a_foreign_timer_is_read_by_its_triggers_unit_in_two_calls(w):
     assert backup.last["unit"] == "demo/backup" and backup.last["exit"] == 4
     assert backup.last["supervisor"] == {"result": "success", "status": "0"}
     assert "backup.service" not in " ".join(" ".join(c) for c in w.sup.calls)
+
+
+def test_a_timers_state_names_the_unit_it_triggers_at_no_extra_call(w):
+    """A marked timer and a foreign one carry the unit their `Triggers` names; a daemon,
+    its socket and a foreign timer the manager does not hold carry none. The reads are
+    the ones status makes anyway: one `show`, and one more for the foreign timers."""
+    w.installed(DAEMONS=SOCKET, TIMERS=TIMER)
+    w.foreign_timer()
+    states = {(s.name, s.kind): s for s in units.status("demo")}
+    assert len(w.calls("show")) == 1
+    assert states[("snapshot", "timer")].triggers == "moxi-demo-snapshot.service"
+    assert states[("relay", "daemon")].triggers is None
+    assert states[("relay", "socket")].triggers is None
+    w.sup.calls.clear()
+    states = {s.name: s for s in units.status("demo", foreign=["backup.timer",
+                                                                "gone.timer"])}
+    assert len(w.calls("show")) == 2
+    assert states["backup.timer"].triggers == "backup-run.service"
+    assert states["snapshot"].triggers == "moxi-demo-snapshot.service"
+    assert (states["gone.timer"].state, states["gone.timer"].triggers) == ("missing", None)
+
+
+def test_a_timer_that_was_not_read_names_no_unit(w, monkeypatch):
+    """`off` (here, not on this system) and `nobackend` make no read, and a failed `show`
+    reads nothing: none of them carries `triggers`."""
+    w.installed(TIMERS=TIMER[:-1] + ", 'win': {'command': 'moxi-demo-snap', 'every': '5m', "
+                                    "'switch': 'snapshot.enabled', 'platforms': ['win32']}}")
+    w.foreign_timer()
+    states = {s.name: s for s in units.status("demo", foreign=["backup.timer"])}
+    assert (states["win"].kind, states["win"].state, states["win"].triggers) == (
+        "timer", "off", None)
+    assert states["snapshot"].triggers == "moxi-demo-snapshot.service"
+    w.sup.fail[("show", None)] = "Failed to connect to bus"
+    states = units.status("demo", foreign=["backup.timer"])
+    assert [(s.name, s.state, s.triggers) for s in states] == [
+        ("snapshot", "unknown", None), ("win", "off", None), ("backup.timer", "unknown", None)]
+    monkeypatch.setattr(_backend, "implementation", lambda: None)
+    states = units.status("demo", foreign=["backup.timer"])
+    assert [(s.state, s.triggers) for s in states] == [("nobackend", None)] * 3
 
 
 def test_status_refuses_a_bad_foreign_name_alone_and_reads_the_rest(w):
