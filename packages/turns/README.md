@@ -44,7 +44,8 @@ moxi install turns --from 'moxi-turns @ git+https://github.com/moxihq/moxi#subdi
 - Linux and Python 3.12 or later.
 - `moxi` (0.1).
 - The `codex` extra adds `websockets`, which the Codex host needs; it also needs `codex`
-  on PATH.
+  on PATH. The host's entry is installed either way; `turns.codex_host_available()` says
+  whether the extra is there.
 - Claude Code sessions need Claude Code with the two plugins loaded; OpenCode sessions
   need `opencode` on PATH or in `~/.opencode/bin`.
 

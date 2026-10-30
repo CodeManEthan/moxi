@@ -351,6 +351,29 @@ def test_the_entry_is_declared_and_gated_by_the_codex_extra():
     assert codex_module.launch_args is launch_args
 
 
+
+@pytest.mark.parametrize("found", [True, False])
+def test_the_host_is_available_when_the_extra_can_be_found(monkeypatch, found):
+    """Whether the Codex host can start, read from a look for the extra's import that
+    never imports it; the doctor's extra row gives the same answer."""
+    import importlib.util
+
+    import moxi_turns
+
+    looked = []
+
+    def find_spec(name, package=None):
+        looked.append(name)
+        return object() if found else None
+
+    monkeypatch.setattr(importlib.util, "find_spec", find_spec)
+    assert moxi_turns.codex_host_available is codex_host.codex_host_available
+    assert moxi_turns.codex_host_available() is found
+    assert looked == [codex_host.EXTRA_IMPORT] == ["websockets"]
+    extra = next(row for row in codex_module.rows() if row.name == "Codex extra")
+    assert extra.state == ("ok" if found else "off")
+    assert "codex_host_available" in moxi_turns.__all__
+
 # -- the host as a process ---------------------------------------------------------------
 
 class Rig:

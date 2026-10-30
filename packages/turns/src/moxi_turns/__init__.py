@@ -39,6 +39,8 @@ out of the harness. This package is turns' whole public API, the announcement's
     kw = turns.codex.launch_args(argv)   # moxi-turns-codex-host's flags as launch()'s
                                          # keywords; that entry runs the host as a
                                          # process of its own: wait_ready(pid=its pid)
+    turns.codex_host_available()         # True when the Codex host can start (the
+                                         # `codex` extra is installed); imports nothing
     s = turns.opencode.launch(cwd, *, instructions=None, env=None, options=None,
                               additions=None)   # an OpenCode host, experimental
 
@@ -62,6 +64,7 @@ _WHERE = {
                      "StopHandler", "TurnsError", "VersionError"), "client"),
     **dict.fromkeys(("launch_additions", "LaunchAdditions", "Contribution",
                      "AdditionsRequest"), "additions"),
+    "codex_host_available": "codex_host",
     "opencode": "opencode",     # a host's namespace (`turns.opencode.launch`): the module
     **dict.fromkeys(("Facts", "Agents", "Agent", "OpenTurn", "Started", "Refused", "Lost",
                      "Ended", "Ran", "Shells", "LeftShell", "Failed", "Ready",
@@ -72,7 +75,7 @@ _WHERE = {
 }
 
 __all__ = [
-    "find", "sessions", "wait_ready", "codex", "opencode",
+    "find", "sessions", "wait_ready", "codex", "codex_host_available", "opencode",
     "launch_additions", "LaunchAdditions", "Contribution", "AdditionsRequest",
     "Session", "Delivery", "Watch", "StopHandler", "TurnsError", "VersionError",
     "Facts", "Agents", "Agent", "OpenTurn", "Started", "Refused", "Lost", "Ended", "Ran",

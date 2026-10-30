@@ -39,6 +39,7 @@ without one, to stderr.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import logging
 import os
@@ -59,8 +60,17 @@ _POLL = 0.5
 # The core's lifeline variable (`moxi.proc.LIFELINE_ENV`): set only when a Moxi parent
 # spawned the host with `lifeline="fd"`.
 _LIFELINE_ENV = "MOXI_LIFELINE_FD"
+#: The import the `codex` extra adds, which the host needs to start.
+EXTRA_IMPORT = "websockets"
 
 log = logging.getLogger("moxi.turns.codex.host")
+
+
+def codex_host_available() -> bool:
+    """Whether the Codex host can start: the `codex` extra is installed. Looks for its
+    import without importing it. The entry `moxi-turns-codex-host` is installed either
+    way, so a launcher asks this, not the path, before it picks the host."""
+    return importlib.util.find_spec(EXTRA_IMPORT) is not None
 
 
 class UsageError(ValueError):
@@ -340,7 +350,8 @@ def main(argv: list[str] | None = None) -> int:
     return moxi_exit.OK
 
 
-__all__ = ["PROG", "SANDBOX_MODES", "UsageError", "launch_args", "main"]
+__all__ = ["PROG", "SANDBOX_MODES", "UsageError", "codex_host_available", "launch_args",
+           "main"]
 
 
 if __name__ == "__main__":
