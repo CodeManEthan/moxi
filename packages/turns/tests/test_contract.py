@@ -347,14 +347,6 @@ def test_lost_tells_the_endpoints_own_reasons_apart():
 
 
 # -- the table's wire rows, against an endpoint ---------------------------------------
-# The endpoint serves version 1 until its wire moves to version 2. Until then nothing
-# listens at a version 2 address, every row below fails with `NotServing`, and the mark
-# reads that as expected. Any other failure is a real one, and a row that passes fails the
-# mark (strict): remove the mark once the endpoint serves version 2.
-
-_SERVES_V2 = pytest.mark.xfail(raises=ipc.NotServing, strict=True,
-                               reason="the endpoint serves version 1 until its wire "
-                                      "moves to version 2")
 _POSIX = pytest.mark.skipif(sys.platform == "win32",
                             reason="moxi.ipc's named pipe client comes later")
 
@@ -435,7 +427,6 @@ CAPABILITY_ROWS = [
 
 
 @_POSIX
-@_SERVES_V2
 def test_the_hello_rows(connect):
     client, ep = connect(hello=False)
     refused = _code(client, "rpc.hello", {"versions": [3, 3], "capabilities": []})
@@ -449,7 +440,6 @@ def test_the_hello_rows(connect):
 
 
 @_POSIX
-@_SERVES_V2
 def test_the_capabilities_a_session_offers(connect):
     client, _ = connect(can=("deliver", "only-if-idle", "compact", "agents"), hello=False)
     agreed = client.hello((2, 2))
@@ -457,7 +447,6 @@ def test_the_capabilities_a_session_offers(connect):
 
 
 @_POSIX
-@_SERVES_V2
 @pytest.mark.parametrize("method", UNKNOWN_METHODS)
 def test_an_unknown_method(connect, method):
     client, _ = connect()
@@ -465,7 +454,6 @@ def test_an_unknown_method(connect, method):
 
 
 @_POSIX
-@_SERVES_V2
 @pytest.mark.parametrize("method, params", INVALID_PARAMS,
                          ids=[f"{m}-{i}" for i, (m, _) in enumerate(INVALID_PARAMS)])
 def test_invalid_params(connect, method, params):
@@ -474,7 +462,6 @@ def test_invalid_params(connect, method, params):
 
 
 @_POSIX
-@_SERVES_V2
 @pytest.mark.parametrize("method, params, capability", CAPABILITY_ROWS,
                          ids=[f"{c}-{i}" for i, (_, _, c) in enumerate(CAPABILITY_ROWS)])
 def test_a_capability_the_session_lacks(connect, method, params, capability):
@@ -485,7 +472,6 @@ def test_a_capability_the_session_lacks(connect, method, params, capability):
 
 
 @_POSIX
-@_SERVES_V2
 def test_the_result_shapes_of_the_reads(connect):
     client, ep = connect()
     session = client.call("session", {}, timeout=5)
@@ -502,7 +488,6 @@ def test_the_result_shapes_of_the_reads(connect):
 
 
 @_POSIX
-@_SERVES_V2
 def test_a_deliver_answers_its_id_and_echoes_its_ref(connect):
     client, _ = connect()
     answer = client.call("deliver", {"text": "x", "ref": "r1"}, timeout=5)
@@ -513,7 +498,6 @@ def test_a_deliver_answers_its_id_and_echoes_its_ref(connect):
 
 
 @_POSIX
-@_SERVES_V2
 def test_a_wait_for_an_unknown_delivery(connect):
     client, _ = connect()
     by_id = client.call("wait", {"delivery": "nonesuch", "until": "started",
@@ -528,7 +512,6 @@ def test_a_wait_for_an_unknown_delivery(connect):
 
 
 @_POSIX
-@_SERVES_V2
 def test_one_stop_handler_at_a_time(connect):
     first, ep = connect()
     assert first.call("stops.handle", {}, timeout=5) == {}

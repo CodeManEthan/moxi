@@ -18,7 +18,8 @@ from moxi_turns.results import Ran
 class FakeHarness(Harness):
     name = "fake"
 
-    def __init__(self, can=("start", "steer", "hold", "clear", "exit"), *, auto=True,
+    def __init__(self, can=("deliver", "only-if-idle", "steer", "stop-handler", "clear",
+                            "exit"), *, auto=True,
                  pid=None):
         self.can = frozenset(can)
         self.pid = os.getpid() if pid is None else pid
