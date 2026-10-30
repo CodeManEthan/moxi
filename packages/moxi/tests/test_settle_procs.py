@@ -548,6 +548,38 @@ def test_a_hang_up_during_setup_ends_the_same_and_keeps_the_failure_record(box, 
     assert f"resume:{SERVICE}" in records, records
 
 
+def test_a_parent_started_with_hang_up_ignored_leaves_it_ignored(box):
+    """Run as `nohup` runs it, the install's parent never catches a hang-up: the wait
+    goes on, nothing is sent to the child, and the step ends as if none came."""
+    box.module(DAEMONS=ONE)
+    box.env["MOXITEST_SETUP"] = "nap"
+
+    def ignore_hang_up():
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
+
+    proc = subprocess.Popen([PY, HELPER, "parent", "demo"], env=box.env,
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, process_group=0,
+                            preexec_fn=ignore_hang_up)
+    try:
+        assert wait_for(lambda: box.events("setup", "begin")), box.events()
+        os.kill(proc.pid, signal.SIGHUP)
+        out, err = proc.communicate(timeout=WAIT)
+    finally:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        proc.kill()
+        proc.wait(WAIT)
+    assert proc.returncode == 0, out + err
+    assert box.value("parent", "outcome") == 0
+    assert box.value("parent", "signals") == []
+    assert box.events("parent", "sent") == []
+    assert box.events("child", "got") == []
+    assert box.value("setup", "end") == "nap"
+
+
 def test_a_second_ctrl_c_during_resume_still_starts_every_recorded_unit(box, job):
     box.installed(DAEMONS=TWO)
     box.legacy()

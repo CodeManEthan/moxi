@@ -141,8 +141,11 @@ def test_each_client_the_daemon_serves_closes_its_connection_when_it_leaves(rig)
     real = rig.gateway.release
 
     def watching():
-        released.append(getattr(rig.gateway._local, "conn", None) if local else None)
+        conn = getattr(rig.gateway._local, "conn", None) if local else None
         real()
+        # Counted only once the real release has closed it, so the checks below never
+        # run a statement on a connection still being closed.
+        released.append(conn)
 
     rig.gateway.release = watching
     for n in range(3):

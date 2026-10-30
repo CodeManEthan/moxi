@@ -316,7 +316,8 @@ def adopt_core_claim(path: str | os.PathLike) -> bool:
 def _claim_descriptor(value: str) -> int | None:
     """The descriptor the variable's text names, or None when it names none."""
     value = value.strip()
-    if not value.isdigit():
+    # ASCII digits only: `isdigit` alone passes "²", which `int` then refuses.
+    if not (value.isascii() and value.isdigit()):
         return None
     number = int(value)
     if not _WINDOWS:

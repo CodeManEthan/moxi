@@ -443,6 +443,28 @@ def test_a_thread_still_waiting_to_take_the_lock_covers_no_other(core, holder):
     assert events == ["first in"]
 
 
+def test_a_plain_take_still_waiting_covers_no_nested_call(core, holder):
+    """While one thread waits on a plain take of the core lock, another process holding
+    it, a second thread's nested call never yields: a take not yet made covers nothing.
+    The nested call then meets the plain take as any second take does, and is refused."""
+    proc = holder(core, seconds=1.0)
+    events = []
+
+    def first():
+        with files.lock(core):
+            events.append("first in")
+
+    one = threading.Thread(target=first)
+    one.start()
+    time.sleep(0.2)
+    with pytest.raises(RuntimeError, match="another thread of this process"):
+        with files.lock(core, nested=True, timeout=0.2):
+            events.append("second in")
+    one.join(10)
+    proc.wait()
+    assert events == ["first in"]
+
+
 def test_the_install_hold_refuses_a_second_plain_take(core):
     with files.lock(core, nested=True):
         with pytest.raises(RuntimeError, match="not re-entrant"):
@@ -559,6 +581,8 @@ FORGED = textwrap.dedent("""
     pytest.param(lambda fd: "0", id="a descriptor open on another file"),
     pytest.param(lambda fd: "seven", id="not a number"),
     pytest.param(lambda fd: "-1", id="a negative number"),
+    pytest.param(lambda fd: "\u00b2", id="a superscript digit"),
+    pytest.param(lambda fd: "\u0663", id="a digit that is not ASCII"),
 ])
 def test_a_forged_claim_is_never_honoured(core, value):
     with files.lock(core):
