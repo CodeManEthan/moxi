@@ -744,15 +744,16 @@ def test_the_clamp_keeps_the_cursor_below_a_held_live_id_and_unbind_queues_it(
     assert rows(rig, REVIEWER_Q) == {low}
 
 
-def test_once_the_lower_id_is_acked_the_cursor_reaches_it_and_no_row_is_left(
-        rig, frames, blocked):
-    """Once L completes, the cursor moves to L, the highest id that ack handled; H,
-    acked before it, has no row and is not routed again."""
+def test_the_clamps_high_water_mark_reaches_the_earlier_digest(rig, frames, blocked):
+    """Once L completes, the cursor reaches H, the highest id acked so far, though the
+    ack that moved it handled only L. H has no row and is not routed again."""
     peer, low, high = _clamp_setup(rig, blocked)
     peer.shim.on_turn_boundary()                     # L completes
     peer.sync()
-    assert cursor_of(REVIEWER_Q) == low
+    assert cursor_of(REVIEWER_Q) == high
     assert rows(rig, REVIEWER_Q) == set() and record_rows(rig.record, REVIEWER_Q) == set()
+    code, out = rig.cli(["explain", REVIEWER_Q, high], name="planner", scope="proj-a")
+    assert code == 0 and "cursor-already-past-it" in out, out
     rig.daemon.rescan()
     peer.sync()
     assert rows(rig, REVIEWER_Q) == set()

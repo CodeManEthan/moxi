@@ -11,9 +11,10 @@ The daemon is the only writer. Each method below is one `BEGIN IMMEDIATE` transa
 so a failure inside one lands none of it. The connection is one per daemon, used from
 any of its threads under this object's lock.
 
-The cursor is the daemon's: at each ack it moves to the lower of the highest id the ack
-handled and one below the lowest id that still has a row for the name, and it never
-goes back. After an ack no row means "not to be delivered again": catch-up is the
+The cursor is the daemon's: at each turn end it moves to the lower of the highest id the
+name has ever acked and one below the lowest id that still has a row for the name, and
+it never goes back. The highest acked id is kept across acks, so acking H while a lower
+L is held leaves the cursor below L, and acking L later carries it up to H. After an ack no row means "not to be delivered again": catch-up is the
 name's rows, never a replay from the record.
 """
 
@@ -57,6 +58,11 @@ TIMESTAMP_FMT = "%Y-%m-%dT%H:%M:%SZ"
 #: is above it: a message acked above a lower held one has no row and sits above the
 #: clamped cursor, and routing it again would deliver it twice.
 META_ROUTED_THROUGH = "routed_through"
+
+#: The prefix of the `meta` key that holds a name's highest acked id, the clamp's
+#: high-water: `acked_through:<name>`. Kept across acks, so the cursor reaches it once
+#: the lower rows that held it back are acked or gone.
+META_ACKED_THROUGH = "acked_through:"
 
 # --------------------------------------------------------------- the cursor's reasons
 #: Why a name's cursor stands where it does, for `moxi comms explain`. A name, not an
@@ -447,13 +453,25 @@ def _why_dropped(conn, mid: int, now: float) -> str | None:
 
 
 def _advance(conn, name: str, acked, at: str) -> str | None:
-    """The clamp, in the ack's transaction: the lower of the highest id acked and one
-    below the lowest id the name still has a row for; never back."""
+    """The clamp, in the turn end's transaction: the lower of the highest id the name has
+    ever acked (kept in `meta`, raised by this ack) and one below the lowest id the name
+    still has a row for; never back. A turn end that acks nothing still moves it when
+    the rows that held it back have gone."""
     row = conn.execute("SELECT message_id FROM cursors WHERE name = ?", (name,)).fetchone()
     old = None if row is None else int(row[0])
-    if not acked:
+    key = META_ACKED_THROUGH + name
+    got = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    try:
+        high = None if got is None else int(got[0])
+    except (TypeError, ValueError):
+        high = None
+    if acked and (high is None or max(acked) > high):
+        high = max(acked)
+        conn.execute("INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO "
+                     "UPDATE SET value = excluded.value", (key, str(high)))
+    if high is None:
         return None if old is None else str(old)
-    target = max(acked)
+    target = high
     low = conn.execute("SELECT MIN(message_id) FROM queue WHERE name = ?",
                        (name,)).fetchone()[0]
     if low is not None:
