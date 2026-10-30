@@ -1,10 +1,13 @@
 {
   "name": "moxi-ui-web",
   "private": true,
-  "description": "The UI module's web sources: the shell document, client.js and the theme.",
+  "description": "The UI module's web sources: the shell document, client.js, the theme and the modules view.",
   "license": "MIT",
   "type": "module",
   "scripts": {
     "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "lit": "3.3.3"
   }
 }

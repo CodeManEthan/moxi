@@ -8,7 +8,10 @@
 // A component reaches data only through `api` and `subscribe`, for its own module, and
 // links to another module only through `navigate` or `place`, and only while
 // `installed` says that module is there.
+//
+// It also defines `<moxi-ui-form>`, the one form renderer, so every page can use it.
 
+import { defineForm } from "./form.ts";
 import { fetchOpener, TabPush } from "./push.ts";
 import { apiTarget, checkAttributes, checkName, panelTarget, scriptUrl } from "./rules.ts";
 import { boot } from "./shell.ts";
@@ -53,6 +56,129 @@ export interface ApiResult {
 
 /** The theme modes: `system` follows the browser's colour scheme. */
 export type ThemeMode = "system" | "light" | "dark";
+
+/** One entry of a switch table, as `moxi config show --json` lists it. */
+export interface FieldEntry {
+  /** The entry's own name. */
+  name: string;
+  /** What a write names: `<table key>.<entry>`. */
+  key: string;
+  value: boolean;
+  /** `default` while no file names the entry, else `file` or `env`. */
+  source: string;
+  /** The units and wraps that name the entry as their switch. */
+  named_by?: string[];
+  /** When a change applies. */
+  mark?: string;
+}
+
+/**
+ * One field of `<moxi-ui-form>`, in `moxi.config.Key`'s shape: the settings view gives it
+ * with its value, source and mark; a launcher's catalog row adds its own fields. Every
+ * field past `name` and `type` is optional. Values are spelled as the command line
+ * spells them: `true`/`false`, a number, the plain string, or one TOML value for a table.
+ */
+export interface FieldDescriptor {
+  name: string;
+  /** `bool`, `int`, `float`, `string`, `path`, `enum`, `list` or `table`. */
+  type: string;
+  default?: string | null;
+  /** Help text. */
+  doc?: string;
+  /** An enum's words. */
+  values?: string[] | null;
+  read?: string;
+  env?: string | null;
+  needs?: string | null;
+  /** A list's item type. */
+  items?: string | null;
+  /** The current value. A list may give its items here, and a switch with an optional
+   * value gives `true` for on with no value. */
+  value?: string | string[] | boolean | null;
+  /** A list's current items. */
+  value_items?: string[] | null;
+  /** `default`, `file` or `env`. */
+  source?: string;
+  /** When a change applies, as a line to show. */
+  mark?: string;
+  /** A line to show under the field. */
+  note?: string | null;
+  /** The field's `needs` module is absent: it is shown off, with `note` saying why. */
+  needs_absent?: boolean;
+  /** Drawn as one toggle per entry of `entries`. */
+  switch_table?: boolean;
+  entries?: FieldEntry[] | null;
+  /** `"unavailable"` when the entries named only by the module's units could not be
+   * listed; `reason` then says why. */
+  declarations?: string | null;
+  reason?: string | null;
+  /** A catalog row: may be given more than once (a list control). */
+  repeatable?: boolean;
+  /** A catalog row: a switch plus an optional value. */
+  optional_value?: boolean;
+  /** A catalog row: shown under "more". */
+  hidden?: boolean;
+  /** A catalog row: shown off unless this module is installed. */
+  requires?: string | null;
+  /** A catalog row the launcher owns: not offered. */
+  owned?: boolean;
+  /** A catalog row of the permission posture: marked so. */
+  posture?: boolean;
+  flag?: string | null;
+  since?: string | null;
+}
+
+/**
+ * The detail of `moxi-change`, which `<moxi-ui-form mode="each">` sends for each change:
+ * exactly one of `value` (a new value, or a switch-table entry's `true`/`false` under its
+ * `<table key>.<entry>` name), `add` or `remove` (a list item), or `reset` (back to the
+ * default).
+ */
+export interface FormChange {
+  name: string;
+  value?: string;
+  add?: string;
+  remove?: string;
+  reset?: true;
+}
+
+/** A value of `moxi-submit`: a field's text (null when empty or a switch is off), or a
+ * list's items. */
+export type FormValue = string | string[] | null;
+
+/** The detail of `moxi-submit`, which `<moxi-ui-form mode="submit">` sends once with
+ * every field that is not off. A switch table gives each entry under its
+ * `<table key>.<entry>` name. */
+export interface FormSubmit {
+  values: Record<string, FormValue>;
+}
+
+/**
+ * `<moxi-ui-form>`, the one form renderer, defined by this script. Set `fields`; choose
+ * `mode` (`each`, the default, or `submit`) by attribute or property. The host makes each
+ * write and shows the server's answer with `setError` or `setMessage`; a message stays
+ * until the user next changes that field.
+ */
+export interface FormElement extends HTMLElement {
+  fields: FieldDescriptor[];
+  mode: "each" | "submit";
+  /** Every control off, as for a settings file that won't parse. */
+  disabled: boolean;
+  /** The submit button's text in `submit` mode. */
+  submitLabel: string;
+  /** Shows `text` as the error of field (or switch-table entry) `name`. */
+  setError(name: string, text: string): void;
+  /** Shows `lines` under field (or entry) `name`; a warning or error is marked so. */
+  setMessage(name: string, lines: string[], kind?: "info" | "warn" | "error"): void;
+  /** The values `moxi-submit` would send now. */
+  values(): Record<string, FormValue>;
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "moxi-ui-form": FormElement;
+  }
+}
 
 /** The `localStorage` item that holds the session key the sign-in page stored. */
 const KEY_STORAGE = "moxi-ui-key";
@@ -245,6 +371,7 @@ export function setTheme(mode: ThemeMode): void {
 
 // --- start ------------------------------------------------------------------------------
 
+defineForm(installed);
 push.start();
 addEventListener("storage", (event) => {
   // A sign-in in another tab of this browser stores a new key.

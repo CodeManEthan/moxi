@@ -6,6 +6,7 @@
 import type { ComponentInfo } from "./client.ts";
 import type { UpstreamState } from "./push.ts";
 import { NAME } from "./rules.ts";
+import { failurePanel } from "./views.ts";
 
 /** One installed module as the menu sees it. */
 export interface PanelModule {
@@ -45,6 +46,26 @@ export function menuEntries(modules: PanelModule[]): Array<{ module: string; rou
     entries.push({ module: "ui", route: "settings", title: "Settings" });
   }
   return entries;
+}
+
+/** The error panel for a page script at `url` that did not load, from a fetch of it
+ * (an asset needs the cookie only), or null when the answer names no failure. */
+async function failure(url: string): Promise<{ title: string; lines: string[] } | null> {
+  const module = where(new URL(url, location.origin).pathname)?.module ?? "";
+  let answer: Response;
+  try {
+    answer = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+  } catch {
+    return failurePanel(module, 0, null);
+  }
+  if (answer.ok) return null;
+  let data: unknown = null;
+  try {
+    data = await answer.json();
+  } catch {
+    data = null;
+  }
+  return failurePanel(module, answer.status, data);
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] {
@@ -128,7 +149,14 @@ export function boot(deps: ShellDeps): void {
       placed?.remove();
       return;
     }
-    if (placed === null) say(`${module}'s panel did not load`, `${module}'s panel script could not be loaded. Run moxi doctor ${module} to see why.`);
+    if (placed !== null) return;
+    // A script that did not load may be a start that failed: the proxy answers its 502
+    // with the exit and the log, and a second fetch within 10 s gets the same answer
+    // with no new start.
+    const panelFailure = await failure(item.page.url);
+    if (mine !== seq) return;
+    if (panelFailure !== null) say(panelFailure.title, ...panelFailure.lines);
+    else say(`${module}'s panel did not load`, `${module}'s panel script could not be loaded. Run moxi doctor ${module} to see why.`);
   };
 
   const renderMenu = (): void => {
