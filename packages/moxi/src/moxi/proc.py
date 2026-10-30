@@ -308,7 +308,7 @@ def _start_watchdog(proc: subprocess.Popen) -> subprocess.Popen:
     watchdog's directory is not put on its path, so no file there can stand in for moxi.
     Raises `OSError` when it can't be started or exits without saying it is ready.
     """
-    import select
+    import selectors
     import time
 
     from . import _watch
@@ -330,32 +330,44 @@ def _start_watchdog(proc: subprocess.Popen) -> subprocess.Popen:
     said = b""
     err = b""
     late = False
+    # A selector, not select.select: a descriptor numbered past 1024, in a process that
+    # holds many, is out of select's range.
+    waiting = None
     try:
         deadline = time.monotonic() + WATCH_START
-        open_fds = {watchdog.stdout.fileno(), watchdog.stderr.fileno()}
         out = watchdog.stdout.fileno()
+        waiting = selectors.DefaultSelector()
+        waiting.register(out, selectors.EVENT_READ)
+        waiting.register(watchdog.stderr.fileno(), selectors.EVENT_READ)
         # Read until the ready line, or to the end of what a failing watchdog writes
         # (a traceback's last line says why).
-        while open_fds and not said.startswith(_watch.READY) and len(said) < 65536:
+        while (waiting.get_map() and not said.startswith(_watch.READY)
+               and len(said) < 65536):
             left = deadline - time.monotonic()
             if left <= 0:
                 late = True
                 break
-            ready, _, _ = select.select(list(open_fds), [], [], left)
-            for fd in ready:
-                part = os.read(fd, 4096)
+            for key, _ in waiting.select(left):
+                part = os.read(key.fd, 4096)
                 if not part:
-                    open_fds.discard(fd)
-                elif fd == out:
+                    waiting.unregister(key.fd)
+                elif key.fd == out:
                     said += part
                 else:
                     err = (err + part)[-65536:]
         if said.startswith(_watch.READY):
             return watchdog
+    except Exception as exc:
+        _end_watchdog(watchdog)
+        if isinstance(exc, OSError):
+            raise
+        raise OSError(f"the watchdog for process {proc.pid} did not start: {exc}") from exc
     except BaseException:
         _end_watchdog(watchdog)
         raise
     finally:
+        if waiting is not None:
+            waiting.close()
         watchdog.stdout.close()
         watchdog.stderr.close()
     _end_watchdog(watchdog)

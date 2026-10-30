@@ -560,6 +560,42 @@ def test_a_watchdog_whose_interpreter_warns_at_startup_still_starts(monkeypatch,
     assert child.watchdog.wait(timeout=30) == 0
 
 
+def test_a_process_holding_more_than_1024_descriptors_starts_a_watched_child():
+    import resource
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    want = 1200
+    if hard != resource.RLIM_INFINITY and hard < want:
+        pytest.skip(f"the descriptor limit is {hard}, under {want}")
+    resource.setrlimit(resource.RLIMIT_NOFILE, (max(soft, want), hard))
+    held = []
+    try:
+        while not held or held[-1] < 1100:
+            held.append(os.open(os.devnull, os.O_RDONLY))
+        child = proc.spawn([PY, "-c", "import time; time.sleep(60)"], lifeline="watch")
+        child.lifeline.close()
+        assert child.wait(timeout=30) == -signal.SIGTERM
+        assert child.watchdog.wait(timeout=30) == 0
+    finally:
+        for fd in held:
+            os.close(fd)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
+
+
+def test_a_failure_while_waiting_for_the_watchdog_is_an_oserror(monkeypatch):
+    import selectors
+
+    class Broken(selectors.DefaultSelector):
+        def select(self, timeout=None):
+            raise ValueError("no way to wait")
+
+    monkeypatch.setattr(selectors, "DefaultSelector", Broken)
+    before = children()
+    with pytest.raises(OSError, match="did not start: no way to wait"):
+        proc.spawn([PY, "-c", "import time; time.sleep(60)"], lifeline="watch")
+    assert children() <= before
+
+
 def test_a_failing_watchdog_is_named_by_its_last_stderr_line(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "python", lambda: fake_python(tmp_path, """
         echo "something on stdout"
