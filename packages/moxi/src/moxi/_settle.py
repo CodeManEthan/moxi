@@ -575,7 +575,9 @@ def _describe(change) -> str:
 
 def _take_out(record: list, applied) -> None:
     """Drop the entries of units an `ok` `Applied` removed, or disabled because their
-    declaration turned `enabled = false`: the unit step has set their state."""
+    declaration turned `enabled = false`: the unit step has set their state. The record
+    holds daemons only, so a timer's change never drops an entry, even a daemon's of the
+    same name; a `.socket` drops the entry of its own id."""
     gone_names: set[str] = set()
     gone_ids: set[str] = set()
     for result in applied:
@@ -588,7 +590,7 @@ def _take_out(record: list, applied) -> None:
             continue
         if change.kind == "socket":
             gone_ids |= {path.name for path in change.paths}
-        else:
+        elif change.kind == "daemon":
             gone_names.add(change.name)
     record[:] = [entry for entry in record
                  if entry.name not in gone_names

@@ -408,6 +408,26 @@ def test_a_change_that_drops_the_socket_takes_its_entry_out(w, capsys, monkeypat
     assert ("start", SERVICE) in w.calls("start", "restart") or w.active(SERVICE)
 
 
+def test_only_a_daemons_or_its_sockets_change_takes_an_entry_out():
+    def applied(kind, action, name="relay", paths=()):
+        change = units.UnitChange("demo", name, kind, action, None, paths, None, "")
+        return units.Applied(change, True)
+
+    def entry(name, unit):
+        return units.Stopped("demo", name, unit, "fake", True)
+
+    record = [entry("relay", SERVICE), entry("relay", "moxi-demo-relay.socket"),
+              entry("other", "moxi-demo-other.service")]
+    _settle._take_out(record, [applied("timer", "remove"), applied("wrap", "remove")])
+    assert [e.unit for e in record] == [SERVICE, "moxi-demo-relay.socket",
+                                        "moxi-demo-other.service"]
+    _settle._take_out(record, [applied("socket", "remove",
+                                       paths=(Path("/u/moxi-demo-relay.socket"),))])
+    assert [e.unit for e in record] == [SERVICE, "moxi-demo-other.service"]
+    _settle._take_out(record, [applied("daemon", "remove")])
+    assert [e.unit for e in record] == ["moxi-demo-other.service"]
+
+
 def test_a_start_the_supervisor_refuses_is_reported_and_recorded(w, capsys, monkeypatch):
     w.installed(DAEMONS=ONE)
     w.legacy()
