@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 
 import pytest
-from conftest import assistant_line, write_cache_config, write_transcript
+from conftest import assistant_line, claude_config, write_cache_config, write_transcript
 
 from moxi_cache import api, records, watch
 from moxi_cache.clock import Clock
@@ -50,17 +50,17 @@ class Fake:
 
 
 @pytest.fixture
-def root(tmp_path) -> Path:
+def root() -> Path:
     """The projects root the watcher finds transcripts under (Claude's, by the
-    environment the suite sets)."""
-    path = tmp_path / "claude-config" / "projects"
+    environment the fence sets)."""
+    path = claude_config() / "projects"
     path.mkdir(parents=True)
     return path
 
 
 @pytest.fixture
-def sessions(tmp_path) -> Path:
-    path = tmp_path / "claude-config" / "sessions"
+def sessions() -> Path:
+    path = claude_config() / "sessions"
     path.mkdir(parents=True)
     return path
 

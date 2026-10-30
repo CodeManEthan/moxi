@@ -35,7 +35,11 @@ packages = ["src/moxi_cache"]
 [tool.hatch.build.targets.sdist]
 # A source distribution built from any branch holds these public paths, and the
 # pyproject.toml and .gitignore hatchling adds itself.
-only-include = ["LICENSE", "README.md", "src/moxi_cache", "tests"]
+only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_cache", "tests"]
 
+# A plain `pytest` runs the units and contract seams, and so does `moxi-dev check`: the
+# tiers are deselected here. Run one by hand with `pytest -m <tier>` (a live test also
+# needs MOXI_TEST_LIVE=1).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not browser and not slow and not build and not live'"

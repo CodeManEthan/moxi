@@ -8,7 +8,7 @@ is the reader beneath it.
 from __future__ import annotations
 
 import pytest
-from conftest import (HOUR, assistant_line, user_line, write_cache_config,
+from conftest import (HOUR, assistant_line, claude_config, user_line, write_cache_config,
                       write_sessions_config, write_transcript)
 
 from moxi_cache import api, claude, clock
@@ -113,7 +113,7 @@ def test_the_default_for_turned_holds_a_missing_transcript(tmp_path):
 def test_a_session_that_stated_no_root_reads_under_sessions_root(tmp_path):
     """The reader's root is sessions' (config `claude.projects`, else the rule over the
     reader's environment); cache has no root setting of its own."""
-    default = tmp_path / "claude-config" / "projects"
+    default = claude_config() / "projects"
     write_transcript(SESS_A, 60, root=default)
     assert api.read("claude", SESS_A).kind == "warm"
     other = tmp_path / "elsewhere"
