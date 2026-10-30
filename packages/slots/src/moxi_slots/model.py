@@ -13,6 +13,7 @@ States:
     occupied   the run pane is live
 
 A slot is launchable when it is `free` or `ended` and unheld, or held by the caller. A
+live `slot-<n>` session with no registry row is never launchable: `start` refuses it. A
 hold is a reservation by a `holder` word until `until` (epoch seconds); past `until` it
 reads as absent.
 
@@ -151,7 +152,7 @@ class Slot:
     `hold` is a live hold or None. The run pane's facts (`pane_id`, `window_id`,
     `pane_pid`, `current_command`, `dead_status`) are None when there is no run
     window. `label` is the last launch's label while its run pane is there. `created`
-    is None for a session with no registry row.
+    is None, and `launchable` False, for a session with no registry row.
     """
 
     number: int

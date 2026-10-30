@@ -103,6 +103,7 @@ def test_join_states_holds_labels_and_drift():
     assert three.state == MISSING and not three.launchable
     assert [s.number for s in listing.unregistered] == [4]
     assert listing.unregistered[0].created is None
+    assert listing.unregistered[0].state == FREE and not listing.unregistered[0].launchable
     assert [(d.number, d.kind) for d in listing.drift] == [(3, "no-session"), (4, "no-row")]
 
 

@@ -165,7 +165,7 @@ def slot(number: int, f: Facts, row, now: float) -> Slot:
                 name=row.name if row is not None else None,
                 state=f.state,
                 hold=hold,
-                launchable=launchable(f.state, hold),
+                launchable=row is not None and launchable(f.state, hold),
                 idle=f.idle,
                 attached=f.attached,
                 label=last.label if last is not None and run is not None else None,
