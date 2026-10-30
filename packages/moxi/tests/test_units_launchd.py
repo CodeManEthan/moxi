@@ -19,7 +19,7 @@ import pytest
 import moxi.modules
 import moxi.paths
 from moxi import files, units
-from moxi.units import _backend, _launchd, _state
+from moxi.units import _backend, _launchd, _plan, _state
 from moxi.units._backend import Backend, RenderError, Schedule, Socket, Spec, UnitRef
 from moxi.units._fence import Fence
 from moxi.units._launchd import LaunchdBackend
@@ -268,12 +268,65 @@ def test_a_daemon_without_process_stop_does_not_abandon_its_group(mac):
     assert body["StandardOutPath"].endswith("/demo/logs/relay.log")
 
 
-def test_a_socket_is_one_listener_per_address(mac):
-    [group] = mac.backend.render(spec(socket=Socket("port", ("127.0.0.1", "::1"), 8470)))
+GOLDEN_SOCKET = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- moxi unit: ui/shell -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>moxi.ui.shell</string>
+  <key>ProgramArguments</key>
+  <array><string>/Users/ana/.local/share/uv/tools/moxi/bin/moxi-ui-shell</string></array>
+  <key>ThrottleInterval</key><integer>2</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>/Users/ana/.local/state/moxi/ui/logs/shell.log</string>
+  <key>StandardErrorPath</key><string>/Users/ana/.local/state/moxi/ui/logs/shell.log</string>
+  <key>EnvironmentVariables</key>
+  <dict><key>MOXI_LOG_FILE</key><string>/Users/ana/.local/state/moxi/ui/logs/shell.log</string></dict>
+  <key>Sockets</key>
+  <dict><key>Listeners</key><dict><key>SockNodeName</key><string>127.0.0.1</string><key>SockServiceName</key><string>8470</string><key>SockType</key><string>stream</string></dict><key>Listeners-1</key><dict><key>SockNodeName</key><string>::1</string><key>SockServiceName</key><string>8470</string><key>SockType</key><string>stream</string></dict></dict>
+</dict>
+</plist>
+"""
+
+
+def listener(address, port="8470"):
+    return {"SockNodeName": address, "SockServiceName": port, "SockType": "stream"}
+
+
+def test_a_socket_daemon_plist_is_the_golden_text(ana):
+    """One key per address, `Listeners` then `Listeners-1`, one dict each; no RunAtLoad
+    and no KeepAlive, so the sockets start it and a login does not."""
+    [group] = ana.render(spec(module="ui", name="shell", command=(f"{BIN}/moxi-ui-shell",),
+                              socket=Socket("port", ("127.0.0.1", "::1"), 8470)))
+    assert group.kind == "daemon"
+    [(path, text)] = group.files
+    assert path.name == "moxi.ui.shell.plist" and text == GOLDEN_SOCKET
+    body = plistlib.loads(text.encode())
+    assert "RunAtLoad" not in body and "KeepAlive" not in body
+    assert body["ThrottleInterval"] == 2
+    assert list(body["Sockets"]) == ["Listeners", "Listeners-1"]
+    assert body["Sockets"] == {"Listeners": listener("127.0.0.1"),
+                               "Listeners-1": listener("::1")}
+
+
+def test_a_socket_key_follows_its_address_place_when_one_is_left_out(mac):
+    def keys(addresses, left_out=()):
+        [group] = mac.backend.render(spec(socket=Socket("port", addresses, 8470, left_out)))
+        return plistlib.loads(group.files[0][1].encode())["Sockets"]
+
+    assert keys(("127.0.0.1", "::1"), ("::1",)) == {"Listeners": listener("127.0.0.1")}
+    assert keys(("::1", "127.0.0.1", "10.0.0.2"), ("::1",)) == {
+        "Listeners-1": listener("127.0.0.1"), "Listeners-2": listener("10.0.0.2")}
+    with pytest.raises(RenderError) as refused:
+        keys(("::1",), ("::1",))
+    assert refused.value.cause == "socket"
+
+
+def test_a_daemon_without_a_socket_keeps_run_at_load_and_keep_alive(mac):
+    [group] = mac.backend.render(spec())
     body = plistlib.loads(group.files[0][1].encode())
-    assert body["Sockets"] == {"Listeners": [
-        {"SockNodeName": "127.0.0.1", "SockServiceName": "8470", "SockType": "stream"},
-        {"SockNodeName": "::1", "SockServiceName": "8470", "SockType": "stream"}]}
+    assert body["RunAtLoad"] is True and body["KeepAlive"] == {"SuccessfulExit": False}
 
 
 def test_run_time_forms_cwd_and_enabled_false(mac):
@@ -579,14 +632,63 @@ def test_a_switched_timer_is_written_after_the_settle_step_records_it(mac):
     assert mac.backend.marked("demo")[0].kind == "timer"
 
 
-def test_a_socket_setting_is_written_into_the_plist(mac):
+def shell(*addresses):
+    return ("{'relay': {'command': 'moxi-demo-relay', "
+            f"'socket': {{'setting': 'port', 'addresses': {list(addresses)!r}}}}}}}")
+
+
+def test_a_socket_daemon_is_one_daemon_change_and_loads_idle(mac, monkeypatch):
+    """The sockets are keys of the daemon's plist, so a plan has no `socket` change; the
+    job is enabled and bootstrapped as any daemon, and with no RunAtLoad it is loaded
+    with no pid until a connection starts it."""
+    monkeypatch.setattr(_plan, "ipv6_loopback", lambda: True)
     mac.script("moxi-demo-relay")
-    mac.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', "
-                       "'socket': {'setting': 'port', 'addresses': ['127.0.0.1']}}}")
+    mac.module(DAEMONS=shell("127.0.0.1", "::1"))
     [change] = units.plan("demo")
-    assert change.kind == "daemon" and change.action == "add"
-    mac.apply([change])
-    assert mac.plist(RELAY)["Sockets"]["Listeners"][0]["SockServiceName"] == "8470"
+    assert (change.kind, change.action) == ("daemon", "add")
+    [done] = mac.apply([change])
+    assert done.ok, done.lines
+    plist = str(mac.agents / f"{RELAY}.plist")
+    assert mac.ctl.calls == [("enable", f"{DOMAIN}/{RELAY}"), ("bootstrap", DOMAIN, plist)]
+    assert mac.plist(RELAY)["Sockets"] == {"Listeners": listener("127.0.0.1"),
+                                           "Listeners-1": listener("::1")}
+    assert mac.ctl.loaded[RELAY] == [None, None]
+    again = mac.plan()
+    assert list(again) == [("relay", "daemon")] and again[("relay", "daemon")].action == "keep"
+
+
+def test_no_ipv6_loopback_leaves_listeners_1_out_until_it_can_be_bound(mac, monkeypatch):
+    monkeypatch.setattr(_plan, "ipv6_loopback", lambda: False)
+    mac.script("moxi-demo-relay")
+    mac.module(DAEMONS=shell("127.0.0.1", "::1"))
+    [change] = units.plan("demo")
+    assert "::1 left out: no IPv6 loopback on this system" in change.reason
+    assert mac.apply([change])[0].ok
+    assert mac.plist(RELAY)["Sockets"] == {"Listeners": listener("127.0.0.1")}
+    monkeypatch.setattr(_plan, "ipv6_loopback", lambda: True)
+    [change] = units.plan("demo")
+    assert (change.kind, change.action) == ("daemon", "change")
+    assert mac.apply([change])[0].ok
+    assert list(mac.plist(RELAY)["Sockets"]) == ["Listeners", "Listeners-1"]
+
+
+def test_a_daemon_that_gains_a_socket_is_booted_out_and_loads_idle(mac):
+    """Booting out the old job ends its process; the new one has no RunAtLoad, so the
+    daemon stays down until a connection, and its sockets hold the port meanwhile."""
+    mac.script("moxi-demo-relay")
+    mac.module(DAEMONS=DAEMON)
+    mac.apply(units.plan("demo"))
+    assert mac.ctl.loaded[RELAY][0]
+    mac.module(DAEMONS=shell("127.0.0.1"))
+    [change] = units.plan("demo")
+    assert (change.kind, change.action) == ("daemon", "change")
+    mac.ctl.calls.clear()
+    assert mac.apply([change])[0].ok
+    assert [c[0] for c in mac.ctl.calls] == ["bootout", "enable", "bootstrap"]
+    assert mac.ctl.loaded[RELAY] == [None, None]
+    body = mac.plist(RELAY)
+    assert "RunAtLoad" not in body and "KeepAlive" not in body
+    assert body["Sockets"]["Listeners"]["SockServiceName"] == "8470"
 
 
 def test_remove_of_a_module_takes_its_plists_and_wraps_nothing(mac):
@@ -870,6 +972,105 @@ def test_status_when_the_print_fails_is_unknown(mac):
                and s.last is None for s in states)
 
 
+SOCKETS_PRINTED = """\
+gui/501 = {
+	services = {
+		       0      -	moxi.demo.idle
+		    4242      0 	moxi.demo.serving
+		       0     -9	moxi.demo.killed
+		       0      0 	moxi.demo.off
+		       0      0 	moxi.demo.old
+	}
+
+	disabled services = {
+		"moxi.demo.off" => disabled
+	}
+}
+"""
+
+
+def test_a_socket_reads_the_daemons_job_and_is_never_failed(mac, monkeypatch):
+    """A socket ref carries the daemon's label and plist. Loaded is `active`, with a pid
+    or not and whatever the last exit; not loaded with its plist is `inactive`; no plist,
+    or a plist with no Sockets, is `missing`. A daemon killed non-zero reads `failed`
+    beside its `active` socket until the next connection starts it."""
+    monkeypatch.setattr(_launchd, "_started", lambda pid: 1700000000.0)
+    sock = Socket("port", ("127.0.0.1",), 8470)
+    for name in ("idle", "serving", "killed", "off", "unloaded"):
+        [group] = mac.backend.render(spec(name=name, socket=sock))
+        group.files[0][0].write_text(group.files[0][1])
+    [old] = mac.backend.render(spec(name="old"))
+    old.files[0][0].write_text(old.files[0][1])
+    names = ("idle", "serving", "killed", "off", "unloaded", "old", "absent")
+    refs = []
+    for name in names:
+        label = f"moxi.demo.{name}"
+        paths = (mac.backend.plist(label),)
+        refs += [UnitRef("demo", name, "daemon", (label,), paths),
+                 UnitRef("demo", name, "socket", (label,), paths)]
+    calls = []
+    fence = recorded(SOCKETS_PRINTED)
+    inner = fence.runner
+    fence.runner = lambda cmd, **kw: calls.append(cmd) or inner(cmd, **kw)
+    states = mac.backend.status(refs, fence)
+    assert len(calls) == 1
+    got = {(s.name, s.kind): (s.state, s.enabled) for s in states}
+    assert got == {
+        ("idle", "daemon"): ("inactive", True), ("idle", "socket"): ("active", True),
+        ("serving", "daemon"): ("active", True), ("serving", "socket"): ("active", True),
+        ("killed", "daemon"): ("failed", True), ("killed", "socket"): ("active", True),
+        ("off", "daemon"): ("inactive", False), ("off", "socket"): ("active", False),
+        ("unloaded", "daemon"): ("inactive", True),
+        ("unloaded", "socket"): ("inactive", True),
+        ("old", "daemon"): ("inactive", True), ("old", "socket"): ("missing", None),
+        ("absent", "daemon"): ("missing", None), ("absent", "socket"): ("missing", None)}
+    sockets = {s.name: s for s in states if s.kind == "socket"}
+    assert all(s.pid is None and s.since is None and s.epoch is None and s.last is None
+               and s.backend == "launchd" for s in sockets.values())
+    assert sockets["idle"].detail == "loaded, listening"
+    assert sockets["unloaded"].detail == "not loaded"
+    assert "has no Sockets" in sockets["old"].detail
+    assert "moxi install demo" in sockets["old"].detail
+    assert "no plist at" in sockets["absent"].detail
+    assert sockets["idle"].log.endswith("/demo/logs/idle.log")
+    assert sockets["old"].log is None and sockets["absent"].log is None
+
+
+def test_a_socket_is_unknown_when_the_print_fails(mac):
+    [group] = mac.backend.render(spec(socket=Socket("port", ("127.0.0.1",), 8470)))
+    group.files[0][0].write_text(group.files[0][1])
+    ref = UnitRef("demo", "relay", "socket", (RELAY,), (group.files[0][0],))
+
+    def run(cmd, *, env=None, timeout=None):
+        return subprocess.CompletedProcess(cmd, 113, "", "Could not find domain for gui: 501")
+    [state] = mac.backend.status([ref], Fence("launchd", run))
+    assert (state.state, state.enabled, state.epoch) == ("unknown", None, None)
+    assert "Could not find domain" in state.detail
+
+
+def test_status_through_the_core_gives_the_socket_after_its_daemon(mac):
+    """An idle socket daemon: the daemon `inactive`, its socket `active` with no epoch,
+    both from the one print; a connection's start gives the daemon its pid, and a kill
+    leaves it `failed` while the socket still reads `active`."""
+    mac.script("moxi-demo-relay")
+    mac.module(DAEMONS=shell("127.0.0.1"))
+    mac.apply(units.plan("demo"))
+    mac.ctl.calls.clear()
+    rows = units.status("demo")
+    assert mac.ctl.calls == [("print", DOMAIN)]
+    assert [(r.name, r.kind, r.state, r.enabled, r.epoch) for r in rows] == [
+        ("relay", "daemon", "inactive", True, None),
+        ("relay", "socket", "active", True, None)]
+    assert rows[1].last is None
+    mac.ctl.loaded[RELAY] = [4100, None]
+    assert [r.state for r in units.status("demo")] == ["active", "active"]
+    mac.ctl.loaded[RELAY] = [None, -9]
+    assert [r.state for r in units.status("demo")] == ["failed", "active"]
+    assert units.disable("demo", ["relay"])[0].ok
+    rows = units.status("demo")
+    assert [(r.state, r.enabled) for r in rows] == [("inactive", False), ("inactive", False)]
+
+
 def test_since_reads_the_process_start_time():
     import psutil
 
@@ -1067,3 +1268,160 @@ def test_proof_the_real_launchctl_on_a_test_label(tmp_path, monkeypatch):
         for ref in refs.values():
             backend.stop_id(ref.ids[0], fence)
             fence.run("enable", backend.target(ref.ids[0]))
+
+
+# A socket daemon for the proof rows: it takes `Listeners` and `Listeners-1` by name,
+# appends one line per start to the file in its first argument (its pid, then how many fds
+# each key gave it), answers each connection `ok`, and exits 0 on a line `exit` or after
+# 20 idle seconds.
+SOCKET_DAEMON = '''\
+import ctypes, os, select, socket, sys, time
+lib = ctypes.CDLL(None)
+lib.launch_activate_socket.argtypes = [
+    ctypes.c_char_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_int)),
+    ctypes.POINTER(ctypes.c_size_t)]
+held = {}
+for key in ("Listeners", "Listeners-1"):
+    fds = ctypes.POINTER(ctypes.c_int)()
+    count = ctypes.c_size_t()
+    err = lib.launch_activate_socket(key.encode(), ctypes.byref(fds), ctypes.byref(count))
+    held[key] = [] if err else [fds[i] for i in range(count.value)]
+with open(sys.argv[1], "a") as out:
+    out.write(f"{os.getpid()} " + " ".join(f"{k}={len(v)}" for k, v in held.items()) + "\\n")
+socks = [socket.socket(fileno=fd) for fds in held.values() for fd in fds]
+deadline = time.monotonic() + 20
+while socks and time.monotonic() < deadline:
+    ready, _, _ = select.select(socks, [], [], 1)
+    for sock in ready:
+        conn, _ = sock.accept()
+        with conn:
+            line = conn.recv(64).strip()
+            conn.sendall(b"ok\\n")
+        if line == b"exit":
+            sys.exit(0)
+'''
+
+
+def _free_port() -> int:
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def _ask(host: str, port: int, line: bytes) -> bytes:
+    import socket
+
+    with socket.create_connection((host, port), timeout=10) as conn:
+        conn.sendall(line + b"\n")
+        return conn.recv(64).strip()
+
+
+def _until(read, check, seconds=15.0):
+    import time
+
+    deadline = time.monotonic() + seconds
+    while True:
+        value = read()
+        if check(value) or time.monotonic() > deadline:
+            return value
+        time.sleep(0.2)
+
+
+def _socket_label(tmp_path, monkeypatch, addresses):
+    """A throwaway socket daemon under a test label, its plist in tmp."""
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path / "home"))
+    module = f"proof{os.urandom(4).hex()}"
+    script = tmp_path / "shell.py"
+    script.write_text(SOCKET_DAEMON)
+    starts = tmp_path / "starts.txt"
+    port = _free_port()
+    backend = LaunchdBackend(agents=tmp_path / "agents", gate="/usr/bin/true")
+    [group] = backend.render(spec(module=module, name="shell",
+                                  command=(sys.executable, "-I", str(script), str(starts)),
+                                  socket=Socket("port", addresses, port)))
+    path, text = group.files[0]
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(text)
+    [ref] = backend.marked(module)
+    sock = UnitRef(module, "shell", "socket", ref.ids, ref.paths)
+    return backend, ref, sock, port, starts
+
+
+@darwin
+def test_proof_a_socket_daemon_starts_at_a_connection_on_either_address(tmp_path,
+                                                                        monkeypatch):
+    """Not started by its bootstrap; a connection to either address starts it and it holds
+    both keys; after `kill -9` it reads `failed` and stays down until the next connection;
+    its socket reads `active` throughout."""
+    import signal
+    import time
+
+    if os.environ.get("MOXI_TEST_REAL_SUPERVISOR") != "1":
+        pytest.skip("a proof row: set MOXI_TEST_REAL_SUPERVISOR=1 on a Mac")
+    backend, ref, sock, port, starts = _socket_label(tmp_path, monkeypatch,
+                                                     ("127.0.0.1", "::1"))
+    fence = Fence("launchd")
+
+    def read():
+        return backend.status([ref, sock], fence)
+
+    try:
+        assert backend.act("enable", ref, fence).ok
+        daemon, socket_state = read()
+        assert (daemon.state, daemon.pid) == ("inactive", None)
+        assert (socket_state.state, socket_state.epoch) == ("active", None)
+        assert not starts.exists()
+        assert _ask("127.0.0.1", port, b"hi") == b"ok"
+        daemon, socket_state = _until(read, lambda s: s[0].pid)
+        assert daemon.state == "active" and socket_state.state == "active"
+        [line] = starts.read_text().splitlines()
+        assert line.split()[1:] == ["Listeners=1", "Listeners-1=1"]
+        os.kill(daemon.pid, signal.SIGKILL)
+        daemon, socket_state = _until(read, lambda s: not s[0].pid)
+        assert daemon.state == "failed" and socket_state.state == "active"
+        time.sleep(5)  # past ThrottleInterval: launchd must not start it on its own
+        daemon, _ = read()
+        assert daemon.pid is None and len(starts.read_text().splitlines()) == 1
+        assert _ask("::1", port, b"exit") == b"ok"
+        daemon, socket_state = _until(read, lambda s: s[0].state == "inactive")
+        assert len(starts.read_text().splitlines()) == 2
+        assert (daemon.state, daemon.pid, socket_state.state) == ("inactive", None, "active")
+    finally:
+        backend.stop_id(ref.ids[0], fence)
+        fence.run("enable", backend.target(ref.ids[0]))
+
+
+@darwin
+def test_proof_record_what_launchd_shows_for_an_address_it_cannot_bind(tmp_path,
+                                                                     monkeypatch, capsys):
+    """`Listeners-1` on 192.0.2.1, which the Mac doesn't have. A record row: it prints the
+    bootstrap's result and `launchctl print` of the label for the report, and holds only
+    that the socket read is never `failed`."""
+    if os.environ.get("MOXI_TEST_REAL_SUPERVISOR") != "1":
+        pytest.skip("a proof row: set MOXI_TEST_REAL_SUPERVISOR=1 on a Mac")
+    backend, ref, sock, port, _ = _socket_label(tmp_path, monkeypatch,
+                                                ("127.0.0.1", "192.0.2.1"))
+    fence = Fence("launchd")
+    try:
+        acted = backend.act("enable", ref, fence)
+        shown = fence.run("print", backend.domain)
+        job = subprocess.run(["launchctl", "print", backend.target(ref.ids[0])],
+                             capture_output=True, text=True)
+        daemon, socket_state = backend.status([ref, sock], fence)
+        try:
+            answer = _ask("127.0.0.1", port, b"exit")
+        except OSError as exc:
+            answer = f"no answer: {exc}"
+        with capsys.disabled():
+            print(f"\nenable: ok={acted.ok} {acted.lines}")
+            print(f"services line: {[l for l in shown.stdout.splitlines() if ref.ids[0] in l]}")
+            print(f"print of the label (exit {job.returncode}):\n{job.stdout}{job.stderr}")
+            print(f"status: daemon {daemon.state} {daemon.detail!r}; "
+                  f"socket {socket_state.state} {socket_state.detail!r}")
+            print(f"a connection to 127.0.0.1: {answer!r}")
+        assert socket_state.state != "failed"
+    finally:
+        backend.stop_id(ref.ids[0], fence)
+        fence.run("enable", backend.target(ref.ids[0]))

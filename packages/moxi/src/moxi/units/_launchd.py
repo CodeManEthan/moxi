@@ -11,9 +11,20 @@ A daemon:
     RunAtLoad, KeepAlive {SuccessfulExit: false}, ThrottleInterval 2,
     ProcessType Background, StandardOutPath and StandardErrorPath (the unit's log file,
     `STATE/<module>/logs/<name>.log`), EnvironmentVariables {MOXI_LOG_FILE: that file},
-    AbandonProcessGroup (only with `stop = "process"`), and a `socket` as
-    Sockets {Listeners: [{SockNodeName, SockServiceName, SockType: stream}, ...]}, one
-    listener per address, which the daemon takes with `launch_activate_socket`.
+    and AbandonProcessGroup (only with `stop = "process"`).
+
+A daemon with a `socket` adds Sockets, one key per address written: `Listeners` for the
+first address in `addresses` and `Listeners-<k>` for the k-th after it, each one
+{SockNodeName, SockServiceName (the port), SockType: stream} dict. The daemon takes each by
+its key with `launch_activate_socket`, so it can tell which addresses it holds. Such a
+daemon has no RunAtLoad and no KeepAlive: RunAtLoad would start it at every login, and
+KeepAlive's SuccessfulExit makes launchd run the job once at load to learn an exit status.
+With neither, launchd holds the sockets from the job's load and starts the job at a
+connection on any of them; after any exit, a crash included, the next connection starts it
+again, with ThrottleInterval still spacing those starts. Its sockets are the job's, so
+there is no `socket` change in a plan, and `status` reads the socket from the job (see
+`status`): launchd never reports a socket it could not bind, so the socket is never
+`failed` here.
 
 A timer has no RunAtLoad and no KeepAlive. Its ProgramArguments is the gate's argv,
 `<scripts>/moxi run [--if <module>.<switch>] --record <module>/<name> -- <command>`;
@@ -31,7 +42,7 @@ launchctl's is relied on.
 The shapes of `launchctl print gui/<uid>` this reads, a `services = {` block of
 `<pid> <last exit status> <label>` lines and a `disabled services = {` block of
 `"<label>" => disabled` lines, are tested here against recorded text; their proof on a
-real Mac is owed.
+real Mac is owed, and so is that of the socket keys and the socket read.
 """
 
 from __future__ import annotations
@@ -42,7 +53,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace as _replaced
 from pathlib import Path
 
-from ._backend import ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef
+from ._backend import ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef, socket_name
 from ._fence import Fence, Ran
 from ._fence import argv as _argv
 from ._types import Acted, UnitChange, UnitState, Wrapped
@@ -125,8 +136,9 @@ class LaunchdBackend:
             body["ProgramArguments"] = list(spec.command)
             if spec.cwd:
                 body["WorkingDirectory"] = spec.cwd
-            body["RunAtLoad"] = True
-            body["KeepAlive"] = {"SuccessfulExit": False}
+            if spec.socket is None:
+                body["RunAtLoad"] = True
+                body["KeepAlive"] = {"SuccessfulExit": False}
             body["ThrottleInterval"] = 2
         else:
             gate = [self.gate(), "run"]
@@ -143,10 +155,7 @@ class LaunchdBackend:
         if spec.kind == "daemon" and spec.stop == "process":
             body["AbandonProcessGroup"] = True
         if spec.kind == "daemon" and spec.socket is not None:
-            port = str(spec.socket.port)
-            body["Sockets"] = {"Listeners": [
-                {"SockNodeName": address, "SockServiceName": port, "SockType": "stream"}
-                for address in spec.socket.addresses]}
+            body["Sockets"] = _sockets(spec)
         head = [MARK.format(spec.unit)] + ([DISABLED] if not spec.enabled else [])
         try:
             text = _document(head, body)
@@ -371,10 +380,21 @@ class LaunchdBackend:
         lists disabled, True otherwise, None when `missing`. When the print fails, every
         unit is `unknown` with the failure in `detail`.
 
+        A `socket` ref is a daemon's sockets, passed with the daemon's own label and
+        plist: launchd holds a loaded job's sockets whether the job runs or not, so the
+        socket is `active` while the label is loaded, `inactive` with the plist there and
+        not loaded, and `missing` with no plist, or with a plist that has no `Sockets`
+        (written before the daemon declared one). Its `pid`, `since` and `epoch` are None
+        and its `enabled` is the label's. It is never `failed`: the print says nothing of
+        a socket launchd could not bind, so a job whose address the system lacks still
+        reads `active`. The daemon's own state follows the daemon rule above, so one
+        idle under its sockets reads `inactive`, and one that was killed or exited
+        non-zero reads `failed` until the next connection starts it again.
+
         One state per unit, in the order of `units`. `last` is launchd's own result only,
-        `{"status": <last exit status>}` for a timer (None for a daemon); the core adds the
-        gate's run line. A foreign label from `foreign(ref, None)` is read in the same
-        call."""
+        `{"status": <last exit status>}` for a timer (None for a daemon and a socket); the
+        core adds the gate's run line. A foreign label from `foreign(ref, None)` is read
+        in the same call."""
         if not units:
             return []
         ran = fence.run("print", self.domain)
@@ -384,8 +404,17 @@ class LaunchdBackend:
             label = unit.ids[0]
             path = unit.paths[0] if unit.paths else self.plist(label)
             pid = since = last = None
+            body = _load(path)
             if not ran.ok:
                 state, detail = "unknown", ran.failure()
+            elif unit.kind == "socket" and not path.is_file():
+                state, detail = "missing", f"no plist at {path}"
+            elif unit.kind == "socket" and not (body and body.get("Sockets")):
+                state, detail = "missing", (f"the plist at {path} has no Sockets; "
+                                            f"`moxi install {unit.module}` writes them")
+            elif unit.kind == "socket":
+                state, detail = (("active", "loaded, listening") if label in services
+                                 else ("inactive", "not loaded"))
             elif label in services:
                 pid, code = services[label]
                 if unit.kind == "timer":
@@ -406,17 +435,13 @@ class LaunchdBackend:
             enabled = None if state in ("missing", "unknown") else disabled.get(label, True)
             out.append(UnitState(unit.module, unit.name, unit.kind, self.name, state,
                                  pid=pid, since=since, last=last, detail=detail,
-                                 log=None if state == "missing" else self.log(unit),
+                                 log=None if state == "missing" else _log(body),
                                  enabled=enabled))
         return out
 
     def log(self, unit: UnitRef) -> str | None:
         """The plist's StandardOutPath (or StandardErrorPath), None when it has neither."""
-        body = _load(unit.paths[0] if unit.paths else self.plist(unit.ids[0]))
-        if not body:
-            return None
-        found = body.get("StandardOutPath") or body.get("StandardErrorPath")
-        return found if isinstance(found, str) else None
+        return _log(_load(unit.paths[0] if unit.paths else self.plist(unit.ids[0])))
 
     # -- a foreign timer's wrap: systemd only --------------------------------------------------
 
@@ -490,6 +515,22 @@ class LaunchdBackend:
 
 # -- the plist text ---------------------------------------------------------------------------
 
+#: The base of a daemon's socket keys: `Listeners`, then `Listeners-<k>`.
+LISTENERS = "Listeners"
+
+
+def _sockets(spec: Spec) -> dict:
+    """The `Sockets` dict: one key per address written, `socket_name(LISTENERS, place)`,
+    each one listener dict, so the daemon tells its addresses apart by key."""
+    socket = spec.socket
+    if not socket.listens:
+        raise RenderError("socket", f"{spec.unit}: its socket has no address to listen on")
+    port = str(socket.port)
+    return {socket_name(LISTENERS, place): {"SockNodeName": address,
+                                            "SockServiceName": port, "SockType": "stream"}
+            for place, address in socket.listens}
+
+
 def _schedule(spec: Spec) -> dict:
     schedule = spec.schedule
     if schedule is None:
@@ -556,6 +597,14 @@ def _load(path: Path) -> dict | None:
     except (OSError, ValueError, plistlib.InvalidFileException):
         return None
     return body if isinstance(body, dict) else None
+
+
+def _log(body: dict | None) -> str | None:
+    """A plist body's StandardOutPath (or StandardErrorPath), None when it has neither."""
+    if not body:
+        return None
+    found = body.get("StandardOutPath") or body.get("StandardErrorPath")
+    return found if isinstance(found, str) else None
 
 
 # -- the domain read ----------------------------------------------------------------------------
