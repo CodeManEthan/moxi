@@ -41,7 +41,12 @@ exclude = ["src/moxi_turns/claude/*/tests"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution built from any branch holds the published paths and nothing else.
-only-include = ["contracts/socket-protocol.md", "src/moxi_turns", "tests", "LICENSE", "README.md"]
+only-include = ["contracts/socket-protocol.md", "src/moxi_turns", "tests", "LICENSE", "README.md",
+                "conftest.py"]
 
+# A plain `pytest` runs the units and contract seams, and so does `moxi-dev check`: the
+# tiers are deselected here. Run one by hand with `pytest -m <tier>` (a live test also
+# needs MOXI_TEST_LIVE=1).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not browser and not slow and not build and not live'"
