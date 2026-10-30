@@ -294,6 +294,9 @@ class FakeBackend:
             return (f"{stem}.timer", f"{stem}.service")
         return (f"{stem}.socket", f"{stem}.service")
 
+    def files(self, module: str, name: str, kind: str) -> tuple[Path, ...]:
+        return tuple(self.root / unit for unit in self.ids(module, name, kind))
+
     def _socket_of(self, unit: UnitRef) -> tuple[str, ...]:
         if unit.kind != "daemon" or not unit.marked:
             return ()

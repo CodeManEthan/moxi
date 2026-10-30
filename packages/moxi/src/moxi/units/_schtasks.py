@@ -286,6 +286,9 @@ class SchtasksBackend:
         or not the task is registered. No supervisor call."""
         return (self.task(module, name),)
 
+    def files(self, module: str, name: str, kind: str) -> tuple[Path, ...]:
+        return (self.xml_path(module, name),)
+
     def act(self, act: str, unit: UnitRef, fence: Fence) -> Acted:
         task = unit.ids[0]
         daemon = unit.kind == "daemon"

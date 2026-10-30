@@ -455,6 +455,10 @@ class SystemdBackend:
             return (f"{stem}.timer", f"{stem}.service")
         return (f"{stem}.socket", f"{stem}.service")
 
+    def files(self, module: str, name: str, kind: str) -> tuple[Path, ...]:
+        """The unit files of those ids, file or not."""
+        return tuple(self.root / unit for unit in self.ids(module, name, kind))
+
     def _socket_of(self, unit: UnitRef) -> tuple[str, ...]:
         """A marked daemon's `.socket` id, when a file with its mark is there."""
         if unit.kind != "daemon" or not unit.marked:

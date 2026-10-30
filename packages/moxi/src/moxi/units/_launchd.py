@@ -295,6 +295,9 @@ class LaunchdBackend:
         not its plist is there. No supervisor call."""
         return (self.label(module, name),)
 
+    def files(self, module: str, name: str, kind: str) -> tuple[Path, ...]:
+        return (self.plist(self.label(module, name)),)
+
     def act(self, act: str, unit: UnitRef, fence: Fence) -> Acted:
         label = unit.ids[0]
         lines: list[str] = []
