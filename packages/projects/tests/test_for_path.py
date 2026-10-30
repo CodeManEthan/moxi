@@ -96,6 +96,14 @@ def test_no_rows_answers_none_without_touching_the_path(store_path, monkeypatch)
     assert [c for c in calls if c.startswith("/some")] == []
 
 
+def test_a_path_holding_a_nul_is_in_no_project(tmp_path):
+    root = tmp_path / "proj"
+    make_main_repo(root)
+    register(("proj", root))
+    assert api.for_path(str(root / "src") + "\0x") is None
+    assert api.for_path("\0") is None
+
+
 # --- symlinks, case and identity -----------------------------------------------------------
 
 @POSIX

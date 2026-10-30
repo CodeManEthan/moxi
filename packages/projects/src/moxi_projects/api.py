@@ -322,12 +322,12 @@ def for_path(path: str) -> Project | None:
     found by reading git's own `.git` and `commondir` files; no git process runs. The
     filesystem calls stay on `path`'s own ancestry (and its main work tree's): a root
     that is not a candidate is never touched. The answer is about the filesystem as it
-    stands now.
+    stands now. A path holding a NUL character names no file, so it is in no project.
 
     Raises `Unreadable` (or its `TooNew` and `Busy`).
     """
     rows = _rows()
-    if not rows:
+    if not rows or "\0" in os.fspath(path):
         return None
     index = _Index(rows)
     path = os.path.normpath(os.path.abspath(os.path.expanduser(os.fspath(path))))
