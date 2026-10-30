@@ -1408,6 +1408,21 @@ def test_a_timer_the_manager_does_not_hold_or_that_names_nothing_has_no_triggers
     assert len(run.calls) == 1
 
 
+def test_a_foreign_socket_read_as_a_daemon_carries_no_triggers(unit_root):
+    """A foreign `.socket` ref is read as a daemon, and its block's `Triggers` names the
+    service it starts. Only a timer's `Triggers` is carried, so a unit a `.socket` starts
+    is never taken for one a timer runs."""
+    show = _shown(_block(Id="watch.socket", LoadState="loaded", ActiveState="active",
+                         SubState="listening", UnitFileState="enabled",
+                         Triggers="watch-run.service"))
+    run = Recorder(show=show)
+    backend = SystemdBackend()
+    ref = backend.foreign("watch.socket", None)
+    [read] = backend.status([ref], Fence("systemd", run))
+    assert (ref.kind, read.state) == ("daemon", "active")
+    assert read.triggers is None
+
+
 def test_status_reads_wrapped_from_the_drop_in_paths(unit_root):
     dropin = unit_root / "backup-run.service.d" / "50-moxi-services.conf"
     dropin.parent.mkdir()
