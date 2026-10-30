@@ -222,3 +222,23 @@ def test_a_refresh_that_fetches_a_newer_copy_lists_it(monkeypatch, capsys):
     assert "catalogue version 4 kept in" in err
     assert out.startswith("comms  moxi-comms")
     assert "cache" not in out
+
+
+@pytest.mark.parametrize("junk", ["status", "body"])
+def test_an_answer_that_is_not_http_fails_the_fetch(monkeypatch, junk):
+    """A broken proxy's answer is a failed refresh, not a traceback."""
+    import http.client
+    import urllib.request
+
+    class Torn(_Response):
+        def read(self, amount=None):
+            raise http.client.IncompleteRead(b"part", 10)
+
+    def urlopen(request, timeout):
+        if junk == "status":
+            raise http.client.BadStatusLine("NOT-HTTP garbage")
+        return Torn(b"")
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    with pytest.raises(CatalogueError, match="cannot fetch"):
+        catalogue._fetch(catalogue.URL)
