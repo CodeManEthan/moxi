@@ -1,0 +1,46 @@
+[project]
+name = "moxi-dev"
+version = "0.1.0"
+description = "Moxi's contributor tools: the moxi-dev command, which checks a change and starts a new package."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Testing",
+]
+# The test runner and its plugins are moxi-dev's own dependencies, so the root's dev
+# group, which names moxi-dev alone, brings them into a contributor's environment.
+dependencies = ["moxi", "pytest", "pytest-xdist", "pytest-timeout"]
+
+[project.scripts]
+moxi-dev = "moxi_dev.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/moxihq/moxi"
+Repository = "https://github.com/moxihq/moxi"
+Issues = "https://github.com/moxihq/moxi/issues"
+
+[dependency-groups]
+dev = ["pytest"]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/moxi_dev"]
+
+[tool.hatch.build.targets.sdist]
+# A source distribution holds these paths and nothing else.
+only-include = ["LICENSE", "README.md", "src/moxi_dev", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
