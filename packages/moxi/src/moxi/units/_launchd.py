@@ -216,9 +216,8 @@ class LaunchdBackend:
         for change in restarts:
             label = self._label_of(change)
             if isinstance(read, Ran):
-                io.fail(change, read, "the daemon runs its old code until it is "
-                                      f"restarted: `moxi restart {change.module} "
-                                      f"{change.name}`")
+                io.fail(change, read, "the daemon runs its old code until it restarts: "
+                                      f"`launchctl kickstart -k {self.target(label)}`")
                 continue
             if read.get(label, (None, None))[0]:
                 self._run(io, change, "kickstart", self.target(label))

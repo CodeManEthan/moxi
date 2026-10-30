@@ -466,6 +466,25 @@ def test_restart_after_an_upgrade_kickstarts_only_running_restart_daemons(mac):
     assert mac.ctl.calls == [("print", DOMAIN), ("kickstart", "-k", f"{DOMAIN}/{RELAY}")]
 
 
+def test_a_failed_domain_read_fails_a_restart_and_rewrites_a_keep_daemon(mac):
+    mac.script("moxi-demo-relay")
+    mac.script("moxi-demo-kept")
+    kept = "'kept': {'command': 'moxi-demo-kept', 'upgrade': 'keep'%s}"
+    mac.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay'}, " + kept % "" + "}")
+    mac.apply(units.plan("demo"))
+    mac.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay'}, "
+                       + kept % ", 'args': ['-v']" + "}")
+    mac.ctl.fail[("print", None)] = (1, "Could not print domain")
+    mac.ctl.calls.clear()
+    done = {a.change.name: a for a in mac.apply(units.plan("demo"), restart=True)}
+    assert mac.ctl.calls == [("print", DOMAIN)]
+    assert not done["relay"].ok and done["relay"].lines == (
+        f"`launchctl print {DOMAIN}` failed: Could not print domain",
+        f"the daemon runs its old code until it restarts: `launchctl kickstart -k "
+        f"{DOMAIN}/{RELAY}`")
+    assert done["kept"].ok and mac.plist("moxi.demo.kept")["ProgramArguments"][1:] == ["-v"]
+
+
 def test_a_removed_unit_is_booted_out_and_deleted_loaded_or_not(mac):
     mac.module(DAEMONS="{}")
     for name in ("old", "gone"):
