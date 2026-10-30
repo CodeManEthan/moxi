@@ -378,6 +378,13 @@ class Backend(Protocol):
         replace=True)` stops the unmarked unit of a declared daemon by these ids."""
         ...
 
+    def files(self, module: str, name: str, kind: str) -> tuple[Path, ...]:
+        """The files the writer gives unit `<module>/<name>` of `kind` (`daemon` or
+        `timer`), whether or not they are there: a systemd daemon's `.service` and
+        `.socket`, a timer's `.service` and `.timer`; a launchd plist; a task's kept XML.
+        No supervisor call. The home move reads them for a file moxi did not write."""
+        ...
+
     def act(self, act: str, unit: UnitRef, fence: Fence) -> Acted:
         """One of `start`, `stop`, `restart`, `enable`, `disable` on one unit, by the verb
         table of the design: after `enable` a daemon runs and a timer's schedule is armed,

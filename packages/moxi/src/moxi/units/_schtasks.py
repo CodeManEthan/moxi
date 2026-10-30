@@ -270,6 +270,9 @@ class SchtasksBackend:
         # and a timer's acts never end a run the user started.
         return UnitRef(None, ref, "timer", (_path(ref),))
 
+    def files(self, module: str, name: str, kind: str) -> tuple[Path, ...]:
+        return (self.xml_path(module, name),)
+
     def act(self, act: str, unit: UnitRef, fence: Fence) -> Acted:
         task = unit.ids[0]
         daemon = unit.kind == "daemon"

@@ -290,6 +290,9 @@ class LaunchdBackend:
                                     or "StartCalendarInterval" in body) else "daemon"
         return UnitRef(None, ref, kind, (ref,), (path,) if path.is_file() else ())
 
+    def files(self, module: str, name: str, kind: str) -> tuple[Path, ...]:
+        return (self.plist(self.label(module, name)),)
+
     def act(self, act: str, unit: UnitRef, fence: Fence) -> Acted:
         label = unit.ids[0]
         lines: list[str] = []
