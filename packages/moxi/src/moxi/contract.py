@@ -69,7 +69,7 @@ ANNOUNCEMENT = ("INTERFACES", "API", "CLI", "SUMMARY", "OPTIONAL", "GATED", "INT
 #: The core's one console script.
 CORE_SCRIPT = ("moxi", "moxi.cli:main")
 #: Inside these core modules check 5 does not apply.
-CORE_ENV_READERS = frozenset({"moxi.paths", "moxi.config"})
+CORE_ENV_READERS = frozenset({"moxi.paths", "moxi.config", "moxi.log"})
 #: What a segment's closure may not import (top-level package names), besides turns.
 SEGMENT_IMPORTS = frozenset({"subprocess", "socket", "multiprocessing", "ctypes", "http",
                              "urllib"})
