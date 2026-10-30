@@ -213,13 +213,23 @@ only what its prepare step judged.
 
 `repo/commit-rules` runs on commit-msg, fail closed, order 10. It checks:
 
-- **Trailer shape.** When the message's last paragraph holds any trailer (`Key: value`),
-  it holds nothing but trailers, so git's parser reads them all. A line outside that block
-  whose key is one of the block's keys, or a refused key, is a trailer stranded in the
-  body. Every trailer has a value. A key on the repo's refused list is refused.
-- **No tags.** The subject and body, without the trailer block, comment lines and anything
-  below the scissors line, are matched against the repo's tag patterns. With no pattern
-  there is no tag check.
+- **Trailer shape.** The piece reads trailers as git's own parser does. The message's last
+  paragraph is its trailer block when git reads it as one: every line a trailer
+  (`Key: value`), or at least a quarter of them with a `Signed-off-by:`, a cherry-pick line
+  or a key set in the repo's `trailer.*` config among them. A last paragraph git won't read
+  that way is refused when it holds a trailer whose key is plainly one (hyphenated, on the
+  refused list, or set in `trailer.*` config), since git then reads none of its trailers:
+  put a blank line before them. Otherwise it is prose, so `Note: check length first.` at
+  the end of a body passes. A line whose `:` is followed by `//`, a URL, is never a
+  trailer. A line outside the block whose key is one of the block's keys, or a refused
+  key, is a trailer stranded in the body. Every trailer has a value. A key on the repo's
+  refused list is refused.
+- **No tags.** The subject and body, without the block's trailers, comment lines and
+  anything below the scissors line, are matched against the repo's tag patterns. With no
+  pattern there is no tag check. A comment line is any line that starts with the repo's
+  comment prefix, whatever git's cleanup mode: a line that starts with `#` is not checked
+  even under `git commit -m` or `--cleanup=verbatim`, where git keeps it in the message, and
+  with `core.commentChar=auto` the prefix is taken as `#`.
 
 ```text
 repo: commit-msg refused by repo/commit-rules: no tags: line 3 has "TAG-12"; say it in plain words
@@ -245,7 +255,8 @@ Two config keys turn it on more widely:
   then; a later change reaches no repo that already has the piece.
 
 The refused-trailer list has no config default: refusing a trailer is decided per repo. A
-pattern that won't compile is refused by `add` before anything is written, and by
+pattern that won't compile, or that matches the empty string (it would find an empty match
+on every line and check nothing), is refused by `add` before anything is written, and by
 `moxi config` in the config file.
 
 ## The committer
