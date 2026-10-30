@@ -31,10 +31,11 @@ import threading
 import time
 
 import pytest
-from conftest import (projects_root, raw_connection, send_ready, send_turn, settle,
+from conftest import (projects_root, raw_connection, record_rows, send_ready, send_turn, settle,
                       wait_for_queue, wait_until, write_config, write_transcript)
 
 from moxi import exit as moxi_exit
+from moxi_comms.store import books as books_mod
 from moxi_comms import cache, cli, constants, cursors, machine_line
 from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.claimhold import ClaimServer
@@ -830,7 +831,7 @@ def test_the_trim_waits_for_the_queue_load(rig, monkeypatch, reboot):
     if rig.backend != "local":
         pytest.skip("only the local record trims")
     mid = next_turn(rig)
-    assert wait_until(lambda: (mid, REVIEWER_Q) in rig.record.queue_rows())
+    assert wait_until(lambda: (mid, REVIEWER_Q) in record_rows(rig.record))
     # Stopped before `ancient` is posted: a live daemon would route it to the unbound
     # name and give it a row whenever its pass beat the cursor below.
     rig.daemon.stop()
@@ -849,7 +850,7 @@ def test_the_trim_waits_for_the_queue_load(rig, monkeypatch, reboot):
         raise RuntimeError("the boot read failed")
 
     with monkeypatch.context() as patched:
-        patched.setattr(rig.record, "queue_rows", lambda: broken(None))
+        patched.setattr(books_mod.Books, "rows", lambda *a, **k: broken(None))
         with pytest.raises(RuntimeError):
             Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     assert os.environ["CLAUDE_CONFIG_DIR"].startswith(tempfile.gettempdir())

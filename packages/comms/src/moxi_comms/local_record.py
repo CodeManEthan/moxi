@@ -12,7 +12,7 @@ What is fixed here, and must not drift:
 
   * `STATE/comms/comms.db` (`paths.comms_db()`), one file per box, opened only
     through `store.open_write`. STATE and not DATA because a live DB is never
-    continuous-file-synced. The record's tables are `rooms`, `messages`, `queue`,
+    continuous-file-synced. The record's tables are `rooms`, `messages`,
     `principals`, `denied` and `meta`; `store/schema.py` makes them.
   * `max_content_length` 16,000 (`record.MAX_CONTENT_LENGTH`), the one cap on one
     message.
@@ -349,33 +349,6 @@ class LocalRecord:
             "ORDER BY id", (str(channel_id), str(timestamp))).fetchall()
         return [self._message(r) for r in rows]
 
-    # ------------------------------------------------------------------ the queue
-    def queue_add(self, name: str, ids) -> None:
-        """Rows: each of `ids` waits for `name`. A row that exists stays as it is. Raises
-        on a failed write; the daemon keeps the change and retries it."""
-        rows = [(int(i), str(name)) for i in ids if str(i).isdigit()]
-        if not rows:
-            return
-        with self._write() as conn:
-            conn.executemany("INSERT OR IGNORE INTO queue(message_id, name, queued_at) "
-                             "VALUES (?,?,?)", [row + (self._now(),) for row in rows])
-
-    def queue_remove(self, name: str, ids) -> None:
-        """Delete the rows of `ids` for `name`. Raises on a failed write."""
-        rows = [(int(i), str(name)) for i in ids if str(i).isdigit()]
-        if not rows:
-            return
-        with self._write() as conn:
-            conn.executemany("DELETE FROM queue WHERE message_id = ? AND name = ?", rows)
-
-    def queue_rows(self) -> list[tuple[str, str]]:
-        """Every row, as (message id, name), oldest id first. The daemon reads them before
-        its socket listens; a read that raises stops the start."""
-        rows = self._conn().execute(
-            "SELECT message_id, name FROM queue ORDER BY message_id, name").fetchall()
-        return [(str(r[0]), r[1]) for r in rows]
-
-    # ------------------------------------------------------------------ retention
     def trim(self, retain_days: int | None = None, *, keep=()) -> int:
         """Delete messages older than `retain_days`; `0` disables.
 

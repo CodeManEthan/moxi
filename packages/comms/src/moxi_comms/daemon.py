@@ -83,6 +83,7 @@ from pathlib import Path
 from moxi import ipc
 
 from . import (attribution, bindings, cache, config, constants, cursors, directory, wire)
+from .store import books as books_mod
 from .attribution import Author
 from .machine_line import (COLD_AT_LIVE, POSTURE_NONE,
                            POSTURE_ONCE, parse as parse_machine_line)
@@ -393,17 +394,14 @@ class Daemon:
         self._auto_seq = 0
         self.auto_windows: dict[str, list] = {}        # agent-N -> [start, end|None]
         #: The queue: qualified -> {message id: the message's epoch, or None until it is
-        #: read}. Every message waiting for a name, offline, cold or flagged alike; the
-        #: record's `queue` table is the durable copy, loaded at boot before the socket
-        #: listens, and memory is the authority for the running daemon.
+        #: read}. Every message waiting for a name, offline, cold or flagged alike: the
+        #: `waiting` rows of the delivery books, loaded at boot before any method is
+        #: answered and written through on every change.
         self.queue: dict[str, dict[str, float | None]] = {}
-        #: (qualified, message id) -> True (add) or False (remove): queue changes the
-        #: record has not taken yet. Written at the end of the change's pass and retried
-        #: at every later one; the last change to a row wins.
-        self._queue_unwritten: dict[tuple[str, str], bool] = {}
-        #: One writer of the queue's record rows at a time, so an older change never
-        #: lands after a newer one.
-        self._queue_write_lock = threading.Lock()
+        #: The delivery books in comms.db (`store.books`): every routed message's row
+        #: per recipient, waiting, handed or in a digest. Each change to `queue` above
+        #: and each hand-over is written through to it at once; opened at boot.
+        self.books = books_mod.Books(self.db_path, clock=clock)
         #: message ids a record line addressed to a send-only identity, logged once
         #: each so a rescan does not say it again. Bounded (`_note_send_only`).
         self.send_only_seen: dict[str, None] = {}
@@ -552,6 +550,7 @@ class Daemon:
         except BaseException:
             self.host.close()
             self.host = None
+            self.books.close()
             raise
         return self
 
@@ -572,9 +571,17 @@ class Daemon:
             if fenced:
                 log.warning("boot fence: closed %d custody interval(s) left open by a "
                             "daemon that did not shut down cleanly", fenced)
-        # boot: the queue, BEFORE any method is answered, so no bind or routing pass can
-        # hand a queued id as live mail. A read that RAISES stops the start here: routing
-        # without the queue would hand queued mail as if it were new.
+        # boot: the delivery books, fenced BEFORE any method is answered: every row a
+        # binding of the last daemon held (handed, or in a digest whose turn never
+        # reported) waits again, and every digest it left open ends `fenced`. Then the
+        # queue, so no bind or routing pass can hand a queued id as live mail. An open
+        # or a read that RAISES stops the start here: routing without the books would
+        # hand queued mail as if it were new.
+        self.books.open()
+        rows, digests = self.books.fence()
+        if rows or digests:
+            log.warning("boot fence: %d row(s) handed by the last daemon wait again, and "
+                        "%d digest(s) it left open are closed", rows, digests)
         self._load_queue()
         # boot: cache's drift store, opened to learn; every lowering is written by it.
         if self._own_store:
@@ -629,6 +636,7 @@ class Daemon:
         # after the connections' releases; a write that lands after this is a no-op,
         # and the next boot's fence closes it
         self.binding_history.close()
+        self.books.close()
         if self._own_store and self.cache_store is not None:
             cache.close_store(self.cache_store)      # the learning lock goes with it
             self.cache_store = None
@@ -1881,29 +1889,47 @@ class Daemon:
         return False
 
     def _queue_unbound(self, b: Binding) -> None:
-        """At unbind: every id this binding was handed that has no row, that its adapter
-        did not name `handled`, and that its cursor has not passed gets a row, so the
-        name's next binding gets it at a release point. Rows are never deleted here. An
-        `agent-N` gets no deferred mail: its rows go with its binding, since a later
-        session numbered the same is someone else. Called under the lock."""
+        """At unbind, the release: every row the binding held, handed or in a digest,
+        waits again for the name's next binding, and its open digests end. An `agent-N`
+        gets no deferred mail: its rows go with its binding, since a later session
+        numbered the same is someone else. Called under the lock."""
         if b.tier == TIER_EPHEMERAL:
             dropped = sorted(self.queue.get(b.qualified, {}), key=_as_id)
             if dropped:
-                self._queue_drop(b.qualified, dropped)
+                self.queue.pop(b.qualified, None)
+            self._book("release the rows of", b.qualified,
+                       lambda: self.books.release(b.qualified, ephemeral=True))
             return
+        released: list = []
+
+        def release() -> None:
+            released.extend(self.books.release(b.qualified))
+
+        self._book("release the rows of", b.qualified, release)
+        # And what this binding was handed with no row (the ids its adapter said it held
+        # at bind) and never handled: it waits again too.
+        back = set(released) | {mid for mid in b.delivered if mid not in b.handled}
+        rows = self.queue.setdefault(b.qualified, {})
         memo: dict = {}
-        back = [mid for mid in b.delivered
-                if mid not in b.handled and mid not in self.queue.get(b.qualified, {})
-                and not self._past_cursor(b.qualified, mid, memo)]
-        # Written here, not through `_queue_add`: the binding is still in `bindings`
-        # (the caller queues before it drops it), and `_queue_add` refuses every id the
-        # live binding was handed -- which is every id here. Epochs fill in at the flush.
-        for mid in back:
-            self.queue.setdefault(b.qualified, {})[mid] = None
-            self._queue_unwritten[(b.qualified, mid)] = True
-        if back:
+        # A row that waited before this binding took it waits again whatever the
+        # cursor says (a held row can sit below an acked one); a live hand-over the
+        # cursor has passed was handled.
+        past = [mid for mid in back if mid not in rows
+                and self._past_cursor(b.qualified, mid, memo)]
+        if past:
+            self._book("drop rows of", b.qualified,
+                       lambda: self.books.drop(b.qualified, past))
+        added = sorted((mid for mid in back - set(past) if mid not in rows), key=_as_id)
+        for mid in added:
+            rows[mid] = None
+            if mid not in released:
+                self._book("queue a row for", b.qualified,
+                           lambda mid=mid: self.books.add(b.qualified, mid))
+        if not rows:
+            self.queue.pop(b.qualified, None)
+        if added:
             log.info("unbind %s: %d handed message(s) not yet handled are queued again",
-                     b.qualified, len(back))
+                     b.qualified, len(added))
 
     def _claim(self, binding: Binding, message_id: str) -> bool:
         """Atomically claim a message for a binding. Live routing, catch-up and a release
@@ -1915,14 +1941,30 @@ class Daemon:
             binding.delivered.add(message_id)
             if _as_id(message_id) > _as_id(binding.handed_max):
                 binding.handed_max = message_id      # the `owed` query's `undelivered`
+            # Its row, handed to this binding: made for a live send, taken from
+            # `waiting` for a release. The row stays until the name acks it.
+            self._book("hand a row of", binding.qualified,
+                       lambda: self.books.hand(binding.qualified, message_id,
+                                               binding.history_id))
             return True
 
     # ------------------------------------------------------------------ the queue
+    def _book(self, what: str, qualified: str, write) -> None:
+        """One write to the delivery books. Never raises: a write that fails is logged,
+        and memory stays the authority for this daemon's life. The row it would have
+        changed is wrong in the store until the next change to it, and the next boot's
+        fence and rescan read the store as it is."""
+        try:
+            write()
+        except Exception:                                          # noqa: BLE001
+            log.exception("could not %s %s in the delivery books; this daemon keeps "
+                          "going on what it holds in memory", what, qualified)
+
     def _queue_add(self, qualified: str, message_id: str, epoch: float | None) -> None:
         """One row: `message_id` waits for `qualified`. A row that exists is left as it
         is. An id the name's live binding was handed gets none (a reader that raced the
         hand-over). An `agent-N` gets a row only while it is bound. Under the lock; the
-        record write follows at `_queue_flush`."""
+        row is written through to the books at once (a handed row waits again)."""
         rows = self.queue.get(qualified)
         if rows is not None and message_id in rows:
             return
@@ -1932,43 +1974,24 @@ class Daemon:
         if b is None and is_auto_name(split_tag(qualified)[0]):
             return
         self.queue.setdefault(qualified, {})[message_id] = epoch
-        self._queue_unwritten[(qualified, message_id)] = True
+        self._book("queue a row for", qualified,
+                   lambda: self.books.add(qualified, message_id))
 
     def _queue_drop(self, qualified: str, ids) -> None:
-        """Delete rows. Only a `handled` report deletes a row of a name that can still
-        be handed it; the other callers drop rows nobody can take (an `agent-N`'s at its
-        unbind or at boot, a send-only name's). Under the lock."""
+        """Delete rows. Only an ack deletes a row of a name that can still be handed
+        it; the other callers drop rows nobody can take (an `agent-N`'s at its unbind or
+        at boot, a send-only name's). Under the lock."""
+        ids = list(ids)
         rows = self.queue.get(qualified, {})
         for mid in ids:
             rows.pop(mid, None)
-            self._queue_unwritten[(qualified, mid)] = False
         if not rows:
             self.queue.pop(qualified, None)
+        self._book("drop rows of", qualified, lambda: self.books.drop(qualified, ids))
 
     def _queue_flush(self) -> None:
-        """Write the queue's changes to the record, then fill in the epoch of any row
-        added without one. Never raises: a write that fails is logged, kept, and tried
-        again at the next pass, and memory stays the authority meanwhile."""
-        with self._queue_write_lock:
-            with self._lock:
-                todo = dict(self._queue_unwritten)
-            if todo:
-                adds, removes = {}, {}
-                for (q, mid), add in todo.items():
-                    (adds if add else removes).setdefault(q, []).append(mid)
-                try:
-                    for q, ids in removes.items():
-                        self.record.queue_remove(q, ids)
-                    for q, ids in adds.items():
-                        self.record.queue_add(q, ids)
-                except Exception:                                  # noqa: BLE001
-                    log.exception("the record write of %d queue change(s) failed; kept in "
-                                  "memory and tried again at the next pass", len(todo))
-                else:
-                    with self._lock:
-                        for key, add in todo.items():
-                            if self._queue_unwritten.get(key) is add:
-                                del self._queue_unwritten[key]
+        """Fill in the epoch of any row added without one. Never raises. The rows
+        themselves are written as they change (`_queue_add`, `_queue_drop`)."""
         with self._lock:
             unknown = [(q, mid) for q, rows in self.queue.items()
                        for mid, at in rows.items() if at is None]
@@ -1997,9 +2020,12 @@ class Daemon:
         return view
 
     def queued_ids(self) -> set:
-        """Every id with a row for any name: what the retention trim keeps."""
+        """Every id with a row for any name, in any state: what the retention trim
+        keeps."""
         with self._lock:
-            return {mid for rows in self.queue.values() for mid in rows}
+            ids = {mid for rows in self.queue.values() for mid in rows}
+        # A stopped daemon's books are closed; it trims with the queue it loaded.
+        return ids | self.books.held_ids() if self.books.is_open else ids
 
     # ------------------------------------------------------------------ send-only lines
     def _note_send_only(self, qualified: str, message_id: str) -> None:
@@ -2408,8 +2434,7 @@ class Daemon:
                              "ignored", q, mid)
                     continue
                 binding.handled.add(mid)
-                if mid in self.queue.get(q, {}):
-                    self._queue_drop(q, [mid])
+                self._queue_drop(q, [mid])
             for raw in unhandled:
                 mid = str(raw)
                 if mid not in binding.delivered:
@@ -2417,9 +2442,10 @@ class Daemon:
                              "handed; ignored", q, mid)
                     continue
                 binding.delivered.discard(mid)
-                if self.bindings.get(q) is binding and mid not in self.queue.get(q, {}):
-                    self.queue.setdefault(q, {})[mid] = None
-                    self._queue_unwritten[(q, mid)] = True
+                if self.bindings.get(q) is binding:
+                    self.queue.setdefault(q, {}).setdefault(mid, None)
+                    self._book("queue a row for", q,
+                               lambda mid=mid: self.books.add(q, mid))
         self._queue_flush()
 
     def _end_pass(self, memo: dict) -> None:
@@ -2430,29 +2456,30 @@ class Daemon:
 
     # ------------------------------------------------------------------ boot
     def _load_queue(self) -> None:
-        """Boot, before the socket listens: every row. A row for an `agent-N` is
-        dropped: its numbering restarts with the daemon, so the name would be a later,
-        unrelated session's. A read that RAISES stops the start."""
-        rows = list(self.record.queue_rows())
-        dropped = []
+        """Boot, after the fence and before any method is answered: every row, all of
+        them waiting now. A row for an `agent-N` is dropped: its numbering restarts with
+        the daemon, so the name would be a later, unrelated session's. A read that
+        RAISES stops the start."""
+        rows = self.books.rows(states=[books_mod.WAITING])
+        dropped: dict[str, list] = {}
         with self._lock:
             self.queue = {}
-            for mid, q in rows:
-                mid, q = str(mid), str(q)
+            for row in rows:
+                q, mid = row.name, row.message_id
                 if is_auto_name(split_tag(q)[0]):
-                    dropped.append((q, mid))
+                    dropped.setdefault(q, []).append(mid)
                     continue
                 self.queue.setdefault(q, {})[mid] = None
-            for q, mid in dropped:
-                self._queue_unwritten[(q, mid)] = False
             self._queue_loaded = True
+        for q, ids in dropped.items():
+            self._book("drop the rows of", q, lambda q=q, ids=ids: self.books.drop(q, ids))
         self._queue_flush()
         n = sum(len(v) for v in self.queue.values())
         if n:
             log.info("boot: %d queued message row(s) for %d name(s)", n, len(self.queue))
         if dropped:
             log.info("boot: %d queue row(s) for agent-N names dropped: an agent-N ends "
-                     "with its binding", len(dropped))
+                     "with its binding", sum(len(v) for v in dropped.values()))
 
     def _name_lock(self, qualified: str) -> threading.RLock:
         with self._lock:
@@ -2503,6 +2530,8 @@ class Daemon:
                         "nothing", msg.id, binding.qualified)
             with self._lock:
                 binding.delivered.discard(msg.id)
+            self._book("drop rows of", binding.qualified,
+                       lambda: self.books.drop(binding.qualified, [msg.id]))
             return
         if held:
             # Handed from the queue: the recipient is told it waited, and how long.

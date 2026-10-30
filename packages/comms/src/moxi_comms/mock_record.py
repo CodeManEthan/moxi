@@ -238,26 +238,6 @@ class MockRecord:
             out = out[-limit:]
         return out
 
-    def queue_add(self, name: str, ids) -> None:
-        """The local record's queue rows, on the double: [message id, name] pairs."""
-        with self._txn(write=True) as st:
-            have = {tuple(p) for p in st.queue}
-            for i in ids:
-                pair = (str(i), str(name))
-                if pair not in have:
-                    st.queue.append(list(pair))
-                    have.add(pair)
-
-    def queue_remove(self, name: str, ids) -> None:
-        gone = {(str(i), str(name)) for i in ids}
-        with self._txn(write=True) as st:
-            st.queue = [p for p in st.queue if tuple(p) not in gone]
-
-    def queue_rows(self) -> list[tuple[str, str]]:
-        with self._txn() as st:
-            return sorted(((str(m), str(n)) for m, n in st.queue),
-                          key=lambda p: (int(p[0]), p[1]))
-
     def meta_get(self, key: str) -> str | None:
         with self._txn() as st:
             return st.meta.get(key)

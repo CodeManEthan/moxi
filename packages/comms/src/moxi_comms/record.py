@@ -149,8 +149,6 @@ class _State:
     denied: dict = field(default_factory=dict)
     users: dict = field(default_factory=dict)
     messages: list = field(default_factory=list)
-    #: [message id, name] queue rows: the message waits for the name.
-    queue: list = field(default_factory=list)
     #: The record's meta keys (the operator's token hash among them).
     meta: dict = field(default_factory=dict)
 
