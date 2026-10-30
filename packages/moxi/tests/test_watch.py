@@ -560,6 +560,16 @@ def test_a_watchdog_whose_interpreter_warns_at_startup_still_starts(monkeypatch,
     assert child.watchdog.wait(timeout=30) == 0
 
 
+def test_a_watchdog_that_exits_is_reaped_without_a_wait():
+    child = proc.spawn([PY, "-c", "pass"], lifeline="watch")
+    assert child.wait(timeout=30) == 0
+    # Nothing here waits on or polls the watchdog: only a reap sets its returncode.
+    assert wait_for(lambda: child.watchdog.returncode is not None)
+    assert child.watchdog.returncode == 0
+    assert child.watchdog.pid not in children()
+    child.lifeline.close()
+
+
 def test_a_process_holding_more_than_1024_descriptors_starts_a_watched_child():
     import resource
 

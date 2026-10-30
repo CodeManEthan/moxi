@@ -297,6 +297,10 @@ def _spawn_watched(argv: Argv, *, env, cwd, stdout, stderr) -> subprocess.Popen:
         raise
     proc.lifeline = watchdog.stdin
     proc.watchdog = watchdog
+    # The watchdog is reaped as soon as it exits, so a long-running parent keeps no
+    # ended watchdog for each child it watched. `wait` and `poll` still answer.
+    threading.Thread(target=watchdog.wait, name=f"moxi-watchdog-{watchdog.pid}",
+                     daemon=True).start()
     return proc
 
 
