@@ -316,8 +316,9 @@ pathspec variables removed, `moxi_repo.changes(root, staged=True)` returns the s
 repo keys every repo by its path. With the projects module installed
 (`moxi install projects`), these work too:
 
-- an argument that isn't an existing path, and has no `/` in it, is a project key
-  (matched ignoring case) wherever a command takes PATH. An unknown key exits 2;
+- an argument that isn't an existing path, has no path separator in it (`/`, and `\` on
+  Windows) and doesn't start with `~`, is a project key (matched ignoring case) wherever a
+  command takes PATH. An unknown key exits 2;
   a projects store that can't be read exits with projects' reason and fix;
 - `git-hooks list` and `specs` show each repo's project key;
 - `git-hooks list --projects` adds every project's repo, including those repo hasn't
@@ -356,7 +357,11 @@ of it. Without projects, paths work as before. The git hooks never ask projects 
 - **The ledger** (`ledger KEY`): a `warn` row for each open doctor record whose subject is
   gone (its repo, piece, spec or branch), or whose piece lacks its `recorded` flag. The
   next `refresh`, `git-hooks` or `specs` verb on that repo, or the repo's next committer
-  pass, clears it.
+  pass, takes care of it: it clears a record whose subject is gone, and sets a missing
+  `recorded` flag.
+- **Projects** (`projects`): `ok` when a project key works in place of PATH; `off`, with
+  the fix `moxi install projects`, when projects isn't installed, is broken, or doesn't
+  offer the interface repo reads.
 
 The core shows the records repo leaves as `fail` rows of their own (`record KEY`): a piece
 that broke or returned `record`, a refused or failed commit pass, a failed push. Each goes

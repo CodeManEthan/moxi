@@ -15,7 +15,8 @@ each. The rows here, in order:
 - uncovered files: in a repo with a saved spec, changed or untracked files that are not
   ignored and that no saved spec's paths cover;
 - the ledger: a `warn` row for each open key the sweep would clear, and each open piece
-  key whose piece has no `recorded` flag.
+  key whose piece has no `recorded` flag;
+- projects: whether project keys work, and `moxi install projects` when they don't.
 """
 
 from __future__ import annotations
@@ -78,7 +79,20 @@ def rows() -> list[Row]:
         if repo is not None:
             out += _spec_rows(repo)
     out += _ledger_rows(index)
+    out.append(_projects_row())
     return out
+
+
+def _projects_row() -> Row:
+    """Whether a project key works in place of PATH: `off`, naming the install, when
+    projects is absent, broken or doesn't offer the interface repo reads."""
+    from moxi_repo import projects
+
+    why = projects.why_off()
+    if why is None:
+        return Row(MODULE, "projects", "ok", "project keys work in place of PATH (projects "
+                   f"offers interface {projects.INTERFACE})")
+    return Row(MODULE, "projects", "off", f"project keys are off: {why}", projects.INSTALL)
 
 
 # -- git ----------------------------------------------------------------------------------

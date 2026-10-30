@@ -295,6 +295,19 @@ def _help(capsys, *argv: str) -> str:
     return capsys.readouterr().out
 
 
+def projects_rows() -> list:
+    from moxi_repo import checks
+
+    return [(r.state, r.detail, r.fix) for r in checks.rows() if r.name == "projects"]
+
+
+@POSIX_ONLY
+def test_the_doctor_says_project_keys_are_on(demo, projects):
+    [(state, detail, fix)] = projects_rows()
+    assert state == "ok" and fix is None
+    assert detail == "project keys work in place of PATH (projects offers interface 1)"
+
+
 @pytest.fixture(params=["not installed", "not importable"])
 def absent(request, monkeypatch):
     """projects absent: its distribution hidden from the environment's metadata (the
@@ -332,6 +345,9 @@ def test_with_projects_absent_paths_work_and_help_names_the_install(
     assert code == 0 and str(alpha) in out
     assert err == ("repo: projects isn't installed, so --projects adds nothing; run: moxi "
                    "install projects\n")
+    [(state, detail, fix)] = projects_rows()
+    assert (state, fix) == ("off", "moxi install projects")
+    assert detail.startswith("project keys are off: ") and "projects" in detail[21:]
 
 
 # A stand-in API that would resolve any key to `FAKE_ROOT`, if repo ever used it.
@@ -374,9 +390,12 @@ def test_a_projects_that_cant_serve_interface_1_is_off(demo, site, capsys, monke
     assert code == 2 and "no git work tree at alpha" in err
     help_text = " ".join(_help(capsys, "git-hooks", "list").split())
     assert "With projects installed (moxi install projects)" in help_text
+    [(state, detail, fix)] = projects_rows()
+    assert state == "off" and fix == "moxi install projects"
+    assert detail.startswith("project keys are off: ") and "projects" in detail[21:]
 
 
-def test_only_the_command_line_reaches_projects():
+def test_only_the_command_line_and_the_doctor_reach_projects():
     """The git hook runner, the pieces and the API never import the projects link."""
     src = Path(cli.__file__).parent
     importers = set()
@@ -390,4 +409,4 @@ def test_only_the_command_line_reaches_projects():
                 names = [a.name for a in node.names]
             if any(n == "moxi_repo.projects" or n.startswith("moxi_projects") for n in names):
                 importers.add(path.name)
-    assert importers == {"cli.py"}
+    assert importers == {"cli.py", "checks.py"}
