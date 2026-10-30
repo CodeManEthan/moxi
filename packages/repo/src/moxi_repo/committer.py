@@ -33,7 +33,11 @@ The git calls of a pass:
 | ours | the same `diff-index` with `-M` in place of `--no-renames`; a path staged and not read back as ours is unstaged as below |
 | drop, unstage | `reset -q --pathspec-from-file=- --pathspec-file-nul`, then the `diff-index` again to verify |
 | commit | `rev-parse -q --verify HEAD^{commit}`; `commit -q -F <file> [--trailer k=v]... --pathspec-from-file=- --pathspec-file-nul`; `rev-list -1 --parents HEAD` (when `HEAD`'s parent isn't the `HEAD` read before, `rev-list --reverse --parents --basic-regexp --author=<anchored> HEAD ^<old HEAD>`); `diff-tree -r -z --no-renames --raw --root --no-commit-id <new commit>` |
-| push | `symbolic-ref -q HEAD`; `remote`; per branch `rev-parse -q --verify refs/heads/<b>`, `rev-list --count refs/remotes/<r>/<b>..refs/heads/<b>`, `push -q <r> refs/heads/<b>:refs/heads/<b>` |
+| push | `symbolic-ref -q HEAD`; `remote`; per branch `rev-parse -q --verify refs/heads/<b>`, `rev-list --count refs/remotes/<r>/<b>..refs/heads/<b>`, `push -q <r> refs/heads/<b>:refs/heads/<b>` (before it, `config --get core.sshCommand`) |
+
+The push part keeps, per branch, the sha its last successful push sent. A branch whose
+remote-tracking ref is missing (a push-only remote) reads as not ahead while
+`refs/heads/<b>` is still that sha, so it is pushed once per new commit, not every pass.
 """
 
 from __future__ import annotations
@@ -64,7 +68,9 @@ SPEC_PREFIX = "moxi-repo.spec."
 
 STATUSES = ("committed", "clean", "throttled", "busy", "index-busy", "refused", "error")
 #: A pass that saw something it can judge: its record part writes or clears the commit
-#: record. `throttled`, `busy` and `index-busy` passes leave it as it was.
+#: record. `throttled`, `busy` and `index-busy` passes leave it as it was, except that
+#: one whose push printed lines writes them into it, and git's index lock held for
+#: `STALE_INDEX_PASSES` passes in a row is written there too.
 CONCLUSIVE = ("committed", "clean", "refused", "error")
 #: This many `index-busy` passes in a row, and git's `index.lock` is reported as stale.
 STALE_INDEX_PASSES = 5
@@ -1071,13 +1077,20 @@ def _push_part(spec: Spec, p: _Pass, state: dict) -> None:
         p.detached = True
     branches = ([current] if current else []) + [b for b in open_branches if b != current]
     remotes: list[str] | None = None
+    pushed_sha = state.get("pushed_sha") or {}
     for b in branches:
         if spec.push is None:
             _push_clear(p, b, state)
+            if b in pushed_sha:
+                p.pushed_sha[b] = None
             continue
-        if _g(p, "rev-parse", "-q", "--verify", f"refs/heads/{b}").returncode != 0:
+        tip = _g(p, "rev-parse", "-q", "--verify", f"refs/heads/{b}")
+        if tip.returncode != 0:
             _push_clear(p, b, state)
+            if b in pushed_sha:
+                p.pushed_sha[b] = None
             continue
+        tip_sha = tip.stdout.strip()
         if remotes is None:
             remotes = _g(p, "remote").stdout.split()
         r = spec.push
@@ -1093,10 +1106,14 @@ def _push_part(spec: Spec, p: _Pass, state: dict) -> None:
         if count.returncode == 0 and count.stdout.strip() == "0":
             _push_clear(p, b, state)
             continue
+        if count.returncode != 0 and tip_sha and pushed_sha.get(b) == tip_sha:
+            # No tracking ref (a push-only remote): the last push sent this very commit.
+            _push_clear(p, b, state)
+            continue
         failed_at = ((state.get("push") or {}).get(b) or {}).get("failed_at")
         if failed_at is not None and _now() - failed_at < spec.push_backoff:
             continue
-        _push_one(spec, p, r, b)
+        _push_one(spec, p, r, b, tip_sha)
 
 
 def _pushable(spec: Spec) -> bool:
@@ -1114,7 +1131,7 @@ def _push_clear(p: _Pass, branch: str, state: dict) -> None:
     p.push_records[branch] = None
 
 
-def _push_one(spec: Spec, p: _Pass, remote: str, branch: str) -> None:
+def _push_one(spec: Spec, p: _Pass, remote: str, branch: str, tip: str) -> None:
     try:
         done = _g(p, "push", "-q", remote, f"refs/heads/{branch}:refs/heads/{branch}",
                   timeout=PUSH_TIMEOUT)
@@ -1126,7 +1143,11 @@ def _push_one(spec: Spec, p: _Pass, remote: str, branch: str) -> None:
         p.pushed.append(branch)
         p.push_state[branch] = None
         p.push_records[branch] = None
-        p.hook_lines += [x for x in lines if not x.startswith("remote:")]
+        if tip:
+            p.pushed_sha[branch] = tip
+        said = [x for x in lines if not x.startswith("remote:")]
+        p.hook_lines += said
+        p.push_lines += said
         return
     error = (f"{remote} did not answer within {int(PUSH_TIMEOUT)} s" if code is None
              else _push_reason(lines, code))
@@ -1186,6 +1207,16 @@ def _record_part(p: _Pass, spec: Spec | None, old: dict) -> None:
                 value = {**push[branch], **value}
             push[branch] = value
     entry["push"] = push
+    pushed_sha = dict(entry.get("pushed_sha") or {})
+    for branch, sha in p.pushed_sha.items():
+        if sha is None:
+            pushed_sha.pop(branch, None)
+        else:
+            pushed_sha[branch] = sha
+    if pushed_sha:
+        entry["pushed_sha"] = pushed_sha
+    else:
+        entry.pop("pushed_sha", None)
     stranded = {} if conclusive else dict(entry.get("stranded") or {})
     stranded.update(p.stranded)
     if stranded:
@@ -1198,7 +1229,8 @@ def _record_part(p: _Pass, spec: Spec | None, old: dict) -> None:
     key = _records.commit_key(p.where.cgd, p.name)
     stale = (status == "index-busy"
              and int(entry.get("index_busy_passes") or 0) >= STALE_INDEX_PASSES)
-    if conclusive or stale:
+    # A pass that saw nothing conclusive still writes the lines its pushes printed.
+    if conclusive or stale or p.push_lines:
         text = _commit_text(p, entry, stale)
         if text:
             _records.open_record(key, cgd=p.where.cgd, kind="commit",
