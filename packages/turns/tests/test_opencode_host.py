@@ -334,10 +334,16 @@ def test_listeners_context_the_host_cannot_carry_is_logged_as_dropped(host, monk
     events = watching(s)
     world.fake.compacted(h.session_id)
     assert events.get(timeout=5).source == "compact"
-    dropped = [r.getMessage() for r in caplog.records if "was dropped" in r.getMessage()]
-    assert [m.split(" (")[0] for m in dropped] == [
+
+    def dropped():
+        return [r.getMessage() for r in caplog.records if "was dropped" in r.getMessage()]
+
+    # The host's event thread logs the drop after `Ready` has gone out, so the line can
+    # land after the event reaches the test: wait for it, then assert on what was logged.
+    until(lambda: len(dropped()) >= 2)
+    assert [m.split(" (")[0] for m in dropped()] == [
         "the listeners' context at startup", "the listeners' context at compact"]
-    assert all("ctx" not in m for m in dropped)
+    assert all("ctx" not in m for m in dropped())
 
 
 def test_running_child_sessions_are_subagents(host):
