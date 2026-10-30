@@ -14,6 +14,8 @@ nothing. `log` lists launches, newest first. `presets` lists, shows or checks th
 and project presets. `catalog` lists the flag rows this install offers. `handoff dir`
 prints the handoff folder for this session; `handoffs` lists the handoffs waiting.
 `deliver` is internal: the detached process that sends a terminal launch's first turn.
+`run` and `preview` keep what this parser does not know as `rest`, which
+`moxi_launcher.catalog.parse` reads against the chosen harness's catalog.
 
 The CLI calls the library in its own process. Exit codes are `moxi.exit`'s: 0 done, 1
 failed, 2 bad arguments, 3 refused, 75 a lock held past its wait. A verb whose part is
@@ -23,6 +25,7 @@ not built yet says so and exits 1.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Callable, Sequence
 
@@ -56,7 +59,34 @@ def _presets(args: argparse.Namespace, prog: str) -> int:
 
 
 def _catalog(args: argparse.Namespace, prog: str) -> int:
-    return _not_built(args, prog)
+    from . import catalog
+
+    if args.harness is not None and args.harness not in catalog.HARNESSES:
+        print(f"{prog} catalog: no harness {args.harness!r}; the harnesses are "
+              f"{', '.join(catalog.HARNESSES)}", file=sys.stderr)
+        return codes.USAGE
+    harnesses = catalog.HARNESSES if args.harness is None else (args.harness,)
+    groups = {catalog.LAUNCHER: catalog.launcher()}
+    groups.update((harness, catalog.load(harness)) for harness in harnesses)
+    described = {name: [catalog.describe(row) for row in rows]
+                 for name, rows in groups.items()}
+    if args.json:
+        print(json.dumps(described, indent=2))
+        return codes.OK
+    for name, rows in described.items():
+        print(name)
+        for row in rows:
+            if row["owned"]:
+                where = "set by the launcher"
+            elif row["name"] == catalog.EXTRA:
+                where = "the words after --"
+            elif not row["offered"]:
+                where = f"needs {row['requires']}"
+            else:
+                where = row["option"] or ""
+            modes = f" [{', '.join(row['modes'])}]" if row["modes"] else ""
+            print(f"  {row['name']:<26} {where:<24} {row['doc']}{modes}")
+    return codes.OK
 
 
 def _handoff(args: argparse.Namespace, prog: str) -> int:
@@ -101,12 +131,16 @@ def build_parser(prog: str = "moxi launcher") -> argparse.ArgumentParser:
     verbs = parser.add_subparsers(dest="verb", metavar="VERB")
     verbs.required = True
 
-    run = verbs.add_parser("run", help="launch a session",
+    # A launch's flags are read again from `rest` against the catalog, so these two
+    # parsers abbreviate nothing: `--project` must stay the catalog's, never become
+    # `--project-preset`.
+    run = verbs.add_parser("run", help="launch a session", allow_abbrev=False,
                            description="Launch a session from at most one preset and the "
                                        "flags typed. Flags after -- go to the harness last.")
     _launch_flags(run)
 
     preview = verbs.add_parser("preview", help="print what a launch would run",
+                               allow_abbrev=False,
                                description="Print the argv and environment a launch would "
                                            "use; starts nothing.")
     _launch_flags(preview)
