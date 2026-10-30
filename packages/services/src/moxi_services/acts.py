@@ -58,7 +58,7 @@ import moxi.files
 import moxi.paths
 from moxi import units
 
-from . import projects_link, rows, state, store
+from . import projects_link, rows, state, store, verdict
 from .errors import Busy, Refused, ServicesError, Usage
 from .rows import MODULE, ModuleRow, UserRow
 
@@ -652,13 +652,10 @@ def _reads(kind: str, st: units.UnitState) -> str:
     """What the supervisor reads of a unit, in a few words."""
     if kind == "timer":
         said = "schedule armed" if st.enabled else "schedule off"
-        last = (st.last or {})
-        code = last.get("exit")
-        if code is None:
-            code = (last.get("supervisor") or {}).get("status")
-        if code in (None, "", 0, "0"):
-            return f"{said}, last run ok" if last else f"{said}, no run yet"
-        return f"{said}, last run exit {code}"
+        last = verdict.last_run(st)
+        if last is None:
+            return f"{said}, no run known"
+        return f"{said}, last run {'failed, ' if last.failed else ''}{last.text}"
     said = "starts at login" if st.enabled else "does not start at login"
     return f"{said}, {'running' if st.state == 'active' else st.state}"
 

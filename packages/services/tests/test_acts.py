@@ -392,12 +392,32 @@ def test_remove_keeps_the_row_when_plan_raises(fake):
 # --- add, adopted -----------------------------------------------------------------------
 
 def test_adopt_without_enable_or_disable_says_what_the_supervisor_reads(fake, store_path):
-    fake.foreign["backup.timer"] = Unit("timer", True, last={"exit": 0})
+    fake.foreign["backup.timer"] = Unit("timer", True,
+                                        last={"supervisor": {"result": "success",
+                                                             "status": "0"}})
     out = acts.add_adopted("backup", "backup.timer", enable=None)
     assert out.code == 2
     assert out.lines == ("backup.timer: schedule armed, last run ok; adopt it with "
                          "--enable to keep it on, or --disable to turn it off",)
     assert not store_path.exists()
+
+
+@pytest.mark.parametrize("supervisor, ref, last, said", [
+    ("schtasks", "\\Backups\\nightly",
+     {"supervisor": {"last_result": 1, "last_run": "2026-10-30T02:00:00"}},
+     "schedule armed, last run failed, result 0x00000001"),
+    ("schtasks", "\\Backups\\nightly",
+     {"supervisor": {"last_result": 0, "last_run": "2026-10-30T02:00:00"}},
+     "schedule armed, last run ok"),
+    ("systemd", "backup.timer", {"supervisor": {"result": "exit-code", "status": "2"}},
+     "schedule armed, last run failed, exit 2"),
+    ("systemd", "backup.timer", None, "schedule armed, no run known"),
+])
+def test_adopt_says_the_last_run_as_the_verdict_reads_it(fake, supervisor, ref, last, said):
+    fake.supervisor = supervisor
+    fake.foreign[ref] = Unit("timer", True, last=last)
+    out = acts.add_adopted("backup", ref, enable=None)
+    assert out.code == 2 and out.lines[0].startswith(f"{ref}: {said}; adopt it with")
 
 
 def test_adopt_a_daemon_makes_the_unit_match_the_flag(fake):
