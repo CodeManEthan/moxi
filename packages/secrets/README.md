@@ -83,6 +83,10 @@ found = scan_lines(added_lines, ("credentials",))   # (path, line, text) triples
   step that needs the author name.
 - `describe()` returns each set's rule ids, source, pin, dropped rules and whether it can
   run here.
+- `Hit`, `LineHit`, `SetInfo` and `PrivateNames` are plain frozen classes, not
+  dataclasses: `dataclasses.replace` and `asdict` don't work on them, and a `match`
+  statement names their fields by keyword (`case Hit(rule="github-pat")`), not by
+  position.
 
 Any `str` a caller made by decoding bytes with UTF-8 and `surrogateescape` scans, redacts
 and fingerprints without raising. A private-names scan that can't read the list raises
