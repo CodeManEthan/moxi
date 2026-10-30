@@ -157,7 +157,8 @@ There are two files, read with `Allowlist.read(public, private)`:
   tracks it.
 
 A malformed line raises `AllowlistError` naming the file and the line number, never the
-line's text. A line whose path, rule and match are all `*` is refused.
+line's text. A line that allows a whole set everywhere is refused: its path and match are
+`*` and its set/rule is `*` or `<set>/*`.
 
 ## Doctor
 

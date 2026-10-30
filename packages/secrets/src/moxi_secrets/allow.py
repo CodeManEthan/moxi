@@ -116,8 +116,10 @@ def _parse(raw: str, where: str, n: int, public: bool) -> _Line | None:
     if public and set_name != "credentials":
         raise refuse("the public file takes credentials lines only; put this line in the "
                      "private file")
-    if path == "*" and which == "*" and match == "*":
-        raise refuse("allows everything: path, set/rule and match are all *")
+    if path == "*" and rule == "*" and match == "*":
+        # A caller who wants a set off doesn't ask for it; such a line only opens the gate.
+        raise refuse("allows a whole set everywhere: the path and match are *, and the "
+                     "set/rule is * or <set>/*")
     return _Line(path, set_name, rule, kind, value)
 
 

@@ -93,7 +93,8 @@ def test_every_valid_form_of_the_public_file_parses_and_keeps_its_hit(public):
     # Any path, but only this set and rule.
     (("*", "credentials/github-pat", "*"), [None, "a.txt"], []),
     (("*", "credentials/stripe-access-token", "*"), [], [None, "a.txt"]),
-    (("*", "broad/*", "*"), [], [None]),
+    # Another set's line keeps nothing of this one.
+    (("docs/", "broad/*", "*"), [], [None, "docs/a.md"]),
     # Any set and rule, at one path.
     (("docs/", "*", "*"), ["docs/a.md"], [None, "src/a.md"]),
 ])
@@ -120,7 +121,7 @@ def test_a_fingerprint_line_keeps_that_value_only(private):
 
 def test_every_valid_form_of_the_private_file_parses(private):
     lines = [
-        line("*", "broad/*", "*"),
+        line("docs/", "broad/*", "*"),
         line("notes/", "personal-data/iban", "sha256:0123456789abcdef"),
         line("@author", "private-names/private-email", "text:someone@example.test"),
         line("*", "private-names/*", "text:Alexa Quill"),
@@ -214,6 +215,7 @@ BAD_ANYWHERE = [
     ("a date in words", line("docs/", "credentials/jwt", "*", day="today")),
     ("a date that is no day", line("docs/", "credentials/jwt", "*", day="2026-02-30")),
     ("all three *", line("*", "*", "*")),
+    ("credentials everywhere", line("*", "credentials/*", "*")),
 ]
 
 BAD_PUBLIC = [
@@ -230,6 +232,9 @@ BAD_PRIVATE = [
     ("text: for broad", line("docs/", "broad/*", "text:x")),
     ("text: for any set", line("docs/", "*", "text:x")),
     ("an empty text:", line("docs/", "private-names/*", "text: -_ ")),
+    ("broad everywhere", line("*", "broad/*", "*")),
+    ("private names everywhere", line("*", "private-names/*", "*")),
+    ("personal data everywhere", line("*", "personal-data/*", "*")),
 ]
 
 
