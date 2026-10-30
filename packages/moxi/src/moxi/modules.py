@@ -723,8 +723,10 @@ def _seen_by_load(dist) -> bool:
     from pathlib import Path
 
     # A distribution found on a path keeps its metadata directory here; the class has no
-    # public name for it.
+    # public name for it, so one without it is looked for beside its files.
     path = getattr(dist, "_path", None)
+    if path is None:
+        path = _metadata_dir(dist)
     if (not isinstance(path, Path) or not path.name.lower().endswith(".dist-info")
             or not path.is_dir()):
         return False
@@ -735,6 +737,34 @@ def _seen_by_load(dist) -> bool:
         except TypeError:
             continue
     return False
+
+
+def _metadata_dir(dist):
+    """`dist`'s `.dist-info` directory found through public names alone: in the directory
+    `locate_file("")` gives, the one whose name, normalized as `_DistInfo.find` normalizes
+    it, is the distribution's and whose version is its own. None when there is none."""
+    from pathlib import Path
+
+    try:
+        where = dist.locate_file("")
+        name, version = dist.metadata["Name"], dist.version
+    except Exception:  # noqa: BLE001 - a distribution that can't say where it is
+        return None
+    if not isinstance(where, Path) or not name:
+        return None
+    wanted = _RUNS.sub("_", name).lower()
+    try:
+        children = os.listdir(where)
+    except OSError:
+        return None
+    for child in children:
+        low = child.lower()
+        if not low.endswith(".dist-info"):
+            continue
+        dist_name, _, dist_version = child[:low.rindex(".")].partition("-")
+        if _RUNS.sub("_", dist_name).lower() == wanted and dist_version == version:
+            return where / child
+    return None
 
 
 # --- the announcement's checks ------------------------------------------------------------

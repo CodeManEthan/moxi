@@ -1,3 +1,4 @@
+import importlib.metadata
 import subprocess
 import sys
 from pathlib import Path
@@ -81,6 +82,49 @@ def test_two_claimants_are_broken_naming_both_in_the_full_scan(site):
     assert "moxi-alpha 0.1.0" in found.reason and "other-alpha 2.0" in found.reason
     # load reads moxi-alpha alone, so it never sees the second claimant.
     assert modules.load("alpha").state == PRESENT
+
+
+class _Renamed(importlib.metadata.Distribution):
+    """A distribution on a path that keeps its metadata directory under another private
+    name than today's, as a later Python might."""
+
+    def __init__(self, info: Path):
+        self._where = info
+
+    def read_text(self, filename):
+        try:
+            return (self._where / filename).read_text(encoding="utf-8")
+        except (FileNotFoundError, IsADirectoryError, NotADirectoryError):
+            return None
+
+    def locate_file(self, path):
+        return self._where.parent / path
+
+
+def test_the_scan_finds_a_distribution_without_its_private_path(site, monkeypatch):
+    site.module("alpha")
+    (info,) = site.root.glob("moxi_alpha-*.dist-info")
+    assert not hasattr(_Renamed(info), "_path")
+    discover = importlib.metadata.Distribution.discover
+    monkeypatch.setattr(importlib.metadata.Distribution, "discover", classmethod(
+        lambda cls, **kw: (_Renamed(d._path) for d in discover(**kw))))
+    (found,) = [f for f in modules.scan() if f.name == "alpha"]
+    assert found.state == PRESENT
+
+
+def test_a_distribution_without_its_private_path_off_sys_path_is_not_seen(site, tmp_path):
+    import shutil
+
+    site.module("alpha")
+    (info,) = site.root.glob("moxi_alpha-*.dist-info")
+    assert modules._seen_by_load(_Renamed(info))
+    moved = tmp_path / "elsewhere" / info.name
+    shutil.copytree(info, moved)
+    assert not modules._seen_by_load(_Renamed(moved))
+    egg = site.root / "moxi_beta-0.1.0.egg-info"
+    egg.mkdir()
+    (egg / "PKG-INFO").write_text("Metadata-Version: 2.1\nName: moxi-beta\nVersion: 0.1.0\n")
+    assert not modules._seen_by_load(_Renamed(egg))
 
 
 def test_a_core_verb_is_broken_naming_the_clash(site):
