@@ -90,7 +90,8 @@ def metadata(name: str, version: str, *, requires: tuple[str, ...] = (),
 
 
 def see_only(root: Path, monkeypatch) -> None:
-    """Let `importlib.metadata` find only the distributions under `root`, and `moxi` itself.
+    """Let `importlib.metadata` and `load` find only the distributions under `root`, and
+    `moxi` itself.
 
     A test of discovery or install sees exactly the distributions its site installs. The
     environment may hold real modules and their dependencies (a workspace installs every
@@ -108,6 +109,29 @@ def see_only(root: Path, monkeypatch) -> None:
         return (d for d in discover(**kwargs) if seen(d))
 
     monkeypatch.setattr(Distribution, "discover", classmethod(filtered))
+
+    # `load` reads a distribution's .dist-info directly, without `importlib.metadata`, so
+    # it is held to the same view: what it finds outside `root` reads as not found.
+    find = moxi.modules._DistInfo.find.__func__
+
+    def find_seen(cls, module):
+        dist = find(cls, module)
+        return dist if dist is not None and Path(dist.path).parent == root else None
+
+    monkeypatch.setattr(moxi.modules._DistInfo, "find", classmethod(find_seen))
+
+
+@pytest.fixture(autouse=True)
+def _no_real_core_roots(tmp_path_factory, monkeypatch):
+    """The core's own roots, uv's tool directory and the user site point into tmp, so
+    nothing the core reads or writes for itself (the catalogue's refreshed copy, the
+    strays record) is the real one. A test that needs another root sets its own."""
+    import moxi.strays
+
+    home = tmp_path_factory.mktemp("core-home")
+    monkeypatch.setenv("MOXI_HOME", str(home / "moxi"))
+    monkeypatch.setenv("UV_TOOL_DIR", str(home / "uv-tools"))
+    monkeypatch.setattr(moxi.strays, "_user_site", lambda: str(home / "user-site"))
 
 
 @pytest.fixture
@@ -170,9 +194,12 @@ def build_wheel(out: Path, name: str, version: str, files: dict[str, str], *,
 
 
 def core_wheel(out: Path, version: str = "0.1.0") -> Path:
-    """This checkout's `moxi` package as a wheel, with its console script."""
+    """This checkout's `moxi` package as a wheel, with its console script: every file
+    under `src/moxi`, its settings schema and vendored copies included."""
     src = Path(__file__).resolve().parents[1] / "src" / "moxi"
-    files = {f"moxi/{p.name}": p.read_text() for p in sorted(src.glob("*.py"))}
+    files = {f"moxi/{p.relative_to(src).as_posix()}": p.read_text(encoding="utf-8")
+             for p in sorted(src.rglob("*"))
+             if p.is_file() and "__pycache__" not in p.parts}
     return build_wheel(out, "moxi", version, files, scripts={"moxi": "moxi.cli:main"})
 
 
@@ -186,9 +213,15 @@ def uv_env(tmp_path):
         pytest.skip("uv is not on PATH")
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("UV_", "VIRTUAL_ENV", "PYTHON"))}
+    # No other moxi on PATH (the workspace's own), which the tool's moxi would tell as
+    # holding strays.
+    env["PATH"] = os.pathsep.join(
+        p for p in env.get("PATH", "").split(os.pathsep)
+        if p and not os.path.isfile(os.path.join(p, "moxi")))
     env.update(UV_TOOL_DIR=str(tmp_path / "tools"), UV_TOOL_BIN_DIR=str(tmp_path / "bin"),
                UV_CACHE_DIR=str(tmp_path / "uv-cache"), UV_OFFLINE="1",
-               UV_PYTHON_DOWNLOADS="never", UV_NO_CONFIG="1", UV_NO_PROGRESS="1")
+               UV_PYTHON_DOWNLOADS="never", UV_NO_CONFIG="1", UV_NO_PROGRESS="1",
+               MOXI_HOME=str(tmp_path / "moxi-home"))
     return env
 
 

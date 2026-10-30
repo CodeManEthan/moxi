@@ -17,7 +17,7 @@ file.
 `uninstall` disables and stops the unit, removes the file and reloads. `status` reads:
 the file, the `ExecStart=` it holds, and what `systemctl --user` says about the unit.
 
-`moxi-comms-daemon` in the foreground stays the baseline. The service runs with the
+The daemon in the foreground, run by its path, stays the baseline. The service runs with the
 user manager's environment, not the installing shell's, so a `MOXI_COMMS_*` variable that
 moves comms' files in this shell is named at install: the service will not see it.
 """
@@ -78,6 +78,20 @@ def daemon_binary(env=None) -> Path | None:
     return found.absolute() if os.access(found, os.X_OK) else None
 
 
+#: How to run the daemon when this environment has none to name: `moxi install comms`
+#: puts comms in the `moxi` tool, and uv puts none of its scripts on PATH.
+TOOL_DAEMON = f'"$(uv tool dir)/moxi/bin/{DAEMON_SCRIPT}"'
+
+
+def foreground(env=None) -> str:
+    """The command that runs the daemon in the foreground: this environment's daemon by
+    its path, else its path in the `moxi` tool."""
+    import shlex
+
+    daemon = daemon_binary(env)
+    return shlex.quote(str(daemon)) if daemon is not None else TOOL_DAEMON
+
+
 def render_unit(daemon: Path) -> str:
     return (
         "[Unit]\n"
@@ -112,12 +126,13 @@ class Service:
         if not self.platform.startswith("linux"):
             self.say(f"moxi comms service: this is {self.platform}. The service is a "
                      "systemd user unit on Linux; macOS's launchd agent comes in a later "
-                     "release. Run moxi-comms-daemon in the foreground meanwhile.")
+                     f"release. Run the daemon in the foreground meanwhile: "
+                     f"{foreground(self.env)}")
             return EXIT_REFUSED
         if shutil.which("systemctl", path=self.env.get("PATH")) is None:
             self.say("moxi comms service: no systemctl on PATH, so there is no systemd "
-                     "user manager to hand the daemon to. Run moxi-comms-daemon in the "
-                     "foreground.")
+                     "user manager to hand the daemon to. Run the daemon in the "
+                     f"foreground: {foreground(self.env)}")
             return EXIT_REFUSED
         return None
 
@@ -135,7 +150,8 @@ class Service:
         daemon = daemon_binary(self.env)
         if daemon is None:
             self.say(f"moxi comms service: no {DAEMON_SCRIPT} in this Python environment. "
-                     f"Reinstall the package (uv tool install {release.DISTRIBUTION}).")
+                     f"Reinstall comms in the moxi tool: uv tool upgrade moxi "
+                     f"--reinstall-package {release.DISTRIBUTION}")
             return EXIT_REFUSED
 
         path = unit_path(self.env)

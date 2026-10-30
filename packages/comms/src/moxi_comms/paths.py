@@ -1,14 +1,15 @@
 """comms' locations: its own five directories under Moxi's roots (`moxi.paths`).
 
     DATA/comms      ~/.local/share/moxi/comms/            MOXI_COMMS_DATA_HOME
-    STATE/comms     ~/.local/state/moxi/<device>/comms/   MOXI_COMMS_STATE_HOME
-    CACHE/comms     ~/.cache/moxi/<device>/comms/         MOXI_COMMS_CACHE_HOME
+    STATE/comms     ~/.local/state/moxi/comms/            MOXI_COMMS_STATE_HOME
+    CACHE/comms     ~/.cache/moxi/comms/                  MOXI_COMMS_CACHE_HOME
     CONFIG/comms    ~/.config/moxi/comms/                 MOXI_COMMS_CONFIG_HOME
     RUNTIME/comms   $XDG_RUNTIME_DIR/moxi/comms/          MOXI_COMMS_RUNTIME_DIR
 
-`MOXI_COMMS_HOME` collapses all five under one directory and `MOXI_COMMS_DEVICE` names
-the device (`moxi.paths.Layout`). comms writes only under these five; its sockets live
-in RUNTIME/comms, which `runtime_root()` names. Only comms-specific subpaths live here.
+`MOXI_COMMS_HOME` collapses all five under one directory, and `MOXI_HOME` all of every
+module's (`moxi.paths.Layout`); `MOXI_COMMS_DEVICE` labels the device and moves no root.
+comms writes only under these five; its sockets live in RUNTIME/comms, which
+`runtime_root()` names. Only comms-specific subpaths live here.
 
 Every function takes an optional `env` mapping and reads the process environment
 without one.
@@ -38,12 +39,12 @@ def data_dir(env=None) -> Path:
 
 
 def state_dir(env=None) -> Path:
-    """STATE/comms, device-keyed."""
+    """STATE/comms, this machine's own."""
     return LAYOUT.state_dir(env)
 
 
 def cache_dir(env=None) -> Path:
-    """CACHE/comms, device-keyed."""
+    """CACHE/comms, this machine's own."""
     return LAYOUT.cache_dir(env)
 
 

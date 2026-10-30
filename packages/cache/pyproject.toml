@@ -13,9 +13,8 @@ Homepage = "https://github.com/moxihq/moxi"
 Repository = "https://github.com/moxihq/moxi"
 Issues = "https://github.com/moxihq/cache/issues"
 
-# Every Moxi distribution declares the umbrella, so a plain install puts `moxi` on PATH.
+# Only the core declares the `moxi` script; this is the watcher's own entry point.
 [project.scripts]
-moxi = "moxi.cli:main"
 moxi-cache-watch = "moxi_cache.watch:main"
 
 # The module's one announcement, read by moxi.modules.

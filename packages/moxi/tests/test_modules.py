@@ -1,4 +1,4 @@
-import dataclasses
+import importlib.metadata
 import subprocess
 import sys
 from pathlib import Path
@@ -52,8 +52,10 @@ def test_load_reads_the_announcement(site):
 def test_found_is_frozen(site):
     site.module("alpha", OPTIONAL="{'x': 'y'}")
     found = modules.load("alpha")
-    with pytest.raises(dataclasses.FrozenInstanceError):
+    with pytest.raises(AttributeError):
         found.state = BROKEN
+    with pytest.raises(AttributeError):
+        del found.state
     with pytest.raises(TypeError):
         found.optional["z"] = "w"
 
@@ -72,12 +74,57 @@ def test_no_claimant_is_absent(site):
     assert found.api is None
 
 
-def test_two_claimants_are_broken_naming_both(site):
+def test_two_claimants_are_broken_naming_both_in_the_full_scan(site):
     site.module("alpha", dist="moxi-alpha")
     site.distribution("other-alpha", "2.0", entry_points={"alpha": "moxi_alpha.module"})
-    found = modules.load("alpha")
+    (found,) = [f for f in modules.scan() if f.name == "alpha"]
     assert found.state == BROKEN
     assert "moxi-alpha 0.1.0" in found.reason and "other-alpha 2.0" in found.reason
+    # load reads moxi-alpha alone, so it never sees the second claimant.
+    assert modules.load("alpha").state == PRESENT
+
+
+class _Renamed(importlib.metadata.Distribution):
+    """A distribution on a path that keeps its metadata directory under another private
+    name than today's, as a later Python might."""
+
+    def __init__(self, info: Path):
+        self._where = info
+
+    def read_text(self, filename):
+        try:
+            return (self._where / filename).read_text(encoding="utf-8")
+        except (FileNotFoundError, IsADirectoryError, NotADirectoryError):
+            return None
+
+    def locate_file(self, path):
+        return self._where.parent / path
+
+
+def test_the_scan_finds_a_distribution_without_its_private_path(site, monkeypatch):
+    site.module("alpha")
+    (info,) = site.root.glob("moxi_alpha-*.dist-info")
+    assert not hasattr(_Renamed(info), "_path")
+    discover = importlib.metadata.Distribution.discover
+    monkeypatch.setattr(importlib.metadata.Distribution, "discover", classmethod(
+        lambda cls, **kw: (_Renamed(d._path) for d in discover(**kw))))
+    (found,) = [f for f in modules.scan() if f.name == "alpha"]
+    assert found.state == PRESENT
+
+
+def test_a_distribution_without_its_private_path_off_sys_path_is_not_seen(site, tmp_path):
+    import shutil
+
+    site.module("alpha")
+    (info,) = site.root.glob("moxi_alpha-*.dist-info")
+    assert modules._seen_by_load(_Renamed(info))
+    moved = tmp_path / "elsewhere" / info.name
+    shutil.copytree(info, moved)
+    assert not modules._seen_by_load(_Renamed(moved))
+    egg = site.root / "moxi_beta-0.1.0.egg-info"
+    egg.mkdir()
+    (egg / "PKG-INFO").write_text("Metadata-Version: 2.1\nName: moxi-beta\nVersion: 0.1.0\n")
+    assert not modules._seen_by_load(_Renamed(egg))
 
 
 def test_a_core_verb_is_broken_naming_the_clash(site):
@@ -87,11 +134,13 @@ def test_a_core_verb_is_broken_naming_the_clash(site):
     assert "verbs" in found.reason and "moxi check" in found.reason
 
 
-def test_a_name_that_breaks_the_rule_is_broken(site):
+def test_a_name_that_breaks_the_rule_is_broken_in_the_scan_and_absent_to_load(site):
     site.module("my_mod", package="mymod")
-    found = modules.load("my_mod")
-    assert found.state == BROKEN
+    (found,) = modules.scan()
+    assert found.name == "my_mod" and found.state == BROKEN
     assert "not a Moxi module name" in found.reason
+    found = modules.load("my_mod")
+    assert found.state == ABSENT and "not a Moxi module name" in found.reason
 
 
 def test_an_entry_point_naming_an_attribute_is_broken(site):
@@ -110,11 +159,11 @@ def test_an_announcement_that_fails_to_import_is_broken(site):
     assert "RuntimeError: no good" in found.reason
 
 
-def test_an_announcement_missing_names_is_broken_naming_them(site):
+def test_an_announcement_missing_names_takes_their_defaults(site):
     site.module("alpha", drop=("SETUP", "SEGMENT"))
     found = modules.load("alpha")
-    assert found.state == BROKEN
-    assert "SETUP, SEGMENT" in found.reason
+    assert found.state == PRESENT
+    assert found.setup is None and found.segment is None
 
 
 @pytest.mark.parametrize("name, value, words", [
@@ -171,12 +220,11 @@ def test_one_record_per_name_per_process_until_reset(site):
 
 
 def test_load_never_raises(site, monkeypatch):
-    import importlib.metadata
-
-    def boom(**kwargs):
+    def boom(*args, **kwargs):
         raise OSError("metadata unreadable")
 
-    monkeypatch.setattr(importlib.metadata, "entry_points", boom)
+    monkeypatch.setattr(modules, "_read_text", boom)
+    site.module("alpha")
     found = modules.load("alpha")
     assert found.state == BROKEN
     assert "metadata unreadable" in found.reason
