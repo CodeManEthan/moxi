@@ -427,7 +427,7 @@ def test_the_stop_handler_answers_each_stop_on_its_connection(make_endpoint, con
 def test_a_late_answer_is_not_taken_and_a_closed_handler_frees_the_slot(
         make_endpoint, connect):
     ep, _ = make_endpoint()
-    ep.hold_wait_s = 0.2
+    ep.stop_wait_s = 0.2
     handler = connect(ep)
     handler.call("stops.handle", {}, timeout=5)
     assert ep.on_stop(StopFacts()) is None               # nobody answered in time

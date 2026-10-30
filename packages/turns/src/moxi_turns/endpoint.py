@@ -81,12 +81,12 @@ from moxi.paths import Layout
 from . import config as turns_config
 from . import listeners as turns_listeners
 from . import protocol
-from .harness import CommandRequest, Delivery, Harness, Live
+from .harness import SHELL_STOP_S, CommandRequest, Delivery, Harness, Live
 from .ledger import Reading, Turn, TurnLedger
 from .results import (COMMANDS, DELIVERY_REFUSALS, FAILED_TIMEOUT, LOST_UNKNOWN, OUTCOMES,
-                      Agents, DeliveryRef, Ended, Facts, Failed, Gone, Lost, OpenTurn,
-                      Passed, Ran, Ready, Refused, SessionEvent, Started, StopFacts,
-                      TurnEnded, TurnStarted, TurnSteered)
+                      SHELL_UNLISTED, Agents, DeliveryRef, Ended, Facts, Failed, Gone,
+                      LeftShell, Lost, OpenTurn, Passed, Ran, Ready, Refused, SessionEvent,
+                      Shells, Started, StopFacts, TurnEnded, TurnStarted, TurnSteered)
 
 log = logging.getLogger("moxi.turns.endpoint")
 
@@ -100,6 +100,10 @@ SETTLED_KEPT = 256
 #: endpoint settles it (a delivery `Lost`, a command `Failed`) and frees its slot, so an
 #: adapter that drops one cannot block the endpoint for its life.
 PENDING_TTL_S = 300.0
+#: How long past a command's moment of effect the endpoint waits for the adapter's report
+#: of its shell stop: the stop's own bound (`SHELL_STOP_S`) and this margin. Past it the
+#: command settles `ran` with shells turns cannot vouch for.
+SHELL_REPORT_MARGIN_S = 5.0
 #: The reason an expired delivery or command settles with, and `entering` returns.
 EXPIRED = "expired"
 #: How long `open()` waits for the address to be served, and `stop()` for its loop to end.
@@ -251,6 +255,18 @@ class _Command:
     result: Ran | Failed | Refused | Passed | None = None
     handed_at: float = field(default_factory=time.monotonic)
     expired: bool = False
+    #: The worker handed it to the adapter.
+    handed: bool = False
+    #: When it took effect (`command_took_effect`, or a compaction's Ready). From here
+    #: `PENDING_TTL_S` no longer counts; the shell stop's own bound does.
+    effect_at: float | None = None
+    #: A compaction's Ready came.
+    ready: bool = False
+    #: The adapter said it ran (`command_ran`), with what it gave: the new session's id
+    #: and, with `stop_shells`, the stop's report.
+    ran: bool = False
+    new_session_id: str | None = None
+    shells: Shells | None = None
 
 
 @dataclass
@@ -273,7 +289,8 @@ class Endpoint:
         self.layout = Layout(turns_config.MODULE)
         self._config = turns_config.reader(self.env)
         settings = self._config.start()          # a ConfigError here refuses the start
-        self.hold_wait_s = max(0, int(settings["hold.wait_ms"])) / 1000
+        #: How long a Stop waits for the stop handler's answer.
+        self.stop_wait_s = max(0, int(settings[turns_config.STOP_WAIT])) / 1000
         self.listen_wait_s = max(0, int(settings["listen.wait_ms"])) / 1000
         #: The bound on an unsettled delivery or command (`PENDING_TTL_S`).
         self.pending_ttl_s = PENDING_TTL_S
@@ -559,6 +576,7 @@ class Endpoint:
                 self._rewrite_hello()
             if ready is not None:
                 self._emit(Ready(ready, self.ledger.session_id, time.time()))
+                self._command_ready(ready)
 
     def load_changed(self, *, release: bool = True) -> None:
         """Publish changed load health and release delivery queued at the load gate."""
@@ -578,6 +596,7 @@ class Endpoint:
                 self._rewrite_hello()
             if announce:
                 self._emit(Ready(source, self.ledger.session_id, time.time()))
+                self._command_ready(source)
             event = self._event("ready", source=source)
         return turns_listeners.ask(self.registry, event, self.listen_wait_s)
 
@@ -810,7 +829,7 @@ class Endpoint:
             holder.asks[ask_id] = slot
             holder.conn.notify_threadsafe(protocol.STOP_ASKED,
                                           {"ask": ask_id, "facts": facts.to_wire()})
-        slot[0].wait(self.hold_wait_s)
+        slot[0].wait(self.stop_wait_s)
         with self._lock:
             # An answer counts only while its ask is open: once it is taken off here,
             # `stop_answer` reads the ask as unknown and answers `taken: false`.
@@ -818,7 +837,7 @@ class Endpoint:
             answered, answer = slot[0].is_set(), slot[1]
         if not answered:
             log.info("the stop handler did not answer Stop %s within %d ms; the turn ends",
-                     ask_id, int(self.hold_wait_s * 1000))
+                     ask_id, int(self.stop_wait_s * 1000))
             return None
         return answer if isinstance(answer, str) and answer else None
 
@@ -842,6 +861,33 @@ class Endpoint:
             c = self._commands.get(request_id)
             if c is not None and c.result is None:
                 self._settle_command(c, result)
+
+    def command_took_effect(self, request_id: str) -> None:
+        """The command took effect (a `clear`'s call returned without a withdrawal; a
+        compaction's Ready, which the core marks itself). With `stop_shells` the adapter
+        stops the shells from here: `PENDING_TTL_S` no longer counts, and the stop has
+        `SHELL_STOP_S` and a margin to report."""
+        with self._lock:
+            c = self._commands.get(request_id)
+            if c is not None and c.result is None and c.effect_at is None:
+                c.effect_at = time.monotonic()
+
+    def command_ran(self, request_id: str, *, new_session_id: str | None = None,
+                    shells: Shells | None = None) -> None:
+        """The adapter's word that the command ran: for `clear` the new session's id, and
+        with `stop_shells` the stop's report. A `clear` or `exit` settles `ran` here. A
+        compaction settles at the later of this and its Ready, since the session, not the
+        call's return, confirms it; without `stop_shells` its Ready alone settles it. With
+        `stop_shells`, `shells` None reads as a list turns cannot vouch for."""
+        with self._lock:
+            c = self._commands.get(request_id)
+            if c is None or c.result is not None:
+                return
+            c.ran = True
+            c.new_session_id = new_session_id
+            if c.request.stop_shells:
+                c.shells = shells if shells is not None else _unvouched()
+            self._settle_if_ran(c)
 
     def gone(self, reason: str = "the session ended") -> None:
         """The session ended."""
@@ -1045,15 +1091,18 @@ class Endpoint:
                 stop_shells: bool = False) -> Ran | Failed | Refused:
         """Run `/clear`, `/exit` or a compaction: consented, one in flight, one accepted
         per 60 s, from an idle snapshot with no open turn, no live subagent and no draft.
-        `stop_shells` is refused `unsupported` until the adapter can stop shells: nothing
-        runs. The snapshot's live read is bounded (`read_live`); the command is recorded
-        and its hand-off put on the worker under one hold of the lock, after any hand-off
-        recorded before it, and this call waits for its settle."""
+        `stop_shells` (with `clear` or `compact`, on an adapter that offers `stop-shells`)
+        stops the session's background shells once the command has taken effect, as one
+        step with it: one consent, one slot, one count toward the rate, and the shells
+        left out of the agent check. The snapshot's live read is bounded (`read_live`);
+        the command is recorded and its hand-off put on the worker under one hold of the
+        lock, after any hand-off recorded before it, and this call waits for its
+        settle."""
         if name not in COMMANDS:
             return Refused("unsupported")
         reason = self._unable(name)
         if reason is None and stop_shells:
-            reason = "unsupported"
+            reason = "unsupported" if name == "exit" else self._unable("stop-shells")
         if reason is None:
             allow = turns_config.allowed(self._config.use("commands.allow"), self.env)
             if name not in allow:
@@ -1066,12 +1115,13 @@ class Endpoint:
                 reason = self._idle_refusal(first, second, if_turn_number)
                 if reason is None and (live is None or live.draft):
                     reason = "draft"         # an unreadable box holds
-                if reason is None and _busy(live):
+                if reason is None and _busy(live, shells=not stop_shells):
                     reason = "busy-agents"   # an unreadable list counts as busy
                 if reason is None:
                     reason = self._command_slot_refusal()
                 if reason is None:
-                    request = CommandRequest(f"{self.nonce}-c{next(self._ids)}", name)
+                    request = CommandRequest(f"{self.nonce}-c{next(self._ids)}", name,
+                                             stop_shells)
                     c = self._commands[request.id] = _Command(request, second.version)
                     self._command_inflight = request.id
                     self._command_accepted_at = time.monotonic()
@@ -1201,6 +1251,7 @@ class Endpoint:
         def run() -> None:
             with self._lock:
                 skip = c.result is not None
+                c.handed = not skip
             if skip:
                 log.info("/%s (%s) settled before its hand-off; skipped",
                          c.request.name, c.request.id)
@@ -1253,7 +1304,19 @@ class Endpoint:
                     self._expire_delivery(d, "neither took nor refused it")
                     freed.append(d.id)
             c = self._commands.get(self._command_inflight) if self._command_inflight else None
-            if c is not None and c.result is None and now - c.handed_at >= ttl:
+            if c is not None and c.result is None and c.effect_at is not None:
+                # Past its moment of effect the command ran: a stop that never reported
+                # leaves shells turns cannot vouch for, and never turns `ran` into a
+                # failure.
+                if now - c.effect_at >= SHELL_STOP_S + SHELL_REPORT_MARGIN_S:
+                    log.warning("/%s (%s) took effect but its shell stop did not report "
+                                "within %g s; it answers ran with the shells unvouched",
+                                c.request.name, c.request.id,
+                                SHELL_STOP_S + SHELL_REPORT_MARGIN_S)
+                    self._settle_command(c, Ran(
+                        self._ran_session_id(c),
+                        c.shells if c.shells is not None else _unvouched()))
+            elif c is not None and c.result is None and now - c.handed_at >= ttl:
                 log.warning("the harness did not settle /%s (%s) within %d s; it answers "
                             "failed", c.request.name, c.request.id, int(ttl))
                 c.expired = True
@@ -1318,6 +1381,38 @@ class Endpoint:
         if self._command_inflight == c.request.id:
             self._command_inflight = None
         self._cond.notify_all()
+
+    def _command_ready(self, source: str | None) -> None:
+        """Under the lock: a Ready was raised. A compaction handed to the adapter took
+        effect at the next Ready with source `compact`."""
+        if source != "compact" or self._command_inflight is None:
+            return
+        c = self._commands.get(self._command_inflight)
+        if c is None or c.result is not None or c.request.name != "compact" or not c.handed:
+            return
+        c.ready = True
+        if c.effect_at is None:
+            c.effect_at = time.monotonic()
+        self._settle_if_ran(c)
+
+    def _settle_if_ran(self, c: _Command) -> None:
+        """Under the lock: settle `c` `ran` once all it waits for has come. A compaction
+        needs its Ready, and with `stop_shells` the stop's report too; a `clear` or
+        `exit` needs the adapter's word."""
+        if c.result is not None:
+            return
+        if c.request.name == "compact":
+            if not c.ready or (c.request.stop_shells and not c.ran):
+                return
+        elif not c.ran:
+            return
+        self._settle_command(c, Ran(self._ran_session_id(c), c.shells))
+
+    def _ran_session_id(self, c: _Command) -> str | None:
+        """The `new_session_id` a `ran` carries: a `clear`'s new id, else None."""
+        if c.request.name != "clear":
+            return None
+        return c.new_session_id or self.ledger.session_id
 
     def _held_turn(self, turn_id: str | None) -> Turn | None:
         for turn in self._held:
@@ -1414,10 +1509,18 @@ class Endpoint:
             log.warning("rewriting %s failed: %s", self.hello_path, exc)
 
 
-def _busy(live: Live | None) -> bool:
+def _busy(live: Live | None, *, shells: bool = True) -> bool:
     """A subagent pending, running or waiting, or a list that could not be read: unknown
-    counts as busy, never as 0."""
-    return live is None or live.agents is None or live.agents > 0
+    counts as busy, never as 0. With `shells` False the background shells the adapter
+    counts among `agents` are left out, as a command with `stop_shells` reads it."""
+    if live is None or live.agents is None:
+        return True
+    return live.agents - (0 if shells else max(0, live.shells)) > 0
+
+
+def _unvouched() -> Shells:
+    """A shell stop turns cannot vouch for: nothing named, the unnamed entry left."""
+    return Shells((), (LeftShell(None, SHELL_UNLISTED),), False)
 
 
 def _moved(reading: Reading, version_seen: int | None) -> str | None:
@@ -1430,5 +1533,6 @@ def _moved(reading: Reading, version_seen: int | None) -> str | None:
     return None
 
 
-__all__ = ["COMMAND_RATE_S", "COMMAND_WAIT_S", "SETTLED_KEPT", "PENDING_TTL_S", "Endpoint",
+__all__ = ["COMMAND_RATE_S", "COMMAND_WAIT_S", "SETTLED_KEPT", "PENDING_TTL_S",
+           "SHELL_REPORT_MARGIN_S", "Endpoint",
            "Handed", "package_version"]

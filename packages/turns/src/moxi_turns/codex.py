@@ -178,7 +178,7 @@ class CodexHarness(Harness):
         if ping is None:
             ping = [str(script("moxi-turns-ping"))]
         flags, self.hook_keys = codex_hooks.session_flags(
-            list(ping), hook_socket, hold_wait_s=endpoint.hold_wait_s,
+            list(ping), hook_socket, hold_wait_s=endpoint.stop_wait_s,
             listen_wait_s=endpoint.listen_wait_s,
         )
 

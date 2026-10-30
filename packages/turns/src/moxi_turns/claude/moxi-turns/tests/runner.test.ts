@@ -147,7 +147,7 @@ describe('the Stop ask', () => {
     expect(w.got.find(g => g.path === '/ask/stop')?.body).toEqual({ turn_id: 't1', session_id: expect.any(String), stop_hook_active: false, task_types: [], crons: 0 })
   })
 
-  test('an endpoint that does not answer within hold_wait_ms + 1 s lets the turn end', async ($: E, on) => {
+  test('an endpoint that does not answer within stop_wait_ms + 1 s lets the turn end', async ($: E, on) => {
     const w = world(on)
     await attached($, w)
     w.answers['/ask/stop'] = 'hang'
@@ -389,5 +389,230 @@ describe('hook times', () => {
     await w.end()
     await w.clock.advance(60_000)
     expect(w.got.filter(g => g.path === '/hook-times')).toEqual([])
+  })
+})
+
+describe('compact and the shell stop', () => {
+  const shell = (id: string) => ({ id, type: 'shell', status: 'running', description: id, command: 'sleep 600' })
+  const monitor = (id: string) => ({ id, type: 'monitor', status: 'running', description: id })
+  const subagent = (id: string) => ({ id, type: 'subagent', status: 'running', description: id })
+  const stop = ($: E, tasks: unknown[], agent?: string) =>
+    $.classic.Stop({ stop_hook_active: false, background_tasks: tasks, ...(agent === undefined ? {} : { agent_id: agent }) })
+  const subagentStop = ($: E, tasks: unknown[], agent = 'a1') =>
+    $.classic.SubagentStop({ stop_hook_active: false, agent_id: agent, agent_type: 'general', agent_transcript_path: '', last_assistant_message: '', background_tasks: tasks })
+  const done = (w: World) => w.reports().filter(r => r.kind === 'command.done')
+  const shellsOf = (w: World) => done(w).at(-1)?.shells
+  const UNLISTED = { id: null, why: 'unlisted' }
+  async function command(w: World, name: string, stopShells = true, request = 'r1') {
+    await w.line({ op: 'command', request, name, stop_shells: stopShells })
+  }
+  /** A tool call the test holds open; `end()` lets it finish. */
+  function hold($: E, w: World, key: string, agentId?: string) {
+    const call = $.tool.call({ tool: 'Bash', command: `hold:${key}`, ...(agentId === undefined ? {} : { agentId }) })
+    return {
+      call,
+      async end() {
+        w.holds[`hold:${key}`]!()
+        await call
+        await w.clock.settle()
+      },
+    }
+  }
+
+  test('compact runs as clear does, and without stop_shells reports no shells', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    await command(w, 'compact', false)
+    expect(w.commands).toEqual(['compact'])
+    expect(w.stateWrites).toContainEqual({ key: 'command', value: { request: 'r1', name: 'compact', sock: SOCK } })
+    expect(done(w)).toEqual([{ seq: 2, kind: 'command.done', request: 'r1', state: 'ran', reason: null, new_session_id: 'S-1' }])
+    expect(w.stopCalls).toEqual([])
+  })
+
+  test('a vouched list: each shell and Monitor is checked, then stopped after the command, by the runner itself', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    await stop($, [shell('s1'), monitor('m1'), subagent('a1'), { id: 'w1', type: 'workflow', status: 'running', description: '' }])
+    await command(w, 'clear')
+    expect(w.order).toEqual(['run clear', 'stop s1', 'stop m1'])
+    expect(w.stopCalls.map(c => c.origin)).toEqual(['moxi-turns', 'moxi-turns'])
+    expect(done(w)).toEqual([{ seq: 2, kind: 'command.done', request: 'r1', state: 'ran', reason: null, new_session_id: 'S-1', shells: { stopped: ['s1', 'm1'], left: [], complete: true } }])
+    // The runner's own TaskStop calls set no mark: a second command still vouches.
+    await command(w, 'compact', true, 'r2')
+    expect(shellsOf(w)).toEqual({ stopped: ['s1', 'm1'], left: [], complete: true })
+  })
+
+  test('a vouched empty list stops nothing and reads complete', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    await stop($, [subagent('a1')])
+    await command(w, 'compact')
+    expect(w.commands).toEqual(['compact'])
+    expect(shellsOf(w)).toEqual({ stopped: [], left: [], complete: true })
+  })
+
+  for (const verdict of ['ask', 'deny']) {
+    test(`a TaskStop check answering ${verdict} refuses unsupported and runs nothing`, async ($: E, on) => {
+      const w = world(on)
+      await attached($, w)
+      await stop($, [shell('s1'), shell('s2')])
+      w.checks.s2 = verdict
+      await command(w, 'clear')
+      expect(w.commands).toEqual([])
+      expect(w.stopCalls).toEqual([])
+      expect(done(w)).toEqual([{ seq: 2, kind: 'command.done', request: 'r1', state: 'refused', reason: 'unsupported', new_session_id: null }])
+    })
+  }
+
+  test('nothing is stopped when the gate withdraws the command or it fails', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    await stop($, [shell('s1')])
+    w.commandAnswer = async name => ({ text: `moxi-turns-gate: /${name} was refused (busy-turn)` })
+    await command(w, 'clear')
+    w.commandAnswer = async () => { throw new Error('no compaction') }
+    await command(w, 'compact', true, 'r2')
+    expect(w.stopCalls).toEqual([])
+    expect(done(w).map(d => [d.state, d.reason, 'shells' in d])).toEqual([['refused', 'busy-turn', false], ['failed', expect.any(String), false]])
+  })
+
+  test('a stop not back within 10 s is left timeout; a deny, an error and an ended task read as such', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    await stop($, [shell('s1'), shell('s2'), shell('s3'), shell('s4'), monitor('m1')])
+    w.stops.s1 = 'hang'                                   // a hook's dialog holds it open
+    w.stops.s2 = { deny: 'not now' }
+    w.stops.s3 = { isError: true, text: 'Task s3 is not running (status: completed)', result: 'x' }
+    w.stops.s4 = { isError: true, text: 'No task found with ID: s4', result: 'x' }
+    const line = command(w, 'compact')
+    await w.clock.advance(9_999)
+    expect(done(w)).toEqual([])
+    await w.clock.advance(1)
+    await line
+    expect(shellsOf(w)).toEqual({
+      stopped: ['m1'],
+      left: [{ id: 's1', why: 'timeout' }, { id: 's2', why: 'denied' }, { id: 's4', why: 'No task found with ID: s4' }],
+      complete: true,
+    })
+  })
+
+  test('with stop_after_clear off a clear stops nothing and names each listed shell', async ($: E, on) => {
+    const w = world(on)
+    await start($)
+    await w.hello({ stop_after_clear: false })
+    await stop($, [shell('s1'), monitor('m1')])
+    await command(w, 'clear')
+    expect(w.stopCalls).toEqual([])
+    expect(shellsOf(w)).toEqual({ stopped: [], left: [{ id: 's1', why: 'not-stopped-after-clear' }, { id: 'm1', why: 'not-stopped-after-clear' }], complete: true })
+    await command(w, 'compact', true, 'r2')                // a compaction still stops them
+    expect(w.stopCalls.map(c => c.taskId)).toEqual(['s1', 'm1'])
+  })
+
+  describe('a list turns cannot vouch for is reported, never read as empty', () => {
+    test('a fresh runner with no Stop seen', async ($: E, on) => {
+      const w = world(on)
+      await attached($, w)
+      await command(w, 'clear')
+      expect(shellsOf(w)).toEqual({ stopped: [], left: [UNLISTED], complete: false })
+    })
+
+    test('a turn with a tool call that ends with no Stop (an interrupt)', async ($: E, on) => {
+      const w = world(on)
+      await attached($, w)
+      await stop($, [shell('s1')])
+      await turnStart($, 't1')
+      await $.tool.call({ tool: 'Bash', command: 'ls' })
+      await turnEnd($, 't1', 'aborted')
+      await command(w, 'clear')
+      expect(shellsOf(w)).toEqual({ stopped: ['s1'], left: [UNLISTED], complete: false })
+    })
+
+    test('a Stop that blocks, then more tool calls with no second Stop', async ($: E, on) => {
+      const w = world(on)
+      await attached($, w)
+      await turnStart($, 't1')
+      w.answers['/ask/stop'] = { reason: 'reply first' }
+      expect((await stop($, [shell('s1')])).block).toBe('reply first')
+      await $.tool.call({ tool: 'Bash', command: 'run_in_background' })
+      await command(w, 'compact')
+      expect(shellsOf(w)).toEqual({ stopped: ['s1'], left: [UNLISTED], complete: false })
+    })
+
+    test('a subagent\'s call after the main turn\'s Stop, with no SubagentStop', async ($: E, on) => {
+      const w = world(on)
+      await attached($, w)
+      await stop($, [shell('s1')])
+      await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'a1' })
+      await command(w, 'clear')
+      expect(shellsOf(w)?.complete).toBe(false)
+      // Its SubagentStop, with nothing in flight, vouches again.
+      await subagentStop($, [shell('s1'), shell('s2')])
+      await command(w, 'compact', true, 'r2')
+      expect(shellsOf(w)).toEqual({ stopped: ['s1', 's2'], left: [], complete: true })
+    })
+
+    test('a Stop seen while another loop\'s call is in flight clears nothing; a later one does', async ($: E, on) => {
+      const w = world(on)
+      await attached($, w)
+      await stop($, [shell('s1')])
+      const h = hold($, w, 'sub', 'a1')
+      await w.clock.settle()
+      await stop($, [shell('s1'), shell('s2')])            // a1's call can still start a shell
+      await command(w, 'clear')
+      expect(shellsOf(w)).toEqual({ stopped: ['s1'], left: [UNLISTED], complete: false })
+      await h.end()
+      await stop($, [shell('s3')])
+      await command(w, 'compact', true, 'r2')
+      expect(shellsOf(w)).toEqual({ stopped: ['s3'], left: [], complete: true })
+    })
+
+    test('a turn with no tool call keeps the list vouched for', async ($: E, on) => {
+      const w = world(on)
+      await attached($, w)
+      await stop($, [shell('s1')])
+      await turnStart($, 't2')
+      await turnEnd($, 't2', 'aborted')
+      await command(w, 'clear')
+      expect(shellsOf(w)).toEqual({ stopped: ['s1'], left: [], complete: true })
+    })
+
+    test('a later Stop with nothing in flight clears the mark, an agent\'s Stop too', async ($: E, on) => {
+      const w = world(on)
+      await attached($, w)
+      await $.tool.call({ tool: 'Bash', command: 'ls' })
+      await stop($, [monitor('m1')], 'a1')
+      await command(w, 'compact')
+      expect(shellsOf(w)).toEqual({ stopped: ['m1'], left: [], complete: true })
+    })
+
+    test('an aborted turn drops the main loop\'s stuck call, never another loop\'s', async ($: E, on) => {
+      const w = world(on)
+      await attached($, w)
+      await turnStart($, 't1')
+      hold($, w, 'main')                                      // its frame never returns
+      const sub = hold($, w, 'sub', 'a1')
+      await w.clock.settle()
+      await turnEnd($, 't1', 'aborted')                      // the person's interrupt
+      await stop($, [shell('s1')])                           // a1's call is still in flight
+      await command(w, 'clear')
+      expect(shellsOf(w)?.complete).toBe(false)
+      await sub.end()
+      await stop($, [shell('s1')])
+      await command(w, 'compact', true, 'r2')
+      expect(shellsOf(w)).toEqual({ stopped: ['s1'], left: [], complete: true })
+    })
+  })
+
+  test('the tool.call hook passes the call on and times only its own work', async ($: E, on) => {
+    const w = world(on, { spinMs: 80 })
+    await attached($, w)
+    const r = await $.tool.call({ tool: 'Bash', command: 'ls' })
+    expect(r.text).toBe('ok')
+    expect(w.toolCalls).toEqual([{ tool: 'Bash', origin: 'engine' }])
+    await w.clock.advance(60_000)
+    const samples = w.got.filter(g => g.path === '/hook-times').flatMap(g => g.body.samples as { event: string; ms: number }[])
+    const call = samples.find(x => x.event === 'tool.call')
+    expect(call).toBeDefined()
+    expect(call!.ms).toBeLessThan(80)
   })
 })

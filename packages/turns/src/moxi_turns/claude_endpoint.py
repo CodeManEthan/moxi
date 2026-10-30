@@ -56,6 +56,15 @@ bound, and the gate drops it unless its window is the open one.
 
 A steer reads `Started`, and its turn names it, once the runner reports `append.done`
 (`$.session.append` resolved without a deny); `append.failed` refuses it `idle`.
+
+Session commands: the runner runs `/clear`, `/exit` and `/compact` through
+`$.command.run`, and the gate re-checks each (`/gate/command`). `exit` settles `passed` at
+the gate's pass. A plain `clear` settles `ran` at the new session's SessionStart. A
+`compact` settles `ran` at its SessionStart with source `compact` (the core's rule for
+every harness). With `stop_shells` the runner stops the session's background shells and
+Monitors after the command has taken effect, and both settle only at its `command.done`,
+which carries the stop's report: a `clear`'s SessionStart records the new id and marks the
+moment of effect, and settles nothing.
 """
 
 from __future__ import annotations
@@ -75,8 +84,8 @@ from typing import Any, BinaryIO
 
 from . import claude_leg as leg
 from .harness import CommandRequest, Delivery, Harness, Live
-from .results import (COMMAND_REFUSALS, LOST_UNTIED, OUTCOMES, Failed, Passed, Ran,
-                      Refused, StopFacts)
+from .results import (COMMAND_REFUSALS, LOST_UNTIED, OUTCOMES, SHELL_UNLISTED, Failed,
+                      LeftShell, Passed, Ran, Refused, Shells, StopFacts)
 
 log = logging.getLogger("moxi.turns.claude")
 
@@ -115,7 +124,8 @@ class ClaudeHarness(Harness):
     """The Claude half of an endpoint: the runner's leg under the endpoint core."""
 
     name = "claude"
-    can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "clear", "exit"})
+    can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "clear", "exit",
+                     "compact", "stop-shells"})
     live_wait_s = LIVE_WAIT_S
 
     def __init__(self, out: BinaryIO, *, pid: int | None = None, cwd: str | None = None,
@@ -132,6 +142,9 @@ class ClaudeHarness(Harness):
         self._live: dict[int, list] = {}
         self._commands: dict[str, CommandRequest] = {}
         self._clear_passed: str | None = None
+        #: A `clear` with `stop_shells` past its SessionStart: its request id and the new
+        #: session's id, which its `command.done` settles with.
+        self._clear_effect: tuple[str, str | None] | None = None
         #: Delivery ids the gate refused, for a `drop` close.
         self._gate_refused: set[str] = set()
         #: Closed windows by nonce: (delivery, how it closed), to name a late entry.
@@ -154,9 +167,10 @@ class ClaudeHarness(Harness):
         ep = self.endpoint
         return self._lines.write({
             "op": leg.LINE_HELLO, "leg": leg.LEG, "mod_sock": str(self.server.path),
-            "hold_wait_ms": int(ep.hold_wait_s * 1000),
+            "stop_wait_ms": int(ep.stop_wait_s * 1000),
             "listen_wait_ms": int(ep.listen_wait_s * 1000),
-            "endpoint_version": ep.version, "pid": os.getpid()})
+            "endpoint_version": ep.version, "pid": os.getpid(),
+            "stop_after_clear": leg.STOP_AFTER_CLEAR})
 
     def handle(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         if path == leg.PATH_REPORT:
@@ -233,7 +247,8 @@ class ClaudeHarness(Harness):
         with self._lock:
             self._commands[request.id] = request
         if not self._lines.write({"op": leg.LINE_COMMAND, "request": request.id,
-                                  "name": request.name}):
+                                  "name": request.name,
+                                  "stop_shells": request.stop_shells}):
             raise OSError("the runner's line is closed")
 
     # -- the window ---------------------------------------------------------------------
@@ -457,17 +472,27 @@ class ClaudeHarness(Harness):
                     "text": f"moxi-turns-gate: /{request.name if request else '?'} was "
                             f"refused ({reason})"}
         # The decision is recorded before the gate passes it.
+        # A compaction settles at its Ready, the core's rule.
         if request.name == "exit":
             ep.command_settled(request.id, Passed())
-        else:
+        elif request.name == "clear":
             with self._lock:
                 self._clear_passed = request.id
         return {"verdict": "pass"}
 
     def _clear_ran(self, new_session_id: str | None) -> None:
+        """The SessionStart of a `clear` the gate passed: a plain one settles `ran` here;
+        one with `stop_shells` has taken effect, and settles at its `command.done`."""
         with self._lock:
             request_id, self._clear_passed = self._clear_passed, None
-        if request_id is not None:
+            request = self._commands.get(request_id) if request_id is not None else None
+            if request is not None and request.stop_shells:
+                self._clear_effect = (request.id, new_session_id)
+        if request_id is None:
+            return
+        if request is not None and request.stop_shells:
+            self.endpoint.command_took_effect(request_id)
+        else:
             self.endpoint.command_settled(request_id, Ran(new_session_id))
 
     def _command_done(self, body: dict[str, Any]) -> None:
@@ -479,14 +504,24 @@ class ClaudeHarness(Harness):
             return
         reason = _opt_str(body, "reason") or state or "unknown"
         ep = self.endpoint
+        with self._lock:
+            effect, self._clear_effect = self._clear_effect, None
+            if effect is not None and effect[0] != request.id:
+                self._clear_effect, effect = effect, None
+            if self._clear_passed == request.id:
+                self._clear_passed = None
         if state == "ran":
+            shells = _shells(body.get("shells")) if request.stop_shells else None
             if request.name == "clear":
-                new_id = _opt_str(body, "new_session_id")
+                new_id = _opt_str(body, "new_session_id") or (effect[1] if effect else None)
                 self._learn(new_id)
-                with self._lock:
-                    if self._clear_passed == request.id:
-                        self._clear_passed = None
-                ep.command_settled(request.id, Ran(new_id or ep.ledger.session_id))
+                new_id = new_id or ep.ledger.session_id
+                if request.stop_shells:
+                    ep.command_ran(request.id, new_session_id=new_id, shells=shells)
+                else:
+                    ep.command_settled(request.id, Ran(new_id))
+            elif request.name == "compact":
+                ep.command_ran(request.id, shells=shells)
             else:
                 ep.command_settled(request.id, Passed())
         elif state == "refused" and reason in COMMAND_REFUSALS:
@@ -496,9 +531,6 @@ class ClaudeHarness(Harness):
             # in time) is no refusal the contract names: the command did not run.
             ep.command_settled(request.id, Failed(f"the gate withdrew it: {reason}"))
         else:
-            with self._lock:
-                if self._clear_passed == request.id:
-                    self._clear_passed = None
             ep.command_settled(request.id, Failed(reason))
 
 
@@ -508,6 +540,34 @@ def _drop(reason: str, kind: str | None) -> dict[str, Any]:
     what = {"start": "the start was refused", "deliver": "the delivery was refused"}.get(
         kind or "", "a late prompt was dropped")
     return {"verdict": "drop", "reason": reason, "text": f"moxi-turns-gate: {what} ({reason})"}
+
+
+def _shells(value: Any) -> Shells:
+    """The runner's report of a shell stop. One turns cannot read is a list it cannot
+    vouch for: nothing named, the unnamed entry left."""
+    unnamed = LeftShell(None, SHELL_UNLISTED)
+    try:
+        if not isinstance(value, dict):
+            raise ValueError("not an object")
+        stopped, left, complete = value.get("stopped"), value.get("left"), value.get("complete")
+        if not isinstance(complete, bool):
+            raise ValueError("complete is not a bool")
+        if not isinstance(stopped, list) or not all(isinstance(i, str) for i in stopped):
+            raise ValueError("stopped is not a list of ids")
+        if not isinstance(left, list):
+            raise ValueError("left is not a list")
+        entries = []
+        for e in left:
+            if (not isinstance(e, dict) or not isinstance(e.get("why"), str)
+                    or not (e.get("id") is None or isinstance(e.get("id"), str))):
+                raise ValueError(f"a left entry is malformed: {e!r}")
+            entries.append(LeftShell(e.get("id"), e["why"]))
+    except ValueError as exc:
+        log.warning("the runner's shell report cannot be read (%s): %r", exc, value)
+        return Shells((), (unnamed,), False)
+    if not complete and unnamed not in entries:
+        entries.append(unnamed)
+    return Shells(tuple(stopped), tuple(entries), complete)
 
 
 def _opt_str(body: dict[str, Any], key: str) -> str | None:

@@ -1,7 +1,8 @@
 // moxi-turns-gate, the gate.
 //
 // It acts only on what the moxi-turns runner submitted or queued, and passes everything
-// else untouched: the person's prompts and typed /clear and /exit, other plugins' runs.
+// else untouched: the person's prompts and typed /clear, /exit and /compact, other
+// plugins' runs.
 //
 // The entry rule: a runner prompt enters only as the prompt of the window now open,
 // admitted once by the endpoint; every other runner prompt is dropped at entry, logged, and
@@ -21,7 +22,7 @@
 // it, and the gate logs each drop it decides itself.
 //
 // A session command's re-check, which lets it run only with consent and from an idle
-// snapshot. For a /clear or /exit the runner queued (its
+// snapshot. For a /clear, /exit or /compact the runner queued (its
 // `command` mark), the gate reads the subagents and the box, then asks the endpoint
 // (POST /gate/command {request, agents, draft}), which records the decision before the
 // gate passes; a drop, or no answer within 1 s (`gone`), withdraws the run without `next`,
@@ -194,7 +195,7 @@ export const register: Register = on => {
     }
   }).catch(($, e, next) => (next.called || !isRunner(e.origin) ? next(e) : gateDrop($, 'a fault in the hook')))
 
-  on('command.run', { command: ['clear', 'exit'] }, async ($, e, next) => {
+  on('command.run', { command: ['clear', 'exit', 'compact'] }, async ($, e, next) => {
     const hook = watch()
     try {
       if (!isRunner(e.origin)) return behind(hook, performance.now(), await next(e))

@@ -74,7 +74,8 @@ def test_the_first_line_and_no_hello_before_the_session_id(claude):
     ep, runner = claude(session=None)
     first = runner.first
     assert first["op"] == "hello" and first["leg"] == leg.LEG
-    assert first["hold_wait_ms"] == 2000 and first["listen_wait_ms"] == 2000
+    assert first["stop_wait_ms"] == 2000 and first["listen_wait_ms"] == 2000
+    assert first["stop_after_clear"] is leg.STOP_AFTER_CLEAR
     assert first["mod_sock"] == str(ep.dir / protocol.MOD_SOCK)
     assert turns.sessions() == []                # no socket until the id comes
     runner.session("s-9", mod_version="0.1.0")
@@ -82,7 +83,7 @@ def test_the_first_line_and_no_hello_before_the_session_id(claude):
     s = turns.find(session_id="s-9")
     assert s is not None and s.harness == "claude"
     assert s.capabilities == frozenset({"deliver", "only-if-idle", "steer", "stop-handler",
-                                        "clear", "exit"})
+                                        "clear", "exit", "compact", "stop-shells"})
     assert s.info["mod_version"] == "0.1.0"
 
 
@@ -305,7 +306,7 @@ def test_holding_answers_the_stop_ask_within_hold_wait(claude, turns_env):
     time.sleep(0.1)
     t0 = time.monotonic()
     assert runner.post(leg.PATH_STOP, stop)["reason"] is None
-    assert time.monotonic() - t0 < 1.0               # the endpoint kept hold.wait_ms
+    assert time.monotonic() - t0 < 1.0               # the endpoint kept stop_handler.wait_ms
     slow.close()
 
 
@@ -595,3 +596,95 @@ def test_an_admitted_window_closes_at_the_core_expiry_and_frees_the_slot(claude)
     d2 = s.deliver("two")
     assert runner.next_line()["delivery"] == d2.id
     assert runner.enter(line["nonce"])["reason"] == leg.LATE
+
+
+def _gate_pass(runner, line):
+    assert runner.post(leg.PATH_GATE_COMMAND, {"request": line["request"], "agents": 0,
+                                               "draft": False})["verdict"] == "pass"
+
+
+def _done(runner, line, **fields):
+    runner.report(leg.R_COMMAND_DONE, **{"request": line["request"], "state": "ran",
+                                         "reason": None, "new_session_id": None, **fields})
+
+
+def test_compact_runs_through_the_gate_and_settles_at_its_session_start(claude,
+                                                                        monkeypatch):
+    monkeypatch.setenv("MOXI_TURNS_COMMANDS", "compact")
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    out: queue.Queue = queue.Queue()
+    threading.Thread(target=_command, args=(s, "compact", out), daemon=True).start()
+    line = runner.next_line()
+    assert line == {"op": "command", "request": line["request"], "name": "compact",
+                    "stop_shells": False}
+    _gate_pass(runner, line)
+    _done(runner, line, new_session_id="s-1")
+    assert out.empty() and not _settles(out)   # the call's return alone settles nothing
+    runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "compact",
+                                   "session_id": "s-1"})
+    assert out.get(timeout=3) == turns.Ran(None)
+
+
+def _settles(out, timeout=0.3):
+    try:
+        out.put(out.get(timeout=timeout))
+        return True
+    except queue.Empty:
+        return False
+
+
+def test_a_clear_with_stop_shells_settles_at_the_stop_report_not_its_session_start(
+        claude, monkeypatch):
+    monkeypatch.setenv("MOXI_TURNS_COMMANDS", "clear")
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    out: queue.Queue = queue.Queue()
+    threading.Thread(target=lambda: out.put(s.command("clear", stop_shells=True,
+                                                      timeout=5)), daemon=True).start()
+    line = runner.next_line()
+    assert line["name"] == "clear" and line["stop_shells"] is True
+    _gate_pass(runner, line)
+    runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "clear",
+                                   "session_id": "s-2"})
+    assert not _settles(out)
+    _done(runner, line, new_session_id="s-2", shells={
+        "stopped": ["b1"], "left": [{"id": "m1", "why": "timeout"}], "complete": False})
+    assert out.get(timeout=3) == turns.Ran("s-2", turns.Shells(
+        ("b1",), (turns.LeftShell("m1", "timeout"), turns.LeftShell(None, "unlisted")),
+        False))
+
+
+@pytest.mark.parametrize("shells,expected", [
+    ({"stopped": [], "left": [], "complete": True}, turns.Shells((), (), True)),
+    ("garbage", turns.Shells((), (turns.LeftShell(None, "unlisted"),), False)),
+    (None, turns.Shells((), (turns.LeftShell(None, "unlisted"),), False)),
+])
+def test_a_compact_with_stop_shells_settles_at_the_later_of_ready_and_report(
+        claude, monkeypatch, shells, expected):
+    monkeypatch.setenv("MOXI_TURNS_COMMANDS", "compact")
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    out: queue.Queue = queue.Queue()
+    threading.Thread(target=lambda: out.put(s.command("compact", stop_shells=True,
+                                                      timeout=5)), daemon=True).start()
+    line = runner.next_line()
+    _gate_pass(runner, line)
+    runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "compact",
+                                   "session_id": "s-1"})
+    assert not _settles(out)
+    _done(runner, line, **({} if shells is None else {"shells": shells}))
+    assert out.get(timeout=3) == turns.Ran(None, expected)
+
+
+def test_a_stop_the_runner_turned_down_reads_unsupported(claude, monkeypatch):
+    monkeypatch.setenv("MOXI_TURNS_COMMANDS", "clear")
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    out: queue.Queue = queue.Queue()
+    threading.Thread(target=lambda: out.put(s.command("clear", stop_shells=True,
+                                                      timeout=5)), daemon=True).start()
+    line = runner.next_line()
+    runner.report(leg.R_COMMAND_DONE, request=line["request"], state="refused",
+                  reason="unsupported", new_session_id=None)
+    assert out.get(timeout=3) == turns.Refused("unsupported")
