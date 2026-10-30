@@ -13,6 +13,7 @@
 - `environ` reads another process's environment as it was started, where the system
   lets one: Linux and macOS.
 - `status` says how a detached child this process started ended.
+- `parent` reads another process's parent pid, with the standard library only.
 
 psutil is imported only inside the functions that use it, so importing this module is
 cheap.
@@ -780,6 +781,139 @@ def _round_up(n: int, to: int) -> int:
     return -(-n // to) * to
 
 
+# -- parent ------------------------------------------------------------------------------
+
+def parent(pid: int) -> int | None:
+    """The pid of process `pid`'s parent, or None when it can't be read.
+
+    A pid that is gone, can't be read, or is not a positive `int` gives None. A process
+    with no parent the reader can see gives the 0 the system gives: Linux's pid 1 and
+    `kthreadd`, a process whose parent is outside the reader's pid namespace, and macOS's
+    `launchd`. So 0 means no parent is visible, and None means no answer.
+
+    Linux reads `/proc/<pid>/stat`. macOS asks the kernel (`sysctl` with
+    `KERN_PROC_PID`), which answers for any user's process. Windows walks a snapshot of
+    the process list (Toolhelp). Standard library only, so no psutil import.
+
+    On Linux and macOS a child whose parent ended reads its new parent (init, or a
+    subreaper). Windows never reparents: the pid named is the parent's at the child's
+    start, and that parent may have ended since and its pid been given to another
+    process. A caller that must know the parent pairs this with `identity` and compares
+    start times: a process started after the child is not its parent.
+    """
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        return None
+    if sys.platform.startswith("linux"):
+        return _linux_parent(pid)
+    if sys.platform == "darwin":
+        return _mac_parent(pid)
+    if _WINDOWS:
+        return _windows_parent(pid)
+    return None
+
+
+def _linux_parent(pid: int, root: str = "/proc") -> int | None:
+    try:
+        with open(os.path.join(root, str(pid), "stat"), "rb") as f:
+            stat = f.read()
+    except OSError:
+        return None
+    # The command name is in parentheses and may hold spaces and parentheses, so the
+    # fields are counted from the last ")": the state, then the parent's pid.
+    fields = stat[stat.rfind(b")") + 1:].split()
+    try:
+        return int(fields[1])
+    except (IndexError, ValueError):
+        return None
+
+
+# macOS's `struct kinfo_proc` of a 64-bit process (x86_64 and arm64): its size, and the
+# offsets of `kp_proc.p_pid` and `kp_eproc.e_ppid`, both 32-bit ints.
+_KERN_PROC = 14
+_KERN_PROC_PID = 1
+_KINFO_PROC_SIZE = 648
+_KINFO_PID_AT = 40
+_KINFO_PPID_AT = 560
+
+
+def _mac_parent(pid: int) -> int | None:
+    import ctypes
+    import ctypes.util
+
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+        sysctl = libc.sysctl
+    except (OSError, AttributeError):
+        return None
+    sysctl.argtypes = (ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
+                       ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t)
+    sysctl.restype = ctypes.c_int
+    mib = (ctypes.c_int * 4)(_CTL_KERN, _KERN_PROC, _KERN_PROC_PID, pid)
+    buffer = ctypes.create_string_buffer(_KINFO_PROC_SIZE)
+    size = ctypes.c_size_t(_KINFO_PROC_SIZE)
+    if sysctl(mib, 4, buffer, ctypes.byref(size), None, 0) != 0:
+        return None
+    return _kinfo_parent(buffer.raw[:size.value], pid)
+
+
+def _kinfo_parent(raw: bytes, pid: int) -> int | None:
+    """The parent's pid in a `KERN_PROC_PID` answer for `pid`. An empty answer is a gone
+    pid. Any other size, or a `p_pid` that is not `pid`, is a layout other than the one
+    named above, and gives None rather than a wrong number."""
+    if len(raw) != _KINFO_PROC_SIZE:
+        return None
+
+    def field(at: int) -> int:
+        return int.from_bytes(raw[at:at + 4], sys.byteorder, signed=True)
+
+    if field(_KINFO_PID_AT) != pid:
+        return None
+    return field(_KINFO_PPID_AT)
+
+
+def _windows_parent(pid: int) -> int | None:
+    import ctypes
+    from ctypes import wintypes as w
+
+    class Entry(ctypes.Structure):  # PROCESSENTRY32W
+        _fields_ = [("dwSize", w.DWORD), ("cntUsage", w.DWORD),
+                    ("th32ProcessID", w.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
+                    ("th32ModuleID", w.DWORD), ("cntThreads", w.DWORD),
+                    ("th32ParentProcessID", w.DWORD), ("pcPriClassBase", w.LONG),
+                    ("dwFlags", w.DWORD), ("szExeFile", w.WCHAR * 260)]
+
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    except OSError:
+        return None
+    snapshot_of = kernel32.CreateToolhelp32Snapshot
+    snapshot_of.argtypes = (w.DWORD, w.DWORD)
+    snapshot_of.restype = w.HANDLE
+    first, following = kernel32.Process32FirstW, kernel32.Process32NextW
+    for call in (first, following):
+        call.argtypes = (w.HANDLE, ctypes.POINTER(Entry))
+        call.restype = w.BOOL
+    kernel32.CloseHandle.argtypes = (w.HANDLE,)
+    kernel32.CloseHandle.restype = w.BOOL
+    snapshot = snapshot_of(_TH32CS_SNAPPROCESS, 0)
+    if not snapshot or snapshot == ctypes.c_void_p(-1).value:
+        return None
+    try:
+        entry = Entry()
+        entry.dwSize = ctypes.sizeof(Entry)
+        found = first(snapshot, ctypes.byref(entry))
+        while found:
+            if entry.th32ProcessID == pid:
+                return int(entry.th32ParentProcessID)
+            found = following(snapshot, ctypes.byref(entry))
+        return None
+    finally:
+        kernel32.CloseHandle(snapshot)
+
+
+_TH32CS_SNAPPROCESS = 0x00000002
+
+
 def _pairs(entries) -> dict[str, str]:
     env: dict[str, str] = {}
     for item in entries:
@@ -790,4 +924,4 @@ def _pairs(entries) -> dict[str, str]:
 
 
 __all__ = ["LIFELINE_ENV", "CODES_KEPT", "ProcId", "run", "spawn", "lifeline", "identity",
-           "alive", "environ", "status"]
+           "alive", "environ", "status", "parent"]

@@ -894,6 +894,126 @@ def test_environ_on_windows_is_none():
     assert proc.environ(os.getpid()) is None
 
 
+# -- parent --------------------------------------------------------------------------------
+
+def test_parent_of_this_process_is_its_parent():
+    assert proc.parent(os.getpid()) == os.getppid()
+
+
+def test_parent_of_a_child_is_this_process():
+    child = subprocess.Popen([PY, "-c", "import sys; sys.stdin.read()"],
+                             stdin=subprocess.PIPE)
+    try:
+        assert proc.parent(child.pid) == os.getpid()
+    finally:
+        child.stdin.close()
+        child.wait(timeout=10)
+
+
+@pytest.mark.parametrize("pid", [0, -1, True, 2.0, "1"])
+def test_parent_of_what_is_not_a_pid_is_none(pid):
+    assert proc.parent(pid) is None
+
+
+def test_parent_of_a_gone_process_is_none():
+    child = subprocess.Popen([PY, "-c", "pass"])
+    child.wait()
+    assert proc.parent(child.pid) is None
+
+
+@POSIX
+def test_parent_of_pid_1_is_zero():
+    assert proc.parent(1) == 0
+
+
+def _stat(root: Path, pid: int, text: bytes) -> None:
+    (root / str(pid)).mkdir(parents=True)
+    (root / str(pid) / "stat").write_bytes(text)
+
+
+@pytest.mark.parametrize("name", [b"python3", b"a b", b"x) (y", b") S 99 (", b"(", b""])
+def test_the_linux_reader_counts_fields_from_the_last_parenthesis(tmp_path, name):
+    _stat(tmp_path, 42, b"42 (" + name + b") S 7 42 42 0 -1 4194560 100 0 0 0\n")
+    assert proc._linux_parent(42, str(tmp_path)) == 7
+
+
+def test_the_linux_reader_of_a_short_or_unreadable_stat_is_none(tmp_path):
+    _stat(tmp_path, 42, b"42 (x) S")
+    _stat(tmp_path, 43, b"43 (x) S q 1")
+    assert proc._linux_parent(42, str(tmp_path)) is None
+    assert proc._linux_parent(43, str(tmp_path)) is None
+    assert proc._linux_parent(44, str(tmp_path)) is None
+
+
+def _kinfo(pid: int, ppid: int, size: int = 648) -> bytes:
+    raw = bytearray(size)
+    for at, value in ((40, pid), (560, ppid)):
+        if at + 4 <= size:
+            raw[at:at + 4] = value.to_bytes(4, sys.byteorder, signed=True)
+    return bytes(raw)
+
+
+def test_a_kinfo_proc_answer_gives_the_parent_at_its_offset():
+    assert proc._kinfo_parent(_kinfo(42, 7), 42) == 7
+    assert proc._kinfo_parent(_kinfo(1, 0), 1) == 0
+
+
+@pytest.mark.parametrize("raw", [b"", _kinfo(42, 7, 492), _kinfo(42, 7, 656),
+                                 _kinfo(43, 7)], ids=["gone", "short", "long", "other pid"])
+def test_a_kinfo_proc_answer_of_another_size_or_pid_is_none(raw):
+    assert proc._kinfo_parent(raw, 42) is None
+
+
+@MACOS
+def test_parent_on_macos_matches_ps():
+    child = subprocess.Popen([PY, "-c", "import sys; sys.stdin.read()"],
+                             stdin=subprocess.PIPE)
+    try:
+        for pid in (os.getpid(), child.pid, 1):
+            ps = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True,
+                                text=True, check=True)
+            assert proc.parent(pid) == int(ps.stdout)
+        assert proc.parent(child.pid) == os.getpid()
+    finally:
+        child.stdin.close()
+        child.wait(timeout=10)
+
+
+@MACOS
+def test_parent_on_macos_reads_another_users_process():
+    ps = subprocess.run(["ps", "-A", "-o", "pid=,uid=,ppid="], capture_output=True,
+                        text=True, check=True)
+    for line in ps.stdout.splitlines():
+        pid, uid, ppid = map(int, line.split())
+        if uid != os.getuid() and pid != 1:
+            assert proc.parent(pid) == ppid
+            return
+    pytest.skip("no other user's process to read")
+
+
+@WINDOWS
+def test_parent_on_windows_names_a_dead_parent_whose_pid_identity_may_not_match(tmp_path):
+    # A middle process starts a grandchild and exits: Windows does not reparent, so the
+    # grandchild still names the middle's pid, and whatever holds that pid now (if any)
+    # started after the grandchild.
+    out = tmp_path / "pid"
+    middle = subprocess.run([PY, "-c", textwrap.dedent(f"""
+        import subprocess, sys
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        open({str(out)!r}, "w").write(str(child.pid))
+        """)], timeout=30)
+    assert middle.returncode == 0
+    grandchild = int(out.read_text())
+    try:
+        named = proc.parent(grandchild)
+        assert named is not None and named != os.getpid()
+        holder = proc.identity(named)
+        mine = proc.identity(grandchild)
+        assert holder is None or holder.started > mine.started
+    finally:
+        subprocess.run(["taskkill", "/F", "/PID", str(grandchild)], capture_output=True)
+
+
 # -- import weight -------------------------------------------------------------------------
 
 def test_importing_the_module_loads_no_psutil_or_ctypes():
