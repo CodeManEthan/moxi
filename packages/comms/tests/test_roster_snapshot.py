@@ -80,7 +80,7 @@ def test_the_snapshot_injects_no_seat_context(rig, capsys):
     assert "adapter claude-shim" in roster
 
     # ...and the same holds of the text the listener hands turns for the session.
-    injected = listener.answer(event("ready", env=session_env(name="x")))
+    injected = listener.answer(event("start", env=session_env(name="x")))
     roster = injected.split(shim_roster.LABEL + "\n", 1)[1]
     assert "planner@proj-a" in roster
     assert "slot" not in roster and "seat" not in roster
@@ -138,21 +138,21 @@ def session_env(name="reviewer", sid="ls1", **extra) -> dict:
     return dict(s.env(), **extra)
 
 
-def test_the_listener_answers_layer_one_at_ready(rig):
+def test_the_listener_answers_layer_one_at_start(rig):
     rig.shim(name="planner", scope="proj-a")
     env = session_env()
     expected, _ = shim_roster.render_snapshot(shim_roster.fetch(daemon_socket()), env=env)
-    assert listener.answer(event("ready", env=env)) == expected
+    assert listener.answer(event("start", env=env)) == expected
     assert expected.startswith(shim_roster.BLOCK) and "planner@proj-a" in expected
     memory = listener.memory_path(env)
     assert memory == session.sessions_dir() / "ls1" / "roster.json"
-    assert "planner@proj-a" in json.loads(memory.read_text()), "ready seeds the memory"
+    assert "planner@proj-a" in json.loads(memory.read_text()), "start seeds the memory"
 
 
 def test_the_listener_gives_the_joins_at_a_prompt_and_nothing_when_nothing_changed(rig):
     rig.shim(name="planner", scope="proj-a")
     env = session_env()
-    listener.answer(event("ready", env=env))
+    listener.answer(event("start", env=env))
     assert listener.answer(event("prompt", env=env)) is None, "most prompts get nothing"
     rig.shim(name="curator", scope="proj-a")
     delta = listener.answer(event("prompt", env=env))
@@ -163,7 +163,7 @@ def test_the_listener_gives_the_joins_at_a_prompt_and_nothing_when_nothing_chang
 def test_offline_the_listener_gives_the_block_and_the_offline_line(rig, capsys):
     rig.daemon.stop()
     env = session_env()
-    assert listener.answer(event("ready", env=env)) == \
+    assert listener.answer(event("start", env=env)) == \
         shim_roster.with_block(shim_roster.OFFLINE, comms=shim_roster.comms_command(env))
     assert listener.answer(event("prompt", env=env)) is None
     capsys.readouterr()
@@ -182,7 +182,7 @@ def test_a_roster_response_this_build_cannot_RENDER_is_treated_as_offline(
     not get: the offline line, with the block."""
     monkeypatch.setattr(shim_roster, "fetch", lambda *a, **k: partial)
     env = session_env()
-    injected = listener.answer(event("ready", env=env))
+    injected = listener.answer(event("start", env=env))
     assert injected == shim_roster.with_block(shim_roster.OFFLINE,
                                               comms=shim_roster.comms_command(env))
     assert injected.startswith(shim_roster.BLOCK), "the block ships regardless"
@@ -192,13 +192,22 @@ def test_a_session_comms_did_not_launch_gets_nothing(rig):
     rig.shim(name="planner", scope="proj-a")
     import os
     env = {k: v for k, v in os.environ.items() if not k.startswith("MOXI_COMMS_NAME")}
-    assert listener.answer(event("ready", env=env)) is None
+    assert listener.answer(event("start", env=env)) is None
     assert listener.answer(event("prompt", env=env)) is None
+
+
+def test_the_listener_answers_nothing_at_ready_and_seeds_no_memory(rig):
+    """`ready` is the same moment as `start`, but turns keeps no answer from it; comms
+    answers layer one once, at `start`."""
+    rig.shim(name="planner", scope="proj-a")
+    env = session_env()
+    assert listener.answer(event("ready", env=env)) is None
+    assert not listener.memory_path(env).exists()
 
 
 def test_the_listener_answers_for_claude_sessions_only(rig):
     env = session_env()
-    assert listener.answer(event("ready", env=env, harness="codex")) is None
+    assert listener.answer(event("start", env=env, harness="codex")) is None
     assert listener.answer(event("turn", env=env)) is None
 
 
@@ -206,7 +215,7 @@ def test_a_claim_socket_outside_a_session_dir_gets_layer_one_and_no_deltas(rig):
     from moxi_comms.paths import runtime_root
     env = dict(session_env(), MOXI_COMMS_CLAIM_SOCKET=str(runtime_root() / "other.sock"))
     assert listener.memory_path(env) is None
-    assert listener.answer(event("ready", env=env)).startswith(shim_roster.BLOCK)
+    assert listener.answer(event("start", env=env)).startswith(shim_roster.BLOCK)
     assert listener.answer(event("prompt", env=env)) is None
 
 
@@ -216,7 +225,7 @@ def test_comms_registers_the_listener_by_entry_point_and_the_target_is_stdlib_on
     from moxi_comms import listeners
     (ep,) = [e for e in entry_points(group="moxi.turns.listeners") if e.name == "comms"]
     assert ep.value == "moxi_comms.listeners"
-    assert listeners.LISTENERS == ((("ready", "prompt"), "moxi_comms.listener:answer"),)
+    assert listeners.LISTENERS == ((("start", "prompt"), "moxi_comms.listener:answer"),)
     tree = ast.parse(Path(listeners.__file__).read_text())
     assert not [n for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))]
 

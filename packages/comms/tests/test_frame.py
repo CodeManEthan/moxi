@@ -704,17 +704,17 @@ def _launched_env():
     return s.env()
 
 
-def _ready(env):
+def _start(env):
     import moxi_turns
     from moxi_comms import listener
-    return listener.answer(moxi_turns.SessionEvent(event="ready", harness="claude",
+    return listener.answer(moxi_turns.SessionEvent(event="start", harness="claude",
                                                    session_id="s-1", env=env))
 
 
 def test_the_block_reaches_the_session_in_the_listeners_answer(rig):
     """Delivery, not text: the context comms' listener hands turns carries the block."""
     rig.shim(name="planner", scope="proj-a")
-    injected = _ready(_launched_env())
+    injected = _start(_launched_env())
     assert injected.startswith(CONTEXT_BLOCK)
     assert shim_roster.LABEL in injected
     assert "comms reply <message-id>" in injected, "the half no seat was ever told"
@@ -736,5 +736,5 @@ def test_the_block_still_reaches_the_session_offline(rig, capsys):
     """A launch is never blocked by comms: offline, the listener still answers the
     block, with the offline line."""
     rig.daemon.stop()
-    assert CONTEXT_BLOCK in _ready(_launched_env())
+    assert CONTEXT_BLOCK in _start(_launched_env())
     capsys.readouterr()

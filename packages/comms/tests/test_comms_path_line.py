@@ -45,7 +45,7 @@ def session_env(name="reviewer", sid="pl1", **extra) -> dict:
 
 def test_the_listener_names_the_stamped_comms_in_a_claude_sessions_layer_one(rig):
     rig.shim(name="planner", scope="proj-a")
-    text = listener.answer(event("ready", env=session_env(MOXI_COMMS_COMMAND=COMMAND)))
+    text = listener.answer(event("start", env=session_env(MOXI_COMMS_COMMAND=COMMAND)))
     assert "Run every comms verb with /x/bin/moxi comms" in text
     block, line, roster = text.split("\n\n", 2)
     assert (block, line) == (CONTEXT_BLOCK, LINE), "the block, then the path line"
@@ -54,7 +54,7 @@ def test_the_listener_names_the_stamped_comms_in_a_claude_sessions_layer_one(rig
 
 def test_the_offline_branch_carries_the_line_too(rig, capsys):
     rig.daemon.stop()
-    text = listener.answer(event("ready", env=session_env(MOXI_COMMS_COMMAND=COMMAND)))
+    text = listener.answer(event("start", env=session_env(MOXI_COMMS_COMMAND=COMMAND)))
     assert text == f"{CONTEXT_BLOCK}\n\n{LINE}\n\n{shim_roster.OFFLINE}"
     capsys.readouterr()
 
@@ -62,7 +62,7 @@ def test_the_offline_branch_carries_the_line_too(rig, capsys):
 def test_the_line_follows_the_director_sentence(rig, capsys):
     rig.daemon.stop()
     env = session_env(MOXI_COMMS_COMMAND=COMMAND, MOXI_COMMS_DIRECTORS="lead")
-    text = listener.answer(event("ready", env=env))
+    text = listener.answer(event("start", env=env))
     assert text == (f"{context.layer_one_block(['lead'])}\n\n{LINE}\n\n"
                     f"{shim_roster.OFFLINE}")
     capsys.readouterr()
@@ -74,7 +74,7 @@ def test_with_no_stamp_the_line_names_the_listeners_own_install(rig, capsys, mon
     rig.daemon.stop()
     env = session_env()
     env.pop("MOXI_COMMS_COMMAND", None)
-    text = listener.answer(event("ready", env=env))
+    text = listener.answer(event("start", env=env))
     assert "Run every comms verb with /endpoint/bin/moxi comms (" in text
     capsys.readouterr()
 
@@ -85,7 +85,7 @@ def test_with_neither_the_line_names_the_bare_verb(rig, capsys, monkeypatch):
     rig.daemon.stop()
     env = session_env()
     env.pop("MOXI_COMMS_COMMAND", None)
-    text = listener.answer(event("ready", env=env))
+    text = listener.answer(event("start", env=env))
     bare = context.MOXI_COMMS_PATH_LINE.format(comms=context.BARE_COMMS)
     assert text == f"{CONTEXT_BLOCK}\n\n{bare}\n\n{shim_roster.OFFLINE}"
     capsys.readouterr()
@@ -94,7 +94,7 @@ def test_with_neither_the_line_names_the_bare_verb(rig, capsys, monkeypatch):
 def test_prompt_deltas_carry_no_path_line(rig):
     rig.shim(name="planner", scope="proj-a")
     env = session_env(MOXI_COMMS_COMMAND=COMMAND)
-    listener.answer(event("ready", env=env))
+    listener.answer(event("start", env=env))
     rig.shim(name="curator", scope="proj-a")
     delta = listener.answer(event("prompt", env=env))
     assert "curator@proj-a" in delta and "Run every comms verb" not in delta
