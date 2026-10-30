@@ -21,9 +21,9 @@ reason, never an empty listing; a directory or file under it that cannot be read
 
 **`subagents(source)`** lists the subagents of one session, in one of four states:
 `listed`, `none` (the place was read and holds none), `unreadable` (the place could not be
-read, with the reason; never read as none) and `unsupported` (sessions cannot yet find this
-harness's subagents, with the reason). A listing says nothing about whether a subagent is
-still running.
+read, with the reason; never read as none) and `unsupported` (sessions cannot find this
+harness's subagents, with the reason; no harness sessions reads answers it today). A
+listing says nothing about whether a subagent is still running.
 
 A listing entry from `sources` or `subagents` carries the file's size when it was listed;
 a read of the entry stops there, so the listing and the records read under it agree.
@@ -43,10 +43,10 @@ from typing import Any
 
 from . import claude, codex
 from .errors import Unreadable
-from .shape import CLAUDE, CODEX, HARNESSES, OPENCODE
+from .shape import CLAUDE, CODEX, HARNESSES, OPENCODE, UNKNOWN
 from .source import (WORKFLOW_DIR, Header, Source, claude_header, codex_head,
-                     codex_header, opencode_header, root as default_root, sidecar_labels,
-                     unpack)
+                     codex_header, opencode_header, root as default_root, sessions_root_of,
+                     sidecar_labels, unpack)
 
 HIT = claude.HIT
 MISS = claude.MISS
@@ -495,10 +495,11 @@ class Subagent:
     """One subagent a listing found.
 
     `source` is what to read, and a read of this entry stops at `size` (None for an
-    OpenCode child session). The labels are each None where the harness did not say:
-    `agent_type`, `description`, `tool_use_id` (the parent's call that spawned it),
-    `spawn_depth`, `parent_agent_id` (the subagent that spawned it, None under the main
-    session) and `workflow_id` (a Claude workflow's `wf_<id>`).
+    OpenCode child session). The labels: `agent_type`, `description`, `tool_use_id` (the
+    parent's call that spawned it), `spawn_depth`, `parent_agent_id` (the subagent that
+    spawned it, None under the main session) and `workflow_id` (a Claude workflow's
+    `wf_<id>`). A Claude or OpenCode label is None where the harness did not say; a Codex
+    label is `UNKNOWN` where Codex wrote nothing for it, and None where it wrote a null.
     """
 
     agent_id: str
@@ -512,11 +513,21 @@ class Subagent:
     workflow_id: Any = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {"agent_id": self.agent_id, "path": self.source.path,
-                "session_id": self.source.session_id, "size": self.size,
-                "agent_type": self.agent_type, "description": self.description,
-                "tool_use_id": self.tool_use_id, "spawn_depth": self.spawn_depth,
-                "parent_agent_id": self.parent_agent_id, "workflow_id": self.workflow_id}
+        """The entry as JSON-ready data: an unknown label left out and named in
+        `"unknown"`."""
+        out: dict[str, Any] = {"agent_id": self.agent_id, "path": self.source.path,
+                               "session_id": self.source.session_id, "size": self.size}
+        unknown = []
+        for name in ("agent_type", "description", "tool_use_id", "spawn_depth",
+                     "parent_agent_id", "workflow_id"):
+            value = getattr(self, name)
+            if value is UNKNOWN:
+                unknown.append(name)
+            else:
+                out[name] = value
+        if unknown:
+            out["unknown"] = unknown
+        return out
 
 
 @dataclass(frozen=True)
@@ -525,10 +536,12 @@ class SubagentListing:
 
     `state` is `listed` (with `entries`), `none` (the place was read and holds none),
     `unreadable` (the place could not be read; `reason` says why, and it is never read as
-    none) or `unsupported` (sessions cannot yet find this harness's subagents; `reason`
-    says why). `unreadable_parts` holds `(path, reason)` for a directory under the place
-    that could not be listed while the rest was. `header` is the parent's OpenCode header,
-    read in the same snapshot as the listing, else None. Iterating gives the entries.
+    none) or `unsupported` (sessions cannot find this harness's subagents; `reason` says
+    why). `unreadable_parts` holds `(path, reason)` for a part of the place that could not
+    be read while the rest was: a Claude directory that could not be listed, or a Codex
+    child thread the parent names whose rollout could not be found or read (its thread id
+    in place of a path). `header` is the parent's OpenCode header, read in the same
+    snapshot as the listing, else None. Iterating gives the entries.
     """
 
     source: Source
@@ -637,6 +650,77 @@ def _opencode_subagents(source: Source) -> SubagentListing:
     return SubagentListing(source, LISTED, entries=entries, header=header)
 
 
+def _codex_child(child: codex.Spawned, root: Path | None,
+                 parent_agent_id: Any) -> tuple[Subagent | None, str | None]:
+    """One named child's entry, or why it has none."""
+    if root is None:
+        return None, "the parent rollout sits under no sessions root"
+    probe = find(CODEX, child.thread_id, root=root).probes[0]
+    if not probe.hit:
+        return None, f"its rollout is not under {root}: {probe.outcome}"
+    hit = next((h for h in probe.hits if not h.compressed), probe.hits[0])
+    try:
+        size = os.stat(hit.source.path).st_size
+    except OSError as exc:
+        return None, f"its rollout cannot be read: {exc.strerror or exc}"
+    link: Any = UNKNOWN
+    if not hit.compressed:
+        try:
+            with open(hit.source.path, "rb") as handle:
+                meta = codex_head(handle, size).meta
+        except OSError:
+            meta = None
+        if meta is not None:
+            link = codex.spawn_link(meta) or UNKNOWN
+    agent_path = child.agent_path
+    if agent_path is UNKNOWN and link is not UNKNOWN:
+        agent_path = link.agent_path
+    depth = UNKNOWN
+    if link is not UNKNOWN and isinstance(link.depth, int) and not isinstance(
+            link.depth, bool):
+        depth = link.depth
+    source = Source(CODEX, hit.source.path, hit.source.session_id, hit.source.session_id)
+    return Subagent(agent_id=hit.source.session_id, source=source, size=size,
+                    agent_type=link.agent_role if link is not UNKNOWN else UNKNOWN,
+                    description=agent_path, tool_use_id=child.call_id,
+                    spawn_depth=depth, parent_agent_id=parent_agent_id), None
+
+
+def _codex_subagents(source: Source, bound: int | None) -> SubagentListing:
+    if source.path.endswith(".zst"):
+        return SubagentListing(source, UNREADABLE,
+                               "the rollout is compressed, and sessions reads no zstd")
+    try:
+        spawns = codex.read_spawns(source.path, thread_id=source.session_id, end=bound)
+    except OSError as exc:
+        return SubagentListing(source, UNREADABLE,
+                               f"the rollout cannot be read: {exc.strerror or exc}")
+    if not spawns.children:
+        return SubagentListing(source, NONE)
+    # A child of a spawned thread names that thread as the agent that spawned it; a child
+    # of a main thread names none. With no line 1, which of the two is not known.
+    parent_agent_id: Any = UNKNOWN
+    if spawns.meta is not None:
+        thread = source.session_id or spawns.meta.get("id")
+        parent_agent_id = thread if codex.spawn_link(spawns.meta) is not None else None
+    root = sessions_root_of(source.path)
+    entries = []
+    parts = []
+    for child in spawns.children:
+        entry, why = _codex_child(child, root, parent_agent_id)
+        if entry is not None:
+            entries.append(entry)
+        else:
+            parts.append((child.thread_id, why))
+    if entries:
+        return SubagentListing(source, LISTED, entries=tuple(entries),
+                               unreadable_parts=tuple(parts))
+    return SubagentListing(source, UNREADABLE,
+                           "; ".join(f"child thread {thread}: {why}"
+                                     for thread, why in parts),
+                           unreadable_parts=tuple(parts))
+
+
 def subagents(source: Any) -> SubagentListing:
     """The subagents of the session `source` names (a `Source` or a listing entry).
 
@@ -647,15 +731,19 @@ def subagents(source: Any) -> SubagentListing:
       subagents had files of their own, whose subagents' lines are in the transcript,
       marked sidechain. For a subagent's own file, the listing holds the subagents it
       spawned (by their sidecars' parent).
-    * Codex: `unsupported` (see `codex.SUBAGENTS_UNSUPPORTED`).
+    * Codex: the child threads the rollout's spawn items name (`codex.read_spawns`),
+      each found by its thread id under the rollout's own sessions root, with no walk,
+      and labelled from the spawn items and the child's line 1. A child named but not
+      found is named in `unreadable_parts`. For a spawned thread's own rollout, the
+      listing holds the threads it spawned.
     * OpenCode: the session's child sessions, read in one snapshot with its row.
 
     Never raises for what the place holds or whether it can be read. Raises ValueError for
     something that is not a source, or an OpenCode source that names no session.
     """
-    source, _bound = unpack(source)
+    source, bound = unpack(source)
     if source.harness == CODEX:
-        return SubagentListing(source, UNSUPPORTED, codex.SUBAGENTS_UNSUPPORTED)
+        return _codex_subagents(source, bound)
     if source.harness == OPENCODE:
         return _opencode_subagents(source)
     return _claude_subagents(source)

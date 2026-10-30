@@ -607,7 +607,3 @@ def test_with_no_line_one_the_originator_mark_is_unknown(sessions):
     assert marks.listed is UNKNOWN
     assert codex.import_marks(head, codex.Imports("x", frozenset({r.thread_id})),
                               thread_id=r.thread_id).listed is True
-
-
-def test_the_subagent_listing_has_a_reason_to_give():
-    assert codex.SUBAGENTS_UNSUPPORTED.startswith("sessions does not yet find")

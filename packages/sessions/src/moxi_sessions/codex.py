@@ -17,6 +17,8 @@ shape, its limits readings, and the marks of an imported thread.
   as the same limits record a rollout's `token_count` gives.
 * **Import marks** (`read_imports`, `read_head`, `import_marks`): the three facts that
   can say a thread was imported from another harness, each as found.
+* **Spawned threads** (`read_spawns`, `spawn_link`): the child threads a rollout's spawn
+  items name, and the parent a spawned thread's line 1 names.
 
 Nothing here judges a line: which records count, and what an import or a missing reading
 means, are the caller's.
@@ -147,15 +149,6 @@ CALL_INPUT_KEYS = ("arguments", "input", "action")
 COMPACTION_KINDS = frozenset({"compacted", "event_msg/context_compacted",
                               "response_item/compaction",
                               "response_item/context_compaction"})
-
-#: Why `subagents()` reads a Codex thread as unsupported. Codex 0.153.0 names a spawned
-#: thread's parent in its own state database and, by its schema, in the child's line 1,
-#: but no real spawn has been read, so the spelling a rollout uses is not known. Until one
-#: is, sessions does not guess at a thread's children.
-SUBAGENTS_UNSUPPORTED = ("sessions does not yet find Codex child threads: how a rollout "
-                         "names its parent thread has not been checked against a real "
-                         "spawn")
-
 
 def _is_legacy(cli_version: Any) -> bool:
     return isinstance(cli_version, str) and any(
@@ -928,3 +921,173 @@ def import_marks(head: Head, imports: Imports, *, thread_id: str | None = None
                  else head.first_turn_id.startswith(IMPORT_TURN_PREFIX)),
         listed=listed, listed_reason=reason, raw_originator=raw_originator,
         imports_path=imports.path)
+
+
+# --- spawned threads ----------------------------------------------------------------------
+#
+# A thread Codex spawns is a thread of its own, with its own rollout. Both sides name the
+# link. The spawning thread writes an `event_msg` `item_completed` whose `item` is a
+# `SubAgentActivity` (kinds `started`, `interacted`, `interrupted`, `completed`), naming the
+# child at `agent_thread_id` and its task at `agent_path`; on `started`, the item's `id` is
+# the spawn call's `call_id`. The child's line 1 names its parent at
+# `source.subagent.thread_spawn` (`parent_thread_id`, `depth`, `agent_path`,
+# `agent_nickname`, `agent_role`), and again at its own `parent_thread_id` and
+# `forked_from_id`. Codex's state database has a table for these links, but Codex 0.153.0
+# left it empty for a real spawn, so it is not read.
+
+#: The `item_completed` item type that names a spawned child thread.
+SPAWN_ITEM = "SubAgentActivity"
+#: The bytes a line must hold to be a spawn item, so a scan decodes no other line.
+SPAWN_ITEM_BYTES = b'"SubAgentActivity"'
+#: The spawn item kind whose `id` is the spawn call's `call_id`.
+SPAWN_STARTED = "started"
+
+
+@dataclass(frozen=True)
+class SpawnLink:
+    """What a spawned thread's line 1 says of its spawn, from
+    `source.subagent.thread_spawn`, each as written (a null as None) and `UNKNOWN` where
+    line 1 does not say: `parent_thread_id`, `depth` (1 for a child of a main thread),
+    `agent_path` (the task's path, `/root/<task>`), `agent_nickname` and `agent_role`."""
+
+    parent_thread_id: Any
+    depth: Any
+    agent_path: Any
+    agent_nickname: Any
+    agent_role: Any
+
+    def as_dict(self) -> dict[str, Any]:
+        """The link as JSON-ready data: an unknown fact left out and named in
+        `"unknown"`."""
+        out: dict[str, Any] = {}
+        unknown = []
+        for name in ("parent_thread_id", "depth", "agent_path", "agent_nickname",
+                     "agent_role"):
+            value = getattr(self, name)
+            if value is UNKNOWN:
+                unknown.append(name)
+            else:
+                out[name] = value
+        if unknown:
+            out["unknown"] = unknown
+        return out
+
+
+def spawn_link(meta: Mapping[str, Any] | None) -> SpawnLink | None:
+    """The spawn link line 1's payload `meta` names, or None when it names no spawn (a
+    thread the user started, or no line 1 at all). A fact the `thread_spawn` object leaves
+    out is taken from line 1's own key of that name when it has one."""
+    if not isinstance(meta, Mapping):
+        return None
+    source = meta.get("source")
+    sub = source.get("subagent") if isinstance(source, Mapping) else None
+    spawn = sub.get("thread_spawn") if isinstance(sub, Mapping) else None
+    if not isinstance(spawn, Mapping):
+        return None
+
+    def fact(name: str) -> Any:
+        if name in spawn:
+            return spawn[name]
+        return meta.get(name, UNKNOWN)
+
+    return SpawnLink(parent_thread_id=fact("parent_thread_id"), depth=fact("depth"),
+                     agent_path=fact("agent_path"), agent_nickname=fact("agent_nickname"),
+                     agent_role=fact("agent_role"))
+
+
+@dataclass(frozen=True)
+class Spawned:
+    """One child thread a rollout's spawn items name, gathered over every item that names
+    it: `thread_id`, `agent_path` (the first an item names, else `UNKNOWN`), `call_id`
+    (the `started` item's `id`, the spawn call; `UNKNOWN` when no `started` item was
+    read) and `kinds`, each item's kind in file order."""
+
+    thread_id: str
+    agent_path: Any
+    call_id: Any
+    kinds: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Spawns:
+    """A rollout's spawn items, read once: line 1's `session_meta` payload (None when
+    line 1 is not one), the children in the order first named, and `size`, the bytes
+    read."""
+
+    meta: dict | None
+    children: tuple[Spawned, ...]
+    size: int
+
+
+def read_spawns(path: str | Path, *, thread_id: str | None = None,
+                end: int | None = None) -> Spawns:
+    """The child threads one rollout's spawn items name.
+
+    Reads forward from line 1, no byte past `end` (a listing's size) or the size the file
+    has when opened, whichever is less; only line 1 and lines holding `SPAWN_ITEM_BYTES`
+    are decoded. A spawn item counts when its `item.type` is `SPAWN_ITEM` and it names an
+    `agent_thread_id`. An item whose `thread_id` names a thread other than this one
+    (`thread_id`, else line 1's `id`) is history the rollout carries from another thread,
+    and is not this thread's spawn. A last line still being written does not decode and
+    is skipped.
+
+    Raises OSError when the file cannot be read, and ValueError for a compressed rollout,
+    which this does not read.
+    """
+    if str(path).endswith(".zst"):
+        raise ValueError(f"{path} is a compressed rollout; it is not read")
+    meta: dict | None = None
+    order: list[str] = []
+    paths: dict[str, Any] = {}
+    calls: dict[str, Any] = {}
+    kinds: dict[str, list[str]] = {}
+    with open(path, "rb") as handle:
+        size = os.fstat(handle.fileno()).st_size
+        if end is not None:
+            size = min(size, end)
+        offset = 0
+        number = 0
+        while offset < size:
+            data = handle.readline(size - offset)
+            if not data:
+                break
+            number += 1
+            offset += len(data)
+            if number == 1:
+                entry = parse_line(data)
+                if entry is not None and entry.get("type") == "session_meta":
+                    payload = entry.get("payload")
+                    meta = payload if isinstance(payload, dict) else None
+                    if thread_id is None and meta is not None:
+                        thread_id = _str(meta.get("id"))
+                continue
+            if SPAWN_ITEM_BYTES not in data:
+                continue
+            entry = parse_line(data)
+            payload = entry.get("payload") if entry is not None else None
+            if (entry is None or entry.get("type") != "event_msg"
+                    or not isinstance(payload, dict)
+                    or payload.get("type") != "item_completed"):
+                continue
+            item = payload.get("item")
+            if not isinstance(item, dict) or item.get("type") != SPAWN_ITEM:
+                continue
+            child = _str(item.get("agent_thread_id"))
+            writer = _str(payload.get("thread_id"))
+            if child is None or (writer is not None and thread_id is not None
+                                 and writer != thread_id):
+                continue
+            if child not in kinds:
+                order.append(child)
+                kinds[child] = []
+                paths[child] = UNKNOWN
+                calls[child] = UNKNOWN
+            kind = item.get("kind")
+            kinds[child].append(kind if isinstance(kind, str) else "?")
+            if paths[child] is UNKNOWN and _str(item.get("agent_path")) is not None:
+                paths[child] = item["agent_path"]
+            if (kind == SPAWN_STARTED and calls[child] is UNKNOWN
+                    and _str(item.get("id")) is not None):
+                calls[child] = item["id"]
+    return Spawns(meta, tuple(Spawned(child, paths[child], calls[child],
+                                      tuple(kinds[child])) for child in order), size)

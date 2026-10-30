@@ -18,8 +18,9 @@ It finds a session's records, asking each root in turn and saying for each wheth
 the session, held none, could not be read, or was not asked because the id is not one; only
 a root that was read and held none counts as a miss. It lists every source under a root with
 the keys a caller needs to tell what changed, and lists a session's subagents: Claude Code's
-subagent files, OpenCode's child sessions. It cannot yet find a Codex thread's subagents,
-and says so rather than reporting none.
+subagent files, the Codex threads a thread spawned (named in the parent's rollout, each
+found by its thread id), and OpenCode's child sessions. A spawned Codex thread's header
+names its parent thread, its depth and its task.
 
 ## The records
 

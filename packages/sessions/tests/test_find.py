@@ -10,9 +10,10 @@ import pytest
 from conftest import write_config
 
 from moxi_sessions import codex
-from moxi_sessions.find import (HIT, LISTED, MISS, NONE, UNREADABLE, UNSUPPORTED, find,
-                                sources, subagents)
-from moxi_sessions.source import Source, unpack
+from moxi_sessions.find import (HIT, LISTED, MISS, NONE, UNREADABLE, find, sources,
+                                subagents)
+from moxi_sessions.shape import UNKNOWN
+from moxi_sessions.source import Source, file_header, unpack
 from moxi_sessions.testing import (ClaudeTranscript, CodexRollout, OpenCodeDb,
                                    write_imports)
 
@@ -483,15 +484,175 @@ def test_subagents_as_dict(projects):
     assert "reason" not in data
 
 
-# --- subagents: Codex and OpenCode ---------------------------------------------------------
+# --- subagents: Codex ---------------------------------------------------------------------
 
-def test_codex_subagents_are_unsupported_with_the_reason(rollouts):
+CHILD = "0190c000-0000-7000-8000-0000000c0de3"
+CHILD_B = "0190c000-0000-7000-8000-0000000c0de4"
+GRANDCHILD = "0190c000-0000-7000-8000-0000000c0de5"
+
+
+def spawned(child) -> object:
+    """A child rollout with one turn and request, written."""
+    child.turn()
+    child.request()
+    child.write()
+    return child
+
+
+def test_codex_subagents_one_child(rollouts):
+    r = rollout(rollouts)
+    child = spawned(r.spawn(CHILD, "explore", call_id="call_spawn_a", role="explorer",
+                            nickname="Noether"))
+    r.write()
+    listing = subagents(Source("codex", str(r.path), THREAD))
+    assert listing.state == LISTED and listing.reason is None
+    assert listing.unreadable_parts == ()
+    (entry,) = listing
+    assert entry.agent_id == CHILD
+    assert entry.source == Source("codex", str(child.path), CHILD, CHILD)
+    assert entry.size == os.stat(child.path).st_size
+    assert (entry.agent_type, entry.description, entry.tool_use_id, entry.spawn_depth,
+            entry.parent_agent_id, entry.workflow_id) == (
+        "explorer", "/root/explore", "call_spawn_a", 1, None, None)
+
+
+def test_codex_subagents_two_children_in_spawn_order(rollouts):
+    r = rollout(rollouts)
+    b = spawned(r.spawn(CHILD_B, "second"))
+    a = spawned(r.spawn(CHILD, "first", completed=False))
+    r.write()
+    listing = subagents(Source("codex", str(r.path), THREAD))
+    assert [e.agent_id for e in listing] == [CHILD_B, CHILD]
+    assert [e.source.path for e in listing] == [str(b.path), str(a.path)]
+    assert [e.description for e in listing] == ["/root/second", "/root/first"]
+    assert all(e.agent_type is None for e in listing)     # Codex wrote a null role
+
+
+def test_codex_a_nested_spawn_is_listed_by_the_thread_that_spawned_it(rollouts):
+    r = rollout(rollouts)
+    child = r.spawn(CHILD, "explore")
+    child.turn()
+    grand = spawned(child.spawn(GRANDCHILD, "look", call_id="call_spawn_g"))
+    child.request()
+    child.write()
+    r.write()
+    top = subagents(Source("codex", str(r.path), THREAD))
+    assert [e.agent_id for e in top] == [CHILD]
+    assert top.entries[0].parent_agent_id is None
+    nested = subagents(top.entries[0])
+    assert nested.state == LISTED
+    (entry,) = nested
+    assert entry.source == Source("codex", str(grand.path), GRANDCHILD, GRANDCHILD)
+    assert (entry.description, entry.tool_use_id, entry.spawn_depth,
+            entry.parent_agent_id) == ("/root/explore/look", "call_spawn_g", 2, CHILD)
+    assert subagents(nested.entries[0]).state == NONE
+
+
+def test_codex_a_child_named_but_missing_is_named_not_dropped(rollouts):
+    r = rollout(rollouts)
+    spawned(r.spawn(CHILD, "here"))
+    r.spawn(CHILD_B, "gone")                     # its rollout is never written
+    r.write()
+    listing = subagents(Source("codex", str(r.path), THREAD))
+    assert listing.state == LISTED and [e.agent_id for e in listing] == [CHILD]
+    ((thread, why),) = listing.unreadable_parts
+    assert thread == CHILD_B and MISS in why
+    assert listing.as_dict()["unreadable_parts"] == [[CHILD_B, why]]
+
+
+def test_codex_children_all_missing_are_unreadable_not_none(rollouts):
+    r = rollout(rollouts)
+    r.spawn(CHILD, "gone")
+    r.write()
+    listing = subagents(Source("codex", str(r.path), THREAD))
+    assert listing.state == UNREADABLE and listing.entries == ()
+    assert CHILD in listing.reason and MISS in listing.reason
+
+
+def test_codex_a_parent_with_no_spawns_is_none(rollouts):
     path = rollout(rollouts).write()
     listing = subagents(Source("codex", str(path), THREAD))
-    assert listing.state == UNSUPPORTED
-    assert listing.reason == codex.SUBAGENTS_UNSUPPORTED
-    assert listing.as_dict()["reason"] == codex.SUBAGENTS_UNSUPPORTED
+    assert listing.state == NONE and listing.reason is None and listing.entries == ()
 
+
+def test_codex_a_missing_or_compressed_parent_is_unreadable(rollouts):
+    listing = subagents(Source("codex", str(rollouts / "absent.jsonl"), THREAD))
+    assert listing.state == UNREADABLE and "cannot be read" in listing.reason
+    zst = rollouts / "2026/10/30/rollout-2026-10-30T10-00-00-" f"{THREAD}.jsonl.zst"
+    zst.parent.mkdir(parents=True)
+    zst.write_bytes(b"\x28\xb5\x2f\xfd")
+    listing = subagents(Source("codex", str(zst), THREAD))
+    assert listing.state == UNREADABLE and "zstd" in listing.reason
+
+
+def test_codex_a_parent_still_writing_is_read_to_its_listed_size(rollouts):
+    r = rollout(rollouts)
+    child = spawned(r.spawn(CHILD, "first", completed=False))
+    r.write()
+    (listed,) = [e for e in sources("codex", root=rollouts) if e.source.session_id == THREAD]
+    # After the listing: a second spawn, the first child's next lines, and a spawn item
+    # still being written.
+    spawned(r.spawn(CHILD_B, "second"))
+    r.flush()
+    child.request()
+    child.flush()
+    r.spawn_item(GRANDCHILD)
+    r.flush(terminated=False)
+    with open(r.path, "rb+") as handle:
+        handle.truncate(os.path.getsize(r.path) - 20)
+    assert [e.agent_id for e in subagents(listed)] == [CHILD]
+    now = subagents(Source("codex", str(r.path), THREAD))
+    assert [e.agent_id for e in now] == [CHILD, CHILD_B]
+    entry = now.entries[0]
+    assert entry.size == os.stat(child.path).st_size
+    assert unpack(entry) == (entry.source, entry.size)
+
+
+def test_codex_spawn_items_carried_from_another_thread_are_not_its_own(rollouts):
+    r = rollout(rollouts)
+    r.spawn_item(CHILD, writer=THREAD_B)
+    r.write()
+    assert subagents(Source("codex", str(r.path), THREAD)).state == NONE
+
+
+def test_codex_a_child_whose_line_one_is_missing_keeps_its_entry(rollouts):
+    r = rollout(rollouts)
+    child = spawned(r.spawn(CHILD, "explore", call_id="call_spawn_a", meta=False))
+    r.write()
+    (entry,) = subagents(Source("codex", str(r.path), THREAD))
+    assert entry.source.path == str(child.path)
+    assert (entry.description, entry.tool_use_id) == ("/root/explore", "call_spawn_a")
+    assert entry.agent_type is UNKNOWN and entry.spawn_depth is UNKNOWN
+    data = entry.as_dict()
+    assert data["unknown"] == ["agent_type", "spawn_depth"]
+    assert "agent_type" not in data and data["tool_use_id"] == "call_spawn_a"
+
+
+def test_codex_a_childs_header_names_its_parent(rollouts):
+    r = rollout(rollouts)
+    child = spawned(r.spawn(CHILD, "explore", role="explorer", nickname="Noether"))
+    r.write()
+    headers = {e.source.session_id: e.header for e in sources("codex", root=rollouts)}
+    link = headers[CHILD].spawn
+    assert (link.parent_thread_id, link.depth, link.agent_path, link.agent_nickname,
+            link.agent_role) == (THREAD, 1, "/root/explore", "Noether", "explorer")
+    assert headers[CHILD].parent == THREAD
+    assert headers[CHILD].as_dict()["spawn"] == {
+        "parent_thread_id": THREAD, "depth": 1, "agent_path": "/root/explore",
+        "agent_nickname": "Noether", "agent_role": "explorer"}
+    assert headers[THREAD].spawn is None and "spawn" not in headers[THREAD].as_dict()
+    assert child.path.exists()
+
+
+def test_codex_a_header_with_no_line_one_has_an_unknown_spawn(rollouts):
+    r = CodexRollout(rollouts, meta=False)
+    r.turn()
+    r.write()
+    (entry,) = sources("codex", root=rollouts)
+    assert entry.header.spawn is UNKNOWN and "spawn" in entry.header.as_dict()["unknown"]
+
+
+# --- subagents: OpenCode -------------------------------------------------------------------
 
 def test_opencode_subagents_are_the_child_sessions(tmp_path):
     db = OpenCodeDb(tmp_path / "oc")
@@ -530,3 +691,28 @@ def test_opencode_subagents_need_a_session(tmp_path):
 def test_subagents_refuses_what_is_not_a_source():
     with pytest.raises(ValueError):
         subagents("/some/path.jsonl")
+
+
+# --- subagents: a real Codex spawn (live) --------------------------------------------------
+
+#: A real Codex rollout whose thread spawned one child, for the live test to read. The
+#: environment is read when the module loads, before a test's own is emptied.
+LIVE_PARENT_ENV = "MOXI_SESSIONS_CODEX_SPAWN_PARENT"
+LIVE_PARENT = os.environ.get(LIVE_PARENT_ENV)
+
+
+@pytest.mark.live
+@pytest.mark.skipif(not LIVE_PARENT, reason=f"{LIVE_PARENT_ENV} names no rollout")
+def test_live_a_real_spawn_lists_its_one_child():
+    thread = codex.NAME_RE.match(os.path.basename(LIVE_PARENT)).group("thread")
+    listing = subagents(Source("codex", LIVE_PARENT, thread))
+    assert listing.state == LISTED and listing.unreadable_parts == ()
+    (entry,) = listing
+    assert entry.agent_id == entry.source.session_id != thread
+    assert entry.size == os.stat(entry.source.path).st_size
+    assert entry.spawn_depth == 1 and entry.parent_agent_id is None
+    assert isinstance(entry.tool_use_id, str) and entry.description.startswith("/root/")
+    with open(entry.source.path, "rb") as handle:
+        header = file_header(entry.source, handle, entry.size)
+    assert header.spawn.parent_thread_id == thread and header.parent == thread
+    assert header.spawn.depth == 1 and header.spawn.agent_path == entry.description
