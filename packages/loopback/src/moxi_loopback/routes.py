@@ -852,6 +852,9 @@ def _body_value(value: Any, item: Field, path: str) -> Any:
             number = float(value)
         except OverflowError:
             raise BadRequest(path, "not a finite number") from None
+        if not math.isfinite(number):
+            # JSON's 1e400 parses to inf, which projection could never send back.
+            raise BadRequest(path, "not a finite number")
         if item.max is not None and number > item.max:
             raise BadRequest(path, "over its max")
         return number

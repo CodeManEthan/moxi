@@ -611,6 +611,21 @@ def test_a_huge_integer_for_a_float_is_a_bad_request():
         parse_body(BODY, b'{"ratio": ' + b"9" * 400 + b"}")
 
 
+@pytest.mark.parametrize(("raw", "key"), [
+    (b'{"x": 1e400}', "x"),
+    (b'{"x": -1e400}', "x"),
+    (b'{"xs": [1.5, 1e400]}', "xs.1"),
+])
+def test_a_float_with_no_max_refuses_a_value_too_large_to_be_finite(raw, key):
+    route = act(body={"x": Field("float", required=False),
+                      "xs": Field("list", required=False, items=Field("float"))})
+    assert parse_body(route, b'{"x": 1e300, "xs": [-1e300]}') == {"x": 1e300, "xs": [-1e300]}
+    with pytest.raises(BadRequest) as err:
+        parse_body(route, raw)
+    assert err.value.key == key
+    assert "finite" in str(err.value)
+
+
 # --- projection ---------------------------------------------------------------------
 
 
