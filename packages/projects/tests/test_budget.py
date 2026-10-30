@@ -5,15 +5,15 @@ import test. On top of it a reader pays for projects' read API: importing it (wh
 `load` does) and the first reads. One test pins the modules that part may add to
 `sys.modules`: projects' own, `sqlite3` and what it pulls in, and the core's
 `moxi.store`, through which a read opens the store. The other, in the slow tier, times
-it as the core's import test does: the median of `python -I` runs of the hook path with a
-`get` and a `for_path`, minus the median of the same hook path for a module whose
-announcement is one line.
+`python -I` runs of the hook path with a `get` and a `for_path` against the same hook path
+for a module whose announcement is one line. The two kinds of run alternate in one loop
+and the test compares the fastest of each, so load that comes and goes during the test
+falls on both sides alike and the least-disturbed run of each is what is compared.
 """
 
 from __future__ import annotations
 
 import os
-import statistics
 import subprocess
 import sys
 import time
@@ -54,14 +54,20 @@ def test_the_reads_add_only_projects_sqlite3_and_the_store_helper(golden_copy):
     assert added <= ALLOWED, sorted(added - ALLOWED)
 
 
-def _median_ms(code: str, env: dict) -> float:
-    times = []
+def _run_ms(code: str, env: dict) -> float:
+    start = time.perf_counter()
+    subprocess.run([sys.executable, "-I", "-c", code], check=True, env=env,
+                   stdout=subprocess.DEVNULL)
+    return (time.perf_counter() - start) * 1000
+
+
+def _fastest_ms(reads: str, floor: str, env: dict) -> tuple[float, float]:
+    """The fastest run of each, the two kinds alternating so neither gets a quieter spell."""
+    read_times, floor_times = [], []
     for _ in range(RUNS):
-        start = time.perf_counter()
-        subprocess.run([sys.executable, "-I", "-c", code], check=True, env=env,
-                       stdout=subprocess.DEVNULL)
-        times.append((time.perf_counter() - start) * 1000)
-    return statistics.median(times)
+        floor_times.append(_run_ms(floor, env))
+        read_times.append(_run_ms(reads, env))
+    return min(read_times), min(floor_times)
 
 
 @pytest.mark.slow
@@ -81,7 +87,8 @@ def test_projects_part_of_the_hook_path_stays_under_its_budget(golden_copy, tmp_
     reads = hook.format(name="projects") + READS.format(
         path=os.path.join(golden_copy, "alpha", "src"))
     env = _env()
-    ms = _median_ms(reads, env) - _median_ms(floor, env)
+    read_ms, floor_ms = _fastest_ms(reads, floor, env)
+    ms = read_ms - floor_ms
     load = os.getloadavg()[0] if hasattr(os, "getloadavg") else float("nan")
     print(f"\nprojects' part of the hook path: {ms:.1f} ms at load average {load:.2f}")
     assert ms < BUDGET_MS
