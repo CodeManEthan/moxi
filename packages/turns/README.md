@@ -11,7 +11,9 @@ part of the process that called `launch()` for a Codex or OpenCode session), so 
 session is idle and whether a delivered turn ran are read from the harness's own turn
 events. Claude Code sessions are
 reached through two Claude Code plugins that ship inside the package; Codex sessions run
-under a host turns launches; OpenCode sessions run under an experimental host. turns is
+under a host turns launches, in its caller or as a process of its own (the internal entry
+`moxi-turns-codex-host`, installed with the `codex` extra); OpenCode sessions run under an
+experimental host. turns is
 a library with no command of its own. Its API is the `moxi_turns` package, and the wire
 under it is described in [contracts/socket-protocol.md](contracts/socket-protocol.md).
 

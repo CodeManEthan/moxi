@@ -21,6 +21,7 @@ Issues = "https://github.com/moxihq/turns/issues"
 # Internal entry points, spawned by the Claude runner or a Codex host, never typed.
 moxi-turns-endpoint = "moxi_turns.claude_endpoint:main"
 moxi-turns-ping = "moxi_turns.codex_hooks:main"
+moxi-turns-codex-host = "moxi_turns.codex_host:main"
 
 # The module's one announcement, read by moxi.modules.
 [project.entry-points."moxi.modules"]

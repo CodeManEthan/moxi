@@ -65,7 +65,7 @@ def test_exited_window_checks_generation_before_calling_it_operator_close():
         def poll(self, window):
             return True
 
-        def reap_group(self, window):
+        def reap(self, window):
             pass
 
         def end(self, window):

@@ -1,5 +1,5 @@
-"""Processes: a process's ancestry, read from `/proc`, for `find(pid=…)`, and the
-parent-death signal a host's children carry.
+"""Processes: a process's ancestry, read from `/proc`, for `find(pid=…)`, the
+parent-death signal a host's children carry, and a child's stdin.
 
 A command run inside a session finds its own endpoint by walking up from its own pid to
 the harness process the endpoint names. `ProcView` is the one reader of `/proc`; a test
@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import ctypes
 import os
+import shutil
 import signal
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 
 #: How long a child a host stops gets between SIGTERM and SIGKILL.
 TERM_GRACE = 5.0
@@ -35,6 +36,34 @@ def die_with_parent(parent_pid: int) -> Callable[[], None] | None:
             os._exit(0)
 
     return _pre
+
+
+# Opens the file named first as fd 0, then becomes the program named next, with the
+# arguments after it (its own name first). The exec keeps the pid and the start time,
+# so whatever watches the pid watches the program.
+_STDIN_EXEC = (
+    "import os, sys\n"
+    "fd = os.open(sys.argv[1], os.O_RDWR | getattr(os, 'O_NOCTTY', 0))\n"
+    "if fd != 0:\n"
+    "    os.dup2(fd, 0)\n"
+    "    os.close(fd)\n"
+    "os.execv(sys.argv[2], sys.argv[3:])\n"
+)
+
+
+def with_stdin(path, argv: Sequence[str], env: Mapping[str, str] | None = None) -> list[str]:
+    """`argv` run with `path` as its stdin, for a spawn that cannot set a child's stdin
+    (`moxi.proc.spawn` leaves it the parent's own). A short interpreter opens `path`
+    as fd 0 and then execs the program, which keeps its pid. The program is looked up
+    on `env`'s PATH (this process's when None) first, so a missing one raises
+    `FileNotFoundError` here, as `Popen` would."""
+    argv = [os.fspath(part) for part in argv]
+    search = (os.environ if env is None else env).get("PATH", os.defpath)
+    program = shutil.which(argv[0], path=search)
+    if program is None:
+        raise FileNotFoundError(f"{argv[0]} is not on PATH")
+    return [sys.executable, "-I", "-S", "-c", _STDIN_EXEC, os.fspath(path),
+            os.path.abspath(program), *argv]
 
 
 class ProcView:
@@ -72,4 +101,5 @@ class ProcView:
 
 DEFAULT = ProcView()
 
-__all__ = ["DEFAULT", "PR_SET_PDEATHSIG", "ProcView", "TERM_GRACE", "die_with_parent"]
+__all__ = ["DEFAULT", "PR_SET_PDEATHSIG", "ProcView", "TERM_GRACE", "die_with_parent",
+           "with_stdin"]
