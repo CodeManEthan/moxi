@@ -43,6 +43,7 @@ from moxi_loopback.api import (
 from . import cli, config, listen
 from .listen import Listeners
 from .proxy import Proxy
+from .push import Push
 from .router import ASGIApp, Router, shell_profile, shell_table, worker_layer
 from .session import TICKETS_DIR, OwnerCheck, Sessions, Tickets, open_store
 from .starter import Starters
@@ -98,7 +99,9 @@ class Shell:
 
     `starters` is the shell's one set of page-server starters, built here unless given;
     `child_args` go to every page server it starts (tests pass `("--idle-s", "0.5")`).
-    Without a `proxy`, `/m/<module>/` goes to the proxy over those starters.
+    Without a `proxy`, `/m/<module>/` goes to the proxy over those starters, and without a
+    `push`, `/m/ui/api/push` goes to a `Push` over them and `mounts` (`Shell.push`; the
+    snapshot gives it new exports with `set_exports` and `ui.modules` with `publish`).
     """
 
     def __init__(self, listeners: Listeners, *, epoch: str | None,
@@ -121,7 +124,7 @@ class Shell:
         self.starters = starters or Starters(
             runtime_dir=self.layout.runtime_dir(), state_dir=self.layout.state_dir(),
             log=cli.log_path(), child_args=child_args)
-        self._push = push
+        self.push = push if push is not None else Push(self.starters, mounts=self._mounts)
         self._proxy = proxy if proxy is not None else Proxy(
             self.starters, table=lambda: self.profile.table)
         self.router: Router | None = None
@@ -136,7 +139,7 @@ class Shell:
                                   port=self.listeners.port, version=version())
         page = app(self._page, module=MODULE, server_id=self.info.server_id, prefix="/m/ui",
                    version=self.info.version)
-        self.router = Router(self.sessions, page=page, push=self._push, proxy=self._proxy)
+        self.router = Router(self.sessions, page=page, push=self.push, proxy=self._proxy)
         self.set_table(shell_table(self._modules, self._mounts))
         self.asgi = worker_layer(guard(
             prove(self.router, token=self.info.token, server_id=self.info.server_id),
@@ -153,11 +156,23 @@ class Shell:
         self._should_exit = asyncio.Event()
         _log.info("serving on 127.0.0.1:%d (%s)", self.listeners.port,
                   ", ".join(sorted(self.listeners.names)))
+        # Push streams never end on their own, so the stop ends them itself rather than
+        # leave them to the server's shutdown deadline.
+        ending = asyncio.ensure_future(self._end_push_at_stop())
         try:
             await serve(self.asgi, self.listeners.sockets, should_exit=self._should_exit,
                         head_limit=HEAD_LIMIT)
         finally:
+            ending.cancel()
+            if isinstance(self.push, Push):
+                await self.push.aclose()
             await self.starters.aclose()
+
+    async def _end_push_at_stop(self) -> None:
+        assert self._should_exit is not None
+        await self._should_exit.wait()
+        if isinstance(self.push, Push):
+            await self.push.aclose()
 
     def stop(self) -> None:
         """Ask a running shell to stop; safe from any thread."""
