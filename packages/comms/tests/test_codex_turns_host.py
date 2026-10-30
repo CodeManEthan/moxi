@@ -23,7 +23,10 @@ PR_SET_PDEATHSIG = 1                  # linux/prctl.h
 def die_with_parent():
     """A `preexec_fn`: the kernel sends the child SIGTERM when this thread exits, and
     a child whose parent is already gone exits at once. libc is looked up here, never
-    in the child."""
+    in the child. Python warns that a `preexec_fn` is unsafe when the parent has
+    threads, since the forked child can block on a lock another thread held; `Popen`
+    offers no other way to set this signal, and the child here takes no lock: it makes
+    two system calls and returns. turns' own launch helpers do the same."""
     prctl = ctypes.CDLL(None, use_errno=True).prctl
     parent = os.getpid()
 
@@ -110,7 +113,8 @@ def test_mail_sent_through_the_daemon_reaches_the_hosted_thread_and_settles(
         # itself. Mail sent while that turn runs is steered into it, and the stub's end
         # then races the `complete` below; under load the steer can also outlast the
         # turns client's wait, so comms requeues the digest into a second turn nothing
-        # ends. The daemon marks the binding `turned` once the adapter reports the
+        # ends. That requeue is a race in turns' client, which reads a slow steer as
+        # refused; this test steers around it and does not cover it. The daemon marks the binding `turned` once the adapter reports the
         # priming turn's end, so the mail starts a turn of its own.
         assert wait_until(lambda: rig.daemon.bindings[IDENTITY].turned, 20)
         code, out = rig.cli(["send", "--posture", "none", IDENTITY, "through the daemon"],

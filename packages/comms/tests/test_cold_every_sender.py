@@ -234,7 +234,9 @@ def adapters():
         # point, and it serves one connection's frames in order: a ping answered on
         # this connection means both have run. Without it, a release point that runs
         # late reads whatever the test has set up since (a transcript warmed after a
-        # post was held) and hands a row the test means to keep.
+        # post was held) and hands a row the test means to keep. If the daemon ever
+        # serves a connection's frames out of order, the ping still answers but proves
+        # nothing, and this race comes back.
         c.request("ping")
         made.append(c)
         pushes.client = c
