@@ -225,7 +225,7 @@ def cmd_history(args, ctx: Context) -> int:
             return EXIT_OK
     with ctx.db() as db:
         room = directory.room_by_name(db, NAMES)
-        msgs = ctx.record.history(room["channel_id"], limit=args.limit)
+        msgs = ctx.record.history(room["room_id"], limit=args.limit)
         rows = []
         # The effective audience of every message IN THIS PAGE, oldest first (the seam's
         # `history` is ascending), so a hand-typed reply can show the audience it

@@ -16,7 +16,7 @@ env = "MOXI_COMMS_BACKEND"
 [local.record]
 type = "path"
 default = ""
-doc = "The local record's file; empty means record.db in comms' state directory."
+doc = "The local record's file; empty means comms.db in comms' state directory."
 read = "start"
 env = "MOXI_COMMS_LOCAL_RECORD"
 

@@ -49,7 +49,7 @@ def _old_state(tmp_path):
     made = provision(record, directory_path, operator=("900001", "operator"))
     conn = directory.connect(directory_path)
     conn.executescript(OLD_DIRECTORY)
-    conn.execute("INSERT INTO agents(name, scope, status, created_at, kind) "
+    conn.execute("INSERT INTO identities(name, scope, status, created_at, kind) "
                  "VALUES ('herald', 'global', 'active', '2026-01-01', 'agent')")
     for number in (1, 2, 3):
         conn.execute("INSERT INTO slots VALUES (?, '2026-01-01')", (number,))

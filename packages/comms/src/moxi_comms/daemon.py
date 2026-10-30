@@ -56,7 +56,7 @@ Contract anchors:
 
 Routing stays memory-only. What the daemon also does is record custody in the binding
 history (`bindings.py`): the two moments it alone witnesses -- the bind, and the
-    connection-close release -- are appended to `DATA/comms/bindings.db`. The binding history is
+    connection-close release -- are appended to comms.db's `bindings`. The binding history is
     evidence and never a routing input: after the old record's one-time conversion it is
     read only for whether an identity has existed, and no lookup in it can make anything
     addressable.
@@ -89,7 +89,7 @@ from .machine_line import (COLD_AT_LIVE, HELD_TOKEN, NEXT_TURN_TOKEN, POSTURE_NO
                            POSTURE_ONCE, parse as parse_machine_line)
 from .record import Message
 from . import kinds as kinds_mod
-from .paths import cold_gate, daemon_socket, directory_db
+from .paths import cold_gate, comms_db, daemon_socket
 from .protocol import CLI_PROTOCOL, PROTOCOL_VERSION, LineConn
 from .provision import NAMES
 from .scoping import GLOBAL, NAME_RE, is_auto_name, qualify, split_tag, tag_matches
@@ -351,7 +351,7 @@ class Daemon:
         #: The local backend's one-time record conversion and idempotent credential-file
         #: cleanup.  It runs after the binding history's boot fence and before the queue load.
         self.migrate = migrate
-        self.db_path = Path(db_path or directory_db())
+        self.db_path = Path(db_path or comms_db())
         self.socket_path = Path(socket_path or daemon_socket())
         self.clock = clock
         #: The cold-cache gate file an older daemon kept (`paths.cold_gate`): read once,
@@ -497,7 +497,7 @@ class Daemon:
             row = directory.room_by_name(conn, NAMES)
             if row is None:
                 raise RuntimeError(f"{NAMES} is not provisioned")
-            return row["channel_id"]
+            return row["room_id"]
 
     # ------------------------------------------------------------------ lifecycle
     def start(self) -> "Daemon":
@@ -2442,8 +2442,12 @@ class Daemon:
                 if self.record.get_message(mid) is None:
                     continue
                 rows.setdefault(str(q), set()).add(mid)
-        # A box with no directory has never routed a message: there is nothing to scan.
-        channel_id = self._names_channel() if self.db_path.exists() else None
+        # A box with no #names room has never routed a message: there is nothing to scan.
+        channel_id = None
+        if self.db_path.exists():
+            with self._db() as conn:
+                room = directory.room_by_name(conn, NAMES)
+            channel_id = room["room_id"] if room is not None else None
         found = {m.id: m for token in (HELD_TOKEN, NEXT_TURN_TOKEN)
                  for m in (self.record.marked(channel_id, token) if channel_id else ())}
         for m in sorted(found.values(), key=lambda m: int(m.id)):

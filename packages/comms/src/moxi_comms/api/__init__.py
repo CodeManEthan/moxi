@@ -220,7 +220,7 @@ def roster(*, deadline: float = READ_DEADLINE) -> Roster:
                         tier=b.get("tier"), adapter=b.get("adapter"),
                         directors=directors.get(b["qualified"], ()))
                   for b in answer.get("bindings") or ())
-    conn = _directory.connect(_paths.directory_db(), read_only=True)
+    conn = _directory.connect(_paths.comms_db(), read_only=True)
     try:
         rows = _directory.standing_rows(conn)
         standing = tuple(Standing(qualified=qualify(r["name"], r["scope"]), name=r["name"],
@@ -247,10 +247,10 @@ def owner(session_id: str, *, deadline: float = READ_DEADLINE) -> Owner:
 
 
 def record_dir() -> Path:
-    """The directory that holds the box's record file (`[local] record`, else its
-    default under comms' state directory)."""
+    """The directory that holds the box's record file (`[local] record`, else comms.db
+    under comms' state directory)."""
     record = _config.load().local.record
-    return (Path(record).expanduser() if record else _paths.record_db()).parent
+    return (Path(record).expanduser() if record else _paths.comms_db()).parent
 
 
 def daemon_socket() -> Path:

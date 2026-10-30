@@ -1,4 +1,4 @@
-"""The LOCAL backend: a SQLite file that IS the record, behind the record seam.
+"""The LOCAL backend: the record's tables in comms.db, behind the record seam.
 
 One of `record.py`'s two implementations, beside `MockRecord` (in-process, the test
 double).
@@ -10,8 +10,10 @@ needs no server and no account.
 
 What is fixed here, and must not drift:
 
-  * `STATE/comms/record.db` (`paths.record_db()`), one file per box. STATE and not
-    DATA because a live DB is never continuous-file-synced.
+  * `STATE/comms/comms.db` (`paths.comms_db()`), one file per box, opened only
+    through `store.open_write`. STATE and not DATA because a live DB is never
+    continuous-file-synced. The record's tables are `rooms`, `messages`, `queue`,
+    `principals`, `denied` and `meta`; `store/schema.py` makes them.
   * `max_content_length` 16,000 (`record.MAX_CONTENT_LENGTH`), the one cap on one
     message.
   * `retain_days` 90 (config.toml's `[local] retain_days`, whose default this is),
@@ -47,6 +49,8 @@ import threading
 import time
 from pathlib import Path
 
+from moxi.store import transaction
+
 from .config import LOCAL_RETAIN_DAYS
 from .record import (
     MAX_CONTENT_LENGTH,
@@ -55,11 +59,8 @@ from .record import (
     Message,
     Subscription,
 )
-
-#: The counter's floor. Larger than every id an older record issued (ids of that era
-#: stay below it until 2049), and well inside `INTEGER PRIMARY KEY`'s signed 64 bits, so
-#: no id issued here sorts before an older one.
-ID_BASE = 2 ** 62
+from .store import open_write
+from .store.schema import ID_BASE, META_NEXT_ID
 
 #: Days of message bodies kept; `0` disables the trim. One owner: the schema's default
 #: for `[local] retain_days` (settings.toml), read through `config`.
@@ -67,23 +68,6 @@ RETAIN_DAYS = LOCAL_RETAIN_DAYS
 
 BUSY_TIMEOUT_MS = 5_000
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS channels  (channel_id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
-                        created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS principals(principal_id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE);
-CREATE TABLE IF NOT EXISTS denied    (principal_id TEXT NOT NULL, channel_id TEXT NOT NULL,
-                        PRIMARY KEY (principal_id, channel_id));
-CREATE TABLE IF NOT EXISTS messages  (id INTEGER PRIMARY KEY, channel_id TEXT NOT NULL,
-                        author_id TEXT NOT NULL, author_kind TEXT NOT NULL,
-                        author_display TEXT NOT NULL, content TEXT NOT NULL,
-                        timestamp TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS messages_channel ON messages(channel_id, id);
-CREATE TABLE IF NOT EXISTS meta      (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS queue     (message_id INTEGER NOT NULL, name TEXT NOT NULL,
-                        PRIMARY KEY (name, message_id));
-"""
-
-META_NEXT_ID = "next_id"
 META_OPERATOR_TOKEN_HASH = "operator_token_hash"
 
 
@@ -102,9 +86,9 @@ class LocalRecord:
     def __init__(self, record=None, *, retain_days: int = RETAIN_DAYS,
                  poll_interval: float = 0.5, clock=time.time,
                  busy_timeout: float | None = None):
-        from .paths import record_db
+        from .paths import comms_db
 
-        self.path = Path(record) if record else record_db()
+        self.path = Path(record) if record else comms_db()
         self.retain_days = retain_days
         self.poll_interval = poll_interval
         #: How long a statement waits on another writer's lock, in milliseconds: a
@@ -120,8 +104,9 @@ class LocalRecord:
         self._pump: threading.Thread | None = None
         self._wake = threading.Event()
         self._stop = threading.Event()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+        # The first connection opens the store through its gate now, so a store that
+        # can't be opened refuses here and not at the first post.
+        self._conn()
 
     # ------------------------------------------------------------------ connections
     def _conn(self) -> sqlite3.Connection:
@@ -130,35 +115,20 @@ class LocalRecord:
         if conn is None:
             # check_same_thread=False so `close()` may be called from any thread; the
             # connection is still only ever USED by the thread it was opened for.
-            conn = sqlite3.connect(str(self.path), timeout=self.busy_timeout_ms / 1000.0,
-                                   isolation_level=None, check_same_thread=False)
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
+            conn = open_write(self.path, timeout=self.busy_timeout_ms / 1000.0,
+                              check_same_thread=False)
             self._local.conn = conn
             with self._lock:
                 self._conns.append(conn)
         return conn
 
-    def _init_schema(self) -> None:
-        conn = self._conn()
-        conn.executescript(SCHEMA)
-        conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES (?,?)",
-                     (META_NEXT_ID, str(ID_BASE)))
-
     @contextlib.contextmanager
     def _write(self):
-        """`BEGIN IMMEDIATE`, always. A DEFERRED transaction that reads the
-        counter before it upgrades computes a stale id and two writers collide."""
-        conn = self._conn()
-        conn.execute("BEGIN IMMEDIATE")
-        try:
+        """`BEGIN IMMEDIATE`, always (`moxi.store.transaction`). A DEFERRED transaction
+        that reads the counter before it upgrades computes a stale id and two writers
+        collide."""
+        with transaction(self._conn()) as conn:
             yield conn
-        except BaseException:
-            with contextlib.suppress(sqlite3.Error):
-                conn.execute("ROLLBACK")
-            raise
-        conn.execute("COMMIT")
 
     def _next_id(self, conn: sqlite3.Connection) -> int:
         conn.execute("UPDATE meta SET value = value + 1 WHERE key = ?", (META_NEXT_ID,))
@@ -182,22 +152,22 @@ class LocalRecord:
     # ------------------------------------------------------------------ channels
     def create_channel(self, name: str) -> str:
         with self._write() as conn:
-            row = conn.execute("SELECT channel_id FROM channels WHERE name = ?",
+            row = conn.execute("SELECT room_id FROM rooms WHERE name = ?",
                                (name,)).fetchone()
             if row:
                 return row[0]
             cid = f"ch-{self._next_id(conn)}"
-            conn.execute("INSERT INTO channels(channel_id, name, created_at) VALUES (?,?,?)",
+            conn.execute("INSERT INTO rooms(room_id, name, created_at) VALUES (?,?,?)",
                          (cid, name, self._now()))
             return cid
 
     def channel_by_name(self, name: str) -> str | None:
-        row = self._conn().execute("SELECT channel_id FROM channels WHERE name = ?",
+        row = self._conn().execute("SELECT room_id FROM rooms WHERE name = ?",
                                    (name,)).fetchone()
         return row[0] if row else None
 
     def channel_name(self, channel_id: str) -> str | None:
-        row = self._conn().execute("SELECT name FROM channels WHERE channel_id = ?",
+        row = self._conn().execute("SELECT name FROM rooms WHERE room_id = ?",
                                    (str(channel_id),)).fetchone()
         return row[0] if row else None
 
@@ -205,8 +175,8 @@ class LocalRecord:
     def delete_channel(self, channel_id: str) -> None:
         channel_id = str(channel_id)
         with self._write() as conn:
-            conn.execute("DELETE FROM messages WHERE channel_id = ?", (channel_id,))
-            conn.execute("DELETE FROM channels WHERE channel_id = ?", (channel_id,))
+            conn.execute("DELETE FROM messages WHERE room_id = ?", (channel_id,))
+            conn.execute("DELETE FROM rooms WHERE room_id = ?", (channel_id,))
 
     # ------------------------------------------------------------------ permissions
     def register_principal(self, name: str) -> str:
@@ -288,14 +258,14 @@ class LocalRecord:
                       author_display=author_display, content=content,
                       timestamp=self._now())
         conn.execute(
-            "INSERT INTO messages(id, channel_id, author_id, author_kind, author_display, "
+            "INSERT INTO messages(id, room_id, author_id, author_kind, author_display, "
             "content, timestamp) VALUES (?,?,?,?,?,?,?)",
             (int(msg.id), msg.channel_id, msg.author_id, msg.author_kind,
              msg.author_display, msg.content, msg.timestamp))
         return msg
 
     # ------------------------------------------------------------------ the record
-    _COLUMNS = ("id, channel_id, author_id, author_kind, author_display, content, timestamp")
+    _COLUMNS = ("id, room_id, author_id, author_kind, author_display, content, timestamp")
 
     @staticmethod
     def _message(row) -> Message:
@@ -311,7 +281,7 @@ class LocalRecord:
         literal "first 500 then take the tail" would scan the whole channel every boot.
         `ORDER BY id DESC LIMIT ?` walks the index backwards and stops at 500.
         """
-        sql = f"SELECT {self._COLUMNS} FROM messages WHERE channel_id = ?"
+        sql = f"SELECT {self._COLUMNS} FROM messages WHERE room_id = ?"
         params: list = [str(channel_id)]
         if after is not None:
             sql += " AND id > ?"
@@ -339,7 +309,7 @@ class LocalRecord:
         if channel_id is None:
             row = self._conn().execute("SELECT MAX(id) FROM messages").fetchone()
         else:
-            row = self._conn().execute("SELECT MAX(id) FROM messages WHERE channel_id = ?",
+            row = self._conn().execute("SELECT MAX(id) FROM messages WHERE room_id = ?",
                                        (str(channel_id),)).fetchone()
         return str(row[0]) if row and row[0] is not None else None
 
@@ -349,7 +319,7 @@ class LocalRecord:
         its sent index. Timestamps are the record's one fixed format, so the comparison
         is a string one."""
         rows = self._conn().execute(
-            f"SELECT {self._COLUMNS} FROM messages WHERE channel_id = ? AND timestamp >= ? "
+            f"SELECT {self._COLUMNS} FROM messages WHERE room_id = ? AND timestamp >= ? "
             "ORDER BY id", (str(channel_id), str(timestamp))).fetchall()
         return [self._message(r) for r in rows]
 
@@ -360,7 +330,7 @@ class LocalRecord:
         of `[held]` and `[next-turn]` mail: the same shape as
         `history`, one scan of the channel."""
         rows = self._conn().execute(
-            f"SELECT {self._COLUMNS} FROM messages WHERE channel_id = ? "
+            f"SELECT {self._COLUMNS} FROM messages WHERE room_id = ? "
             "AND instr(lower(content), ?) > 0 ORDER BY id",
             (str(channel_id), token.lower())).fetchall()
         return [self._message(r) for r in rows]
@@ -373,8 +343,8 @@ class LocalRecord:
         if not rows:
             return
         with self._write() as conn:
-            conn.executemany("INSERT OR IGNORE INTO queue(message_id, name) VALUES (?,?)",
-                             rows)
+            conn.executemany("INSERT OR IGNORE INTO queue(message_id, name, queued_at) "
+                             "VALUES (?,?,?)", [row + (self._now(),) for row in rows])
 
     def queue_remove(self, name: str, ids) -> None:
         """Delete the rows of `ids` for `name`. Raises on a failed write."""
@@ -509,5 +479,5 @@ class LocalRecord:
         self._local = threading.local()
 
 
-__all__ = ["LocalRecord", "ID_BASE", "MAX_CONTENT_LENGTH", "RETAIN_DAYS", "SCHEMA",
+__all__ = ["LocalRecord", "ID_BASE", "MAX_CONTENT_LENGTH", "RETAIN_DAYS",
            "META_NEXT_ID", "META_OPERATOR_TOKEN_HASH", "token_hash"]

@@ -40,3 +40,18 @@ SEGMENT = None
 #: comms' whole loader over a config text alone, run by `moxi config set`, `unset` and
 #: `check`, so the verb never writes a file comms would refuse.
 CONFIG_CHECK = "moxi_comms.config:check_text"
+#: What comms keeps, for `moxi paths comms`, the doctor's checks and `moxi uninstall
+#: --purge`. comms.db is the one SQLite store; the rest are folders a holder or an
+#: adapter makes on first use.
+STORES = {
+    "comms": {"root": "state", "path": "comms.db", "kind": "sqlite", "private": True,
+              "retention": "keep", "rebuildable": False},
+    "cards": {"root": "data", "path": "cards", "kind": "dir", "private": False,
+              "retention": "keep", "rebuildable": False, "lazy": True},
+    "tokens": {"root": "state", "path": "tokens", "kind": "dir", "private": True,
+               "retention": "keep", "rebuildable": False, "lazy": True},
+    "codex": {"root": "state", "path": "codex", "kind": "dir", "private": True,
+              "retention": "keep", "rebuildable": False, "lazy": True},
+    "opencode": {"root": "state", "path": "opencode", "kind": "dir", "private": True,
+                 "retention": "keep", "rebuildable": False, "lazy": True},
+}

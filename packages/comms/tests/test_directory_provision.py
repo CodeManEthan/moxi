@@ -1,4 +1,4 @@
-"""directory.db + provisioning."""
+"""The directory in comms.db, and provisioning."""
 
 import os
 
@@ -6,7 +6,7 @@ import pytest
 
 from moxi_comms import directory
 from moxi_comms.mock_record import MockRecord
-from moxi_comms.paths import directory_db
+from moxi_comms.paths import comms_db
 from moxi_comms.provision import (NAMES, ROOM_KINDS, ProvisionError, add_standing,
                                   provision)
 
@@ -18,51 +18,23 @@ def table_names(conn) -> set[str]:
 
 def test_schema_and_file_posture():
     gw = MockRecord()
-    provision(gw, directory_db(), standing=[("planner", "proj-a")])
-    assert oct(os.stat(directory_db()).st_mode & 0o777) == "0o600"
-    conn = directory.connect(directory_db())
+    provision(gw, comms_db(), standing=[("planner", "proj-a")])
+    assert oct(os.stat(comms_db()).st_mode & 0o777) == "0o600"
+    conn = directory.connect(comms_db())
     try:
         tables = table_names(conn)
-        assert {"agents", "rooms", "meta", "operators"} <= tables
+        assert {"identities", "rooms", "meta", "operators"} <= tables
         assert {"slots", "webhooks"}.isdisjoint(tables)
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     finally:
         conn.close()
 
 
-def test_foreign_keys_are_live_not_inert():
-    gw = MockRecord()
-    _old_directory(gw)
-    conn = directory.connect(directory_db())
-    try:
-        with pytest.raises(Exception):
-            conn.execute(
-                "INSERT INTO webhooks(webhook_id, slot_id, agent_name, agent_scope, "
-                "channel_id, secret_id, created_at) VALUES ('x',1,NULL,NULL,'nope','s','t')")
-            conn.commit()
-    finally:
-        conn.close()
-
-
-def test_exactly_one_owner_kind():
-    gw = MockRecord()
-    p = _old_directory(gw)
-    conn = directory.connect(directory_db())
-    try:
-        with pytest.raises(Exception):   # neither owner
-            conn.execute(
-                "INSERT INTO webhooks(webhook_id, slot_id, agent_name, agent_scope, "
-                "channel_id, secret_id, created_at) VALUES ('y',NULL,NULL,NULL,?,'s','t')",
-                (p.rooms[NAMES],))
-    finally:
-        conn.close()
-
-
 def test_provisioning_creates_one_room_without_agent_webhooks():
     gw = MockRecord()
-    p = provision(gw, directory_db())
+    p = provision(gw, comms_db())
     assert list(p.rooms) == [NAMES]
-    conn = directory.connect(directory_db(), read_only=True)
+    conn = directory.connect(comms_db(), read_only=True)
     try:
         assert {r["kind"] for r in conn.execute("SELECT kind FROM rooms")} == {"names"}
         assert directory.meta_get(conn, "reader_principal") is None, "no reader principal"
@@ -77,93 +49,19 @@ def test_a_new_directory_refuses_a_freed_room_row(room, kind):
     """The schema's CHECK names the one room provision makes, for a new file."""
     import sqlite3
 
-    conn = directory.init(directory_db())
+    conn = directory.init(comms_db())
     try:
         with pytest.raises(sqlite3.IntegrityError):
-            conn.execute("INSERT INTO rooms(channel_id, name, kind, created_at) "
+            conn.execute("INSERT INTO rooms(room_id, name, kind, created_at) "
                          "VALUES ('c', ?, ?, 't')", (room, kind))
     finally:
         conn.close()
 
 
-def _old_directory(gw):
-    """A directory as an install from before one room left it: the old rooms CHECK, and
-    `#conference` and `#notices` rows beside `#names`. `CREATE TABLE IF NOT EXISTS`
-    leaves the old table and its CHECK as they are."""
-    directory_db().parent.mkdir(parents=True, exist_ok=True)
-    conn = directory.connect(directory_db())
-    try:
-        conn.execute("CREATE TABLE rooms (channel_id TEXT PRIMARY KEY, name TEXT NOT NULL "
-                     "UNIQUE, kind TEXT NOT NULL CHECK (kind IN ('names','conference',"
-                     "'notices')), created_at TEXT NOT NULL)")
-        conn.execute("CREATE TABLE slots (slot_id INTEGER PRIMARY KEY, "
-                     "created_at TEXT NOT NULL)")
-        conn.execute("CREATE TABLE webhooks (webhook_id TEXT PRIMARY KEY, "
-                     "slot_id INTEGER REFERENCES slots(slot_id), agent_name TEXT, "
-                     "agent_scope TEXT, channel_id TEXT NOT NULL REFERENCES rooms(channel_id), "
-                     "secret_id TEXT NOT NULL, created_at TEXT NOT NULL, "
-                     "FOREIGN KEY (agent_name, agent_scope) REFERENCES agents(name, scope), "
-                     "CHECK ((slot_id IS NULL) <> (agent_name IS NULL)), "
-                     "CHECK ((agent_name IS NULL) = (agent_scope IS NULL)), "
-                     "UNIQUE (slot_id, channel_id), "
-                     "UNIQUE (agent_name, agent_scope, channel_id))")
-        conn.commit()
-    finally:
-        conn.close()
-    os.chmod(directory_db(), 0o600)
-    p = provision(gw, directory_db())
-    conn = directory.init(directory_db())
-    try:
-        for room, kind in (("#conference", "conference"), ("#notices", "notices")):
-            channel_id = gw.create_channel(room)
-            conn.execute("INSERT OR IGNORE INTO rooms(channel_id, name, kind, created_at) "
-                         "VALUES (?,?,?,?)", (channel_id, room, kind, directory.now()))
-        conn.commit()
-    finally:
-        conn.close()
-    return p
-
-
-def test_an_old_directory_with_three_rooms_adds_a_row_without_webhooks():
-    gw = MockRecord()
-    _old_directory(gw)
-    conn = directory.init(directory_db())
-    try:
-        assert {r["name"] for r in conn.execute("SELECT name FROM rooms")} >= {
-            NAMES, "#conference", "#notices"}
-        add_standing(gw, conn, "planner", "proj-a")
-    finally:
-        conn.close()
-    provision(gw, directory_db())
-    conn = directory.connect(directory_db(), read_only=True)
-    try:
-        assert conn.execute("SELECT COUNT(*) FROM webhooks").fetchone()[0] == 0
-    finally:
-        conn.close()
-
-
-def test_send_only_on_an_old_directory_adds_only_the_row(tmp_path):
-    from moxi_comms.provision import send_only_main
-
-    gw = MockRecord()
-    _old_directory(gw)
-    said: list[str] = []
-    assert send_only_main(["relay@proj-a", "--db", str(directory_db())], record=gw,
-                          env={}, out=said.append) == 0
-    conn = directory.connect(directory_db(), read_only=True)
-    try:
-        rows = conn.execute("SELECT channel_id FROM webhooks WHERE agent_name='relay'"
-                            ).fetchall()
-    finally:
-        conn.close()
-    assert rows == []
-    assert not any(line.lstrip().startswith("webhook") for line in said)
-
-
 def test_standing_identity_gets_no_stored_credential():
     gw = MockRecord()
-    provision(gw, directory_db(), standing=[("planner", "proj-a")])
-    conn = directory.connect(directory_db(), read_only=True)
+    provision(gw, comms_db(), standing=[("planner", "proj-a")])
+    conn = directory.connect(comms_db(), read_only=True)
     try:
         assert "webhooks" not in table_names(conn)
     finally:
@@ -172,9 +70,9 @@ def test_standing_identity_gets_no_stored_credential():
 
 def test_provisioning_is_idempotent():
     gw = MockRecord()
-    provision(gw, directory_db(), standing=[("planner", "proj-a")])
-    provision(gw, directory_db(), standing=[("planner", "proj-a")])
-    conn = directory.connect(directory_db(), read_only=True)
+    provision(gw, comms_db(), standing=[("planner", "proj-a")])
+    provision(gw, comms_db(), standing=[("planner", "proj-a")])
+    conn = directory.connect(comms_db(), read_only=True)
     try:
         assert "webhooks" not in table_names(conn)
         assert conn.execute("SELECT COUNT(*) FROM rooms").fetchone()[0] == len(ROOM_KINDS)
@@ -184,8 +82,8 @@ def test_provisioning_is_idempotent():
 
 def test_agent_n_namespace_is_refused_as_a_standing_row():
     gw = MockRecord()
-    provision(gw, directory_db())
-    conn = directory.connect(directory_db())
+    provision(gw, comms_db())
+    conn = directory.connect(comms_db())
     try:
         with pytest.raises(ProvisionError, match="reserved"):
             add_standing(gw, conn, "agent-4", "proj-a")
@@ -199,7 +97,7 @@ def test_standing_row_refused_while_the_name_is_live_as_chosen(rig):
 
     rig.shim(name="planner", scope="proj-a")
     client = DaemonClient(daemon_socket()).connect()
-    conn = directory.connect(directory_db())
+    conn = directory.connect(comms_db())
     try:
         with pytest.raises(ProvisionError, match="release it first"):
             add_standing(rig.record, conn, "planner", "proj-a", daemon_client=client)
@@ -227,7 +125,7 @@ def test_only_the_operator_token_lands_in_the_store(tmp_path):
 
     gw, store = local_rig(tmp_path)
     try:
-        provision(gw, directory_db(), standing=[("planner", "proj-a")],
+        provision(gw, comms_db(), standing=[("planner", "proj-a")],
                   operator=("900001", "operator"), store=store)
     finally:
         gw.close()
@@ -242,7 +140,7 @@ def test_the_record_keeps_only_the_operator_hash(tmp_path):
 
     gw, store = local_rig(tmp_path)
     try:
-        provision(gw, directory_db(), standing=[("planner", "proj-a")],
+        provision(gw, comms_db(), standing=[("planner", "proj-a")],
                   operator=("900001", "operator"), store=store)
     finally:
         gw.close()
@@ -251,13 +149,13 @@ def test_the_record_keeps_only_the_operator_hash(tmp_path):
     minted = [store.read_secret(owner, tokens.OPERATOR_SECRET_ID)]
     assert all(minted)
 
-    for db in ((tmp_path / "record.db"), directory_db()):
+    for db in ((tmp_path / "record.db"), comms_db()):
         for path in db.parent.glob(db.name + "*"):        # the WAL and the shm too
             blob = path.read_bytes()
             for token in minted:
                 assert token.encode() not in blob, f"{token[:4]}... is in the clear in {path.name}"
 
-    conn = directory.connect(directory_db(), read_only=True)
+    conn = directory.connect(comms_db(), read_only=True)
     try:
         tables = table_names(conn)
     finally:
@@ -273,13 +171,13 @@ def test_a_second_run_converges_and_rotates_nothing(tmp_path):
 
     gw, store = local_rig(tmp_path)
     try:
-        first = provision(gw, directory_db(), standing=[("planner", "proj-a")],
+        first = provision(gw, comms_db(), standing=[("planner", "proj-a")],
                           operator=("900001", "operator"), store=store)
         before = {(owner.key, secret_id): store.read_secret(owner, secret_id)
                   for owner in (tokens.owner_for_role(tokens.ROLE_OPERATOR),)
                   for secret_id in store.secret_ids(owner)}
 
-        second = provision(gw, directory_db(), standing=[("planner", "proj-a")],
+        second = provision(gw, comms_db(), standing=[("planner", "proj-a")],
                            operator=("900001", "operator"), store=store)
         after = {(owner.key, secret_id): store.read_secret(owner, secret_id)
                  for owner in (tokens.owner_for_role(tokens.ROLE_OPERATOR),)
@@ -301,10 +199,10 @@ def test_half_an_operator_pair_is_replaced_rather_than_left_unusable(tmp_path):
     gw, store = local_rig(tmp_path)
     owner = tokens.owner_for_role(tokens.ROLE_OPERATOR)
     try:
-        provision(gw, directory_db(), operator=("900001", "operator"), store=store)
+        provision(gw, comms_db(), operator=("900001", "operator"), store=store)
         store.write_secret(owner, tokens.OPERATOR_SECRET_ID, "stale-and-unmatched")
 
-        again = provision(gw, directory_db(), operator=("900001", "operator"),
+        again = provision(gw, comms_db(), operator=("900001", "operator"),
                           store=store)
         token = store.read_secret(owner, tokens.OPERATOR_SECRET_ID)
         stored = gw.meta_get(META_OPERATOR_TOKEN_HASH)
@@ -322,7 +220,7 @@ def test_the_mock_is_not_given_a_store(tmp_path):
     from moxi_comms.tokens import TokenStore
 
     store = TokenStore(tmp_path / "store")
-    provision(MockRecord(), directory_db(), standing=[("planner", "proj-a")])
+    provision(MockRecord(), comms_db(), standing=[("planner", "proj-a")])
 
     assert store.owners_present() == []
 
@@ -342,8 +240,8 @@ def test_the_first_start_makes_what_provision_in_config_says(tmp_path):
 
     gw = LocalRecord(tmp_path / "record.db")
     try:
-        prov.first_start(TokenStore(tmp_path / "store"))(gw, directory_db())
-        conn = directory.connect(directory_db(), read_only=True)
+        prov.first_start(TokenStore(tmp_path / "store"))(gw, comms_db())
+        conn = directory.connect(comms_db(), read_only=True)
         try:
             assert {"slots", "webhooks"}.isdisjoint(table_names(conn))
             assert [r["name"] for r in conn.execute("SELECT name FROM operators")] == \
@@ -352,8 +250,8 @@ def test_the_first_start_makes_what_provision_in_config_says(tmp_path):
             conn.close()
         # A provisioned directory is left alone, whatever the config says now.
         write_config(None, '[provision]\noperator = "bob"\n')
-        prov.first_start(TokenStore(tmp_path / "store"))(gw, directory_db())
-        conn = directory.connect(directory_db(), read_only=True)
+        prov.first_start(TokenStore(tmp_path / "store"))(gw, comms_db())
+        conn = directory.connect(comms_db(), read_only=True)
         try:
             assert {"slots", "webhooks"}.isdisjoint(table_names(conn))
             assert [r["name"] for r in conn.execute("SELECT name FROM operators")] == \

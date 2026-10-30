@@ -22,7 +22,7 @@ from moxi_comms import cli, context, directory, glossary, machine_line, owed
 from moxi_comms.adapters import claude_shim, harness
 from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.attribution import Author
-from moxi_comms.paths import directory_db
+from moxi_comms.paths import comms_db
 from moxi_comms.provision import add_standing
 
 from test_posture_intent import make_ref, open_root, posts  # noqa: F401
@@ -504,7 +504,7 @@ def test_new_name_on_a_name_bound_now_or_before_changes_nothing(rig, pair, monke
 
 
 def test_a_standing_identity_never_bound_passes(rig, pair, monkeypatch):
-    conn = directory.connect(directory_db())
+    conn = directory.connect(comms_db())
     try:
         add_standing(rig.record, conn, "curator")
     finally:

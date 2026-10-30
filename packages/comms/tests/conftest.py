@@ -6,7 +6,7 @@ record is the in-process mock, which is also the record.
 The rig runs on TWO backends. The
 `backend` fixture answers `mock` everywhere by default, and the suites named in
 `BOTH_BACKENDS` below run every rig-using test twice, once against the mock and once
-against a real `record.db` under the tmp STATE root. The mock stays the default and the
+against a real `comms.db` under the tmp STATE root. The mock stays the default and the
 in-memory double; `local` is there so the seam's second real implementation is
 exercised by the same tests, not by a parallel set of its own.
 
@@ -42,7 +42,7 @@ from moxi_comms.daemon import Daemon
 from moxi_comms.local_record import LocalRecord
 from moxi_comms.membership import SELF, root_of
 from moxi_comms.mock_record import MockRecord
-from moxi_comms.paths import daemon_socket, directory_db, tokens_dir
+from moxi_comms.paths import daemon_socket, comms_db, tokens_dir
 from moxi_comms.provision import NAMES, provision
 from moxi_comms.scoping import is_auto_name, project_key
 from moxi_comms.sender import MalformedStamp, SenderIdentity, sender_from_env
@@ -430,7 +430,7 @@ class Rig:
         # resolve the real home's config file.
         out = io.StringIO()
         ctx = cli.Context(record=record if record is not None else self.record,
-                          db_path=directory_db(), socket_path=daemon_socket(),
+                          db_path=comms_db(), socket_path=daemon_socket(),
                           env=dict(os.environ, **environ), out=out, clock=clock)
         code = cli.main(argv, ctx=ctx)
         return code, out.getvalue()
@@ -444,7 +444,7 @@ def rig(backend):
     # On `local`, provision writes the operator's token to its 0600 holder file. On the
     # mock, `store` is None and the mock's record holds it.
     prov = provision(
-        record, directory_db(),
+        record, comms_db(),
         standing=[("main", "proj-a"), ("main", "proj-b"), ("herald", "global")],
         operator=("900001", "operator"), store=store,
     )

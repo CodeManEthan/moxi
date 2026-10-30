@@ -14,7 +14,7 @@ from conftest import queued, record_rows, wait_for_queue, wait_until
 from moxi_comms import bindings, cards, directors, directory, scoping
 from moxi_comms.adapters.session import Session
 from moxi_comms.client import DaemonClient, DaemonError
-from moxi_comms.paths import daemon_socket, directory_db
+from moxi_comms.paths import daemon_socket, comms_db
 
 RETIRED_SEND = ("{q} is retired: comms keeps a project suffix only to tell apart two "
                 "agents of one name in different projects, and {q} had no such twin. "
@@ -26,10 +26,10 @@ RETIRED_BIND = ("{q} is retired: comms keeps a project suffix only to tell apart
 
 def retire(name: str, scope: str) -> None:
     """The retire op's own insert."""
-    conn = directory.connect(directory_db())
+    conn = directory.connect(comms_db())
     try:
         with conn:
-            conn.execute("INSERT OR IGNORE INTO agents(name, scope, status, created_at, "
+            conn.execute("INSERT OR IGNORE INTO identities(name, scope, status, created_at, "
                          "kind) VALUES (?, ?, 'retired', ?, 'agent')",
                          (name, scope, directory.now()))
     finally:
@@ -255,7 +255,7 @@ def test_resolve_answers_ever_bound_none_when_the_binding_history_is_closed(rig)
 
 def test_directory_retired_and_standing_row_ignores_a_retired_row(rig):
     retire("captain", "proj-old")
-    conn = directory.connect(directory_db(), read_only=True)
+    conn = directory.connect(comms_db(), read_only=True)
     try:
         assert directory.retired(conn, "captain", "proj-old")
         assert not directory.retired(conn, "captain", "global")
@@ -335,10 +335,10 @@ def test_the_provisioner_does_not_reactivate_a_retired_row(rig):
     from moxi_comms import provision
     retire("console2", "acme")
     with pytest.raises(SystemExit) as e:
-        provision.send_only_main(["console2@acme", "--db", str(directory_db())],
+        provision.send_only_main(["console2@acme", "--db", str(comms_db())],
                                  record=rig.record, store=rig.store)
     assert "retired" in str(e.value)
-    conn = directory.connect(directory_db(), read_only=True)
+    conn = directory.connect(comms_db(), read_only=True)
     try:
         assert directory.retired(conn, "console2", "acme")
         assert directory.standing_row(conn, "console2", "acme") is None

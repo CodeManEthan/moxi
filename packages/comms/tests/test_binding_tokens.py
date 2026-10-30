@@ -14,7 +14,7 @@ from moxi_comms.claimhold import ClaimServer
 from moxi_comms.client import (DaemonClient, DaemonError, DaemonNoAnswer,
                                DaemonOffline)
 from moxi_comms.daemon import Daemon
-from moxi_comms.paths import daemon_socket, directory_db, state_dir
+from moxi_comms.paths import daemon_socket, comms_db, state_dir
 from moxi_comms.protocol import PROTOCOL_VERSION, ProtocolError
 
 
@@ -105,10 +105,10 @@ def test_retired_overlong_and_stopping_posts_write_nothing(rig, bind_answered):
                     "x" * (rig.record.max_content_length + 1))
     assert "credential" not in too_long.value.response
 
-    db = directory.connect(directory_db())
+    db = directory.connect(comms_db())
     try:
         with db:
-            db.execute("INSERT INTO agents(name, scope, status, created_at, kind) "
+            db.execute("INSERT INTO identities(name, scope, status, created_at, kind) "
                        "VALUES ('planner', 'proj-a', 'retired', ?, 'agent')",
                        (directory.now(),))
     finally:

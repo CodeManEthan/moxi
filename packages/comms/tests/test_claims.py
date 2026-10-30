@@ -53,10 +53,10 @@ def test_standing_bind_is_open_first_bind_wins_and_the_second_is_refused(rig):
 
 def test_standing_rows_are_read_per_claim_not_from_a_boot_cache(rig):
     from moxi_comms import directory
-    from moxi_comms.paths import directory_db
+    from moxi_comms.paths import comms_db
     from moxi_comms.provision import add_standing
 
-    conn = directory.connect(directory_db())
+    conn = directory.connect(comms_db())
     try:
         add_standing(rig.record, conn, "curator", "proj-a")
     finally:

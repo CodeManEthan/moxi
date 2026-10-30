@@ -154,14 +154,14 @@ def main() -> int:
     os.environ.update(env)
 
     from moxi_comms.mock_record import MockRecord
-    from moxi_comms.paths import cursors_dir, directory_db
+    from moxi_comms.paths import cursors_dir, comms_db
     from moxi_comms.provision import provision
 
     procs, sessions = [], {}
     try:
-        provision(MockRecord(store), directory_db(), slots=4,
+        provision(MockRecord(store), comms_db(), slots=4,
                   standing=[("main", "smoke")], operator=("900001", "operator"))
-        print(f"provisioned -> {directory_db()}")
+        print(f"provisioned -> {comms_db()}")
 
         procs.append(subprocess.Popen([BIN / "moxi-comms-daemon",
                                        "--backend-store", str(store)],

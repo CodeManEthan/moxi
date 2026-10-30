@@ -406,7 +406,7 @@ def test_the_paths_and_the_replay_bound(env, tmp_path):
     from moxi_comms import paths
 
     assert api.daemon_socket() == paths.daemon_socket()
-    assert api.record_dir() == paths.record_db().parent
+    assert api.record_dir() == paths.comms_db().parent
     assert api.replay() == (50, 24 * 3600)
     write_config(None, f'[local]\nrecord = "{tmp_path / "r" / "record.db"}"\n'
                        "[replay]\nmessages = 7\nhours = 2\n")

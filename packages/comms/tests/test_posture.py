@@ -31,7 +31,7 @@ from moxi_comms.attribution import Author
 from moxi_comms.client import DaemonClient, DaemonOffline, DaemonTimeout
 from moxi_comms.daemon import ASK_INDEX_SLACK, Daemon, Refusal, Resolution
 from moxi_comms.record import RecordError, Message
-from moxi_comms.paths import directory_db
+from moxi_comms.paths import comms_db
 from moxi_comms.sender import SenderIdentity
 
 from test_cold_sends import bind  # noqa: F401 -- a shared fixture
@@ -431,7 +431,7 @@ def test_a_failed_record_read_lets_the_send_through_naming_the_ask(rig, pair, wh
 def test_a_failed_directory_read_lets_the_single_reply_check_through(rig, pair,
                                                                      monkeypatch, seam):
     ask = open_ask(rig)
-    ctx = cli.Context(record=rig.record, db_path=directory_db(), clock=rig.clock)
+    ctx = cli.Context(record=rig.record, db_path=comms_db(), clock=rig.clock)
     sender = SenderIdentity(qualified=R, scope="global", name="reviewer")
 
     if seam == "db":

@@ -201,7 +201,7 @@ def record_write_root(env=None, cwd=None) -> tuple:
     wrapper's environment:
 
       * `local`: the parent of the record (`MOXI_COMMS_LOCAL_RECORD`, else `[local] record`,
-        else `STATE/comms/record.db`). Every local send writes the record and its WAL
+        else `STATE/comms/comms.db`). Every local send writes the record and its WAL
         from the sender's own process.
       * `mock`: the directory of the `MOXI_COMMS_MOCK_BACKEND` store, which the mock writes
         through a temp file beside it.
@@ -211,7 +211,7 @@ def record_write_root(env=None, cwd=None) -> tuple:
     """
     from .. import config as config_mod
     from ..record import LOCAL, MOCK, RecordError, backend_name
-    from ..paths import record_db
+    from ..paths import comms_db
 
     env = os.environ if env is None else env
     try:
@@ -230,7 +230,7 @@ def record_write_root(env=None, cwd=None) -> tuple:
             record = config_mod.load(env=env).local.record
         except ConfigError as e:
             return None, f"comms' config could not be read ({e})"
-        source = absolute(record) if record else record_db()
+        source = absolute(record) if record else comms_db()
         return source.parent, f"the local backend's record ({source})"
     if backend == MOCK:
         store = env.get("MOXI_COMMS_MOCK_BACKEND")
