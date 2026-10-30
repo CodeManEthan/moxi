@@ -39,10 +39,11 @@ and the fix (repair it or uninstall it):
   is not a mapping, or a function it offers is not callable) blocks `remove`, since it
   can't say whether it holds the project; `add`, since it can't say whether its
   `prepare` would have filled a field or its kind is the one asked for; and `set` of a
-  kind no loaded entry declares.
+  kind no loaded entry declares, whether the set names the kind or the row keeps it.
 - A kind declared twice, by two modules or by one module over a built-in kind, or
-  declared with a value of the wrong shape, blocks `add` and `set` of that kind alone. A
-  blocked kind is not among the kinds found; it is named among the broken ones.
+  declared with a value of the wrong shape, blocks `add` and `set` of that kind alone,
+  and `set` of any field on a row of that kind. A blocked kind is not among the kinds
+  found; it is named among the broken ones.
 """
 
 from __future__ import annotations
@@ -502,11 +503,12 @@ def plan_set(key: str, *, contributions: Contributions | None = None,
 
     `changes` holds the fields named (`root`, `kind`, `lead`, `notes_root`; None clears
     `lead` and `notes_root`). A `set` never takes defaults. A typed `notes_root` needs
-    notes installed. A named kind must be usable (`Contributions.kind`): an unknown kind
-    is `Refused` when every entry loaded and `Broken` when one won't; a set of a known kind
-    goes ahead past an entry that won't load. The row's kind, named or kept, has its check
-    run on the row as it would stand; a kept kind that no loaded module declares any more
-    stays as a label, with no check. Raises `NotFound` for an unknown key.
+    notes installed. The row's kind, named or kept, must be usable (`Contributions.kind`)
+    and has its check run on the row as it would stand. A blocked kind is `Broken`. An
+    unknown kind is `Broken` while some entry won't load, since that entry may be its home
+    and its check can't run. Else a named unknown kind is `Refused`, and a kept one, whose
+    module is gone, stays as a label with no check. A set of a usable kind goes ahead past
+    an entry that won't load. Raises `NotFound` for an unknown key.
     """
     unknown = set(changes) - {"root", "kind", "lead", "notes_root"}
     if unknown:
@@ -532,7 +534,8 @@ def plan_set(key: str, *, contributions: Contributions | None = None,
     else:
         try:
             declared = contributions.kind(row["kind"], "set")
-        except (Refused, Broken):
+        except Refused:
+            # Unknown while every entry loaded: its module is gone, so no check is owed.
             declared = None
     if declared is not None:
         declared.check_row(row)

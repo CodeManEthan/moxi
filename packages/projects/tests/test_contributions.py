@@ -233,6 +233,46 @@ def test_a_row_whose_kinds_module_is_gone_stays_a_label(site, tmp_path):
     assert contributions.plan_set("t", lead="someone") is None
 
 
+def topic_row(tmp_path) -> str:
+    """A row of kind topic, written straight to the store, since an add of a blocked kind
+    is refused; returns its key."""
+    root = str(tmp_path / "notes" / "t")
+    store.write(lambda conn: store.insert(conn, key="t", root=root, kind="topic"))
+    return "t"
+
+
+def test_a_set_on_a_row_whose_kind_is_blocked_is_exit_1(site, tmp_path):
+    site.contribution("notes", TOPIC)
+    site.contribution("other", TOPIC)
+    key = topic_row(tmp_path)
+    for change in ({"root": str(tmp_path / "elsewhere")}, {"lead": "someone"}):
+        with pytest.raises(Broken) as caught:
+            contributions.plan_set(key, **change)
+        assert caught.value.exit_code == 1
+        assert set(caught.value.modules) == {"notes", "other"}
+        assert "uninstall all but one" in caught.value.fix
+    assert contributions.plan_set(key, kind="project").name == "project"
+
+
+def test_a_set_on_a_row_of_an_unknown_kind_while_an_entry_wont_load_is_exit_1(
+        site, tmp_path):
+    site.contribution("bad", BROKEN_ENTRIES["import"])
+    key = topic_row(tmp_path)
+    with pytest.raises(Broken) as caught:
+        contributions.plan_set(key, root=str(tmp_path / "elsewhere"))
+    assert caught.value.exit_code == 1 and caught.value.modules == ("bad",)
+    assert "may be the kind's home" in caught.value.reason
+    assert "moxi uninstall bad" in caught.value.fix
+    assert contributions.plan_set(key, kind="project").name == "project"
+
+
+def test_a_set_on_a_row_of_an_unknown_kind_while_every_entry_loads_runs_no_check(
+        site, tmp_path):
+    site.contribution("svc", HOLDS)
+    key = topic_row(tmp_path)
+    assert contributions.plan_set(key, root=str(tmp_path / "elsewhere")) is None
+
+
 def test_an_entry_installed_after_the_first_call_is_seen_by_the_next(site):
     assert {k.name for k in api.kinds().found} == {"project", "agent"}
     site.contribution("notes", TOPIC)
