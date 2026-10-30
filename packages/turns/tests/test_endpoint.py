@@ -15,7 +15,7 @@ import pytest
 import moxi_turns as turns
 from conftest import bare, write_config
 from fake_harness import FakeHarness
-from moxi_turns import protocol
+from moxi_turns import procs, protocol
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32",
                                 reason="moxi.ipc's named pipe server comes later")
@@ -46,6 +46,19 @@ def test_find_by_pid_walks_up_from_a_process_under_the_harness(make_endpoint):
 
     ep, _ = make_endpoint()
     assert turns.find(pid=999999, proc=Tree()).dir == ep.dir
+
+
+def test_find_by_pid_walks_up_from_a_real_child_through_the_cores_parent(make_endpoint):
+    import subprocess
+
+    ep, _ = make_endpoint()
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        assert list(procs.DEFAULT.ancestry(child.pid))[:2] == [child.pid, os.getpid()]
+        assert turns.find(pid=child.pid).dir == ep.dir
+    finally:
+        child.kill()
+        child.wait()
 
 
 def test_directory_and_hello(make_endpoint):
