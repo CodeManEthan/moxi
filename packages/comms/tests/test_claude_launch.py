@@ -97,6 +97,45 @@ def test_the_launcher_waits_a_bounded_time_and_then_starts_claude(capsys, monkey
         os.close(w)
 
 
+# ------------------------------------------------------------- the launcher's pidfd
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pidfds are Linux's")
+def test_the_pidfd_comes_from_the_system_call_when_python_lacks_the_wrapper(monkeypatch):
+    """A Python built without `os.pidfd_open` still gets a working pidfd: it polls
+    unready while the process runs and ready once it has ended. A pid that names no
+    process raises OSError, as the wrapper does."""
+    import select
+
+    from moxi_comms.adapters import terminal
+    monkeypatch.delattr(os, "pidfd_open", raising=False)
+    proc = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"],
+                            stdin=subprocess.PIPE)
+    fd = terminal.pidfd_open(proc.pid)
+    try:
+        assert os.get_inheritable(fd) is False
+        poller = select.poll()
+        poller.register(fd, select.POLLIN)
+        assert poller.poll(0) == [], "the process still runs"
+        proc.stdin.close()
+        proc.wait(timeout=30)
+        assert poller.poll(5000) != [], "the pidfd is ready once the process has ended"
+    finally:
+        os.close(fd)
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    with pytest.raises(OSError):
+        terminal.pidfd_open(2 ** 22 + 1)     # past the kernel's largest pid
+
+
+def test_where_no_pidfd_exists_the_helper_fails_as_the_wrapper_would(monkeypatch):
+    from moxi_comms.adapters import terminal
+    monkeypatch.delattr(os, "pidfd_open", raising=False)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    with pytest.raises(AttributeError):
+        terminal.pidfd_open(os.getpid())
+
+
 # ------------------------------------------------------------- the id the launch names
 
 OTHER = "5e55a1d0-0000-4000-8000-0000000000f2"

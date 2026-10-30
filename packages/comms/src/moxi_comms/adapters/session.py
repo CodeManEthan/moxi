@@ -503,8 +503,11 @@ def launch(session: Session, binary: str, cmd: list[str], env: dict, *,
     so it is never `claude`'s child and is not left a zombie under it, and it runs in a
     session of its own. The launcher waits for its ready byte, at most `ready_wait`
     seconds, then execs whatever it heard; past the bound it says so on stderr."""
+    from .terminal import pidfd_open   # not at the top: it needs termios, and the listener
+    #                                    imports this module
+
     harness_pid = os.getpid()
-    handle = os.pidfd_open(harness_pid)
+    handle = pidfd_open(harness_pid)
     r, w = os.pipe()
     child = os.fork()
     if child == 0:                                         # pragma: no cover - forked

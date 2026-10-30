@@ -1,5 +1,5 @@
-"""The terminal a launcher's window borrows, and the children a launcher spawns, shared by
-every launcher that opens a window.
+"""The terminal a launcher's window borrows, the children a launcher spawns, and the pidfd a
+launcher takes on a process, shared by the launchers.
 
 A window is a CLI's own full-screen interface, run as the launcher's child in the
 launcher's terminal. The launcher gives the window the terminal's foreground, takes it
@@ -52,6 +52,30 @@ def die_with_parent(parent_pid: int):
         if os.getppid() != parent_pid:
             os._exit(0)
     return _pre
+
+
+#: The `pidfd_open` system call's number: the same on x86_64 and aarch64 (asm-generic).
+SYS_PIDFD_OPEN = 434
+
+
+def pidfd_open(pid: int) -> int:
+    """A pidfd on `pid`, close-on-exec: `os.pidfd_open` where this Python has it, else on
+    Linux the system call itself (some Linux builds of Python lack the wrapper, such as
+    uv's managed 3.12). Elsewhere no pidfd exists, and this raises the AttributeError
+    `os.pidfd_open` would. A failed call raises OSError, as `os.pidfd_open` does."""
+    opener = getattr(os, "pidfd_open", None)
+    if opener is not None:
+        return opener(pid)
+    if not sys.platform.startswith("linux"):
+        raise AttributeError("module 'os' has no attribute 'pidfd_open'")
+    libc = ctypes.CDLL(None, use_errno=True)
+    syscall = libc.syscall
+    syscall.restype = ctypes.c_long
+    fd = syscall(ctypes.c_long(SYS_PIDFD_OPEN), ctypes.c_int(pid), ctypes.c_uint(0))
+    if fd == -1:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err))
+    return fd
 
 
 def terminal_fd():
@@ -111,5 +135,6 @@ class Terminal:
 
 
 __all__ = ["ENTER_ALT_SCREEN", "LEAVE_ALT_SCREEN", "SHOW_CURSOR", "RESTORE_SCREEN",
-           "JOB_CONTROL_SIGNALS", "PR_SET_PDEATHSIG", "TERM_GRACE", "Terminal",
-           "die_with_parent", "in_terminal_foreground", "terminal_fd"]
+           "JOB_CONTROL_SIGNALS", "PR_SET_PDEATHSIG", "SYS_PIDFD_OPEN", "TERM_GRACE",
+           "Terminal", "die_with_parent", "in_terminal_foreground", "pidfd_open",
+           "terminal_fd"]
