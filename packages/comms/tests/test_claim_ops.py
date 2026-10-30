@@ -82,7 +82,7 @@ def test_claim_answers_inside_the_session_only(rig, world):
     p, n = pair(world)
     answer = world.call(p, p.verb_pid, "claim")
     assert answer["claim"]["qualified"] == PLANNER
-    assert answer["protocol"] == 2 and answer["token"] == p.holder.token
+    assert "protocol" not in answer and answer["token"] == p.holder.token
     stranger = world.proc.spawn()
     answer = world.call(p, stranger, "claim")
     assert not answer["ok"] and answer["error"] == NOT_INSIDE
@@ -133,7 +133,7 @@ def test_a_name_held_elsewhere_moves_a_held_claim_to_standby_and_leaves_a_launch
     late = world.session("planner", bind=False)
     with pytest.raises(DaemonError) as e:
         late.bind()
-    holder = (e.value.response.get("holder") or {}).get("qualified")
+    holder = (e.value.data.get("holder") or {}).get("qualified")
     late.holder.name_refused(holder)
     assert late.state == "waiting" and late.holder.claim
     p.holder.name_refused(holder)                 # as if its register were refused now

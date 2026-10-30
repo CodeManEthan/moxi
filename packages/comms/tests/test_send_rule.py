@@ -27,6 +27,7 @@ import pytest
 
 from claim_kit import World, wait_for
 from conftest import clock_reads_warm, wait_for_queue
+from moxi import exit as moxi_exit
 from moxi_comms import attribution, claimfile, claimhold, cli, codex_threads
 from moxi_comms.adapters.codex import CodexAdapter
 from moxi_comms.adapters.codex_roster import CodexAgent
@@ -139,7 +140,7 @@ def test_a_stamp_is_refused_when_a_live_claim_file_names_its_identity(rig, world
     before = len(history(rig))
     code, out = rig.cli(["send", "--posture", "none", "nobody", "hello"], name="seat",  scope="proj-a",
                         stamp_only=True)
-    assert code == cli.EXIT_REFUSED == 2
+    assert code == moxi_exit.REFUSED
     assert out.strip() == ("this process is not inside the session that holds "
                            "seat@proj-a — nothing was sent. A session sends as its "
                            "identity through its own claim socket.")
@@ -152,7 +153,7 @@ def test_a_stamp_is_refused_when_no_live_claim_file_names_it(rig):
     bob = rig.shim(name="bob", scope="proj-a")
     code, out = rig.cli(["send", "--posture", "none", "nobody", "hello"], name="bob",  scope="proj-a",
                         stamp_only=True)
-    assert code == 2
+    assert code == 3
     assert out.strip() == STAMP_REFUSAL.format(q=BOB)
     assert history(rig) == []
     assert not bob.queue
@@ -163,7 +164,7 @@ def test_a_stamped_reply_is_refused_the_same_way(rig):
     asked = rig.post_as("alice@proj-a", ["bob"], "a question")
     code, out = rig.cli(["reply", str(asked.id), "an answer"], name="bob", scope="proj-a",
                         stamp_only=True)
-    assert code == 2
+    assert code == 3
     assert STAMP_REFUSAL.format(q=BOB) in out
     assert [m.id for m in history(rig)] == [asked.id]
 
@@ -171,14 +172,14 @@ def test_a_stamped_reply_is_refused_the_same_way(rig):
 def test_a_global_stamp_names_its_global_identity(rig):
     code, out = rig.cli(["send", "--posture", "none", "nobody", "hi"], name="herald",
                         env={"MOXI_COMMS_GLOBAL": "1"}, stamp_only=True)
-    assert code == 2 and out.strip() == STAMP_REFUSAL.format(q="herald")
+    assert code == 3 and out.strip() == STAMP_REFUSAL.format(q="herald")
     assert history(rig) == []
 
 
 def test_no_stamp_and_no_socket_is_refused(rig):
     rig.shim(name="bob", scope="proj-a")
     code, out = rig.cli(["send", "--posture", "none", "bob@proj-a", "hi"])
-    assert code == 2
+    assert code == 3
     assert out.startswith("comms has no identity for this process: nothing was sent.")
     assert history(rig) == []
 
@@ -212,14 +213,14 @@ def test_the_operators_lane_inside_a_session_is_refused(rig, world):
     world.real("alice")          # this process is inside alice's session
     code, out = rig.cli(["send", "--posture", "none", "nobody", "hi"],
                         env={"MOXI_COMMS_OPERATOR": rig.prov.operator_user_id})
-    assert code == 2 and "operator's lane is its own terminal" in out
+    assert code == 3 and "operator's lane is its own terminal" in out
     assert history(rig) == []
 
 
 def test_the_operators_stamp_beside_an_agents_stamp_is_refused(rig):
     code, out = rig.cli(["send", "--posture", "none", "nobody", "hi"], name="alice", scope="proj-a",
                         env={"MOXI_COMMS_OPERATOR": rig.prov.operator_user_id})
-    assert code == 2 and "claimed session is never the operator" in out
+    assert code == 3 and "claimed session is never the operator" in out
     assert history(rig) == []
 
 
@@ -287,7 +288,7 @@ class Loop:
 
     def hold(self, name, kind):
         client = DaemonClient(daemon_socket()).connect()
-        answer = client.register(name=name, scope="proj-a", project="proj-a",
+        answer = client.bind(name=name, scope="proj-a", project="proj-a",
                                  adapter=kind)
         server = ClaimServer(name, "proj-a", kind=kind).start()
         server.set_bound(token=answer["token"])
@@ -357,7 +358,7 @@ def test_a_process_the_loop_did_not_spawn_is_refused(rig, loop):
     done = subprocess.run([sys.executable, "-c", CHILD_SEND, BOB, "x"],
                           env=child_env(**claim_env(driver.socket_path)),
                           capture_output=True, text=True, timeout=60)
-    assert done.returncode == 2, done
+    assert done.returncode == 3, done
     assert NOT_INSIDE in done.stdout and "nothing was sent" in done.stdout
     assert len(history(rig)) == before
 
@@ -426,7 +427,7 @@ def test_a_shim_that_died_cannot_send_by_its_claim_file(rig):
     alice.stop()                                       # the shim dies; its session lives
     assert wait_for(lambda: ALICE not in rig.daemon.bindings)
     code, out = rig.cli(["send", "--posture", "none", BOB, "still here"], env=claim_env(path))
-    assert code == 4
+    assert code == 75
     assert "comms adapter is gone" in out and "holds no posting credential" in out
     assert history(rig) == []
 
@@ -458,7 +459,7 @@ def refuses_as_no_identity(rig, path, asked_id):
     assert code == 2 and out.splitlines()[0] == NO_IDENTITY, out
     assert "None" not in out, out
     code, out = rig.cli(["send", "--posture", "none", BOB, "who am i"], env=claim_env(path))
-    assert (code, out) == (2, f"{NO_IDENTITY} — nothing was sent.\n"), out
+    assert (code, out) == (3, f"{NO_IDENTITY} — nothing was sent.\n"), out
     code, out = rig.cli(["reply", str(asked_id), "an answer"], env=claim_env(path))
     # a reply says whom it answers first, as every refused reply does
     assert code == 2 and out.splitlines()[-1] == f"{NO_IDENTITY} — nothing was sent.", out
@@ -543,7 +544,7 @@ def test_a_named_offline_claim_is_refused(rig):
         code, out = rig.cli(["whoami"], env=claim_env(path))
         assert code == 0 and out.splitlines()[0] == f"{ALICE} (offline)", out
         code, out = rig.cli(["send", "--posture", "none", BOB, "from offline"], env=claim_env(path))
-        assert code == 4
+        assert code == 75
         assert "holds no posting credential" in out and "nothing was sent" in out
         assert history(rig) == []
     finally:

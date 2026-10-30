@@ -39,8 +39,8 @@ def test_each_binding_gets_a_fresh_token_and_only_its_hash_stays_in_the_daemon(
     refused = client()
     try:
         with pytest.raises(DaemonError) as raised:
-            refused.register(name="reviewer", scope="proj-a", adapter="stranger")
-        assert "token" not in raised.value.response
+            refused.bind(name="reviewer", scope="proj-a", adapter="stranger")
+        assert "token" not in raised.value.data
     finally:
         refused.close()
 
@@ -49,7 +49,7 @@ def test_each_binding_gets_a_fresh_token_and_only_its_hash_stays_in_the_daemon(
 def test_a_live_token_posts_one_stamped_row_in_the_names_room(
         rig, bind_answered, backend):
     holder, answer = bind_answered(name="planner", scope="proj-a")
-    posted = holder.post("planner@proj-a", answer["token"], "hello")
+    posted = holder.send("planner@proj-a", answer["token"], "hello")
     rows = rig.record.history(rig.names_channel)
     assert [row.id for row in rows] == [posted["message_id"]]
     assert (rows[0].channel_id, rows[0].author_kind, rows[0].author_id,
@@ -67,17 +67,16 @@ def test_wrong_missing_released_and_unbound_credentials_write_nothing(
     assert wait_until(lambda: "curator@proj-a" not in rig.daemon.bindings)
     caller = client()
     attempts = [
-        {"identity": "planner@proj-a", "token": other["token"], "content": "wrong"},
-        {"identity": "planner@proj-a", "content": "missing"},
-        {"identity": "curator@proj-a", "token": released["token"],
-         "content": "released"},
-        {"identity": "ghost@proj-a", "token": own["token"], "content": "unbound"},
+        {"as": "planner@proj-a", "token": other["token"], "content": "wrong"},
+        {"as": "planner@proj-a", "content": "missing"},
+        {"as": "curator@proj-a", "token": released["token"], "content": "released"},
+        {"as": "ghost@proj-a", "token": own["token"], "content": "unbound"},
     ]
     try:
         for fields in attempts:
             with pytest.raises(DaemonError) as raised:
-                caller.request("post", **fields)
-            assert raised.value.response["credential"] is True
+                caller.call("send", fields)
+            assert raised.value.data["credential"] is True
     finally:
         caller.close()
     assert rig.record.history(rig.names_channel) == []
@@ -90,8 +89,8 @@ def test_a_token_from_before_a_daemon_restart_is_dead(rig, bind_answered):
     caller = client()
     try:
         with pytest.raises(DaemonError) as raised:
-            caller.post("planner@proj-a", answer["token"], "stale")
-        assert raised.value.response["credential"] is True
+            caller.send("planner@proj-a", answer["token"], "stale")
+        assert raised.value.data["credential"] is True
     finally:
         caller.close()
         old.close()
@@ -101,9 +100,9 @@ def test_a_token_from_before_a_daemon_restart_is_dead(rig, bind_answered):
 def test_retired_overlong_and_stopping_posts_write_nothing(rig, bind_answered):
     holder, answer = bind_answered(name="planner", scope="proj-a")
     with pytest.raises(DaemonError, match="over the") as too_long:
-        holder.post("planner@proj-a", answer["token"],
+        holder.send("planner@proj-a", answer["token"],
                     "x" * (rig.record.max_content_length + 1))
-    assert "credential" not in too_long.value.response
+    assert "credential" not in too_long.value.data
 
     db = directory.connect(comms_db())
     try:
@@ -114,13 +113,13 @@ def test_retired_overlong_and_stopping_posts_write_nothing(rig, bind_answered):
     finally:
         db.close()
     with pytest.raises(DaemonError, match="retired"):
-        holder.post("planner@proj-a", answer["token"], "too late")
+        holder.send("planner@proj-a", answer["token"], "too late")
 
     with rig.daemon._lock:
         rig.daemon._stopping = True
     try:
         with pytest.raises(DaemonError, match="stopping"):
-            holder.post("planner@proj-a", answer["token"], "stopping")
+            holder.send("planner@proj-a", answer["token"], "stopping")
     finally:
         with rig.daemon._lock:
             rig.daemon._stopping = False
@@ -138,8 +137,8 @@ def test_a_declared_kind_gets_a_token_and_posts_the_same_way(rig):
     rig.daemon.kinds = kinds.load([Entry()])
     holder = client()
     try:
-        answer = holder.register(name="helper", scope="proj-a", adapter="helper-kind")
-        holder.post("helper@proj-a", answer["token"], "declared")
+        answer = holder.bind(name="helper", scope="proj-a", adapter="helper-kind")
+        holder.send("helper@proj-a", answer["token"], "declared")
     finally:
         holder.close()
     (row,) = rig.record.history(rig.names_channel)
@@ -152,7 +151,7 @@ def test_a_binding_token_is_absent_from_state_files_and_logs(
         rig, bind_answered, caplog, backend):
     caplog.set_level(logging.DEBUG)
     holder, answer = bind_answered(name="planner", scope="proj-a")
-    holder.post("planner@proj-a", answer["token"], "quiet")
+    holder.send("planner@proj-a", answer["token"], "quiet")
     token = answer["token"]
     assert token not in caplog.text
     for path in state_dir().rglob("*"):
@@ -180,7 +179,7 @@ def test_post_distinguishes_a_frame_that_never_left_from_a_lost_answer():
     failed write, a closed connection and a timeout alike may have landed."""
     disconnected = DaemonClient()
     with pytest.raises(DaemonOffline):
-        disconnected.post("planner@proj-a", "token", "body")
+        disconnected.send("planner@proj-a", "token", "body")
 
     for failure, said in ((ipc.IpcError("the connection broke: EPIPE"), "closed"),
                           (ipc.IpcError("the server closed the connection"), "closed"),
@@ -188,7 +187,7 @@ def test_post_distinguishes_a_frame_that_never_left_from_a_lost_answer():
         lost = DaemonClient(timeout=0.001)
         lost._client = FakeClient(failure)
         with pytest.raises(DaemonNoAnswer, match=said):
-            lost.post("planner@proj-a", "token", "body")
+            lost.send("planner@proj-a", "token", "body")
         assert lost._client.calls == ["send"]
 
 
@@ -196,11 +195,11 @@ def test_register_frames_carry_no_protocol_and_never_a_slot(monkeypatch):
     """The wire version rides the hello, so a bind names no protocol."""
     seen = []
     daemon = DaemonClient()
-    monkeypatch.setattr(daemon, "request",
-                        lambda op, **fields: seen.append((op, fields)) or {})
-    daemon.register(name="planner", scope="proj-a",
-                    report={"protocol": 1, "slot": 4})
-    daemon.register(name="reviewer", scope="proj-a")
+    monkeypatch.setattr(daemon, "call",
+                        lambda method, params=None, **kw: seen.append((method, params)) or {})
+    daemon.bind(name="planner", scope="proj-a", report={"protocol": 1, "slot": 4})
+    daemon.bind(name="reviewer", scope="proj-a")
+    assert [method for method, _ in seen] == ["bind", "bind"]
     assert all("protocol" not in fields for _, fields in seen)
     assert all("slot" not in fields for _, fields in seen)
 
@@ -213,8 +212,8 @@ def test_more_than_six_names_bind_and_a_slot_is_ignored(
     assert len(rig.daemon.bindings) == 7
     assert all(not hasattr(binding, "slot_id") for binding in rig.daemon.bindings.values())
     explicit = client()
-    explicit_answer = explicit.request("register", slot=4, name="helper",
-                                       scope="proj-a", adapter="codex")
+    explicit_answer = explicit.call("bind", {"slot": 4, "name": "helper",
+                                             "scope": "proj-a", "adapter": "codex"})
     try:
         assert "slot" not in explicit_answer
         assert "helper@proj-a" in rig.daemon.bindings
@@ -234,7 +233,7 @@ def test_a_restart_writes_no_keep_file_and_the_name_rebinds_with_a_new_token(
     rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     fresh = client()
     try:
-        rebound = fresh.register(name="planner", scope="proj-a")
+        rebound = fresh.bind(name="planner", scope="proj-a")
         assert rebound["token"] != old_token
         assert "slot" not in rebound
     finally:

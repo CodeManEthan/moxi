@@ -121,7 +121,7 @@ def test_a_reply_to_an_optional_message_takes_the_once_row(rig, pair, typed):
         assert code == 0, out
         assert (zero(last(rig)).reply_to, zero(last(rig)).posture) == (ref.id, want)
     else:
-        assert code == 2 and tail(out) == (
+        assert code == 3 and tail(out) == (
             "A reply to a [reply-optional] message closes it: leave out --posture, or add "
             "--posture once to ask something back. A back-and-forth starts with a new "
             f'send: moxi comms send {P} --posture open "text". Nothing was sent.')
@@ -139,7 +139,7 @@ def test_the_optional_column(rig, pair, kind):
     ref = make_ref(rig, kind)
     code, out = rig.cli(["reply", ref.id, "answer", "--posture", "optional"], **REVIEWER)
     if OPTIONAL_COLUMN[kind] == "refused":
-        assert code == 2 and tail(out).endswith("Nothing was sent."), out
+        assert code == 3 and tail(out).endswith("Nothing was sent."), out
         assert "--posture none|optional|once|open" in tail(out)
     else:
         assert code == 0, out
@@ -156,7 +156,7 @@ def test_an_optional_message_in_a_closed_thread_by_someone_else_stays_answerable
     msg, _ = posts(rig, REVIEWER, ["reply", late.id, "answer"])
     assert zero(msg).posture == "none"
     code, out = rig.cli(["reply", late.id, "more", "--posture", "open"], **REVIEWER)
-    assert code == 2 and "[reply-optional] message" in tail(out)
+    assert code == 3 and "[reply-optional] message" in tail(out)
 
 
 def test_an_optional_message_inside_an_open_thread_follows_the_thread(rig, pair):
@@ -357,7 +357,7 @@ def test_your_own_no_reply_is_refused_naming_its_recipients(rig, trio):
     mine, _ = posts(rig, PLANNER, ["send", "reviewer,critic", "done", "--posture", "none"])
     before = len(posted(rig))
     code, out = rig.cli(["reply", mine.id, "p.s."], **PLANNER)
-    assert code == 2
+    assert code == 3
     assert tail(out) == (f"msg {mine.id} from {P} is marked [no reply], so it takes no "
                          "reply. If you have something new, send it as a new message: "
                          f'moxi comms send {R},{C} --posture none|optional|once|open "text". '
@@ -369,7 +369,7 @@ def test_your_own_prose_message_is_refused(rig, pair):
     prose = rig.post_as(P, "no routing line here", raw=True)
     before = len(posted(rig))
     code, out = rig.cli(["reply", prose.id, "x"], **PLANNER)
-    assert (code, out.strip()) == (2, (
+    assert (code, out.strip()) == (3, (
         f"msg {prose.id} is your own, and comms cannot read whom it was sent to, so a reply "
         "has no one to go to. Send it as a new message with moxi comms send. Nothing was sent."))
     assert len(posted(rig)) == before
@@ -379,7 +379,7 @@ def test_your_own_message_to_yourself_alone_is_refused(rig, pair):
     alone = rig.post_as(P, f"::to {P}\nnote to self", raw=True)
     before = len(posted(rig))
     code, out = rig.cli(["reply", alone.id, "x"], **PLANNER)
-    assert (code, out.strip()) == (2, (
+    assert (code, out.strip()) == (3, (
         f"msg {alone.id} is your own and went to no one but you, so a reply has no one to "
         "go to. Send it as a new message with moxi comms send. Nothing was sent."))
     assert len(posted(rig)) == before
@@ -398,7 +398,7 @@ def test_others_replies_are_unchanged(rig, pair):
 def test_a_sender_refusal_prints_no_replying_to_line(rig, pair):
     theirs, _ = posts(rig, PLANNER, ["send", "reviewer", "q?", "--posture", "once"])
     code, out = rig.cli(["reply", theirs.id, "a"], **REVIEWER, stamp_only=True)
-    assert code == 2 and "replying to" not in out, out
+    assert code == 3 and "replying to" not in out, out
 
 
 def test_the_targets_are_the_tags_as_written_read_by_the_rule():
@@ -459,7 +459,7 @@ def test_a_send_to_a_never_bound_name_is_refused(rig, pair, monkeypatch):
     binding_history(rig, monkeypatch)
     before = len(posted(rig))
     code, out = rig.cli(["send", "newbie", "brief", "--posture", "none"], **PLANNER)
-    assert (code, out.strip()) == (2, NEVER)
+    assert (code, out.strip()) == (3, NEVER)
     assert len(posted(rig)) == before
 
 
@@ -467,7 +467,7 @@ def test_one_never_bound_name_refuses_the_whole_post(rig, pair, monkeypatch):
     binding_history(rig, monkeypatch)
     before = len(posted(rig))
     code, out = rig.cli(["send", "reviewer,newbie", "brief", "--posture", "none"], **PLANNER)
-    assert (code, out.strip()) == (2, NEVER)
+    assert (code, out.strip()) == (3, NEVER)
     assert len(posted(rig)) == before
 
 
@@ -475,7 +475,7 @@ def test_send_reply_to_is_checked_too(rig, pair, monkeypatch):
     binding_history(rig, monkeypatch)
     ref, _ = posts(rig, REVIEWER, ["send", "planner", "q?", "--posture", "open"])
     code, out = rig.cli(["send", "planner,newbie", "a", "--reply-to", ref.id], **PLANNER)
-    assert code == 2 and "comms has never seen newbie bound" in out
+    assert code == 3 and "comms has never seen newbie bound" in out
 
 
 def test_new_name_defers_the_message(rig, pair, monkeypatch):
@@ -552,7 +552,7 @@ def test_the_refusal_names_the_identities_of_that_name_that_exist(rig, pair, mon
     scopes says which, so `--new-name` is not the only cure on offer."""
     binding_history(rig, monkeypatch, seen_as=["newbie@proj-b"])
     code, out = rig.cli(["send", "newbie@global", "x", "--posture", "none"], **PLANNER)
-    assert code == 2
+    assert code == 3
     assert out.strip() == (
         "newbie@global: comms has never seen newbie bound, so no agent of that name has "
         "started. If it has not started yet, send it again with --new-name and the message "
@@ -609,7 +609,7 @@ def test_reply_check_prints_the_replying_to_line_first_and_posts_nothing(rig, pa
         f"replying to {P} (chosen, verified) in #names", f"would send 1 message(s) to {P}"])
     assert len(posted(rig)) == before
     code, out = rig.cli(["reply", theirs.id, "a", "--check", "--posture", "open"], **REVIEWER)
-    assert code == 2 and out.splitlines()[0].startswith("replying to")
+    assert code == 3 and out.splitlines()[0].startswith("replying to")
     assert len(posted(rig)) == before
 
 

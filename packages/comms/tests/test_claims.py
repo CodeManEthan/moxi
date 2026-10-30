@@ -47,7 +47,7 @@ def test_standing_bind_is_open_first_bind_wins_and_the_second_is_refused(rig):
     with pytest.raises(DaemonError) as e:
         rig.shim(name="herald", global_=True)
     assert "herald" in str(e.value)
-    assert e.value.response["holder"] == {
+    assert e.value.data["holder"] == {
         "qualified": "herald", "adapter": "claude-shim"}
 
 
@@ -140,7 +140,7 @@ def test_unknown_adapter_kind_is_refused(rig):
     c = client()
     try:
         with pytest.raises(DaemonError, match="unknown adapter kind"):
-            c.register(name="x", scope="proj-a", adapter="telepathy")
+            c.bind(name="x", scope="proj-a", adapter="telepathy")
     finally:
         c.close()
 
@@ -151,7 +151,7 @@ def test_register_still_refuses_an_unknown_adapter_kind(rig):
     c = client()
     try:
         with pytest.raises(DaemonError, match="unknown adapter kind") as e:
-            c.register(name="x", scope="proj-a", adapter="megaphone")
+            c.bind(name="x", scope="proj-a", adapter="megaphone")
     finally:
         c.close()
     said = str(e.value)

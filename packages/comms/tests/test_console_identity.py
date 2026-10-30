@@ -12,7 +12,8 @@ import sys
 
 import pytest
 
-from conftest import queued, wait_until, warm_session, write_config, write_transcript
+from conftest import as_frames, queued, wait_until, warm_session, write_config, write_transcript
+from moxi import exit as moxi_exit
 from moxi_comms import attribution, cli, directory, machine_line, provision
 from moxi_comms.claimhold import CLAIM_SOCKET_ENV, NOT_INSIDE, ClaimServer, call
 from moxi_comms.client import DaemonClient, DaemonError
@@ -71,8 +72,8 @@ class Pushes:
 
     def __init__(self):
         self.frames = []
-        self.client = DaemonClient(daemon_socket(), on_push=self.frames.append).connect()
-        self.reply = self.client.register(name="relay", scope="proj-a", project="proj-a",
+        self.client = DaemonClient(daemon_socket(), on_push=as_frames(self.frames)).connect()
+        self.reply = self.client.bind(name="relay", scope="proj-a", project="proj-a",
                                           adapter="send-only")
 
     def delivers(self):
@@ -97,7 +98,7 @@ def history(rig):
 def register(**kw):
     c = DaemonClient(daemon_socket()).connect()
     try:
-        return c.register(**kw)
+        return c.bind(**kw)
     finally:
         c.close()
 
@@ -163,7 +164,7 @@ def test_a_send_to_console_is_refused_before_posting(console, request, bound, ta
     before = len(history(console))
     code, out = console.cli(["send", "--posture", "none", tag, "report back"],
                             name="captain", scope=scope)
-    assert code == cli.EXIT_REFUSED
+    assert code == moxi_exit.REFUSED
     assert out.strip() == REFUSAL
     assert len(history(console)) == before
 
@@ -175,7 +176,7 @@ def test_a_send_naming_console_among_others_is_refused_whole(console, request, b
     console.shim(name="planner", scope="proj-a")
     before = len(history(console))
     code, out = console.cli(["send", "--posture", "none", f"{PLANNER},{CONSOLE}", "x"], **LEAD)
-    assert code == cli.EXIT_REFUSED and REFUSAL in out
+    assert code == moxi_exit.REFUSED and REFUSAL in out
     assert len(history(console)) == before
 
 
@@ -192,10 +193,10 @@ def test_a_reply_to_consoles_message_is_refused_before_posting(console, request,
         assert wait_until(lambda: CONSOLE not in console.daemon.bindings)
     before = len(history(console))
     code, out = console.cli(["reply", brief.id, "done"], **LEAD)
-    assert code == cli.EXIT_REFUSED
+    assert code == moxi_exit.REFUSED
     assert out.splitlines()[-1] == REFUSAL
     code, out = console.cli(["send", "--reply-to", brief.id, CONSOLE, "done"], **LEAD)
-    assert code == cli.EXIT_REFUSED and out.strip() == REFUSAL
+    assert code == moxi_exit.REFUSED and out.strip() == REFUSAL
     assert len(history(console)) == before
 
 
@@ -350,12 +351,12 @@ def test_a_send_from_a_process_outside_it_is_refused(console, server):
     env = dict(os.environ, **{CLAIM_SOCKET_ENV: str(server.socket_path)})
     done = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True,
                           text=True, timeout=60)
-    assert done.returncode == cli.EXIT_REFUSED, done
+    assert done.returncode == moxi_exit.REFUSED, done
     assert NOT_INSIDE in done.stdout and "nothing was sent" in done.stdout
     # A stamp of the name is no live session holding it.
     code, out = console.cli(["send", "--posture", "none", PLANNER, "x"], name="relay", scope="proj-a",
                             stamp_only=True)
-    assert code == cli.EXIT_REFUSED
+    assert code == moxi_exit.REFUSED
     assert f"not inside the session that holds {CONSOLE}" in out
     assert len(history(console)) == before
     answer = call(server.socket_path, "claim")
@@ -457,9 +458,9 @@ def test_a_bare_relay_is_global_while_the_scoped_send_only_row_exists(
         console):
     """The scoped send-only row does not change the meaning of a bare global name."""
     frames = []
-    global_console = DaemonClient(daemon_socket(), on_push=frames.append).connect()
+    global_console = DaemonClient(daemon_socket(), on_push=as_frames(frames)).connect()
     try:
-        global_console.register(name="relay", global_=True, project="proj-a",
+        global_console.bind(name="relay", global_=True, project="proj-a",
                                 adapter="claude-shim",
                                 session_id=warm_session())
         assert "relay" in console.daemon.bindings
@@ -476,7 +477,7 @@ def test_a_bare_relay_is_global_while_the_scoped_send_only_row_exists(
         before = len(history(console))
         code, out = console.cli(["send", "--posture", "none", CONSOLE, "x"], name="captain",
                                 scope="proj-a")
-        assert code == cli.EXIT_REFUSED and out.strip() == REFUSAL
+        assert code == moxi_exit.REFUSED and out.strip() == REFUSAL
         assert len(history(console)) == before
     finally:
         global_console.close()
@@ -536,7 +537,7 @@ def test_a_second_send_only_register_is_refused_as_already_bound(console, pushes
     with pytest.raises(DaemonError) as e:
         register(name="relay", scope="proj-a", project="proj-a", adapter="send-only")
     assert str(e.value) == f"{CONSOLE} is already bound (adapter send-only)"
-    assert e.value.response["holder"] == {"qualified": CONSOLE, "adapter": "send-only"}
+    assert e.value.data["holder"] == {"qualified": CONSOLE, "adapter": "send-only"}
 
 
 def test_the_binding_history_row_has_no_retired_column_and_replay_reads_its_post_verified(

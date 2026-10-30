@@ -181,7 +181,7 @@ def test_a_binding_never_bound_says_so(rig, tmp_path):
         code, out = rig.cli(["send", "--posture", "none", "--new-name",
                              "nobody", "hello"],
                             env={CLAIM_SOCKET_ENV: str(srv.socket_path)})
-        assert code == 2
+        assert code == 3
         assert "newbie@proj-a is not bound to comms yet — nothing was sent." in out, out
         assert down.holder.state == "waiting"
         assert line_of(down) == "nobody@proj-a is not bound to comms yet"
@@ -220,7 +220,7 @@ def test_a_held_name_still_says_another_session_holds_it(rig):
         code, out = rig.cli(["send", "--posture", "none", "--new-name",
                              "nobody", "hello"],
                             env={CLAIM_SOCKET_ENV: str(srv.socket_path)})
-        assert code == 2
+        assert code == 3
         assert "planner@proj-a is held by another session — nothing was sent." in out, out
     finally:
         srv.stop()
@@ -257,7 +257,7 @@ def test_a_claim_socket_outside_comms_runtime_directory_is_never_asked(
 
         # A send is refused the same way, naming the variable, and nothing is sent.
         code, out = rig.cli(["send", "main", "hello"], env=env)
-        assert code == 2, out
+        assert code == 3, out
         assert "outside comms' runtime directory" in out and CLAIM_SOCKET_ENV in out, out
         assert "Nothing was sent." in out and "scout" not in out, out
 

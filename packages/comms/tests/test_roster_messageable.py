@@ -171,12 +171,12 @@ def test_the_race_line_tests_the_filtered_list():
 def test_the_verb_and_the_snapshot_print_the_same_from_one_answer(rig, monkeypatch):
     """Snapshot equals verb, through the real CLI path and the real hook, both handed
     the same answer."""
-    real = DaemonClient.query
+    real = DaemonClient.call
 
-    def query(self, kind, **kw):
-        return answer() if kind == "agents" else real(self, kind, **kw)
+    def query(self, kind, params=None, **kw):
+        return answer() if kind == "agents" else real(self, kind, params, **kw)
 
-    monkeypatch.setattr(DaemonClient, "query", query)
+    monkeypatch.setattr(DaemonClient, "call", query)
     code, out = rig.cli(["agents"])
     assert code == 0
     envelope, online = shim_roster.snapshot(daemon_socket(), env={})

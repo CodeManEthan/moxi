@@ -174,14 +174,16 @@ def test_the_verb_answers_with_nothing_behind_it(monkeypatch):
     write_card("planner@proj-a", "Design + planning for proj-a.")
     assert run(["whois", "planner@proj-a"])[0] == 0
     assert run(["whois", "nobody@proj-a"])[0] == 0
-    assert run(["whois", "agent-7"])[0] == 2
+    assert run(["whois", "agent-7"])[0] == 3
 
 
 def test_comms_offline_is_unreachable():
-    """There is no daemon in this path to be down, so exit 4 cannot happen."""
+    """There is no daemon in this path to be down, so exit 75 cannot happen."""
     verb = function_code(Path(cli.__file__), "cmd_whois")
-    assert set(re.findall(r"EXIT_\w+", verb)) == {"EXIT_OK", "EXIT_REFUSED", "EXIT_FAILED"}
-    assert "EXIT_" not in code_text(Path(cards.__file__)), "the reader knows no exit codes"
+    assert set(re.findall(r"moxi_exit\.\w+", verb)) == {
+        "moxi_exit.OK", "moxi_exit.REFUSED", "moxi_exit.ERROR"}
+    assert "moxi_exit" not in code_text(Path(cards.__file__)), \
+        "the reader knows no exit codes"
 
 
 def test_a_malformed_launch_stamp_is_answered_not_tracebacked():
@@ -231,7 +233,7 @@ def test_a_malformed_name_refuses_before_composing_a_path(bad, monkeypatch):
     monkeypatch.setattr(cards, "card_path",
                         lambda q: pytest.fail(f"composed a path for {q!r}"))
     code, out = run(["whois", bad])
-    assert code == 2
+    assert code == 3
     assert "is not a comms identity" in out and "`name@scope`" in out
 
 
@@ -241,8 +243,8 @@ def test_a_trailing_newline_in_a_name_is_refused(monkeypatch):
     straight into rendered envelope text, where a raw newline splits the header in two."""
     monkeypatch.setattr(cards, "card_path",
                         lambda q: pytest.fail(f"composed a path for {q!r}"))
-    assert run(["whois", "q\n"])[0] == 2
-    assert run(["whois", "q@proj-a\n"])[0] == 2
+    assert run(["whois", "q\n"])[0] == 3
+    assert run(["whois", "q@proj-a\n"])[0] == 3
 
 
 def test_dot_and_dotdot_are_accepted_and_inert():
@@ -258,7 +260,7 @@ def test_an_ephemeral_name_is_refused():
     """An agent-N name describes nobody in particular, and `_auto_seq` resets at daemon
     init, so the number really is handed to a stranger later."""
     code, out = run(["whois", "agent-7"])
-    assert code == 2
+    assert code == 3
     assert "no continuity" in out and "agent-N" in out
 
 
@@ -268,7 +270,7 @@ def test_a_card_that_cannot_be_decoded_exits_five():
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"role: planner\n\xff\xfe not utf-8\n")
     code, out = run(["whois", "planner@proj-a"])
-    assert code == 5
+    assert code == 1
     assert "planner@proj-a" in out and "not valid UTF-8" in out
     assert "�" not in out
 
@@ -287,7 +289,7 @@ def test_a_fifo_at_a_card_path_answers_instead_of_hanging():
     started = _time.monotonic()
     code, out = run(["whois", "victim@proj-a"])
     assert _time.monotonic() - started < 5, "the reader must not wait on a card"
-    assert code == 5
+    assert code == 1
     assert "victim@proj-a" in out and "not a regular file" in out
 
 
@@ -302,7 +304,7 @@ def test_a_symlink_at_a_card_path_is_refused_not_followed():
     path.parent.mkdir(parents=True, exist_ok=True)
     path.symlink_to(secret)
     code, out = run(["whois", "planner@proj-a"])
-    assert code == 5
+    assert code == 1
     assert "SECRET-NOT-A-CARD" not in out
     assert "symbolic link" in out and "planner@proj-a" in out
 
@@ -311,7 +313,7 @@ def test_a_directory_at_a_card_path_is_refused():
     """The same guard, the mundane case."""
     cards.card_path("planner@proj-a").mkdir(parents=True)
     code, out = run(["whois", "planner@proj-a"])
-    assert code == 5 and "not a regular file" in out
+    assert code == 1 and "not a regular file" in out
 
 
 # ------------------------------------------------------------------- scope resolution

@@ -13,6 +13,7 @@ import time
 import pytest
 from conftest import queued, wait_for_queue, wait_until
 
+from moxi import exit as moxi_exit
 from moxi_comms import cli, machine_line, wire
 from moxi_comms.adapters.claude_shim import frame_line, held_mark, sent_at
 from moxi_comms.daemon import Daemon
@@ -142,7 +143,7 @@ def test_an_unknown_read_refuses_the_send_held_or_not(rig, monkeypatch):
     before = posted(rig)
     for flags in ([], ["--held"]):
         code, out = rig.cli(["send", "x,w", "hi", "--posture", "none", *flags], **PLANNER)
-        assert code == cli.EXIT_COLD, out
+        assert code == moxi_exit.TEMPFAIL, out
         assert out.splitlines() == [
             "Nothing was sent: comms could not read x's cache (no session id "
             "reported yet).",
@@ -246,11 +247,11 @@ def test_a_daemon_on_another_wire_version_refuses_every_send(rig, monkeypatch, o
             "this program is older than the daemon")
     before = posted(rig)
     code, out = rig.cli(["send", "x", "hi", "--posture", "none"], **PLANNER)
-    assert code == cli.EXIT_OFFLINE
+    assert code == moxi_exit.TEMPFAIL
     assert cure in out and out.count("Nothing was sent.") == 1, out
     assert posted(rig) == before
     code, out = rig.cli(["agents"], **PLANNER)
-    assert code == cli.EXIT_OFFLINE and cure in out
+    assert code == moxi_exit.TEMPFAIL and cure in out
 
 
 # --------------------------------------------------------------------- the held frame mark

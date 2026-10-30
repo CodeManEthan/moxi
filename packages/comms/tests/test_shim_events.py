@@ -614,8 +614,8 @@ def test_a_connection_that_dies_during_register_is_not_a_binding(rig, monkeypatc
     closed = threading.Event()
 
     class DropsAfterRegister(real):
-        def register(self, **kwargs):
-            resp = super().register(**kwargs)
+        def bind(self, **kwargs):
+            resp = super().bind(**kwargs)
             if not dropped:
                 dropped.append(True)
                 self.close()
@@ -770,7 +770,7 @@ def test_a_send_waits_for_the_new_token_after_a_restart(rig, monkeypatch, restar
 
     code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "before"],
         env={CLAIM_SOCKET_ENV: str(path)})
-    assert code == 4 and "holds no posting credential" in out
+    assert code == 75 and "holds no posting credential" in out
     assert rig.record.history(rig.names_channel) == []
 
     seeds[0].step()

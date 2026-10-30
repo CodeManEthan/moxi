@@ -406,7 +406,7 @@ def test_explain_with_the_daemon_down_still_prints_the_cursor(rig):
     rig.daemon.stop()
 
     code, out = rig.cli(["explain", IDENTITY],  name="planner", scope="proj-a")
-    assert code == 4                                            # EXIT_OFFLINE
+    assert code == 75                                            # TEMPFAIL
     assert "comms offline" in out
     assert "1500000000000009252" in out
 
@@ -428,7 +428,7 @@ def test_explaining_a_retired_ephemeral_says_so(rig):
     """The daemon already refuses that name for the send verb, and the refusal is the
     whole answer to "why did my message not land". Printed as it came."""
     code, out = rig.cli(["explain", "agent-99"],  name="planner", scope="proj-a")
-    assert code == 2                                            # EXIT_REFUSED
+    assert code == 3                                            # REFUSED
     assert "never reused" in out
 
 

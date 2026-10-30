@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from moxi import exit as moxi_exit
 from moxi_comms import cli, config, paths
 
 
@@ -94,14 +95,14 @@ def test_a_configured_box_whose_daemon_is_down_exits_offline(tmp_path):
     path.parent.mkdir(parents=True)
     path.write_text('backend = "local"\n')
     code, out = doctor(env={"PATH": ""})
-    assert code == cli.EXIT_OFFLINE
+    assert code == moxi_exit.TEMPFAIL
     assert rows(out)["config"] == str(path)
     assert rows(out)["backend"] == "local (the config file)"
     code, _ = doctor(env={"PATH": "", "MOXI_COMMS_BACKEND": "local"})
-    assert code == cli.EXIT_OFFLINE
+    assert code == moxi_exit.TEMPFAIL
     path.unlink()
     code, _ = doctor(env={"PATH": "", "MOXI_COMMS_BACKEND": "mock"})
-    assert code == cli.EXIT_OFFLINE                         # the env var configures it too
+    assert code == moxi_exit.TEMPFAIL                         # the env var configures it too
 
 
 def test_a_bad_config_is_reported_not_raised(tmp_path):

@@ -141,7 +141,7 @@ def test_reply_table_row_5_a_different_audience_is_refused(rig):
     audience, says a reply cannot change it, and names the cure: a new send."""
     original = ask(rig, audience="operator")
     code, out = rig.cli(["reply", original.id, "answer.", "--audience", "archivist"], **REVIEWER)
-    assert code == 2
+    assert code == 3
     assert "'operator'" in out and "cannot change" in out
     assert "new message" in out and "Nothing was sent" in out
     assert posted(rig) == [original]
@@ -164,7 +164,7 @@ def test_send_reply_to_gets_the_same_table(rig):
     before = len(posted(rig))
     code, out = rig.cli(["send", "--new-name", "planner@proj-a", "c.", "--reply-to", marked.id,
                          "--audience", "archivist"], **REVIEWER)
-    assert code == 2 and "cannot change" in out
+    assert code == 3 and "cannot change" in out
     assert len(posted(rig)) == before
 
 
@@ -189,9 +189,9 @@ def test_a_failed_referent_read_refuses_in_both_verbs(rig):
     broken = ReadFails(rig.record, RecordError("500 on GET: the record is unreadable"))
     code, out = rig.cli(["send", "--new-name", "planner@proj-a", "hi", "--reply-to",
                          original.id], **REVIEWER, record=broken)
-    assert code == 5 and "could not be read" in out and "Nothing was sent" in out
+    assert code == 1 and "could not be read" in out and "Nothing was sent" in out
     code, out = rig.cli(["reply", original.id, "hi"], **REVIEWER, record=broken)
-    assert code == 5 and "Nothing was sent" in out
+    assert code == 1 and "Nothing was sent" in out
     offline = ReadFails(rig.record, DaemonOffline("comms offline"))
     code, out = rig.cli(["send", "--new-name", "planner@proj-a", "hi", "--reply-to",
                          original.id], **REVIEWER, record=offline)

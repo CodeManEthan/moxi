@@ -29,7 +29,7 @@ import threading
 import time
 
 import pytest
-from conftest import queued, wait_until, warm_session
+from conftest import as_frames, queued, wait_until, warm_session
 
 from moxi_comms.client import DaemonClient, DaemonError
 from moxi_comms.record import RecordError, Message
@@ -104,7 +104,7 @@ def test_concurrent_registers_overlap_their_record_round_trips(rig):
     cs = clients(3)
     try:
         names = ("planner", "reviewer", "curator")
-        results = race(lambda i: cs[i].register(name=names[i], scope="proj-a"), 3)
+        results = race(lambda i: cs[i].bind(name=names[i], scope="proj-a"), 3)
         assert [r[1] for r in results.values()] == [None, None, None]
         assert len(calls) == 3, "one boundary read per register, no more"
         assert max_overlap(calls) == 3, (
@@ -131,11 +131,11 @@ def test_no_register_waits_out_another_registers_round_trip(rig):
     cs = clients(5)
     try:
         t0 = time.monotonic()
-        control.register(name="planner", scope="proj-a")
+        control.bind(name="planner", scope="proj-a")
         solo = time.monotonic() - t0
 
         names = ("reviewer", "curator", "coder", "critic", "scout")
-        results = race(lambda i: cs[i].register(name=names[i], scope="proj-a"), 5)
+        results = race(lambda i: cs[i].bind(name=names[i], scope="proj-a"), 5)
         assert [r[1] for r in results.values()] == [None] * 5
         contended = sorted(seconds for _, _, seconds in results.values())
         assert contended[-1] < solo + HOLD * 2, (
@@ -156,7 +156,7 @@ def test_one_name_survives_a_concurrent_stampede(rig):
     instrument(rig.record)
     cs = clients(4)
     try:
-        results = race(lambda i: cs[i].register(name="planner", scope="proj-a"), 4)
+        results = race(lambda i: cs[i].bind(name="planner", scope="proj-a"), 4)
         winners = [i for i, (_, error, _) in results.items() if error is None]
         assert len(winners) == 1, "exactly one claimant binds a name, concurrent or not"
         for i, (_, error, _) in results.items():
@@ -180,7 +180,7 @@ def test_a_broken_record_does_not_change_which_refusal_a_register_gets(rig):
     the record was doing at the time. That is why the read is deferred-raise -- the
     exception is raised where the call itself used to sit."""
     held = clients(1)[0]
-    held.register(name="planner", scope="proj-a")
+    held.bind(name="planner", scope="proj-a")
 
     def unreachable(channel_id=None):
         raise RecordError("503 the record is unreachable")
@@ -190,11 +190,11 @@ def test_a_broken_record_does_not_change_which_refusal_a_register_gets(rig):
     late = clients(1)[0]
     try:
         with pytest.raises(DaemonError, match="planner@proj-a is already bound"):
-            late.register(name="planner", scope="proj-a")
+            late.bind(name="planner", scope="proj-a")
         # ...and a register that WOULD have bound still fails on the record, and binds
         # nothing: the boundary is not something a register may proceed without.
         with pytest.raises(DaemonError, match="the record is unreachable"):
-            late.register(name="reviewer", scope="proj-a")
+            late.bind(name="reviewer", scope="proj-a")
         assert list(rig.daemon.bindings) == ["planner@proj-a"]
         assert [r["qualified"] for r in rig.daemon.binding_history.intervals()] == ["planner@proj-a"]
     finally:
@@ -253,13 +253,13 @@ def test_a_message_that_lands_during_the_round_trip_is_delivered_not_stranded(ri
     rig.record.max_message_id = gated
 
     pushes: list = []
-    client = DaemonClient(daemon_socket(), on_push=pushes.append).connect()
+    client = DaemonClient(daemon_socket(), on_push=as_frames(pushes)).connect()
     outcome: dict = {}
     warm = warm_session()
 
     def register():
         try:
-            outcome["ok"] = client.register(name="planner", scope="proj-a",
+            outcome["ok"] = client.bind(name="planner", scope="proj-a",
                                             session_id=warm)      # a working agent
         except Exception as e:
             outcome["error"] = e

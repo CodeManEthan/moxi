@@ -43,7 +43,7 @@ def history(rig):
 def query(kind, **kw):
     c = DaemonClient(daemon_socket()).connect()
     try:
-        return c.query(kind, **kw)
+        return c.call(kind, kw)
     finally:
         c.close()
 
@@ -171,7 +171,7 @@ def test_a_shim_with_no_scope_binds_global(rig):
 def test_a_register_with_only_project_binds_global(rig):
     c = DaemonClient(daemon_socket()).connect()
     try:
-        got = c.register(name="loner", project="proj-a", adapter="claude-shim")
+        got = c.bind(name="loner", project="proj-a", adapter="claude-shim")
         assert got["identity"]["qualified"] == "loner"
     finally:
         c.close()
@@ -270,7 +270,7 @@ def test_a_retired_identity_cannot_bind(rig):
     c = DaemonClient(daemon_socket()).connect()
     try:
         with pytest.raises(DaemonError) as e:
-            c.register(name="captain", scope="proj-old", adapter="claude-shim")
+            c.bind(name="captain", scope="proj-old", adapter="claude-shim")
         assert str(e.value) == RETIRED_BIND.format(q="captain@proj-old",
                                                    name="captain")
     finally:
@@ -287,7 +287,7 @@ def test_a_send_or_check_to_a_retired_identity_is_refused(rig, argv):
     retire("mate", "proj-old")
     before = len(history(rig))
     code, out = rig.cli(argv,  name="planner")
-    assert code == 2
+    assert code == 3
     assert out.strip() == RETIRED_SEND.format(q="mate@proj-old",
                                               name="mate")
     assert len(history(rig)) == before, "nothing posted"
@@ -302,7 +302,7 @@ def test_a_reply_to_a_retired_author_is_refused(rig):
     before = len(history(rig))
     code, out = rig.cli(["reply", "--posture", "none", str(m.id), "answer"],
                         name="planner")
-    assert code == 2
+    assert code == 3
     assert RETIRED_SEND.format(q="mate@proj-old",
                                name="mate") in out
     assert len(history(rig)) == before
@@ -312,10 +312,10 @@ def test_explain_and_cache_refuse_a_retired_identity(rig):
     retire("captain", "proj-old")
     text = RETIRED_SEND.format(q="captain@proj-old", name="captain")
     code, out = rig.cli(["explain", "captain@proj-old"])
-    assert code == 2 and out.strip() == text
+    assert code == 3 and out.strip() == text
     code, out = rig.cli(["cache", "captain@proj-old"],
                         env={"MOXI_COMMS_OPERATOR": "900001"})
-    assert code == 2 and text in out
+    assert code == 3 and text in out
 
 
 def test_a_recorded_tag_naming_a_retired_identity_is_held_for_nobody(rig):

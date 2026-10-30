@@ -35,7 +35,7 @@ def test_a_signal_runs_the_clean_shutdown(tmp_path, sig):
 
 
 def _deliver(shim, message_id):
-    shim._on_push({"op": "deliver", "payload": {"message_id": message_id, "text": "x"}})
+    shim._on_push("deliver", {"payload": {"message_id": message_id, "text": "x"}})
 
 
 def test_a_replayed_message_already_queued_is_dropped(rig):
@@ -58,7 +58,7 @@ def _one_real_delivery(rig):
 def test_a_replayed_message_injected_but_not_completed_is_dropped(rig):
     reviewer, payload = _one_real_delivery(rig)
     assert reviewer.on_turn_boundary() is not None      # injected; the turn is running
-    reviewer._on_push({"op": "deliver", "payload": payload})   # the restart's replay
+    reviewer._on_push("deliver", {"payload": payload})   # the restart's replay
     assert reviewer.queue == []
     reviewer.on_turn_boundary()                         # completes; nothing to inject
     assert len(reviewer.digests) == 1

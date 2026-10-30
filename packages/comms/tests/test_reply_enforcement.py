@@ -307,7 +307,7 @@ def test_an_unknown_read_is_what_an_old_daemon_answers(rig):
         from moxi_comms.client import DaemonError
         with pytest.raises(DaemonError, match="method not found: nope") as refused:
             client.call("nope")
-        assert refused.value.response["refused"] is True
+        assert refused.value.data["refused"] is True
     finally:
         client.close()
 
@@ -474,7 +474,10 @@ def test_the_delta_announces_the_operator_joining_and_leaving(rig, bind, tmp_pat
 # ------------------------------------------------- the unanswered record
 
 def note_unanswered(shim, message_id, author, at=None):
-    shim._client.notify("unanswered", {"identity": shim.identity, "message_id": message_id, "author": author, **{"at": at} if at is not None else {}})
+    params = {"identity": shim.identity, "message_id": message_id, "author": author}
+    if at is not None:
+        params["at"] = at
+    shim._client.notify("unanswered", params)
 
 
 def unanswered(rig):
@@ -1163,7 +1166,7 @@ def test_the_first_table_every_exchange_the_rule_creates_ends(rig, pair):
     assert line_zero(m4).posture == "none"
     assert settle(rig, rev, m4.id) == [] and m4.id in rev.ledger.payments   # 4: pays 1
     code, out = rig.cli(["reply", m4.id, "good"], **LEAD)            # 5: takes no reply
-    assert code == 2 and "is marked [no reply]" in out
+    assert code == 3 and "is marked [no reply]" in out
 
 
 def test_the_second_table_an_unprompted_report(rig, pair):

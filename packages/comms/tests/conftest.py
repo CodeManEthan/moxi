@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -35,7 +36,7 @@ from pathlib import Path
 import pytest
 
 from moxi_comms import cli, config, cursors, machine_line, tokens as tokens_mod
-from moxi_comms.adapters.claude_shim import ClaudeShim
+from moxi_comms.adapters.claude_shim import ACTIVITY_METHODS, ClaudeShim
 from moxi_comms.claimfile import HOLDS
 from moxi_comms.claimhold import CLAIM_SOCKET_ENV, ClaimServer
 from moxi_comms.daemon import Daemon
@@ -389,7 +390,7 @@ class Rig:
             claim = holder.claim or {}
             if claim.get("qualified") != sender.qualified or holder.state not in HOLDS:
                 continue
-            if holder._server is None:
+            if holder._host is None:
                 holder.listen()       # serves claim ops for the rest of the test
             with holder.lock:
                 holder.roots.append(me)
@@ -637,7 +638,7 @@ def bind_answered():
 
     def _bind(**kwargs):
         c = DaemonClient(daemon_socket()).connect()
-        answer = c.register(**kwargs)
+        answer = c.bind(**kwargs)
         made.append(c)
         return c, answer
 
@@ -656,18 +657,58 @@ def bind(bind_answered):
     return _bind
 
 
+def synced(client, timeout: float = 5.0) -> None:
+    """Wait until the daemon has handled everything `client` sent before now, and
+    `client`'s `on_push` has been handed everything the daemon pushed before that.
+
+    The first half is a read answered on the same connection: the daemon serves one
+    connection's messages in order. The second half has no public `moxi.ipc` call: the
+    answer proves the pushes before it were read off the socket, not that the reader
+    thread has handed them on. So this test kit puts a marker behind them on the
+    connection's own notification queue and waits for `on_push` to reach it. Test code
+    only; it reads `moxi.ipc.Client`'s private queue."""
+    client.call("max_id")
+    marker = f"test.synced-{uuid.uuid4()}"
+    reached = threading.Event()
+    handler = client.on_push
+
+    def on_push(method, params):
+        if method == marker:
+            reached.set()
+        elif handler is not None:
+            handler(method, params)
+
+    client.on_push = on_push
+    try:
+        client._client._notes.put((marker, {}))
+        assert reached.wait(timeout), "the client's reader never reached the marker"
+    finally:
+        client.on_push = handler
+
+
+def as_frames(frames: list):
+    """An `on_push` handler that keeps each push in `frames` as one dict: its method as
+    `op`, with its params."""
+    return lambda method, params: frames.append({"op": method, **params})
+
+
 @pytest.fixture
 def frames(monkeypatch):
     """Every `activity` frame a harness adapter sends, with its identity's cursor as it
-    stood when the frame went out (`cursor_then`)."""
+    stood when the frame went out (`cursor_then`). A kind sent as its own method
+    (`turn_ended`, `ready`, `look`) is recorded as an `activity` frame with that `kind`."""
     from moxi_comms.client import DaemonClient
     seen: list = []
     real = DaemonClient.notify
+    kinds = {method: kind for kind, method in ACTIVITY_METHODS.items()}
 
-    def notify(self, op, **kw):
-        if op == "activity":
-            seen.append(dict(kw, cursor_then=cursor_of(kw.get("identity"))))
-        return real(self, op, **kw)
+    def notify(self, method, params=None):
+        if method == "activity" or method in kinds:
+            frame = dict(params or {}, cursor_then=cursor_of((params or {}).get("identity")))
+            if method in kinds:
+                frame["kind"] = kinds[method]
+            seen.append(frame)
+        return real(self, method, params)
 
     monkeypatch.setattr(DaemonClient, "notify", notify)
     return seen
@@ -696,7 +737,9 @@ def own_activity(adapter, **fields) -> None:
             report["session_id"] = adapter.session_id
         if adapter.projects_root:
             report["projects_root"] = adapter.projects_root
-    client.notify("activity", {"identity": identity, **{**report, **fields}})
+    kind = fields.pop("kind", None)
+    client.notify(ACTIVITY_METHODS.get(kind, "activity"),
+                  {"identity": identity, **{**report, **fields}})
 
 
 def send_turn(adapter, handled=(), unhandled=()) -> None:

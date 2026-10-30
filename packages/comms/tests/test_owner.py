@@ -15,6 +15,7 @@ import json
 import pytest
 from conftest import wait_until
 
+from moxi import exit as moxi_exit
 from moxi_comms import cli, provision
 from moxi_comms.client import DaemonClient, DaemonError, DaemonTimeout
 from moxi_comms.paths import daemon_socket
@@ -26,12 +27,9 @@ from test_reply_enforcement import (PLANNER, REVIEWER, P, R, indexed, query_owed
 def owner(session_id):
     client = DaemonClient(daemon_socket()).connect()
     try:
-        answer = client.call("owner", {"session_id": session_id})
+        return client.call("owner", {"session_id": session_id})
     finally:
         client.close()
-    answer.pop("id", None)
-    assert answer.pop("ok") is True
-    return answer
 
 
 def owner_cli(rig, *argv):
@@ -153,7 +151,7 @@ def test_a_send_only_binding_owns_a_session_only_if_its_register_named_one(rig):
     assert code == 0
     c = DaemonClient(daemon_socket()).connect()
     try:
-        c.register(name="relay", scope="proj-a",
+        c.bind(name="relay", scope="proj-a",
                    project="proj-a", adapter="send-only",
                    session_id="5e5e5e5e-0000-4000-8000-000000000000")
         answer = owner("5e5e5e5e-0000-4000-8000-000000000000")
@@ -171,14 +169,14 @@ def test_the_verb_prints_the_answer_as_json(rig):
     ask = send(rig, P, "do it", "--posture", "once", who=REVIEWER)
     indexed(rig, ask.id)
     code, out = owner_json(rig, reviewer.session_id)
-    assert code == cli.EXIT_OK
+    assert code == moxi_exit.OK
     assert out == {"ok": True, "session_id": reviewer.session_id, "owner": R,
                    "adapter": "claude-shim", "awaiting": [P]}
 
 
 def test_the_verb_answers_no_owner_with_exit_0(rig):
     code, out = owner_json(rig, "0b9f6a1e-0000-4000-8000-000000000000")
-    assert code == cli.EXIT_OK
+    assert code == moxi_exit.OK
     assert out == {"ok": True, "session_id": "0b9f6a1e-0000-4000-8000-000000000000",
                    "owner": None, "adapter": None, "awaiting": []}
 
@@ -194,10 +192,10 @@ def test_the_verbs_text_form(rig):
                                          "session.")
 
 
-def test_the_verb_with_the_daemon_down_is_offline_exit_4(rig):
+def test_the_verb_with_the_daemon_down_is_offline_exit_75(rig):
     rig.daemon.stop()
     code, out = owner_json(rig, "0b9f6a1e-0000-4000-8000-000000000000")
-    assert code == cli.EXIT_OFFLINE == 4
+    assert code == moxi_exit.TEMPFAIL
     assert out["ok"] is False and out["error"] == "offline"
     assert "comms offline" in out["detail"]
 
@@ -206,22 +204,22 @@ def test_the_verb_refuses_an_empty_session_id_exit_2_without_asking(rig, monkeyp
     monkeypatch.setattr(cli.Context, "daemon",
                         lambda self: pytest.fail("asked the daemon"))
     code, out = owner_json(rig, "  ")
-    assert code == cli.EXIT_REFUSED == 2
+    assert code == moxi_exit.USAGE
     assert out["ok"] is False and out["error"] == "refused"
 
 
-def test_a_daemon_without_the_query_is_a_failed_read_exit_5(rig, monkeypatch):
+def test_a_daemon_without_the_query_is_a_failed_read_exit_1(rig, monkeypatch):
     monkeypatch.delitem(rig.daemon._methods, "owner")
     code, out = owner_json(rig, "0b9f6a1e-0000-4000-8000-000000000000")
-    assert code == cli.EXIT_FAILED == 5
+    assert code == moxi_exit.ERROR
     assert (out["ok"], out["error"]) == (False, "failed")
     assert "method not found: owner" in out["detail"]
 
 
-def test_a_daemon_that_never_answers_is_a_failed_read_exit_5(rig, monkeypatch):
-    def silent(self, kind, **kw):
-        raise DaemonTimeout("timeout waiting for query")
-    monkeypatch.setattr(DaemonClient, "query", silent)
+def test_a_daemon_that_never_answers_is_a_failed_read_exit_1(rig, monkeypatch):
+    def silent(self, method, params=None, **kw):
+        raise DaemonTimeout(f"timeout waiting for {method}")
+    monkeypatch.setattr(DaemonClient, "call", silent)
     code, out = owner_json(rig, "0b9f6a1e-0000-4000-8000-000000000000")
-    assert code == cli.EXIT_FAILED
+    assert code == moxi_exit.ERROR
     assert (out["ok"], out["error"]) == (False, "timeout")

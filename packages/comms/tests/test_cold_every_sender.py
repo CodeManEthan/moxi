@@ -40,11 +40,12 @@ from types import SimpleNamespace
 
 import pytest
 from conftest import (assistant_line, cache_absent, cache_api, projects_root, raw_connection,
-                      record_rows, send_turn, settle, wait_for_queue, wait_until,
+                      record_rows, send_turn, settle, synced, wait_for_queue, wait_until,
                       write_transcript)
 
+from moxi import exit as moxi_exit
 from moxi_comms import cache, cli, cursors, machine_line, paths
-from moxi_comms.adapters.claude_shim import ClaudeShim
+from moxi_comms.adapters.claude_shim import ACTIVITY_METHODS, ClaudeShim
 from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import Daemon
 from moxi_comms.paths import daemon_socket
@@ -183,7 +184,8 @@ def raw_activity(pushes, q, **fields):
     """An `activity` frame on a bare binding's own connection (a bare claude-shim, a codex or an
     opencode agent bound by `adapters`): the release points ride
     these frames, whichever adapter code sends them."""
-    pushes.client.notify("activity", {"identity": q, **fields})
+    kind = fields.pop("kind", None)
+    pushes.client.notify(ACTIVITY_METHODS.get(kind, "activity"), {"identity": q, **fields})
 
 
 def raw_turn(pushes, q, handled=(), unhandled=()):
@@ -207,8 +209,8 @@ class Pushes:
     def __init__(self):
         self.frames = []
 
-    def __call__(self, frame):
-        self.frames.append(frame)
+    def __call__(self, method, params):
+        self.frames.append({"op": method, **params})
 
     def delivered(self):
         return [f["payload"] for f in self.frames if f.get("op") == "deliver"]
@@ -226,15 +228,14 @@ def adapters():
     def _bind(**kw):
         pushes = Pushes()
         c = DaemonClient(daemon_socket(), on_push=pushes).connect()
-        c.register(**kw)
-        # The daemon answers a register before it runs the bind's replay and release
-        # point, and it serves one connection's frames in order: a ping answered on
-        # this connection means both have run. Without it, a release point that runs
-        # late reads whatever the test has set up since (a transcript warmed after a
-        # post was held) and hands a row the test means to keep. If the daemon ever
-        # serves a connection's frames out of order, the ping still answers but proves
-        # nothing, and this race comes back.
-        c.call("max_id")
+        c.bind(**kw)
+        # The daemon answers a bind before it runs the bind's replay and release
+        # point, and it serves one connection's messages in order: a read answered on
+        # this connection means both have run, and `synced` then waits for what they
+        # pushed to reach the handler. Without it, a release point that runs late reads
+        # whatever the test has set up since (a transcript warmed after a post was
+        # held) and hands a row the test means to keep.
+        synced(c)
         made.append(c)
         pushes.client = c
         return pushes
@@ -387,7 +388,7 @@ def test_every_sender_is_held_or_refused_in_every_state_that_does_not_pass(
         time.sleep(0.1)
         assert msg.id not in rig.daemon.bindings[to].delivered, "held, not delivered"
     else:
-        assert code == cli.EXIT_COLD == 6, out
+        assert code == moxi_exit.TEMPFAIL, out
         assert lines[0].startswith(f"Nothing was sent: comms could not read {to}'s cache ("), out
         assert lines[1:] == ["Send it again in a moment; a read that succeeds holds or "
                              "delivers it.", "Nothing was sent."], out
@@ -421,17 +422,17 @@ def test_a_small_cold_context_is_held(rig):
 def test_a_failed_session_query_refuses_the_post(rig, monkeypatch):
     """A `session` query that fails refuses the post, exit 6."""
     shim(rig, SESS_A, age=60)
-    real = DaemonClient.query
+    real = DaemonClient.call
 
-    def broken(self, kind, **kw):
+    def broken(self, kind, params=None, **kw):
         if kind == "session":
             from moxi_comms.client import DaemonError
             raise DaemonError("the daemon fell over")
-        return real(self, kind, **kw)
+        return real(self, kind, params, **kw)
 
-    monkeypatch.setattr(DaemonClient, "query", broken)
+    monkeypatch.setattr(DaemonClient, "call", broken)
     code, out = send(rig, REVIEWER_Q)
-    assert code == cli.EXIT_COLD and posted(rig) == []
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == []
     assert out.splitlines()[0] == ("Nothing was sent: comms could not ask the daemon about "
                                    "reviewer@proj-a (the session query failed (the daemon "
                                    "fell over)).")
@@ -457,7 +458,7 @@ def test_a_session_answer_with_no_verdict_refuses_the_post(rig, monkeypatch, old
 
     monkeypatch.setattr(rig.daemon, "_session_query", old)
     code, out = send(rig, REVIEWER_Q)
-    assert code == cli.EXIT_COLD and posted(rig) == []
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == []
     assert out.splitlines()[0] == {
         "no session query": ("Nothing was sent: comms could not ask the daemon about "
                              "reviewer@proj-a (the session query failed (unknown query "
@@ -499,7 +500,7 @@ def test_held_to_a_recipient_comms_cannot_read_is_refused(rig):
     """An unknown read refuses a flagged send too; it is not held."""
     rig.shim(**REVIEWER, session_id=None)
     code, out = send(rig, REVIEWER_Q, "later", "--held")
-    assert code == cli.EXIT_COLD and posted(rig) == [], out
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == [], out
     assert out.splitlines()[0] == ("Nothing was sent: comms could not read "
                                    "reviewer@proj-a's cache (no session id reported yet).")
     assert held_of(rig) == set()
@@ -536,7 +537,7 @@ def test_the_refusal_text_for_an_unreadable_codex_recipient(rig, adapters):
     shim(rig, SESS_A, age=2 * HOUR)
     adapters(name="coder", scope="proj-a", adapter="codex")
     code, out = send(rig, "reviewer@proj-a,coder@proj-a")
-    assert code == cli.EXIT_COLD and posted(rig) == []
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == []
     assert out.splitlines() == [
         "Nothing was sent: comms could not read coder@proj-a's cache (no thread id "
         "reported yet).",
@@ -787,7 +788,7 @@ def test_replays_cursor_never_passes_a_cold_held_id(rig):
     pushes = Pushes()
     c = DaemonClient(daemon_socket(), on_push=pushes).connect()
     try:
-        c.register(name="reviewer", scope="proj-a", adapter="claude-shim",
+        c.bind(name="reviewer", scope="proj-a", adapter="claude-shim",
                    session_id=SESS_A, projects_root=str(projects_root()), turned=True)
         wait_until(lambda: any(f.get("op") == "replay_complete" for f in pushes.frames))
         (done,) = [f for f in pushes.frames if f.get("op") == "replay_complete"]
@@ -990,13 +991,13 @@ def test_checked_warm_and_cold_at_delivery_is_held(rig, monkeypatch):
     """The verb reads warm; the clock crosses the hour before the daemon routes the
     post. The daemon's gate holds it, after the sender was told `sent`."""
     s = shim(rig, SESS_A, age=60)
-    real = DaemonClient.post
+    real = DaemonClient.send
 
     def late(*a, **kw):
         write_transcript(SESS_A, HOUR + 5)          # the hour passes in between
         return real(*a, **kw)
 
-    monkeypatch.setattr(DaemonClient, "post", late)
+    monkeypatch.setattr(DaemonClient, "send", late)
     code, out = send(rig, REVIEWER_Q, "just in time?")
     assert code == 0 and out.startswith("sent ")
     mid = out.split()[1]
@@ -1046,7 +1047,7 @@ def test_a_second_binding_reporting_a_held_session_id_is_refused(rig, caplog):
     time.sleep(0.1)
     assert rig.daemon.bindings["main@proj-a"].session_id is None
     code, out = send(rig, "main@proj-a")
-    assert code == cli.EXIT_COLD and posted(rig) == [], "no id: unknown, and refused"
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == [], "no id: unknown, and refused"
     assert out.splitlines()[0] == ("Nothing was sent: comms could not read main@proj-a's "
                                    "cache (no session id reported yet).")
     assert first.identity == REVIEWER_Q
@@ -1098,7 +1099,7 @@ def _old_shim_register(session_id, **extra):
     """A register as an older shim sends it: a session id, no root."""
     pushes = Pushes()
     c = DaemonClient(daemon_socket(), on_push=pushes).connect()
-    c.register(name="reviewer", scope="proj-a", adapter="claude-shim",
+    c.bind(name="reviewer", scope="proj-a", adapter="claude-shim",
                session_id=session_id, **extra)
     pushes.client = c
     return pushes
