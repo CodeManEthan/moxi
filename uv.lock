@@ -11,6 +11,7 @@ members = [
     "moxi-loopback",
     "moxi-sessions",
     "moxi-turns",
+    "moxi-ui",
 ]
 
 [manifest.dependency-groups]
@@ -276,6 +277,33 @@ provides-extras = ["codex"]
 dev = [
     { name = "pytest" },
     { name = "websockets", specifier = ">=17.0.1" },
+]
+
+[[package]]
+name = "moxi-ui"
+version = "0.1.0"
+source = { editable = "packages/ui" }
+dependencies = [
+    { name = "moxi" },
+    { name = "moxi-loopback" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "moxi-dev" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-loopback", editable = "packages/loopback" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "pytest" },
 ]
 
 [[package]]
