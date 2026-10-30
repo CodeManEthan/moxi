@@ -965,7 +965,7 @@ def test_status_through_the_core_adds_the_run_line_beside_launchds_result(mac):
 # -- on a real Mac -------------------------------------------------------------------------------
 
 darwin = pytest.mark.skipif(sys.platform != "darwin",
-                            reason="needs macOS: owed to the cloud Mac")
+                            reason="needs macOS: run it on a Mac")
 
 
 @darwin
@@ -992,7 +992,7 @@ def test_proof_the_real_launchctl_on_a_test_label(tmp_path, monkeypatch):
     """A throwaway daemon and timer under labels no one else uses, their plists in tmp
     (never in ~/Library/LaunchAgents), booted out in a `finally`."""
     if os.environ.get("MOXI_TEST_REAL_SUPERVISOR") != "1":
-        pytest.skip("a proof row: set MOXI_TEST_REAL_SUPERVISOR=1 on the cloud Mac")
+        pytest.skip("a proof row: set MOXI_TEST_REAL_SUPERVISOR=1 on a Mac")
     monkeypatch.setenv("MOXI_HOME", str(tmp_path / "home"))
     suffix = os.urandom(4).hex()
     backend = LaunchdBackend(agents=tmp_path / "agents", gate="/usr/bin/true")

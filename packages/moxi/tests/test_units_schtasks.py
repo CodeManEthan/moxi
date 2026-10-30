@@ -865,7 +865,7 @@ def test_python_dash_m_moxi_runs_with_no_standard_streams(tmp_path):
     assert (tmp_path / "code").read_text() == "0"
 
 
-# -- Windows rows (Mini 2) ---------------------------------------------------------------
+# -- Windows rows, run on a Windows host -------------------------------------------------
 
 windows = pytest.mark.skipif(
     sys.platform != "win32" or os.environ.get("MOXI_TEST_REAL_SUPERVISOR") != "1",

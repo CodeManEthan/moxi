@@ -306,6 +306,7 @@ def _start(argv: list[str], environ: dict[str, str], fd: int) -> subprocess.Pope
 # -- setup.json ------------------------------------------------------------------------------------
 
 def setup_path():
+    """`setup.json`'s path; the settle step and the doctor both read it here."""
     from . import paths
 
     return paths.core().state_dir() / SETUP_FILE
@@ -575,7 +576,9 @@ def _describe(change) -> str:
 
 def _take_out(record: list, applied) -> None:
     """Drop the entries of units an `ok` `Applied` removed, or disabled because their
-    declaration turned `enabled = false`: the unit step has set their state."""
+    declaration turned `enabled = false`: the unit step has set their state. The record
+    holds daemons only, so a timer's change never drops an entry, even a daemon's of the
+    same name; a `.socket` drops the entry of its own id."""
     gone_names: set[str] = set()
     gone_ids: set[str] = set()
     for result in applied:
@@ -588,7 +591,7 @@ def _take_out(record: list, applied) -> None:
             continue
         if change.kind == "socket":
             gone_ids |= {path.name for path in change.paths}
-        else:
+        elif change.kind == "daemon":
             gone_names.add(change.name)
     record[:] = [entry for entry in record
                  if entry.name not in gone_names
@@ -619,12 +622,12 @@ def _restart(step: Settle) -> tuple[int, list[str]]:
         by_hand = None
         if lines[-1].startswith("start it by hand: "):
             by_hand = lines.pop()[len("start it by hand: "):]
-        line = f"{module}: {'; '.join(lines)}"
-        if by_hand:
-            line += f"; start it by hand: {by_hand}"
+        detail = f"{module}: {'; '.join(lines)}"
+        # The record's own `fix` holds the by-hand command, so its text doesn't repeat it.
+        line = f"{detail}; start it by hand: {by_hand}" if by_hand else detail
         say(line, err=True)
         try:
-            doctor.record(module, line, key=RESUME_KEY.format(unit=entry.unit), fix=by_hand)
+            doctor.record(module, detail, key=RESUME_KEY.format(unit=entry.unit), fix=by_hand)
         except (OSError, ValueError):
             pass
         problems.append(line)

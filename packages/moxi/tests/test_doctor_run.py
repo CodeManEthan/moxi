@@ -341,6 +341,27 @@ def test_an_off_platform_unit_and_no_supervisor_are_off(d, monkeypatch):
     assert row.state == "off" and "no supervisor" in row.detail
 
 
+def test_health_runs_only_for_an_active_daemon(d, monkeypatch):
+    d.installed(DAEMONS=DAEMON, HEALTH="{'relay': 'moxi_demo.health:counted'}",
+                files_={"health.py": """\
+                    import os
+                    from moxi.doctor import Row
+                    def counted():
+                        with open(os.environ["HEALTH_CALLS"], "a") as handle:
+                            handle.write("called\\n")
+                        return Row("demo", "x", "ok", "fine")
+                    """})
+    calls = d.tmp / "health-calls"
+    monkeypatch.setenv("HEALTH_CALLS", str(calls))
+    assert d.rows("demo")[("demo", "daemon relay health")].detail == "fine"
+    assert calls.read_text() == "called\n"
+    d.sup.state("moxi-demo-relay.service")["active"] = False
+    got = d.rows("demo")
+    assert got[("demo", "daemon relay")].detail.startswith("up to date; inactive")
+    assert ("demo", "daemon relay health") not in got
+    assert calls.read_text() == "called\n"
+
+
 def test_a_failing_units_from_and_a_bad_health_key_are_reported(d):
     d.installed(DAEMONS=DAEMON, HEALTH="{'relay': 'moxi_demo.health:ok', 'typo': 'x.y:z'}",
                 UNITS_FROM="'moxi_demo.runtime:units'",
@@ -510,6 +531,20 @@ def test_a_wrap_shows_the_timer_s_state_its_key_and_its_last_run(d):
     assert d.rows("demo")[("demo", "wrap backup.timer")].state == "warn"
 
 
+def test_a_hand_edited_wrap_ref_costs_only_its_own_row(d):
+    d.installed(DAEMONS=DAEMON)
+    d.sup.state("moxi-demo-relay.service")["active"] = True
+    dropin = d.root / "own.service.d" / "50-moxi-demo.conf"
+    dropin.parent.mkdir()
+    dropin.write_text("# moxi wrap: demo/backup\n"
+                      "# moxi: timer = moxi-demo-relay.timer, if = demo.rows.backup\n")
+    got = d.rows("demo")
+    assert ("demo", "units") not in got
+    assert got[("demo", "daemon relay")].state == "ok"
+    wrap = got[("demo", "wrap moxi-demo-relay.timer")]
+    assert wrap.state == "warn" and "moxi's own unit namespace" in wrap.detail
+
+
 @pytest.mark.parametrize("seen, state", [("missing", "warn"), ("failed", "fail"),
                                           ("unknown", "warn")])
 def test_a_wrap_whose_timer_is_gone_or_failed(d, seen, state):
@@ -625,6 +660,20 @@ def test_a_setup_version_that_differs_warns(d, held):
     assert (row.state, row.fix) == ("warn", "moxi install demo")
     path.write_text(json.dumps({"demo": "0.1.0"}))
     assert ("demo", "setup version") not in d.rows("demo")
+
+
+def test_the_doctor_reads_the_setup_version_the_settle_step_writes(d, monkeypatch):
+    from moxi import _settle
+
+    d.module(settings=None)
+    _settle.record_setup("demo", "0.0.9")
+    assert d.rows("demo")[("demo", "setup version")].state == "warn"
+    moved = d.tmp / "elsewhere" / "setup.json"
+    moved.parent.mkdir()
+    monkeypatch.setattr(_settle, "setup_path", lambda: moved)
+    assert ("demo", "setup version") not in d.rows("demo")
+    _settle.record_setup("demo", "0.0.8")
+    assert "0.0.8" in d.rows("demo")[("demo", "setup version")].detail
 
 
 def test_records_are_fail_rows_until_cleared(d):

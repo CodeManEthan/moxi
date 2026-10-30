@@ -42,7 +42,7 @@ class FakeSupervisor:
     command lines), and `version` is the manager's `Version`. `fail` maps `(verb, unit)`
     (or `(verb, None)` for `daemon-reload` and `show`) to the stderr that command fails
     with. `calls` lists every command as a tuple of its arguments after `systemctl
-    --user`.
+    --user`, without the `--` the fence puts before the units.
     """
 
     def __init__(self, root: Path, *, linger: bool = True):
@@ -71,7 +71,7 @@ class FakeSupervisor:
         if cmd[0] == "loginctl":
             self.calls.append(tuple(cmd))
             return subprocess.CompletedProcess(cmd, 0, f"Linger={'yes' if self.linger else 'no'}\n", "")
-        args = cmd[2:]
+        args = [arg for arg in cmd[2:] if arg != "--"]
         self.calls.append(tuple(args))
         verb, rest = args[0], args[1:]
         if verb == "daemon-reload":

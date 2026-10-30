@@ -37,6 +37,7 @@ from collections.abc import Iterable, Sequence
 from . import _backend
 from ._apply import core_lock, fence as _fence
 from ._backend import ReadError, UnitRef
+from ._fence import Fence, FenceError
 from ._types import Acted, Stopped
 
 #: The acts on named units.
@@ -113,7 +114,8 @@ def resume(record: Iterable[Stopped], *, runner=None) -> list[Acted]:
     is started; it is taken as it is acted on. Any other entry (built by hand, or
     resumed already) is `ok=False`, "not stopped by this process", and is not started.
     A start the supervisor refuses, or that raises, is `ok=False` with its text and, as
-    its last line, `start it by hand: <command>`; the next entry is still started. A
+    its last line, `start it by hand: <command>` (left out only when the backend raises
+    before it can name the command); the next entry is still started. A
     start that succeeds clears the module's `resume:<unit>` doctor record.
     """
     entries = list(record)
@@ -145,14 +147,32 @@ def _resume_one(entry, impl, fence, problem: str | None) -> Acted:
         ran = impl.start_id(entry.unit, fence)
     except Exception as exc:  # each entry's error stays in its own Acted
         text = str(exc).strip().splitlines()
-        return Acted(entry.module, entry.name, "start", False,
-                     (f"{entry.unit}: {type(exc).__name__}: {text[0] if text else ''}"
-                      .rstrip(": "),))
+        lines = [f"{entry.unit}: {type(exc).__name__}: {text[0] if text else ''}"
+                 .rstrip(": ")]
+        command = _start_command(impl, entry.unit)
+        if command:
+            lines.append(f"start it by hand: {command}")
+        return Acted(entry.module, entry.name, "start", False, tuple(lines))
     if not ran.ok:
         return Acted(entry.module, entry.name, "start", False,
                      (f"{entry.unit}: {ran.failure()}", f"start it by hand: {ran.command}"))
     _clear_record(entry)
     return Acted(entry.module, entry.name, "start", True, (f"{entry.unit} started",))
+
+
+def _start_command(impl, unit: str) -> str | None:
+    """The command `impl.start_id(unit, ...)` runs, named without running anything: the
+    start is asked again of a fence whose runner only notes the command. None when the
+    backend raises before naming one."""
+    import subprocess
+
+    def note(cmd, *, env=None, timeout=None):
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    try:
+        return impl.start_id(unit, Fence(impl.supervisor, note)).command
+    except Exception:  # noqa: BLE001 - the start's own error is the line that counts
+        return None
 
 
 def _clear_record(entry: Stopped) -> None:
@@ -212,7 +232,11 @@ def _act(act: str, module: str, names, foreign: bool, runner) -> list[Acted]:
             if isinstance(unit, str):
                 out.append(Acted(owner, name, act, False, (unit,)))
                 continue
-            acted = impl.act(act, unit, fence)
+            try:
+                acted = impl.act(act, unit, fence)
+            except FenceError as exc:  # a name the fence refuses is that name's refusal
+                out.append(Acted(owner, name, act, False, (f"{name}: {exc}",)))
+                continue
             out.append(Acted(owner, name, act, acted.ok, acted.lines))
         return out
 
@@ -240,11 +264,14 @@ def _marked_unit(marked: Sequence[UnitRef], module: str, name: str) -> UnitRef |
 
 def foreign_unit(impl, ref: str, fence) -> UnitRef | str:
     """The `UnitRef` of foreign unit `ref`, or the line refusing it: a name in moxi's
-    own namespace, or a unit whose file carries a moxi mark."""
+    own namespace, a name the fence refuses, or a unit whose file carries a moxi mark."""
     if impl.own(ref):
         return (f"{ref} is in moxi's own unit namespace; foreign=True takes only units "
                 "moxi did not write")
-    unit = impl.foreign(ref, fence)
+    try:
+        unit = impl.foreign(ref, fence)
+    except FenceError as exc:
+        return f"{ref}: {exc}"
     for path in unit.paths:
         try:
             text = path.read_bytes().decode(impl.encoding, errors="replace")

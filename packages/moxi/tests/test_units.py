@@ -219,6 +219,31 @@ def test_an_unmarked_file_is_refused_and_moved_aside_only_with_replace(w):
     assert aside.read_text() == "[Service]\nExecStart=/old\n"
 
 
+def test_the_move_aside_crosses_file_systems(w, monkeypatch):
+    import errno
+
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=DAEMON)
+    old = w.root / "moxi-demo-relay.service"
+    old.write_text("[Service]\nExecStart=/old\n")
+    change = w.plan()[("relay", "daemon")]
+    renames = {"rename": os.rename, "replace": os.replace}
+
+    def across(name):
+        def call(src, dst, *a, **k):
+            if os.fspath(src) == os.fspath(old):
+                raise OSError(errno.EXDEV, "Invalid cross-device link", src)
+            return renames[name](src, dst, *a, **k)
+        return call
+
+    monkeypatch.setattr(os, "rename", across("rename"))
+    monkeypatch.setattr(os, "replace", across("replace"))
+    [done] = w.apply([change], replace=True)
+    assert done.ok and old.read_text().startswith("# moxi unit: demo/relay")
+    [aside] = (moxi.paths.core().data_dir() / "displaced").glob("*/moxi-demo-relay.service")
+    assert aside.read_text() == "[Service]\nExecStart=/old\n"
+
+
 def test_a_file_marked_for_another_unit_is_foreign(w):
     w.script("moxi-demo-relay")
     w.module(DAEMONS=DAEMON)
@@ -329,6 +354,51 @@ def test_config_set_of_a_daemon_switch_plans_only_that_daemon(w, capsys):
     assert "demo: applying units for relay.enabled" in capsys.readouterr().out
     assert not (w.root / "moxi-demo-other.service").exists()
     assert config.set("demo", "snapshot.enabled", True, by="test") == []
+
+
+def test_config_set_plans_and_applies_a_daemon_switch_under_one_hold(w, monkeypatch):
+    import contextlib
+
+    from moxi import files
+
+    events: list[str] = []
+    real_lock, real_plan, real_apply = files.lock, units.plan, units.apply
+
+    @contextlib.contextmanager
+    def lock(path, **kw):
+        with real_lock(path, **kw):
+            events.append("in")
+            try:
+                yield
+            finally:
+                events.append("out")
+
+    def plan(*a, **k):
+        events.append("plan")
+        return real_plan(*a, **k)
+
+    def apply(*a, **k):
+        events.append("apply")
+        return real_apply(*a, **k)
+
+    monkeypatch.setattr(files, "lock", lock)
+    monkeypatch.setattr(units, "plan", plan)
+    monkeypatch.setattr(units, "apply", apply)
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS="{'relay': {'command': 'moxi-demo-relay', 'switch': 'relay.enabled'}}")
+    applied = config.set("demo", "relay.enabled", True, by="test")
+    assert [a.change.action for a in applied] == ["add"]
+    depth, hold, held_at = 0, 0, {}
+    for event in events:
+        if event == "in":
+            depth += 1
+            hold += depth == 1
+        elif event == "out":
+            depth -= 1
+        elif depth:
+            held_at[event] = hold
+    assert held_at.keys() == {"plan", "apply"}, events
+    assert held_at["plan"] == held_at["apply"], events
 
 
 def test_config_set_with_a_failing_units_from_says_the_key_was_not_checked(w, capsys):
@@ -516,7 +586,7 @@ def test_a_failed_step_prints_the_command_and_a_remedy_and_goes_on(w):
     done = {a.change.name: a for a in w.apply(units.plan("demo"))}
     assert done["relay"].ok and not done["other"].ok
     assert done["other"].lines == (
-        "`systemctl --user enable --now moxi-demo-other.service` failed: Failed to enable "
+        "`systemctl --user enable --now -- moxi-demo-other.service` failed: Failed to enable "
         "unit: denied",
         "the unit file is written; fix the cause and run `moxi install demo` again")
 

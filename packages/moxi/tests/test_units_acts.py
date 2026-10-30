@@ -185,7 +185,7 @@ def test_a_failed_act_carries_the_supervisors_text(w):
     w.sup.fail[("restart", "moxi-demo-relay.service")] = "Job failed. See journal."
     [acted] = units.restart("demo", ["relay"])
     assert not acted.ok
-    assert acted.lines == ("`systemctl --user restart moxi-demo-relay.service` failed: "
+    assert acted.lines == ("`systemctl --user restart -- moxi-demo-relay.service` failed: "
                            "Job failed. See journal.",)
 
 
@@ -218,6 +218,18 @@ def test_foreign_refuses_a_name_in_moxis_own_namespace(w, ref):
     for act in (units.start, units.stop, units.enable, units.disable, units.restart):
         [acted] = act("services", [ref], foreign=True)
         assert not acted.ok and "moxi's own unit namespace" in acted.lines[0]
+    assert w.sup.calls == []
+
+
+@pytest.mark.parametrize("ref", ["-Hhost.service", "--host=x.timer"])
+def test_foreign_refuses_a_name_led_by_a_dash_without_a_supervisor_call(w, ref):
+    w.installed(DAEMONS=DAEMON)
+    for act in (units.start, units.stop, units.enable, units.disable, units.restart):
+        [acted] = act("services", [ref], foreign=True)
+        assert not acted.ok and acted.lines[0].startswith(f"{ref}: ")
+        assert "none starting with -" in acted.lines[0]
+    acted = units.wrap("-Hhost.timer", module="demo", key="rows.backup", name="backup")
+    assert not acted.ok and "none starting with -" in acted.lines[0]
     assert w.sup.calls == []
 
 
@@ -361,6 +373,24 @@ def test_a_stop_that_fails_is_recorded_first_and_resumed(w):
                            ("start", "moxi-demo-other.service")]
 
 
+def test_a_stop_that_raises_leaves_its_entry_recorded_for_resume(w, monkeypatch):
+    w.installed(DAEMONS=DAEMON)
+
+    def runner(cmd, **kw):
+        if cmd[2:] == ["stop", "--", "moxi-demo-relay.service"]:
+            raise RuntimeError("the runner broke")
+        return w.sup(cmd, **kw)
+
+    monkeypatch.setattr(w.backend, "runner", runner)
+    record: list = []
+    with pytest.raises(RuntimeError, match="the runner broke"):
+        units.stop("demo", record=record)
+    assert [s.unit for s in record] == ["moxi-demo-relay.service"]
+    monkeypatch.setattr(w.backend, "runner", w.sup)
+    [started] = units.resume(record)
+    assert started.ok
+
+
 def test_a_refused_start_is_reported_never_retried_and_the_next_is_started(w):
     w.installed(DAEMONS="{'relay': {'command': 'moxi-demo-relay'}, "
                         "'other': {'command': 'moxi-demo-relay'}}")
@@ -371,9 +401,9 @@ def test_a_refused_start_is_reported_never_retried_and_the_next_is_started(w):
     first, second = units.resume(record)
     assert not first.ok and second.ok
     assert first.lines == (
-        "moxi-demo-relay.service: `systemctl --user start moxi-demo-relay.service` "
+        "moxi-demo-relay.service: `systemctl --user start -- moxi-demo-relay.service` "
         "failed: Unit is masked.",
-        "start it by hand: systemctl --user start moxi-demo-relay.service")
+        "start it by hand: systemctl --user start -- moxi-demo-relay.service")
     assert w.sup.calls == [("start", "moxi-demo-relay.service"),
                            ("start", "moxi-demo-other.service")]
 
@@ -383,18 +413,32 @@ def test_a_start_that_raises_is_caught_into_its_entry(w, monkeypatch):
                         "'other': {'command': 'moxi-demo-relay'}}")
     record: list = []
     units.stop("demo", record=record)
-    real = w.backend.start_id
 
-    def start_id(unit, fence):
-        if unit == "moxi-demo-relay.service":
-            raise OSError("no such program")
-        return real(unit, fence)
+    def runner(cmd, **kw):
+        if cmd[2:] == ["start", "--", "moxi-demo-relay.service"]:
+            raise RuntimeError("the runner broke")
+        return w.sup(cmd, **kw)
 
-    monkeypatch.setattr(w.backend, "start_id", start_id)
+    monkeypatch.setattr(w.backend, "runner", runner)
     first, second = units.resume(record)
     assert not first.ok and first.lines == (
-        "moxi-demo-relay.service: OSError: no such program",)
+        "moxi-demo-relay.service: RuntimeError: the runner broke",
+        "start it by hand: systemctl --user start -- moxi-demo-relay.service")
     assert second.ok
+
+
+def test_a_start_that_raises_before_naming_its_command_has_no_by_hand_line(w, monkeypatch):
+    w.installed(DAEMONS=DAEMON)
+    record: list = []
+    units.stop("demo", record=record)
+
+    def start_id(unit, fence):
+        raise RuntimeError("the backend broke")
+
+    monkeypatch.setattr(w.backend, "start_id", start_id)
+    [acted] = units.resume(record)
+    assert not acted.ok and acted.lines == (
+        "moxi-demo-relay.service: RuntimeError: the backend broke",)
 
 
 def test_resume_starts_a_unit_the_user_disabled_and_leaves_it_disabled(w):
@@ -412,7 +456,7 @@ def test_resume_clears_the_record_of_a_unit_it_started_and_keeps_the_others(w):
                         "'other': {'command': 'moxi-demo-relay'}}")
     for unit in ("moxi-demo-relay.service", "moxi-demo-other.service"):
         doctor.record("demo", f"{unit} was not started", key=f"resume:{unit}",
-                      fix=f"systemctl --user start {unit}")
+                      fix=f"systemctl --user start -- {unit}")
     doctor.record("demo", "unrelated", key="other")
     record: list = []
     units.stop("demo", record=record)
@@ -571,10 +615,25 @@ def test_a_foreign_timer_is_read_by_its_triggers_unit_in_two_calls(w):
     assert "backup.service" not in " ".join(" ".join(c) for c in w.sup.calls)
 
 
-def test_status_refuses_a_foreign_name_in_moxis_namespace(w):
+def test_status_refuses_a_bad_foreign_name_alone_and_reads_the_rest(w):
     w.installed(DAEMONS=DAEMON)
-    with pytest.raises(ValueError, match="own unit namespace"):
-        units.status("demo", foreign=["moxi-demo-relay.service"])
+    w.foreign_timer()
+    states = units.status("demo", foreign=["moxi-demo-relay.service", "backup.timer", "",
+                                           "-Hhost.timer", "plain"])
+    by_name = {(s.module, s.name): s for s in states}
+    assert by_name[("demo", "relay")].state == "active"
+    assert by_name[(None, "backup.timer")].state == "active"
+    own = by_name[(None, "moxi-demo-relay.service")]
+    assert (own.state, own.kind) == ("unknown", "daemon")
+    assert "moxi's own unit namespace" in own.detail
+    assert by_name[(None, "")].state == "unknown"
+    for ref in ("-Hhost.timer", "plain"):
+        bad = by_name[(None, ref)]
+        assert bad.state == "unknown" and bad.detail.startswith(f"{ref}: ")
+        assert "the fence takes" in bad.detail
+    assert [s.name for s in states] == ["relay", "moxi-demo-relay.service", "backup.timer",
+                                        "", "-Hhost.timer", "plain"]
+    assert not any("-Hhost" in " ".join(c) or "plain" in c for c in w.sup.calls)
 
 
 def test_last_runs_gives_the_newest_lines_of_one_timer_oldest_first(w):

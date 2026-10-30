@@ -59,9 +59,9 @@ RUNS_FILE = "runs.jsonl"
 RUNS_CAP = 1_000_000
 #: The gate's log files, in a module's state directory.
 LOGS_DIR = "logs"
-#: In the core's state directory: the cost samples, and each module's `SETUP` version.
+#: In the core's state directory: the cost samples. Each module's `SETUP` version is in
+#: the settle step's file, `moxi._settle.setup_path()`.
 COSTS_FILE = "costs.jsonl"
-SETUP_FILE = "setup.json"
 #: How old a cost sample must be to take a rate against, and the age preferred.
 SAMPLE_MIN_AGE = 600.0
 SAMPLE_AGE = 3600.0
@@ -678,9 +678,9 @@ def _check_strays(ctx: _Context) -> list[Row]:
 def _check_setup(ctx: _Context) -> list[Row]:
     import json
 
-    from .. import paths
+    from .._settle import setup_path
 
-    path = paths.core().state_dir() / SETUP_FILE
+    path = setup_path()
     try:
         held = json.loads(path.read_bytes())
     except FileNotFoundError:

@@ -17,10 +17,10 @@ from moxi.units._fence import Fence, FenceError, argv
 @pytest.mark.parametrize("backend, verb, args, expect", [
     ("systemd", "daemon-reload", (), ["systemctl", "--user", "daemon-reload"]),
     ("systemd", "enable", ("--now", "a.service", "a.socket"),
-     ["systemctl", "--user", "enable", "--now", "a.service", "a.socket"]),
-    ("systemd", "disable", ("a.timer",), ["systemctl", "--user", "disable", "a.timer"]),
+     ["systemctl", "--user", "enable", "--now", "--", "a.service", "a.socket"]),
+    ("systemd", "disable", ("a.timer",), ["systemctl", "--user", "disable", "--", "a.timer"]),
     ("systemd", "show", ("--property=Id,Triggers", "a.timer"),
-     ["systemctl", "--user", "show", "--property=Id,Triggers", "a.timer"]),
+     ["systemctl", "--user", "show", "--property=Id,Triggers", "--", "a.timer"]),
     ("systemd", "show", ("--property=Version",),
      ["systemctl", "--user", "show", "--property=Version"]),
     ("systemd", "linger", ("ana",), ["loginctl", "show-user", "ana", "-p", "Linger"]),
@@ -45,6 +45,12 @@ def test_the_fence_builds_each_allowed_command(backend, verb, args, expect):
     ("systemd", "kill", ("a.service",)),
     ("systemd", "start", ()),
     ("systemd", "start", ("--force",)),
+    ("systemd", "start", ("-Hhost.service",)),
+    ("systemd", "start", ("--host=x.service",)),
+    ("systemd", "stop", ("a.service", "-Hhost.service")),
+    ("systemd", "enable", ("--now", "--now.service")),
+    ("systemd", "show", ("--property=Id", "-Mbox.timer")),
+    ("systemd", "start", ("--", "a.service")),
     ("systemd", "start", ("a.service; rm",)),
     ("systemd", "daemon-reload", ("a.service",)),
     ("systemd", "show", ("--property=Id;x", "a.service")),
@@ -97,7 +103,7 @@ def test_a_call_keeps_stderr_as_it_is_and_names_a_failed_start():
 
     ran = Fence("systemd", fails).run("start", "a.service")
     assert not ran.ok and ran.stderr == "Unit a.service not found.\n"
-    assert ran.failure() == ("`systemctl --user start a.service` failed: Unit a.service "
+    assert ran.failure() == ("`systemctl --user start -- a.service` failed: Unit a.service "
                              "not found.")
 
     def slow(cmd, *, env, timeout):

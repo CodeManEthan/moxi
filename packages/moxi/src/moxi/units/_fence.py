@@ -10,7 +10,9 @@ The closed sets:
 
 - systemd: `systemctl --user` (always `--user`) with `daemon-reload`; `enable` and
   `disable`, each with or without `--now`; `start`, `stop`, `restart`; and `show` with
-  `--property=<names>` (with no unit, only `--property=Version`: the manager's version). Also `loginctl show-user <user> -p Linger`, read only.
+  `--property=<names>` (with no unit, only `--property=Version`: the manager's version).
+  The units always follow `--`, and a unit name never starts with `-`, so no name is ever
+  read as an option. Also `loginctl show-user <user> -p Linger`, read only.
 - launchd: `launchctl` with `bootstrap gui/<uid> <plist>`, `bootout gui/<uid>/<label>`,
   `enable` and `disable` of `gui/<uid>/<label>`, `kickstart -k gui/<uid>/<label>`,
   `kill SIGTERM gui/<uid>/<label>` and `print gui/<uid>`.
@@ -80,7 +82,8 @@ BACKENDS = ("systemd", "launchd", "schtasks")
 # A unit id, a label or a task name: no leading dash (never read as a flag), no control
 # characters, nothing empty.
 _UNIT = re.compile(r"[^\s\-][^\x00-\x1f]*")
-_SYSTEMD_UNIT = re.compile(r"[A-Za-z0-9:_.\\@-]+\.(service|timer|socket)")
+# A systemd unit name: never led by `-`, which systemctl would read as an option.
+_SYSTEMD_UNIT = re.compile(r"[A-Za-z0-9:_.\\@][A-Za-z0-9:_.\\@-]*\.(service|timer|socket)")
 _PROPERTIES = re.compile(r"[A-Za-z]+(,[A-Za-z]+)*")
 _DOMAIN = re.compile(r"gui/[0-9]+")
 _TARGET = re.compile(r"gui/[0-9]+/[A-Za-z0-9._-]+")
@@ -217,7 +220,8 @@ def _refuse(verb: str, args: list[str], shape: str) -> FenceError:
 
 def _units(verb: str, args: list[str]) -> list[str]:
     if not args or not all(_SYSTEMD_UNIT.fullmatch(a) for a in args):
-        raise _refuse(verb, args, "one or more unit names (name.service, .timer, .socket)")
+        raise _refuse(verb, args, "one or more unit names (name.service, .timer, .socket), "
+                      "none starting with -")
     return args
 
 
@@ -233,7 +237,7 @@ def _systemctl(verb: str, *, now: bool = False, properties: bool = False):
             if not args and head == ["--property=Version"]:
                 # The manager's own version, read before a wrap.
                 return [SYSTEMCTL, "--user", verb, *head]
-        return [SYSTEMCTL, "--user", verb, *head, *_units(verb, args)]
+        return [SYSTEMCTL, "--user", verb, *head, "--", *_units(verb, args)]
     return build
 
 

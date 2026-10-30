@@ -408,18 +408,61 @@ def test_a_change_that_drops_the_socket_takes_its_entry_out(w, capsys, monkeypat
     assert ("start", SERVICE) in w.calls("start", "restart") or w.active(SERVICE)
 
 
+def test_only_a_daemons_or_its_sockets_change_takes_an_entry_out():
+    def applied(kind, action, name="relay", paths=()):
+        change = units.UnitChange("demo", name, kind, action, None, paths, None, "")
+        return units.Applied(change, True)
+
+    def entry(name, unit):
+        return units.Stopped("demo", name, unit, "fake", True)
+
+    record = [entry("relay", SERVICE), entry("relay", "moxi-demo-relay.socket"),
+              entry("other", "moxi-demo-other.service")]
+    _settle._take_out(record, [applied("timer", "remove"), applied("wrap", "remove")])
+    assert [e.unit for e in record] == [SERVICE, "moxi-demo-relay.socket",
+                                        "moxi-demo-other.service"]
+    _settle._take_out(record, [applied("socket", "remove",
+                                       paths=(Path("/u/moxi-demo-relay.socket"),))])
+    assert [e.unit for e in record] == [SERVICE, "moxi-demo-other.service"]
+    _settle._take_out(record, [applied("daemon", "remove")])
+    assert [e.unit for e in record] == ["moxi-demo-other.service"]
+
+
 def test_a_start_the_supervisor_refuses_is_reported_and_recorded(w, capsys, monkeypatch):
     w.installed(DAEMONS=ONE)
     w.legacy()
     w.sup.fail[("start", SERVICE)] = "Unit is masked."
     code, out = settle(w, capsys, monkeypatch, setup="fail")
     assert code == 1
-    assert (f"demo: {SERVICE}: `systemctl --user start {SERVICE}` failed" in out
-            and f"start it by hand: systemctl --user start {SERVICE}" in out), out
+    assert (f"demo: {SERVICE}: `systemctl --user start -- {SERVICE}` failed" in out
+            and f"start it by hand: systemctl --user start -- {SERVICE}" in out), out
     records = json.loads((moxi.paths.Layout("demo").state_dir() / "doctor.json")
                          .read_text())
-    assert records[f"resume:{SERVICE}"]["fix"] == f"systemctl --user start {SERVICE}"
+    assert records[f"resume:{SERVICE}"]["fix"] == f"systemctl --user start -- {SERVICE}"
+    assert records[f"resume:{SERVICE}"]["text"] == (
+        f"demo: {SERVICE}: `systemctl --user start -- {SERVICE}` failed: Unit is masked.")
     assert w.calls("enable") == []
+
+
+def test_a_start_that_raises_is_recorded_with_its_by_hand_command(w, capsys, monkeypatch):
+    w.installed(DAEMONS=ONE)
+    w.legacy()
+
+    def runner(cmd, **kw):
+        if cmd[2:] == ["start", "--", SERVICE]:
+            raise RuntimeError("the runner broke")
+        return w.sup(cmd, **kw)
+
+    monkeypatch.setattr(w.backend, "runner", runner)
+    code, out = settle(w, capsys, monkeypatch, setup="fail")
+    assert code == 1
+    assert (f"demo: {SERVICE}: RuntimeError: the runner broke; start it by hand: "
+            f"systemctl --user start -- {SERVICE}") in out, out
+    records = json.loads((moxi.paths.Layout("demo").state_dir() / "doctor.json")
+                         .read_text())
+    assert records[f"resume:{SERVICE}"] | {"at": None} == {
+        "text": f"demo: {SERVICE}: RuntimeError: the runner broke",
+        "fix": f"systemctl --user start -- {SERVICE}", "at": None}
 
 
 def test_resume_records_clear_only_when_the_step_ends_clean(w, capsys, monkeypatch):
@@ -527,7 +570,7 @@ def test_a_signal_inside_a_held_span_lets_the_move_finish(w, capsys, monkeypatch
     _settle.install_handlers()
 
     def runner(cmd, **kw):
-        if cmd[2:4] == ["stop", SERVICE]:
+        if cmd[2:5] == ["stop", "--", SERVICE]:
             os.kill(os.getpid(), signal.SIGINT)
         return w.sup(cmd, **kw)
     monkeypatch.setattr(w.backend, "runner", runner)
