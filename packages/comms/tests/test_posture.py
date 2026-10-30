@@ -21,8 +21,8 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from conftest import (no_cold_at, queued, send_turn, wait_for_queue, wait_until,
-                      write_transcript)
+from conftest import (no_cold_at, queued, send_turn, wait_for_payload, wait_for_queue,
+                      wait_until, write_transcript)
 
 from moxi_comms import attribution, cli, constants, cursors, directory, glossary
 from moxi_comms import machine_line
@@ -782,7 +782,7 @@ def test_new_posts_on_an_open_ask_with_nothing_added(rig, pair):
     assert code == 0, out
     msg = last(rig)
     assert no_cold_at(msg.content) == "::to planner [no reply]\na different subject"
-    payload = next(p for p in wait_for_queue(planner, 1) if p["message_id"] == msg.id)
+    payload = wait_for_payload(planner, msg.id)
     assert (payload["posture"], payload["reply_to"]) == ("none", None)
     assert "speaker" not in payload
     assert "new" not in payload
@@ -831,7 +831,7 @@ def test_the_payload_carries_the_posture_on_release_at_bind(rig):
     rig.shim(**PLANNER)
     ask = open_ask(rig)
     reviewer = rig.shim(**REVIEWER)
-    p = next(p for p in wait_for_queue(reviewer, 1) if p["message_id"] == ask.id)
+    p = wait_for_payload(reviewer, ask.id)
     assert (p["posture"], p.get("held")) == ("once", True)
 
 

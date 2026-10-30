@@ -20,8 +20,8 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from conftest import (no_cold_at, queued, wait_for_queue, wait_until, write_config,
-                      write_transcript)
+from conftest import (no_cold_at, queued, wait_for_payload, wait_for_queue, wait_until,
+                      write_config, write_transcript)
 
 from moxi_comms import cli, config, constants, context, glossary, machine_line, owed
 from moxi_comms.adapters import claude_shim, codex, opencode, shim_roster
@@ -1099,7 +1099,7 @@ def test_the_payload_on_release_at_bind_and_the_hand_over_time(rig):
     # register would fix its boundary above the root and replay would hand it, unheld.
     assert wait_until(lambda: root.id in queued(rig.daemon, R))
     reviewer = rig.shim(**REVIEWER)
-    p = next(p for p in wait_for_queue(reviewer, 1) if p["message_id"] == root.id)
+    p = wait_for_payload(reviewer, root.id)
     assert (p["open_mark"], p.get("held")) == (True, True)
     # Taken after the send: the shim can hold the payload before the time is in.
     delivered(rig, R, root.id)
