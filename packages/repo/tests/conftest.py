@@ -32,6 +32,26 @@ from moxi_repo import gitconf
 POSIX_ONLY = pytest.mark.skipif(sys.platform == "win32",
                                 reason="POSIX sh git hooks; the Windows run is owed")
 
+
+def _git_found() -> tuple[int, int, int] | None:
+    """The version of the git on PATH, read once when the tests are collected."""
+    try:
+        done = subprocess.run(["git", "version"], capture_output=True, text=True,
+                              timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return gitconf.parse_version(done.stdout) if done.returncode == 0 else None
+
+
+GIT_FOUND = _git_found()
+#: For a test that needs git to run repo's config entries: skipped under an older git,
+#: which ignores them by design.
+NEEDS_CONFIG_GIT = pytest.mark.skipif(
+    GIT_FOUND is None or GIT_FOUND < gitconf.CONFIG_FROM,
+    reason=f"needs git {gitconf.version_text(gitconf.CONFIG_FROM)} or later to run config "
+           f"entries; the git found is "
+           f"{gitconf.version_text(GIT_FOUND) if GIT_FOUND else 'none'}")
+
 DEMO_INIT = '''
 """A module made for repo's tests: it declares git hook pieces."""
 

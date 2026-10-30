@@ -17,7 +17,8 @@ import moxi_repo
 from moxi import paths
 from moxi_repo import _records, api, checks, committer, gitconf
 from moxi_repo import install as repo_install
-from tests.conftest import POSIX_ONLY, change, commit, doctor, git, problems
+from tests.conftest import (GIT_FOUND, NEEDS_CONFIG_GIT, POSIX_ONLY, change, commit, doctor,
+                            git, problems)
 from tests.test_commit_records import doctor_records, failed_push, push_key
 from tests.test_committer import AUTHOR, deny, spec, write
 
@@ -50,7 +51,8 @@ def test_the_git_row_reads_the_floor_and_the_mode(demo):
     [row] = rows_named("git")
     version = gitconf.version_text(gitconf.git_version())
     assert row.state == "ok" and row.detail.startswith(f"git {version} (")
-    assert row.detail.endswith("a repo not pinned gets config mode")
+    auto = "config" if GIT_FOUND and GIT_FOUND >= gitconf.CONFIG_FROM else "shim"
+    assert row.detail.endswith(f"a repo not pinned gets {auto} mode")
     demo.mp.setattr(gitconf, "git_version", lambda: (2, 34, 1))
     [row] = rows_named("git")
     # Nothing is indexed yet, so nothing depends on it.
@@ -64,6 +66,8 @@ def test_the_git_row_reads_the_floor_and_the_mode(demo):
 
 def test_a_git_too_old_for_an_indexed_repo_fails(demo):
     repo = demo.repo()
+    # Added while git runs config entries, so not pinned, it gets config mode.
+    demo.mp.setattr(gitconf, "git_version", lambda: (2, 56, 0))
     api.add(repo, ["demo/gate"])
     demo.mp.setattr(gitconf, "git_version", lambda: (2, 34, 1))
     [row] = rows_named("git")
@@ -121,7 +125,8 @@ def test_another_git_too_old_for_config_entries_beside_a_config_mode_repo(demo):
 
 # -- git hooks --------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("mode", ["config", "shim", "launcher"])
+@pytest.mark.parametrize("mode", [pytest.param("config", marks=NEEDS_CONFIG_GIT), "shim",
+                                  "launcher"])
 def test_the_interpreter_and_the_runner_are_checked(demo, mode):
     repo = demo.repo()
     if mode == "launcher":
@@ -463,6 +468,7 @@ def test_the_announcement_declares_setup_and_doctor():
     assert found.doctor == "moxi_repo.checks:rows"
 
 
+@NEEDS_CONFIG_GIT
 def test_setup_rewrites_every_entry_shim_and_launcher(demo, capsys):
     repos, _ = _stale_entries(demo)
     capsys.readouterr()
@@ -473,6 +479,7 @@ def test_setup_rewrites_every_entry_shim_and_launcher(demo, capsys):
     _pieces_run(demo, repos)
 
 
+@NEEDS_CONFIG_GIT
 def test_moxi_install_runs_setup_and_the_doctor_holds_no_version_row(demo):
     """`moxi install repo` on an installed repo runs its settle step again, in a child of
     the environment's own Python; that child runs SETUP and records the version the

@@ -7,7 +7,7 @@ piece reads its settings through the runner from the repo's git config.
 from __future__ import annotations
 
 import pytest
-from conftest import POSIX_ONLY, change, commit, git, head
+from conftest import NEEDS_CONFIG_GIT, POSIX_ONLY, change, commit, git, head
 
 from moxi_repo import api, cli, commit_rules, gitconf, settings
 from moxi_repo.commit_rules import check_message
@@ -262,7 +262,7 @@ def test_it_is_declared_and_off_unless_added(demo, capsys):
 
 
 @POSIX_ONLY
-@pytest.mark.parametrize("mode", ["config", "shim"])
+@pytest.mark.parametrize("mode", [pytest.param("config", marks=NEEDS_CONFIG_GIT), "shim"])
 def test_settings_given_in_mixed_case_reach_the_piece_through_the_runner(demo, capsys, mode):
     repo = demo.repo()
     code, _, err = run(capsys, "git-hooks", "add", str(repo), PIECE, "--mode", mode,

@@ -9,11 +9,12 @@ import pytest
 
 import moxi_repo
 from moxi_repo import _records, api, gitconf, pieces
-from tests.conftest import POSIX_ONLY, change, commit, doctor, git, head, problems
+from tests.conftest import (NEEDS_CONFIG_GIT, POSIX_ONLY, change, commit, doctor, git, head,
+                            problems)
 
 pytestmark = POSIX_ONLY
 
-MODES = ["config", "shim"]
+MODES = [pytest.param("config", marks=NEEDS_CONFIG_GIT), "shim"]
 
 
 def existing_hook(repo: Path, event: str, log: Path) -> None:
@@ -414,6 +415,7 @@ def manager_hook(path: Path, log: Path, name: str, *, before: str = "") -> None:
     path.chmod(0o755)
 
 
+@NEEDS_CONFIG_GIT
 def test_config_mode_under_a_managers_hooks_path_runs_both(demo):
     repo = demo.repo()
     husky = repo / ".husky" / "_"
@@ -519,7 +521,7 @@ def test_a_shim_another_tool_replaced_shows_in_the_listing(demo):
 
 # -- the interpreter and the runner ----------------------------------------------------------
 
-VIAS = ["config", "shim", "launcher"]
+VIAS = [pytest.param("config", marks=NEEDS_CONFIG_GIT), "shim", "launcher"]
 
 
 def _set_up(demo, via: str, pieces_: list[str]) -> Path:
@@ -676,6 +678,7 @@ def _entries_name(repo: Path, python: str) -> bool:
     return python in gitconf.read(gitconf.resolve(repo)).entries["pre-commit"]
 
 
+@NEEDS_CONFIG_GIT
 def test_a_repo_added_through_a_linked_worktree_outlives_that_worktree(demo):
     repo = demo.repo()
     wt = demo.tmp / "wt"
@@ -699,6 +702,7 @@ def test_a_repo_added_through_a_linked_worktree_outlives_that_worktree(demo):
     assert set(gitconf.read(gitconf.resolve(repo)).pieces) == {"demo/gate", "demo/watch"}
 
 
+@NEEDS_CONFIG_GIT
 def test_an_index_entry_that_names_a_removed_linked_worktree_finds_the_repo(demo):
     repo = demo.repo()
     wt = demo.tmp / "wt"

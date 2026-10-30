@@ -368,13 +368,14 @@ def test_lines_a_piece_prints_on_ok_reach_the_result(demo):
 
 def test_glob_pathspecs_in_a_piece_and_an_existing_hook_see_every_staged_md(demo, monkeypatch):
     repo = demo.repo()
-    api.add(repo, ["demo/gate"])
-    demo.act(gate="glob")
     out = demo.tmp / "hook-saw.txt"
+    # The existing hook is there before add, so in shim mode add moves it beside the shim.
     hook = repo / ".git" / "hooks" / "pre-commit"
     hook.write_text(f"#!/bin/sh\ngit diff --cached --name-only -- '*.md' > '{out}'\n"
                     f"env | grep PATHSPECS >> '{out}' || true\n", encoding="utf-8")
     hook.chmod(0o755)
+    api.add(repo, ["demo/gate"])
+    demo.act(gate="glob")
     monkeypatch.setenv("GIT_LITERAL_PATHSPECS", "1")
     monkeypatch.setenv("GIT_ICASE_PATHSPECS", "1")
     for name in ("notes/one.md", "notes/two[x].md", "notes/other.txt"):
