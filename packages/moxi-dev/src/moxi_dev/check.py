@@ -14,10 +14,13 @@ only once the ones before it have passed:
    dependencies or dependency groups, is picked too, and so on until nothing is added:
    a plain path filter would skip a dependent's tests and its contract check. `--full`
    picks every package.
-3. Sync the check's own environment, `.moxi-dev/env-3.12` under the root, with every
+3. Check the build stamps of the picked packages that have a web page
+   (`moxi-dev stamp`, on the working tree): built files that lag their sources fail here,
+   with no Node.
+4. Sync the check's own environment, `.moxi-dev/env-3.12` under the root, with every
    package, extra and group at the lowest Python the packages support. The root's own
    `.venv` is never touched.
-4. Run each picked package's tests in a pytest session of its own, from the package's
+5. Run each picked package's tests in a pytest session of its own, from the package's
    directory (each has its own conftest, and test names repeat across packages), always
    spread over workers: `-n N`, where N is the CPUs this process may run on, at most
    `MOXI_TEST_WORKERS` when that is set, and never less than one. A serial run is not a
@@ -25,7 +28,7 @@ only once the ones before it have passed:
    can turn `-n auto` into a serial run) and the caller's `PYTEST_ADDOPTS` are dropped
    from the suites' environment, and an option that would undo the workers (`--pdb`)
    makes pytest refuse the run.
-5. Print one summary line, the last line of the output: the commit, the packages, each
+6. Print one summary line, the last line of the output: the commit, the packages, each
    package's result and seconds, the total and the exit code.
 
 The exit code is 0 only when every step passed, 1 when one failed, and 2 when the check
@@ -46,6 +49,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
+
+from moxi_dev import stamp
 
 PYTHON = "3.12"
 ENV_DIR = Path(".moxi-dev") / f"env-{PYTHON}"
@@ -209,6 +214,7 @@ class Result:
     commit: str = "unknown"
     packages: list[str] | None = None
     lock: str = "not run"
+    stamps: str = "not run"
     sync: str = "not run"
     suites: list[tuple[str, bool, float]] = field(default_factory=list)
     seconds: float = 0.0
@@ -219,7 +225,7 @@ class Result:
         suites = ", ".join(f"{name} {'pass' if ok else 'fail'} {secs:.1f}s"
                            for name, ok, secs in self.suites) or "no suites run"
         return (f"moxi-dev check: commit {self.commit} | packages: {names} | "
-                f"lock {self.lock} | sync {self.sync} | {suites} | "
+                f"lock {self.lock} | stamps {self.stamps} | sync {self.sync} | {suites} | "
                 f"total {self.seconds:.1f}s | exit {self.code}")
 
 
@@ -252,10 +258,13 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
 
 def _steps(root: Path, chosen: Sequence[Package], workers: Sequence[str],
            environ: Mapping[str, str], run: Run, result: Result) -> bool:
-    """The lock, the sync and the suites, recorded in `result`; True when all passed."""
+    """The lock, the stamps, the sync and the suites, recorded in `result`; True when all
+    passed."""
     env = _base_env(environ)
     ok = run(["uv", "lock", "--check"], root, env) == 0
     result.lock = "pass" if ok else "fail"
+    if ok and chosen:
+        ok = _stamps(root, chosen, result)
     if ok and chosen:
         venv = root / ENV_DIR
         ok = run(["uv", "sync", "--locked", "--all-packages", "--all-extras",
@@ -275,8 +284,19 @@ def _steps(root: Path, chosen: Sequence[Package], workers: Sequence[str],
                 result.suites.append((package.dir, passed, time.monotonic() - began))
                 ok = ok and passed
     elif ok:
-        result.sync = "skipped"
+        result.stamps = result.sync = "skipped"
     return ok
+
+
+def _stamps(root: Path, chosen: Sequence[Package], result: Result) -> bool:
+    try:
+        checked, problems = stamp.check_stamps(root, only=[package.dir for package in chosen])
+    except stamp.StampError as exc:
+        raise CheckError(f"the build stamps could not be checked ({exc})") from exc
+    for problem in problems:
+        print(f"moxi-dev check: {problem}", file=sys.stderr, flush=True)
+    result.stamps = "fail" if problems else "pass" if checked else "none"
+    return not problems
 
 
 def _parser() -> argparse.ArgumentParser:

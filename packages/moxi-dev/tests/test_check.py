@@ -335,7 +335,7 @@ def test_a_stale_lock_stops_before_the_sync(repo):
     runs = Runs({lambda cmd, cwd: cmd[:2] == ["uv", "lock"]: 1})
     result = run_check(repo, runs)
     assert result.code == 1 and len(runs.calls) == 1
-    assert "lock fail | sync not run" in result.line()
+    assert "lock fail | stamps not run | sync not run" in result.line()
 
 
 def test_a_failed_sync_runs_no_suite(repo):
@@ -349,7 +349,8 @@ def test_nothing_picked_checks_the_lock_and_passes(repo):
     result = run_check(repo, runs)
     assert result.code == 0
     assert [cmd for cmd, _, _ in runs.calls] == [["uv", "lock", "--check"]]
-    assert "packages: none | lock pass | sync skipped | no suites run" in result.line()
+    assert ("packages: none | lock pass | stamps skipped | sync skipped | no suites run"
+            in result.line())
 
 
 # --- the summary line -------------------------------------------------------------------
@@ -357,6 +358,7 @@ def test_nothing_picked_checks_the_lock_and_passes(repo):
 LINE = re.compile(
     r"moxi-dev check: commit (?P<commit>[0-9a-f]{12}(\+dirty)?) \| "
     r"packages: (?P<packages>[^|]+) \| lock (pass|fail|not run) \| "
+    r"stamps (pass|fail|none|skipped|not run) \| "
     r"sync (pass|fail|skipped|not run) \| (?P<suites>[^|]+) \| "
     r"total \d+\.\d+s \| exit (?P<code>\d)$")
 

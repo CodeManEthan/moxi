@@ -1,0 +1,21 @@
+{
+  "name": "moxi-web",
+  "private": true,
+  "description": "The build for the modules' web pages: one toolchain at the root, one package per module under packages/<name>/web.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/*/web"
+  ],
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "build": "node tools/web/build.mjs",
+    "check": "node tools/web/check.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  }
+}

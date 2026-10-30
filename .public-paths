@@ -1,11 +1,16 @@
 # Which tracked paths are public. Each line is `public <path>` or `private <path>`, and
 # every tracked path falls under exactly one line. A new top-level path needs a line.
+public .gitattributes
 public .github
 public .gitignore
+public .nvmrc
 public LICENSE
 public README.md
+public package-lock.json
+public package.json
 public packages
 public pyproject.toml
+public tools
 public uv.lock
 private .public-paths
 private .residue-allow

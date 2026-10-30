@@ -1,6 +1,8 @@
 # The same check a contributor runs before asking for a merge: `moxi-dev check`.
 # Linux runs on every push to any branch; Windows and macOS run on pushes to main,
 # after the merge, and gate nothing while the packages are Linux-only.
+# The web job runs on all three systems on every push: the web pages' built files must be
+# what the pinned Node toolchain makes from their sources, byte for byte.
 # Actions are pinned to a release commit, with its version beside it.
 
 name: check
@@ -52,3 +54,29 @@ jobs:
           python-version: "3.12"
       - run: uv sync --locked
       - run: uv run --locked moxi-dev check --full
+
+  web:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: npm ci
+      - name: type-check each page, build into a temp directory, compare with the tree
+        run: npm run check
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      # The pre-commit check's own code, standard library only: its stamp must equal the
+      # one the build wrote, on this system too.
+      - name: the build stamps, recomputed without Node
+        env:
+          PYTHONPATH: packages/moxi-dev/src
+        run: uv run --no-project --python 3.12 python -m moxi_dev.stamp
