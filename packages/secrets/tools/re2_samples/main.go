@@ -1,0 +1,400 @@
+// re2_samples: Go's matches on samples generated from each pattern's parse tree.
+//
+// Dev-only, run by bump_gitleaks.py. It reads a JSON request on stdin,
+//
+//	{"samples": 60, "seed": 7, "patterns": [{"id": "...", "pattern": "...", "group": 0}]}
+//
+// and for each pattern makes `samples` texts from the pattern's own parse tree, each in a
+// fixed list of variants (case flips, quoting, line endings, Unicode case folds, a dotless
+// i for each i and a dotted I for each i and I, non-ASCII neighbours). Its first line is
+// Go's case-fold orbit (unicode.SimpleFold) of every ASCII character, for the caller to
+// check against the fallback translator's table,
+//
+//	{"orbits": [[0], ..., [75, 107, 8490], ...], "unicode": "15.0.0"}
+//
+// and then, for each text, one JSON line,
+//
+//	{"id": "...", "kind": "plain", "text": "...", "found": true, "matches": [[ms, me, ss, se]],
+//	 "secrets": [[gs, ge]], "lines": [[ls, le]]}
+//
+// where `found` is MatchString, and `matches` lists every non-empty match of
+// FindAllStringSubmatchIndex with its secret group's span in context: the group `group`
+// names when it is above zero, else the first non-empty group, else the whole match. A
+// secret group the match has no span for is [-1, -1].
+//
+// `secrets` gives each match's secret as gitleaks takes it (detect.go at the pin): the
+// match with its leading and trailing newlines trimmed, FindStringSubmatch run again on
+// that alone, its group, else the trimmed match. A group with no span is the empty secret
+// at the trimmed match's start; [-1, -1] is a match gitleaks drops (a secret group past
+// the pattern's last). `lines` gives each match's line as gitleaks bounds it, the Line its
+// finding carries for `gitleaks:allow` and a "line" allowlist: it keeps the match's start,
+// ends the match at the start plus the trimmed match's length, and bounds it with
+// location(), copied below from location.go at the pin. Offsets are UTF-8 byte offsets
+// into the text.
+//
+// Nothing is stored: the caller reads the lines as they come and keeps none.
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/rand"
+	"os"
+	"regexp"
+	"regexp/syntax"
+	"strings"
+	"unicode"
+)
+
+type pattern struct {
+	ID      string `json:"id"`
+	Pattern string `json:"pattern"`
+	Group   int    `json:"group"`
+}
+
+type request struct {
+	Samples  int       `json:"samples"`
+	Seed     int64     `json:"seed"`
+	Patterns []pattern `json:"patterns"`
+}
+
+type sample struct {
+	ID      string  `json:"id"`
+	Kind    string  `json:"kind"`
+	Text    string  `json:"text"`
+	Found   bool    `json:"found"`
+	Matches [][]int `json:"matches"`
+	Secrets [][]int `json:"secrets"`
+	Lines   [][]int `json:"lines"`
+}
+
+var rng *rand.Rand
+
+// pickRune picks a rune from a character class, printable ASCII when the class has any.
+func pickRune(ranges []rune) rune {
+	var ascii [][2]rune
+	for i := 0; i+1 < len(ranges); i += 2 {
+		lo, hi := ranges[i], ranges[i+1]
+		if lo < 0x21 {
+			lo = 0x21
+		}
+		if hi > 0x7e {
+			hi = 0x7e
+		}
+		if lo <= hi {
+			ascii = append(ascii, [2]rune{lo, hi})
+		}
+	}
+	if len(ascii) > 0 {
+		r := ascii[rng.Intn(len(ascii))]
+		return r[0] + rune(rng.Intn(int(r[1]-r[0]+1)))
+	}
+	if len(ranges) >= 2 {
+		lo, hi := ranges[0], ranges[1]
+		if hi-lo > 1000 {
+			hi = lo + 1000
+		}
+		return lo + rune(rng.Intn(int(hi-lo+1)))
+	}
+	return 'x'
+}
+
+func flipRune(r rune) rune {
+	if unicode.IsUpper(r) {
+		return unicode.ToLower(r)
+	}
+	return unicode.ToUpper(r)
+}
+
+// gen writes one string the parse tree matches (anchors and boundaries write nothing).
+func gen(re *syntax.Regexp, b *strings.Builder) {
+	switch re.Op {
+	case syntax.OpLiteral:
+		for _, r := range re.Rune {
+			if re.Flags&syntax.FoldCase != 0 && rng.Intn(2) == 0 {
+				r = flipRune(r)
+			}
+			b.WriteRune(r)
+		}
+	case syntax.OpCharClass:
+		b.WriteRune(pickRune(re.Rune))
+	case syntax.OpAnyChar, syntax.OpAnyCharNotNL:
+		b.WriteRune(rune('a' + rng.Intn(26)))
+	case syntax.OpCapture:
+		gen(re.Sub[0], b)
+	case syntax.OpStar, syntax.OpPlus, syntax.OpQuest, syntax.OpRepeat:
+		lo, hi := 0, 3
+		switch re.Op {
+		case syntax.OpPlus:
+			lo = 1
+		case syntax.OpQuest:
+			hi = 1
+		case syntax.OpRepeat:
+			lo, hi = re.Min, re.Max
+			if hi < 0 {
+				hi = lo + 3
+			}
+		}
+		n := lo
+		if hi > lo {
+			n = lo + rng.Intn(hi-lo+1)
+		}
+		for i := 0; i < n; i++ {
+			gen(re.Sub[0], b)
+		}
+	case syntax.OpConcat:
+		for _, s := range re.Sub {
+			gen(s, b)
+		}
+	case syntax.OpAlternate:
+		gen(re.Sub[rng.Intn(len(re.Sub))], b)
+	}
+}
+
+func flipCase(s string) string {
+	out := []rune(s)
+	for i, r := range out {
+		if rng.Intn(3) == 0 {
+			out[i] = flipRune(r)
+		}
+	}
+	return string(out)
+}
+
+var folds = strings.NewReplacer("k", "K", "s", "ſ")
+
+// variants is the fixed list of texts made from one sample, in a fixed order so a seed
+// always gives the same texts.
+func variants(s string) [][2]string {
+	return [][2]string{
+		{"plain", s},
+		{"flip", flipCase(s)},
+		{"quoted", "token = \"" + s + "\"\n"},
+		{"padded", " " + s + " "},
+		{"trail-nl", s + "\n"},
+		{"vtab", "key = " + s + "\v"},
+		{"lead-nl", "x\n" + s},
+		{"crlf", "token = " + s + "\r\n"},
+		{"fold", folds.Replace(s)},
+		{"nbsp", "key = " + s + " rest"},
+		{"unicode-pre", "é" + s},
+		{"dotless-i", strings.ReplaceAll(s, "i", "ı")},
+		{"dotted-I", strings.NewReplacer("i", "İ", "I", "İ").Replace(s)},
+		{"twice", s + " " + s},
+		{"multi", "a\n" + s + "\nb\n" + s},
+	}
+}
+
+// asciiOrbits is the case-fold orbit of each ASCII character, the character first.
+func asciiOrbits() map[string]any {
+	orbits := make([][]rune, 0, 128)
+	for r := rune(0); r < 128; r++ {
+		orbit := []rune{r}
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			orbit = append(orbit, f)
+		}
+		orbits = append(orbits, orbit)
+	}
+	return map[string]any{"unicode": unicode.Version, "orbits": orbits}
+}
+
+// pick is the secret group of one match's spans: the group `group` names when it is above
+// zero, else the first non-empty group. ok is false when the pattern has no group or no
+// group is non-empty; a named group the match has no span for is [-1, -1].
+func pick(span []int, group int) (s, e int, ok bool) {
+	groups := len(span)/2 - 1
+	if groups == 0 {
+		return 0, 0, false
+	}
+	if group > 0 {
+		if group > groups {
+			return -1, -1, true
+		}
+		return span[2*group], span[2*group+1], true
+	}
+	for g := 1; g <= groups; g++ {
+		if span[2*g] >= 0 && span[2*g+1] > span[2*g] {
+			return span[2*g], span[2*g+1], true
+		}
+	}
+	return 0, 0, false
+}
+
+func secret(span []int, group int) (int, int) {
+	if s, e, ok := pick(span, group); ok {
+		return s, e
+	}
+	return span[0], span[1]
+}
+
+// gitleaksSecret is one match's secret as gitleaks takes it (FindStringSubmatch on the
+// newline-trimmed match), as [gs, ge].
+func gitleaksSecret(compiled *regexp.Regexp, text string, span []int, group int) []int {
+	ts, te := span[0], span[1]
+	for ts < te && text[ts] == '\n' {
+		ts++
+	}
+	for te > ts && text[te-1] == '\n' {
+		te--
+	}
+	gs, ge := ts, te
+	if sub := compiled.FindStringSubmatchIndex(text[ts:te]); len(sub) >= 4 {
+		if s, e, ok := pick(sub, group); ok {
+			switch {
+			case s < 0 && group > len(sub)/2-1:
+				gs, ge = -1, -1 // gitleaks drops the match
+			case s < 0:
+				gs, ge = ts, ts // a group with no span is the empty secret
+			default:
+				gs, ge = ts+s, ts+e
+			}
+		}
+	}
+	return []int{gs, ge}
+}
+
+// Location and location are gitleaks' (detect/location.go at the pin): the code unchanged,
+// its comments left out.
+type Location struct {
+	startLine      int
+	endLine        int
+	startColumn    int
+	endColumn      int
+	startLineIndex int
+	endLineIndex   int
+}
+
+func location(newlineIndices [][]int, raw string, matchIndex []int) Location {
+	var (
+		prevNewLine int
+		location    Location
+		lineSet     bool
+		_lineNum    int
+	)
+
+	start := matchIndex[0]
+	end := matchIndex[1]
+
+	location.startLineIndex = 0
+
+	if len(newlineIndices) == 0 {
+		newlineIndices = [][]int{
+			{len(raw), len(raw) + 1},
+		}
+	}
+
+	for lineNum, pair := range newlineIndices {
+		_lineNum = lineNum
+		newLineByteIndex := pair[0]
+		if prevNewLine <= start && start < newLineByteIndex {
+			lineSet = true
+			location.startLine = lineNum
+			location.endLine = lineNum
+			location.startColumn = (start - prevNewLine) + 1
+			location.startLineIndex = prevNewLine
+			location.endLineIndex = newLineByteIndex
+		}
+		if prevNewLine < end && end <= newLineByteIndex {
+			location.endLine = lineNum
+			location.endColumn = (end - prevNewLine)
+			location.endLineIndex = newLineByteIndex
+		}
+
+		prevNewLine = pair[0]
+	}
+
+	if !lineSet {
+		location.startColumn = (start - prevNewLine) + 1
+		location.endColumn = (end - prevNewLine)
+		location.startLine = _lineNum + 1
+		location.endLine = _lineNum + 1
+
+		i := 0
+		for end+i < len(raw) {
+			if raw[end+i] == '\n' {
+				break
+			}
+			if raw[end+i] == '\r' {
+				break
+			}
+			i++
+		}
+		location.endLineIndex = end + i
+	}
+	return location
+}
+
+var newLineRegexp = regexp.MustCompile("\n")
+
+// gitleaksLine is one match's line as gitleaks bounds it (detect.go at the pin), as
+// [lo, hi].
+func gitleaksLine(text string, newlines [][]int, span []int) []int {
+	secret := strings.Trim(text[span[0]:span[1]], "\n")
+	matchIndex := []int{span[0], span[0] + len(secret)}
+	loc := location(newlines, text, matchIndex)
+	if matchIndex[1] > loc.endLineIndex {
+		loc.endLineIndex = matchIndex[1]
+	}
+	return []int{loc.startLineIndex, loc.endLineIndex}
+}
+
+func run() error {
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return err
+	}
+	var req request
+	if err := json.Unmarshal(data, &req); err != nil {
+		return err
+	}
+	rng = rand.New(rand.NewSource(req.Seed))
+	out := bufio.NewWriter(os.Stdout)
+	defer out.Flush()
+	enc := json.NewEncoder(out)
+	if err := enc.Encode(asciiOrbits()); err != nil {
+		return err
+	}
+	for _, p := range req.Patterns {
+		compiled, err := regexp.Compile(p.Pattern)
+		if err != nil {
+			return fmt.Errorf("%s: %v", p.ID, err)
+		}
+		tree, err := syntax.Parse(p.Pattern, syntax.Perl)
+		if err != nil {
+			return fmt.Errorf("%s: %v", p.ID, err)
+		}
+		tree = tree.Simplify()
+		for i := 0; i < req.Samples; i++ {
+			var b strings.Builder
+			gen(tree, &b)
+			for _, v := range variants(b.String()) {
+				matches, both, lines := [][]int{}, [][]int{}, [][]int{}
+				newlines := newLineRegexp.FindAllStringIndex(v[1], -1)
+				for _, span := range compiled.FindAllStringSubmatchIndex(v[1], -1) {
+					if span[1] == span[0] {
+						continue
+					}
+					ss, se := secret(span, p.Group)
+					matches = append(matches, []int{span[0], span[1], ss, se})
+					both = append(both, gitleaksSecret(compiled, v[1], span, p.Group))
+					lines = append(lines, gitleaksLine(v[1], newlines, span))
+				}
+				row := sample{p.ID, v[0], v[1], compiled.MatchString(v[1]), matches, both,
+					lines}
+				if err := enc.Encode(row); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, "re2_samples:", err)
+		os.Exit(1)
+	}
+}
