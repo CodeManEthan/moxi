@@ -174,6 +174,17 @@ def test_an_iban_followed_by_a_word_is_still_found(engine_name):
     assert [text[h.start:h.end] for h in hits] == [value]
 
 
+@pytest.mark.parametrize("before", ["AB12", "ref XY00 1234", "AB12 CD34 EF56 GH78"])
+def test_a_grouped_iban_after_a_token_of_its_shape_is_found(engine_name, before):
+    # The leftmost candidate starts at the token and takes the IBAN's groups as its own;
+    # the search starts again inside it.
+    r = corpus.rng(32)
+    value = corpus.grouped(corpus.iban(r, "DE", 22))
+    text = f"{before} {value} end"
+    hits = [h for h in scan(text, PD) if h.rule == "iban"]
+    assert [text[h.start:h.end] for h in hits] == [value]
+
+
 def test_a_wrong_check_or_a_glued_iban_is_quiet(engine_name):
     r = corpus.rng(31)
     value = corpus.iban(r, "DE", 22)

@@ -1,10 +1,10 @@
 """Personal data: payment cards, IBANs and dashed US SSNs.
 
 python-stdnum validates a string but does not find one, so each format is a candidate
-pattern here plus stdnum's validator. Each pattern is one pass with no lookaround; the
-"no digit next to it" checks run in code on each match. Every candidate has a bounded
-length and a small fixed number of readings, so the pass stays linear on RE2 and on
-Python's re alike.
+pattern here plus stdnum's validator. Each pattern is one pass with no lookaround (an
+IBAN candidate that fails searches again from its next group); the "no digit next to it"
+checks run in code on each match. Every candidate has a bounded length and a small fixed
+number of readings, so the pass stays linear on RE2 and on Python's re alike.
 
 stdnum is the optional extra `moxi-secrets[personal-data]`, imported at first use.
 """
@@ -113,26 +113,46 @@ def _cards(t, eng, luhn_ok, out) -> None:
 def _ibans(t, eng, iban_ok, out) -> None:
     etext = t.etext
     rx = eng.compile(_IBAN)
-    for m in rx.finditer(eng.target(t)):
-        s, e = eng.to_str(t, m.start()), eng.to_str(t, m.end())
-        if _alnum(etext, s - 1):
+    target = eng.target(t)
+    space = b" " if isinstance(target, bytes) else " "
+    pos = 0
+    while True:
+        m = rx.search(target, pos)
+        if m is None:
+            break
+        pos = m.end()
+        s, e = eng.to_str(t, m.start()), eng.to_str(t, pos)
+        if _iban_at(etext, s, e, iban_ok, out):
             continue
-        text = etext[s:e]
-        # Readings, longest first: the whole match, then without each trailing group.
-        ends = [e]
-        if " " in text:
-            cut = e
-            while True:
-                cut = etext.rfind(" ", s, cut)
-                if cut < s + 4 + 10:   # at least two groups of four stay
-                    break
-                ends.append(cut)
-        for end in ends:
-            if _alnum(etext, end):
-                continue
-            if iban_ok(etext[s:end].replace(" ", "")):
-                out.append(("personal-data", "iban", "an IBAN", s, end))
+        # No reading from this start is an IBAN. A grouped match may have taken a real
+        # IBAN's groups after a token of the same shape ("AB12 DE89 ..."), so search again
+        # from its next group. A match spans at most eight groups, so this stays linear.
+        cut = target.find(space, m.start(), m.end())
+        if cut >= 0:
+            pos = cut + 1
+
+
+def _iban_at(etext, s, e, iban_ok, out) -> bool:
+    """Report the longest reading of the match at s..e that is an IBAN; False if none."""
+    if _alnum(etext, s - 1):
+        return False
+    text = etext[s:e]
+    # Readings, longest first: the whole match, then without each trailing group.
+    ends = [e]
+    if " " in text:
+        cut = e
+        while True:
+            cut = etext.rfind(" ", s, cut)
+            if cut < s + 4 + 10:   # at least two groups of four stay
                 break
+            ends.append(cut)
+    for end in ends:
+        if _alnum(etext, end):
+            continue
+        if iban_ok(etext[s:end].replace(" ", "")):
+            out.append(("personal-data", "iban", "an IBAN", s, end))
+            return True
+    return False
 
 
 def _ssns(t, eng, ssn_ok, out) -> None:
