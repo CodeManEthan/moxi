@@ -170,7 +170,10 @@ def test_wrap_on_this_boxs_user_manager(tmp_path, monkeypatch, capsys):
             assert row.start().ok
             shown = row.show("Result", "ActiveState")
             report.append(f"off: {shown} lines={row.lines()}")
-            assert shown["ActiveState"] != "failed" and shown["Result"] == "exec-condition"
+            # systemd hands `exec-condition` to ExecStopPost= in $SERVICE_RESULT; the
+            # unit's own Result property reads `success` after the skip (systemd 258).
+            assert shown["ActiveState"] != "failed"
+            assert shown["Result"] in ("success", "exec-condition")
             assert row.output() == []
             assert [r["result"] for r in row.lines()] == ["off"]
 
