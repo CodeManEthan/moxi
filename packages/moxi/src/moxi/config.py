@@ -1,4 +1,9 @@
-"""One config file per module, born declared, read and changed only through this module.
+"""One config file per module, born declared, read through this module.
+
+A program changes the file through this module (`set`, `unset`, `add_item`,
+`remove_item`), which checks each change against the schema before it writes. A person
+may also edit the file by hand; one that no longer reads raises `ConfigError`, naming the
+file, when it is next read.
 
 Every value a user may set lives in its module's one config file,
 `<config root>/<module>/config.toml` (see `moxi.paths`), and every key in that file is
