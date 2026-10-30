@@ -198,8 +198,8 @@ def test_the_wrappers_environment_drops_a_stamp_the_identity_does_not_carry():
 def test_a_message_goes_in_steer_first_and_settles_handled_at_its_turns_end(rig, launch):
     adapter = launch()
     send(rig, "hello planner")
-    (did, text, steer) = delivered(adapter.fake)[0]
-    assert steer is True and "hello planner" in text
+    first = delivered(adapter.fake)[0]
+    assert first.steer is True and "hello planner" in first.text
     assert wait_until(lambda: adapter.held_ids)
     adapter.fake.end_turn("answer")
     assert wait_until(lambda: not adapter.held_ids)
@@ -213,7 +213,7 @@ def test_a_digest_into_a_running_turn_is_steered_into_it(rig, launch):
     send(rig, "while you work")
     rows = wait_until(lambda: len(session.turn_deliveries.get("turn-1", ())) >= 1
                       and session.delivered)
-    assert all(steer for _, _, steer in rows)
+    assert all(row.steer for row in rows)
     assert wait_until(lambda: adapter.held_ids)
     session.end_turn("answer")
     assert wait_until(lambda: not adapter.held_ids)
