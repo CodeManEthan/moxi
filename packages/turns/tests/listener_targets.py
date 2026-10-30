@@ -31,3 +31,10 @@ def silent(event):
 
 def not_text(event):
     return 42
+
+
+BIG = ""
+
+
+def big(event):
+    return BIG

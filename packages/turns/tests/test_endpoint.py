@@ -345,7 +345,7 @@ def test_the_stop_handler_holds_a_stop_open_or_lets_it_end(make_endpoint):
 
 
 def test_a_late_or_broken_stop_handler_lets_the_turn_end(make_endpoint, turns_env):
-    write_config(turns_env, "[hold]\nwait_ms = 100\n")
+    write_config(turns_env, "[stop_handler]\nwait_ms = 100\n")
     ep, fake = make_endpoint()
     s = turns.find(session_id="s-1")
     h = s.handle_stops(lambda f: time.sleep(0.5) or "too late")

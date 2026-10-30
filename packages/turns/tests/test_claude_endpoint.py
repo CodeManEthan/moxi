@@ -282,7 +282,7 @@ def test_live_facts_come_from_the_runner_and_an_unanswered_read_holds(claude):
 
 
 def test_holding_answers_the_stop_ask_within_hold_wait(claude, turns_env):
-    write_config(turns_env, "[hold]\nwait_ms = 300\n")
+    write_config(turns_env, "[stop_handler]\nwait_ms = 300\n")
     ep, runner = claude()
     s = turns.find(session_id="s-1")
     answers = iter(["reply first", None])
@@ -306,19 +306,19 @@ def _ctx(event):
 
 
 def test_context_asks_reach_the_listeners_and_a_clear_follows_the_id(claude):
-    registry = Registry((Listener("comms", frozenset({"ready", "prompt"}),
+    registry = Registry((Listener("comms", frozenset({"start", "prompt"}),
                                   f"{__name__}:_ctx"),))
     ep, runner = claude(registry=registry)
     s = turns.find(session_id="s-1")
     events = watcher(s)
     assert runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "startup",
                                           "session_id": "s-1"})["context"] \
-        == "ready:startup:s-1"
+        == "start:startup:s-1"
     assert runner.post(leg.PATH_CONTEXT, {"event": "prompt"})["context"] \
         == "prompt:None:s-1"
     assert runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "clear",
                                           "session_id": "s-2"})["context"] \
-        == "ready:clear:s-2"
+        == "start:clear:s-2"
     assert turns.find(session_id="s-2").dir == ep.dir
     assert [(type(e).__name__, e.source) for e in drain(events)] == [
         ("Ready", "startup"), ("Ready", "clear")]

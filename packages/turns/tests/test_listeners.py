@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import time
 import types
@@ -25,8 +26,8 @@ class Entry:
         return types.SimpleNamespace(LISTENERS=self._rows)
 
 
-def registry(*entries):
-    return listeners.load(entries)
+def registry(*entries, order=("comms", "alpha", "zeta"), limit=0):
+    return listeners.load(entries, order=order, limit=limit)
 
 
 def event(name="ready", **kw):
@@ -39,13 +40,14 @@ def clear_calls():
     listener_targets.CALLS.clear()
 
 
-def test_texts_join_in_module_name_order_and_each_listener_gets_its_own_env():
-    reg = registry(Entry("zeta", [("ready", "listener_targets:comms")]),
-                   Entry("alpha", [(("ready", "prompt"), "listener_targets:cache")]))
+def test_texts_join_in_list_order_and_each_listener_gets_its_own_env():
+    reg = registry(Entry("zeta", [("start", "listener_targets:comms")]),
+                   Entry("alpha", [(("start", "prompt"), "listener_targets:cache")]),
+                   order=("zeta", "alpha"))
     assert [ls.module for ls in reg.listeners] == ["alpha", "zeta"]
     text = listeners.ask(reg, event("ready", source="startup"), 2.0)
-    assert text == "cache context\n\ncomms at ready"
-    assert ("cache", "ready", None) in listener_targets.CALLS
+    assert text == "comms at start\n\ncache context"
+    assert ("cache", "start", None) in listener_targets.CALLS
     assert listeners.ask(reg, event("prompt"), 2.0) == "cache context"
 
 
@@ -77,6 +79,8 @@ def test_turn_and_gone_answers_are_ignored_and_do_not_wait():
 @pytest.mark.parametrize("rows, why", [
     (None, "LISTENERS"),
     ([("ready",)], "not (events, target)"),
+    ([("tool", "x.y:z")], "kept for a later turns"),
+    ([(("start", "usage"), "x.y:z")], "kept for a later turns"),
     ([("finished", "x.y:z")], "names events"),
     ([("ready", "no-colon")], "has target"),
     (ImportError("gone"), "does not load"),
@@ -94,18 +98,18 @@ def test_two_registrations_under_one_name_are_both_off():
 
 
 def test_the_endpoint_asks_at_ready_and_prompt_and_tells_turn_and_gone(make_endpoint):
-    reg = registry(Entry("comms", [(("ready", "prompt", "turn", "gone"),
+    reg = registry(Entry("comms", [(("start", "prompt", "turn", "gone"),
                                     "listener_targets:comms")]))
     env = dict(os.environ, SESSION_STAMP="x")
     ep, fake = make_endpoint(registry=reg, env=env)
-    assert ep.ready("startup", "s-1") == "comms at ready"
+    assert ep.ready("startup", "s-1") == "comms at start"
     assert ep.prompt() == "comms at prompt"
     fake.start_turn()
     fake.end_turn("aborted")
     ep.gone("the session ended")
     time.sleep(0.1)
     assert [c[:4] for c in listener_targets.CALLS] == [
-        ("comms", "ready", "s-1", "startup"), ("comms", "prompt", "s-1", None),
+        ("comms", "start", "s-1", "startup"), ("comms", "prompt", "s-1", None),
         ("comms", "turn", "s-1", None), ("comms", "gone", "s-1", None)]
 
 
@@ -114,3 +118,94 @@ def test_the_environment_metadata_group_loads(monkeypatch):
     reg = listeners.load()
     assert all(b.module for b in reg.broken)
     assert listeners.GROUP == "moxi.turns.listeners"
+
+
+# -- the start list ------------------------------------------------------------------------
+
+def _answer(text):
+    return types.SimpleNamespace(answer=lambda event: text)
+
+
+def _module(name, rows):
+    return Entry(name, rows)
+
+
+def test_the_default_order_is_the_schemas_and_an_uninstalled_module_is_skipped():
+    assert listeners.default_order() == ("launcher", "comms", "notes", "memory")
+    reg = listeners.load([Entry("comms", [("start", "listener_targets:comms")])], order=None,
+                         limit=0)
+    plan = listeners.plan(reg, present=lambda name: name == "comms")
+    assert [e.entry for e in plan.entries] == ["comms"]
+    assert dict(plan.skipped) == {"launcher": "not installed", "notes": "not installed",
+                                  "memory": "not installed"}
+    assert listeners.ask(reg, event("ready", source="startup"), 2.0) == "comms at start"
+
+
+def test_an_off_list_start_row_adds_nothing_and_ready_rows_are_still_told():
+    reg = registry(Entry("comms", [("start", "listener_targets:comms")]),
+                   Entry("other", [("start", "listener_targets:cache")]),
+                   Entry("watcher", [("ready", "listener_targets:comms")]), order=("comms",))
+    assert listeners.ask(reg, event("ready", source="startup"), 2.0) == "comms at start"
+    time.sleep(0.1)
+    assert ("comms", "ready", "s-1", "startup") in listener_targets.CALLS
+    assert not any(c[0] == "cache" for c in listener_targets.CALLS)
+    assert listeners.plan(reg).off_list == ("other",)
+
+
+def test_a_module_with_several_start_rows_gets_one_share_joined_in_declared_order():
+    reg = registry(Entry("launcher", [("start", "listener_targets:silent"),
+                                      ("start", "listener_targets:cache"),
+                                      ("ready", "listener_targets:comms"),
+                                      ("start", "listener_targets:comms")]),
+                   order=("launcher",))
+    assert listeners.ask(reg, event("start"), 2.0) == "cache context\n\ncomms at start"
+    assert len(listeners.plan(reg).entries) == 1
+
+
+def test_file_entries_are_read_and_a_missing_one_adds_nothing(tmp_path, caplog):
+    brief = tmp_path / "brief.md"
+    brief.write_text("the brief")
+    missing = str(tmp_path / "gone.md")
+    reg = registry(Entry("comms", [("start", "listener_targets:comms")]),
+                   order=(str(brief), missing, "comms", "relative/file.md"))
+    for _ in range(2):
+        assert listeners.ask(reg, event("start"), 2.0) == "the brief\n\ncomms at start"
+    logged = [r.message for r in caplog.records if "adds nothing" in r.message]
+    assert len(logged) == 2                     # each bad entry once per endpoint
+    assert dict(listeners.plan(reg).skipped) == {
+        missing: "does not exist",
+        "relative/file.md": "not an absolute path; write it from / or ~"}
+
+
+def test_shares_pass_on_and_a_long_answer_is_cut_on_a_line_with_a_last_line():
+    long = "\n".join(f"line {i:03d} " + "x" * 30 for i in range(100))
+    out = listeners.share_out([("a", "short"), ("b", long), ("c", None)], 300)
+    assert out.startswith("short\n\nline 000")
+    assert len(out) <= 300
+    last = out.splitlines()[-1]
+    assert last.startswith("[turns: b cut at ") and last.endswith(" characters]")
+    kept = out.split("\n\n", 1)[1].rsplit("\n", 1)[0]
+    assert kept.endswith("x") and f"cut at {len(kept)} characters" in last
+    # Equal shares when every answer is long.
+    out = listeners.share_out([("a", long), ("b", long)], 400)
+    assert out.count("[turns: ") == 2 and len(out) <= 400
+
+
+def test_the_limit_is_clamped_to_the_harness_ceiling():
+    long = "y" * 20_000
+    reg = registry(Entry("comms", [("start", "listener_targets:big")]), order=("comms",),
+                   limit=50_000)
+    listener_targets.BIG = long
+    for harness, ceiling in (("claude", 9500), ("codex", 9000), ("fake", 9000)):
+        text = listeners.ask(reg, dataclasses.replace(event("start"), harness=harness), 2.0)
+        assert len(text) <= ceiling and text.endswith("characters]")
+    reg = registry(Entry("comms", [("start", "listener_targets:big")]), order=("comms",),
+                   limit=100)
+    assert len(listeners.ask(reg, event("start"), 2.0)) <= 100
+
+
+def test_a_longer_row_loads_as_its_first_two_items_with_a_notice():
+    reg = registry(Entry("comms", [("start", "listener_targets:comms", {"floor": 1})]),
+                   order=("comms",))
+    assert [ls.target for ls in reg.listeners] == ["listener_targets:comms"]
+    assert reg.notices and "older than the row" in reg.notices[0].reason

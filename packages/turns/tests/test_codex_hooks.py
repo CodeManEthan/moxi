@@ -49,9 +49,9 @@ def _registry():
         return f"context at {event.event}"
 
     listener = listeners.Listener(
-        "sample", frozenset({"ready", "prompt"}), "sample.module:answer", _fn=answer,
+        "sample", frozenset({"start", "prompt"}), "sample.module:answer", _fn=answer,
     )
-    return listeners.Registry((listener,))
+    return listeners.Registry((listener,), order=("sample",))
 
 
 def _ping(monkeypatch, path, event, data, *extra):
@@ -73,7 +73,7 @@ def test_session_hooks_render_listener_context_through_turns_hook_code(
         output = _ping(monkeypatch, server.socket_path, "SessionStart",
                        {"session_id": "thread-1", "source": "startup"})
         assert json.loads(output)["hookSpecificOutput"] == {
-            "hookEventName": "SessionStart", "additionalContext": "context at ready",
+            "hookEventName": "SessionStart", "additionalContext": "context at start",
         }
         output = _ping(monkeypatch, server.socket_path, "UserPromptSubmit",
                        {"session_id": "thread-1"})
@@ -167,15 +167,15 @@ def test_hook_commands_carry_the_endpoints_event_budget():
 
 
 def test_holder_and_listener_may_answer_after_three_seconds(monkeypatch, turns_env):
-    write_config(turns_env, "hold.wait_ms = 4000\nlisten.wait_ms = 4000\n")
+    write_config(turns_env, "stop_handler.wait_ms = 4000\nlisten.wait_ms = 4000\n")
 
     def answer(event):
         time.sleep(3.05)
         return "late but in budget"
 
     registry = listeners.Registry((listeners.Listener(
-        "slow", frozenset({"ready"}), "slow:answer", _fn=answer,
-    ),))
+        "slow", frozenset({"start"}), "slow:answer", _fn=answer,
+    ),), order=("slow",))
     harness = HookHarness()
     endpoint = Endpoint(harness, registry=registry,
                         session_id=harness.session_id).open()
@@ -199,15 +199,15 @@ def test_holder_and_listener_may_answer_after_three_seconds(monkeypatch, turns_e
 
 
 def test_late_hook_answers_produce_no_context_or_block(monkeypatch, turns_env):
-    write_config(turns_env, "hold.wait_ms = 50\nlisten.wait_ms = 50\n")
+    write_config(turns_env, "stop_handler.wait_ms = 50\nlisten.wait_ms = 50\n")
 
     def answer(event):
         time.sleep(0.2)
         return "too late"
 
     registry = listeners.Registry((listeners.Listener(
-        "slow", frozenset({"ready"}), "slow:answer", _fn=answer,
-    ),))
+        "slow", frozenset({"start"}), "slow:answer", _fn=answer,
+    ),), order=("slow",))
     harness = HookHarness()
     endpoint = Endpoint(harness, registry=registry,
                         session_id=harness.session_id).open()
@@ -248,7 +248,7 @@ def test_load_hooks_ask_listeners_but_leave_ready_to_the_accepted_load(
             output = _ping(monkeypatch, server.socket_path, event,
                            {"session_id": "thread-1", "source": source})
             assert json.loads(output)["hookSpecificOutput"]["additionalContext"] == \
-                "context at ready"
+                "context at start"
         deadline = time.monotonic() + 2
         while len(events) < 2 and time.monotonic() < deadline:
             time.sleep(0.02)
