@@ -31,8 +31,8 @@ from moxi.paths import Layout
 from .. import first, handoffs, presets, slots
 from . import claude, codex, common
 from .common import (Additions, Composition, Context, NoBrief, NotYet, PromptFile,
-                     TooLong, Unreadable, environment, first_turn, identity_block,
-                     scrub, stamps, write_prompt)
+                     TooLong, TurnsAdditions, Unreadable, environment, first_turn,
+                     identity_block, scrub, stamps, write_prompt)
 
 MODULE = "launcher"
 #: The optional links a launch may use, as `Context.modules` names them.
@@ -41,7 +41,7 @@ LINKS = ("turns", "comms", "slots", "projects", "notes", "usage", "loadout")
 #: delivery, the Codex host). An older turns counts as absent.
 TURNS_INTERFACE = 2
 #: turns' Codex host, its own process.
-HOST = "moxi-turns-codex-host"
+HOST = presets.CODEX_HOST
 COMPOSERS = {"claude": claude, "codex": codex}
 
 
@@ -72,11 +72,8 @@ def moxi_command() -> str:
 
 
 def host_script() -> str | None:
-    """turns' Codex host, or None when it is not installed."""
-    try:
-        return str(paths.script(HOST))
-    except FileNotFoundError:
-        return None
+    """turns' Codex host, or None when it can't start here (`presets.codex_host`)."""
+    return presets.codex_host()
 
 
 def context(values: Mapping[str, object], *, request_id: str,
@@ -134,15 +131,25 @@ def context(values: Mapping[str, object], *, request_id: str,
 
 def launch_additions(*, cwd: str, env: Mapping[str, str],
                      session_id: str | None) -> Additions:
-    """turns' launch additions for a Claude launch without comms, asked once."""
+    """turns' launch additions for a Claude launch without comms, asked once. turns'
+    own error, or its `ValueError` for a harness or command it does not know, is a
+    `TurnsAdditions` refusal, so `preview` and the launch say it in one line."""
     api = first.turns_api(quiet=True)
     call = getattr(api, "launch_additions", None) if api is not None else None
     if call is None:
         raise RuntimeError("turns' launch additions can't be read: "
                            + ("turns is not reachable" if api is None
                               else "its API has no launch_additions"))
-    got = call("claude", cwd=cwd, env=dict(env), session_id=session_id,
-               commands=common.COMMANDS)
+    turns_error = getattr(api, "TurnsError", None)
+    caught = (ValueError,) + ((turns_error,) if isinstance(turns_error, type)
+                              and issubclass(turns_error, BaseException) else ())
+    try:
+        got = call("claude", cwd=cwd, env=dict(env), session_id=session_id,
+                   commands=common.COMMANDS)
+    except caught as error:
+        raise TurnsAdditions(None, f"turns could not give this launch its additions: "
+                                   f"{error}", "moxi doctor shows what is wrong with turns"
+                             ) from error
     return Additions(argv=tuple(str(word) for word in got.argv),
                      env={str(k): str(v) for k, v in dict(got.env).items()},
                      notes=tuple(str(note) for note in (got.notes or ())))
@@ -192,7 +199,8 @@ def _read(row: str, name: object) -> str | None:
 
 
 __all__ = ["COMPOSERS", "HOST", "LINKS", "TURNS_INTERFACE", "Additions", "Composition",
-           "Context", "NoBrief", "NotYet", "PromptFile", "TooLong", "Unreadable",
+           "Context", "NoBrief", "NotYet", "PromptFile", "TooLong", "TurnsAdditions",
+           "Unreadable",
            "build", "compose", "context", "environment", "first_turn", "host_script",
            "identity_block", "installed", "launch_additions", "moxi_command", "scrub", "stamps",
            "write_prompt"]

@@ -39,6 +39,7 @@ the project listing. Never from a listener.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -63,11 +64,15 @@ KINDS = ("seat", "project")
 HOME = "home"
 #: The rows (and the seat's `home`) that name where a session starts; a layer names one.
 PLACE = ("cwd", "project", "scratch", HOME)
-#: The launcher's share of Codex's start-context ceiling, in characters. A Codex seat
-#: whose identity block and instructions pass it is warned about at check.
-CODEX_START_CEILING = 9000
+#: The launcher's share of Codex's start context, in characters. A Codex seat whose
+#: identity block and instructions pass it is warned about at check. turns gives the
+#: modules that answer at a Codex session's start 9000 characters between them, an even
+#: share each, and comms answers there too, so the launcher counts on half.
+CODEX_START_CEILING = 4500
 #: turns' Codex host, which a Codex launch with turns runs under.
 CODEX_HOST = "moxi-turns-codex-host"
+#: The package turns' Codex host needs at its start, which turns' `codex` extra brings.
+CODEX_HOST_NEEDS = "websockets"
 #: The start postures every install takes; `with:<identity>` needs comms.
 POSTURES = ("operator", "go")
 WITH = "with:"
@@ -884,19 +889,32 @@ def mode_of(harness: str, target: str, *, identity: str | None = None,
     if not turns:
         return "interactive", False, []
     if not _host_installed():
-        return "interactive", False, [f"turns' Codex host ({CODEX_HOST}) is not "
-                                      "installed: launching codex without turns"]
+        return "interactive", False, [f"turns' Codex host ({CODEX_HOST}) can't start "
+                                      "here, as it is not installed or turns lacks its "
+                                      "codex extra: launching codex without turns"]
     return "host", True, []
 
 
-def _host_installed() -> bool:
+def codex_host() -> str | None:
+    """turns' Codex host, when it can start here, else None: its script is installed in
+    this environment, and the package it needs at its start is importable. Without turns'
+    `codex` extra the script is installed all the same, and the host fails at its start,
+    so the script alone does not count."""
+    # turns will offer a call that says whether its Codex host can start; this check
+    # gives way to that call once it is there.
     from moxi import paths
 
     try:
-        paths.script(CODEX_HOST)
+        script = paths.script(CODEX_HOST)
     except FileNotFoundError:
-        return False
-    return True
+        return None
+    if importlib.util.find_spec(CODEX_HOST_NEEDS) is None:
+        return None
+    return str(script)
+
+
+def _host_installed() -> bool:
+    return codex_host() is not None
 
 
 def _named(request, found: Presets) -> Preset | None:

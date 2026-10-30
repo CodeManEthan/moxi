@@ -159,6 +159,36 @@ def test_no_one_else_asks_turns_for_additions(turns, values, links):
     assert got.additions is None and turns.calls == []
 
 
+class FakeTurnsError(Exception):
+    """turns' own error, as the fake API carries it."""
+
+
+@pytest.mark.parametrize("error", [FakeTurnsError("the endpoint file can't be written"),
+                                   ValueError("unknown command 'exit'")])
+def test_a_failure_to_give_the_additions_is_a_turns_additions_refusal(
+        turns, monkeypatch, error):
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(turns, "launch_additions", fail)
+    monkeypatch.setattr(turns, "TurnsError", FakeTurnsError, raising=False)
+    with pytest.raises(common.TurnsAdditions) as raised:
+        compose.context({"harness": "claude", "cwd": "/work"}, request_id="r1",
+                        session_id=SID, modules=frozenset({"turns"}))
+    assert raised.value.code == "turns-additions" and raised.value.__cause__ is error
+    assert str(error) in raised.value.problem
+
+
+def test_another_error_from_the_additions_call_is_not_turned_into_a_refusal(turns, monkeypatch):
+    def fail(*args, **kwargs):
+        raise KeyError("a bug, not a refusal")
+
+    monkeypatch.setattr(turns, "launch_additions", fail)
+    with pytest.raises(KeyError):
+        compose.context({"harness": "claude", "cwd": "/work"}, request_id="r1",
+                        session_id=SID, modules=frozenset({"turns"}))
+
+
 def test_a_codex_context_finds_the_host_and_a_claude_one_does_not(monkeypatch):
     monkeypatch.setattr(compose, "host_script", lambda: "/env/bin/moxi-turns-codex-host")
     codex = compose.context({"harness": "codex", "cwd": "/work"}, request_id="r1",
@@ -181,9 +211,13 @@ def test_the_context_says_whether_the_agent_role_resolved(monkeypatch):
 
 
 def test_the_host_script_is_looked_for_in_this_environment():
+    import importlib.util
+
     try:
         expected = str(compose.paths.script(compose.HOST))
     except FileNotFoundError:
+        expected = None
+    if importlib.util.find_spec(presets.CODEX_HOST_NEEDS) is None:
         expected = None
     assert compose.host_script() == expected
 

@@ -10,6 +10,8 @@ same record whether the sender ran in its own process or in a detached deliverer
 
 The script's keys, each with its default:
 
+- `additions`: `ok`, `error` (raises `TurnsError`, as when turns can't write its own
+  file) or `value` (raises `ValueError`, as for a command turns does not know).
 - `ready`: `ok`, `timeout` (raises `TimeoutError`) or `error` (raises `TurnsError`).
 - `session_id`: the id the ready `Session` names (a Codex thread id), default the asked id.
 - `deliver`: `answered` (the endpoint answers with a delivery id), `unanswered` (the
@@ -98,6 +100,11 @@ class LaunchAdditions:
 def launch_additions(harness, *, cwd, env, session_id=None, commands=()):
     record("launch_additions", harness=harness, cwd=cwd, session_id=session_id,
            commands=list(commands))
+    additions = script().get("additions", "ok")
+    if additions == "error":
+        raise TurnsError("the endpoint file can't be written")
+    if additions == "value":
+        raise ValueError("unknown command 'exit'")
     return LaunchAdditions(harness, ADDITIONS, {"MOXI_TURNS_COMMANDS": ",".join(commands)},
                            {}, ())
 

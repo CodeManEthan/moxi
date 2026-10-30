@@ -2,7 +2,10 @@
 # moxi_launcher.catalog documents the fields. Modes: interactive (codex), exec (codex
 # exec) and host (turns' Codex host, whose flags comms' Codex wrapper also takes). The
 # host spellings are turns' host grammar, which is not diffed; `moxi doctor` checks the
-# others against the installed codex --help and codex exec --help.
+# others against the installed codex --help and codex exec --help. In host mode the
+# composer puts add_dir and trust_cwd in the host's options file as nested config, not as
+# the --option spelled here: the host's --option splits its key at every dot and keeps
+# quotes, so the launch's directory would not come through as one key.
 
 [model]
 type = "string"

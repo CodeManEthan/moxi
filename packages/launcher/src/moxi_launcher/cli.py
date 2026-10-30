@@ -154,7 +154,14 @@ def preview_json(composition) -> dict:
             "target": composition.target, "argv": list(composition.argv),
             "env": dict(composition.env), "first_turn": composition.first,
             "not_applied": list(composition.not_applied),
-            "warnings": list(composition.warnings), "values": dict(composition.values)}
+            "warnings": list(composition.warnings), "values": dict(composition.values),
+            "options_file": _options_json(composition.options_file)}
+
+
+def _options_json(options_file) -> dict | None:
+    if options_file is None:
+        return None
+    return {"path": options_file.path, "options": json.loads(options_file.text)}
 
 
 def _preview(args: argparse.Namespace, prog: str) -> int:
@@ -173,6 +180,10 @@ def _preview(args: argparse.Namespace, prog: str) -> int:
     print("env:")
     for name, value in composition.env.items():
         print(f"  {name}={shlex.quote(str(value))}")
+    if composition.options_file is not None:
+        print(f"options file, written at launch: {composition.options_file.path}")
+        for line in composition.options_file.text.splitlines():
+            print(f"  {line}")
     if composition.not_applied:
         print("not applied in this mode: " + ", ".join(composition.not_applied))
     if composition.first:

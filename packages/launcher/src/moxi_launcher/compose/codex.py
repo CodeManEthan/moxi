@@ -7,20 +7,20 @@ The mode follows from the target and the links:
 | turns absent | `interactive` (`codex`) | `exec` (`codex exec`) |
 | turns present | `host` (turns' Codex host) | `exec` |
 
-Until turns' host entry is installed, a launch with turns runs as one without it
-(`interactive`, the brief as the opening prompt) and says so in one warning line. A launch
-with a comms identity runs comms' Codex wrapper, which takes the host's flags; until comms
-takes per-launch settings there, it is refused with that reason, and a headless one is
-refused until comms takes its headless flags.
+Until turns' host can start (its entry installed, with turns' `codex` extra), a launch
+with turns runs as one without it (`interactive`, the brief as the opening prompt) and
+says so in one warning line. A launch with a comms identity runs comms' Codex wrapper,
+which takes the host's flags; until comms takes per-launch settings there, it is refused
+with that reason, and a headless one is refused until comms takes its headless flags.
 
     interactive  codex [<opening prompt>] -c check_for_update_on_startup=false -C <cwd>
                    [-m M] -s <S> -a <A> [other rows] [extra flags]
     exec         codex exec <prompt> -c check_for_update_on_startup=false -C <cwd>
                    [-m M] -s <S> [--skip-git-repo-check] [other rows] [extra flags]
     host         moxi-turns-codex-host --cwd <cwd> [--model M] --sandbox <S>
-                   [--option ...] [extra flags]
+                   [--option ...] [--options-file F] [extra flags]
     host, comms  moxi comms codex --name N [--scope S] [--director D ...] [--model M]
-                   --sandbox <S> [--option ...] [extra flags]
+                   --sandbox <S> [--option ...] [--options-file F] [extra flags]
 
 The host runs with its window, and applies turns' launch additions itself; the launcher
 passes none. A Codex session under the host gets its identity block and instructions from
@@ -28,25 +28,42 @@ the launcher's `start` listener, never on the argv. Without turns, or in `exec` 
 gets neither, and a seat with instructions says so in one warning line; the posture line
 then goes on the opening prompt's second line.
 
+In `host` mode `add_dir` and `trust_cwd` go in the host's options file, a JSON object
+the launch writes before its start (`<runs>/<request id>.options.json`), as nested
+`config` entries: `config.projects["<cwd>"].trust_level` and
+`config.sandbox_workspace_write.writable_roots`. The host's `--option` splits its key at
+every dot and keeps quotes, so a directory with a dot in it, or quoted, would not come
+through as one key.
+
 Extra flags in `host` mode go to the host's command line as given. The host's
 `--permissions PROFILE` is not among them: it sets the sandbox, as the posture row
 `sandbox` does, so passed on it is refused like that row, until a permission profile has
-a row of its own.
+a row of its own. For the same reason a config override keyed `sandbox_mode`, as a
+`config` item or a passed-on `--option`, is refused in `host` mode: the host names the
+sandbox only through `--sandbox`.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import json
+from collections.abc import Mapping, Sequence
 
 from .. import catalog
 from . import common
-from .common import Composition, Context, NoBrief, NotYet
+from .common import Composition, Context, NoBrief, NotYet, PromptFile
 
 HARNESS = "codex"
 #: The rows in the order they are composed, per mode.
 ORDER = ("update_check", "cwd", "model", "sandbox", "approval", "skip_git_check",
          "profile", "search", "add_dir", "config", "trust_cwd")
 HOST_ORDER = ("cwd", "model", "sandbox", "update_check", "add_dir", "config", "trust_cwd")
+#: The rows the host takes in its options file, not as an `--option`.
+OPTIONS_FILE_ROWS = ("add_dir", "trust_cwd")
+#: The host's spellings of a config override, and the config key that names the sandbox
+#: a second way, which the host refuses.
+HOST_OPTION = "--option"
+HOST_OPTIONS_FILE = "--options-file"
+SANDBOX_KEY = "sandbox_mode"
 
 
 def comms_identity(values: Mapping[str, object], ctx: Context) -> str | None:
@@ -79,16 +96,17 @@ def mode(values: Mapping[str, object], ctx: Context) -> tuple[str, tuple[str, ..
                          "yet", "leave the identity out")
         if "turns" not in ctx.modules or not ctx.host:
             raise NotYet("identity", "a Codex launch with an identity runs under turns' "
-                         "Codex host, which is not installed",
+                         "Codex host, which can't start here",
                          "install moxi-turns with its codex extra, or leave the identity "
                          "out")
         return "host", ()
     if "turns" in ctx.modules:
         if ctx.host:
             return "host", ()
-        return "interactive", ("turns' Codex host is not installed, so this Codex launch "
-                               "runs without turns: its brief is the opening prompt and "
-                               "the session is not reached by turns",)
+        return "interactive", ("turns' Codex host can't start here (it is not "
+                               "installed, or turns lacks its codex extra), so this Codex "
+                               "launch runs without turns: its brief is the opening "
+                               "prompt and the session is not reached by turns",)
     return "interactive", ()
 
 
@@ -123,12 +141,22 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     catalog.refuse_passthrough(HARNESS, extra)
     fit = catalog.fit(HARNESS, mode_, {**values, **owned}, ctx.chosen)
     not_applied = fit.not_applied
+    if host:
+        refuse_sandbox_key(fit.applied.get("config") or (), extra)
 
     rows = catalog.load(HARNESS).rows
     flags: list[str] = []
     for name in HOST_ORDER if host else ORDER:
-        if name in fit.applied and not (identity and name == "cwd"):
+        if name in fit.applied and not (identity and name == "cwd") and not (
+                host and name in OPTIONS_FILE_ROWS):
             flags += rows[name].tokens(mode_, fit.applied[name], cwd=cwd)
+    options_file = None
+    if host:
+        options = host_options(fit.applied, cwd)
+        if options is not None:
+            options_file = PromptFile(common.options_path(ctx.runs_dir, ctx.request_id),
+                                      json.dumps(options, ensure_ascii=False, indent=2))
+            flags += [HOST_OPTIONS_FILE, options_file.path]
 
     if identity:
         argv = [ctx.moxi, "comms", HARNESS, "--name", identity]
@@ -152,8 +180,38 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     return Composition(harness=HARNESS, mode=mode_,
                        target=str(values.get("target") or "terminal"), argv=tuple(argv),
                        env=env, values=recorded, prompt=prompt, first=first,
-                       brief=ctx.brief, not_applied=not_applied,
-                       warnings=tuple(warnings))
+                       brief=ctx.brief, options_file=options_file,
+                       not_applied=not_applied, warnings=tuple(warnings))
 
 
-__all__ = ["HARNESS", "HOST_ORDER", "ORDER", "comms_identity", "compose", "mode"]
+def host_options(applied: Mapping[str, object], cwd: str) -> dict | None:
+    """The host's options file for the rows it takes there (`OPTIONS_FILE_ROWS`), in the
+    shape its `--options-file` reads: `{"config": {...}}` of nested Codex config entries.
+    None when no such row is set."""
+    config: dict[str, object] = {}
+    if catalog.is_set(applied.get("trust_cwd")):
+        config["projects"] = {cwd: {"trust_level": "trusted"}}
+    if catalog.is_set(applied.get("add_dir")):
+        config["sandbox_workspace_write"] = {
+            "writable_roots": [str(item) for item in applied["add_dir"]]}
+    return {"config": config} if config else None
+
+
+def refuse_sandbox_key(config: Sequence[object], extra: Sequence[str]) -> None:
+    """Raise `catalog.PostureKey` when a `config` item or a passed-on `--option` sets
+    `sandbox_mode`, which turns' Codex host refuses: it takes the sandbox only from
+    `--sandbox`, the posture row's spelling."""
+    keys = [str(item) for item in config]
+    for i, token in enumerate(extra):
+        if token == HOST_OPTION and i + 1 < len(extra):
+            keys.append(extra[i + 1])
+        elif token.startswith(HOST_OPTION + "="):
+            keys.append(token[len(HOST_OPTION) + 1:])
+    for item in keys:
+        if item.partition("=")[0].strip() == SANDBOX_KEY:
+            raise catalog.PostureKey("sandbox", SANDBOX_KEY)
+
+
+__all__ = ["HARNESS", "HOST_OPTION", "HOST_OPTIONS_FILE", "HOST_ORDER", "OPTIONS_FILE_ROWS",
+           "ORDER", "SANDBOX_KEY", "comms_identity", "compose", "host_options", "mode",
+           "refuse_sandbox_key"]

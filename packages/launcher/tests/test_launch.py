@@ -4,6 +4,7 @@ the scratch directory and the run-log sweep."""
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import stat
@@ -22,7 +23,7 @@ import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness, run_child
 from moxi_launcher import api, catalog, first, presets, store, targets
 from moxi_launcher.api import LaunchRequest
-from moxi_launcher.compose import common
+from moxi_launcher.compose import Context, codex, common
 
 TESTS = Path(__file__).resolve().parent
 SID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
@@ -469,6 +470,33 @@ def test_a_busy_launch_log_exits_75_and_writes_nothing(work, harness, monkeypatc
     assert row() is None and harness.runs() == []
 
 
+@pytest.mark.parametrize("failure", ["error", "value"])
+def test_turns_failing_to_give_its_additions_is_a_refusal_before_the_row(
+        work, harness, turns, failure):
+    (turns.dir / "script.json").write_text(json.dumps({"additions": failure}))
+    for call in (api.preview, api.launch):
+        with pytest.raises(common.TurnsAdditions) as raised:
+            call(request(work, brief=BRIEF))
+        assert raised.value.code == "turns-additions"
+        assert api.exit_code(raised.value) == exits.REFUSED
+        assert "turns could not give this launch its additions" in raised.value.problem
+    assert nothing_written() and harness.runs() == []
+
+
+def test_a_host_launch_writes_its_options_file_before_the_start(work):
+    composition = codex.compose(
+        {"harness": "codex", "cwd": str(work), "trust_cwd": True},
+        Context(request_id="r1", runs_dir=str(targets.runs_dir()),
+                modules=frozenset({"turns"}), host="/env/bin/moxi-turns-codex-host"))
+    api._make_files(composition)
+    written = Path(common.options_path(targets.runs_dir(), "r1"))
+    assert composition.argv[-2:] == ("--options-file", str(written))
+    assert json.loads(written.read_text()) == {
+        "config": {"projects": {str(work): {"trust_level": "trusted"}}}}
+    if os.name != "nt":
+        assert stat.S_IMODE(written.stat().st_mode) == 0o600
+
+
 def test_a_passed_on_permissions_profile_is_refused_from_a_preset_too(work, harness):
     write_presets('[seat.coder]\nharness = "codex"\nextra_flags = ["--permissions", "p"]\n')
     with pytest.raises(catalog.Refused) as raised:
@@ -712,14 +740,15 @@ def running_row(conn, rid: str) -> None:
 def test_the_sweep_removes_old_run_files_and_keeps_the_rest():
     old_log = runs_file("old.log", age_days=31)
     old_prompt = runs_file("old.prompt.md", age_days=31)
+    old_options = runs_file("old.options.json", age_days=31)
     new_log = runs_file("new.log", age_days=29)
     other = runs_file("notes.txt", age_days=90)
     conn = store.connect()
     running_row(conn, "live")
     live = runs_file("live.log", age_days=31)
     swept = targets.sweep(conn, keep_days=30)
-    assert sorted(swept.removed) == ["old.log", "old.prompt.md"]
-    assert not old_log.exists() and not old_prompt.exists()
+    assert sorted(swept.removed) == ["old.log", "old.options.json", "old.prompt.md"]
+    assert not old_log.exists() and not old_prompt.exists() and not old_options.exists()
     assert new_log.exists() and other.exists() and live.exists()
 
 

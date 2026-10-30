@@ -186,6 +186,20 @@ class PostureFlag(Owned):
                          f"which this launcher does not have yet, so set {row} instead")
 
 
+class PostureKey(Owned):
+    """A config override whose key sets what a posture row sets, where the command it
+    goes to names that setting one way only (turns' Codex host takes the sandbox from
+    `--sandbox` alone)."""
+
+    def __init__(self, row: str, key: str):
+        self.token = key
+        Refused.__init__(self, row, f"the config key {key} sets what the posture row "
+                                    f"{row} sets, and turns' Codex host takes it only "
+                                    f"from --{row}",
+                         f"leave {key} out of the config, and set it with --{row}, so "
+                         "the posture check sees it")
+
+
 class NeedsModule(Refused):
     """A row whose `requires` module is not installed."""
 

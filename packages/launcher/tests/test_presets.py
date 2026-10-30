@@ -501,6 +501,35 @@ def test_the_mode(monkeypatch, harness, target, links, mode, turns):
     assert presets.mode_of(harness, target, available=only(*links)) == (mode, turns, [])
 
 
+@pytest.mark.parametrize("script, needs, found", [
+    (True, True, True), (False, True, False), (True, False, False)])
+def test_the_codex_host_counts_only_when_it_can_start(monkeypatch, tmp_path, script,
+                                                      needs, found):
+    import importlib.util
+
+    from moxi import paths
+
+    host = tmp_path / presets.CODEX_HOST
+
+    def script_of(name):
+        if name == presets.CODEX_HOST and script:
+            return host
+        raise FileNotFoundError(name)
+
+    real_find = importlib.util.find_spec
+    monkeypatch.setattr(paths, "script", script_of)
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: (
+        (real_find("json") if needs else None) if name == presets.CODEX_HOST_NEEDS
+        else real_find(name, *a)))
+    assert presets.codex_host() == (str(host) if found else None)
+    assert presets._host_installed() is found
+    from moxi_launcher import compose
+
+    assert compose.host_script() == presets.codex_host()
+    assert presets.mode_of("codex", "terminal", available=only("turns"))[0] == (
+        "host" if found else "interactive")
+
+
 def test_codex_with_turns_but_no_host_runs_without_turns(monkeypatch):
     monkeypatch.setattr(presets, "_host_installed", lambda: False)
     got = resolve(typed={"harness": "codex"}, available=only("turns"))
@@ -648,6 +677,12 @@ def test_roles_reads_the_core_harness_tables_folder(tmp_path):
                [{"name": "claude", "skills": "", "agents": str(folder)},
                 {"name": "codex", "skills": "", "agents": ""}], by="test")
     assert presets.roles("claude") == {"lead"}
+
+
+def test_the_codex_start_ceiling_is_the_launchers_half_of_turns_share():
+    # turns splits 9000 characters of Codex start context evenly between the modules
+    # that answer there, and comms answers there too.
+    assert presets.CODEX_START_CEILING == 4500
 
 
 def test_check_warns_when_a_codex_seat_passes_the_start_ceiling(tmp_path):
