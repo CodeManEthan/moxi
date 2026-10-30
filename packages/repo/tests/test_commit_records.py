@@ -14,7 +14,7 @@ import pytest
 import moxi_repo
 from moxi import doctor, files, paths
 from moxi_repo import _records, api, cli, committer
-from tests.conftest import POSIX_ONLY, git
+from tests.conftest import POSIX_ONLY, git, problems
 from tests.test_committer import AUTHOR, deny, make_remote, spec, write
 
 pytestmark = POSIX_ONLY
@@ -313,6 +313,10 @@ def test_the_sweep_clears_an_unsaved_specs_keys_once_its_state_file_is_gone(demo
     (cgd(repo) / "moxi-repo" / "state.json").unlink()
     [found] = _records.judge()
     assert found.key == key and "neither saved nor in the repo's state file" in found.reason
+    [row] = problems("ledger ")
+    assert (row.name, row.state, row.fix) == (
+        f"ledger {key}", "warn", f"moxi repo git-hooks refresh {repo}")
+    assert "neither saved nor in the repo's state file" in row.detail
     api.specs(repo)
     assert is_open(key) == set()
 
@@ -327,6 +331,7 @@ def test_the_sweep_clears_a_push_key_whose_saved_spec_stops_pushing_or_branch_go
     git(repo, "branch", "-q", "-D", "a")
     [found] = _records.judge()
     assert (found.key, found.reason) == (push_key(repo, "a"), "its branch is gone")
+    assert [r.name for r in problems("ledger ")] == [f"ledger {push_key(repo, 'a')}"]
     api.specs(repo)
     assert is_open(push_key(repo, "a")) == set() and is_open(push_key(repo)) == OPEN
     git(repo, "config", "--unset", "moxi-repo.spec.demo/snap.push")

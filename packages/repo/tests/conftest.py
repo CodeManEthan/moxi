@@ -401,3 +401,33 @@ def site(demo, tmp_path, monkeypatch):
     for mod in list(sys.modules):
         if mod.split(".")[0] in s.packages:
             del sys.modules[mod]
+
+
+# -- the doctor ----------------------------------------------------------------------------------
+
+def doctor(name: str | None = None) -> list:
+    """The rows `moxi doctor repo --json` prints, as `moxi.doctor.Row`s; with `name`, only
+    the rows whose name starts with it."""
+    import contextlib
+    import io
+
+    import moxi.cli
+    from moxi.doctor import Row
+
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = moxi.cli.main(["doctor", "repo", "--json"])
+    rows = [Row(**row) for row in json.loads(out.getvalue())]
+    assert code == (1 if any(r.state == "fail" for r in rows) else 0)
+    return [r for r in rows if name is None or r.name.startswith(name)]
+
+
+#: The rows repo's own checks give, and the core's records and setup version rows for
+#: repo. The core's other rows (`stray`, `store ...`) are about the test's environment.
+REPO_ROWS = ("git", "hooks ", "spec ", "uncovered ", "ledger ", "record ", "setup version")
+
+
+def problems(name: str | None = None) -> list:
+    """`doctor(name)`'s `warn` and `fail` rows of `REPO_ROWS`."""
+    return [r for r in doctor(name) if r.state in ("warn", "fail")
+            and r.name.startswith(REPO_ROWS)]

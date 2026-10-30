@@ -635,8 +635,14 @@ def _bre(text: str) -> str:
 
 
 def _last_commit(p: _Pass, author: tuple[str, str]) -> float | None:
+    return last_commit_time(p.where.top, author)
+
+
+def last_commit_time(top, author: tuple[str, str]) -> float | None:
+    """The commit time of `author`'s newest commit on any ref of the repo at `top`, or
+    None when there is none."""
     who = f"^{_bre(author[0])} <{_bre(author[1])}>$"
-    done = _g(p, "log", "--all", "-1", "--basic-regexp", f"--author={who}", "--format=%ct")
+    done = git(top, "log", "--all", "-1", "--basic-regexp", f"--author={who}", "--format=%ct")
     try:
         return float(done.stdout.strip()) if done.returncode == 0 else None
     except ValueError:

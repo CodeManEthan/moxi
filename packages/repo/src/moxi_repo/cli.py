@@ -208,7 +208,9 @@ def _with_keys(repos: list[dict], *, add_projects: bool = False) -> list[dict]:
     return repos
 
 
-def _print_report(report: api.Report) -> int:
+def print_report(report: api.Report) -> int:
+    """Print a verb's report: its lines, the chain lines needed, then its problems on
+    stderr. Returns 1 when there were problems, else 0."""
     for line in report.lines:
         print(line)
     for root, event, hook, line, present in report.chain:
@@ -282,23 +284,23 @@ def _available(args) -> int:
 
 
 def _add(args) -> int:
-    return _print_report(api.add(args.path, args.pieces, mode=args.mode, sets=args.sets))
+    return print_report(api.add(args.path, args.pieces, mode=args.mode, sets=args.sets))
 
 
 def _remove(args) -> int:
-    return _print_report(api.remove(args.path, args.pieces))
+    return print_report(api.remove(args.path, args.pieces))
 
 
 def _enable(args) -> int:
-    return _print_report(api.enable(args.path, args.piece))
+    return print_report(api.enable(args.path, args.piece))
 
 
 def _disable(args) -> int:
-    return _print_report(api.disable(args.path, args.piece))
+    return print_report(api.disable(args.path, args.piece))
 
 
 def _refresh(args) -> int:
-    return _print_report(api.refresh(args.path))
+    return print_report(api.refresh(args.path))
 
 
 def _commit(args) -> int:
@@ -341,7 +343,7 @@ def _commit(args) -> int:
 
 def _specs(args) -> int:
     if args.args[:1] == ["remove"]:
-        return _print_report(api.forget_spec(args.args[1], args.args[2]))
+        return print_report(api.forget_spec(args.args[1], args.args[2]))
     repos = _with_keys(api.specs(args.args[0] if args.args else None))
     if args.json:
         print(json.dumps(repos, indent=2, sort_keys=True))

@@ -8,10 +8,11 @@ import shutil
 import time
 from pathlib import Path
 
+import moxi.cli
 from moxi import doctor, paths
 
 from moxi_repo import _records, api, gitconf, run
-from tests.conftest import POSIX_ONLY, change, commit, git
+from tests.conftest import POSIX_ONLY, change, commit, doctor as doctor_rows, git, problems
 
 pytestmark = POSIX_ONLY
 
@@ -109,8 +110,14 @@ def test_a_hand_edit_of_enabled_is_cleared_by_the_sweep(demo):
         key(repo, "demo/lint"), "clear", "its piece is disabled")
     # judge reads only: the doctor's row stands until a verb sweeps.
     assert left(repo, "demo/lint") == OPEN
+    [row] = problems("ledger ")
+    assert (row.state, row.name, row.fix) == (
+        "warn", f"ledger {key(repo, 'demo/lint')}", f"moxi repo git-hooks refresh {repo}")
+    assert row.detail == "its piece is disabled; the next sweep clears its record"
+    assert left(repo, "demo/lint") == OPEN
     api.add(repo)
     assert left(repo, "demo/lint") == set()
+    assert problems() == []
 
 
 def test_a_hand_removed_section_is_cleared_by_the_sweep(demo):
@@ -143,6 +150,8 @@ def test_a_flag_write_that_meets_a_held_config_lock(demo):
     assert left(repo, "demo/watch") == {"record", "ledger"}
     [found] = _records.judge()
     assert (found.action, found.reason) == ("flag", "its piece has no recorded flag")
+    [row] = problems("ledger ")
+    assert row.state == "warn" and "no recorded flag" in row.detail
     lock.unlink()
     # The repo's next committer pass sets the flag, from its record part's sweep.
     import moxi_repo
@@ -165,8 +174,10 @@ def test_a_cleared_record_then_a_good_run_leaves_nothing(demo):
     demo.act(lint="raise")
     change(repo)
     commit(repo)
-    # What `moxi doctor --clear repo <key>` does.
-    doctor.clear("repo", key(repo, "demo/lint"))
+    [row] = [r for r in doctor_rows() if r.name == f"record {key(repo, 'demo/lint')}"]
+    assert row.state == "fail" and row.fix.endswith(
+        f"then: moxi doctor --clear repo {key(repo, 'demo/lint')}")
+    assert moxi.cli.main(["doctor", "--clear", "repo", key(repo, "demo/lint")]) == 0
     assert left(repo, "demo/lint") == {"ledger", "flag"}
     demo.act(lint="ok")
     change(repo, text="2\n")
@@ -228,6 +239,13 @@ def test_a_deleted_repo_shows_in_judge_then_the_sweep_clears_it(demo):
     [found] = _records.judge()
     assert (found.key, found.action, found.reason) == (gone, "clear", "its repo is gone")
     assert gone in doctor_records()
+    # The doctor's warn row, until the sweep or `remove` on the old path.
+    [row] = problems("ledger ")
+    assert (row.name, row.state, row.fix) == (
+        f"ledger {gone}", "warn", f"moxi repo git-hooks remove {repo}")
+    assert row.detail == f"its repo {repo} is gone; the next sweep clears its record"
+    assert any(r.name == f"hooks {repo}" and "no longer a git work tree" in r.detail
+               for r in problems())
     swept = _records.sweep()
     assert [f.key for f in swept] == [gone]
     assert set(_records.ledger()) == {kept} and set(doctor_records()) == {kept}

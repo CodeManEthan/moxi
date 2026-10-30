@@ -17,7 +17,10 @@ INTERNAL_ENV = {
 SETTINGS = "settings.toml"
 # The schema can't tell a regular expression that won't compile; this loader can.
 CONFIG_CHECK = "moxi_repo.settings:check_text"
-SETUP = None
+# On every `moxi install repo`: refresh every indexed repo, so an install that moved the
+# environment rewrites every entry, shim and launcher.
+SETUP = "moxi_repo.install:setup"
+DOCTOR = "moxi_repo.checks:rows"
 SEGMENT = None
 STORES = {
     "repos": {"root": "state", "path": "repos.json", "kind": "file", "private": True,

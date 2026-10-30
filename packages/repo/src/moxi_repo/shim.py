@@ -29,6 +29,8 @@ SHIM_MARK = "# moxi-repo shim ("
 _SHIM_LINE = re.compile(r"# moxi-repo shim \(([a-z-]+)\)\.")
 LAUNCHER_MARK = "# moxi-repo launcher."
 LOCAL = ".local"
+#: The name a hook manager that runs the hook it moved aside gives it: `<event>.legacy`.
+LEGACY = ".legacy"
 #: The launcher's place under the common git dir.
 LAUNCHER = ("moxi-repo", "hook")
 

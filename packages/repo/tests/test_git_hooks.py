@@ -9,7 +9,7 @@ import pytest
 
 import moxi_repo
 from moxi_repo import _records, api, gitconf, pieces
-from tests.conftest import POSIX_ONLY, change, commit, git, head
+from tests.conftest import POSIX_ONLY, change, commit, doctor, git, head, problems
 
 pytestmark = POSIX_ONLY
 
@@ -212,6 +212,9 @@ def test_a_renamed_shim_still_runs_local_and_refresh_rewrites_it_in_place(demo):
     assert demo.ids() == ["demo/gate", "existing"]
     assert any("moved repo's shim to pre-commit.legacy" in p
                for p in api.status(repo)[0]["problems"])
+    # A manager that keeps `.legacy` runs it, so the doctor says so and finds nothing wrong.
+    [row] = [r for r in doctor(f"hooks {repo}") if "pre-commit.legacy" in r.detail]
+    assert row.state == "ok" and problems() == []
     demo.mp.setattr(gitconf, "interpreter", lambda: str(demo.hook_env["python"]) + "-new")
     api.refresh(repo)
     assert "-new" in (hooks / "pre-commit.legacy").read_text()
@@ -228,9 +231,21 @@ def test_shim_mode_outside_the_git_dir_writes_a_launcher_and_a_chain_line(demo):
     lines = {event: line for _, event, _, line, present in report.chain if not present}
     assert set(lines) == {"pre-commit", "pre-push"}
     assert api.status(repo)[0]["events"]["pre-commit"]["chain_line"] == "needed"
+    needed = {r.detail.split(":")[0]: r for r in problems(f"hooks {repo}")}
+    assert set(needed) == {"pre-commit", "pre-push"}
+    assert needed["pre-commit"].state == "warn"
+    assert needed["pre-commit"].detail.startswith("pre-commit: chain line needed in ")
+    assert needed["pre-commit"].fix.endswith(lines["pre-commit"])
     (tracked / "pre-commit").write_text(f"#!/bin/sh\n{lines['pre-commit']}\n")
     (tracked / "pre-commit").chmod(0o755)
     assert api.status(repo)[0]["events"]["pre-commit"]["chain_line"] == "present"
+    (tracked / "pre-push").write_text(f"#!/bin/sh\n{lines['pre-push']}\n")
+    (tracked / "pre-push").chmod(0o755)
+    # The doctor reads both lines present.
+    assert problems() == []
+    [row] = doctor(f"hooks {repo}")
+    assert row.state == "ok" and "pre-commit: 1 piece through launcher, chain line present" \
+        in row.detail
     demo.act(gate="refuse")
     change(repo, ".githooks/pre-commit", "")
     assert commit(repo).returncode != 0
@@ -244,6 +259,13 @@ def test_shim_mode_outside_the_git_dir_writes_a_launcher_and_a_chain_line(demo):
     assert commit(clone).returncode == 0
     (repo / ".git" / "moxi-repo" / "hook").unlink()
     assert any("launcher" in p for p in api.status(repo)[0]["problems"])
+    # With the chain line in place the pieces now skip quietly: a fail row each.
+    rows = problems(f"hooks {repo}")
+    assert {r.state for r in rows} == {"fail"} and len(rows) == 2
+    assert all("launcher" in r.detail and r.fix == f"moxi repo git-hooks refresh {repo}"
+               for r in rows)
+    api.refresh(repo)
+    assert problems() == []
 
 
 def test_refresh_after_a_git_upgrade_moves_shims_to_config_entries(demo):
@@ -436,9 +458,14 @@ def test_a_shim_another_tool_replaced_shows_in_the_listing(demo):
     [listed] = api.status(repo)
     assert any("repo's shim is missing or another tool replaced it" in p
                for p in listed["problems"])
+    [row] = problems()
+    assert (row.state, row.name, row.fix) == (
+        "fail", f"hooks {repo}", f"moxi repo git-hooks refresh {repo}")
+    assert "repo's shim is missing or another tool replaced it" in row.detail
     # refresh puts the shim back, and the other tool's git hook runs after the pieces.
     api.refresh(repo)
     assert api.status(repo)[0]["problems"] == []
+    assert problems() == []
     assert (hook.parent / "pre-commit.local").read_text() == "#!/bin/sh\nexit 0\n"
 
 
