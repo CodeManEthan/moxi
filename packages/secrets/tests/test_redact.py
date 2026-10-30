@@ -302,6 +302,23 @@ def test_a_path_only_hit_redacts_to_one_placeholder(engine_name, fuzz_names, set
         assert redact(out, sets, path=P12) == out
 
 
+def test_a_placeholder_naming_what_secrets_cannot_emit_is_ordinary_text(engine_name,
+                                                                         names_config):
+    # Only a placeholder secrets could have written is opaque: a secret wrapped as one
+    # (a token, a private name, a known value) is still reported and redacted.
+    names_config(words=["alexa quill"])
+    token = corpus.github(corpus.rng(43))
+    value = "kv-" + corpus.chars(corpus.rng(44), 12)
+    for inside, sets, known, rule in ((token, ("credentials",), (), "github-pat"),
+                                      ("Alexa Quill", ("private-names",), (), "private-name"),
+                                      (value, ("credentials",), (value,), "known")):
+        text = f"a {ph(inside)} b"
+        hits = scan(text, sets, known=known)
+        assert [(h.rule, text[h.start:h.end]) for h in hits] == [(rule, inside)], rule
+        out = redact(text, sets, known=known)
+        assert inside not in out and out == f"a [REDACTED:{ph(rule)}] b", rule
+
+
 def test_placeholder_only_text_comes_back_unchanged(engine_name, fuzz_names, count_scans):
     every = [ph(rule) for rule in sorted(scan_mod.emittable())]
     for text in every + ["".join(every)]:
