@@ -37,8 +37,8 @@ def test_every_name_is_built_from_moxi_names():
     assert release.DISTRIBUTION == names.distribution("comms") == "moxi-comms"
     assert release.DISPLAY_NAME == "Moxi comms"
     assert release.UNIT == "moxi-comms-daemon.service"
-    assert release.REPO_URL == f"https://github.com/{names.repo('comms')}" == \
-        "https://github.com/moxihq/comms"
+    assert release.REPO_URL == f"https://github.com/{names.ORG}/{names.HARNESS}" == \
+        "https://github.com/moxihq/moxi"
 
 
 def _code_strings(path: Path) -> list[str]:
@@ -72,9 +72,8 @@ def test_pyproject_spells_it_the_same():
     assert project["entry-points"]["moxi.modules"] == {"comms": "moxi_comms.module"}
     # The code lives in the one Moxi repository; issues stay at the module's own tracker.
     urls = project["urls"]
-    one_repo = f"https://github.com/{names.ORG}/{names.HARNESS}"
-    assert urls["Homepage"] == urls["Repository"] == one_repo
-    assert urls["Issues"] == f"{release.REPO_URL}/issues"
+    assert urls["Homepage"] == urls["Repository"] == release.REPO_URL
+    assert urls["Issues"] == f"https://github.com/{names.repo('comms')}/issues"
 
 
 def test_the_public_identity_is_one_everywhere():

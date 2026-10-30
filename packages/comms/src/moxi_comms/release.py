@@ -25,7 +25,8 @@ DISPLAY_NAME = f"{names.HARNESS.capitalize()} {MODULE}"
 #: The systemd user unit `moxi comms service install` writes.
 UNIT = f"{DISTRIBUTION}-daemon.service"
 
-#: The public repository: the org and the module's plain name.
-REPO_URL = f"https://github.com/{names.repo(MODULE)}"
+#: The repository that holds the code, the unit's Documentation=: the one Moxi repository,
+#: every module's. Issues stay at the module's own (`moxi.names.repo`).
+REPO_URL = f"https://github.com/{names.ORG}/{names.HARNESS}"
 
 __all__ = ["MODULE", "DISTRIBUTION", "DISPLAY_NAME", "UNIT", "REPO_URL"]

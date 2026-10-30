@@ -54,21 +54,21 @@ distribution the module needs that the environment lacks, in dependency order: `
 PyPI and the install fails. For comms:
 
 ```sh
-uv tool install git+https://github.com/moxihq/moxi
+uv tool install git+https://github.com/moxihq/moxi#subdirectory=packages/moxi
 moxi install comms --none \
-  --from 'moxi-turns @ git+https://github.com/moxihq/turns' \
-  --from 'moxi-comms @ git+https://github.com/moxihq/comms'
+  --from 'moxi-turns @ git+https://github.com/moxihq/moxi#subdirectory=packages/turns' \
+  --from 'moxi-comms @ git+https://github.com/moxihq/moxi#subdirectory=packages/comms'
 ```
 
 comms with its `cache` extra needs cache and sessions too:
 
 ```sh
-uv tool install git+https://github.com/moxihq/moxi
+uv tool install git+https://github.com/moxihq/moxi#subdirectory=packages/moxi
 moxi install comms --with cache \
-  --from 'moxi-sessions @ git+https://github.com/moxihq/sessions' \
-  --from 'moxi-turns @ git+https://github.com/moxihq/turns' \
-  --from 'moxi-cache @ git+https://github.com/moxihq/cache' \
-  --from 'moxi-comms @ git+https://github.com/moxihq/comms'
+  --from 'moxi-sessions @ git+https://github.com/moxihq/moxi#subdirectory=packages/sessions' \
+  --from 'moxi-turns @ git+https://github.com/moxihq/moxi#subdirectory=packages/turns' \
+  --from 'moxi-cache @ git+https://github.com/moxihq/moxi#subdirectory=packages/cache' \
+  --from 'moxi-comms @ git+https://github.com/moxihq/moxi#subdirectory=packages/comms'
 ```
 
 ## Troubleshooting

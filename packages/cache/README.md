@@ -44,10 +44,10 @@ Before the modules are on PyPI, install the core from git and give `moxi install
 source for sessions and for cache, in that order:
 
 ```sh
-uv tool install git+https://github.com/moxihq/moxi
+uv tool install git+https://github.com/moxihq/moxi#subdirectory=packages/moxi
 moxi install cache \
-  --from 'moxi-sessions @ git+https://github.com/moxihq/sessions' \
-  --from 'moxi-cache @ git+https://github.com/moxihq/cache'
+  --from 'moxi-sessions @ git+https://github.com/moxihq/moxi#subdirectory=packages/sessions' \
+  --from 'moxi-cache @ git+https://github.com/moxihq/moxi#subdirectory=packages/cache'
 ```
 
 The front door's README, at [moxihq/moxi](https://github.com/moxihq/moxi), covers the

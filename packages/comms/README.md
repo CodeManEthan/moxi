@@ -48,7 +48,7 @@ moxi comms service install
 Until the package is on PyPI, install from the repository:
 
 ```sh
-uv tool install git+https://github.com/moxihq/comms
+uv tool install git+https://github.com/moxihq/moxi#subdirectory=packages/comms
 ```
 
 `pipx install` works the same way. `uv tool install` fetches Python 3.12 if the machine

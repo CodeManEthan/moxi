@@ -33,8 +33,8 @@ launcher can instead load the plugins for one launch with `--plugin-dir`, using
 Install the core from git, then name turns' repo with `--from`:
 
 ```sh
-uv tool install git+https://github.com/moxihq/moxi
-moxi install turns --from 'moxi-turns @ git+https://github.com/moxihq/turns'
+uv tool install git+https://github.com/moxihq/moxi#subdirectory=packages/moxi
+moxi install turns --from 'moxi-turns @ git+https://github.com/moxihq/moxi#subdirectory=packages/turns'
 ```
 
 ## Requirements
