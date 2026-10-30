@@ -18,6 +18,15 @@ seconds apart) and an `ordinal`. Methods that add a line return its 1-based line
 `turn` returns the turn id, `tool_call` the call id and `request` the response id.
 `offset(n)` is the byte offset where line `n` starts once written.
 
+A spawn writes, in the parent, the `spawn_agent` call, the `SubAgentActivity` items that
+name the child thread and the call's output, and returns the child's own rollout, its line
+1 naming the parent as Codex 0.153.0 writes it:
+
+    child = r.spawn("0190c000-0000-7000-8000-0000000c0de9", "explore")
+    child.turn()
+    grandchild = child.spawn("0190c000-0000-7000-8000-0000000c0dea", "look")
+    r.write(); child.write(); grandchild.write()
+
 `write_imports` writes the imports file Codex keeps beside its sessions root.
 """
 
@@ -51,6 +60,28 @@ IMPORT_TURN_PREFIX = "external-import-turn-"
 
 #: The versions that write no `token_usage_record`.
 LEGACY_VERSIONS = ("0.145", "0.146")
+
+#: The agent path of a thread the user started; a spawned task's is `/root/<task>`.
+ROOT_PATH = "/root"
+
+#: The nickname a builder's spawned threads take when none is given.
+NICKNAME = "Hopper"
+
+
+def spawn_meta(parent_thread: str, *, depth: int = 1, agent_path: str = "/root/task",
+               nickname: str | None = NICKNAME, role: str | None = None) -> dict:
+    """Line 1's payload keys for a thread `parent_thread` spawned, as Codex 0.153.0 writes
+    them, for `CodexRollout(meta_fields=...)`: the parent at `session_id`,
+    `forked_from_id`, `parent_thread_id` and `source.subagent.thread_spawn`."""
+    return {"session_id": parent_thread, "forked_from_id": parent_thread,
+            "parent_thread_id": parent_thread,
+            "source": {"subagent": {"thread_spawn": {
+                "parent_thread_id": parent_thread, "depth": depth,
+                "agent_path": agent_path, "agent_nickname": nickname,
+                "agent_role": role}}},
+            "thread_source": "subagent", "agent_nickname": nickname,
+            "agent_path": agent_path, "subagent_history_start_ordinal": 1,
+            "multi_agent_version": "v2"}
 
 
 def token_usage(*, input: int = 1000, cached: int = 800, cache_write: int = 0,
@@ -140,6 +171,9 @@ class CodexRollout:
             / f"rollout-{moment.strftime('%Y-%m-%dT%H-%M-%S')}-{thread_id}.jsonl")
         self.lines: list[str] = []
         self.turn_id: str | None = None
+        #: The thread's agent path and spawn depth; `spawn` sets a child's.
+        self.agent_path = ROOT_PATH
+        self.depth = 0
         self.info: dict | None = None
         self._count = 0
         self._written = 0
@@ -342,6 +376,49 @@ class CodexRollout:
         if kind == "context_compacted":
             return self.event("context_compacted")
         return self.item(kind, id=f"cmp_{self._serial():04d}", encrypted_content="gAAAA")
+
+    def spawn_item(self, thread_id: str, kind: str = "started", *,
+                   item_id: str | None = None, agent_path: str | None = None,
+                   writer: str | None = None) -> int:
+        """An `item_completed` event whose item is a `SubAgentActivity` of `kind`
+        naming child thread `thread_id`. `item_id` is the item's `id` (on `started`, the
+        spawn call's id); `writer` the thread the event names, by default this one."""
+        item_id = item_id or f"subagent-{kind}-{self._serial():04d}"
+        stamp = int(self.clock * 1000)
+        return self.event("item_completed", thread_id=writer or self.thread_id,
+                          turn_id=self.turn_id,
+                          item={"type": "SubAgentActivity", "id": item_id, "kind": kind,
+                                "agent_thread_id": thread_id,
+                                "agent_path": agent_path or f"{self.agent_path}/task"},
+                          started_at_ms=stamp, completed_at_ms=stamp)
+
+    def spawn(self, thread_id: str, task: str = "task", *, call_id: str | None = None,
+              completed: bool = True, nickname: str | None = NICKNAME,
+              role: str | None = None, **child: Any) -> CodexRollout:
+        """Spawn child thread `thread_id` for `task`, as Codex 0.153.0 writes a spawn: the
+        `spawn_agent` call, the `started` item (its id the call id), the call's output and,
+        with `completed`, the `completed` item. Returns the child's rollout, not yet
+        written, dated from this one's clock under the same root; `child` passes on to
+        `CodexRollout`."""
+        call_id = call_id or f"call_spawn_{self._serial():04d}"
+        path = f"{self.agent_path}/{task}"
+        self.item("function_call", id=f"fc_{call_id}", name="spawn_agent",
+                  namespace="collaboration", call_id=call_id,
+                  arguments=json.dumps({"task_name": task, "fork_turns": "none",
+                                        "message": "gAAAA"}))
+        self.spawn_item(thread_id, "started", item_id=call_id, agent_path=path)
+        self.item("function_call_output", id=f"fco_{call_id}", call_id=call_id,
+                  output=json.dumps({"task_name": path}))
+        if completed:
+            self.spawn_item(thread_id, "completed", agent_path=path)
+        fields = spawn_meta(self.thread_id, depth=self.depth + 1, agent_path=path,
+                            nickname=nickname, role=role)
+        fields.update(child.pop("meta_fields", None) or {})
+        rollout = CodexRollout(self.root, thread_id=thread_id, start=self.clock,
+                               meta_fields=fields, **child)
+        rollout.agent_path = path
+        rollout.depth = self.depth + 1
+        return rollout
 
     # -- writing -------------------------------------------------------------------------
 

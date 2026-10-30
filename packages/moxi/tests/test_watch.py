@@ -461,6 +461,45 @@ def test_a_descendant_moved_away_after_a_scan_is_still_killed(tmp_path):
             os.kill(orphan, signal.SIGKILL)
 
 
+PARENT_OF_ONE = """
+    import subprocess, sys, time
+    grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    print(grandchild.pid, flush=True)
+    time.sleep(120)
+"""
+
+
+def test_a_descendant_no_scan_saw_is_killed_though_the_child_dies_at_once(tmp_path,
+                                                                           monkeypatch):
+    # The lifeline closes before the watchdog's next scan, and the child dies of the
+    # SIGTERM before the watchdog can look again: its descendant must still be found.
+    child = subprocess.Popen([PY, script(tmp_path, "parent.py", PARENT_OF_ONE)],
+                             stdout=subprocess.PIPE)
+    grandchild = 0
+    try:
+        grandchild = int(child.stdout.readline())
+        watch = _watch.Watch(child.pid, proc.identity(child.pid).started)
+        assert watch.watched == {}
+        send = watch._send
+
+        def send_and_let_the_child_die(signum):
+            send(signum)
+            if signum == signal.SIGTERM:
+                assert wait_for(lambda: watch.child() is None)
+
+        monkeypatch.setattr(watch, "_send", send_and_let_the_child_die)
+        watch.stop(grace=0.2)
+        assert child.wait(timeout=30) == -signal.SIGTERM
+        assert wait_for(lambda: gone(grandchild))
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+        child.stdout.close()
+        if grandchild and not gone(grandchild):
+            os.kill(grandchild, signal.SIGKILL)
+
+
 def test_the_watchdog_kills_what_starts_while_it_waits_out_the_grace(tmp_path):
     forker = """
         import os, signal, sys, time

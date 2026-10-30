@@ -82,3 +82,41 @@ def test_the_imports_file_sits_beside_the_sessions_root(sessions):
     assert path == CodexRollout(sessions).imports_path
     data = json.loads(path.read_text())
     assert [rec["imported_thread_id"] for rec in data["records"]] == ["t-1"]
+
+
+CHILD = "0190c000-0000-7000-8000-0000000c0de3"
+GRANDCHILD = "0190c000-0000-7000-8000-0000000c0de5"
+
+
+def test_a_spawn_writes_the_call_its_items_and_the_childs_line_one(sessions):
+    r = CodexRollout(sessions)
+    r.turn()
+    child = r.spawn(CHILD, "explore", call_id="call_x")
+    lines = [json.loads(text) for text in r.lines]
+    kinds = [(line["type"], line["payload"]["type"]) for line in lines[-4:]]
+    assert kinds == [("response_item", "function_call"), ("event_msg", "item_completed"),
+                     ("response_item", "function_call_output"),
+                     ("event_msg", "item_completed")]
+    assert lines[-4]["payload"]["name"] == "spawn_agent"
+    started, done = lines[-3]["payload"], lines[-1]["payload"]
+    assert started["thread_id"] == r.thread_id
+    assert started["item"] == {"type": "SubAgentActivity", "id": "call_x",
+                               "kind": "started", "agent_thread_id": CHILD,
+                               "agent_path": "/root/explore"}
+    assert done["item"]["kind"] == "completed" and done["item"]["agent_thread_id"] == CHILD
+    meta = json.loads(child.lines[0])["payload"]
+    assert meta["id"] == CHILD and meta["session_id"] == r.thread_id
+    assert meta["parent_thread_id"] == meta["forked_from_id"] == r.thread_id
+    assert meta["source"]["subagent"]["thread_spawn"] == {
+        "parent_thread_id": r.thread_id, "depth": 1, "agent_path": "/root/explore",
+        "agent_nickname": "Hopper", "agent_role": None}
+    assert meta["thread_source"] == "subagent" and meta["multi_agent_version"] == "v2"
+    assert child.path.parent == r.path.parent
+
+
+def test_a_childs_spawn_is_one_deeper(sessions):
+    r = CodexRollout(sessions)
+    grand = r.spawn(CHILD, "explore").spawn(GRANDCHILD, "look")
+    spawn = json.loads(grand.lines[0])["payload"]["source"]["subagent"]["thread_spawn"]
+    assert (spawn["parent_thread_id"], spawn["depth"], spawn["agent_path"]) == (
+        CHILD, 2, "/root/explore/look")
