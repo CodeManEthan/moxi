@@ -98,7 +98,8 @@ class Client:
 
     def hello(self, versions: tuple[int, int], capabilities: Iterable[str] = ()) -> Agreed:
         """Offer `versions` (lo, hi) and `capabilities`, and return what the server
-        agreed. Raises `RpcError` -32001 when no version is common, and `NotRpc` when
+        agreed: the version, and the server's own capabilities as it answered them.
+        Raises `RpcError` -32001 when no version is common, and `NotRpc` when
         the server doesn't speak JSON-RPC."""
         ours = Hello(versions, capabilities)
         answer = self.call(_wire.HELLO, _wire.hello_params(ours), timeout=self._timeout)

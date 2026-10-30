@@ -385,9 +385,9 @@ def test_the_agreed_hello_is_on_the_connection(serving):
     srv = serving(handler, hello=ipc.Hello((1, 4), {"a", "b"}))
     raw = Raw(srv.address)
     raw.send(req(0, "rpc.hello", {"versions": [2, 9], "capabilities": ["b", "c"]}))
-    assert raw.json()["result"] == {"version": 4, "capabilities": ["b"]}
+    assert raw.json()["result"] == {"version": 4, "capabilities": ["a", "b"]}
     raw.send(req(1, "go"))
-    assert raw.json()["result"] == [4, ["b"]]
+    assert raw.json()["result"] == [4, ["b", "c"]]
 
 
 # -- the line cap ---------------------------------------------------------------------------

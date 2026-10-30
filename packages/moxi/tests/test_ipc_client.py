@@ -167,8 +167,25 @@ def test_hello_agrees_a_version(serving):
     srv = serving(handler, hello=ipc.Hello((1, 3), {"watch", "steer"}))
     with ipc.connect(srv.address) as client:
         agreed = client.hello((2, 5), ["watch", "other"])
-        assert agreed == ipc.Agreed(3, {"watch"}) and client.agreed == agreed
+        assert agreed == ipc.Agreed(3, {"watch", "steer"}) and client.agreed == agreed
         assert client.call("echo", [1]) == [1]
+
+
+def test_hello_tells_a_client_that_offers_nothing_the_servers_capabilities(serving):
+    seen = []
+
+    async def keep(conn, method, params):
+        seen.append(conn.agreed)
+        return None
+
+    srv = serving(keep, hello=ipc.Hello((2, 2), {"deliver", "steer"}))
+    with ipc.connect(srv.address) as client:
+        assert client.hello((2, 2)) == ipc.Agreed(2, {"deliver", "steer"})
+        client.call("go")
+    with ipc.connect(srv.address) as client:
+        client.hello((1, 2), ["guards"])
+        client.call("go")
+    assert seen == [ipc.Agreed(2), ipc.Agreed(2, {"guards"})]
 
 
 def test_hello_refused_raises_rpc_error(serving):

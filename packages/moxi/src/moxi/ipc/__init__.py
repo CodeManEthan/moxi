@@ -15,10 +15,13 @@ from outside the reserved -32768..-32000, and owns its method and capability nam
 
 The hello: the method `rpc.hello`. The client offers
 `{"versions": [lo, hi], "capabilities": [...]}`; the server answers
-`{"version": v, "capabilities": [...]}`, `v` the highest version in both ranges and the
-capabilities those both ends name, or refuses with -32001 and data
-`{"client": [lo, hi], "server": [lo, hi]}`. A server given `hello=` answers any other
-first request -32002 and closes the connection. `hello(offer, ours)` is that rule.
+`{"version": v, "capabilities": [...]}`, `v` the highest version in both ranges and
+`capabilities` the server's own set whatever the client offered, or refuses with -32001
+and data `{"client": [lo, hi], "server": [lo, hi]}`. The two sets are separate names, each end's
+own, and nothing intersects them: each side's `Agreed.capabilities` is the other end's
+set, so the client's holds the server's answer and the server's `conn.agreed` holds what
+the client offered. A server given `hello=` answers any other first request -32002 and
+closes the connection. `hello(offer, ours)` is that rule.
 
 Importing this module costs little: the server and the client, and what they import, load
 on first use.

@@ -463,7 +463,9 @@ async def serve(address: str, handler: Handler, *, hello: Hello | None = None,
     dropped. One connection's messages reach the handler one at a time, in order.
 
     `hello`: the connection's first request must be `rpc.hello` (anything else is
-    answered -32002 and the connection closes); `conn.agreed` holds what it settled.
+    answered -32002 and the connection closes). The server answers with the agreed
+    version and `hello.capabilities`, whatever the client offered; `conn.agreed` holds
+    the version and the capabilities the client offered.
     `max_line`: the longest line read, in bytes without the newline; a longer one is
     answered -32600 and closes the connection. `write_deadline`: seconds one write may
     take before the peer is dropped. `queue`: frames a connection may have waiting to
