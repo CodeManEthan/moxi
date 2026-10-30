@@ -32,6 +32,7 @@ harness. On Windows it returns when the harness exits, with the harness's exit c
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 import uuid
@@ -99,7 +100,8 @@ class LaunchResult:
     """What one launch did, as its row in the launch log says.
 
     `state` and `reason` are the row's; `exit_code` is what the command exits with. `pid`
-    is the process started. `duplicate` is set when the request id was already in the
+    is the process started, and `slot` the tmux slot it runs in for a slot launch.
+    `duplicate` is set when the request id was already in the
     launch log, so nothing was started and this is the stored row's outcome. `warnings`
     are one line each, `line` one line for the caller. `outcome` is the first turn's, when
     the launch sent it itself."""
@@ -118,6 +120,7 @@ class LaunchResult:
     warnings: tuple[str, ...] = ()
     line: str = ""
     outcome: first.Outcome | None = None
+    slot: str | None = None
 
 
 def launch(request, *, environ: Mapping[str, str] | None = None,
@@ -148,8 +151,9 @@ def launch(request, *, environ: Mapping[str, str] | None = None,
             harness=composition.harness, target=composition.target,
             cwd=str(values["cwd"]), values=values, argv=composition.argv,
             env=composition.env, posture=str(resolved.posture or ""),
-            session_id=session_id, preset_kind=resolved.preset_kind,
-            preset_name=resolved.preset_name, project_key=resolved.project_key,
+            session_id=session_id, slot=_slot_named(values),
+            preset_kind=resolved.preset_kind, preset_name=resolved.preset_name,
+            project_key=resolved.project_key,
             identity=resolved.identity, scope=resolved.scope, brief=composition.brief,
             handoff_path=str(values.get("handoff") or "") or None,
             handoff_key=handoffs.key_of_row(SimpleNamespace(
@@ -159,8 +163,7 @@ def launch(request, *, environ: Mapping[str, str] | None = None,
             return _stored(inserted.row)
 
         rid = ids.request_id
-        warnings = tuple(resolved.warnings) + tuple(
-            w for w in composition.warnings if w not in resolved.warnings)
+        warnings = _warnings(resolved, composition)
         try:
             _make_files(composition)
         except OSError as error:
@@ -185,7 +188,8 @@ def check(request, *, environ: Mapping[str, str] | None = None) -> list[Refusal]
     """The refusals `launch` would meet in the live state, without composing or writing
     anything: the resolver's own (an unknown preset or project, projects unreadable or
     busy, a posture off its default), a directory that does not exist, a comms name that
-    is held or not free, and the target's (a slot launch, not built yet)."""
+    is held or not free, and the target's (for a slot launch: slots not installed or not
+    supported here, or a named slot that is held, occupied or missing)."""
     caller = dict(os.environ if environ is None else environ)
     try:
         resolved = _resolve(request, environ)
@@ -196,8 +200,12 @@ def check(request, *, environ: Mapping[str, str] | None = None) -> list[Refusal]
 
 def preview(request, *, environ: Mapping[str, str] | None = None) -> Composition:
     """The composition `request` would launch: argv, the stamped environment, target and
-    mode. Starts nothing and writes nothing of the launcher's."""
-    return compose.build(request, _resolve(request, environ), environ=environ)
+    mode. Starts nothing and writes nothing of the launcher's. Its `warnings` are the
+    ones `launch` gives: the resolver's, then the composer's."""
+    resolved = _resolve(request, environ)
+    composition = compose.build(request, resolved, environ=environ)
+    return dataclasses.replace(composition,
+                               warnings=_warnings(resolved, composition))
 
 
 def exit_code(error: BaseException) -> int:
@@ -259,6 +267,18 @@ def _with_ids(request, harness: str) -> SimpleNamespace:
     return SimpleNamespace(**given, request_id=request_id, session_id=session_id)
 
 
+def _warnings(resolved, composition: Composition) -> tuple[str, ...]:
+    """A launch's warning lines: the resolver's, then the composer's not already given."""
+    given = tuple(getattr(resolved, "warnings", ()) or ())
+    return given + tuple(w for w in composition.warnings if w not in given)
+
+
+def _slot_named(values: Mapping[str, object]) -> str | None:
+    """The slot a launch names, as the row records it before the start, or None."""
+    named = targets.named_slot(values)
+    return None if named is None else str(named)
+
+
 def _actor(request, caller: Mapping[str, str]) -> str:
     return getattr(request, "actor", None) or first.actor(caller)
 
@@ -280,7 +300,7 @@ def _result(composition: Composition, request_id: str, session_id: str | None,
         mode=composition.mode, reason=started.reason, pid=started.pid,
         argv=composition.argv, warnings=warnings,
         line=started.line or f"launch {request_id} {started.state}",
-        outcome=started.outcome)
+        outcome=started.outcome, slot=started.slot)
 
 
 def _stored(row: store.LaunchRow) -> LaunchResult:
@@ -289,7 +309,7 @@ def _stored(row: store.LaunchRow) -> LaunchResult:
         request_id=row.request_id, harness=row.harness, target=row.target,
         state=row.state, exit_code=targets.exit_of(row), session_id=row.session_id,
         mode=row.values.get("mode"), reason=row.reason, pid=row.pid, duplicate=True,
-        argv=tuple(row.argv),
+        argv=tuple(row.argv), slot=row.slot,
         line=f"launch {row.request_id} was already made; it is {row.state}{reason}, and "
              "nothing was started again")
 

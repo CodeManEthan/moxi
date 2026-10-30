@@ -410,7 +410,6 @@ def write_presets(text: str) -> None:
     (lambda w: request(w, permission_mode="bypassPermissions"), 3, presets.OffPosture),
     (lambda w: request(w / "missing"), 3, api.NoDirectory),
     (lambda w: request(w, target="headless"), 3, common.NoBrief),
-    (lambda w: request(w, target="slot"), 3, targets.NotBuilt),
     (lambda w: request(w, brief="x" * (store.CAP + 1)), 3, store.TooLarge),
     (lambda w: request(w, brief_file=str(w / "no-brief.md")), 3, common.Unreadable),
     (lambda w: request(w, harness="codex", sid=None, target="headless", brief="b",
@@ -562,9 +561,6 @@ def test_check_lists_nothing_for_a_launch_that_can_go(work, harness):
 def test_check_lists_the_live_refusals_and_writes_nothing(work):
     [missing] = api.check(request(work / "gone"))
     assert isinstance(missing, api.NoDirectory) and missing.exit_code == exits.REFUSED
-    [slot] = api.check(request(work, target="slot"))
-    assert isinstance(slot, targets.NotBuilt) and "not built" in slot.problem
-    assert "terminal" in slot.hint and "headless" in slot.hint
     assert nothing_written()
 
 

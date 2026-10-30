@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -261,6 +262,9 @@ LAUNCHES = [
     ("codex headless, scratch", {"harness": "codex", "target": "headless", "brief": "b",
                                  "scratch": True}, False),
     ("claude under comms", {"identity": "planner", "brief": "b"}, True),
+    ("claude in a slot", {"target": "slot", "brief": "b"}, False),
+    ("claude in a slot, with turns", {"target": "slot", "brief": "b", "slot": "2"}, True),
+    ("codex in a slot", {"harness": "codex", "target": "slot", "brief": "b"}, False),
 ]
 
 
@@ -269,8 +273,9 @@ LAUNCHES = [
 @pytest.mark.parametrize("name, typed, with_turns", LAUNCHES, ids=[c[0] for c in LAUNCHES])
 def test_preview_argv_is_the_argv_launch_hands_the_target(tmp_path, monkeypatch, name,
                                                           typed, with_turns):
-    """For each target, with a fake harness on PATH, turns faked on its seam
-    (`MOXI_LAUNCHER_TURNS`) and comms' wrapper stood in for, the argv the launch hands
+    """For each target, with a fake harness on PATH, turns and slots faked on their seams
+    (`MOXI_LAUNCHER_TURNS`, `MOXI_LAUNCHER_SLOTS`; the fake slots runs the command it is
+    handed) and comms' wrapper stood in for, the argv the launch hands
     the target equals `preview(request).argv` for the same request, its request id and
     session id given. The launch runs in a process of its own, as `moxi launcher run`
     does, since a launch in this terminal becomes the harness."""
@@ -282,6 +287,13 @@ def test_preview_argv_is_the_argv_launch_hands_the_target(tmp_path, monkeypatch,
         fake.mkdir()
         monkeypatch.setenv(first.TURNS_SEAM, "launcher_fake_turns")
         monkeypatch.setenv("LAUNCHER_FAKE_TURNS", str(fake))
+    if typed.get("target") == "slot":
+        slots = tmp_path / "fake-slots"
+        slots.mkdir()
+        (slots / "script.json").write_text(json.dumps(
+            {"run": True, "slots": {"2": {"state": "free", "launchable": True}}}))
+        monkeypatch.setenv("MOXI_LAUNCHER_SLOTS", "launcher_fake_slots")
+        monkeypatch.setenv("LAUNCHER_FAKE_SLOTS", str(slots))
     work = tmp_path / "work"
     work.mkdir()
     sid = None if typed.get("harness") == "codex" else SID
@@ -293,7 +305,7 @@ def test_preview_argv_is_the_argv_launch_hands_the_target(tmp_path, monkeypatch,
     handed = [Path(run["argv"][0]).name, *run["argv"][1:]]
     assert handed == seen["preview"]
     assert run["env"]["MOXI_LAUNCHER_REQUEST"] == "r1"
-    if with_turns and typed.get("target") != "headless":
+    if with_turns and typed.get("target") not in ("headless", "slot"):
         # The detached deliverer sends the first turn; let it finish inside the test.
         log = first.run_log("r1")
         wait_for(lambda: log.exists() and log.read_text().strip(), timeout=60)
@@ -365,3 +377,23 @@ def test_preview_of_a_scratch_codex_launch_names_the_scratch_folder():
     got = api.preview(request)
     assert str(common.scratch_dir("r9")) in got.argv
     assert not common.scratch_dir("r9").exists()
+
+
+def test_preview_gives_the_resolvers_warnings_as_launch_does(tmp_path, monkeypatch):
+    """An identity without comms is dropped with a warning from the resolver; `preview`
+    carries it, as `launch` does, so the CLI shows it before anything runs."""
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "comms" and real(name))
+    rig = Harness.on_path(tmp_path, monkeypatch)
+    work = tmp_path / "work"
+    work.mkdir()
+    req = api.LaunchRequest(typed={"identity": "planner", "target": "headless",
+                                   "brief": "b"}, cwd=str(work), request_id="r1",
+                            session_id=SID, actor="ann")
+    line = "identity planner is ignored: comms is not installed"
+    shown = api.preview(req)
+    assert line in shown.warnings
+    monkeypatch.setattr("moxi_launcher.targets._spawn", lambda argv, **kw: 99)
+    launched = api.launch(req)
+    assert shown.warnings == launched.warnings
+    assert rig.runs() == []

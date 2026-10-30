@@ -1043,9 +1043,9 @@ def describe(row_: Row, available: Callable[[str], bool] | None = None) -> dict:
 def _available(available: Callable[[str], bool] | None) -> Callable[[str], bool]:
     if available is not None:
         return available
-    from moxi import modules
+    from . import slots
 
-    return modules.available
+    return slots.links
 
 
 def _str_list(value) -> bool:

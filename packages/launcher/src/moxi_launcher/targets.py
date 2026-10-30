@@ -21,7 +21,18 @@ prompt, started detached and left: a session of its own (a detached process grou
 Windows), stdin closed, its output appended to the run log `STATE/runs/<request id>.log`.
 The pid and its start time are recorded, and the launch returns at once.
 
-**A tmux slot** (`slot`) is refused as not built yet.
+**A tmux slot** (`slot`; Linux, macOS and WSL2, with slots installed). A launch that names
+a slot (a number or a name) goes only there, and `check` refuses it, naming who has it,
+when slots says it is not launchable; one that names none takes the lowest launchable slot
+or a new one. slots claims the slot and opens the window in one step (`start`), with the
+launch's environment on that command only. The row records the slot, the pane and the
+pane's pid (the harness's, since slots' trampoline execs it), and `started` once slots says
+the command started (or could not confirm it either way), or `failed` with slots' exec line.
+A slot taken since `check` ends the row `failed` with slots' reason, naming the holder
+(exit 3); slots' lock held too long ends it `try-again` (exit 75). Nothing retries. The
+launch then watches for the startup screens it is set to answer (`startup`), and sends the
+first turn itself before it returns. Native Windows, and an install without slots, are
+refused with a hint naming the other two targets.
 
 **The sweep.** A launch's run files (its run log and its system prompt file) are kept for
 `runs.keep_days` and then removed, and a run log past `LOG_CAP` is cut from the front to
@@ -31,6 +42,7 @@ still running is left for a later sweep, since its process is still writing to i
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import sqlite3
@@ -44,10 +56,13 @@ from typing import Any
 
 from moxi import exit as exits
 from moxi import files, proc
+from moxi.config import ConfigError
 from moxi.paths import Layout
 
-from . import catalog, first, store
+from . import catalog, first, slots, startup, store
 from .compose import Composition
+
+log = logging.getLogger("moxi.launcher.targets")
 
 MODULE = "launcher"
 #: The folder under the launcher's state root that holds every launch's run files.
@@ -64,8 +79,8 @@ NO_DELIVERER = "no-deliverer"
 #: Reasons a failed row exits 1 with; any other failed reason is a refusal (3), except
 #: `TRY_AGAIN` (75).
 FAILED_ERRORS = frozenset({SPAWN_FAILED, NO_DELIVERER, first.NO_READY,
-                           first.HANDOFF_UNREADABLE, first.NO_TURNS, "exited",
-                           "screen-mismatch"})
+                           first.HANDOFF_UNREADABLE, first.NO_TURNS, startup.EXITED,
+                           startup.SCREEN_MISMATCH})
 TRY_AGAIN = "try-again"
 
 WINDOWS = sys.platform == "win32"
@@ -91,10 +106,53 @@ class NoCommand(catalog.Refused):
                          f"install {command}, or put it on PATH")
 
 
-class NotBuilt(catalog.Refused):
-    """A target this launcher does not start sessions in yet."""
+#: The hint every refusal of the slot target itself gives.
+OTHER_TARGETS = "launch with --target terminal or --target headless"
 
-    code = "not-built"
+
+class NoSlots(catalog.Refused):
+    """A slot launch without slots installed. Nothing is written."""
+
+    code = "no-slots"
+
+    def __init__(self):
+        super().__init__("target", "the slot target needs slots, which is not installed",
+                         f"install moxi-slots, or {OTHER_TARGETS}")
+
+
+class SlotsUnsupported(catalog.Refused):
+    """A slot launch where tmux slots can't run: native Windows, or what slots'
+    `supported()` says. Nothing is written."""
+
+    code = "unsupported"
+
+    def __init__(self, why: str):
+        super().__init__("target", f"tmux slots can't run here: {why}", OTHER_TARGETS)
+
+
+class SlotTaken(catalog.Refused):
+    """A named slot that is not launchable (held, occupied or missing), or one that is
+    not there; `holder` names who has it, when someone does. Nothing is written."""
+
+    code = "slot-taken"
+
+    def __init__(self, slot: object, problem: str, hint: str, holder: str | None = None):
+        self.slot, self.holder = slot, holder
+        super().__init__("slot", problem, hint)
+
+
+class SlotsBusy(catalog.Refused):
+    """slots' lock, or its server, did not answer in its bound. Nothing is written."""
+
+    code = "try-again"
+    exit_code = exits.TEMPFAIL
+
+
+class SlotsFailed(catalog.Refused):
+    """slots could not be asked about the slot. Nothing is written."""
+
+    code = "slots-failed"
+    exit_code = exits.ERROR
 
 
 # -- the shapes -------------------------------------------------------------------------
@@ -241,26 +299,138 @@ class Headless(Target):
                             f"to {output}")
 
 
-class Unbuilt(Target):
-    """A target this launcher does not start sessions in yet: every launch is refused,
-    before anything is written."""
+class Slot(Target):
+    """A tmux slot, through slots: the launch claims a slot and starts there, the
+    startup screens it is set to answer are answered, and the first turn is sent before
+    the launch returns."""
 
-    def __init__(self, name: str, problem: str, hint: str):
-        self.name, self.problem, self.hint = name, problem, hint
+    name = "slot"
 
     def check(self, resolved: Any) -> list[catalog.Refused]:
-        return [NotBuilt("target", self.problem, self.hint)]
+        if WINDOWS:
+            return [SlotsUnsupported("native Windows has no tmux; slots runs on Linux, "
+                                     "macOS and WSL2")]
+        api = slots.api()
+        if api is None:
+            return [NoSlots()]
+        support = api.supported()
+        if not getattr(support, "ok", False):
+            return [SlotsUnsupported(str(getattr(support, "why", "") or "slots says so"))]
+        named = named_slot(getattr(resolved, "values", {}) or {})
+        if named is None:
+            return []
+        try:
+            found = api.show(named)
+        except _errors(api, "TryAgain") as error:
+            return [SlotsBusy("slot", f"slots did not answer about slot {named}: {error}",
+                              "try again in a moment")]
+        except Exception as error:  # noqa: BLE001  (any failure to ask is a refusal)
+            return [SlotsFailed("slot", f"slots could not show slot {named}: {error}",
+                                "moxi slots list shows the slots")]
+        if found is None:
+            return [SlotTaken(named, f"there is no slot {named}",
+                              f"make it with moxi slots create, or leave out the slot to "
+                              "take the lowest free one")]
+        if getattr(found, "launchable", False):
+            return []
+        state = str(getattr(found, "state", "") or "not launchable")
+        holder = _slot_holder(found)
+        by = f" by {holder}" if holder else ""
+        if state == "missing":
+            return [SlotTaken(named, f"slot {named} is missing: its tmux session is gone",
+                              f"recreate it with moxi slots create {named}")]
+        if getattr(found, "hold", None) is not None:
+            state = "held"
+        return [SlotTaken(named, f"slot {named} is {state}{by}",
+                          "name another slot, or leave out the slot to take the lowest "
+                          "free one", holder)]
+
+    def prepare(self, composition: Composition, env: Mapping[str, str]) -> str:
+        # slots' trampoline finds the command on the child's PATH; a harness that is not
+        # there is refused now, before anything is written.
+        find(composition.argv[0], env)
+        return composition.argv[0]
 
     def start(self, launch: Launch) -> Started:
-        raise NotBuilt("target", self.problem, self.hint)
+        conn, rid = launch.conn, launch.request_id
+        api = slots.api()
+        if api is None:
+            return fail(conn, rid, SPAWN_FAILED, "slots can't be loaded")
+        named = named_slot(launch.composition.values)
+        row = store.get(conn, rid)
+        meta = {"request_id": rid, "session_id": row.session_id if row else None}
+        try:
+            placed = api.start(named, list(launch.argv), env=dict(launch.env),
+                               cwd=launch.cwd, label=f"launcher:{rid}", meta=meta,
+                               create=named is None)
+        except _errors(api, "Refused") as refused:
+            reason = str(getattr(refused, "reason", "") or "refused")
+            holder = _holder_words(getattr(refused, "holder", None))
+            words = str(getattr(refused, "words", "") or refused)
+            if holder and holder not in words:
+                words += f" ({reason} by {holder})"
+            return fail(conn, rid, reason, words)
+        except _errors(api, "TryAgain") as error:
+            return fail(conn, rid, TRY_AGAIN, f"slots' lock was not had in time: {error}")
+        except Exception as error:  # noqa: BLE001  (tmux failed; the row says so)
+            return fail(conn, rid, SPAWN_FAILED,
+                        f"{launch.argv[0]} could not be started in a slot: {error}")
+
+        slot = getattr(placed, "slot", named)
+        pane_id = getattr(placed, "pane_id", None)
+        where = {"slot": str(slot), "pane_id": pane_id}
+        verdict = str(getattr(placed, "exec", "") or "")
+        if verdict not in ("started", "unconfirmed"):
+            line = getattr(placed, "exec_line", None) or verdict or "no verdict"
+            status = getattr(placed, "dead_status", None)
+            store.set_facts(conn, rid, **where)
+            return fail(conn, rid, SPAWN_FAILED,
+                        f"{launch.argv[0]} did not start in slot {slot}: {line}"
+                        + (f" (pane status {status})" if status is not None else ""))
+        pid = _pane_pid(api, slot)
+        ident = proc.identity(pid) if pid else None
+        store.set_state(conn, rid, "started", leaving=("spawning",), pid=pid,
+                        pid_started=ident.started if ident is not None else None, **where)
+        here = f"launch {rid} started in slot {slot}"
+        if verdict == "unconfirmed":
+            here += " (slots could not confirm that the command started)"
+
+        turns = first.turns_api(quiet=True)
+        try:
+            enabled = startup.screens(launch.composition.harness, api)
+        except ConfigError as error:
+            log.warning("startup screens of %s not watched: %s", rid, error)
+            enabled = []
+        if enabled:
+            watched = startup.watch(conn, rid, slot, enabled, api=api,
+                                    ready=_ready(turns, launch, row, pid))
+            if watched.failed:
+                done = fail(conn, rid, watched.reason or startup.EXITED, watched.why,
+                            capture=watched.capture)
+                capture = f"; the screen is saved at {watched.capture}" \
+                    if watched.capture else ""
+                return Started(done.state, done.exit_code, done.reason, pid, pane_id,
+                               str(slot), done.line + capture)
+
+        if not launch.first_owed:
+            return Started("started", exits.OK, pid=pid, pane_id=pane_id, slot=str(slot),
+                           line=here)
+        outcome = first.send(conn, rid, pid=pid, turns=turns)
+        line = f"{here}; {outcome.line()}"
+        if outcome.outcome == "no-ready" and launch.composition.harness == "codex":
+            line += (f". Codex may be waiting on its folder-trust prompt: attach to slot "
+                     f"{slot} to answer it, or launch with trust_cwd on")
+        now = store.get(conn, rid)
+        return Started(now.state if now else "started", outcome.exit_code,
+                       now.reason if now else outcome.reason, pid, pane_id, str(slot),
+                       line, outcome)
 
 
 #: The targets by the `target` row's values.
 TARGETS: dict[str, Target] = {
     "terminal": Terminal(),
     "headless": Headless(),
-    "slot": Unbuilt("slot", "the slot target is not built in this launcher yet",
-                    "launch with --target terminal or --target headless"),
+    "slot": Slot(),
 }
 
 
@@ -296,11 +466,14 @@ def runs_dir(env: Mapping[str, str] | None = None) -> Path:
 def exit_of(row: store.LaunchRow) -> int:
     """The code a launch exits with for its stored row: 0 unless it ended `failed`; then
     1 for a start or boot that failed, 75 for a lock held too long, and 3 for a refusal."""
-    if row.state != "failed":
-        return exits.OK
-    if row.reason == TRY_AGAIN:
+    return exits.OK if row.state != "failed" else failed_exit(row.reason)
+
+
+def failed_exit(reason: str | None) -> int:
+    """The code a launch that ended `failed` with `reason` exits with."""
+    if reason == TRY_AGAIN:
         return exits.TEMPFAIL
-    return exits.ERROR if row.reason in FAILED_ERRORS else exits.REFUSED
+    return exits.ERROR if reason in FAILED_ERRORS else exits.REFUSED
 
 
 def _started(conn: sqlite3.Connection, request_id: str, pid: int) -> None:
@@ -309,15 +482,92 @@ def _started(conn: sqlite3.Connection, request_id: str, pid: int) -> None:
                     pid_started=ident.started if ident is not None else None)
 
 
-def fail(conn: sqlite3.Connection, request_id: str, reason: str, why: str) -> Started:
-    """End a launch's row `failed` with `reason` from before or just after its start, and
-    record why as a `start-failed` event."""
+def fail(conn: sqlite3.Connection, request_id: str, reason: str, why: str,
+         **more: Any) -> Started:
+    """End a launch's row `failed` with `reason` from before or just after its start (or
+    before its session is ready), and record why, with anything in `more`, as a
+    `start-failed` event. The exit code is the reason's (`failed_exit`)."""
     store.set_state(conn, request_id, "failed", reason=reason,
-                    leaving=("spawning", "started"))
-    store.add_event(conn, "start-failed", {"reason": reason, "why": why},
-                    request_id=request_id)
-    return Started("failed", exits.ERROR, reason=reason,
+                    leaving=("spawning", "started", "ready"))
+    detail = {"reason": reason, "why": why,
+              **{k: v for k, v in more.items() if v is not None}}
+    store.add_event(conn, "start-failed", detail, request_id=request_id)
+    return Started("failed", failed_exit(reason), reason=reason,
                    line=f"launch {request_id} failed: {why}")
+
+
+def named_slot(values: Mapping[str, object]) -> int | str | None:
+    """The slot a launch's values name, a number or a name, or None when they name none."""
+    value = values.get("slot")
+    if value is None or not str(value).strip():
+        return None
+    text = str(value).strip()
+    return int(text) if text.isdigit() else text
+
+
+def _errors(api: Any, *names: str) -> tuple[type[BaseException], ...]:
+    """The exception classes slots' API declares under `names`."""
+    found = (getattr(api, name, None) for name in names)
+    return tuple(c for c in found if isinstance(c, type) and issubclass(c, BaseException))
+
+
+def _slot_holder(found: Any) -> str | None:
+    """Who has a slot that `show` read: the hold's holder and until, else the last
+    launch's label and meta."""
+    hold = getattr(found, "hold", None)
+    if hold is not None:
+        return _holder_words(hold)
+    return _holder_words(getattr(found, "last", None))
+
+
+def _holder_words(holder: Any) -> str | None:
+    """`holder` (a hold, a last launch, a mapping of either, or words) in a few words."""
+    if holder is None:
+        return None
+    if isinstance(holder, str):
+        return holder or None
+    get = holder.get if isinstance(holder, Mapping) else \
+        (lambda name, default=None: getattr(holder, name, default))
+    if get("holder"):
+        until = get("until")
+        when = (f" until {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(until))}"
+                if isinstance(until, (int, float)) else f" until {until}" if until else "")
+        return f"{get('holder')}{when}"
+    label, meta = get("label"), get("meta")
+    if label or meta:
+        words = str(label or "")
+        if isinstance(meta, Mapping) and meta:
+            facts = ", ".join(f"{k} {v}" for k, v in meta.items() if v is not None)
+            words = f"{words} ({facts})" if words else facts
+        return words or None
+    return str(holder)
+
+
+def _pane_pid(api: Any, slot: Any) -> int | None:
+    """The pid of slot `slot`'s run pane, as slots shows it, or None."""
+    try:
+        found = api.show(slot)
+    except Exception:  # noqa: BLE001  (the pid is a fact the row can do without)
+        return None
+    pid = getattr(found, "pane_pid", None) if found is not None else None
+    return pid if isinstance(pid, int) and pid > 0 else None
+
+
+def _ready(turns: Any, launch: Launch, row: store.LaunchRow | None,
+           pid: int | None):
+    """How the screens loop asks turns whether the session is ready, or None without
+    turns: by the minted session id for Claude, by the pane's pid for Codex's host."""
+    if turns is None:
+        return None
+    if launch.composition.harness == "codex":
+        if launch.composition.mode != "host" or not pid:
+            return None
+        where = {"pid": pid}
+    else:
+        if row is None or not row.session_id:
+            return None
+        where = {"session_id": row.session_id}
+    return lambda timeout: turns.wait_ready(**where, timeout=timeout)
 
 
 def _start_deliverer(launch: Launch, pid: int) -> Started | None:
@@ -412,7 +662,9 @@ def _cut(path: Path, size: int, cap: int) -> None:
     files.atomic_write(path, head + tail, mode=0o600)
 
 
-__all__ = ["CUT_LINE", "FAILED_ERRORS", "LOG_CAP", "NO_DELIVERER", "RUNS", "RUN_FILES",
-           "SPAWN_FAILED", "TARGETS", "TRY_AGAIN", "Headless", "Launch", "NoCommand",
-           "NotBuilt", "Started", "Swept", "Target", "Terminal", "Unbuilt", "exit_of",
-           "fail", "find", "get", "run_log", "runs_dir", "sweep"]
+__all__ = ["CUT_LINE", "FAILED_ERRORS", "LOG_CAP", "NO_DELIVERER", "OTHER_TARGETS", "RUNS",
+           "RUN_FILES", "SPAWN_FAILED", "TARGETS", "TRY_AGAIN", "Headless", "Launch",
+           "NoCommand", "NoSlots", "Slot", "SlotTaken", "SlotsBusy",
+           "SlotsFailed", "SlotsUnsupported", "Started", "Swept", "Target", "Terminal",
+           "exit_of", "fail", "failed_exit", "find", "get", "named_slot",
+           "run_log", "runs_dir", "sweep"]

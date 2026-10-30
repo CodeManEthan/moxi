@@ -1,0 +1,741 @@
+"""The slot target and the startup screens: a slot launch through a fake slots, with a slot
+named and with none, every refusal before and after the row, the first turn sent before the
+launch returns, the screens loop's outcomes, and the install questions."""
+
+from __future__ import annotations
+
+import io
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from moxi import config, modules
+from moxi import exit as exits
+from moxi.paths import Layout
+
+import launcher_fake_slots as fake
+import launcher_fake_turns as fake_turns
+from launcher_fake_harness import Harness
+from moxi_launcher import api, compose, first, module, slots, startup, store, targets
+from moxi_launcher.api import LaunchRequest
+
+TESTS = Path(__file__).resolve().parent
+SID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
+BRIEF = "Read the design and start the build."
+
+
+@pytest.fixture
+def harness(tmp_path, monkeypatch) -> Harness:
+    return Harness.on_path(tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def work(tmp_path) -> Path:
+    path = tmp_path / "work"
+    path.mkdir()
+    return path
+
+
+@pytest.fixture
+def rig(tmp_path, monkeypatch):
+    """The fake slots behind the launcher's seam; `rig.plan(...)` scripts it."""
+    directory = tmp_path / "fake-slots"
+    directory.mkdir()
+    monkeypatch.setenv(slots.SEAM, "launcher_fake_slots")
+    monkeypatch.setenv(fake.DIR, str(directory))
+    monkeypatch.syspath_prepend(str(TESTS))
+    fake.reset()
+    script = directory / "script.json"
+
+    def plan(**keys):
+        now = json.loads(script.read_text()) if script.exists() else {}
+        script.write_text(json.dumps({**now, **keys}))
+
+    return SimpleNamespace(dir=directory, plan=plan,
+                           calls=lambda name=None: fake.calls(directory, name))
+
+
+@pytest.fixture
+def turns(tmp_path, monkeypatch):
+    directory = tmp_path / "fake-turns"
+    directory.mkdir()
+    monkeypatch.setenv(first.TURNS_SEAM, "launcher_fake_turns")
+    monkeypatch.setenv(fake_turns.DIR, str(directory))
+    monkeypatch.syspath_prepend(str(TESTS))
+    script = directory / "script.json"
+    return SimpleNamespace(
+        dir=directory, plan=lambda **keys: script.write_text(json.dumps(keys)),
+        calls=lambda name=None: [c for c in fake_turns.calls(directory)
+                                 if name is None or c["call"] == name])
+
+
+@pytest.fixture
+def no_slots(monkeypatch):
+    """slots not installed, whatever this environment holds."""
+    monkeypatch.delenv(slots.SEAM, raising=False)
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "slots" and real(name))
+
+
+def settings_file(text: str) -> None:
+    path = Layout("launcher").config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def screens_on(wait_s: int = 2, *, trust: bool = True, dev: bool = False) -> None:
+    settings_file(f"[startup]\nwait_s = {wait_s}\ntrust_dialog = {str(trust).lower()}\n"
+                  f"dev_channels_dialog = {str(dev).lower()}\n")
+
+
+def request(work: Path, *, rid: str = "r1", sid: str | None = SID,
+            **typed) -> LaunchRequest:
+    return LaunchRequest(typed={"target": "slot", **typed}, cwd=str(work), request_id=rid,
+                         session_id=sid, actor="ann")
+
+
+def row(rid: str = "r1") -> store.LaunchRow | None:
+    if not store.path().exists():
+        return None
+    conn = store.connect(create=False)
+    try:
+        return store.get(conn, rid)
+    finally:
+        conn.close()
+
+
+def events(rid: str = "r1", kind: str | None = None) -> list:
+    conn = store.connect(create=False)
+    try:
+        return [e for e in store.events(conn, rid) if kind is None or e.kind == kind]
+    finally:
+        conn.close()
+
+
+def nothing_written(rid: str = "r1") -> bool:
+    return row(rid) is None and not targets.runs_dir().exists()
+
+
+# -- a slot launch ----------------------------------------------------------------------
+
+
+def test_a_launch_naming_no_slot_takes_the_lowest_free_one(work, harness, rig,
+                                                           monkeypatch):
+    rig.plan(placed=4, pane_pid=5151)
+    at_start = []
+    real = fake.start
+
+    def start(*args, **kwargs):
+        at_start.append(row())
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(fake, "start", start)
+    got = api.launch(request(work, model="opus"))
+    [call] = rig.calls("start")
+    # No slot named: slots takes the lowest launchable one, or makes the next.
+    assert call["slot"] is None and call["create"] is True
+    assert call["label"] == "launcher:r1"
+    assert call["meta"] == {"request_id": "r1", "session_id": SID}
+    assert call["cwd"] == str(work)
+    # The whole child environment goes to slots, scrubbed and stamped.
+    assert call["env"]["MOXI_LAUNCHER_REQUEST"] == "r1"
+    assert call["env"]["PATH"].startswith(str(harness.bin))
+    # The argv slots runs is preview's.
+    assert call["argv"] == list(api.preview(request(work, model="opus")).argv)
+    assert call["argv"][0] == "claude"
+    # The row was in before the start, with no slot yet; then it records where it went.
+    [before] = at_start
+    assert (before.state, before.slot, before.target) == ("spawning", None, "slot")
+    after = row()
+    assert (after.state, after.slot, after.pane_id, after.pid) == ("started", "4", "%7",
+                                                                  5151)
+    assert (got.state, got.exit_code, got.slot, got.target) == ("started", 0, "4", "slot")
+    assert "slot 4" in got.line
+    # A launch that names no slot reads none with show before it starts.
+    assert [c["slot"] for c in rig.calls("show")] == [4]
+
+
+@pytest.mark.parametrize("given, asked", [("3", 3), ("review", "review")])
+def test_a_launch_naming_a_slot_goes_only_there(work, harness, rig, given, asked):
+    rig.plan(slots={str(asked): {"state": "free", "launchable": True}})
+    got = api.launch(request(work, slot=given))
+    [call] = rig.calls("start")
+    assert call["slot"] == asked and call["create"] is False
+    # check read the slot before anything was written.
+    assert rig.calls("show")[0]["slot"] == asked
+    assert row().slot == str(asked) and got.slot == str(asked)
+    assert got.state == "started" and got.exit_code == 0
+
+
+def test_the_named_slot_is_on_the_row_from_its_insert(work, harness, rig, monkeypatch):
+    rig.plan(slots={"3": {"state": "ended", "launchable": True}})
+    seen = []
+    real = fake.start
+    monkeypatch.setattr(fake, "start", lambda *a, **kw: (seen.append(row().slot),
+                                                         real(*a, **kw))[1])
+    api.launch(request(work, slot="3"))
+    assert seen == ["3"]
+
+
+def test_the_harness_runs_in_the_slot_with_the_launch_env(work, harness, rig):
+    rig.plan(run=True)
+    got = api.launch(request(work))
+    run = harness.one()
+    assert run["cwd"] == str(work)
+    assert [Path(run["argv"][0]).name, *run["argv"][1:]] == list(
+        api.preview(request(work)).argv)
+    assert run["env"]["MOXI_LAUNCHER_REQUEST"] == "r1"
+    assert got.pid == run["pid"] == row().pid
+    assert row().pid_started is not None
+
+
+def test_an_unconfirmed_start_is_started_and_says_so(work, harness, rig):
+    rig.plan(exec="unconfirmed")
+    got = api.launch(request(work))
+    assert got.state == "started" and got.exit_code == 0
+    assert "could not confirm" in got.line
+
+
+def test_a_command_that_did_not_start_fails_the_row_with_slots_exec_line(work, harness,
+                                                                         rig):
+    rig.plan(exec="failed", exec_line="failed: execve: permission denied", dead_status=127)
+    got = api.launch(request(work))
+    assert (got.state, got.reason, got.exit_code) == ("failed", targets.SPAWN_FAILED,
+                                                      exits.ERROR)
+    assert "permission denied" in got.line and "127" in got.line
+    stored = row()
+    assert (stored.state, stored.slot, stored.pane_id) == ("failed", "1", "%7")
+    [failed] = events(kind="start-failed")
+    assert "execve" in failed.detail["why"]
+
+
+# -- refusals before the row ------------------------------------------------------------
+
+
+def test_without_slots_a_slot_launch_is_refused_naming_the_other_targets(work, harness,
+                                                                          no_slots):
+    with pytest.raises(targets.NoSlots) as raised:
+        api.launch(request(work, brief=BRIEF))
+    refused = raised.value
+    assert api.exit_code(refused) == exits.REFUSED and refused.code == "no-slots"
+    assert "terminal" in refused.hint and "headless" in refused.hint
+    assert nothing_written() and harness.runs() == []
+    [listed] = api.check(request(work))
+    assert type(listed) is targets.NoSlots and nothing_written()
+
+
+def test_on_native_windows_a_slot_launch_is_refused(work, harness, rig, monkeypatch):
+    monkeypatch.setattr(targets, "WINDOWS", True)
+    with pytest.raises(targets.SlotsUnsupported) as raised:
+        api.launch(request(work))
+    assert api.exit_code(raised.value) == exits.REFUSED
+    assert "Windows" in raised.value.problem
+    assert "terminal" in raised.value.hint and "headless" in raised.value.hint
+    assert nothing_written() and rig.calls("start") == []
+
+
+def test_where_slots_is_not_supported_a_slot_launch_is_refused(work, harness, rig):
+    rig.plan(supported={"ok": False, "why": "tmux 3.0 is older than 3.2"})
+    with pytest.raises(targets.SlotsUnsupported) as raised:
+        api.launch(request(work))
+    assert api.exit_code(raised.value) == exits.REFUSED
+    assert "tmux 3.0" in raised.value.problem
+    assert "terminal" in raised.value.hint and "headless" in raised.value.hint
+    assert nothing_written()
+
+
+HELD = {"state": "free", "launchable": False,
+        "hold": {"holder": "relaunch-77", "until": 1900000000}}
+OCCUPIED = {"state": "occupied", "launchable": False, "label": "launcher:r0",
+            "last": {"at": "2026-10-30T10:00:00Z", "label": "launcher:r0",
+                     "meta": {"request_id": "r0", "session_id": "s-0"}}}
+
+
+@pytest.mark.parametrize("entry, words", [
+    (HELD, ["slot 3 is held by relaunch-77 until"]),
+    (OCCUPIED, ["slot 3 is occupied by launcher:r0", "request_id r0", "session_id s-0"]),
+    ({"state": "missing", "launchable": False}, ["slot 3 is missing"]),
+    (None, ["there is no slot 3"]),
+])
+def test_a_named_slot_that_is_not_launchable_is_refused_naming_its_holder(
+        work, harness, rig, entry, words):
+    rig.plan(slots={"3": entry} if entry else {})
+    with pytest.raises(targets.SlotTaken) as raised:
+        api.launch(request(work, slot="3"))
+    refused = raised.value
+    assert api.exit_code(refused) == exits.REFUSED
+    for word in words:
+        assert word in refused.problem
+    assert refused.hint
+    assert nothing_written() and rig.calls("start") == []
+    [listed] = api.check(request(work, slot="3"))
+    assert type(listed) is targets.SlotTaken
+
+
+@pytest.mark.parametrize("how, kind, code", [
+    ("try-again", targets.SlotsBusy, exits.TEMPFAIL),
+    ("error", targets.SlotsFailed, exits.ERROR)])
+def test_slots_that_cant_show_the_named_slot_refuse_the_launch(work, harness, rig, how,
+                                                               kind, code):
+    rig.plan(show=how)
+    with pytest.raises(kind) as raised:
+        api.launch(request(work, slot="3"))
+    assert api.exit_code(raised.value) == code and nothing_written()
+
+
+def test_a_harness_missing_from_path_is_refused_before_the_row(work, rig, monkeypatch):
+    monkeypatch.setenv("PATH", str(work))
+    with pytest.raises(targets.NoCommand):
+        api.launch(request(work))
+    assert nothing_written() and rig.calls("start") == []
+
+
+# -- refusals at the start, after the row -------------------------------------------------
+
+
+def test_a_slot_taken_since_check_ends_the_row_failed_naming_the_holder(work, harness,
+                                                                        rig):
+    rig.plan(start="refused", refused={
+        "reason": "occupied", "words": "slot 1 is occupied",
+        "holder": {"label": "launcher:r0", "meta": {"request_id": "r0"}}})
+    got = api.launch(request(work))
+    assert (got.state, got.reason, got.exit_code) == ("failed", "occupied", exits.REFUSED)
+    assert "launcher:r0" in got.line and "request_id r0" in got.line
+    assert (row().state, row().reason) == ("failed", "occupied")
+    # The same request again starts nothing and gives the stored outcome.
+    again = api.launch(request(work))
+    assert again.duplicate and again.exit_code == exits.REFUSED
+    assert len(rig.calls("start")) == 1
+
+
+def test_a_held_slot_at_start_names_the_hold(work, harness, rig):
+    rig.plan(start="refused", refused={
+        "reason": "held", "words": "slot 1 is held",
+        "holder": {"holder": "relaunch-77", "until": 1900000000}})
+    got = api.launch(request(work))
+    assert (got.reason, got.exit_code) == ("held", exits.REFUSED)
+    assert "relaunch-77" in got.line
+
+
+def test_slots_lock_held_too_long_ends_the_row_try_again(work, harness, rig):
+    rig.plan(start="try-again")
+    got = api.launch(request(work))
+    assert (got.state, got.reason, got.exit_code) == ("failed", targets.TRY_AGAIN,
+                                                      exits.TEMPFAIL)
+    assert targets.exit_of(row()) == exits.TEMPFAIL
+    assert len(rig.calls("start")) == 1  # nothing retries
+
+
+def test_a_tmux_failure_at_start_ends_the_row_spawn_failed(work, harness, rig):
+    rig.plan(start="error")
+    got = api.launch(request(work))
+    assert (got.reason, got.exit_code) == (targets.SPAWN_FAILED, exits.ERROR)
+
+
+# -- the first turn -----------------------------------------------------------------------
+
+
+def test_a_slot_launch_sends_the_first_turn_before_it_returns(work, harness, rig, turns):
+    got = api.launch(request(work, brief=BRIEF))
+    [ready] = turns.calls("wait_ready")
+    assert ready["session_id"] == SID
+    [given] = turns.calls("deliver")
+    assert given["ref"] == "launcher:r1" and BRIEF in given["text"]
+    # The brief is the first turn, not on the slot's argv.
+    [call] = rig.calls("start")
+    assert not any(BRIEF in word for word in call["argv"])
+    assert (got.state, got.exit_code) == ("first-sent", 0)
+    assert got.outcome is not None and got.outcome.outcome == "sent"
+    assert "slot 1" in got.line and "delivered" in got.line
+    assert row().state == "first-sent"
+
+
+def test_a_slot_launch_that_never_gets_ready_ends_no_ready(work, harness, rig, turns):
+    turns.plan(ready="timeout")
+    got = api.launch(request(work, brief=BRIEF))
+    assert (got.state, got.reason, got.exit_code) == ("failed", first.NO_READY,
+                                                      exits.ERROR)
+    assert turns.calls("deliver") == []
+
+
+def test_without_turns_the_brief_is_on_the_slots_argv(work, harness, rig):
+    got = api.launch(request(work, brief=BRIEF))
+    [call] = rig.calls("start")
+    assert call["argv"][1].startswith("Brief from launcher, launched by ann")
+    assert got.outcome is None and got.state == "started"
+
+
+def test_a_codex_slot_launch_answers_no_screen_and_says_what_may_be_waiting(work, rig,
+                                                                          monkeypatch):
+    """No Codex screen is declared yet: a Codex slot launch reads no screen, even with the
+    startup settings on, and one whose session never got ready says Codex's trust prompt
+    may be waiting for a person."""
+    screens_on()
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}])
+    conn = store.connect()
+    store.insert(conn, request_id="r1", actor="ann", harness="codex", target="slot",
+                 cwd=str(work), values={}, argv=["moxi-turns-codex-host"], env={},
+                 posture="", brief=BRIEF)
+    sent = []
+
+    def send(conn, rid, *, pid=None, turns=None):
+        sent.append(pid)
+        return first.Outcome(rid, "no-ready", "failed", first.NO_READY, "not ready")
+
+    composition = compose.Composition(
+        harness="codex", mode="host", target="slot", argv=("moxi-turns-codex-host",),
+        env={}, values={"cwd": str(work)}, first=BRIEF)
+    launch = targets.Launch(conn=conn, request_id="r1", composition=composition,
+                            argv=composition.argv, command="moxi-turns-codex-host",
+                            env={}, cwd=str(work))
+    monkeypatch.setattr(first, "send", send)
+    try:
+        started = targets.Slot().start(launch)
+    finally:
+        conn.close()
+    assert rig.calls("read_screen") == [] and rig.calls("answer_screen") == []
+    assert sent == [4343]  # the pane's pid finds Codex's host
+    assert started.exit_code == exits.ERROR
+    assert "folder-trust prompt" in started.line and "slot 1" in started.line
+    assert startup.screens("codex", fake, {"startup.trust_dialog": True,
+                                           "startup.dev_channels_dialog": True}) == []
+
+
+# -- startup screens, through a launch ------------------------------------------------------
+
+
+def test_with_the_settings_off_no_screen_is_read(work, harness, rig):
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}])
+    got = api.launch(request(work))
+    assert rig.calls("read_screen") == [] and got.state == "started"
+
+
+def test_a_trust_screen_that_shows_is_answered_and_recorded(work, harness, rig):
+    screens_on(2)
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}, {"screen": None}],
+             answers=[{"outcome": "gone"}])
+    got = api.launch(request(work))
+    reads = rig.calls("read_screen")
+    assert reads[0]["screens"] == ["CLAUDE_TRUST_FOLDER"] and reads[0]["slot"] == 1
+    [answer] = rig.calls("answer_screen")
+    assert answer["screen"] == "CLAUDE_TRUST_FOLDER"
+    # The answer is bounded by what remains of startup.wait_s, never more than 5 s.
+    assert 1 <= answer["wait"] <= 2
+    [seen] = events(kind=startup.EVENT)
+    assert (seen.detail["screen"], seen.detail["outcome"]) == ("CLAUDE_TRUST_FOLDER",
+                                                              "gone")
+    # Without turns the loop runs to its bound, and the launch goes on.
+    assert len(reads) > 2
+    assert (got.state, got.exit_code) == ("started", 0)
+
+
+def test_both_screens_are_watched_when_both_settings_are_on(work, harness, rig):
+    screens_on(1, dev=True)
+    api.launch(request(work))
+    assert rig.calls("read_screen")[0]["screens"] == ["CLAUDE_TRUST_FOLDER",
+                                                      "CLAUDE_DEV_CHANNELS"]
+
+
+def test_a_screen_still_showing_after_a_mismatch_fails_screen_mismatch(work, harness, rig,
+                                                                        turns):
+    screens_on(3)
+    turns.plan(ready="timeout")
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}],
+             answers=[{"outcome": "mismatch", "why": "the option row is missing",
+                       "capture": "/state/slots/mismatches/1.txt"}])
+    got = api.launch(request(work, brief=BRIEF))
+    assert (got.state, got.reason, got.exit_code) == ("failed", startup.SCREEN_MISMATCH,
+                                                      exits.ERROR)
+    assert "/state/slots/mismatches/1.txt" in got.line
+    [failed] = events(kind="start-failed")
+    assert failed.detail["capture"] == "/state/slots/mismatches/1.txt"
+    # The launcher sends nothing further: no first turn.
+    assert turns.calls("deliver") == []
+    assert len(rig.calls("answer_screen")) == 1
+    assert targets.exit_of(row()) == exits.ERROR
+
+
+def test_a_mismatch_whose_screen_left_is_not_a_failure(work, harness, rig):
+    screens_on(2)
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}, {"screen": None}],
+             answers=[{"outcome": "mismatch", "why": "marker moved away"}])
+    got = api.launch(request(work))
+    assert got.state == "started"
+    [seen] = events(kind=startup.EVENT)
+    assert seen.detail["outcome"] == "mismatch"
+
+
+def test_a_spent_settle_bound_is_recorded_as_such_not_as_a_mismatch(work, harness, rig):
+    screens_on(3)
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}, {"screen": "CLAUDE_TRUST_FOLDER"},
+                     {"screen": None}],
+             answers=[{"outcome": "mismatch", "why": "not-settled: the marker stayed on "
+                                                    "row 2 for 2 s"},
+                      {"outcome": "gone"}])
+    got = api.launch(request(work))
+    assert got.state == "started" and got.exit_code == 0
+    first_answer, second = events(kind=startup.EVENT)
+    assert first_answer.detail["outcome"] == startup.NOT_SETTLED
+    assert first_answer.detail["answer"] == "mismatch"
+    assert second.detail["outcome"] == "gone"
+    assert row().reason is None
+
+
+def test_a_pane_that_died_at_startup_fails_exited(work, harness, rig, turns):
+    screens_on(2)
+    turns.plan(ready="timeout")
+    rig.plan(frames=[{"screen": None, "dead": 1}])
+    got = api.launch(request(work, brief=BRIEF))
+    assert (got.state, got.reason, got.exit_code) == ("failed", startup.EXITED,
+                                                      exits.ERROR)
+    assert "pane status 1" in got.line
+    assert turns.calls("deliver") == []
+
+
+def test_with_turns_the_loop_ends_when_the_session_is_ready(work, harness, rig, turns):
+    screens_on(20)
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}, {"screen": None}])
+    got = api.launch(request(work, brief=BRIEF))
+    assert len(rig.calls("read_screen")) == 2
+    assert got.state == "first-sent"
+    # Asked by the minted id, then again by the sender.
+    assert [c["session_id"] for c in turns.calls("wait_ready")] == [SID, SID]
+
+
+# -- the loop itself, on a clock of its own -------------------------------------------------
+
+
+class Clock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def loop_api(clock: Clock, frames: list, answers: list, *, answer_takes: float = 0.0,
+             fail_read: Exception | None = None):
+    seen = SimpleNamespace(reads=[], answers=[])
+
+    def read_screen(slot, screens):
+        if fail_read is not None:
+            raise fail_read
+        seen.reads.append(clock.now)
+        frame = frames[min(len(seen.reads) - 1, len(frames) - 1)]
+        return SimpleNamespace(screen=frame.get("screen"), dead=frame.get("dead"))
+
+    def answer_screen(slot, screen, wait=5):
+        seen.answers.append(wait)
+        answer = answers[min(len(seen.answers) - 1, len(answers) - 1)]
+        clock.now += min(answer_takes, wait)
+        return SimpleNamespace(outcome=answer["outcome"], why=answer.get("why", ""),
+                               capture=answer.get("capture"))
+
+    seen.api = SimpleNamespace(read_screen=read_screen, answer_screen=answer_screen)
+    return seen
+
+
+@pytest.fixture
+def conn():
+    connection = store.connect()
+    store.insert(connection, request_id="r1", actor="ann", harness="claude",
+                 target="slot", cwd="/w", values={}, argv=["claude"], env={}, posture="",
+                 session_id=SID)
+    yield connection
+    connection.close()
+
+
+TRUST = [("CLAUDE_TRUST_FOLDER", "trust-screen")]
+
+
+def watch(conn, clock, seen, **kw):
+    return startup.watch(conn, "r1", 1, TRUST, api=seen.api, clock=clock,
+                         sleep=clock.sleep, **kw)
+
+
+def test_a_screen_that_never_shows_runs_the_loop_to_its_bound(conn):
+    clock = Clock()
+    seen = loop_api(clock, [{"screen": None}], [])
+    got = watch(conn, clock, seen, wait_s=20)
+    assert got.ended == "bound" and not got.failed
+    # Every 250 ms, sending nothing.
+    assert len(seen.reads) == 80 and seen.answers == []
+    assert seen.reads[1] - seen.reads[0] == pytest.approx(0.25)
+
+
+def test_the_loop_ends_once_the_session_is_ready(conn):
+    clock = Clock()
+    seen = loop_api(clock, [{"screen": None}], [])
+    asked = []
+
+    def ready(timeout):
+        asked.append(timeout)
+        clock.now += timeout
+        if len(asked) < 3:
+            raise TimeoutError("not yet")
+        return SimpleNamespace(session_id=SID)
+
+    got = watch(conn, clock, seen, wait_s=20, ready=ready)
+    assert got.ended == "ready" and len(seen.reads) == 3
+    assert asked == [0.25, 0.25, 0.25]
+
+
+def test_each_answer_gets_what_remains_of_the_bound_at_most_5_s(conn):
+    clock = Clock()
+    seen = loop_api(clock, [{"screen": "trust-screen"}], [{"outcome": "gone"}],
+                    answer_takes=4.0)
+    got = watch(conn, clock, seen, wait_s=12)
+    # 12 s: answers at 0 (wait 5), 4 (5), 8 (4); at 12 the bound is spent.
+    assert seen.answers == [5.0, 5.0, 4.0]
+    assert got.ended == "bound"
+    assert [a for _, a in got.answered] == ["gone", "gone", "gone"]
+
+
+def test_no_answer_is_started_with_less_than_a_second_left(conn):
+    clock = Clock()
+    clock.now = 0.0
+    seen = loop_api(clock, [{"screen": None}, {"screen": "trust-screen"}],
+                    [{"outcome": "gone"}])
+    got = watch(conn, clock, seen, wait_s=1, interval=0.25)
+    # The screen shows at 0.25 s, with 0.75 s left: too little to answer.
+    assert seen.answers == [] and got.ended == "bound"
+
+
+def test_a_mismatch_with_the_screen_still_showing_fails(conn):
+    clock = Clock()
+    seen = loop_api(clock, [{"screen": "trust-screen"}],
+                    [{"outcome": "mismatch", "why": "two rows marked", "capture": "/c"}])
+    got = watch(conn, clock, seen, wait_s=20)
+    assert (got.ended, got.reason, got.capture) == ("failed", startup.SCREEN_MISMATCH,
+                                                     "/c")
+    assert "two rows marked" in got.why and len(seen.reads) == 2
+
+
+def test_a_spent_settle_bound_goes_on_watching(conn):
+    clock = Clock()
+    seen = loop_api(clock, [{"screen": "trust-screen"}, {"screen": "trust-screen"},
+                            {"screen": None}],
+                    [{"outcome": "mismatch", "why": "not-settled"}, {"outcome": "gone"}],
+                    answer_takes=2.0)
+    got = watch(conn, clock, seen, wait_s=6)
+    assert not got.failed
+    assert got.answered == (("CLAUDE_TRUST_FOLDER", startup.NOT_SETTLED),
+                            ("CLAUDE_TRUST_FOLDER", "gone"))
+    detail = [e.detail for e in store.events(conn, "r1")]
+    assert detail[0]["outcome"] == startup.NOT_SETTLED and detail[0]["answer"] == "mismatch"
+
+
+@pytest.mark.parametrize("frames, answers, why", [
+    ([{"screen": None, "dead": True}], [], "exited before it was ready"),
+    ([{"screen": None, "dead": 137}], [], "pane status 137"),
+    ([{"screen": "trust-screen"}], [{"outcome": "no-pane"}], "pane is gone"),
+    ([{"screen": "trust-screen"}, {"screen": None, "dead": 0}],
+     [{"outcome": "mismatch", "why": "x"}], "pane status 0"),
+])
+def test_a_dead_or_gone_pane_fails_exited(conn, frames, answers, why):
+    clock = Clock()
+    seen = loop_api(clock, frames, answers)
+    got = watch(conn, clock, seen, wait_s=20)
+    assert (got.ended, got.reason) == ("failed", startup.EXITED) and why in got.why
+
+
+def test_a_screen_named_by_its_name_is_answered_as_that_screen(conn):
+    clock = Clock()
+    seen = loop_api(clock, [{"screen": "CLAUDE_TRUST_FOLDER"}, {"screen": None}],
+                    [{"outcome": "gone"}])
+    got = watch(conn, clock, seen, wait_s=2)
+    assert got.answered == (("CLAUDE_TRUST_FOLDER", "gone"),)
+
+
+def test_slots_that_cant_be_read_stop_the_loop_without_failing(conn):
+    clock = Clock()
+    seen = loop_api(clock, [], [], fail_read=RuntimeError("tmux capture-pane failed"))
+    got = watch(conn, clock, seen, wait_s=20)
+    assert got.ended == "stopped" and not got.failed and "capture-pane" in got.why
+    [event] = store.events(conn, "r1")
+    assert event.kind == startup.EVENT and event.detail["outcome"] == "stopped"
+
+
+def test_the_enabled_screens_follow_the_settings():
+    on = {"startup.trust_dialog": True, "startup.dev_channels_dialog": False}
+    assert startup.screens("claude", fake, on) == [
+        ("CLAUDE_TRUST_FOLDER", fake.CLAUDE_TRUST_FOLDER)]
+    both = {"startup.trust_dialog": True, "startup.dev_channels_dialog": True}
+    assert [n for n, _ in startup.screens("claude", fake, both)] == [
+        "CLAUDE_TRUST_FOLDER", "CLAUDE_DEV_CHANNELS"]
+    off = {"startup.trust_dialog": False, "startup.dev_channels_dialog": False}
+    assert startup.screens("claude", fake, off) == []
+    # A screen slots does not declare is left out.
+    assert startup.screens("claude", SimpleNamespace(), both) == []
+
+
+# -- the install questions ------------------------------------------------------------------
+
+
+def test_the_announcement_names_the_setup_and_the_seam():
+    assert module.SETUP == "moxi_launcher.startup:setup"
+    assert slots.SEAM in module.INTERNAL_ENV
+
+
+def test_without_slots_setup_asks_nothing(no_slots):
+    asked, out = [], io.StringIO()
+    assert startup.setup(ask=lambda q: asked.append(q) or True, out=out) == 0
+    assert asked == [] and out.getvalue() == ""
+    assert not Layout("launcher").config_file().exists()
+
+
+def test_with_slots_setup_asks_the_two_questions_once(rig):
+    asked, out = [], io.StringIO()
+    answers = iter([True, False])
+    assert startup.setup(ask=lambda q: asked.append(q) or next(answers), out=out) == 0
+    assert len(asked) == 2
+    assert "folder-trust" in asked[0] and "development-channels" in asked[1]
+    from moxi_launcher import settings
+
+    now = settings.current()
+    assert now["startup.trust_dialog"] is True
+    assert now["startup.dev_channels_dialog"] is False
+    assert now.source("startup.dev_channels_dialog") == config.FILE
+    assert "moxi config set launcher startup.dev_channels_dialog true" in out.getvalue()
+    # An install again asks nothing: both were answered, and nothing is reset.
+    again = []
+    assert startup.setup(ask=lambda q: again.append(q) or False, out=io.StringIO()) == 0
+    assert again == [] and settings.current()["startup.trust_dialog"] is True
+
+
+def test_with_nobody_at_the_keyboard_both_stay_off_and_the_lines_are_printed(
+        rig, monkeypatch):
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    out = io.StringIO()
+    assert startup.setup(out=out) == 0
+    text = out.getvalue()
+    assert "moxi config set launcher startup.trust_dialog true" in text
+    assert "moxi config set launcher startup.dev_channels_dialog true" in text
+    assert not Layout("launcher").config_file().exists()
+
+
+#: How the core's installer runs a `SETUP` target: import it, call it, exit with its code.
+RUN_SETUP = """\
+import importlib, sys
+module, _, attr = sys.argv[1].partition(":")
+result = getattr(importlib.import_module(module), attr)()
+sys.exit(result if isinstance(result, int) and not isinstance(result, bool) else 0)
+"""
+
+
+def test_the_core_runs_setup_in_a_process_of_its_own(rig, tmp_path):
+    """As `moxi install launcher` runs a module's `SETUP`: its target, in a fresh
+    process, with nobody at the keyboard."""
+    done = subprocess.run(
+        [sys.executable, "-c", RUN_SETUP, module.SETUP], stdin=subprocess.DEVNULL,
+        capture_output=True, text=True, timeout=60,
+        env={**os.environ, "PYTHONPATH": str(TESTS)})
+    assert done.returncode == 0, done.stderr
+    assert "moxi config set launcher startup.trust_dialog true" in done.stdout
