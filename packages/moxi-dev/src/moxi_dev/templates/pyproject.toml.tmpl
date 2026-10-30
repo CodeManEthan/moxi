@@ -12,10 +12,6 @@ Homepage = "https://github.com/moxihq/moxi"
 Repository = "https://github.com/moxihq/moxi"
 Issues = "https://github.com/moxihq/moxi/issues"
 
-# Every Moxi distribution declares the umbrella, so a plain install puts `moxi` on PATH.
-[project.scripts]
-moxi = "moxi.cli:main"
-
 # The module's one announcement, read by moxi.modules.
 [project.entry-points."moxi.modules"]
 $module = "moxi_$module.module"

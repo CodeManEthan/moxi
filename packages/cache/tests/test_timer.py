@@ -445,8 +445,7 @@ def test_read_log_skips_a_cut_first_line_and_junk(tmp_path):
 
 
 def test_the_log_is_under_caches_state_directory(own_roots):
-    assert timer.log_path() == own_roots / "state" / timer.log_path().parent.parent.name \
-        / "cache" / "timer.jsonl"
+    assert timer.log_path() == own_roots / "state" / "cache" / "timer.jsonl"
 
 
 # --- a real start -------------------------------------------------------------------------------

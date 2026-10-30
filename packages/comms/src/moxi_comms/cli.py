@@ -570,6 +570,20 @@ def _binary_version(path: str) -> str:
     return first[0] if first else f"version not read (exit {proc.returncode})"
 
 
+def _device_label() -> str:
+    """This box's device label for comms, read without writing the device id."""
+    from moxi import paths as moxi_paths
+
+    from .paths import LAYOUT
+
+    where = moxi_paths.core().state_dir() / moxi_paths.DEVICE_ID
+    try:
+        label = LAYOUT.device(create=False)
+    except OSError as e:
+        return f"ERROR: {where} cannot be read ({e.strerror or e})"
+    return f"none set yet (no id in {where})" if label is None else label
+
+
 #: The directories `moxi comms doctor` prints: comms' own under each of Moxi's roots.
 DOCTOR_DIRS = ("data", "state", "cache", "config", "runtime")
 
@@ -586,7 +600,7 @@ def cmd_doctor(args, ctx: Context) -> int:
 
     # Where this process keeps comms' files: its five directories under Moxi's roots
     # (`moxi.paths`), as this process resolves them.
-    row("device", LAYOUT.device())
+    row("device", _device_label())
     for name in DOCTOR_DIRS:
         row(f"  {name.upper()}", str(getattr(LAYOUT, f"{name}_dir")()))
 

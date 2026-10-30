@@ -1,4 +1,3 @@
-import dataclasses
 import textwrap
 import tomllib
 from pathlib import Path
@@ -191,7 +190,7 @@ def test_the_file_sets_keys_and_says_so(schema, home):
 def test_settings_are_frozen(schema, home):
     env, _ = home
     s = config.load("demo", schema, env=env)
-    with pytest.raises(dataclasses.FrozenInstanceError):
+    with pytest.raises(AttributeError):
         s.module = "other"
     with pytest.raises(TypeError):
         s.values["backend"] = "remote"

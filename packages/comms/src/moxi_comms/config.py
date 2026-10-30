@@ -36,6 +36,11 @@ line of doc and, for a few, the one variable that overrides it for one process:
     [codex.agents."planner@proj-a"]         # the Codex roster (adapters/codex_roster)
     [opencode.agents."planner@proj-a"]      # the OpenCode roster
 
+`check_text(text)` is the same whole read over one config text alone, with no path, no
+environment and no cache, and it runs the roster parsers' row checks too; it is the
+announcement's `CONFIG_CHECK`, which `moxi config set`, `unset` and `check` run before they
+write or pass a file.
+
 `load(env=None)` returns a `CommsConfig`: the typed tables comms reads, with the
 rosters' `codex` and `opencode` tables as raw dicts for their own parsers. A test points
 `MOXI_COMMS_CONFIG_HOME` (or `MOXI_COMMS_HOME`) at a directory of its own.
@@ -237,15 +242,63 @@ def load(env=None) -> CommsConfig:
     A one-shot reader (a verb, an adapter at start) calls this. A process that runs all
     day reads through `Config`, which keeps the last good settings."""
     environ = env if env is not None else os.environ
-    path = config_path(environ)
+    return _read(config_path(environ), environ)
+
+
+def _read(path: Path, environ) -> CommsConfig:
+    """Read the comms config file `path` with every check: the token refusal, the
+    schema's and comms' own."""
     _check_file(path)
     try:
-        settings = _moxi_config.load(MODULE, schema(), env=environ)
+        settings = _moxi_config.load(MODULE, schema(), env=environ, path=path)
     except ConfigError:
         raise
     except _moxi_config.ConfigError as e:
         raise ConfigError(e.file, e.key, e.problem, e.fix) from None
     return _typed(settings, path)
+
+
+def check_text(text: str) -> None:
+    """comms' whole read over config text `text` alone: the token refusal, the schema's
+    checks and comms' own, as `load` makes them, then the codex and opencode roster
+    parsers' checks of their rows, as a launcher makes them, but with no path, no
+    environment and no cache: nothing is read but the text (a path's `~` still expands to
+    the user's home, as `moxi.config.check_text` expands it), and nothing is logged.
+    Raises `ConfigError`, naming no file."""
+    try:
+        raw = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(None, None, f"is not readable TOML ({e})",
+                          "correct the file's TOML syntax") from None
+    refuse_secrets(None, raw)
+    try:
+        settings = _moxi_config.check_text(MODULE, schema(), text)
+    except ConfigError:
+        raise
+    except _moxi_config.ConfigError as e:
+        raise ConfigError(e.file, e.key, e.problem, e.fix) from None
+    _check_rosters(_typed(settings, None))
+
+
+#: The source the roster parsers' refusals name when they check a config text.
+_TEXT = "the config text"
+
+
+def _check_rosters(typed: CommsConfig) -> None:
+    """The roster parsers over the text's `[codex]` and `[opencode]` tables, each refusal
+    raised as a `ConfigError` naming no file. They check the rows only: no default path is
+    built from the environment, and a row's warning (codex's `network_access = false`) is
+    left for a launch to log."""
+    from .adapters import codex_roster, opencode_roster
+
+    try:
+        codex_roster.from_table(typed.codex, _TEXT, check=True)
+        opencode_roster.from_table(typed.opencode, _TEXT, check=True)
+    except ConfigError as e:
+        if e.file is not None or e.key is not None:
+            raise
+        raise ConfigError(None, None, e.problem.removeprefix(f"{_TEXT}: "),
+                          "correct the roster table or row it names") from None
 
 
 class Config(_moxi_config.Config):
@@ -292,39 +345,20 @@ class Config(_moxi_config.Config):
 def load_file(path, env=None) -> CommsConfig:
     """A comms config file named on a command line (`moxi-comms-codex --config PATH`),
     read whole in place of the box's: the same schema, the same token refusal, the same
-    checks. Nothing else in the process reads it; the caller takes the table it named
-    the file for (a launcher, its roster).
-
-    moxi.config reads a module's file only at its layout's path, so `path` is read in
-    place through a link under a private config root, and every error names `path`."""
-    import tempfile
-
+    checks, and every error names `path`. Nothing else in the process reads it; the
+    caller takes the table it named the file for (a launcher, its roster)."""
     path = Path(os.path.expanduser(str(path)))
     if not path.is_absolute():
         path = Path.cwd() / path
     if not path.is_file():
         raise ConfigError(path, None, "is not a file",
                           "name a comms config file (the format of config.toml)")
-    environ = dict(env if env is not None else os.environ)
-    with tempfile.TemporaryDirectory(prefix="moxi-comms-config-") as root:
-        environ["MOXI_COMMS_CONFIG_HOME"] = root
-        link = config_path(environ)
-        link.parent.mkdir(parents=True)
-        link.symlink_to(path.resolve())
-        try:
-            cfg = load(environ)
-        except ConfigError as e:
-            if e.file is None or Path(e.file) != link:
-                raise
-            raise ConfigError(path, e.key, e.problem, e.fix) from None
-        finally:
-            with _checked_lock:
-                _checked.pop(link, None)
+    cfg = _read(path, env if env is not None else os.environ)
     cfg.source = str(path)
     return cfg
 
 
-def _typed(settings, path: Path) -> CommsConfig:
+def _typed(settings, path: Path | None) -> CommsConfig:
     v = settings.values
 
     def bad(key: str, problem: str, fix: str) -> ConfigError:
@@ -366,7 +400,7 @@ def _typed(settings, path: Path) -> CommsConfig:
         block=v["block"],
         codex=_roster(bad, "codex", v),
         opencode=_roster(bad, "opencode", v),
-        source=str(path) if path.exists() else "defaults",
+        source=str(path) if path is not None and path.exists() else "defaults",
         sources=dict(settings.sources),
     )
 
@@ -439,7 +473,7 @@ def _roster(bad, table: str, v) -> dict:
     return out
 
 
-def refuse_secrets(path: Path, raw: dict) -> None:
+def refuse_secrets(path: Path | None, raw: dict) -> None:
     """The refusal every comms config table shares: a token-shaped key is a hard stop."""
     def walk(node, trail):
         if isinstance(node, dict):
@@ -455,5 +489,6 @@ def refuse_secrets(path: Path, raw: dict) -> None:
 
 __all__ = ["Config", "ConfigError", "LocalConfig", "ThreadsConfig", "SecretsConfig", "PolicyConfig",
            "ProvisionConfig", "ReplayConfig", "CommsConfig", "GatewayConfig",
-           "BUILTIN_ROLES", "config_path", "load", "load_file", "refuse_secrets", "schema",
+           "BUILTIN_ROLES", "check_text", "config_path", "load", "load_file",
+           "refuse_secrets", "schema",
            "LOCAL_RETAIN_DAYS"]

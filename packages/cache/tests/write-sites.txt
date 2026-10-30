@@ -1,0 +1,13 @@
+# The places in src/ that write a file themselves rather than through moxi.files or
+# moxi.store. `moxi check` (check 8) fails on a write site not listed here, and on a line
+# that no longer matches one, so this list only shrinks as the module moves onto the
+# helpers. One line per site: <path> <enclosing scope> <call>.
+src/moxi_cache/drift.py Store._take_lock os.open
+src/moxi_cache/drift.py write os.fdopen
+src/moxi_cache/drift.py write os.replace
+src/moxi_cache/opencode.py connect sqlite3.connect
+src/moxi_cache/service.py Service.install .write_text
+src/moxi_cache/timer.py append_log os.open
+src/moxi_cache/timer.py append_log os.replace
+src/moxi_cache/watch.py write_record open
+src/moxi_cache/watch.py write_record os.replace

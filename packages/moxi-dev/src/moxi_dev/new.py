@@ -5,9 +5,9 @@
 Run it in the repository (the root is the nearest directory up whose `pyproject.toml`
 declares `[tool.uv.workspace]`). It writes `packages/<module>/`:
 
-- `pyproject.toml` declaring `moxi-<module>`, its `moxi.modules` entry point and the
-  `moxi` console script, a dev group with `pytest` and `moxi-dev`, and pytest options
-  that deselect the browser, slow, build and live tiers;
+- `pyproject.toml` declaring `moxi-<module>` and its `moxi.modules` entry point (no
+  `moxi` console script: only the core declares it), a dev group with `pytest` and
+  `moxi-dev`, and pytest options that deselect the browser, slow, build and live tiers;
 - `conftest.py`, which loads the test kit (`moxi_dev.testing`), so every test runs
   inside its fence;
 - `src/moxi_<module>/` with an announcement that offers nothing yet;
@@ -214,6 +214,9 @@ def render(module: str, root: Path, *, summary: str | None = None,
     if module in names.VERBS:
         raise Refused(f"{module!r} is one of the core's own verbs; a module needs another "
                       "name")
+    if module in names.RESERVED:
+        raise Refused(f"{module!r} is a name the core keeps for itself; a module needs "
+                      "another name")
     summary = summary or f"Moxi's {module} module."
     if "\n" in summary or not summary.strip():
         raise Refused("the summary is one non-empty line")

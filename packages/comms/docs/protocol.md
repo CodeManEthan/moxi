@@ -44,7 +44,7 @@ Tiers:
 
 - **chosen**: a name a session claims at launch. Its adapter holds the binding token
   while connected.
-- **standing**: provisioned as a durable identity (`moxi-comms-provision --standing`).
+- **standing**: provisioned as a durable identity (`"$(uv tool dir)/moxi/bin/moxi-comms-provision" --standing`).
 - **ephemeral**: an `agent-N` name the daemon mints for a session that claimed none.
 - **operator**: the human, whose lane reads the operator's credential through the
   configured resolver chain.
@@ -219,7 +219,7 @@ and for how long:
 `sent` is the time alone on the day it was sent; the wait is minutes under an hour,
 hours under two days, then days.
 
-Directors are granted by the recipient at launch (`moxi-comms-claude --director`, the
+Directors are granted by the recipient at launch (`moxi comms claude --director`, the
 `directors` key in the Codex and OpenCode rosters), never claimed by the sender. A
 declared director's verified message renders as a directive. The operator's messages
 always do.

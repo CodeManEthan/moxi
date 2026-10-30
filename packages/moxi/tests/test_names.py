@@ -35,5 +35,14 @@ def test_anything_else_is_refused(name):
 
 def test_the_umbrellas_verbs_are_reserved():
     assert names.VERBS == {"modules", "install", "shortcut", "config", "check", "help",
-                           "version"}
+                           "version", "doctor", "uninstall", "run", "paths"}
     assert isinstance(names.VERBS, frozenset)
+
+
+def test_the_core_keeps_five_more_names():
+    assert names.RESERVED == {"moxi", "set", "unset", "runtime", "installs"}
+    assert not names.RESERVED & names.VERBS
+    for name in ("doctor", "installs", "set", "moxi"):
+        assert names.is_reserved(name)
+    for name in ("comms", "sets", None, 3):
+        assert not names.is_reserved(name)
