@@ -757,20 +757,39 @@ def _remove_wrapped(row: UserRow, by: str, lines: list[str]):
         lines.append(f"{row.id} removed; its drop-in on {row.unit} stays on {where}, and "
                      f"with its key gone the gate holds its runs off there")
         return moxi.exit.OK, None
+    retry = f"moxi services remove {row.name}"
     with _locked():
         store.write(lambda c: store.set_removing(c, row.name, by=by))
-        if not state.key_on(row.name):
-            acted = units.disable(MODULE, [row.unit], foreign=True)
-            lines.append(f"{row.unit}: its key was off, so its schedule is disabled "
-                         "first; without the gate it would run")
-            if not _acted(acted, lines):
-                return moxi.exit.ERROR, f"moxi services remove {row.name}"
+        # From here the row is marked: a config file that can't be read or written is
+        # a failure of the act (exit 1), and remove again retries.
+        try:
+            key_on = state.key_on(row.name)
+        except moxi.config.ConfigError as exc:
+            lines.append(str(exc))
+            return moxi.exit.ERROR, retry
+        if not key_on:
+            st = state.read_one(row)
+            if st is not None and st.state == "missing":
+                # Gone from the supervisor: nothing can run, so there is no schedule to
+                # disable, and only the drop-in is left to take away.
+                lines.append(f"{row.unit} is gone from the supervisor, so there is no "
+                             "schedule to disable")
+            else:
+                acted = units.disable(MODULE, [row.unit], foreign=True)
+                lines.append(f"{row.unit}: its key was off, so its schedule is disabled "
+                             "first; without the gate it would run")
+                if not _acted(acted, lines):
+                    return moxi.exit.ERROR, retry
         _acted([units.unwrap(row.unit, module=MODULE)], lines)
     if row.unit in units.wraps(MODULE):
         lines.append(f"{row.id}: its drop-in on {row.unit} is still there; the row stays "
                      "until it goes")
-        return moxi.exit.ERROR, f"moxi services remove {row.name}"
-    moxi.config.unset(MODULE, state.key(row.name), by=by)
+        return moxi.exit.ERROR, retry
+    try:
+        moxi.config.unset(MODULE, state.key(row.name), by=by)
+    except moxi.config.ConfigError as exc:
+        lines.append(str(exc))
+        return moxi.exit.ERROR, retry
     _forget(row.name)
     lines.append(f"{row.id} removed; {row.unit} runs as it did before it was adopted")
     return moxi.exit.OK, None

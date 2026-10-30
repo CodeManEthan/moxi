@@ -340,6 +340,23 @@ def test_remove_finishes_with_a_unit_deleted_by_hand(fake):
     assert acts.remove("web").code == 0 and store.get("web") is None
 
 
+@LINUX
+@pytest.mark.parametrize("on", [False, True])
+def test_remove_finishes_with_a_wrapped_timer_deleted_by_hand(fake, on):
+    fake.foreign["backup.timer"] = Unit("timer", True)
+    acts.add_adopted("backup", "backup.timer", enable=on)
+    del fake.foreign["backup.timer"]
+    fake.calls.clear()
+    out = acts.remove("backup")
+    assert out.code == 0, out
+    assert store.get("backup") is None and fake.wrapped == {}
+    assert [c[0] for c in fake.calls if c[0] in ("disable", "unwrap")] == ["unwrap"]
+    assert moxi.config.load("services", state.schema())["adopted"] == {}
+    if not on:
+        assert "backup.timer is gone from the supervisor, so there is no schedule to " \
+               "disable" in out.lines
+
+
 def test_remove_of_a_row_of_another_system_deletes_it(fake, monkeypatch):
     add(**written("web"))
     other_system(monkeypatch)
@@ -568,6 +585,21 @@ def test_remove_a_wrapped_timer_with_its_key_on_leaves_its_schedule(fake):
     assert acts.remove("backup").code == 0
     assert [c[0] for c in fake.calls if c[0] in ("disable", "unwrap")] == ["unwrap"]
     assert moxi.config.load("services", state.schema())["adopted"] == {}
+
+
+@LINUX
+def test_remove_a_wrapped_timer_whose_config_cant_be_read_fails_and_retries(fake):
+    fake.foreign["backup.timer"] = Unit("timer", True)
+    acts.add_adopted("backup", "backup.timer", enable=False)
+    config = moxi.paths.Layout("services").config_file()
+    good = config.read_text()
+    config.write_text("[adopted\n")
+    fake.calls.clear()
+    out = acts.remove("backup")
+    assert out.code == 1 and out.fix == "moxi services remove backup"
+    assert store.get("backup").removing and fake.calls == []
+    config.write_text(good)
+    assert acts.remove("backup").code == 0 and store.get("backup") is None
 
 
 @LINUX
