@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -106,5 +107,38 @@ def test_a_missing_unit_names_the_install(fake_tmux, monkeypatch):
     monkeypatch.setattr(server, "supervised", lambda: True)
     monkeypatch.setattr(server, "unit_state", lambda: UnitState(
         places.MODULE, "server", "daemon", "systemd", "missing"))
+    monkeypatch.setattr(server, "editable", lambda: False)
     with pytest.raises(TryAgain, match="moxi install slots"):
         server.ensure()
+
+
+def test_a_missing_unit_on_an_editable_install_says_to_start_the_server_by_hand(
+        fake_tmux, monkeypatch):
+    from moxi.units import UnitState
+
+    record("tmux", str(fake_tmux()))
+    monkeypatch.setattr(server, "supervised", lambda: True)
+    monkeypatch.setattr(server, "unit_state", lambda: UnitState(
+        places.MODULE, "server", "daemon", "systemd", "missing"))
+    monkeypatch.setattr(server, "editable", lambda: True)
+    with pytest.raises(TryAgain, match="start `moxi-slots-server` by hand") as caught:
+        server.ensure()
+    assert "moxi install" not in str(caught.value)
+
+
+def test_editable_reads_the_cores_editable_refusal(monkeypatch):
+    from moxi import units
+
+    def plan(cause):
+        return lambda module, only=None: [SimpleNamespace(cause=cause)]
+
+    monkeypatch.setattr(units, "plan", plan("editable"))
+    assert server.editable()
+    monkeypatch.setattr(units, "plan", plan(None))
+    assert not server.editable()
+
+    def broken(module, only=None):
+        raise ValueError("slots is absent")
+
+    monkeypatch.setattr(units, "plan", broken)
+    assert not server.editable()

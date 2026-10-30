@@ -246,11 +246,27 @@ def _unit_words() -> str:
     if state is None:
         return f"no slots server answers on {socket}; `moxi doctor slots` says why"
     if state.state == "missing":
+        if editable():
+            return (f"no slots server answers on {socket}; this is an editable install, "
+                    f"where no unit is written, so start `{SCRIPT}` by hand (it runs in "
+                    "the foreground)")
         return (f"no slots server answers on {socket}, and its unit is not installed; run "
                 "`moxi install slots`")
     hint = f"; its log: {state.log}" if state.log else ""
     return (f"no slots server answers on {socket}; its unit is {state.state}{hint}; "
             "`moxi doctor slots` says more")
+
+
+def editable() -> bool:
+    """Whether the core refuses to write the server's unit here because slots is an
+    editable install (a workspace's), where `moxi install slots` can't help."""
+    from moxi import units
+
+    try:
+        changes = units.plan(places.MODULE, only=[DAEMON])
+    except Exception:
+        return False
+    return any(c.cause == "editable" for c in changes)
 
 
 def unit_state():
@@ -266,4 +282,4 @@ def unit_state():
 
 __all__ = ["KEEP", "OPTIONS", "SYSTEM_CONF", "START_WAIT", "DAEMON", "SCRIPT", "clean_env",
            "user_conf", "quote", "config_text", "sweep_launch_files", "main",
-           "recorded_pid", "supervised", "ensure", "unit_state"]
+           "recorded_pid", "supervised", "ensure", "editable", "unit_state"]
