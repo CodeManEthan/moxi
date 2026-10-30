@@ -10,13 +10,13 @@ waits for that before `spawn` returns) and then sends stdout and stderr to `/dev
 
 While the lifeline is open, each second it adds the current descendants of the child,
 and of every process it already watches, to the set it watches. When stdin reaches EOF
-(the parent closed the lifeline, or died) it sends SIGTERM to the child and to every
-watched process still alive, scans for descendants again and adds them, waits up to two
-seconds for all of them to go, scans once more with the tree held still (each process
-stopped with SIGSTOP, so none starts another between that scan and the kill), sends
-SIGKILL to every one left, the child first, and exits once none is left. It exits on its own,
-sending nothing, when the child is gone and no watched process is left. A process that
-has ended and was not yet reaped (a zombie) counts as gone.
+(the parent closed the lifeline, or died) it scans for descendants, sends SIGTERM to the
+child and to every watched process still alive, scans again and adds what it finds,
+waits up to two seconds for all of them to go, scans once more with the tree held still
+(each process stopped with SIGSTOP, so none starts another between that scan and the
+kill), sends SIGKILL to every one left, the child first, and exits once none is left. It
+exits on its own, sending nothing, when the child is gone and no watched process is
+left. A process that has ended and was not yet reaped (a zombie) counts as gone.
 
 A descendant started and moved away from the child's tree between two scans (a wrapper
 that forks and exits at once) is never seen, so it is not reached.
@@ -105,6 +105,10 @@ class Watch:
         after `grace` seconds."""
         import signal
 
+        # Scan first: a child that dies of the SIGTERM before the scan after it leaves its
+        # descendants to init, where no scan finds them. A descendant born between this scan
+        # and the SIGTERM, to a child that then dies of it, can still be missed.
+        self.scan()
         self._send(signal.SIGTERM)
         self.scan()
         deadline = time.monotonic() + grace
