@@ -2,16 +2,14 @@
 
     from moxi_dev.contract import check
 
-Today this re-exports `moxi.contract` unchanged: the same `check`, `Finding`, `CheckError`
-and constants, the same objects. A package's `tests/test_contract.py` imports them from
-here, so it keeps its import when the check's code moves behind this module.
+Today this re-exports three names of `moxi.contract` unchanged, the same objects:
+`check`, the `Finding` it returns and the `CheckError` it raises. A package's
+`tests/test_contract.py` imports them from here, so it keeps its import when the check's
+code moves behind this module. Nothing else of `moxi.contract` is promised here.
 """
 
 from __future__ import annotations
 
-import moxi.contract
-from moxi.contract import *  # noqa: F403 - the whole public surface, re-exported
-from moxi.contract import (ANNOUNCEMENT, CORE, CORE_MODULES, CORE_SCRIPT,  # noqa: F401
-                           GROUP, CheckError, Finding, check, main)
+from moxi.contract import CheckError, Finding, check
 
-__all__ = list(moxi.contract.__all__)
+__all__ = ["CheckError", "Finding", "check"]

@@ -226,9 +226,9 @@ def test_a_package_deselects_the_tiers():
 
 # --- moxi_dev.contract -----------------------------------------------------------------
 
-def test_the_contract_is_moxi_contract_re_exported():
-    assert moxi_dev.contract.__all__ == moxi.contract.__all__
-    for name in moxi.contract.__all__:
+def test_the_contract_re_exports_the_check_and_nothing_more():
+    assert sorted(moxi_dev.contract.__all__) == ["CheckError", "Finding", "check"]
+    for name in moxi_dev.contract.__all__:
         assert getattr(moxi_dev.contract, name) is getattr(moxi.contract, name), name
     from moxi_dev.contract import Finding, check
     assert check is moxi.contract.check and Finding is moxi.contract.Finding
