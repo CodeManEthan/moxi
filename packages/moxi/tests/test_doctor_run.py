@@ -452,6 +452,60 @@ def test_a_failed_supervisor_read_is_a_fail_row_and_the_plan_rows_stay(d):
     assert "unknown" in got[("demo", "daemon relay")].detail
 
 
+def test_a_failed_supervisor_read_makes_every_unit_row_warn_unknown(d):
+    d.installed(DAEMONS=DAEMON, TIMERS=TIMER)
+    d.sup.fail[("show", None)] = "Failed to connect to bus"
+    got = d.rows("demo")
+    for label in ("daemon relay", "timer snapshot"):
+        row = got[("demo", label)]
+        assert row.state == "warn" and row.fix is None
+        assert row.detail.startswith("up to date; its state is unknown: ")
+        assert row.detail.endswith("failed: Failed to connect to bus")
+    assert ("demo", "daemon relay health") not in got
+
+
+def test_an_armed_timer_whose_last_run_failed_is_ok_and_its_run_line_warns(d):
+    d.installed(TIMERS=TIMER)
+    d.sup.props["moxi-demo-snapshot.service"] = {"ActiveState": "failed",
+                                                 "Result": "exit-code", "ExecMainStatus": 2}
+    files.append_record(d.state_dir() / "runs.jsonl",
+                        {"unit": "demo/snapshot", "at": "2026-10-30T10:00:00Z",
+                         "seconds": 1.0, "result": "ran", "exit": 2})
+    got = d.rows("demo")
+    unit = got[("demo", "timer snapshot")]
+    assert unit.state == "ok" and unit.detail.startswith("up to date; active")
+    last = got[("demo", "timer snapshot last run")]
+    assert (last.state, last.detail) == ("warn", "ran at 2026-10-30T10:00:00Z, exit 2")
+
+
+RUN_LINE = {"unit": "demo/snap", "at": "t", "seconds": 1.0, "result": "ran", "exit": 2}
+
+
+@pytest.mark.parametrize("backend, supervisor", [
+    ("systemd", {"result": "exit-code", "status": "2"}),
+    ("launchd", {"status": 2}),
+    ("schtasks", None),
+])
+def test_an_armed_timer_s_rows_are_the_same_on_every_backend(backend, supervisor):
+    """What each backend's `status` gives an armed timer whose last run exited 2: the
+    unit row is `ok`, and only the run-line row shows the failure."""
+    last = dict(RUN_LINE, **({"supervisor": supervisor} if supervisor else {}))
+    read = UnitState("demo", "snap", "timer", backend, "active", last=last, enabled=True)
+    change = UnitChange("demo", "snap", "timer", "keep", None, (), None, "r")
+    assert _run._unit_row(change, read).state == "ok"
+    row = _run._last_row("demo", "timer snap", _run._run_line(read, "demo", "snap"), None)
+    assert (row.state, row.detail) == ("warn", "ran at t, exit 2")
+
+
+@pytest.mark.parametrize("enabled, state", [(True, "warn"), (False, "ok")])
+def test_a_disabled_timer_warns_unless_declared_disabled(enabled, state):
+    read = UnitState("demo", "snap", "timer", "launchd", "inactive", enabled=False)
+    entry = {"argv": ["/x"], "every": "5m"} if enabled else {"argv": ["/x"], "every": "5m",
+                                                             "enabled": False}
+    change = UnitChange("demo", "snap", "timer", "keep", None, (), None, "r", entry=entry)
+    assert _run._unit_row(change, read).state == state
+
+
 # -- HEALTH ------------------------------------------------------------------------------------
 
 HEALTHS = """\

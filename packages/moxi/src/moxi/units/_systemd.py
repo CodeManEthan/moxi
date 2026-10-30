@@ -22,6 +22,7 @@ import os
 import re
 import time
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from ._backend import ApplyIO, ReadError, Rendered, RenderError, Spec, UnitRef
@@ -330,11 +331,14 @@ class SystemdBackend:
                                          "--user daemon-reload` once the cause is fixed")
                 return
         services = {(c.module, c.name): c for c in writes if c.kind == "daemon"}
+        restarted: set[tuple[str, str]] = set()
         lingered = False
         for change in sorted(writes, key=lambda c: c.kind != "socket"):
             if change.kind == "socket":
-                self._start_socket(io, change, services.get((change.module, change.name)))
-            elif self._start(io, change) and change.kind == "daemon" \
+                if self._start_socket(io, change, services.get((change.module, change.name))):
+                    restarted.add((change.module, change.name))
+            elif self._start(io, change, (change.module, change.name) in restarted) \
+                    and change.kind == "daemon" \
                     and change.action == "add" and change.enabled and not lingered:
                 lingered = True
                 self._linger(io, change)
@@ -368,9 +372,10 @@ class SystemdBackend:
                 return False
         return True
 
-    def _start(self, io: ApplyIO, change: UnitChange) -> bool:
+    def _start(self, io: ApplyIO, change: UnitChange, restarted: bool = False) -> bool:
         """Enable and start a written daemon or timer as its change asks. True when every
-        step it ran passed."""
+        step it ran passed. `restarted` says the daemon's changed socket already stopped
+        and started it again, which an `upgrade = "keep"` daemon takes as its start."""
         unit = self._id(change)
         if not change.enabled:
             if change.action == "change" and change.enabled_before:
@@ -378,37 +383,46 @@ class SystemdBackend:
             return True
         if change.action == "add" or change.enabled_before is False:
             return self._run(io, change, "enable", "--now", unit)
-        if change.kind == "daemon" and change.entry.get("upgrade") == "keep":
+        if _keeps(change):
             if self._run(io, change, "enable", unit):
-                io.say(change, f"{unit} rewritten; the new code runs from its next start")
+                io.say(change, f"{unit} rewritten and restarted, since its socket changed"
+                       if restarted else
+                       f"{unit} rewritten; the new code runs from its next start")
                 return True
             return False
         return self._run(io, change, "enable", unit) and self._run(io, change, "restart",
                                                                      unit)
 
     def _start_socket(self, io: ApplyIO, change: UnitChange,
-                      service_change: UnitChange | None) -> None:
+                      service_change: UnitChange | None) -> bool:
         """Enable and start a written `.socket` before its service. systemd refuses to
         start a socket while its service runs, so the service is stopped first unless it is
-        new, and started again after unless its own change starts it."""
+        new, and started again after unless its own change starts it. A daemon with
+        `upgrade = "keep"` is started here too: a changed socket restarts its daemon
+        whatever `upgrade` says, never leaving it stopped until the next connection.
+        True when this step started the service again."""
         stem = self._stem(change.module, change.name)
         service, unit = f"{stem}.service", f"{stem}.socket"
         if not change.enabled:
             if change.action == "change" and change.enabled_before:
                 self._run(io, change, "disable", "--now", unit)
-            return
+            return False
         if service_change is None or service_change.action != "add":
             ran = io.fence.run("stop", service)
             if not ran.ok and not _not_loaded(ran):
                 io.fail(change, ran)
-                return
+                return False
         if change.action == "add" or change.enabled_before is False:
             ok = self._run(io, change, "enable", "--now", unit)
         else:
             ok = self._run(io, change, "enable", unit) and self._run(io, change, "restart",
                                                                        unit)
-        if ok and service_change is None:
-            self._run(io, change, "start", service)
+        starts_itself = service_change is not None and (
+            service_change.action == "add" or service_change.enabled_before is False
+            or not _keeps(service_change))
+        if ok and not starts_itself:
+            return self._run(io, change, "start", service)
+        return False
 
     def _linger(self, io: ApplyIO, change: UnitChange) -> None:
         """The lingering advice, when `loginctl` says lingering is off for this user. The
@@ -524,7 +538,11 @@ class SystemdBackend:
 
     def status(self, units: Sequence[UnitRef], fence: Fence) -> list[UnitState]:
         """One `show` over every id of `units`, and, when a foreign timer came without the
-        unit its `Triggers` names, one more for those units."""
+        unit its `Triggers` names, one more for those units.
+
+        A timer's state is its `.timer`'s, so it reads `active` while armed whatever its
+        runs did; its service's `Result` and `ExecMainStatus` go in `last`. When the first
+        `show` fails, every unit is `unknown` with the failure in `detail`."""
         ids = list(dict.fromkeys(i for u in units for i in u.ids))
         if not ids:
             return []
@@ -539,11 +557,22 @@ class SystemdBackend:
                     units[i] = UnitRef(None, unit.name, "timer", (unit.ids[0], *triggers),
                                        unit.paths, unit.enabled)
                     later += [t for t in triggers if t not in shown]
+        unread: Ran | None = None
         if ran.ok and later:
             later = list(dict.fromkeys(later))
             more = fence.run("show", f"--property={STATUS_PROPERTIES}", *later)
             shown.update(_by_id(more, later))
-        return [self._state(unit, shown, ran) for unit in units]
+            unread = None if more.ok else more
+        states = [self._state(unit, shown, ran) for unit in units]
+        if unread is not None:
+            # The timers read; the units they trigger did not, so no last result is
+            # known for them. Their state is their `.timer`'s, read above.
+            states = [replace(state, detail=f"{state.detail}; its triggered unit could not "
+                                            f"be read: {unread.failure()}")
+                      if unit.kind == "timer" and not unit.marked and len(unit.ids) > 1
+                      and unit.ids[1] in later and state.state != "unknown" else state
+                      for unit, state in zip(units, states)]
+        return states
 
     def _state(self, unit: UnitRef, shown: Mapping, ran: Ran) -> UnitState:
         head = shown.get(unit.ids[0], {})
@@ -753,6 +782,11 @@ def _read_wrap(path: Path) -> tuple[str, str, str, str] | None:
     if not sep or not match or not match["switch"].startswith(module + "."):
         return None
     return module, match["ref"], match["switch"][len(module) + 1:], name
+
+
+def _keeps(change: UnitChange) -> bool:
+    """Whether a changed daemon is written without a restart (`upgrade = "keep"`)."""
+    return change.kind == "daemon" and change.entry.get("upgrade") == "keep"
 
 
 def _delete(path: Path) -> None:

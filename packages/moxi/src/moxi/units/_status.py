@@ -43,6 +43,10 @@ def status(modules: Iterable[str] | str | None = None, *, foreign: Iterable[str]
     `.socket` unit). A foreign name that is empty, in moxi's own namespace (read such a
     unit through its module), or one the supervisor's fence refuses is `unknown` with the
     reason, and the other units are read as ever.
+
+    On every backend a timer's state is its schedule, never its last run, whose result is
+    in `last` (`UnitState` gives its shape per backend); and when a backend's supervisor
+    read fails, every unit that read covers is `unknown` with the failure in `detail`.
     """
     from .. import modules as _modules
 

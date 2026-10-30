@@ -352,7 +352,11 @@ def _unit_row(change, state) -> Row:
 
 
 def _state_of(change, state) -> tuple[str, str, str | None]:
-    """The supervisor's state of a written unit as a row's state, detail and fix."""
+    """The supervisor's state of a written unit as a row's state, detail and fix:
+    `active` ok, `failed` fail, `inactive` warn (ok for a unit declared `enabled = false`),
+    `missing` warn with the install line, `unknown` warn. A timer's state is its schedule
+    on every backend, so a timer whose last run failed is `active` here; that run shows
+    only in its run-line row."""
     what = state.state
     if what == "active":
         detail = "active"

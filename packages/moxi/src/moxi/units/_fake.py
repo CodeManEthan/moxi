@@ -38,8 +38,10 @@ class FakeSupervisor:
     `daemon-reload` found in `root` (plus `extra`, units a test declares outside it, such
     as a foreign timer's service). `triggers` maps a timer id to the unit it triggers
     (default `<stem>.service`; several separated by spaces, or none). `props` maps a unit
-    id to properties `show` prints for it (`Type`, and `ExecStart` as the number of its
-    command lines), and `version` is the manager's `Version`. `fail` maps `(verb, unit)`
+    id to properties `show` prints for it (`Type`, `ExecStart` as the number of its
+    command lines, and `Result`, `ExecMainStatus` and `ActiveState`, which stand in for
+    the ones its state gives, so a test can show a failed run), and `version` is the
+    manager's `Version`. `fail` maps `(verb, unit)`
     (or `(verb, None)` for `daemon-reload` and `show`) to the stderr that command fails
     with. `calls` lists every command as a tuple of its arguments after `systemctl
     --user`, without the `--` the fence puts before the units.
@@ -117,15 +119,16 @@ class FakeSupervisor:
             props = self.props.get(unit, {})
             execs = [f"ExecStart={{ path=/bin/true ; argv[]=/bin/true {i} }}"
                      for i in range(props.get("ExecStart", 1 if loaded else 0))]
+            active = props.get("ActiveState", "active" if state["active"] else "inactive")
             blocks.append("\n".join([
                 f"Id={unit}",
                 f"LoadState={'loaded' if loaded else 'not-found'}",
-                f"ActiveState={'active' if state['active'] else 'inactive'}",
+                f"ActiveState={active}",
                 f"SubState={'running' if state['active'] else 'dead'}",
                 f"MainPID={4242 if state['active'] and unit.endswith('.service') else 0}",
                 "ActiveEnterTimestampMonotonic=0",
-                "Result=success",
-                "ExecMainStatus=0",
+                f"Result={props.get('Result', 'success')}",
+                f"ExecMainStatus={props.get('ExecMainStatus', 0)}",
                 f"UnitFileState={'enabled' if state['enabled'] else 'disabled'}",
                 f"Triggers={trigger}",
                 f"DropInPaths={' '.join(dropins)}",

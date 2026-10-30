@@ -548,6 +548,17 @@ def test_ending_a_task_that_is_not_running_is_no_failure(w):
     assert acted.ok
 
 
+def test_without_powershell_ending_a_stopped_task_still_fails_and_says_why(w):
+    """The residual: with no PowerShell read, a failed `/end` cannot be told from an idle
+    task, so it stands, with a note that the check could not run."""
+    unit = registered(w, running=False)
+    w.sup.powershell = False
+    acted = w.backend.act("stop", unit, w.fence)
+    assert not acted.ok
+    assert "The task is not running." in acted.lines[0]
+    assert "could not be checked" in acted.lines[0]
+
+
 def test_an_end_that_fails_on_a_running_task_is_a_failure(w):
     unit = registered(w, running=True)
     w.sup.fail[("/end", unit.ids[0])] = "ERROR: Access is denied."
@@ -622,9 +633,9 @@ def test_status_reads_marked_tasks_by_position_and_the_runtime_file(w):
         "active", me.pid, me.started, True, "schtasks")
     assert r.log == str(moxi.paths.Layout("demo").state_dir() / "logs" / "relay.log")
     s = states["snap"]
-    # The run line decides `failed`; `last` carries only the supervisor's result, and the
-    # PowerShell read gives a marked task none.
-    assert s.state == "failed" and s.last is None and s.enabled is True
+    # A timer reads its schedule: armed is `active` whatever its last run did; the run line
+    # is the core's to add to `last`, and the PowerShell read gives a marked task none.
+    assert s.state == "active" and s.last is None and s.enabled is True
     g = states["gone"]
     assert (g.state, g.enabled, g.log) == ("missing", None, None)
 
@@ -650,6 +661,34 @@ def test_without_powershell_enabled_is_none_and_the_state_is_read_as_before(w):
     assert state.state == "active" and state.enabled is None
 
 
+@pytest.mark.parametrize("enabled, running, code, state", [
+    (True, False, 0, "active"),
+    (True, False, 2, "active"),  # a failed last run: the run line says it, not the state
+    (True, True, None, "active"),
+    (False, False, 0, "inactive"),
+])
+def test_a_marked_timer_reads_its_schedule_never_its_runs(w, enabled, running, code, state):
+    snap = registered(w, "timer", enabled=enabled, running=running)
+    if code is not None:
+        run_line("demo", "snap", code)
+    [read] = w.backend.status([snap], w.fence)
+    assert (read.state, read.enabled, read.pid, read.last) == (state, enabled, None, None)
+
+
+def test_a_marked_timer_without_powershell_reads_active_and_says_why(w):
+    snap = registered(w, "timer", enabled=False)
+    run_line("demo", "snap", 2)
+    w.sup.powershell = False
+    [read] = w.backend.status([snap], w.fence)
+    assert (read.state, read.enabled) == ("active", None)
+    assert "whether it is disabled could not be checked" in read.detail
+    assert "did not run" in read.detail  # the reason the read gave
+    w.sup.powershell = True
+    w.sup.fail[("tasks", None)] = "Get-ScheduledTask : Access is denied."
+    [read] = w.backend.status([snap], w.fence)
+    assert (read.state, read.enabled) == ("active", None) and "Access is denied" in read.detail
+
+
 def test_a_failed_query_reads_unknown(w):
     relay = registered(w)
     w.sup.fail[("/query", None)] = "ERROR: The RPC server is unavailable."
@@ -657,22 +696,43 @@ def test_a_failed_query_reads_unknown(w):
     assert state.state == "unknown" and "RPC server" in state.detail
 
 
+def test_a_failed_query_makes_every_marked_unit_it_covers_unknown(w):
+    """Daemon and timer alike; a foreign task, read by the PowerShell call instead, is
+    not covered by the query and reads as ever."""
+    relay = registered(w, running=True)
+    snap = registered(w, "timer")
+    live_runtime("demo", "relay")
+    w.sup.foreign["\\Backups\\Daily"] = {"state": "Ready", "last_run": None,
+                                         "last_result": 0}
+    w.sup.fail[("/query", None)] = "ERROR: The RPC server is unavailable."
+    states = w.backend.status([relay, snap, w.backend.foreign("\\Backups\\Daily", None)],
+                              w.fence)
+    assert [s.state for s in states] == ["unknown", "unknown", "active"]
+    assert all("RPC server" in s.detail for s in states[:2])
+
+
 @pytest.mark.parametrize("info, state, enabled", [
     ({"state": "Running", "last_run": "2026-01-01T00:00:00", "last_result": 0x41301},
      "active", True),
-    ({"state": "Ready", "last_run": None, "last_result": 0x41303}, "inactive", True),
+    ({"state": "Queued", "last_run": None, "last_result": 0x41303}, "active", True),
+    ({"state": "Ready", "last_run": None, "last_result": 0x41303}, "active", True),
     ({"state": "Ready", "last_run": "2026-01-01T00:00:00", "last_result": 0},
-     "inactive", True),
-    ({"state": "Ready", "last_run": "2026-01-01T00:00:00", "last_result": 1}, "failed", True),
-    ({"state": "Ready", "last_run": "x", "last_result": 0x80070002}, "failed", True),
+     "active", True),
+    # A failed last run leaves the schedule armed: still `active`, the result in `last`.
+    ({"state": "Ready", "last_run": "2026-01-01T00:00:00", "last_result": 1}, "active", True),
+    ({"state": "Ready", "last_run": "x", "last_result": 0x80070002}, "active", True),
     ({"state": "Disabled", "last_run": None, "last_result": 0x41306}, "inactive", False),
+    ({"state": "Disabled", "last_run": "x", "last_result": 1}, "inactive", False),
 ])
-def test_a_foreign_task_is_read_from_the_powershell_call(w, info, state, enabled):
+def test_a_foreign_task_is_read_as_a_timer_from_the_powershell_call(w, info, state,
+                                                                     enabled):
     w.sup.foreign["\\Backups\\Daily (home)"] = info
     ref = w.backend.foreign("\\Backups\\Daily (home)", w.fence)
     [read] = w.backend.status([ref], w.fence)
     assert w.sup.calls == [("tasks",)]
-    assert (read.module, read.state, read.enabled) == (None, state, enabled)
+    assert (read.module, read.kind, read.state, read.enabled) == (None, "timer", state,
+                                                                  enabled)
+    assert read.detail.startswith(info["state"])
     assert read.last == {"last_run": info["last_run"], "last_result": info["last_result"]}
     assert read.since is None and read.log is None
 
@@ -684,7 +744,7 @@ def test_foreign_refs_reach_powershell_only_in_its_environment(w):
     ref = w.backend.foreign(f"\\MoxiTest\\{name}", w.fence)
     missing = w.backend.foreign("\\Backups\\Gone", w.fence)
     read, gone = w.backend.status([ref, missing], w.fence)
-    assert read.state == "inactive" and gone.state == "missing" and gone.enabled is None
+    assert read.state == "active" and gone.state == "missing" and gone.enabled is None
     [env] = w.sup.envs
     assert json.loads(env["MOXI_TASK_REFS"]) == [
         {"path": "\\MoxiTest\\", "name": name}, {"path": "\\Backups\\", "name": "Gone"}]
@@ -694,7 +754,7 @@ def test_a_foreign_ref_matches_regardless_of_case(w):
     w.sup.foreign["\\Backups\\Daily"] = {"state": "Ready", "last_run": None,
                                          "last_result": 0}
     [read] = w.backend.status([w.backend.foreign("\\backups\\daily", w.fence)], w.fence)
-    assert read.state == "inactive"
+    assert read.state == "active"
 
 
 @pytest.mark.parametrize("missing_powershell", [True, False])
@@ -820,7 +880,7 @@ def test_status_gives_one_state_per_unit_in_order_with_only_the_supervisors_resu
     assert w.sup.calls == [("/query",), ("tasks",)]
     assert [(s.module, s.name, s.kind) for s in states] == [
         (r.module, r.name, r.kind) for r in refs]
-    assert [s.state for s in states] == ["failed", "failed", "inactive", "missing"]
+    assert [s.state for s in states] == ["active", "active", "inactive", "missing"]
     assert states[0].last == {"last_run": info["last_run"], "last_result": 1}
     assert [s.last for s in states[1:]] == [None, None, None]
 
@@ -874,9 +934,13 @@ windows = pytest.mark.skipif(
 
 
 @windows
-def test_a_real_task_under_a_test_folder_is_created_run_read_ended_and_deleted(tmp_path):
+def test_a_real_task_under_a_test_folder_is_created_run_read_ended_and_deleted(
+        tmp_path, record_property):
     """Registers `\\MoxiTest\\<hex>-probe` from a rendered XML whose gate is replaced by a
-    short sleep, and walks it through the verbs and the reads."""
+    short sleep, and walks it through the verbs and the reads: armed and disabled, as a
+    marked timer and as a foreign task. It records what `/end` of an idle task exits
+    with (printed, and in the JUnit report as `end_idle_exit`), which decides whether
+    stopping a stopped task can be read as done without PowerShell."""
     import secrets
 
     from moxi.units._fence import Fence as RealFence
@@ -899,14 +963,26 @@ def test_a_real_task_under_a_test_folder_is_created_run_read_ended_and_deleted(t
     try:
         assert fence.run("/create", task, str(xml)).ok
         unit = UnitRef(module, "probe", "timer", (task,))
+        other = SchtasksBackend()  # reads the same task as a foreign one
+        foreign = other.foreign(task, None)
+        [state] = backend.status([unit], fence)
+        assert (state.state, state.enabled) == ("active", True)  # armed, never run
+        [state] = other.status([foreign], fence)
+        assert (state.state, state.enabled) == ("active", True)
         assert backend.act("start", unit, fence).ok
         assert backend.act("start", unit, fence).ok  # already running: done
         [state] = backend.status([unit], fence)
-        assert state.state in ("inactive", "failed") and state.enabled is True
+        assert (state.state, state.enabled) == ("active", True)
         assert backend.act("disable", unit, fence).ok
-        [state] = backend.status([unit], fence)
-        assert state.enabled is False
         assert backend.act("stop", unit, fence).ok
+        [state] = backend.status([unit], fence)
+        assert (state.state, state.enabled) == ("inactive", False)
+        [state] = other.status([foreign], fence)
+        assert (state.state, state.enabled) == ("inactive", False)
+        assert state.detail.startswith("Disabled")
+        idle = fence.run("/end", task)
+        record_property("end_idle_exit", idle.returncode)
+        print(f"/end of an idle task: exit {idle.returncode}, {idle.stderr.strip()!r}")
         assert backend.act("stop", unit, fence).ok  # not running: done
     finally:
         fence.run("/end", task)

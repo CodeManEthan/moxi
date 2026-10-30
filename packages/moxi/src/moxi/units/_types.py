@@ -106,11 +106,31 @@ class Wrapped:
 class UnitState:
     """What `status` read for one unit. `module` is None for a foreign unit.
 
-    `state` is one of `STATES`. `since` is a wall-clock time. `last` is the newest run
-    line, with the supervisor's own result beside it where it has one. `log` is the hint
-    for reading the unit's output (`journalctl --user -u <unit>`, a log file's path), or
-    None. `enabled` is whether it starts at login or on schedule, None when the backend
-    cannot say. `wrapped` is set only for a foreign timer that a module wrapped.
+    `state` is one of `STATES`. A timer's state is its schedule on every backend: `active`
+    while the backend will run it at its next time, `inactive` when it won't, `failed` only
+    when the schedule itself failed (a systemd `.timer` in `failed`), never because of a run.
+    `unknown` means the supervisor read that covers the unit failed, on any backend, with
+    the failure in `detail`. `since` is a wall-clock time. `log` is the hint for reading
+    the unit's output (`journalctl --user -u <unit>`, a log file's path), or None.
+    `enabled` is whether it starts at login or on schedule, None when the backend cannot
+    say. `wrapped` is set only for a foreign timer that a module wrapped.
+
+    `last` is how the unit's last run went, None when nothing is known. Its keys at the top
+    level are the gate's newest run line (`unit`, `at`, `seconds`, `result`, `exit`), the
+    same on every backend, present for a marked unit (and a wrapped foreign timer) once
+    the gate has run it. The supervisor's own last result, where it has one, is beside
+    them under `"supervisor"`, in each backend's shape:
+
+        systemd       a timer's service: {"result": Result, "status": ExecMainStatus}
+                      (strings, as `systemctl show` prints them)
+        launchd       a timer: {"status": last exit status} (an int, or None)
+        Task Scheduler  a foreign task: {"last_run": LastRunTime, "last_result":
+                      LastTaskResult} (Task Scheduler's own status codes, such as
+                      0x41303 for "has not yet run", are among its values)
+
+    A daemon has no `"supervisor"` entry, nor does a marked Task Scheduler unit. To tell
+    whether a timer's last run failed the same way on every backend, read the run line
+    (`exit`, `result`), as the doctor does, or `last_runs`.
     """
 
     module: str | None
