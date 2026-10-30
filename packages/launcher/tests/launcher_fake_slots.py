@@ -12,7 +12,9 @@ The script's keys, each with its default:
 - `supported`: `{"ok": true, "why": ""}`.
 - `slots`: what `show` reads, by slot (`{"3": {"state": "occupied", "launchable": false,
   "hold": null, "label": ..., "last": {"at": ..., "label": ..., "meta": {...}}}}`), any
-  other `Slot` field given by name. A slot not listed reads None, except the slot a `start`
+  other `Slot` field given by name. A listed slot has a registry row (`created` is a time)
+  unless it gives `"created": null`, a session of a slot's name with no row, which slots
+  reads not launchable. A slot not listed reads None, except the slot a `start`
   placed, which reads occupied with the pane's id and pid, and `dead_status` as the pane's
   exit status.
 - `show`: `ok`, `try-again` (raises `TryAgain`), `error` (raises `TmuxError`), `registry`
@@ -120,11 +122,15 @@ class Slot:
     created: float | None
 
 
+#: When a fake slot's registry row was made.
+CREATED = 1880000000.0
+
+
 def make_slot(number: int, state: str, launchable: bool = False, **fields) -> Slot:
-    """A `Slot` with every field not given empty."""
+    """A registered `Slot` with every other field not given empty."""
     blank = {"name": None, "hold": None, "idle": False, "attached": 0, "label": None,
              "pane_id": None, "window_id": None, "pane_pid": None, "current_command": None,
-             "dead_status": None, "last": None, "created": None}
+             "dead_status": None, "last": None, "created": CREATED}
     return Slot(number=number, state=state, launchable=launchable, **{**blank, **fields})
 
 

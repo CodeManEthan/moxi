@@ -36,8 +36,8 @@ import pytest
 from moxi import config, modules, paths
 from moxi_dev.testing import short_dir, wait_for
 
-from moxi_launcher import (api, catalog, compose, first, handoffs, presets, store,
-                           targets)
+from moxi_launcher import (api, catalog, compose, first, handoffs, presets, startup,
+                           store, targets)
 
 pytestmark = [pytest.mark.live,
               pytest.mark.skipif(sys.platform == "win32",
@@ -305,6 +305,84 @@ def test_a_launch_without_turns_has_the_brief_as_its_opening_prompt(
     assert first_turn_events(result.request_id) == []
 
 
+def pane_text(socket: str, pane_id: str, env: dict[str, str]) -> str:
+    """What the pane shows now, on slots' own server."""
+    done = subprocess.run(["tmux", "-S", socket, "capture-pane", "-p", "-t", pane_id],
+                          capture_output=True, text=True, env=env, timeout=10)
+    return done.stdout
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_a_slot_launch_without_turns_has_the_brief_as_its_opening_prompt(
+        harness, live_env, work, own_slots, monkeypatch):
+    """A slot launch on real slots, which makes the slot, answers Claude's folder-trust
+    screen when it shows (the switch is on), and runs the brief as the opening prompt."""
+    needs(harness)
+    monkeypatch.setattr(first, "turns_api", lambda quiet=False: None)
+    config.set("launcher", "startup.trust_dialog", True, by="launcher live test")
+    config.set("launcher", "startup.wait_s", 15, by="launcher live test")
+    brief, answer = words()
+    typed = {**flags(harness), "target": "slot", "brief": brief, "cwd": str(work)}
+    extra: tuple[str, ...] = ()
+    if harness == "claude":
+        extra = ("--setting-sources", "project")
+    else:
+        typed["trust_cwd"] = True
+    result = api.launch(api.LaunchRequest(typed=typed, extra=extra, cwd=str(work)),
+                        environ=live_env)
+    row = launch_row(result.request_id)
+    try:
+        assert result.state == "started", result.line
+        assert first.on_argv(result.argv)
+        assert row.slot and row.pane_id and row.pid, row
+        wait_for(lambda: answer in pane_text(own_slots, row.pane_id, live_env),
+                 timeout=ANSWER_S, interval=0.5,
+                 what=lambda: f"{answer} in pane {row.pane_id}; saw "
+                              f"{pane_text(own_slots, row.pane_id, live_env)[-2000:]}")
+        assert first_turn_events(result.request_id) == []
+        # The work dir is new, so Claude asks whether to trust it, and the launcher
+        # answered that screen through slots; Codex is trusted by its row and shows none.
+        conn = store.connect(create=False)
+        try:
+            answered = [(e.detail["screen"], e.detail["outcome"])
+                        for e in store.events(conn, result.request_id)
+                        if e.kind == startup.EVENT]
+        finally:
+            conn.close()
+        assert answered == ([("CLAUDE_TRUST_FOLDER", "gone")] if harness == "claude"
+                            else []), answered
+        # The slot it took now reads occupied by this launch, and a second launch that
+        # names it is refused as taken, naming this one.
+        [taken] = api.check(api.LaunchRequest(
+            typed={**flags(harness), "target": "slot", "slot": str(row.slot),
+                   "cwd": str(work)}, cwd=str(work)), environ=live_env)
+        assert type(taken) is targets.SlotTaken, taken
+        assert result.request_id in taken.problem
+    finally:
+        if row is not None and row.pane_id:
+            subprocess.run(["tmux", "-S", own_slots, "kill-pane", "-t", row.pane_id],
+                           env=live_env, capture_output=True)
+
+
+def test_a_named_slot_with_no_registry_row_is_refused_as_missing(live_env, work,
+                                                                 own_slots):
+    """A tmux session named like a slot but made outside slots has no registry row: real
+    slots reads it not launchable, and the launcher refuses it before writing anything,
+    in slots' no-slot words, not as taken."""
+    subprocess.run(["tmux", "-S", own_slots, "new-session", "-d", "-s", "slot-7"],
+                   env=live_env, capture_output=True, timeout=10, check=True)
+    request = api.LaunchRequest(typed={"harness": "claude", "target": "slot",
+                                       "slot": "7", "cwd": str(work)}, cwd=str(work))
+    [refused] = api.check(request, environ=live_env)
+    assert type(refused) is targets.SlotMissing, refused
+    assert "there is no slot 7 (a session of that name runs with no registry row)" in (
+        refused.problem)
+    assert "moxi slots create 7" in refused.hint
+    with pytest.raises(targets.SlotMissing):
+        api.launch(request, environ=live_env)
+    assert launch_row() is None
+
+
 # -- with turns: one launch per target, the brief received as the first turn -------------
 
 
@@ -374,10 +452,7 @@ def test_a_slot_launch_with_turns_gets_its_brief_as_the_first_turn(harness, live
         assert (row.state, row.reason) == ("first-sent", None)
 
         def screen() -> str:
-            done = subprocess.run(["tmux", "-S", own_slots, "capture-pane", "-p", "-t",
-                                   row.pane_id], capture_output=True, text=True,
-                                  env=live_env)
-            return done.stdout
+            return pane_text(own_slots, row.pane_id, live_env)
         wait_for(lambda: answer in screen(), timeout=ANSWER_S, interval=0.5,
                  what=lambda: f"{answer} in pane {row.pane_id}; saw {screen()[-2000:]}")
     finally:

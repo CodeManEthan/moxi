@@ -22,9 +22,10 @@ Windows), stdin closed, its output appended to the run log `STATE/runs/<request 
 The pid and its start time are recorded, and the launch returns at once.
 
 **A tmux slot** (`slot`; Linux, macOS and WSL2, with slots installed). A launch that names
-a slot (a number or a name) goes only there, and `check` refuses it, naming who has it,
-when slots says it is not launchable; one that names none takes the lowest launchable slot
-or a new one. slots claims the slot and opens the window in one step (`start`), with the
+a slot (a number or a name) goes only there, and `check` refuses it when slots says it is
+not launchable: as taken, naming who has it, when it is held or occupied, and as missing
+when slots has no such slot (a session of its name with no registry row included) or its
+session is gone. One that names none takes the lowest launchable slot or a new one. slots claims the slot and opens the window in one step (`start`), with the
 launch's environment on that command only. The row records the slot, the pane and the
 pane's pid (the harness's, since slots' trampoline execs it), and `started` once slots says
 the command started, or `started` with reason `unconfirmed` when slots could not confirm it
@@ -137,13 +138,25 @@ class SlotsUnsupported(catalog.Refused):
 
 
 class SlotTaken(catalog.Refused):
-    """A named slot that is not launchable (held, occupied or missing), or one that is
-    not there; `holder` names who has it, when someone does. Nothing is written."""
+    """A named slot that is not launchable because someone has it (held or occupied);
+    `holder` names who. Nothing is written."""
 
     code = "slot-taken"
 
     def __init__(self, slot: object, problem: str, hint: str, holder: str | None = None):
         self.slot, self.holder = slot, holder
+        super().__init__("slot", problem, hint)
+
+
+class SlotMissing(catalog.Refused):
+    """A named slot that slots has no slot for: none of that number or name, a tmux
+    session of that name with no registry row, or a registered slot whose session is
+    gone. Nothing is written."""
+
+    code = "slot-missing"
+
+    def __init__(self, slot: object, problem: str, hint: str):
+        self.slot = slot
         super().__init__("slot", problem, hint)
 
 
@@ -338,14 +351,20 @@ class Slot(Target):
                                         f"{_error_words(error)}",
                                 "moxi slots list shows the slots")]
         if found is None:
-            return [SlotTaken(named, f"there is no slot {named}",
-                              f"make it with moxi slots create, or leave out the slot to "
-                              "take the lowest free one")]
+            return [SlotMissing(named, f"there is no slot {named}",
+                                "make it with moxi slots create, or leave out the slot to "
+                                "take the lowest free one")]
+        # A session named like a slot but with no registry row is not a slot to slots:
+        # it reads not launchable, and slots' start refuses it `no-slot`. Its words.
+        if found.created is None:
+            return [SlotMissing(named, f"there is no slot {found.number} (a session of "
+                                       "that name runs with no registry row)",
+                                f"moxi slots create {found.number} makes it")]
         if found.launchable:
             return []
         if found.state == "missing":
-            return [SlotTaken(named, f"slot {named} is missing: its tmux session is gone",
-                              f"recreate it with moxi slots create {named}")]
+            return [SlotMissing(named, f"slot {named} is missing: its tmux session is gone",
+                                f"recreate it with moxi slots create {named}")]
         # As slots' own refusal at start: an occupied slot names its last launch, even when
         # it is held too; a held one names the hold.
         if found.state == "occupied":
@@ -687,7 +706,7 @@ def _cut(path: Path, size: int, cap: int) -> None:
 
 __all__ = ["CUT_LINE", "FAILED_ERRORS", "LOG_CAP", "NO_DELIVERER", "OTHER_TARGETS", "RUNS",
            "RUN_FILES", "SPAWN_FAILED", "TARGETS", "TRY_AGAIN", "Headless", "Launch",
-           "NoCommand", "NoSlots", "Slot", "SlotTaken", "SlotsBusy",
+           "NoCommand", "NoSlots", "Slot", "SlotMissing", "SlotTaken", "SlotsBusy",
            "STARTED", "SlotsFailed", "SlotsUnsupported", "Started", "Swept", "Target",
            "Terminal", "UNCONFIRMED",
            "exit_of", "fail", "failed_exit", "find", "get", "named_slot",

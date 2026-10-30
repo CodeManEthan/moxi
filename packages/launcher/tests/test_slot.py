@@ -304,8 +304,6 @@ OCCUPIED_AND_HELD = {**OCCUPIED, "hold": {"holder": "relaunch-77", "until": 1900
     (OCCUPIED, ["slot 3 is occupied by launcher:r0", "request_id r0", "session_id s-0"]),
     # As slots' own refusal at start: occupied wins, naming the last launch, not the hold.
     (OCCUPIED_AND_HELD, ["slot 3 is occupied by launcher:r0", "request_id r0"]),
-    ({"state": "missing", "launchable": False}, ["slot 3 is missing"]),
-    (None, ["there is no slot 3"]),
 ])
 def test_a_named_slot_that_is_not_launchable_is_refused_naming_its_holder(
         work, harness, rig, entry, words):
@@ -322,6 +320,33 @@ def test_a_named_slot_that_is_not_launchable_is_refused_naming_its_holder(
     assert nothing_written() and rig.calls("start") == []
     [listed] = api.check(request(work, slot="3"))
     assert type(listed) is targets.SlotTaken
+
+
+@pytest.mark.parametrize("entry, words, hint", [
+    ({"state": "missing", "launchable": False}, "slot 3 is missing: its tmux session is gone",
+     "moxi slots create 3"),
+    (None, "there is no slot 3", "moxi slots create"),
+    # A live session named like the slot but with no registry row: slots reads it not
+    # launchable, whatever its state, and its start refuses it no-slot. Not taken.
+    ({"state": "free", "launchable": False, "created": None},
+     "there is no slot 3 (a session of that name runs with no registry row)",
+     "moxi slots create 3 makes it"),
+    ({"state": "occupied", "launchable": False, "created": None, "label": "vim"},
+     "there is no slot 3 (a session of that name runs with no registry row)",
+     "moxi slots create 3 makes it"),
+])
+def test_a_named_slot_slots_has_no_slot_for_is_refused_as_missing(work, harness, rig,
+                                                                   entry, words, hint):
+    rig.plan(slots={"3": entry} if entry else {})
+    with pytest.raises(targets.SlotMissing) as raised:
+        api.launch(request(work, slot="3"))
+    refused = raised.value
+    assert refused.code == "slot-missing" and api.exit_code(refused) == exits.REFUSED
+    assert words in refused.problem and hint in refused.hint
+    assert "taken" not in refused.problem and "occupied" not in refused.problem
+    assert nothing_written() and rig.calls("start") == []
+    [listed] = api.check(request(work, slot="3"))
+    assert type(listed) is targets.SlotMissing
 
 
 @pytest.mark.parametrize("how, kind, code, words", [
