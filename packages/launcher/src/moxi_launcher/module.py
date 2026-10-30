@@ -32,6 +32,8 @@ INTERNAL_ENV = {
                              "this session",
     "MOXI_LAUNCHER_RELAUNCH": "launcher stamp: the session is a relaunch, whose handoff "
                               "comes in its first turn",
+    "MOXI_LAUNCHER_TURNS": "test seam: the import name of a module that stands in for "
+                           "turns' API in the first-turn sender",
 }
 SETTINGS = "settings.toml"
 SETUP = None
