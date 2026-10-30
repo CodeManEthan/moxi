@@ -5,7 +5,7 @@ Everything else a module is called is spelled from that name here:
 
     distribution("cache")   moxi-cache      the package on PyPI
     import_name("cache")    moxi_cache      the Python package
-    repo("cache")           moxihq/cache    the public repository
+    repo("cache")           moxihq/cache    the module's own repository, for its issues
     env_prefix("cache")     MOXI_CACHE_     the prefix of every variable it reads
 
 The core itself is `moxi` in all four places and is not a module.
@@ -17,7 +17,7 @@ import re
 
 #: The harness.
 HARNESS = "moxi"
-#: The GitHub organisation that holds the public repositories.
+#: The GitHub organisation that holds the public repository and the modules' issues.
 ORG = "moxihq"
 #: The directory namespace under the data, state, cache, config and runtime roots,
 #: shared by every module, each under its own subdirectory.
@@ -54,7 +54,9 @@ def import_name(name: str) -> str:
 
 
 def repo(name: str) -> str:
-    """The public repository of module `name`: `moxihq/<name>`."""
+    """The module's own repository, which holds its issues: `moxihq/<name>`.
+
+    The code of every module lives in the one repository, `moxihq/moxi`."""
     return f"{ORG}/{check_module_name(name)}"
 
 

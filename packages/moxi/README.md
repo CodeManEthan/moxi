@@ -12,13 +12,13 @@ module is off and quiet.
 
 ## Modules
 
-| module | what it does | requires | optional | repo |
+| module | what it does | requires | optional | issues |
 |---|---|---|---|---|
-| `moxi` | The core: names, paths, one config file per module, module discovery, the module contract check, and the `moxi` command | nothing (standard library only) | | [moxihq/moxi](https://github.com/moxihq/moxi) |
-| sessions | Where a harness keeps a session's record, and how its lines read | `moxi` | | [moxihq/sessions](https://github.com/moxihq/sessions) |
-| turns | The one interface to a harness's session: a turn, mail, `/clear` and `/exit` in, session events out. A library with no command of its own | `moxi` | `codex`: the Codex host | [moxihq/turns](https://github.com/moxihq/turns) |
-| cache | The prompt cache clock: when a session's cache goes cold, with a watcher and a status line segment | `moxi`, sessions | | [moxihq/cache](https://github.com/moxihq/cache) |
-| comms | Messages between agent sessions on one machine, delivered into the recipient's session at the end of its current turn | `moxi`, turns | `cache`: hold a send while the recipient's cache is cold; `codex`: Codex sessions | [moxihq/comms](https://github.com/moxihq/comms) |
+| `moxi` | The core: names, paths, one config file per module, module discovery, the module contract check, and the `moxi` command | nothing (standard library only) | | [moxihq/moxi/issues](https://github.com/moxihq/moxi/issues) |
+| sessions | Where a harness keeps a session's record, and how its lines read | `moxi` | | [moxihq/sessions/issues](https://github.com/moxihq/sessions/issues) |
+| turns | The one interface to a harness's session: a turn, mail, `/clear` and `/exit` in, session events out. A library with no command of its own | `moxi` | `codex`: the Codex host | [moxihq/turns/issues](https://github.com/moxihq/turns/issues) |
+| cache | The prompt cache clock: when a session's cache goes cold, with a watcher and a status line segment | `moxi`, sessions | | [moxihq/cache/issues](https://github.com/moxihq/cache/issues) |
+| comms | Messages between agent sessions on one machine, delivered into the recipient's session at the end of its current turn | `moxi`, turns | `cache`: hold a send while the recipient's cache is cold; `codex`: Codex sessions | [moxihq/comms/issues](https://github.com/moxihq/comms/issues) |
 
 ## The `moxi` command
 
@@ -32,7 +32,7 @@ commands:
 - `moxi shortcut <module>` puts a bare `<module>` command on PATH. It is off by default
   and refused when the name is already taken; `--remove` takes it off.
 - `moxi config <module>` shows a module's settings and its config file.
-- `moxi check` checks a module repo against the module contract.
+- `moxi check` checks a module's package against the module contract.
 
 ## Install
 

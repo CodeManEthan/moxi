@@ -1,6 +1,6 @@
-"""The module contract check over this repo, as `moxi check` runs it at each commit.
+"""The module contract check over this package, as `moxi check` runs it.
 
-A contributor's clone and a pull request run the same check as the commit hook.
+It runs with the package's suite, so `moxi-dev check` and CI hold every change to it.
 """
 
 from pathlib import Path
