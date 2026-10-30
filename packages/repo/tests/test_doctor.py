@@ -76,6 +76,24 @@ def test_a_git_too_old_for_an_indexed_repo_fails(demo):
     assert row.fix == f"moxi repo git-hooks refresh {repo}"
 
 
+def test_a_config_mode_repo_under_an_old_git_is_told_the_fix_that_moves_it(demo):
+    pinned, unpinned = demo.repo("my notes"), demo.repo("beta-code")
+    api.add(pinned, ["demo/gate"], mode="config")
+    demo.mp.setattr(gitconf, "git_version", lambda: (2, 56, 0))
+    api.add(unpinned, ["demo/gate"])
+    demo.mp.setattr(gitconf, "git_version", lambda: (2, 43, 0))
+    # Pinned to config, refresh would keep the config entries: the fix moves it to shims.
+    [row] = problems(f"hooks {pinned}")
+    assert row.detail == "git 2.43.0 runs no config entries, so no piece runs here"
+    assert row.fix == pasted("moxi", "repo", "git-hooks", "add", pinned, "--mode", "shim")
+    # Not pinned, refresh picks shims for this git.
+    [row] = problems(f"hooks {unpinned}")
+    assert row.fix == f"moxi repo git-hooks refresh {unpinned}"
+    assert api.refresh(unpinned).ok and problems(f"hooks {unpinned}") == []
+    # Run as printed, the pinned repo's fix clears its row.
+    assert api.add(pinned, mode="shim").ok and problems(f"hooks {pinned}") == []
+
+
 def test_another_git_too_old_for_config_entries_beside_a_config_mode_repo(demo):
     other = fake_git(demo.tmp, "2.43.0")
     demo.mp.setattr(checks, "OTHER_GITS", {sys.platform: (str(other),)})

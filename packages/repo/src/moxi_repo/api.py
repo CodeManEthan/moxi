@@ -699,9 +699,18 @@ def _status_of(repo: Repo, in_index: bool, version, good: dict) -> dict:
     listed.sort(key=lambda p: (p["event"] or "", p["order"], p["id"]))
     mode = state.mode
     if mode == "config" and version is not None and version < gitconf.CONFIG_FROM:
+        # refresh keeps config mode when the repo or the module's default pins it, so
+        # then the fix is the pin to shim mode.
+        try:
+            default = default_mode()
+        except Failure:
+            default = "auto"  # refresh itself then names the config that can't be read
+        if gitconf.pick_mode(state.mode_set, default, version) == "config":
+            fix = f"moxi repo git-hooks add {_arg(repo.root)} --mode shim"
+        else:
+            fix = f"moxi repo git-hooks refresh {_arg(repo.root)}"
         problems.append(Problem(f"git {gitconf.version_text(version)} runs no config "
-                                "entries, so no piece runs here",
-                                f"moxi repo git-hooks refresh {_arg(repo.root)}"))
+                                "entries, so no piece runs here", fix))
     events = {}
     ours = shim.our_shims(repo.hooks_dir)
     python, runner = gitconf.interpreter(), gitconf.runner_file()
