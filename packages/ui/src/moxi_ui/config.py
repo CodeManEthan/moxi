@@ -1,4 +1,4 @@
-"""The shell's settings, read through `moxi.config`: `port` and `idle_s`."""
+"""The shell's settings, read through `moxi.config`: `port`, `idle_s` and `theme.mode`."""
 
 from __future__ import annotations
 
@@ -38,3 +38,16 @@ def idle_s(settings: Settings | None = None) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise ValueError(f"ui's idle_s is {value!r}, not a whole number of seconds above 0")
     return value
+
+
+#: The theme modes `theme.mode` takes.
+THEME_MODES = ("system", "light", "dark")
+
+
+def theme_mode(settings: Settings | None = None) -> str:
+    """The pages' theme mode, `system` when the file can't be read or holds no mode."""
+    try:
+        value = (settings or current())["theme.mode"]
+    except Exception:  # A broken config file must not stop the document from loading.
+        return "system"
+    return value if value in THEME_MODES else "system"

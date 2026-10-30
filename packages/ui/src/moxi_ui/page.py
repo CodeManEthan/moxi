@@ -21,7 +21,6 @@ The settings view's routes are declared by `settings.py` and joined here as
 from __future__ import annotations
 
 import contextvars
-import importlib.resources
 import json
 import os
 import subprocess
@@ -246,14 +245,6 @@ ROUTES = (
 SETTINGS_ROUTES: tuple[Route, ...] = _settings.ROUTES
 
 
-def _assets() -> str | None:
-    # The built page (`web/`) is the web build's output; a tree without it serves the
-    # routes alone.
-    try:
-        return "web" if importlib.resources.files("moxi_ui").joinpath("web").is_dir() else None
-    except (ImportError, OSError):
-        return None
-
-
-#: The shell's page, served in process at `/m/ui/`.
-PAGE = Page(routes=(*ROUTES, *SETTINGS_ROUTES), assets=_assets(), package="moxi_ui")
+#: The shell's page, served in process at `/m/ui/`. Its assets are the web build's
+#: output, `web/`: client.js, the theme, the document and the shell's components.
+PAGE = Page(routes=(*ROUTES, *SETTINGS_ROUTES), assets="web", package="moxi_ui")

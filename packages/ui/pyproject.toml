@@ -34,7 +34,7 @@ packages = ["src/moxi_ui"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_ui", "tests"]
+only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_ui", "tests", "web"]
 
 # A plain `pytest` runs the units and contract seams, and so does `moxi-dev check`: the
 # tiers are deselected here. Run one by hand with `pytest -m <tier>` (a live test also

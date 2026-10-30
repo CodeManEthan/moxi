@@ -40,6 +40,7 @@ from moxi_loopback.api import (
     response_headers,
 )
 
+from . import document as _document
 from . import session as _session
 from .session import (
     HEALTH_PATH,
@@ -171,18 +172,6 @@ def _json(status: int, value: Any) -> Static:
                                            ("Content-Length", str(len(body)))]), body
 
 
-_MISSING_DOCUMENT = (
-    b'<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><title>Moxi</title>'
-    b"</head><body><p>The shell's page is not built into this install.</p></body></html>\n"
-)
-
-
-def _document() -> Static:
-    body = _MISSING_DOCUMENT
-    return 200, response_headers(extra=[("Content-Type", "text/html; charset=utf-8"),
-                                        ("Content-Length", str(len(body)))]), body
-
-
 async def _read_body(receive: Callable[..., Any], cap: int) -> bytes | None:
     """The request body, or None when it runs past `cap` bytes."""
     body = b""
@@ -207,7 +196,7 @@ class Router:
 
     def __init__(self, sessions: Sessions, *, page: ASGIApp | None = None,
                  push: ASGIApp | None = None, proxy: ASGIApp | None = None,
-                 document: Callable[[], Static] = _document,
+                 document: Callable[[], Static] = _document.answer,
                  on_signout: Callable[[], None] | None = None):
         self.sessions = sessions
         self.page = page
