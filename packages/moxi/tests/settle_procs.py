@@ -240,7 +240,9 @@ def child(argv: list[str]) -> int:
     except BaseException as exc:
         note("child", raised=repr(exc))
         raise
-    note("child", exit=code)
+    # The stop signals ignored by now: a late copy can't kill the child as it shuts down.
+    note("child", exit=code, ignored=[int(s) for s in _settle.signals()
+                                      if signal.getsignal(s) == signal.SIG_IGN])
     return code
 
 
