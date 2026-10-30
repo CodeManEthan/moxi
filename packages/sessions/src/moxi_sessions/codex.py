@@ -105,11 +105,14 @@ CHECKED_VERSIONS = ("0.153.0",)
 LEGACY_VERSIONS = ("0.145", "0.146")
 
 #: Every top-level line kind Codex 0.153.0 persists in a rollout, as far as one has been
-#: seen. Codex 0.153.0 can also write `inter_agent_communication`, `security_risk_score`
-#: and `realtime_item`; none has been seen, so each reads as not recognised until the
-#: mapping is checked against one.
+#: seen. `inter_agent_communication_metadata`, written by a spawning thread and its child
+#: when a message passes between them, carries only whether the message starts a turn
+#: (`trigger_turn`), so it gives no record of its own. Codex 0.153.0 can also write
+#: `inter_agent_communication`, `security_risk_score` and `realtime_item`; none has been
+#: seen, so each reads as not recognised until the mapping is checked against one.
 TOP_KINDS = ("session_meta", "turn_context", "world_state", "token_usage_record",
-             "compacted", "event_msg", "response_item")
+             "compacted", "event_msg", "response_item",
+             "inter_agent_communication_metadata")
 
 #: `event_msg` payload types Codex 0.153.0 persists in a rollout (its rollout policy's
 #: `should_persist_event_msg`), by their serialized names.
