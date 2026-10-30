@@ -74,7 +74,8 @@ def rewrite(text: str, name: str, where: str) -> str:
     for line in text.splitlines(keepends=True):
         if re.match(rf"\s*import {name}\b", line):
             raise SystemExit(f"{where}: cannot rewrite {line.strip()!r}; extend the tool")
-        out.append(re.sub(rf"^(\s*)from {name}(?=[. ])", rf"\1from {PACKAGE}.{name}", line))
+        out.append(re.sub(rf"^(\s*)from {name}(?=(?:\.[\w.]+)?\s+import\b)",
+                          rf"\1from {PACKAGE}.{name}", line))
     return "".join(out)
 
 

@@ -42,7 +42,8 @@ def test_no_vendored_file_imports_an_installed_copy():
     bad = []
     for path in VENDOR.rglob("*.py"):
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if re.match(r"\s*(from|import) (tomlkit|packaging)\b", line):
+            if re.match(r"\s*(from (tomlkit|packaging)(\.[\w.]+)? import\b"
+                        r"|import (tomlkit|packaging)\b)", line):
                 bad.append(f"{path.relative_to(VENDOR)}:{number}: {line.strip()}")
     assert bad == []
 
@@ -75,6 +76,27 @@ def test_the_tool_copies_the_package_and_licences_and_rewrites_self_imports(tool
     assert (dest / "core.py").read_text().startswith(
         "    from moxi._vendor.demo import other")
     assert (dest / "LICENSE").read_text() == "the licence"
+
+
+@pytest.mark.parametrize("line, rewritten", [
+    ("from demo import x\n", "from moxi._vendor.demo import x\n"),
+    ("from demo.core import (a,\n", "from moxi._vendor.demo.core import (a,\n"),
+    ("    from demo._x.y import z\n", "    from moxi._vendor.demo._x.y import z\n"),
+    ("from demo\timport x\n", "from moxi._vendor.demo\timport x\n"),
+    ("        from demo < 26.2 is supported but may be removed in a future\n", None),
+    ("from demo.core, the prose goes on\n", None),
+    ("from demonstrate import x\n", None),
+    ("from . import demo\n", None),
+])
+def test_the_tool_rewrites_import_statements_and_never_prose(tool, line, rewritten):
+    assert tool.rewrite(line, "demo", "demo/x.py") == (rewritten or line)
+
+
+def test_the_vendored_prose_is_upstream_s():
+    for name in ("requirements", "markers", "tags", "version", "specifiers"):
+        text = (VENDOR / "packaging" / f"{name}.py").read_text(encoding="utf-8")
+        assert "        from packaging < 26.2 is supported but may be removed" in text
+        assert "moxi._vendor.packaging < " not in text
 
 
 def test_the_tool_refuses_an_import_it_cannot_rewrite(tool, tmp_path):
