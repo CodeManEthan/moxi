@@ -420,6 +420,39 @@ def test_an_answer_that_is_not_json_rpc_raises_not_rpc(fake):
         f.client.call("again")
 
 
+def test_each_call_after_a_failure_raises_a_fresh_exception(fake):
+    import traceback
+
+    f = fake()
+    f.server.close()
+    f.client._reader.join(10)
+    raised, depths = [], []
+    for _ in range(4):
+        for fn in (lambda: f.client.call("again", timeout=1), lambda: f.client.notify("n")):
+            with pytest.raises(ipc.IpcError) as caught:
+                fn()
+            raised.append(caught.value)
+            depths.append(len(traceback.extract_tb(caught.value.__traceback__)))
+    # the traceback of each is as deep as the first: none grows from call to call
+    assert depths[::2] == depths[:1] * 4 and depths[1::2] == depths[1:2] * 4
+    assert len({id(exc) for exc in raised}) == len(raised)
+    assert len({str(exc) for exc in raised}) == 1
+
+
+def test_a_fresh_not_rpc_keeps_the_line(fake):
+    f = fake()
+    thread = threading.Thread(target=lambda: pytest.raises(ipc.NotRpc, f.client.call, "x"))
+    thread.start()
+    f.request()
+    f.send(b'{"ok": true}\n')
+    thread.join(10)
+    first = pytest.raises(ipc.NotRpc, f.client.call, "again").value
+    second = pytest.raises(ipc.NotRpc, f.client.call, "again").value
+    assert first is not second
+    assert first.line == second.line == b'{"ok": true}'
+    assert first.reason == second.reason
+
+
 def test_hello_raises_not_rpc_from_an_old_daemon(fake):
     f = fake()
     errors = []

@@ -70,6 +70,15 @@ def connect(address: str, *, timeout: float = 5.0, max_line: int = _wire.MAX_LIN
         return Client(sock, address, timeout=timeout, max_line=max_line)
 
 
+def _fresh(exc: BaseException) -> BaseException:
+    """A new exception like `exc`: its type, arguments and attributes, with no
+    traceback. A connection's one failure is raised this way by every call that meets
+    it, so threads never share one instance and its traceback never grows."""
+    new = type(exc).__new__(type(exc), *exc.args)
+    new.__dict__.update(exc.__dict__)
+    return new
+
+
 def _writable(sock: socket.socket, seconds: float) -> bool:
     """Whether `sock` can take more bytes within `seconds`."""
     poller = select.poll()
@@ -145,7 +154,7 @@ class Client:
         call = _Call()
         with self._lock:
             if self._failure is not None:
-                raise self._failure
+                raise _fresh(self._failure)
             id = next(self._ids)
             self._calls[id] = call
         try:
@@ -166,7 +175,7 @@ class Client:
         """Send notification `method`; nothing comes back."""
         with self._lock:
             if self._failure is not None:
-                raise self._failure
+                raise _fresh(self._failure)
         self._send(_wire.notification(method, params))
 
     def notifications(self) -> Iterator[tuple[str, object]]:
@@ -211,7 +220,7 @@ class Client:
         except OSError as exc:
             failure = self._fail(IpcError(f"the connection to {self.address} "
                                           f"broke: {exc}"))
-            raise failure from None
+            raise _fresh(failure) from None
         finally:
             self._write_lock.release()
 
@@ -286,7 +295,7 @@ class Client:
                 calls = list(self._calls.values())
                 self._calls.clear()
             for call in calls:
-                call.error = got.error
+                call.error = _fresh(got.error)
                 call.done.set()
             return
         with self._lock:
@@ -307,6 +316,6 @@ class Client:
             self._calls.clear()
         for call in calls:
             if not call.done.is_set():
-                call.error = failure
+                call.error = _fresh(failure)
                 call.done.set()
         return failure
