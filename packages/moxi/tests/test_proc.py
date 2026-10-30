@@ -337,12 +337,14 @@ def test_the_child_ends_when_its_parent_is_killed(tmp_path, kind):
 
 
 @POSIX
-def test_a_watched_child_is_alone_in_its_session_and_its_tree_is_killed(tmp_path):
+def test_a_watched_child_stays_in_this_group_and_its_tree_is_killed(tmp_path):
     child = proc.spawn([PY, script(tmp_path, "tree.py", TREE)], lifeline="watch",
                        stdout=subprocess.PIPE)
     word, pid = child.stdout.readline().split()
     grandchild = proc.identity(int(pid))
-    assert os.getsid(child.pid) == child.pid
+    assert os.getpgid(child.pid) == os.getpgrp()
+    assert os.getsid(child.pid) == os.getsid(0)
+    assert os.getsid(child.watchdog.pid) == child.watchdog.pid
     child.lifeline.close()
     assert child.wait(timeout=30) == -15
     assert gone(grandchild)
@@ -380,7 +382,10 @@ def test_the_watchdog_leaves_when_the_child_ends_by_itself(tmp_path):
 def test_the_watchdog_refuses_bad_arguments(capsys):
     assert _watch.main([]) == 2
     assert _watch.main(["x"]) == 2
-    assert _watch.main(["1"]) == 2
+    assert _watch.main(["123"]) == 2
+    assert _watch.main(["1", "100.5"]) == 2
+    assert _watch.main(["123", "soon"]) == 2
+    assert _watch.main(["123", "nan"]) == 2
     assert "usage" in capsys.readouterr().err
 
 
