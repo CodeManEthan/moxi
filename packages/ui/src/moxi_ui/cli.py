@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import secrets
 import socket
 import sys
@@ -66,6 +67,12 @@ REDIRECT_AGE = 60.0
 LOG_TAIL = 20
 
 _NOT_INSTALLED = ("missing", "nobackend")
+#: A socket state that holds nothing: none written, no backend, or `off` (the daemon is
+#: switched off, or Windows, where the socket is skipped and the shell binds its own).
+_NO_SOCKET = (*_NOT_INSTALLED, "off")
+#: systemd's socket unit for the shell's first address, `127.0.0.1`; the one for `::1`
+#: is `moxi-ui-shell-1.socket`.
+FIRST_SOCKET_UNIT = f"moxi-{MODULE}-{DAEMON}.socket"
 
 
 class Refused(Exception):
@@ -233,9 +240,24 @@ def _row(rows: Sequence[Any], kind: str) -> Any | None:
 
 
 def socket_row(rows: Sequence[Any]) -> Any | None:
-    """The shell's socket, when one is installed."""
+    """The shell's socket, when one is installed and not `off`."""
     row = _row(rows, "socket")
-    return row if row is not None and row.state not in _NOT_INSTALLED else None
+    return row if row is not None and row.state not in _NO_SOCKET else None
+
+
+def socket_holds_v4(row: Any | None) -> bool:
+    """Whether the socket state `row` holds `127.0.0.1:<port>` for the shell: True when
+    it is `active`; on systemd also when it is `failed` or `inactive` and the socket
+    units it names as not active leave out the first one, so only `::1` is not held.
+    The shell then starts on a connection to `127.0.0.1` and refuses `localhost`."""
+    if row is None:
+        return False
+    if row.state == "active":
+        return True
+    if getattr(row, "backend", None) != "systemd" or row.state not in ("failed", "inactive"):
+        return False
+    named = set(re.split(r"[\s,:;()]+", getattr(row, "detail", "") or ""))
+    return any(name.endswith(".socket") for name in named) and FIRST_SOCKET_UNIT not in named
 
 
 def task_row(rows: Sequence[Any]) -> Any | None:
@@ -287,7 +309,7 @@ def _check_locators(rows: Sequence[Any], environ: Mapping[str, str]) -> None:
         where = "the logon task's shell"
     else:
         stop = ("launchctl bootout the shell's agent" if _platform() == "darwin"
-                else "systemctl --user stop moxi-ui-shell.socket")
+                else f"systemctl --user stop {FIRST_SOCKET_UNIT} moxi-ui-shell-1.socket")
         fix = f"unset {variables}, or run `moxi ui serve` in this shell after `{stop}`"
         where = "the socket-started shell"
     raise Refused(f"{variables} moves the shell's runtime directory, so {where} would read "
@@ -380,6 +402,11 @@ def ensure_shell(port: int, *, environ: Mapping[str, str] | None = None,
 
     sock = socket_row(rows)
     if sock is not None and sock.state == "active":
+        return None
+    if socket_holds_v4(sock):
+        # The socket holds 127.0.0.1, which `open` opens: a connect would only start it.
+        say(f"the shell's socket holds 127.0.0.1 but not ::1 ({sock.detail}), so localhost "
+            "is refused; `moxi install ui` writes and starts it again")
         return None
     if sock is not None:
         detail = f" ({sock.detail})" if getattr(sock, "detail", "") else ""

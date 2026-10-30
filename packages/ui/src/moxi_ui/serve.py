@@ -5,8 +5,11 @@ It runs under `moxi.aio.run(workers=4, slow=0.5)` and:
 1. creates its runtime dir and holds `<runtime_dir>/page.lock` for its whole life, taken
    before anything else (a shell of this user is running exactly while the lock is
    held); a 3 s wait that runs out exits 75;
-2. takes its listeners;
-3. reads its epoch and opens its session store for it;
+2. takes its listeners: the sockets a socket unit passed it (systemd's `LISTEN_FDS`, or
+   launchd's `Listeners` keys), else its own, bound on its port;
+3. reads its epoch and opens its session store for it: on sockets systemd passed, the
+   socket units' activation ids from `units.status`, when every unit is active and the
+   passed names are exactly those units; else none, and its sessions live in memory;
 4. writes its runtime file, `page.json`, with loopback's `write_runtime` (format 1, TCP);
 5. serves `worker_layer(guard(prove(router), profile))` on the listeners with loopback's
    `serve` and a 4 MiB head limit, so every request head Chromium or Firefox can send,
@@ -17,6 +20,12 @@ It runs under `moxi.aio.run(workers=4, slow=0.5)` and:
 
 The shell's own page (`moxi_ui.page`) is served in process at `/m/ui/`, its export
 mounted there in the table like any module's.
+
+A shell on inherited sockets exits 0 once it has been idle for `idle_s` (no open request
+or stream and no page server running), when that loses no session: it has an epoch, so
+its sessions are on disk, or it holds none. The socket keeps the port, and the next
+connection starts a shell again. A shell that bound its own listener never exits idle,
+since nothing would hold the port after it.
 
 A port another program holds exits 1, naming the fix. At a clean stop it closes the
 listeners and removes `page.json` before it lets go of the lock.
@@ -56,6 +65,7 @@ from .push import Push
 from .router import ASGIApp, Router, shell_profile, shell_table, worker_layer
 from .session import (
     HEALTH_PATH,
+    PROVE_PATH,
     SERVERS_PATH,
     SIGNIN_API,
     SIGNOUT_API,
@@ -82,9 +92,13 @@ LOCK_FILE = "page.lock"
 #: The event loop's worker threads and slow-callback threshold.
 WORKERS = 4
 SLOW = 0.5
+#: The longest the idle timer sleeps between two looks.
+IDLE_LOOK = 1.0
 
 _log = logging.getLogger("moxi.ui")
 
+#: The probes the idle exit doesn't count.
+_NOT_COUNTED = frozenset((HEALTH_PATH, PROVE_PATH))
 #: The paths under `/m/` that never need the module snapshot: the token routes, the
 #: worker answer and the sign-in.
 _NO_SNAPSHOT = frozenset(path.encode("ascii") for path in (
@@ -99,15 +113,38 @@ def version() -> str:
         return "0+unknown"
 
 
-def epoch_for(listeners: Listeners) -> str | None:
+def _units_status() -> list[Any]:
+    from moxi import units
+
+    try:
+        return list(units.status([MODULE]))
+    except Exception:  # noqa: BLE001 - an unread supervisor gives no epoch
+        _log.warning("the units could not be read; serving with no epoch", exc_info=True)
+        return []
+
+
+def epoch_for(listeners: Listeners, *, rows: Sequence[Any] | None = None) -> str | None:
     """The epoch of the hold the shell serves under, or None.
 
     A shell that bound its own listener has none: its hold is its own process, so its
-    sessions live in its memory only. A shell on sockets inherited from systemd socket
-    units takes the units' activation ids, and only when every unit is active and the
-    inherited names are exactly those units.
+    sessions live in its memory only. Nor has one on launchd's sockets, which carry no
+    activation id. A shell on sockets systemd passed takes the socket state's `epoch`
+    from `units.status` (`rows`, read here unless given): each socket unit's
+    `InvocationID`, which systemd changes whenever the unit starts again. It takes it
+    only when the socket state is `active` and the names systemd passed with the sockets
+    are exactly the units the epoch names, so the sessions it keeps are tied to the very
+    sockets it serves on.
     """
-    return None
+    if not listeners.inherited or not listeners.fd_names:
+        return None
+    sock = cli.socket_row(_units_status() if rows is None else rows)
+    epoch = getattr(sock, "epoch", None) if sock is not None else None
+    if sock is None or sock.state != "active" or not isinstance(epoch, str) or not epoch:
+        return None
+    units = [part.partition("=")[0] for part in epoch.split(",")]
+    if len(set(units)) != len(units) or sorted(units) != sorted(listeners.fd_names):
+        return None
+    return epoch
 
 
 def may_exit_idle(*, inherited: bool, epoch: str | None, live_sessions: int) -> bool:
@@ -115,6 +152,36 @@ def may_exit_idle(*, inherited: bool, epoch: str | None, live_sessions: int) -> 
     port held. So only on an inherited listener (the socket keeps the port), and only
     with an epoch (its sessions are on disk) or with no live session."""
     return inherited and (epoch is not None or live_sessions == 0)
+
+
+class Activity:
+    """The shell's open requests, streams among them, for the idle exit. Health probes
+    and proofs are not counted, so a probe never keeps an idle shell running."""
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic):
+        self.open = 0
+        self._clock = clock
+        self._quiet_since = clock()
+
+    def quiet(self) -> float | None:
+        """Seconds with no open request, or None while one is open."""
+        return None if self.open else max(0.0, self._clock() - self._quiet_since)
+
+    def wrap(self, inner: ASGIApp) -> ASGIApp:
+        async def counted(scope: dict[str, Any], receive: Callable[..., Any],
+                          send: Callable[..., Any]) -> None:
+            if scope.get("type") != "http" or scope.get("path") in _NOT_COUNTED:
+                await inner(scope, receive, send)
+                return
+            self.open += 1
+            try:
+                await inner(scope, receive, send)
+            finally:
+                self.open -= 1
+                if not self.open:
+                    self._quiet_since = self._clock()
+
+        return counted
 
 
 class Shell:
@@ -135,6 +202,10 @@ class Shell:
     `snapshot` True (or a `ModuleSnapshot`), the shell reads its module snapshot when
     `run()` starts and takes each refresh's table, versions, exports and modules view;
     `leave_out` names installed modules it leaves out (test shells only).
+
+    `idle_s` is the idle exit's wait, None for none. The shell exits idle only on
+    inherited listeners and only as `may_exit_idle` allows, so a bound listener never
+    exits idle whatever `idle_s` says. `idled` is True once it has.
     """
 
     def __init__(self, listeners: Listeners, *, epoch: str | None,
@@ -143,9 +214,12 @@ class Shell:
                  page: Page | None = None, push: ASGIApp | None = None,
                  proxy: ASGIApp | None = None, starters: Starters | None = None,
                  child_args: Sequence[str] = (), snapshot: bool | ModuleSnapshot = False,
-                 leave_out: Sequence[str] = ()):
+                 leave_out: Sequence[str] = (), idle_s: float | None = None):
         self.listeners = listeners
         self.epoch = epoch
+        self.idle_s = idle_s
+        self.idled = False
+        self.activity = Activity()
         self.layout = layout or Layout(MODULE)
         self.info: RuntimeInfo | None = None
         store = open_store(self.layout.state_dir(), epoch)
@@ -191,7 +265,7 @@ class Shell:
                       lambda: self.profile)
         if self.snapshot is not None:
             inner = _needing(self.snapshot, inner)
-        self.asgi = worker_layer(inner)
+        self.asgi = self.activity.wrap(worker_layer(inner))
         return self.info
 
     @property
@@ -224,11 +298,15 @@ class Shell:
         """Serve until `stop()`, a signal, or the server's own end."""
         self._loop = asyncio.get_running_loop()
         self._should_exit = asyncio.Event()
-        _log.info("serving on 127.0.0.1:%d (%s)", self.listeners.port,
-                  ", ".join(sorted(self.listeners.names)))
+        _log.info("serving on 127.0.0.1:%d (%s), %s, %s", self.listeners.port,
+                  ", ".join(sorted(self.listeners.names)),
+                  "on inherited sockets" if self.listeners.inherited else "on its own listener",
+                  "with an epoch" if self.epoch else "sessions in memory")
         # Push streams never end on their own, so the stop ends them itself rather than
         # leave them to the server's shutdown deadline.
         ending = asyncio.ensure_future(self._end_push_at_stop())
+        idling = (asyncio.ensure_future(self._idle_exit())
+                  if self.idle_s is not None and self.listeners.inherited else None)
         if self.snapshot is not None:
             self.snapshot.start()
         try:
@@ -236,6 +314,8 @@ class Shell:
                         head_limit=HEAD_LIMIT)
         finally:
             ending.cancel()
+            if idling is not None:
+                idling.cancel()
             if self.snapshot is not None:
                 await self.snapshot.aclose()
             if isinstance(self.push, Push):
@@ -247,6 +327,29 @@ class Shell:
         await self._should_exit.wait()
         if isinstance(self.push, Push):
             await self.push.aclose()
+
+    def idle(self) -> bool:
+        """Whether the shell may exit idle now: `idle_s` with no open request or stream,
+        no page server running, and `may_exit_idle`."""
+        quiet = self.activity.quiet()
+        if self.idle_s is None or quiet is None or quiet < self.idle_s:
+            return False
+        if self.starters.children():
+            return False
+        return may_exit_idle(inherited=self.listeners.inherited, epoch=self.epoch,
+                             live_sessions=self.sessions.store.live())
+
+    async def _idle_exit(self) -> None:
+        assert self._should_exit is not None and self.idle_s is not None
+        look = min(IDLE_LOOK, self.idle_s / 10)
+        while not self._should_exit.is_set():
+            if self.idle():
+                _log.info("idle for %g s; exiting, and the socket starts a shell at the "
+                          "next connection", self.idle_s)
+                self.idled = True
+                self._should_exit.set()
+                return
+            await asyncio.sleep(look)
 
     def stop(self) -> None:
         """Ask a running shell to stop; safe from any thread."""
@@ -284,10 +387,11 @@ def _needing(snapshot: ModuleSnapshot, inner: ASGIApp) -> ASGIApp:
     return layer
 
 
-def run(*, bind: Callable[[int], Listeners] = listen.bind,
+def run(*, bind: Callable[[int], Listeners] = listen.take,
         say: Callable[[str], Any] | None = None) -> int:
-    """Run the shell to its end and return its exit code: 0 for a stop, 1 for an error
-    (the port taken included), 75 when another shell holds the lock."""
+    """Run the shell to its end and return its exit code: 0 for a stop or an idle exit,
+    1 for an error (the port taken, or passed sockets it can't serve, included), 75 when
+    another shell holds the lock. `bind(port)` takes the listeners."""
     say = say or (lambda text: print(text, file=sys.stderr, flush=True))
     layout = Layout(MODULE)
     try:
@@ -314,10 +418,21 @@ def _run_held(layout: Layout, bind: Callable[[int], Listeners], say: Callable[[s
     except listen.PortInUse as err:
         say(f"moxi ui: {err}")
         return 1
+    except listen.NotLoopback as err:
+        say(f"moxi ui: the sockets passed to the shell can't be served: {err}; "
+            "`moxi install ui` writes its socket units again")
+        return 1
     except OSError as err:
         say(f"moxi ui: the listener on port {port} could not be bound: {err}")
         return 1
-    shell = Shell(listeners, epoch=epoch_for(listeners), layout=layout, snapshot=True)
+    idle_s = None
+    if listeners.inherited:
+        try:
+            idle_s = config.idle_s()
+        except Exception as err:  # noqa: BLE001 - a bad setting keeps the shell running
+            say(f"moxi ui: {err}; the shell won't exit idle")
+    shell = Shell(listeners, epoch=epoch_for(listeners), layout=layout, snapshot=True,
+                  idle_s=idle_s)
     try:
         shell.start()
         from moxi import aio

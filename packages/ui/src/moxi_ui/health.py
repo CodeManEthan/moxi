@@ -12,11 +12,14 @@ starting one.
    that holds the lock and has not written its file yet, or removed it on the way out, is
    this user's own). A free lock means no shell runs; a runtime file then is a crash's or
    a reboot's leftover and counts as none.
-2. The units: a socket that is `active` is `idle` (it holds the port, and the first
-   browser connection starts the shell), with no connect; a socket installed and not
-   `active` is `socket`; a supervisor that could not be read is `unknown`, also with no
-   connect, since a socket may hold the port. On Windows the logon task's state is read
-   for the row, and the probe goes on.
+2. The units' socket state: one that is `active` is `idle` (it holds the port, and the
+   first browser connection starts the shell), with no connect. One that holds
+   `127.0.0.1` and not `::1` (systemd's unit for `::1` failed or stopped) is `partial`:
+   the shell starts there too, and refuses `localhost`. Any other installed socket is
+   `socket`, not listening. A supervisor that could not be read is `unknown`, also with
+   no connect, since a socket may hold the port. A socket `off` (Windows, where the
+   shell binds its own) is none; there the logon task's state is read for the row, and
+   the probe goes on.
 3. With no socket, one connect to `127.0.0.1:<port>`, which wakes nothing: one that
    succeeds is `held`, since the lock is free; else `down`.
 
@@ -74,8 +77,8 @@ _SIZE_UNITS = {"": 1, "K": 1024, "M": 1024**2, "G": 1024**3}
 class Probe:
     """What `probe()` found.
 
-    `state` is one of `running`, `starting`, `held`, `idle`, `socket`, `unknown`,
-    `down` or `error` (see the module docstring). `info` is the runtime file read under a
+    `state` is one of `running`, `starting`, `held`, `idle`, `partial`, `socket`,
+    `unknown`, `down` or `error` (see the module docstring). `info` is the runtime file read under a
     held lock; `servers` the `/servers` data of a running shell; `socket` and `task` the
     units' `UnitState`s (the socket, the Windows logon task) when installed; `port` the
     port the probe used; `detail` a line for a person.
@@ -189,8 +192,12 @@ def probe(*, wait: float = WAIT) -> Probe:
     if sock is not None:
         if sock.state == "active":
             return Probe("idle", socket=sock, detail="idle, socket listening")
-        detail = f"the shell's socket is {sock.state}" + (f": {sock.detail}" if sock.detail else "")
-        return Probe("socket", socket=sock, detail=detail)
+        if cli.socket_holds_v4(sock):
+            return Probe("partial", socket=sock,
+                         detail=f"idle, socket listening on 127.0.0.1 only ({sock.detail}); "
+                                "localhost is refused, so use 127.0.0.1")
+        return Probe("socket", socket=sock, detail="the shell's socket is not listening: "
+                                                   + (sock.detail or sock.state))
     task = _task(ours) if _platform() == "win32" else None
     # 3. No socket: one connect, which wakes nothing.
     try:
@@ -303,6 +310,8 @@ def shell_row(found: Probe) -> Row:
         return Row(MODULE, "shell", "fail", found.detail, "moxi config set ui port N")
     if state == "idle":
         return Row(MODULE, "shell", "off", found.detail)
+    if state == "partial":
+        return Row(MODULE, "shell", "warn", found.detail, "moxi install ui")
     if state == "socket":
         return Row(MODULE, "shell", "fail", found.detail, "moxi install ui")
     if state == "unknown":
