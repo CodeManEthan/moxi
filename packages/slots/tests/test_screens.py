@@ -47,6 +47,10 @@ EXPECTED = {
     "claude-2.1.314-dev-channels-120x40.ansi.txt":
         (CLAUDE_DEV_CHANNELS, True, "I am using this for local development", ""),
     "claude-2.1.314-prompt-120x40.ansi.txt": (None, False, None, ""),
+    "claude-2.1.314-exit-shell-120x40.plain.txt":
+        (CLAUDE_EXIT_DIALOG, True, "Exit and stop tasks", ""),
+    "claude-2.1.314-exit-shell-120x40.ansi.txt":
+        (CLAUDE_EXIT_DIALOG, True, "Exit and stop tasks", ""),
     "claude-2.1.296-exit-shell-160.ansi.txt":
         (CLAUDE_EXIT_DIALOG, True, "Exit and stop tasks", ""),
     "claude-2.1.296-exit-monitor-160.ansi.txt":
@@ -86,7 +90,7 @@ def test_the_trust_capture_needs_one_down():
 
 
 def test_the_plain_and_colour_captures_give_one_region():
-    for stem in ("trust-120x40", "dev-channels-120x40"):
+    for stem in ("trust-120x40", "dev-channels-120x40", "exit-shell-120x40"):
         a = region(fixture(f"claude-2.1.314-{stem}.plain.txt"), 120)
         b = region(fixture(f"claude-2.1.314-{stem}.ansi.txt"), 120)
         assert a == b

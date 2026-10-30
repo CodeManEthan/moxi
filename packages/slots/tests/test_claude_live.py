@@ -9,11 +9,15 @@ deselected by default, and run only with MOXI_TEST_LIVE=1 and `claude` on PATH.
   folder MOXI_TEST_LIVE_CLAUDE_CWD names, which your Claude Code must already trust. It
   is skipped without that variable. Answering it starts a session that is given no
   prompt and is killed with the server.
+- The exit dialog needs background work, which only a turn starts, so this test runs
+  Claude Code the same way (your own config, safe mode, that folder, skipped without
+  it) with a prompt on its command line: one short turn on the small model that starts
+  `sleep 600` as a background shell. Then it types `/exit`, reads the dialog and
+  answers it, which stops the shell and ends Claude Code.
 
 Each screen's capture (plain and with colour) is written to the test's tmp, under
-`captures/`, and its path printed (`pytest -s` shows it), to be added as a fixture.
-
-The exit dialog is not captured here: it needs background work a session's turn starts.
+`captures/`, and its path printed (`pytest -s` shows it), to be added as a fixture once
+it is cropped as `test_screens.py` says.
 """
 
 from __future__ import annotations
@@ -28,7 +32,8 @@ import pytest
 
 from moxi_slots import launch, slots, tmux
 from moxi_slots.answer import answer_screen, read_screen
-from moxi_slots.screens import CLAUDE_DEV_CHANNELS, CLAUDE_TRUST_FOLDER, SCREENS
+from moxi_slots.screens import (CLAUDE_DEV_CHANNELS, CLAUDE_EXIT_DIALOG, CLAUDE_TRUST_FOLDER,
+                                SCREENS, plain)
 
 pytestmark = [pytest.mark.live,
               pytest.mark.touches("packages/slots/src/moxi_slots/answer.py",
@@ -99,16 +104,55 @@ def test_the_trust_warning_on_a_fresh_config(claude_slot, tmp_path):
     assert (done.outcome, done.why, done.keys) == ("gone", "", ("Down", "Enter"))
 
 
-def test_the_dev_channels_warning(claude_slot, tmp_path):
+def own_config(why: str) -> tuple[str, dict[str, str]]:
+    """The trusted folder and the environment that reach your own Claude Code config."""
     cwd = REAL.get("MOXI_TEST_LIVE_CLAUDE_CWD")
     if not cwd or "HOME" not in REAL:
-        pytest.skip("set MOXI_TEST_LIVE_CLAUDE_CWD to a folder your Claude Code trusts: "
-                    "the development channels warning shows only when logged in, so this "
-                    "test uses your own config")
+        pytest.skip(f"set MOXI_TEST_LIVE_CLAUDE_CWD to a folder your Claude Code trusts: "
+                    f"{why}, so this test uses your own config")
     env = {k: REAL[k] for k in ("HOME", "USER", "LOGNAME", "CLAUDE_CONFIG_DIR") if k in REAL}
+    return cwd, env
+
+
+def test_the_dev_channels_warning(claude_slot, tmp_path):
+    cwd, env = own_config("the development channels warning shows only when logged in")
     pane = run(["--safe-mode", "--dangerously-load-development-channels", "server:moxi-live"],
                env, cwd)
     until_shown(CLAUDE_DEV_CHANNELS)
     keep(pane, "claude-dev-channels", tmp_path)
     done = answer_screen(1, CLAUDE_DEV_CHANNELS, wait=10)
     assert (done.outcome, done.why, done.keys) == ("gone", "", ("Enter",))
+
+
+BACKGROUND = ("Run the shell command sleep 600 with the Bash tool in the background "
+              "(run_in_background: true), then reply with the single word: started.")
+
+
+def turn_done(pane: str) -> bool:
+    """The turn has replied `started` and nothing is working any more."""
+    text = plain(tmux.call("capture-pane", "-p", "-t", pane).out)
+    replied = any(row.startswith("●") and "started" in row for row in text.split("\n"))
+    return replied and "esc to interrupt" not in text
+
+
+def test_the_exit_dialog_with_a_background_shell(claude_slot, tmp_path):
+    cwd, env = own_config("only a turn starts background work, and a turn needs a login")
+    # The prompt goes first: --allowedTools takes every word after it as another tool.
+    pane = run([BACKGROUND, "--safe-mode", "--model", "haiku",
+                "--allowedTools", "Bash(sleep 600)"], env, cwd)
+    deadline = time.monotonic() + 90
+    while not turn_done(pane):
+        if time.monotonic() > deadline:
+            keep(pane, "claude-exit-turn", tmp_path)
+            raise AssertionError("the turn did not end with the shell started in 90 s")
+        assert not read_screen(1, SCREENS).dead, "claude ended before /exit"
+        time.sleep(0.5)
+    time.sleep(1.0)
+    tmux.call("send-keys", "-t", pane, "-l", "/exit")
+    time.sleep(0.5)
+    tmux.call("send-keys", "-t", pane, "Enter")
+    seen = until_shown(CLAUDE_EXIT_DIALOG, bound=30)
+    keep(pane, "claude-exit-shell", tmp_path)
+    assert any("sleep 600" in row for row in seen.rows), seen.rows
+    done = answer_screen(1, CLAUDE_EXIT_DIALOG, wait=10)
+    assert (done.outcome, done.why, done.keys) == ("ended", "", ("Enter",))
