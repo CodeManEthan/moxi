@@ -241,6 +241,20 @@ def test_private_names_warn_by_key_and_position(names_config):
     assert_no_entry(row, EVERY_ENTRY + ["qx", "zq"])
 
 
+def test_private_names_warn_not_off_when_every_entry_trims_to_nothing(names_config):
+    # The list finds nothing, as an empty one does, but the user wrote entries: the row
+    # warns about them by position rather than calling the list empty.
+    names_config(words=[" - _ "], emails=["_"])
+    row = doctor.private_names_row()
+    assert row.state == "warn"
+    assert row.detail == (
+        "words 1, anywhere 0, emails 1, allowed 0; "
+        "private_names.words entry 1 is empty once separators are trimmed, so it is left "
+        "out; "
+        "private_names.emails entry 1 is empty once separators are trimmed, so it is left "
+        "out")
+
+
 def test_a_three_character_entry_gets_no_warning(names_config):
     names_config(words=["-qxz-"])
     assert doctor.private_names_row().state == "ok"
