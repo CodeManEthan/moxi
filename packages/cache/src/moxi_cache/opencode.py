@@ -87,6 +87,23 @@ def _is_number(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def _unread(error: Unreadable, session_id, path) -> Unread:
+    """sessions' failed read as the clock's `unknown`: a database with no row for the
+    session is `no-record`, one whose tables or columns are not the reader's is
+    `unrecognised` (the sign of an OpenCode upgrade), one that opened but could not be
+    read (locked, or not a database) is `unreadable`, and one missing or that cannot be
+    opened is `source-unreadable`."""
+    from moxi_sessions.api import opencode as reader
+    if isinstance(error, reader.MissingSession):
+        return Unread(f"no session {session_id} in {path}", _clock.NO_RECORD)
+    if isinstance(error, reader.UnknownSchema):
+        return Unread(error.reason, _clock.UNRECOGNISED)
+    if isinstance(error, reader.QueryFailed):
+        return Unread(f"the OpenCode database could not be read ({error.error})",
+                      _clock.UNREADABLE)
+    return Unread(error.reason, _clock.SOURCE_UNREADABLE)
+
+
 class _Session:
     """One read of the session through sessions, opened on first use: the session row
     first, the records only when a step needs them."""
@@ -121,16 +138,12 @@ class _Session:
             raise Unread(NO_SOURCE, _clock.NO_SOURCE)
         if not self.session_id:
             raise Unread(NO_SESSION_YET, _clock.NO_SESSION_YET)
-        from moxi_sessions.api import opencode as reader
         try:
             self.read = records(Source(HARNESS, str(self.path), self.session_id),
                                 kinds=KINDS)
             return self.read.header.session_row
-        except reader.MissingSession:
-            raise Unread(f"no session {self.session_id} in {self.path}",
-                         _clock.NO_RECORD) from None
         except Unreadable as e:
-            raise Unread(e.reason, _clock.SOURCE_UNREADABLE) from e
+            raise _unread(e, self.session_id, self.path) from e
 
     def records(self) -> list:
         """Every record the clock reads, in the session's order. Raises Unread."""
@@ -140,7 +153,7 @@ class _Session:
                 self._records = list(self.read)
             except Unreadable as e:
                 # The read is over once it fails: every later ask fails the same way.
-                self.failed = Unread(e.reason, _clock.SOURCE_UNREADABLE)
+                self.failed = _unread(e, self.session_id, self.path)
                 raise self.failed from e
         return self._records
 

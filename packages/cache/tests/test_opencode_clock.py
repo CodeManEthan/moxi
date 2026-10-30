@@ -176,11 +176,21 @@ def test_the_launchers_own_new_session_is_fresh(tmp_path):
     assert oc_read(s, turned=True).kind == "unknown"
 
 
-@pytest.mark.parametrize("case", ["assistant-no-step", "bad-role", "bad-data",
-                                  "file-part", "step-on-user", "totals", "version",
-                                  "missing-column", "no-session", "missing-db",
-                                  "unreadable-db", "locked-db", "no-part-table",
-                                  "no-source"])
+#: Each failed witness's code. A schema change, the sign of an OpenCode upgrade, is
+#: `unrecognised`; a database that opened but could not be read is `unreadable`; one that
+#: is missing or cannot be opened is `source-unreadable`.
+WITNESS_CODES = {
+    "assistant-no-step": "unrecognised", "bad-role": "unrecognised",
+    "bad-data": "unrecognised", "file-part": "no-request", "step-on-user": "no-request",
+    "totals": "no-request", "version": "no-request", "missing-column": "unrecognised",
+    "no-session": "no-record", "missing-db": "source-unreadable",
+    "unreadable-db": "source-unreadable", "locked-db": "unreadable",
+    "not-a-database": "unreadable", "no-part-table": "unrecognised",
+    "no-source": "no-source",
+}
+
+
+@pytest.mark.parametrize("case", list(WITNESS_CODES))
 def test_each_witness_that_fails_is_unknown(tmp_path, case):
     if case == "missing-column":
         s = oc_db(tmp_path)
@@ -209,11 +219,15 @@ def test_each_witness_that_fails_is_unknown(tmp_path, case):
     if case == "no-session":
         clock = oc_read(s, sid=SID_B, turned=False, source=source)
         assert clock.kind == "unknown" and "no session" in clock.reason
+        assert clock.code == WITNESS_CODES[case]
         return
     elif case == "missing-db":
         source = str(tmp_path / "nowhere.db")
     elif case == "unreadable-db":
         path.chmod(0)
+    elif case == "not-a-database":
+        source = str(tmp_path / "not-a.db")
+        (tmp_path / "not-a.db").write_bytes(b"this is not a database at all" * 100)
     elif case == "no-source":
         source = None
     try:
@@ -233,8 +247,20 @@ def test_each_witness_that_fails_is_unknown(tmp_path, case):
         if case == "unreadable-db":
             path.chmod(0o600)
     assert clock.kind == "unknown", (case, clock)
+    assert clock.code == WITNESS_CODES[case], (case, clock)
     if case == "assistant-no-step":
         assert clock.reason == opencode.UNSHAPED_ROWS
+    elif case == "missing-column":
+        assert clock.reason == ("the OpenCode database's `session` table has no "
+                                "`tokens_cache_write` column")
+    elif case == "no-part-table":
+        assert clock.reason == "the OpenCode database has no `part` table"
+    elif case == "missing-db":
+        assert clock.reason == f"the OpenCode database {source} is missing"
+    elif case == "unreadable-db":
+        assert clock.reason == f"the OpenCode database {source} cannot be read"
+    elif case in ("locked-db", "not-a-database"):
+        assert clock.reason.startswith("the OpenCode database could not be read (")
 
 
 def test_the_session_rows_step_needs_only_the_session_tables_shape(tmp_path):
@@ -247,6 +273,7 @@ def test_the_session_rows_step_needs_only_the_session_tables_shape(tmp_path):
     change(s, "DROP TABLE part")
     clock = oc_read(s)
     assert clock.kind == "unknown" and "no `part` table" in clock.reason
+    assert clock.code == "unrecognised"
 
 
 def test_the_pairs_under_the_wildcard_row(tmp_path):

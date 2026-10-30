@@ -14,7 +14,8 @@ import sqlite3
 import pytest
 
 from moxi_sessions import opencode, reader
-from moxi_sessions.opencode import Cursor, MissingSession, Snapshot, Unreadable, since
+from moxi_sessions.opencode import (Cursor, MissingSession, QueryFailed, Snapshot,
+                                    UnknownSchema, Unreadable, since)
 from moxi_sessions.shape import UNKNOWN, Malformed, Marker, Message, Other, Request
 from moxi_sessions.testing import OpenCodeDb
 from moxi_sessions.testing.opencode import OpenCodeAssistant
@@ -58,12 +59,39 @@ def test_a_missing_database_is_unreadable_not_empty(tmp_path):
     assert "missing" in caught.value.reason
 
 
-def test_a_file_that_is_not_a_database_is_unreadable(tmp_path):
+def test_a_missing_database_is_not_a_failed_query_or_an_unknown_schema(tmp_path):
+    with pytest.raises(Unreadable) as caught:
+        Snapshot(tmp_path / "nowhere" / "opencode.db")
+    assert not isinstance(caught.value, (QueryFailed, UnknownSchema, MissingSession))
+
+
+def test_a_file_that_is_not_a_database_is_a_failed_query(tmp_path):
     path = tmp_path / "opencode.db"
     path.write_bytes(b"this is not a database at all" * 100)
-    with pytest.raises(Unreadable):
+    with pytest.raises(QueryFailed) as caught:
         with Snapshot(path) as snap:
             snap.session("ses_x")
+    assert isinstance(caught.value, Unreadable)
+    assert caught.value.error == "file is not a database"
+    assert caught.value.reason == (f"the OpenCode database {path} could not be read "
+                                   "(file is not a database)")
+
+
+def test_a_database_locked_past_the_busy_timeout_is_a_failed_query(tmp_path):
+    """A writer's exclusive lock blocks a reader only outside WAL mode."""
+    db = OpenCodeDb(tmp_path / "opencode", wal=False)
+    s = db.session()
+    path = db.write()
+    holder = sqlite3.connect(path)
+    holder.execute("BEGIN EXCLUSIVE")
+    try:
+        with pytest.raises(QueryFailed) as caught:
+            with Snapshot(path) as snap:
+                snap.session(s.id)
+    finally:
+        holder.rollback()
+        holder.close()
+    assert "locked" in caught.value.error
 
 
 def test_the_authorizer_refuses_everything_off_its_list(db):
@@ -153,13 +181,15 @@ def test_a_missing_column_is_named(tmp_path):
         "CREATE TABLE message (id text, session_id text, time_created integer, data text);")
     conn.close()
     with Snapshot(path) as snap:
-        with pytest.raises(Unreadable, match="`session` table has no `title` column"):
+        with pytest.raises(UnknownSchema, match="`session` table has no `title` column"):
             snap.session("ses_x")
-        with pytest.raises(Unreadable, match="`message` table has no `time_updated`"):
+        with pytest.raises(UnknownSchema, match="`message` table has no `time_updated`"):
             list(snap.records("ses_x"))
     with Snapshot(path) as snap:
-        with pytest.raises(Unreadable, match="has no `part` table"):
+        with pytest.raises(UnknownSchema, match="has no `part` table") as caught:
             snap.require("part")
+    assert isinstance(caught.value, Unreadable)
+    assert caught.value.reason == "the OpenCode database has no `part` table"
 
 
 def test_the_builder_writes_every_column_the_reader_reads(db):

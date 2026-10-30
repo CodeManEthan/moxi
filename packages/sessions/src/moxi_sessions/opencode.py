@@ -20,6 +20,13 @@ reader runs under the authorizer.
 row and all its messages and parts come from the same state of the database, and checks
 the columns it reads (`COLUMNS`) before it reads them.
 
+**What a failed read raises.** Every failure is an `Unreadable`, and three kinds of it
+are told apart, so a caller can say which went wrong: `MissingSession` when the database
+holds no row for the session; `UnknownSchema` when a table or column the reader reads is
+missing, the sign of an OpenCode that changed its database; and `QueryFailed` when the
+database opened but a read of it failed (locked past the busy timeout, or not a database
+at all). A database that is missing or cannot be opened raises plain `Unreadable`.
+
 **Order.** Records of one session come with its messages by `(time_created, id)` and each
 message's parts by `id`, the order OpenCode's own indexes give. A record's `at` is
 `{"table": t, "id": id}`, the row's own `id`, never its rowid: SQLite hands a rowid out
@@ -123,6 +130,20 @@ class MissingSession(Unreadable):
     def __init__(self, session_id: str, path: str | Path):
         super().__init__(f"no session {session_id} in {path}")
         self.session_id = session_id
+
+
+class UnknownSchema(Unreadable):
+    """The database opened, but a table or column the reader reads is not in it: the
+    database is not in a shape the reader knows, most likely from a newer OpenCode."""
+
+
+class QueryFailed(Unreadable):
+    """The database opened, but a read of it failed: it stayed locked past the busy
+    timeout, or the file is not a database. `error` is SQLite's own words."""
+
+    def __init__(self, path: str | Path, error: str):
+        super().__init__(f"the OpenCode database {path} could not be read ({error})")
+        self.error = error
 
 
 def _sqlite():
@@ -488,7 +509,8 @@ class Snapshot:
             records = list(snap.records(session_id))
 
     Each read checks the columns it reads first (`require`). Raises Unreadable from any
-    read that fails, the connection included. Closing ends the transaction.
+    read that fails, the connection included, as the kinds the module docstring names.
+    Closing ends the transaction.
     """
 
     def __init__(self, path: str | Path):
@@ -527,8 +549,7 @@ class Snapshot:
         try:
             return self.conn.execute(sql, tuple(args)).fetchall()
         except sqlite3.Error as e:
-            raise Unreadable(f"the OpenCode database {self.path} could not be read "
-                             f"({e})") from e
+            raise QueryFailed(self.path, str(e)) from e
 
     def rows(self, sql: str, args: Iterable[Any] = ()) -> Iterator[tuple]:
         """The query's rows one at a time, so a long result is never held whole."""
@@ -538,22 +559,21 @@ class Snapshot:
             while (row := cursor.fetchone()) is not None:
                 yield row
         except sqlite3.Error as e:
-            raise Unreadable(f"the OpenCode database {self.path} could not be read "
-                             f"({e})") from e
+            raise QueryFailed(self.path, str(e)) from e
 
     def require(self, *tables: str) -> None:
-        """Each column the reader reads from `tables` exists. Raises Unreadable naming
-        the first table or column that does not."""
+        """Each column the reader reads from `tables` exists. Raises UnknownSchema
+        naming the first table or column that does not."""
         for table in tables:
             if table in self._checked:
                 continue
             have = {row[1] for row in self.query(f"PRAGMA table_info({table})")}
             if not have:
-                raise Unreadable(f"the OpenCode database has no `{table}` table")
+                raise UnknownSchema(f"the OpenCode database has no `{table}` table")
             missing = [column for column in COLUMNS[table] if column not in have]
             if missing:
-                raise Unreadable(f"the OpenCode database's `{table}` table has no "
-                                 f"`{missing[0]}` column")
+                raise UnknownSchema(f"the OpenCode database's `{table}` table has no "
+                                    f"`{missing[0]}` column")
             self._checked.add(table)
 
     # -- sessions --------------------------------------------------------------------
@@ -928,7 +948,8 @@ def _changed(snap: Snapshot, cursor: Cursor, cols: str, scope: str,
 __all__ = [
     "CHECKED_VERSIONS", "TABLES", "FUNCTIONS", "TRANSACTIONS", "COLUMNS", "TOTALS",
     "BUSY_MS", "KNOWN_PART_TYPES", "BACK_ENDED",
-    "Unreadable", "MissingSession", "authorize", "connect",
+    "Unreadable", "MissingSession", "UnknownSchema", "QueryFailed",
+    "authorize", "connect",
     "message_records", "SessionRow", "Child", "Snapshot",
     "Cursor", "Since", "since",
 ]
