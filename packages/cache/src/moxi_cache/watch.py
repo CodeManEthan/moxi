@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from moxi.config import Config, ConfigError
-from moxi_sessions.api import claude as transcripts
+from moxi_sessions.api import find
 
 from . import api, records
 from . import timer as _timer
@@ -353,8 +353,8 @@ class Watcher:
         seen.pid = live.pid
         if seen.path is None or not seen.path.is_file():
             try:
-                probe = transcripts.probe_root(self.projects_root(), live.session)
-                seen.path = probe.path_or_none()
+                found = find("claude", live.session, root=self.projects_root())
+                seen.path = Path(found.hits[0].source.path) if found.found else None
             except (ConfigError, OSError) as e:
                 self.say("root", f"cannot find transcripts: {e}")
                 seen.path = None

@@ -136,3 +136,12 @@ def test_importing_the_api_imports_none_of_its_names(tmp_path):
     out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
                          cwd=tmp_path, check=True).stdout.splitlines()
     assert out == ["['moxi_sessions', 'moxi_sessions.api']", "False", "False"]
+
+
+def test_the_builders_are_reached_through_the_api():
+    """Another module's tests import only sessions' API module, so the builders are a name
+    on it; importing the API alone loads none of them (the test above)."""
+    from moxi_sessions import testing
+    assert "testing" in api.__all__
+    assert api.testing is testing
+    assert {"ClaudeTranscript", "CodexRollout", "OpenCodeDb"} <= set(dir(api.testing))

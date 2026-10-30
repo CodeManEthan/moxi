@@ -1,5 +1,6 @@
 """Shared fixtures for cache's suite. Every record here is synthetic, built from the shapes
-Claude Code, Codex and OpenCode write; none is cut from a real record.
+Claude Code, Codex and OpenCode write; none is cut from a real record. Claude transcripts
+are written through sessions' builders (`moxi_sessions.api.testing`).
 
 Every test runs with cache's and sessions' roots under a directory of its own
 (`MOXI_CACHE_HOME`, `MOXI_SESSIONS_CONFIG_HOME`), with Claude Code's config directory
@@ -17,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from moxi_cache import table
+from moxi_sessions.api import testing
 
 HOUR = 3600
 
@@ -66,47 +68,84 @@ def write_sessions_config(tmp_path: Path, text: str) -> Path:
 
 
 # --- Claude transcripts ---------------------------------------------------------------
+#
+# Transcripts come from sessions' `ClaudeTranscript`, one builder per transcript: the
+# builder numbers each request's `requestId`, and two builders would give two requests the
+# same id, which the backward read takes for one request.
+
+ClaudeTranscript = testing.ClaudeTranscript
+usage = testing.usage
+
 
 def stamp(t: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + ".000Z"
 
 
+#: The usage block each `tier` of `assistant_line` writes: the cache write, and the part of
+#: it written for an hour.
+TIERS = {
+    "1h": dict(cache_write=500, cache_write_1h=500),
+    "5m": dict(cache_write=500),
+    "both": dict(cache_write=1000, cache_write_1h=500),
+    "none": dict(cache_write=0),
+    None: dict(cache_write=0, breakdown=False),
+}
+
+
 def assistant_line(age: float, *, now: float | None = None, tier: str | None = None,
-                   **extra) -> dict:
-    """One transcript line that meets the clock's rule, `age` seconds old. `tier` is
-    `1h`, `5m`, `both`, `none` (a `cache_creation` that wrote nothing) or None (no
-    `cache_creation` at all)."""
+                   without: tuple[str, ...] = (), **fields):
+    """One request that meets the clock's rule, `age` seconds old, as a step that adds it
+    to a builder. `tier` is `1h`, `5m`, `both`, `none` (a `cache_creation` that wrote
+    nothing) or None (no `cache_creation` at all). `fields` are set on the line, and the
+    keys named in `without` are taken off it."""
     now = time.time() if now is None else now
-    usage = {"input_tokens": 1, "output_tokens": 1}
-    if tier is not None:
-        usage["cache_creation"] = {
-            "ephemeral_1h_input_tokens": 500 if tier in ("1h", "both") else 0,
-            "ephemeral_5m_input_tokens": 500 if tier in ("5m", "both") else 0}
-    line = {"type": "assistant", "timestamp": stamp(now - age), "sessionId": "s",
-            "message": {"model": "claude-model-x", "role": "assistant", "usage": usage}}
-    line.update(extra)
-    return line
+    block = usage(**TIERS[tier])
+    fields = {"timestamp": stamp(now - age), **fields}
+
+    def add(t: ClaudeTranscript) -> int:
+        number = t.request(usage_block=block).text(**fields)
+        if without:
+            line = json.loads(t.lines[number - 1])
+            for key in without:
+                line.pop(key, None)
+            t.lines[number - 1] = json.dumps(line)
+        return number
+
+    return add
 
 
-def user_line() -> dict:
-    return {"type": "user", "timestamp": "2026-01-01T00:00:00.000Z",
-            "message": {"role": "user", "content": "hello"}}
+def user_line():
+    """A user prompt, as a step that adds it to a builder."""
+    return lambda t: t.user("hello")
+
+
+def transcript(session_id: str, *, root: Path, project: str = "proj") -> ClaudeTranscript:
+    """A builder for `<root>/<project>/<session_id>.jsonl`."""
+    return ClaudeTranscript(root, session_id=session_id, project=project)
+
+
+def add_lines(t: ClaudeTranscript, lines: list) -> ClaudeTranscript:
+    """Add `lines` to `t`: a step (`assistant_line`, `user_line`) is applied to it, a dict
+    is added as it is, and a string is written as one line as it is."""
+    for line in lines:
+        if callable(line):
+            line(t)
+        elif isinstance(line, str):
+            t.add_raw(line)
+        else:
+            t.add(line)
+    return t
 
 
 def write_transcript(session_id: str, age: float | None = 0, *, root: Path,
                      lines: list | None = None, project: str = "proj",
                      newline_at_end: bool = True) -> Path:
-    """`<root>/<project>/<session_id>.jsonl`. With `lines`, exactly those (dicts are
-    dumped, strings written as they are); otherwise one user line and, unless `age` is
-    None, one assistant line `age` seconds old."""
-    path = Path(root) / project / f"{session_id}.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """`<root>/<project>/<session_id>.jsonl`. With `lines`, exactly those (see
+    `add_lines`); otherwise one user line and, unless `age` is None, one request `age`
+    seconds old."""
     if lines is None:
         lines = [user_line()]
         if age is not None:
             lines.append(assistant_line(age))
-    body = "\n".join(ln if isinstance(ln, str) else json.dumps(ln) for ln in lines)
-    if lines and newline_at_end:
-        body += "\n"
-    path.write_text(body)
-    return path
+    t = add_lines(transcript(session_id, root=Path(root), project=project), lines)
+    return t.write(terminated=newline_at_end)

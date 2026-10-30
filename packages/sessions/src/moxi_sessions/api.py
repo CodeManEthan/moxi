@@ -30,6 +30,12 @@ Reading one source (`Read`, `Back`, `LastRequest`, `Batch`, `Window`):
 * `window(source, *, turns=5, before=None, limit=WINDOW_LIMIT)`: the last turns, with a
   position to page back.
 
+Writing records for tests:
+
+* `testing`: the builders other modules' tests write harness records with
+  (`ClaudeTranscript`, `CodexRollout`, `OpenCodeDb`; see `moxi_sessions.testing`). A test
+  reaches them through this module, as it reaches every other name sessions offers.
+
 Kept from interface 1, which cache reads:
 
 * `claude`: `parse_line`, `iter_entries`, `stream_entries`, `parse_timestamp` and
@@ -56,9 +62,9 @@ import importlib
 from typing import Any
 
 #: Each name's home module, under this package. A name whose home is itself a module
-#: (`claude`, `codex`, `opencode`) is that module.
+#: (`claude`, `codex`, `opencode`, `testing`) is that module.
 _HOMES: dict[str, str] = {
-    **dict.fromkeys(("claude", "codex", "opencode"), ""),
+    **dict.fromkeys(("claude", "codex", "opencode", "testing"), ""),
     **dict.fromkeys(("projects_root",), "claude"),
     **dict.fromkeys(("read_back",), "reader"),
     **dict.fromkeys(("Unreadable",), "errors"),
