@@ -28,6 +28,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from moxi.files import atomic_write
+
 #: The thread id a builder uses when none is given.
 THREAD = "0190c000-0000-7000-8000-0000000c0de1"
 
@@ -102,7 +104,7 @@ def write_imports(sessions_root: str | Path, thread_ids: list[str] | tuple[str, 
                     "connector_names": []}
                    for n, thread in enumerate(thread_ids, start=1)]
         text = json.dumps({"records": records, "detected_connector_records": []})
-    path.write_text(text, encoding="utf-8")
+    atomic_write(path, text, mode=0o644)
     return path
 
 
@@ -361,7 +363,7 @@ class CodexRollout:
         """Write the whole file. With `terminated` false the last line has no newline,
         as a line being written."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_bytes(self.text(terminated=terminated).encode("utf-8"))
+        atomic_write(self.path, self.text(terminated=terminated), mode=0o644)
         self._written = len(self.lines)
         self._terminated = terminated
         return self.path

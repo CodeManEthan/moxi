@@ -31,6 +31,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from moxi.files import atomic_write
+
 #: The session id a builder uses when none is given.
 SESSION = "0190b000-0000-7000-8000-00000000c1a0"
 
@@ -348,13 +350,13 @@ class ClaudeTranscript:
         """Write the whole file, its subagents' files and their sidecars. With
         `terminated` false the last line has no newline, as a line being written."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_bytes(self.text(terminated=terminated).encode("utf-8"))
+        atomic_write(self.path, self.text(terminated=terminated), mode=0o644)
         self._written = len(self.lines)
         self._terminated = terminated
         if self.sidecar is not None:
             text = (self.sidecar if isinstance(self.sidecar, str)
                     else json.dumps(self.sidecar))
-            self.sidecar_path.write_text(text, encoding="utf-8")
+            atomic_write(self.sidecar_path, text, mode=0o644)
         for child in self._children:
             child.write()
         return self.path
