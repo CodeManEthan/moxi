@@ -409,6 +409,7 @@ def test_adopt_a_daemon_makes_the_unit_match_the_flag(fake):
                                                            "web.service", True)
     assert fake.acts() == [("enable", "services", ("web.service",), True)]
     assert fake.foreign["web.service"].active
+    assert fake.locked == [("enable", True)]
 
 
 def test_adopt_with_disable_turns_it_off(fake):
@@ -643,6 +644,18 @@ def test_stop_an_adopted_daemon_is_recorded_under_the_lock(fake):
     assert fake.locked == [("stop", True)]
     assert store.get("web").stopped is not None
     assert fake.acts()[-1] == ("stop", "services", ("web.service",), True)
+
+
+@pytest.mark.parametrize("act", ["enable", "disable"])
+def test_switch_an_adopted_daemon_under_the_lock(fake, act):
+    fake.foreign["web.service"] = Unit("daemon", act == "disable",
+                                       active=act == "disable")
+    acts.add_adopted("web", "web.service", enable=act == "disable")
+    fake.locked.clear()
+    out = getattr(acts, act)("web")
+    assert out.code == 0, out
+    assert fake.locked == [(act, True)]
+    assert store.get("web").enabled is (act == "enable")
 
 
 def test_enable_an_adopted_daemon_clears_a_recorded_stop(fake):
