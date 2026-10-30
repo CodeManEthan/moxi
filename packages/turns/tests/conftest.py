@@ -3,6 +3,7 @@ of the test's own, and an endpoint driven by the fake harness."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -22,6 +23,48 @@ def turns_env(monkeypatch, tmp_path_factory):
     monkeypatch.delenv("MOXI_TURNS_COMMANDS", raising=False)
     monkeypatch.delenv("MOXI_TURNS_HOME", raising=False)
     yield root
+
+
+def bare(value):
+    """A delivery's value without the delivery id and the ref it echoes."""
+    return dataclasses.replace(value, delivery=None, ref=None)
+
+
+def opener(event):
+    """The id of the delivery that opened a `TurnStarted` or `TurnEnded`'s turn, or None
+    for the person's own turn (and for any other event)."""
+    for entry in getattr(event, "deliveries", ()):
+        if entry.how == "opened":
+            return entry.id
+    return None
+
+
+class CoreDelivery:
+    """A delivery made on the endpoint core rather than through the client, with the
+    client's two waits. The steering `deliver` (a steer with a deliver to fall back on)
+    has no wire method, so its tests drive the core."""
+
+    def __init__(self, endpoint, handed):
+        self.endpoint = endpoint
+        self.id = handed.id
+        self.ref = handed.ref
+
+    def wait_started(self, timeout):
+        return self._wait("started", timeout)
+
+    def wait_ended(self, timeout):
+        return self._wait("ended", timeout)
+
+    def _wait(self, until, timeout):
+        value = self.endpoint.wait(self.id, until, timeout)
+        if value is None:
+            raise TimeoutError(f"delivery {self.id} has not {until} after {timeout} s")
+        return value
+
+
+def steer_first(endpoint, text: str) -> CoreDelivery:
+    """The core's steering deliver: into the running turn, or a new turn when none runs."""
+    return CoreDelivery(endpoint, endpoint.deliver(text, steer=True))
 
 
 def write_config(root: Path, text: str) -> None:

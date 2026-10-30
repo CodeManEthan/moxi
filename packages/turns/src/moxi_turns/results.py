@@ -49,6 +49,12 @@ READY_SOURCES = ("startup", "resume", "clear", "compact")
 #: The session commands.
 COMMANDS = ("clear", "exit", "compact")
 
+#: How long a `command` call waits for its settle when the caller gives no bound, in
+#: seconds: a compaction often outlasts 30 s.
+COMMAND_WAIT_S = {"clear": 30.0, "exit": 30.0, "compact": 330.0}
+#: What `stop_shells` adds to that wait, in seconds.
+STOP_SHELLS_WAIT_S = 10.0
+
 #: How a delivery joined a turn (`DeliveryRef.how`): it opened the turn, or was steered in.
 DELIVERY_HOW = ("opened", "steered")
 
@@ -569,7 +575,8 @@ def from_notification(method: str, params: Any):
 
 
 __all__ = ["CAPABILITIES", "OUTCOMES", "DELIVERY_REFUSALS", "COMMAND_REFUSALS",
-           "READY_SOURCES", "COMMANDS", "DELIVERY_HOW", "AGENT_KINDS", "AGENT_STATES",
+           "READY_SOURCES", "COMMANDS", "COMMAND_WAIT_S", "STOP_SHELLS_WAIT_S",
+           "DELIVERY_HOW", "AGENT_KINDS", "AGENT_STATES",
            "BUSY_STATES", "REF_MAX_BYTES", "ERROR_GONE", "ERROR_CAPABILITY",
            "ERROR_STOP_HANDLER_TAKEN", "ERRORS", "REFUSED_GONE", "LOST_UNTIED",
            "LOST_EXPIRED", "LOST_UNKNOWN", "LOST_UNANSWERED", "FAILED_UNANSWERED",

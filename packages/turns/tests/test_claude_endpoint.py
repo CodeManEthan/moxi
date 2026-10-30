@@ -16,7 +16,7 @@ import pytest
 
 import moxi_turns as turns
 from claude_runner import FakeRunner, pipe_pair, post
-from conftest import write_config
+from conftest import bare, opener, write_config
 from moxi_turns import claude_leg as leg
 from moxi_turns import client, listeners, protocol
 from moxi_turns.claude_endpoint import ClaudeHarness
@@ -81,15 +81,15 @@ def test_the_first_line_and_no_hello_before_the_session_id(claude):
     ep.open()
     s = turns.find(session_id="s-9")
     assert s is not None and s.harness == "claude"
-    assert s.can == frozenset({"start", "steer", "hold", "clear", "exit"})
-    assert s.hello["mod_version"] == "0.1.0"
+    assert s.capabilities == frozenset(turns.CAPABILITIES)
+    assert s.info["mod_version"] == "0.1.0"
 
 
 def test_an_idle_start_is_tied_at_the_resolve_and_its_events_wait(claude):
     ep, runner = claude()
     s = turns.find(session_id="s-1")
     events = watcher(s)
-    d = s.start("hello", refuse_draft=True)
+    d = s.deliver("hello", only_if_idle=True, refuse_draft=True)
     line = runner.next_line()
     assert line == {"op": "submit", "delivery": d.id, "kind": "start", "text": "hello",
                     "nonce": line["nonce"]}
@@ -100,12 +100,12 @@ def test_an_idle_start_is_tied_at_the_resolve_and_its_events_wait(claude):
     with pytest.raises(TimeoutError):
         d.wait_started(0.1)
     runner.close(d.id, leg.END_RESOLVE)
-    assert d.wait_started(2) == turns.Started("T1")
+    assert bare(d.wait_started(2)) == turns.Started("T1")
     runner.turn_complete("T1")
-    assert d.wait_ended(2) == turns.Ended("T1", "answer")
+    assert bare(d.wait_ended(2)) == turns.Ended("T1", "answer")
     got = drain(events)
     assert [type(e).__name__ for e in got] == ["TurnStarted", "TurnEnded"]
-    assert got[0].delivery_id == d.id and got[1].delivery_id == d.id
+    assert opener(got[0]) == d.id and opener(got[1]) == d.id
 
 
 def test_a_turn_that_ends_before_the_close_raises_both_events_at_the_close(claude):
@@ -118,8 +118,8 @@ def test_a_turn_that_ends_before_the_close_raises_both_events_at_the_close(claud
     runner.turn_complete("T1", reason="aborted", is_aborted=True)
     assert drain(events) == []
     runner.close(d.id, leg.END_RESOLVE)
-    assert d.wait_ended(2) == turns.Ended("T1", "aborted")
-    assert [(type(e).__name__, e.delivery_id) for e in drain(events)] == [
+    assert bare(d.wait_ended(2)) == turns.Ended("T1", "aborted")
+    assert [(type(e).__name__, opener(e)) for e in drain(events)] == [
         ("TurnStarted", d.id), ("TurnEnded", d.id)]
 
 
@@ -133,8 +133,8 @@ def test_a_person_turn_in_the_window_is_released_by_the_later_turn_start(claude)
     runner.turn_complete("P")
     runner.turn_start("D")
     runner.close(d.id, leg.END_RESOLVE)
-    assert d.wait_started(2) == turns.Started("D")
-    got = [(type(e).__name__, e.turn_id, e.delivery_id) for e in drain(events)]
+    assert bare(d.wait_started(2)) == turns.Started("D")
+    got = [(type(e).__name__, e.turn_id, opener(e)) for e in drain(events)]
     assert got == [("TurnStarted", "P", None), ("TurnEnded", "P", None),
                    ("TurnStarted", "D", d.id)]
 
@@ -162,7 +162,7 @@ def test_a_fail_releases_the_held_turn_and_reads_lost_untied(claude):
     result = d.wait_ended(2)
     assert isinstance(result, turns.Lost) and result.untied
     assert "unsettled after 5 s idle" in result.reason
-    assert [(type(e).__name__, e.delivery_id) for e in drain(events)] == [
+    assert [(type(e).__name__, opener(e)) for e in drain(events)] == [
         ("TurnStarted", None)]
 
 
@@ -174,9 +174,9 @@ def test_another_plugin_drop_reads_dropped_and_releases_the_held_turn(claude):
     runner.next_line()
     runner.turn_start("T")
     runner.close(d.id, leg.END_DROP, "some-plugin: no")
-    assert d.wait_started(2) == turns.Refused("dropped")
-    assert d.wait_ended(1) == turns.Refused("dropped")
-    assert [(type(e).__name__, e.delivery_id) for e in drain(events)] == [
+    assert bare(d.wait_started(2)) == turns.Refused("dropped")
+    assert bare(d.wait_ended(1)) == turns.Refused("dropped")
+    assert [(type(e).__name__, opener(e)) for e in drain(events)] == [
         ("TurnStarted", None)]
 
 
@@ -186,42 +186,42 @@ def test_a_drop_the_endpoint_did_not_record_reads_the_plugins_own_code(claude, c
     # runner reads the code from the drop's line, and the delivery reads it.
     ep, runner = claude()
     s = turns.find(session_id="s-1")
-    d = s.start("x")
+    d = s.deliver("x", only_if_idle=True)
     runner.next_line()
     runner.close(d.id, leg.END_DROP, code)
-    assert d.wait_started(2) == turns.Refused(code)
-    assert d.wait_ended(1) == turns.Refused(code)
+    assert bare(d.wait_started(2)) == turns.Refused(code)
+    assert bare(d.wait_ended(1)) == turns.Refused(code)
 
 
 def test_the_gate_refusal_and_the_next_submit_waits_for_the_close(claude):
     ep, runner = claude()
     s = turns.find(session_id="s-1")
-    d = s.start("x", refuse_draft=True)
+    d = s.deliver("x", only_if_idle=True, refuse_draft=True)
     line = runner.next_line()
     answer = runner.enter(line["nonce"], draft=True, agents=None)
     assert answer["verdict"] == "drop" and answer["reason"] == "draft"
     assert "draft" in answer["text"]
-    assert d.wait_started(2) == turns.Refused("draft")
+    assert bare(d.wait_started(2)) == turns.Refused("draft")
     # The core's slot is free, but the window is not closed yet: no second submit.
     d2 = s.deliver("next")
     assert runner.no_line()
     runner.close(d.id, leg.END_DROP, answer["text"])
     line = runner.next_line()
     assert line["delivery"] == d2.id and line["kind"] == "deliver"
-    assert d.wait_ended(1) == turns.Refused("draft")      # the gate's reason stands
+    assert bare(d.wait_ended(1)) == turns.Refused("draft")      # the gate's reason stands
 
 
 def test_the_gate_refuses_a_start_when_a_turn_opened_since_the_read(claude):
     ep, runner = claude()
     s = turns.find(session_id="s-1")
-    d = s.start("x", if_epoch=0)
+    d = s.deliver("x", only_if_idle=True, if_turn_number=0)
     line = runner.next_line()
     runner.turn_start("P")                       # a person's turn in the window
     answer = runner.enter(line["nonce"], draft=None, agents=None)
     assert answer == {"ok": True, "verdict": "drop", "reason": "busy-turn",
                       "text": answer["text"]}
     runner.close(d.id, leg.END_DROP, answer["text"])
-    assert d.wait_ended(2) == turns.Refused("busy-turn")
+    assert bare(d.wait_ended(2)) == turns.Refused("busy-turn")
 
 
 def test_reports_apply_once_in_seq_order_and_a_gap_fails_the_window(claude):
@@ -231,7 +231,7 @@ def test_reports_apply_once_in_seq_order_and_a_gap_fails_the_window(claude):
     runner.next_line()
     runner.report(leg.R_TURN_START, seq=2, turn_id="T")
     runner.report(leg.R_TURN_START, seq=2, turn_id="T")    # a resend: no second turn
-    assert s.facts().epoch == 1
+    assert s.facts().turn_number == 1
     # Report 3 (say, the turn's end) never lands; 4 arrives: the window fails.
     runner.report(leg.R_SUBMIT_CLOSE, seq=4, delivery=d.id, end=leg.END_RESOLVE)
     result = d.wait_started(2)
@@ -249,7 +249,7 @@ def test_a_close_after_the_window_failed_changes_nothing(claude):
     assert d.wait_started(1).untied
     events = watcher(s)
     runner.turn_complete("late")
-    assert [(type(e).__name__, e.delivery_id) for e in drain(events)] == [
+    assert [(type(e).__name__, opener(e)) for e in drain(events)] == [
         ("TurnEnded", None)]
 
 
@@ -259,7 +259,7 @@ def test_reports_before_the_session_id_keep_the_turn_count(claude):
     runner.session("s-5")
     ep.open()
     f = turns.find(session_id="s-5").facts()
-    assert f.epoch == 1 and f.turn_open and f.session_id == "s-5"
+    assert f.turn_number == 1 and f.turn_open and f.session_id == "s-5"
 
 
 def test_live_facts_come_from_the_runner_and_an_unanswered_read_holds(claude):
@@ -270,13 +270,15 @@ def test_live_facts_come_from_the_runner_and_an_unanswered_read_holds(claude):
     assert (f.agents, f.draft) == (2, True)
     runner.agents = None                         # $.agent.list() could not be read
     assert s.facts().agents is None
-    assert s.start("x", refuse_agents=True).wait_started(1) == turns.Refused("busy-agents")
+    d = s.deliver("x", only_if_idle=True, refuse_agents=True)
+    assert bare(d.wait_started(1)) == turns.Refused("busy-agents")
     runner.agents = 0
     runner.answer_live = False
     t0 = time.monotonic()
     f = s.facts()
     assert f.draft is True and f.agents is None and time.monotonic() - t0 < 1.8
-    assert s.start("x", refuse_draft=True).wait_started(1) == turns.Refused("draft")
+    d = s.deliver("x", only_if_idle=True, refuse_draft=True)
+    assert bare(d.wait_started(1)) == turns.Refused("draft")
 
 
 def test_holding_answers_the_stop_ask_within_hold_wait(claude, turns_env):
@@ -284,14 +286,14 @@ def test_holding_answers_the_stop_ask_within_hold_wait(claude, turns_env):
     ep, runner = claude()
     s = turns.find(session_id="s-1")
     answers = iter(["reply first", None])
-    h = s.hold(lambda facts: next(answers))
+    h = s.handle_stops(lambda facts: next(answers))
     time.sleep(0.1)
     stop = {"turn_id": "T", "session_id": "s-1", "stop_hook_active": False,
             "task_types": ["bash"], "crons": 0}
     assert runner.post(leg.PATH_STOP, stop)["reason"] == "reply first"
     assert runner.post(leg.PATH_STOP, {**stop, "stop_hook_active": True})["reason"] is None
     h.close()
-    slow = s.hold(lambda facts: time.sleep(2) or "too late")
+    slow = s.handle_stops(lambda facts: time.sleep(2) or "too late")
     time.sleep(0.1)
     t0 = time.monotonic()
     assert runner.post(leg.PATH_STOP, stop)["reason"] is None
@@ -386,9 +388,9 @@ def test_steer_appends_and_a_failed_append_refuses_idle(claude):
     runner.turn_start("T")
     d = s.steer("also this")
     assert runner.next_line() == {"op": "append", "delivery": d.id, "text": "also this"}
-    assert d.wait_started(1) == turns.Started("T")
+    assert bare(d.wait_started(1)) == turns.Started("T")
     runner.report(leg.R_APPEND_FAILED, delivery=d.id, reason="no turn running")
-    assert d.wait_ended(1) == turns.Refused("idle")
+    assert bare(d.wait_ended(1)) == turns.Refused("idle")
 
 
 def test_the_endpoint_end_releases_a_held_turn_then_answers_lost(claude):
@@ -399,7 +401,7 @@ def test_the_endpoint_end_releases_a_held_turn_then_answers_lost(claude):
     runner.next_line()
     runner.turn_start("T")
     ep.stop("SIGTERM: Claude Code ended the endpoint")
-    got = [(type(e).__name__, getattr(e, "delivery_id", None)) for e in drain(events)]
+    got = [(type(e).__name__, opener(e)) for e in drain(events)]
     assert got[:2] == [("TurnStarted", None), ("Gone", None)]
     lost = ep.wait(d.id, "ended", 0)
     assert isinstance(lost, turns.Lost) and not lost.untied
@@ -452,7 +454,7 @@ def test_a_deliver_is_admitted_once_with_the_open_windows_nonce(claude):
     assert again["verdict"] == "drop" and again["reason"] == leg.LATE
     runner.turn_start("T")
     runner.close(d.id, leg.END_RESOLVE)
-    assert d.wait_started(2) == turns.Started("T")
+    assert bare(d.wait_started(2)) == turns.Started("T")
 
 
 def test_a_nonce_no_window_of_this_endpoint_names_is_dropped_late(claude):
@@ -490,7 +492,7 @@ def test_a_prompt_entering_after_the_bound_failed_its_window_is_dropped(claude):
 def test_a_start_entering_after_its_window_failed_never_runs_unchecked(claude):
     ep, runner = claude()
     s = turns.find(session_id="s-1")
-    d = s.start("go", if_epoch=0)
+    d = s.deliver("go", only_if_idle=True, if_turn_number=0)
     line = runner.next_line()
     runner.bound(d.id)
     assert d.wait_started(2).untied
@@ -515,7 +517,7 @@ def test_the_rehanded_text_runs_once(claude):
     assert runner.enter(line_b["nonce"])["verdict"] == "pass"
     runner.turn_start("TB")
     runner.close(b.id, leg.END_RESOLVE)
-    assert b.wait_started(2) == turns.Started("TB")
+    assert bare(b.wait_started(2)) == turns.Started("TB")
 
 
 def test_the_bound_after_admission_changes_nothing(claude):
@@ -533,7 +535,7 @@ def test_the_bound_after_admission_changes_nothing(claude):
     assert runner.no_line()                      # the window is still open
     runner.turn_start("T")
     runner.close(d.id, leg.END_RESOLVE)
-    assert d.wait_started(2) == turns.Started("T")
+    assert bare(d.wait_started(2)) == turns.Started("T")
     runner.turn_complete("T")
     assert runner.next_line()["delivery"] == d2.id
 
@@ -547,7 +549,7 @@ def test_the_gate_dropping_an_admitted_prompt_reads_its_own_code(claude):
     line = runner.next_line()
     assert runner.enter(line["nonce"])["verdict"] == "pass"
     runner.close(d.id, leg.END_DROP, "gone")
-    assert d.wait_ended(2) == turns.Refused("gone")
+    assert bare(d.wait_ended(2)) == turns.Refused("gone")
 
 
 def test_a_lost_report_fails_even_an_admitted_window(claude):
@@ -575,7 +577,7 @@ def test_an_admitted_window_closes_at_the_core_expiry_and_frees_the_slot(claude)
     runner.turn_complete("P")
     result = d1.wait_started(3)
     assert isinstance(result, turns.Lost) and result.reason.startswith("expired")
-    got = [(type(e).__name__, e.turn_id, e.delivery_id) for e in drain(events)]
+    got = [(type(e).__name__, e.turn_id, opener(e)) for e in drain(events)]
     assert got == [("TurnStarted", "P", None), ("TurnEnded", "P", None)]
     d2 = s.deliver("two")
     assert runner.next_line()["delivery"] == d2.id

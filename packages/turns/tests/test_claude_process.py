@@ -5,6 +5,7 @@ from a terminal does not end it."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import signal
@@ -117,7 +118,10 @@ def test_epipe_on_its_stdout_ends_it(spawn):
                                               "session_id": "s-e"})
     assert _until(lambda: turns.find(session_id="s-e") is not None)
     p.stdout.close()                              # the runner is gone
-    turns.find(session_id="s-e").facts()          # a `live` line meets the closed pipe
+    # A `live` line meets the closed pipe: the endpoint ends, and may close this call's
+    # connection before it answers.
+    with contextlib.suppress(turns.TurnsError):
+        turns.find(session_id="s-e").facts()
     assert p.wait(timeout=5) == 0
     assert not os.path.exists(os.path.dirname(first["mod_sock"]))
 

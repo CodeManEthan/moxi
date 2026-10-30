@@ -73,12 +73,12 @@ def _endpoint_rows() -> list[Row]:
     live = client.sessions()
     rows = [Row("endpoints", True, f"{len(live)} live under {client.runtime_dir()}")]
     for s in live:
-        hello = s.hello
-        mod = f", mod {hello['mod_version']}" if hello.get("mod_version") else ""
-        trouble = hello.get("trouble")
-        detail = (f"session {s.session_id or '(not yet known)'}; can "
-                  f"{', '.join(sorted(s.can)) or 'nothing'}; endpoint "
-                  f"{hello.get('endpoint_version')}{mod}")
+        info = s.info
+        mod = f", mod {info['mod_version']}" if info.get("mod_version") else ""
+        trouble = info.get("trouble")
+        detail = (f"session {s.session_id or '(not yet known)'}; offers "
+                  f"{', '.join(sorted(s.capabilities)) or 'nothing'}; endpoint "
+                  f"{info.get('endpoint_version')}{mod}")
         if trouble:
             detail += f"; {trouble}"
         rows.append(Row(f"endpoint {s.harness} pid {s.pid}", not bool(trouble), detail))
