@@ -139,6 +139,7 @@ import argparse
 import json
 import logging
 import os
+import sqlite3
 import sys
 import textwrap
 import time
@@ -271,6 +272,7 @@ def cmd_history(args, ctx: Context) -> int:
             if author.qualified != identity and not addressed:
                 continue
             rows.append((m, ml, author, "from" if author.qualified == identity else "to"))
+        dropped = _history_dropped(db, [m.id for m, *_ in rows])
     if not rows:
         ctx.say(f"no {NAMES} history for {identity}.")
     for m, ml, author, direction in rows:
@@ -284,7 +286,8 @@ def cmd_history(args, ctx: Context) -> int:
                 f"  -> {', '.join(ml.recipients)}"
                 + (f" re:{ml.reply_to}" if ml.reply_to else "")
                 + _history_audience(ml, effective)
-                + _history_marks(ml))
+                + _history_marks(ml)
+                + _history_gone(m, dropped.get(str(m.id), {})))
         for line in ml.text.splitlines():
             ctx.say(f"      {line}")
     if window is not None:
@@ -301,6 +304,27 @@ def _history_marks(ml) -> str:
         bits.append(machine_line.OPEN_TOKEN)
     elif ml.posture != machine_line.POSTURE_OPEN:
         bits.append(machine_line.POSTURE_TOKENS[ml.posture])
+    return "".join(f" {bit}" for bit in bits)
+
+
+def _history_dropped(db, ids) -> dict:
+    """Which of the page's messages left a recipient's queue undelivered, and why: the
+    store's `dropped` rows. An older store without them reads as none."""
+    try:
+        return books.dropped_by_message(db, ids)
+    except sqlite3.Error:
+        return {}
+
+
+def _history_gone(m, dropped: dict) -> str:
+    """`[withdrawn]` for a message its author deleted (the record keeps it, marked), and
+    `[expired for <names>]` for the recipients it expired before reaching."""
+    bits = []
+    if getattr(m, "withdrawn_at", None) or books.WITHDRAWN in dropped.values():
+        bits.append("[withdrawn]")
+    expired = [name for name, why in dropped.items() if why == books.EXPIRED]
+    if expired:
+        bits.append(f"[expired for {', '.join(expired)}]")
     return "".join(f" {bit}" for bit in bits)
 
 
@@ -375,7 +399,8 @@ def cmd_explain(args, ctx: Context) -> int:
 
     With the daemon down it still prints the cursor, which is the one durable fact,
     and says plainly that the rest is unknowable rather than showing a blank where a
-    binding would be.
+    binding would be. Asked about one message, it also reads from the store whether
+    that message was dropped for this name, withdrawn or expired, which is durable too.
     """
     identity = args.identity
     try:
@@ -388,6 +413,15 @@ def cmd_explain(args, ctx: Context) -> int:
             "comms' store and survives, so here is that much.", 76)))
         ctx.say("")
         qualified = identity_of(identity)
+        if args.message_id is not None:
+            dropped = books.read_dropped(qualified, args.message_id)
+            if dropped is not None:
+                from .daemon import CASE_REASONS
+
+                ctx.say(f"{qualified}   {dropped}   message {args.message_id}")
+                ctx.say("")
+                ctx.say("\n".join(_wrap(CASE_REASONS[dropped], 74, "  ")))
+                ctx.say("")
         ctx.say(_render_cursor(books.explain_cursor(books.read_cursor(qualified))))
         return _offline(e)
     try:

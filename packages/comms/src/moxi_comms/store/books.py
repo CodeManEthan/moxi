@@ -607,6 +607,41 @@ def explain_cursor(row: dict | None, message_id=None) -> dict:
             "reason": reason, "sentence": REASONS.get(reason)}
 
 
+def read_dropped(name: str, message_id, *, path=None, env=None) -> str | None:
+    """Why `message_id` left `name`'s queue undelivered (`withdrawn` or `expired`), from
+    a read-only open, for a process that isn't the daemon; None when it didn't, or the
+    store isn't there."""
+    try:
+        mid = int(message_id)
+    except (TypeError, ValueError):
+        return None
+    try:
+        conn = open_read(Path(path) if path else None, env=env)
+    except sqlite3.Error:
+        return None
+    try:
+        row = conn.execute("SELECT reason FROM dropped WHERE name = ? AND message_id = ?",
+                           (name, mid)).fetchone()
+    finally:
+        conn.close()
+    return None if row is None else row[0]
+
+
+def dropped_by_message(conn, ids) -> dict[str, dict[str, str]]:
+    """For each of `ids` that left a queue undelivered: {message id: {name: reason}},
+    read on `conn`, any connection to comms.db."""
+    mids = _ids(ids)
+    if not mids:
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    marks = ", ".join("?" * len(mids))
+    for mid, name, reason in conn.execute(
+            f"SELECT message_id, name, reason FROM dropped WHERE message_id IN ({marks}) "
+            "ORDER BY message_id, name", mids):
+        out.setdefault(str(mid), {})[name] = reason
+    return out
+
+
 def read_cursor(name: str, *, path=None, env=None) -> dict | None:
     """One name's cursor from a read-only open, for a process that isn't the daemon:
     `{"cursor", "updated_at"}`, or None when it has none or the store isn't there."""
