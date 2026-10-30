@@ -117,6 +117,8 @@ class SchtasksBackend:
         gate += ["--record", spec.unit, "--log", str(log)]
         if daemon:
             gate += ["--restart", "--runtime"]
+            if spec.stop == "process":  # its detached children may leave the gate's job
+                gate += ["--stop", "process"]
         gate += ["--", *spec.command]
         user = escape(self.user())
         triggers = ([f"    <LogonTrigger><Enabled>true</Enabled><UserId>{user}</UserId>"
