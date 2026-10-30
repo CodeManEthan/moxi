@@ -373,10 +373,17 @@ def _environ(env: Mapping[str, str] | None) -> Mapping[str, str]:
 
 
 def _expanduser(path: str, environ: Mapping[str, str]) -> str:
-    """`os.path.expanduser`, reading HOME from `environ` when it is a mapping of its own."""
+    """`os.path.expanduser`, reading HOME from `environ` when it is a mapping of its own.
+
+    Only a bare `~` or a `~/` start is this user's home; `~user/...` is another user's,
+    found the way `os.path.expanduser` finds it.
+    """
     if environ is os.environ or "HOME" not in environ:
         return os.path.expanduser(path)
-    return environ["HOME"] + path[1:] if path.startswith("~") else path
+    seps = ("/", "\\") if _WINDOWS else ("/",)
+    if path == "~" or path.startswith(tuple("~" + sep for sep in seps)):
+        return environ["HOME"] + path[1:]
+    return os.path.expanduser(path)
 
 
 def _windows_folders() -> tuple[str, str]:

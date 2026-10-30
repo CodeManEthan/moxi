@@ -467,6 +467,20 @@ def test_script_and_python_find_exe_files_on_windows():
     assert paths.script("moxi").suffix.lower() == ".exe"
 
 
+# -- a user's home in a given environment ---------------------------------------------------
+
+@POSIX
+def test_a_given_home_expands_only_this_users_tilde():
+    import pwd
+
+    me = pwd.getpwuid(os.getuid())
+    given = {"HOME": "/home/given"}
+    assert paths._expanduser("~", given) == "/home/given"
+    assert paths._expanduser("~/x", given) == "/home/given/x"
+    assert paths._expanduser(f"~{me.pw_name}/x", given) == os.path.join(me.pw_dir, "x")
+    assert paths._expanduser("/abs/~x", given) == "/abs/~x"
+
+
 # -- import cost --------------------------------------------------------------------------
 
 def test_importing_paths_loads_nothing_it_defers():
