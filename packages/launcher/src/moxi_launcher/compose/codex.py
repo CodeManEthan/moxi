@@ -35,18 +35,19 @@ the launch writes before its start (`<runs>/<request id>.options.json`), as nest
 every dot and keeps quotes, so a directory with a dot in it, or quoted, would not come
 through as one key.
 
-Extra flags in `host` mode go to the host's command line as given. The host's
-`--permissions PROFILE` is not among them: it sets the sandbox, as the posture row
-`sandbox` does, so passed on it is refused like that row, until a permission profile has
-a row of its own. For the same reason a config override keyed `sandbox_mode`, as a
-`config` item or a passed-on `--option`, is refused in `host` mode: the host names the
-sandbox only through `--sandbox`.
+Extra flags go to the command line as given, in every mode, except a flag or config
+override that sets what a posture row sets, which is refused like that row so the posture
+check sees every posture: the host's `--permissions PROFILE` (until a permission profile
+has a row of its own), Codex's `--dangerously-bypass-approvals-and-sandbox` and
+`--approve-for-me`, and a config override keyed `sandbox_mode` or `approval_policy`,
+passed on (`-c`, `--config`, `--option`) or as a `config` item (`catalog.POSTURE_FLAGS`,
+`catalog.POSTURE_KEYS`).
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 
 from .. import catalog
 from . import common
@@ -59,11 +60,8 @@ ORDER = ("update_check", "cwd", "model", "sandbox", "approval", "skip_git_check"
 HOST_ORDER = ("cwd", "model", "sandbox", "update_check", "add_dir", "config", "trust_cwd")
 #: The rows the host takes in its options file, not as an `--option`.
 OPTIONS_FILE_ROWS = ("add_dir", "trust_cwd")
-#: The host's spellings of a config override, and the config key that names the sandbox
-#: a second way, which the host refuses.
-HOST_OPTION = "--option"
+#: The host's options file flag.
 HOST_OPTIONS_FILE = "--options-file"
-SANDBOX_KEY = "sandbox_mode"
 
 
 def comms_identity(values: Mapping[str, object], ctx: Context) -> str | None:
@@ -141,8 +139,7 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     catalog.refuse_passthrough(HARNESS, extra)
     fit = catalog.fit(HARNESS, mode_, {**values, **owned}, ctx.chosen)
     not_applied = fit.not_applied
-    if host:
-        refuse_sandbox_key(fit.applied.get("config") or (), extra)
+    catalog.refuse_posture_keys(HARNESS, fit.applied.get("config") or ())
 
     rows = catalog.load(HARNESS).rows
     flags: list[str] = []
@@ -197,21 +194,5 @@ def host_options(applied: Mapping[str, object], cwd: str) -> dict | None:
     return {"config": config} if config else None
 
 
-def refuse_sandbox_key(config: Sequence[object], extra: Sequence[str]) -> None:
-    """Raise `catalog.PostureKey` when a `config` item or a passed-on `--option` sets
-    `sandbox_mode`, which turns' Codex host refuses: it takes the sandbox only from
-    `--sandbox`, the posture row's spelling."""
-    keys = [str(item) for item in config]
-    for i, token in enumerate(extra):
-        if token == HOST_OPTION and i + 1 < len(extra):
-            keys.append(extra[i + 1])
-        elif token.startswith(HOST_OPTION + "="):
-            keys.append(token[len(HOST_OPTION) + 1:])
-    for item in keys:
-        if item.partition("=")[0].strip() == SANDBOX_KEY:
-            raise catalog.PostureKey("sandbox", SANDBOX_KEY)
-
-
-__all__ = ["HARNESS", "HOST_OPTION", "HOST_OPTIONS_FILE", "HOST_ORDER", "OPTIONS_FILE_ROWS",
-           "ORDER", "SANDBOX_KEY", "comms_identity", "compose", "host_options", "mode",
-           "refuse_sandbox_key"]
+__all__ = ["HARNESS", "HOST_OPTIONS_FILE", "HOST_ORDER", "OPTIONS_FILE_ROWS", "ORDER",
+           "comms_identity", "compose", "host_options", "mode"]

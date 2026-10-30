@@ -33,7 +33,12 @@ every row this install offers, and marks the rows the launcher sets itself and t
 whose module is not installed. A flag the catalog does not know is passed on to the
 harness, last on its argv, after one warning line; the words after `--` are passed on as
 given. A passed-on flag that would set a row the launcher owns (the session id, a resume)
-or a permission row is refused, so the permission check always sees it.
+or a permission row is refused, so the permission check always sees it. So is one that
+sets what a permission row sets another way: Claude's `--dangerously-skip-permissions`
+and a `--settings` JSON string with a `permissions` mode, allow or deny list; Codex's
+`--dangerously-bypass-approvals-and-sandbox`, `--approve-for-me`, and a config override
+(passed on, or a `--config` item) keyed `sandbox_mode` or `approval_policy`. A settings
+file, or a Codex profile, is not read: what it sets is up to you.
 
 **Permission rows.** A row that sets how much the session may do without asking (Claude's
 permission mode and tool lists, Codex's sandbox and approval) is a posture row. A launch

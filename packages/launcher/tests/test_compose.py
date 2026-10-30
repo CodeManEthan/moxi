@@ -314,28 +314,46 @@ def test_without_trust_or_add_dir_the_host_gets_no_options_file():
         assert other.mode == mode and other.options_file is None
 
 
-@pytest.mark.parametrize("values", [
-    {"config": ["sandbox_mode=read-only"]},
-    {"config": ["x=1", " sandbox_mode = \"danger-full-access\""]},
-    {"extra_flags": ["--option", "sandbox_mode=read-only"]},
-    {"extra_flags": ["--option=sandbox_mode=read-only"]},
+#: The three Codex modes, as (links, host, values) for `codex.compose`.
+CODEX_MODES = {
+    "interactive": (frozenset(), None, {}),
+    "exec": (frozenset(), None, {"target": "headless"}),
+    "host": (frozenset({"turns"}), HOST, {}),
+}
+
+
+@pytest.mark.parametrize("mode", list(CODEX_MODES))
+@pytest.mark.parametrize("values, row", [
+    ({"config": ["sandbox_mode=read-only"]}, "sandbox"),
+    ({"config": ["x=1", " sandbox_mode = \"danger-full-access\""]}, "sandbox"),
+    ({"config": ["approval_policy=never"]}, "approval"),
+    ({"extra_flags": ["--option", "sandbox_mode=read-only"]}, "sandbox"),
+    ({"extra_flags": ["--option=sandbox_mode=read-only"]}, "sandbox"),
+    ({"extra_flags": ["-c", "sandbox_mode=danger-full-access"]}, "sandbox"),
+    ({"extra_flags": ["-csandbox_mode=danger-full-access"]}, "sandbox"),
+    ({"extra_flags": ["--config", "approval_policy=never"]}, "approval"),
+    ({"extra_flags": ["--config=approval_policy=never"]}, "approval"),
+    ({"extra_flags": ["--dangerously-bypass-approvals-and-sandbox"]}, "sandbox"),
+    ({"extra_flags": ["--approve-for-me"]}, "approval"),
 ])
-def test_under_the_host_a_config_key_naming_the_sandbox_is_refused(values):
-    with pytest.raises(catalog.PostureKey) as raised:
-        codex.compose(codex_values(**values),
-                      ctx(session_id=None, modules=frozenset({"turns"}), host=HOST))
-    assert raised.value.row == "sandbox" and raised.value.code == "owned"
-    assert raised.value.exit_code == 3 and "--sandbox" in raised.value.hint
+def test_a_config_key_or_flag_that_sets_a_posture_row_is_refused_in_every_mode(
+        mode, values, row):
+    links, host, more = CODEX_MODES[mode]
+    with pytest.raises(catalog.Owned) as raised:
+        codex.compose(codex_values(**more, **values),
+                      ctx(session_id=None, modules=links, host=host, brief="b"))
+    assert raised.value.row == row and raised.value.code == "owned"
+    assert raised.value.exit_code == 3 and f"--{row}" in raised.value.hint
 
 
-def test_outside_the_host_a_config_key_naming_the_sandbox_is_codexs_own():
-    got = codex.compose(codex_values(config=["sandbox_mode=read-only"]),
-                        ctx(session_id=None, brief="b"))
-    assert got.mode == "interactive" and "sandbox_mode=read-only" in got.argv
-    # A key that only starts with it is another key.
-    host = codex.compose(codex_values(config=["sandbox_mode_x=1"]),
-                         ctx(session_id=None, modules=frozenset({"turns"}), host=HOST))
-    assert "sandbox_mode_x=1" in host.argv
+@pytest.mark.parametrize("mode", list(CODEX_MODES))
+def test_a_config_key_that_only_starts_with_a_posture_key_is_another_key(mode):
+    links, host, more = CODEX_MODES[mode]
+    got = codex.compose(codex_values(**more, config=["sandbox_mode_x=1"],
+                                     extra_flags=["-c", "approval_policy_y=2"]),
+                        ctx(session_id=None, modules=links, host=host, brief="b"))
+    assert got.mode == mode
+    assert "sandbox_mode_x=1" in got.argv and "approval_policy_y=2" in got.argv
 
 
 def test_a_codex_launch_under_the_host_passes_extra_flags_unchanged():
@@ -354,7 +372,7 @@ def test_a_permissions_profile_passed_on_is_refused_like_the_sandbox_row(tail, l
         codex.compose(codex_values(extra_flags=tail),
                       ctx(session_id=None, modules=links, host=host))
     assert raised.value.row == "sandbox" and raised.value.exit_code == 3
-    assert "needs a catalog row" in raised.value.hint
+    assert "set sandbox with --sandbox" in raised.value.hint
 
 
 def test_the_codex_host_with_comms_takes_the_hosts_flags_without_its_directory():

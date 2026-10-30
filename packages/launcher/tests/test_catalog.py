@@ -432,10 +432,66 @@ def test_a_flag_without_a_row_that_sets_a_posture_rows_value_is_refused(argv):
         catalog.parse(argv, "codex", available=everything)
     assert raised.value.row == "sandbox" and raised.value.exit_code == 3
     assert raised.value.token == "--permissions" and raised.value.code == "owned"
-    assert "permission profile needs a catalog row" in raised.value.hint
-    # Every flag it names stands in for a posture row of its harness.
+    assert "set sandbox with --sandbox" in raised.value.hint
+    # Every flag, key and setting it names stands in for a posture row of its harness.
     for harness, flags in catalog.POSTURE_FLAGS.items():
         assert all(catalog.row(harness, row).posture for row in flags.values())
+    for harness, (_, keys) in catalog.POSTURE_KEYS.items():
+        assert all(catalog.row(harness, row).posture for row in keys.values())
+    for harness, entries in catalog.POSTURE_SETTINGS.items():
+        assert all(catalog.row(harness, row).posture for row in entries.values())
+
+
+@pytest.mark.parametrize("harness, argv, row", [
+    ("claude", ["--", "--dangerously-skip-permissions"], "permission_mode"),
+    ("claude", ["--allow-dangerously-skip-permissions"], "permission_mode"),
+    ("codex", ["--", "--dangerously-bypass-approvals-and-sandbox"], "sandbox"),
+    ("codex", ["--approve-for-me"], "approval"),
+])
+def test_a_flag_that_skips_or_hands_off_the_permission_checks_is_refused(harness, argv,
+                                                                         row):
+    with pytest.raises(catalog.PostureFlag) as raised:
+        catalog.parse(argv, harness, available=everything)
+    assert raised.value.row == row and raised.value.exit_code == 3
+    assert raised.value.token == argv[-1]
+    assert f"set {row} with --{row.replace('_', '-')}" in raised.value.hint
+
+
+@pytest.mark.parametrize("argv, key, row", [
+    (["--", "-c", "sandbox_mode=danger-full-access"], "sandbox_mode", "sandbox"),
+    (["--", "--config=approval_policy=never"], "approval_policy", "approval"),
+    (["--", "--option", "sandbox_mode=read-only"], "sandbox_mode", "sandbox"),
+])
+def test_a_codex_config_override_passed_on_that_sets_a_posture_row_is_refused(argv, key,
+                                                                               row):
+    with pytest.raises(catalog.PostureKey) as raised:
+        catalog.parse(argv, "codex", available=everything)
+    assert (raised.value.row, raised.value.token) == (row, key)
+    assert raised.value.exit_code == 3 and f"--{row}" in raised.value.hint
+    # Another key passes, and so does a value that only names one.
+    catalog.parse(["--", "-c", "model_reasoning_effort=high", "-c",
+                   "notify=sandbox_mode"], "codex", available=everything)
+
+
+@pytest.mark.parametrize("settings, entry, row", [
+    ('{"permissions": {"defaultMode": "bypassPermissions"}}', "defaultMode",
+     "permission_mode"),
+    ('{"permissions": {"allow": ["Bash"]}}', "allow", "allowed_tools"),
+    ('{"permissions": {"deny": ["Bash"]}}', "deny", "disallowed_tools"),
+])
+def test_claude_settings_json_that_sets_a_posture_row_is_refused(settings, entry, row):
+    for argv in (["--", "--settings", settings], [f"--settings={settings}"]):
+        with pytest.raises(catalog.PostureKey) as raised:
+            catalog.parse(argv, "claude", available=everything)
+        assert (raised.value.row, raised.value.token) == (row, f"permissions.{entry}")
+
+
+@pytest.mark.parametrize("settings", [
+    '{"env": {"A": "1"}}', '{"permissions": {"additionalDirectories": ["/a"]}}',
+    "/home/someone/settings.json", "[1]", '{"permissions": "x"}'])
+def test_claude_settings_without_a_posture_entry_pass(settings):
+    parsed = catalog.parse(["--", "--settings", settings], "claude", available=everything)
+    assert parsed.extra == ("--settings", settings)
 
 
 def test_an_unknown_flag_before_the_tail_is_held_to_the_same_refusal():

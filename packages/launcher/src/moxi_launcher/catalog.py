@@ -95,9 +95,32 @@ LAUNCHER = "launcher"
 EXTRA = "extra_flags"
 #: Flags with no row of their own that set what a posture row sets, per harness: the
 #: posture row each one stands in for. Passed on, each would change the posture without
-#: the posture check, so each is refused like that row. Codex's host takes a permissions
-#: profile in place of a sandbox mode.
-POSTURE_FLAGS = {"claude": {}, "codex": {"--permissions": "sandbox"}}
+#: the posture check, so each is refused like that row, in every mode. Claude's two skip
+#: or offer to skip every permission check; Codex's bypass drops the sandbox and the
+#: approvals, its approve-for-me hands approvals to an automatic reviewer, and its host
+#: takes a permissions profile in place of a sandbox mode.
+POSTURE_FLAGS = {
+    "claude": {"--dangerously-skip-permissions": "permission_mode",
+               "--allow-dangerously-skip-permissions": "permission_mode"},
+    "codex": {"--permissions": "sandbox",
+              "--dangerously-bypass-approvals-and-sandbox": "sandbox",
+              "--approve-for-me": "approval"},
+}
+#: Config overrides that set what a posture row sets, per harness: the flags that carry a
+#: `key=value` override (in any mode), and each key with the posture row it stands in for.
+#: An override with one of these keys, passed on or as a `config` item, is refused like
+#: the row, in every mode.
+POSTURE_KEYS = {
+    "claude": ((), {}),
+    "codex": (("-c", "--config", "--option"),
+              {"sandbox_mode": "sandbox", "approval_policy": "approval"}),
+}
+#: Claude's `--settings` (a file or a JSON string) takes a `permissions` table whose
+#: entries set what these posture rows set. A JSON string holding one is refused like the
+#: row; a file is not read here.
+SETTINGS_FLAG = "--settings"
+POSTURE_SETTINGS = {"claude": {"defaultMode": "permission_mode", "allow": "allowed_tools",
+                               "deny": "disallowed_tools"}}
 
 TYPES = ("bool", "int", "float", "string", "enum", "path", "list")
 KEY_FIELDS = ("type", "default", "doc", "values", "env", "retired")
@@ -182,22 +205,25 @@ class PostureFlag(Owned):
         self.token = token
         Refused.__init__(self, row, f"{token} sets what the posture row {row} sets, and "
                                     "has no row of its own for the posture check to see",
-                         f"leave {token} out; a permission profile needs a catalog row, "
-                         f"which this launcher does not have yet, so set {row} instead")
+                         f"leave {token} out, and set {row} with {_option(row)} instead, "
+                         "so the posture check sees it")
 
 
 class PostureKey(Owned):
-    """A config override whose key sets what a posture row sets, where the command it
-    goes to names that setting one way only (turns' Codex host takes the sandbox from
-    `--sandbox` alone)."""
+    """A config override or setting whose key sets what a posture row sets, which the
+    posture check can't see there."""
 
     def __init__(self, row: str, key: str):
         self.token = key
         Refused.__init__(self, row, f"the config key {key} sets what the posture row "
-                                    f"{row} sets, and turns' Codex host takes it only "
-                                    f"from --{row}",
-                         f"leave {key} out of the config, and set it with --{row}, so "
-                         "the posture check sees it")
+                                    f"{row} sets, where the posture check can't see it",
+                         f"leave {key} out, and set {row} with {_option(row)} instead, "
+                         "so the posture check sees it")
+
+
+def _option(row_name: str) -> str:
+    """The launcher's option for a row: its name, dashed."""
+    return "--" + row_name.replace("_", "-")
 
 
 class NeedsModule(Refused):
@@ -831,12 +857,14 @@ def typed_harness(argv: Sequence[str]) -> str | None:
 
 def refuse_passthrough(harness: str, tokens: Sequence[str]) -> None:
     """Raise `Owned` when a token of `tokens`, flags passed on to `harness`, spells an
-    owned or a posture row in any of its modes, or `PostureFlag` when it is a flag with
-    no row that sets what a posture row sets (`POSTURE_FLAGS`). A templated spelling
-    (Codex's `-c check_for_update_on_startup=false`) matches only when the value's key
-    does."""
+    owned or a posture row in any of its modes, `PostureFlag` when it is a flag with
+    no row that sets what a posture row sets (`POSTURE_FLAGS`), and `PostureKey` when it
+    is a config override or a settings string whose key does (`POSTURE_KEYS`,
+    `POSTURE_SETTINGS`). A templated spelling (Codex's `-c
+    check_for_update_on_startup=false`) matches only when the value's key does."""
     rows = [r for r in load(harness) if r.owned or r.posture]
     standing_in = POSTURE_FLAGS.get(harness, {})
+    key_flags, _ = POSTURE_KEYS.get(harness, ((), {}))
     tokens = list(tokens)
     for i, token in enumerate(tokens):
         flag, attached = _split_flag(token)
@@ -849,6 +877,41 @@ def refuse_passthrough(harness: str, tokens: Sequence[str]) -> None:
         for row_ in rows:
             if _spells(row_, flag, value):
                 raise Owned(row_, flag)
+        if value is not None and flag in key_flags:
+            refuse_posture_keys(harness, [value])
+        if value is not None and flag == SETTINGS_FLAG:
+            refuse_posture_settings(harness, value)
+
+
+def refuse_posture_keys(harness: str, items: Iterable[object]) -> None:
+    """Raise `PostureKey` when a `key=value` config override of `items` has a key that
+    sets what a posture row of `harness` sets (`POSTURE_KEYS`). A key that only starts
+    with one is another key."""
+    _, keys = POSTURE_KEYS.get(harness, ((), {}))
+    for item in items:
+        key = str(item).partition("=")[0].strip()
+        if key in keys:
+            raise PostureKey(keys[key], key)
+
+
+def refuse_posture_settings(harness: str, value: str) -> None:
+    """Raise `PostureKey` when `value`, given to Claude's `--settings`, is a JSON string
+    whose `permissions` table has an entry that sets what a posture row sets
+    (`POSTURE_SETTINGS`). A value that is not a JSON object is a settings file, which is
+    not read here."""
+    entries = POSTURE_SETTINGS.get(harness, {})
+    if not entries:
+        return
+    try:
+        settings = json.loads(value)
+    except ValueError:
+        return
+    permissions = settings.get("permissions") if isinstance(settings, dict) else None
+    if not isinstance(permissions, dict):
+        return
+    for entry, row_name in entries.items():
+        if entry in permissions:
+            raise PostureKey(row_name, f"permissions.{entry}")
 
 
 def _split_flag(token: str) -> tuple:
