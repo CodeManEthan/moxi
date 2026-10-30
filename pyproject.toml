@@ -14,6 +14,7 @@ members = [
     "packages/comms",
     "packages/moxi-dev",
     "packages/repo",
+    "packages/loopback",
 ]
 
 [tool.uv.sources]
@@ -24,6 +25,7 @@ moxi-cache = { workspace = true }
 moxi-comms = { workspace = true }
 moxi-dev = { workspace = true }
 moxi-repo = { workspace = true }
+moxi-loopback = { workspace = true }
 
 # The contributor's tools: `uv sync` installs moxi-dev, whose `moxi-dev check` runs the
 # checks a change must pass.

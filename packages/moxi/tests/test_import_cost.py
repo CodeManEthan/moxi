@@ -40,6 +40,16 @@ def test_the_light_core_modules_import_no_heavy_module(module):
     assert done.stdout.strip() == "", f"{module} imports {done.stdout.strip()}"
 
 
+def test_importing_the_store_pulls_no_typing_and_no_sqlite():
+    """`typing` costs over a millisecond, and `sqlite3` more; the store imports neither
+    until a function needs it, and `typing` only for a type checker."""
+    code = ("import sys; import moxi.store; "
+            "print(' '.join(m for m in ('typing', 'sqlite3', '_sqlite3') if m in sys.modules))")
+    done = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True,
+                          text=True, check=True)
+    assert done.stdout.strip() == "", f"moxi.store imports {done.stdout.strip()}"
+
+
 def _median_ms(argv: list[str], env: dict | None = None) -> float:
     times = []
     for _ in range(RUNS):
