@@ -182,6 +182,24 @@ def test_the_private_files_own_entries_are_kept(private, names_config):
                 allow=allow) == []
 
 
+def test_a_crlf_private_files_own_entries_are_kept(private, names_config):
+    # Scanned from its bytes, a CRLF file keeps its line ends; read with newline
+    # translation, it doesn't. Its own text: values are no hit either way.
+    names_config(words=["alexa quill", "zedlander"])
+    # Scoped to @author, the line keeps nothing in the file itself; only the own-text
+    # keep can.
+    path = private(line("@author", "private-names/private-name", "text:Alexa Quill",
+                        why="for zedlander"))
+    path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+    allow = Allowlist.read(None, path)
+    for own in (path.read_bytes().decode("utf-8", "surrogateescape"),
+                path.read_text(encoding="utf-8")):
+        assert {own[h.start:h.end] for h in scan(own, ("private-names",))} == {
+            "Alexa Quill", "zedlander"}
+        assert [own[h.start:h.end] for h in scan(own, ("private-names",), allow=allow)] == [
+            "zedlander"]
+
+
 def test_missing_files_add_no_lines(tmp_path, config_dir):
     assert len(Allowlist.read(tmp_path / "none", config_dir / "none")) == 0
     assert len(Allowlist.read()) == 0

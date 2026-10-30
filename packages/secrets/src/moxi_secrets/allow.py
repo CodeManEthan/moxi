@@ -42,6 +42,11 @@ def normalise_text(text: str) -> str:
     return _ENDS.sub("", joined.replace("_", "-"))
 
 
+def _translated(text: str) -> str:
+    """`text` with its line ends read as universal newlines read them."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 class _Line:
     __slots__ = ("path", "set", "rule", "kind", "value")
 
@@ -146,7 +151,10 @@ class Allowlist:
 
     def __init__(self, lines=(), own_text: str | None = None):
         self._lines = tuple(lines)
-        self._own_text = own_text
+        # The private file's text as its bytes decode, line ends and all, and as a caller
+        # that reads it with newline translation gets it.
+        self._own_texts = frozenset() if own_text is None else frozenset(
+            {own_text, _translated(own_text)})
         self._own_values = frozenset(line.value for line in self._lines
                                      if line.kind == "text")
 
@@ -172,13 +180,15 @@ class Allowlist:
                                      "directory or the secrets config directory, where git "
                                      "never tracks it")
             try:
-                text = path.read_text(encoding="utf-8")
+                with path.open(encoding="utf-8", newline="") as handle:
+                    content = handle.read()
             except FileNotFoundError:
                 continue
             except UnicodeDecodeError:
                 raise AllowlistError(f"{path}: is not UTF-8") from None
             if not is_public:
-                own_text = text
+                own_text = content
+            text = _translated(content)
             for n, raw in enumerate(text.split("\n"), 1):
                 parsed = _parse(raw, str(path), n, is_public)
                 if parsed is not None:
@@ -191,6 +201,5 @@ class Allowlist:
             return True
         # The private file has to spell what it keeps: scanned itself, its own text:
         # values are no hit.
-        return (hit.set == "private-names" and self._own_text is not None
-                and text == self._own_text
+        return (hit.set == "private-names" and text in self._own_texts
                 and normalise_text(text[hit.start:hit.end]) in self._own_values)
