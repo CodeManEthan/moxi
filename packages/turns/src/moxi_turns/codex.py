@@ -2,8 +2,8 @@
 
 ``launch`` owns one app-server, one thread, its hook socket, and an optional Codex
 window. The app-server link reconnects and resumes the same thread after a connection
-or child failure. Calls into the endpoint settle every submitted delivery; steering is
-best effort because the endpoint has already tied it to the turn that was open.
+or child failure. Calls into the endpoint settle every submitted delivery and every
+steer.
 
 A turn is open in the ledger from its start until Codex says it is over:
 ``turn/completed``; a ``thread/status/changed`` to a non-active status with no
@@ -13,12 +13,24 @@ did not take its text (the request was never sent, or Codex answered it with an 
 once the request went out it reads ``Started`` on a turn the host has just learned of,
 or ``Lost("untied: ...")`` at once.
 
+Steers. The endpoint records a steer and answers its caller at once; ``append`` runs on
+the endpoint's ordered worker, so steers reach ``turn/steer`` one at a time in the order
+recorded. ``steering`` (called as the steer is recorded) puts its id in ``_steering``, and
+a ``turn/completed`` that comes while any id is there is held until that steer settles:
+the hold starts at record, not when the worker reaches the steer, so a steer recorded
+while the turn ran is either taken into that turn or refused ``idle``, and ``turn.ended``
+lists it when taken. ``turn/steer`` answered reports ``steered``; "no active turn" reports
+``refused`` ``idle``; no answer within the app-server client's bound reports ``lost``. A
+steer the endpoint settles meanwhile (its own bound) goes to ``expired``, which drops it
+from ``_steering`` and runs the completions it held. Its ``turn/steer``, if already sent,
+may still be taken by Codex: the caller read ``lost``, and Codex's late answer changes
+nothing.
+
 The ending form: once a Stop is answered unblocked, Codex may complete the turn
 at any moment, and a steer it takes in that gap can be written into the turn and never
 answered. So the turn is marked ending: it stays open, but no ``turn/steer`` for it goes
-out after the Stop answer. A steer-first delivery waits and starts a new turn after
-``turn/completed``; a plain steer reads ``idle``. A ``turn/steer`` already on its way
-when the hold answers is let finish first, so it reaches Codex inside the hook.
+out after the Stop answer, and a steer reads ``idle``. A ``turn/steer`` already on its
+way when the hold answers is let finish first, so it reaches Codex inside the hook.
 """
 
 from __future__ import annotations
@@ -95,7 +107,7 @@ class _TurnEnding(RuntimeError):
 
 class CodexHarness(Harness):
     name = "codex"
-    can = frozenset({"start", "steer", "hold"})
+    can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler"})
     mod_version = None
 
     def __init__(self, cwd, *, instructions: str | None = None, env=None,
@@ -498,7 +510,7 @@ class CodexHarness(Harness):
             # Never sent, or Codex answered it with an error.
             self._drop_pending(delivery.id)
             log.warning("Codex refused delivery %s: %s", delivery.id, exc)
-            self.endpoint.refused(delivery.id, "gone")
+            self.endpoint.refused(delivery.id, "unsupported")
             return
         if turn_id is None:
             log.warning("Codex took delivery %s's turn/start but named no turn the host "
@@ -514,35 +526,51 @@ class CodexHarness(Harness):
                 return True
             return False
 
+    def steering(self, delivery_id: str) -> None:
+        """A steer is being recorded, under the endpoint's lock: from here a
+        ``turn/completed`` waits for it. No harness call, and the host never calls the
+        endpoint while it holds its own lock, so the two locks cannot deadlock."""
+        with self._lock:
+            self._steering.add(delivery_id)
+
     def append(self, delivery: Delivery) -> None:
-        """Steer while the endpoint call waits, so a miss can be re-admitted before
-        the caller can observe which turn started the delivery."""
+        """On the endpoint's worker: ``turn/steer`` the text into the running turn and
+        report what Codex said. Blocks the worker until Codex answers, at most the
+        app-server client's request bound."""
         with self._lock:
             self._steering.add(delivery.id)
         try:
             self._inject(delivery.text)
         except (proto.NoActiveTurn, _TurnEnding):
             # Codex has no turn to steer, or its turn is ending: the text never went out.
-            if not delivery.fallback:
-                self.endpoint.refused(delivery.id, "idle")
-            elif not self.endpoint.steer_missed(delivery.id):
-                log.warning("Codex steer %s missed after its delivery had settled",
-                            delivery.id)
+            self.endpoint.refused(delivery.id, "idle")
         except proto.NoReply as exc:
             log.warning("Codex did not answer steer %s: %s; it reads lost",
                         delivery.id, exc)
             self.endpoint.lost(delivery.id, _no_reply(exc))
         except Exception as exc:
             log.warning("Codex could not steer delivery %s: %s", delivery.id, exc)
-            self.endpoint.refused(delivery.id, "gone")
+            self.endpoint.refused(delivery.id, "unsupported")
+        else:
+            self.endpoint.steered(delivery.id)
         finally:
-            with self._lock:
-                self._steering.discard(delivery.id)
-                pending = self._pending_completions if not self._steering else []
-                if pending:
-                    self._pending_completions = []
-            for params in pending:
-                self._turn_completed(params)
+            self._release(delivery.id)
+
+    def expired(self, delivery_id: str) -> None:
+        """The endpoint settled a steer without the host's word (its bound), or its worker
+        skipped one that had settled: stop holding ``turn/completed`` for it."""
+        self._release(delivery_id)
+
+    def _release(self, delivery_id: str) -> None:
+        """Drop a steer from ``_steering``; once none is left, report the completions held
+        for it."""
+        with self._lock:
+            self._steering.discard(delivery_id)
+            pending = self._pending_completions if not self._steering else []
+            if pending:
+                self._pending_completions = []
+        for params in pending:
+            self._turn_completed(params)
 
     def command(self, request: CommandRequest) -> None:
         self.endpoint.command_settled(request.id, Failed("unsupported"))
@@ -691,8 +719,9 @@ class CodexHarness(Harness):
             log.warning("unanswered app-server request %s; approvals are disabled", method)
 
     def _completed(self, params: dict) -> None:
-        """A turn's end, by Codex's word: held while a steer is in flight, so a steer
-        that missed is re-admitted before the end is reported."""
+        """A turn's end, by Codex's word: held while a steer recorded by the endpoint
+        is unsettled, so that steer is taken into the turn (or refused) before the end is
+        reported, and ``turn.ended`` lists it."""
         with self._lock:
             if self._steering:
                 self._pending_completions.append(params)

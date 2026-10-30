@@ -43,6 +43,19 @@ a caller that will not wait that long frees itself with its own `wait_*` timeout
 The endpoint's life, a rule: it ends on its own SIGTERM, an EPIPE on its stdout, or
 a change of parent, and never on a `session.end` hook. It takes its session id from the
 runner on every load, and opens its caller socket (answers `hello`) once it has the id.
+
+Lines and the adapter's lock: `submit`, `append` and `command` come from the endpoint's
+ordered worker, and each writes a line through `LineWriter.write`, which blocks while the
+runner's pipe is full. No line is written while the adapter's lock is held, so a write
+the runner does not read holds the worker and nothing else: the reports, the gate's asks
+and the core's expiry still take the lock and settle what they must. A submit line the
+window's close (on a leg thread) hands over is written the same way. A line already
+being written when its delivery settles `lost` (the core's expiry) may still reach the
+runner once it reads again, and its prompt may run; that is the accepted cost of the
+bound, and the gate drops it unless its window is the open one.
+
+A steer reads `Started`, and its turn names it, once the runner reports `append.done`
+(`$.session.append` resolved without a deny); `append.failed` refuses it `idle`.
 """
 
 from __future__ import annotations
@@ -62,8 +75,8 @@ from typing import Any, BinaryIO
 
 from . import claude_leg as leg
 from .harness import CommandRequest, Delivery, Harness, Live
-from .results import (CAPABILITIES, COMMAND_REFUSALS, LOST_UNTIED, OUTCOMES, Failed,
-                      Passed, Ran, Refused, StopFacts)
+from .results import (COMMAND_REFUSALS, LOST_UNTIED, OUTCOMES, Failed, Passed, Ran,
+                      Refused, StopFacts)
 
 log = logging.getLogger("moxi.turns.claude")
 
@@ -82,6 +95,8 @@ class _Window:
     """One plugin submit's window."""
 
     delivery: str
+    #: The leg's word for the submit: `start` for an only-if-idle delivery, else
+    #: `deliver`.
     kind: str
     #: The window nonce: random, 128 bits, minted at the hand-over.
     nonce: str = field(default_factory=lambda: secrets.token_hex(16))
@@ -92,13 +107,16 @@ class _Window:
     #: The turn held in the window: the last main-loop `turn.start` reported in it.
     held: str | None = None
     held_set: bool = False
+    #: The delivery, for the window's submit line.
+    spec: Delivery | None = None
 
 
 class ClaudeHarness(Harness):
     """The Claude half of an endpoint: the runner's leg under the endpoint core."""
 
     name = "claude"
-    can = frozenset(CAPABILITIES)
+    can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "clear", "exit"})
+    live_wait_s = LIVE_WAIT_S
 
     def __init__(self, out: BinaryIO, *, pid: int | None = None, cwd: str | None = None,
                  on_end=None):
@@ -193,7 +211,7 @@ class ClaudeHarness(Harness):
     def submit(self, delivery: Delivery) -> None:
         with self._lock:
             self._pending.append(delivery)
-            self._next_window()
+        self._hand_next()
 
     def expired(self, delivery_id: str) -> None:
         """The core expired the delivery (`PENDING_TTL_S`): its window closes now, admitted
@@ -204,6 +222,7 @@ class ClaudeHarness(Harness):
                 log.warning("window of %s (%s) expired; it closes", delivery_id,
                             "admitted" if w.admitted else "not admitted")
                 self._close(leg.END_FAIL, "expired: the submit never settled")
+        self._hand_next()
 
     def append(self, delivery: Delivery) -> None:
         if not self._lines.write({"op": leg.LINE_APPEND, "delivery": delivery.id,
@@ -219,18 +238,36 @@ class ClaudeHarness(Harness):
 
     # -- the window ---------------------------------------------------------------------
 
-    def _next_window(self) -> None:
-        """Under the lock: hand the runner the next pending submit, once no window is
-        open. A delivery the core settled meanwhile (refused, expired) is skipped."""
+    def _hand_next(self) -> None:
+        """Hand the runner the next pending submit, once no window is open. A delivery
+        the core settled meanwhile (refused, expired) is skipped. The window opens under
+        the lock; its line is written after the lock is let go."""
+        while True:
+            with self._lock:
+                w = self._open_next()
+                if w is None:
+                    return
+                d = w.spec
+            if self._lines.write({"op": leg.LINE_SUBMIT, "delivery": d.id,
+                                  "kind": w.kind, "text": d.text, "nonce": w.nonce}):
+                return
+            with self._lock:
+                if self._window is not w:
+                    return
+                self._close(leg.END_FAIL, "the runner's line is closed")
+
+    def _open_next(self) -> _Window | None:
+        """Under the lock: open the window of the next pending submit still waiting, or
+        None (a window is open, or nothing waits)."""
         while self._window is None and self._pending:
             d = self._pending.pop(0)
             if not self.endpoint.is_waiting(d.id):
                 continue
             # The window counts as open from here, a few ms before the runner's call.
-            w = self._window = _Window(d.id, d.kind)
-            if not self._lines.write({"op": leg.LINE_SUBMIT, "delivery": d.id,
-                                      "kind": d.kind, "text": d.text, "nonce": w.nonce}):
-                self._close(leg.END_FAIL, "the runner's line is closed")
+            w = self._window = _Window(d.id, "start" if d.only_if_idle else "deliver")
+            w.spec = d
+            return w
+        return None
 
     def _close(self, end: str, reason: str | None) -> None:
         """Under the lock: the open window closes by `end`."""
@@ -264,7 +301,6 @@ class ClaudeHarness(Harness):
                 ep.lost(w.delivery, f"{LOST_UNTIED}: the submit failed"
                                     + (f": {reason}" if reason else ""))
         self._gate_refused.discard(w.delivery)
-        self._next_window()
 
     # -- reports ------------------------------------------------------------------------
 
@@ -283,6 +319,7 @@ class ClaudeHarness(Harness):
                     self._close(leg.END_FAIL, "a report from the runner was lost")
                 self._last_seq = seq
             self._apply(kind, body)
+        self._hand_next()                       # a report may have closed the window
 
     def _apply(self, kind: str, body: dict[str, Any]) -> None:
         ep = self.endpoint
@@ -322,6 +359,10 @@ class ClaudeHarness(Harness):
                          "window waits for the settle", delivery)
             else:
                 self._close(leg.END_FAIL, _opt_str(body, "reason") or "the runner's bound")
+        elif kind == leg.R_APPEND_DONE:
+            delivery = body.get("delivery")
+            if isinstance(delivery, str):
+                ep.steered(delivery)
         elif kind == leg.R_APPEND_FAILED:
             delivery = body.get("delivery")
             if isinstance(delivery, str):
@@ -379,8 +420,8 @@ class ClaudeHarness(Harness):
             reason = ep.entering(w.delivery)
             if reason is None and not ep.is_waiting(w.delivery):
                 reason = "gone"           # the core settled it meanwhile
-            if reason is None and w.kind == "start":
-                spec = ep._deliveries[w.delivery].spec
+            spec = w.spec
+            if reason is None and spec is not None and spec.only_if_idle:
                 if spec.refuse_draft and body.get("draft") is not False:
                     reason = "draft"      # a draft, or a box the gate could not read
                 elif spec.refuse_agents and _busy_agents(body.get("agents")):
@@ -448,9 +489,12 @@ class ClaudeHarness(Harness):
                 ep.command_settled(request.id, Ran(new_id or ep.ledger.session_id))
             else:
                 ep.command_settled(request.id, Passed())
+        elif state == "refused" and reason in COMMAND_REFUSALS:
+            ep.command_settled(request.id, Refused(reason))
         elif state == "refused":
-            ep.command_settled(request.id, Refused(reason if reason in COMMAND_REFUSALS
-                                                   else "gone"))
+            # The plugins' own word (the gate's `gone`: it could not reach this endpoint
+            # in time) is no refusal the contract names: the command did not run.
+            ep.command_settled(request.id, Failed(f"the gate withdrew it: {reason}"))
         else:
             with self._lock:
                 if self._clear_passed == request.id:

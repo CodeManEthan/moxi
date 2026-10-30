@@ -10,11 +10,14 @@ for params that break the contract, and turns' own: `gone` (the endpoint is endi
 `capability` (the session does not offer the method or option, `data` naming it) and
 `stop-handler-taken`. Every reason the session's state decides is a value instead.
 
-A handler on the loop never waits on the harness. `session`, `stops.handle`,
-`stops.answer`, `watch`'s registration and a `wait` with `timeout_ms` 0 read the core's
-record and answer at once; every call that may wait (a live read, a bounded `wait`, a
-`command`, a hand-off to the adapter) runs on a thread of its own, so the loop keeps
-serving every other connection while it waits.
+A handler on the loop never waits on the harness or on a blocking write. `session`,
+`deliver`, `steer`, `stops.handle`, `stops.answer` and a `wait` with `timeout_ms` 0 read or
+write the core's record and answer at once: `deliver` and `steer` record the delivery and
+put its hand-off on the endpoint's ordered worker in one locked step, before the handler's
+first `await`. `facts`, `agents` and `watch` await the endpoint's bounded live read, which
+runs on its reader threads, so they answer within the harness's live bound. A `wait` with
+a bound or none, and a `command`, which waits for its settle, run on a thread of their
+own, so the loop keeps serving every other connection while they wait.
 """
 
 from __future__ import annotations
@@ -58,6 +61,9 @@ class Rpc:
 
     def __init__(self, endpoint: Endpoint):
         self.ep = endpoint
+        #: Calls waiting on a thread for their answer (`wait`, `command`). The endpoint's
+        #: stop lets them answer before it closes the server.
+        self.answering = 0
         self._methods: dict[str, Callable[[ipc.Connection, dict], Any]] = {
             "session": self._session,
             "facts": self._facts,
@@ -93,12 +99,12 @@ class Rpc:
         return self.ep.session()
 
     async def _facts(self, conn, params: dict) -> dict:
-        facts = await in_thread(self.ep.facts)
+        facts = await self.ep.facts_async()
         return facts.to_wire()
 
     async def _agents(self, conn, params: dict) -> dict:
         self._needs("agents")
-        agents = await in_thread(self.ep.agents)
+        agents = await self.ep.agents_async()
         return agents.to_wire()
 
     async def _deliver(self, conn, params: dict) -> dict:
@@ -112,22 +118,35 @@ class Rpc:
                                  or refuse_agents):
             raise invalid("if_turn_number, refuse_draft and refuse_agents are valid only "
                           "with only_if_idle: true")
-        if only_if_idle:
-            self._needs("only-if-idle")
-            d = await in_thread(lambda: self.ep.start(
-                text, if_turn_number=if_turn_number, refuse_draft=refuse_draft,
-                refuse_agents=refuse_agents, ref=ref))
-        else:
-            self._needs("deliver")
-            d = await in_thread(lambda: self.ep.deliver(text, ref=ref))
+        self._needs("only-if-idle" if only_if_idle else "deliver")
+        # Recorded, checked and handed to the worker before this handler's first await.
+        d = self.ep.deliver(text, ref=ref, only_if_idle=only_if_idle,
+                            if_turn_number=if_turn_number, refuse_draft=refuse_draft,
+                            refuse_agents=refuse_agents)
+        await self._hook("deliver", d)
         return self._handed(d)
 
     async def _steer(self, conn, params: dict) -> dict:
         text = _text(params)
         ref = _ref(params)
         self._needs("steer")
-        d = await in_thread(lambda: self.ep.steer(text, ref=ref))
+        d = self.ep.steer(text, ref=ref)
+        await self._hook("steer", d)
         return self._handed(d)
+
+    async def _in_thread(self, fn: Callable[..., Any], *args: Any) -> Any:
+        """`in_thread`, counted in `answering` until its result is back on the loop. The
+        handler's answer is queued in the same step, with no await after this one."""
+        self.answering += 1
+        try:
+            return await in_thread(fn, *args)
+        finally:
+            self.answering -= 1
+
+    async def _hook(self, method: str, d) -> None:
+        hook = self.ep.answer_hook
+        if hook is not None:
+            await hook(method, d)
 
     async def _wait(self, conn, params: dict) -> dict:
         delivery = params.get("delivery")
@@ -144,12 +163,12 @@ class Rpc:
             if timeout == 0:
                 value = self.ep.wait(delivery, until, 0)
             else:
-                value = await in_thread(self.ep.wait, delivery, until, timeout)
+                value = await self._in_thread(self.ep.wait, delivery, until, timeout)
             return _waited(value)
         if timeout == 0:
             delivery, value = self.ep.wait_ref(ref, until, 0)
         else:
-            delivery, value = await in_thread(self.ep.wait_ref, ref, until, timeout)
+            delivery, value = await self._in_thread(self.ep.wait_ref, ref, until, timeout)
         return {"delivery": delivery, **_waited(value)}
 
     async def _command(self, conn, params: dict) -> dict:
@@ -166,16 +185,17 @@ class Rpc:
             self._needs("stop-shells")
         if timeout is None:
             timeout = COMMAND_WAIT_S[name] + (STOP_SHELLS_WAIT_S if stop_shells else 0)
-        result = await in_thread(lambda: self.ep.command(
+        result = await self._in_thread(lambda: self.ep.command(
             name, if_turn_number=if_turn_number, timeout=timeout, stop_shells=stop_shells))
         if isinstance(result, Refused) and result.reason == REFUSED_GONE:
             raise gone(self.ep.gone_reason)
         return {"result": result.to_wire()}
 
     async def _watch(self, conn, params: dict) -> dict:
-        first, live = await in_thread(self.ep.watch_read)
-        # Back on the loop: the facts and the subscription in one hold of the endpoint's
-        # lock, and the answer queued before any notification the loop runs after it.
+        first = self.ep.reading()
+        live = await self.ep.live_async()
+        # Then, with no await between: the facts and the subscription in one hold of the
+        # endpoint's lock, and the answer queued before any notification after it.
         facts = self.ep.watch(conn, first, live)
         if facts is None:
             raise gone(self.ep.gone_reason)

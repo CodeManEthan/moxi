@@ -180,7 +180,7 @@ class _Post:
 
 class OpenCodeHarness(Harness):
     name = "opencode"
-    can = frozenset({"start"})
+    can = frozenset({"deliver", "only-if-idle"})
     mod_version = None
 
     def __init__(self, cwd, *, instructions: str | None = None, env=None, options=None,
@@ -628,7 +628,7 @@ class OpenCodeHarness(Harness):
             outcome = self._post_once(d)
             if outcome == "posted":
                 return
-            if outcome == "busy" and d.kind == "start":
+            if outcome == "busy" and d.only_if_idle:
                 self.endpoint.refused(d.id, "busy-turn")
                 return
             if outcome == "retry":
@@ -674,7 +674,7 @@ class OpenCodeHarness(Harness):
         if code >= 500 or code == 429:
             log.warning("post %s answered %s; trying again", mid, code)
             return "retry"
-        self.endpoint.refused(d.id, "gone")
+        self.endpoint.refused(d.id, "unsupported")     # the server turned the post down
         self._fatal(code, answer)
         return "refused"
 
