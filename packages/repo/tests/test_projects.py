@@ -266,6 +266,38 @@ def test_a_subdirectory_and_a_linked_worktree_take_their_main_repos_key(demo, pr
 
 
 @POSIX_ONLY
+def test_remove_through_a_linked_worktree_reaches_the_indexed_repo(demo, projects, capsys,
+                                                                   monkeypatch):
+    alpha = demo.repo("alpha-notes")
+    scratch = demo.tmp / "scratch"
+    worktree = scratch / "alpha-feature"
+    git(alpha, "worktree", "add", "-q", "-b", "feature", str(worktree))
+    (worktree / "src").mkdir()
+    projects.add("feature", worktree)
+    assert run(capsys, "git-hooks", "add", str(alpha), "demo/gate", "demo/lint",
+               "demo/watch")[0] == 0
+    # A path inside the linked worktree, and a key whose root is the worktree, both name
+    # the repo indexed by its main work tree.
+    code, out, err = run(capsys, "git-hooks", "remove", str(worktree / "src"), "demo/lint")
+    assert code == 0, err
+    assert f"removed demo/lint from {alpha}" in out
+    assert run(capsys, "git-hooks", "remove", "feature", "demo/watch")[0] == 0
+    assert pieces_of(alpha) == {"demo/gate"}
+
+    # The worktree's directory deleted by hand: git still lists it for alpha's git dir,
+    # so its name, given from where it was, is a path of the indexed repo and not a
+    # project key; remove names the live repo and leaves it alone.
+    shutil.rmtree(worktree)
+    monkeypatch.chdir(scratch)
+    fix = f"moxi repo git-hooks remove {alpha}"
+    for arg in ("alpha-feature", "feature"):
+        code, out, err = run(capsys, "git-hooks", "remove", arg)
+        assert code == 1, err
+        assert fix in err
+    assert pieces_of(alpha) == {"demo/gate"}
+
+
+@POSIX_ONLY
 def test_a_projects_error_leaves_keys_empty_with_one_line(demo, projects, capsys):
     alpha, beta = demo.repo("alpha-notes"), demo.repo("beta-code")
     projects.add("alpha", alpha)

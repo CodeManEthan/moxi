@@ -216,11 +216,21 @@ def _index_change(fn: Callable[[dict], None]) -> None:
 
 
 def indexed_at(path: str | os.PathLike) -> list[str]:
-    """The keys of indexed repos whose root, or key, is `path`."""
-    want = os.path.normcase(os.path.abspath(path))
-    return [key for key, entry in indexed().items()
-            if os.path.normcase(os.path.abspath(entry.get("root", ""))) == want
-            or key == want]
+    """The keys of indexed repos whose root, or key, is `path`. A path that no longer
+    exists also names a repo when git still lists it as a work tree of that repo's common
+    git dir: a linked worktree whose directory was deleted."""
+    want = gitconf.key_of(path)
+    index = indexed()
+    found = [key for key, entry in index.items()
+             if gitconf.key_of(entry.get("root", "")) == want or key == want]
+    if found or os.path.lexists(path):
+        return found
+    for key, entry in index.items():
+        common = entry.get("common_dir") or key
+        if os.path.isdir(common) and any(gitconf.key_of(top) == want
+                                         for top, _ in gitconf.worktrees(common)):
+            found.append(key)
+    return found
 
 
 def _index_put(repo: Repo) -> None:

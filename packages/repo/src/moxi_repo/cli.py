@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Sequence
 
@@ -150,10 +151,12 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi repo") -> int:
 
 
 def _resolve_paths(args, action: str) -> None:
-    """Turn a project key given for PATH into its root. A path that no longer exists but
-    is in repo's index stays a path, so `remove` can drop it."""
+    """Turn a project key given for PATH into its root. For `remove`, a path that no
+    longer exists but names an indexed repo stays a path, so `remove` can drop it: the
+    repo's root, its git dir, or a work tree git still lists for that git dir."""
     def one(arg):
-        if arg is None or (action == "remove" and api.indexed_at(arg)):
+        if arg is None or (action == "remove" and not os.path.lexists(arg)
+                           and api.indexed_at(arg)):
             return arg
         return projects.resolve(arg)
 
