@@ -72,7 +72,9 @@ found = scan_lines(added_lines, ("credentials",))   # (path, line, text) triples
   outside hits comes back character for character, `surrogateescape` bytes included.
 - `scan_lines(triples, sets, *, allow=None)` takes the added lines of a whole change as
   `(path, line number, text)`, scans each path's lines as one text, and returns
-  `LineHit(path, line, hit)` values.
+  `LineHit(path, line, hit)` values. It joins a path's lines with `\n` whatever their
+  numbers, so a pattern that can span lines, such as a private name with a space, can
+  match across lines 3 and 40 when no line between them was added.
 - `is_secret_path(path)` says a file must not be read at all: `.env*`, `auth.json`,
   `*_history`, anything under `.ssh/`, `*.pem`, `credentials`, `.netrc`, `.pgpass`,
   `*.p12`, `*.pfx`, `*.jks`, `*.keystore`. It matches names and paths case-insensitively,
