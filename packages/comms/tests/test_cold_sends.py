@@ -26,14 +26,13 @@ import itertools
 import json
 import os
 import re
-import socket
 import tempfile
 import threading
 import time
 
 import pytest
-from conftest import (projects_root, send_ready, send_turn, wait_for_queue, wait_until,
-                      write_config, write_transcript)
+from conftest import (projects_root, raw_connection, send_ready, send_turn, settle,
+                      wait_for_queue, wait_until, write_config, write_transcript)
 
 from moxi_comms import cache, cli, constants, cursors, machine_line
 from moxi_comms.adapters.claude_shim import frame_line
@@ -41,7 +40,6 @@ from moxi_comms.claimhold import ClaimServer
 from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import Daemon, Refusal
 from moxi_comms.paths import daemon_socket
-from moxi_comms.protocol import LineConn
 
 import shim_drive
 
@@ -221,16 +219,10 @@ class _client:
 def test_a_forged_activity_from_another_connection_changes_nothing(rig):
     reviewer = reviewer_with_session(rig)
     held = next_turn(rig)
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.connect(str(daemon_socket()))
-    conn = LineConn(s)
-    try:
-        conn.send({"op": "activity", "identity": REVIEWER_Q, "session_id": SESS_OTHER,
-                   "kind": "turn", "handled": [held], "unhandled": [], "seq": 1})
-        conn.send({"id": 1, "op": "ping"})
-        assert conn.recv()["ok"] is True
-    finally:
-        conn.close()
+    with raw_connection() as conn:
+        conn.notify("turn_ended", {"identity": REVIEWER_Q, "session_id": SESS_OTHER,
+                                   "handled": [held], "unhandled": [], "seq": 1})
+        settle(conn)
     assert rig.daemon.bindings[REVIEWER_Q].session_id == SESS_REVIEWER
     assert held_of(rig) == {held} and reviewer.queue == [], "a forged turn releases nothing"
 
@@ -791,11 +783,12 @@ def test_the_trim_keeps_held_mail_past_retention(rig):
     assert rig.record.get_message(old.id) is None
 
 
-def test_the_queue_load_runs_before_the_socket_listens(rig, monkeypatch):
-    """Nothing can register, and so nothing can be handed, until every row is loaded.
-    Live mail posted inside the boot window waits as a row and goes at the
-    bind; the flagged row waits for a real boundary."""
-    from moxi_comms.client import DaemonOffline
+def test_the_queue_load_runs_before_any_method_is_answered(rig, monkeypatch):
+    """Nothing can register, and so nothing can be handed, until every row is loaded:
+    the socket takes a connection and its hello, and its methods wait. Live mail posted
+    inside the boot window waits as a row and goes at the bind; the flagged row waits
+    for a real boundary."""
+    from moxi_comms.client import DaemonTimeout
     held = next_turn(rig)
     rig.daemon.stop()
     entered, go = threading.Event(), threading.Event()
@@ -812,8 +805,12 @@ def test_the_queue_load_runs_before_the_socket_listens(rig, monkeypatch):
     boot.start()
     try:
         assert entered.wait(5)
-        with pytest.raises(DaemonOffline):
-            DaemonClient(daemon_socket()).connect()      # not listening yet
+        early = DaemonClient(daemon_socket(), timeout=0.5).connect()
+        try:
+            with pytest.raises(DaemonTimeout):
+                early.request("ping")                     # waits for the queue
+        finally:
+            early.close()
         live = rig.post_as("planner@proj-a", [REVIEWER_Q], "live, inside the boot window")
     finally:
         go.set()

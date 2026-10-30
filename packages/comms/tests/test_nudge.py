@@ -3,7 +3,7 @@
 Layer 1 is in-process and layer 3 is the slow poll; both live in `local_record.py` and
 are tested there. This is the middle one for the operator lane: its CLI process writes
 the record itself, so the daemon learns of the row from a fire-and-forget
-`{"op": "nudge"}` frame. Agent posts go through the daemon and its record fans them out
+`nudge` notification. Agent posts go through the daemon and its record fans them out
 in-process without a nudge.
 
 Every test that measures the nudge posts through a SECOND `LocalRecord` on the same
@@ -18,9 +18,9 @@ import time
 import pytest
 from conftest import wait_for_queue, wait_until
 
+from moxi import ipc
+from moxi_comms import cli, wire
 from moxi_comms.local_record import LocalRecord
-
-from moxi_comms import cli
 
 POLL = 0.5              # the default `poll_interval`, and slow on purpose here
 
@@ -50,16 +50,6 @@ def notified(monkeypatch):
 
     monkeypatch.setattr(cli.DaemonClient, "notify", spy)
     return ops
-
-
-class Frames:
-    """A `LineConn` that only records what the daemon wrote to it."""
-
-    def __init__(self):
-        self.sent: list = []
-
-    def send(self, frame):
-        self.sent.append(frame)
 
 
 def quiet_pump(record, interval: float = 5.0) -> None:
@@ -128,36 +118,32 @@ def test_a_lost_nudge_is_delivered_by_the_poll(rig, cli_record, monkeypatch):
 
 @pytest.mark.parametrize("backend", ["local"], indirect=True)
 def test_the_op_wakes_the_local_record(rig, monkeypatch):
-    """The sixth op's whole body: `self.record.nudge()` when the record has one."""
+    """The method's whole body: `self.record.nudge()` when the record has one."""
     woken: list = []
     monkeypatch.setattr(rig.record, "nudge", lambda: woken.append(1))
-    conn = Frames()
-    rig.daemon._handle(conn, {"op": "nudge"})
+    assert rig.daemon._call(None, "nudge", {}) is None
     assert woken == [1]
-    assert conn.sent == [], "fire-and-forget: a reply would arrive at a closed socket"
 
 
-# ------------------------------------------------------------------- the old daemon
+# ------------------------------------------------------------------- an unknown method
 
-def test_nudge_is_a_no_op_on_a_record_without_one_and_never_replies(rig):
-    """The mock has no `nudge` (nor does Discord): the op is taken and does nothing."""
-    conn = Frames()
-    rig.daemon._handle(conn, {"id": 11, "op": "nudge"})
-    rig.daemon._handle(conn, {"op": "nudge"})
-    assert conn.sent == []
+def test_nudge_is_a_no_op_on_a_record_without_one_and_answers_nothing(rig):
+    """The mock has no `nudge` (nor does Discord): the method is taken and does
+    nothing."""
+    assert rig.daemon._call(None, "nudge", {}) is None
+    assert rig.daemon._call(None, "nudge", None) is None
 
 
-def test_an_old_daemon_answers_unknown_op_and_is_otherwise_unharmed(rig):
-    """Accepted: a daemon built before this op answers `unknown op` to a frame
-    nobody waits for. The answer is the ordinary one and the connection lives on."""
-    conn = Frames()
-    rig.daemon._handle(conn, {"id": 12, "op": "nudge-the-daemon"})
-    assert conn.sent == [{"id": 12, "ok": False,
-                          "error": "unknown op 'nudge-the-daemon'"}]
+def test_an_unknown_method_is_refused_and_the_connection_lives_on(rig):
+    """A notification the daemon does not know is dropped; asked as a request it is
+    the ordinary method-not-found, and the connection lives on."""
+    with pytest.raises(ipc.RpcError) as refused:
+        rig.daemon._call(None, "nudge-the-daemon", {})
+    assert refused.value.code == wire.METHOD_NOT_FOUND
 
     client = cli.DaemonClient(rig.daemon.socket_path).connect()
     try:
-        client.notify("nudge-the-daemon")       # what an old daemon makes of a nudge
+        client.notify("nudge-the-daemon")
         assert client.request("ping")["ok"] is True
     finally:
         client.close()

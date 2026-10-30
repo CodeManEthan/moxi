@@ -1,4 +1,4 @@
-"""Credentials minted for live bindings and protocol-two registration."""
+"""Credentials minted for live bindings, and what a bind carries."""
 
 from __future__ import annotations
 
@@ -9,13 +9,13 @@ import logging
 import pytest
 from conftest import wait_until
 
+from moxi import ipc
 from moxi_comms import directory, kinds
 from moxi_comms.claimhold import ClaimServer
 from moxi_comms.client import (DaemonClient, DaemonError, DaemonNoAnswer,
                                DaemonOffline)
 from moxi_comms.daemon import Daemon
 from moxi_comms.paths import daemon_socket, comms_db, state_dir
-from moxi_comms.protocol import PROTOCOL_VERSION, ProtocolError
 
 
 def client(**kwargs):
@@ -160,48 +160,40 @@ def test_a_binding_token_is_absent_from_state_files_and_logs(
             assert token.encode() not in path.read_bytes(), path.name
 
 
-class RecordingConnection:
-    def __init__(self, client=None, *, close_after_send=False, fail_send=False):
-        self.client = client
-        self.close_after_send = close_after_send
-        self.fail_send = fail_send
-        self.frames = []
+class FakeClient:
+    """Stands in for the `moxi.ipc` client: records each call, then fails it as told."""
 
-    def send(self, frame):
-        if self.fail_send:
-            raise ProtocolError("write failed")
-        self.frames.append(frame)
-        if self.close_after_send:
-            self.client._closed = True
+    def __init__(self, failure):
+        self.failure = failure
+        self.calls = []
+
+    def call(self, method, params=None, *, timeout=None):
+        self.calls.append(method)
+        raise self.failure
 
     def close(self):
         pass
 
 
 def test_post_distinguishes_a_frame_that_never_left_from_a_lost_answer():
+    """Offline only when nothing went out; once `send` was handed to the connection, a
+    failed write, a closed connection and a timeout alike may have landed."""
     disconnected = DaemonClient()
     with pytest.raises(DaemonOffline):
         disconnected.post("planner@proj-a", "token", "body")
 
-    failed = DaemonClient()
-    failed._conn = RecordingConnection(fail_send=True)
-    with pytest.raises(DaemonOffline):
-        failed.post("planner@proj-a", "token", "body")
-
-    closed = DaemonClient()
-    closed._conn = RecordingConnection(closed, close_after_send=True)
-    with pytest.raises(DaemonNoAnswer, match="closed"):
-        closed.post("planner@proj-a", "token", "body")
-    assert closed._conn.frames[0]["op"] == "post"
-
-    timed_out = DaemonClient(timeout=0.001)
-    timed_out._conn = RecordingConnection()
-    with pytest.raises(DaemonNoAnswer, match="timeout"):
-        timed_out.post("planner@proj-a", "token", "body")
-    assert timed_out._conn.frames[0]["op"] == "post"
+    for failure, said in ((ipc.IpcError("the connection broke: EPIPE"), "closed"),
+                          (ipc.IpcError("the server closed the connection"), "closed"),
+                          (ipc.Timeout("no answer to send"), "timeout")):
+        lost = DaemonClient(timeout=0.001)
+        lost._client = FakeClient(failure)
+        with pytest.raises(DaemonNoAnswer, match=said):
+            lost.post("planner@proj-a", "token", "body")
+        assert lost._client.calls == ["send"]
 
 
-def test_register_frames_name_protocol_two_and_never_carry_a_slot(monkeypatch):
+def test_register_frames_carry_no_protocol_and_never_a_slot(monkeypatch):
+    """The wire version rides the hello, so a bind names no protocol."""
     seen = []
     daemon = DaemonClient()
     monkeypatch.setattr(daemon, "request",
@@ -209,11 +201,11 @@ def test_register_frames_name_protocol_two_and_never_carry_a_slot(monkeypatch):
     daemon.register(name="planner", scope="proj-a",
                     report={"protocol": 1, "slot": 4})
     daemon.register(name="reviewer", scope="proj-a")
-    assert all(fields["protocol"] == PROTOCOL_VERSION == 2 for _, fields in seen)
+    assert all("protocol" not in fields for _, fields in seen)
     assert all("slot" not in fields for _, fields in seen)
 
 
-def test_more_than_six_names_bind_and_a_protocol_two_slot_is_ignored(
+def test_more_than_six_names_bind_and_a_slot_is_ignored(
         rig, bind_answered):
     for name in ("planner", "reviewer", "curator", "coder", "critic", "scout",
                  "pilot"):
@@ -222,34 +214,12 @@ def test_more_than_six_names_bind_and_a_protocol_two_slot_is_ignored(
     assert all(not hasattr(binding, "slot_id") for binding in rig.daemon.bindings.values())
     explicit = client()
     explicit_answer = explicit.request("register", slot=4, name="helper",
-                                       scope="proj-a", adapter="codex", protocol=2)
+                                       scope="proj-a", adapter="codex")
     try:
         assert "slot" not in explicit_answer
         assert "helper@proj-a" in rig.daemon.bindings
     finally:
         explicit.close()
-
-
-@pytest.mark.parametrize("slot", ["next-free", 3])
-def test_an_old_register_is_refused_before_it_changes_any_binding_state(rig, slot):
-    message = rig.post_as("reviewer@proj-a", ["planner@proj-a"], "waiting")
-    assert wait_until(lambda: str(message.id) in rig.daemon.queue.get("planner@proj-a", {}))
-    before = list(rig.daemon.binding_history.intervals())
-    old = client()
-    try:
-        with pytest.raises(DaemonError) as raised:
-            old.request("register", slot=slot, name="planner", scope="proj-a",
-                        adapter="claude-shim")
-        answer = raised.value.response
-        assert answer["refused"] is True
-        assert "holder" not in answer and "token" not in answer
-        assert "claims protocol 1" in answer["error"]
-        assert "Relaunch the session" in answer["error"]
-    finally:
-        old.close()
-    assert "planner@proj-a" not in rig.daemon.bindings
-    assert list(rig.daemon.binding_history.intervals()) == before
-    assert str(message.id) in rig.daemon.queue["planner@proj-a"]
 
 
 def test_a_restart_writes_no_keep_file_and_the_name_rebinds_with_a_new_token(

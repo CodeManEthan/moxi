@@ -602,6 +602,27 @@ def wait_for_payload(shim, message_id: str, timeout: float = WAIT) -> dict:
     return payload
 
 
+@contextlib.contextmanager
+def raw_connection(path=None):
+    """A bare connection to the daemon socket, past the hello and holding no binding:
+    `moxi.ipc`'s own client, so a test sends methods and notifications as it likes."""
+    from moxi import ipc
+
+    from moxi_comms import wire
+    client = ipc.connect(str(path or daemon_socket()), timeout=5.0)
+    try:
+        client.hello(wire.VERSIONS)
+        yield client
+    finally:
+        client.close()
+
+
+def settle(client) -> None:
+    """A round trip on `client`: the daemon handles one connection's messages in order,
+    so its answer says every message sent before it has been handled."""
+    client.call("max_id", {}, timeout=5.0)
+
+
 def cursor_of(qualified: str):
     return cursors.read(qualified)
 

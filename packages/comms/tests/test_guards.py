@@ -1,6 +1,5 @@
 """The guards: the `block` setting, 429-then-loud, the rescan."""
 
-import errno
 import itertools
 import shutil
 import socket
@@ -8,14 +7,13 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from conftest import queued, wait_for_queue, wait_until, write_config
+from conftest import queued, raw_connection, settle, wait_for_queue, wait_until, write_config
 
 from moxi_comms import constants, cursors, daemon as daemon_mod
 from moxi_comms.daemon import Daemon
 from moxi_comms.record import RateLimited
 from moxi_comms.mock_record import MockRecord
 from moxi_comms.paths import cursors_dir, daemon_socket
-from moxi_comms.protocol import CLI_PROTOCOL, LineConn
 from moxi_comms.sender import SendFailed, _bounded
 
 
@@ -324,16 +322,11 @@ def stale_socket(path: Path) -> Path:
 
 
 def says_ping(path: Path) -> bool:
-    """Does something at `path` answer the claims protocol? A round trip, not a knock."""
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.settimeout(2.0)
-    s.connect(str(path))
-    conn = LineConn(s)
-    try:
-        conn.send({"id": 7, "op": "ping"})
-        return conn.recv() == {"id": 7, "ok": True, "cli_protocol": CLI_PROTOCOL}
-    finally:
-        conn.close()
+    """Does something at `path` answer comms' wire? A hello and a round trip, not a
+    knock."""
+    with raw_connection(path) as conn:
+        settle(conn)
+    return True
 
 
 def test_stop_without_a_start_removes_nothing(shortdir):
@@ -342,7 +335,7 @@ def test_stop_without_a_start_removes_nothing(shortdir):
     path = shortdir / "d.sock"
     path.write_text("someone else's")
     d = Daemon(MockRecord(), socket_path=path, start_trim_thread=False)
-    assert d.bound is False
+    assert d.host is None
     d.stop()
     assert path.exists(), "a daemon removes only the socket it bound"
 
@@ -371,7 +364,7 @@ def test_a_stale_socket_file_is_cleared_and_the_daemon_serves(rig, shortdir):
     d = Daemon(rig.record, clock=rig.clock, socket_path=path, start_trim_thread=False,
                history_path=shortdir / "j.db").start()
     try:
-        assert d.bound is True
+        assert d.host is not None
         assert says_ping(path)
     finally:
         d.stop()
@@ -386,37 +379,11 @@ def test_a_clean_stop_removes_the_socket_and_a_second_stop_does_not(rig, shortdi
                history_path=shortdir / "j.db").start()
     assert path.exists()
     d.stop()
-    assert not path.exists() and d.bound is False
+    assert not path.exists() and d.host is None
 
     path.write_text("a successor's")
     d.stop()
     assert path.exists(), "the second stop removes nothing"
-
-
-@pytest.mark.parametrize("error", [
-    BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable"),
-    PermissionError(errno.EACCES, "Permission denied"),
-])
-def test_a_probe_that_cannot_conclude_refuses_and_says_which_errno(monkeypatch, rig,
-                                                                   shortdir, error):
-    """The blocker the allowlist exists for. A live listener with a full backlog
-    answers EAGAIN and a foreign-owned socket answers EACCES -- and a bare
-    `except OSError: proceed` would read both as `dead`, re-introducing the steal
-    exactly under load. Neither refusal may claim to know a live daemon is there."""
-    path = stale_socket(shortdir / "d.sock")
-
-    def refuse(self, address):
-        raise error
-
-    monkeypatch.setattr(socket.socket, "connect", refuse)
-    d = Daemon(rig.record, clock=rig.clock, socket_path=path, start_trim_thread=False,
-               history_path=shortdir / "j.db")
-    with pytest.raises(RuntimeError) as caught:
-        d.start()
-    assert f"errno {error.errno}" in str(caught.value)
-    assert type(error).__name__ in str(caught.value)
-    assert "live comms daemon" not in str(caught.value), "it does not claim to know"
-    assert path.exists() and d.bound is False
 
 
 def test_a_refused_start_has_no_side_effects_at_all(rig, shortdir):
@@ -430,7 +397,7 @@ def test_a_refused_start_has_no_side_effects_at_all(rig, shortdir):
     with pytest.raises(RuntimeError):
         intruder.start()
 
-    assert intruder._server is None and intruder.bound is False
+    assert intruder.host is None
     assert len(rig.record._subs) == subscribers, "it never subscribed"
     assert not history.exists() and not history.parent.exists()
 

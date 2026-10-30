@@ -299,7 +299,7 @@ def test_required_and_absent_refuses_the_start(rig, monkeypatch):
     with pytest.raises(RuntimeError, match=r"\[cache\] required = true") as e:
         daemon.start()
     assert cache.INSTALL in str(e.value)
-    assert not daemon.bound and not daemon_socket().exists()
+    assert daemon.host is None and not daemon_socket().exists()
 
 
 def test_required_and_broken_refuses_the_start(rig, monkeypatch):
@@ -316,7 +316,7 @@ def test_required_and_present_starts(rig):
     write_config(None, "[cache]\nrequired = true\n")
     daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     try:
-        assert daemon.bound
+        assert daemon.host is not None
     finally:
         daemon.stop()
 
@@ -326,7 +326,7 @@ def test_not_required_and_absent_starts_without_the_hold(rig, monkeypatch):
     cache_absent(monkeypatch)
     daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     try:
-        assert daemon.bound and daemon.cache_store is None
+        assert daemon.host is not None and daemon.cache_store is None
     finally:
         daemon.stop()
 

@@ -17,7 +17,6 @@ from conftest import wait_until
 
 from moxi_comms import cli, provision
 from moxi_comms.client import DaemonClient, DaemonError, DaemonTimeout
-from moxi_comms.daemon import Refusal
 from moxi_comms.paths import daemon_socket
 
 from test_reply_enforcement import (PLANNER, REVIEWER, P, R, indexed, query_owed,
@@ -212,13 +211,11 @@ def test_the_verb_refuses_an_empty_session_id_exit_2_without_asking(rig, monkeyp
 
 
 def test_a_daemon_without_the_query_is_a_failed_read_exit_5(rig, monkeypatch):
-    def old(frame):
-        raise Refusal("unknown query kind 'owner'")
-    monkeypatch.setattr(rig.daemon, "_owner_query", old)
+    monkeypatch.delitem(rig.daemon._methods, "owner")
     code, out = owner_json(rig, "0b9f6a1e-0000-4000-8000-000000000000")
     assert code == cli.EXIT_FAILED == 5
     assert (out["ok"], out["error"]) == (False, "failed")
-    assert "unknown query kind 'owner'" in out["detail"]
+    assert "method not found: owner" in out["detail"]
 
 
 def test_a_daemon_that_never_answers_is_a_failed_read_exit_5(rig, monkeypatch):

@@ -7,15 +7,16 @@ are `unhandled`; the cursor is clamped with its high-water mark; a digest's ids 
 held set exactly, never by comparison.
 
 The daemon side of these frames is tested elsewhere, so the shim talks to a fake daemon
-socket here: it answers `register`, records every frame with the cursor as it stood when
-the frame arrived, and pushes `deliver` frames as the daemon's release would.
+socket here: it answers `bind`, records every message with the cursor as it stood when
+it arrived, and pushes `deliver` notifications as the daemon's release would.
 """
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import itertools
 import os
-import socket
 import threading
 import time
 from pathlib import Path
@@ -23,13 +24,13 @@ from pathlib import Path
 import pytest
 from conftest import FakeClock, wait_until
 
-from moxi_comms import cursors
+from moxi import ipc
+from moxi_comms import cursors, wire
 from moxi_comms import daemon as daemon_mod
 from moxi_comms.adapters import claude_shim
 from moxi_comms.adapters.claude_shim import ClaudeShim
 from moxi_comms.client import DaemonError, DaemonOffline
 from moxi_comms.paths import runtime_root
-from moxi_comms.protocol import LineConn
 
 import shim_drive
 
@@ -39,63 +40,66 @@ SESSION = "11111111-2222-3333-4444-555555555555"
 T0 = 1_790_000_000.0
 
 
+#: The daemon methods that replaced the old frames: each as the old frame's op and kind,
+#: so a test reads every frame the shim sends in one shape.
+_AS_FRAME = {"bind": ("register", None), "activity": ("activity", None),
+             "turn_ended": ("activity", "turn"), "ready": ("activity", "ready"),
+             "look": ("activity", "look")}
+
+
 class FakeDaemon:
-    """A unix socket that speaks enough of the claims protocol for one shim."""
+    """A `moxi.ipc` server that speaks enough of the daemon's wire for one shim."""
 
     def __init__(self, path: Path):
         self.path = path
         self.frames: list[dict] = []          # every frame, with the cursor at receipt
-        self.conns: list[LineConn] = []
+        self.conns: list = []
         self.registers: list[dict] = []
         self._lock = threading.Lock()
-        self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._server.bind(str(path))
-        self._server.listen(8)
-        self._stop = threading.Event()
-        threading.Thread(target=self._accept, daemon=True).start()
+        self._loop = asyncio.new_event_loop()
+        self._server = self._loop.run_until_complete(ipc.serve(
+            str(path), self._handle, hello=ipc.Hello(wire.VERSIONS, wire.CAPABILITIES)))
+        threading.Thread(target=self._loop.run_forever, daemon=True).start()
 
-    def _accept(self):
-        while not self._stop.is_set():
-            try:
-                sock, _ = self._server.accept()
-            except OSError:
-                return
-            conn = LineConn(sock)
-            with self._lock:
+    async def _handle(self, conn, method, params):
+        params = params if isinstance(params, dict) else {}
+        with self._lock:
+            if conn not in self.conns:
                 self.conns.append(conn)
-            threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
+            op, kind = _AS_FRAME.get(method, (method, None))
+            frame = {"op": op, **params}
+            if kind is not None:
+                frame["kind"] = kind
+            self.frames.append(dict(frame, _cursor=cursors.read(IDENT),
+                                    _conn=self.conns.index(conn)))
+            if op == "register":
+                self.registers.append(frame)
+        if op == "register":
+            return {"identity": {"qualified": IDENT, "name": NAME, "scope": SCOPE,
+                                 "tier": "chosen"}}
+        return None
 
-    def _serve(self, conn):
-        while True:
+    def _on_loop(self, fn):
+        done = concurrent.futures.Future()
+
+        def run():
             try:
-                frame = conn.recv()
-            except Exception:                                     # noqa: BLE001
-                return
-            if frame is None:
-                return
-            seen = dict(frame, _cursor=cursors.read(IDENT), _conn=self.conns.index(conn))
-            with self._lock:
-                self.frames.append(seen)
-            if frame.get("op") == "register":
-                with self._lock:
-                    self.registers.append(frame)
-                try:
-                    conn.send({"id": frame["id"], "ok": True,
-                               "identity": {"qualified": IDENT, "name": NAME,
-                                            "scope": SCOPE, "tier": "chosen"}})
-                except OSError:
-                    return
+                done.set_result(fn())
+            except BaseException as exc:                          # noqa: BLE001
+                done.set_exception(exc)
+
+        self._loop.call_soon_threadsafe(run)
+        return done.result(5.0)
 
     def push(self, *mids):
-        """`deliver` frames on the newest connection, as a release hands them."""
+        """`deliver` notifications on the newest connection, as a release hands them."""
         conn = self.conns[-1]
-        for mid in mids:
-            conn.send({"op": "deliver", "payload": payload(mid)})
+        self._on_loop(lambda: [conn.notify("deliver", {"payload": payload(mid)})
+                               for mid in mids])
 
     def drop(self):
         """Close every connection, as a daemon restart does."""
-        for conn in list(self.conns):
-            conn.close()
+        self._on_loop(lambda: [conn.close() for conn in list(self.conns)])
 
     def activity(self, kind="any"):
         with self._lock:
@@ -105,9 +109,8 @@ class FakeDaemon:
         return [f for f in out if f.get("kind") == kind]
 
     def close(self):
-        self._stop.set()
-        self._server.close()
-        self.drop()
+        self._on_loop(self._server.close)
+        self._loop.call_soon_threadsafe(self._loop.stop)
 
 
 def payload(mid):
