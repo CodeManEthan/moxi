@@ -12,6 +12,7 @@ import time
 import pytest
 from conftest import clock_reads_warm, cursor_of, frame_kinds, wait_until
 
+from moxi_comms import paths
 from moxi_comms.adapters import opencode as oc
 from moxi_comms.adapters import opencode_roster
 from moxi_comms.adapters.opencode import OpenCodeAdapter
@@ -326,10 +327,13 @@ def test_an_idle_before_the_model_saw_the_digest_moves_no_cursor(rig, wrapper, f
 
 
 
-def test_a_posted_digest_is_not_posted_again_after_a_daemon_restart(rig, wrapper, fake):
-    """The digest is posted and its turn runs when the daemon
-    restarts. The reconnect lists its id as `holding`, so the replay does not queue it
-    again, and once the turn ends and the cursor moves it has been posted once."""
+def test_a_digest_posted_before_a_daemon_restart_is_posted_again_and_acked_once(
+        rig, wrapper, fake):
+    """The digest is posted and its turn runs when the daemon restarts. The boot fence
+    ends the open digest and its row waits; the reconnect holds nothing, so the bind
+    hands the message again and the adapter posts it again once that turn is over.
+    Replay is the safe direction. The second turn's end acks it, and nothing is posted
+    a third time."""
     from moxi_comms import daemon as daemon_mod
     fake.auto = False
     adapter = wrapper()
@@ -341,15 +345,16 @@ def test_a_posted_digest_is_not_posted_again_after_a_daemon_restart(rig, wrapper
     rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,
                                    start_trim_thread=False).start()
     assert wait_until(lambda: not adapter.offline and not adapter.replaying, 5.0)
-    time.sleep(0.3)
-    assert adapter.queue == [], "the replay handed nothing the adapter holds"
 
-    fake.finish(adapter.session_id)                 # the digest's turn ends well
+    fake.finish(adapter.session_id)                 # the first post's turn ends
+    assert wait_until(lambda: len(posts(fake)) == 2, 5.0), "handed again after the fence"
+    assert cursor_of(IDENTITY) is None, "the fenced digest's turn acks nothing"
+    fake.finish(adapter.session_id)                 # the second post's turn ends well
     high = max(int(m.id) for m in rig.record.history(rig.names_channel))
     assert wait_until(lambda: cursor_of(IDENTITY) == str(high), 5.0)
     time.sleep(0.5)
     carried = [b["parts"][0]["text"].count("M2-OC") for _, b in posts(fake)]
-    assert carried == [1], f"posted once, not {carried}"
+    assert carried == [1, 1], f"posted twice, once per binding, not {carried}"
     assert not adapter.held_ids
 
 
@@ -685,21 +690,24 @@ def test_an_operator_turn_sends_activity_at_busy_and_one_turn_at_its_idle(
     assert "kind" not in ours[0], "busy: a no-kind activity first"
     turns = turn_frames(ours)
     assert len(turns) == 1, "one turn frame per idle"
-    assert turns[0]["handled"] == [] and turns[0]["unhandled"] == []
+    assert turns[0]["handled_ids"] == [] and turns[0]["unhandled_ids"] == []
     assert turns[0]["session_id"] == adapter.session_id
     assert cursor_of(IDENTITY) is None
 
 
-def test_a_digests_turn_is_handled_on_the_frame_after_the_cursor_write(
+def test_a_digests_turn_is_handled_and_the_daemons_ack_moves_the_cursor(
         rig, wrapper, fake, frames):
+    """The adapter writes no cursor: it names the digest handled in `turn_ended`, and
+    the daemon's answer carries the cursor the ack moved."""
     adapter = wrapper()
     send(rig, "handle me")
     assert wait_until(lambda: turn_frames(frames) and cursor_of(IDENTITY), 5.0)
     high = max(int(m.id) for m in rig.record.history(rig.names_channel))
     turn = turn_frames(frames)[-1]
-    assert turn["handled"] == [str(high)] and turn["unhandled"] == []
-    assert turn["cursor_then"] == str(high), "the cursor is written before the frame"
+    assert turn["handled_ids"] == [str(high)] and turn["unhandled_ids"] == []
+    assert str(turn["answer"]["cursor"]) == str(high), "the ack moved the cursor"
     assert not adapter.held_ids
+    assert not paths.cursors_dir().exists(), "the adapter writes no cursor file"
 
 
 def test_a_digests_turn_that_errs_is_unhandled_and_moves_no_cursor(
@@ -712,7 +720,7 @@ def test_a_digests_turn_that_errs_is_unhandled_and_moves_no_cursor(
     fake.error(adapter.session_id)
     assert wait_until(lambda: turn_frames(frames), 5.0)
     turn = turn_frames(frames)[-1]
-    assert turn["handled"] == [] and set(turn["unhandled"]) == held
+    assert turn["handled_ids"] == [] and set(turn["unhandled_ids"]) == held
     assert cursor_of(IDENTITY) is None
     assert wait_until(lambda: not adapter.held_ids, 2.0), "let go once the frame is sent"
 
@@ -735,7 +743,7 @@ def test_an_aborted_turn_sends_no_turn_and_its_ids_go_unhandled_on_the_next(
     fake.control("type", {"session": adapter.session_id, "text": "next"})
     fake.finish(adapter.session_id)
     assert wait_until(lambda: turn_frames(frames), 5.0)
-    assert set(turn_frames(frames)[0]["unhandled"]) == held
+    assert set(turn_frames(frames)[0]["unhandled_ids"]) == held
     assert wait_until(lambda: not adapter.held_ids, 2.0)
     assert cursor_of(IDENTITY) is None
 
@@ -813,7 +821,7 @@ def test_a_post_pending_at_the_follow_goes_again_into_the_new_session(
     assert adapter.queue == [], "a re-push of a held id is dropped"
     fake.finish(adapter.session_id)
     assert wait_until(lambda: cursor_of(IDENTITY) == max(held, key=int), 5.0)
-    assert set(turn_frames(frames)[-1]["handled"]) == held
+    assert set(turn_frames(frames)[-1]["handled_ids"]) == held
 
 
 def test_a_compaction_while_the_daemon_is_away_is_reported_after_the_register(

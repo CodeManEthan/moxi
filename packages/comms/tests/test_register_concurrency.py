@@ -232,15 +232,11 @@ def test_a_message_that_lands_during_the_round_trip_is_delivered_not_stranded(ri
 
     With the read outside the lock, the answer can be stale by the width of the round
     trip. A message posted inside that window is ABOVE the value the record gave, and
-    the router resolves it while the table still has no binding -- so live routing files
-    it under `pending` and never delivers it. If the boundary were the record's stale
-    answer, replay would skip it too (it is above the boundary) and the message would sit
-    there until a rescan that only a record reconnect brings.
-
-    The daemon's `_seen_max` is what makes that impossible: the boundary is raised to
-    what the ROUTER has already taken responsibility for, so replay owns exactly what
-    live routing declined. The gate below is an explicit hold rather than a timed one --
-    this is a correctness property, and it should not be asserted through a sleep."""
+    the router resolves it while the table still has no binding -- so live routing makes
+    it a row and does not deliver it. The bind's catch-up releases the name's rows, that
+    one among them, so it is delivered once, by the release. The gate below is an
+    explicit hold rather than a timed one -- this is a correctness property, and it
+    should not be asserted through a sleep."""
     entered, release = threading.Event(), threading.Event()
     real = rig.record.max_message_id
 
@@ -282,7 +278,10 @@ def test_a_message_that_lands_during_the_round_trip_is_delivered_not_stranded(ri
             "the message that landed during the round trip was delivered exactly once")
         assert delivered[0]["payload"].get("held") is True, \
             "the register's release owns it (its row), not live routing"
-        client.notify("turn_ended", {"identity": "planner@proj-a", "turned": True, "handled": [msg.id], "unhandled": [], "session_id": warm})
+        digest = client.call("open_digest", {"ids": [msg.id]})["digest"]
+        client.call("turn_ended", {"identity": "planner@proj-a", "turned": True,
+                                   "handled": [digest], "unhandled": [],
+                                   "session_id": warm})
         assert wait_until(lambda: not queued(rig.daemon, "planner@proj-a")), (
             "and it left the queue when its turn completed")
     finally:

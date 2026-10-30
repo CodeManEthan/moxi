@@ -35,8 +35,8 @@ the reply to them, and the digest completes on that idle. A turn that ends by an
 or an error moves no cursor, and its ids are `unhandled`, so the daemon hands them again.
 
 **Every turn is reported**, whoever prompted it: busy is an
-`activity` with no kind, and the idle after it one `turn` frame with the settled posts'
-ids `handled` or `unhandled`, sent after the clamped cursor write. An idle after an abort
+`activity` with no kind, and the idle after it one `turn_ended` with the settled posts'
+digests `handled` or `unhandled`; the daemon acks them and moves the cursor. An idle after an abort
 sends none: nothing reports the abort itself, as no hook reports Claude Code's Esc. Its
 ids go `unhandled` on the next frame, as the Claude shim names an interrupted digest
 `unhandled` once it reads the Esc in the session's transcript. `session.compacted` is `ready source=compact`. A window
@@ -162,7 +162,7 @@ def read_record(path: Path) -> dict:
 
 
 def write_record(path: Path, record: dict) -> None:
-    """Whole file, atomic replace, 0600 in a 0700 directory, as the cursors are."""
+    """Whole file, atomic replace, 0600 in a 0700 directory."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(path.parent, 0o700)
@@ -995,8 +995,9 @@ class OpenCodeAdapter(HarnessAdapter):
         return isinstance(error, dict) and error.get("name") == ABORTED
 
     def _turn_ended(self, settled: list) -> None:
-        """One turn end: the settled posts' ids go `handled` or `unhandled` on one `turn`
-        frame, after the cursor write (the base's `report_turn_end`, with the clamp).
+        """One turn end: the settled posts' ids go `handled` or `unhandled` in one
+        `turn_ended` (the base's `report_turn_end`, which names their digests); the
+        daemon's ack moves the cursor.
 
         An idle after an abort sends no `turn`: no frame reports the abort itself, as
         none reports Claude Code's Esc, whose Stop hook does not run on a user interrupt

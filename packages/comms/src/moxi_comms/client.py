@@ -241,14 +241,13 @@ class DaemonClient:
 
     # ------------------------------------------------------------------ the methods
     def bind(self, *, name=None, scope=None, global_=False, project=None,
-             adapter="claude-shim", session_id=None, holding=None, projects_root=None,
+             adapter="claude-shim", session_id=None, projects_root=None,
              turned=None, report=None, endpoint=None) -> dict:
         """`bind`: the result's `identity`, `token` and `high`.
 
-        `session_id`, `holding`, `projects_root` and `turned` are the claude-shim's:
-        which live session is behind the name, the ids it already holds, the root its
-        Claude Code writes transcripts under, and whether a prompt or a turn end has been
-        seen in that session (cold-sends). `report` is a codex or opencode wrapper's
+        `session_id`, `projects_root` and `turned` are the claude-shim's: which live
+        session is behind the name, the root its Claude Code writes transcripts under,
+        and whether a prompt or a turn end has been seen in that session (cold-sends). `report` is a codex or opencode wrapper's
         evidence for its cache clock, sent as it stands (`REPORT_FIELDS`;
         `HarnessAdapter.session_report`). They are left off when there is nothing to
         say. `endpoint` is a Claude adapter's word on whether its session has a turns
@@ -257,8 +256,6 @@ class DaemonClient:
                   if key in REPORT_FIELDS}
         if session_id:
             params["session_id"] = session_id
-        if holding:
-            params["holding"] = list(holding)
         if projects_root:
             params["projects_root"] = str(projects_root)
         if turned is not None:

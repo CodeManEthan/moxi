@@ -11,9 +11,9 @@ ordinary rig with its real injection path.
 from __future__ import annotations
 
 import pytest
-from conftest import wait_until
+from conftest import cursor_of, wait_until
 
-from moxi_comms import constants, cursors, daemon as daemon_mod, stall
+from moxi_comms import constants, daemon as daemon_mod, stall
 
 import shim_drive
 
@@ -259,7 +259,7 @@ def test_a_turn_boundary_also_answers_it(rig):
     assert b.stall.armed
     b.on_turn_boundary()              # the turn completed
     assert b.stall.armed is False
-    assert cursors.read("reviewer@proj-a") is not None
+    assert cursor_of("reviewer@proj-a") is not None
 
 
 def test_the_shim_report_goes_to_the_status_sink_and_nowhere_else(rig):
@@ -276,7 +276,7 @@ def test_the_shim_report_goes_to_the_status_sink_and_nowhere_else(rig):
     assert len(b.statuses) == 1
     assert (dict(rig.daemon.injected_through), dict(rig.daemon.activity),
             rig.record.history(rig.names_channel)) == before
-    assert cursors.read("reviewer@proj-a") is None, "and it moves no cursor"
+    assert cursor_of("reviewer@proj-a") is None, "and it moves no cursor"
 
 
 def test_a_shim_that_is_stopping_is_not_a_stalled_one(rig):

@@ -21,6 +21,7 @@ A refusal names the file and the reason and writes nothing.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import threading
@@ -42,11 +43,6 @@ LOCK_WAIT = 60.0
 ABSENT = "absent"
 MARKED = "marked"
 UNMARKED = "unmarked"
-
-#: Whether a leftover `cursors/` folder counts as comms 0.2's. The adapters and the
-#: daemon of this version still write cursor files there until the daemon keeps the
-#: cursors in the store; until then the folder says nothing about a 0.2 install.
-CURSORS_ARE_0_2 = False
 
 log = logging.getLogger("comms.store")
 
@@ -79,14 +75,46 @@ def path(env=None) -> Path:
     return _paths.comms_db(env)
 
 
-def zero_two_files(env=None) -> list[Path]:
-    """comms 0.2's files still under their 0.2 names, in the roots `env` names."""
+def zero_two_files(env=None, target=None) -> list[Path]:
+    """comms 0.2's files still under their 0.2 names, in the roots `env` names.
+
+    The `cursors/` folder counts unless the store (`target`, default `path(env)`) is
+    already beside it and its move didn't fingerprint the folder. Then an earlier build
+    of this version, whose adapters still wrote cursor files after the store was made,
+    left it there; it says nothing about a 0.2 install, and the gate leaves it where it
+    is."""
     found = [p for p in (_paths.record_db(env), _paths.directory_db(env),
                          _paths.bindings_db(env)) if p.exists()]
     cursors = _paths.cursors_dir(env)
-    if CURSORS_ARE_0_2 and cursors.is_dir():
+    if cursors.is_dir() and _cursors_are_0_2(
+            Path(target) if target is not None else path(env)):
         found.append(cursors)
     return found
+
+
+def _cursors_are_0_2(target: Path) -> bool:
+    """Whether a `cursors/` folder beside `target` is comms 0.2's: no store yet, or the
+    store's move fingerprinted the folder (a move stopped before its renames). A store
+    that can't be read answers yes, so the gate's own refusal names it."""
+    if not target.exists():
+        return True
+    from .upgrade_0_2 import META_MIGRATED_FILES
+    try:
+        conn = _store.connect(target, create=False)
+        try:
+            if not conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND "
+                                "name = 'meta'").fetchone():
+                return False
+            row = conn.execute("SELECT value FROM meta WHERE key = ?",
+                               (META_MIGRATED_FILES,)).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return True
+    try:
+        return row is not None and "cursors" in json.loads(row[0])
+    except (TypeError, ValueError):
+        return True
 
 
 def state_of(target) -> str:
@@ -146,7 +174,7 @@ def open_write(target=None, *, env=None, timeout: float = 5.0,
     report = report if report is not None else _log_report
     _make_missing_dirs(target.parent)
     with _gate, _files.lock(target.parent / MIGRATE_LOCK, timeout=LOCK_WAIT):
-        found = zero_two_files(env)
+        found = zero_two_files(env, target)
         if found:
             try:
                 state = state_of(target)
@@ -180,7 +208,7 @@ def open_read(target=None, *, env=None, timeout: float = 5.0,
     `sqlite3.OperationalError` for a store that is missing or can't be opened.
     """
     target = Path(target) if target is not None else path(env)
-    found = zero_two_files(env)
+    found = zero_two_files(env, target)
     if found:
         try:
             state = state_of(target)
@@ -224,5 +252,5 @@ def _finish_0_2(found: list[Path], target: Path, env) -> list[str]:
 
 
 __all__ = ["MIGRATE_LOCK", "LOCK_WAIT", "ABSENT", "MARKED", "UNMARKED",
-           "CURSORS_ARE_0_2", "StoreRefused", "Unmoved", "path", "zero_two_files",
+           "StoreRefused", "Unmoved", "path", "zero_two_files",
            "state_of", "open_write", "open_read"]

@@ -29,11 +29,11 @@ table. A card is written with an ordinary file write and never with a comms verb
 exactly how the card surface avoids becoming a fifth ACTING verb.
 
 `explain` is a diagnostic for whoever is at the terminal when an agent has gone quiet:
-it asks the daemon every live fact behind one identity's delivery and reads one cursor
-file, and it acts on nothing. It touches no credential. It differs from the other two
+it asks the daemon every live fact behind one identity's delivery, the cursor among
+them, and it acts on nothing. It touches no credential. It differs from the other two
 readers in reaching the daemon at all, so it is the first reading verb that can be told
-"comms offline" -- and when it is, it prints the cursor anyway, because the cursor is a
-file and the one durable fact.
+"comms offline" -- and when it is, it prints the cursor anyway, read from comms' store,
+because the cursor is the one durable fact.
 
 `cache` reads any agent's prompt-cache state. It answers only a caller the config file's
 `[policy] cache_callers` names (the operator by default), found the way `send` finds a
@@ -142,9 +142,10 @@ import time
 
 from moxi import exit as moxi_exit
 
-from . import (attribution, cache, cards, claimfile, claimhold, config, cursors,
+from . import (attribution, cache, cards, claimfile, claimhold, config,
                directory, glossary, machine_line, policy, sending)
 from .client import DaemonClient, DaemonError, DaemonOffline, DaemonTimeout, VersionMismatch
+from .store import books
 from .record import RecordError
 from .provision import NAMES
 from .roster_view import render_agents
@@ -352,8 +353,9 @@ def cmd_explain(args, ctx: Context) -> int:
 
     A READING verb. It posts nothing, advances nothing, and records nothing: asking does
     not change a single fact it reports, and comms keeps no receipts ledger for it to
-    write to. What it does touch, and `help` and `whois` do not, is the daemon and one
-    cursor file. It reaches no credential, no network and no provisioner secret.
+    write to. What it does touch, and `help` and `whois` do not, is the daemon, and with
+    the daemon down comms' store, read-only. It reaches no credential, no network and no
+    provisioner secret.
 
     With the daemon down it still prints the cursor, which is the one durable fact,
     and says plainly that the rest is unknowable rather than showing a blank where a
@@ -366,10 +368,11 @@ def cmd_explain(args, ctx: Context) -> int:
         ctx.say(str(e))
         ctx.say("\n".join(_wrap(
             "The binding, the adapter kind and the last delivery are daemon memory, so "
-            "with the daemon down there is nothing to read them out of. The cursor is a "
-            "file and survives, so here is that much.", 76)))
+            "with the daemon down there is nothing to read them out of. The cursor is in "
+            "comms' store and survives, so here is that much.", 76)))
         ctx.say("")
-        ctx.say(_render_cursor(cursors.explain(identity_of(identity))))
+        qualified = identity_of(identity)
+        ctx.say(_render_cursor(books.explain_cursor(books.read_cursor(qualified))))
         return _offline(e)
     try:
         try:
@@ -761,20 +764,13 @@ def _wrap(text: str, width: int = 60, indent: str = "") -> list[str]:
 def _render_cursor(cursor: dict) -> str:
     """The cursor block on its own, so the offline path can print it alone."""
     lines = []
-    where = f"backend {cursor['backend']}" if cursor["backend"] else "no backend resolved"
     if cursor["cursor"] is None:
-        lines += _field("cursor", f"none on this box ({where})", cursor["read_path"])
+        lines += _field("cursor", "none yet")
     else:
-        written = cursor["updated_at"] or "no timestamp in the file"
-        lines += _field("cursor", f"{cursor['cursor']}, written {written}",
-                        f"{where}, {cursor['read_path']}")
-    if cursor["path"] != cursor["read_path"]:
-        lines += _field("", f"the next advance writes {cursor['path']}")
+        written = cursor["updated_at"] or "no time kept"
+        lines += _field("cursor", f"{cursor['cursor']}, moved {written}")
     if cursor["reason"]:
         lines += _field("reason", cursor["reason"], *_wrap(cursor["sentence"]))
-    if cursor["backend_reason"]:
-        lines += _field("also", cursor["backend_reason"],
-                        *_wrap(cursor["backend_sentence"]))
     return "\n".join(lines)
 
 
@@ -796,7 +792,7 @@ def _render_explain(info: dict) -> str:
     if info["case"]:
         # the classifier's four cases, or the waiting one, whose sentence is the named reason
         # the cursor has not reached it
-        reason = CASE_REASONS.get(info["case"]) or cursors.REASONS.get(info["case"], "")
+        reason = CASE_REASONS.get(info["case"]) or books.REASONS.get(info["case"], "")
         lines += _wrap(reason, 74, "  ") + [""]
     if info["case_error"]:
         lines += _wrap(f"comms could not classify this message: "
@@ -840,16 +836,6 @@ def _render_explain(info: dict) -> str:
                     else f"{len(waiting)} in the queue for its next release point: "
                          f"{', '.join(waiting[:5])}")
     lines += _render_cursor(info["cursor"]).splitlines()
-
-    # Only where a write could plausibly have been the thing that failed. In the handled
-    # case the cursor moved, so nothing declined to move it and this would be noise.
-    if d is not None and info["cursor"]["reason"] != cursors.ALREADY_PAST:
-        lines += ["", "  Two more reasons never reach this command. They happen inside "
-                      "the session",
-                  "  that writes the cursor and leave nothing behind to read. Grep that "
-                  "session's",
-                  "  log for them by name:"]
-        lines += [f"    {name}" for name in cursors.WRITE_SIDE_REASONS]
 
     if info["digest"]:
         lines += ["", "  the text this identity was shown, verbatim:"]

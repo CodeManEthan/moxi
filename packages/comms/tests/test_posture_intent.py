@@ -1119,6 +1119,7 @@ def test_the_payload_on_rescan_and_the_hand_over_time(rig, pair, whole_clock):
     binding.conn.notify_threadsafe = record
     with rig.daemon._lock:
         binding.delivered.clear()
+    rig.daemon.books.routed_through = lambda: None     # no mark: route it again
     whole_clock.advance(60)
     rig.daemon.rescan()
     (again,) = [f["payload"] for f in sent

@@ -5,23 +5,23 @@ Contract anchors:
   * addressability = something that can deliver is connected right now;
   * the connection IS the liveness signal (close == deregistration);
   * the `block` setting is enforced HERE, symmetric, read at use;
-  * catch-up replays past the cursor, bounded when the cursor is absent/stale, then
-    `replay_complete`;
+  * catch-up at a bind is the name's rows, then `replay_complete`; nothing is replayed
+    from the record, since every routed message holds a row until it is acked or
+    dropped;
   * a record reconnect that could not RESUME triggers the #names rescan;
   * the queue: every message to a name is delivered live or waits
-    in the name's queue, one table in the record (`queue`) mirrored in `queue` here.
+    in the name's queue, the delivery books' rows in comms.db mirrored in `queue` here.
     Live means: the name is bound, its cache reads `warm`, `fresh` or `no-cache` (or
     `unknown` while the send's `[cold-at:…]` for it is still ahead, or is `-`), and the
     message is not flagged `[held]`. Anything else waits: offline, cold, or flagged. A
     queued message goes out only at the name's next release point (a `ready` with a
-    `source`, a `turn` carrying `handled`, or a register on a passing read), never
-    because another message to the name went out. A turn end whose read does not pass
+    `source`, a `turn_ended`, or a bind on a passing read), never because another
+    message to the name went out. A turn end whose read does not pass
     stays open for a settle window (`RELEASE_SETTLE_STEPS`), read again until
-    a read passes or the window ends. A row is deleted only when the adapter names its
-    id `handled` on a `turn` frame from the binding that was handed it; never by cursor
-    and never at unbind. An `unhandled` id, an id handed and not past the cursor at
-    unbind, and a hand-off whose socket send failed get a row. Rows are never trimmed
-    by age;
+    a read passes or the window ends. A row is deleted only when a `turn_ended` from
+    the binding names the digest that holds it `handled`; never by cursor and never
+    at unbind. An unhandled digest's rows, the rows a binding held at its unbind, and
+    a hand-off whose socket send failed wait again. Rows are never trimmed by age;
   * the audience mark: an absent audience on a reply is
     filled in at `_deliver` from an in-memory index of effective audiences, and what
     the index cannot answer is delivered as `unknown`, never fetched. The index holds
@@ -83,7 +83,7 @@ from pathlib import Path
 
 from moxi import ipc
 
-from . import (attribution, bindings, cache, config, constants, cursors, directory, wire)
+from . import (attribution, bindings, cache, config, constants, directory, wire)
 from .store import books as books_mod
 from .attribution import Author
 from .machine_line import (COLD_AT_LIVE, POSTURE_NONE,
@@ -157,7 +157,7 @@ CASE_TURN_INCOMPLETE = "delivered-but-the-turn-never-completed"
 #: Not one of the four: the message waits in the name's queue, so nothing has handed it
 #: out since it was queued. `moxi comms explain` checks it before the cursor, so a queued id
 #: never reads `cursor-behind-it`.
-CASE_WAITING = cursors.WAITING
+CASE_WAITING = books_mod.WAITING
 
 #: The `kind` of an `activity` notify for a turn that ran and ended. With `handled` on
 #: it, it is a release point and settles the ids it names.
@@ -192,6 +192,8 @@ STORE_RECORD = "store"
 #: The key a routing pass keeps in its memo beside the cursors: the cache's one read per
 #: binding per pass.
 _GATE_MEMO = "\0gate"
+#: The key a rescan keeps in its memo for the routed mark it read as it began.
+_ROUTED_MEMO = "\0routed"
 
 #: What each case means, for the person reading `moxi comms explain` because an agent has
 #: gone quiet. These live beside the constants so there is one wording and it cannot
@@ -296,8 +298,7 @@ class Binding:
     new_session: bool = False
     agent_model: object = cache.MISSING
     #: The newest id CLAIMED for this binding since it registered (what the `owed`
-    #: query reads as undelivered mail). The ids a shim listed in `holding` at register
-    #: are not claims, so a reconnect with no `injected_through` yet reads no mail waiting.
+    #: query reads as undelivered mail).
     handed_max: str = "0"
     #: The ids this binding's adapter named `handled` on a `turn` frame. Their rows are
     #: gone, and an unbind does not queue them again: a queued id can be handled while
@@ -325,6 +326,9 @@ class Binding:
     #: `deliver` frame needs.
     window: set = field(default_factory=set)
     overflow: dict = field(default_factory=dict)
+    #: The ids a turn of this binding left unhandled, back to `waiting` until the next
+    #: release point. A live send above one waits with them (`_behind_returned`).
+    returned: set = field(default_factory=set)
 
 
 @dataclass
@@ -392,6 +396,12 @@ class Daemon:
         #: the catch-up boundary exact now that the boundary's record read happens
         #: OUTSIDE the lock: see `_register`.
         self._seen_max = "0"
+        #: The lowest `#names` id the `block` setting kept from routing, or None. The
+        #: routed mark stays below it until a rescan routes it, so the next rescan (at
+        #: boot, too) still finds it. `_skips` counts every such skip, so a rescan knows
+        #: whether the block skipped anything while it ran. Both under `_lock`.
+        self._unrouted: int | None = None
+        self._skips = 0
         #: Set under `_lock` by `stop()` before anything closes. From then on a register
         #: is answered with a close.
         self._stopping = False
@@ -606,10 +616,12 @@ class Daemon:
             # The rescan queues mail posted to unbound names while no daemon ran. A
             # daemon that cannot do it is still a daemon that can deliver, and refusing
             # to boot would take live routing down with it -- so this is
-            # log-and-continue, exactly as the event loop's rescan already is. Replay
-            # past each name's cursor still finds that mail at its next bind.
-            log.exception("boot rescan failed; replay at each name's next bind finds "
-                          "what it would have queued")
+            # log-and-continue, exactly as the event loop's rescan already is. The
+            # routed mark is held where it stands, so the next rescan or the next boot
+            # still finds what this one would have queued.
+            log.exception("boot rescan failed; the next rescan or boot queues what it "
+                          "would have")
+            self._hold_routed()
         if self._start_trim_thread:
             self._spawn(self._trim_loop)
 
@@ -710,14 +722,14 @@ class Daemon:
 
     def _bind(self, conn, params: dict):
         """`bind`: the binding, answered with its identity, token and catch-up boundary.
-        Its catch-up follows the answer: replay first, then the release of the unflagged
-        rows on a passing read. Flagged rows wait for a real boundary."""
+        Its catch-up follows the answer: the release of the name's unflagged rows on a
+        passing read, then `replay_complete`. Flagged rows wait for a real boundary."""
         result = self._register(conn, params)
         bound = self.bindings[result["identity"]["qualified"]]
 
         def catch_up() -> None:
-            self._replay(bound)
             self._on_register(bound)
+            self._replay_complete(bound)
 
         return wire.Then(result, catch_up)
 
@@ -733,8 +745,15 @@ class Daemon:
             raise Refusal("open_digest: `ids` lists the message ids of the digest",
                           code=wire.INVALID_PARAMS)
         asked = {str(i) for i in ids}
-        opened = self.books.open_digest(b.qualified, b.history_id,
-                                        list(dict.fromkeys(str(i) for i in ids)))
+        # Only what this binding was handed goes in its digest: a turn end acks the
+        # digest's rows, and a row the binding never got is not its to ack.
+        with self._lock:
+            mine = [mid for mid in dict.fromkeys(str(i) for i in ids)
+                    if mid in b.delivered]
+        if len(mine) < len(asked):
+            log.info("open_digest from %s names %s, which it was not handed; left out",
+                     b.qualified, ", ".join(sorted(asked - set(mine), key=_as_id)))
+        opened = self.books.open_digest(b.qualified, b.history_id, mine)
         if opened.dropped:
             with self._lock:
                 rows = self.queue.get(b.qualified, {})
@@ -747,28 +766,40 @@ class Daemon:
         return {"digest": opened.digest, "ids": opened.ids, "dropped": opened.dropped}
 
     def _injected(self, conn, params: dict) -> None:
-        """`injected`: the adapter put a digest in. The text is kept for `last_digest`,
-        and on the digest `digest` names; every pushed id up to `through` (an adapter
-        that names no digest) has left the binding's window."""
+        """`injected`: the adapter put the digest `digest` names in. Its text is kept on
+        the digest and for `last_digest`, and its highest id is what `explain` reads as
+        injected."""
         b = self._own_binding(conn, params)
-        identity = b.qualified if b is not None else str(params.get("identity") or "")
-        if identity and self._ping_ordered(conn, identity, "injected", params.get("seq")):
-            through = params.get("through")
-            text = params.get("text")
-            if isinstance(text, str) and len(text.encode()) > INJECTED_CAP:
-                text = text.encode()[:INJECTED_CAP].decode(errors="ignore")
-            with self._lock:
-                if through is not None:
-                    self.injected_through[identity] = str(through)
-                if text is not None:
-                    self.injected_digest[identity] = str(text)
-            digest = params.get("digest")
-            if b is not None and digest is not None and text is not None:
-                self._book("keep the digest text of", identity,
-                           lambda: self.books.injected(identity, int(digest), str(text)))
-            if b is not None and through is not None:
-                self._window_take(b, lambda mid: _as_id(mid) <= _as_id(str(through)))
-        return self._not_bound(b)
+        if b is None:
+            return self._not_bound(b)
+        identity = b.qualified
+        if not self._ping_ordered(conn, identity, "injected", params.get("seq")):
+            return None
+        text = params.get("text")
+        if isinstance(text, str) and len(text.encode()) > INJECTED_CAP:
+            text = text.encode()[:INJECTED_CAP].decode(errors="ignore")
+        try:
+            digest = int(params.get("digest"))
+        except (TypeError, ValueError):
+            digest = None
+        found = None
+        if digest is not None:
+            try:
+                found = self.books.digest(digest)
+            except Exception:                                      # noqa: BLE001
+                log.exception("could not read digest %s of %s", digest, identity)
+            if found is not None and found["name"] != identity:
+                found = None
+        ids = [] if found is None else found["ids"]
+        with self._lock:
+            if ids:
+                self.injected_through[identity] = max(ids, key=_as_id)
+            if text is not None:
+                self.injected_digest[identity] = str(text)
+        if found is not None and text is not None:
+            self._book("keep the digest text of", identity,
+                       lambda: self.books.injected(identity, digest, str(text)))
+        return None
 
     def _ready(self, conn, params: dict) -> None:
         return self._activity(conn, params, kind=ACTIVITY_READY)
@@ -776,8 +807,31 @@ class Daemon:
     def _look(self, conn, params: dict) -> None:
         return self._activity(conn, params, kind=ACTIVITY_LOOK)
 
-    def _turn_ended(self, conn, params: dict) -> None:
-        return self._activity(conn, params, kind=ACTIVITY_TURN)
+    def _turn_ended(self, conn, params: dict) -> dict:
+        """`turn_ended`, the ack: a turn of the binding's session ended, answering the
+        digests `handled` names and not the ones `unhandled` names (both digest ids;
+        `turn_id` names the turn, and none is a hand-in that failed before any turn).
+        The books delete the handled digests' rows and advance the cursor, and put the
+        unhandled ones' rows back to waiting, in one transaction. It is a release point
+        with its settle window, and empty lists are the person's own turn ending.
+        Answered with the name's cursor."""
+        b = self._own_binding(conn, params)
+        self._not_bound(b)
+        lists = {}
+        for key in ("handled", "unhandled"):
+            got = params.get(key)
+            if got is None:
+                got = []
+            if not isinstance(got, list):
+                raise Refusal(f"turn_ended: `{key}` lists digest ids",
+                              code=wire.INVALID_PARAMS)
+            lists[key] = got
+        with self._lock:
+            self.activity[b.qualified] = self.clock()
+            self._take_session(b, params, at=self.clock(), turn=True)
+        ended = self.books.turn_ended(b.qualified, lists["handled"], lists["unhandled"])
+        self._on_turn(b, ended)
+        return {"cursor": ended.cursor}
 
     def _activity(self, conn, params: dict, kind: str | None = None) -> None:
         """`activity` and its kinds: the session reports, from the binding's own
@@ -788,16 +842,14 @@ class Daemon:
         if not identity or not self._ping_ordered(conn, identity, method,
                                                   params.get("seq")):
             return self._not_bound(b)
-        turn = kind == ACTIVITY_TURN
         with self._lock:
             self.activity[identity] = self.clock()
             # The session id rides the notification, and is taken only from the
             # connection that holds this binding: the identity a message names is a
-            # claim, the connection is not. So are `projects_root` and `turned`, and a
-            # turn's end sets `turned` whatever it says. So are `source`, `handled` and
-            # `unhandled`: a forged message releases and settles nothing.
+            # claim, the connection is not. So are `projects_root`, `turned` and
+            # `source`: a forged message releases nothing.
             if b is not None:
-                self._take_session(b, params, at=self.clock(), turn=turn)
+                self._take_session(b, params, at=self.clock())
         if b is None:
             return self._not_bound(b)
         ref = params.get("ref")
@@ -810,12 +862,6 @@ class Daemon:
             self._on_ready(b, params.get("source"))
         elif kind == ACTIVITY_LOOK:
             self._on_look(b)
-        elif turn:
-            named = {str(m) for key in ("handled", "unhandled")
-                     for m in (params.get(key) if isinstance(params.get(key), list) else ())}
-            if named:
-                self._window_take(b, lambda mid: mid in named)
-            self._on_turn(b, params)
         return None
 
     # ------------------------------------------------------------------ register
@@ -907,15 +953,6 @@ class Daemon:
             # binding's own connection by construction. With it, the shim's evidence for
             # `fresh`; an id another live binding holds is refused.
             self._take_session(binding, frame, at=binding.bound_at, register=True)
-            # `holding`: ids the adapter already has queued or injected. Claimed for
-            # this binding at once, so neither replay nor a release hands them again and
-            # a reconnect whose replay finds only these sets nothing off. An id with a
-            # row keeps it: the row goes only when this binding names it `handled`.
-            for mid in frame.get("holding") or ():
-                mid = str(mid)
-                if not mid.isdigit():
-                    continue
-                binding.delivered.add(mid)
             if adapter == SEND_ONLY_ADAPTER:
                 # Anything queued for the name from before its row was send-only is for
                 # nobody now: a send-only binding is never handed mail.
@@ -1346,15 +1383,20 @@ class Daemon:
             # is still explainable and its delivery age is not. Said, not guessed at.
             "delivered_for": None if handed_at is None else now - handed_at,
             "asked_for": asked is not None}
-        cursor = cursors.explain(identity, message_id)
+        try:
+            row = self.books.cursor_row(identity) if self.books.is_open else None
+        except Exception:                                          # noqa: BLE001
+            log.exception("explain: could not read the cursor of %s", identity)
+            row = None
+        cursor = books_mod.explain_cursor(row, message_id)
         case = case_error = None
         if message_id is not None and message_id in waiting:
             # Queued BEFORE the cursor: a queued id is not `cursor-behind-it`, whose
             # sentence says a turn that would advance it has not completed -- not why
             # it waits.
             case = CASE_WAITING
-            cursor = {**cursor, "reason": cursors.WAITING,
-                      "sentence": cursors.REASONS[cursors.WAITING]}
+            cursor = {**cursor, "reason": books_mod.WAITING,
+                      "sentence": books_mod.REASONS[books_mod.WAITING]}
         elif message_id is not None:
             try:
                 case = self.classify(identity, message_id)
@@ -1468,13 +1510,31 @@ class Daemon:
                 log.exception("event handling failed")
 
     def rescan(self) -> None:
-        """Route the record's newest `RESCAN_LIMIT` messages again: mail to an unbound
-        name gets a row, and mail a bound name has not been handed is routed as live."""
+        """Route the record again: every message above the routed mark, however many,
+        and the newest `RESCAN_LIMIT` for the indexes. Mail to an unbound name gets a
+        row, and mail a bound name has not been handed is routed as live. With no
+        routed mark (a home that has routed nothing since its migration) the pass is
+        the newest `RESCAN_LIMIT`, gated by each name's cursor alone."""
         channel_id = self._names_channel()
         msgs = self.record.history(channel_id, limit=constants.RESCAN_LIMIT)
         with self._lock:
             self.rescans += 1
-        memo: dict[str, str | None] = {}   # one cursor read per name for THIS pass only
+            skips = self._skips
+        memo: dict = {}   # one cursor read per name for THIS pass only
+        # The ids routed before this pass began have their rows, or had them until they
+        # were acked: the pass routes only what is above them.
+        try:
+            through = self.books.routed_through() if self.books.is_open else None
+        except Exception:                                          # noqa: BLE001
+            log.exception("rescan: could not read the routed mark; every message is "
+                          "routed by its cursor alone")
+            through = None
+        memo[_ROUTED_MEMO] = through
+        if (through is not None and len(msgs) >= constants.RESCAN_LIMIT
+                and _as_id(msgs[0].id) > through + 1):
+            # The newest window does not reach down to the mark: everything above the
+            # mark is read, so no message the daemon never routed is left behind.
+            msgs = self.record.history(channel_id, after=str(through))
         try:
             for m in msgs:
                 try:
@@ -1485,6 +1545,15 @@ class Daemon:
                     # re-reads the same record and has the same reason to.
                     log.exception("rescan: routing message %s failed",
                                   getattr(m, "id", "?"))
+            # The pass routed what the block had kept back, unless the block skipped
+            # more while it ran: the mark may rise past those ids now.
+            last = _as_id(msgs[-1].id) if msgs else -1
+            with self._lock:
+                cleared = self._skips == skips and self._unrouted is not None
+                if cleared:
+                    self._unrouted = None
+            if cleared and last > 0:
+                self._raise_routed(last)
         finally:
             self._end_pass(memo)
 
@@ -1498,10 +1567,15 @@ class Daemon:
         becomes a row, never a delivery; and no row is written for an id at or below
         the name's cursor. A row that exists is never re-created or dropped here."""
         opening = None          # decided at the first recipient: does this pass create it?
+        through = memo.get(_ROUTED_MEMO) if backlog else None
+        routed = through is not None and _as_id(msg.id) <= through
         for position, tag in enumerate(ml.recipients):
             r = self.resolve(tag)
             if opens or ml.reply_to is not None:
                 opening = self._index_ask(msg, ml, author, r, opens=opens, opening=opening)
+            if routed:
+                # Routed before this pass: its rows are in the books, or it was acked.
+                continue
             q = r.qualified
             if r.send_only:
                 # A record line that names a send-only identity (typed by hand, or from
@@ -1512,18 +1586,22 @@ class Daemon:
             if r.binding is None:
                 # An unbound chosen or standing name: the message waits in its queue,
                 # unless the name already handled it before it unbound (past its
-                # cursor). A dead agent-N is inert, not misdelivered.
-                if r.resolvable and r.tier in (TIER_CHOSEN, TIER_STANDING):
-                    if not self._past_cursor(q, msg.id, memo):
-                        with self._lock:
-                            self._queue_add(q, msg.id, _epoch(msg.timestamp))
-                continue
+                # cursor). A dead agent-N is inert, not misdelivered. A binding made
+                # since the resolve takes it as live mail: its bind's catch-up may
+                # already have read the rows.
+                if not (r.resolvable and r.tier in (TIER_CHOSEN, TIER_STANDING)):
+                    continue
+                with self._lock:
+                    late = self.bindings.get(q)
+                    if late is None and not self._past_cursor(q, msg.id, memo):
+                        self._queue_add(q, msg.id, _epoch(msg.timestamp))
+                if late is None:
+                    continue
+                r.binding = late
             if backlog:
                 # one guarded reading of "handled?" for bound and unbound alike
                 if self._past_cursor(q, msg.id, memo):
                     continue
-            elif int(msg.id) <= int(r.binding.replay_hwm):
-                continue                              # catch-up owns everything below
             with self._lock:
                 if msg.id in self.queue.get(q, {}) or msg.id in r.binding.delivered:
                     # A row waits for a release point; a handed id is not handed again.
@@ -1548,6 +1626,12 @@ class Daemon:
                         if backlog or not self._past_cursor(q, msg.id, memo):
                             self._queue_add(q, msg.id, _epoch(msg.timestamp))
                         live = False
+                    elif not backlog and self._behind_returned(r.binding, msg.id):
+                        # Rows a turn of this binding left unhandled wait below this
+                        # one: it waits with them for the next release point, and goes
+                        # out after them by id.
+                        self._queue_add(q, msg.id, _epoch(msg.timestamp))
+                        live = False
                     else:
                         live = self._claim(r.binding, msg.id)
                 break
@@ -1559,26 +1643,28 @@ class Daemon:
                 self._deliver(r.binding, msg, ml, author, backlog=backlog)
 
     # ------------------------------------------------------------------ routing
+    def _cursor(self, qualified: str) -> str | None:
+        """The name's cursor in the books; None when it has none, or the books are
+        closed or can't be read (no cursor degrades toward delivery, never loss)."""
+        if not self.books.is_open:
+            return None
+        try:
+            return self.books.cursor(qualified)
+        except Exception:                                          # noqa: BLE001
+            log.exception("could not read the cursor of %s; treating it as unset",
+                          qualified)
+            return None
+
     def _past_cursor(self, qualified: str, message_id: str, memo: dict) -> bool:
-        """Has this identity's cursor already passed this message? The cursor is the one
-        durable "handled?" fact and the daemon only ever READS it -- `memo` is scoped
-        to a single routing pass so a rescan does not re-read one file per message, and
-        nothing survives the pass to go stale."""
+        """Has this identity's cursor already passed this message? The cursor moves
+        only at an ack, in the books; `memo` is scoped to a single routing pass so a
+        rescan does not read it once per message."""
         if qualified not in memo:
-            memo[qualified] = cursors.read(qualified)
+            memo[qualified] = self._cursor(qualified)
         cursor = memo[qualified]
         if cursor is None:
             return False
-        try:
-            return int(message_id) <= int(cursor)
-        except (TypeError, ValueError):
-            # A cursor file whose `cursor` is not a number is unreadable, not authority.
-            # Treating it as no-cursor degrades toward replay and pending -- the daemon
-            # would rather show a message twice than let a corrupt file swallow it, and
-            # it must never be a reason boot cannot finish.
-            log.warning("cursor for %s is not a message id (%r); treating it as unset",
-                        qualified, cursor)
-            return False
+        return _as_id(message_id) <= _as_id(cursor)
 
     def _route(self, msg, *, backlog: bool, cursor_memo: dict | None = None) -> None:
         if msg.channel_id != self._names_channel():
@@ -1607,8 +1693,14 @@ class Daemon:
         self._index_audience(msg, ml)                 # at parse, before any claim
         if self.settings.use("block"):
             # symmetric: a blocked identity is neither delivered to nor routed from.
-            # The setting is a bare bool, read at use, so it blocks all routing.
+            # The setting is a bare bool, read at use, so it blocks all routing. The
+            # message is not routed yet: the routed mark stays below it.
             log.info("block on: not routing message %s", msg.id)
+            if seen is not None:
+                with self._lock:
+                    self._skips += 1
+                    if self._unrouted is None or seen < self._unrouted:
+                        self._unrouted = seen
             return
         author = self.attribute(msg, live=not backlog)
         memo = {} if cursor_memo is None else cursor_memo
@@ -1618,6 +1710,8 @@ class Daemon:
         opens = ml.posture == POSTURE_ONCE and author.attribution == attribution.VERIFIED
         try:
             self._route_recipients(msg, ml, author, memo, opens, backlog)
+            if seen is not None:
+                self._raise_routed(seen)
         finally:
             # The sent index is fed AFTER the recipients are claimed (the claim that
             # hands a message to a recipient's binding precedes the lock section that
@@ -1628,6 +1722,32 @@ class Daemon:
             if cursor_memo is None:
                 # A live message is a pass of its own; a rescan ends its pass itself.
                 self._end_pass(memo)
+
+    def _hold_routed(self) -> None:
+        """Keep the routed mark where it stands until a rescan completes: what lies
+        above it was not routed."""
+        try:
+            through = self.books.routed_through() if self.books.is_open else None
+        except Exception:                                          # noqa: BLE001
+            log.exception("could not read the routed mark to hold it")
+            return
+        if through is None:
+            return
+        with self._lock:
+            self._skips += 1
+            if self._unrouted is None or through + 1 < self._unrouted:
+                self._unrouted = through + 1
+
+    def _raise_routed(self, through: int) -> None:
+        """Raise the routed mark to `through`, but never to or past a message the block
+        kept from routing: a rescan must still find that one."""
+        with self._lock:
+            hold = self._unrouted
+        if hold is not None:
+            through = min(through, hold - 1)
+        if through > 0 and self.books.is_open:
+            self._book("raise the routed mark for", str(through),
+                       lambda: self.books.routed(through))
 
     def _index_ask(self, msg, ml, author: Author, r: Resolution, *, opens: bool,
                    opening: bool | None) -> bool | None:
@@ -1989,6 +2109,7 @@ class Daemon:
             if message_id in binding.delivered:
                 return False
             binding.delivered.add(message_id)
+            binding.returned.discard(message_id)
             if _as_id(message_id) > _as_id(binding.handed_max):
                 binding.handed_max = message_id      # the `owed` query's `undelivered`
             # Its row, handed to this binding: made for a live send, taken from
@@ -2280,30 +2401,29 @@ class Daemon:
             return
         self._release(b, flagged=True)
 
-    def _on_turn(self, b: Binding, frame: dict) -> None:
-        """`activity kind=turn` from the binding's own connection. Carrying `handled`, it
-        is a release point that stays open for a settle window, then settles.
-        Its read passing, it releases every row at once and opens no window. Its read
-        not passing, whatever the queue holds, it opens the binding's window
+    def _on_turn(self, b: Binding, ended) -> None:
+        """A `turn_ended` from the binding's own connection, after the books took the
+        ack (`ended`: the message ids acked and the ids back to waiting). A release point
+        that stays open for a settle window. Its read passing, it releases every row at
+        once and opens no window. Its read not passing, it opens the binding's window
         (`RELEASE_SETTLE_STEPS`): the harness may not have written the turn yet, and a
         send can queue a row a moment later in the same lag. The window releases every
-        row then queued at its first read that passes, except the ids this frame names
-        `unhandled`. A newer `turn` of the binding closes the window before its own
-        read; a `ready`, `look` or register leaves it open. Without `handled` the frame
-        comes from an adapter started before the queue: it releases nothing and deletes
-        nothing."""
+        row then queued at its first read that passes, except the ids this turn left
+        unhandled. A newer turn end of the binding closes the window before its own
+        read; a `ready`, `look` or bind leaves it open. The acked ids leave memory
+        before the release; the unhandled ones wait again after it, so not this
+        release but the next hands them."""
         opened = time.monotonic()
         self._close_window(b)
-        handled = frame.get("handled")
-        if not isinstance(handled, list):
-            return
-        unhandled = frame.get("unhandled")
-        unhandled = unhandled if isinstance(unhandled, list) else []
+        named = set(ended.handled) | set(ended.unhandled)
+        if named:
+            self._window_take(b, lambda mid: mid in named)
+        self._settle(b, handled=ended.handled)
         if self._passing(b):
             self._release(b, flagged=True)
         else:
-            self._open_window(b, opened, unhandled)
-        self._settle(b, handled, unhandled)
+            self._open_window(b, opened, ended.unhandled)
+        self._settle(b, unhandled=ended.unhandled)
 
     def _on_look(self, b: Binding) -> None:
         """`activity kind=look` from the binding's own connection: its adapter found the
@@ -2336,6 +2456,18 @@ class Daemon:
         log.info("release for %s waits: its cache reads %s", b.qualified,
                  self._describe(clock))
         return False
+
+    def _behind_returned(self, binding: Binding, message_id: str) -> bool:
+        """Whether a row this binding's turns left unhandled still waits below
+        `message_id`. A live send behind one gets a row instead of a push, so it never
+        overtakes mail already handed to the name once. Rows that never went out (a
+        `[held]` message's, one queued while the cache was cold) don't hold it back:
+        those wait for their own release point while live mail goes alone. Under the
+        lock."""
+        rows = self.queue.get(binding.qualified, {})
+        binding.returned &= rows.keys()
+        mid = _as_id(message_id)
+        return any(_as_id(m) < mid for m in binding.returned)
 
     def _release(self, binding: Binding, *, flagged: bool, exclude=()) -> int:
         """Hand the name's rows this binding was not handed already, oldest first, each
@@ -2469,39 +2601,32 @@ class Daemon:
                      "the rows wait for the next release point", q, self._describe(clock),
                      w.steps[-1])
 
-    def _settle(self, binding: Binding, handled, unhandled) -> None:
-        """A `turn` frame's report, after its release. Each `handled` id this binding was
-        handed loses its row. Each `unhandled` id it was handed gets a row (an
-        `agent-N` too, while it is bound) and leaves `delivered`, so the next release
-        point hands it again; not the release of the frame that reported it, which ran
-        first. An id this binding was not handed is ignored and logged."""
+    def _settle(self, binding: Binding, handled=(), unhandled=()) -> None:
+        """An ack, in memory, after the books took it: each `handled` id has no row now
+        and is this binding's handled; each `unhandled` id waits again (while the
+        binding is the name's) and leaves `delivered`, so the next release point hands
+        it again."""
         q = binding.qualified
         with self._lock:
-            for raw in handled:
-                mid = str(raw)
-                if mid not in binding.delivered:
-                    log.info("turn from %s names msg=%s handled, which it was not handed; "
-                             "ignored", q, mid)
-                    continue
+            rows = self.queue.get(q, {})
+            for mid in handled:
                 binding.handled.add(mid)
-                self._queue_drop(q, [mid])
-            for raw in unhandled:
-                mid = str(raw)
-                if mid not in binding.delivered:
-                    log.info("turn from %s names msg=%s unhandled, which it was not "
-                             "handed; ignored", q, mid)
-                    continue
+                rows.pop(mid, None)
+            if not rows:
+                self.queue.pop(q, None)
+            for mid in unhandled:
                 binding.delivered.discard(mid)
                 if self.bindings.get(q) is binding:
                     self.queue.setdefault(q, {}).setdefault(mid, None)
-                    self._book("queue a row for", q,
-                               lambda mid=mid: self.books.add(q, mid))
-        self._queue_flush()
+                    binding.returned.add(mid)
+        if unhandled:
+            self._queue_flush()
 
     def _end_pass(self, memo: dict) -> None:
-        """The end of one routing pass, rescan or replay: the cache reads it kept go, and
-        the queue's changes reach the record. Never raises."""
+        """The end of one routing pass: the cache reads it kept go, and the rows' times
+        are filled in. Never raises."""
         memo.pop(_GATE_MEMO, None)
+        memo.pop(_ROUTED_MEMO, None)
         self._queue_flush()
 
     # ------------------------------------------------------------------ boot
@@ -2707,92 +2832,19 @@ class Daemon:
             return attribution.from_record(db, msg)
 
     # ------------------------------------------------------------------ catch-up
-    def _replay(self, binding: Binding) -> None:
-        """Replay past the cursor, then `replay_complete`.
+    def _replay_complete(self, binding: Binding) -> None:
+        """The end of a bind's catch-up: `replay_complete`, with the name's cursor.
 
-        Replay is for mail with no row: live mail handed to an earlier binding and not
-        handled when the daemon or the adapter died, and mail posted while the daemon
-        was down beyond the boot rescan's window. It skips every id with a row. A flagged
-        message it finds with no row becomes a row. The cache is read once, and each
-        other message is decided after it as live routing decides it: a passing read
-        delivers, an `unknown` read delivers by the message's own cold-at, and the rest
-        become rows. `replay_complete`'s cursor covers only what was handed.
-        """
+        Catch-up is the name's rows, which `_on_register` releases before this; nothing
+        is replayed from the record. Every routed message holds a row until it is acked
+        or dropped, so a message with no row is not one to deliver again."""
         if binding.adapter == SEND_ONLY_ADAPTER:
             # Nothing was ever kept for it, so there is nothing to catch up on.
             return
-        truncated = False
-        memo: dict = {}
         q = binding.qualified
-        if binding.tier == TIER_EPHEMERAL:
-            # an ephemeral identity receives no deferred mail, ever -- nothing to replay
-            mine = []
-            cursor = None
-        else:
-            cursor = cursors.read(q)
-            channel_id = self._names_channel()
-            candidates = [m for m in self.record.history(channel_id, after=cursor)
-                          if int(m.id) <= int(binding.replay_hwm)]
-            parsed = [(m, parse_machine_line(m.content)) for m in candidates]
-            for m, ml in parsed:
-                if ml is not None:
-                    self._index_audience(m, ml)       # every line zero parsed, not just mine
-            mine = []
-            for m, ml in parsed:
-                position = None if ml is None else self._position(ml, binding, m)
-                if position is not None:
-                    mine.append((m, ml, position))
-            with self._lock:
-                rows = set(self.queue.get(q, {}))
-                for m, ml, _ in mine:
-                    if (_flagged(ml, q) and m.id not in rows
-                            and m.id not in binding.delivered):
-                        self._queue_add(q, m.id, _epoch(m.timestamp))
-                mine = [(m, ml, p) for m, ml, p in mine
-                        if m.id not in rows and not _flagged(ml, q)]
-            if cursor is None:
-                # Bounded replay is for an ABSENT cursor only: a first bind, or a
-                # cursor lost with STATE. It bounds mail with no row; queued mail is
-                # never bounded. A present cursor, however old, replays all that is
-                # past it. The bound is the `[replay]` setting, read at use.
-                replay = self.settings.use("replay")
-                bounded = mine[-replay.messages:]
-                now = self.clock()
-                bounded = [(m, ml, p) for (m, ml, p) in bounded
-                           if now - _epoch(m.timestamp) <= replay.seconds]
-                truncated = len(bounded) < len(mine)
-                mine = bounded
-            # The read, once per register, and only when something would be handed.
-            with self._lock:
-                fresh = [(m, ml, p) for m, ml, p in mine if m.id not in binding.delivered]
-            if fresh:
-                clock, now = self._read_memo(binding, memo)
-                with self._lock:
-                    for m, ml, p in fresh:
-                        if not _passes(ml, p, clock, now):
-                            self._queue_add(q, m.id, _epoch(m.timestamp))
-                    gated = {m.id for m, ml, p in fresh if not _passes(ml, p, clock, now)}
-                if gated:
-                    log.info("replay to %s queued %d message(s): cache %s", q, len(gated),
-                             self._describe(clock))
-                mine = [(m, ml, p) for m, ml, p in mine if m.id not in gated]
-        handed = []
-        for m, ml, _ in mine:
-            handed.append(m)
-            if not self._claim(binding, m.id):
-                continue          # `holding`, or live routing got there first
-            with self._name_lock(q):
-                self._deliver(binding, m, ml, self.attribute(m, live=False), backlog=True)
-        self._end_pass(memo)
-        # The highest id replay handed (or found the adapter already holding): never a
-        # queued id, so the adapter's cursor is never carried past queued mail.
-        high = max((m.id for m in handed), key=int, default=cursor)
-        frame = {"op": "replay_complete", "identity": q, "cursor": high,
-                 "truncated": truncated}
-        if truncated:
-            frame["notice"] = constants.replay_notice(replay.messages, replay.seconds)
-        frame.pop("op")
-        binding.conn.notify_threadsafe("replay_complete", frame)
+        cursor = None if binding.tier == TIER_EPHEMERAL else self._cursor(q)
+        binding.conn.notify_threadsafe("replay_complete", {"identity": q, "cursor": cursor,
+                                                           "truncated": False})
 
     def _position(self, ml, binding: Binding, msg) -> int | None:
         """The position on line zero of the first tag that names this binding's
@@ -2844,7 +2896,7 @@ class Daemon:
 
     def classify(self, qualified: str, message_id: str) -> str:
         """`moxi comms explain`'s case for one message handed to one name, on demand."""
-        cursor = cursors.read(qualified)
+        cursor = self._cursor(qualified)
         if cursor is not None and int(cursor) >= int(message_id):
             return CASE_HANDLED
         with self._lock:

@@ -168,10 +168,30 @@ def test_the_cursor_stays_below_a_held_row_and_never_goes_back(books):
     assert [r.message_id for r in books.rows(NAME)] == ["100"]
     books.hand(NAME, 100, 3)
     d2 = books.open_digest(NAME, 3, [100]).digest
-    assert books.turn_ended(NAME, [d2], []).cursor == "100"
+    assert books.turn_ended(NAME, [d2], []).cursor == "105", "the high-water, kept"
     books.hand(NAME, 90, 3)
     d3 = books.open_digest(NAME, 3, [90]).digest
-    assert books.turn_ended(NAME, [d3], []).cursor == "100", "never back"
+    assert books.turn_ended(NAME, [d3], []).cursor == "105", "never back"
+
+
+def test_the_high_water_survives_a_restart_and_a_turn_end_that_acks_nothing(
+        books, clock, tmp_path):
+    """Acked H above a held L: the cursor waits below L across a reopen of the books.
+    Once L's row goes without an ack (dropped), the next turn end, even an empty one,
+    carries the cursor to H."""
+    books.add(NAME, 100, held=True)
+    books.hand(NAME, 105, 3)
+    d = books.open_digest(NAME, 3, [105]).digest
+    assert books.turn_ended(NAME, [d], []).cursor == "99"
+    books.close()
+    again = Books(tmp_path / "comms.db", clock=clock)
+    again.open()
+    try:
+        assert again.drop(NAME, [100]) == 1
+        assert again.turn_ended(NAME, [], []).cursor == "105"
+        assert again.cursor(NAME) == "105"
+    finally:
+        again.close()
 
 
 def test_an_ack_names_only_the_names_own_open_digests(books):

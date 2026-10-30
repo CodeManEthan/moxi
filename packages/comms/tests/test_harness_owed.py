@@ -75,10 +75,10 @@ def test_the_next_stop_counts_the_reminder_and_the_turn_end_reports_unanswered(
     # The stop recorded it unanswered; the turn end settles later, on the adapter's own
     # thread, so wait for its frame and the cleared block before reading them.
     assert wait_until(lambda: not codex.blocked and any(
-        f["handled"] == [msg.id] for f in frame_kinds(frames, "turn")))
+        f["handled_ids"] == [msg.id] for f in frame_kinds(frames, "turn")))
     assert unanswered(rig)[msg.id]["owing"] == CODEX
     assert codex.reply_ledger.debts == {} and not codex.blocked
-    assert frame_kinds(frames, "turn")[-1]["handled"] == [msg.id]
+    assert frame_kinds(frames, "turn")[-1]["handled_ids"] == [msg.id]
 
 
 def test_background_work_lets_the_stop_pass_without_a_reminder(rig, codex):
@@ -108,7 +108,7 @@ def test_an_interrupted_turn_voids_the_reminder_and_marks_the_digest_unhandled(
     assert wait_until(lambda: not codex.blocked)
     debt = codex.reply_ledger.debts[msg.id]
     assert not debt.pending and not debt.counted
-    assert frame_kinds(frames, "turn")[-1]["unhandled"] == [msg.id]
+    assert frame_kinds(frames, "turn")[-1]["unhandled_ids"] == [msg.id]
     assert unanswered(rig) == {}
 
 
@@ -181,7 +181,7 @@ def test_an_owing_turn_end_with_no_work_posts_the_reminder_as_the_adapters_line(
     # after the stub has the reminder.
     assert wait_until(lambda: opencode.blocked)
     assert opencode.turn_blocks == 1 and debt.pending
-    assert frame_kinds(frames, "turn")[-1]["handled"] == [msg.id]
+    assert frame_kinds(frames, "turn")[-1]["handled_ids"] == [msg.id]
     assert wait_until(lambda: opencode.busy)
     assert opencode.pending == {}
 
@@ -201,7 +201,7 @@ def test_the_reminder_turns_end_counts_it_and_unanswered_is_sent(
     assert len(reminders(fake)) == 1
     ended = frame_kinds(frames, "turn")
     assert len(ended) == turns + 1
-    assert ended[-1]["handled"] == [] and ended[-1]["unhandled"] == []
+    assert ended[-1]["handled_ids"] == [] and ended[-1]["unhandled_ids"] == []
 
 
 def test_another_turn_end_before_the_reminders_voids_it(rig, opencode, fake, monkeypatch):

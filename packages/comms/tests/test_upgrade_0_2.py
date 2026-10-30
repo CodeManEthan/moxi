@@ -196,6 +196,28 @@ def test_a_move_stopped_after_its_commit_finishes_its_renames(soon, monkeypatch)
     assert all(upgrade_0_2.moved_name(p).exists() for p in found.values())
 
 
+def test_a_stopped_move_whose_cursor_folder_alone_is_left_finishes_it(soon, monkeypatch):
+    """The cursor folder counts as comms 0.2's when the move fingerprinted it: left
+    under its 0.2 name alone, it still makes the next open finish the move."""
+    found = zero_two_home()
+    assert "cursors" in found
+    real = upgrade_0_2._rename
+    monkeypatch.setattr(upgrade_0_2, "_rename",
+                        lambda *a: (_ for _ in ()).throw(KeyboardInterrupt()))
+    with pytest.raises(KeyboardInterrupt):
+        store.open_write()
+    monkeypatch.setattr(upgrade_0_2, "_rename", real)
+    for role, p in found.items():
+        if role != "cursors":
+            os.replace(p, upgrade_0_2.moved_name(p))
+    assert store.zero_two_files() == [found["cursors"]]
+    said = []
+    store.open_write(report=said.extend).close()
+    assert said[0].startswith("finished the move")
+    assert upgrade_0_2.moved_name(found["cursors"]).is_dir()
+    assert not found["cursors"].exists()
+
+
 def test_0_2_files_changed_after_the_move_are_refused_not_renamed(soon, monkeypatch):
     found = zero_two_home()
     real = upgrade_0_2._rename
