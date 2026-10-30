@@ -42,7 +42,9 @@ nor call `os.system`, `os.exec*`, `os.spawn*`, `os.fork` or `os.kill`.
 
 The core's own repo, known by its distribution name `moxi`, is held to checks 1 to 6 with
 two exemptions: check 5 does not apply inside `moxi.paths` and `moxi.config`, which read
-every module's root locators and declared overrides by computed keys, and check 6 does
+every module's root locators and declared overrides by computed keys, nor inside
+`moxi.log` and `moxi.proc`, which read the core's own logging and lifeline variables, and
+check 6 does
 not apply to `shutil.which("moxi")` inside `moxi.cli`, where the shortcut verb looks up
 the umbrella's place. Check 7 is replaced: the core declares no `moxi.modules` entry
 point, its import package is `moxi`, and its one console script is
@@ -74,7 +76,7 @@ CORE_MODULES = frozenset({"names", "paths", "config", "modules", "cli", "files",
 #: The core's one console script.
 CORE_SCRIPT = ("moxi", "moxi.cli:main")
 #: Inside these core modules check 5 does not apply.
-CORE_ENV_READERS = frozenset({"moxi.paths", "moxi.config", "moxi.log"})
+CORE_ENV_READERS = frozenset({"moxi.paths", "moxi.config", "moxi.log", "moxi.proc"})
 #: What a segment's closure may not import (top-level package names), besides turns.
 SEGMENT_IMPORTS = frozenset({"subprocess", "socket", "multiprocessing", "ctypes", "http",
                              "urllib"})
