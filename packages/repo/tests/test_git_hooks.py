@@ -601,3 +601,22 @@ def test_a_post_merge_piece_runs_after_a_merge_and_never_stops_it(demo, mode):
     assert done.returncode == 0
     assert "repo: post-merge, demo/after-merge: after-merge noticed something" in done.stderr
     assert _records.piece_key(cgd, "demo/after-merge") not in _records.ledger()
+
+
+# -- the verbs' call forms ------------------------------------------------------------------
+
+def test_add_and_remove_take_piece_ids_as_arguments_or_as_a_list(demo):
+    repo = demo.repo()
+
+    def registered() -> set[str]:
+        return set(gitconf.read(gitconf.resolve(repo)).pieces)
+
+    api.add(repo, "demo/gate")
+    api.add(repo, "demo/lint", "demo/watch", mode="config")
+    api.add(repo, ["demo/first"], sets=())
+    assert registered() == {"demo/gate", "demo/lint", "demo/watch", "demo/first"}
+    api.remove(repo, "demo/gate")
+    api.remove(repo, "demo/lint", "demo/watch")
+    api.remove(repo, piece="demo/first")
+    assert registered() == set()
+    assert gitconf.resolve(repo).key in api.indexed()

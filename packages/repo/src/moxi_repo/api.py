@@ -257,11 +257,25 @@ def available() -> dict:
             "refused": dict(sorted(bad.items()))}
 
 
-def add(path: str | os.PathLike, piece_ids: list[str] | tuple = (), *,
+def _ids(given: tuple, piece: str | None = None) -> list[str]:
+    """Piece ids given one per argument, as lists, or both: `add(path, "a/b", "c/d")` and
+    `add(path, ["a/b", "c/d"])` name the same pieces."""
+    out: list[str] = []
+    for item in (*given, *(() if piece is None else (piece,))):
+        for pid in ((item,) if isinstance(item, str) else item):
+            if not isinstance(pid, str):
+                raise Usage(f"a piece id is a string like owner/name, not {pid!r}")
+            if pid not in out:
+                out.append(pid)
+    return out
+
+
+def add(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...],
         mode: str | None = None, sets: list[str] | tuple = ()) -> Report:
     """Register pieces in the repo at `path`; with none, index the repo and write nothing
-    else. `mode` pins the mode (auto unpins); `sets` are `KEY=VALUE` settings for the
-    named pieces."""
+    else. Each piece id is its own argument, or they come as a list. `mode` pins the mode
+    (auto unpins); `sets` are `KEY=VALUE` settings for the named pieces."""
+    piece_ids = tuple(_ids(piece_ids))
     if mode is not None and mode not in gitconf.MODE_SETS:
         raise Usage(f"--mode {mode}: it is one of {', '.join(gitconf.MODE_SETS)}")
     if sets and not piece_ids:
@@ -345,9 +359,12 @@ def _changes(piece: pieces.Piece, state: State,
     return changes
 
 
-def remove(path: str | os.PathLike, piece_ids: list[str] | tuple = ()) -> Report:
-    """Remove pieces from the repo at `path`; with none, everything repo wrote there. On a
-    path that no longer exists, drop its index entry and its records."""
+def remove(path: str | os.PathLike, *piece_ids: str | list[str] | tuple[str, ...],
+           piece: str | None = None) -> Report:
+    """Remove pieces from the repo at `path`, given as `add` takes them or as `piece=`;
+    with none, everything repo wrote there. On a path that no longer exists, drop its
+    index entry and its records."""
+    piece_ids = tuple(_ids(piece_ids, piece))
     report = Report()
     where = Path(path)
     if not where.exists():
