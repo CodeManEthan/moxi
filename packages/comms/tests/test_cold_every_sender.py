@@ -1149,7 +1149,8 @@ def test_a_prompt_alone_tells_the_daemon_and_releases_nothing(rig, monkeypatch):
     frames = []
     real_notify = s._client.notify
     monkeypatch.setattr(s._client, "notify",
-                        lambda op, **kw: frames.append((op, kw)) or real_notify(op, **kw))
+                        lambda op, params=None: frames.append((op, params or {}))
+                        or real_notify(op, params))
     shim_drive.turn_started(s)
     wait_until(lambda: rig.daemon.bindings[REVIEWER_Q].turned)
     assert rig.daemon._read(rig.daemon.bindings[REVIEWER_Q]).kind == "unknown"

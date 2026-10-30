@@ -657,7 +657,7 @@ def test_the_inject_file_seam_reports_a_timeout_as_offline_not_refused(
     assert claude_shim._serve_inject_file(args, common) == claude_shim.EXIT_OFFLINE
     err = capsys.readouterr().err
     assert claude_shim.REFUSED_PREFIX not in err, "nothing refused anything"
-    assert "timeout waiting for register" in err and "Traceback" not in err
+    assert "timeout waiting for bind" in err and "Traceback" not in err
 
 
 def test_a_round_trip_that_never_landed_leaves_no_replay_flag_armed(rig):

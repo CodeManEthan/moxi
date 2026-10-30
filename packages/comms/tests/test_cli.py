@@ -584,7 +584,7 @@ def test_a_message_over_the_one_cap_is_refused_with_the_pointer_text(rig):
     for argv in (["send", "--posture", "none", "reviewer@proj-a", over],
                  ["send", "--check", "--posture", "none", "reviewer@proj-a", over]):
         code, out = rig.cli(argv,  name="planner", scope="proj-a")
-        assert (code, out.strip()) == (2, want)
+        assert (code, out.strip()) == (3, want)
     assert rig.record.history(rig.names_channel) == []
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", fits],
                         name="planner", scope="proj-a")

@@ -796,7 +796,7 @@ def test_closed_cures_add_new_when_the_sender_holds_an_open_ask_and_then_post(ri
     first, _ = posts(rig, REVIEWER, ["reply", root.id, "one"])
     code, out = reply(rig, REVIEWER, root.id, "two")
     cure = (f'moxi comms send {P} --new --posture none|optional|once|open "text"')
-    assert code == 2 and cure in tail(out)
+    assert code == 3 and cure in tail(out)
     code, out = send(rig, REVIEWER, P, "a new subject", "--new", "--posture", "open")
     assert code == 0, out
 
@@ -1461,7 +1461,7 @@ def test_the_gateway_lanes_once_opens_an_ask_the_recipient_answers(rig, op):
     his = rig.record.get_message(sent_id(out))
     assert wait_until(lambda: his.id in rig.daemon.asks)
     code, out = send(rig, PLANNER, "operator", "unrelated", "--posture", "none")
-    assert code == 2 and "still open" in out
+    assert code == 3 and "still open" in out
     answer, _ = posts(rig, PLANNER, ["reply", his.id, "on it"])
     assert zero(answer).posture == "none"
     assert wait_until(lambda: P not in rig.daemon.asks[his.id]["open"])

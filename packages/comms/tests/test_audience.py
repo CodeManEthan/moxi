@@ -195,7 +195,7 @@ def test_a_failed_referent_read_refuses_in_both_verbs(rig):
     offline = ReadFails(rig.record, DaemonOffline("comms offline"))
     code, out = rig.cli(["send", "--new-name", "planner@proj-a", "hi", "--reply-to",
                          original.id], **REVIEWER, record=offline)
-    assert code == 4 and "Nothing was sent" in out
+    assert code == 75 and "Nothing was sent" in out
     assert posted(rig) == [original]
 
 

@@ -12,7 +12,8 @@ import pytest
 
 from claim_kit import wait_for
 from moxi_comms import claimfile
-from moxi_comms.claimhold import CLAIM_SOCKET_ENV, NOT_INSIDE, ClaimServer, call
+from moxi_comms.claimhold import (CLAIM_SOCKET_ENV, NOT_INSIDE, ClaimServer, ClaimUnreachable,
+                                   call)
 
 ASK = ("import json,os,sys\nfrom moxi_comms import claimhold\n"
        "out={}\n"
@@ -38,7 +39,7 @@ def test_the_holder_sends_as_each_binding_it_holds(servers):
     operator, archivist = servers
     answer = call(operator.socket_path, "claim")
     assert answer["claim"]["qualified"] == "operator"
-    assert answer["protocol"] == 2 and answer["token"] == "operator-token"
+    assert "protocol" not in answer and answer["token"] == "operator-token"
     assert call(archivist.socket_path, "claim")["token"] == "archivist-token"
 
 
@@ -90,8 +91,8 @@ def test_state_answers_and_every_old_act_is_an_unknown_op(servers):
     assert call(operator.socket_path, "state")["claim"] == "operator"
     for op in ("lock", "release", "take", "confirm", "reclaim", "abandon", "contingent",
                "uncontingent"):
-        answer = call(operator.socket_path, op, verb="v", receiver="x", token="operator")
-        assert not answer["ok"] and f"unknown claim op {op!r}" in answer["error"], op
+        with pytest.raises(ClaimUnreachable, match=f"refused {op}: method not found"):
+            call(operator.socket_path, op)
 
 
 def test_the_file_records_the_holder_as_a_self_root(servers):

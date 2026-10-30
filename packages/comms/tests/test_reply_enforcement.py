@@ -26,6 +26,7 @@ from conftest import projects_root, wait_for_queue, wait_until, write_config
 
 from moxi_comms import cli, constants, machine_line, scoping
 from moxi_comms.adapters.claude_shim import frame_line
+from moxi_comms import wire
 from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import Daemon
 from moxi_comms.paths import daemon_socket
@@ -301,13 +302,13 @@ def test_owed_referents_say_whose_message_and_its_posture(rig):
 
 
 def test_an_unknown_read_is_what_an_old_daemon_answers(rig):
-    """A read the daemon does not have is the wire's method-not-found, a refusal."""
+    """A read the daemon does not have is the wire's method-not-found."""
     client = DaemonClient(daemon_socket()).connect()
     try:
         from moxi_comms.client import DaemonError
         with pytest.raises(DaemonError, match="method not found: nope") as refused:
             client.call("nope")
-        assert refused.value.data["refused"] is True
+        assert refused.value.code == wire.METHOD_NOT_FOUND
     finally:
         client.close()
 

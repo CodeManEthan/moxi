@@ -196,10 +196,10 @@ def test_the_shims_stop_on_a_warm_read_releases_the_row(rig, monkeypatch):
     # fall; so the payloads are read as they arrive, not from the queue.
     pushed, on_push = [], s._on_push
 
-    def record(frame):
-        if frame.get("op") == "deliver":
-            pushed.append(frame["payload"])
-        on_push(frame)
+    def record(method, params):
+        if method == "deliver":
+            pushed.append(params["payload"])
+        on_push(method, params)
 
     monkeypatch.setattr(s, "_on_push", record)
     s.start()

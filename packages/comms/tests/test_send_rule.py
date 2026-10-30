@@ -453,7 +453,7 @@ def auto_named(rig, **extra):
 
 def refuses_as_no_identity(rig, path, asked_id):
     """whoami, send and reply from inside the session: each says the no-identity line
-    and exits 2, nothing is posted, and no `None` is printed as a name."""
+    and exits 2 (whoami) or 3 (a send), nothing is posted, and no `None` is printed as a name."""
     before = len(history(rig))
     code, out = rig.cli(["whoami"], env=claim_env(path))
     assert code == 2 and out.splitlines()[0] == NO_IDENTITY, out
@@ -462,7 +462,7 @@ def refuses_as_no_identity(rig, path, asked_id):
     assert (code, out) == (3, f"{NO_IDENTITY} — nothing was sent.\n"), out
     code, out = rig.cli(["reply", str(asked_id), "an answer"], env=claim_env(path))
     # a reply says whom it answers first, as every refused reply does
-    assert code == 2 and out.splitlines()[-1] == f"{NO_IDENTITY} — nothing was sent.", out
+    assert code == 3 and out.splitlines()[-1] == f"{NO_IDENTITY} — nothing was sent.", out
     assert "None" not in out, out
     assert len(history(rig)) == before
 

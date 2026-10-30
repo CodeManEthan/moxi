@@ -350,7 +350,7 @@ def test_no_identity_and_the_offline_daemon_are_refusals(rig):
     with rig.session_holding(_sender(rig, "planner")) as path:
         rig.daemon.stop()
         got = api.send(api.Sender.socket(path), "reviewer", "x", posture="none")
-    assert (got.outcome, got.exit_code, got.refusal.code) == ("offline", 4, "offline")
+    assert (got.outcome, got.exit_code, got.refusal.code) == ("offline", 75, "offline")
 
 
 def test_the_operator_lane(rig):

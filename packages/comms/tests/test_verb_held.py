@@ -234,7 +234,8 @@ def test_held_to_the_operator_and_another_flags_the_line_and_says_so(rig):
 @pytest.mark.parametrize("older", ["daemon", "verb"])
 def test_a_daemon_on_another_wire_version_refuses_every_send(rig, monkeypatch, older):
     """A verb and a daemon with no comms wire version in common: the hello is refused,
-    every verb exits 4 with nothing sent, and the text names the older side."""
+    every verb exits 1 with nothing sent (trying again won't change it), and the text
+    names the older side."""
     rig.shim(name="x")
     if older == "daemon":
         monkeypatch.setattr(wire, "VERSIONS", (2, 2))
@@ -247,11 +248,11 @@ def test_a_daemon_on_another_wire_version_refuses_every_send(rig, monkeypatch, o
             "this program is older than the daemon")
     before = posted(rig)
     code, out = rig.cli(["send", "x", "hi", "--posture", "none"], **PLANNER)
-    assert code == moxi_exit.TEMPFAIL
+    assert code == moxi_exit.ERROR
     assert cure in out and out.count("Nothing was sent.") == 1, out
     assert posted(rig) == before
     code, out = rig.cli(["agents"], **PLANNER)
-    assert code == moxi_exit.TEMPFAIL and cure in out
+    assert code == moxi_exit.ERROR and cure in out
 
 
 # --------------------------------------------------------------------- the held frame mark

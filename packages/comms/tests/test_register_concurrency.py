@@ -164,7 +164,7 @@ def test_one_name_survives_a_concurrent_stampede(rig):
                 continue
             assert isinstance(error, DaemonError)
             assert "planner@proj-a is already bound" in str(error)
-            assert error.response["holder"]["qualified"] == "planner@proj-a"
+            assert error.data["holder"]["qualified"] == "planner@proj-a"
         assert list(rig.daemon.bindings) == ["planner@proj-a"]
         rows = [r for r in rig.daemon.binding_history.intervals()
                 if r["qualified"] == "planner@proj-a"]
