@@ -64,10 +64,25 @@ def test_the_one_hour_write_is_clamped_to_the_total(transcript):
     assert request.cache_creation_5m_input_tokens == 0
 
 
-def test_with_no_split_written_the_tiers_are_unknown(transcript):
+def test_with_no_split_written_the_whole_write_is_five_minutes(transcript):
+    # The 1-hour tier came with the `cache_creation` object, so a line without the
+    # object wrote no 1-hour cache.
     transcript.assistant(usage=usage(cache_write=100, breakdown=False))
+    transcript.assistant(usage=usage(cache_write=0, breakdown=False))
+    first, second = requests(read(transcript.write()))
+    assert first.cache_creation_input_tokens == 100
+    assert first.cache_creation_5m_input_tokens == 100
+    assert first.cache_creation_1h_input_tokens == 0
+    assert (second.cache_creation_5m_input_tokens, second.cache_creation_1h_input_tokens) \
+        == (0, 0)
+
+
+def test_with_no_creation_total_the_tiers_are_unknown(transcript):
+    block = usage(cache_write=100)
+    del block["cache_creation_input_tokens"]
+    transcript.assistant(usage=block)
     (request,) = requests(read(transcript.write()))
-    assert request.cache_creation_input_tokens == 100
+    assert request.cache_creation_input_tokens is UNKNOWN
     assert request.cache_creation_5m_input_tokens is UNKNOWN
     assert request.cache_creation_1h_input_tokens is UNKNOWN
 

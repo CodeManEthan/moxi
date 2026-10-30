@@ -1,6 +1,9 @@
 """sessions' config, read through `moxi.config` at each use.
 
-The one key is `claude.projects`, the projects root for a session that stated none.
+Three keys, each a root read when the caller hands none in: `claude.projects` (Claude
+Code's projects root), `codex.sessions` (Codex's sessions root) and `opencode.database`
+(OpenCode's database). Unset, each is the harness's own default in the reading process's
+environment.
 """
 
 from __future__ import annotations
@@ -31,3 +34,9 @@ def current() -> Settings:
 def configured_projects() -> Path | None:
     """`claude.projects` when the file or its default sets it, else None."""
     return current()["claude.projects"]
+
+
+def configured(key: str) -> Path | None:
+    """`key` (`claude.projects`, `codex.sessions` or `opencode.database`) when the file or
+    its default sets it, else None."""
+    return current()[key]

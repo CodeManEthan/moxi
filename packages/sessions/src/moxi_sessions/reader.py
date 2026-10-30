@@ -30,7 +30,8 @@ LIMIT = "limit"
 _DONE = object()
 
 
-def read_back(path: str | Path, *, block: int, limit: int, head: bool = False) -> Reader:
+def read_back(path: str | Path, *, block: int, limit: int, head: bool = False,
+              end: int | None = None, offsets: bool = False) -> Reader:
     """Open `path` and return a `Reader` over its lines, newest first.
 
     `block` is the size of each backward read in bytes, and `limit` the most bytes the
@@ -40,15 +41,20 @@ def read_back(path: str | Path, *, block: int, limit: int, head: bool = False) -
     as `Reader.first` and the backward read stops at line 2.
 
     The file's size is taken when it is opened; bytes appended after that are not read.
+    `end` reads the file as if it ended there (at most the size at open): a caller that
+    listed the file at some size, or pages back from a line's offset, passes it. With
+    `offsets=True` each line comes as `(raw, unterminated, offset)`, `offset` the byte
+    offset where the line starts.
     Raises OSError when the file cannot be opened or read, and ValueError on a block under
     1 or a negative limit. Use the reader as a context manager, or iterate it to its end,
     to close the file.
     """
-    return Reader(path, block=block, limit=limit, head=head)
+    return Reader(path, block=block, limit=limit, head=head, end=end, offsets=offsets)
 
 
 class Reader:
-    """One backward read. Iterate it for `(raw, unterminated)` pairs, newest first.
+    """One backward read. Iterate it for `(raw, unterminated)` pairs, newest first, or
+    `(raw, unterminated, offset)` with `offsets`.
 
     `raw` is the line's bytes without its newline. `unterminated` is True only for the
     file's last line when the file does not end in a newline; that line is yielded like
@@ -65,11 +71,15 @@ class Reader:
     then sees None.
     """
 
-    def __init__(self, path: str | Path, *, block: int, limit: int, head: bool = False):
+    def __init__(self, path: str | Path, *, block: int, limit: int, head: bool = False,
+                 end: int | None = None, offsets: bool = False):
         if not isinstance(block, int) or isinstance(block, bool) or block < 1:
             raise ValueError(f"block must be a positive number of bytes, not {block!r}")
         if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
             raise ValueError(f"limit must be zero or more bytes, not {limit!r}")
+        if end is not None and (not isinstance(end, int) or isinstance(end, bool) or end < 0):
+            raise ValueError(f"end must be zero or more bytes, not {end!r}")
+        self.offsets = offsets
         self.path = Path(path)
         self.block = block
         self.limit = limit
@@ -78,6 +88,8 @@ class Reader:
         self._file = open(self.path, "rb")
         try:
             self._size = os.fstat(self._file.fileno()).st_size
+            if end is not None:
+                self._size = min(self._size, end)
             self._unterminated = False
             if self._size:
                 self._file.seek(self._size - 1)
@@ -141,19 +153,25 @@ class Reader:
             data = f.read(step) + carry
             scanned += step
             pieces = data.split(b"\n")
+            starts = []
+            here = pos
+            for piece in pieces:
+                starts.append(here)
+                here += len(piece) + 1
             if pos > stop:
                 # The first piece may be the tail of a line that starts in an earlier block.
                 carry = pieces[0]
-                whole = pieces[1:]
+                first = 1
             else:
                 carry = b""
-                whole = pieces
-            for raw in reversed(whole):
+                first = 0
+            for index in range(len(pieces) - 1, first - 1, -1):
+                raw = pieces[index]
                 last = at_end
                 at_end = False
                 if not raw.strip():
                     continue
-                yield raw, last and self._unterminated
+                yield raw, last and self._unterminated, starts[index]
         self.ended = START
 
     # -- iteration ---------------------------------------------------------------------
@@ -170,7 +188,7 @@ class Reader:
             raise StopIteration
         # Look one line ahead, so `ended` is set while the caller holds the last line.
         self._next = self._advance()
-        return item  # type: ignore[return-value]
+        return item if self.offsets else item[:2]  # type: ignore[index]
 
     def _advance(self) -> object:
         if self._file.closed:

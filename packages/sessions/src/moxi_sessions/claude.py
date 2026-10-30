@@ -434,13 +434,18 @@ def _usage_request(entry: dict, message: dict, usage: dict, common: dict,
     written = _count(usage, "cache_creation_input_tokens")
     total = (fresh + read + written
              if UNKNOWN not in (fresh, read, written) else UNKNOWN)
+    # The 1-hour write is the `cache_creation` object's, clamped to the creation total, and
+    # the 5-minute write the remainder. Claude Code wrote the 1-hour tier and that object
+    # together, so a line without the object wrote no 1-hour cache: its whole write is
+    # 5-minute, not an unknown split.
     creation = usage.get("cache_creation")
-    if isinstance(creation, dict) and written is not UNKNOWN:
-        one_hour = _count(creation, "ephemeral_1h_input_tokens")
+    if written is UNKNOWN:
+        one_hour = five_minutes = UNKNOWN
+    else:
+        one_hour = (_count(creation, "ephemeral_1h_input_tokens")
+                    if isinstance(creation, dict) else 0)
         one_hour = 0 if one_hour is UNKNOWN else min(max(one_hour, 0), written)
         five_minutes = written - one_hour
-    else:
-        one_hour = five_minutes = UNKNOWN
     model = message.get("model")
     synthetic = model == SYNTHETIC_MODEL
     requested = entry.get("requestedModel")

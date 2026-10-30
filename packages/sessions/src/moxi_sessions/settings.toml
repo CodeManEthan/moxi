@@ -6,3 +6,15 @@ type = "path"
 default = ""
 doc = "Where Claude Code transcripts are read for a session that stated no root of its own; unset, it is ${CLAUDE_CONFIG_DIR:-~/.claude}/projects in the reading process's environment."
 read = "use"
+
+[codex.sessions]
+type = "path"
+default = ""
+doc = "Where Codex rollouts are read when no root is handed in; unset, it is ${CODEX_HOME:-~/.codex}/sessions in the reading process's environment."
+read = "use"
+
+[opencode.database]
+type = "path"
+default = ""
+doc = "The OpenCode database read when no database is handed in; unset, it is ${XDG_DATA_HOME:-~/.local/share}/opencode/opencode.db in the reading process's environment."
+read = "use"

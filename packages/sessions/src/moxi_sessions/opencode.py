@@ -70,6 +70,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .errors import Unreadable
 from .shape import (BAD_STRUCTURE, NOT_OBJECT, OPENCODE, UNDECODABLE, UNKNOWN, Malformed,
                     Marker, Message, Other, Record, Request, ToolCall, ToolResult,
                     tool_summary)
@@ -114,14 +115,6 @@ BACK_ENDED = "start"
 
 #: Ids handed to one `IN (...)` list at most.
 _CHUNK = 500
-
-
-class Unreadable(OSError):
-    """A read that cannot open or read the database, with the reason in plain words."""
-
-    def __init__(self, reason: str):
-        super().__init__(reason)
-        self.reason = reason
 
 
 class MissingSession(Unreadable):

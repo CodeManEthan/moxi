@@ -36,7 +36,7 @@ def test_interface_1_holds_its_names():
 
 def test_the_interface_signatures_hold_their_parameters():
     sig = inspect.signature(api.read_back)
-    assert list(sig.parameters) == ["path", "block", "limit", "head"]
+    assert list(sig.parameters)[:4] == ["path", "block", "limit", "head"]
     assert sig.parameters["block"].kind is inspect.Parameter.KEYWORD_ONLY
     assert sig.parameters["block"].default is inspect.Parameter.empty
     assert sig.parameters["limit"].default is inspect.Parameter.empty
@@ -46,8 +46,9 @@ def test_the_interface_signatures_hold_their_parameters():
         "sessions_root", "thread_id"]
 
 
-def test_the_schema_holds_claude_projects_only():
+def test_the_schema_holds_the_three_roots():
     schema = Schema.from_resource("moxi_sessions", "settings.toml")
-    assert list(schema.keys) == ["claude.projects"]
-    key = schema.keys["claude.projects"]
-    assert (key.type, key.default, key.read, key.env) == ("path", "", "use", None)
+    assert list(schema.keys) == ["claude.projects", "codex.sessions", "opencode.database"]
+    for name in schema.keys:
+        key = schema.keys[name]
+        assert (key.type, key.default, key.read, key.env) == ("path", "", "use", None)
