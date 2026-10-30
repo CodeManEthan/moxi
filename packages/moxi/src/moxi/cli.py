@@ -40,7 +40,7 @@ commands:
   modules --available [--refresh]    list the first-party modules, installed or not
   install <module> [options]         install a module and offer its optional extras
   shortcut [<module>] [--remove]     put a bare <module> command on PATH, or take it off
-  config <module> [show|path|check|init]
+  config <module> [show [--json]|path|check|init]
                                      a module's settings and its config file
   config set|unset <module> <key> ...
                                      change one of a module's settings
@@ -683,7 +683,7 @@ def _shortcut(argv: list[str]) -> int:
 # -- moxi config --------------------------------------------------------------------------
 
 _CONFIG_USAGE = """\
-usage: moxi config <module> [show|path|check|init]
+usage: moxi config <module> [show [--json]|path|check|init]
        moxi config set <module> <key> <value> [--by WHO]
        moxi config set <module> <key> (--add VALUE | --remove VALUE) [--by WHO]
        moxi config unset <module> <key> [--by WHO]
@@ -705,7 +705,11 @@ def _config(argv: list[str]) -> int:
                              "check: exit non-zero when the file cannot be read or the "
                              "module refuses it; init: "
                              "write the file with every key commented out at its default")
+    parser.add_argument("--json", action="store_true",
+                        help="with show: print the keys as one JSON list")
     args = parser.parse_args(argv)
+    if args.json and args.action != "show":
+        parser.error("--json goes with show")
     from . import config, modules
     from .paths import _layout
 
@@ -731,6 +735,9 @@ def _config(argv: list[str]) -> int:
         _error(f"{module}'s settings schema cannot be read: {exc}")
         return 1
     if schema is None:
+        if args.json:
+            print("[]")
+            return 0
         print(f"{module} has no settings.")
         return 0
     if args.action == "init":
@@ -762,6 +769,8 @@ def _config(argv: list[str]) -> int:
         state = "" if path.exists() else " (no file: every key at its default)"
         print(f"ok: {path}{state}")
         return 0
+    if args.json:
+        return _config_json(module, found, schema)
     try:
         settings = config.load(module, schema)
     except config.ConfigError as exc:
@@ -786,6 +795,112 @@ def _config(argv: list[str]) -> int:
 
 
 _DONE = {"set": "set", "unset": "unset", "add": "added to", "remove": "removed from"}
+
+
+def _config_json(module: str, found, schema) -> int:
+    """`moxi config <module> show --json`: one JSON list, one object per live key.
+
+    Each object holds the key's schema fields (`name`, `type`, `default`, `doc`,
+    `values`, `read`, `env`, `needs`, `items`), its `value` and its `source` (`default`,
+    `file` or `env`). A switch table also holds `switch_table: true` and `entries`, one
+    `{name, value, source, named_by}` per entry in the file and per entry the module's
+    units, wraps and questions name as a switch (see `_switch_names`). When the file
+    cannot be read the output is one `{"error", "fix"}` object instead, and the exit 1.
+    """
+    import json
+
+    from . import config
+
+    try:
+        settings = config.load(module, schema)
+    except config.ConfigError as exc:
+        print(json.dumps({"error": exc.problem, "fix": exc.fix}, indent=2))
+        return 1
+    names: list = []
+    out = []
+    for key in schema.live():
+        item = {field: _plain_json(getattr(key, field))
+                for field in ("name", "type", "default", "doc", "values", "read", "env",
+                              "needs", "items")}
+        item["value"] = _plain_json(settings[key.name])
+        item["source"] = settings.source(key.name)
+        if config.is_switch_table(key):
+            if not names:
+                names.append(_switch_names(module, found))
+            named, unavailable = names[0]
+            item["switch_table"] = True
+            item["entries"] = _switch_entries(key.name, settings, named,
+                                              unavailable is None)
+            if unavailable is not None:
+                item["declarations"] = "unavailable"
+                item["reason"] = unavailable
+        out.append(item)
+    print(json.dumps(out, indent=2))
+    return 0
+
+
+def _plain_json(value):
+    from collections.abc import Mapping as _Mapping
+    from pathlib import PurePath
+
+    if isinstance(value, PurePath):
+        return str(value)
+    if isinstance(value, _Mapping):
+        return {str(k): _plain_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_plain_json(v) for v in value]
+    return value
+
+
+def _switch_names(module: str, found) -> tuple[dict[str, list[str]], str | None]:
+    """What names each switch of `module`: `{switch: ["daemon:<n>", "timer:<n>",
+    "wrap:<ref>", "question"]}`, from its merged declarations (the read `plan` makes, with
+    its time limit), its wraps and its `QUESTIONS`; and the reason when the declarations
+    could not be read (None when they were), in which case the table is empty."""
+    named: dict[str, list[str]] = {}
+    if found is None:
+        return named, None
+    from . import units
+
+    try:
+        decl = units.declarations(module)
+    except units.DeclarationError as exc:
+        return {}, f"UNITS_FROM failed: {exc.text}"
+    for kind, table in (("daemon", decl.daemons), ("timer", decl.timers)):
+        for name, entry in table.items():
+            if entry.get("switch"):
+                named.setdefault(entry["switch"], []).append(f"{kind}:{name}")
+    try:
+        wrapped = units.wraps(module)
+    except OSError:
+        wrapped = {}
+    for ref, wrap in sorted(wrapped.items()):
+        named.setdefault(wrap.key, []).append(f"wrap:{ref}")
+    for key in found.questions:
+        named.setdefault(key, []).append("question")
+    return named, None
+
+
+def _switch_entries(table: str, settings, named: dict[str, list[str]],
+                    with_named: bool) -> list[dict]:
+    """A switch table's entries: each in the file, then each a switch names that the file
+    lacks (false, from the default); by entry name."""
+    in_file = {}
+    if settings.source(table) == "file":
+        in_file = dict(settings[table] or {})
+    by_entry: dict[str, list[str]] = {}
+    if with_named:
+        for switch, by in named.items():
+            head, dot, entry = switch.rpartition(".")
+            if dot and head == table and entry:
+                by_entry.setdefault(entry, []).extend(by)
+    entries = []
+    for entry in sorted(set(in_file) | set(by_entry)):
+        there = entry in in_file
+        entries.append({"name": entry, "value": bool(in_file[entry]) if there else False,
+                        "source": "file" if there else "default",
+                        "named_by": by_entry.get(entry, [])})
+    return entries
 
 
 def _last_set(records: list[dict], keys) -> dict[str, dict]:
