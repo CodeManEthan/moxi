@@ -46,7 +46,7 @@ def test_the_environment_is_what_the_fence_says(fence, tmp_path):
     assert current == {k: v for k, v in fence.env.items() if k != "PYTEST_CURRENT_TEST"}
     modules = testing._modules()
     assert modules, "the workspace installs Moxi modules; none found"
-    expected = set(testing.HARNESS_HOMES) | {"XDG_RUNTIME_DIR"} | {
+    expected = set(testing.HARNESS_HOMES) | {"XDG_RUNTIME_DIR", "TMPDIR"} | {
         f"MOXI_{m.upper()}_HOME" for m in modules}
     for key in os.environ:
         assert (key in expected or key in testing.KEPT_ENV or key.startswith("LC_")), key
@@ -58,6 +58,7 @@ def test_the_environment_is_what_the_fence_says(fence, tmp_path):
         assert Path(os.environ[key]) == fence.home / rel
         assert Path(os.environ[key]).is_relative_to(tmp_path)
     assert os.environ["XDG_RUNTIME_DIR"] == str(fence.runtime)
+    assert os.environ["TMPDIR"] == str(fence.short) == tempfile.gettempdir()
     assert fence.runtime.is_dir() and (fence.runtime.stat().st_mode & 0o777) == 0o700
     for module in modules:
         home = Path(os.environ[f"MOXI_{module.upper()}_HOME"])
@@ -217,6 +218,105 @@ def test_another_thread_is_fenced_too():
     assert len(errors) == 1
 
 
+# --- byte code and the narrow roots ---------------------------------------------------
+
+@pytest.fixture(scope="module")
+def outside():
+    """A directory outside every test's tmp, made unfenced (a wider-scoped fixture is),
+    with a module in it never imported and no `__pycache__`, one `__pycache__` that is
+    there already, and a listening socket like another process's under /tmp."""
+    where = Path(tempfile.mkdtemp(prefix="mxd-out-", dir="/tmp"))
+    name = f"fresh_{uuid.uuid4().hex}"
+    (where / "src").mkdir()
+    (where / "src" / f"{name}.py").write_text("VALUE = 7\n")
+    (where / "cached" / "__pycache__").mkdir(parents=True)
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(where / "sock"))
+    listener.listen()
+    try:
+        yield where, name
+    finally:
+        listener.close()
+        shutil.rmtree(where, ignore_errors=True)
+
+
+def test_a_module_first_imported_in_a_test_writes_no_byte_code(outside, monkeypatch):
+    where, name = outside
+    import importlib
+    import sys
+
+    assert sys.dont_write_bytecode
+    monkeypatch.syspath_prepend(str(where / "src"))
+    monkeypatch.delitem(sys.modules, name, raising=False)
+    assert importlib.import_module(name).VALUE == 7
+    assert not (where / "src" / "__pycache__").exists()
+
+
+def test_a_write_into_a_pycache_outside_the_tmp_fails(outside):
+    where, _ = outside
+    refused(lambda: (where / "cached" / "__pycache__" / "x.cpython-312.pyc").write_bytes(b""))
+    refused(lambda: os.mkdir(where / "src" / "__pycache__"))
+
+
+def test_the_rest_of_the_temp_dirs_is_outside(outside, fence, tmp_path_factory):
+    where, _ = outside
+    refused(lambda: (where / "f").write_text("x"))             # another process's, in /tmp
+    basetemp = tmp_path_factory.getbasetemp()
+    refused(lambda: (basetemp.parent / f"stray-{uuid.uuid4().hex}").write_text("x"))
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        refused(lambda: s.connect(str(where / "sock")))
+    assert fence.roots == (basetemp.resolve(), fence.short.resolve())
+
+
+def test_temp_files_land_in_the_test_s_short_directory(fence):
+    fd, name = tempfile.mkstemp()
+    os.close(fd)
+    assert Path(name).parent == fence.short
+    with testing.short_dir() as where:
+        assert where.parent == fence.short and len(str(where / "sock")) < 40
+
+
+@pytest.fixture(scope="module")
+def module_server():
+    """A server a wider-scoped fixture serves, its socket in a short_dir made unfenced."""
+    class Server(socketserver.UnixStreamServer):
+        pass
+
+    with testing.served(lambda path: Server(str(path), _Echo)) as server:
+        yield server
+
+
+def test_a_test_reaches_a_server_a_wider_fixture_serves(module_server):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
+        c.settimeout(5)
+        c.connect(module_server.server_address)
+        c.sendall(b"ping")
+        assert c.recv(64) == b"ping"
+
+
+# --- a pytest run inside a test --------------------------------------------------------
+
+def test_an_in_process_run_puts_the_outer_fence_back(pytester):
+    pytester.makeconftest('pytest_plugins = ["moxi_dev.testing"]\n')
+    pytester.makepyfile(test_inner=(
+        "import os, tempfile\n"
+        "def test_inner(tmp_path, fence):\n"
+        "    (tmp_path / 'f').write_text('x')\n"
+        "    assert tempfile.gettempdir() == str(fence.short)\n"))
+    roots, short, session = testing._GUARD.roots, testing._GUARD.short, dict(testing._SESSION)
+    start = len(testing._GUARD.breaches)
+    with pytest.raises(FenceError):
+        stray().write_text("x")                  # a refusal of the outer test's own
+    result = pytester.runpytest("-p", "no:cacheprovider")
+    result.assert_outcomes(passed=1)
+    assert testing._GUARD.active and testing._GUARD.network
+    assert (testing._GUARD.roots, testing._GUARD.short) == (roots, short)
+    assert testing._SESSION == session
+    assert len(testing._GUARD.breaches) == start + 1, "the outer refusal is still recorded"
+    del testing._GUARD.breaches[start:]
+    refused(lambda: stray().write_text("x"))
+
+
 # --- the network -----------------------------------------------------------------------
 
 @pytest.mark.parametrize("host", ["192.0.2.1", "8.8.8.8", "10.0.0.1"])
@@ -325,6 +425,10 @@ def test_sees_only_the_fenced_environment(fence):
 def test_live():
     from moxi_dev import testing
     assert testing._GUARD.network is False
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        with pytest.raises(OSError) as caught:     # lifted: the kernel answers
+            s.connect(f"/run/user/{os.getuid()}/moxi-dev-probe-{uuid.uuid4().hex}.sock")
+        assert not isinstance(caught.value, testing.FenceError)
 '''
 
 

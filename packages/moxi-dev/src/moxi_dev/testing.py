@@ -9,25 +9,28 @@ package that names the plugin is fenced.
 
 The fence, around every test (the autouse fixture `fence`):
 
-- The environment. Emptied to `PATH`, the locale (`LANG`, `LANGUAGE`, `LC_*`), `TMPDIR`
-  (so a child's temp files land where this process's do) and the variables pytest and
-  xdist set for themselves (`PYTEST_CURRENT_TEST`, `PYTEST_VERSION`,
+- The environment. Emptied to `PATH`, the locale (`LANG`, `LANGUAGE`, `LC_*`) and the
+  variables pytest and xdist set for themselves (`PYTEST_CURRENT_TEST`, `PYTEST_VERSION`,
   `PYTEST_XDIST_WORKER`, `PYTEST_XDIST_WORKER_COUNT`, `PYTEST_XDIST_TESTRUNUID`). Then
   every harness home a package reads is pointed into the test's tmp: `HOME` and the XDG
   homes under `tmp_path / "home"`, `CLAUDE_CONFIG_DIR` and `CODEX_HOME` inside it, and
   `XDG_RUNTIME_DIR` and each installed module's `MOXI_<MODULE>_HOME` in a short
   per-test directory (see `short_dir`), so a socket under them keeps a short path.
+  `TMPDIR`, and `tempfile`'s own default with it, point into that short directory too,
+  so a temp file the test or a child makes lands in the test's tmp and goes with it.
   OpenCode reads its homes through `XDG_*`; its content variables (`OPENCODE_*`) are
   cleared with the rest. A package that starts reading another home adds it to
   `HARNESS_HOMES`.
+- Byte code. `sys.dont_write_bytecode` is set for the test, so a module first imported
+  inside it is compiled in memory and nothing is written next to its source.
 - Writes. An audit hook (`sys.addaudithook`) refuses, with `FenceError`, a write whose
-  path resolves outside the allowed roots: the pytest temp root (`--basetemp`, else the
-  run's `pytest-of-<user>/pytest-<n>` directory), the system temp directory pytest uses
-  (`PYTEST_DEBUG_TEMPROOT`, else `tempfile.gettempdir()`), `tempfile.gettempdir()`
-  itself, and the root `short_dir` makes its directories in. Besides those it lets
-  through, and only these: `os.devnull`, `/dev/tty` and `/dev/pts/*` (terminals), and a
-  file whose directory is named `__pycache__` (the byte code the interpreter writes as
-  a test imports a module for the first time). A write is: `open` for writing or
+  path resolves outside the test's own tmp: the run's pytest temp root (`--basetemp`,
+  else the `pytest-of-<user>/pytest-<n>` directory, or under xdist the worker's own
+  directory in it), which holds the test's `tmp_path` and whatever `tmp_path_factory`
+  makes, and the test's short directory, with every directory `short_dir` has made and
+  not yet removed. The rest of the system temp directories (other runs, other
+  processes' files) is outside. Besides those it lets through, and only these:
+  `os.devnull`, `/dev/tty` and `/dev/pts/*` (terminals). A write is: `open` for writing or
   creating, `os.mkdir`, `os.rename`/`os.replace` (both ends), `os.remove`, `os.rmdir`,
   `os.symlink` and `os.link` (the new name), `os.truncate`, `os.chmod`, `os.chown`,
   `os.utime`, `os.setxattr`, `os.removexattr`, `shutil.rmtree`, `shutil.copyfile`,
@@ -39,11 +42,16 @@ The fence, around every test (the autouse fixture `fence`):
   `::1`, `::ffff:127.*`, the unspecified address, `localhost` and `*.localhost`; any
   other host name is refused, though Python has looked it up before the hook sees the
   connect, so a lookup alone is not fenced), and a connect to a filesystem `AF_UNIX`
-  socket outside the allowed roots (a real daemon's socket). A `live` test lifts the
-  network part; its writes stay fenced.
+  socket outside the allowed roots (a real daemon's socket, a tmux or X11 socket under
+  `/tmp`). A `live` test lifts the network part, both the address check and the
+  `AF_UNIX` connect check; its writes, a `bind` included, stay fenced.
 
 The hook can't be removed, so it checks a flag the fixture raises for the test's setup,
-call and teardown and lowers after; a session-scoped fixture is not fenced. A refusal
+call and teardown and lowers after. The fixture is function-scoped, so a fixture of any
+wider scope (class, module, package or session) runs unfenced: it sees the real
+environment and may write anywhere. A pytest run inside a test, in process
+(`pytester.runpytest()`), fences its own tests and puts the outer test's fence back
+when it ends. A refusal
 raises `FenceError` (a `PermissionError`) where the write or connect was tried and is
 also recorded, so a test that catches the error still fails. The hook sees this process
 only: a subprocess gets the fenced environment but not the hook. Paths are judged after
@@ -124,7 +132,7 @@ HARNESS_HOMES = {
 }
 
 #: Variables carried into the fence unchanged, when set.
-KEPT_ENV = ("PATH", "LANG", "LANGUAGE", "TMPDIR", "PYTEST_CURRENT_TEST", "PYTEST_VERSION",
+KEPT_ENV = ("PATH", "LANG", "LANGUAGE", "PYTEST_CURRENT_TEST", "PYTEST_VERSION",
             "PYTEST_XDIST_WORKER", "PYTEST_XDIST_WORKER_COUNT", "PYTEST_XDIST_TESTRUNUID")
 
 #: What `uv_env` adds to the fenced environment, besides uv's two directories.
@@ -171,13 +179,25 @@ class _Guard:
         self.active = False
         self.network = True
         self.roots: tuple[str, ...] = ()
+        self.short: str | None = None          # the current test's short directory
         self.breaches: list[str] = []
         self.reported = 0
+
+    def save(self) -> tuple:
+        return (self.active, self.network, self.roots, self.short, list(self.breaches),
+                self.reported)
+
+    def restore(self, saved: tuple) -> None:
+        (self.active, self.network, self.roots, self.short, breaches,
+         self.reported) = saved
+        self.breaches[:] = breaches
 
 
 _GUARD = _Guard()
 _LOCAL = threading.local()
 _INSTALLED = False
+#: The directories `short_dir` has made and not yet removed, by their real paths.
+_SHORT_DIRS: set[str] = set()
 
 
 def _fd_path(dir_fd: object) -> str | None:
@@ -213,9 +233,8 @@ def _resolve(path: object, dir_fd: object = None, *, follow: bool = True) -> str
 def _allowed(real: str) -> bool:
     if real == os.devnull or real == "/dev/tty" or real.startswith("/dev/pts/"):
         return True
-    if os.path.basename(os.path.dirname(real)) == "__pycache__":
-        return True
-    return any(real == root or real.startswith(root + os.sep) for root in _GUARD.roots)
+    return any(real == root or real.startswith(root + os.sep)
+               for root in (*_GUARD.roots, *_SHORT_DIRS))
 
 
 def _write(event: str, path: object, dir_fd: object = None, *,
@@ -282,7 +301,7 @@ def _on_reach(event: str) -> Callable[[tuple], str | None]:
         family = getattr(sock, "family", None)
         if family == getattr(socket, "AF_UNIX", object()):
             path = _unix_path(address)
-            return None if path is None else _write(event, path)
+            return None if path is None or not _GUARD.network else _write(event, path)
         if family in (socket.AF_INET, socket.AF_INET6) and _GUARD.network:
             if isinstance(address, tuple) and address and not _loopback(address[0]):
                 return f"{event} {address[0]}:{address[1] if len(address) > 1 else ''}: " \
@@ -372,7 +391,10 @@ _SESSION: dict[str, Any] = {}
 
 
 def _short_root() -> str:
-    """Where short directories go: /tmp where it is a directory, else the temp dir."""
+    """Where short directories go: inside the current test's short directory while a
+    test is fenced, else /tmp where it is a directory, else the temp dir."""
+    if _GUARD.active and _GUARD.short:
+        return _GUARD.short
     return "/tmp" if os.path.isdir("/tmp") and os.access("/tmp", os.W_OK) \
         else tempfile.gettempdir()
 
@@ -424,11 +446,10 @@ def _quiet_fsync(fd: Any) -> None:
 def pytest_configure(config: pytest.Config) -> None:
     for name, line in MARKERS.items():
         config.addinivalue_line("markers", f"{name}: {line}")
-    _SESSION["live"] = os.environ.get(LIVE_ENV) == "1"
-    _SESSION["temproot"] = os.environ.get("PYTEST_DEBUG_TEMPROOT") or tempfile.gettempdir()
-    _SESSION["modules"] = _modules()
     # Read once, from the environment this process started with: a pytest run inside a
     # test (pytester's in-process run) already sees the fenced one.
+    _SESSION.setdefault("live", os.environ.get(LIVE_ENV) == "1")
+    _SESSION.setdefault("modules", _modules())
     _SESSION.setdefault("uv", _uv_dirs(os.environ, os.path.expanduser("~")))
     _install()
 
@@ -460,30 +481,35 @@ def fence(request: pytest.FixtureRequest, tmp_path: Path,
           monkeypatch: pytest.MonkeyPatch) -> Iterator[Fence]:
     """Fence the test in: its environment, its writes and its connects (module doc)."""
     _install()
+    # A fence set up inside a fenced test (pytester's in-process run) puts the outer
+    # one back when it ends; the outermost leaves the hook idle.
+    outer = _GUARD.save()
     basetemp = tmp_path_factory.getbasetemp()
-    short_root = _short_root()
-    short = Path(tempfile.mkdtemp(prefix="mx-", dir=short_root))
+    short = Path(tempfile.mkdtemp(prefix="mx-", dir=_short_root()))
     home = tmp_path / "home"
     runtime = short / "run"
     home.mkdir()
     runtime.mkdir(mode=0o700)
     env = _fenced_env(os.environ, home, runtime, short,
                       _SESSION.get("modules") or _modules())
+    env["TMPDIR"] = str(short)
     for key in [k for k in os.environ if k not in env]:
         monkeypatch.delenv(key)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
+    monkeypatch.setattr(tempfile, "tempdir", str(short))
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
     if not request.node.get_closest_marker("honest_fsync"):
         monkeypatch.setattr(os, "fsync", _quiet_fsync)
         if _REAL_FDATASYNC is not None:
             monkeypatch.setattr(os, "fdatasync", _quiet_fsync)
     roots: list[str] = []
-    for root in (basetemp, _SESSION.get("temproot") or tempfile.gettempdir(),
-                 tempfile.gettempdir(), short_root):
+    for root in (basetemp, short):
         real = os.path.realpath(root)
         if real not in roots:
             roots.append(real)
     _GUARD.roots = tuple(roots)
+    _GUARD.short = os.path.realpath(short)
     _GUARD.network = not request.node.get_closest_marker("live")
     _GUARD.reported = len(_GUARD.breaches)
     _GUARD.active = True
@@ -491,12 +517,9 @@ def fence(request: pytest.FixtureRequest, tmp_path: Path,
         yield Fence(home=home, runtime=runtime, short=short, env=dict(env),
                     roots=tuple(Path(r) for r in roots))
     finally:
-        _GUARD.active = False
-        _GUARD.network = True
+        late = _GUARD.breaches[_GUARD.reported:]
+        _GUARD.restore(outer)
         shutil.rmtree(short, ignore_errors=True)
-    late = _GUARD.breaches[_GUARD.reported:]
-    _GUARD.breaches.clear()
-    _GUARD.reported = 0
     if late:
         pytest.fail("the test fence refused, outside the test's call:\n  "
                     + "\n  ".join(late), pytrace=False)
@@ -532,12 +555,17 @@ def short_dir(prefix: str = "mx-") -> Iterator[Path]:
     """A new directory with a short path (under /tmp where it can be), removed after.
 
     A Unix socket's path is limited to about 100 bytes; pytest's tmp_path is often
-    longer than that."""
+    longer than that. In a fenced test it is made inside the test's short directory;
+    made elsewhere (by a fixture of wider scope), it is one of the fence's allowed roots
+    until it is removed, so a test may reach a server whose socket is in it."""
     path = Path(tempfile.mkdtemp(prefix=prefix, dir=_short_root()))
+    real = os.path.realpath(path)
+    _SHORT_DIRS.add(real)
     try:
         yield path
     finally:
         shutil.rmtree(path, ignore_errors=True)
+        _SHORT_DIRS.discard(real)
 
 
 @contextlib.contextmanager
