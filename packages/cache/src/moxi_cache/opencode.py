@@ -1,26 +1,28 @@
 """The OpenCode clock: the start of a session's last request, read from `opencode.db`.
 
 The launcher asks OpenCode where its database is (`opencode db path`, under the server's
-environment) and passes it as `cache_source`. cache opens it read only, with a 200 ms busy
-timeout and an authorizer that allows reads of `session`, `message` and `part` and their
-`table_info`, and nothing else. The database also holds accounts and credentials, which
-cache has no reason to read. cache is the database's one reader in Moxi.
+environment) and passes it as `cache_source`. cache reads the session through sessions
+(`records`), whose reader opens the database read only, with a short busy timeout and an
+authorizer that lets it read the `session`, `message` and `part` tables and nothing else.
+The database also holds accounts and credentials, which cache has no reason to read.
 
 **The order of the read.** The next pair first: the pair OpenCode will use for a prompt
 that names no model and no agent. It is the default agent's configured model as the
 launcher reports it (`agent_model`); else the session row's `model`; else the latest user
-message's `model`; else not known. Each step reads only what it needs. A next pair on a
-free row of the lifetime table is `no-cache` at any age, whatever the last request was: a
-cold landing on a free model costs nothing. A next pair that cannot be read is `unknown`.
+message's `model`; else not known. Each step reads only what it needs: the session row
+needs only the `session` table, and the messages are read only when a step needs them. A
+next pair on a free row of the lifetime table is `no-cache` at any age, whatever the last
+request was: a cold landing on a free model costs nothing. A next pair that cannot be read
+is `unknown`.
 
-Otherwise the whole read runs. On every read: the shape check (`PRAGMA table_info` on the
-three tables), every message row classified (`role` `user` or `assistant`), and no revert
-pending. The last request is the latest `step-start` part of a qualifying assistant
-message (this session's own, not a compaction, not a summary). Its stamp is the latest
-time known to be at or before the request's start: the message's creation for its first
-step, the end of the step before it for a later one. So the clock errs old. The last pair
-is that message's `providerID` and `modelID`. Pairs that differ read `cold`; equal pairs
-are looked up in the lifetime table, `"*"` matching any model of the provider.
+Otherwise the whole session is read. On every read: every message is one the reader knows
+(`role` `user` or `assistant`), and no revert is pending. The last request is the latest
+step of a qualifying assistant message (this session's own, not a compaction, not a
+summary). Its stamp is the latest time known to be at or before the request's start: the
+message's creation for its first step, the end of the step before it for a later one. So
+the clock errs old. The last pair is that message's `providerID` and `modelID`. Pairs that
+differ read `cold`; equal pairs are looked up in the lifetime table, `"*"` matching any
+model of the provider.
 
 **`fresh`** only for a session the launcher's own start attempt created after a read that
 found no session, until its first turn ends (`turned` false), whose rows are all on the
@@ -31,11 +33,7 @@ no session id at all, on the caller's word that its attempt creates one (`new_se
 
 from __future__ import annotations
 
-import json
-import os
-import sqlite3
-from pathlib import Path
-
+from moxi_sessions.api import Source, Unreadable, known, records
 from moxi_sessions.api import claude as transcripts
 
 from . import clock as _clock
@@ -48,17 +46,13 @@ HARNESS = "opencode"
 #: The OpenCode versions whose new sessions read as `fresh`.
 CHECKED_VERSIONS = ("1.18.34",)
 
-#: The columns the reader reads, checked on every read.
-SHAPE = {
-    "session": ("id", "parent_id", "version", "model", "revert", "tokens_input",
-                "tokens_output", "tokens_reasoning", "tokens_cache_read",
-                "tokens_cache_write", "cost"),
-    "message": ("id", "session_id", "time_created", "data"),
-    "part": ("id", "message_id", "session_id", "time_created", "data"),
-}
+#: The session row's token and cost totals, all zero on a session that made no request.
 TOTALS = ("tokens_input", "tokens_output", "tokens_reasoning", "tokens_cache_read",
           "tokens_cache_write", "cost")
-BUSY_MS = 200
+
+#: The record kinds the clock reads. Tool calls and results are left out: a message
+#: names the kinds of its parts, so a tool part still keeps a session from `fresh`.
+KINDS = frozenset({"message", "request", "malformed", "other"})
 
 NO_SESSION_YET = "no session id reported yet"
 NO_SOURCE = "no OpenCode database was named for this session"
@@ -81,33 +75,6 @@ class Unread(Exception):
         self.code = code
 
 
-def _authorize(action, arg1, arg2, _db, _source):
-    if action == sqlite3.SQLITE_SELECT:
-        return sqlite3.SQLITE_OK
-    if action == sqlite3.SQLITE_READ and arg1 in SHAPE:
-        return sqlite3.SQLITE_OK
-    if action == sqlite3.SQLITE_PRAGMA and arg1 == "table_info" and arg2 in SHAPE:
-        return sqlite3.SQLITE_OK
-    return sqlite3.SQLITE_DENY
-
-
-def connect(path) -> sqlite3.Connection:
-    """The database, read only, with the busy timeout and the authorizer. Raises Unread."""
-    path = Path(path)
-    if not path.is_file():
-        raise Unread(f"the OpenCode database {path} is missing", _clock.SOURCE_UNREADABLE)
-    if not os.access(path, os.R_OK):
-        raise Unread(f"the OpenCode database {path} cannot be read",
-                     _clock.SOURCE_UNREADABLE)
-    try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=BUSY_MS / 1000)
-    except sqlite3.Error as e:
-        raise Unread(f"the OpenCode database {path} could not be opened ({e})",
-                     _clock.SOURCE_UNREADABLE) from e
-    conn.set_authorizer(_authorize)
-    return conn
-
-
 def _parse_model(value) -> tuple | None:
     """`"provider/model"` -> (provider, model), else None."""
     if not isinstance(value, str) or "/" not in value:
@@ -116,94 +83,87 @@ def _parse_model(value) -> tuple | None:
     return (provider, model) if provider and model else None
 
 
-class _Db:
-    """One read's connection and what it has checked, opened on first use."""
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+class _Session:
+    """One read of the session through sessions, opened on first use: the session row
+    first, the records only when a step needs them."""
 
     def __init__(self, path, session_id):
         self.path = path
         self.session_id = session_id
-        self.conn = None
-        self.row = None
-        self.messages = None
+        self.read = None
+        self._row = None
+        self._records = None
         self.failed: Unread | None = None
 
     def close(self):
-        if self.conn is not None:
-            self.conn.close()
+        if self.read is not None:
+            self.read.close()
 
-    def query(self, sql, args=()):
-        try:
-            return self.conn.execute(sql, args).fetchall()
-        except sqlite3.Error as e:
-            raise Unread(f"the OpenCode database could not be read ({e})",
-                         _clock.UNREADABLE) from e
-
-    def session(self):
-        """Open, check the shape, and read the session row. Raises Unread."""
-        if self.row is not None:
-            return self.row
+    def row(self):
+        """The session row (sessions' `SessionRow`). Raises Unread."""
+        if self._row is not None:
+            return self._row
         if self.failed is not None:
             raise self.failed
         try:
-            self.row = self._open()
+            self._row = self._open()
         except Unread as e:
             self.failed = e
             raise
-        return self.row
+        return self._row
 
-    def _open(self) -> dict:
+    def _open(self):
         if not self.path:
             raise Unread(NO_SOURCE, _clock.NO_SOURCE)
         if not self.session_id:
             raise Unread(NO_SESSION_YET, _clock.NO_SESSION_YET)
-        self.conn = connect(self.path)
-        self.check_shape("session")
-        cols = SHAPE["session"]
-        rows = self.query(f"SELECT {', '.join(cols)} FROM session WHERE id = ?",
-                          (self.session_id,))
-        if not rows:
-            raise Unread(f"no session {self.session_id} in {self.path}", _clock.NO_RECORD)
-        return dict(zip(cols, rows[0]))
+        from moxi_sessions.api import opencode as reader
+        try:
+            self.read = records(Source(HARNESS, str(self.path), self.session_id),
+                                kinds=KINDS)
+            return self.read.header.session_row
+        except reader.MissingSession:
+            raise Unread(f"no session {self.session_id} in {self.path}",
+                         _clock.NO_RECORD) from None
+        except Unreadable as e:
+            raise Unread(e.reason, _clock.SOURCE_UNREADABLE) from e
 
-    def check_shape(self, *tables) -> None:
-        """Each column the reader reads from `tables` exists. Raises Unread naming the
-        first that does not. The session row's own step needs only `session`'s."""
-        for table in tables:
-            have = {r[1] for r in self.query(f"PRAGMA table_info({table})")}
-            if not have:
-                raise Unread(f"the OpenCode database has no `{table}` table")
-            missing = [c for c in SHAPE[table] if c not in have]
-            if missing:
-                raise Unread(f"the OpenCode database's `{table}` table has no "
-                             f"`{missing[0]}` column")
-
-    def classified(self):
-        """Every message row of the session, each a JSON object with role user or
-        assistant; oldest first as (id, time_created, data). Raises Unread."""
-        if self.messages is not None:
-            return self.messages
-        self.session()
-        self.check_shape("message", "part")
-        out = []
-        for mid, created, raw in self.query(
-                "SELECT id, time_created, data FROM message WHERE session_id = ? "
-                "ORDER BY time_created, id", (self.session_id,)):
+    def records(self) -> list:
+        """Every record the clock reads, in the session's order. Raises Unread."""
+        if self._records is None:
+            self.row()
             try:
-                data = json.loads(raw)
-            except (TypeError, ValueError):
-                raise Unread(UNSHAPED_MESSAGE) from None
-            if not isinstance(data, dict) or data.get("role") not in ("user", "assistant"):
-                raise Unread(UNSHAPED_MESSAGE)
-            out.append((mid, created, data))
-        self.messages = out
+                self._records = list(self.read)
+            except Unreadable as e:
+                # The read is over once it fails: every later ask fails the same way.
+                self.failed = Unread(e.reason, _clock.SOURCE_UNREADABLE)
+                raise self.failed from e
+        return self._records
+
+    def messages(self) -> list:
+        """Every message of the session as (its message record, its requests), oldest
+        first. Raises Unread when a message is not one the reader knows: a row that is
+        not a JSON object, or has a role other than user or assistant."""
+        out = []
+        for record in self.records():
+            if record.at.get("table") == "message":
+                if record.kind != "message":
+                    raise Unread(UNSHAPED_MESSAGE)
+                out.append((record, []))
+            elif record.kind == "request" and out:
+                out[-1][1].append(record)
         return out
 
     def no_revert(self):
-        if self.session().get("revert") is not None:
+        if self.row().revert_pending:
             raise Unread(REVERT, _clock.REVERT)
 
 
-def next_pair(db: _Db, agent_model):
+def next_pair(session: _Session, agent_model):
     """(provider, model) of the next request, by the first step that applies; raises
     Unread when it cannot be known."""
     if agent_model is MISSING or agent_model is None:
@@ -218,24 +178,20 @@ def next_pair(db: _Db, agent_model):
             raise Unread(f"{NO_PAIR} (the default agent's model {configured!r} does not "
                          "parse)", _clock.NO_PAIR)
         return pair
-    row = db.session()
-    raw = row.get("model")
-    if raw is not None:
-        try:
-            value = json.loads(raw) if isinstance(raw, str) else None
-        except ValueError:
-            value = None
+    value = session.row().model
+    if value is not None:
         if (not isinstance(value, dict) or not isinstance(value.get("providerID"), str)
                 or not isinstance(value.get("id"), str) or not value["providerID"]
                 or not value["id"]):
             raise Unread(f"{NO_PAIR} (the session's model does not parse)", _clock.NO_PAIR)
         return value["providerID"], value["id"]
-    messages = db.classified()
-    db.no_revert()
-    for _mid, _created, data in reversed(messages):
-        if data.get("role") != "user" or "model" not in data:
+    messages = session.messages()
+    session.no_revert()
+    for message, _requests in reversed(messages):
+        # A user message that names no model has no known model.
+        if message.role != "user" or not known(message.model):
             continue
-        model = data.get("model")
+        model = message.model
         if (not isinstance(model, dict) or not isinstance(model.get("providerID"), str)
                 or not isinstance(model.get("modelID"), str) or not model["providerID"]
                 or not model["modelID"]):
@@ -255,21 +211,22 @@ def read(session_id, *, cache_source, turned, new_session, agent_model=MISSING,
     if session_id and (not isinstance(session_id, str)
                        or not transcripts.SAFE_ID_RE.match(session_id)):
         return bad_id("session id", session_id)
-    db = _Db(cache_source, session_id)
+    session = _Session(cache_source, session_id)
     try:
-        return _read(db, session_id, table=table, cache_source=cache_source, turned=turned,
-                     new_session=new_session, agent_model=agent_model, now=now)
+        return _read(session, session_id, table=table, cache_source=cache_source,
+                     turned=turned, new_session=new_session, agent_model=agent_model,
+                     now=now)
     except Unread as e:
         return unknown(e.code, str(e))
     finally:
-        db.close()
+        session.close()
 
 
-def _read(db: _Db, session_id, *, table, cache_source, turned, new_session, agent_model,
-          now) -> Clock:
+def _read(session: _Session, session_id, *, table, cache_source, turned, new_session,
+          agent_model, now) -> Clock:
     # The next pair first: on a free row nothing else is read or checked.
     try:
-        upcoming = next_pair(db, agent_model)
+        upcoming = next_pair(session, agent_model)
         unknown_next = None
     except Unread as e:
         upcoming, unknown_next = None, e
@@ -282,19 +239,18 @@ def _read(db: _Db, session_id, *, table, cache_source, turned, new_session, agen
         return unknown(_clock.NO_SESSION_YET, NO_SESSION_YET)
     if not cache_source:
         return unknown(_clock.NO_SOURCE, NO_SOURCE)
-    row = db.session()
-    messages = db.classified()
-    db.no_revert()
-    last = _last_request(db, messages)
+    row = session.row()
+    messages = session.messages()
+    session.no_revert()
+    last = _last_request(messages)
     if last is None:
-        return _no_request(db, row, messages, turned)
-    stamp_ms, data = last
-    provider, model = data.get("providerID"), data.get("modelID")
+        return _no_request(row, session.records(), turned)
+    ts, request = last
+    provider, model = request.provider, request.model
     if unknown_next is not None:
         return unknown(unknown_next.code, str(unknown_next))
     if not (isinstance(provider, str) and provider and isinstance(model, str) and model):
         return unknown(_clock.NO_PAIR, NO_PAIR)
-    ts = stamp_ms / 1000.0
     skew = future_stamp(ts, now)
     if skew:
         return unknown(_clock.FUTURE_STAMP, skew)
@@ -315,68 +271,59 @@ def _read(db: _Db, session_id, *, table, cache_source, turned, new_session, agen
                  basis="documented", provider=provider, model=model)
 
 
-def _qualifies(data: dict) -> bool:
-    return (data.get("role") == "assistant" and data.get("agent") != "compaction"
-            and data.get("summary") is not True)
+def _qualifies(message) -> bool:
+    return (message.role == "assistant" and message.extra.get("agent") != "compaction"
+            and message.flags.get("summary") is not True)
 
 
-def _last_request(db: _Db, messages):
-    """(stamp in epoch ms, the assistant message's data) for the session's last request,
-    or None when the session has no assistant message. Raises Unread when it has
-    assistant messages and none with a step the reader can use."""
-    assistants = [m for m in messages if m[2].get("role") == "assistant"]
+def _last_request(messages):
+    """(stamp in epoch seconds, the request) for the session's last request, or None when
+    the session has no assistant message. Raises Unread when it has assistant messages
+    and none with a step the reader can use.
+
+    A step is a request with a start time (a `step-start` part). The stamp of a message's
+    first step is the message's creation; a later step's is the end of the newest step
+    finished before it in that message, or the message's creation when none was."""
+    assistants = [m for m in messages if m[0].role == "assistant"]
     if not assistants:
         return None
-    for mid, created, data in reversed(assistants):
-        if not _qualifies(data):
+    for message, requests in reversed(assistants):
+        if not _qualifies(message):
             continue
-        parts = []
-        for _pid, pcreated, raw in db.query(
-                "SELECT id, time_created, data FROM part WHERE message_id = ? "
-                "AND session_id = ? ORDER BY time_created, id", (mid, db.session_id)):
-            try:
-                pdata = json.loads(raw)
-            except (TypeError, ValueError):
-                continue
-            if isinstance(pdata, dict):
-                parts.append((pcreated, pdata.get("type")))
-        starts = [i for i, (_c, t) in enumerate(parts) if t == "step-start"]
-        if not starts:
+        steps = [i for i, r in enumerate(requests) if known(r.start_time)]
+        if not steps:
             continue
-        last = starts[-1]
-        stamp = created
-        if last != starts[0]:
-            for c, t in reversed(parts[:last]):
-                if t == "step-finish":
-                    stamp = c
+        last = requests[steps[-1]]
+        stamp = last.extra.get("message_time")
+        if steps[-1] != steps[0]:
+            for earlier in reversed(requests[:steps[-1]]):
+                if earlier.final:
+                    stamp = earlier.time
                     break
-        if not isinstance(stamp, (int, float)) or isinstance(stamp, bool):
+        if not _is_number(stamp):
             raise Unread("the session's last request has no readable time", _clock.NO_STAMP)
-        return stamp, data
+        return float(stamp), last
     raise Unread(UNSHAPED_ROWS)
 
 
-def _no_request(db: _Db, row: dict, messages, turned) -> Clock:
+def _fresh_record(record) -> bool:
+    """A record of a session that has made no request: a user message whose parts are
+    all text."""
+    return (record.kind == "message" and record.role == "user" and not record.reasoning
+            and all(kind == "text" for kind in record.content_kinds))
+
+
+def _no_request(row, session_records, turned) -> Clock:
     """No assistant message: `fresh` only on every witness of a new session."""
     if turned:
         return unknown(_clock.NO_REQUEST, NO_REQUEST)
-    if row.get("version") not in CHECKED_VERSIONS:
+    if row.version not in CHECKED_VERSIONS:
         return unknown(_clock.NO_REQUEST, NO_REQUEST)
-    if any(row.get(k) not in (0, 0.0) for k in TOTALS):
+    if any(getattr(row, k) not in (0, 0.0) for k in TOTALS):
         return unknown(_clock.NO_REQUEST, NO_REQUEST)
-    users = {mid for mid, _c, data in messages if data.get("role") == "user"}
-    if len(users) != len(messages):
+    if not all(_fresh_record(r) for r in session_records):
         return unknown(_clock.NO_REQUEST, NO_REQUEST)
-    for message_id, raw in db.query("SELECT message_id, data FROM part WHERE session_id = ?",
-                                    (db.session_id,)):
-        try:
-            pdata = json.loads(raw)
-        except (TypeError, ValueError):
-            return unknown(_clock.NO_REQUEST, NO_REQUEST)
-        if (not isinstance(pdata, dict) or pdata.get("type") != "text"
-                or message_id not in users):
-            return unknown(_clock.NO_REQUEST, NO_REQUEST)
     return Clock(FRESH)
 
 
-__all__ = ["HARNESS", "CHECKED_VERSIONS", "SHAPE", "connect", "read", "next_pair", "Unread"]
+__all__ = ["HARNESS", "CHECKED_VERSIONS", "read", "next_pair", "Unread"]
