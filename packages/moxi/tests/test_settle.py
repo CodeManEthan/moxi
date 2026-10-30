@@ -447,6 +447,17 @@ def test_setup_json_holds_the_version_and_a_new_version_restarts(w, capsys, monk
     assert _settle.setup_version("demo") == "0.2.0"
 
 
+@pytest.mark.parametrize("setup", ["fail", "exit"])
+def test_a_failed_setup_leaves_setup_json_alone(w, capsys, monkeypatch, setup):
+    w.installed(DAEMONS=ONE)
+    before = _settle.setup_path().read_bytes()
+    w.module(DAEMONS=ONE, version="0.2.0")
+    code, out = settle(w, capsys, monkeypatch, setup=setup)
+    assert code == 1 and "setup demo: failed" in out
+    assert _settle.setup_path().read_bytes() == before
+    assert _settle.setup_version("demo") == "0.1.0"
+
+
 def test_a_module_without_setup_still_settles_and_is_recorded(w, capsys, monkeypatch):
     w.module(DAEMONS=ONE, SETUP="None")
     code, out = settle(w, capsys, monkeypatch)
