@@ -2,12 +2,19 @@
 
     moxi usage prices [MODEL] [--provider P] [--json]
     moxi usage prices update [--dry-run] [--revert] [--json]
+    moxi usage index [--rebuild] [--force] [--no-wait] [--check] [--json]
 
 `prices MODEL` prints the model's facts and where each came from, and exits 1 when the
 table does not know the model; `prices` alone prints the layers in effect. `prices update`
 fetches LiteLLM's price file and writes the snapshot layer (`moxi_usage.prices`); a fetch
 that fails exits 75, a result usage will not use exits 3. With `--json`, each prints one
 JSON object.
+
+`index` runs the token index's pass (`moxi_usage.index`) and prints what it did: exit 75
+when another pass holds the index past `index.wait_seconds` (at once with `--no-wait`), 3
+when the index's schema can't move (`--rebuild --force` drops offline archive lanes'
+rows to let it), and with `--check` 1 when the stored claims differ from the `claimed`
+view, naming the keys.
 """
 
 from __future__ import annotations
@@ -41,8 +48,11 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi usage") -> int:
     prices.add_argument("model", nargs="?", metavar="MODEL", help="a model id")
     prices.add_argument("--provider", help="the request's provider, for the lookup")
     prices.add_argument("--json", action="store_true", help="print one JSON object")
+    _index_parser(verbs)
     parsed = parser.parse_args(args)
     try:
+        if parsed.verb == "index":
+            return _index(parsed, prog)
         return _prices(parsed)
     except ConfigError as exc:
         print(f"{prog}: {exc}", file=sys.stderr)
@@ -163,6 +173,104 @@ def _print_facts(facts: Any) -> None:
         print(f"  period          {json.dumps(provenance['period'])}")
     if data.get("unknown"):
         print(f"  unknown         {', '.join(data['unknown'])}")
+
+
+# --- index ----------------------------------------------------------------------------
+
+#: How many keys `index --check` names before it counts the rest.
+KEYS_SHOWN = 20
+
+
+def _index_parser(verbs: Any) -> None:
+    index = verbs.add_parser(
+        "index", help="read what changed in the harnesses' records into the token index",
+        description="Run the token index's pass: read every source that changed since the "
+                    "last pass, and print what it did.")
+    index.add_argument("--rebuild", action="store_true",
+                       help="read every source again from its start")
+    index.add_argument("--force", action="store_true",
+                       help="let a schema change drop the rows of offline archive lanes")
+    index.add_argument("--no-wait", action="store_true",
+                       help="exit 75 at once when another pass holds the index")
+    index.add_argument("--check", action="store_true",
+                       help="after the pass, compare the stored claims with the claimed "
+                            "view; exit 1 naming the keys that differ")
+    index.add_argument("--json", action="store_true", help="print one JSON object")
+
+
+def _index(args: argparse.Namespace, prog: str) -> int:
+    import moxi.files
+    import moxi.store
+
+    from . import index, store
+
+    try:
+        result = index.pass_(rebuild=args.rebuild, force=args.force,
+                             wait=0.0 if args.no_wait else None)
+    except moxi.files.LockTimeout as exc:
+        print(f"{prog} index: another pass holds the index: {exc}", file=sys.stderr)
+        return codes.TEMPFAIL
+    except moxi.store.StoreTooNew as exc:
+        print(f"{prog} index: {exc}", file=sys.stderr)
+        return codes.REFUSED
+    except store.MigrationRefused as exc:
+        print(f"{prog} index: refused: {exc}", file=sys.stderr)
+        return exc.exit_code
+    differ: list[int] = []
+    if args.check:
+        conn = store.connect()
+        try:
+            differ = store.check(conn)
+        finally:
+            conn.close()
+    doc = result.as_dict()
+    if args.check:
+        doc["check"] = {"agree": not differ, "keys": differ}
+    if args.json:
+        print(json.dumps(doc, indent=2))
+    else:
+        _print_pass(result)
+        if args.check:
+            _print_check(differ)
+    return codes.ERROR if differ else codes.OK
+
+
+def _print_pass(result: Any) -> None:
+    what = "rebuilt" if result.rebuild else "pass"
+    print(f"{what}: {result.listed} sources listed, {result.read} read, "
+          f"{result.reused} unchanged, {result.excluded} imported, {result.deleted} "
+          f"gone, {result.held} held")
+    for lane, state in result.lanes.items():
+        line = f"  {lane:<16} {state['state']:<8} {state['listed']} listed"
+        if state["held"]:
+            line += f", {state['held']} held"
+        if state.get("imported"):
+            line += f", {state['imported']} imported"
+        if state.get("compressed"):
+            line += f", {state['compressed']} compressed"
+        print(line)
+        if state.get("reason"):
+            print(f"  {'':<16} {state['reason']}")
+    for lane in result.dropped_lanes:
+        print(f"  dropped {lane}: its archive root left the config")
+    if result.migration_dropped:
+        print(f"  dropped offline lanes to move the schema: "
+              f"{', '.join(result.migration_dropped)}")
+    for line in result.unreadable[:KEYS_SHOWN]:
+        print(f"  unreadable: {line}")
+    if result.readings_error:
+        print(f"  limits readings not stored: {result.readings_error}")
+    if result.cancelled:
+        print("  cancelled: what was read so far is kept")
+
+
+def _print_check(differ: list[int]) -> None:
+    if not differ:
+        print("check: the stored claims agree with the claimed view")
+        return
+    shown = ", ".join(str(key) for key in differ[:KEYS_SHOWN])
+    more = f" and {len(differ) - KEYS_SHOWN} more" if len(differ) > KEYS_SHOWN else ""
+    print(f"check: {len(differ)} keys differ from the claimed view: {shown}{more}")
 
 
 # --- prices update ----------------------------------------------------------------------

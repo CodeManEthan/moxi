@@ -26,12 +26,18 @@ A `[[model]]` row:
     note     text shown beside the row
 
 A row must give at least one fact.
+
+The other key the schema checks only as a list is `claude.archive_roots`, more Claude Code
+trees for the token index to read: each a `[[claude.archive_roots]]` row with `path`, a
+directory holding a `projects/` tree, and `id`, which names its lane (`archive:<id>`).
+`archive_roots(settings)` reads them in config order, and `check` runs it too.
 """
 
 from __future__ import annotations
 
 import datetime
 import math
+import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -117,7 +123,64 @@ def overrides(settings: Settings, *, file: Any = None) -> list[Override]:
 def check(text: str) -> None:
     """The announcement's `CONFIG_CHECK`: the whole of usage's config reader over a
     config text alone. Raises `ConfigError` when usage would refuse the text."""
-    overrides(check_text(MODULE, schema(), text))
+    settings = check_text(MODULE, schema(), text)
+    overrides(settings)
+    archive_roots(settings)
+
+
+# --- archive roots ----------------------------------------------------------------------
+
+ARCHIVE_KEY = "claude.archive_roots"
+_ARCHIVE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+
+
+@dataclass(frozen=True, slots=True)
+class ArchiveRoot:
+    """One archive root: `id` names its lane (`archive:<id>`), `path` is the directory
+    holding its `projects/` tree (`~` expanded), and `number` its place in the config,
+    from 1."""
+
+    id: str
+    path: str
+    number: int
+
+    @property
+    def lane(self) -> str:
+        return f"archive:{self.id}"
+
+
+def archive_roots(settings: Settings, *, file: Any = None) -> list[ArchiveRoot]:
+    """The `[[claude.archive_roots]]` rows of `settings` in config order, checked. Raises
+    `ConfigError` naming the row: a row that is not a table, has no `path` or `id`, has
+    another key, or repeats an `id`."""
+    where = file if file is not None else settings.file
+    fix = 'write each as [[claude.archive_roots]] with path = "/a/dir" and id = "name"'
+    out: list[ArchiveRoot] = []
+    seen: set[str] = set()
+    for n, row in enumerate(settings[ARCHIVE_KEY], start=1):
+        if not isinstance(row, dict):
+            raise ConfigError(where, ARCHIVE_KEY, f"row {n} is not a table", fix)
+        extra = sorted(set(row) - {"path", "id"})
+        if extra:
+            raise ConfigError(where, ARCHIVE_KEY,
+                              f"row {n} has unknown keys: {', '.join(extra)}",
+                              "give each row only path and id")
+        path, ident = row.get("path"), row.get("id")
+        if not isinstance(path, str) or not path.strip():
+            raise ConfigError(where, ARCHIVE_KEY, f"row {n} has no path", fix)
+        if not isinstance(ident, str) or not _ARCHIVE_ID.match(ident):
+            raise ConfigError(where, ARCHIVE_KEY, f"row {n} has id {ident!r}",
+                              "give it an id of letters, digits, _ or -")
+        if ident in seen:
+            raise ConfigError(where, ARCHIVE_KEY, f"row {n} repeats the id {ident!r}",
+                              "give every archive root its own id")
+        seen.add(ident)
+        expanded = os.path.expanduser(path.strip())
+        if not os.path.isabs(expanded):
+            raise ConfigError(where, ARCHIVE_KEY, f"row {n} ({ident}) has a relative path",
+                              "give the archive root's absolute path")
+        out.append(ArchiveRoot(ident, os.path.normpath(expanded), n))
+    return out
 
 
 # --- one row --------------------------------------------------------------------------
