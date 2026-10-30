@@ -74,7 +74,7 @@ def test_agents_lists_the_names_you_can_message(rig):
     assert code == 0, out
     # The mail is counted in the answer's `waiting`, never in the default view.
     assert wait_until(lambda: "curator@proj-a" in
-                      (rig.daemon._query({"kind": "agents"}).get("waiting") or {}))
+                      (rig.daemon._agents_query({}).get("waiting") or {}))
     code, out = rig.cli(["agents"])
     assert code == 0
     assert out == (

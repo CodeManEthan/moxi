@@ -156,7 +156,7 @@ from .sending import (  # noqa: F401
     EXIT_COLD, EXIT_FAILED, EXIT_OFFLINE, EXIT_OK, EXIT_REFUSED, HELD_IGNORED_OPERATOR,
     HELD_NOTE, HELD_NOTE_SESSION_ONLY, NO_REPLY_REFUSED, NOT_BOUND_NOTE, ONCE_ASK,
     ONCE_NOT_OPEN, ONE_LEFT_SENT, OPERATOR, POSTURE_REQUIRED, THREAD_NOTE_MISSING,
-    TIER_EPHEMERAL, TIER_STANDING, VERB_PROTOCOL_MISMATCH, WOULD_SEND, Context, SendPlan,
+    TIER_EPHEMERAL, TIER_STANDING, WOULD_SEND, Context, SendPlan,
     VerbProtocolMismatch, _ago, _bodies, _claim_sender, _cure_flags, _hold_text,
     _nudge_daemon, _open_asks, _refusal_reason, _refused_tag, _reply_checks,
     _reply_targets, _say_notes, _say_would_send, _send, _send_checks, _send_resolved,

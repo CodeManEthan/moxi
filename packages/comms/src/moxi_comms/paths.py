@@ -145,7 +145,20 @@ def record_db(env=None) -> Path:
 
 
 def daemon_socket(env=None) -> Path:
-    """RUNTIME/comms/moxi-comms-daemon.sock -- the daemon's one listening socket."""
+    """The daemon's socket, `moxi.ipc.address("comms", "daemon")`: on POSIX
+    RUNTIME/comms/daemon.sock, or the core's short hashed path when that is too long.
+    With `env` given, RUNTIME/comms/daemon.sock under that environment's roots."""
+    if env is None:
+        from moxi import ipc
+
+        return Path(ipc.address(MODULE, "daemon"))
+    return runtime_dir(env) / "daemon.sock"
+
+
+def old_daemon_socket(env=None) -> Path:
+    """RUNTIME/comms/moxi-comms-daemon.sock -- comms 0.2's daemon socket. This build
+    never binds, removes or renames it; the move of 0.2's files only connects to it, to
+    see that no 0.2 daemon still answers there."""
     return runtime_dir(env) / "moxi-comms-daemon.sock"
 
 
