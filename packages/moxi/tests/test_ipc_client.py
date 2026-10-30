@@ -123,6 +123,76 @@ def test_a_closed_server_is_not_serving(serving):
         ipc.connect(address)
 
 
+def full_listener(address: str) -> tuple[socket.socket, list[socket.socket]]:
+    """A listener that never accepts, with its backlog filled by connects already made."""
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(address)
+    listener.listen(1)
+    waiting = []
+    for _ in range(64):
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.setblocking(False)
+        try:
+            sock.connect(address)
+        except BlockingIOError:
+            sock.close()
+            return listener, waiting
+        waiting.append(sock)
+    raise AssertionError("the backlog never filled")
+
+
+linux_backlog = pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="a full Unix socket backlog answers EAGAIN on Linux; macOS is checked on a Mac")
+
+
+@linux_backlog
+def test_a_full_backlog_is_busy_until_the_timeout(sock_dir):
+    listener, waiting = full_listener(str(sock_dir / "full.sock"))
+    try:
+        start = time.monotonic()
+        with pytest.raises(ipc.Timeout) as caught:
+            ipc.connect(listener.getsockname(), timeout=0.3)
+        assert 0.3 <= time.monotonic() - start < 3
+        assert "busy" in str(caught.value)
+    finally:
+        for sock in [*waiting, listener]:
+            sock.close()
+
+
+@linux_backlog
+def test_a_busy_server_is_tried_again_until_it_accepts(sock_dir):
+    listener, waiting = full_listener(str(sock_dir / "full.sock"))
+    accepted = []
+
+    def accept_later():
+        time.sleep(0.3)
+        for _ in range(len(waiting) + 1):
+            accepted.append(listener.accept()[0])
+
+    thread = threading.Thread(target=accept_later, daemon=True)
+    thread.start()
+    try:
+        client = bounded(lambda: ipc.connect(listener.getsockname(), timeout=5.0))
+        client.close()
+        thread.join(10)
+    finally:
+        for sock in [*waiting, *accepted, listener]:
+            sock.close()
+
+
+def test_connect_passes_its_line_cap_to_the_client(serving):
+    srv = serving(handler)
+    with ipc.connect(srv.address, max_line=100) as client:
+        assert client.call("echo", ["x" * 40], timeout=10) == ["x" * 40]
+        with pytest.raises(ipc.IpcError, match="longer than 100 bytes"):
+            client.call("echo", ["x" * 120], timeout=10)
+    with ipc.connect(srv.address) as client:
+        assert client.call("echo", ["x" * 120], timeout=10) == ["x" * 120]
+    with pytest.raises(ValueError):
+        ipc.connect(srv.address, max_line=0)
+
+
 # -- calls ----------------------------------------------------------------------------------
 
 def test_call_returns_the_result_and_raises_the_error(serving):

@@ -15,6 +15,7 @@ import queue
 import socket
 import sys
 import threading
+import time
 from collections.abc import Iterable, Iterator
 
 from . import _wire
@@ -24,30 +25,47 @@ from ._wire import Agreed, Hello, IpcError, NotServing, Timeout
 _CHUNK = 64 * 1024
 #: The errors that mean nothing listens at the address: the daemon is cold.
 _COLD = (errno.ENOENT, errno.ECONNREFUSED)
+#: The errors that mean the server is busy (its listen backlog is full), and how often,
+#: in seconds, `connect` tries a busy server again.
+_BUSY = (errno.EAGAIN, errno.EWOULDBLOCK)
+BUSY_RETRY = 0.05
 _END = object()
 
 
-def connect(address: str, *, timeout: float = 5.0) -> Client:
+def connect(address: str, *, timeout: float = 5.0, max_line: int = _wire.MAX_LINE) -> Client:
     """A connection to the server at `address`. Raises `NotServing` when nothing listens
-    there and `Timeout` when the connect takes longer than `timeout` seconds. `timeout`
-    is also the client's wait for `hello()`."""
+    there and `Timeout` when no connection is made in `timeout` seconds. A busy server
+    (its listen backlog full) is tried again every 50 ms until then. `timeout` is also
+    the client's wait for `hello()`. `max_line` caps the answer lines the client reads,
+    in bytes without the newline: match a server given a larger `serve(max_line=...)`."""
     if sys.platform == "win32":
         raise NotImplementedError("moxi.ipc.connect is not built for Windows yet: the "
                                   "named pipe client comes later")
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-    try:
-        sock.connect(address)
-    except TimeoutError:
-        sock.close()
-        raise Timeout(f"no connection to {address} in {timeout} s") from None
-    except OSError as exc:
-        sock.close()
-        if exc.errno in _COLD:
-            raise NotServing(address, exc.strerror) from None
-        raise
-    sock.settimeout(None)
-    return Client(sock, address, timeout=timeout)
+    if isinstance(max_line, bool) or not isinstance(max_line, int) or max_line < 1:
+        raise ValueError(f"max_line is a whole number of bytes above 0, not {max_line!r}")
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while True:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(None if deadline is None else max(deadline - time.monotonic(), 0.0))
+        try:
+            sock.connect(address)
+        except TimeoutError:
+            sock.close()
+            raise Timeout(f"no connection to {address} in {timeout} s") from None
+        except OSError as exc:
+            sock.close()
+            if exc.errno in _COLD:
+                raise NotServing(address, exc.strerror) from None
+            if exc.errno not in _BUSY:
+                raise
+            left = BUSY_RETRY if deadline is None else deadline - time.monotonic()
+            if left <= 0:
+                raise Timeout(f"no connection to {address} in {timeout} s: the server "
+                              f"is busy") from None
+            time.sleep(min(BUSY_RETRY, left))
+            continue
+        sock.settimeout(None)
+        return Client(sock, address, timeout=timeout, max_line=max_line)
 
 
 class _Call:
