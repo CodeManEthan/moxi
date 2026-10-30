@@ -343,10 +343,13 @@ class Site:
             self.packages.add(top)
         return path
 
-    def module(self, name: str, *, version: str = "0.1.0", **names: str) -> str:
+    def module(self, name: str, *, version: str = "0.1.0", package: str | None = None,
+               **names: str) -> str:
         """A whole fake module: its distribution, package and announcement. Each keyword
-        is an announcement name's Python expression."""
-        package = f"moxi_{name}"
+        is an announcement name's Python expression. `package` names the fake's package
+        (default `moxi_<name>`); give another name when the real module is installed in
+        the workspace, so the fake never imports, or unloads, the real package."""
+        package = package or f"moxi_{name}"
         fields = {"INTERFACES": "frozenset({1})", "API": "None",
                   "SUMMARY": "'A module made for a test.'", **names}
         self.write(f"{package}/__init__.py", "")
