@@ -89,6 +89,9 @@ operator = "operator"                 # the human's identity name
 [replay]
 messages = 50                         # a reader's catch-up bound with no cursor
 hours    = 24
+
+[delivery]
+expiry = "24h"                        # how long a send waits before it is dropped
 ```
 
 | key | default | override | what it does |
@@ -104,6 +107,7 @@ hours    = 24
 | `[policy] labels` | `{}` | | send-only identities by qualified name, each mapped to the words the send and reply verbs use when they refuse it as a recipient. Without a label it is "a send-only identity". |
 | `[provision] operator` | `operator` | | the human's identity name, provisioned at first start |
 | `[replay] messages`, `hours` | `50`, `24` | | a reader with no cursor catches up on at most this many messages, none older than this many hours. The daemon reads them at use, so a change needs no restart. |
+| `[delivery] expiry` | `24h` | `MOXI_COMMS_DELIVERY_EXPIRY` | how long a sent message may wait undelivered before it is dropped, when the send names no `--expires`: a whole number with `s`, `m`, `h` or `d` (`30m`, `6h`, `3d`), or `never`. The send verb writes the expiry on the message's first line, so a change touches only later sends. Nothing goes back to the sender when a message expires; `moxi comms explain` says `expired`. Read at each send. |
 | `[cache] required` | `false` | | makes the daemon refuse to start when the cache module is absent or broken (`moxi install comms --with cache` installs it), so the cold-send hold cannot switch off without a word. With this off, an absent or broken cache makes every agent read as having no cache and get its mail live. Read at the daemon's start. |
 | `block` | `false` | | stops all routing: while it is true the daemon neither delivers to nor routes from any identity, and `moxi comms send` says so and sends nothing. Read at every use, so a change needs no restart. |
 | `[codex] defaults`, `[codex] agents` | `{}` | | the Codex roster (experimental, below) |

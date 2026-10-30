@@ -45,8 +45,8 @@ from .. import sending as _sending
 from ..claimhold import ClaimServer
 from ..client import DaemonError, DaemonOffline
 from ..scoping import GLOBAL, NAME_RE, qualify, split_tag
-from ..sending import (DELIVERIES, EXIT_CODES, OUTCOMES, Recipient, Refusal, Sender,
-                       SendResult)
+from ..sending import (DELIVERIES, EXIT_CODES, OUTCOMES, DeleteResult, Recipient, Refusal,
+                       Sender, SendResult)
 
 #: The interface this module is.
 INTERFACE = 2
@@ -64,7 +64,8 @@ POSTURES = (_machine_line.POSTURE_NONE, _machine_line.POSTURE_OPTIONAL,
 def send(sender: Sender, to, text: str, *, posture, reply_to=None, new: bool = False,
          audience=None, held: bool = False, cap=None, no_cap: bool = False,
          deadline: float = 30.0, standing: bool = False,
-         new_name: bool = False) -> SendResult:
+         new_name: bool = False, interrupt: bool = False,
+         expires=None) -> SendResult:
     """Send `text` to `to` as `sender`, with every check `moxi comms send` makes.
 
     `to` is a name, a comma-separated list of names, or a sequence of names. With `to`
@@ -72,7 +73,9 @@ def send(sender: Sender, to, text: str, *, posture, reply_to=None, new: bool = F
     message's author (or, for your own message, to its recipients). With both, it is
     `send --reply-to`. `posture` is `none`, `optional`, `once` or `open`, or None (a
     reply, or the operator). `cap` is a whole number of replies. `standing` and
-    `new_name` are the verb's `--standing` and `--new-name`. `deadline` is seconds,
+    `new_name` are the verb's `--standing` and `--new-name`. `interrupt` is
+    `--interrupt`. `expires` is `--expires`: a duration (`30m`, `6h`, `3d`), `never`, a
+    whole number of seconds, or None for the config's default. `deadline` is seconds,
     passed to every daemon call, to the claim socket and to the record's busy timeout.
 
     The result says whether it posted (`message_id`), and a post either commits or does
@@ -80,31 +83,37 @@ def send(sender: Sender, to, text: str, *, posture, reply_to=None, new: bool = F
     `TypeError`)."""
     return _run(sender, to, text, posture=posture, reply_to=reply_to, new=new,
                 audience=audience, held=held, cap=cap, no_cap=no_cap, deadline=deadline,
-                standing=standing, new_name=new_name, check=False)
+                standing=standing, new_name=new_name, interrupt=interrupt,
+                expires=expires, check=False)
 
 
 def check(sender: Sender, to, text: str, *, posture, reply_to=None, new: bool = False,
           audience=None, held: bool = False, cap=None, no_cap: bool = False,
           deadline: float = 30.0, standing: bool = False,
-          new_name: bool = False) -> SendResult:
+          new_name: bool = False, interrupt: bool = False,
+          expires=None) -> SendResult:
     """`send`'s every check, stopping before the post: outcome `would-send`, with the
     recipients and notes the post would have, or the refusal the send would give.
     Posts, nudges and records nothing."""
     return _run(sender, to, text, posture=posture, reply_to=reply_to, new=new,
                 audience=audience, held=held, cap=cap, no_cap=no_cap, deadline=deadline,
-                standing=standing, new_name=new_name, check=True)
+                standing=standing, new_name=new_name, interrupt=interrupt,
+                expires=expires, check=True)
 
 
 def _run(sender, to, text, *, posture, reply_to, new, audience, held, cap, no_cap,
-         deadline, standing, new_name, check) -> SendResult:
+         deadline, standing, new_name, interrupt, expires, check) -> SendResult:
     if not isinstance(sender, Sender):
         raise TypeError(f"sender must be an api.Sender, not {type(sender).__name__}")
+    if expires is not None:
+        _sending.expiry_seconds(expires)          # a bad duration raises ValueError
     if posture is not None and posture not in POSTURES:
         raise ValueError(f"posture must be one of {', '.join(POSTURES)} or None, "
                          f"not {posture!r}")
     args = SimpleNamespace(text=str(text), posture=posture, cap=cap, no_cap=bool(no_cap),
                            audience=audience, new=bool(new), held=bool(held),
                            standing=bool(standing), new_name=bool(new_name),
+                           interrupt=bool(interrupt), expires=expires,
                            check=check, reply_to=None, message_id=None)
     tags = None
     if to is None:
@@ -120,6 +129,16 @@ def _run(sender, to, text, *, posture, reply_to, new, audience, held, cap, no_ca
         args.reply_to = None if reply_to is None else str(reply_to)
     ctx = _sending.Context(env=sender.environ(os.environ), deadline=deadline)
     return _sending.run(ctx, args, tags=tags)
+
+
+def delete(sender: Sender, message_id, *, deadline: float = 30.0) -> DeleteResult:
+    """Withdraw `message_id`, which `sender` sent, from every recipient that hasn't had
+    it in a digest (`moxi comms delete`). The `DeleteResult` names who it was withdrawn
+    from, who had it already and whose copy expired first."""
+    if not isinstance(sender, Sender):
+        raise TypeError(f"sender must be an api.Sender, not {type(sender).__name__}")
+    ctx = _sending.Context(env=sender.environ(os.environ), deadline=deadline)
+    return _sending.delete(ctx, message_id)
 
 
 # --------------------------------------------------------------------------- reads
@@ -266,7 +285,8 @@ def replay() -> tuple[int, int]:
 
 
 __all__ = [
-    "INTERFACE", "send", "check", "Sender", "SendResult", "Recipient", "Refusal",
+    "INTERFACE", "send", "check", "delete", "DeleteResult", "Sender", "SendResult",
+    "Recipient", "Refusal",
     "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
     "session", "roster", "owner", "Roster", "Agent", "Standing", "Owner", "record_dir",
     "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE", "replay",

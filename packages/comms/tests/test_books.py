@@ -291,3 +291,95 @@ def test_read_cursor_reads_from_outside_the_daemon(books, tmp_path):
     got = books_mod.read_cursor(NAME, path=tmp_path / "comms.db")
     assert got["cursor"] == "101"
     assert books_mod.read_cursor(OTHER, path=tmp_path / "comms.db") is None
+
+
+# ------------------------------------------------------------------ withdraw, sweep
+
+def _message(books, mid, *, expires=None):
+    books._conn.execute(
+        "INSERT INTO messages(id, room_id, author_id, author_kind, author_display, "
+        "content, timestamp, expires_at) VALUES (?, 'r', 'a', 'identity', 'a', 'x', 't', ?)",
+        (mid, expires))
+
+
+def _withdrawn_at(books, mid):
+    return books._conn.execute("SELECT withdrawn_at FROM messages WHERE id = ?",
+                               (mid,)).fetchone()[0]
+
+
+@pytest.mark.parametrize("needle", ["DELETE FROM queue WHERE message_id",
+                                    "UPDATE messages SET withdrawn_at"])
+def test_a_fault_inside_withdraw_lands_nothing(books, needle):
+    _message(books, 101)
+    books.hand(NAME, 101, 3)
+    books.add(OTHER, 101)
+    faulted(books, needle, lambda: books.withdraw(101, unrouted=["third@proj-a"]))
+    assert _withdrawn_at(books, 101) is None
+    done = books.withdraw(101, unrouted=["third@proj-a"])
+    assert done.written and done.withdrawn == sorted([NAME, OTHER, "third@proj-a"])
+    assert _withdrawn_at(books, 101) is not None
+
+
+def test_a_fault_inside_the_sweep_lands_nothing(books, clock):
+    _message(books, 101, expires=int(clock.t) - 1)
+    books.add(NAME, 101)
+    books.add(OTHER, 101)
+    books.add(NAME, 102)
+    faulted(books, "INSERT OR IGNORE INTO dropped",
+            lambda: books.sweep(clock.t, {102: int(clock.t) - 1}))
+    swept = books.sweep(clock.t, {102: int(clock.t) - 1})
+    assert sorted(swept) == sorted([(NAME, "101"), (NAME, "102"), (OTHER, "101")])
+    assert books.rows() == []
+
+
+def test_delete_racing_open_digest_ends_withdrawn_or_in_a_digest(books):
+    """The author's delete and the adapter's `open_digest`, from two threads at once, a
+    thousand times: every message ends either withdrawn, with no row left, or in the
+    digest, with the delete answering it delivered. Never both, never neither."""
+    rounds = 1000
+    go = threading.Barrier(3, timeout=10)
+    done = threading.Barrier(3, timeout=10)
+    current: dict = {}
+    errors: list = []
+
+    def worker(act):
+        try:
+            for _ in range(rounds):
+                go.wait()
+                current[act] = (books.withdraw(current["mid"]) if act == "delete"
+                                else books.open_digest(NAME, 3, [current["mid"]]))
+                done.wait()
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+            go.abort()
+            done.abort()
+
+    threads = [threading.Thread(target=worker, args=(a,), daemon=True)
+               for a in ("delete", "open")]
+    for t in threads:
+        t.start()
+    outcomes = {"withdrawn": 0, "digested": 0}
+    for i in range(rounds):
+        mid = 10_000 + i
+        books.hand(NAME, mid, 3)
+        current.clear()
+        current["mid"] = mid
+        go.wait()
+        done.wait()
+        withdrawn, opened = current["delete"], current["open"]
+        rows = {r.message_id: r.state for r in books.rows(NAME)}
+        if opened.ids == [str(mid)]:
+            assert withdrawn.withdrawn == [] and withdrawn.delivered == [NAME], i
+            assert not withdrawn.written and rows == {str(mid): "in_digest"}, i
+            outcomes["digested"] += 1
+        else:
+            assert opened.ids == [] and withdrawn.withdrawn == [NAME], i
+            assert opened.dropped == [{"id": str(mid), "reason": "withdrawn"}], i
+            assert withdrawn.delivered == [] and rows == {}, i
+            outcomes["withdrawn"] += 1
+        # The digested message's row goes, so the next round starts on its own row.
+        books.turn_ended(NAME, [opened.digest], [])
+    for t in threads:
+        t.join(timeout=10)
+    assert errors == []
+    assert sum(outcomes.values()) == rounds

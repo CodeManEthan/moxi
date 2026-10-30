@@ -57,7 +57,7 @@ def test_interface_2_holds_its_names():
         "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
         "session", "roster", "owner", "Roster", "Agent", "Standing", "Owner",
         "record_dir", "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
-        "replay", "DaemonError", "DaemonOffline"}
+        "replay", "DaemonError", "DaemonOffline", "delete", "DeleteResult"}
     for name in api.__all__:
         assert hasattr(api, name), name
     assert api.ClaimServer is ClaimServer
@@ -71,7 +71,7 @@ def test_the_send_and_check_signatures():
         params = inspect.signature(fn).parameters
         assert list(params) == ["sender", "to", "text", "posture", "reply_to", "new",
                                 "audience", "held", "cap", "no_cap", "deadline",
-                                "standing", "new_name"], fn
+                                "standing", "new_name", "interrupt", "expires"], fn
         assert all(params[n].kind is inspect.Parameter.KEYWORD_ONLY
                    for n in list(params)[3:])
         assert params["posture"].default is inspect.Parameter.empty

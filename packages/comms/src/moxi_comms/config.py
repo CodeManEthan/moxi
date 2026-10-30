@@ -158,6 +158,38 @@ class ReplayConfig:
         return self.hours * 3600
 
 
+#: The units a duration takes, in seconds: `30m`, `6h`, `3d`.
+DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+#: The duration that means no expiry.
+NEVER = "never"
+
+
+def parse_duration(text) -> int | None:
+    """A duration as `--expires` and `[delivery] expiry` spell it, in seconds: a whole
+    number, 1 or more, followed by s, m, h or d. `never` is None: no expiry. Anything
+    else raises ValueError."""
+    raw = str(text).strip().lower()
+    if raw == NEVER:
+        return None
+    number, unit = raw[:-1], raw[-1:]
+    if unit not in DURATION_UNITS or not number.isdigit() or int(number) < 1:
+        raise ValueError(f"{text!r} is not a duration: write a whole number with s, m, h "
+                         "or d (30m, 6h, 3d), or never")
+    return int(number) * DURATION_UNITS[unit]
+
+
+@dataclass
+class DeliveryConfig:
+    """`[delivery]`: the expiry a send writes when it names none (`--expires`). Kept as
+    typed, so `expiry_seconds` is its meaning: seconds, or None for never."""
+
+    expiry: str = _default("delivery.expiry")
+
+    @property
+    def expiry_seconds(self) -> int | None:
+        return parse_duration(self.expiry)
+
+
 @dataclass
 class CacheConfig:
     """`[cache]`: whether the daemon refuses to start when the cache module is not
@@ -176,6 +208,7 @@ class CommsConfig:
     provision: ProvisionConfig = field(default_factory=ProvisionConfig)
     replay: ReplayConfig = field(default_factory=ReplayConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
+    delivery: DeliveryConfig = field(default_factory=DeliveryConfig)
     block: bool = _default("block")
     #: The rosters' tables, raw: `{"defaults": {...}, "agents": {...}}`.
     codex: dict = field(default_factory=dict)
@@ -376,6 +409,12 @@ def _typed(settings, path: Path | None) -> CommsConfig:
                   "set it to 1 or more")
     if v["replay.hours"] < 0:
         raise bad("replay.hours", f"is {v['replay.hours']}", "set it to 0 or more hours")
+    try:
+        parse_duration(v["delivery.expiry"])
+    except ValueError:
+        raise bad("delivery.expiry", f"is {v['delivery.expiry']!r}",
+                  "set it to a whole number with s, m, h or d (30m, 6h, 3d), or never") \
+            from None
     operator = v["provision.operator"].strip()
     if not operator:
         raise bad("provision.operator", "is empty", "name the human's identity")
@@ -394,6 +433,7 @@ def _typed(settings, path: Path | None) -> CommsConfig:
         provision=ProvisionConfig(operator=operator),
         replay=ReplayConfig(messages=v["replay.messages"], hours=v["replay.hours"]),
         cache=CacheConfig(required=v["cache.required"]),
+        delivery=DeliveryConfig(expiry=str(v["delivery.expiry"]).strip().lower()),
         block=v["block"],
         codex=_roster(bad, "codex", v),
         opencode=_roster(bad, "opencode", v),

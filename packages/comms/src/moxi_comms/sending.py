@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from moxi import exit as moxi_exit
 
 from . import (attribution, cache, claimfile, claimhold, config, constants, directory,
-               machine_line, policy)
+               machine_line, policy, wire)
 from .membership import sessions_of
 from .claimhold import AdapterMismatch, ClaimUnreachable
 from .client import (DaemonClient, DaemonError, DaemonNoAnswer, DaemonOffline,
@@ -83,6 +83,17 @@ HELD_NOTE_SESSION_ONLY = ("NOTE: {name} reads this after its own next turn in th
 HELD_IGNORED_OPERATOR = ("NOTE: --held was ignored for operator: the operator has no "
                          "session to hold it for, so it went to him as an ordinary "
                          "message.")
+
+#: `--interrupt` with the operator among the recipients: he has no session to steer.
+INTERRUPT_IGNORED_OPERATOR = ("NOTE: --interrupt was ignored for operator: the operator "
+                              "has no session to steer, so it went to him as an ordinary "
+                              "message.")
+
+#: `--interrupt` beside `--held`: one says go into a running turn, the other wait for
+#: the next release point.
+INTERRUPT_WITH_HELD = ("--interrupt asks for the message to go into a running turn, and "
+                       "--held asks for it to wait for the recipient's next turn. They "
+                       "can't both hold; nothing was sent. Drop one of them.")
 
 
 # --------------------------------------------------------------------------- the result
@@ -649,9 +660,11 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
     # so the record is the only place a reply's referent can live,
     # and it lives there self-describingly. The marks go as keywords, never read off
     # `args`.
+    expires_at = (None if plan.expires_in is None
+                  else math.floor(ctx.clock()) + plan.expires_in)
     bodies = _bodies(args, ctx, plan.resolved, reply_to, plan.audience,
                      next_turn=plan.flagged, cold_at=plan.cold_at, posture=plan.posture,
-                     **plan.marks)
+                     interrupt=plan.interrupt, expires_at=expires_at, **plan.marks)
     if bodies is None:
         return _REFUSED             # over the cap; _bodies said why
     token = None
@@ -868,6 +881,11 @@ class SendPlan:
     #: Bound recipients whose session has no turns endpoint, each with how long it has
     #: had none (seconds, None when the daemon did not say).
     waiting: dict = field(default_factory=dict)
+    #: Line zero carries `[interrupt]` (`--interrupt`, to a non-operator).
+    interrupt: bool = False
+    #: Seconds from the post to the message's expiry (`--expires`, else the config's
+    #: default); None: it never expires.
+    expires_in: int | None = None
 
 
 def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, project,
@@ -936,6 +954,19 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
             _refuse(ctx, "cap-shape", CAP_SHAPE)
             return _USAGE, None
         cap = int(text)
+    interrupt_typed = bool(getattr(args, "interrupt", False))
+    if interrupt_typed and getattr(args, "held", False):
+        _refuse(ctx, "interrupt-with-held", INTERRUPT_WITH_HELD)
+        return _USAGE, None
+    expires = getattr(args, "expires", None)
+    if expires is None:
+        expires_in = config.load(env=ctx.env).delivery.expiry_seconds
+    else:
+        try:
+            expires_in = expiry_seconds(expires)
+        except ValueError as e:
+            _refuse(ctx, "expires-shape", f"--expires: {e}. Nothing was sent.")
+            return _USAGE, None
     if _blocked(ctx):
         # Advisory only: enforcement is at daemon routing. Refusing here is a
         # courtesy to the operator, never the mechanism.
@@ -1104,6 +1135,10 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
     flagged = held_typed and any(q != OPERATOR for q in resolved)
     if held_typed and OPERATOR in resolved:
         notes.append(HELD_IGNORED_OPERATOR)
+    # `[interrupt]` likewise: the operator has no session to steer.
+    interrupt = interrupt_typed and any(q != OPERATOR for q in resolved)
+    if interrupt_typed and OPERATOR in resolved:
+        notes.append(INTERRUPT_IGNORED_OPERATOR)
     held = [] if flagged else [state for state in states if state.kind == cache.COLD]
     # The send's cold-at, which the daemon reads when its own read is unknown: on every
     # line zero without `[held]`, never beside it. One value per tag, in line zero's tag order.
@@ -1121,7 +1156,8 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
     return None, SendPlan(resolved=resolved, deferred=deferred, tiers=tiers, held=held,
                           audience=audience, posture=posture, flagged=flagged,
                           cold_at=cold_at, marks=marks, sent_lines=sent_lines,
-                          notes=notes, ask_notes=ask_notes, waiting=waiting)
+                          notes=notes, ask_notes=ask_notes, waiting=waiting,
+                          interrupt=interrupt, expires_in=expires_in)
 
 
 #: A `moxi comms send` to an identity comms has never seen bound, without `--new-name`.
@@ -1144,6 +1180,19 @@ def _never_bound_refusal(tag: str, r: dict) -> str:
                 "that identity by its full name")
         seen = NEVER_BOUND_SEEN.format(name=name, seen=_and(seen_as), that=that)
     return NEVER_BOUND.format(tag=tag, name=name, seen=seen)
+
+
+def expiry_seconds(expires) -> int | None:
+    """`--expires` (or `api.send`'s `expires`) in seconds: a duration string
+    (`30m`, `6h`, `3d`), `never` (None), or a whole number of seconds, 1 or more.
+    Anything else raises ValueError."""
+    if isinstance(expires, bool):
+        raise ValueError(f"{expires!r} is not a duration")
+    if isinstance(expires, (int, float)):
+        if expires < 1:
+            raise ValueError(f"{expires!r} seconds is not a duration: 1 or more")
+        return int(expires)
+    return config.parse_duration(expires)
 
 
 def _blocked(ctx: Context) -> bool:
@@ -1677,6 +1726,10 @@ def _cure_flags(args) -> str:
     if args is None:
         return ""
     flags = ["--held"] if getattr(args, "held", False) else []
+    if getattr(args, "interrupt", False):
+        flags.append("--interrupt")
+    if getattr(args, "expires", None) is not None:
+        flags.append(f"--expires {args.expires}")
     if getattr(args, "standing", False):
         flags.append("--standing")
     typed = getattr(args, "posture", None)
@@ -1824,7 +1877,8 @@ def _reply_audience(referent, passed: str | None) -> tuple[str | None, str | Non
 def _bodies(args, ctx: Context, resolved, reply_to, audience=None, *,
             next_turn: bool = False, cold_at=None, posture: str | None = None,
             open_mark: bool = False, cap: int | None = None, no_cap: bool = False,
-            thread_mark: str | None = None) -> list[str] | None:
+            thread_mark: str | None = None, interrupt: bool = False,
+            expires_at: int | None = None) -> list[str] | None:
     """The postable body for one `send`, as a one-item list, or None when it is over
     the cap and refused; the refusal is printed here.
 
@@ -1832,14 +1886,15 @@ def _bodies(args, ctx: Context, resolved, reply_to, audience=None, *,
     (`record.MAX_CONTENT_LENGTH`). Comms does not split: over the cap, nothing is sent.
 
     Only `args.text` is read off `args`. `[held]` (`next_turn`), the cold-at, `posture`,
-    `[open]`, the cap tokens and the thread mark are keywords the verb decided on its
+    `[open]`, the cap tokens, the thread mark, `[interrupt]` and the expiry are keywords the verb decided on its
     checks; None is the open posture with no explicit token, exactly as `format_line`
     has it.
     """
     line = machine_line.format_line(resolved, reply_to=reply_to, audience=audience,
                                     next_turn=next_turn, cold_at=cold_at, posture=posture,
                                     open_mark=open_mark, cap=cap, no_cap=no_cap,
-                                    thread_mark=thread_mark)
+                                    thread_mark=thread_mark, interrupt=interrupt,
+                                    expires_at=expires_at)
     body = f"{line}\n{args.text}"
     limit = ctx.record.max_content_length
     if len(body) <= limit:
@@ -1884,7 +1939,8 @@ def run(ctx: Context, args, *, tags=None) -> SendResult:
     in the result's `lines()`.
 
     `args` carries the verb's fields by their flag names: `text`, `posture`, `cap`,
-    `no_cap`, `audience`, `new`, `held`, `standing`, `new_name`, `check`, and either
+    `no_cap`, `audience`, `new`, `held`, `interrupt`, `expires`, `standing`,
+    `new_name`, `check`, and either
     `reply_to` (with `tags`, the names) or `message_id` (the reply verb: the names come
     from the message it answers). The sender is the one `ctx.env` describes."""
     capture, outer = _Capture(), ctx.capture
@@ -1958,3 +2014,154 @@ def _recipients(plan) -> tuple:
         at = None if at is None or at == machine_line.COLD_AT_LIVE else int(at)
         out.append(Recipient(qualified, delivery, at, reason))
     return tuple(out)
+
+
+# --------------------------------------------------------------------------- delete
+
+#: What a delete came to. `deleted`: withdrawn from at least one recipient. `unknown`:
+#: the request was written and no answer came, so it may have been withdrawn.
+DELETE_DELETED = "deleted"
+DELETE_OUTCOMES = ("deleted", OUTCOME_REFUSED, OUTCOME_OFFLINE, OUTCOME_FAILED,
+                   OUTCOME_UNKNOWN)
+DELETE_EXIT_CODES = {DELETE_DELETED: moxi_exit.OK, OUTCOME_REFUSED: moxi_exit.REFUSED,
+                     OUTCOME_OFFLINE: moxi_exit.TEMPFAIL, OUTCOME_FAILED: moxi_exit.ERROR,
+                     OUTCOME_UNKNOWN: moxi_exit.ERROR}
+
+#: What a delete says when its request was written and no answer came.
+DELETE_NO_ANSWER = ("the daemon did not answer, so the message may have been withdrawn; "
+                    "check `moxi comms explain` for a recipient before deleting it again")
+
+
+@dataclass(frozen=True)
+class DeleteResult:
+    """What a delete did, as data. `withdrawn` names the recipients it was withdrawn
+    from, `delivered` those that had it already, `expired` those whose copy expired
+    first. `refusal` is set exactly when the outcome is not `deleted`. `lines()` is the
+    verb's text, one line per recipient."""
+
+    outcome: str
+    message_id: str
+    withdrawn: tuple = ()
+    delivered: tuple = ()
+    expired: tuple = ()
+    refusal: Refusal | None = None
+    said: tuple = ()
+
+    @property
+    def exit_code(self) -> int:
+        return DELETE_EXIT_CODES[self.outcome]
+
+    def lines(self) -> list[str]:
+        return [line for said in self.said for line in str(said).split("\n")]
+
+    def to_dict(self) -> dict:
+        return {"outcome": self.outcome, "message_id": self.message_id,
+                "withdrawn": list(self.withdrawn), "delivered": list(self.delivered),
+                "expired": list(self.expired),
+                "refusal": None if self.refusal is None else
+                {"code": self.refusal.code, "text": self.refusal.text}}
+
+
+def delete(ctx: Context, message_id) -> DeleteResult:
+    """Withdraw `message_id`, sent by the identity `ctx.env` describes, from every
+    recipient that hasn't had it in a digest. The sender is found as a send finds it:
+    this session's claim, or the operator's lane. Nothing is printed: what the verb says
+    is in the result's `lines()`."""
+    mid = str(message_id).strip()
+    capture, outer = _Capture(), ctx.capture
+    ctx.capture = capture
+    answer: dict | None = None
+    try:
+        if not mid.isdigit():
+            _refuse(ctx, "message-id-shape",
+                    f"{message_id!r} is not a message id (message ids are digits). "
+                    "Nothing was withdrawn.")
+            code = _USAGE
+        else:
+            code, answer = _delete(ctx, mid)
+    finally:
+        ctx.capture = outer
+    said = list(capture.said)
+    data = answer or {}
+    withdrawn = tuple(data.get("withdrawn") or ())
+    delivered = tuple(data.get("delivered") or ())
+    expired = tuple(data.get("expired") or ())
+    lines = ([f"withdrawn from {q}" for q in withdrawn]
+             + [f"already delivered to {q}" for q in delivered]
+             + [f"expired before delivery to {q}" for q in expired])
+    if code == _OK:
+        return DeleteResult(outcome=DELETE_DELETED, message_id=mid, withdrawn=withdrawn,
+                            delivered=delivered, expired=expired,
+                            said=tuple(lines + said))
+    outcome = {_USAGE: OUTCOME_REFUSED, _REFUSED: OUTCOME_REFUSED,
+               _OFFLINE: OUTCOME_OFFLINE, _AGAIN: OUTCOME_OFFLINE,
+               _UNKNOWN: OUTCOME_UNKNOWN}.get(code, OUTCOME_FAILED)
+    refusal = capture.refusal or Refusal(outcome, "\n".join(map(str, said)))
+    return DeleteResult(outcome=outcome, message_id=mid, withdrawn=withdrawn,
+                        delivered=delivered, expired=expired, refusal=refusal,
+                        said=tuple(lines + said))
+
+
+def _delete(ctx: Context, mid: str):
+    """The delete's sender and its one request: (step code, the daemon's answer, or the
+    names a refusal carries)."""
+    try:
+        claim_path = claimhold.socket_from_env(ctx.env)
+    except OutsideRuntime as e:
+        _refuse(ctx, "outside-runtime", f"{e} Nothing was withdrawn.")
+        return _REFUSED, None
+    user = None
+    if claim_path and not (ctx.env.get("MOXI_COMMS_OPERATOR") or "").strip():
+        got = _claim_sender(ctx, claim_path)
+        if isinstance(got, int):
+            return got, None
+        sender, claim_answer = got
+        token = _claim_token(ctx, sender, claim_answer)
+        if isinstance(token, int):
+            return token, None
+        who = sender.qualified
+    else:
+        try:
+            operator_id = None if claim_path else operator_from_env(ctx.env)
+        except OperatorRefused:
+            operator_id = None
+        if operator_id is None or _inside_a_session():
+            _refuse(ctx, "no-identity",
+                    "comms has no identity for this process to delete as: a session "
+                    "deletes its own messages through its own claim socket, and the "
+                    "operator from his own terminal. Nothing was withdrawn.")
+            return _REFUSED, None
+        try:
+            with ctx.db() as db:
+                token, _channel_id = operator_credential(db, room=NAMES, env=ctx.env)
+        except (SendFailed, RecordError) as e:
+            _refuse(ctx, "credential", str(e))
+            return _FAILED, None
+        who, user = OPERATOR, operator_id
+    client = None
+    try:
+        client = ctx.daemon()
+        return _OK, client.delete(who, token, mid, user=user)
+    except DaemonNoAnswer:
+        _refuse(ctx, "delete-no-answer", DELETE_NO_ANSWER)
+        return _UNKNOWN, None
+    except VersionMismatch as error:
+        _refuse(ctx, "protocol-mismatch", str(error))
+        return _FAILED, None
+    except DaemonOffline as error:
+        _refuse(ctx, "offline", f"{error} Nothing was withdrawn.")
+        return _OFFLINE, None
+    except DaemonError as error:
+        names = {k: error.data.get(k) for k in ("delivered", "expired")}
+        if error.refused:
+            _refuse(ctx, wire.CODE_NAMES.get(error.code, "refused"),
+                    f"{error} — nothing was withdrawn.")
+            return _REFUSED, names
+        if error.try_again:
+            _refuse(ctx, "delete-again", f"{error} Nothing was withdrawn; try again.")
+            return _AGAIN, None
+        _refuse(ctx, "delete-failed", f"{error} Nothing was withdrawn.")
+        return _FAILED, None
+    finally:
+        if client is not None:
+            client.close()

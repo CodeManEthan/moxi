@@ -46,7 +46,8 @@ def payload(*, message_id="101", room="#names", text="body", backlog=False,
             "recipients": ["reviewer@proj-a"], "posture": "open",
             "open_mark": False, "backlog": backlog,
             "text": text, "reply_to": None, "audience": None, "audience_source": None,
-            "timestamp": timestamp if timestamp is not None else stamp(), **extra}
+            "timestamp": timestamp if timestamp is not None else stamp(),
+            "interrupt": False, "expires_at": None, **extra}
 
 
 def test_the_synthetic_payload_really_is_the_delivered_shape(rig):

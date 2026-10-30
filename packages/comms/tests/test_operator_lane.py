@@ -13,9 +13,12 @@ suites prove that every time they post as the operator.
 from __future__ import annotations
 
 import pytest
-from conftest import wait_for_queue
+from conftest import wait_for_queue, wait_until
 
+from moxi import exit as moxi_exit
 from moxi_comms import tokens
+from moxi_comms.client import DaemonClient, DaemonError
+from moxi_comms.paths import daemon_socket
 from moxi_comms.local_record import META_OPERATOR_TOKEN_HASH, token_hash
 
 
@@ -141,3 +144,46 @@ def test_an_unstamped_terminal_is_not_the_operator(rig):
     assert code == 3, out
     assert "comms has no identity for this process" in out
     assert rig.record.history(rig.names_channel) == []
+
+
+# ------------------------------------------------------------------ the operator's delete
+
+MAIN_Q = "main@proj-a"
+
+
+def _last(rig):
+    return rig.record.history(rig.names_channel)[-1]
+
+
+def test_the_operator_deletes_his_own_message_and_no_one_elses(rig):
+    rig.shim(name="planner")
+    code, out = rig.cli(["send", MAIN_Q, "never mind"], env=operator_env(
+        rig.prov.operator_user_id))
+    assert code == 0, out
+    mid = _last(rig).id
+    assert wait_until(lambda: mid in rig.daemon.queue.get(MAIN_Q, {}))
+    code, out = rig.cli(["delete", mid], name="planner")
+    assert code == moxi_exit.REFUSED and "not yours" in out, out
+    code, out = rig.send(MAIN_Q, "mine", sender=dict(name="planner"))
+    theirs = _last(rig).id
+    code, out = rig.cli(["delete", theirs], env=operator_env(rig.prov.operator_user_id))
+    assert code == moxi_exit.REFUSED and "not yours" in out, out
+    code, out = rig.cli(["delete", mid], env=operator_env(rig.prov.operator_user_id))
+    assert code == moxi_exit.OK, out
+    assert f"withdrawn from {MAIN_Q}" in out
+    assert rig.record.get_message(mid).withdrawn_at
+
+
+def test_the_operators_delete_needs_his_credential(rig):
+    code, out = rig.cli(["send", MAIN_Q, "x"], env=operator_env(rig.prov.operator_user_id))
+    assert code == 0, out
+    mid = _last(rig).id
+    client = DaemonClient(daemon_socket()).connect()
+    try:
+        with pytest.raises(DaemonError) as caught:
+            client.delete("operator", "not-the-token", mid,
+                          user=rig.prov.operator_user_id)
+    finally:
+        client.close()
+    assert "credential" in str(caught.value)
+    assert rig.record.get_message(mid).withdrawn_at is None

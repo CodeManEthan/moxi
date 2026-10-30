@@ -3,10 +3,13 @@
     moxi comms send <name[,name...]> "text"   --posture none|optional|once|open
                                          [--cap N | --no-cap] [--standing]
                                          [--reply-to ID] [--audience NAME] [--held]
+                                         [--interrupt] [--expires DURATION|never]
                                          [--new] [--new-name] [--check]
     moxi comms reply <message-id> "text"      [--posture none|optional|once|open]
                                          [--cap N | --no-cap] [--standing]
-                                         [--audience NAME] [--held] [--check]
+                                         [--audience NAME] [--held] [--interrupt]
+                                         [--expires DURATION|never] [--check]
+    moxi comms delete <message-id>            [--json]
     moxi comms agents                         [--seats]
     moxi comms history <identity>             [--limit N]
     moxi comms help [<term>]
@@ -136,6 +139,7 @@ import argparse
 import json
 import logging
 import os
+import sqlite3
 import sys
 import textwrap
 import time
@@ -189,6 +193,19 @@ def cmd_send(args, ctx: Context) -> int:
 def cmd_reply(args, ctx: Context) -> int:
     """`moxi comms reply`: the library's reply, rendered."""
     return _render(ctx, sending.run(ctx, args))
+
+
+def cmd_delete(args, ctx: Context) -> int:
+    """`moxi comms delete`: withdraw one of your messages from every recipient that
+    hasn't had it yet. One line per recipient; exit `OK` when it was withdrawn from
+    anyone, `REFUSED` when from no one, `TEMPFAIL` with the daemon down."""
+    result = sending.delete(ctx, args.message_id)
+    if getattr(args, "json", False):
+        ctx.say(json.dumps(result.to_dict(), sort_keys=True))
+        return result.exit_code
+    for line in result.lines():
+        ctx.say(line)
+    return result.exit_code
 
 
 def _render(ctx: Context, result: sending.SendResult) -> int:
@@ -255,6 +272,7 @@ def cmd_history(args, ctx: Context) -> int:
             if author.qualified != identity and not addressed:
                 continue
             rows.append((m, ml, author, "from" if author.qualified == identity else "to"))
+        dropped = _history_dropped(db, [m.id for m, *_ in rows])
     if not rows:
         ctx.say(f"no {NAMES} history for {identity}.")
     for m, ml, author, direction in rows:
@@ -268,7 +286,8 @@ def cmd_history(args, ctx: Context) -> int:
                 f"  -> {', '.join(ml.recipients)}"
                 + (f" re:{ml.reply_to}" if ml.reply_to else "")
                 + _history_audience(ml, effective)
-                + _history_marks(ml))
+                + _history_marks(ml)
+                + _history_gone(m, dropped.get(str(m.id), {})))
         for line in ml.text.splitlines():
             ctx.say(f"      {line}")
     if window is not None:
@@ -285,6 +304,27 @@ def _history_marks(ml) -> str:
         bits.append(machine_line.OPEN_TOKEN)
     elif ml.posture != machine_line.POSTURE_OPEN:
         bits.append(machine_line.POSTURE_TOKENS[ml.posture])
+    return "".join(f" {bit}" for bit in bits)
+
+
+def _history_dropped(db, ids) -> dict:
+    """Which of the page's messages left a recipient's queue undelivered, and why: the
+    store's `dropped` rows. An older store without them reads as none."""
+    try:
+        return books.dropped_by_message(db, ids)
+    except sqlite3.Error:
+        return {}
+
+
+def _history_gone(m, dropped: dict) -> str:
+    """`[withdrawn]` for a message its author deleted (the record keeps it, marked), and
+    `[expired for <names>]` for the recipients it expired before reaching."""
+    bits = []
+    if getattr(m, "withdrawn_at", None) or books.WITHDRAWN in dropped.values():
+        bits.append("[withdrawn]")
+    expired = [name for name, why in dropped.items() if why == books.EXPIRED]
+    if expired:
+        bits.append(f"[expired for {', '.join(expired)}]")
     return "".join(f" {bit}" for bit in bits)
 
 
@@ -359,7 +399,8 @@ def cmd_explain(args, ctx: Context) -> int:
 
     With the daemon down it still prints the cursor, which is the one durable fact,
     and says plainly that the rest is unknowable rather than showing a blank where a
-    binding would be.
+    binding would be. Asked about one message, it also reads from the store whether
+    that message was dropped for this name, withdrawn or expired, which is durable too.
     """
     identity = args.identity
     try:
@@ -372,6 +413,15 @@ def cmd_explain(args, ctx: Context) -> int:
             "comms' store and survives, so here is that much.", 76)))
         ctx.say("")
         qualified = identity_of(identity)
+        if args.message_id is not None:
+            dropped = books.read_dropped(qualified, args.message_id)
+            if dropped is not None:
+                from .daemon import CASE_REASONS
+
+                ctx.say(f"{qualified}   {dropped}   message {args.message_id}")
+                ctx.say("")
+                ctx.say("\n".join(_wrap(CASE_REASONS[dropped], 74, "  ")))
+                ctx.say("")
         ctx.say(_render_cursor(books.explain_cursor(books.read_cursor(qualified))))
         return _offline(e)
     try:
@@ -876,6 +926,13 @@ CAP_HELP = ("on an open thread you opened: close it after N replies. On the send
 NO_CAP_HELP = ("on an open thread you opened: no reply limit (it still closes after an "
                "hour with no message). On the send, or on any reply of yours in the thread")
 
+INTERRUPT_HELP = ("go into the recipient's running turn where its harness can take it "
+                  "there, instead of waiting for the turn to end. A recipient whose cache "
+                  "is cold still gets it at its next release point. Not with --held")
+EXPIRES_HELP = ("drop the message undelivered if it still waits after this long: a whole "
+                "number with s, m, h or d (30m, 6h, 3d), or never. The default is the "
+                "config's [delivery] expiry (24h). The sender is not told")
+
 CHECK_HELP = ("run every check this send makes before posting and then stop: posts, nudges "
               "and records nothing. Prints \"would send N message(s) to NAMES\", any "
               "held: lines and every NOTE the post would print, exit 0; or the send's own "
@@ -912,6 +969,8 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
                    help="hold the message until the recipient's next turn, or until its "
                         "session starts, is cleared or is compacted; nothing wakes it for "
                         "this message")
+    s.add_argument("--interrupt", action="store_true", help=INTERRUPT_HELP)
+    s.add_argument("--expires", metavar="DURATION", help=EXPIRES_HELP)
     s.add_argument("--posture", choices=machine_line.POSTURES,
                    help="required on a new message: what you want back. none: no reply "
                         "(a reply to it is refused). optional: a reply is welcome but not "
@@ -946,6 +1005,8 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
                    help="hold the message until the recipient's next turn, or until its "
                         "session starts, is cleared or is compacted; nothing wakes it for "
                         "this message")
+    r.add_argument("--interrupt", action="store_true", help=INTERRUPT_HELP)
+    r.add_argument("--expires", metavar="DURATION", help=EXPIRES_HELP)
     r.add_argument("--posture", choices=machine_line.POSTURES,
                    help="leave it out: a reply takes its posture from the message it "
                         "answers. once asks something back; none closes an open thread")
@@ -953,6 +1014,13 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
     r.add_argument("--no-cap", dest="no_cap", action="store_true", help=NO_CAP_HELP)
     r.add_argument("--check", action="store_true", help=CHECK_HELP)
     r.set_defaults(func=cmd_reply, reply_to=None)
+
+    dl = sub.add_parser("delete", help="withdraw a message you sent from every recipient "
+                                       "that hasn't had it yet")
+    dl.add_argument("message_id")
+    dl.add_argument("--json", action="store_true",
+                    help="print the outcome and each recipient's state as one JSON object")
+    dl.set_defaults(func=cmd_delete)
 
     a = sub.add_parser("agents", help="who you can message")
     a.add_argument("--seats", action="store_true",
