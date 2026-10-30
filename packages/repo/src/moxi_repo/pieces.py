@@ -171,19 +171,22 @@ class HookContext:
         return tuple(out)
 
     def git(self, *args: str, input: bytes | str | None = None,
-            timeout: float | None = None) -> subprocess.CompletedProcess:
+            timeout: float | None = None,
+            binary: bool = False) -> subprocess.CompletedProcess:
         """Run `git <args>` with this git hook's environment, in its working directory.
 
         `input` is fed on stdin (else stdin is closed). Returns the finished process with
-        `stdout` and `stderr` as text (UTF-8; bytes that aren't are kept as surrogates).
-        The exit status is not checked. `timeout` raises `subprocess.TimeoutExpired`.
+        `stdout` and `stderr` as text (UTF-8; bytes that aren't are kept as surrogates);
+        with `binary`, `stdout` is the bytes git wrote. The exit status is not checked.
+        `timeout` raises `subprocess.TimeoutExpired`.
         """
         data = input.encode("utf-8") if isinstance(input, str) else input
         proc = subprocess.run(["git", *args], input=data,
                               stdin=subprocess.DEVNULL if data is None else None,
                               capture_output=True, timeout=timeout)
         return subprocess.CompletedProcess(
-            proc.args, proc.returncode, proc.stdout.decode("utf-8", "surrogateescape"),
+            proc.args, proc.returncode,
+            proc.stdout if binary else proc.stdout.decode("utf-8", "surrogateescape"),
             proc.stderr.decode("utf-8", "surrogateescape"))
 
     def __repr__(self) -> str:

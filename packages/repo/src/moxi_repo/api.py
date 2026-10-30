@@ -1,4 +1,5 @@
-"""The verbs behind `moxi repo git-hooks`, for the CLI and for other modules.
+"""The verbs behind `moxi repo git-hooks` and `moxi repo specs`, for the CLI and for other
+modules.
 
 `add`, `remove`, `enable`, `disable` and `refresh` change a repo's git hooks and return a
 `Report` of what they did; `status` and `available` read. A verb that can't act raises a
@@ -44,6 +45,12 @@ class Usage(Failure):
 
 class Refused(Failure):
     code = 3
+
+
+class Busy(Failure):
+    """Another process holds a lock the verb needs; try again later."""
+
+    code = 75
 
 
 class Report:
@@ -375,6 +382,59 @@ def refresh(path: str | os.PathLike | None = None) -> Report:
     return report
 
 
+# -- committer specs ----------------------------------------------------------------------
+
+def specs(path: str | os.PathLike | None = None) -> list[dict]:
+    """Each indexed repo, or the one at `path`, with its saved specs and the specs that ran
+    there without being saved, each with its last result (`moxi repo specs --json`). Runs
+    the record sweep for each repo first."""
+    from moxi_repo import committer
+
+    if path is not None:
+        repos = [_resolve(path)]
+    else:
+        repos = []
+        for key, entry in sorted(indexed().items()):
+            try:
+                repos.append(gitconf.resolve(entry.get("root", "")))
+            except gitconf.NotARepo:
+                continue
+    out = []
+    for repo in repos:
+        _sweep(repo)
+        try:
+            listed = committer.listing(repo.root)
+        except committer.SpecError as exc:
+            raise Failure(str(exc)) from None
+        if path is None and not listed:
+            continue
+        out.append({"root": str(repo.root), "common_dir": str(repo.common_dir),
+                    "specs": listed})
+    return out
+
+
+def forget_spec(path: str | os.PathLike, name: str) -> Report:
+    """Forget a spec in the repo at `path`, saved or not: its saved section, its state-file
+    entry and its doctor records (`moxi repo specs remove`)."""
+    from moxi import files
+
+    from moxi_repo import committer
+
+    repo = _resolve(path)
+    try:
+        lines = committer.remove_spec(repo.root, name)
+    except files.LockTimeout as exc:
+        raise Busy(f"a committer pass holds {exc.path}; try again") from None
+    except committer.SpecError as exc:
+        raise Failure(str(exc)) from None
+    if not lines:
+        raise Usage(f"no spec named {name} in {repo.root}; see: moxi repo specs {repo.root}")
+    report = Report()
+    report.lines += lines
+    _sweep(repo)
+    return report
+
+
 # -- reading ------------------------------------------------------------------------------
 
 def status(path: str | os.PathLike | None = None) -> list[dict]:
@@ -505,5 +565,6 @@ def _guard_problems(event: str, text: str, python: str, runner: str, root) -> li
     return out
 
 
-__all__ = ["Failure", "Usage", "Refused", "Report", "SEEDS", "available", "add", "remove",
-           "enable", "disable", "refresh", "status", "indexed", "default_mode"]
+__all__ = ["Failure", "Usage", "Refused", "Busy", "Report", "SEEDS", "available", "add",
+           "remove", "enable", "disable", "refresh", "status", "indexed", "default_mode",
+           "specs", "forget_spec"]

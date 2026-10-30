@@ -1,4 +1,4 @@
-"""`moxi repo`: the git hooks of the repos you name.
+"""`moxi repo`: the git hooks of the repos you name, and the committer's specs.
 
     moxi repo git-hooks [list] [PATH] [--json]
     moxi repo git-hooks available [--json]
@@ -6,6 +6,9 @@
     moxi repo git-hooks remove PATH [PIECE...]
     moxi repo git-hooks enable|disable PATH PIECE
     moxi repo git-hooks refresh [PATH]
+    moxi repo commit PATH [--spec NAME] [--wait SECONDS] [--json]
+    moxi repo specs [PATH] [--json]
+    moxi repo specs remove PATH NAME
 """
 
 from __future__ import annotations
@@ -75,6 +78,24 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                                     "of one repo or of every indexed repo, keeping each "
                                     "piece's enabled key, settings and record flag.")
     rf.add_argument("path", nargs="?", metavar="PATH")
+
+    cm = verbs.add_parser(
+        "commit", help="run a repo's saved committer specs",
+        description="Run one pass of the spec saved as NAME in the repo at PATH, or of every "
+                    "spec saved there, and print each pass's line.")
+    cm.add_argument("path", metavar="PATH")
+    cm.add_argument("--spec", metavar="NAME", help="the saved spec to run")
+    cm.add_argument("--wait", type=float, default=0, metavar="SECONDS",
+                    help="wait this long for another pass's lock (default: try once)")
+    cm.add_argument("--json", action="store_true", help="print one JSON array")
+
+    sp = verbs.add_parser(
+        "specs", help="the committer's specs, and forgetting one",
+        description="List each repo's saved specs, and the specs that ran without being "
+                    "saved, with their last result. 'specs remove PATH NAME' forgets one: its "
+                    "saved section, its state and its doctor records.")
+    sp.add_argument("args", nargs="*", metavar="PATH | remove PATH NAME")
+    sp.add_argument("--json", action="store_true", help="print one JSON array")
     return parser
 
 
@@ -85,9 +106,16 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi repo") -> int:
         argv.insert(1, "list")
     if argv[:2] == ["git-hooks", "--json"]:
         argv.insert(1, "list")
-    args = _parser(prog).parse_args(argv)
+    parser = _parser(prog)
+    args = parser.parse_args(argv)
+    if args.verb == "specs":
+        if args.args[:1] == ["remove"] and len(args.args) != 3:
+            parser.error("specs remove takes PATH NAME")
+        if args.args[:1] != ["remove"] and len(args.args) > 1:
+            parser.error("specs takes one PATH, or: remove PATH NAME")
+    action = args.action if args.verb == "git-hooks" else args.verb
     try:
-        return _ACTIONS[args.action](args)
+        return _ACTIONS[action](args)
     except api.Failure as exc:
         print(f"repo: {exc.text}", file=sys.stderr)
         for line in exc.lines:
@@ -185,5 +213,79 @@ def _refresh(args) -> int:
     return _print_report(api.refresh(args.path))
 
 
+def _commit(args) -> int:
+    from moxi_repo import committer
+
+    try:
+        where = committer._where(args.path)
+    except committer.SpecError as exc:
+        raise api.Usage(str(exc)) from None
+    saved = committer.saved_names(where.cgd)
+    if args.spec and args.spec not in saved:
+        raise api.Usage(f"no spec named {args.spec} is saved in {where.top}; see: "
+                        f"moxi repo specs {where.top}")
+    names = [args.spec] if args.spec else saved
+    if not names:
+        if args.json:
+            print("[]")
+        else:
+            print(f"no spec is saved in {where.top}")
+        return 0
+    results = [committer.commit_saved(where.top, name, wait=args.wait) for name in names]
+    codes = []
+    for result in results:
+        code = result.exit_code
+        if result.status == "busy" and args.wait:
+            code = 75
+        codes.append(code)
+        if not args.json:
+            out = sys.stdout if code == 0 else sys.stderr
+            print(result.line(), file=out)
+            for line in result.hook_lines:
+                print(f"  {line}", file=out)
+    if args.json:
+        print(json.dumps([r.as_dict() for r in results], indent=2, sort_keys=True))
+    for worst in (1, 3, 75):
+        if worst in codes:
+            return worst
+    return 0
+
+
+def _specs(args) -> int:
+    if args.args[:1] == ["remove"]:
+        return _print_report(api.forget_spec(args.args[1], args.args[2]))
+    repos = api.specs(args.args[0] if args.args else None)
+    if args.json:
+        print(json.dumps(repos, indent=2, sort_keys=True))
+        return 0
+    if not any(repo["specs"] for repo in repos):
+        print("no committer spec has been saved or run yet")
+    for repo in repos:
+        print(repo["root"])
+        for item in repo["specs"]:
+            last = item.get("last") or {}
+            print(f"  {item['name']}  {'saved' if item['saved'] else 'not saved'}"
+                  + (f"  last: {last.get('status')}" if last else "  never ran"))
+            if item.get("problem"):
+                print(f"    problem: {item['problem']}")
+            spec = item.get("spec")
+            if spec:
+                print(f"    paths: {', '.join(spec['paths'])}; every "
+                      f"{spec['min_interval']} s; push: {spec['push'] or 'none'}")
+            if last.get("line"):
+                print(f"    {last['line']}")
+            if item.get("refused_since"):
+                print(f"    refused since {item['refused_since']}, "
+                      f"{item.get('refused_passes')} passes")
+            for branch, info in sorted(item.get("push", {}).items()):
+                print(f"    push of {branch}: {info.get('error')}")
+            for path, info in sorted(item.get("left", {}).items()):
+                print(f"    left out: {path} ({info.get('why')})")
+            for key in item.get("records", []):
+                print(f"    doctor record open: {key}")
+    return 0
+
+
 _ACTIONS = {"list": _list, "available": _available, "add": _add, "remove": _remove,
-            "enable": _enable, "disable": _disable, "refresh": _refresh}
+            "enable": _enable, "disable": _disable, "refresh": _refresh,
+            "commit": _commit, "specs": _specs}

@@ -8,7 +8,8 @@ and launcher are pointed at that environment's Python, and the demo site is put 
 process's `sys.path` too, so `moxi.modules.extensions` finds the demo declarations here.
 
 Each demo piece does what the environment variable `DEMO_<NAME>` says (`ok` by default;
-`refuse`, `raise`, `notice`, `record`, `print`, `stage`, `none`, `input`, `slow`), and
+`refuse`, `raise`, `notice`, `record`, `print`, `stage`, `none`, `input`, `slow`, `glob`),
+and
 appends one JSON line per run to the file `DEMO_LOG` names.
 
 Git runs with its own global config in tmp (`GIT_CONFIG_GLOBAL`) and no system config, so
@@ -73,6 +74,10 @@ import moxi_repo
 def _run(name, ctx):
     action = os.environ.get("DEMO_" + name.upper().replace("-", "_"), "ok")
     log = os.environ.get("DEMO_LOG")
+    glob = None
+    if action == "glob":
+        glob = ctx.git("diff", "--cached", "--name-only", "--", "*.md").stdout.split("\\n")
+        glob = sorted(x for x in glob if x)
     if log:
         with open(log, "a", encoding="utf-8") as fh:
             fh.write(json.dumps({
@@ -82,6 +87,7 @@ def _run(name, ctx):
                 "root": ctx.root, "updates": [u.local_ref for u in ctx.updates],
                 "message": (open(ctx.message_path, encoding="utf-8").read()
                             if ctx.message_path else None),
+                "glob": glob,
             }) + "\\n")
     if action == "refuse":
         return moxi_repo.Outcome.refuse(name + " says no", "a second line")
@@ -115,6 +121,51 @@ def after_merge(ctx): return _run("after-merge", ctx)
 def push_check(ctx): return _run("push-check", ctx)
 '''
 
+DEMO_COMMITTING = '''
+"""A prepare step and trailers for the committer's tests, given as "pkg.mod:fn" targets.
+
+`DEMO_DROP` names the paths to drop (comma-separated); `DEMO_PREPARE` set to `refuse`
+refuses, `raise` raises, `edit` appends to each path it keeps. Each call appends one JSON
+line to the file `DEMO_PREPARE_LOG` names.
+"""
+
+import json
+import os
+
+import moxi_repo
+
+PATHSPEC_VARS = ("GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS",
+                 "GIT_ICASE_PATHSPECS")
+
+
+def prepare(ctx):
+    action = os.environ.get("DEMO_PREPARE", "")
+    drop = [p for p in os.environ.get("DEMO_DROP", "").split(",") if p]
+    log = os.environ.get("DEMO_PREPARE_LOG")
+    if log:
+        seen = ctx.git("diff", "--cached", "--name-only", "--", "*.md").stdout.split("\\n")
+        env = ctx.git("var", "GIT_EDITOR")  # any call: the wrapper logs its environment
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "changes": [[c.status, c.path, c.old_path, c.blob] for c in ctx.changes],
+                "glob": sorted(x for x in seen if x), "spec": ctx.spec,
+                "root": str(ctx.root)}) + "\\n")
+    if action == "refuse":
+        return moxi_repo.Prepared(refuse="demo prepare says no")
+    if action == "raise":
+        raise RuntimeError("demo prepare fell over")
+    if action == "edit":
+        for c in ctx.changes:
+            if c.path not in drop and c.blob:
+                with open(os.path.join(ctx.root, c.path), "a", encoding="utf-8") as fh:
+                    fh.write("edited after prepare\\n")
+    return moxi_repo.Prepared(drop=[(p, "demo says so") for p in drop])
+
+
+def trailers(changes, since):
+    return [("Demo-Paths", str(len(changes))), ("Demo-Since", "yes" if since else "no")]
+'''
+
 DEMO_ENTRIES = {
     "demo.first": "demo_pieces:FIRST",
     "demo.gate": "demo_pieces:GATE",
@@ -134,6 +185,7 @@ def _write_demo(site: Path) -> None:
     package.mkdir(parents=True)
     (package / "__init__.py").write_text(DEMO_INIT, encoding="utf-8")
     (package / "hooks.py").write_text(DEMO_HOOKS, encoding="utf-8")
+    (package / "committing.py").write_text(DEMO_COMMITTING, encoding="utf-8")
     info = site / "moxi_demo-0.1.0.dist-info"
     info.mkdir()
     (info / "METADATA").write_text("Metadata-Version: 2.1\nName: moxi-demo\nVersion: 0.1.0\n",

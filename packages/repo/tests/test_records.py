@@ -144,8 +144,13 @@ def test_a_flag_write_that_meets_a_held_config_lock(demo):
     [found] = _records.judge()
     assert (found.action, found.reason) == ("flag", "its piece has no recorded flag")
     lock.unlink()
-    # The next verb (or, once it lands, committer pass) for the repo sets the flag.
-    api.add(repo)
+    # The repo's next committer pass sets the flag, from its record part's sweep.
+    import moxi_repo
+
+    result = moxi_repo.commit(moxi_repo.Spec(
+        name="demo/snap", root=repo, paths=("README.md",),
+        author=("snap-bot", "snap@example.invalid")))
+    assert result.status == "clean", result
     assert left(repo, "demo/watch") == OPEN
     assert _records.judge() == []
     demo.act(watch="ok")

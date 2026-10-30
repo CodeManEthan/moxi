@@ -19,8 +19,9 @@ already gone counts as done. No code holds the ledger's lock across a git call.
 `sweep()` clears each key whose subject is gone: its repo's common git dir doesn't exist,
 or its piece's section is missing or disabled (and then unsets the disabled piece's
 `recorded` flag); and it sets a missing `recorded` flag on an open piece key whose piece is
-registered and enabled. Spec and push keys are judged by the
-committer's own rules, through `SPEC_GONE`.
+registered and enabled. Spec and push keys are judged by the committer's own rules
+(`committer.spec_gone`) and cleared under the committer's lock, taken try-once: while a
+pass holds it, they are left for that pass's own sweep.
 """
 
 from __future__ import annotations
@@ -149,14 +150,10 @@ def close_piece(cgd: str | os.PathLike, piece_id: str) -> bool:
     return True
 
 
-#: The committer's judge of a spec or push key: fn(cgd, kind, subject) -> why it is gone,
-#: or None while its subject stands. The committer sets it; until then such keys are left
-#: to the committer's own pass, and only a repo that is gone clears them here.
-SPEC_GONE: Callable[[str, str, dict], str | None] | None = None
-
-
 #: The reason a piece key is cleared whose section stays, so its flag is unset too.
 DISABLED = "its piece is disabled"
+#: The reason every key of a repo whose common git dir is gone is cleared.
+GONE = "its repo is gone"
 
 
 class Finding:
@@ -199,7 +196,7 @@ def judge(repo: str | os.PathLike | None = None) -> list[Finding]:
     for cgd, entries in sorted(by_repo.items()):
         if not cgd or not os.path.isdir(cgd):
             for key, entry in sorted(entries.items()):
-                out.append(Finding(key, "clear", "its repo is gone", cgd,
+                out.append(Finding(key, "clear", GONE, cgd,
                                    entry.get("subject") or {}))
             continue
         pieces = None
@@ -219,8 +216,10 @@ def judge(repo: str | os.PathLike | None = None) -> list[Finding]:
                 elif "recorded" not in section:
                     out.append(Finding(key, "flag", "its piece has no recorded flag", cgd,
                                        subject))
-            elif SPEC_GONE is not None:
-                why = SPEC_GONE(cgd, kind, subject)
+            elif kind in ("commit", "push"):
+                from moxi_repo import committer
+
+                why = committer.spec_gone(cgd, kind, subject)
                 if why:
                     out.append(Finding(key, "clear", why, cgd, subject))
     return out
@@ -232,7 +231,13 @@ def sweep(repo: str | os.PathLike | None = None) -> list[Finding]:
     from moxi_repo.gitrun import git
 
     found = judge(repo)
+    done: list[Finding] = []
+    specs_of: set[str] = set()
     for item in found:
+        if item.reason != GONE and "spec" in item.subject:
+            specs_of.add(item.cgd)
+            continue
+        done.append(item)
         flag = f"moxi-repo.piece.{item.subject.get('piece')}.recorded"
         if item.action == "clear" and item.reason == DISABLED:
             close_record(item.key, after=lambda cgd=item.cgd, flag=flag: git(
@@ -241,9 +246,14 @@ def sweep(repo: str | os.PathLike | None = None) -> list[Finding]:
             close_record(item.key)
         elif item.action == "flag":
             git(item.cgd, f"--git-dir={item.cgd}", "config", "--local", flag, "true")
-    return found
+    if specs_of:
+        from moxi_repo import committer
+
+        for cgd in sorted(specs_of):
+            done += committer.clear_gone(cgd)
+    return done
 
 
 __all__ = ["MODULE", "piece_key", "commit_key", "push_key", "ledger", "open_record",
            "close_record", "close_repo", "close_all", "close_piece", "keys_of_repo", "judge",
-           "sweep", "Finding", "SPEC_GONE"]
+           "sweep", "Finding", "DISABLED", "GONE"]
