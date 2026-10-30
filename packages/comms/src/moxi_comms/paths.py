@@ -126,19 +126,6 @@ def cursors_dir(env=None) -> Path:
     return state_dir(env) / "cursors"
 
 
-def cold_gate(env=None) -> Path:
-    """STATE/comms/cold-gate.json -- the cold-cache gate file an older daemon kept.
-
-    `{"held": {name: [ids]}, "refused": {name: [ids]}}`: the ids that daemon's gate held
-    for a name's own next turn, and the ids it refused for an adapter that takes no
-    delayed mail. Nothing writes it now. A daemon reads it once, at its first boot with
-    the delivery queue: the held ids become queue rows, the refused half is dropped, and
-    the file is deleted, as is the local record's `cold_refusals` table
-    (`Daemon._migrate_queue`). STATE, not DATA: it describes this box's daemon.
-    """
-    return state_dir(env) / "cold-gate.json"
-
-
 def tokens_dir(env=None) -> Path:
     """STATE/comms/tokens -- the per-holder token store.
 

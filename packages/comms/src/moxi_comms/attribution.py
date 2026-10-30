@@ -5,9 +5,7 @@ What the record alone can prove:
   * an identity row stamped by the daemon   -> that qualified identity, **verified**
                                                at its current directory tier
   * the operator's user id                -> the operator, **verified**
-  * an unconverted webhook row            -> the frozen migration reader gives the same
-                                             answer the older release gave
-  * a webhook row left after conversion   -> its display, **labeled**
+  * a webhook row an older release left   -> its display, **labeled**
   * anything else                         -> `unknown`, never guessed
 """
 
@@ -15,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from . import directory, migration
+from . import directory
 from .scoping import GLOBAL, is_auto_name, qualify, split_tag
 
 TIER_EPHEMERAL, TIER_CHOSEN, TIER_STANDING = "ephemeral", "chosen", "standing"
@@ -62,7 +60,7 @@ def from_display(display: str) -> Author:
     return Author(name, scope, qualify(name, scope), tier, LABELED)
 
 
-def from_record(db, msg, *, record=None, history_path=None) -> Author:
+def from_record(db, msg) -> Author:
     """Everything the record + directory can prove about who authored `msg`."""
     if msg.author_kind == "identity":
         name, scope = split_tag(msg.author_id)
@@ -82,9 +80,7 @@ def from_record(db, msg, *, record=None, history_path=None) -> Author:
     if msg.author_kind == "unknown":
         return unknown()
     if msg.author_kind == "webhook":
-        marker = (record.meta_get(migration.META_AUTHOR_STAMPS)
-                  if record is not None else migration.META_AUTHOR_STAMPS)
-        if marker is None:
-            return migration.legacy_author(db, msg, history_path=history_path)
+        # comms 0.2 converted every webhook row it could prove before its record moved
+        # into comms.db; what it left proves only its display.
         return from_display(msg.author_display)
     return unknown()

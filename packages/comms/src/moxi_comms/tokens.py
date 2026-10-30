@@ -39,8 +39,7 @@ and each role holder the box names in config.toml's `[secrets] roles`, under its
 name. A role the config does not list is unknown, with no store path, like any role the
 store has never heard of.
 
-Old agent posting files are interpreted only by the migration module and are never a
-live owner family here.
+Old agent posting files are never a live owner family here.
 """
 
 from __future__ import annotations

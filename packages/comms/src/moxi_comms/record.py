@@ -151,7 +151,7 @@ class _State:
     messages: list = field(default_factory=list)
     #: [message id, name] queue rows: the message waits for the name.
     queue: list = field(default_factory=list)
-    #: The record's meta keys the daemon reads (`queue_migrated`).
+    #: The record's meta keys (the operator's token hash among them).
     meta: dict = field(default_factory=dict)
 
     def replace_with(self, raw: dict) -> None:

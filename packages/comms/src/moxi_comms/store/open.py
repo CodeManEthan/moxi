@@ -21,6 +21,7 @@ A refusal names the file and the reason and writes nothing.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
 from pathlib import Path
@@ -46,6 +47,8 @@ UNMARKED = "unmarked"
 #: daemon of this version still write cursor files there until the daemon keeps the
 #: cursors in the store; until then the folder says nothing about a 0.2 install.
 CURSORS_ARE_0_2 = False
+
+log = logging.getLogger("comms.store")
 
 # `moxi.files.lock` refuses a second holder in one process, so this process's threads
 # queue for the gate here first.
@@ -105,8 +108,13 @@ def state_of(target) -> str:
         conn.close()
 
 
+def _log_report(lines: list[str]) -> None:
+    for line in lines:
+        log.info("%s", line)
+
+
 def open_write(target=None, *, env=None, timeout: float = 5.0,
-               check_same_thread: bool = False) -> sqlite3.Connection:
+               check_same_thread: bool = False, report=None) -> sqlite3.Connection:
     """Open comms.db for writing, through the gate, with its schema brought up to date.
 
     `target` is the store's file (default `path(env)`); `env` names the roots the 0.2
@@ -115,8 +123,12 @@ def open_write(target=None, *, env=None, timeout: float = 5.0,
     through `moxi.store.transaction`. Raises `StoreRefused` with nothing written,
     `moxi.files.LockTimeout` when another open holds the gate past `LOCK_WAIT`, and
     `moxi.store.StoreTooNew` for a store a newer comms wrote.
+
+    When the open moves comms 0.2's files, or finishes a move, `report` is called once
+    with the report's lines (default: each is logged).
     """
     target = Path(target) if target is not None else path(env)
+    report = report if report is not None else _log_report
     with _gate, _files.lock(target.parent / MIGRATE_LOCK, timeout=LOCK_WAIT):
         found = zero_two_files(env)
         if found:
@@ -126,9 +138,9 @@ def open_write(target=None, *, env=None, timeout: float = 5.0,
                 raise StoreRefused(target, f"can't be read ({e}); nothing was written") \
                     from None
             if state == ABSENT:
-                _move_0_2(found, target, env)
+                report(_move_0_2(found, target, env))
             elif state == MARKED:
-                _finish_0_2(found, target, env)
+                report(_finish_0_2(found, target, env))
             else:
                 raise StoreRefused(target, (
                     "it exists beside comms 0.2's files "
@@ -175,23 +187,24 @@ def open_read(target=None, *, env=None, timeout: float = 5.0,
 
 
 # -- the move of comms 0.2's files -------------------------------------------------------
-# The two steps below are where the move plugs in. Each runs under the gate's lock, and
-# each either leaves `target` a store holding the marker or raises `StoreRefused` with
-# nothing written. Until the move is built, both refuse.
+# Each runs under the gate's lock, and each either leaves `target` a store holding the
+# marker or raises `StoreRefused` with nothing written. `upgrade_0_2` holds the move.
 
-def _move_0_2(found: list[Path], target: Path, env) -> None:
-    """Move comms 0.2's `found` files into a new store at `target`."""
-    raise StoreRefused(found[0], (
-        "comms 0.2's files are still here and this version of comms can't move them yet; "
-        "nothing was written"))
+def _move_0_2(found: list[Path], target: Path, env) -> list[str]:
+    """Move comms 0.2's files into a new store at `target`; the report's lines."""
+    from . import upgrade_0_2
+
+    return upgrade_0_2.move(target, env).lines(target)
 
 
-def _finish_0_2(found: list[Path], target: Path, env) -> None:
+def _finish_0_2(found: list[Path], target: Path, env) -> list[str]:
     """Finish a move that stopped after its commit: rename the 0.2 files that are left,
-    when they still match the fingerprint the marker keeps."""
-    raise StoreRefused(found[0], (
-        f"{target} was moved from comms 0.2, but these files are still under their 0.2 "
-        "names and this version of comms can't finish the move; nothing was written"))
+    when they still match the fingerprint the marker keeps; the report's lines."""
+    from . import upgrade_0_2
+
+    done = upgrade_0_2.finish(target, env)
+    return [f"finished the move of comms 0.2's files into {target}"] + [
+        f"renamed {a} to {b}" for a, b in done]
 
 
 __all__ = ["MIGRATE_LOCK", "LOCK_WAIT", "ABSENT", "MARKED", "UNMARKED",

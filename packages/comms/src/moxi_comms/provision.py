@@ -425,6 +425,10 @@ def send_only_main(argv=None, *, record=None, store=None, env=None, out=None,
 
 # --------------------------------------------------------------------------- operator CLI
 
+#: What provisioning says when comms 0.2's daemon still runs, and writes nothing.
+SETUP_WAITS = "comms' 0.2 data moves at the daemon's next start"
+
+
 def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
     """`moxi-comms-provision` -- OPERATOR machinery, deliberately not a `moxi comms` verb.
 
@@ -491,10 +495,20 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
     for entry in args.standing:
         name, sep, scope = entry.partition("@")
         standing.append((name, scope if sep else GLOBAL))
+    from .store import StoreRefused, upgrade_0_2
+
     try:
         record = open_record(args.backend, role="provisioner")
     except RecordError as e:
         raise SystemExit(str(e)) from None
+    except upgrade_0_2.DaemonLive:
+        # The upgrade's usual order: the 0.2 daemon still runs until the unit step, so
+        # its files can't move yet. Nothing is written; the daemon's start moves them and
+        # then provisions what is missing.
+        print(SETUP_WAITS)
+        return 0
+    except StoreRefused as e:
+        raise SystemExit(f"moxi-comms-provision: {e}") from None
     # The local backend mints its own tokens and they have no other home, so provision
     # is their writer. Built HERE because this is the caller that knows which backend it
     # opened, and skipped on the mock, which keeps its tokens in its own record.

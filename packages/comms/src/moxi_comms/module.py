@@ -36,6 +36,8 @@ INTERNAL_ENV = {
 }
 SETTINGS = "settings.toml"
 SETUP = None
+#: comms' own doctor rows: the move of comms 0.2's files into comms.db, and what it left.
+DOCTOR = "moxi_comms.store.upgrade_0_2:doctor_rows"
 SEGMENT = None
 #: comms' whole loader over a config text alone, run by `moxi config set`, `unset` and
 #: `check`, so the verb never writes a file comms would refuse.
