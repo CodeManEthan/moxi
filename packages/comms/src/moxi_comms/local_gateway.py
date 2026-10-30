@@ -120,7 +120,8 @@ class LocalGateway:
         self._pump: threading.Thread | None = None
         self._wake = threading.Event()
         self._stop = threading.Event()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # `connect` makes a missing directory of the record's, private; one already
+        # there, such as a shared directory a configured record names, is left as it is.
         self._init_schema()
 
     # ------------------------------------------------------------------ connections
@@ -128,7 +129,8 @@ class LocalGateway:
         """One connection per thread. WAL lets them all read while one writes.
 
         Opened through `moxi.store.connect`: a record it creates is private to its owner
-        (0600) from its first byte and starts in WAL; an existing record is opened as it
+        (0600) from its first byte and starts in WAL, in a directory left as it was when it
+        was there already (a missing one is made 0700); an existing record is opened as it
         is, its mode and journal mode untouched. A thread that is done with the record
         calls `release()`, or its connection stays open until `close()`.
         """
