@@ -5,10 +5,14 @@ cases."""
 from __future__ import annotations
 
 import pytest
-from conftest import wait_until
+from conftest import (_stamp_of, as_frames, projects_root, store_rows, synced, wait_until,
+                      warm_session)
 
 from moxi import exit as moxi_exit
-from moxi_comms import machine_line
+from moxi_comms import api, glossary, machine_line
+from moxi_comms import daemon as daemon_mod
+from moxi_comms.client import DaemonClient
+from moxi_comms.paths import daemon_socket
 
 REVIEWER = "reviewer@proj-a"
 MAIN = "main@proj-a"
@@ -117,12 +121,201 @@ def test_delete_of_an_unknown_id_is_refused(rig):
     assert '"outcome": "refused"' in out
 
 
-# --------------------------------------------------------------------------- history, explain
+# --------------------------------------------------------------------------- end to end
+
+class Reader:
+    """A bound reviewer on a bare connection with a warm session, so mail goes to it
+    live: it keeps every push and opens digests and ends turns as an adapter does."""
+
+    def __init__(self, rig):
+        self.frames: list = []
+        self.client = DaemonClient(daemon_socket(),
+                                   on_push=as_frames(self.frames)).connect()
+        self.client.bind(name="reviewer", scope="proj-a", session_id=warm_session(),
+                         projects_root=str(projects_root()))
+        self.rig = rig
+
+    def handed(self) -> list:
+        synced(self.client)
+        return [f["payload"]["message_id"] for f in self.frames if f["op"] == "deliver"]
+
+    def open(self, *ids) -> dict:
+        return self.client.call("open_digest", {"ids": [str(i) for i in ids]})
+
+    def turn(self, handled=(), unhandled=()) -> None:
+        self.client.call("turn_ended", {"identity": REVIEWER, "turned": True,
+                                        "handled": list(handled),
+                                        "unhandled": list(unhandled)})
+        synced(self.client)
+
+    def look(self) -> None:
+        self.client.notify("look", {"identity": REVIEWER})
+        synced(self.client)
+
+
+@pytest.fixture
+def reader(rig):
+    r = Reader(rig)
+    yield r
+    r.client.close()
+
 
 def post(rig, recipients, text, **kw):
     return rig.record.post_as_identity(
         "planner", rig.names_channel, machine_line.compose(recipients, text, **kw)).id
 
+
+def handed_rows(name, ids) -> bool:
+    got = {m for m, _, st in store_rows(name) if st == "handed"}
+    return set(ids) <= got
+
+
+def test_an_overflowed_push_past_its_expiry_is_dropped_when_the_window_frees(
+        rig, reader, monkeypatch):
+    monkeypatch.setattr(daemon_mod, "WINDOW", 1)
+    first = post(rig, [REVIEWER], "first")
+    assert wait_until(lambda: first in reader.handed())
+    late = post(rig, [REVIEWER], "late", expires_at=int(rig.clock()) + 60)
+    b = rig.daemon.bindings[REVIEWER]
+    assert wait_until(lambda: late in b.overflow), "the window is full: it waits for room"
+    rig.clock.advance(120)
+    assert reader.open(first)["ids"] == [first]
+    assert late not in reader.handed()
+    assert rig.daemon.books.dropped_reason(REVIEWER, late) == "expired"
+    assert late not in b.window and late not in b.delivered
+    assert late not in {m for m, _, _ in store_rows(REVIEWER)}
+
+
+def test_a_digest_that_ends_unhandled_past_its_expiry_is_dropped_not_replayed(
+        rig, reader):
+    mid = post(rig, [REVIEWER], "soon stale", expires_at=int(rig.clock()) + 60)
+    assert wait_until(lambda: mid in reader.handed())
+    opened = reader.open(mid)
+    assert opened["ids"] == [mid]
+    rig.clock.advance(120)
+    reader.turn(unhandled=[opened["digest"]])
+    reader.look()                                         # the next release point
+    assert wait_until(lambda: rig.daemon.books.dropped_reason(REVIEWER, mid) == "expired")
+    assert reader.handed() == [mid], "handed once, never again"
+    assert store_rows(REVIEWER) == []
+    assert mid not in rig.daemon.queue.get(REVIEWER, {})
+
+
+def test_a_waiting_message_past_its_expiry_is_dropped_at_the_bind(rig):
+    mid = post(rig, [REVIEWER], "for later", expires_at=int(rig.clock()) + 60)
+    assert wait_until(lambda: mid in rig.daemon.queue.get(REVIEWER, {}))
+    rig.clock.advance(120)
+    shim = rig.shim(name="reviewer", scope="proj-a")
+    wait_until(lambda: not shim.replaying)
+    after = post(rig, [REVIEWER], "fresh")
+    assert wait_until(lambda: after in [p["message_id"] for p in shim.queue])
+    assert mid not in [p["message_id"] for p in shim.queue]
+    assert rig.daemon.books.dropped_reason(REVIEWER, mid) == "expired"
+
+
+def test_delete_after_a_digest_is_already_delivered(rig, reader):
+    rig.shim(name="planner")
+    code, out = rig.send(REVIEWER, "read it", sender=dict(name="planner"))
+    assert code == 0, out
+    mid = last(rig).id
+    assert wait_until(lambda: mid in reader.handed())
+    reader.open(mid)
+    code, out = rig.cli(["delete", mid], name="planner")
+    assert code == moxi_exit.REFUSED, out
+    assert f"already delivered to {REVIEWER}" in out
+    assert rig.record.get_message(mid).withdrawn_at is None
+    assert rig.daemon.books.dropped_reason(REVIEWER, mid) is None
+
+
+def test_a_handed_row_not_yet_in_a_digest_is_still_withdrawn(rig, reader):
+    rig.shim(name="planner")
+    code, out = rig.send(REVIEWER, "pushed, not read", sender=dict(name="planner"))
+    assert code == 0, out
+    mid = last(rig).id
+    assert wait_until(lambda: mid in reader.handed() and handed_rows(REVIEWER, [mid]))
+    code, out = rig.cli(["delete", mid], name="planner")
+    assert code == moxi_exit.OK, out
+    assert f"withdrawn from {REVIEWER}" in out
+    opened = reader.open(mid)
+    assert opened["ids"] == [] and opened["dropped"] == [{"id": mid,
+                                                          "reason": "withdrawn"}]
+
+
+def test_delete_withdraws_from_some_and_says_who_had_it(rig, reader):
+    rig.shim(name="planner")
+    code, out = rig.send(f"{REVIEWER},{MAIN}", "half read", sender=dict(name="planner"))
+    assert code == 0, out
+    mid = last(rig).id
+    assert wait_until(lambda: mid in reader.handed())
+    opened = reader.open(mid)
+    code, out = rig.cli(["delete", mid, "--json"], name="planner")
+    assert code == moxi_exit.OK, out
+    assert '"withdrawn": ["main@proj-a"]' in out and '"delivered": ["reviewer@proj-a"]' in out
+    # The reviewer's digest ends unhandled: the message, withdrawn now, isn't replayed.
+    reader.turn(unhandled=[opened["digest"]])
+    reader.look()
+    assert wait_until(lambda: rig.daemon.books.dropped_reason(REVIEWER, mid) == "withdrawn")
+    assert reader.handed() == [mid]
+
+
+# --------------------------------------------------------------------------- the API
+
+def _sender(name):
+    return _stamp_of({"MOXI_COMMS_PROJECT": "proj-a", "MOXI_COMMS_NAME": name})
+
+
+def test_the_api_sends_interrupt_and_expires_and_deletes(rig):
+    rig.shim(name="planner")
+    with rig.session_holding(_sender("planner")) as path:
+        sent = api.send(api.Sender.socket(path), MAIN, "now", posture="none",
+                        interrupt=True, expires="30m")
+        checked = api.check(api.Sender.socket(path), MAIN, "now", posture="none",
+                            interrupt=True, expires=3600)
+        assert sent.outcome == "sent", sent.lines()
+        assert checked.outcome == "would-send", checked.lines()
+        ml = machine_line.parse(rig.record.get_message(sent.message_id).content)
+        assert ml.interrupt and ml.expires_at is not None
+        assert wait_until(lambda: sent.message_id in rig.daemon.queue.get(MAIN, {}))
+        gone = api.delete(api.Sender.socket(path), sent.message_id)
+        again = api.delete(api.Sender.socket(path), sent.message_id)
+        unknown = api.delete(api.Sender.socket(path), "4611686018427399999")
+    assert isinstance(gone, api.DeleteResult)
+    assert (gone.outcome, gone.exit_code) == ("deleted", moxi_exit.OK), gone.lines()
+    assert gone.withdrawn == (MAIN,) and gone.delivered == () and gone.refusal is None
+    assert gone.lines() == [f"withdrawn from {MAIN}"]
+    assert gone.to_dict()["withdrawn"] == [MAIN]
+    assert again.outcome == "deleted"
+    assert unknown.outcome == "refused" and unknown.refusal is not None
+
+
+def test_the_api_refuses_a_bad_expiry_as_the_parser_would(rig):
+    with pytest.raises(ValueError):
+        api.send(api.Sender.session(), MAIN, "x", posture="none", expires="5y")
+    with pytest.raises(TypeError):
+        api.delete(object(), "1")
+
+
+def test_the_api_delete_offline_is_offline(rig):
+    rig.shim(name="planner")
+    with rig.session_holding(_sender("planner")) as path:
+        rig.daemon.stop()
+        got = api.delete(api.Sender.socket(path), "12345")
+    assert got.outcome == "offline" and got.exit_code == moxi_exit.TEMPFAIL
+
+
+# --------------------------------------------------------------------------- help
+
+@pytest.mark.parametrize("form,term", [
+    ("interrupt", "interrupt"), ("--interrupt", "interrupt"), ("[interrupt]", "interrupt"),
+    ("expiry", "expiry"), ("--expires", "expiry"), ("expired", "expiry"),
+    ("withdrawn", "withdrawn"), ("delete", "withdrawn"), ("withdraw", "withdrawn"),
+])
+def test_the_glossary_explains_the_new_words(form, term):
+    entry = glossary.lookup(form)
+    assert entry is not None and entry.term == term
+
+
+# --------------------------------------------------------------------------- history, explain
 
 def history_row(out, message_id):
     (row,) = [ln for ln in out.splitlines() if ln.startswith(f"{message_id} ")]

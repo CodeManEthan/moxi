@@ -132,6 +132,33 @@ TERMS: tuple[Entry, ...] = (
         aliases=("--held", "pending", "cold"),
     ),
     Entry(
+        "interrupt",
+        "`[interrupt]` on a frame line means the sender asked for the message to reach "
+        "you while you work, between the steps of a running turn, instead of after the "
+        "turn ends. Send one with `moxi comms send --interrupt`. It skips no hold: mail to "
+        "a session that is not running, or whose cache is cold, waits like any other. "
+        "Where the harness cannot take mail mid-turn, it arrives when the turn ends.",
+    ),
+    Entry(
+        "expiry",
+        "how long a message may wait before it is dropped undelivered. Every send "
+        "carries one: `--expires 30m`, `6h`, `3d` or `never`, and without the flag the "
+        "box's default, 24 hours unless its config says otherwise. A message still "
+        "waiting when its time passes is dropped, not delivered late, and its sender is "
+        "not told; `moxi comms explain <name> <id>` says `expired`. A message that has "
+        "already reached you is not taken back.",
+        aliases=("expires", "--expires", "expired"),
+    ),
+    Entry(
+        "withdrawn",
+        "a message its author took back with `moxi comms delete <id>` before it reached "
+        "the recipient. It never arrives, `moxi comms explain` says `withdrawn`, and "
+        "`moxi comms history` still shows it, marked `[withdrawn]`, so its id and replies "
+        "to it still hold. Only the author can delete a message, and only from those who "
+        "have not had it yet: a recipient who has read it keeps it.",
+        aliases=("delete", "withdraw"),
+    ),
+    Entry(
         "posture",
         "what the sender wants back. Every new `moxi comms send` states it with `--posture`: "
         "`none` for no reply, `optional` for a reply only if you have something to add, "
