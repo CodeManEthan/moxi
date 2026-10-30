@@ -237,10 +237,15 @@ def load(env=None) -> CommsConfig:
     A one-shot reader (a verb, an adapter at start) calls this. A process that runs all
     day reads through `Config`, which keeps the last good settings."""
     environ = env if env is not None else os.environ
-    path = config_path(environ)
+    return _read(config_path(environ), environ)
+
+
+def _read(path: Path, environ) -> CommsConfig:
+    """Read the comms config file `path` with every check: the token refusal, the
+    schema's and comms' own."""
     _check_file(path)
     try:
-        settings = _moxi_config.load(MODULE, schema(), env=environ)
+        settings = _moxi_config.load(MODULE, schema(), env=environ, path=path)
     except ConfigError:
         raise
     except _moxi_config.ConfigError as e:
@@ -292,34 +297,15 @@ class Config(_moxi_config.Config):
 def load_file(path, env=None) -> CommsConfig:
     """A comms config file named on a command line (`moxi-comms-codex --config PATH`),
     read whole in place of the box's: the same schema, the same token refusal, the same
-    checks. Nothing else in the process reads it; the caller takes the table it named
-    the file for (a launcher, its roster).
-
-    moxi.config reads a module's file only at its layout's path, so `path` is read in
-    place through a link under a private config root, and every error names `path`."""
-    import tempfile
-
+    checks, and every error names `path`. Nothing else in the process reads it; the
+    caller takes the table it named the file for (a launcher, its roster)."""
     path = Path(os.path.expanduser(str(path)))
     if not path.is_absolute():
         path = Path.cwd() / path
     if not path.is_file():
         raise ConfigError(path, None, "is not a file",
                           "name a comms config file (the format of config.toml)")
-    environ = dict(env if env is not None else os.environ)
-    with tempfile.TemporaryDirectory(prefix="moxi-comms-config-") as root:
-        environ["MOXI_COMMS_CONFIG_HOME"] = root
-        link = config_path(environ)
-        link.parent.mkdir(parents=True)
-        link.symlink_to(path.resolve())
-        try:
-            cfg = load(environ)
-        except ConfigError as e:
-            if e.file is None or Path(e.file) != link:
-                raise
-            raise ConfigError(path, e.key, e.problem, e.fix) from None
-        finally:
-            with _checked_lock:
-                _checked.pop(link, None)
+    cfg = _read(path, env if env is not None else os.environ)
     cfg.source = str(path)
     return cfg
 
