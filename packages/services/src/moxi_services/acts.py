@@ -566,7 +566,9 @@ def add_adopted(name: str, ref: str, *, enable: bool | None, timer: bool = False
 
     `enable` None is asked wrongly (exit 2), with what the supervisor reads now. A unit
     that is missing, whose on/off can't be read, in moxi's own namespace, or already held
-    by another row is refused (exit 3)."""
+    by another row is refused (exit 3). On systemd a unit is held too when it is tied by a
+    timer's Triggers to one another row holds: the service a timer triggers, or the timer
+    that triggers a service."""
     return _outcome("add")(_add_adopted)(
         name, ref, enable=enable, timer=timer, health=health, project=project,
         launches_session=launches_session, doc=doc, by=by)
@@ -589,8 +591,13 @@ def _add_adopted(name, ref, *, enable, timer, health, project, launches_session,
         if not plist.is_file():
             raise Refused(f"{ref} has no plist in ~/Library/LaunchAgents; services adopts "
                           "only the user's own agents", None)
-    st = units.status([], foreign=[ref])
-    st = st[0] if st else None
+    # Other rows' timers here are read with the REF, in the same status call, for what
+    # their Triggers name.
+    timers = _timers(name) if backend == "systemd" else []
+    read = {s.name: s for s in units.status([], foreign=[ref, *timers])}
+    st = read.get(ref)
+    triggers = {unit: read[unit].triggers for unit in timers if unit in read}
+    _held(name, ref, st, triggers)
     _adoptable(ref, kind, st, enable)
     if project is not None:
         fields["project"] = projects_link.lookup(project)
@@ -599,9 +606,9 @@ def _add_adopted(name, ref, *, enable, timer, health, project, launches_session,
     wrapped = state.is_wrapped(probe) and backend == "systemd"
     retry = f"moxi services {'enable' if enable else 'disable'} {name}"
     with _locked():
-        # Again under the lock: another add of the same unit may have written its row
-        # since the check above.
-        _held(name, ref)
+        # Again under the lock: another add of the same unit, or of one its Triggers
+        # ties to it, may have written its row since the check above.
+        _held(name, ref, st, triggers)
         store.write(lambda c: store.insert(c, enabled=enable, by=by, **fields))
         if wrapped:
             if not _wrap(probe, lines):
@@ -619,17 +626,58 @@ def _add_adopted(name, ref, *, enable, timer, health, project, launches_session,
     return _check_enabled(store.get(name), enable, lines, wrapped=wrapped), None
 
 
-def _held(name: str, ref: str) -> None:
+def _held(name: str, ref: str, st: units.UnitState | None = None,
+          triggers: dict[str, str | None] | None = None) -> None:
     """Refuse a unit another row already holds: one adopted by another row, or a Linux
-    timer another module or row has wrapped."""
-    for other in store.read_rows():
-        if other.form == "adopted" and other.unit == ref and other.name != name:
+    timer another module or row has wrapped.
+
+    Given the REF's state `st`, also a unit tied to it by a systemd timer's Triggers:
+    for a timer REF, the service it triggers when another row adopted that service or
+    it is in moxi's own namespace (a written or module row's unit); and another row's
+    timer that triggers the REF, or the same service as a timer REF. `triggers` holds
+    what other rows' timers trigger, by unit; a timer row not in it is read here and
+    added. Only systemd reports Triggers, so elsewhere the REF alone is compared."""
+    others = [r for r in store.read_rows() if r.form == "adopted" and r.name != name]
+    for other in others:
+        if other.unit == ref:
             raise Refused(f"{ref} is already adopted as {other.id}",
                           f"`moxi services show {other.name}` shows it")
     wrapped = units.wraps(MODULE).get(ref)
     if wrapped is not None:
         raise Refused(f"{ref} is already wrapped for services/{wrapped.name}",
                       f"moxi services remove {wrapped.name}")
+    if st is None or st.backend != "systemd":
+        return
+    service = st.triggers
+    if service is not None:
+        if rows.is_own_ref(service):
+            raise Refused(f"{ref} triggers {service}, a unit in moxi's own namespace; "
+                          "that unit is a row already", None)
+        for other in others:
+            if other.unit == service:
+                raise Refused(f"{ref} triggers {service}, already adopted as {other.id}",
+                              f"`moxi services show {other.name}` shows it")
+    if triggers is None:
+        triggers = {}
+    timers = [o for o in others if o.kind == "timer" and o.here]
+    unread = [o.unit for o in timers if o.unit not in triggers]
+    if unread:
+        triggers.update({s.name: s.triggers for s in units.status([], foreign=unread)})
+    for other in timers:
+        named = triggers.get(other.unit)
+        if named is not None and named == ref:
+            raise Refused(f"{ref} is triggered by {other.unit}, already adopted as "
+                          f"{other.id}", f"`moxi services show {other.name}` shows it")
+        if named is not None and named == service:
+            raise Refused(f"{ref} triggers {service}, as {other.unit} does, already "
+                          f"adopted as {other.id}",
+                          f"`moxi services show {other.name}` shows it")
+
+
+def _timers(name: str) -> list[str]:
+    """The units of the timers other rows adopted on this system."""
+    return [r.unit for r in store.read_rows()
+            if r.form == "adopted" and r.kind == "timer" and r.here and r.name != name]
 
 
 def _adoptable(ref: str, kind: str, st: units.UnitState | None,

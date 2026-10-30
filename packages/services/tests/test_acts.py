@@ -571,6 +571,127 @@ def test_adopt_refuses_a_timer_services_already_wrapped_for_another_row(fake):
     assert out.code == 3 and "services/old" in out.lines[0]
 
 
+# On systemd only a foreign timer's state says it is wrapped, and only a timer's names
+# what its Triggers names, so a service's own state shows nothing of the timer that
+# triggers it; the fake reads them the same way.
+
+def backup_with_its_service(fake) -> None:
+    """A foreign timer and the service its Triggers names, under different names."""
+    fake.foreign["backup.timer"] = Unit("timer", True, triggers="backup-run.service")
+    fake.foreign["backup-run.service"] = Unit("daemon", False)
+
+
+@LINUX
+def test_adopt_refuses_a_service_another_rows_timer_triggers(fake):
+    backup_with_its_service(fake)
+    assert acts.add_adopted("backup", "backup.timer", enable=True).code == 0
+    assert "backup-run.service" not in fake.wrapped
+    before = fake.acts()
+    out = acts.add_adopted("run", "backup-run.service", enable=True)
+    assert out.code == 3, out
+    assert ("backup-run.service is triggered by backup.timer, already adopted as "
+            "services/backup") in out.lines[0]
+    assert store.get("run") is None and fake.acts() == before
+    # Read in the one status call that reads the REF.
+    assert ("status", (), ("backup-run.service", "backup.timer")) in fake.calls
+
+
+@LINUX
+def test_adopt_refuses_a_timer_whose_service_another_row_adopted(fake):
+    backup_with_its_service(fake)
+    assert acts.add_adopted("run", "backup-run.service", enable=True).code == 0
+    out = acts.add_adopted("backup", "backup.timer", enable=True)
+    assert out.code == 3, out
+    assert ("backup.timer triggers backup-run.service, already adopted as services/run"
+            in out.lines[0])
+    assert store.get("backup") is None
+    assert not any(c[0] == "wrap" for c in fake.calls) and fake.wrapped == {}
+
+
+@LINUX
+def test_adopt_refuses_a_timer_naming_no_unit_whose_own_service_another_row_adopted(fake):
+    fake.foreign["nightly.timer"] = Unit("timer", True)
+    fake.foreign["nightly.service"] = Unit("daemon", False)
+    assert acts.add_adopted("job", "nightly.service", enable=False).code == 0
+    out = acts.add_adopted("nightly", "nightly.timer", enable=True)
+    assert out.code == 3 and "triggers nightly.service" in out.lines[0]
+
+
+@LINUX
+def test_adopt_refuses_a_second_timer_on_a_service_another_rows_timer_triggers(fake):
+    backup_with_its_service(fake)
+    fake.foreign["extra.timer"] = Unit("timer", True, triggers="backup-run.service")
+    assert acts.add_adopted("backup", "backup.timer", enable=True).code == 0
+    out = acts.add_adopted("extra", "extra.timer", enable=True)
+    assert out.code == 3, out
+    assert ("extra.timer triggers backup-run.service, as backup.timer does, already "
+            "adopted as services/backup") in out.lines[0]
+    assert "extra.timer" not in fake.wrapped
+
+
+@LINUX
+def test_adopt_refuses_a_timer_that_triggers_a_unit_in_moxis_own_namespace(fake):
+    fake.foreign["web.timer"] = Unit("timer", True, triggers="moxi-services-web.service")
+    out = acts.add_adopted("web", "web.timer", enable=True)
+    assert out.code == 3 and "moxi's own namespace" in out.lines[0]
+    assert store.get("web") is None and fake.wrapped == {}
+
+
+@LINUX
+def test_adopt_checks_triggers_again_under_the_lock(fake, monkeypatch):
+    backup_with_its_service(fake)
+    checked = acts._adoptable
+
+    def race(*args):
+        checked(*args)
+        # Another add of the timer that triggers it writes its row between the first
+        # check and the lock.
+        add(**adopted("backup"))
+
+    monkeypatch.setattr(acts, "_adoptable", race)
+    out = acts.add_adopted("run", "backup-run.service", enable=True)
+    assert out.code == 3, out
+    assert "triggered by backup.timer, already adopted as services/backup" in out.lines[0]
+    assert store.get("run") is None and fake.acts() == []
+    # The timer's row was new under the lock, so its Triggers was read there.
+    assert ("status", (), ("backup.timer",)) in fake.calls
+
+
+@LINUX
+def test_adopt_checks_a_timers_service_again_under_the_lock(fake, monkeypatch):
+    backup_with_its_service(fake)
+    checked = acts._adoptable
+
+    def race(*args):
+        checked(*args)
+        add(**adopted("run", kind="daemon", unit="backup-run.service"))
+
+    monkeypatch.setattr(acts, "_adoptable", race)
+    out = acts.add_adopted("backup", "backup.timer", enable=True)
+    assert out.code == 3, out
+    assert "triggers backup-run.service, already adopted as services/run" in out.lines[0]
+    assert store.get("backup") is None and fake.wrapped == {}
+
+
+def test_adopt_off_systemd_compares_the_ref_alone(fake, tmp_path, monkeypatch):
+    from pathlib import Path
+
+    # On launchd a label is its own job: no state carries `triggers`, so names that would
+    # pair on systemd are two units here.
+    fake.supervisor = "launchd"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    for label in ("backup.timer", "backup.service"):
+        plist(tmp_path, label)
+    fake.foreign["backup.timer"] = Unit("timer", True, triggers="backup.service")
+    fake.foreign["backup.service"] = Unit("daemon", True, active=True)
+    assert all(s.triggers is None for s in fake.status(
+        [], foreign=["backup.timer", "backup.service"]))
+    out = acts.add_adopted("backup", "backup.timer", timer=True, enable=True)
+    assert out.code == 0, out
+    out = acts.add_adopted("run", "backup.service", enable=True)
+    assert out.code == 0, out
+
+
 @LINUX
 def test_enable_a_wrapped_timer_wraps_it_again_when_its_drop_in_is_gone(fake):
     fake.foreign["backup.timer"] = Unit("timer", True)

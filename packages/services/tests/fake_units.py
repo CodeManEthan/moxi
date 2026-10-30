@@ -27,6 +27,9 @@ class Unit:
     active: bool = False
     last: dict | None = None
     detail: str = ""
+    #: the unit a foreign systemd timer's Triggers names; None means the service of its
+    #: own name, as systemd reads a timer that names no unit.
+    triggers: str | None = None
 
 
 @dataclass
@@ -204,10 +207,13 @@ class FakeUnits:
                 out.append(UnitState(None, ref, kind, self.supervisor, "missing",
                                      detail=f"{ref} is not loaded"))
             else:
-                out.append(self._state(None, ref, unit, self.wrapped.get(ref)))
+                out.append(self._state(None, ref, unit, self.wrapped.get(ref), foreign=True))
         return out
 
-    def _state(self, module, name, unit, wrapped=None):
+    def _state(self, module, name, unit, wrapped=None, foreign=False):
+        # As the core's on systemd: only a foreign timer's state carries `wrapped` (the
+        # table is keyed by timer), and a timer's carries `triggers`; a missing, unknown
+        # or unread one carries neither. Other backends report no `triggers`.
         if self.supervisor is None:
             return UnitState(module, name, unit.kind, None, "nobackend",
                              detail="no supervisor on this system")
@@ -218,9 +224,12 @@ class FakeUnits:
             st = "active" if unit.enabled else "inactive"
         else:
             st = "active" if unit.active else "inactive"
+        triggers = None
+        if self.supervisor == "systemd" and unit.kind == "timer" and foreign:
+            triggers = unit.triggers or name.removesuffix(".timer") + ".service"
         return UnitState(module, name, unit.kind, self.supervisor, st, last=unit.last,
                          detail=unit.detail, enabled=unit.enabled, wrapped=wrapped,
-                         log=f"journalctl --user -u {name}")
+                         log=f"journalctl --user -u {name}", triggers=triggers)
 
     def last_runs(self, module, timer, n=1):
         self.calls.append(("last_runs", module, timer, n))

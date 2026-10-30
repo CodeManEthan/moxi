@@ -70,7 +70,9 @@ and the gate holds each run. `remove` takes the drop-in away again and leaves th
 as it was before (disabled first if its switch was off, since without the gate it would
 run). A timer whose service has several `ExecStart` lines, a `Type` other than `oneshot`,
 `simple` or `exec`, or a systemd older than 243 can't be wrapped, and so can't be
-adopted.
+adopted. A timer and the service it triggers belong to one row: a service is not adopted
+while another row holds the timer that triggers it, nor a timer while another row holds
+its service.
 
 ## Projects
 
