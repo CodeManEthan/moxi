@@ -445,6 +445,22 @@ def test_a_notes_root_default_is_kept_while_notes_is_installed(site):
     assert store.write(planned.insert).notes_root == "/srv/notes/k"
 
 
+@pytest.mark.parametrize("value", ['"relative/notes"', "5"])
+def test_a_notes_root_default_is_dropped_unchecked_while_notes_is_absent(site, value):
+    site.contribution("notes", prepare_source(f'{{"notes_root": {value}}}'))
+    planned = contributions.plan_add("k", root="/srv/k")
+    assert planned.row["notes_root"] is None and planned.supplied == {}
+
+
+def test_a_relative_notes_root_default_is_exit_1_while_notes_is_installed(site):
+    site.module("notes")
+    site.contribution("notes", prepare_source('{"notes_root": "relative/notes"}'),
+                      package="fake_notes_link")
+    with pytest.raises(Broken, match="not an absolute path") as caught:
+        contributions.plan_add("k", root="/srv/k")
+    assert caught.value.exit_code == 1 and caught.value.modules == ("notes",)
+
+
 def test_a_typed_notes_root_is_refused_while_notes_is_absent(site):
     with pytest.raises(Refused, match="notes") as caught:
         contributions.plan_add("k", root="/srv/k", notes_root="/srv/n")

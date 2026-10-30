@@ -305,12 +305,12 @@ class Contributions:
         `fields`. A default fills only a field the user left unset: a default for a field
         in `fields` is neither merged nor compared. A value of None is no default. A
         default may name only `root` and `notes_root`, each an absolute path, given as a
-        string; it is returned normalized. A `notes_root` default is dropped while notes
-        is not installed (`notes` overrides that test). Any other name, a value that isn't
-        a string, a relative path, or a `prepare` that raises or answers other than a
-        dict or None is `Broken` naming the module. Two modules defaulting one field to
-        different values is `Broken` naming both; the user settles it by passing the
-        field.
+        string; it is returned normalized. A `notes_root` default is dropped unchecked
+        while notes is not installed (`notes` overrides that test). Any other name, a
+        value that isn't a string, a relative path, or a `prepare` that raises or answers
+        other than a dict or None is `Broken` naming the module. Two modules defaulting
+        one field to different values is `Broken` naming both; the user settles it by
+        passing the field.
 
         Refuses first, as `add` does, while any entry won't load.
         """
@@ -337,6 +337,11 @@ class Contributions:
                                  _fix(c.module))
                 if value is None:
                     continue
+                if name == "notes_root":
+                    if notes is None:
+                        notes = notes_present()
+                    if not notes:
+                        continue
                 if not isinstance(value, str):
                     raise Broken(c.module, f"{c.module}'s prepare defaults {name} to "
                                            f"{value!r}, not a string", _fix(c.module))
@@ -348,10 +353,6 @@ class Contributions:
                                  f"{_fix(c.module)}, or pass --{name.replace('_', '-')} "
                                  "yourself")
                 proposals.setdefault(name, []).append((os.path.normpath(value), c.module))
-        if notes is None and "notes_root" in proposals:
-            notes = notes_present()
-        if not notes:
-            proposals.pop("notes_root", None)
         out: dict[str, tuple[str, str]] = {}
         for name, said in proposals.items():
             values = {os.path.normcase(value) for value, _m in said}
