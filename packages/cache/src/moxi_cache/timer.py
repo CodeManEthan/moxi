@@ -42,11 +42,18 @@ an upgrade that changes them is read when the watcher restarts.
 **How it fires.** At each tick the watcher hands the timer the clock records it wrote. For
 each live session whose record has a last request and a lifetime, the timer compares the
 session's age with each subscription. On the first tick at or past `at`, then each
-`every` after the last ask, until `until`, it checks `requires_env` against
-`/proc/<pid>/environ` and starts `run` detached: a session of its own (`setsid`), stdin and
-stdout on `/dev/null`, stderr where the watcher's goes. It does not wait. The started
-process outlives the watcher: a stop or restart of the watcher's unit ends the watcher
-only (`KillMode=process`, see `service`), and the asks it started keep running. It stops
+`every` after the last ask, until `until`, it checks `requires_env` against the
+environment the session's process started with (`moxi.proc.environ`) and starts `run`
+detached. On Linux and macOS that is a session of its own (`setsid`), stdin and stdout on
+`/dev/null`, stderr where the watcher's goes. On Windows it is `moxi.proc.spawn`'s detached
+child, a process outside any job the watcher runs in, with no console, and its stdout and
+stderr go to a file of its own (below). It does not wait. The started process outlives the
+watcher: a stop or restart of the watcher's unit ends the watcher only (`KillMode=process`,
+see `service`), and the asks it started keep running.
+
+A process's environment can't be read on Windows (`env_checkable` says so), so there a
+subscription with `requires_env` never asks: the requirement counts as not met, as it
+does for any process whose environment can't be read. It stops
 asking a session when its clock moves (a new request, which opens a new window), when the
 session leaves the live list, or when `until` passes. It keeps no memory across a restart:
 after one it asks on the next tick inside a window, and not for a crossing whose window has
@@ -58,8 +65,30 @@ without waiting), when it could not be started, or when the watcher stops while 
 runs (`exit` null). Each line holds `at` (when it was asked), `subscriber`, `source`,
 `session`, `pid`, `age` (seconds since the last request, at the ask), `last_request`,
 `child` (the started process's id), `exit` (its exit status; minus a signal's number when
-a signal ended it), `ended`, and `error` (why it could not be started, or why there is no
-status). Past `LOG_LIMIT` bytes the log moves to `timer.jsonl.1`, replacing the one before.
+a signal ended it), `ended`, `error` (why it could not be started, or why there is no
+status), and `output` (the file holding a Windows ask's output, else null). Every ask's
+line carries its real exit status, on Windows too (`moxi.proc.status`). Past `LOG_LIMIT`
+bytes the log moves to `timer.jsonl.1`, replacing the one before.
+
+**A Windows ask's output**, `STATE/cache/asks/<at in ms>-<n>-<subscriber>.log`: each
+Windows ask writes its stdout and stderr to a file of its own, `<n>` counting the asks this
+watcher has started, so two asks never share one. Three bounds hold the directory small:
+
+- When the ask is reaped, an empty file is deleted and its line's `output` is null, so
+  only asks that wrote something keep a file; a file past `ASK_OUTPUT_LIMIT` (256 KiB)
+  keeps its last 256 KiB.
+- Before each Windows ask, the oldest files past the newest `ASK_FILES_KEPT - 1` are
+  deleted, so with the new one `ASK_FILES_KEPT` (32) are kept. A file whose ask is still
+  pending is never deleted, so while more than 31 asks run at once more files are kept. A
+  delete that fails (on Windows, a file an ask from before a watcher restart still holds
+  open) is left and tried again at the next ask.
+- A running ask's file is not capped while it runs, as a POSIX ask's stderr into the
+  watcher's log is not.
+
+An ask still running when the watcher stops keeps its file, and its line names it. An ask
+that could not be started has its file deleted and `output` null.
+
+Linux and macOS asks keep no file: their stderr goes where the watcher's does.
 """
 
 from __future__ import annotations
@@ -70,12 +99,15 @@ import math
 import os
 import re
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
 
+from moxi import proc as _proc
+from moxi.files import atomic_write
 from moxi.paths import Layout, script
 
 from .settings import MODULE
@@ -107,6 +139,13 @@ LOG_NAME = "timer.jsonl"
 LOG_LIMIT = 4 * 1024 * 1024
 #: The log's format version.
 LOG_VERSION = 1
+
+#: Where Windows asks' output files go, under cache's state directory beside the log; how
+#: much of an ended ask's file is kept; and how many files are kept (with the new one).
+ASKS_DIR = "asks"
+ASK_OUTPUT_LIMIT = 256 * 1024
+ASK_FILES_KEPT = 32
+_ASK_FILE_RE = re.compile(r"(\d+)-(\d+)-[A-Za-z0-9._-]+\.log")
 
 #: Two reads of a session's last request this close are the same clock. The watcher
 #: computes a last request as `read_at - age`, which can differ from one read to the next
@@ -347,18 +386,20 @@ def load(config_entries, *, modules: Iterable[Subscription | Refusal] | None = N
 
 # --- the process's environment -----------------------------------------------------------
 
-def proc_environ(pid: int, proc: Path = Path("/proc")) -> dict[str, str] | None:
-    """A process's environment as it was started, or None when it cannot be read."""
-    try:
-        raw = (proc / str(pid) / "environ").read_bytes()
-    except OSError:
-        return None
-    env: dict[str, str] = {}
-    for item in raw.split(b"\0"):
-        key, sep, value = item.partition(b"=")
-        if sep:
-            env[key.decode("utf-8", "replace")] = value.decode("utf-8", "replace")
-    return env
+def proc_environ(pid: int) -> dict[str, str] | None:
+    """A process's environment as it was started, or None when it cannot be read: always
+    on Windows, and for a process that is gone or another user's (`moxi.proc.environ`)."""
+    return _proc.environ(pid)
+
+
+def env_checkable() -> bool:
+    """Whether a process's environment can be read on this system, so a subscription's
+    `requires_env` can be checked: True on Linux and macOS, False on Windows.
+
+    It asks the platform, not a process, so it costs no read. Where it is False, a
+    subscription with `requires_env` never asks.
+    """
+    return sys.platform.startswith("linux") or sys.platform == "darwin"
 
 
 def env_met(sub: Subscription, environ: Mapping[str, str] | None) -> bool:
@@ -442,12 +483,36 @@ class Track:
 class Pending:
     """A started process not yet reaped, and its log line so far."""
 
-    proc: subprocess.Popen
+    proc: subprocess.Popen | Detached
     entry: dict = field(default_factory=dict)
 
 
-def spawn(argv: list[str]) -> subprocess.Popen:
-    """Start `argv` detached: its own session, stdin and stdout on /dev/null."""
+class Detached:
+    """An ask started by `moxi.proc.spawn(..., detached=True)`, which gives back a pid:
+    `poll` reads how it ended through `moxi.proc.status`."""
+
+    def __init__(self, pid: int):
+        self.pid = pid
+
+    def poll(self) -> int | None:
+        """None while the process runs, else its exit status. Raises `LookupError` when
+        `moxi.proc` no longer holds it (its code was dropped past `moxi.proc`'s bound,
+        which a reap at every tick never reaches)."""
+        return _proc.status(self.pid)
+
+
+def spawn(argv: list[str], output: Path | None = None) -> subprocess.Popen | Detached:
+    """Start `argv` detached, so it outlives the watcher.
+
+    Linux and macOS: its own session, stdin and stdout on /dev/null, stderr where the
+    watcher's goes; the `Popen` is returned, so its exit status is logged. `output` is not
+    used there. Windows: a detached process outside any job the watcher runs in
+    (`moxi.proc.spawn(..., detached=True)`), so a stop of the watcher's job does not end
+    it; its stdout and stderr are appended to `output` (the null device when None), and
+    its exit status is read by pid through `moxi.proc.status`.
+    """
+    if sys.platform == "win32":
+        return Detached(_proc.spawn(argv, detached=True, output=output))
     return subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                             start_new_session=True, close_fds=True)
 
@@ -471,13 +536,14 @@ class Timer:
     """The timer's state and its tick. The outside effects can be replaced for tests:
     `config_entries` (the user's tables now), `modules` (the modules' checked
     subscriptions now: a callable, run at each tick, or a fixed list), `environ` (a
-    process's environment), `spawn` and `log_file`."""
+    process's environment), `spawn` and `log_file`. `spawn` is called with the argv alone,
+    and on Windows with the ask's output file as `output=` too."""
 
     def __init__(self, *, config_entries: Callable[[], object] | None = None,
                  modules: Callable[[], Iterable[Subscription | Refusal]]
                  | Iterable[Subscription | Refusal] | None = None,
                  environ: Callable[[int], Mapping[str, str] | None] = proc_environ,
-                 spawn: Callable[[list[str]], subprocess.Popen] = spawn,
+                 spawn: Callable[[list[str]], subprocess.Popen | Detached] = spawn,
                  log_file: Path | None = None, now: Callable[[], float] = time.time):
         self.config_entries = config_entries or (lambda: [])
         if modules is None:
@@ -489,11 +555,13 @@ class Timer:
         self.environ = environ
         self.spawn = spawn
         self.log_file = log_path() if log_file is None else Path(log_file)
+        self.asks_dir = self.log_file.parent / ASKS_DIR
         self.now = now
         self.loaded = Loaded()
         self._loaded_once = False
         self.tracks: dict[tuple[str, str], Track] = {}
         self.pending: list[Pending] = []
+        self.asked = 0
 
     # -- loading ----------------------------------------------------------------------------
 
@@ -568,14 +636,23 @@ class Timer:
         entry = {"v": LOG_VERSION, "at": now, "subscriber": sub.name, "source": sub.source,
                  "session": session, "pid": pid, "age": round(now - last_request, 3),
                  "last_request": last_request, "child": None, "exit": None, "ended": None,
-                 "error": None}
+                 "error": None, "output": None}
+        self.asked += 1
+        argv = sub.argv(session, pid)
+        output = None
+        if sys.platform == "win32":
+            output = self.asks_dir / f"{int(now * 1000)}-{self.asked}-{sub.name}.log"
+            self.trim_outputs()
         try:
-            proc = self.spawn(sub.argv(session, pid))
+            proc = self.spawn(argv) if output is None else self.spawn(argv, output=output)
         except OSError as e:
             entry["error"] = f"could not start {sub.argv0}: {e.strerror or e}"
+            if output is not None:
+                _remove(output)  # the start may have made it before it failed
             self._write(entry)
             return entry
         entry["child"] = proc.pid
+        entry["output"] = None if output is None else str(output)
         self.pending.append(Pending(proc, entry))
         return entry
 
@@ -583,18 +660,68 @@ class Timer:
         """Log each started process that has exited, without waiting for the others."""
         now = self.now() if now is None else now
         still = []
-        for p in self.pending:
-            code = p.proc.poll()
-            if code is None:
-                still.append(p)
-                continue
+        for p in self.pending:  # oldest first, as `moxi.proc.status` needs for a reused pid
+            try:
+                code = p.proc.poll()
+            except LookupError:
+                code = None
+                p.entry["error"] = "its exit status is not known: it was no longer held"
+            else:
+                if code is None:
+                    still.append(p)
+                    continue
+            self._end_output(p.entry)
             p.entry["exit"], p.entry["ended"] = code, now
             self._write(p.entry)
         self.pending = still
 
+    def _end_output(self, entry: dict) -> None:
+        """An ended Windows ask's file: deleted when empty (its `output` then null), cut
+        to its last `ASK_OUTPUT_LIMIT` bytes when longer."""
+        if entry.get("output") is None:
+            return
+        path = Path(entry["output"])
+        try:
+            size = path.stat().st_size
+        except FileNotFoundError:
+            entry["output"] = None
+            return
+        except OSError as e:
+            log.warning("timer: cannot read %s: %s", path, e)
+            return
+        if size == 0:
+            if _remove(path):
+                entry["output"] = None
+            return
+        if size > ASK_OUTPUT_LIMIT:
+            try:
+                with open(path, "rb") as fh:
+                    fh.seek(-ASK_OUTPUT_LIMIT, os.SEEK_END)
+                    tail = fh.read()
+                atomic_write(path, tail)
+            except OSError as e:
+                log.warning("timer: cannot cut %s to its last %d bytes: %s", path,
+                            ASK_OUTPUT_LIMIT, e)
+
+    def trim_outputs(self) -> None:
+        """Delete the oldest Windows ask files past the newest `ASK_FILES_KEPT - 1`, so
+        with the ask about to start `ASK_FILES_KEPT` are kept. A pending ask's file is never
+        deleted; one whose delete fails is left for the next ask to try."""
+        try:
+            names = os.listdir(self.asks_dir)
+        except OSError:
+            return
+        held = {Path(p.entry["output"]).name for p in self.pending if p.entry.get("output")}
+        files = sorted((int(m[1]), int(m[2]), name) for name in names
+                       if (m := _ASK_FILE_RE.fullmatch(name)))
+        for _, _, name in files[:max(len(files) - (ASK_FILES_KEPT - 1), 0)]:
+            if name not in held:
+                _remove(self.asks_dir / name)
+
     def close(self, now: float | None = None) -> None:
         """At the watcher's stop: log the asks whose processes still run, with no status.
-        They are in sessions of their own and keep running."""
+        They are in sessions of their own and keep running; a Windows ask's file is kept
+        and its line names it."""
         now = self.now() if now is None else now
         self.reap(now)
         for p in self.pending:
@@ -607,6 +734,18 @@ class Timer:
             append_log(self.log_file, entry)
         except OSError as e:
             log.warning("timer: cannot write %s: %s", self.log_file, e)
+
+
+def _remove(path: Path) -> bool:
+    """Delete one file; True when it is gone. A delete that fails is left as it is."""
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        return True
+    except OSError as e:
+        log.info("timer: cannot delete %s yet: %s", path, e)
+        return False
+    return True
 
 
 # --- what `moxi cache timers` shows -----------------------------------------------------------
@@ -652,6 +791,7 @@ def plan(sub: Subscription, record: Mapping, now: float, environ, asks: list[dic
 
 __all__ = ["GROUP", "ATTRIBUTE", "CONFIG_KEY", "CONFIG", "FIELDS", "LOG_NAME", "LOG_LIMIT",
            "Subscription", "Refusal", "Loaded", "Timer", "Track", "check", "from_config",
-           "from_modules", "combine", "load", "proc_environ", "env_met", "missing_env",
+           "from_modules", "combine", "load", "proc_environ", "env_checkable", "env_met",
+           "missing_env", "Detached", "ASKS_DIR", "ASK_OUTPUT_LIMIT", "ASK_FILES_KEPT",
            "append_log", "read_log", "log_path", "spawn", "due", "plan",
            "resolve_config_argv0", "module_argv0_resolver"]

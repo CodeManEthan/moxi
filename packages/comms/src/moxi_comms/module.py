@@ -40,3 +40,10 @@ SEGMENT = None
 #: comms' whole loader over a config text alone, run by `moxi config set`, `unset` and
 #: `check`, so the verb never writes a file comms would refuse.
 CONFIG_CHECK = "moxi_comms.config:check_text"
+#: The record: the box's message store. Private, since it holds every message; kept,
+#: since nothing rebuilds it. The doctor warns when its file can be read by others.
+STORES = {"record": {"root": "state", "path": "record.db", "kind": "sqlite",
+                     "private": True, "retention": "keep", "rebuildable": False}}
+#: The delivery daemon, which `moxi install comms` writes as a unit through the core's
+#: writer. `moxi comms service` still writes today's unmarked unit, as it always has.
+DAEMONS = {"daemon": {"command": "moxi-comms-daemon", "doc": "the delivery daemon"}}
