@@ -7,7 +7,9 @@ from.
 `find` prints where the session's records are (a Claude Code transcript, every rollout
 file of a Codex thread, or the OpenCode database that holds the session), or every root it
 probed and why each held none, and exits 1 then. `root` prints the root each harness is
-read from when a caller names none, and where that root came from.
+read from when a caller names none, and where that root came from. With `--json`, each
+prints one JSON object whose first key is `shape`, the shape version, as every JSON
+document sessions writes has.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from moxi.config import ConfigError
 
 from . import claude
 from .find import find
-from .shape import CLAUDE, CODEX, HARNESSES
+from .shape import CLAUDE, CODEX, HARNESSES, document
 from .source import root, root_origin
 
 #: What `find` calls a harness's record when it finds none.
@@ -74,11 +76,11 @@ def _find(args, prog: str) -> int:
         probes = [{"root": probe.root, "outcome": probe.outcome,
                    "paths": [hit.source.path for hit in probe.hits]}
                   for probe in found.probes]
-        print(json.dumps({"harness": args.harness, "session": session,
-                          "found": found.found, "paths": paths,
-                          "compressed": [hit.source.path for hit in found.hits
-                                         if hit.compressed],
-                          "probes": probes}, indent=2))
+        print(json.dumps(document(harness=args.harness, session=session,
+                                  found=found.found, paths=paths,
+                                  compressed=[hit.source.path for hit in found.hits
+                                              if hit.compressed],
+                                  probes=probes), indent=2))
     elif paths:
         for path in paths:
             print(path)
@@ -94,10 +96,10 @@ def _find(args, prog: str) -> int:
 def _root(args) -> int:
     origins = [root_origin(harness) for harness in HARNESSES]
     if args.json:
-        print(json.dumps({origin.harness: {"root": str(origin.path),
-                                           "source": origin.source,
-                                           "detail": origin.detail}
-                          for origin in origins}, indent=2))
+        print(json.dumps(document(**{origin.harness: {"root": str(origin.path),
+                                                      "source": origin.source,
+                                                      "detail": origin.detail}
+                                     for origin in origins}), indent=2))
         return 0
     for origin in origins:
         print(f"{origin.harness}: {origin.path}")

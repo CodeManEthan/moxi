@@ -9,6 +9,7 @@ from conftest import THREAD, assistant_line, write_config, write_rollout, write_
 
 from moxi import cli as umbrella
 from moxi_sessions import cli
+from moxi_sessions.shape import SHAPE
 from moxi_sessions.testing import OpenCodeDb
 
 SID = "aaaaaaaa-1111-4111-8111-111111111111"
@@ -52,6 +53,15 @@ def test_find_probes_an_added_root_after_the_usual_one(env, capsys, tmp_path):
     data = json.loads(out)
     assert code == 0 and data["found"] and data["paths"] == [str(path)]
     assert [p["outcome"] for p in data["probes"]] == ["miss", "hit"]
+
+
+def test_both_json_documents_carry_the_shape_version_first(env, capsys, tmp_path):
+    archive = tmp_path / "archive"
+    write_transcript(archive, "p", SID, [assistant_line()])
+    for argv in (("find", SID, "--root", str(archive), "--json"),
+                 ("find", SID, "--json"), ("root", "--json")):
+        data = json.loads(run(capsys, *argv)[1])
+        assert list(data)[0] == "shape" and data["shape"] == SHAPE == 1, argv
 
 
 def test_find_reads_the_configured_root(env, capsys, own_config, tmp_path):
@@ -161,7 +171,7 @@ def test_root_names_codex_home_and_xdg_data_home(env, capsys, monkeypatch, tmp_p
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     data = json.loads(run(capsys, "root", "--json")[1])
-    assert set(data) == {"claude", "codex", "opencode"}
+    assert set(data) == {"shape", "claude", "codex", "opencode"}
     assert data["codex"] == {"root": str(tmp_path / "codex" / "sessions"),
                              "source": "environment", "detail": "CODEX_HOME/sessions"}
     assert data["opencode"] == {"root": str(tmp_path / "data" / "opencode" / "opencode.db"),
