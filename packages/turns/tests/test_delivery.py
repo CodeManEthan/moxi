@@ -388,3 +388,19 @@ def test_loading_refuses_in_the_answer_and_a_plain_deliver_waits(make_endpoint, 
     got = client.call("wait", {"delivery": held["delivery"], "until": "started",
                                "timeout_ms": 5000}, timeout=10)
     assert isinstance(R.from_wire(got["result"]), R.Started)
+
+
+def test_a_wait_in_flight_when_the_endpoint_stops_reads_its_reason(make_endpoint, connect):
+    for _ in range(5):
+        ep, fake = make_endpoint(FakeHarness(auto=False))
+        client = connect(ep)
+        d = client.call("deliver", {"text": "x"}, timeout=5)
+        got: list = []
+        waiter = threading.Thread(target=lambda: got.append(client.call(
+            "wait", {"delivery": d["delivery"], "until": "ended", "timeout_ms": None},
+            timeout=10)))
+        waiter.start()
+        time.sleep(0.2)                               # the wait is out on its thread
+        ep.stop("the session ended")
+        waiter.join(10)
+        assert R.from_wire(got[0]["result"]) == R.Lost("the session ended", d["delivery"])

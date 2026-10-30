@@ -66,6 +66,9 @@ class Rpc:
 
     def __init__(self, endpoint: Endpoint):
         self.ep = endpoint
+        #: Calls waiting on a thread for their answer (`wait`, `command`). The endpoint's
+        #: stop lets them answer before it closes the server.
+        self.answering = 0
         self._methods: dict[str, Callable[[ipc.Connection, dict], Any]] = {
             "session": self._session,
             "facts": self._facts,
@@ -136,6 +139,15 @@ class Rpc:
         await self._hook("steer", d)
         return self._handed(d)
 
+    async def _in_thread(self, fn: Callable[..., Any], *args: Any) -> Any:
+        """`in_thread`, counted in `answering` until its result is back on the loop. The
+        handler's answer is queued in the same step, with no await after this one."""
+        self.answering += 1
+        try:
+            return await in_thread(fn, *args)
+        finally:
+            self.answering -= 1
+
     async def _hook(self, method: str, d) -> None:
         hook = self.ep.answer_hook
         if hook is not None:
@@ -156,12 +168,12 @@ class Rpc:
             if timeout == 0:
                 value = self.ep.wait(delivery, until, 0)
             else:
-                value = await in_thread(self.ep.wait, delivery, until, timeout)
+                value = await self._in_thread(self.ep.wait, delivery, until, timeout)
             return _waited(value)
         if timeout == 0:
             delivery, value = self.ep.wait_ref(ref, until, 0)
         else:
-            delivery, value = await in_thread(self.ep.wait_ref, ref, until, timeout)
+            delivery, value = await self._in_thread(self.ep.wait_ref, ref, until, timeout)
         return {"delivery": delivery, **_waited(value)}
 
     async def _command(self, conn, params: dict) -> dict:
@@ -178,7 +190,7 @@ class Rpc:
             self._needs("stop-shells")
         if timeout is None:
             timeout = COMMAND_WAIT_S[name] + (STOP_SHELLS_WAIT_S if stop_shells else 0)
-        result = await in_thread(lambda: self.ep.command(
+        result = await self._in_thread(lambda: self.ep.command(
             name, if_turn_number=if_turn_number, timeout=timeout, stop_shells=stop_shells))
         if isinstance(result, Refused) and result.reason == REFUSED_GONE:
             raise gone(self.ep.gone_reason)

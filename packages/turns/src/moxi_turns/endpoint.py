@@ -104,6 +104,10 @@ PENDING_TTL_S = 300.0
 EXPIRED = "expired"
 #: How long `open()` waits for the address to be served, and `stop()` for its loop to end.
 OPEN_WAIT_S = 10.0
+#: How long the endpoint's stop waits for the calls answering on a thread (`wait`,
+#: `command`) to answer before it closes the server. They answer at once then, since
+#: every delivery and command has settled.
+ANSWER_WAIT_S = 1.0
 
 #: A delivery's states: held behind a turn or the load gate; handed to `submit` and not
 #: yet tied; a steer handed to `append` and not yet confirmed; taken into a turn; settled.
@@ -309,6 +313,8 @@ class Endpoint:
         #: The loop that serves the address, its server and its thread, once open.
         self._loop: Any = None
         self._server: Any = None
+        self._rpc: Any = None
+        self._closing: Any = None
         self._serving: threading.Thread | None = None
         #: The one ordered worker every hand-off to the harness runs on.
         self._worker = _Worker("turns-endpoint-worker")
@@ -372,7 +378,7 @@ class Endpoint:
 
         from . import rpc
 
-        handler = rpc.Rpc(self)
+        handler = self._rpc = rpc.Rpc(self)
 
         async def main() -> None:
             import asyncio
@@ -411,13 +417,28 @@ class Endpoint:
         its socket and then its lock go) and wait for the loop's thread. True when the
         thread has ended."""
         if self._server is not None:
-            self._call_soon(self._server.close)
+            self._call_soon(self._close_when_answered)
         thread = self._serving
         if thread is None:
             return True
         if thread is not threading.current_thread():
             thread.join(timeout=OPEN_WAIT_S)
         return not thread.is_alive()
+
+    def _close_when_answered(self) -> None:
+        """On the loop: close the server once the calls answering on a thread have
+        answered, at most `ANSWER_WAIT_S` from now, so a `wait` out when the endpoint ends
+        reads the endpoint's reason rather than a closed connection."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + ANSWER_WAIT_S
+
+        async def close() -> None:
+            while (self._rpc is not None and self._rpc.answering
+                   and loop.time() < deadline):
+                await asyncio.sleep(0.01)
+            self._server.close()
+
+        self._closing = loop.create_task(close())
 
     def stop(self, reason: str = "the endpoint stopped") -> None:
         """End the endpoint: every open delivery answers `Lost`, watchers get
