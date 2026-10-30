@@ -230,6 +230,14 @@ def adapters():
         pushes = Pushes()
         c = DaemonClient(daemon_socket(), on_push=pushes).connect()
         c.register(**kw)
+        # The daemon answers a register before it runs the bind's replay and release
+        # point, and it serves one connection's frames in order: a ping answered on
+        # this connection means both have run. Without it, a release point that runs
+        # late reads whatever the test has set up since (a transcript warmed after a
+        # post was held) and hands a row the test means to keep. If the daemon ever
+        # serves a connection's frames out of order, the ping still answers but proves
+        # nothing, and this race comes back.
+        c.request("ping")
         made.append(c)
         pushes.client = c
         return pushes
@@ -940,7 +948,8 @@ def test_the_trim_keeps_cold_held_ids(rig):
         pytest.skip("only the local record trims")
     shim(rig, SESS_A, age=2 * HOUR)
     msg = post(rig, [REVIEWER_Q])
-    wait_until(lambda: msg.id in held_of(rig))
+    # The trim keeps queued ids only: the row must be in before it runs.
+    assert wait_until(lambda: msg.id in held_of(rig))
     rig.age_message(msg.id, time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                           time.gmtime(rig.clock() - 200 * 86400)))
     rig.daemon.trim_record()

@@ -17,7 +17,7 @@ import threading
 from types import SimpleNamespace
 
 import pytest
-from conftest import no_cold_at, queued, wait_for_queue, wait_until
+from conftest import no_cold_at, queued, wait_for_payload, wait_for_queue, wait_until
 
 from moxi_comms import constants, cursors, machine_line
 from moxi_comms.client import DaemonOffline
@@ -300,7 +300,7 @@ def test_register_replay_feeds_the_index_before_it_delivers(rig):
     with rig.daemon._lock:
         rig.daemon.audiences.clear()
     planner = rig.shim(**PLANNER)
-    payload = next(p for p in wait_for_queue(planner, 1) if p["message_id"] == reply.id)
+    payload = wait_for_payload(planner, reply.id)
     assert payload["backlog"] is False and payload["held"] is True, "released, not replayed"
     assert (payload["audience"], payload["audience_source"]) == ("operator", "inherited")
 
@@ -324,7 +324,7 @@ def test_rescan_deliveries_carry_the_fill_in(rig, reboot):
     reply = reply_to_planner(rig, original.id)      # lands while the daemon is down
     daemon = reboot(rig)
     planner = rig.shim(**PLANNER)
-    payload = next(p for p in wait_for_queue(planner, 1) if p["message_id"] == reply.id)
+    payload = wait_for_payload(planner, reply.id)
     assert (payload["audience"], payload["audience_source"]) == ("operator", "inherited")
     # and the rescan pass itself, against a bound identity past nothing
     with daemon._lock:
@@ -417,7 +417,7 @@ def test_an_ordinary_reply_chain_to_an_unmarked_ask_carries_no_mark_at_every_hop
     first = reply_to_planner(rig, original.id)
     assert delivered(planner, first.id) == (None, None)
     second = ask_re(rig, first.id)
-    payload = next(p for p in wait_for_queue(reviewer, 2) if p["message_id"] == second.id)
+    payload = wait_for_payload(reviewer, second.id)
     assert (payload["audience"], payload["audience_source"]) == (None, None)
     assert "audience" not in frame_line(payload)
     assert rig.daemon.audiences[first.id] is None, "known none, not unknown"
@@ -576,7 +576,7 @@ def test_register_replay_does_not_overwrite_a_known_inherited_value(rig):
     marker = ask(rig, text="after the reply")       # a queue row for reviewer
     assert wait_until(lambda: marker.id in queued(rig.daemon, "reviewer@proj-a"))
     reviewer = rig.shim(**REVIEWER)
-    payload = next(p for p in wait_for_queue(reviewer, 1) if p["message_id"] == marker.id)
+    payload = wait_for_payload(reviewer, marker.id)
     # Register replays past the cursor first, then releases the row: the marker's
     # release says the replay already walked past the reply
     assert payload["backlog"] is False and payload["held"] is True, \
