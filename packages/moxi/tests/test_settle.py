@@ -16,7 +16,7 @@ import pytest
 
 import moxi.paths
 from moxi import _settle, config, doctor, files, home, units
-from moxi.units import _backend, _declare, _state
+from moxi.units import _backend, _declare, _plan, _state
 from moxi.units._fake import FakeBackend, FakeSupervisor
 
 SETTINGS = """
@@ -498,6 +498,45 @@ def test_a_change_that_drops_the_socket_takes_its_entry_out(w, capsys, monkeypat
     assert ("stop", "moxi-demo-relay.socket") in w.calls("stop")
     assert ("start", "moxi-demo-relay.socket") not in w.calls("start")
     assert ("start", SERVICE) in w.calls("start", "restart") or w.active(SERVICE)
+
+
+SOCKETS = ("{'relay': {'command': 'moxi-demo-relay', "
+           "'socket': {'setting': 'port', 'addresses': ['127.0.0.1', '::1']}}}")
+
+
+def test_a_socket_unit_the_set_dropped_leaves_the_record(w, capsys, monkeypatch):
+    """The move stops every socket unit, then the plan drops the second address's: its
+    file is gone, so its entry leaves the record and only the rest start again."""
+    monkeypatch.setattr(_plan, "ipv6_loopback", lambda: True)
+    w.installed(DAEMONS=SOCKETS)
+    for unit in ("moxi-demo-relay.socket", "moxi-demo-relay-1.socket", SERVICE):
+        w.sup.state(unit)["active"] = True
+    w.module(DAEMONS=SOCKET)
+    w.legacy()
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    stops = w.calls("stop")
+    assert stops.index(("stop", "moxi-demo-relay.socket")) < \
+        stops.index(("stop", "moxi-demo-relay-1.socket")) < stops.index(("stop", SERVICE))
+    assert ("disable", "--now", "moxi-demo-relay-1.socket") in w.calls("disable")
+    assert not (w.root / "moxi-demo-relay-1.socket").exists()
+    assert ("start", "moxi-demo-relay-1.socket") not in w.calls("start")
+    assert w.active("moxi-demo-relay.socket") and w.active(SERVICE)
+
+
+def test_a_dropped_socket_unit_takes_its_own_entry_out():
+    def entry(unit):
+        return units.Stopped("demo", "relay", unit, "fake", True)
+
+    record = [entry("moxi-demo-relay.socket"), entry("moxi-demo-relay-1.socket"),
+              entry(SERVICE)]
+    change = units.UnitChange("demo", "relay", "socket", "change", None,
+                              (Path("/u/moxi-demo-relay.socket"),), None, "",
+                              dropped=(Path("/u/moxi-demo-relay-1.socket"),))
+    _settle._take_out(record, [units.Applied(change, False)])
+    assert len(record) == 3
+    _settle._take_out(record, [units.Applied(change, True)])
+    assert [e.unit for e in record] == ["moxi-demo-relay.socket", SERVICE]
 
 
 def test_only_a_daemons_or_its_sockets_change_takes_an_entry_out():
