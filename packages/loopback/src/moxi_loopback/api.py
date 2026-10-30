@@ -150,7 +150,6 @@ __all__ = [
 
 # --- gate_matrix ---------------------------------------------------------------------
 
-_MATRIX_PORT = 4321
 _UNKNOWN_KEYS = tuple("xyzwvuts")
 _reached: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
     "moxi_loopback_matrix", default=None)
@@ -172,7 +171,7 @@ def _unknown_key(declared: Any) -> str:
     raise ValueError("gate_matrix found no undeclared key to send")
 
 
-def _matrix_scope(method: str, path: str, *, token: str, host: bytes,
+def _matrix_scope(method: str, path: str, *, port: int, token: str, host: bytes,
                   headers: list[tuple[bytes, bytes]], query: bytes) -> dict[str, Any]:
     pairs = [(b"host", host)]
     if token:
@@ -183,7 +182,7 @@ def _matrix_scope(method: str, path: str, *, token: str, host: bytes,
         "type": "http",
         "asgi": {"version": "3.0", "spec_version": "2.3"},
         "http_version": "1.1",
-        "server": ("127.0.0.1", _MATRIX_PORT),
+        "server": ("127.0.0.1", port),
         "client": ("127.0.0.1", 50000),
         "scheme": "http",
         "method": method,
@@ -228,10 +227,13 @@ async def _run_matrix(page: Page) -> list[tuple[str, str, int, int]]:
     routes = tuple(dataclasses.replace(route, handler=target) for route in page.routes)
     page = dataclasses.replace(page, routes=routes, health=None)
     token = secrets.token_urlsafe(32)
+    # Nothing is bound: the port only has to agree between the scope, Host and the
+    # profile, so each call picks its own rather than a library constant.
+    port = 1024 + secrets.randbelow(65536 - 1024)
     inner = app(page, module="matrix", server_id=secrets.token_hex(16), strict=True)
-    profile = upstream(inner.table, token=token, port=_MATRIX_PORT)
+    profile = upstream(inner.table, token=token, port=port)
     asgi = guard(inner, lambda: profile)
-    host = b"127.0.0.1:%d" % _MATRIX_PORT
+    host = b"127.0.0.1:%d" % port
     json_type = [(b"content-type", b"application/json")]
 
     rows: list[tuple[str, str, int, int]] = []
@@ -241,7 +243,7 @@ async def _run_matrix(page: Page) -> list[tuple[str, str, int, int]]:
                    token_: str = token, host_: bytes = host,
                    headers: list[tuple[bytes, bytes]] | None = None,
                    query: bytes = b"", body: bytes = b"", error: str | None = None) -> None:
-        scope = _matrix_scope(method, route.path, token=token_, host=host_,
+        scope = _matrix_scope(method, route.path, port=port, token=token_, host=host_,
                               headers=list(headers or ()), query=query)
         status, answer, reached = await _send_one(asgi, scope, body)
         rows.append((route.path, name, expected, status))
@@ -286,7 +288,7 @@ async def _run_matrix(page: Page) -> list[tuple[str, str, int, int]]:
             await case(route, "act without JSON", 403, method,
                        headers=[(b"content-type", b"text/plain")], body=base_body)
         await case(route, "refused gate: Host", 403, method,
-                   host_=b"localhost:%d" % _MATRIX_PORT, headers=base_headers, body=base_body)
+                   host_=b"localhost:%d" % port, headers=base_headers, body=base_body)
         await case(route, "refused gate: OPTIONS", 403, "OPTIONS", headers=base_headers,
                    body=base_body)
         await case(route, "refused gate: Origin", 403, method,

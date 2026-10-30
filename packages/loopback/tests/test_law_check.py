@@ -98,7 +98,7 @@ def test_the_token_compare_is_compare_digest_and_never_equals():
 
 
 def test_no_port_number_is_a_constant():
-    for path in FILES:
+    for path in [*FILES, SRC / "api.py"]:
         for node in ast.walk(_tree(path)):
             if isinstance(node, ast.Assign):
                 for target in node.targets:
