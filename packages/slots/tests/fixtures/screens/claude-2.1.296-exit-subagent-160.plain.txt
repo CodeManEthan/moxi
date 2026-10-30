@@ -1,33 +1,3 @@
- ▐▛███▛█   Claude Code v2.1.296
-▝▜██████▀  Haiku 5.5 · Claude Max
- ▝▝   ▝▝   ~/tmp/launch-console-worktrees/exit-background-shells/stop-shells.scratch/live-runs/ebs/work
-
-⚠ Your login expires in 3 days · run /login to renew
-
-› Prompt from the trigger plugin
-❯ The trigger plugin sent a message:
-  Reply with the single word: ready.
-
-  This is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.
-
-● ready.
-
-✻ Worked for 0s · done 11:53 PM
-
-› Prompt from the trigger plugin
-❯ The trigger plugin sent a message:
-  Use the Agent tool to start one general-purpose subagent in the background (run_in_background: true). Its task: run the shell command sleep 90 with the Bash
-  tool, then reply with the single word: done. Do not wait for it. Then reply with the single word: started.
-
-  This is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.
-
-● Agent(Run sleep 90 in background)
-  ⎿  Backgrounded agent (↓ to manage · ctrl+o to expand)
-
-● started.
-
-✻ Waiting for 1 background agent to finish
-
 ❯ /exit
 
 › Message from @general-purpose (ctrl+o to expand)

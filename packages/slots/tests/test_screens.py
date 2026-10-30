@@ -3,6 +3,11 @@
 The fixtures in `fixtures/screens/` are real Claude Code captures, `capture-pane -p`
 (`.plain.txt`) or `-p -e` (`.ansi.txt`), named `claude-<version>-<what>-<width>[x<height>]`.
 Each runs against the matcher on every run; a new version's capture is added here.
+
+A capture is cropped to a few rows above the last full-width rule before it is added: the
+matcher reads only below that rule, and the history above it carries the capturing
+machine's paths, prompts and status line. Below the rule, a row that names the capturing
+user's own things (paths, skills, a custom status line) is rewritten or taken out.
 """
 
 from __future__ import annotations
