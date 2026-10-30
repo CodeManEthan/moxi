@@ -18,7 +18,8 @@ is a script in the row's tmp that records the sockets it was handed, answers one
 connection on each and exits. One row also writes a hand-made socket unit,
 `moxitest-bind-<8 hex>.socket`, with its service. At its end each row removes its module's
 units with `units.remove`, then stops and deletes anything left under its names, takes any
-`.wants` link to them, and reloads, and it fails if the unit directory listing changed.
+`.wants` link to them, resets the failure of every unit under its names, a dropped one
+included, and reloads, and it fails if the unit directory listing changed.
 """
 
 from __future__ import annotations
@@ -296,9 +297,21 @@ def _free_ports(count: int) -> list[int]:
             s.close()
 
 
+def _known(stems: list[str]) -> list[str]:
+    """The units the user manager still holds under `stems`, file or not."""
+    patterns = [p for stem in stems for p in (f"{stem}.*", f"{stem}-*")]
+    listed = subprocess.run(["systemctl", "--user", "list-units", "--all", "--plain",
+                             "--no-legend", "--no-pager", "--", *patterns],
+                            capture_output=True, text=True, timeout=30)
+    return [line.split()[0] for line in listed.stdout.splitlines() if line.strip()]
+
+
 def _scrub(directory: Path, stems: list[str], fence: Fence) -> None:
     """Stop and delete every unit file under `stems` and every `.wants` link to one, then
-    forget their failures and reload. Cleanup only: names nothing else."""
+    forget the failure of every unit under `stems` and reload. That takes in a unit whose
+    file the row already deleted, such as a dropped socket unit that failed: the manager
+    keeps it, `not-found failed`, until its failure is reset. Cleanup only: names nothing
+    else."""
     def ours(name: str) -> bool:
         return any(name.startswith((stem + ".", stem + "-")) for stem in stems)
 
@@ -312,9 +325,10 @@ def _scrub(directory: Path, stems: list[str], fence: Fence) -> None:
     for path in found:
         if path.is_file() or path.is_symlink():
             path.unlink()
-    if found:
-        # Cleanup only: forget a failed run of the throwaway units.
-        subprocess.run(["systemctl", "--user", "reset-failed", *[p.name for p in found]],
+    # Cleanup only: forget a failed run of the throwaway units, one at a time, so a name
+    # the manager no longer holds doesn't keep the others failed.
+    for name in sorted({p.name for p in found} | {u for u in _known(stems) if ours(u)}):
+        subprocess.run(["systemctl", "--user", "reset-failed", "--", name],
                        capture_output=True, timeout=30)
     fence.run("daemon-reload")
 
