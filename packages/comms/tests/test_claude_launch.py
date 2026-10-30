@@ -11,6 +11,7 @@ exits.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import subprocess
@@ -103,7 +104,7 @@ def test_the_launcher_waits_a_bounded_time_and_then_starts_claude(capsys, monkey
 def test_the_pidfd_comes_from_the_system_call_when_python_lacks_the_wrapper(monkeypatch):
     """A Python built without `os.pidfd_open` still gets a working pidfd: it polls
     unready while the process runs and ready once it has ended. A pid that names no
-    process raises OSError, as the wrapper does."""
+    process raises OSError with the call's own errno, ESRCH, as the wrapper does."""
     import select
 
     from moxi_comms.adapters import terminal
@@ -124,8 +125,9 @@ def test_the_pidfd_comes_from_the_system_call_when_python_lacks_the_wrapper(monk
         if proc.poll() is None:
             proc.kill()
             proc.wait()
-    with pytest.raises(OSError):
+    with pytest.raises(OSError) as raised:
         terminal.pidfd_open(2 ** 22 + 1)     # past the kernel's largest pid
+    assert raised.value.errno == errno.ESRCH
 
 
 def test_where_no_pidfd_exists_the_helper_fails_as_the_wrapper_would(monkeypatch):
