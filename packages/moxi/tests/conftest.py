@@ -248,3 +248,140 @@ def wheels():
     import types
 
     return types.SimpleNamespace(build=build_wheel, core=core_wheel, module=module_wheel)
+
+
+# -- moxi.ipc on real Unix sockets ----------------------------------------------------------
+
+#: A Unix socket path must stay under about 100 bytes, so IPC tests use short directories.
+_SHORT_SOCKETS = 60
+
+
+@pytest.fixture
+def sock_dir(tmp_path_factory):
+    """A short private directory for a test's Unix sockets, removed after the test."""
+    import shutil
+    import tempfile
+
+    base = str(tmp_path_factory.getbasetemp())
+    if len(base) > _SHORT_SOCKETS:
+        base = "/tmp"
+    path = Path(tempfile.mkdtemp(prefix="ipc", dir=base))
+    yield path
+    shutil.rmtree(path, ignore_errors=True)
+
+
+class ServerThread:
+    """An event loop on a thread of its own, running a `moxi.ipc` server, so a test's
+    blocking code (the client, a raw socket) can talk to it from the main thread."""
+
+    def __init__(self, address, handler, **options):
+        import asyncio
+        import threading
+
+        self.address = str(address)
+        self.loop = asyncio.new_event_loop()
+        self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
+        self.thread.start()
+        from moxi import ipc
+
+        try:
+            self.server = self.run(ipc.serve(self.address, handler, **options))
+        except BaseException:
+            self._stop_loop()
+            raise
+
+    def run(self, coro, timeout: float = 10.0):
+        """Run coroutine `coro` on the server's loop and return its result."""
+        import asyncio
+
+        return asyncio.run_coroutine_threadsafe(coro, self.loop).result(timeout)
+
+    def call(self, fn, *args, timeout: float = 10.0):
+        """Call `fn(*args)` on the loop's thread and return its result."""
+        async def on_loop():
+            return fn(*args)
+        return self.run(on_loop(), timeout)
+
+    def close(self) -> None:
+        async def stop():
+            self.server.close()
+            await self.server.wait_closed()
+        try:
+            if not self.loop.is_closed():
+                self.run(stop())
+        finally:
+            self._stop_loop()
+
+    def _stop_loop(self) -> None:
+        if self.loop.is_closed():
+            return
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self.thread.join(10)
+        self.loop.close()
+
+
+@pytest.fixture
+def serving(sock_dir):
+    """`serving(handler, **options)` starts a server at `<sock_dir>/s/a.sock` on a loop
+    thread and closes it after the test."""
+    started = []
+
+    def start(handler, *, address=None, **options):
+        thread = ServerThread(address or sock_dir / "s" / "a.sock", handler, **options)
+        started.append(thread)
+        return thread
+
+    yield start
+    for thread in reversed(started):
+        thread.close()
+
+
+class Raw:
+    """A plain blocking Unix socket to a server, reading whole lines with a deadline."""
+
+    def __init__(self, address, timeout: float = 10.0):
+        import socket
+
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(timeout)
+        self.sock.connect(str(address))
+        self.timeout = timeout
+        self.buffer = b""
+
+    def send(self, data: bytes) -> None:
+        self.sock.sendall(data)
+
+    def line(self) -> bytes:
+        """The next line, without its newline. AssertionError at the end of the stream."""
+        import time
+
+        deadline = time.monotonic() + self.timeout
+        while b"\n" not in self.buffer:
+            assert time.monotonic() < deadline, "no line in time"
+            chunk = self.sock.recv(65536)
+            assert chunk, f"the stream ended; unread: {self.buffer[:200]!r}"
+            self.buffer += chunk
+        line, _, self.buffer = self.buffer.partition(b"\n")
+        return line
+
+    def json(self) -> dict:
+        import json
+
+        return json.loads(self.line())
+
+    def closed(self) -> bool:
+        """Read to the end of the stream: True when the server closed it with nothing
+        more sent (anything unread fails the test)."""
+        while True:
+            try:
+                chunk = self.sock.recv(65536)
+            except ConnectionResetError:
+                break  # closed with our bytes unread: a reset, still the end
+            if not chunk:
+                break
+            self.buffer += chunk
+        assert self.buffer == b"", f"unread: {self.buffer[:200]!r}"
+        return True
+
+    def close(self) -> None:
+        self.sock.close()

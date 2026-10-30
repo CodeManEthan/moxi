@@ -40,7 +40,7 @@ _LAZY = {
     "serve": "_server",
     "Server": "_server",
     "Connection": "_server",
-    "sweep": "_server",
+    "sweep": "_sweep",
     "Peer": "_server",
     "connect": "_client",
     "Client": "_client",
