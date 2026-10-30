@@ -34,7 +34,7 @@ packages = ["src/moxi_sessions"]
 [tool.hatch.build.targets.sdist]
 # A source distribution built from any branch holds only these paths; hatchling adds
 # pyproject.toml and .gitignore itself.
-only-include = ["LICENSE", "README.md", "src/moxi_sessions", "tests"]
+only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_sessions", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
