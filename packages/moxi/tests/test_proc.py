@@ -82,6 +82,18 @@ def test_run_uses_env_as_given_and_cwd(tmp_path):
     assert Path(cwd).resolve() == tmp_path.resolve()
 
 
+@pytest.mark.parametrize("stale", ["inherited", "env-given"])
+def test_a_run_child_sees_no_lifeline_variable(monkeypatch, stale):
+    code = "import os; print(os.environ.get(%r))" % proc.LIFELINE_ENV
+    env = None
+    if stale == "inherited":
+        monkeypatch.setenv(proc.LIFELINE_ENV, "7")
+    else:
+        monkeypatch.delenv(proc.LIFELINE_ENV, raising=False)
+        env = child_env(**{proc.LIFELINE_ENV: "7"})
+    assert proc.run([PY, "-c", code], timeout=30, env=env).stdout.strip() == b"None"
+
+
 def test_run_without_capture_leaves_output_alone(tmp_path):
     done = proc.run([PY, "-c", "pass"], timeout=30, capture=False)
     assert (done.stdout, done.stderr) == (None, None)

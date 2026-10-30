@@ -63,7 +63,9 @@ def run(argv: Argv, *, timeout: float, input: bytes | str | None = None,
     stdin is closed (`/dev/null`), or a pipe fed `input` and then closed. With `capture`
     stdout and stderr are collected; without it they are this process's own. Output is
     `str` when `input` is a `str` and `bytes` otherwise. `env` is the child's whole
-    environment, used as given (None: this process's). The exit status is not checked.
+    environment, used as given (None: this process's), less `MOXI_LIFELINE_FD`: the child
+    holds no lifeline, so it must not see a value meant for this process, whether it came
+    from this process's environment or from `env`. The exit status is not checked.
 
     POSIX: the child starts in a new session, so it and everything it starts form one
     process group; on timeout the group gets SIGTERM and, two seconds later, SIGKILL
@@ -82,7 +84,7 @@ def run(argv: Argv, *, timeout: float, input: bytes | str | None = None,
         options["start_new_session"] = True
     proc = subprocess.Popen(
         _argv(argv), stdin=subprocess.DEVNULL if input is None else subprocess.PIPE,
-        stdout=pipe, stderr=pipe, env=_env(env), cwd=cwd, text=text,
+        stdout=pipe, stderr=pipe, env=_lifeline_env(env, None), cwd=cwd, text=text,
         encoding="utf-8" if text else None, **options)
     job = None
     try:
@@ -543,10 +545,6 @@ def _argv(argv: Argv) -> list[str]:
     if isinstance(argv, (str, bytes)):
         raise TypeError("argv is a sequence of arguments, not one string")
     return [os.fspath(part) for part in argv]
-
-
-def _env(env: Mapping[str, str] | None) -> dict[str, str] | None:
-    return None if env is None else dict(env)
 
 
 def _lifeline_env(env: Mapping[str, str] | None, value: str | None) -> dict[str, str]:
