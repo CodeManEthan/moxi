@@ -519,8 +519,8 @@ def own_tree(tag: str) -> bool:
     say(f"exit {done.returncode}: {summary[-1].strip()}")
     if done.returncode == 0:
         return True
-    say("The package's own files must raise no hit: change the file it names, never the "
-        "allowance.")
+    say("The package's own files must raise no hit: change the file it names; the own-file "
+        "allowance covers sets.json only.")
     return False
 
 
