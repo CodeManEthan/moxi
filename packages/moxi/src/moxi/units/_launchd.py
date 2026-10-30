@@ -42,7 +42,7 @@ launchctl's is relied on.
 The shapes of `launchctl print gui/<uid>` this reads, a `services = {` block of
 `<pid> <last exit status> <label>` lines and a `disabled services = {` block of
 `"<label>" => disabled` lines, are tested here against recorded text; their proof on a
-real Mac is owed.
+real Mac is owed, and so is that of the socket keys and the socket read.
 """
 
 from __future__ import annotations
@@ -380,10 +380,21 @@ class LaunchdBackend:
         lists disabled, True otherwise, None when `missing`. When the print fails, every
         unit is `unknown` with the failure in `detail`.
 
+        A `socket` ref is a daemon's sockets, passed with the daemon's own label and
+        plist: launchd holds a loaded job's sockets whether the job runs or not, so the
+        socket is `active` while the label is loaded, `inactive` with the plist there and
+        not loaded, and `missing` with no plist, or with a plist that has no `Sockets`
+        (written before the daemon declared one). Its `pid`, `since` and `epoch` are None
+        and its `enabled` is the label's. It is never `failed`: the print says nothing of
+        a socket launchd could not bind, so a job whose address the system lacks still
+        reads `active`. The daemon's own state follows the daemon rule above, so one
+        idle under its sockets reads `inactive`, and one that was killed or exited
+        non-zero reads `failed` until the next connection starts it again.
+
         One state per unit, in the order of `units`. `last` is launchd's own result only,
-        `{"status": <last exit status>}` for a timer (None for a daemon); the core adds the
-        gate's run line. A foreign label from `foreign(ref, None)` is read in the same
-        call."""
+        `{"status": <last exit status>}` for a timer (None for a daemon and a socket); the
+        core adds the gate's run line. A foreign label from `foreign(ref, None)` is read
+        in the same call."""
         if not units:
             return []
         ran = fence.run("print", self.domain)
@@ -393,8 +404,17 @@ class LaunchdBackend:
             label = unit.ids[0]
             path = unit.paths[0] if unit.paths else self.plist(label)
             pid = since = last = None
+            body = _load(path)
             if not ran.ok:
                 state, detail = "unknown", ran.failure()
+            elif unit.kind == "socket" and not path.is_file():
+                state, detail = "missing", f"no plist at {path}"
+            elif unit.kind == "socket" and not (body and body.get("Sockets")):
+                state, detail = "missing", (f"the plist at {path} has no Sockets; "
+                                            f"`moxi install {unit.module}` writes them")
+            elif unit.kind == "socket":
+                state, detail = (("active", "loaded, listening") if label in services
+                                 else ("inactive", "not loaded"))
             elif label in services:
                 pid, code = services[label]
                 if unit.kind == "timer":
@@ -415,17 +435,13 @@ class LaunchdBackend:
             enabled = None if state in ("missing", "unknown") else disabled.get(label, True)
             out.append(UnitState(unit.module, unit.name, unit.kind, self.name, state,
                                  pid=pid, since=since, last=last, detail=detail,
-                                 log=None if state == "missing" else self.log(unit),
+                                 log=None if state == "missing" else _log(body),
                                  enabled=enabled))
         return out
 
     def log(self, unit: UnitRef) -> str | None:
         """The plist's StandardOutPath (or StandardErrorPath), None when it has neither."""
-        body = _load(unit.paths[0] if unit.paths else self.plist(unit.ids[0]))
-        if not body:
-            return None
-        found = body.get("StandardOutPath") or body.get("StandardErrorPath")
-        return found if isinstance(found, str) else None
+        return _log(_load(unit.paths[0] if unit.paths else self.plist(unit.ids[0])))
 
     # -- a foreign timer's wrap: systemd only --------------------------------------------------
 
@@ -581,6 +597,14 @@ def _load(path: Path) -> dict | None:
     except (OSError, ValueError, plistlib.InvalidFileException):
         return None
     return body if isinstance(body, dict) else None
+
+
+def _log(body: dict | None) -> str | None:
+    """A plist body's StandardOutPath (or StandardErrorPath), None when it has neither."""
+    if not body:
+        return None
+    found = body.get("StandardOutPath") or body.get("StandardErrorPath")
+    return found if isinstance(found, str) else None
 
 
 # -- the domain read ----------------------------------------------------------------------------

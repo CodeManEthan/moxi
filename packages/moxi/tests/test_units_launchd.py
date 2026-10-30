@@ -972,6 +972,105 @@ def test_status_when_the_print_fails_is_unknown(mac):
                and s.last is None for s in states)
 
 
+SOCKETS_PRINTED = """\
+gui/501 = {
+	services = {
+		       0      -	moxi.demo.idle
+		    4242      0 	moxi.demo.serving
+		       0     -9	moxi.demo.killed
+		       0      0 	moxi.demo.off
+		       0      0 	moxi.demo.old
+	}
+
+	disabled services = {
+		"moxi.demo.off" => disabled
+	}
+}
+"""
+
+
+def test_a_socket_reads_the_daemons_job_and_is_never_failed(mac, monkeypatch):
+    """A socket ref carries the daemon's label and plist. Loaded is `active`, with a pid
+    or not and whatever the last exit; not loaded with its plist is `inactive`; no plist,
+    or a plist with no Sockets, is `missing`. A daemon killed non-zero reads `failed`
+    beside its `active` socket until the next connection starts it."""
+    monkeypatch.setattr(_launchd, "_started", lambda pid: 1700000000.0)
+    sock = Socket("port", ("127.0.0.1",), 8470)
+    for name in ("idle", "serving", "killed", "off", "unloaded"):
+        [group] = mac.backend.render(spec(name=name, socket=sock))
+        group.files[0][0].write_text(group.files[0][1])
+    [old] = mac.backend.render(spec(name="old"))
+    old.files[0][0].write_text(old.files[0][1])
+    names = ("idle", "serving", "killed", "off", "unloaded", "old", "absent")
+    refs = []
+    for name in names:
+        label = f"moxi.demo.{name}"
+        paths = (mac.backend.plist(label),)
+        refs += [UnitRef("demo", name, "daemon", (label,), paths),
+                 UnitRef("demo", name, "socket", (label,), paths)]
+    calls = []
+    fence = recorded(SOCKETS_PRINTED)
+    inner = fence.runner
+    fence.runner = lambda cmd, **kw: calls.append(cmd) or inner(cmd, **kw)
+    states = mac.backend.status(refs, fence)
+    assert len(calls) == 1
+    got = {(s.name, s.kind): (s.state, s.enabled) for s in states}
+    assert got == {
+        ("idle", "daemon"): ("inactive", True), ("idle", "socket"): ("active", True),
+        ("serving", "daemon"): ("active", True), ("serving", "socket"): ("active", True),
+        ("killed", "daemon"): ("failed", True), ("killed", "socket"): ("active", True),
+        ("off", "daemon"): ("inactive", False), ("off", "socket"): ("active", False),
+        ("unloaded", "daemon"): ("inactive", True),
+        ("unloaded", "socket"): ("inactive", True),
+        ("old", "daemon"): ("inactive", True), ("old", "socket"): ("missing", None),
+        ("absent", "daemon"): ("missing", None), ("absent", "socket"): ("missing", None)}
+    sockets = {s.name: s for s in states if s.kind == "socket"}
+    assert all(s.pid is None and s.since is None and s.epoch is None and s.last is None
+               and s.backend == "launchd" for s in sockets.values())
+    assert sockets["idle"].detail == "loaded, listening"
+    assert sockets["unloaded"].detail == "not loaded"
+    assert "has no Sockets" in sockets["old"].detail
+    assert "moxi install demo" in sockets["old"].detail
+    assert "no plist at" in sockets["absent"].detail
+    assert sockets["idle"].log.endswith("/demo/logs/idle.log")
+    assert sockets["old"].log is None and sockets["absent"].log is None
+
+
+def test_a_socket_is_unknown_when_the_print_fails(mac):
+    [group] = mac.backend.render(spec(socket=Socket("port", ("127.0.0.1",), 8470)))
+    group.files[0][0].write_text(group.files[0][1])
+    ref = UnitRef("demo", "relay", "socket", (RELAY,), (group.files[0][0],))
+
+    def run(cmd, *, env=None, timeout=None):
+        return subprocess.CompletedProcess(cmd, 113, "", "Could not find domain for gui: 501")
+    [state] = mac.backend.status([ref], Fence("launchd", run))
+    assert (state.state, state.enabled, state.epoch) == ("unknown", None, None)
+    assert "Could not find domain" in state.detail
+
+
+def test_status_through_the_core_gives_the_socket_after_its_daemon(mac):
+    """An idle socket daemon: the daemon `inactive`, its socket `active` with no epoch,
+    both from the one print; a connection's start gives the daemon its pid, and a kill
+    leaves it `failed` while the socket still reads `active`."""
+    mac.script("moxi-demo-relay")
+    mac.module(DAEMONS=shell("127.0.0.1"))
+    mac.apply(units.plan("demo"))
+    mac.ctl.calls.clear()
+    rows = units.status("demo")
+    assert mac.ctl.calls == [("print", DOMAIN)]
+    assert [(r.name, r.kind, r.state, r.enabled, r.epoch) for r in rows] == [
+        ("relay", "daemon", "inactive", True, None),
+        ("relay", "socket", "active", True, None)]
+    assert rows[1].last is None
+    mac.ctl.loaded[RELAY] = [4100, None]
+    assert [r.state for r in units.status("demo")] == ["active", "active"]
+    mac.ctl.loaded[RELAY] = [None, -9]
+    assert [r.state for r in units.status("demo")] == ["failed", "active"]
+    assert units.disable("demo", ["relay"])[0].ok
+    rows = units.status("demo")
+    assert [(r.state, r.enabled) for r in rows] == [("inactive", False), ("inactive", False)]
+
+
 def test_since_reads_the_process_start_time():
     import psutil
 
