@@ -55,6 +55,17 @@ def test_every_error_derives_from_ipc_error():
     assert issubclass(ipc.Timeout, TimeoutError)
 
 
+def test_the_public_errors_are_named_as_moxi_ipc_s():
+    import traceback
+
+    for cls in (ipc.IpcError, ipc.RpcError, ipc.NotRpc, ipc.NotServing,
+                ipc.AlreadyServing, ipc.Timeout):
+        assert cls.__module__ == "moxi.ipc"
+        assert getattr(ipc, cls.__name__) is cls
+    shown = traceback.format_exception_only(ipc.AlreadyServing("/x.sock", 7))
+    assert shown[-1].startswith("moxi.ipc.AlreadyServing: pid 7 ")
+
+
 def test_rpc_error_carries_code_message_and_data():
     exc = ipc.RpcError(1001, "no such session", {"session": "x"})
     assert (exc.code, exc.message, exc.data) == (1001, "no such session", {"session": "x"})
@@ -285,9 +296,12 @@ def test_no_common_version_is_refused_with_both_ranges():
     assert caught.value.data == {"client": [3, 4], "server": [1, 2]}
 
 
-def test_the_capabilities_are_those_both_ends_name():
+def test_the_servers_agreed_holds_the_set_the_client_offered():
     agreed = ipc.hello({"versions": [1, 3], "capabilities": ["watch", "environ"]}, HELLO)
-    assert agreed.capabilities == frozenset({"watch"})
+    assert agreed.capabilities == frozenset({"watch", "environ"})
+    # a name the server never declared is kept: the two sets are separate names
+    assert ipc.hello({"versions": [1, 3], "capabilities": ["guards"]},
+                     HELLO).capabilities == frozenset({"guards"})
     assert ipc.hello({"versions": [1, 3]}, HELLO).capabilities == frozenset()
     assert ipc.hello({"versions": [1, 3], "capabilities": []},
                      ipc.Hello((1, 3))).capabilities == frozenset()
@@ -326,9 +340,11 @@ def test_the_client_reads_the_answer_through_the_same_rule():
                                        "capabilities": ["environ", "watch"]}
     assert wire.agreed_from({"version": 2, "capabilities": ["watch"]}, ours) == ipc.Agreed(
         2, {"watch"})
-    # a capability the client never offered is not agreed
+    # the client's agreed holds the server's answered set, offered by the client or not
     assert wire.agreed_from({"version": 1, "capabilities": ["watch", "other"]},
-                            ours).capabilities == frozenset({"watch"})
+                            ours).capabilities == frozenset({"watch", "other"})
+    assert wire.agreed_from({"version": 1, "capabilities": ["deliver"]},
+                            ipc.Hello((1, 2))).capabilities == frozenset({"deliver"})
 
 
 @pytest.mark.parametrize("answer", [
@@ -346,9 +362,18 @@ def test_a_server_with_a_hello_agrees_and_then_passes_requests():
     inbound = wire.Inbound(HELLO)
     reply = inbound.receive(hello_line(0, (2, 9), ("watch", "environ")))
     assert reply.kind == "hello" and not reply.close
-    assert frame(reply.frame) == {"jsonrpc": "2.0", "id": 0,
-                                  "result": {"version": 3, "capabilities": ["watch"]}}
-    assert inbound.agreed == ipc.Agreed(3, {"watch"})
+    assert frame(reply.frame) == {"jsonrpc": "2.0", "id": 0, "result": {
+        "version": 3, "capabilities": ["steer", "watch"]}}
+    assert inbound.agreed == ipc.Agreed(3, {"watch", "environ"})
+
+
+def test_the_server_answers_its_own_capabilities_whatever_the_client_offered():
+    for offered in ((), ("guards",), ("watch", "steer", "other")):
+        inbound = wire.Inbound(HELLO)
+        reply = inbound.receive(hello_line(0, (1, 3), offered))
+        assert frame(reply.frame)["result"] == {"version": 3,
+                                                "capabilities": ["steer", "watch"]}
+        assert inbound.agreed == ipc.Agreed(3, offered)
     assert isinstance(inbound.receive(req(1, "go")), wire.Message)
 
 

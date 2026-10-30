@@ -40,14 +40,20 @@ SHOWN = 200
 
 
 # -- errors -----------------------------------------------------------------------------
+# The public ones say they are `moxi.ipc`'s, where they are imported from, so a traceback
+# names them as callers write them.
 
 class IpcError(Exception):
     """Every failure `moxi.ipc` raises derives from this."""
+
+    __module__ = "moxi.ipc"
 
 
 class RpcError(IpcError):
     """A JSON-RPC error object: raised by a handler to answer with it, and raised by the
     client when the server answers with one."""
+
+    __module__ = "moxi.ipc"
 
     def __init__(self, code: int, message: str, data: object = None):
         if isinstance(code, bool) or not isinstance(code, int):
@@ -72,6 +78,8 @@ class NotRpc(IpcError):
     """The other end sent a line that is not a JSON-RPC message (an old daemon, say).
     `line` holds its first 200 bytes."""
 
+    __module__ = "moxi.ipc"
+
     def __init__(self, line: bytes, reason: str | None = None):
         self.line = bytes(line[:SHOWN])
         self.reason = reason
@@ -82,6 +90,8 @@ class NotRpc(IpcError):
 class NotServing(IpcError):
     """Nothing listens at the address: the daemon is cold. A command that stops on this
     exits `exit_code` (try again later)."""
+
+    __module__ = "moxi.ipc"
 
     exit_code = _exit.TEMPFAIL
 
@@ -96,6 +106,8 @@ class AlreadyServing(IpcError):
     """Another server holds the address's lock. `holder` is its pid when the lock file
     names one."""
 
+    __module__ = "moxi.ipc"
+
     def __init__(self, address: str, holder: int | None = None):
         self.address = address
         self.holder = holder
@@ -105,6 +117,8 @@ class AlreadyServing(IpcError):
 
 class Timeout(IpcError, TimeoutError):
     """No answer, or no connection, in the time given."""
+
+    __module__ = "moxi.ipc"
 
 
 class LineTooLong(IpcError):
@@ -130,8 +144,9 @@ class Hello(_Frozen):
 
 
 class Agreed(_Frozen):
-    """What a hello settled for one connection: the version and the capabilities both
-    ends have."""
+    """What a hello settled for one connection: the version, and the capabilities the
+    other end declared (on the server the client's offered set, on the client the
+    server's answered set)."""
 
     __slots__ = _fields = ("version", "capabilities")
 
@@ -145,8 +160,13 @@ def hello(offer: object, ours: Hello) -> Agreed:
     """The hello rule: what a server that speaks `ours` agrees to with the client's
     `offer`, `{"versions": [lo, hi], "capabilities": [...]}`.
 
-    The version is the highest one in both ranges; the capabilities are those both ends
-    name. No common version raises `RpcError` -32001, with data
+    The version is the highest one in both ranges. The two ends' capabilities are
+    separate names, each end's own to declare, and nothing intersects them: the server
+    answers its own set whatever the client offered (`hello_result`), and each side's
+    `Agreed` holds the other end's set. So the `Agreed` this returns, the server's, holds
+    the set the client offered; the client's, from `agreed_from`, holds the set the
+    server answered. A module decides what a pair of sets means. No common version
+    raises `RpcError` -32001, with data
     `{"client": [lo, hi], "server": [lo, hi]}`; an offer of the wrong shape raises
     `RpcError` -32602.
     """
@@ -164,7 +184,7 @@ def hello(offer: object, ours: Hello) -> Agreed:
                        f"no common version: the client speaks {theirs[0]} to {theirs[1]}, "
                        f"the server {ours.versions[0]} to {ours.versions[1]}",
                        {"client": list(theirs), "server": list(ours.versions)})
-    return Agreed(high, names & ours.capabilities)
+    return Agreed(high, names)
 
 
 def hello_params(ours: Hello) -> dict:
@@ -172,14 +192,16 @@ def hello_params(ours: Hello) -> dict:
     return {"versions": list(ours.versions), "capabilities": sorted(ours.capabilities)}
 
 
-def hello_result(agreed: Agreed) -> dict:
-    """The server's answer to a hello it agreed to."""
-    return {"version": agreed.version, "capabilities": sorted(agreed.capabilities)}
+def hello_result(agreed: Agreed, ours: Hello) -> dict:
+    """The server's answer to a hello it agreed to: the agreed version and the server's
+    own capabilities, `ours`."""
+    return {"version": agreed.version, "capabilities": sorted(ours.capabilities)}
 
 
 def agreed_from(answer: object, ours: Hello) -> Agreed:
-    """The client's reading of the server's hello answer. An answer of the wrong shape,
-    or a version outside the range the client offered, raises `IpcError`."""
+    """The client's reading of the server's hello answer: the agreed version and the
+    server's capabilities as it answered them. An answer of the wrong shape, or a version
+    outside the range the client offered, raises `IpcError`."""
     if not isinstance(answer, dict) or not _whole(answer.get("version")):
         raise IpcError(f"the server's hello answer is not "
                        f'{{"version": v, "capabilities": [...]}}: {answer!r}')
@@ -191,7 +213,7 @@ def agreed_from(answer: object, ours: Hello) -> Agreed:
         names = _names(answer.get("capabilities", []), TypeError, wire=True)
     except TypeError as exc:
         raise IpcError(f"the server's hello answer: {exc}") from None
-    return Agreed(version, names & ours.capabilities)
+    return Agreed(version, names)
 
 
 def _whole(value: object) -> bool:
@@ -407,7 +429,8 @@ class Inbound:
                 self.agreed = hello(obj.get("params"), self.hello)
             except RpcError as exc:
                 return Reply(encode(error(id, exc)), False, first, "hello")
-            return Reply(encode(result(id, hello_result(self.agreed))), False, first, "hello")
+            return Reply(encode(result(id, hello_result(self.agreed, self.hello))), False,
+                         first, "hello")
         if method.startswith("rpc."):
             if note:
                 return Reply(None, False, first, "reserved")

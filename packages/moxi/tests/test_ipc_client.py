@@ -123,6 +123,76 @@ def test_a_closed_server_is_not_serving(serving):
         ipc.connect(address)
 
 
+def full_listener(address: str) -> tuple[socket.socket, list[socket.socket]]:
+    """A listener that never accepts, with its backlog filled by connects already made."""
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(address)
+    listener.listen(1)
+    waiting = []
+    for _ in range(64):
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.setblocking(False)
+        try:
+            sock.connect(address)
+        except BlockingIOError:
+            sock.close()
+            return listener, waiting
+        waiting.append(sock)
+    raise AssertionError("the backlog never filled")
+
+
+linux_backlog = pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="a full Unix socket backlog answers EAGAIN on Linux; macOS is checked on a Mac")
+
+
+@linux_backlog
+def test_a_full_backlog_is_busy_until_the_timeout(sock_dir):
+    listener, waiting = full_listener(str(sock_dir / "full.sock"))
+    try:
+        start = time.monotonic()
+        with pytest.raises(ipc.Timeout) as caught:
+            ipc.connect(listener.getsockname(), timeout=0.3)
+        assert 0.3 <= time.monotonic() - start < 3
+        assert "busy" in str(caught.value)
+    finally:
+        for sock in [*waiting, listener]:
+            sock.close()
+
+
+@linux_backlog
+def test_a_busy_server_is_tried_again_until_it_accepts(sock_dir):
+    listener, waiting = full_listener(str(sock_dir / "full.sock"))
+    accepted = []
+
+    def accept_later():
+        time.sleep(0.3)
+        for _ in range(len(waiting) + 1):
+            accepted.append(listener.accept()[0])
+
+    thread = threading.Thread(target=accept_later, daemon=True)
+    thread.start()
+    try:
+        client = bounded(lambda: ipc.connect(listener.getsockname(), timeout=5.0))
+        client.close()
+        thread.join(10)
+    finally:
+        for sock in [*waiting, *accepted, listener]:
+            sock.close()
+
+
+def test_connect_passes_its_line_cap_to_the_client(serving):
+    srv = serving(handler)
+    with ipc.connect(srv.address, max_line=100) as client:
+        assert client.call("echo", ["x" * 40], timeout=10) == ["x" * 40]
+        with pytest.raises(ipc.IpcError, match="longer than 100 bytes"):
+            client.call("echo", ["x" * 120], timeout=10)
+    with ipc.connect(srv.address) as client:
+        assert client.call("echo", ["x" * 120], timeout=10) == ["x" * 120]
+    with pytest.raises(ValueError):
+        ipc.connect(srv.address, max_line=0)
+
+
 # -- calls ----------------------------------------------------------------------------------
 
 def test_call_returns_the_result_and_raises_the_error(serving):
@@ -163,12 +233,73 @@ def test_a_call_past_its_timeout_raises_and_its_late_answer_is_dropped(serving):
         assert client.call("echo", ["next"], timeout=10) == ["next"]
 
 
+#: Far more than a socket pair buffers, so a write of it blocks while nobody reads.
+BIG = "x" * (16 << 20)
+
+
+def test_a_call_whose_request_cannot_be_written_times_out_and_ends_the_connection(fake):
+    f = fake()
+    start = time.monotonic()
+    with pytest.raises(ipc.Timeout):
+        bounded(lambda: f.client.call("echo", [BIG], timeout=0.3))
+    assert 0.3 <= time.monotonic() - start < 3
+    # Part of the request was written, so the connection can't carry another frame.
+    with pytest.raises(ipc.IpcError) as caught:
+        bounded(lambda: f.client.call("echo", [1], timeout=1))
+    assert not isinstance(caught.value, ipc.Timeout)
+
+
+def test_a_call_waiting_on_another_calls_blocked_write_times_out(fake):
+    f = fake()
+    stuck = threading.Thread(target=lambda: pytest.raises(ipc.IpcError, f.client.call,
+                                                          "echo", [BIG]), daemon=True)
+    stuck.start()
+    time.sleep(0.2)  # the untimed call holds the write lock, blocked in its write
+    start = time.monotonic()
+    with pytest.raises(ipc.Timeout):
+        bounded(lambda: f.client.call("echo", [1], timeout=0.3))
+    assert 0.3 <= time.monotonic() - start < 3
+    f.client.close()
+    stuck.join(10)
+    assert not stuck.is_alive()
+
+
+def test_a_timed_call_writes_a_large_request_the_server_reads(fake):
+    f = fake()
+    payload = "y" * (4 << 20)
+    got = {}
+    reader = threading.Thread(target=lambda: got.update(f.request()), daemon=True)
+    reader.start()
+    answer = threading.Thread(target=lambda: (reader.join(20), f.answer(got["id"], "ok")),
+                              daemon=True)
+    answer.start()
+    assert bounded(lambda: f.client.call("echo", [payload], timeout=20)) == "ok"
+    assert got["params"] == [payload]
+
+
 def test_hello_agrees_a_version(serving):
     srv = serving(handler, hello=ipc.Hello((1, 3), {"watch", "steer"}))
     with ipc.connect(srv.address) as client:
         agreed = client.hello((2, 5), ["watch", "other"])
-        assert agreed == ipc.Agreed(3, {"watch"}) and client.agreed == agreed
+        assert agreed == ipc.Agreed(3, {"watch", "steer"}) and client.agreed == agreed
         assert client.call("echo", [1]) == [1]
+
+
+def test_hello_tells_a_client_that_offers_nothing_the_servers_capabilities(serving):
+    seen = []
+
+    async def keep(conn, method, params):
+        seen.append(conn.agreed)
+        return None
+
+    srv = serving(keep, hello=ipc.Hello((2, 2), {"deliver", "steer"}))
+    with ipc.connect(srv.address) as client:
+        assert client.hello((2, 2)) == ipc.Agreed(2, {"deliver", "steer"})
+        client.call("go")
+    with ipc.connect(srv.address) as client:
+        client.hello((1, 2), ["guards"])
+        client.call("go")
+    assert seen == [ipc.Agreed(2), ipc.Agreed(2, {"guards"})]
 
 
 def test_hello_refused_raises_rpc_error(serving):
@@ -287,6 +418,39 @@ def test_an_answer_that_is_not_json_rpc_raises_not_rpc(fake):
     assert errors[0].line == old[:200]
     with pytest.raises(ipc.NotRpc):
         f.client.call("again")
+
+
+def test_each_call_after_a_failure_raises_a_fresh_exception(fake):
+    import traceback
+
+    f = fake()
+    f.server.close()
+    f.client._reader.join(10)
+    raised, depths = [], []
+    for _ in range(4):
+        for fn in (lambda: f.client.call("again", timeout=1), lambda: f.client.notify("n")):
+            with pytest.raises(ipc.IpcError) as caught:
+                fn()
+            raised.append(caught.value)
+            depths.append(len(traceback.extract_tb(caught.value.__traceback__)))
+    # the traceback of each is as deep as the first: none grows from call to call
+    assert depths[::2] == depths[:1] * 4 and depths[1::2] == depths[1:2] * 4
+    assert len({id(exc) for exc in raised}) == len(raised)
+    assert len({str(exc) for exc in raised}) == 1
+
+
+def test_a_fresh_not_rpc_keeps_the_line(fake):
+    f = fake()
+    thread = threading.Thread(target=lambda: pytest.raises(ipc.NotRpc, f.client.call, "x"))
+    thread.start()
+    f.request()
+    f.send(b'{"ok": true}\n')
+    thread.join(10)
+    first = pytest.raises(ipc.NotRpc, f.client.call, "again").value
+    second = pytest.raises(ipc.NotRpc, f.client.call, "again").value
+    assert first is not second
+    assert first.line == second.line == b'{"ok": true}'
+    assert first.reason == second.reason
 
 
 def test_hello_raises_not_rpc_from_an_old_daemon(fake):

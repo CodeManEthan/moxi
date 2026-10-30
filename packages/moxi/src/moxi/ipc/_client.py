@@ -4,17 +4,20 @@ One lock serialises the frames written. One reader thread reads every line the s
 sends, hands each answer to the call waiting on its id and queues each notification, so
 the server's answers and its pushed notifications share the one connection in any order.
 A call waits on its own event; one that runs out of time raises `Timeout`, and its late
-answer is dropped.
+answer is dropped. A call's time limit holds while its request waits to be written too.
 """
 
 from __future__ import annotations
 
 import errno
 import itertools
+import math
 import queue
+import select
 import socket
 import sys
 import threading
+import time
 from collections.abc import Iterable, Iterator
 
 from . import _wire
@@ -24,30 +27,63 @@ from ._wire import Agreed, Hello, IpcError, NotServing, Timeout
 _CHUNK = 64 * 1024
 #: The errors that mean nothing listens at the address: the daemon is cold.
 _COLD = (errno.ENOENT, errno.ECONNREFUSED)
+#: The errors that mean the server is busy (its listen backlog is full), and how often,
+#: in seconds, `connect` tries a busy server again.
+_BUSY = (errno.EAGAIN, errno.EWOULDBLOCK)
+BUSY_RETRY = 0.05
 _END = object()
 
 
-def connect(address: str, *, timeout: float = 5.0) -> Client:
+def connect(address: str, *, timeout: float = 5.0, max_line: int = _wire.MAX_LINE) -> Client:
     """A connection to the server at `address`. Raises `NotServing` when nothing listens
-    there and `Timeout` when the connect takes longer than `timeout` seconds. `timeout`
-    is also the client's wait for `hello()`."""
+    there and `Timeout` when no connection is made in `timeout` seconds. A busy server
+    (its listen backlog full) is tried again every 50 ms until then. `timeout` is also
+    the client's wait for `hello()`. `max_line` caps the answer lines the client reads,
+    in bytes without the newline: match a server given a larger `serve(max_line=...)`."""
     if sys.platform == "win32":
         raise NotImplementedError("moxi.ipc.connect is not built for Windows yet: the "
                                   "named pipe client comes later")
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-    try:
-        sock.connect(address)
-    except TimeoutError:
-        sock.close()
-        raise Timeout(f"no connection to {address} in {timeout} s") from None
-    except OSError as exc:
-        sock.close()
-        if exc.errno in _COLD:
-            raise NotServing(address, exc.strerror) from None
-        raise
-    sock.settimeout(None)
-    return Client(sock, address, timeout=timeout)
+    if isinstance(max_line, bool) or not isinstance(max_line, int) or max_line < 1:
+        raise ValueError(f"max_line is a whole number of bytes above 0, not {max_line!r}")
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while True:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(None if deadline is None else max(deadline - time.monotonic(), 0.0))
+        try:
+            sock.connect(address)
+        except TimeoutError:
+            sock.close()
+            raise Timeout(f"no connection to {address} in {timeout} s") from None
+        except OSError as exc:
+            sock.close()
+            if exc.errno in _COLD:
+                raise NotServing(address, exc.strerror) from None
+            if exc.errno not in _BUSY:
+                raise
+            left = BUSY_RETRY if deadline is None else deadline - time.monotonic()
+            if left <= 0:
+                raise Timeout(f"no connection to {address} in {timeout} s: the server "
+                              f"is busy") from None
+            time.sleep(min(BUSY_RETRY, left))
+            continue
+        sock.settimeout(None)
+        return Client(sock, address, timeout=timeout, max_line=max_line)
+
+
+def _fresh(exc: BaseException) -> BaseException:
+    """A new exception like `exc`: its type, arguments and attributes, with no
+    traceback. A connection's one failure is raised this way by every call that meets
+    it, so threads never share one instance and its traceback never grows."""
+    new = type(exc).__new__(type(exc), *exc.args)
+    new.__dict__.update(exc.__dict__)
+    return new
+
+
+def _writable(sock: socket.socket, seconds: float) -> bool:
+    """Whether `sock` can take more bytes within `seconds`."""
+    poller = select.poll()
+    poller.register(sock.fileno(), select.POLLOUT)
+    return bool(poller.poll(max(math.ceil(seconds * 1000), 1)))
 
 
 class _Call:
@@ -98,7 +134,8 @@ class Client:
 
     def hello(self, versions: tuple[int, int], capabilities: Iterable[str] = ()) -> Agreed:
         """Offer `versions` (lo, hi) and `capabilities`, and return what the server
-        agreed. Raises `RpcError` -32001 when no version is common, and `NotRpc` when
+        agreed: the version, and the server's own capabilities as it answered them.
+        Raises `RpcError` -32001 when no version is common, and `NotRpc` when
         the server doesn't speak JSON-RPC."""
         ours = Hello(versions, capabilities)
         answer = self.call(_wire.HELLO, _wire.hello_params(ours), timeout=self._timeout)
@@ -110,16 +147,22 @@ class Client:
         """Send request `method` and return its result. Raises `RpcError` when the
         server answers with an error, `Timeout` past `timeout` seconds (None waits with
         no limit), `NotRpc` when the server sends a line that isn't JSON-RPC, and
-        `IpcError` when the connection ends first."""
+        `IpcError` when the connection ends first. `timeout` covers the whole call:
+        the wait to write the request as well as the wait for its answer. A request
+        the timeout cuts off partway ends the connection."""
+        deadline = None if timeout is None else time.monotonic() + timeout
         call = _Call()
         with self._lock:
             if self._failure is not None:
-                raise self._failure
+                raise _fresh(self._failure)
             id = next(self._ids)
             self._calls[id] = call
         try:
-            self._send(_wire.request(id, method, params))
-            if not call.done.wait(timeout):
+            if not self._send(_wire.request(id, method, params), deadline):
+                raise Timeout(f"no answer to {method} in {timeout} s: its request could "
+                              f"not be written in that time")
+            left = None if deadline is None else max(deadline - time.monotonic(), 0.0)
+            if not call.done.wait(left):
                 raise Timeout(f"no answer to {method} in {timeout} s")
         finally:
             with self._lock:
@@ -132,7 +175,7 @@ class Client:
         """Send notification `method`; nothing comes back."""
         with self._lock:
             if self._failure is not None:
-                raise self._failure
+                raise _fresh(self._failure)
         self._send(_wire.notification(method, params))
 
     def notifications(self) -> Iterator[tuple[str, object]]:
@@ -158,15 +201,52 @@ class Client:
 
     # -- the wire -----------------------------------------------------------------------
 
-    def _send(self, message: dict) -> None:
+    def _send(self, message: dict, deadline: float | None = None) -> bool:
+        """Write one frame, holding the write lock. With a `deadline` (a
+        `time.monotonic()` time), the wait for the lock and for the socket to take the
+        frame both end then, and False says the time ran out: nothing was written, or
+        the frame was cut partway and the connection is ended, since the server can
+        no longer tell where the next frame starts."""
         frame = _wire.encode(message)
-        with self._write_lock:
-            try:
+        if deadline is None:
+            self._write_lock.acquire()
+        elif not self._write_lock.acquire(timeout=max(deadline - time.monotonic(), 0.0)):
+            return False
+        try:
+            if deadline is None:
                 self._sock.sendall(frame)
-            except OSError as exc:
-                failure = self._fail(IpcError(f"the connection to {self.address} "
-                                              f"broke: {exc}"))
-                raise failure from None
+                return True
+            return self._send_by(frame, deadline)
+        except OSError as exc:
+            failure = self._fail(IpcError(f"the connection to {self.address} "
+                                          f"broke: {exc}"))
+            raise _fresh(failure) from None
+        finally:
+            self._write_lock.release()
+
+    def _send_by(self, frame: bytes, deadline: float) -> bool:
+        """Write `frame` without blocking past `deadline`, waiting for the socket to
+        take more between writes. The caller holds the write lock."""
+        view = memoryview(frame)
+        sent = 0
+        while sent < len(frame):
+            try:
+                sent += self._sock.send(view[sent:], socket.MSG_DONTWAIT)
+                continue
+            except BlockingIOError:
+                pass
+            left = deadline - time.monotonic()
+            if left <= 0 or not _writable(self._sock, left):
+                if sent:
+                    self._fail(IpcError(f"the connection to {self.address} is ended: a "
+                                        f"request was cut off when its call ran out of "
+                                        f"time"))
+                    try:
+                        self._sock.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                return False
+        return True
 
     def _read(self) -> None:
         failure: BaseException = IpcError(
@@ -215,7 +295,7 @@ class Client:
                 calls = list(self._calls.values())
                 self._calls.clear()
             for call in calls:
-                call.error = got.error
+                call.error = _fresh(got.error)
                 call.done.set()
             return
         with self._lock:
@@ -236,6 +316,6 @@ class Client:
             self._calls.clear()
         for call in calls:
             if not call.done.is_set():
-                call.error = failure
+                call.error = _fresh(failure)
                 call.done.set()
         return failure

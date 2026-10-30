@@ -1,8 +1,10 @@
 """The asyncio server of `moxi.ipc`, on a Unix socket (Linux and macOS).
 
-`serve` makes the socket's directory private, takes the lock beside the socket and keeps
-it for the server's life, removes a socket left over from a dead server and binds. Only a
-live server makes a second one refuse; a sweep's short hold is waited out.
+`serve` makes the socket's directory private when it creates it or the directory is the
+core's own (any other directory is checked and never changed), takes the lock beside the
+socket and keeps it for the server's life, removes a socket left over from a dead server
+and binds. Only a live server makes a second one refuse; a sweep's short hold is waited
+out.
 
 Each connection gets one reader, which hands the handler one message at a time in order,
 and one writer, which drains a bounded queue of frames with a deadline on each write. A
@@ -25,6 +27,8 @@ from collections.abc import Awaitable, Callable
 from contextlib import ExitStack
 
 from .. import files
+from .. import names as _names
+from .. import paths as _paths
 from .. import proc as _proc
 from ..modules import _Frozen
 from . import _wire
@@ -451,6 +455,47 @@ class Server:
         await self.wait_closed()
 
 
+def _socket_dir(directory: str) -> None:
+    """Make ready the directory the socket goes in, `directory`.
+
+    A directory that doesn't exist yet is made private (`moxi.files.private_dir`), and
+    so is one of the core's own: a module's runtime directory or the short hashed
+    directory `moxi.paths.socket_path` uses. Any other directory that exists is never
+    changed: it must be this user's, not a symbolic link, and not writable by group or
+    others, or `serve` refuses it with an `OSError` naming it.
+    """
+    if not os.path.lexists(directory) or _core_dir(directory):
+        files.private_dir(directory)
+        return
+    st = os.lstat(directory)
+    if stat.S_ISLNK(st.st_mode):
+        raise PermissionError(f"{directory} is a symbolic link; a socket's directory "
+                              f"must not be")
+    if not stat.S_ISDIR(st.st_mode):
+        raise NotADirectoryError(f"{directory} is not a directory")
+    if st.st_uid != os.getuid():
+        raise PermissionError(f"{directory} belongs to uid {st.st_uid}, not this user; a "
+                              f"socket's directory must be this user's own")
+    if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise PermissionError(f"{directory} is writable by group or others (mode "
+                              f"{stat.S_IMODE(st.st_mode):o}); serve leaves it as it is, so "
+                              f"make it 0700 or serve elsewhere")
+
+
+def _core_dir(directory: str) -> bool:
+    """Whether `directory` is one the core makes private: a module's runtime directory,
+    a child of its runtime root as `moxi.paths` computes it, or the short hashed
+    directory. Decided by comparing resolved paths, never by a name alone."""
+    real = os.path.realpath(directory)
+    short = os.path.join(_paths._SHORT_ROOT, f"moxi-{os.getuid()}")
+    if real == os.path.realpath(short):
+        return True
+    module = os.path.basename(directory)
+    if not _names.is_module_name(module):
+        return False
+    return real == os.path.realpath(_paths._layout(module).runtime_dir())
+
+
 async def serve(address: str, handler: Handler, *, hello: Hello | None = None,
                 max_line: int = _wire.MAX_LINE, write_deadline: float = 5.0,
                 queue: int = 256, legacy: Callable[[bytes], object] | None = None,
@@ -463,7 +508,9 @@ async def serve(address: str, handler: Handler, *, hello: Hello | None = None,
     dropped. One connection's messages reach the handler one at a time, in order.
 
     `hello`: the connection's first request must be `rpc.hello` (anything else is
-    answered -32002 and the connection closes); `conn.agreed` holds what it settled.
+    answered -32002 and the connection closes). The server answers with the agreed
+    version and `hello.capabilities`, whatever the client offered; `conn.agreed` holds
+    the version and the capabilities the client offered.
     `max_line`: the longest line read, in bytes without the newline; a longer one is
     answered -32600 and closes the connection. `write_deadline`: seconds one write may
     take before the peer is dropped. `queue`: frames a connection may have waiting to
@@ -474,6 +521,11 @@ async def serve(address: str, handler: Handler, *, hello: Hello | None = None,
     usual refusal for that line before closing. Only the first message is judged.
     `on_close`: called as `on_close(conn)` (sync or async) once each connection has
     closed.
+
+    The socket's directory is made private when it doesn't exist yet, or when it is a
+    module's runtime directory or the short hashed directory `moxi.paths.socket_path`
+    uses. Any other directory that exists is left as it is: one that isn't this user's,
+    is a symbolic link, or is writable by group or others raises `OSError` naming it.
 
     Raises `AlreadyServing` when another server still holds the address's lock after a
     one-second wait.
@@ -493,7 +545,7 @@ async def serve(address: str, handler: Handler, *, hello: Hello | None = None,
     if hello is not None and not isinstance(hello, Hello):
         raise TypeError(f"hello is a moxi.ipc.Hello, not {hello!r}")
     address = os.fspath(address)
-    files.private_dir(os.path.dirname(os.path.abspath(address)))
+    _socket_dir(os.path.dirname(os.path.abspath(address)))
     server = Server(address, handler, hello=hello, max_line=max_line,
                     write_deadline=write_deadline, queue=queue, legacy=legacy,
                     on_close=on_close)
