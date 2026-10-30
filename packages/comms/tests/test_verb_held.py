@@ -1,0 +1,305 @@
+"""The send verb's half of the queue: `--held` and `[held]`, the send's `[cold-at:…]`,
+the refusal of a read comms cannot make, `--held` to the operator, the held frame mark
+and the one version check on `ping`.
+
+The daemon's use of the cold-at is tested with the queue; here the token is pinned as
+the verb writes it, from `session` answers the daemon is made to give.
+"""
+
+from __future__ import annotations
+
+import time
+
+import pytest
+from conftest import queued, wait_for_queue, wait_until
+
+from moxi_comms import cli, machine_line
+from moxi_comms.adapters.claude_shim import frame_line, held_mark, sent_at
+from moxi_comms.client import DaemonClient
+from moxi_comms.paths import daemon_socket
+
+PLANNER = dict(name="planner")
+T_ASK = 1_760_000_000.5
+
+
+def last(rig):
+    return rig.gateway.history(rig.names_channel)[-1]
+
+
+def posted(rig):
+    return rig.gateway.history(rig.names_channel)
+
+
+def answers(rig, monkeypatch, table: dict):
+    """The daemon's `session` answer for each name in `table`, as given; every other
+    name answers as the daemon does."""
+    real = rig.daemon._session_query
+
+    def session(frame):
+        identity = str(frame.get("identity") or "")
+        if identity in table:
+            return {"identity": identity, "bound": True, "session_id": "s",
+                    "bound_at": 0.0, "bound_for": 60.0, "cache_reason": None,
+                    "cache_key": None, "cache_source": None, **table[identity]}
+        return real(frame)
+
+    monkeypatch.setattr(rig.daemon, "_session_query", session)
+
+
+# ------------------------------------------------------------------------ the cold-at
+
+def test_the_cold_at_is_written_per_tag_from_each_session_answer(rig, monkeypatch):
+    """A warm Claude x (age 600, ttl 3600), a cold Codex y (age 600 on a
+    row of 300 s), an unbound z, a fresh f and a no-clock n, in tag order."""
+    for slot, name in ((2, "x"), (3, "y"), (4, "f"), (5, "n")):
+        rig.shim(name=name)
+    answers(rig, monkeypatch, {
+        "x": dict(adapter="claude-shim", cache_kind="warm", age_seconds=600,
+                         cache_ttl=3600),
+        "y": dict(adapter="codex", cache_kind="cold", age_seconds=600,
+                         cache_ttl=300),
+        "f": dict(adapter="claude-shim", cache_kind="fresh", age_seconds=None,
+                         cache_ttl=None),
+        "n": dict(adapter="pager", cache_kind="no-cache", age_seconds=None,
+                         cache_ttl=None, cache_reason="comms has no cache clock for pager"
+                         " agents"),
+    })
+    code, out = rig.cli(["send", "x,y,z,f,n", "hi", "--posture", "none", "--new-name"], **PLANNER,
+                        clock=lambda: T_ASK)
+    assert code == 0, out
+    ml = machine_line.parse(last(rig).content)
+    t = int(T_ASK)
+    assert ml.recipients == ("x", "y", "z", "f", "n")
+    assert ml.cold_at == (t + 3000, t - 300, t, "-", "-")
+    assert f"[cold-at:{t + 3000},{t - 300},{t},-,-]" in ml.line
+    # never later than the read's last turn plus its lifetime
+    assert ml.cold_at[0] <= T_ASK - 600 + 3600 and ml.cold_at[1] <= T_ASK - 600 + 300
+    assert not ml.held
+
+
+def test_a_cold_read_with_no_lifetime_writes_the_ask_time(rig, monkeypatch):
+    """A Codex or OpenCode `cold` with no lifetime (a model switch) is a "wait" reading:
+    `floor(t_ask)`, a time already reached. So is a warm read with no lifetime."""
+    rig.shim(name="y")
+    rig.shim(name="w")
+    answers(rig, monkeypatch, {
+        "y": dict(adapter="codex", cache_kind="cold", age_seconds=600,
+                         cache_ttl=None, cache_reason="the model changed"),
+        "w": dict(adapter="codex", cache_kind="warm", age_seconds=10,
+                         cache_ttl=None),
+    })
+    code, out = rig.cli(["send", "y,w", "hi", "--posture", "none"], **PLANNER,
+                        clock=lambda: T_ASK)
+    assert code == 0, out
+    assert machine_line.parse(last(rig).content).cold_at == (int(T_ASK), int(T_ASK))
+
+
+def test_a_send_that_reads_only_live_writes_every_value_as_dash(rig, monkeypatch):
+    """Every recipient `fresh` or `no-cache` (no clock, a no-row model, the operator):
+    the token is still written, every value `-`, so a line from this verb always carries
+    the send's reading."""
+    rig.shim(name="f")
+    rig.shim(name="n")
+    answers(rig, monkeypatch, {
+        "f": dict(adapter="claude-shim", cache_kind="fresh", age_seconds=None,
+                         cache_ttl=None),
+        "n": dict(adapter="opencode", cache_kind="no-cache", age_seconds=None,
+                         cache_ttl=None),
+    })
+    code, out = rig.cli(["send", "f,n", "hi", "--posture", "none"], **PLANNER)
+    assert code == 0, out
+    assert machine_line.parse(last(rig).content).cold_at == ("-", "-")
+
+
+def test_a_held_send_writes_no_cold_at(rig):
+    rig.shim(name="x")
+    code, out = rig.cli(["send", "x", "later", "--posture", "none", "--held"], **PLANNER)
+    assert code == 0, out
+    ml = machine_line.parse(last(rig).content)
+    assert ml.held and ml.cold_at is None
+    assert "[held]" in ml.line and "[next-turn]" not in ml.line and "cold-at" not in ml.line
+
+
+def test_an_unbound_recipient_alone_gets_the_ask_time_and_the_not_bound_note(rig):
+    for argv in (["send", "z", "hi", "--posture", "none", "--new-name"],
+                 ["send", "z", "hi", "--posture", "none", "--held", "--new-name"]):
+        code, out = rig.cli(argv, **PLANNER, clock=lambda: T_ASK)
+        assert code == 0, out
+        assert cli.NOT_BOUND_NOTE.format(name="z") in out.splitlines()
+    plain, flagged = posted(rig)[-2:]
+    assert machine_line.parse(plain.content).cold_at == (int(T_ASK),)
+    assert machine_line.parse(flagged.content).cold_at is None
+
+
+# ----------------------------------------------------------------- reads comms cannot make
+
+def test_an_unknown_read_refuses_the_send_held_or_not(rig, monkeypatch):
+    rig.shim(name="x")
+    rig.shim(name="w")
+    answers(rig, monkeypatch, {
+        "x": dict(adapter="claude-shim", cache_kind="unknown", age_seconds=None,
+                         cache_ttl=None, cache_reason="no session id reported yet"),
+    })
+    before = posted(rig)
+    for flags in ([], ["--held"]):
+        code, out = rig.cli(["send", "x,w", "hi", "--posture", "none", *flags], **PLANNER)
+        assert code == cli.EXIT_COLD, out
+        assert out.splitlines() == [
+            "Nothing was sent: comms could not read x's cache (no session id "
+            "reported yet).",
+            "To reach the other recipients now, send it again without x.",
+            "Send it again in a moment; a read that succeeds holds or delivers it.",
+            "Nothing was sent."]
+    assert posted(rig) == before
+
+
+def test_the_refusal_reasons(rig):
+    from moxi_comms import cache
+
+    def state(**kw):
+        return cache.CacheState(target="reviewer", kind="unknown", **kw)
+
+    assert cli._refusal_reason(state(adapter="codex", reason="transcript missing")) == \
+        "comms could not read reviewer's cache (transcript missing)"
+    assert cli._refusal_reason(state(reason=cache.NOT_BOUND)) == \
+        "reviewer unbound while comms was checking it"
+    assert cli._refusal_reason(state(reason="the session query failed (boom)")) == \
+        "comms could not ask the daemon about reviewer (the session query failed (boom))"
+    assert cli._hold_text([state(adapter="codex", reason="x")]).splitlines()[1:] == [
+        "Send it again in a moment; a read that succeeds holds or delivers it.",
+        "Nothing was sent."]
+
+
+def test_a_cold_read_of_any_adapter_posts_and_holds(rig, monkeypatch):
+    rig.shim(name="y")
+    answers(rig, monkeypatch, {
+        "y": dict(adapter="codex", cache_kind="cold", age_seconds=4000,
+                         cache_ttl=1800),
+    })
+    code, out = rig.cli(["send", "y", "hi", "--posture", "none"], **PLANNER)
+    assert code == 0, out
+    lines = out.splitlines()
+    assert lines[1].startswith("held: y's cache went cold")
+    assert lines[-1] == ("Sent and held: y reads this after its own next turn, or "
+                         "when its session is cleared, compacted or restarted. Nothing "
+                         "wakes it for this message alone.")
+
+
+def test_held_to_a_bound_recipient_says_when_it_reads_it(rig):
+    rig.shim(name="x")
+    code, out = rig.cli(["send", "x", "later", "--posture", "none", "--held"], **PLANNER)
+    assert code == 0, out
+    assert out.splitlines()[-1] == (
+        "NOTE: x reads this after its own next turn, or when its session is "
+        "cleared, compacted or restarted. Nothing wakes it for this message alone.")
+    assert "held:" not in out
+
+
+# ------------------------------------------------------------------- --held to the operator
+
+def operator_env(rig):
+    return {"MOXI_COMMS_OPERATOR": rig.prov.operator_user_id}
+
+
+def test_held_to_the_operator_alone_writes_no_held(rig):
+    rig.shim(name="operator", global_=True)
+    code, out = rig.cli(["send", "operator", "fyi", "--posture", "none", "--held"], **PLANNER)
+    assert code == 0, out
+    assert cli.HELD_IGNORED_OPERATOR in out.splitlines()
+    ml = machine_line.parse(last(rig).content)
+    assert not ml.held and ml.cold_at is not None, "an ordinary message, with its reading"
+
+
+def test_held_to_the_operator_and_another_flags_the_line_and_says_so(rig):
+    """One post with `[held]`, the NOTE printed, the operator gets it live
+    and x waits."""
+    operator = rig.shim(name="operator", global_=True)
+    x = rig.shim(name="x")
+    code, out = rig.cli(["send", "operator,x", "both", "--posture", "none", "--held"], **PLANNER)
+    assert code == 0, out
+    lines = out.splitlines()
+    assert cli.HELD_IGNORED_OPERATOR in lines
+    assert cli.HELD_NOTE.format(name="x") in lines
+    assert not any(line.startswith("NOTE: operator reads") for line in lines)
+    msg = last(rig)
+    ml = machine_line.parse(msg.content)
+    assert ml.held and ml.cold_at is None
+    assert any(p["message_id"] == msg.id for p in wait_for_queue(operator, 1))
+    assert wait_until(lambda: msg.id in queued(rig.daemon, "x"))
+    assert msg.id not in [p["message_id"] for p in x.queue]
+
+
+# ------------------------------------------------------------------------ one version check
+
+@pytest.mark.parametrize("answer", [{}, {"cli_protocol": 0}, {"cli_protocol": 1},
+                                    {"cli_protocol": 4}])
+def test_a_daemon_on_another_verb_protocol_refuses_every_send(rig, monkeypatch, answer):
+    """Exit 4 with the protocol refusal's text, nothing posted."""
+    rig.shim(name="x")
+    real = DaemonClient.request
+
+    def request(self, op, **kw):
+        got = real(self, op, **kw)
+        if op == "ping":
+            got = {k: v for k, v in got.items() if k != "cli_protocol"} | answer
+        return got
+
+    monkeypatch.setattr(DaemonClient, "request", request)
+    before = posted(rig)
+    code, out = rig.cli(["send", "x", "hi", "--posture", "none"], **PLANNER)
+    spoken = answer.get("cli_protocol", 0)
+    assert (code, out.strip()) == (cli.EXIT_OFFLINE, (
+        f"the comms daemon speaks verb protocol {spoken} and this comms speaks 3; restart "
+        "the daemon (moxi comms service status names its unit), then run this again. Nothing "
+        "was sent."))
+    assert posted(rig) == before
+    code, out = rig.cli(["agents"], **PLANNER)
+    assert code == cli.EXIT_OFFLINE and "speaks verb protocol" in out
+
+
+@pytest.mark.parametrize("side", ["sending", "daemon"])
+def test_a_verb_and_a_daemon_from_either_side_of_cache_code_refuse_each_other(
+        rig, monkeypatch, side):
+    """An old verb on a new daemon, and a new verb on an old daemon, each exit 4
+    with nothing sent, so neither reads the other's session answer."""
+    rig.shim(name="x")
+    monkeypatch.setattr(f"moxi_comms.{side}.CLI_PROTOCOL", 2)
+    daemon, verb = (3, 2) if side == "sending" else (2, 3)
+    before = posted(rig)
+    code, out = rig.cli(["send", "x", "hi", "--posture", "none"], **PLANNER)
+    assert (code, out.strip()) == (cli.EXIT_OFFLINE, (
+        f"the comms daemon speaks verb protocol {daemon} and this comms speaks {verb}; "
+        "restart the daemon (moxi comms service status names its unit), then run this "
+        "again. Nothing was sent."))
+    assert posted(rig) == before
+    code, out = rig.cli(["agents"], **PLANNER)
+    assert code == cli.EXIT_OFFLINE and "speaks verb protocol" in out
+
+
+def test_ping_answers_the_verb_protocol_and_register_the_claims_one(rig):
+    from moxi_comms.protocol import CLI_PROTOCOL, PROTOCOL_VERSION
+
+    c = DaemonClient(daemon_socket()).connect()
+    try:
+        assert c.request("ping") == {"id": 1, "ok": True, "cli_protocol": CLI_PROTOCOL}
+    finally:
+        c.close()
+    assert (CLI_PROTOCOL, PROTOCOL_VERSION) == (3, 2)
+
+
+# --------------------------------------------------------------------- the held frame mark
+
+def test_the_held_mark_says_when_it_was_sent_and_how_long_it_waited():
+    """The held mark on the frame line: when it was sent and how long it waited."""
+    now = time.time()
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 3 * 3600 - 30))
+    assert held_mark(stamp, now=now) == f"[held] sent {sent_at(stamp, now=now)}, waited 3h"
+    assert held_mark("not a time", now=now) == "[held]"
+    payload = {"message_id": "4611686018427391719", "room": "#names",
+               "author": {"name": "captain", "tier": "chosen", "attribution": "verified"},
+               "posture": "once", "timestamp": stamp, "held": True}
+    line = frame_line(payload, now=now)
+    assert line.endswith(f"· [held] sent {sent_at(stamp, now=now)}, waited 3h · "
+                         "[reply-once]")
+    assert "[held]" not in frame_line({**payload, "held": False}, now=now)
+    assert "[next-turn]" not in frame_line({**payload, "next_turn": True}, now=now)

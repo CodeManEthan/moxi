@@ -1,49 +1,29 @@
-[project]
-name = "moxi"
-version = "0.1.1"
-description = "Moxi's core: the names, paths, config and module discovery every Moxi module shares, and the moxi command"
-readme = "README.md"
-requires-python = ">=3.11"
-license = "MIT"
-authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
-keywords = ["agents", "harness", "claude-code", "codex"]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Environment :: Console",
-    "Intended Audience :: Developers",
-    "Operating System :: POSIX :: Linux",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Software Development",
+# The root of the uv workspace: the repository's root, a virtual one that names every
+# package under packages/ as a member and holds no project of its own.
+# Members are named one by one, never by a glob, and declare no [tool.uv.sources] of
+# their own, so a package built or installed alone resolves its siblings from the index;
+# the sources below exist only here, and make each member resolve to its directory in
+# this tree. uv.lock beside this file is committed; .venv is derived and ignored.
+
+[tool.uv.workspace]
+members = [
+    "packages/moxi",
+    "packages/sessions",
+    "packages/turns",
+    "packages/cache",
+    "packages/comms",
+    "packages/moxi-dev",
 ]
-# The core is standard library only and declares no extras.
-dependencies = []
 
-# Every Moxi distribution declares this script, so a plain `uv tool install` of any
-# module puts the umbrella on PATH. The core declares no other.
-[project.scripts]
-moxi = "moxi.cli:main"
+[tool.uv.sources]
+moxi = { workspace = true }
+moxi-sessions = { workspace = true }
+moxi-turns = { workspace = true }
+moxi-cache = { workspace = true }
+moxi-comms = { workspace = true }
+moxi-dev = { workspace = true }
 
-[project.urls]
-Homepage = "https://github.com/moxihq/moxi"
-Repository = "https://github.com/moxihq/moxi"
-Issues = "https://github.com/moxihq/moxi/issues"
-
+# The contributor's tools: `uv sync` installs moxi-dev, whose `moxi-dev check` runs the
+# checks a change must pass.
 [dependency-groups]
-dev = ["pytest"]
-
-[build-system]
-requires = ["hatchling>=1.27"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/moxi"]
-
-[tool.hatch.build.targets.sdist]
-# A source distribution built from any branch holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "src/moxi", "tests"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
+dev = ["moxi-dev"]

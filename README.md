@@ -1,91 +1,42 @@
 # Moxi
 
-Moxi is a harness for running many AI coding-agent sessions as one system. Popular agent
-CLIs such as Claude Code and Codex add little structure around a session. Moxi adds some,
-and it makes opinionated choices to do it: agents have names and identities, sessions
-message each other, and a clock tracks when a session's prompt cache goes cold. These
-choices won't suit everyone.
+Moxi is a harness for running many AI coding-agent sessions as one system. Agent CLIs
+such as Claude Code, Codex and OpenCode add little structure around a session; Moxi adds
+some. Agents have names and identities, sessions message each other, and a clock tracks
+when a session's prompt cache goes cold.
 
-Moxi is built as modules that plug together. A module installs with the modules it
-requires and nothing more; the rest are optional, and a feature that needs a missing
-module is off and quiet.
+Moxi is built as modules that plug together. Each one is its own package with its own
+dependencies, and a module installs with the modules it requires and nothing more. This
+repository holds all of them.
 
-## Modules
+## Packages
 
-| module | what it does | requires | optional | repo |
-|---|---|---|---|---|
-| `moxi` | The core: names, paths, one config file per module, module discovery, the module contract check, and the `moxi` command | nothing (standard library only) | | [moxihq/moxi](https://github.com/moxihq/moxi) |
-| sessions | Where a harness keeps a session's record, and how its lines read | `moxi` | | [moxihq/sessions](https://github.com/moxihq/sessions) |
-| turns | The one interface to a harness's session: a turn, mail, `/clear` and `/exit` in, session events out. A library with no command of its own | `moxi` | `codex`: the Codex host | [moxihq/turns](https://github.com/moxihq/turns) |
-| cache | The prompt cache clock: when a session's cache goes cold, with a watcher and a status line segment | `moxi`, sessions | | [moxihq/cache](https://github.com/moxihq/cache) |
-| comms | Messages between agent sessions on one machine, delivered into the recipient's session at the end of its current turn | `moxi`, turns | `cache`: hold a send while the recipient's cache is cold; `codex`: Codex sessions | [moxihq/comms](https://github.com/moxihq/comms) |
+| directory | PyPI name | what it is |
+|---|---|---|
+| `packages/moxi` | `moxi` | The core: names, paths, config, module discovery, the module contract and the `moxi` command |
+| `packages/sessions` | `moxi-sessions` | Reads a harness's own session records |
+| `packages/turns` | `moxi-turns` | One interface to a harness session's turns |
+| `packages/cache` | `moxi-cache` | The prompt cache clock, its watcher and timer |
+| `packages/comms` | `moxi-comms` | Messages between agent sessions, delivered into their turns |
+| `packages/moxi-dev` | `moxi-dev` | The contributor tools; not a module, and nothing depends on it at run time |
 
-## The `moxi` command
+Each package's README says how to install and use it. `packages/moxi/README.md` is the
+place to start.
 
-Every module runs as `moxi <module> <verb>`, for example `moxi comms send`. The core's own
-commands:
+## Working on Moxi
 
-- `moxi modules` lists the modules this environment holds, their state and their extras.
-- `moxi install <module>` installs a module with the modules it requires, runs its setup,
-  and offers each optional extra with a line saying what it enables. `--with`,
-  `--without`, `--all` and `--none` answer ahead.
-- `moxi shortcut <module>` puts a bare `<module>` command on PATH. It is off by default
-  and refused when the name is already taken; `--remove` takes it off.
-- `moxi config <module>` shows a module's settings and its config file.
-- `moxi check` checks a module repo against the module contract.
-
-## Install
-
-Linux, Python 3.11 or later, and [uv](https://docs.astral.sh/uv/).
+Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/). From a clone:
 
 ```sh
-uv tool install moxi
-moxi install comms
+uv sync
+uv run moxi-dev check
 ```
 
-A plain `uv tool install moxi-comms` also works and puts `moxi` on PATH, but runs no
-setup; `moxi install turns` then installs turns' Claude Code plugin.
-
-### Before the modules are on PyPI
-
-Install the core from git, then give `moxi install` one `--from` for each Moxi
-distribution the module needs that the environment lacks, in dependency order: `moxi`,
-`moxi-sessions`, `moxi-turns`, `moxi-cache`, `moxi-comms`. One left out is looked for on
-PyPI and the install fails. For comms:
-
-```sh
-uv tool install git+https://github.com/moxihq/moxi
-moxi install comms --none \
-  --from 'moxi-turns @ git+https://github.com/moxihq/turns' \
-  --from 'moxi-comms @ git+https://github.com/moxihq/comms'
-```
-
-comms with its `cache` extra needs cache and sessions too:
-
-```sh
-uv tool install git+https://github.com/moxihq/moxi
-moxi install comms --with cache \
-  --from 'moxi-sessions @ git+https://github.com/moxihq/sessions' \
-  --from 'moxi-turns @ git+https://github.com/moxihq/turns' \
-  --from 'moxi-cache @ git+https://github.com/moxihq/cache' \
-  --from 'moxi-comms @ git+https://github.com/moxihq/comms'
-```
-
-## Troubleshooting
-
-**`moxi` is gone after removing a module.** Every Moxi distribution provides the `moxi`
-command, so removing one from an environment can take `moxi` with it while other modules
-remain. Reinstall the tool (its name is in `uv tool list`):
-
-```sh
-uv tool install <tool> --reinstall-package <tool>
-```
-
-In a plain virtual environment, reinstalling any Moxi module brings `moxi` back.
-
-**A shortcut fails with `moxi: not found`.** Its environment was removed. Delete the
-shortcut file, or reinstall.
+`uv sync` sets up one environment at the root with every package installed from its
+directory, plus the contributor tools. `moxi-dev check` runs the checks a change must
+pass before it merges. A package's own tests also run from its directory with
+`uv run pytest`.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT; see `LICENSE`. Each package carries the same license.

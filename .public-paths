@@ -1,0 +1,11 @@
+# Which tracked paths are public. Each line is `public <path>` or `private <path>`, and
+# every tracked path falls under exactly one line. A new top-level path needs a line.
+public .github
+public .gitignore
+public LICENSE
+public README.md
+public packages
+public pyproject.toml
+public uv.lock
+private .public-paths
+private .residue-allow
