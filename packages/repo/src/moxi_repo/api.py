@@ -728,6 +728,10 @@ def _status_of(repo: Repo, in_index: bool, version, good: dict) -> dict:
                     f"{event}: another tool's git hook took {hook}, and moved repo's shim "
                     f"to {mine[0].name}; the pieces run only if that tool runs it",
                     state="ok" if runs else "fail"))
+                if runs:
+                    # It still runs, so its guard's two paths matter as the shim's do.
+                    problems += _guard_problems(event, mine[0].read_text(
+                        encoding="utf-8", errors="replace"), python, runner, repo.root)
             else:
                 problems.append(Problem(f"{event}: repo's shim is missing or another tool "
                                         "replaced it",

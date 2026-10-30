@@ -252,6 +252,22 @@ def test_a_renamed_shim_still_runs_local_and_refresh_rewrites_it_in_place(demo):
     assert "-new" in (hooks / "pre-commit.legacy").read_text()
 
 
+def test_a_shim_renamed_legacy_has_its_guard_checked(demo):
+    repo = demo.repo()
+    hooks = repo / ".git" / "hooks"
+    api.add(repo, ["demo/gate"], mode="shim")
+    (hooks / "pre-commit").rename(hooks / "pre-commit.legacy")
+    (hooks / "pre-commit").write_text("#!/bin/sh\nexec \"$(dirname \"$0\")/pre-commit.legacy\""
+                                      " \"$@\"\n")
+    gone = str(demo.tmp / "gone" / "python")
+    legacy = hooks / "pre-commit.legacy"
+    legacy.write_text(legacy.read_text().replace(str(demo.hook_env["python"]), gone))
+    [row] = [r for r in problems(f"hooks {repo}") if gone in r.detail]
+    assert row.state == "fail" and row.fix == f"moxi repo git-hooks refresh {repo}"
+    api.refresh(repo)
+    assert problems(f"hooks {repo}") == []
+
+
 def test_shim_mode_outside_the_git_dir_writes_a_launcher_and_a_chain_line(demo):
     repo = demo.repo()
     tracked = repo / ".githooks"

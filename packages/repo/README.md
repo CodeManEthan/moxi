@@ -341,8 +341,8 @@ of it. Without projects, paths work as before. The git hooks never ask projects 
 - **Each indexed repo** (`hooks PATH`): every event's hook entry, shim or launcher is
   there and is repo's; the interpreter and runner it names exist (a `fail` row when one is
   missing; a `warn` row when it names another environment's); a shim another tool moved
-  aside (`<event>.legacy`, which that tool runs, is fine; any other name means the pieces
-  don't run); a chain line still needed, with the line to add; a launcher missing where
+  aside (`<event>.legacy`, which that tool runs, is fine, and its interpreter and runner
+  are checked as a shim's are; any other name means the pieces don't run); a chain line still needed, with the line to add; a launcher missing where
   the chain line is in place, which makes the pieces skip quietly; a registered piece that
   no installed module declares (a `fail` row when it is enabled and closed, since it then
   refuses every commit). With nothing wrong, one `ok` row gives the mode and each event's
