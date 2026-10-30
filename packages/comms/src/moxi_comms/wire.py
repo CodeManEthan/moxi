@@ -26,6 +26,7 @@ import asyncio
 import concurrent.futures
 import logging
 import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -177,6 +178,12 @@ class Host:
         #: still running after its last answer.
         self._counted: set = set()
         self._tails: dict = {}
+        #: Each closed connection's release, from when it is handed to the pool until it
+        #: ends. `close` waits for them: `moxi.ipc` stops waiting for a connection once
+        #: its own work is done, and a release still running then must not outlive the
+        #: daemon's stop.
+        self._releases: set = set()
+        self._releases_lock = threading.Lock()
 
     # -- life ---------------------------------------------------------------------------
 
@@ -201,12 +208,19 @@ class Host:
         """Stop serving: no new connections, every open one ended without waiting on a
         peer past the write deadline, each one's `closed` run, the socket removed. True
         when it finished within `timeout`."""
+        deadline = time.monotonic() + timeout
         if self._server is not None:
             self._soon(self._server.close)
         done = True
         if self._thread is not None and self._thread is not threading.current_thread():
             self._thread.join(timeout)
             done = not self._thread.is_alive()
+        with self._releases_lock:
+            releases = list(self._releases)
+        if releases:
+            _, waiting = concurrent.futures.wait(
+                releases, timeout=max(deadline - time.monotonic(), 0.0))
+            done = done and not waiting
         self._pool.shutdown(wait=False, cancel_futures=True)
         return done
 
@@ -282,12 +296,33 @@ class Host:
 
     async def _on_close(self, conn: ipc.Connection) -> None:
         self._counted.discard(conn)
-        await self._settle_tail(conn)
+        tail = self._tails.pop(conn, None)
+
+        def release() -> None:
+            # The work after the connection's last answer first, then its release.
+            if tail is not None:
+                try:
+                    tail.result()
+                except Exception:  # noqa: BLE001 - the work logs its own failure
+                    log.exception("the work after an answer failed")
+            self._closed_cb(conn)
+
+        # Handed to the pool before the first wait, so a cancelled close still releases.
         try:
-            await asyncio.wrap_future(self._pool.submit(self._closed_cb, conn))
+            future = self._pool.submit(release)
         except RuntimeError:
             # The pool is already shut down: run it here rather than lose the release.
-            self._closed_cb(conn)
+            release()
+            return
+        with self._releases_lock:
+            self._releases.add(future)
+        future.add_done_callback(self._released)
+        # Shielded: cancelling this wait must not cancel a release not yet started.
+        await asyncio.shield(asyncio.wrap_future(future))
+
+    def _released(self, future: concurrent.futures.Future) -> None:
+        with self._releases_lock:
+            self._releases.discard(future)
 
 
 __all__ = ["VERSIONS", "CAPABILITIES", "CODE_NAMES", "Host", "Then", "error",
