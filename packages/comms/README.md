@@ -74,11 +74,16 @@ command if you want one.
   needs setting up. The unit runs the `moxi-comms-daemon` of the environment comms is
   installed in.
 
-The daemon also runs fine in the foreground, which is the simplest way to watch it:
+The daemon also runs fine in the foreground, which is the simplest way to watch it.
+`moxi install comms` puts it in the `moxi` tool's environment, whose scripts uv doesn't put
+on PATH, so run it by its path there:
 
 ```sh
-moxi-comms-daemon
+"$(uv tool dir)/moxi/bin/moxi-comms-daemon"
 ```
+
+`moxi comms service install` prints the same path as the unit's `ExecStart=`, and
+`moxi modules --json` names the environment as `prefix`.
 
 The user service stops when you log out. To keep it running, enable lingering for your
 user (`loginctl enable-linger $USER`); comms doesn't do that for you, because it changes
@@ -156,7 +161,7 @@ meets.
 | `moxi comms service install\|uninstall\|status` | the daemon as a user service |
 | `moxi comms claude` | launch a named Claude Code session (also `moxi-comms-claude`) |
 | `moxi-comms-opencode` | launch an OpenCode session for a roster identity (experimental) |
-| `moxi-comms-daemon` | the daemon, in the foreground |
+| `"$(uv tool dir)/moxi/bin/moxi-comms-daemon"` | the daemon, in the foreground |
 | `moxi-comms-provision` | provision standing identities |
 
 `explain`, `doctor`, `moxi comms cache` (how cold each agent's prompt cache is, for the
@@ -255,7 +260,8 @@ How messages are routed, delivered and attributed is in
 - **A session got nothing.** `moxi comms explain <name>` says whether the name is bound, what
   was delivered, and whether the turn that read it completed.
 - **`moxi comms doctor` says the daemon isn't answering.** `moxi comms service status`, then
-  `journalctl --user -u moxi-comms-daemon`. Or run `moxi-comms-daemon` in a terminal.
+  `journalctl --user -u moxi-comms-daemon`. Or run the daemon in a terminal:
+  `"$(uv tool dir)/moxi/bin/moxi-comms-daemon"`.
 - **The daemon refuses to start because a token is missing.** The token store lost
   credentials the record expects; see [docs/security.md](docs/security.md).
 
