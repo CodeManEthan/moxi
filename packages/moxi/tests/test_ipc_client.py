@@ -512,6 +512,125 @@ def test_a_line_over_the_clients_cap_ends_the_connection(fake):
     assert bounded(lambda: list(f.client.notifications())) == [("first", None)]
 
 
+# -- closed ----------------------------------------------------------------------------------
+
+def _raise_at_once(client) -> None:
+    """Once closed, `call` and `notify` raise without waiting on anything."""
+    start = time.monotonic()
+    with pytest.raises(ipc.IpcError):
+        client.call("echo", [1])
+    with pytest.raises(ipc.IpcError):
+        client.notify("echo", [1])
+    assert time.monotonic() - start < 1
+
+
+def test_closed_is_false_after_connect_and_true_after_close(serving):
+    srv = serving(handler)
+    client = ipc.connect(srv.address)
+    assert client.closed is False
+    assert client.call("echo", [1]) == [1]
+    assert client.closed is False
+    client.close()
+    assert client.closed is True
+    _raise_at_once(client)
+
+
+def test_closed_once_the_server_closes_the_connection(serving):
+    srv = serving(handler)
+    client = ipc.connect(srv.address)
+    try:
+        client.notify("bye")
+        assert bounded(lambda: list(client.notifications())) == []
+        assert client.closed is True
+        _raise_at_once(client)
+    finally:
+        client.close()
+
+
+def test_closed_after_an_answer_line_over_the_cap(fake):
+    f = fake(max_line=100)
+    f.send(b"x" * 101)
+    assert bounded(lambda: list(f.client.notifications())) == []
+    assert f.client.closed is True
+    _raise_at_once(f.client)
+
+
+def test_closed_after_a_line_that_is_not_json_rpc(fake):
+    f = fake()
+    assert f.client.closed is False
+    f.send(b'{"ok": true}\n')
+    assert bounded(lambda: list(f.client.notifications())) == []
+    assert f.client.closed is True
+    with pytest.raises(ipc.NotRpc):
+        f.client.call("again")
+
+
+def test_closed_after_a_write_that_failed(fake):
+    f = fake()
+    # The client's side can no longer write, while its reader still waits on the server.
+    f.client._sock.shutdown(socket.SHUT_WR)
+    assert f.client.closed is False
+    with pytest.raises(ipc.IpcError, match="broke"):
+        f.client.notify("echo", [1])
+    assert f.client.closed is True
+    _raise_at_once(f.client)
+
+
+def test_closed_after_a_request_cut_off_by_its_timeout(fake):
+    f = fake()
+    with pytest.raises(ipc.Timeout):
+        bounded(lambda: f.client.call("echo", [BIG], timeout=0.3))
+    assert f.client.closed is True
+    _raise_at_once(f.client)
+
+
+def test_a_call_that_only_timed_out_leaves_closed_false(fake):
+    f = fake()
+    with pytest.raises(ipc.Timeout):
+        bounded(lambda: f.client.call("echo", [1], timeout=0.2))
+    assert f.client.closed is False
+    request = f.request()
+    f.answer(request["id"], [1])  # late: dropped, and the connection still carries calls
+    thread = threading.Thread(target=lambda: f.answer(f.request()["id"], "ok"))
+    thread.start()
+    assert bounded(lambda: f.client.call("echo", [2], timeout=10)) == "ok"
+    thread.join(10)
+    assert f.client.closed is False
+
+
+def test_closed_read_from_another_thread_never_raises_or_goes_back(serving):
+    srv = serving(handler)
+    client = ipc.connect(srv.address)
+    seen: list[bool] = []
+    errors: list[BaseException] = []
+    stop = threading.Event()
+
+    def watch():
+        try:
+            while not stop.is_set():
+                seen.append(client.closed)
+        except BaseException as exc:  # noqa: BLE001 - handed back to the test
+            errors.append(exc)
+
+    thread = threading.Thread(target=watch, daemon=True)
+    thread.start()
+    time.sleep(0.05)
+    client.close()
+    time.sleep(0.05)
+    stop.set()
+    thread.join(10)
+    assert errors == []
+    assert seen and seen[0] is False and seen[-1] is True
+    first = seen.index(True)
+    assert all(seen[first:])
+
+
+def test_closed_is_read_only(fake):
+    f = fake()
+    with pytest.raises(AttributeError):
+        f.client.closed = True
+
+
 # -- threads ---------------------------------------------------------------------------------
 
 def test_one_client_shared_by_many_threads(serving):

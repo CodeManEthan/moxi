@@ -156,6 +156,11 @@ _STORE_KEYS = frozenset({"root", "path", "kind", "private", "retention", "rebuil
                          "lazy"})
 _STORE_ROOTS = ("data", "state", "cache", "runtime")
 _STORE_KINDS = ("sqlite", "jsonl", "file", "dir")
+#: The core's own stores in a module's state directory: the gate's run record (with its
+#: rolled generation) and logs (`moxi.run`), and the doctor's records (`moxi.doctor`). No
+#: module declares one of them, or a path under `logs/`, in its `STORES`.
+CORE_STATE_FILES = ("runs.jsonl", "runs.jsonl.1", "doctor.json")
+CORE_STATE_DIRS = ("logs",)
 _BUDGET_KEYS = ("idle_cpu", "rss", "fds", "hook_ms")
 
 
@@ -1083,6 +1088,10 @@ def _stores(value, name):
         if not _relative(get("path")):
             raise _Bad(f"has {where} path = {get('path')!r}; it must be a relative path "
                        "with no '..'")
+        if get("root") == "state" and _core_store(get("path")):
+            raise _Bad(f"has {where} path = {get('path')!r} in the state root; that path "
+                       "is the core's (the gate's runs.jsonl and logs/, the doctor's "
+                       "doctor.json), and no module declares it")
         if get("kind") not in _STORE_KINDS:
             raise _Bad(f"has {where} kind = {get('kind')!r}; it must be one of "
                        f"{', '.join(_STORE_KINDS)}")
@@ -1144,6 +1153,20 @@ def _size(value) -> bool:
 
 def _str_list(value) -> bool:
     return isinstance(value, (list, tuple)) and all(isinstance(v, str) for v in value)
+
+
+def _core_store(path: str) -> bool:
+    """Whether a relative store path names one of the core's stores in a state directory.
+
+    Read with either separator and without `.` segments, and compared case-folded, since
+    on macOS and Windows two spellings that differ only in case name one file.
+    """
+    parts = [p.casefold() for p in re.split(r"[\\/]", path) if p not in ("", ".")]
+    if not parts:
+        return False
+    if parts[0] in CORE_STATE_DIRS:
+        return True
+    return len(parts) == 1 and parts[0] in CORE_STATE_FILES
 
 
 def _relative(value) -> bool:
