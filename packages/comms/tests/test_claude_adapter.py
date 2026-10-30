@@ -26,6 +26,7 @@ What is held here:
 from __future__ import annotations
 
 import os
+import sys
 import time
 
 import pytest
@@ -36,6 +37,10 @@ from turns_endpoint import (CLAUDE, FakeEndpoint, drop, gone, hold, late, lose, 
 import moxi_turns
 from moxi_comms import api, owed, paths
 from moxi_comms.adapters.claude_adapter import ClaudeAdapter
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="the test endpoint serves on moxi.ipc, whose named "
+                                       "pipe server comes later")
 
 PLANNER = dict(name="planner", scope="proj-a")
 REVIEWER = "reviewer@proj-a"
