@@ -563,7 +563,9 @@ class Installer:
 
         # step 5 ----------------------------------------------------------------------
         if chosen:
-            reqs = [Req(target["distribution"], chosen)]
+            # Sorted, as a requirement read from metadata is, so the line is the same
+            # whatever order the module declares its extras in.
+            reqs = [Req(target["distribution"], sorted(chosen))]
             if not self._install(reqs, after):
                 self._report(after)
                 return 1
