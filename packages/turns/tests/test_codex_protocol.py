@@ -61,3 +61,17 @@ def test_thread_loads_carry_the_callers_options_without_rewriting_them():
         **options, "threadId": "thread-1", "excludeTurns": True,
         "approvalPolicy": "never", "developerInstructions": "rules",
     }
+
+
+def test_the_terminal_list_reads_process_ids_and_refuses_any_other_shape():
+    assert proto.terminal_ids({"data": [{"processId": "7"}, {"processId": 8}]}) == ["7", "8"]
+    assert proto.terminal_ids({"data": []}) == []
+    for bad in ({}, {"data": None}, {"data": [{}]}, {"data": [{"processId": True}]}, []):
+        with pytest.raises(ValueError):
+            proto.terminal_ids(bad)
+
+
+def test_only_method_not_found_reads_as_a_missing_method():
+    assert proto.method_missing(proto.classify_error({"code": -32601, "message": "x"}))
+    assert not proto.method_missing(proto.classify_error({"code": -32603, "message": "x"}))
+    assert not proto.method_missing(proto.NoReply("timed out"))

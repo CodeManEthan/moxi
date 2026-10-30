@@ -366,7 +366,7 @@ def test_start_warning_runs_but_resume_warning_fails_and_stops_its_process(turns
         assert endpoint.session()["trouble"] == "start differs"
         row = next(row for row in doctor._endpoint_rows()
                    if row.name.startswith("endpoint codex"))
-        assert not row.ok and "start differs" in row.detail
+        assert row.state == "warn" and "start differs" in row.detail
         made[-1].close()
         with pytest.raises(RuntimeError, match="resume differs"):
             harness._connect()

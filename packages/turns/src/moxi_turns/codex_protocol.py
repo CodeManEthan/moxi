@@ -12,6 +12,8 @@ import re
 
 JSONRPC = "2.0"
 INVALID_REQUEST = -32600
+#: JSON-RPC's code for a method the server does not have (an older Codex).
+METHOD_NOT_FOUND = -32601
 NO_ACTIVE_TURN_MESSAGE = "no active turn to steer"
 _MISMATCH_RE = re.compile(r"expected active turn id `([^`]*)` but found `([^`]*)`")
 ZERO_TURN_ID = "00000000-0000-0000-0000-000000000000"
@@ -119,6 +121,39 @@ def start_params(thread_id: str, text: str) -> dict:
     return {"threadId": str(thread_id), "input": text_input(text)}
 
 
+def method_missing(exc: BaseException) -> bool:
+    """Whether `exc` is the app-server's answer that it has no such method."""
+    return isinstance(exc, CodexError) and exc.code == METHOD_NOT_FOUND
+
+
+def compact_params(thread_id: str) -> dict:
+    return {"threadId": str(thread_id)}
+
+
+def terminals_params(thread_id: str) -> dict:
+    return {"threadId": str(thread_id)}
+
+
+def terminate_params(thread_id: str, process_id: str) -> dict:
+    return {"threadId": str(thread_id), "processId": process_id}
+
+
+def terminal_ids(result) -> list[str]:
+    """The process ids of a `thread/backgroundTerminals/list` answer, in its order. An
+    answer of any other shape raises `ValueError`: a list turns cannot read is not an
+    empty one."""
+    data = result.get("data") if isinstance(result, dict) else None
+    if not isinstance(data, list):
+        raise ValueError("the background terminal list has no data list")
+    ids = []
+    for entry in data:
+        process_id = entry.get("processId") if isinstance(entry, dict) else None
+        if not isinstance(process_id, (str, int)) or isinstance(process_id, bool):
+            raise ValueError("a background terminal has no process id")
+        ids.append(str(process_id))
+    return ids
+
+
 def thread_is_active(thread: dict | None) -> bool:
     return bool(thread and (thread.get("status") or {}).get("type") == "active")
 
@@ -131,10 +166,13 @@ def active_turn_id(turns_result: dict | None) -> str | None:
 
 
 __all__ = [
-    "JSONRPC", "INVALID_REQUEST", "NO_ACTIVE_TURN_MESSAGE", "ZERO_TURN_ID",
+    "JSONRPC", "INVALID_REQUEST", "METHOD_NOT_FOUND", "NO_ACTIVE_TURN_MESSAGE",
+    "ZERO_TURN_ID",
     "STATUS_COMPLETED", "STATUS_IN_PROGRESS", "TERMINAL_STATUSES", "AppServerOffline",
     "NoReply", "CodexError", "NoActiveTurn", "ActiveTurnMismatch", "classify_error",
     "request", "notification",
     "text_input", "initialize_params", "resume_params", "start_thread_params",
-    "steer_params", "start_params", "thread_is_active", "active_turn_id",
+    "steer_params", "start_params", "method_missing", "compact_params",
+    "terminals_params", "terminate_params", "terminal_ids", "thread_is_active",
+    "active_turn_id",
 ]

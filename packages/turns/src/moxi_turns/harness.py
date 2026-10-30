@@ -42,6 +42,9 @@ through the endpoint's adapter-side calls:
     endpoint.turn_started(turn_id, delivery_id=None)
                                           a main-loop turn started; the adapter's tie
                                           names the delivery that took it
+    endpoint.turn_started(turn_id, command="compact")
+                                          a main-loop turn the harness ran for a turns
+                                          compaction (Codex runs one as a turn)
     endpoint.turn_started(turn_id, held=True)
                                           a main-loop turn started whose delivery, if
                                           any, is decided later (Claude Code's tie):
@@ -66,10 +69,12 @@ through the endpoint's adapter-side calls:
                                           a command is about to take effect: the re-check
     endpoint.command_settled(request_id, result)
                                           a command ran (`Ran`), failed or was refused
-    endpoint.command_took_effect(request_id)
+    endpoint.command_took_effect(request_id) -> bool
                                           the command took effect: with `stop_shells`
                                           the stop begins, bounded by `SHELL_STOP_S`
-                                          (a compaction's Ready marks it by itself)
+                                          (a compaction's Ready marks it by itself);
+                                          False when the command has already settled,
+                                          and then nothing is stopped
     endpoint.command_ran(request_id, new_session_id=None, shells=None)
                                           the command ran, with the stop's report when
                                           `stop_shells` was set; a compaction settles at
@@ -142,6 +147,14 @@ class Live:
     #: Of `agents`, the background shells (Codex's terminals), which a command with
     #: `stop_shells` leaves out of its agent check. Claude's list holds none.
     shells: int = 0
+
+    def busy(self, *, shells: bool = True) -> bool:
+        """Whether a live subagent keeps the session busy; an unreadable list does. With
+        `shells` False the background shells counted among `agents` are left out, as a
+        command with `stop_shells` reads it."""
+        if self.agents is None:
+            return True
+        return self.agents - (0 if shells else max(0, self.shells)) > 0
 
 
 @dataclass(frozen=True)
