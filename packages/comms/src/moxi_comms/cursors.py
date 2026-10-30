@@ -62,8 +62,8 @@ BEHIND = "cursor-behind-it"
 TARGET_NOT_A_MESSAGE_ID = "advance-target-is-not-a-message-id"
 #: The file could not be written. Read-only STATE, a full disk.
 WRITE_FAILED = "cursor-write-failed"
-#: `gateway.backend_name` raised, so the cursor is filed in the bare directory.
-BACKEND_UNRESOLVED = "gateway-backend-unresolved"
+#: `record.backend_name` raised, so the cursor is filed in the bare directory.
+BACKEND_UNRESOLVED = "record-backend-unresolved"
 #: Not the cursor's own: the message waits in the name's queue. `moxi comms explain` checks
 #: it BEFORE the cursor, so a queued id never reads `cursor-behind-it`, whose sentence
 #: would be false for it.
@@ -100,7 +100,7 @@ REASONS = {
         "This message waits in the queue for the name's next release point: its next "
         "session start, /clear, compaction, or a turn of its own on a warm cache."),
     BACKEND_UNRESOLVED: (
-        "The gateway backend would not resolve, so this cursor is read and written in "
+        "The record backend would not resolve, so this cursor is read and written in "
         "the bare directory instead of under a backend. A position filed there belongs "
         "to no particular record."),
 }
@@ -113,12 +113,12 @@ WRITE_SIDE_REASONS = (TARGET_NOT_A_MESSAGE_ID, WRITE_FAILED)
 
 def _resolve_backend() -> tuple[str | None, str | None]:
     """(backend, the named reason it could not be resolved) -- see `_backend`."""
-    from . import gateway
+    from . import record
 
     try:
-        return gateway.backend_name(None, env=os.environ), None
-    except Exception as e:  # ConfigError, GatewayError, and whatever config growth adds
-        log.warning("[%s] could not resolve the gateway backend for a cursor path (%s); "
+        return record.backend_name(None, env=os.environ), None
+    except Exception as e:  # ConfigError, RecordError, and whatever config growth adds
+        log.warning("[%s] could not resolve the record backend for a cursor path (%s); "
                     "using the bare cursors directory", BACKEND_UNRESOLVED, e)
         return None, BACKEND_UNRESOLVED
 
@@ -127,13 +127,13 @@ def _backend() -> str | None:
     """Which record these cursors count in, or None when that cannot be resolved.
 
     The same resolution every adapter process and the daemon already share
-    (`gateway.backend_name`: flag > MOXI_COMMS_GATEWAY > config.toml > `local`), read
+    (`record.backend_name`: flag > MOXI_COMMS_BACKEND > config.toml > `local`), read
     fresh on each call: a flip is a config line plus a daemon restart, so nothing here
     needs to cache across one.
 
     None is the degraded answer, and it lands where everything else in this module lands.
     `advance` runs inside the adapter's Stop hook, so an unreadable `config.toml` or a
-    MOXI_COMMS_GATEWAY naming a backend that does not exist must not raise out of it. The
+    MOXI_COMMS_BACKEND naming a backend that does not exist must not raise out of it. The
     caller then files the cursor in the bare directory, and a later resolution that
     succeeds starts fresh -- toward replay, never toward loss.
 
@@ -150,7 +150,7 @@ def _dir(backend: str | None) -> Path:
     in-memory record per store file with no flip to make, so there is nothing for a
     segment to separate.
     """
-    from .gateway import MOCK
+    from .record import MOCK
 
     base = cursors_dir()
     return base if backend is None or backend == MOCK else base / backend

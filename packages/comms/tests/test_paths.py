@@ -19,8 +19,8 @@ def test_comms_locations(monkeypatch, tmp_path):
         monkeypatch.delenv(var, raising=False)
     p = paths
     assert p.directory_db() == tmp_path / "data" / "comms" / "directory.db"  # DATA: not device-keyed
-    # the custody journal is DATA too, and beside it: a binding is a live-session fact,
-    # but what the journal is FOR is interpreting the record, which is device-agnostic
+    # the binding history is DATA too, and beside it: a binding is a live-session fact,
+    # but what the binding history is FOR is interpreting the record, which is device-agnostic
     assert p.bindings_db() == tmp_path / "data" / "comms" / "bindings.db"
     # Cards are DATA and device-agnostic -- who someone IS does not depend on which box
     # is asking.

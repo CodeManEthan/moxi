@@ -3,7 +3,7 @@
 Every key is declared in `settings.toml` beside this file, with its type, default, one
 line of doc and, for a few, the one variable that overrides it for one process:
 
-    backend = "local"                       # or "mock"         MOXI_COMMS_GATEWAY
+    backend = "local"                       # or "mock"         MOXI_COMMS_BACKEND
     block = false                           # read at each use
 
     [local]
@@ -100,7 +100,7 @@ def _default(key: str):
     return schema().keys[key].default
 
 
-#: The local record's retention, owned by the schema: the gateway's default reads it.
+#: The local record's retention, owned by the schema: the record's default reads it.
 LOCAL_RETAIN_DAYS = _default("local.retain_days")
 
 
@@ -186,9 +186,6 @@ class CommsConfig:
     sources: dict = field(default_factory=dict)
 
 
-#: The name a pre-Moxi caller used for the whole.
-GatewayConfig = CommsConfig
-
 
 def config_path(env=None) -> Path:
     """CONFIG/comms/config.toml, under the roots `env` (else the process) names."""
@@ -261,7 +258,7 @@ def _read(path: Path, environ) -> CommsConfig:
 def check_text(text: str) -> None:
     """comms' whole read over config text `text` alone: the token refusal, the schema's
     checks and comms' own, as `load` makes them, then the codex and opencode roster
-    parsers' checks of their rows, as a launcher makes them, but with no path, no
+    parsers' checks of their rows, as a wrapper makes them, but with no path, no
     environment and no cache: nothing is read but the text (a path's `~` still expands to
     the user's home, as `moxi.config.check_text` expands it), and nothing is logged.
     Raises `ConfigError`, naming no file."""
@@ -346,7 +343,7 @@ def load_file(path, env=None) -> CommsConfig:
     """A comms config file named on a command line (`moxi-comms-codex --config PATH`),
     read whole in place of the box's: the same schema, the same token refusal, the same
     checks, and every error names `path`. Nothing else in the process reads it; the
-    caller takes the table it named the file for (a launcher, its roster)."""
+    caller takes the table it named the file for (a wrapper, its roster)."""
     path = Path(os.path.expanduser(str(path)))
     if not path.is_absolute():
         path = Path.cwd() / path
@@ -488,7 +485,7 @@ def refuse_secrets(path: Path | None, raw: dict) -> None:
 
 
 __all__ = ["Config", "ConfigError", "LocalConfig", "ThreadsConfig", "SecretsConfig", "PolicyConfig",
-           "ProvisionConfig", "ReplayConfig", "CommsConfig", "GatewayConfig",
+           "ProvisionConfig", "ReplayConfig", "CommsConfig",
            "BUILTIN_ROLES", "check_text", "config_path", "load", "load_file",
            "refuse_secrets", "schema",
            "LOCAL_RETAIN_DAYS"]

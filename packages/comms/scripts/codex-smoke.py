@@ -2,14 +2,14 @@
 """Smoke the Codex delivery path through turns' real host.
 
 ``--dry-run`` uses the repository's fake ``codex`` executable. It starts a real comms
-daemon and launcher, lets turns spawn and verify the fake app-server, sends two deliveries
+daemon and wrapper, lets turns spawn and verify the fake app-server, sends two deliveries
 through turns' public API, checks steer-first delivery, completes the turn through the
 fake's control socket, and checks settlement. Then it sends mail with ``moxi comms send``
-from a sender's session, which goes through the daemon and the launcher into the thread,
+from a sender's session, which goes through the daemon and the wrapper into the thread,
 checks that the turn's end advances the cursor, and checks child cleanup.
 
 ``--live`` puts the requested real Codex binary on a private PATH, then runs the same
-daemon and launcher and hands one delivery to the hosted session through turns' public
+daemon and wrapper and hands one delivery to the hosted session through turns' public
 API. It spends a model turn and waits for that turn to end ``answer``.
 
     uv run python scripts/codex-smoke.py --dry-run
@@ -75,13 +75,13 @@ def clean_environ() -> dict:
 def build_env(home: Path, runtime: Path, store: Path, binary_dir: Path) -> dict:
     env = clean_environ()
     env.update({
-        "MOXI_COMMS_GATEWAY": "mock",
+        "MOXI_COMMS_BACKEND": "mock",
         "MOXI_COMMS_HOME": str(home),
         "MOXI_COMMS_DEVICE": "codexsmoke",
         "MOXI_COMMS_RUNTIME_DIR": str(runtime),
         "MOXI_TURNS_RUNTIME_DIR": str(runtime),
         "MOXI_COMMS_PROJECT": SCOPE,
-        "MOXI_COMMS_MOCK_GATEWAY": str(store),
+        "MOXI_COMMS_MOCK_BACKEND": str(store),
         "PYTHONPATH": str(REPO / "src"),
         "PATH": f"{binary_dir}{os.pathsep}{BIN}{os.pathsep}{env.get('PATH', '')}",
     })
@@ -101,11 +101,11 @@ def provision_home(env, store: Path) -> None:
         del os.environ[key]
     os.environ.update({key: value for key, value in env.items()
                        if key.startswith(("MOXI_COMMS_", "MOXI_TURNS_"))})
-    from moxi_comms.mock_gateway import MockGateway
+    from moxi_comms.mock_record import MockRecord
     from moxi_comms.paths import directory_db
     from moxi_comms.provision import provision
 
-    provision(MockGateway(store), directory_db(), slots=3,
+    provision(MockRecord(store), directory_db(), slots=3,
               operator=("900001", "operator"))
 
 
@@ -126,7 +126,7 @@ def write_roster(path: Path, work: Path) -> Path:
 
 def start_daemon(env, runtime: Path, store: Path):
     proc = subprocess.Popen(
-        [str(BIN / "moxi-comms-daemon"), "--gateway-store", str(store)],
+        [str(BIN / "moxi-comms-daemon"), "--backend-store", str(store)],
         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     socket = runtime / "comms" / "moxi-comms-daemon.sock"
@@ -231,7 +231,7 @@ def prepare(binary: str | None = None):
     home = root / "home"
     runtime = root / "run"
     (runtime / "comms").mkdir(parents=True)
-    store = root / "mock" / "gateway.json"
+    store = root / "mock" / "record.json"
     store.parent.mkdir()
     work = root / "work"
     work.mkdir()
@@ -274,9 +274,9 @@ def dry_run() -> int:
               "the dry plan names the pinned slot and turns' approval policy")
 
         daemon = start_daemon(env, runtime, store)
-        adapter = launch(env, roster, root / "launcher.log")
+        adapter = launch(env, roster, root / "wrapper.log")
         check(bool(wait_until(lambda: IDENTITY in comms(env, ["agents"]).stdout, 20)),
-              "the launcher registered on the daemon socket")
+              "the wrapper registered on the daemon socket")
         starts = wait_until(lambda: fake_codex.calls(records, "thread/start"), 20) or []
         check(bool(starts), "turns spawned the fake app-server and started a thread")
         params = starts[0]["params"] if starts else {}
@@ -309,9 +309,9 @@ def dry_run() -> int:
         check(first_ended.outcome == second_ended.outcome == "answer",
               "one Stop settled both deliveries as answered")
         check(bool(thread_id_of(IDENTITY)),
-              "the launcher recorded the hosted thread id")
+              "the wrapper recorded the hosted thread id")
 
-        # comms' own path: moxi comms send -> daemon -> launcher -> turns -> app-server.
+        # comms' own path: moxi comms send -> daemon -> wrapper -> turns -> app-server.
         write_rollout(root / "codex-home" / "sessions", thread_id_of(IDENTITY))
         sender = sender_session()
         mail = send(env, sender, "codex smoke through the daemon")
@@ -327,7 +327,7 @@ def dry_run() -> int:
         adapter = None
         check(wait_until(lambda: any(row["event"] == "app-server-exit"
                                      for row in fake_codex.events(records)), 10),
-              f"launcher exit reaped the app-server process {app_pid}")
+              f"wrapper exit reaped the app-server process {app_pid}")
         return report()
     finally:
         if sender is not None:
@@ -367,9 +367,9 @@ def live_run(binary: str) -> int:
     daemon = adapter = None
     try:
         daemon = start_daemon(env, runtime, store)
-        adapter = launch(env, roster, root / "launcher.log")
+        adapter = launch(env, roster, root / "wrapper.log")
         check(bool(wait_until(lambda: IDENTITY in comms(env, ["agents"]).stdout, 60)),
-              "the live launcher registered after turns loaded the real app-server")
+              "the live wrapper registered after turns loaded the real app-server")
         import moxi_turns as turns
 
         session = wait_until(lambda: next((item for item in turns.sessions()

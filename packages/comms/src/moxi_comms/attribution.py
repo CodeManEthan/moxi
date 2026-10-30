@@ -62,7 +62,7 @@ def from_display(display: str) -> Author:
     return Author(name, scope, qualify(name, scope), tier, LABELED)
 
 
-def from_record(db, msg, *, record=None, journal_path=None) -> Author:
+def from_record(db, msg, *, record=None, history_path=None) -> Author:
     """Everything the record + directory can prove about who authored `msg`."""
     if msg.author_kind == "identity":
         name, scope = split_tag(msg.author_id)
@@ -85,6 +85,6 @@ def from_record(db, msg, *, record=None, journal_path=None) -> Author:
         marker = (record.meta_get(migration.META_AUTHOR_STAMPS)
                   if record is not None else migration.META_AUTHOR_STAMPS)
         if marker is None:
-            return migration.legacy_author(db, msg, journal_path=journal_path)
+            return migration.legacy_author(db, msg, history_path=history_path)
         return from_display(msg.author_display)
     return unknown()

@@ -181,7 +181,7 @@ class FakeSession:
         self._events.put(Gone(reason))
 
 
-def launcher(session: FakeSession):
+def fake_launch(session: FakeSession):
     """A `launch` stand-in that records its call and hands back `session`."""
     calls: list = []
 

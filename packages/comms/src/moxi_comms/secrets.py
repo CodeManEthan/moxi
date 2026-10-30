@@ -39,7 +39,7 @@ import logging
 import os
 import re
 
-from .gateway import GatewayError
+from .record import RecordError
 
 log = logging.getLogger("comms.secrets")
 
@@ -63,8 +63,8 @@ def default_chain() -> tuple:
     return DEFAULT_CHAIN
 
 
-class SecretError(GatewayError):
-    """A chain refusal. A `GatewayError`, so the send verb's exit 5 is unchanged."""
+class SecretError(RecordError):
+    """A chain refusal. A `RecordError`, so the send verb's exit 5 is unchanged."""
 
 
 class SecretNotFound(SecretError):

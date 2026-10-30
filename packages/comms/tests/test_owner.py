@@ -1,6 +1,6 @@
 """The `owner` read: which live binding owns one session id now, and whom it awaits.
 
-One read a launcher can call, given a session id: the binding that owns it now (its
+One read a wrapper can call, given a session id: the binding that owns it now (its
 identity as comms renders it), and that identity's `awaiting` list. No acting verb is
 added. The daemon answers it as `query kind="owner"`; a caller asks it as
 `moxi comms owner <session-id> --json`.
@@ -149,7 +149,7 @@ def test_the_read_changes_nothing(rig):
 def test_a_send_only_binding_owns_a_session_only_if_its_register_named_one(rig):
     """No shipped send-only holder reports a session id (`ClaimServer._register`), so it
     owns none; a register that does carry one is answered as any owner, by its kind."""
-    code = provision.send_only_main(["relay@proj-a"], gateway=rig.gateway,
+    code = provision.send_only_main(["relay@proj-a"], record=rig.record,
                                     store=rig.store, out=lambda _l: None)
     assert code == 0
     c = DaemonClient(daemon_socket()).connect()

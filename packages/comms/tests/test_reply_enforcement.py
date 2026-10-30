@@ -47,7 +47,7 @@ OPERATOR_SID = "eeeeeeee-5555-4555-8555-555555555555"
 # --------------------------------------------------------------------------- helpers
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def last(rig):
@@ -104,7 +104,7 @@ def reboot():
 
     def _reboot(rig):
         rig.daemon.stop()
-        rig.daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+        rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
         started.append(rig.daemon)
         return rig.daemon
 
@@ -167,7 +167,7 @@ def test_bodies_keeps_its_bare_namespace_form():
     from types import SimpleNamespace
 
     class Ctx:
-        class gateway:
+        class record:
             max_content_length = 2000
 
     args = SimpleNamespace(text="hi")
@@ -241,8 +241,8 @@ def test_the_floor_is_the_boot_windows_start_and_older_mail_is_not_read(rig, reb
     assert query_owed(R)["floor"] == daemon.sent_floor
 
 
-def test_a_gateway_without_since_floors_at_boot(rig, monkeypatch, reboot):
-    monkeypatch.delattr(type(rig.gateway), "since")
+def test_a_record_without_since_floors_at_boot(rig, monkeypatch, reboot):
+    monkeypatch.delattr(type(rig.record), "since")
     daemon = reboot(rig)
     assert daemon.sent_floor == pytest.approx(rig.clock(), abs=1)
 
@@ -251,7 +251,7 @@ def test_a_failed_boot_read_floors_at_boot_and_the_daemon_still_starts(rig, monk
                                                                         reboot):
     def broken(*a, **k):
         raise RuntimeError("record unreadable")
-    monkeypatch.setattr(type(rig.gateway), "since", broken)
+    monkeypatch.setattr(type(rig.record), "since", broken)
     daemon = reboot(rig)
     assert daemon.sent_floor == pytest.approx(rig.clock(), abs=1)
 
@@ -574,7 +574,7 @@ def test_the_authors_delta_shows_each_record_naming_it_once(rig, tmp_path):
 
 def test_comms_writes_no_claude_hook_settings():
     """A Claude session's Stop reaches comms through turns' holder (`claude_adapter`),
-    so the launcher writes no hook settings at all."""
+    so the wrapper writes no hook settings at all."""
     from moxi_comms.adapters import session
     assert not hasattr(session, "hook_settings")
 

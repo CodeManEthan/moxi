@@ -10,7 +10,7 @@ from moxi_comms.adapters.codex import CodexAdapter, layer_one_hash, layer_one_te
 from moxi_comms.adapters.codex_roster import CodexAgent
 from moxi_comms.context import CONTEXT_BLOCK
 
-from fake_turns import FakeSession, launcher
+from fake_turns import FakeSession, fake_launch
 
 
 IDENTITY = "pilot@proj-a"
@@ -37,7 +37,7 @@ def test_a_new_thread_is_born_with_layer_one_as_developer_instructions(
         rig, tmp_path, monkeypatch):
     clock_reads_warm(monkeypatch, "codex")
     fake = FakeSession()
-    launch = launcher(fake)
+    launch = fake_launch(fake)
     adapter = CodexAdapter(row(tmp_path), launch=launch, comms_path=COMMS,
                            autoreconnect=False, clock=rig.clock)
     try:
@@ -55,7 +55,7 @@ def test_a_new_thread_is_born_with_layer_one_as_developer_instructions(
 def test_layer_one_can_be_omitted_without_writing_its_hash(rig, tmp_path, monkeypatch):
     clock_reads_warm(monkeypatch, "codex")
     fake = FakeSession()
-    launch = launcher(fake)
+    launch = fake_launch(fake)
     adapter = CodexAdapter(row(tmp_path), launch=launch, layer_one=False,
                            autoreconnect=False, clock=rig.clock)
     try:

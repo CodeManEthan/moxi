@@ -3,7 +3,7 @@ message, the start text, `--new-name`, `--check`'s NOTEs and `moxi comms reply -
 and the `held` help entry.
 
 The never-bound check reads `ever_bound` (and `seen_as`) off the daemon's resolve
-answer. The daemon's half (`Journal.ever_bound`, the resolve answer's field) is tested
+answer. The daemon's half (`BindingHistory.ever_bound`, the resolve answer's field) is tested
 with the names; here the daemon is made to give the answer chosen for each test.
 """
 
@@ -36,7 +36,7 @@ P, R, C = "planner", "reviewer", "critic"
 
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def last(rig):
@@ -429,11 +429,11 @@ def test_the_reply_standing_help_names_its_recipients():
 
 # ===================================================================== --new-name
 
-def journal(rig, monkeypatch, *, seen=(), seen_as=None, present=True):
+def binding_history(rig, monkeypatch, *, seen=(), seen_as=None, present=True):
     """The daemon's resolve answer carries `ever_bound`: True for a
-    bound identity, else whether `seen` holds it. `present=False` is a journal that
+    bound identity, else whether `seen` holds it. `present=False` is a binding history that
     could not be read (no field). `seen_as` adds that field to every never-bound
-    answer. It replaces the daemon's own journal answer."""
+    answer. It replaces the daemon's own binding history answer."""
     real = rig.daemon._resolve_query
 
     def resolve(frame):
@@ -456,7 +456,7 @@ NEVER = ("newbie: comms has never seen newbie bound, so no agent of that name ha
 
 
 def test_a_send_to_a_never_bound_name_is_refused(rig, pair, monkeypatch):
-    journal(rig, monkeypatch)
+    binding_history(rig, monkeypatch)
     before = len(posted(rig))
     code, out = rig.cli(["send", "newbie", "brief", "--posture", "none"], **PLANNER)
     assert (code, out.strip()) == (2, NEVER)
@@ -464,7 +464,7 @@ def test_a_send_to_a_never_bound_name_is_refused(rig, pair, monkeypatch):
 
 
 def test_one_never_bound_name_refuses_the_whole_post(rig, pair, monkeypatch):
-    journal(rig, monkeypatch)
+    binding_history(rig, monkeypatch)
     before = len(posted(rig))
     code, out = rig.cli(["send", "reviewer,newbie", "brief", "--posture", "none"], **PLANNER)
     assert (code, out.strip()) == (2, NEVER)
@@ -472,14 +472,14 @@ def test_one_never_bound_name_refuses_the_whole_post(rig, pair, monkeypatch):
 
 
 def test_send_reply_to_is_checked_too(rig, pair, monkeypatch):
-    journal(rig, monkeypatch)
+    binding_history(rig, monkeypatch)
     ref, _ = posts(rig, REVIEWER, ["send", "planner", "q?", "--posture", "open"])
     code, out = rig.cli(["send", "planner,newbie", "a", "--reply-to", ref.id], **PLANNER)
     assert code == 2 and "comms has never seen newbie bound" in out
 
 
 def test_new_name_defers_the_message(rig, pair, monkeypatch):
-    journal(rig, monkeypatch)
+    binding_history(rig, monkeypatch)
     code, out = rig.cli(["send", "newbie", "brief", "--posture", "none", "--new-name"], **PLANNER)
     assert code == 0, out
     assert out.splitlines()[-1] == cli.NOT_BOUND_NOTE.format(name="newbie")
@@ -487,7 +487,7 @@ def test_new_name_defers_the_message(rig, pair, monkeypatch):
 
 
 def test_a_name_bound_before_defers_with_no_refusal(rig, pair, monkeypatch):
-    journal(rig, monkeypatch, seen={"oldie"})
+    binding_history(rig, monkeypatch, seen={"oldie"})
     code, out = rig.cli(["send", "oldie", "x", "--posture", "none"], **PLANNER)
     assert code == 0, out
     assert out.splitlines()[-1] == cli.NOT_BOUND_NOTE.format(name="oldie")
@@ -496,7 +496,7 @@ def test_a_name_bound_before_defers_with_no_refusal(rig, pair, monkeypatch):
 @pytest.mark.parametrize("target", ["reviewer", "oldie"])
 def test_new_name_on_a_name_bound_now_or_before_changes_nothing(rig, pair, monkeypatch,
                                                                  target):
-    journal(rig, monkeypatch, seen={"oldie"})
+    binding_history(rig, monkeypatch, seen={"oldie"})
     code, plain = rig.cli(["send", "--check", target, "x", "--posture", "none"], **PLANNER)
     code2, flagged = rig.cli(["send", "--check", target, "x", "--posture", "none",
                               "--new-name"], **PLANNER)
@@ -506,10 +506,10 @@ def test_new_name_on_a_name_bound_now_or_before_changes_nothing(rig, pair, monke
 def test_a_standing_identity_never_bound_passes(rig, pair, monkeypatch):
     conn = directory.connect(directory_db())
     try:
-        add_standing(rig.gateway, conn, "curator")
+        add_standing(rig.record, conn, "curator")
     finally:
         conn.close()
-    journal(rig, monkeypatch)
+    binding_history(rig, monkeypatch)
     code, out = rig.cli(["send", "curator", "x", "--posture", "none"], **PLANNER)
     assert code == 0, out
 
@@ -517,7 +517,7 @@ def test_a_standing_identity_never_bound_passes(rig, pair, monkeypatch):
 def test_the_operator_is_known_on_a_box_provisioned_by_default(rig):
     """`moxi comms send operator` works on a box where the operator never bound. A box
     provisioned by default writes no `operator` agents row and nothing has bound
-    `operator`, so the real journal has never seen it: the send still goes."""
+    `operator`, so the real binding history has never seen it: the send still goes."""
     rig.shim(**PLANNER)
     assert "operator" not in rig.daemon.bindings
     code, out = rig.cli(["send", "operator", "x", "--posture", "none"], **PLANNER)
@@ -528,9 +528,9 @@ def test_the_operator_is_known_on_a_box_provisioned_by_default(rig):
     assert cli.HELD_IGNORED_OPERATOR in out
 
 
-def test_an_unreadable_journal_lets_the_send_defer_with_no_added_text(rig, pair,
+def test_an_unreadable_binding_history_lets_the_send_defer_with_no_added_text(rig, pair,
                                                                     monkeypatch):
-    journal(rig, monkeypatch, present=False)
+    binding_history(rig, monkeypatch, present=False)
     code, out = rig.cli(["send", "newbie", "x", "--posture", "none"], **PLANNER)
     assert code == 0, out
     assert out.splitlines()[1:] == [cli.NOT_BOUND_NOTE.format(name="newbie")]
@@ -538,19 +538,19 @@ def test_an_unreadable_journal_lets_the_send_defer_with_no_added_text(rig, pair,
 
 def test_comms_reply_is_not_checked(rig, pair, monkeypatch):
     """A reply's names come from the record: your own message to a name since gone from
-    the journal's knowledge is answered without `--new-name`."""
+    the binding history's knowledge is answered without `--new-name`."""
     mine, _ = posts(rig, PLANNER, ["send", "newbie", "brief", "--posture", "once",
                                    "--new-name"])
-    journal(rig, monkeypatch)
+    binding_history(rig, monkeypatch)
     code, out = rig.cli(["reply", mine.id, "and"], **PLANNER)
     assert code == 0, out
     assert line_of(last(rig)) == f"::to newbie re:{mine.id} [no reply]"
 
 
 def test_the_refusal_names_the_identities_of_that_name_that_exist(rig, pair, monkeypatch):
-    """A never-bound identity whose name the journal knows in other
+    """A never-bound identity whose name the binding history knows in other
     scopes says which, so `--new-name` is not the only cure on offer."""
-    journal(rig, monkeypatch, seen_as=["newbie@proj-b"])
+    binding_history(rig, monkeypatch, seen_as=["newbie@proj-b"])
     code, out = rig.cli(["send", "newbie@global", "x", "--posture", "none"], **PLANNER)
     assert code == 2
     assert out.strip() == (
@@ -559,7 +559,7 @@ def test_the_refusal_names_the_identities_of_that_name_that_exist(rig, pair, mon
         "waits for its first session; if it has, check the name (moxi comms agents lists who "
         "you can message). newbie was seen bound only as newbie@proj-b; address that "
         "identity as newbie@proj-b if it is who you mean. Nothing was sent.")
-    journal(rig, monkeypatch, seen_as=["newbie@proj-b", "newbie@proj-c"])
+    binding_history(rig, monkeypatch, seen_as=["newbie@proj-b", "newbie@proj-c"])
     code, out = rig.cli(["send", "newbie@global", "x", "--posture", "none"], **PLANNER)
     assert ("newbie was seen bound only as newbie@proj-b and newbie@proj-c; address that "
             "identity by its full name if it is who you mean. Nothing was sent.") in out

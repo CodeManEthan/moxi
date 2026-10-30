@@ -55,7 +55,7 @@ def fake():
 
 
 @pytest.fixture
-def launcher(rig, fake, tmp_path, monkeypatch):
+def wrapper(rig, fake, tmp_path, monkeypatch):
     monkeypatch.setattr(oc, "FLUSH_RETRY", 0.05)
     made: list = []
 
@@ -98,8 +98,8 @@ def session_of(adapter):
 
 # --------------------------------------------------------------------------- binding
 
-def test_it_registers_with_the_opencode_kind(rig, launcher):
-    adapter = launcher()
+def test_it_registers_with_the_opencode_kind(rig, wrapper):
+    adapter = wrapper()
     binding = rig.daemon.bindings[IDENTITY]
     assert binding.adapter == "opencode"
     assert adapter.identity == IDENTITY
@@ -110,16 +110,16 @@ def creates(fake) -> list:
 
 
 def test_a_first_launch_records_its_session_and_a_relaunch_creates_a_new_one(
-        rig, launcher, fake):
+        rig, wrapper, fake):
     """An OpenCode launch is a new session, as a Claude launch is."""
-    first = launcher()
+    first = wrapper()
     sid = first.session_id
     assert sid.startswith("ses")
     record = oc.read_record(opencode_roster.session_path(IDENTITY))
     assert record["session_id"] == sid and record["launch"]
     first.stop()
     assert wait_until(lambda: IDENTITY not in rig.daemon.bindings)
-    second = launcher()
+    second = wrapper()
     assert second.session_id != sid
     assert len(creates(fake)) == 2, "two launches, two sessions"
     assert ("GET", f"/session/{sid}") not in [r[:2] for r in fake.requests], \
@@ -130,7 +130,7 @@ def test_a_first_launch_records_its_session_and_a_relaunch_creates_a_new_one(
 
 
 @pytest.mark.parametrize("stale", ["ses_ef0000000000000000000000000", "garbage"])
-def test_a_stale_session_file_is_never_read_for_an_id(rig, launcher, fake, monkeypatch,
+def test_a_stale_session_file_is_never_read_for_an_id(rig, wrapper, fake, monkeypatch,
                                                        stale, capsys):
     """The record rule: with the file naming a gone `ses_` id, or garbage, the launch
     asks nothing about it, creates its own session, and never puts the stale id in a
@@ -142,7 +142,7 @@ def test_a_stale_session_file_is_never_read_for_an_id(rig, launcher, fake, monke
 
     path = opencode_roster.session_path(IDENTITY)
     oc.update_record(path, session_id=stale, launch="1@earlier")
-    adapter = launcher(start=False)
+    adapter = wrapper(start=False)
     reports: list = []
     real_report = adapter.session_report
     adapter.session_report = lambda *, register: (
@@ -181,8 +181,8 @@ def restart_server(adapter, fake, monkeypatch) -> None:
     adapter.server.alive = False
 
 
-def test_a_server_restart_keeps_the_launchs_session(rig, launcher, fake, monkeypatch):
-    adapter = launcher()
+def test_a_server_restart_keeps_the_launchs_session(rig, wrapper, fake, monkeypatch):
+    adapter = wrapper()
     sid = adapter.session_id
     first = adapter.generation
     restart_server(adapter, fake, monkeypatch)
@@ -194,9 +194,9 @@ def test_a_server_restart_keeps_the_launchs_session(rig, launcher, fake, monkeyp
 
 
 def test_a_session_gone_after_a_server_restart_closes_the_launchs_posts(
-        rig, launcher, fake, monkeypatch):
+        rig, wrapper, fake, monkeypatch):
     """Inside a launch, the launch's session gone is loud and never replaced."""
-    adapter = launcher()
+    adapter = wrapper()
     sid = adapter.session_id
     with fake.lock:
         fake.sessions.pop(sid)
@@ -213,8 +213,8 @@ def test_a_session_gone_after_a_server_restart_closes_the_launchs_posts(
 # --------------------------------------------------------------------------- delivery
 
 def test_mail_is_posted_under_comms_id_and_the_cursor_moves_on_the_idle_after_stop(
-        rig, launcher, fake):
-    adapter = launcher()
+        rig, wrapper, fake):
+    adapter = wrapper()
     send(rig, "hello coder")
     assert wait_until(lambda: posts(fake), 5.0)
     path, body = posts(fake)[0]
@@ -227,12 +227,12 @@ def test_mail_is_posted_under_comms_id_and_the_cursor_moves_on_the_idle_after_st
 
 
 def test_the_post_follows_an_idle_status_read_and_a_busy_session_gets_no_post(
-        rig, launcher, fake):
+        rig, wrapper, fake):
     """The status is read immediately before each post, and only an idle session is
     posted into. A session running a turn of the person's own gets nothing until it is
     idle again."""
     fake.auto = False
-    adapter = launcher()
+    adapter = wrapper()
     sid = adapter.session_id
     fake.prompt(sid, oc.mint_message_id(), text="his own prompt")     # he is mid-turn
     assert wait_until(lambda: adapter.busy)
@@ -249,8 +249,8 @@ def test_the_post_follows_an_idle_status_read_and_a_busy_session_gets_no_post(
 
 @pytest.mark.parametrize("status,raw", [(500, "{}"), (200, ""), (200, "not json"),
                                         (200, "[]"), (401, "")])
-def test_anything_but_a_valid_idle_200_is_read_as_not_idle(rig, launcher, fake, status, raw):
-    adapter = launcher()
+def test_anything_but_a_valid_idle_200_is_read_as_not_idle(rig, wrapper, fake, status, raw):
+    adapter = wrapper()
     fake.status_answers = [(status, raw)]
     send(rig, "one")
     assert wait_until(lambda: posts(fake), 5.0), "the next read was idle, and it went"
@@ -259,11 +259,11 @@ def test_anything_but_a_valid_idle_200_is_read_as_not_idle(rig, launcher, fake, 
     assert len(statuses) >= 3, "the first read was refused as not idle, then read again"
 
 
-def test_one_digest_per_turn_comms_starts(rig, launcher, fake):
+def test_one_digest_per_turn_comms_starts(rig, wrapper, fake):
     """From comms' own post until that turn ends, nothing more is posted; mail that
     arrives meanwhile goes as the next digest."""
     fake.auto = False
-    adapter = launcher()
+    adapter = wrapper()
     send(rig, "first")
     assert wait_until(lambda: len(posts(fake)) == 1, 5.0)
     send(rig, "second")
@@ -277,12 +277,12 @@ def test_one_digest_per_turn_comms_starts(rig, launcher, fake):
     assert "second" in text and "third" in text
 
 
-def test_his_prompt_into_a_digests_turn_still_completes_the_digest(rig, launcher, fake):
+def test_his_prompt_into_a_digests_turn_still_completes_the_digest(rig, wrapper, fake):
     """He submits while the digest's turn runs: his prompt takes the turn over, the
     digest's assistant message ends at tool-calls with no reply of its own, the stop is
     on the reply to him, and the digest completes on that idle."""
     fake.auto = False
-    adapter = launcher()
+    adapter = wrapper()
     send(rig, "digest")
     assert wait_until(lambda: posts(fake), 5.0)
     assert wait_until(lambda: any(p.seen for p in adapter.pending.values()))
@@ -292,9 +292,9 @@ def test_his_prompt_into_a_digests_turn_still_completes_the_digest(rig, launcher
 
 
 def test_a_turn_that_ends_in_an_error_moves_no_cursor_and_releases_the_session(
-        rig, launcher, fake, caplog):
+        rig, wrapper, fake, caplog):
     fake.auto = False
-    adapter = launcher()
+    adapter = wrapper()
     send(rig, "doomed")
     assert wait_until(lambda: posts(fake), 5.0)
     fake.error(adapter.session_id)
@@ -303,11 +303,11 @@ def test_a_turn_that_ends_in_an_error_moves_no_cursor_and_releases_the_session(
     assert "no cursor advance" in caplog.text
 
 
-def test_an_idle_before_the_model_saw_the_digest_moves_no_cursor(rig, launcher, fake):
+def test_an_idle_before_the_model_saw_the_digest_moves_no_cursor(rig, wrapper, fake):
     """The safe corner: a digest whose turn never made an assistant message for it is
     in the model's context, but nothing counts it as seen, so it replays."""
     fake.auto = False
-    adapter = launcher()
+    adapter = wrapper()
     sid = adapter.session_id
     original = fake.prompt
 
@@ -326,26 +326,26 @@ def test_an_idle_before_the_model_saw_the_digest_moves_no_cursor(rig, launcher, 
 
 
 
-def test_a_posted_digest_is_not_posted_again_after_a_daemon_restart(rig, launcher, fake):
+def test_a_posted_digest_is_not_posted_again_after_a_daemon_restart(rig, wrapper, fake):
     """The digest is posted and its turn runs when the daemon
     restarts. The reconnect lists its id as `holding`, so the replay does not queue it
     again, and once the turn ends and the cursor moves it has been posted once."""
     from moxi_comms import daemon as daemon_mod
     fake.auto = False
-    adapter = launcher()
+    adapter = wrapper()
     send(rig, "M2-OC")
     assert wait_until(lambda: len(posts(fake)) == 1, 5.0)
 
     rig.daemon.stop()
     assert wait_until(lambda: adapter.offline, 5.0)
-    rig.daemon = daemon_mod.Daemon(rig.gateway, clock=rig.clock,
+    rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,
                                    start_trim_thread=False).start()
     assert wait_until(lambda: not adapter.offline and not adapter.replaying, 5.0)
     time.sleep(0.3)
     assert adapter.queue == [], "the replay handed nothing the adapter holds"
 
     fake.finish(adapter.session_id)                 # the digest's turn ends well
-    high = max(int(m.id) for m in rig.gateway.history(rig.names_channel))
+    high = max(int(m.id) for m in rig.record.history(rig.names_channel))
     assert wait_until(lambda: cursor_of(IDENTITY) == str(high), 5.0)
     time.sleep(0.5)
     carried = [b["parts"][0]["text"].count("M2-OC") for _, b in posts(fake)]
@@ -354,14 +354,14 @@ def test_a_posted_digest_is_not_posted_again_after_a_daemon_restart(rig, launche
 
 
 def test_a_post_lost_with_its_server_replays_at_the_next_registration(
-        rig, launcher, fake, monkeypatch):
+        rig, wrapper, fake, monkeypatch):
     """On OpenCode, the server dies under a running post. The restarted
     server's reconcile finds the session idle and the turn not ended well, settles the
     post as not completed and lets its ids go, so the next registration hands the
     message again."""
     from moxi_comms import daemon as daemon_mod
     fake.auto = False
-    adapter = launcher()
+    adapter = wrapper()
     send(rig, "CRASH-OC")
     assert wait_until(lambda: len(posts(fake)) == 1, 5.0)
     assert wait_until(lambda: adapter.held_ids, 5.0)
@@ -375,7 +375,7 @@ def test_a_post_lost_with_its_server_replays_at_the_next_registration(
 
     rig.daemon.stop()
     assert wait_until(lambda: adapter.offline, 5.0)
-    rig.daemon = daemon_mod.Daemon(rig.gateway, clock=rig.clock,
+    rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,
                                    start_trim_thread=False).start()
     assert wait_until(lambda: len(posts(fake)) == 2, 5.0), "the lost message was posted again"
     assert "CRASH-OC" in posts(fake)[-1][1]["parts"][0]["text"]
@@ -388,8 +388,8 @@ def test_a_post_lost_with_its_server_replays_at_the_next_registration(
     (409, "a refusal a retry cannot fix"), (413, "a refusal a retry cannot fix"),
     (302, "a refusal a retry cannot fix")])
 def test_a_refusal_a_retry_cannot_fix_closes_the_session_for_the_launch_loudly(
-        rig, launcher, fake, code, meaning):
-    adapter = launcher()
+        rig, wrapper, fake, code, meaning):
+    adapter = wrapper()
     fake.post_answers = [(code, {"name": "Refused", "data": {"message": "nope"}})]
     send(rig, "refused")
     assert wait_until(lambda: adapter.fatal, 5.0)
@@ -406,8 +406,8 @@ def test_a_refusal_a_retry_cannot_fix_closes_the_session_for_the_launch_loudly(
 
 @pytest.mark.parametrize("code", [500, 502, 503, 429])
 def test_a_failure_a_retry_can_fix_is_retried_and_a_run_of_them_is_said_once(
-        rig, launcher, fake, code):
-    adapter = launcher()
+        rig, wrapper, fake, code):
+    adapter = wrapper()
     fake.post_answers = [(code, {})] * (oc.FAILURE_STREAK + 2)
     send(rig, "persistent")
     assert wait_until(lambda: len(posts(fake)) == oc.FAILURE_STREAK + 3, 10.0)
@@ -417,16 +417,16 @@ def test_a_failure_a_retry_can_fix_is_retried_and_a_run_of_them_is_said_once(
     assert adapter.fatal is None
 
 
-def test_a_post_that_cannot_connect_is_put_back(launcher):
-    adapter = launcher(start=False)
+def test_a_post_that_cannot_connect_is_put_back(wrapper):
+    adapter = wrapper(start=False)
     adapter.http = oc.Http("http://127.0.0.1:9", PASSWORD, timeout=1.0)
     adapter.session_id = "ses_x"
     assert adapter.deliver("t", 5, IDENTITY, 1) is oc.REQUEUE
 
 
-def test_a_post_with_no_answer_is_a_receipt_and_the_messages_decide(rig, launcher, fake,
+def test_a_post_with_no_answer_is_a_receipt_and_the_messages_decide(rig, wrapper, fake,
                                                                     monkeypatch):
-    adapter = launcher()
+    adapter = wrapper()
     real = adapter.http.request
 
     def lost_answer(method, path, body=None, timeout=None):
@@ -444,8 +444,8 @@ def test_a_post_with_no_answer_is_a_receipt_and_the_messages_decide(rig, launche
 # --------------------------------------------------------------------------- the stream
 
 def test_a_silent_stream_counts_as_cut_and_is_reconnected_and_reconciled(
-        rig, launcher, fake):
-    adapter = launcher(silence=0.6)
+        rig, wrapper, fake):
+    adapter = wrapper(silence=0.6)
     first = adapter.stream
     closed_ready: list = []
     real_close = adapter._on_stream_close
@@ -466,12 +466,12 @@ def test_a_silent_stream_counts_as_cut_and_is_reconnected_and_reconciled(
 
 
 def test_a_turn_that_ends_while_the_stream_is_cut_is_settled_by_the_reconcile(
-        rig, launcher, fake):
+        rig, wrapper, fake):
     fake.auto = False
-    adapter = launcher()
+    adapter = wrapper()
     send(rig, "cut")
     assert wait_until(lambda: any(p.seen for p in adapter.pending.values()), 5.0)
-    fake.stalled = True                    # nothing reaches the launcher...
+    fake.stalled = True                    # nothing reaches the wrapper...
     fake.finish(adapter.session_id)        # ...while the turn ends
     fake.stalled = False
     fake.close_streams()
@@ -482,8 +482,8 @@ def test_a_turn_that_ends_while_the_stream_is_cut_is_settled_by_the_reconcile(
 # --------------------------------------------------------------------------- the model
 
 def test_a_request_on_another_model_is_logged_and_shown_and_nothing_more(
-        rig, launcher, fake):
-    adapter = launcher()
+        rig, wrapper, fake):
+    adapter = wrapper()
     sid = adapter.session_id
     fake.sessions[sid]["model"] = "opencode/big-pickle"          # his pick in the window
     send(rig, "on his model")
@@ -499,15 +499,15 @@ def test_a_request_on_another_model_is_logged_and_shown_and_nothing_more(
     assert len([s for s in adapter.statuses if "big-pickle" in s]) == 1
 
 
-def test_a_side_request_on_the_default_says_nothing(launcher, fake):
-    adapter = launcher()
+def test_a_side_request_on_the_default_says_nothing(wrapper, fake):
+    adapter = wrapper()
     fake.create_session(None)          # an untitled session: its title is a side request
     time.sleep(0.2)
     assert not [s for s in adapter.statuses if "ran on" in s]
 
 
-def test_an_answer_with_no_request_line_before_it_is_said(rig, launcher, fake):
-    adapter = launcher()
+def test_an_answer_with_no_request_line_before_it_is_said(rig, wrapper, fake):
+    adapter = wrapper()
     fake.on_log = lambda line: None        # the log shows no request
     send(rig, "unseen request")
     assert wait_until(lambda: cursor_of(IDENTITY) is not None, 5.0)
@@ -516,8 +516,8 @@ def test_an_answer_with_no_request_line_before_it_is_said(rig, launcher, fake):
                            "update arrives twice"
 
 
-def test_the_watch_counts_one_request_per_assistant_message(launcher):
-    adapter = launcher(start=False)
+def test_the_watch_counts_one_request_per_assistant_message(wrapper):
+    adapter = wrapper(start=False)
     adapter.default_model = "opencode/m"
     adapter.agent.qualified = IDENTITY
     line = ("timestamp=x level=INFO run=r message=stream providerID=opencode modelID=m "
@@ -540,8 +540,8 @@ def test_the_watch_counts_one_request_per_assistant_message(launcher):
     assert adapter.model_notes == []
 
 
-def test_with_no_default_every_model_is_shown(launcher):
-    adapter = launcher(start=False)
+def test_with_no_default_every_model_is_shown(wrapper):
+    adapter = wrapper(start=False)
     adapter.default_model = None
     adapter.on_log_line("timestamp=x level=INFO message=stream providerID=p modelID=q "
                         "session.id=ses_9 small=true agent=title mode=primary\n")
@@ -608,12 +608,12 @@ def test_the_launch_config_names_only_a_free_model_and_carries_no_credential(mod
         assert config["model"] == config["small_model"] == model
 
 
-def test_every_model_comms_names_is_one_the_server_offers_free(rig, launcher, fake):
+def test_every_model_comms_names_is_one_the_server_offers_free(rig, wrapper, fake):
     """The chosen default comes only from the free listing, the server's environment
     adds the password and the launch config only, and no post names a model."""
     fake.free = ["opencode/big-pickle"]
     fake.paid = ["opencode/minimax-m3.1-flash-free"]      # named by the roster, but not free
-    adapter = launcher()
+    adapter = wrapper()
     assert adapter.default_model == "opencode/big-pickle"
     env = adapter.server_env(adapter.default_model)
     inherited = {k for k in os.environ if k.startswith("OPENCODE_")}
@@ -626,9 +626,9 @@ def test_every_model_comms_names_is_one_the_server_offers_free(rig, launcher, fa
     assert all("model" not in body for _, body in posts(fake))
 
 
-def test_the_launch_notice_is_printed_and_held_before_the_window(launcher, fake, capsys):
+def test_the_launch_notice_is_printed_and_held_before_the_window(wrapper, fake, capsys):
     fake.free = ["opencode/big-pickle"]
-    adapter = launcher()
+    adapter = wrapper()
     started = time.monotonic()
     oc.show_notice(adapter, 0.3)
     assert time.monotonic() - started >= 0.3
@@ -638,14 +638,14 @@ def test_the_launch_notice_is_printed_and_held_before_the_window(launcher, fake,
     assert any("is not offered" in s for s in adapter.statuses)
 
 
-def test_a_launch_on_the_default_prints_no_notice(launcher, capsys):
-    adapter = launcher()
+def test_a_launch_on_the_default_prints_no_notice(wrapper, capsys):
+    adapter = wrapper()
     oc.show_notice(adapter, 0.3)
     assert capsys.readouterr().err == ""
 
 
-def test_the_status_line_is_kept_in_the_session_file_and_explain_shows_it(rig, launcher):
-    adapter = launcher()
+def test_the_status_line_is_kept_in_the_session_file_and_explain_shows_it(rig, wrapper):
+    adapter = wrapper()
     adapter.status_sink("coder@proj-a: a line he should see")
     code, out = rig.cli(["explain", IDENTITY],  name="main", scope="proj-a")
     assert code == 0, out
@@ -654,14 +654,14 @@ def test_the_status_line_is_kept_in_the_session_file_and_explain_shows_it(rig, l
 
 
 def test_the_status_lines_survive_a_relaunch_while_the_session_is_replaced(
-        rig, launcher):
+        rig, wrapper):
     path = opencode_roster.session_path(IDENTITY)
-    first = launcher()
+    first = wrapper()
     first.status_sink("coder@proj-a: said in the first launch")
     sid = first.session_id
     first.stop()
     assert wait_until(lambda: IDENTITY not in rig.daemon.bindings)
-    second = launcher()
+    second = wrapper()
     assert oc.read_record(path)["session_id"] == second.session_id != sid
     assert any("said in the first launch" in row["text"] for row in oc.status_lines(path))
 
@@ -673,10 +673,10 @@ def turn_frames(frames):
 
 
 def test_an_operator_turn_sends_activity_at_busy_and_one_turn_at_its_idle(
-        rig, launcher, fake, frames):
+        rig, wrapper, fake, frames):
     """Busy is the turn start (no-kind activity), the idle after it the turn end,
     whoever prompted; the server's two idle events make one frame."""
-    adapter = launcher()
+    adapter = wrapper()
     before = len(frames)
     fake.control("type", {"session": adapter.session_id, "text": "his own"})
     assert wait_until(lambda: turn_frames(frames[before:]), 5.0)
@@ -691,11 +691,11 @@ def test_an_operator_turn_sends_activity_at_busy_and_one_turn_at_its_idle(
 
 
 def test_a_digests_turn_is_handled_on_the_frame_after_the_cursor_write(
-        rig, launcher, fake, frames):
-    adapter = launcher()
+        rig, wrapper, fake, frames):
+    adapter = wrapper()
     send(rig, "handle me")
     assert wait_until(lambda: turn_frames(frames) and cursor_of(IDENTITY), 5.0)
-    high = max(int(m.id) for m in rig.gateway.history(rig.names_channel))
+    high = max(int(m.id) for m in rig.record.history(rig.names_channel))
     turn = turn_frames(frames)[-1]
     assert turn["handled"] == [str(high)] and turn["unhandled"] == []
     assert turn["cursor_then"] == str(high), "the cursor is written before the frame"
@@ -703,9 +703,9 @@ def test_a_digests_turn_is_handled_on_the_frame_after_the_cursor_write(
 
 
 def test_a_digests_turn_that_errs_is_unhandled_and_moves_no_cursor(
-        rig, launcher, fake, frames):
+        rig, wrapper, fake, frames):
     fake.auto = False
-    adapter = launcher()
+    adapter = wrapper()
     send(rig, "doomed")
     assert wait_until(lambda: posts(fake), 5.0)
     held = set(adapter.held_ids)
@@ -718,12 +718,12 @@ def test_a_digests_turn_that_errs_is_unhandled_and_moves_no_cursor(
 
 
 def test_an_aborted_turn_sends_no_turn_and_its_ids_go_unhandled_on_the_next(
-        rig, launcher, fake, frames):
+        rig, wrapper, fake, frames):
     """The window's Esc mirrors Claude Code, whose Stop does not run on a user
     interrupt: no `turn` at the abort's idle; the digest's ids stay held and are
     `unhandled` on the next turn frame."""
     fake.auto = False
-    adapter = launcher()
+    adapter = wrapper()
     send(rig, "abort me")
     assert wait_until(lambda: any(p.seen for p in adapter.pending.values()), 5.0)
     held = set(adapter.held_ids)
@@ -740,10 +740,10 @@ def test_an_aborted_turn_sends_no_turn_and_its_ids_go_unhandled_on_the_next(
     assert cursor_of(IDENTITY) is None
 
 
-def test_compaction_sends_ready_compact_and_leaves_busy(rig, launcher, fake, frames):
+def test_compaction_sends_ready_compact_and_leaves_busy(rig, wrapper, fake, frames):
     """An automatic compaction runs inside the busy loop."""
     fake.auto = False
-    adapter = launcher()
+    adapter = wrapper()
     fake.control("type", {"session": adapter.session_id, "text": "long turn"})
     assert wait_until(lambda: adapter.busy, 5.0)
     fake.compacted(adapter.session_id)
@@ -754,10 +754,10 @@ def test_compaction_sends_ready_compact_and_leaves_busy(rig, launcher, fake, fra
 
 
 def test_ready_startup_once_and_none_on_a_server_restart(
-        rig, launcher, fake, monkeypatch, frames):
+        rig, wrapper, fake, monkeypatch, frames):
     """The launch's own session is `ready source=startup`; a server restart's
     report refreshes are no-kind activity, never `ready`."""
-    adapter = launcher()
+    adapter = wrapper()
     ready = frame_kinds(frames, "ready")
     assert [f["source"] for f in ready] == ["startup"]
     assert ready[0]["session_id"] == adapter.session_id
@@ -770,11 +770,11 @@ def test_ready_startup_once_and_none_on_a_server_restart(
 
 
 def test_a_window_new_is_followed_and_a_child_session_is_not(
-        rig, launcher, fake, frames):
-    """A top-level `session.created` the launcher did not make is the
+        rig, wrapper, fake, frames):
+    """A top-level `session.created` the wrapper did not make is the
     window's /new or /clear: rebind, session file, then `ready source=clear` naming the
     new session; mail goes there. A child session is not followed."""
-    adapter = launcher()
+    adapter = wrapper()
     old = adapter.session_id
     fake.control("new-session", {"parent": old})              # a subagent's child
     time.sleep(0.3)
@@ -793,11 +793,11 @@ def test_a_window_new_is_followed_and_a_child_session_is_not(
 
 
 def test_a_post_pending_at_the_follow_goes_again_into_the_new_session(
-        rig, launcher, fake, frames):
+        rig, wrapper, fake, frames):
     """The old session's pending post goes back in the queue, its ids still held: a
     re-push of its id is dropped, and it is posted again into the new session."""
     fake.auto = False
-    adapter = launcher()
+    adapter = wrapper()
     old = adapter.session_id
     send(rig, "carry me")
     assert wait_until(lambda: adapter.pending, 5.0)
@@ -817,17 +817,17 @@ def test_a_post_pending_at_the_follow_goes_again_into_the_new_session(
 
 
 def test_a_compaction_while_the_daemon_is_away_is_reported_after_the_register(
-        rig, launcher, fake, frames):
+        rig, wrapper, fake, frames):
     """The `ready` is owed and sent once, right after the next register's
     answer."""
     from moxi_comms import daemon as daemon_mod
-    adapter = launcher()
+    adapter = wrapper()
     rig.daemon.stop()
     assert wait_until(lambda: adapter.offline, 5.0)
     fake.compacted(adapter.session_id)
     time.sleep(0.3)
     assert not [f for f in frame_kinds(frames, "ready") if f.get("source") == "compact"]
-    rig.daemon = daemon_mod.Daemon(rig.gateway, clock=rig.clock,
+    rig.daemon = daemon_mod.Daemon(rig.record, clock=rig.clock,
                                    start_trim_thread=False).start()
     assert wait_until(lambda: [f for f in frame_kinds(frames, "ready")
                                if f.get("source") == "compact"], 5.0)

@@ -279,7 +279,7 @@ def clock_state(adapter, session_id, *, projects_root=None, turned=True, name=No
     session itself reported and `turned` whether a prompt or a turn end has been seen in
     this session id: together they are the evidence for reading a missing transcript as
     `fresh`. `cache_source`, `new_session` and `agent_model` are a Codex or OpenCode
-    launcher's report, `bound_at` when the binding registered, and `store` cache's drift
+    wrapper's report, `bound_at` when the binding registered, and `store` cache's drift
     store (`open_store`).
 
     `turned` defaults to True, `new_session` to False and `agent_model` to not reported,

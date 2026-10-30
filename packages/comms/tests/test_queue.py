@@ -173,7 +173,7 @@ def reboot(rig):
 
     def _reboot():
         rig.daemon.stop()
-        rig.daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+        rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
         started.append(rig.daemon)
         return rig.daemon
 
@@ -192,7 +192,7 @@ def blocked(rig):
             write_config(None, "block = true\n")
 
         def __exit__(self, *exc):
-            top = int(rig.gateway.max_message_id() or 0)
+            top = int(rig.record.max_message_id() or 0)
             try:
                 assert wait_until(lambda: int(rig.daemon._seen_max) >= top)
             finally:
@@ -269,7 +269,7 @@ def test_a_held_id_the_cursor_passed_survives_a_restart_and_goes_at_the_next_tur
     assert again.held() == [held]
     again.turn(handled=[held])
     assert rows(rig, REVIEWER_Q) == set()
-    assert record_rows(rig.gateway, REVIEWER_Q) == set()
+    assert record_rows(rig.record, REVIEWER_Q) == set()
 
 
 def test_only_a_turn_naming_the_id_handled_deletes_its_row(rig, reads, peers, reboot):
@@ -289,7 +289,7 @@ def test_only_a_turn_naming_the_id_handled_deletes_its_row(rig, reads, peers, re
     assert rows(rig, REVIEWER_Q) == {held}
     peer.close()                                    # the binding ends
     assert rows(rig, REVIEWER_Q) == {held}
-    assert record_rows(rig.gateway, REVIEWER_Q) == {held}
+    assert record_rows(rig.record, REVIEWER_Q) == {held}
     reboot()
     assert queued(rig.daemon, REVIEWER_Q) == {held}
     again = peers()
@@ -297,7 +297,7 @@ def test_only_a_turn_naming_the_id_handled_deletes_its_row(rig, reads, peers, re
     assert again.held() == [held]
     again.turn(handled=[held])
     assert rows(rig, REVIEWER_Q) == set()
-    assert record_rows(rig.gateway, REVIEWER_Q) == set()
+    assert record_rows(rig.record, REVIEWER_Q) == set()
 
 
 def test_a_handled_report_for_an_id_this_binding_was_not_handed_is_ignored(
@@ -427,7 +427,7 @@ def test_an_unhandled_live_id_becomes_a_row_and_goes_at_the_next_release(rig, re
     assert rows(rig, REVIEWER_Q) == set()
     peer.turn(unhandled=[live])
     assert rows(rig, REVIEWER_Q) == {live}
-    assert record_rows(rig.gateway, REVIEWER_Q) == {live}
+    assert record_rows(rig.record, REVIEWER_Q) == {live}
     assert peer.handed() == [live]
     peer.ready("compact")
     assert peer.handed() == [live, live] and peer.held() == [live]
@@ -460,7 +460,7 @@ def test_unbind_queues_handed_ids_not_handled_and_not_past_the_cursor(rig, reads
     assert rows(rig, REVIEWER_Q) == set()
     peer.close()
     assert rows(rig, REVIEWER_Q) == {unfinished}
-    assert record_rows(rig.gateway, REVIEWER_Q) == {unfinished}
+    assert record_rows(rig.record, REVIEWER_Q) == {unfinished}
 
 
 # ============================================================ (e) the readers
@@ -494,7 +494,7 @@ def test_replay_makes_a_flagged_message_with_no_row_a_row_and_delivers_it_not(
     assert peer.handed() == [plain]
     assert peer.payloads()[0]["backlog"] is True and "held" not in peer.payloads()[0]
     assert rows(rig, REVIEWER_Q) == {flagged}
-    assert record_rows(rig.gateway, REVIEWER_Q) == {flagged}
+    assert record_rows(rig.record, REVIEWER_Q) == {flagged}
 
 
 def test_a_rescan_writes_no_row_at_or_below_the_cursor(rig, reads, peers, blocked):
@@ -538,7 +538,7 @@ def test_a_failed_hand_off_is_a_row_the_next_binding_gets(rig, reads, peers, mon
     mid = post(rig, [REVIEWER_Q], "this one is lost on the wire")
     row_for(rig, REVIEWER_Q, mid)
     assert mid not in binding.delivered
-    assert wait_until(lambda: record_rows(rig.gateway, REVIEWER_Q) == {mid})
+    assert wait_until(lambda: record_rows(rig.record, REVIEWER_Q) == {mid})
     peer.close()
     again = peers()
     assert again.held() == [mid]
@@ -567,7 +567,7 @@ def test_a_failed_hand_off_to_an_agent_n_writes_no_row(rig, reads, peers, monkey
 # ============================================================ (g) migration and trim
 
 def _forget_migration(rig) -> None:
-    gw = rig.gateway
+    gw = rig.record
     if rig.backend == "local":
         with gw._write() as conn:
             conn.execute("DELETE FROM meta WHERE key = ?", (META_QUEUE_MIGRATED,))
@@ -580,7 +580,7 @@ def _forget_migration(rig) -> None:
 
 
 def _has_refusals_table(rig) -> bool:
-    row = rig.gateway._conn().execute(
+    row = rig.record._conn().execute(
         "SELECT name FROM sqlite_master WHERE name = 'cold_refusals'").fetchone()
     return row is not None
 
@@ -610,22 +610,22 @@ def test_the_migration_moves_held_mail_into_the_queue_once(rig, monkeypatch):
                                          "agent-3@global": [held]},
                                 "refused": {CODER_Q: [refused]}}))
     _forget_migration(rig)
-    rig.daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+    rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     assert queued(rig.daemon, REVIEWER_Q) == {held}
-    assert not {old_held, old_next_turn} & record_rows(rig.gateway, REVIEWER_Q)
+    assert not {old_held, old_next_turn} & record_rows(rig.record, REVIEWER_Q)
     assert queued(rig.daemon, "planner@proj-a") == {next_turn}
     assert queued(rig.daemon, CODER_Q) == set()
     assert not gate.exists()
-    assert rig.gateway.meta_get(META_QUEUE_MIGRATED) is not None
+    assert rig.record.meta_get(META_QUEUE_MIGRATED) is not None
     if rig.backend == "local":
         assert not _has_refusals_table(rig)
-    before = record_rows(rig.gateway)
-    stamp = rig.gateway.meta_get(META_QUEUE_MIGRATED)
+    before = record_rows(rig.record)
+    stamp = rig.record.meta_get(META_QUEUE_MIGRATED)
     gate.write_text(json.dumps({"held": {CODER_Q: [refused]}}))
     rig.daemon.stop()
-    rig.daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
-    assert record_rows(rig.gateway) == before
-    assert rig.gateway.meta_get(META_QUEUE_MIGRATED) == stamp
+    rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
+    assert record_rows(rig.record) == before
+    assert rig.record.meta_get(META_QUEUE_MIGRATED) == stamp
     assert gate.exists(), "the second boot runs no migration"
 
 
@@ -649,28 +649,28 @@ def test_the_trim_keeps_every_queued_message_past_retention(rig, reads, peers,
     row_for(rig, SENTINEL_Q, flagged)
     for mid in (offline, flagged, plain):
         _age(rig, mid, 200)
-    assert rig.gateway.trim(keep=()) == 1
-    assert rig.gateway.get_message(offline) is not None
-    assert rig.gateway.get_message(flagged) is not None
-    assert rig.gateway.get_message(plain) is None
+    assert rig.record.trim(keep=()) == 1
+    assert rig.record.get_message(offline) is not None
+    assert rig.record.get_message(flagged) is not None
+    assert rig.record.get_message(plain) is None
     # A row only in memory: its record write failed and waits for the next pass.
     def disk_full(*args, **kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr(rig.gateway, "queue_add", disk_full)
+    monkeypatch.setattr(rig.record, "queue_add", disk_full)
     unwritten = post(rig, [REVIEWER_Q], "its row is not in the record yet")
     row_for(rig, REVIEWER_Q, unwritten)
-    assert unwritten not in record_rows(rig.gateway, REVIEWER_Q)
+    assert unwritten not in record_rows(rig.record, REVIEWER_Q)
     _age(rig, unwritten, 200)
     rig.daemon.trim_record()
-    assert rig.gateway.get_message(unwritten) is not None
+    assert rig.record.get_message(unwritten) is not None
 
 
 def test_the_mock_record_has_no_trim():
     """The trim's other backend: the in-memory double keeps every message, so a row's
     message can only be lost from a local record."""
-    from moxi_comms.mock_gateway import MockGateway
-    assert not hasattr(MockGateway, "trim")
+    from moxi_comms.mock_record import MockRecord
+    assert not hasattr(MockRecord, "trim")
 
 
 # ============================================================ (h) the Claude shim, end to end
@@ -951,21 +951,21 @@ def test_a_turn_with_no_handled_deletes_no_handed_row(rig, reads, peers):
 def _lose(rig, mid) -> None:
     """Take a message out of the record by hand."""
     if rig.backend == "local":
-        with rig.gateway._write() as conn:
+        with rig.record._write() as conn:
             conn.execute("DELETE FROM messages WHERE id = ?", (int(mid),))
     else:
-        with rig.gateway._txn(write=True) as st:
+        with rig.record._txn(write=True) as st:
             st.messages = [m for m in st.messages if m["id"] != str(mid)]
 
 
 def _garble(rig, mid) -> None:
     """Make a message's line zero something no parser reads, by hand."""
     if rig.backend == "local":
-        with rig.gateway._write() as conn:
+        with rig.record._write() as conn:
             conn.execute("UPDATE messages SET content = ? WHERE id = ?",
                          ("not a machine line any more", int(mid)))
     else:
-        with rig.gateway._txn(write=True) as st:
+        with rig.record._txn(write=True) as st:
             for m in st.messages:
                 if m["id"] == str(mid):
                     m["content"] = "not a machine line any more"
@@ -991,7 +991,7 @@ def test_a_row_whose_message_the_record_lost_is_kept_skipped_and_logged_once(
         peer.turn()
     assert peer.held() == [kept]
     assert rows(rig, REVIEWER_Q) == {lost, kept}
-    assert record_rows(rig.gateway, REVIEWER_Q) == {lost, kept}
+    assert record_rows(rig.record, REVIEWER_Q) == {lost, kept}
     said = [r for r in caplog.records if lost in r.getMessage()]
     assert len(said) == 1 and said[0].levelno == logging.WARNING, said
     assert "its row stays" in said[0].getMessage()

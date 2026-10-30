@@ -166,7 +166,7 @@ def test_the_verb_answers_with_nothing_behind_it(monkeypatch):
 
     monkeypatch.setattr(cli.Context, "daemon", boom)
     monkeypatch.setattr(cli.Context, "db", boom)
-    monkeypatch.setattr(cli.Context, "gateway", property(boom))
+    monkeypatch.setattr(cli.Context, "record", property(boom))
     monkeypatch.setattr(cli.DaemonClient, "connect", boom)
     import socket
     monkeypatch.setattr(socket.socket, "connect", boom)
@@ -614,7 +614,7 @@ def test_only_the_cli_imports_the_card_reader():
             assert "moxi_comms.cards" not in import_closure(module, modules), module
 
     forbidden = ("daemon", "sender", "directors", "attribution", "routing", "client",
-                 "gateway", "directory")
+                 "record", "directory")
     reader_closure = import_closure("moxi_comms.cards", modules)
     assert not [e for e in reader_closure if e.split(".")[-1] in forbidden]
     # `moxi_comms.envelope` is in the closure: the indent, the scrub and the
@@ -624,7 +624,7 @@ def test_only_the_cli_imports_the_card_reader():
     # reach card content through it. `moxi_comms.release` is in it because `paths`
     # names its layout by the module's name (the roots themselves are `moxi.paths`, outside
     # the package); it imports nothing from the package. Neither the config nor the
-    # gateway behind it joins this closure.
+    # record behind it joins this closure.
     assert reader_closure == {"moxi_comms.constants", "moxi_comms.envelope",
                               "moxi_comms.paths", "moxi_comms.release",
                               "moxi_comms.scoping"}, "the reader's own closure"

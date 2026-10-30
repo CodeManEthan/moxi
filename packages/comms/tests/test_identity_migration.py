@@ -9,8 +9,8 @@ import pytest
 
 from moxi_comms import attribution, directory, migration, tokens
 from moxi_comms.daemon import Daemon
-from moxi_comms.local_gateway import LocalGateway
-from moxi_comms.mock_gateway import MockGateway
+from moxi_comms.local_record import LocalRecord
+from moxi_comms.mock_record import MockRecord
 from moxi_comms.provision import provision
 
 
@@ -44,7 +44,7 @@ CREATE TABLE bindings (
 
 
 def _old_state(tmp_path):
-    record = LocalGateway(tmp_path / "record.db", clock=lambda: 1_700_000_000)
+    record = LocalRecord(tmp_path / "record.db", clock=lambda: 1_700_000_000)
     directory_path = tmp_path / "directory.db"
     made = provision(record, directory_path, operator=("900001", "operator"))
     conn = directory.connect(directory_path)
@@ -66,10 +66,10 @@ def _old_state(tmp_path):
     conn.commit()
     conn.close()
 
-    journal_path = tmp_path / "bindings.db"
-    journal = sqlite3.connect(journal_path)
-    journal.executescript(OLD_BINDINGS)
-    journal.executemany(
+    history_path = tmp_path / "bindings.db"
+    history = sqlite3.connect(history_path)
+    history.executescript(OLD_BINDINGS)
+    history.executemany(
         "INSERT INTO bindings(qualified,name,scope,tier,slot_id,adapter,bound_at,released_at) "
         "VALUES (?,?,?,?,?,?,?,?)",
         [
@@ -80,8 +80,8 @@ def _old_state(tmp_path):
             ("curator@proj-a", "curator", "proj-a", "chosen", 3, "claude-shim",
              "2023-11-14T20:00:00Z", "2023-11-14T21:00:00Z"),
         ])
-    journal.commit()
-    journal.close()
+    history.commit()
+    history.close()
 
     with record._write() as db:
         for author_id, display in (
@@ -93,23 +93,23 @@ def _old_state(tmp_path):
             record._insert(db, channel_id=made.rooms["#names"], author_id=author_id,
                            author_kind="webhook", author_display=display, content="old")
     record.post_as_user(made.operator_user_id, made.rooms["#names"], "operator")
-    return record, directory_path, journal_path, made.rooms["#names"]
+    return record, directory_path, history_path, made.rooms["#names"]
 
 
-def _answers(record, directory_path, journal_path, channel):
+def _answers(record, directory_path, history_path, channel):
     db = directory.connect(directory_path, read_only=True)
     try:
         return [(a.qualified, a.attribution) for a in (
-            attribution.from_record(db, msg, record=record, journal_path=journal_path)
+            attribution.from_record(db, msg, record=record, history_path=history_path)
             for msg in record.history(channel))]
     finally:
         db.close()
 
 
 def test_old_messages_read_the_same_before_and_after_the_one_time_conversion(tmp_path):
-    record, directory_path, journal_path, channel = _old_state(tmp_path)
+    record, directory_path, history_path, channel = _old_state(tmp_path)
     try:
-        before = _answers(record, directory_path, journal_path, channel)
+        before = _answers(record, directory_path, history_path, channel)
         assert before == [
             ("herald", "verified"),
             ("planner@proj-a", "verified"),
@@ -120,29 +120,29 @@ def test_old_messages_read_the_same_before_and_after_the_one_time_conversion(tmp
         ]
 
         assert migration.stamp_record(
-            record, directory_path, journal_path=journal_path) == (3, True)
-        assert _answers(record, directory_path, journal_path, channel) == before
+            record, directory_path, history_path=history_path) == (3, True)
+        assert _answers(record, directory_path, history_path, channel) == before
         messages = record.history(channel)
         assert [m.author_kind for m in messages] == [
             "identity", "identity", "webhook", "webhook", "unknown", "user"]
         snapshot = [m.to_dict() for m in messages]
 
         assert migration.stamp_record(
-            record, directory_path, journal_path=journal_path) == (0, False)
+            record, directory_path, history_path=history_path) == (0, False)
         assert [m.to_dict() for m in record.history(channel)] == snapshot
     finally:
         record.close()
 
 
 def test_an_unreadable_binding_history_leaves_the_record_unchanged(tmp_path):
-    record, directory_path, journal_path, channel = _old_state(tmp_path)
+    record, directory_path, history_path, channel = _old_state(tmp_path)
     record.close()
-    journal_path.write_text("not a database")
-    record = LocalGateway(tmp_path / "record.db")
+    history_path.write_text("not a database")
+    record = LocalRecord(tmp_path / "record.db")
     try:
         before = [m.to_dict() for m in record.history(channel)]
         with pytest.raises(migration.MigrationError, match="left unchanged"):
-            migration.stamp_record(record, directory_path, journal_path=journal_path)
+            migration.stamp_record(record, directory_path, history_path=history_path)
         assert record.meta_get(migration.META_AUTHOR_STAMPS) is None
         assert [m.to_dict() for m in record.history(channel)] == before
     finally:
@@ -185,7 +185,7 @@ def test_store_cleanup_is_idempotent_and_matches_only_retired_posting_files(
 def test_startup_finishes_cleanup_after_the_record_marker_was_committed(tmp_path):
     root = tmp_path / "tokens"
     store = tokens.TokenStore(root)
-    record = LocalGateway(tmp_path / "record.db")
+    record = LocalRecord(tmp_path / "record.db")
     directory_path = tmp_path / "directory.db"
     made = provision(record, directory_path, operator=("900001", "operator"), store=store)
     operator_token = store.read_secret(tokens.owner_for_role(tokens.ROLE_OPERATOR),
@@ -203,7 +203,7 @@ def test_startup_finishes_cleanup_after_the_record_marker_was_committed(tmp_path
     keep.write_text("{}")
     daemon = Daemon(
         record, db_path=directory_path, socket_path=tmp_path / "daemon.sock",
-        journal_path=tmp_path / "bindings.db", start_trim_thread=False,
+        history_path=tmp_path / "bindings.db", start_trim_thread=False,
         migrate=migration.startup(store, keep_path=keep, own_store=True),
         cache_store=None)
 
@@ -225,7 +225,7 @@ def test_startup_keeps_an_unreadable_root_retired_file_and_removes_its_neighbors
     caplog.set_level(logging.INFO, logger="comms.migration")
     root = tmp_path / "tokens"
     store = tokens.TokenStore(root)
-    record = LocalGateway(tmp_path / "record.db")
+    record = LocalRecord(tmp_path / "record.db")
     directory_path = tmp_path / "directory.db"
     provision(record, directory_path, operator=("900001", "operator"), store=store)
 
@@ -238,7 +238,7 @@ def test_startup_keeps_an_unreadable_root_retired_file_and_removes_its_neighbors
     store.write_secret(standing, "comms/proj-a/planner/names", "old")
     daemon = Daemon(
         record, db_path=directory_path, socket_path=tmp_path / "daemon.sock",
-        journal_path=tmp_path / "bindings.db", start_trim_thread=False,
+        history_path=tmp_path / "bindings.db", start_trim_thread=False,
         migrate=migration.startup(store, own_store=True), cache_store=None)
 
     try:
@@ -261,7 +261,7 @@ def test_startup_keeps_an_unreadable_keep_file_and_continues_cleanup(
     caplog.set_level(logging.INFO, logger="comms.migration")
     root = tmp_path / "tokens"
     store = tokens.TokenStore(root)
-    record = LocalGateway(tmp_path / "record.db")
+    record = LocalRecord(tmp_path / "record.db")
     directory_path = tmp_path / "directory.db"
     provision(record, directory_path, operator=("900001", "operator"), store=store)
 
@@ -271,7 +271,7 @@ def test_startup_keeps_an_unreadable_keep_file_and_continues_cleanup(
     store.write_secret(retired, "comms/slot-2/names", "old")
     daemon = Daemon(
         record, db_path=directory_path, socket_path=tmp_path / "daemon.sock",
-        journal_path=tmp_path / "bindings.db", start_trim_thread=False,
+        history_path=tmp_path / "bindings.db", start_trim_thread=False,
         migrate=migration.startup(store, keep_path=keep, own_store=True),
         cache_store=None)
 
@@ -292,7 +292,7 @@ def test_startup_keeps_unreadable_legacy_holder_files(tmp_path, caplog, body):
     caplog.set_level(logging.INFO, logger="comms.migration")
     root = tmp_path / "tokens"
     store = tokens.TokenStore(root)
-    record = LocalGateway(tmp_path / "record.db")
+    record = LocalRecord(tmp_path / "record.db")
     directory_path = tmp_path / "directory.db"
     provision(record, directory_path, operator=("900001", "operator"), store=store)
 
@@ -305,7 +305,7 @@ def test_startup_keeps_unreadable_legacy_holder_files(tmp_path, caplog, body):
     unrelated_before = unrelated.read_bytes()
     daemon = Daemon(
         record, db_path=directory_path, socket_path=tmp_path / "daemon.sock",
-        journal_path=tmp_path / "bindings.db", start_trim_thread=False,
+        history_path=tmp_path / "bindings.db", start_trim_thread=False,
         migrate=migration.startup(store, own_store=True), cache_store=None)
 
     try:
@@ -327,7 +327,7 @@ def test_an_external_store_is_counted_once_and_never_changed(tmp_path, caplog):
     store.write_secret(old, "comms/slot-4/names", "old")
     path = store.path_for(old)
 
-    record = LocalGateway(tmp_path / "record.db")
+    record = LocalRecord(tmp_path / "record.db")
     directory_path = tmp_path / "directory.db"
     provision(record, directory_path)
     run = migration.startup(store, own_store=False)
@@ -345,13 +345,13 @@ def test_an_external_store_is_counted_once_and_never_changed(tmp_path, caplog):
 def test_daemon_runs_conversion_after_provision_and_the_boot_fence(tmp_path):
     order = []
     daemon = Daemon(
-        MockGateway(), db_path=tmp_path / "directory.db",
+        MockRecord(), db_path=tmp_path / "directory.db",
         socket_path=tmp_path / "daemon.sock", start_trim_thread=False,
         first_start=lambda *_: order.append("provision"),
         migrate=lambda *_: (order.append("convert"), (_ for _ in ()).throw(RuntimeError("stop"))))
     daemon._probe_or_refuse = lambda: order.append("probe")
-    daemon.journal.open = lambda: order.append("open") or True
-    daemon.journal.fence = lambda: order.append("fence") or 0
+    daemon.binding_history.open = lambda: order.append("open") or True
+    daemon.binding_history.fence = lambda: order.append("fence") or 0
 
     with pytest.raises(RuntimeError, match="stop"):
         daemon.start()

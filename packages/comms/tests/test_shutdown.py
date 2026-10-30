@@ -20,7 +20,7 @@ from moxi_comms.paths import daemon_socket
 def test_a_signal_runs_the_clean_shutdown(tmp_path, sig):
     proc = subprocess.Popen(
         [sys.executable, "-c", "from moxi_comms.daemon import main; raise SystemExit(main())",
-         "--gateway", "mock", "--gateway-store", str(tmp_path / "store.json")],
+         "--backend", "mock", "--backend-store", str(tmp_path / "store.json")],
         env=os.environ.copy(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     sock = daemon_socket()
     deadline = time.time() + 20

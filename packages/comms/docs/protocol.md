@@ -35,9 +35,9 @@ spelled bare), `planner@proj-a` is planner in project proj-a, and an `agent-N` i
 ephemeral name. No reader consults the scope of the sender, of a message's author, of
 the reader or of the working directory. A project scope is for one thing: keeping apart
 two agents of one name in different projects. A session that names no scope binds the
-global identity. A send to an identity the custody journal (below) has never seen bound,
+global identity. A send to an identity the binding history (below) has never seen bound,
 with no standing row, is refused unless it passes `--new-name`; otherwise mail to an
-identity that isn't bound waits for it. The journal decides only that: it never changes
+identity that isn't bound waits for it. The binding history decides only that: it never changes
 which identity a tag names. A retired identity is refused.
 
 Tiers:
@@ -146,7 +146,7 @@ else wrote, which stays answerable while its ask is open. Only the opener change
 cap, with `--cap N` or `--no-cap` on any of its replies while the thread is open. The
 verb writes `[1 reply left]` on the reply that leaves one and `[last reply]` on the one
 that reaches the cap, and prints a `Sent.` line saying so. A read that fails, or a
-members' read that the backend may have cut short (`history_bound` on the gateway), lets
+members' read that the backend may have cut short (`history_bound` on the record), lets
 the reply through with a `NOTE:`. The daemon counts nothing and refuses nothing; it parses
 the marks into the payload and answers the verb's questions.
 
@@ -162,12 +162,12 @@ identity directly, but it does not authorize a live post. A live binding is
 the message is **unverified**, and every way of not knowing lands there, never on a
 false verified.
 
-For mail delivered later from the record ("catch-up"), the **custody journal**,
+For mail delivered later from the record ("catch-up"), the **binding history**,
 `DATA/comms/bindings.db`, supplies the binding history. The daemon alone writes it, at
 each bind and each release: which identity was held over which interval, with exact
 containment (`bound_at <= T <= released_at`, second resolution). A daemon that stopped
 without releasing has its open intervals closed at its next start, marked fenced. A
-journal that won't open costs verification and nothing else.
+binding history that won't open costs verification and nothing else.
 
 ## What a model is shown
 
@@ -444,15 +444,15 @@ was interrupted, ended in an error or a refusal, or whose delivery turns refused
 lost), after the cursor write. The idle tick that hands mail to a session at its prompt
 sends an `activity` with no `kind`.
 
-A codex or opencode launcher's `register` and every `activity` carry `session_id` (the
+A codex or opencode wrapper's `register` and every `activity` carry `session_id` (the
 thread or session id), `cache_source` (the Codex sessions root of an app-server the
-launcher spawned, or the path `opencode db path` gives) and `turned`; `register` also
+wrapper spawned, or the path `opencode db path` gives) and `turned`; `register` also
 carries `new_session`. A Codex or OpenCode launch starts its own thread or session, as a
-Claude launch does: neither launcher reads its
+Claude launch does: neither wrapper reads its
 record, so every launch's `register` reports `new_session: true` and its `turned` is
 false until its own first turn ends; a `register` later in the same launch reports the
 held id with `new_session: false`, and no reconnect or restart inside the launch makes
-it fresh again. The opencode launcher adds `agent_model`,
+it fresh again. The opencode wrapper adds `agent_model`,
 `{"agent": <name>, "model": "<provider>/<model>" or null}`, the default agent it named
 from `opencode debug config` and that agent's model, or `null` when it could not name
 one (which withdraws an earlier report). An `activity` with `kind: "ready"` and no
@@ -520,7 +520,7 @@ text from the answer.
      "text": "the body, line zero removed", "timestamp": "2026-01-01T12:00:00Z"}
 ```
 
-`author` is computed by the record and the custody journal (see Attribution), the same
+`author` is computed by the record and the binding history (see Attribution), the same
 way replay delivers it and `moxi comms history` prints it. It answers for who held the posting
 seat when the message was posted, not for whoever holds it now, so it never reads
 `verified` where live delivery read `labeled`. `attribution` is the wire value,
@@ -583,7 +583,7 @@ clear the path.
 | path | written by | what |
 |---|---|---|
 | `DATA/comms/directory.db` | provisioning | rooms, standing identities and the operator (0600) |
-| `DATA/comms/bindings.db` | the daemon | the custody journal (0600, WAL) |
+| `DATA/comms/bindings.db` | the daemon | the binding history (0600, WAL) |
 | `DATA/comms/cards/<identity>` | each identity | the card `moxi comms whois` reads |
 | `STATE/comms/record.db` | every comms process | the record, on `local` |
 | `STATE/comms/tokens/` | provisioning | the operator and role credentials (0600) |

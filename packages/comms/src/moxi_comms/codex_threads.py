@@ -52,7 +52,7 @@ def read_meta(qualified: str) -> dict | None:
 
 
 #: What one read of the record found: no record, a thread id, or a file that exists but
-#: could not be read as one. Only `NONE` is evidence that a thread the launcher then
+#: could not be read as one. Only `NONE` is evidence that a thread the wrapper then
 #: starts is new.
 NONE, RECORDED, UNREADABLE = "none", "recorded", "unreadable"
 

@@ -17,9 +17,9 @@ Measured on OpenCode 1.18.34, and each one a rule here:
     says where it listens on its log (`opencode server listening on http://...`).
   * **The log is read, and drained, continuously.** With `--print-logs` the server
     writes one `message=stream` line per model request at INFO, naming the provider, the
-    model, the session and whether it is a side request (`small=true`). The launcher
+    model, the session and whether it is a side request (`small=true`). The wrapper
     reads every line as it comes; a pipe nobody drains would stall the server's logging.
-  * **The child dies with the launcher**, by the same parent-death signal the Codex
+  * **The child dies with the wrapper**, by the same parent-death signal the Codex
     app-server gets, and is signalled only through the handle that spawned it.
 """
 
@@ -291,7 +291,7 @@ class EventStream:
         finally:
             self.close(reason)
 
-    def close(self, reason: str = "closed by the launcher") -> None:
+    def close(self, reason: str = "closed by the wrapper") -> None:
         if self.closed.is_set():
             return
         self.closed.set()

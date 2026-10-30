@@ -1,4 +1,4 @@
-"""The comms daemon: one gateway connection, one routing table, in memory only.
+"""The comms daemon: one record connection, one routing table, in memory only.
 
 Contract anchors:
   * routing lives in daemon MEMORY ONLY, rebuilt from live connections;
@@ -7,7 +7,7 @@ Contract anchors:
   * the `block` setting is enforced HERE, symmetric, read at use;
   * catch-up replays past the cursor, bounded when the cursor is absent/stale, then
     `replay_complete`;
-  * a gateway reconnect that could not RESUME triggers the #names rescan;
+  * a record reconnect that could not RESUME triggers the #names rescan;
   * the queue: every message to a name is delivered live or waits
     in the name's queue, one table in the record (`queue`) mirrored in `queue` here.
     Live means: the name is bound, its cache reads `warm`, `fresh` or `no-cache` (or
@@ -54,9 +54,9 @@ Contract anchors:
     the owing binding ends; `moxi comms agents` lists them and the author's next prompt delta
     shows the ones naming it. No timer runs anywhere.
 
-Routing stays memory-only. What the daemon also does is JOURNAL custody
-(`bindings.py`): the two moments it alone witnesses -- the bind, and the
-    connection-close release -- are appended to `DATA/comms/bindings.db`. The journal is
+Routing stays memory-only. What the daemon also does is record custody in the binding
+history (`bindings.py`): the two moments it alone witnesses -- the bind, and the
+    connection-close release -- are appended to `DATA/comms/bindings.db`. The binding history is
     evidence and never a routing input: after the old record's one-time conversion it is
     read only for whether an identity has existed, and no lookup in it can make anything
     addressable.
@@ -87,7 +87,7 @@ from . import (attribution, bindings, cache, config, constants, cursors, directo
 from .attribution import Author
 from .machine_line import (COLD_AT_LIVE, HELD_TOKEN, NEXT_TURN_TOKEN, POSTURE_NONE,
                            POSTURE_ONCE, parse as parse_machine_line)
-from .gateway import Message
+from .record import Message
 from . import kinds as kinds_mod
 from .paths import cold_gate, daemon_socket, directory_db
 from .protocol import CLI_PROTOCOL, PROTOCOL_VERSION, LineConn
@@ -259,7 +259,7 @@ class Binding:
     token_hash: bytes = b""
     replay_hwm: str = "0"     # the record's high-water mark when this binding was made
     delivered: set = field(default_factory=set)
-    journal_id: int | None = None   # the custody interval to close at deregistration
+    history_id: int | None = None   # the custody interval to close at deregistration
     #: The live Claude session behind this binding, as its own adapter last reported it,
     #: and when. Written only from the connection that holds this binding: an
     #: `activity` frame's identity is not authenticated, and a forged id would point
@@ -276,7 +276,7 @@ class Binding:
     turned: bool = False
     #: A codex or opencode binding's evidence for its cache clock, taken only from this
     #: binding's own connection: where its harness keeps the record the clock reads (the
-    #: Codex sessions root, the OpenCode database), the launcher's word on `register`
+    #: Codex sessions root, the OpenCode database), the wrapper's word on `register`
     #: that its own attempt found no record and starts a new thread or session (cleared
     #: once an id is held), and the opencode default agent and its model, `MISSING`
     #: until reported and kept apart from a reported agent with no model.
@@ -328,11 +328,11 @@ def _config_kept(exc) -> None:
 
 
 class Daemon:
-    def __init__(self, gateway, *, db_path=None, socket_path=None, clock=time.time,
-                 start_trim_thread: bool = True, journal_path=None,
+    def __init__(self, record, *, db_path=None, socket_path=None, clock=time.time,
+                 start_trim_thread: bool = True, history_path=None,
                  first_start=None, migrate=None, gate_path=None, kinds=None, settings=None,
                  cache_store=cache.MISSING):
-        self.gateway = gateway
+        self.record = record
         #: The adapter kinds a register may name: the built-in four and each kind the
         #: `moxi.comms.kinds` group declares (`kinds.load`), read once at construction.
         self.kinds = kinds if kinds is not None else kinds_mod.load()
@@ -345,11 +345,11 @@ class Daemon:
             settings.start()
         self.settings = settings
         #: A step `start()` runs after the single-instance probe and before anything
-        #: else, given (gateway, db_path): a daemon on the local backend provisions its
+        #: else, given (record, db_path): a daemon on the local backend provisions its
         #: directory here (`provision.first_start`). None elsewhere.
         self.first_start = first_start
         #: The local backend's one-time record conversion and idempotent credential-file
-        #: cleanup.  It runs after the journal's boot fence and before the queue load.
+        #: cleanup.  It runs after the binding history's boot fence and before the queue load.
         self.migrate = migrate
         self.db_path = Path(db_path or directory_db())
         self.socket_path = Path(socket_path or daemon_socket())
@@ -369,13 +369,13 @@ class Daemon:
         self._drift_said: set = set()
         self._drift_lock = threading.Lock()
         self._start_trim_thread = start_trim_thread
-        # custody, journalled: the daemon is the only writer, and the only witness
-        self.journal = bindings.Journal(journal_path, clock=clock)
+        # custody, recorded: the daemon is the only writer, and the only witness
+        self.binding_history = bindings.BindingHistory(history_path, clock=clock)
 
         self._lock = threading.RLock()
         self.bindings: dict[str, Binding] = {}
         #: The newest #names id the ROUTER has taken responsibility for. It is what makes
-        #: the catch-up boundary exact now that the boundary's gateway read happens
+        #: the catch-up boundary exact now that the boundary's record read happens
         #: OUTSIDE the lock: see `_register`.
         self._seen_max = "0"
         #: Set under `_lock` by `stop()` before anything closes. From then on a register
@@ -514,18 +514,18 @@ class Daemon:
         # has shown that no other daemon holds the socket, so two daemons starting on
         # one empty home cannot both provision it. It may refuse (RuntimeError).
         if self.first_start is not None:
-            self.first_start(self.gateway, self.db_path)
+            self.first_start(self.record, self.db_path)
         # The fence comes after the probe and before the bind. The probe proves no other
-        # daemon can still own an open interval. Live readers use the journal only for
+        # daemon can still own an open interval. Live readers use the binding history only for
         # never-bound checks, while the one-time conversion reads older intervals through
         # its frozen compatibility reader before a new binding can open.
-        if self.journal.open():
-            fenced = self.journal.fence()
+        if self.binding_history.open():
+            fenced = self.binding_history.fence()
             if fenced:
                 log.warning("boot fence: closed %d custody interval(s) left open by a "
                             "daemon that did not shut down cleanly", fenced)
         if self.migrate is not None:
-            self.migrate(self.gateway, self.db_path, self.journal._resolved())
+            self.migrate(self.record, self.db_path, self.binding_history._resolved())
         # boot: the queue, BEFORE the socket listens, so no register or routing pass can
         # hand a queued id as live mail. The first boot of this daemon moves the mail an
         # older daemon held into it first (`_migrate_queue`). A read that RAISES stops
@@ -553,7 +553,7 @@ class Daemon:
         self._spawn(self._window_loop)
         self._spawn(self._accept_loop)
 
-        self._sub = self.gateway.subscribe()
+        self._sub = self.record.subscribe()
         self._spawn(self._event_loop)
         self.trim_record()                                 # boot: retention
         try:
@@ -610,15 +610,15 @@ class Daemon:
             with contextlib.suppress(OSError):
                 self._server.close()
         if self._sub is not None:
-            self.gateway.unsubscribe(self._sub)
+            self.record.unsubscribe(self._sub)
         with self._lock:
             for b in list(self.bindings.values()):
                 b.conn.close()
         for t in self._threads:
             t.join(timeout=1.0)
-        # after the serve threads have had their chance to journal their releases; a
+        # after the serve threads have had their chance to record their releases; a
         # write that lands after this is a no-op, and the next boot's fence closes it
-        self.journal.close()
+        self.binding_history.close()
         if self._own_store and self.cache_store is not None:
             cache.close_store(self.cache_store)      # the learning lock goes with it
             self.cache_store = None
@@ -714,10 +714,10 @@ class Daemon:
                 # instead of at the next poll. NO REPLY: it is fire-and-forget
                 # (`DaemonClient.notify`), nobody waits for one, and a frame back would
                 # arrive at a socket already closed.
-                # Only the local gateway has a `nudge`; the mock fans out in-process, so
+                # Only the local record has a `nudge`; the mock fans out in-process, so
                 # on the mock this op does nothing.
-                if hasattr(self.gateway, "nudge"):
-                    self.gateway.nudge()
+                if hasattr(self.record, "nudge"):
+                    self.record.nudge()
             else:
                 conn.send({"id": rid, "ok": False, "error": f"unknown op {op!r}"})
         except DaemonStopping:
@@ -736,7 +736,7 @@ class Daemon:
             conn.send({"id": rid, "ok": False, "error": str(e), "refused": True,
                        **e.extra})
         except Exception as e:  # never take the daemon down for one bad frame
-            # An ACCIDENT, not a refusal: a gateway read that 429'd, a broken socket.
+            # An ACCIDENT, not a refusal: a record read that 429'd, a broken socket.
             # Marked `transient` so a shim that has held its name keeps retrying instead
             # of reading it as a rival claim (a restart once had three boundary reads
             # 429 in a burst, and three sessions gave up their names for good).
@@ -755,14 +755,14 @@ class Daemon:
         if adapter not in self.kinds:
             raise Refusal(f"unknown adapter kind {adapter!r}; expected one of "
                           f"{', '.join(self.kinds.names())}")
-        # The catch-up boundary is READ BEFORE THE LOCK. It is a gateway round trip -- a
+        # The catch-up boundary is READ BEFORE THE LOCK. It is a record round trip -- a
         # file read, local or mock -- and taking it under the daemon's ONE lock made every register
         # wait out every other register's network call, and every router, resolver and
         # query wait with them.
         #
         # The read is deferred-raise rather than plain, so the REFUSAL ORDER is unchanged:
         # a name that is already bound is refused with the daemon's own words even
-        # when the gateway is also broken, exactly as when the call sat below those checks.
+        # when the record is also broken, exactly as when the call sat below those checks.
         hwm, hwm_error = self._high_water_mark()
         with self._lock, self._db() as db:
             if self._stopping:
@@ -810,7 +810,7 @@ class Daemon:
             # business (bounded, possibly dropped); everything above it is live. Without
             # this line a lagging event loop would re-deliver what the bound just omitted.
             #
-            # The gateway's answer above was read before the lock, so it can be stale by
+            # The record's answer above was read before the lock, so it can be stale by
             # the width of the round trip; `_seen_max` is what closes that gap. A message
             # the router handled while this register was in flight was resolved against a
             # table with no binding in it, so live routing will never deliver it -- and if
@@ -858,10 +858,10 @@ class Daemon:
             self.bindings[q] = binding
             if tier == TIER_EPHEMERAL:
                 self.auto_windows[name] = [binding.bound_at, None]
-            # custody, journalled at the moment only the daemon sees it. An `agent-N` is
-            # a binding like any other and is journalled like any other; a failed write
+            # custody, recorded at the moment only the daemon sees it. An `agent-N` is
+            # a binding like any other and is recorded like any other; a failed write
             # returns None and the binding proceeds regardless (evidence, not product).
-            binding.journal_id = self.journal.bind(
+            binding.history_id = self.binding_history.bind(
                 qualified=q, name=name, scope=scope, tier=tier,
                 adapter=adapter, at=binding.bound_at)
             log.info("bind %s tier=%s adapter=%s", q, tier, adapter)
@@ -890,12 +890,12 @@ class Daemon:
                 raise Refusal(f"{binding.qualified} is retired")
             if not isinstance(content, str):
                 raise Refusal("post content must be text")
-            if len(content) > self.gateway.max_content_length:
+            if len(content) > self.record.max_content_length:
                 raise Refusal(
                     f"content is {len(content)} characters, over the "
-                    f"{self.gateway.max_content_length}-character cap on one message")
+                    f"{self.record.max_content_length}-character cap on one message")
             qualified = binding.qualified
-        message = self.gateway.post_as_identity(qualified, self._names_channel(), content)
+        message = self.record.post_as_identity(qualified, self._names_channel(), content)
         return {"message_id": str(message.id)}
 
     def _high_water_mark(self):
@@ -906,7 +906,7 @@ class Daemon:
         the shim's backoff retries it a moment later. See `_handle`.
         """
         try:
-            return self.gateway.max_message_id(self._names_channel()) or "0", None
+            return self.record.max_message_id(self._names_channel()) or "0", None
         except Exception as e:            # re-raised by the caller, in the old call's place
             return "0", e
 
@@ -970,7 +970,7 @@ class Daemon:
                     del self.unanswered[key]
                 # the close of the custody interval: the connection IS the liveness
                 # signal, so the connection's end is the release, here and nowhere else
-                self.journal.release(b.journal_id)
+                self.binding_history.release(b.history_id)
                 log.info("unbind %s", b.qualified)
         if gone:
             self._queue_flush()
@@ -1036,18 +1036,18 @@ class Daemon:
         # Comms' own CLI opens the record directly. Other modules (`record_history`,
         # `attributed_message`) read it through these queries.
         if kind == "record_message":
-            msg = self.gateway.get_message(str(frame.get("message_id")))
+            msg = self.record.get_message(str(frame.get("message_id")))
             return {"message": msg.to_dict() if msg else None}
         if kind == "attributed_message":
             return self._attributed_message_query(frame)
         if kind == "record_history":
             channel_id = frame.get("channel_id") or self._names_channel()
-            msgs = self.gateway.history(str(channel_id), after=frame.get("after"),
+            msgs = self.record.history(str(channel_id), after=frame.get("after"),
                                         limit=frame.get("limit"))
             return {"messages": [m.to_dict() for m in msgs]}
         if kind == "record_max_id":
             channel_id = frame.get("channel_id")
-            return {"message_id": self.gateway.max_message_id(
+            return {"message_id": self.record.max_message_id(
                 str(channel_id) if channel_id else None)}
         raise Refusal(f"unknown query kind {kind!r}")
 
@@ -1148,7 +1148,7 @@ class Daemon:
                 "text": "the body, line zero removed",
                 "timestamp": "2026-01-01T12:00:00Z"}
 
-        `author` is `attribute(msg, live=False)`: the record and the custody journal,
+        `author` is `attribute(msg, live=False)`: the record and the binding history,
         the function replay delivers by and `moxi comms history` and `moxi comms reply` print. It
         answers for who held the posting seat at the message's own timestamp, never for
         whoever holds it now, so it can never say `verified` where live delivery said
@@ -1172,7 +1172,7 @@ class Daemon:
         mid = str(raw).strip() if isinstance(raw, (str, int)) else ""
         if not mid.isdigit():
             raise Refusal("attributed_message: `message_id` must be a message id")
-        msg = self.gateway.get_message(mid)
+        msg = self.record.get_message(mid)
         if msg is None:
             return {"message_id": mid, "found": False, "room": None, "author": None,
                     "recipients": [], "resolved": [], "text": None, "timestamp": None}
@@ -1184,7 +1184,7 @@ class Daemon:
             r = self.resolve(tag)
             resolved.append(r.qualified if r.resolvable else None)
         return {"message_id": msg.id, "found": True,
-                "room": self.gateway.channel_name(msg.channel_id) or msg.channel_id,
+                "room": self.record.channel_name(msg.channel_id) or msg.channel_id,
                 "author": {"name": author.qualified, "tier": author.tier,
                            "attribution": author.attribution},
                 "recipients": tags, "resolved": resolved,
@@ -1289,15 +1289,15 @@ class Daemon:
                 f"{tag}: no such ephemeral identity. agent-N names are never reused and a "
                 "retired one is nobody -- there is nothing to deliver to."))
         bound = r.binding is not None
-        ever = True if bound else self.journal.ever_bound(r.name, r.scope)
+        ever = True if bound else self.binding_history.ever_bound(r.name, r.scope)
         answer = {"tier": r.tier, "route": NAMES, "qualified": r.qualified,
                   "bound": bound, "deferred": r.deferred,
                   "send_only": r.send_only,
                   # the directory fact, read at the SAME (name, scope) the send resolved
                   # to -- not the live binding's tier, which can predate a row being added
                   "standing_row": self.has_standing_row(r.name, r.scope),
-                  # has this exact identity ever been bound (the custody journal)? None
-                  # when the journal cannot say; the send's never-bound check reads it
+                  # has this exact identity ever been bound (the binding history)? None
+                  # when the binding history cannot say; the send's never-bound check reads it
                   "ever_bound": ever}
         if ever is False:
             # The identities of this name that were bound, for that refusal to name:
@@ -1307,9 +1307,9 @@ class Daemon:
         return answer
 
     def _seen_as(self, name: str, scope: str) -> list:
-        """The other identities of `name` the journal has seen bound, most recent first,
+        """The other identities of `name` the binding history has seen bound, most recent first,
         leaving out retired and send-only ones."""
-        scopes = [sc for sc in self.journal.known_scopes(name) if sc != scope]
+        scopes = [sc for sc in self.binding_history.known_scopes(name) if sc != scope]
         if not scopes:
             return []
         with self._db() as db:
@@ -1350,7 +1350,7 @@ class Daemon:
         tier = TIER_STANDING if directory.standing_row(db, name, scope) else TIER_CHOSEN
         return Resolution(tag, name, scope, q, tier, b, deferred=b is None)
 
-    # ------------------------------------------------------------------ gateway
+    # ------------------------------------------------------------------ record events
     def _event_loop(self) -> None:
         while not self._stop.is_set():
             event = self._sub.next_event(timeout=0.2)
@@ -1362,7 +1362,7 @@ class Daemon:
                 elif event["t"] == "READY" and not event.get("resumed"):
                     # fresh IDENTIFY: events in the gap are gone from the socket. The
                     # record still has them -- re-derive rather than continue blind.
-                    log.warning("gateway reconnected without RESUME; rescanning %s", NAMES)
+                    log.warning("record reconnected without RESUME; rescanning %s", NAMES)
                     self.rescan()
             except Exception:
                 log.exception("event handling failed")
@@ -1371,7 +1371,7 @@ class Daemon:
         """Route the record's newest `RESCAN_LIMIT` messages again: mail to an unbound
         name gets a row, and mail a bound name has not been handed is routed as live."""
         channel_id = self._names_channel()
-        msgs = self.gateway.history(channel_id, limit=constants.RESCAN_LIMIT)
+        msgs = self.record.history(channel_id, limit=constants.RESCAN_LIMIT)
         with self._lock:
             self.rescans += 1
         memo: dict[str, str | None] = {}   # one cursor read per name for THIS pass only
@@ -1707,10 +1707,10 @@ class Daemon:
 
     def rebuild_sent(self) -> int:
         """Boot: one read of every `#names` message of the last `OWED_TTL`, unbounded,
-        through the gateway's `since`. The floor is that window's start.
+        through the record's `since`. The floor is that window's start.
         """
         now = self.clock()
-        since = self.gateway.since
+        since = self.record.since
         floor = now - constants.OWED_TTL
         stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(floor))
         count = 0
@@ -1916,9 +1916,9 @@ class Daemon:
                     (adds if add else removes).setdefault(q, []).append(mid)
                 try:
                     for q, ids in removes.items():
-                        self.gateway.queue_remove(q, ids)
+                        self.record.queue_remove(q, ids)
                     for q, ids in adds.items():
-                        self.gateway.queue_add(q, ids)
+                        self.record.queue_add(q, ids)
                 except Exception:                                  # noqa: BLE001
                     log.exception("the record write of %d queue change(s) failed; kept in "
                                   "memory and tried again at the next pass", len(todo))
@@ -1932,7 +1932,7 @@ class Daemon:
                        for mid, at in rows.items() if at is None]
         for q, mid in unknown:
             try:
-                msg = self.gateway.get_message(mid)
+                msg = self.record.get_message(mid)
             except Exception:                                      # noqa: BLE001
                 continue
             if msg is None:
@@ -2011,7 +2011,7 @@ class Daemon:
         if isinstance(source, str) and source:
             b.cache_source = source
         if "agent_model" in frame:
-            # A launcher that re-read its config and could not name the default agent
+            # A wrapper that re-read its config and could not name the default agent
             # sends null: the report it made before may be stale, so it is withdrawn.
             reported = frame.get("agent_model")
             b.agent_model = dict(reported) if isinstance(reported, dict) else cache.MISSING
@@ -2243,7 +2243,7 @@ class Daemon:
                                key=_as_id)
             for n, mid in enumerate(order):
                 try:
-                    msg = self.gateway.get_message(mid)
+                    msg = self.record.get_message(mid)
                 except Exception:                                  # noqa: BLE001
                     log.exception("release for %s: reading %s failed; %d row(s) wait for "
                                   "the next release point", q, mid, len(order) - n)
@@ -2391,9 +2391,9 @@ class Daemon:
         """Boot, before the socket listens: the migration once, then every row. A row
         for an `agent-N` is dropped: its numbering restarts with the daemon, so the name
         would be a later, unrelated session's. A read that RAISES stops the start."""
-        if self.gateway.meta_get(META_QUEUE_MIGRATED) is None:
+        if self.record.meta_get(META_QUEUE_MIGRATED) is None:
             self._migrate_queue()
-        rows = list(self.gateway.queue_rows())
+        rows = list(self.record.queue_rows())
         dropped = []
         with self._lock:
             self.queue = {}
@@ -2439,13 +2439,13 @@ class Daemon:
             for mid in (str(i) for i in ids):
                 if not mid.isdigit() or self._past_cursor(str(q), mid, memo):
                     continue
-                if self.gateway.get_message(mid) is None:
+                if self.record.get_message(mid) is None:
                     continue
                 rows.setdefault(str(q), set()).add(mid)
         # A box with no directory has never routed a message: there is nothing to scan.
         channel_id = self._names_channel() if self.db_path.exists() else None
         found = {m.id: m for token in (HELD_TOKEN, NEXT_TURN_TOKEN)
-                 for m in (self.gateway.marked(channel_id, token) if channel_id else ())}
+                 for m in (self.record.marked(channel_id, token) if channel_id else ())}
         for m in sorted(found.values(), key=lambda m: int(m.id)):
             ml = parse_machine_line(m.content)
             if ml is None or not ml.held:
@@ -2459,12 +2459,12 @@ class Daemon:
                 if not self._past_cursor(r.qualified, m.id, memo):
                     rows.setdefault(r.qualified, set()).add(m.id)
         for q, ids in rows.items():
-            self.gateway.queue_add(q, sorted(ids, key=_as_id))
+            self.record.queue_add(q, sorted(ids, key=_as_id))
         self.gate_path.unlink(missing_ok=True)
-        drop = getattr(self.gateway, "drop_refusals", None)
+        drop = getattr(self.record, "drop_refusals", None)
         if drop is not None:
             drop()
-        self.gateway.meta_set(META_QUEUE_MIGRATED, str(int(self.clock())))
+        self.record.meta_set(META_QUEUE_MIGRATED, str(int(self.clock())))
         log.info("boot: queue migration made %d row(s) from held mail",
                  sum(len(v) for v in rows.values()))
 
@@ -2489,7 +2489,7 @@ class Daemon:
         payload = {
             "message_id": msg.id,
             "channel_id": msg.channel_id,
-            "room": self.gateway.channel_name(msg.channel_id) or msg.channel_id,
+            "room": self.record.channel_name(msg.channel_id) or msg.channel_id,
             "author": {"name": author.qualified, "tier": author.tier,
                        "attribution": author.attribution},
             "recipients": list(ml.recipients),
@@ -2579,7 +2579,7 @@ class Daemon:
 
         Touches ABSENCE only: an audience on line zero is delivered as typed, even where
         it differs from the referent's, because the verb is where a change is refused and
-        the daemon polices no line zero. Nothing here reaches the gateway:
+        the daemon polices no line zero. Nothing here reaches the record:
         a referent the index does not hold, or holds as unknown, is `unknown`, said in the
         payload. A referent held as known none delivers no mark.
         """
@@ -2608,7 +2608,7 @@ class Daemon:
     def attribute(self, msg, *, live: bool) -> Author:
         """What the record proves."""
         with self._db() as db:
-            return attribution.from_record(db, msg, record=self.gateway)
+            return attribution.from_record(db, msg, record=self.record)
 
     # ------------------------------------------------------------------ catch-up
     def _replay(self, binding: Binding) -> None:
@@ -2635,7 +2635,7 @@ class Daemon:
         else:
             cursor = cursors.read(q)
             channel_id = self._names_channel()
-            candidates = [m for m in self.gateway.history(channel_id, after=cursor)
+            candidates = [m for m in self.record.history(channel_id, after=cursor)
                           if int(m.id) <= int(binding.replay_hwm)]
             parsed = [(m, parse_machine_line(m.content)) for m in candidates]
             for m, ml in parsed:
@@ -2721,7 +2721,7 @@ class Daemon:
         # once a day and not once a trim tick.
         self._last_trim = self.clock()
         self._trim_handed()
-        trim = getattr(self.gateway, "trim", None)
+        trim = getattr(self.record, "trim", None)
         if trim is None:
             return
         if not self._queue_loaded:
@@ -2839,21 +2839,21 @@ def _epoch(timestamp: str) -> float:
 def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
     import argparse
 
-    from .gateway import BACKENDS, LOCAL, MOCK, GatewayError, backend_choice, open_gateway
+    from .record import BACKENDS, LOCAL, MOCK, RecordError, backend_choice, open_record
 
     from . import migration, provision, tokens
 
     ap = argparse.ArgumentParser(prog="moxi-comms-daemon")
-    ap.add_argument("--gateway", choices=BACKENDS,
+    ap.add_argument("--backend", choices=BACKENDS,
                     help="which backend to hold: local or mock; default: "
-                         "MOXI_COMMS_GATEWAY, then the config file, then local")
-    ap.add_argument("--gateway-store", help="JSON store of the mock gateway")
+                         "MOXI_COMMS_BACKEND, then the config file, then local")
+    ap.add_argument("--backend-store", help="JSON store of the mock record")
     ap.add_argument("--log-level", default="INFO")
     args = ap.parse_args(argv)
     logging.basicConfig(level=args.log_level,
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    if args.gateway_store:
-        os.environ["MOXI_COMMS_MOCK_GATEWAY"] = args.gateway_store
+    if args.backend_store:
+        os.environ["MOXI_COMMS_MOCK_BACKEND"] = args.backend_store
     # The flag may name a backend the box's config does not, and every adapter resolves the
     # backend WITHOUT a flag. A daemon holding one record while the shims and the CLI write
     # another is a fleet that looks connected and delivers nothing, so the disagreement is
@@ -2868,20 +2868,20 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
         raise SystemExit(str(e)) from None
     try:
         choice = backend_choice(None, env=os.environ)
-    except GatewayError as e:
+    except RecordError as e:
         raise SystemExit(str(e)) from None
     resolved = choice.name
-    if args.gateway and args.gateway != resolved and not (
-            args.gateway == MOCK and args.gateway_store):
+    if args.backend and args.backend != resolved and not (
+            args.backend == MOCK and args.backend_store):
         raise SystemExit(
-            f"--gateway {args.gateway} disagrees with this box's configured backend "
+            f"--backend {args.backend} disagrees with this box's configured backend "
             f"({resolved}). Every adapter and the CLI resolve the backend from the "
             f"config and the environment, with no flag, so a daemon started this way "
             f"would hold a record nothing else writes. Change `backend` in comms' config "
-            f"file (or MOXI_COMMS_GATEWAY) if the flip is what you meant, or drop the flag.")
+            f"file (or MOXI_COMMS_BACKEND) if the flip is what you meant, or drop the flag.")
     try:
-        gateway = open_gateway(args.gateway, role="reader")
-    except GatewayError as e:
+        record = open_record(args.backend, role="reader")
+    except RecordError as e:
         raise SystemExit(str(e)) from None
     # systemd stops the unit with SIGTERM. Without a handler the process died before the
     # `finally`, every restart left its custody intervals open for the next boot's
@@ -2897,18 +2897,18 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
     # in `main`: a Daemon constructed by a test, a smoke script or an embedding caller
     # provisions nothing.
     store = (tokens.TokenStore(None, env=os.environ)
-             if (args.gateway or resolved) == LOCAL else None)
+             if (args.backend or resolved) == LOCAL else None)
     first_start = provision.first_start(store) if store is not None else None
     migrate = migration.startup(store) if store is not None else None
-    daemon = Daemon(gateway, first_start=first_start, migrate=migrate, settings=settings)
+    daemon = Daemon(record, first_start=first_start, migrate=migrate, settings=settings)
     try:
         daemon.start()
     except RuntimeError as e:
         # A refusal is an answer, not a crash: the operator gets the recovery sentence
-        # and systemd gets a clean nonzero exit, and the gateway connection this process
+        # and systemd gets a clean nonzero exit, and the record connection this process
         # opened does not leak past the `finally` it never reaches.
         with contextlib.suppress(Exception):
-            gateway.close()
+            record.close()
         raise SystemExit(str(e)) from None
     log.info("comms daemon listening on %s", daemon.socket_path)
     try:
@@ -2918,7 +2918,7 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
     finally:
         daemon.stop()
         with contextlib.suppress(Exception):
-            gateway.close()          # the process owns the socket it opened
+            record.close()          # the process owns the socket it opened
     return 0
 
 

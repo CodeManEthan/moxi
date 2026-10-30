@@ -21,7 +21,7 @@ import pytest
 from conftest import write_config
 
 from moxi_comms import config, secrets
-from moxi_comms.gateway import GatewayError
+from moxi_comms.record import RecordError
 from moxi_comms.sender import operator_credential
 from moxi_comms.tokens import OPERATOR_SECRET_ID, TokenStore, owner_for_role
 
@@ -105,7 +105,7 @@ def test_the_all_miss_error_names_the_steps_tried_and_the_holder(tmp_path):
     tried, in order, and WHOSE credential was being looked for. No path, no key, no
     value."""
     chain = secrets.build(["env", "store"], env={}, store=tmp_path / "tokens")
-    with pytest.raises(GatewayError) as e:            # SecretNotFound IS a GatewayError
+    with pytest.raises(RecordError) as e:            # SecretNotFound IS a RecordError
         chain.get(SECRET_ID, owner=OWNER)
     said = str(e.value)
     assert f"cannot resolve the posting credential {SECRET_ID}" in said

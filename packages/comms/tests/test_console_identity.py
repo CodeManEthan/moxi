@@ -16,7 +16,7 @@ from conftest import queued, wait_until, warm_session, write_config, write_trans
 from moxi_comms import attribution, cli, directory, machine_line, provision
 from moxi_comms.claimhold import CLAIM_SOCKET_ENV, NOT_INSIDE, ClaimServer, call
 from moxi_comms.client import DaemonClient, DaemonError
-from moxi_comms.gateway import Message
+from moxi_comms.record import Message
 from moxi_comms.paths import daemon_socket, directory_db
 
 HOUR = 3600
@@ -41,9 +41,9 @@ def console_label(env):
 
 def provision_console(rig, out=None):
     """The provisioner's act, as the lead runs it at land: the subcommand, against the
-    rig's gateway and store."""
+    rig's record and store."""
     lines = out if out is not None else []
-    code = provision.send_only_main([CONSOLE], gateway=rig.gateway,
+    code = provision.send_only_main([CONSOLE], record=rig.record,
                                     store=rig.store, out=lines.append)
     assert code == 0, lines
     return lines
@@ -91,7 +91,7 @@ def pushes(console):
 
 
 def history(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def register(**kw):
@@ -328,7 +328,7 @@ def test_a_comms_send_child_the_service_spawns_sends_as_console(console, server)
     planner = console.shim(name="planner", scope="proj-a")
     script = ("import sys\nfrom moxi_comms import cli\n"
               f"sys.exit(cli.main(['send', {PLANNER!r}, 'your brief', '--posture', 'none']))\n")
-    env = dict(os.environ, MOXI_COMMS_GATEWAY="local", MOXI_COMMS_PROJECT="proj-a")
+    env = dict(os.environ, MOXI_COMMS_BACKEND="local", MOXI_COMMS_PROJECT="proj-a")
     for var in ("MOXI_COMMS_NAME", "MOXI_COMMS_SCOPE", "MOXI_COMMS_SLOT", "MOXI_COMMS_GLOBAL"):
         env.pop(var, None)
     child = server.spawn([sys.executable, "-c", script], env=env,
@@ -413,7 +413,7 @@ def test_the_provisioning_adds_a_send_only_row_without_credentials(rig):
 
 def test_the_provisioning_refuses_to_convert_an_agent_row(rig):
     with pytest.raises(SystemExit) as e:
-        provision.send_only_main(["herald"], gateway=rig.gateway, store=rig.store,
+        provision.send_only_main(["herald"], record=rig.record, store=rig.store,
                                  out=lambda _l: None)
     assert "already provisioned as a standing row of kind 'agent'" in str(e.value)
     db = directory.connect(directory_db(), read_only=True)
@@ -426,7 +426,7 @@ def test_the_provisioning_refuses_to_convert_an_agent_row(rig):
 def test_the_provisioning_refuses_a_name_live_as_a_chosen_binding(rig):
     rig.shim(name="relay", scope="proj-a",  project="proj-a")
     with pytest.raises(SystemExit) as e:
-        provision.send_only_main([CONSOLE], gateway=rig.gateway,
+        provision.send_only_main([CONSOLE], record=rig.record,
                                  store=rig.store, out=lambda _l: None)
     assert "currently live as a chosen binding" in str(e.value)
 
@@ -519,7 +519,7 @@ def test_the_provisioning_refuses_a_retired_send_only_row(console):
         db.close()
     lines = []
     with pytest.raises(SystemExit) as e:
-        provision.send_only_main([CONSOLE], gateway=console.gateway,
+        provision.send_only_main([CONSOLE], record=console.record,
                                  store=console.store, out=lines.append)
     assert f"{CONSOLE} is provisioned but retired; nothing was changed" in str(e.value)
     assert lines == []
@@ -553,14 +553,14 @@ def test_a_second_send_only_register_is_refused_as_already_bound(console, pushes
     assert e.value.response["holder"] == {"qualified": CONSOLE, "adapter": "send-only"}
 
 
-def test_the_journal_row_has_no_retired_column_and_replay_reads_its_post_verified(
+def test_the_binding_history_row_has_no_retired_column_and_replay_reads_its_post_verified(
         console, server):
     planner = console.shim(name="planner", scope="proj-a")
     code, out = console_cli(console, server, ["send", PLANNER, "your brief", "--posture", "none"])
     assert code == 0, out
     msg = history(console)[-1]
     assert wait_until(lambda: got(planner, msg.id))
-    rows = [r for r in console.daemon.journal.intervals() if r["qualified"] == CONSOLE]
+    rows = [r for r in console.daemon.binding_history.intervals() if r["qualified"] == CONSOLE]
     assert rows and all("slot_id" not in r.keys() for r in rows)
     replayed = console.daemon.attribute(msg, live=False)
     assert (replayed.qualified, replayed.tier, replayed.attribution) == (

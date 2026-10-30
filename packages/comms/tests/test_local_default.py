@@ -33,15 +33,15 @@ import pytest
 
 from conftest import write_config
 
-from moxi_comms import cli, config, directory, gateway as gw, provision, tokens
+from moxi_comms import cli, config, directory, record as gw, provision, tokens
 from moxi_comms.daemon import Daemon
-from moxi_comms.local_gateway import META_OPERATOR_TOKEN_HASH, LocalGateway
+from moxi_comms.local_record import META_OPERATOR_TOKEN_HASH, LocalRecord
 from moxi_comms.paths import daemon_socket, directory_db, record_db, tokens_dir
 
 
 def env_of(**extra) -> dict:
     """The rig's own environment, minus anything that names a backend."""
-    env = {k: v for k, v in os.environ.items() if k != "MOXI_COMMS_GATEWAY"}
+    env = {k: v for k, v in os.environ.items() if k != "MOXI_COMMS_BACKEND"}
     env.update(extra)
     return env
 
@@ -70,7 +70,7 @@ def test_the_profile_is_gone_from_the_choice():
 def test_a_named_backend_wins(tmp_path):
     assert gw.backend_choice("mock", env=env_of()).source == gw.SOURCE_FLAG
     assert gw.backend_choice("mock", env=env_of()).name == gw.MOCK
-    env_set = env_of(MOXI_COMMS_GATEWAY="mock")
+    env_set = env_of(MOXI_COMMS_BACKEND="mock")
     assert (gw.backend_choice(env=env_set).name,
             gw.backend_choice(env=env_set).source) == (gw.MOCK, gw.SOURCE_ENV)
     write_config(None, 'backend = "mock"\n')
@@ -79,13 +79,13 @@ def test_a_named_backend_wins(tmp_path):
 
 
 def test_the_most_local_choice_wins(tmp_path):
-    """Flag over `MOXI_COMMS_GATEWAY` over the config file, with two sources set at
+    """Flag over `MOXI_COMMS_BACKEND` over the config file, with two sources set at
     once (one at a time cannot tell the order)."""
     write_config(None, 'backend = "local"\n')
-    assert gw.backend_name("mock", env=env_of(MOXI_COMMS_GATEWAY="local")) == gw.MOCK
-    choice = gw.backend_choice("local", env=env_of(MOXI_COMMS_GATEWAY="mock"))
+    assert gw.backend_name("mock", env=env_of(MOXI_COMMS_BACKEND="local")) == gw.MOCK
+    choice = gw.backend_choice("local", env=env_of(MOXI_COMMS_BACKEND="mock"))
     assert (choice.name, choice.source) == (gw.LOCAL, gw.SOURCE_FLAG)
-    choice = gw.backend_choice(env=env_of(MOXI_COMMS_GATEWAY="mock"))
+    choice = gw.backend_choice(env=env_of(MOXI_COMMS_BACKEND="mock"))
     assert (choice.name, choice.source) == (gw.MOCK, gw.SOURCE_ENV)
 
 
@@ -100,27 +100,27 @@ def test_the_help_text_no_longer_calls_mock_the_default():
 
 @pytest.mark.parametrize("named", ["flag", "env", "config"])
 def test_a_removed_backend_is_refused_wherever_it_is_named(named, tmp_path):
-    """`discord` is no backend: a flag, `MOXI_COMMS_GATEWAY` or the config file naming
+    """`discord` is no backend: a flag, `MOXI_COMMS_BACKEND` or the config file naming
     it is refused, and the refusal lists the two there are."""
     env = env_of()
     if named == "config":
         write_config(None, 'backend = "discord"\n')
     if named == "env":
-        env["MOXI_COMMS_GATEWAY"] = "discord"
-    with pytest.raises(gw.GatewayError) as e:
+        env["MOXI_COMMS_BACKEND"] = "discord"
+    with pytest.raises(gw.RecordError) as e:
         gw.backend_name("discord" if named == "flag" else None, env=env)
     said = str(e.value)
     if named == "flag":
-        assert said == "unknown gateway backend 'discord'; expected one of local, mock"
+        assert said == "unknown record backend 'discord'; expected one of local, mock"
     else:
         assert "'discord'" in said and "'local', 'mock'" in said
-        assert ("MOXI_COMMS_GATEWAY" if named == "env" else "config.toml") in said
+        assert ("MOXI_COMMS_BACKEND" if named == "env" else "config.toml") in said
 
 
 # --------------------------------------------------------------- one definition
 
 def _local(tmp_path):
-    return LocalGateway(poll_interval=0.02), tokens.TokenStore(tokens_dir())
+    return LocalRecord(poll_interval=0.02), tokens.TokenStore(tokens_dir())
 
 
 def test_readiness_of_nothing_is_empty_and_writes_nothing(tmp_path):
@@ -131,14 +131,14 @@ def test_readiness_of_nothing_is_empty_and_writes_nothing(tmp_path):
 
 
 def test_readiness_after_the_cli_default_is_complete(tmp_path):
-    gateway, store = _local(tmp_path)
+    record, store = _local(tmp_path)
     try:
-        provision.provision(gateway, directory_db(), store=store)
+        provision.provision(record, directory_db(), store=store)
         found = provision.readiness(directory_db(),
-                                    operator_hash=gateway.meta_get(META_OPERATOR_TOKEN_HASH),
+                                    operator_hash=record.meta_get(META_OPERATOR_TOKEN_HASH),
                                     store=store)
     finally:
-        gateway.close()
+        record.close()
     assert found.state == provision.COMPLETE
     assert found.provisioned
 
@@ -146,34 +146,34 @@ def test_readiness_after_the_cli_default_is_complete(tmp_path):
 def test_a_directory_without_the_operator_credential_is_unfinished(tmp_path):
     """A first start that died after the directory committed and before the operator's
     credential was minted: the directory alone is not enough."""
-    gateway, store = _local(tmp_path)
+    record, store = _local(tmp_path)
     try:
-        provision.provision(gateway, directory_db(), store=store)
+        provision.provision(record, directory_db(), store=store)
         operator_files(store)
-        with gateway._write() as conn:
+        with record._write() as conn:
             conn.execute("DELETE FROM meta WHERE key = ?", (META_OPERATOR_TOKEN_HASH,))
         found = provision.readiness(directory_db(), operator_hash=None, store=store)
     finally:
-        gateway.close()
+        record.close()
     assert found.state == provision.UNFINISHED
     assert not found.provisioned
 
 
 @pytest.mark.parametrize("loss", ["the whole store", "the operator's file"])
 def test_a_lost_token_store_is_lost_not_a_first_start(tmp_path, loss):
-    gateway, store = _local(tmp_path)
+    record, store = _local(tmp_path)
     try:
-        provision.provision(gateway, directory_db(), store=store)
+        provision.provision(record, directory_db(), store=store)
         if loss == "the whole store":
             for path in sorted(tokens_dir().rglob("*"), reverse=True):
                 path.unlink() if path.is_file() else path.rmdir()
         elif loss == "the operator's file":
             operator_files(store)
         found = provision.readiness(
-            directory_db(), operator_hash=gateway.meta_get(META_OPERATOR_TOKEN_HASH),
+            directory_db(), operator_hash=record.meta_get(META_OPERATOR_TOKEN_HASH),
             store=store)
     finally:
-        gateway.close()
+        record.close()
     assert found.state == provision.LOST
     assert not found.provisioned
     assert "token" in found.detail
@@ -181,14 +181,14 @@ def test_a_lost_token_store_is_lost_not_a_first_start(tmp_path, loss):
 
 # --------------------------------------------------------------- the daemon's first start
 
-def _daemon(gateway, store, **kw):
-    return Daemon(gateway, start_trim_thread=False,
+def _daemon(record, store, **kw):
+    return Daemon(record, start_trim_thread=False,
                   first_start=provision.first_start(store), **kw)
 
 
 def test_a_daemon_on_an_empty_directory_provisions_before_it_serves(tmp_path):
-    gateway, store = _local(tmp_path)
-    daemon = _daemon(gateway, store)
+    record, store = _local(tmp_path)
+    daemon = _daemon(record, store)
     try:
         daemon.start()
         conn = directory.connect(directory_db(), read_only=True)
@@ -202,19 +202,19 @@ def test_a_daemon_on_an_empty_directory_provisions_before_it_serves(tmp_path):
         finally:
             conn.close()
         found = provision.readiness(
-            directory_db(), operator_hash=gateway.meta_get(META_OPERATOR_TOKEN_HASH),
+            directory_db(), operator_hash=record.meta_get(META_OPERATOR_TOKEN_HASH),
             store=store)
         assert found.state == provision.COMPLETE
     finally:
         daemon.stop()
-        gateway.close()
+        record.close()
 
 
 def test_a_complete_directory_is_left_alone(tmp_path):
-    gateway, store = _local(tmp_path)
-    provision.provision(gateway, directory_db(), store=store)
+    record, store = _local(tmp_path)
+    provision.provision(record, directory_db(), store=store)
     before = sorted(p.stat().st_mtime_ns for p in tokens_dir().rglob("*") if p.is_file())
-    daemon = _daemon(gateway, store)
+    daemon = _daemon(record, store)
     try:
         daemon.start()
         conn = directory.connect(directory_db(), read_only=True)
@@ -228,32 +228,32 @@ def test_a_complete_directory_is_left_alone(tmp_path):
         assert after == before
     finally:
         daemon.stop()
-        gateway.close()
+        record.close()
 
 
 def test_an_unfinished_first_start_is_finished(tmp_path):
-    gateway, store = _local(tmp_path)
-    provision.provision(gateway, directory_db(), store=store)
+    record, store = _local(tmp_path)
+    provision.provision(record, directory_db(), store=store)
     operator_files(store)
-    with gateway._write() as conn:
+    with record._write() as conn:
         conn.execute("DELETE FROM meta WHERE key = ?", (META_OPERATOR_TOKEN_HASH,))
-    daemon = _daemon(gateway, store)
+    daemon = _daemon(record, store)
     try:
         daemon.start()
         found = provision.readiness(
-            directory_db(), operator_hash=gateway.meta_get(META_OPERATOR_TOKEN_HASH),
+            directory_db(), operator_hash=record.meta_get(META_OPERATOR_TOKEN_HASH),
             store=store)
         assert found.state == provision.COMPLETE
     finally:
         daemon.stop()
-        gateway.close()
+        record.close()
 
 
 def test_a_lost_token_store_refuses_to_start(tmp_path):
-    gateway, store = _local(tmp_path)
-    provision.provision(gateway, directory_db(), store=store)
+    record, store = _local(tmp_path)
+    provision.provision(record, directory_db(), store=store)
     operator_files(store)
-    daemon = _daemon(gateway, store)
+    daemon = _daemon(record, store)
     try:
         with pytest.raises(RuntimeError, match="token"):
             daemon.start()
@@ -262,16 +262,16 @@ def test_a_lost_token_store_refuses_to_start(tmp_path):
                                  tokens.OPERATOR_SECRET_ID) is None, "nothing re-minted"
     finally:
         daemon.stop()
-        gateway.close()
+        record.close()
 
 
 def test_first_start_waits_for_the_single_instance_probe(tmp_path):
     """A second daemon refused by the probe has provisioned nothing."""
-    gateway, store = _local(tmp_path)
-    provision.provision(gateway, directory_db(), store=store)
-    first = Daemon(gateway, start_trim_thread=False).start()
+    record, store = _local(tmp_path)
+    provision.provision(record, directory_db(), store=store)
+    first = Daemon(record, start_trim_thread=False).start()
     directory_db().unlink()                 # what a first-start provisioning would refill
-    second = _daemon(gateway, store)
+    second = _daemon(record, store)
     try:
         with pytest.raises(RuntimeError, match="live comms daemon"):
             second.start()
@@ -279,7 +279,7 @@ def test_first_start_waits_for_the_single_instance_probe(tmp_path):
     finally:
         second.stop()
         first.stop()
-        gateway.close()
+        record.close()
 
 
 # --------------------------------------------------------------- the real process
@@ -342,8 +342,8 @@ def test_a_daemon_process_on_mock_never_provisions(tmp_path, runtime_dir):
     home = tmp_path / "mocked"
     env = _clean_env(tmp_path, MOXI_COMMS_HOME=str(home),
                      MOXI_COMMS_RUNTIME_DIR=str(runtime_dir), MOXI_COMMS_DEVICE="t",
-                     MOXI_COMMS_GATEWAY="mock",
-                     MOXI_COMMS_MOCK_GATEWAY=str(tmp_path / "mock.json"))
+                     MOXI_COMMS_BACKEND="mock",
+                     MOXI_COMMS_MOCK_BACKEND=str(tmp_path / "mock.json"))
     code, out = _run_daemon(env, runtime_dir / "comms" / "moxi-comms-daemon.sock")
     assert code == 0, out
     assert not (home / "data" / "comms" / "directory.db").exists()
@@ -354,7 +354,7 @@ def test_a_daemon_process_on_mock_never_provisions(tmp_path, runtime_dir):
 
 def doctor(env):
     out = io.StringIO()
-    ctx = cli.Context(gateway=object(), env=env, out=out,
+    ctx = cli.Context(record=object(), env=env, out=out,
                       socket_path=Path("/nonexistent/comms.sock"))
     code = cli.main(["doctor"], ctx=ctx)
     return code, {line[:10].strip(): line[12:] for line in out.getvalue().splitlines()
@@ -368,16 +368,16 @@ def test_doctor_says_where_the_backend_came_from(tmp_path):
     assert "slots" not in rows
     assert not directory_db().exists()
 
-    gateway, store = _local(tmp_path)
+    record, store = _local(tmp_path)
     try:
-        provision.provision(gateway, directory_db(), store=store)
+        provision.provision(record, directory_db(), store=store)
     finally:
-        gateway.close()
+        record.close()
     _, rows = doctor(env_of(PATH=""))
     assert "slots" not in rows
 
-    _, rows = doctor(env_of(PATH="", MOXI_COMMS_GATEWAY="mock"))
-    assert rows["backend"] == "mock (MOXI_COMMS_GATEWAY)"
+    _, rows = doctor(env_of(PATH="", MOXI_COMMS_BACKEND="mock"))
+    assert rows["backend"] == "mock (MOXI_COMMS_BACKEND)"
 
     write_config(None, 'backend = "local"\n')
     _, rows = doctor(env_of(PATH=""))

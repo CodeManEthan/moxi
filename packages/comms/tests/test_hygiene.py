@@ -68,7 +68,7 @@ def test_the_verbs_that_act_stay_four():
     is
     untouched and the acting four are still four.
 
-    `owner` reads which identity owns one session id and whom it awaits, so a launcher
+    `owner` reads which identity owns one session id and whom it awaits, so a wrapper
     that keeps sessions warm can tell whether a session it may nudge has an ask out. It
     reaches the daemon
     (one `owner` query) and nothing else; it posts nothing, writes nothing, and reaches
@@ -78,7 +78,7 @@ def test_the_verbs_that_act_stay_four():
     what it holds. It posts nothing, writes nothing and reaches no credential, so the
     acting four are still four.
 
-    `claude` is the LAUNCHER: it starts a Claude Code session with a comms identity and
+    `claude` is the WRAPPER: it starts a Claude Code session with a comms identity and
     forks the session's adapter, which binds the name as any session binds it. The verb
     itself posts nothing and reaches no credential, so the acting four are still four."""
     from moxi_comms import cli
@@ -92,8 +92,8 @@ def test_the_verbs_that_act_stay_four():
     reading = {"help", "whois", "explain", "cache", "doctor", "owner"}
     machine = {"service"}
     claim = {"whoami"}
-    launcher = {"claude"}
-    assert acting | reading | machine | claim | launcher == set(sub.choices) \
+    wrapper = {"claude"}
+    assert acting | reading | machine | claim | wrapper == set(sub.choices) \
         and len(acting) == 4
     assert sub.choices["whoami"].get_default("func") is cli.cmd_whoami
     assert sub.choices["service"].get_default("func") is cli.cmd_service

@@ -66,8 +66,8 @@ SOURCE_STARTUP, SOURCE_RESUME, SOURCE_CLEAR, SOURCE_COMPACT = (
 
 
 def launch_stamp() -> str:
-    """`<pid>@<UTC start>`: which launcher process wrote a thread record or session
-    file. A launch is one launcher process, so this names the launch."""
+    """`<pid>@<UTC start>`: which wrapper process wrote a thread record or session
+    file. A launch is one wrapper process, so this names the launch."""
     from datetime import datetime, timezone
 
     started = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
@@ -75,7 +75,7 @@ def launch_stamp() -> str:
 
 
 def plan_head(agent, roster, say, *, record: str) -> None:
-    """The head of a launcher's plan: the identity, roster, cwd, `record` (the
+    """The head of a wrapper's plan: the identity, roster, cwd, `record` (the
     harness's own line for the thread or session it keeps), and the agent's directors
     when it declares any."""
     say(f"identity   {agent.qualified}")
@@ -159,7 +159,7 @@ class TurnLedger:
 
 
 #: Which harness adapter this is in its process: the first is keyed by its pid and
-#: start time alone, as a launcher always is; a test that builds several gets suffixes.
+#: start time alone, as a wrapper always is; a test that builds several gets suffixes.
 _HOLDERS = itertools.count()
 
 
@@ -523,7 +523,7 @@ class HarnessAdapter:
         unreadable, the id or None).
 
         Kept for a port whose launch reads its record. Neither the codex nor the
-        opencode launcher calls this, `read_for_register` or `read_for_attempt`: each
+        opencode wrapper calls this, `read_for_register` or `read_for_attempt`: each
         launch creates its own thread or session and reads no id from the record, as a
         Claude launch starts a new session."""
         raise NotImplementedError

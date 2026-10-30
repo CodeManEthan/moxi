@@ -1,7 +1,7 @@
 """The operator's typed lane, and the credential that guards it.
 
 The terminal is the lane. The lane's two halves live in two places and this file pins
-the second: `local_gateway.py` owns the hash compare (`test_local_gateway.py`), and the
+the second: `local_record.py` owns the hash compare (`test_local_record.py`), and the
 SENDER owns the trigger, the claimed-session refusal and the token it presents.
 
 Why local only: Discord refuses `post_as_user` outright and the mock keeps no `meta` for
@@ -16,7 +16,7 @@ import pytest
 from conftest import wait_for_queue
 
 from moxi_comms import tokens
-from moxi_comms.local_gateway import META_OPERATOR_TOKEN_HASH, token_hash
+from moxi_comms.local_record import META_OPERATOR_TOKEN_HASH, token_hash
 
 
 @pytest.fixture
@@ -26,7 +26,7 @@ def backend():
 
 
 def operator_env(user_id: str = "900001", **extra) -> dict:
-    """The stamp the operator types into their own terminal. The launcher never sets it."""
+    """The stamp the operator types into their own terminal. The wrapper never sets it."""
     return {"MOXI_COMMS_OPERATOR": user_id, **extra}
 
 
@@ -46,7 +46,7 @@ def test_provision_gives_the_operator_a_holder_and_the_record_only_its_hash(rig)
     assert path.name == "operator", "the operator is a holder like any other"
     assert oct(path.stat().st_mode & 0o777) == "0o600"
     assert rig.store.secret_ids(owner) == [tokens.OPERATOR_SECRET_ID]
-    assert rig.gateway.meta_get(META_OPERATOR_TOKEN_HASH) == token_hash(token)
+    assert rig.record.meta_get(META_OPERATOR_TOKEN_HASH) == token_hash(token)
 
 
 # ------------------------------------------------------------------ the guard
@@ -63,12 +63,12 @@ def test_a_claimed_session_is_never_the_operator(rig):
     assert "claimed session is never the operator" in out
     # No seat vocabulary and no variable names on an agent-facing surface.
     assert "MOXI_COMMS_" not in out and "slot" not in out.lower()
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 def test_a_bad_operator_token_is_refused_by_the_record(rig):
     """The store is the only place the token lives, so a wrong one there is a wrong one
-    at the record: the gateway compares against `meta('operator_token_hash')` and the
+    at the record: the record compares against `meta('operator_token_hash')` and the
     verb reports a send that did NOT happen."""
     rig.store.write_secret(tokens.owner_for_role(tokens.ROLE_OPERATOR),
                            tokens.OPERATOR_SECRET_ID, "not-the-minted-one")
@@ -78,7 +78,7 @@ def test_a_bad_operator_token_is_refused_by_the_record(rig):
 
     assert code == 5, out
     assert "bad operator token" in out
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 def test_no_operator_credential_on_the_box_is_a_loud_refusal(rig):
@@ -94,7 +94,7 @@ def test_no_operator_credential_on_the_box_is_a_loud_refusal(rig):
     assert "the environment (MOXI_COMMS_SECRET_COMMS_OPERATOR_TOKEN)" in out
     assert "the holder's token store" in out
     assert "ask the operator" in out
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 # ------------------------------------------------------------------ the lane itself
@@ -114,7 +114,7 @@ def test_the_operator_posts_with_the_provisioned_token_and_lands_as_the_operator
     assert reviewer.queue[0]["text"] == "ship it"
     assert reviewer.queue[0]["author"] == {"name": "operator", "tier": "operator",
                                            "attribution": "verified"}
-    posted = rig.gateway.history(rig.names_channel)
+    posted = rig.record.history(rig.names_channel)
     assert [m.author_kind for m in posted] == ["user"]
     assert posted[0].author_id == rig.prov.operator_user_id
     assert f"sent {posted[0].id}" in out
@@ -124,13 +124,13 @@ def test_the_operator_obeys_the_same_cap(rig):
     """The lane shares `_send`'s composition: the cap is a property of a MESSAGE, not of
     the webhook route, so a long operator post is refused the same way an agent's is,
     with nothing posted."""
-    long_text = "x" * (rig.gateway.max_content_length + 500)
+    long_text = "x" * (rig.record.max_content_length + 500)
 
     code, out = rig.cli(["send", "--new-name", "reviewer@proj-a", long_text], env=operator_env())
 
     assert code == 2, out
     assert "-character cap on one message. Nothing was sent." in out
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 def test_an_unstamped_terminal_is_not_the_operator(rig):
@@ -140,4 +140,4 @@ def test_an_unstamped_terminal_is_not_the_operator(rig):
 
     assert code == 2, out
     assert "comms has no identity for this process" in out
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []

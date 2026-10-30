@@ -58,7 +58,7 @@ def test_standing_rows_are_read_per_claim_not_from_a_boot_cache(rig):
 
     conn = directory.connect(directory_db())
     try:
-        add_standing(rig.gateway, conn, "curator", "proj-a")
+        add_standing(rig.record, conn, "curator", "proj-a")
     finally:
         conn.close()
     s = rig.shim(name="curator", scope="proj-a")

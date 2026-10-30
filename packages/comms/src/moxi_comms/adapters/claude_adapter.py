@@ -47,7 +47,7 @@ that gap is not held, and ends the turn.
 **Esc.** turns reports an interrupted turn as `aborted`, so the turn's outcome says
 whether the digest was handled.
 
-**What ends it.** `claude`'s exit, seen on the handle the launcher took before it forked
+**What ends it.** `claude`'s exit, seen on the handle the wrapper took before it forked
 (a pidfd, so a reused pid cannot stand in for it). The adapter closes its binding, which
 deregisters the name, and removes its claim socket and claim file. An adapter that dies
 first leaves the session unbound until it is relaunched.
@@ -469,7 +469,7 @@ def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, ready=None,
 
     `ready()` is called once the bind has been tried (bound, or the daemon not there and
     the supervisor left to bind when it returns) and the claim socket listens, so the
-    launcher can exec `claude`. A register the daemon refused for good (an unknown kind,
+    wrapper can exec `claude`. A register the daemon refused for good (an unknown kind,
     an invalid name) ends the adapter with its one line in the log: the session runs
     without comms, as a dead shim's did."""
     from ..client import DaemonError

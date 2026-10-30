@@ -30,7 +30,7 @@ IDENTITY = "reviewer@proj-a"
 def on_the_mock(monkeypatch):
     """This suite's rig is the mock, and the bare cursors directory is the mock's, so the
     process names the mock rather than fall through to the profile's default."""
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "mock")
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "mock")
 
 
 def ask(identity=IDENTITY, message_id=None) -> dict:
@@ -98,7 +98,7 @@ def test_the_quiet_paths_each_name_themselves_in_the_log(rig, caplog):
 def test_an_unresolvable_backend_names_itself(monkeypatch, caplog):
     import logging
     caplog.set_level(logging.WARNING, logger="comms.cursors")
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "no-such-backend")
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "no-such-backend")
 
     info = cursors.explain(IDENTITY)
     assert info["backend"] is None
@@ -165,7 +165,7 @@ def test_the_write_side_reasons_are_never_answers():
 
 
 def test_explain_reads_and_writes_the_same_path_the_rest_of_the_module_does(monkeypatch):
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "local")
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "local")
     cursors.advance(IDENTITY, "100")
     info = cursors.explain(IDENTITY, "100")
     assert info["backend"] == "local"
@@ -416,11 +416,11 @@ def test_explain_reaches_no_credential_and_writes_nothing(rig):
     is on the far side of it: the daemon and one cursor file, nothing else."""
     reviewer = rig.shim(name="reviewer", scope="proj-a")
     deliver_one(rig, reviewer)
-    before = rig.gateway.history(rig.names_channel)
+    before = rig.record.history(rig.names_channel)
 
     code, _ = rig.cli(["explain", IDENTITY],  name="planner", scope="proj-a")
     assert code == 0
-    assert rig.gateway.history(rig.names_channel) == before
+    assert rig.record.history(rig.names_channel) == before
     assert cursors.read(IDENTITY) is None, "explaining a cursor never moves it"
 
 

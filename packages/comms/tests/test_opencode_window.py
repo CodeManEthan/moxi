@@ -1,5 +1,5 @@
 """`moxi-comms-opencode <identity>` end to end on a pty, as a terminal runs it: the real
-launcher, the rig's daemon, and the stub `opencode` (`tests/fake_opencode.py`) as both
+wrapper, the rig's daemon, and the stub `opencode` (`tests/fake_opencode.py`) as both
 the server and the window. No model, no network."""
 
 from __future__ import annotations
@@ -17,12 +17,12 @@ from conftest import wait_until, write_config
 import fake_opencode
 from moxi_comms.adapters import opencode as oc
 from moxi_comms.adapters import opencode_roster
-from pty_kit import PtyLauncher, alive
+from pty_kit import PtyWrapper, alive
 
 IDENTITY = "coder@proj-a"
 
 
-class OpenCodePty(PtyLauncher):
+class OpenCodePty(PtyWrapper):
     def __init__(self, argv, env):
         import fcntl
         import termios

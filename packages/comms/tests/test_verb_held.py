@@ -23,11 +23,11 @@ T_ASK = 1_760_000_000.5
 
 
 def last(rig):
-    return rig.gateway.history(rig.names_channel)[-1]
+    return rig.record.history(rig.names_channel)[-1]
 
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def answers(rig, monkeypatch, table: dict):

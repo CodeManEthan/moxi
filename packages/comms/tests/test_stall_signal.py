@@ -271,11 +271,11 @@ def test_the_shim_report_goes_to_the_status_sink_and_nowhere_else(rig):
     b.on_turn_boundary()
     wait_until(lambda: rig.daemon.injected_through.get("reviewer@proj-a") == mid)
     before = (dict(rig.daemon.injected_through), dict(rig.daemon.activity),
-              rig.gateway.history(rig.names_channel))
+              rig.record.history(rig.names_channel))
     timers.fire()
     assert len(b.statuses) == 1
     assert (dict(rig.daemon.injected_through), dict(rig.daemon.activity),
-            rig.gateway.history(rig.names_channel)) == before
+            rig.record.history(rig.names_channel)) == before
     assert cursors.read("reviewer@proj-a") is None, "and it moves no cursor"
 
 

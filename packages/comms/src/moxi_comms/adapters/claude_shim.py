@@ -191,7 +191,7 @@ def survive_supervisor_error(adapter, error, delays, logger):
 
 #: The room every name-lane message rides. Rendered ONLY when a message did not come
 #: from it. Compared sigil-stripped because the directory spells the room `#names` and
-#: the wire `names`; the payload carries whatever the gateway's
+#: the wire `names`; the payload carries whatever the record's
 #: `channel_name` returned, and both spellings mean the same room.
 DEFAULT_ROOM = "names"
 
@@ -244,7 +244,7 @@ def frame_line(payload: dict, directors=(), *, suppress_unverified: bool = False
     if standing.note:
         bits.append(standing.note)
     bits.append(f"msg {payload['message_id']}")
-    # `str()` because the daemon falls back to the bare channel_id when the gateway
+    # `str()` because the daemon falls back to the bare channel_id when the record
     # cannot name the channel, and a rendering must never raise over a helpful field.
     # Missing or empty renders no room bit at all, never a dangling `· in `.
     room = str(payload.get("room") or "")
@@ -878,7 +878,7 @@ class ClaudeShim:
         except DaemonError as e:
             if e.response.get("transient"):
                 # The daemon ANSWERED, but with an accident, not a refusal: a boundary
-                # read that 429'd under a restart burst, a broken gateway. Nobody holds
+                # read that 429'd under a restart burst, a broken record. Nobody holds
                 # the name; keep the backoff going. Falling into the ever-bound arm below
                 # would give the name up for good.
                 log.warning("register failed transiently (%s); retrying", e)

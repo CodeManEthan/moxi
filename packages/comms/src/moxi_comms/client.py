@@ -36,7 +36,7 @@ class DaemonTimeout(DaemonError):
     which is an unreachable daemon wearing a different hat: nothing refused anything,
     and there is no holder to name. The shim's tolerate-at-launch path therefore treats
     it as offline (retry) rather than printing a refusal line for a claim nobody
-    contested. Register is the call that made this concrete -- it holds a gateway round
+    contested. Register is the call that made this concrete -- it holds a record round
     trip in production. A post uses `DaemonNoAnswer` instead because, once sent, it may
     have landed even when its answer did not return.
 
@@ -171,7 +171,7 @@ class DaemonClient:
         """`session_id`, `holding`, `projects_root` and `turned` are the claude-shim's:
         which live session is behind the name, the ids it already holds, the root its
         Claude Code writes transcripts under, and whether a prompt or a turn end has been
-        seen in that session (cold-sends). `report` is a codex or opencode launcher's
+        seen in that session (cold-sends). `report` is a codex or opencode wrapper's
         evidence for its cache clock, sent as it stands (`session_id`, `cache_source`,
         `turned`, `new_session`, `agent_model`; `HarnessAdapter.session_report`). A
         daemon older than them reads none, and they are left off when there is nothing

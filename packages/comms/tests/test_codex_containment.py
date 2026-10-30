@@ -90,8 +90,8 @@ def test_a_permission_profile_has_no_sandbox_read_back(tmp_path):
 
 def test_the_mock_backend_adds_the_store_directory(monkeypatch, tmp_path):
     store = tmp_path / "mock" / "store.json"
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "mock")
-    monkeypatch.setenv("MOXI_COMMS_MOCK_GATEWAY", str(store))
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "mock")
+    monkeypatch.setenv("MOXI_COMMS_MOCK_BACKEND", str(store))
     root, reason = record_write_root(env=os.environ, cwd=tmp_path)
     assert root == store.parent
     assert str(store) in reason

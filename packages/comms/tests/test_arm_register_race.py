@@ -35,7 +35,7 @@ from moxi_comms.adapters.codex_roster import CodexAgent
 from moxi_comms.adapters.opencode import OpenCodeAdapter
 from moxi_comms.adapters.opencode_roster import OpenCodeAgent
 from moxi_comms.claimhold import ClaimServer
-from fake_turns import FakeSession, launcher
+from fake_turns import FakeSession, fake_launch
 from fake_opencode import FakeOpenCode
 from test_console_identity import CONSOLE, provision_console
 
@@ -107,7 +107,7 @@ def codex_arm(rig, tmp_path, request):
                        cwd=str(tmp_path), thread_file=codex_threads.path("planner@proj-a"),
                        directors=[])
     return HarnessArm(rig, CodexAdapter(
-        agent, launch=launcher(FakeSession()), autoreconnect=True,
+        agent, launch=fake_launch(FakeSession()), autoreconnect=True,
         backoff=itertools.repeat(FAST), clock=rig.clock))
 
 

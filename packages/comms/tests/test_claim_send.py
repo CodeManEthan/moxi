@@ -28,7 +28,7 @@ def as_claim(s):
 
 
 def last(rig):
-    return rig.gateway.history(rig.names_channel)[-1]
+    return rig.record.history(rig.names_channel)[-1]
 
 
 def test_a_send_inside_the_session_is_stamped_as_the_claim(rig, world):
@@ -81,7 +81,7 @@ def test_offline_with_the_name_unbound_is_refused(rig, world):
     code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "hello"], env=as_claim(s))
     assert code == 4
     assert "is offline" in out and "holds no posting credential" in out
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 def test_offline_refusal_does_not_look_up_another_binding(rig, world, monkeypatch):
@@ -130,7 +130,7 @@ def test_a_dead_adapter_is_refused_while_nobody_holds_the_name(rig, world):
     code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "hello"], env=as_claim(s))
     assert code == 4
     assert "comms adapter is gone" in out and "holds no posting credential" in out
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 def test_a_dead_adapter_with_no_live_file_is_refused(rig, world):
@@ -145,7 +145,7 @@ def test_a_stamp_is_refused_when_a_live_session_holds_its_name(rig, world):
     code, out = rig.cli(["send", "--posture", "none", "nobody", "hello"], name="planner", scope="proj-a",
                         stamp_only=True)
     assert code == 2 and "not inside the session that holds planner@proj-a" in out
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 def test_a_stamp_is_refused_while_a_waiting_launch_names_it(rig, world):
@@ -169,7 +169,7 @@ def test_a_stamp_no_live_session_names_is_refused_too(rig):
         "this process has no comms claim socket, so it sends under no identity — nothing "
         "was sent. Its launch stamp names planner@proj-a, but a stamp is not a live session "
         "holding a name: a session sends as its identity through its own claim socket.")
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 def test_the_operators_lane_is_refused_inside_a_session(rig, world):
@@ -335,7 +335,7 @@ def test_a_refused_unchanged_token_fails_without_a_retry(rig, world, monkeypatch
     code, out = rig.cli(["send", "--posture", "none", "reviewer", "hello"],
                         env=as_claim(planner))
     assert code == 5 and "refused this session's posting credential" in out
-    assert len(calls) == 1 and rig.gateway.history(rig.names_channel) == []
+    assert len(calls) == 1 and rig.record.history(rig.names_channel) == []
 
 
 @pytest.mark.parametrize(
@@ -368,7 +368,7 @@ def test_a_credential_refusal_rereads_the_changed_claim_state(
                         env=as_claim(planner))
     assert code == exit_code and phrase in out
     assert len(calls) == 1
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 @pytest.mark.parametrize(
@@ -388,4 +388,4 @@ def test_post_transport_failures_say_whether_it_may_have_landed(
     code, out = rig.cli(["send", "--posture", "none", "reviewer", "hello"],
                         env=as_claim(planner))
     assert code == (4 if isinstance(error, DaemonOffline) else 5)
-    assert phrase in out and rig.gateway.history(rig.names_channel) == []
+    assert phrase in out and rig.record.history(rig.names_channel) == []
