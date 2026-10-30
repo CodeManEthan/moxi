@@ -2,9 +2,9 @@
 """Smoke the Codex delivery path through turns' real host.
 
 ``--dry-run`` uses the repository's fake ``codex`` executable. It starts a real comms
-daemon and wrapper, lets turns spawn and verify the fake app-server, sends two deliveries
-through turns' public API, checks steer-first delivery, completes the turn through the
-fake's control socket, and checks settlement. Then it sends mail with ``moxi comms send``
+daemon and wrapper, lets turns spawn and verify the fake app-server, steers two texts
+into the open turn through turns' public API, completes the turn through the fake's
+control socket, and checks settlement. Then it sends mail with ``moxi comms send``
 from a sender's session, which goes through the daemon and the wrapper into the thread,
 checks that the turn's end advances the cursor, and checks child cleanup.
 
@@ -295,19 +295,22 @@ def dry_run() -> int:
         session = wait_until(lambda: next((item for item in turns.sessions()
                                            if item.harness == "codex"), None), 20)
         check(session is not None, "turns published the hosted session through its API")
-        first = session.deliver("codex smoke first", steer=True)
+        first = session.steer("codex smoke first", ref="smoke-first")
         first_started = first.wait_started(20)
-        second = session.deliver("codex smoke steer", steer=True)
+        second = session.steer("codex smoke steer", ref="smoke-steer")
         second_started = second.wait_started(20)
         check(bool(wait_until(lambda: fake_codex.calls(records, "turn/steer"), 20)),
-              "the deliveries used Codex's steer path into the open priming turn")
-        check(first_started.turn_id == second_started.turn_id,
-              "both deliveries belong to the same live turn")
+              "the steers used Codex's steer path into the open priming turn")
+        check(isinstance(first_started, turns.Started)
+              and isinstance(second_started, turns.Started)
+              and first_started.turn_id == second_started.turn_id,
+              "both steers belong to the same live turn")
         fake_codex.control_call(records, {"op": "complete"})
         first_ended = first.wait_ended(20)
         second_ended = second.wait_ended(20)
-        check(first_ended.outcome == second_ended.outcome == "answer",
-              "one Stop settled both deliveries as answered")
+        check(isinstance(first_ended, turns.Ended) and isinstance(second_ended, turns.Ended)
+              and first_ended.outcome == second_ended.outcome == "answer",
+              "one Stop settled both steers as answered")
         check(bool(thread_id_of(IDENTITY)),
               "the wrapper recorded the hosted thread id")
 
@@ -375,11 +378,13 @@ def live_run(binary: str) -> int:
         session = wait_until(lambda: next((item for item in turns.sessions()
                                            if item.harness == "codex"), None), 60)
         delivery = session.deliver("Reply with a short acknowledgement, then stop.",
-                                   steer=True)
+                                   ref="smoke-live")
         started = delivery.wait_started(60)
         ended = delivery.wait_ended(300)
-        check(bool(started.turn_id) and ended.outcome == "answer",
-              f"the real Codex turn {started.turn_id} completed and settled")
+        check(isinstance(started, turns.Started) and bool(started.turn_id)
+              and isinstance(ended, turns.Ended) and ended.outcome == "answer",
+              f"the real Codex turn {getattr(started, 'turn_id', started)} completed "
+              "and settled")
         return report()
     finally:
         stop(adapter)
