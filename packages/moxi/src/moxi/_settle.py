@@ -1,7 +1,8 @@
 """The settle step and the teardown, each in a child process of `moxi install` or
 `moxi uninstall`, and how the parent starts and waits for that child.
 
-    python -m moxi._settle MODULE [--replace]      the settle step of one module
+    python -m moxi._settle MODULE [--replace] [--skills | --no-skills]
+                                                   the settle step of one module
     python -m moxi._settle --teardown MODULE       a module's TEARDOWN
 
 The parent holds the core lock for the whole install (`moxi.files.lock(core_lock())`)
@@ -27,8 +28,18 @@ failed stop or rename, a failed `SETUP`, a plan that refuses or keeps the unit, 
 interrupt. A start the supervisor refuses is printed with the command that starts it by
 hand, left as a doctor record, and the install exits 1. That record clears when a later
 start of the unit succeeds, or when a later settle step ends clean and the unit then runs
-or was removed or disabled by that step; a clean step with the unit still down keeps it. Skills, install questions and the
-`moxi.installs` listeners come after the `finally` (`_later_steps`).
+or was removed or disabled by that step; a clean step with the unit still down keeps it.
+
+Skills, install questions and the `moxi.installs` listeners come after the `finally`
+(`_later_steps`), in that order, so a listener sees the run's units and placements. They
+run unless the move refused (other than for an old directory that is a link to a
+relative path), `SETUP` failed, or steps 1 to 3 raised; a unit the plan refused, or a
+start the `finally` couldn't make, leaves them to run and the step exits 1. Each install
+question (`QUESTIONS`) is asked once per module and recorded in `questions.json`
+(`moxi._questions`): a key the config file already sets is recorded without a question
+or a write, and with nobody at the keyboard a key is set off with the line that turns it
+on. Every listener's `on_install(module, found)` is called, the module's own included; one
+that fails is printed, the rest still run, and the step exits 1.
 
 Signals. The child takes SIGINT, SIGTERM, SIGHUP and SIGQUIT (on Windows SIGINT for
 Ctrl-C, and SIGBREAK, which Python raises for Ctrl-Break and for a console close) as one
@@ -36,7 +47,7 @@ request to stop. A signal that was ignored when the process started stays ignore
 `nohup` install survives its terminal. The handlers are Python handlers, never `SIG_IGN`,
 so a program the child starts gets default dispositions. In the steps, a signal raises
 `Interrupted` at once, except inside the core's own writes (the move, a timer switch with
-its entry, `apply`), which are marked `held()`: there it only sets the request, and the
+its entry, `apply`, a question's setting with its record), which are marked `held()`: there it only sets the request, and the
 write finishes before the request is obeyed. In the `finally` it only sets the request,
 so `resume` and its reports always run. Then the child prints how many units it started
 again and exits 130, the pair's private "interrupted" code. Once the step or the teardown
@@ -231,12 +242,17 @@ class Outcome:
 
 
 def child_argv(python: str, module: str, *, replace: bool = False,
-               teardown: bool = False) -> list[str]:
-    """The settle child's command line (or the teardown child's)."""
+               teardown: bool = False, skills: bool | None = None) -> list[str]:
+    """The settle child's command line (or the teardown child's). `skills` is the
+    install's answer ahead to the skills question: True for `--skills`, False for
+    `--no-skills`, None to ask."""
     argv = [str(python), "-m", "moxi._settle"]
     if teardown:
         return [*argv, "--teardown", module]
-    return [*argv, module] + (["--replace"] if replace else [])
+    argv += [module] + (["--replace"] if replace else [])
+    if skills is not None:
+        argv.append("--skills" if skills else "--no-skills")
+    return argv
 
 
 def run_child(argv: list[str], *, env: dict[str, str] | None = None) -> Outcome:
@@ -389,6 +405,13 @@ class Settle:
     #: The move refused in a way that leaves the rest of the step to run (an old
     #: directory that is a link to a relative path): the step goes on, and exits 1.
     moved: bool = True
+    #: The install's answer ahead to the skills question (`--skills` True,
+    #: `--no-skills` False), or None to ask.
+    skills: bool | None = None
+    #: Whether steps 4 to 6 run after the `finally`: not after a move that refused
+    #: (other than the relative link above), a failed `SETUP`, or an exception in steps 1
+    #: to 3.
+    later: bool = True
 
     @property
     def restart(self) -> bool:
@@ -396,7 +419,7 @@ class Settle:
         return self.found.version != self.before
 
 
-def settle(module: str, *, replace: bool = False) -> int:
+def settle(module: str, *, replace: bool = False, skills: bool | None = None) -> int:
     """Run `module`'s settle step in this process; returns the exit code: 0, 1 on a
     failure, `INTERRUPTED` on a stop request."""
     from . import modules
@@ -406,7 +429,7 @@ def settle(module: str, *, replace: bool = False) -> int:
         say(f"{module}: not set up, the module is {found.state}"
             + (f": {found.reason}" if found.reason else ""), err=True)
         return 1
-    step = Settle(module, found, replace, setup_version(module))
+    step = Settle(module, found, replace, setup_version(module), skills=skills)
     try:
         try:
             try:
@@ -416,9 +439,11 @@ def settle(module: str, *, replace: bool = False) -> int:
             except Exception as exc:
                 _state.raising = False
                 step.failed = True
+                step.later = False
                 say(f"{module}: the settle step failed: {_one_line(exc)}", err=True)
         except Interrupted:  # a signal in an except clause above
             step.failed = True
+            step.later = False
     finally:
         # A plain store first: the handler is called only between bytecodes that check
         # for it, and none does before this one, so nothing can raise from here on.
@@ -430,9 +455,12 @@ def settle(module: str, *, replace: bool = False) -> int:
         say(f"{module}: interrupted; started again {started} of the {len(step.record)} "
             f"units the move stopped", err=True)
         return INTERRUPTED
-    if step.failed or problems or not step.moved:
-        return 1
-    code = _later_steps(step)
+    code = 1 if step.failed or problems or not step.moved else 0
+    if step.later:
+        later = _later_steps(step)
+        if later == INTERRUPTED:
+            return INTERRUPTED
+        code = code or later
     if code == 0:
         _clear_resume_records(step)
     return code
@@ -442,7 +470,10 @@ def _steps(step: Settle) -> bool:
     """Steps 1 to 3; True when each went through. Sets the steps flag first and clears
     it as its last act."""
     _state.raising = True
-    ok = _move(step) and _setup(step) and _units(step)
+    ok = _move(step) and _setup(step)
+    if not ok:
+        step.later = False
+    ok = ok and _units(step)
     _state.raising = False
     _after_steps()
     return ok
@@ -783,9 +814,153 @@ def _running_ids(module: str) -> set[str]:
 
 
 def _later_steps(step: Settle) -> int:
-    """Steps 4 to 6 (skills, install questions, the `moxi.installs` listeners), which
-    run after the `finally`; 0 until they are built."""
-    return 0
+    """Steps 4 to 6, after the `finally`: skills, install questions, then every
+    `moxi.installs` listener. Each runs even when an earlier one failed. Returns 0, 1
+    when one failed, or `INTERRUPTED`: a signal here raises at once outside a held span,
+    as in steps 1 to 3, and there is no stopped unit left to start again."""
+    module = step.module
+    try:
+        try:
+            _state.raising = True
+            ok = _skills(step)
+            ok = _ask_questions(step) and ok
+            ok = _listeners(step) and ok
+        finally:
+            _state.raising = False
+    except Interrupted:
+        say(f"{module}: interrupted; no later step ran", err=True)
+        return INTERRUPTED
+    except Exception as exc:
+        say(f"{module}: the settle step failed: {_one_line(exc)}", err=True)
+        return 1
+    if _state.request is not None:
+        say(f"{module}: interrupted; no later step ran", err=True)
+        return INTERRUPTED
+    return 0 if ok else 1
+
+
+def _skills(step: Settle) -> bool:
+    """Step 4: the module's skills, placed for each harness in `skills.harnesses`.
+
+    Placing is the placer's (`moxi.place`), which this step doesn't call yet: it places
+    nothing and returns True. When it does, it plans with the module as owner, asks
+    `skills_wanted` only when the ledger holds none of the module's placements, applies
+    in a held span, and returns False when a placement failed."""
+    return True
+
+
+def skills_wanted(step: Settle, skills: list[str], harnesses: list[str]) -> bool:
+    """Whether to place the module's skills `skills` for `harnesses`, asked when the
+    ledger holds none of its placements. `--skills` or `--no-skills` answers ahead; at
+    a terminal the question is asked, default no; with nobody at the keyboard the answer
+    is no, and one line says how to place them later. The install never waits here."""
+    module = step.module
+    if step.skills is not None:
+        return step.skills
+    stdin = sys.stdin
+    on = False
+    if stdin is not None and stdin.isatty():
+        count = f"{len(skills)} skill" + ("" if len(skills) == 1 else "s")
+        on = _ask(f"{module} ships {count} ({', '.join(skills)}). Place them for "
+                  f"{_and(harnesses)}? [y/N] ")
+    if not on:
+        say(f"{module}: skills not placed; place them with: moxi install {module} "
+            f"--skills")
+    return on
+
+
+def _and(items: list[str]) -> str:
+    """`a`, `a and b`, `a, b and c`."""
+    items = list(items)
+    if len(items) <= 1:
+        return "".join(items)
+    return f"{', '.join(items[:-1])} and {items[-1]}"
+
+
+def _ask_questions(step: Settle) -> bool:
+    """Step 5: the module's install questions (`QUESTIONS`), in the order declared.
+
+    A key that isn't switch-shaped (a bool read at use, no `env`, default false; or a
+    switch table's entry) is not asked: one line says why, and the step exits 1. A key
+    recorded for the module is not asked again. A key the config file already sets is
+    recorded without a question or a write. Otherwise, at a terminal it is asked,
+    default no; with nobody at the keyboard it is no. The answer is set with
+    `moxi.config.set` and then recorded, both in one held span; an answer of no prints
+    the line that turns the key on."""
+    from . import _questions, config
+    from .units import switch_problem
+
+    module, found = step.module, step.found
+    if not found.questions:
+        return True
+    try:
+        schema = config.schema_for(found)
+    except config.ConfigError as exc:
+        say(f"{module}: install questions not asked: {_one_line(exc)}", err=True)
+        return False
+    done = _questions.recorded(module)
+    ok = True
+    for key, text in found.questions.items():
+        problem = switch_problem(schema, key)
+        if problem is not None:
+            say(f"{module}: install question {key} not asked: {problem}", err=True)
+            ok = False
+            continue
+        if key in done:
+            continue
+        try:
+            already = config.load(module, schema).source(key) == "file"
+        except config.ConfigError as exc:
+            say(f"{module}: install question {key} not asked: {exc}", err=True)
+            ok = False
+            continue
+        if already:
+            with held():
+                _questions.record(module, key)
+            continue
+        on = _ask(f"{module}: {text}? [y/N] ")
+        try:
+            with held():
+                config.set(module, key, on, by="moxi install")
+                _questions.record(module, key)
+        except config.ConfigError as exc:
+            say(f"{module}: install question {key} not set: {exc}", err=True)
+            ok = False
+            continue
+        if not on:
+            say(f"{module}: {text} is off; turn it on with: moxi config set {module} "
+                f"{key} true")
+    return ok
+
+
+#: The entry-point group of the install listeners.
+INSTALLS = "moxi.installs"
+
+
+def _listeners(step: Settle) -> bool:
+    """Step 6: every `moxi.installs` listener's `on_install(module, found)`, the
+    module's own included, in the group's order. One that fails (it can't be loaded,
+    lacks `on_install`, or raises) is printed and the rest still run; the step then
+    exits 1. The stop request is checked as each returns."""
+    from . import modules
+
+    module, ok = step.module, True
+    for ext in modules.extensions(INSTALLS):
+        try:
+            fn = getattr(ext.load(), "on_install")
+            fn(module, step.found)
+        except Interrupted:
+            raise
+        except (Exception, SystemExit) as exc:
+            check()
+            reason = (exc.reason if isinstance(exc, modules.ExtensionError)
+                      else _one_line(exc))
+            say(f"{module}: the moxi.installs listener {ext.name} failed: {reason}",
+                err=True)
+            ok = False
+            continue
+        check()
+    return ok
 
 
 # -- the teardown ----------------------------------------------------------------------------
@@ -864,6 +1039,9 @@ def _parse(argv: list[str]):
     parser.add_argument("module")
     parser.add_argument("--replace", action="store_true")
     parser.add_argument("--teardown", action="store_true")
+    answer = parser.add_mutually_exclusive_group()
+    answer.add_argument("--skills", dest="skills", action="store_true", default=None)
+    answer.add_argument("--no-skills", dest="skills", action="store_false")
     return parser.parse_args(argv)
 
 
@@ -885,7 +1063,7 @@ def main(argv: list[str] | None = None,
     try:
         if args.teardown:
             return teardown(args.module)
-        return settle(args.module, replace=args.replace)
+        return settle(args.module, replace=args.replace, skills=args.skills)
     finally:
         _ignore_signals()
 

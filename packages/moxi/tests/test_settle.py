@@ -4,6 +4,7 @@ those."""
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import signal
@@ -15,6 +16,7 @@ from pathlib import Path
 import pytest
 
 import moxi.paths
+from conftest import drop_modules
 from moxi import _settle, config, doctor, files, home, units
 from moxi.units import _backend, _declare, _plan, _state
 from moxi.units._fake import FakeBackend, FakeSupervisor
@@ -1037,3 +1039,449 @@ def test_teardown_codes(w, capsys, monkeypatch):
         monkeypatch.setenv("MOXITEST_DOWN", how)
         assert _settle.teardown("demo") == code
     assert "demo: its store holds unsent mail" in capsys.readouterr().err
+
+
+# -- steps 4 to 6: skills, install questions, listeners ---------------------------------------
+
+QSETTINGS = SETTINGS + """
+[guard.push]
+type = "bool"
+default = false
+doc = "Guard pushes."
+read = "use"
+
+[guard.force]
+type = "bool"
+default = false
+doc = "Guard force pushes."
+read = "use"
+
+[guards]
+type = "table"
+items = "bool"
+default = {}
+doc = "Guards by name."
+read = "use"
+
+[count]
+type = "int"
+default = 0
+doc = "A number."
+read = "use"
+
+[loud]
+type = "bool"
+default = true
+doc = "On by default."
+read = "use"
+
+[envy]
+type = "bool"
+default = false
+doc = "Read from the environment too."
+read = "use"
+env = "MOXI_DEMO_ENVY"
+"""
+
+LISTENER = """
+import json, os
+
+def _note(event, module, extra=None):
+    with open(os.environ["MOXITEST_HEARD"], "a") as fh:
+        fh.write(json.dumps({"who": WHO, "event": event, "module": module,
+                             **(extra or {})}) + "\\n")
+
+def on_install(module, found):
+    from moxi import _questions
+    how = os.environ.get("MOXITEST_LISTEN_" + WHO, "ok")
+    seen = {"found": found.name, "questions": sorted(_questions.recorded(module))}
+    _note("install", module, seen)
+    if how == "fail":
+        raise RuntimeError("no route")
+    if how == "exit":
+        raise SystemExit(2)
+    if how == "signal":
+        import signal
+        os.kill(os.getpid(), signal.SIGTERM)
+    if how == "catch":
+        import signal
+        from moxi._settle import Interrupted
+        try:
+            os.kill(os.getpid(), signal.SIGTERM)
+        except Interrupted:
+            _note("caught", module)
+
+def on_uninstall(module):
+    _note("uninstall", module)
+"""
+
+
+def qmodule(w, questions: dict, **names):
+    """Module `demo` declaring `questions`, with switch-shaped keys and some that aren't."""
+    w.module(QUESTIONS=repr(questions), **names)
+    w.site.write("moxi_demo/settings.toml", QSETTINGS)
+
+
+def listen(w, *, own=True, other=False):
+    """`moxi.installs` listeners: module demo's own, and one of another module, ears."""
+    if own:
+        w.site.write("moxi_demo/installs.py", "WHO = 'demo'\n" + LISTENER)
+        info = next(w.site.root.glob("moxi_demo-*.dist-info"))
+        (info / "entry_points.txt").write_text(
+            "[moxi.modules]\ndemo = moxi_demo.module\n"
+            "[moxi.installs]\ndemo = moxi_demo.installs\n")
+    if other:
+        w.site.write("moxi_ears/__init__.py", "")
+        w.site.write("moxi_ears/installs.py", "WHO = 'ears'\n" + LISTENER)
+        w.site.write("moxi_ears-0.1.0.dist-info/METADATA",
+                     "Metadata-Version: 2.1\nName: moxi-ears\nVersion: 0.1.0\n")
+        w.site.write("moxi_ears-0.1.0.dist-info/entry_points.txt",
+                     "[moxi.installs]\nears = moxi_ears.installs\n")
+    moxi.modules.reset()
+
+
+def heard(w) -> list[dict]:
+    path = w.tmp / "heard.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+@pytest.fixture
+def ear(w, monkeypatch):
+    monkeypatch.setenv("MOXITEST_HEARD", str(w.tmp / "heard.jsonl"))
+    return w
+
+
+class Tty:
+    def isatty(self):
+        return True
+
+
+def at_terminal(monkeypatch, *answers):
+    """Standard input a terminal, answering each question in turn; returns the questions
+    asked."""
+    asked: list[str] = []
+    left = list(answers)
+    monkeypatch.setattr(sys, "stdin", Tty())
+    monkeypatch.setattr("builtins.input", lambda q: asked.append(q) or left.pop(0))
+    return asked
+
+
+def config_text() -> str:
+    path = moxi.paths.Layout("demo").config_file()
+    return path.read_text() if path.exists() else ""
+
+
+def value(key: str):
+    """Key `key` of module demo as `moxi.config` reads it, and whether the file sets it."""
+    settings = config.load("demo", config.schema_for(moxi.modules.load("demo")))
+    return settings[key], settings.source(key)
+
+
+def recorded_questions() -> dict:
+    from moxi import _questions
+
+    return _questions.read()
+
+
+def test_a_question_is_asked_once_with_default_no(w, capsys, monkeypatch):
+    qmodule(w, {"guard.push": "Guard pushes to main"})
+    asked = at_terminal(monkeypatch, "")
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert asked == ["demo: Guard pushes to main? [y/N] "]
+    assert value("guard.push") == (False, "file")
+    assert ("demo: Guard pushes to main is off; turn it on with: moxi config set demo "
+            "guard.push true") in out
+    assert set(recorded_questions()["demo"]) == {"guard.push"}
+    assert config.history("demo", "guard.push")[-1]["by"] == "moxi install"
+    asked.clear()
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0 and asked == [] and "guard.push" not in out
+
+
+def test_a_yes_sets_the_key_true(w, capsys, monkeypatch):
+    qmodule(w, {"guard.push": "Guard pushes to main"})
+    at_terminal(monkeypatch, "y")
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert value("guard.push") == (True, "file")
+    assert "is off" not in out
+    assert set(recorded_questions()["demo"]) == {"guard.push"}
+
+
+def test_nobody_at_the_keyboard_sets_the_key_off_with_its_line(w, capsys, monkeypatch):
+    qmodule(w, {"guard.push": "Guard pushes to main"})
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert value("guard.push") == (False, "file")
+    assert ("demo: Guard pushes to main is off; turn it on with: moxi config set demo "
+            "guard.push true") in out
+    assert set(recorded_questions()["demo"]) == {"guard.push"}
+
+
+def test_an_upgrade_asks_only_the_key_it_adds_and_never_resets_one(w, capsys, monkeypatch):
+    qmodule(w, {"guard.push": "Guard pushes to main"})
+    at_terminal(monkeypatch, "n")
+    settle(w, capsys, monkeypatch)
+    config.set("demo", "guard.push", True, by="test")        # the user turns it on later
+    qmodule(w, {"guard.push": "Guard pushes to main",
+                "guard.force": "Guard force pushes"}, version="0.2.0")
+    asked = at_terminal(monkeypatch, "y")
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert asked == ["demo: Guard force pushes? [y/N] "]
+    assert value("guard.push") == (True, "file")
+    assert value("guard.force") == (True, "file")
+    assert set(recorded_questions()["demo"]) == {"guard.push", "guard.force"}
+
+
+def test_a_key_the_config_file_already_sets_is_recorded_without_a_question_or_write(
+        w, capsys, monkeypatch):
+    qmodule(w, {"guard.push": "Guard pushes to main"})
+    config.set("demo", "guard.push", True, by="test")
+    before = config_text()
+    lines = len(config.history("demo"))
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert config_text() == before and len(config.history("demo")) == lines
+    assert "guard.push" not in out
+    assert set(recorded_questions()["demo"]) == {"guard.push"}
+
+
+def test_a_crash_between_the_setting_and_its_record_keeps_the_answer_written(
+        w, capsys, monkeypatch):
+    """The setting is written first: an install cut short before the record leaves the
+    answer in the file, and the next install records it without asking again."""
+    from moxi import _questions
+
+    qmodule(w, {"guard.push": "Guard pushes to main"})
+    at_terminal(monkeypatch, "y")
+    real = _questions.record
+    monkeypatch.setattr(_questions, "record",
+                        lambda m, k: (_ for _ in ()).throw(OSError("disk full")))
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 1 and "disk full" in out
+    assert value("guard.push") == (True, "file") and recorded_questions() == {}
+    monkeypatch.setattr(_questions, "record", real)
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert value("guard.push") == (True, "file")
+    assert set(recorded_questions()["demo"]) == {"guard.push"}
+
+
+@pytest.mark.parametrize("key, why", [
+    ("count", "switch count must be a bool setting read at use, with no env and default "
+              "false"),
+    ("loud", "switch loud must be a bool setting read at use"),
+    ("envy", "switch envy must be a bool setting read at use"),
+    ("nothere", "switch nothere is not a setting the module declares"),
+])
+def test_a_key_that_is_not_switch_shaped_is_not_asked_and_exits_1(
+        w, capsys, monkeypatch, key, why):
+    qmodule(w, {key: "A question", "guard.push": "Guard pushes to main"})
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 1
+    assert f"demo: install question {key} not asked: {why}" in out
+    assert key not in recorded_questions().get("demo", {})
+    # The good key is still asked (off, with nobody at the keyboard) and recorded.
+    assert set(recorded_questions()["demo"]) == {"guard.push"}
+
+
+def test_a_switch_table_entry_is_asked_as_a_plain_key_is(w, capsys, monkeypatch):
+    qmodule(w, {"guards.push": "Guard pushes to main"})
+    asked = at_terminal(monkeypatch, "yes")
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert asked == ["demo: Guard pushes to main? [y/N] "]
+    settings = config.load("demo", config.schema_for(moxi.modules.load("demo")))
+    assert settings["guards.push"] is True
+    assert set(recorded_questions()["demo"]) == {"guards.push"}
+
+
+def test_a_switch_table_entry_already_in_the_file_is_recorded_without_a_question(
+        w, capsys, monkeypatch):
+    qmodule(w, {"guards.push": "Guard pushes to main"})
+    config.set("demo", "guards.push", False, by="test")
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert set(recorded_questions()["demo"]) == {"guards.push"}
+
+
+def test_ctrl_c_at_a_question_writes_neither_setting_nor_record(w, capsys, monkeypatch):
+    qmodule(w, {"guard.push": "Guard pushes to main"})
+    _settle.install_handlers()
+
+    def ctrl_c(question):
+        os.kill(os.getpid(), signal.SIGINT)
+        return "y"
+    monkeypatch.setattr(sys, "stdin", Tty())
+    monkeypatch.setattr("builtins.input", ctrl_c)
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == _settle.INTERRUPTED
+    assert "demo: interrupted; no later step ran" in out
+    assert value("guard.push") == (False, "default") and recorded_questions() == {}
+
+
+def test_a_question_s_setting_and_record_are_one_held_span(w, capsys, monkeypatch):
+    """A signal while the answer is written lets the record follow it, then stops."""
+    from moxi import _questions
+
+    qmodule(w, {"guard.push": "Guard pushes to main",
+                "guard.force": "Guard force pushes"})
+    _settle.install_handlers()
+    real = config.set
+
+    def set_then_signal(*a, **k):
+        done = real(*a, **k)
+        os.kill(os.getpid(), signal.SIGTERM)
+        return done
+    monkeypatch.setattr(config, "set", set_then_signal)
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == _settle.INTERRUPTED
+    assert set(_questions.recorded("demo")) == {"guard.push"}   # the second never asked
+    assert value("guard.force") == (False, "default")
+
+
+# -- the listeners ----------------------------------------------------------------------------
+
+def test_every_listener_hears_the_install_last_its_own_module_s_included(
+        ear, capsys, monkeypatch):
+    qmodule(ear, {"guard.push": "Guard pushes to main"}, DAEMONS=ONE)
+    config.set("demo", "relay.enabled", True, by="test")
+    listen(ear, other=True)
+    code, out = settle(ear, capsys, monkeypatch)
+    assert code == 0, out
+    events = [e for e in heard(ear) if e["event"] == "install"]
+    assert [(e["who"], e["module"]) for e in events] == [("demo", "demo"), ("ears", "demo")]
+    # Each ran after the units and the questions: the unit file is written and the
+    # question recorded by the time it was called.
+    assert all(e["questions"] == ["guard.push"] and e["found"] == "demo" for e in events)
+    assert (ear.root / SERVICE).exists()
+
+
+def test_a_failing_listener_is_printed_the_rest_run_and_the_step_exits_1(
+        ear, capsys, monkeypatch):
+    ear.module()
+    listen(ear, other=True)
+    for how in ("fail", "exit"):
+        monkeypatch.setenv("MOXITEST_LISTEN_demo", how)
+        code, out = settle(ear, capsys, monkeypatch)
+        assert code == 1, out
+        why = "RuntimeError: no route" if how == "fail" else "SystemExit: 2"
+        assert f"demo: the moxi.installs listener demo failed: {why}" in out
+        assert [e["who"] for e in heard(ear) if e["event"] == "install"][-1] == "ears"
+
+
+def test_a_listener_without_on_install_or_that_cannot_load_fails_the_step(
+        ear, capsys, monkeypatch):
+    ear.module()
+    listen(ear, other=True)
+    ear.site.write("moxi_ears/installs.py", "def on_uninstall(module):\n    pass\n")
+    code, out = settle(ear, capsys, monkeypatch)
+    assert code == 1
+    assert "the moxi.installs listener ears failed: AttributeError" in out
+    ear.site.write("moxi_ears/installs.py", "import no_such_module_here\n")
+    drop_modules({"moxi_ears"})
+    code, out = settle(ear, capsys, monkeypatch)
+    assert code == 1
+    assert "the moxi.installs listener ears failed: loading moxi_ears.installs" in out
+
+
+@pytest.mark.parametrize("how", ["signal", "catch"])
+def test_a_signal_in_a_listener_stops_the_step_before_the_next(ear, capsys, monkeypatch,
+                                                               how):
+    ear.module()
+    listen(ear, other=True)
+    monkeypatch.setenv("MOXITEST_LISTEN_demo", how)
+    _settle.install_handlers()
+    code, out = settle(ear, capsys, monkeypatch)
+    assert code == _settle.INTERRUPTED
+    assert "demo: interrupted; no later step ran" in out
+    assert [e["who"] for e in heard(ear)] == (["demo"] if how == "signal"
+                                              else ["demo", "demo"])
+
+
+@pytest.mark.parametrize("path", ["setup", "refusal", "raised"])
+def test_after_a_failed_setup_a_refused_move_or_an_exception_no_later_step_runs(
+        ear, capsys, monkeypatch, path):
+    qmodule(ear, {"guard.push": "Guard pushes to main"}, DAEMONS=ONE)
+    listen(ear)
+    if path == "refusal":
+        ear.legacy()
+        (ear.home / "state" / "demo").mkdir()
+        (ear.home / "state" / "demo" / "x").write_text("x")
+    if path == "raised":
+        monkeypatch.setattr(units, "plan", lambda *a, **k: (_ for _ in ()).throw(
+            KeyError("boom")))
+    code, out = settle(ear, capsys, monkeypatch, setup="fail" if path == "setup" else "ok")
+    assert code == 1, out
+    assert heard(ear) == [] and recorded_questions() == {}
+
+
+@pytest.mark.parametrize("path", ["unit", "link"])
+def test_a_refused_unit_or_a_relative_legacy_link_still_runs_the_later_steps(
+        ear, capsys, monkeypatch, path):
+    if path == "link" and sys.platform == "win32":
+        pytest.skip("symbolic links need a privilege on Windows")
+    if path == "unit":
+        (moxi.paths._scripts() / "moxi-demo-relay").unlink()   # the plan refuses it
+        qmodule(ear, {"guard.push": "Guard pushes to main"}, DAEMONS=ONE)
+    else:
+        ear.installed(DAEMONS=ONE)
+        linked_legacy(ear, relative=True)
+        qmodule(ear, {"guard.push": "Guard pushes to main"}, DAEMONS=ONE)
+    listen(ear)
+    code, out = settle(ear, capsys, monkeypatch)
+    assert code == 1, out
+    assert [e["who"] for e in heard(ear)] == ["demo"]
+    assert set(recorded_questions()["demo"]) == {"guard.push"}
+
+
+# -- the skills question and its flags --------------------------------------------------------
+
+def test_the_skills_answer_is_passed_to_the_child_and_parsed_there():
+    assert _settle.child_argv("py", "comms", skills=True)[-1] == "--skills"
+    assert _settle.child_argv("py", "comms", replace=True, skills=False)[-2:] == [
+        "--replace", "--no-skills"]
+    assert _settle.child_argv("py", "comms")[-1] == "comms"
+    assert _settle._parse(["comms", "--skills"]).skills is True
+    assert _settle._parse(["comms", "--no-skills"]).skills is False
+    assert _settle._parse(["comms"]).skills is None
+    with pytest.raises(SystemExit):
+        _settle._parse(["comms", "--skills", "--no-skills"])
+
+
+def _step(skills=None):
+    return _settle.Settle("comms", None, skills=skills)
+
+
+def test_the_skills_question_is_answered_ahead_by_a_flag(capsys, monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    monkeypatch.setattr(sys, "stdin", Tty())
+    assert _settle.skills_wanted(_step(True), ["comms-send"], ["claude"]) is True
+    assert _settle.skills_wanted(_step(False), ["comms-send"], ["claude"]) is False
+    assert capsys.readouterr().out == ""
+
+
+def test_the_skills_question_at_a_terminal_and_with_nobody_there(capsys, monkeypatch):
+    asked = at_terminal(monkeypatch, "y", "")
+    skills = ["comms-send", "comms-read"]
+    assert _settle.skills_wanted(_step(), skills, ["claude", "codex"]) is True
+    assert _settle.skills_wanted(_step(), ["comms-send"], ["claude", "codex", "pi"]) is False
+    assert asked == [
+        "comms ships 2 skills (comms-send, comms-read). Place them for claude and codex? "
+        "[y/N] ",
+        "comms ships 1 skill (comms-send). Place them for claude, codex and pi? [y/N] "]
+    line = "comms: skills not placed; place them with: moxi install comms --skills"
+    assert capsys.readouterr().out.count(line) == 1
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    assert _settle.skills_wanted(_step(), skills, ["claude"]) is False
+    assert line in capsys.readouterr().out
