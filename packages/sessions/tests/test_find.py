@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from pathlib import Path
 
 import pytest
 from conftest import write_config
@@ -546,6 +547,18 @@ def test_codex_a_nested_spawn_is_listed_by_the_thread_that_spawned_it(rollouts):
     assert (entry.description, entry.tool_use_id, entry.spawn_depth,
             entry.parent_agent_id) == ("/root/explore/look", "call_spawn_g", 2, CHILD)
     assert subagents(nested.entries[0]).state == NONE
+
+
+def test_the_docs_say_how_deep_each_harness_listing_goes():
+    """Claude Code lists every agent of a session; Codex, like OpenCode, lists direct
+    children only, and the README and `subagents()` both say so, with how to reach a
+    nested spawn. Each harness's nested-spawn test pins the behaviour."""
+    readme = (Path(__file__).parents[1] / "README.md").read_text()
+    for text in (readme, subagents.__doc__):
+        text = " ".join(text.split())
+        assert "every agent of the session" in text
+        assert "A Codex listing, like OpenCode's, holds the direct children only" in text
+        assert "a nested spawn is listed by calling `subagents()` on the child's entry" in text
 
 
 def test_codex_a_child_named_but_missing_is_named_not_dropped(rollouts):

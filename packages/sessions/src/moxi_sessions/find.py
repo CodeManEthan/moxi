@@ -745,6 +745,11 @@ def subagents(source: Any) -> SubagentListing:
       spawned.
     * OpenCode: the session's child sessions, read in one snapshot with its row.
 
+    How deep a listing goes differs by harness. Claude Code's listing of a session holds
+    every agent of the session, one a subagent spawned included. A Codex listing, like
+    OpenCode's, holds the direct children only; a nested spawn is listed by calling
+    `subagents()` on the child's entry, so a caller that wants the whole tree recurses.
+
     Never raises for what the place holds or whether it can be read. Raises ValueError for
     something that is not a source, or an OpenCode source that names no session.
     """
