@@ -54,6 +54,13 @@ def test_mail_sent_through_the_daemon_reaches_the_hosted_thread_and_settles(
         assert wait_until(lambda: IDENTITY in rig.daemon.bindings, 20), \
             proc.stdout.read() if proc.poll() is not None else "no binding"
         assert wait_until(lambda: rig.daemon.bindings[IDENTITY].session_id, 20)
+        # The launch primes its thread with a turn of its own, which the stub ends
+        # itself. Mail sent while that turn runs is steered into it, and the stub's end
+        # then races the `complete` below; under load the steer can also outlast the
+        # turns client's wait, so comms requeues the digest into a second turn nothing
+        # ends. The daemon marks the binding `turned` once the adapter reports the
+        # priming turn's end, so the mail starts a turn of its own.
+        assert wait_until(lambda: rig.daemon.bindings[IDENTITY].turned, 20)
         code, out = rig.cli(["send", "--posture", "none", IDENTITY, "through the daemon"],
                              name="main", scope="proj-a")
         assert code == 0, out
