@@ -18,10 +18,10 @@ verb takes `--json`, which prints the read API's field names instead; `find --js
 prints the project or `null`.
 
 Paths on the command line are made absolute: `~` expanded, relative ones against the
-working directory. Notes that refuse nothing (a root that doesn't exist yet, what
-`--create` made) go to stderr. A refusal prints its reason and the command that fixes
-it to stderr, and exits 1 (an error), 2 (usage), 3 (refused) or 75 (the store stayed
-locked; try again).
+working directory; an empty `--root` or `--notes-root` is a usage error. Notes that
+refuse nothing (a root that doesn't exist yet, what `--create` made) go to stderr. A
+refusal prints its reason and the command that fixes it to stderr, and exits 1 (an
+error), 2 (usage), 3 (refused) or 75 (the store stayed locked; try again).
 """
 
 from __future__ import annotations
@@ -41,6 +41,13 @@ from .rules import absolutize
 _PARSERS: dict[str, argparse.ArgumentParser] = {}
 
 
+def _directory(text: str) -> str:
+    """A directory as typed; empty is a usage error, not the working directory."""
+    if not text:
+        raise argparse.ArgumentTypeError("is empty; name a directory")
+    return text
+
+
 def _parser(prog: str) -> argparse.ArgumentParser:
     """The parser, built once per `prog`."""
     if prog in _PARSERS:
@@ -58,25 +65,25 @@ def _parser(prog: str) -> argparse.ArgumentParser:
 
     p = verb("add", "add a project")
     p.add_argument("key", metavar="KEY")
-    p.add_argument("--root", metavar="DIR",
+    p.add_argument("--root", metavar="DIR", type=_directory,
                    help="its directory (needed unless an installed module supplies it)")
     p.add_argument("--create", action="store_true",
                    help="make the root first (for most kinds, a directory and git init)")
     p.add_argument("--kind", default=DEFAULT_KIND, metavar="KIND",
                    help=f"its kind (default: {DEFAULT_KIND}; `kinds` lists them)")
     p.add_argument("--lead", metavar="NAME", help="its lead agent")
-    p.add_argument("--notes-root", metavar="DIR",
+    p.add_argument("--notes-root", metavar="DIR", type=_directory,
                    help="its notes directory (only while notes is installed)")
 
     p = verb("set", "change a project's fields")
     p.add_argument("key", metavar="KEY")
-    p.add_argument("--root", metavar="DIR", help="a new directory")
+    p.add_argument("--root", metavar="DIR", type=_directory, help="a new directory")
     p.add_argument("--kind", metavar="KIND", help="a new kind")
     lead = p.add_mutually_exclusive_group()
     lead.add_argument("--lead", metavar="NAME", help="a new lead agent")
     lead.add_argument("--no-lead", action="store_true", help="clear the lead")
     notes = p.add_mutually_exclusive_group()
-    notes.add_argument("--notes-root", metavar="DIR",
+    notes.add_argument("--notes-root", metavar="DIR", type=_directory,
                        help="a new notes directory (only while notes is installed)")
     notes.add_argument("--no-notes-root", action="store_true", help="clear the notes root")
 

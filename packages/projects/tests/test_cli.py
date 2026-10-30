@@ -104,6 +104,23 @@ def test_a_usage_error_from_argparse_is_exit_2(capsys):
     capsys.readouterr()
 
 
+@pytest.mark.parametrize("argv", [
+    ("add", "web", "--root", ""),
+    ("add", "web", "--root", "/srv/web", "--notes-root", ""),
+    ("set", "gamma", "--root", ""),
+    ("set", "gamma", "--notes-root", ""),
+])
+def test_an_empty_directory_is_exit_2_not_the_working_directory(capsys, golden_copy,
+                                                                 tmp_path, monkeypatch,
+                                                                 argv):
+    monkeypatch.chdir(tmp_path)
+    before = api.list_projects()
+    code, out, err = run(capsys, *argv)
+    assert code == 2 and out == ""
+    assert err.startswith("usage:") and "is empty; name a directory" in err
+    assert api.list_projects() == before
+
+
 def test_help_is_exit_0(capsys):
     assert cli.main(["--help"]) == 0
     assert "add" in capsys.readouterr().out
