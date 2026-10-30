@@ -145,7 +145,7 @@ def test_a_change_of_parent_ends_it(spawn):
 
 
 def test_a_broken_config_sends_one_failed_line(spawn, turns_env):
-    write_config(turns_env, "[hold]\nwait_ms = 'soon'\n")
+    write_config(turns_env, "[stop_handler]\nwait_ms = 'soon'\n")
     p = spawn()
     first = _first(p)
     assert first["op"] == "failed" and first["leg"] == leg.LEG and first["error"]

@@ -40,9 +40,14 @@
 //   /ask/stop    {turn_id, session_id, stop_hook_active, task_types, crons}
 //                                                          -> {reason: string | null}
 //   /live        {ask, agents, draft}                      -> {}  (agents null: unreadable)
+//   /hook-times  {samples: [{event, ms}]}                   -> {}  at most once a minute
 //   The gate asks on the same socket: /gate/entry {nonce, draft, agents} and
 //   /gate/command {request, agents, draft} -> {verdict: pass} | {verdict: drop, reason,
 //   text}; `draft` and `agents` are the gate's readings.
+//
+// Hook times: each hook handler times its own work, from entry to return less the time
+// spent in `next` (the hooks behind it, and a tool's own run), and the samples go to
+// /hook-times once a minute, outside the report queue. The doctor reports them.
 //
 // The internal leg rule: no hook waits on the endpoint longer than a bound this plugin's
 // own timer keeps, and a request that misses its bound counts as unanswered. A reporting
@@ -99,6 +104,8 @@ const BUSY_AGENT = new Set(['pending', 'running', 'waiting'])
 const GATE_DROP = /^moxi-turns-gate: .*\(([a-z-]+)\)$/
 const NONCE_LINE = 'moxi-turns-window: '
 const LEG = 1
+const HOOK_TIMES_MS = 60_000
+const HOOK_TIMES_MAX = 1000
 
 const ENDPOINT = { plugin: 'moxi-turns', key: 'endpoint' } as const
 const COMMAND = { plugin: 'moxi-turns', key: 'command' } as const
@@ -127,6 +134,8 @@ let win: Win | null = null
 let seq = 0
 let queue: Report[] = []
 let sending = false
+let samples: { event: string; ms: number }[] = []
+let samplesArmed = false
 
 const log = ($: Dollar, text: string): void => {
   try {
@@ -161,6 +170,38 @@ async function ask($: Dollar, path: string, body: Json, boundMs: number): Promis
     return undefined
   })
   return Promise.race([sent, after<Json>($, boundMs)])
+}
+
+// -- hook times ----------------------------------------------------------------------------
+
+/** Keeps one hook's time and sends the samples a minute after the first of a batch. */
+function sample($: Dollar, event: string, ms: number): void {
+  if (ended || headless === true || !Number.isFinite(ms) || ms < 0) return
+  if (samples.length >= HOOK_TIMES_MAX) samples.shift()
+  samples.push({ event, ms: Math.round(ms * 1000) / 1000 })
+  if (samplesArmed) return
+  samplesArmed = true
+  $.clock.after(HOOK_TIMES_MS, () => {
+    samplesArmed = false
+    const batch = samples
+    samples = []
+    if (hello === undefined || ended || batch.length === 0) return
+    post($, hello.sock, '/hook-times', { samples: batch }).catch(err => log($, `hook times not sent: ${String(err)}`))
+  })
+}
+
+/** A hook's watch: its own time is entry to return, less the time spent in `next`. */
+type Watch = { start: number; away: number }
+const watch = (): Watch => ({ start: performance.now(), away: 0 })
+
+/** `value`, counting the time since `since` as spent behind the hook (in `next`). */
+function behind<T>(w: Watch, since: number, value: T): T {
+  w.away += performance.now() - since
+  return value
+}
+
+function timeHook($: Dollar, event: string, w: Watch): void {
+  sample($, event, performance.now() - w.start - w.away)
 }
 
 // -- the report queue -------------------------------------------------------------------
@@ -525,61 +566,91 @@ const withContext = <R extends { additionalContext?: string[] }>(r: R, context: 
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    // Spawned before `next`, so the endpoint's start overlaps the session's.
-    if (!(await isHeadless($))) await spawn($)
-    return next(e)
+    const hook = watch()
+    try {
+      // Spawned before `next`, so the endpoint's start overlaps the session's.
+      if (!(await isHeadless($))) await spawn($)
+      return behind(hook, performance.now(), await next(e))
+    } finally {
+      timeHook($, 'session.start', hook)
+    }
   })
 
   on('classic.SessionStart', async ($, e, next) => {
-    if (e.agent_id !== undefined || (await isHeadless($))) return next(e)
-    if (!spawned) await spawn($)
-    if (hello === undefined && !ended) await Promise.race([helloP, after($, HELLO_WAIT_MS)])
-    if (hello === undefined || ended) return next(e)
-    // A /clear empties $.state (and a resume or compaction may): the mod.sock path is
-    // written again at every SessionStart, for the gate.
-    await writeSock($).catch(err => log($, `the mod.sock path was not written: ${String(err)}`))
-    const answer = await ask($, '/ask/context', { event: 'ready', source: e.source ?? null, session_id: e.session_id }, hello.listenWaitMs + MARGIN_MS)
-    return withContext(await next(e), answer?.context)
+    const hook = watch()
+    try {
+      if (e.agent_id !== undefined || (await isHeadless($))) return behind(hook, performance.now(), await next(e))
+      if (!spawned) await spawn($)
+      if (hello === undefined && !ended) await Promise.race([helloP, after($, HELLO_WAIT_MS)])
+      if (hello === undefined || ended) return behind(hook, performance.now(), await next(e))
+      // A /clear empties $.state (and a resume or compaction may): the mod.sock path is
+      // written again at every SessionStart, for the gate.
+      await writeSock($).catch(err => log($, `the mod.sock path was not written: ${String(err)}`))
+      const answer = await ask($, '/ask/context', { event: 'ready', source: e.source ?? null, session_id: e.session_id }, hello.listenWaitMs + MARGIN_MS)
+      return withContext(behind(hook, performance.now(), await next(e)), answer?.context)
+    } finally {
+      timeHook($, 'classic.SessionStart', hook)
+    }
   })
 
   on('classic.UserPromptSubmit', async ($, e, next) => {
-    if (e.agent_id !== undefined || headless === true || hello === undefined || ended) return next(e)
-    const w = win
-    // turns' own entry hook: the bound is raised by this ask's bound while it runs.
-    if (w !== null && turnOpen === null) arm($, w, IDLE_FAIL_MS + hello.listenWaitMs + MARGIN_MS)
-    const answer = await ask($, '/ask/context', { event: 'prompt', source: null, session_id: e.session_id }, hello.listenWaitMs + MARGIN_MS)
-    if (w !== null && win === w && turnOpen === null) arm($, w, IDLE_FAIL_MS)
-    return withContext(await next(e), answer?.context)
+    const hook = watch()
+    try {
+      if (e.agent_id !== undefined || headless === true || hello === undefined || ended) return behind(hook, performance.now(), await next(e))
+      const w = win
+      // turns' own entry hook: the bound is raised by this ask's bound while it runs.
+      if (w !== null && turnOpen === null) arm($, w, IDLE_FAIL_MS + hello.listenWaitMs + MARGIN_MS)
+      const answer = await ask($, '/ask/context', { event: 'prompt', source: null, session_id: e.session_id }, hello.listenWaitMs + MARGIN_MS)
+      if (w !== null && win === w && turnOpen === null) arm($, w, IDLE_FAIL_MS)
+      return withContext(behind(hook, performance.now(), await next(e)), answer?.context)
+    } finally {
+      timeHook($, 'classic.UserPromptSubmit', hook)
+    }
   })
 
   on('turn.start', async ($, e, next) => {
-    if (headless === true || ended) return next(e)
-    turnOpen = e.turnId
-    stopTimer(win)
-    await reportAndWait($, 'turn.start', { turn_id: e.turnId })
-    return next(e)
+    const hook = watch()
+    try {
+      if (headless === true || ended) return behind(hook, performance.now(), await next(e))
+      turnOpen = e.turnId
+      stopTimer(win)
+      await reportAndWait($, 'turn.start', { turn_id: e.turnId })
+      return behind(hook, performance.now(), await next(e))
+    } finally {
+      timeHook($, 'turn.start', hook)
+    }
   })
 
   on('turn.complete', async ($, e, next) => {
-    if (e.agentId !== undefined || headless === true || ended) return next(e)
-    turnOpen = null
-    await reportAndWait($, 'turn.complete', { turn_id: e.turnId, reason: e.reason, is_aborted: e.isAborted })
-    if (win !== null) arm($, win, IDLE_FAIL_MS)
-    return next(e)
+    const hook = watch()
+    try {
+      if (e.agentId !== undefined || headless === true || ended) return behind(hook, performance.now(), await next(e))
+      turnOpen = null
+      await reportAndWait($, 'turn.complete', { turn_id: e.turnId, reason: e.reason, is_aborted: e.isAborted })
+      if (win !== null) arm($, win, IDLE_FAIL_MS)
+      return behind(hook, performance.now(), await next(e))
+    } finally {
+      timeHook($, 'turn.complete', hook)
+    }
   })
 
   on('classic.Stop', async ($, e, next) => {
-    if (e.agent_id !== undefined || headless === true || hello === undefined || ended) return next(e)
-    const facts = {
-      turn_id: turnOpen,
-      session_id: e.session_id,
-      stop_hook_active: e.stop_hook_active,
-      task_types: e.background_tasks === undefined ? null : e.background_tasks.map(t => String((t as { type?: unknown }).type ?? 'unknown')),
-      crons: e.session_crons === undefined ? null : e.session_crons.length,
+    const hook = watch()
+    try {
+      if (e.agent_id !== undefined || headless === true || hello === undefined || ended) return behind(hook, performance.now(), await next(e))
+      const facts = {
+        turn_id: turnOpen,
+        session_id: e.session_id,
+        stop_hook_active: e.stop_hook_active,
+        task_types: e.background_tasks === undefined ? null : e.background_tasks.map(t => String((t as { type?: unknown }).type ?? 'unknown')),
+        crons: e.session_crons === undefined ? null : e.session_crons.length,
+      }
+      const answer = await ask($, '/ask/stop', facts, hello.holdWaitMs + MARGIN_MS)
+      const r = behind(hook, performance.now(), await next(e))
+      const reason = answer?.reason
+      return typeof reason === 'string' && reason !== '' ? { ...r, block: reason } : r
+    } finally {
+      timeHook($, 'classic.Stop', hook)
     }
-    const answer = await ask($, '/ask/stop', facts, hello.holdWaitMs + MARGIN_MS)
-    const r = await next(e)
-    const reason = answer?.reason
-    return typeof reason === 'string' && reason !== '' ? { ...r, block: reason } : r
   })
 }

@@ -10,7 +10,7 @@ export const SOCK = '/run/user/1000/moxi/turns/claude-n1/mod.sock'
 
 type Answer = Record<string, unknown> | 'hang' | 'fail'
 
-export function world(on: On, options: { surfaces?: string[]; endpointJson?: string | null; gate?: boolean } = {}) {
+export function world(on: On, options: { surfaces?: string[]; endpointJson?: string | null; gate?: boolean; spinMs?: number } = {}) {
   const clock = mock.clock(on, { now: 1_000 })
   const w = {
     clock,
@@ -40,7 +40,13 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
   on('session.surfaces', async () => ({ value: w.surfaces as never }))
   on('session.id', async () => ({ value: w.sessionId }))
-  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.start', async ($, e) => {
+    // The work behind a hook (another plugin's, the engine's): real time, which a hook's
+    // own timing leaves out.
+    const t0 = performance.now()
+    while (performance.now() - t0 < (options.spinMs ?? 0)) { /* spin */ }
+    return { turnId: e.turnId }
+  })
   on('turn.complete', async ($, e) => ({ text: e.answer }))
   on('classic.SessionStart', async () => ({}))
   on('classic.UserPromptSubmit', async () => ({}))

@@ -132,18 +132,21 @@ def _rows():
 def test_rows_name_the_plugins_endpoint_json_and_the_version(turns_env, claude_root,
                                                              fake_claude):
     rows = _rows()
-    assert rows["claude plugin moxi-turns"].ok and rows["claude plugin moxi-turns-gate"].ok
-    assert not rows["claude endpoint.json"].ok and "missing" in rows["claude endpoint.json"].detail
-    assert rows["claude code"].ok
+    assert rows["claude plugin moxi-turns"].state == "ok"
+    assert rows["claude plugin moxi-turns-gate"].state == "ok"
+    assert rows["claude endpoint.json"].state == "fail" and "missing" in rows["claude endpoint.json"].detail
+    assert rows["claude code"].state == "ok"
     claude_setup.write_endpoint_file()
-    assert _rows()["claude endpoint.json"].ok
+    assert _rows()["claude endpoint.json"].state == "ok"
     write_config(turns_env, '[claude]\nendpoint = "/opt/moved/moxi-turns-endpoint"\n')
-    assert not _rows()["claude endpoint.json"].ok      # names a command no longer given
+    assert _rows()["claude endpoint.json"].state == "fail"      # names a command no longer given
     os.environ["FAKE_CLAUDE_VERSION"] = "9.9.9"
     row = _rows()["claude code"]
-    assert not row.ok and "9.9.9" in row.detail
+    assert row.state == "fail" and "9.9.9" in row.detail
 
 
 def test_check_carries_the_claude_rows(turns_env, fake_claude):
-    names = [row.name for row in turns.check()]
+    from moxi_turns import doctor
+
+    names = [row.name for row in doctor.check()]
     assert "claude endpoint.json" in names and "claude code" in names

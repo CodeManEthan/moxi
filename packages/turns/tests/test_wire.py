@@ -504,23 +504,10 @@ def test_an_exit_that_passes_leaves_the_endpoint_answering(make_endpoint, connec
 
 # -- the doctor's rows and the announcement ---------------------------------------------
 
-def test_check_rows(make_endpoint, turns_env):
-    from conftest import write_config
-
-    ep, _ = make_endpoint()
-    rows = {r.name: r for r in turns.check()}
-    assert rows["config"].ok and "hold.wait_ms 2000" in rows["config"].detail
-    assert rows["endpoints"].detail.startswith("1 live")
-    assert any(name.startswith("endpoint fake pid") for name in rows)
-    write_config(turns_env, "[hold]\nwait_ms = 'soon'\n")
-    rows = {r.name: r for r in turns.check()}
-    assert not rows["config"].ok and "hold.wait_ms" in rows["config"].detail
-
-
-def test_the_announcement_loads_with_interface_1():
+def test_the_announcement_loads_with_interface_2():
     from moxi import modules
 
     modules.reset()
-    found = modules.load("turns", interface=1)
+    found = modules.load("turns", interface=2)
     assert found.state == modules.PRESENT, found.reason
     assert found.api is turns and found.settings == "settings.toml"

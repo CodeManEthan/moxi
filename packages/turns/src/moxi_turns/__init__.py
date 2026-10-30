@@ -30,7 +30,6 @@ out of the harness. This package is turns' whole public API, the announcement's
                               # TurnEnded, and one Gone; w.close()
     h = s.handle_stops(on_stop)   # one stop handler per session; h.close()
     s.close()                 # or `with turns.find(...) as s:`
-    turns.check()             # rows for a doctor
     turns.claude_plugin_dirs()  # the Claude plugin folders, for a per-launch --plugin-dir
     s = turns.opencode.launch(cwd, *, instructions=None, env=None, options=None)
                               # an OpenCode host, experimental
@@ -53,7 +52,6 @@ _WHERE = {
     "codex": "codex",
     **dict.fromkeys(("find", "sessions", "wait_ready", "Session", "Delivery", "Watch",
                      "StopHandler", "TurnsError", "VersionError"), "client"),
-    **dict.fromkeys(("check", "Row"), "doctor"),
     "claude_plugin_dirs": "claude_setup",
     "opencode": "opencode",     # a host's namespace (`turns.opencode.launch`): the module
     **dict.fromkeys(("Facts", "Agents", "Agent", "OpenTurn", "Started", "Refused", "Lost",
@@ -65,8 +63,8 @@ _WHERE = {
 }
 
 __all__ = [
-    "find", "sessions", "wait_ready", "check", "codex", "claude_plugin_dirs", "opencode",
-    "Session", "Delivery", "Watch", "StopHandler", "Row", "TurnsError", "VersionError",
+    "find", "sessions", "wait_ready", "codex", "claude_plugin_dirs", "opencode",
+    "Session", "Delivery", "Watch", "StopHandler", "TurnsError", "VersionError",
     "Facts", "Agents", "Agent", "OpenTurn", "Started", "Refused", "Lost", "Ended", "Ran",
     "Shells", "LeftShell", "Failed", "Ready", "TurnStarted", "TurnSteered", "TurnEnded",
     "DeliveryRef", "Gone", "StopFacts", "SessionEvent",
