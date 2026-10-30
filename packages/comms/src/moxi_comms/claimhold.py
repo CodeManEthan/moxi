@@ -21,6 +21,7 @@ and can never be sent as (`state`). There is no other op.
 
 from __future__ import annotations
 
+import itertools
 import logging
 import os
 import subprocess
@@ -480,6 +481,10 @@ _GATE = ("import os,sys\n"
          "os.execvp(sys.argv[2], sys.argv[2:])\n")
 
 
+#: Numbers each `ClaimServer`'s socket in this process.
+_SERVER_SOCKETS = itertools.count(1)
+
+
 class ClaimServer:
     """A claim socket for a binding held by a module's own process (its own loop, a
     send-only console). Its roots are the holder, reach `self`, and any child roots the
@@ -507,7 +512,10 @@ class ClaimServer:
                                                               else scope),
                       "tier": None, "directors": list(directors)}
         key = f"srv-{me}-{start}-{self.claim['qualified']}"
-        path = socket_path or runtime_root() / f"claim-srv-{me}-{abs(hash(key)) % 10**8}.sock"
+        # Numbered per server: two servers for one name in one process (one waiting on
+        # the other) each serve a socket of their own.
+        path = socket_path or runtime_root() / (
+            f"claim-srv-{me}-{abs(hash(key)) % 10**8}-{next(_SERVER_SOCKETS)}.sock")
         self.holder = ClaimHolder(kind=kind, key=key, socket_path=path, proc=self.proc,
                                   keying="server", roots=[Root(me, start, SELF)])
         self.holder.claim = dict(self.claim)
