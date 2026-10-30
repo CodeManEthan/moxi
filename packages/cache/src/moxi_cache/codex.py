@@ -64,16 +64,6 @@ from .drift import DriftView
 
 HARNESS = "codex"
 
-#: The lists the evidence rule reads by, kept in sessions with the mapping that applies
-#: them: the Codex versions whose new threads read as `fresh`, the line kinds, event and
-#: response item types a rollout may hold, line 1's keys, and its history modes.
-CHECKED_VERSIONS = rollouts.CHECKED_VERSIONS
-TOP_KINDS = rollouts.TOP_KINDS
-EVENT_KINDS = rollouts.EVENT_KINDS
-RESPONSE_KINDS = rollouts.RESPONSE_KINDS
-META_KEYS = rollouts.META_KEYS
-HISTORY_MODES = rollouts.HISTORY_MODES
-
 #: Drift: the smallest previous prompt an observation is made from, and the share of it a
 #: request must read from the cache to count as warm.
 DRIFT_MIN_INPUT = 16_384
@@ -236,7 +226,7 @@ def _whole_history(first, thread_id: str):
         return None
     if meta.extra.get("id") != thread_id or meta.extra.get("session_id") != thread_id:
         return None
-    if meta.fields.get("history_mode") not in HISTORY_MODES:
+    if meta.fields.get("history_mode") not in rollouts.HISTORY_MODES:
         return None
     return meta
 
@@ -363,7 +353,9 @@ def _no_record(scan: Scan, thread_id, turned) -> Clock:
         return unknown(_clock.OLDER_HARNESS, OLDER_CODEX)
     if turned:
         return unknown(_clock.NO_REQUEST, NO_REQUEST)
-    if scan.meta.fields.get("cli_version") not in CHECKED_VERSIONS:
+    # The Codex versions sessions' mapping was checked against are the ones whose new
+    # threads read as `fresh`.
+    if scan.meta.fields.get("cli_version") not in rollouts.CHECKED_VERSIONS:
         return unknown(_clock.NO_REQUEST, NO_REQUEST)
     if all(_fresh_kind(rec, thread_id) for rec in scan.lines):
         return Clock(FRESH)
@@ -645,5 +637,4 @@ def _observe(lines, meta, thread_id, s, r, *, row, pair, bound_at, whole):
     return gap, prev_rec, rec
 
 
-__all__ = ["HARNESS", "CHECKED_VERSIONS", "TOP_KINDS", "EVENT_KINDS", "RESPONSE_KINDS",
-           "META_KEYS", "read", "judge_drift", "lower_to"]
+__all__ = ["HARNESS", "read", "judge_drift", "lower_to"]

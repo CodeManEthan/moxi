@@ -17,6 +17,7 @@ import pytest
 
 from moxi_cache import api, codex, drift, opencode, table
 from moxi_cache import clock as _clock
+from moxi_sessions.api import codex as rollouts
 from conftest import CodexRollout, token_usage
 
 NOW = 1_791_300_000.0                    # a fixed "now" for the pure reads
@@ -423,26 +424,30 @@ def test_a_last_line_being_written_is_skipped_but_a_whole_one_is_judged(tmp_path
 
 
 def test_the_lists_are_pinned():
-    assert codex.TOP_KINDS == ("session_meta", "turn_context", "world_state",
-                                     "token_usage_record", "compacted", "event_msg",
-                                     "response_item")
-    assert set(codex.EVENT_KINDS) == {
+    """The lists the evidence rule reads by live in sessions' Codex mapping; cache's
+    verdicts rest on them, so a change to any of them fails here too. OpenCode's versions
+    that read as `fresh` are cache's own."""
+    assert rollouts.TOP_KINDS == ("session_meta", "turn_context", "world_state",
+                                  "token_usage_record", "compacted", "event_msg",
+                                  "response_item")
+    assert set(rollouts.EVENT_KINDS) == {
         "item_completed", "token_count", "thread_goal_updated", "thread_rolled_back",
         "turn_aborted", "task_started", "task_complete", "thread_settings_applied",
         "user_message", "agent_message", "agent_reasoning", "agent_reasoning_raw_content",
         "entered_review_mode", "exited_review_mode", "patch_apply_end",
         "context_compacted", "mcp_tool_call_end", "web_search_end",
         "image_generation_end", "sub_agent_activity"}
-    assert set(codex.RESPONSE_KINDS) == {
+    assert set(rollouts.RESPONSE_KINDS) == {
         "message", "agent_message", "reasoning", "local_shell_call", "function_call",
         "tool_search_call", "function_call_output", "tool_search_output",
         "custom_tool_call", "custom_tool_call_output", "web_search_call",
         "image_generation_call", "compaction", "context_compaction"}
-    assert set(codex.META_KEYS) == {
+    assert set(rollouts.META_KEYS) == {
         "session_id", "id", "timestamp", "cwd", "originator", "cli_version", "source",
         "thread_source", "model_provider", "base_instructions", "history_mode",
         "multi_agent_version", "context_window", "git"}
-    assert codex.CHECKED_VERSIONS == ("0.153.0",)
+    assert rollouts.HISTORY_MODES == ("legacy", "paginated")
+    assert rollouts.CHECKED_VERSIONS == ("0.153.0",)
     assert opencode.CHECKED_VERSIONS == ("1.18.34",)
 
 
