@@ -21,9 +21,11 @@ from __future__ import annotations
 
 import io
 import os
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -282,6 +284,15 @@ def test_first_start_waits_for_the_single_instance_probe(tmp_path):
 
 # --------------------------------------------------------------- the real process
 
+@pytest.fixture
+def runtime_dir():
+    """A SHORT runtime directory for the daemon's socket: `sun_path` is 108 bytes, and
+    `tmp_path` (longer still under xdist) can spend them all."""
+    d = Path(tempfile.mkdtemp(prefix="cml"))
+    yield d
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def _clean_env(tmp_path, **extra) -> dict:
     keep = {k: v for k, v in os.environ.items()
             if not k.startswith(("MOXI_", "XDG_", "CLAUDE"))}
@@ -309,11 +320,11 @@ def _run_daemon(env, sock: Path, *, expect_socket=True):
     return proc.returncode, out
 
 
-def test_the_daemon_process_provisions_without_slots(tmp_path):
+def test_the_daemon_process_provisions_without_slots(tmp_path, runtime_dir):
     home = tmp_path / "solo"
     env = _clean_env(tmp_path, MOXI_COMMS_HOME=str(home),
-                     MOXI_COMMS_RUNTIME_DIR=str(tmp_path / "r"), MOXI_COMMS_DEVICE="t")
-    code, out = _run_daemon(env, tmp_path / "r" / "comms" / "moxi-comms-daemon.sock")
+                     MOXI_COMMS_RUNTIME_DIR=str(runtime_dir), MOXI_COMMS_DEVICE="t")
+    code, out = _run_daemon(env, runtime_dir / "comms" / "moxi-comms-daemon.sock")
     assert code == 0, out
     db = home / "data" / "comms" / "directory.db"
     conn = directory.connect(db, read_only=True)
@@ -325,15 +336,15 @@ def test_the_daemon_process_provisions_without_slots(tmp_path):
         conn.close()
 
 
-def test_a_daemon_process_on_mock_never_provisions(tmp_path):
+def test_a_daemon_process_on_mock_never_provisions(tmp_path, runtime_dir):
     """`mock` is a test seam: a daemon on it with no directory starts and mints
     nothing."""
     home = tmp_path / "mocked"
     env = _clean_env(tmp_path, MOXI_COMMS_HOME=str(home),
-                     MOXI_COMMS_RUNTIME_DIR=str(tmp_path / "r"), MOXI_COMMS_DEVICE="t",
+                     MOXI_COMMS_RUNTIME_DIR=str(runtime_dir), MOXI_COMMS_DEVICE="t",
                      MOXI_COMMS_GATEWAY="mock",
                      MOXI_COMMS_MOCK_GATEWAY=str(tmp_path / "mock.json"))
-    code, out = _run_daemon(env, tmp_path / "r" / "comms" / "moxi-comms-daemon.sock")
+    code, out = _run_daemon(env, runtime_dir / "comms" / "moxi-comms-daemon.sock")
     assert code == 0, out
     assert not (home / "data" / "comms" / "directory.db").exists()
     assert not (home / "state" / "t" / "comms" / "tokens").exists()
