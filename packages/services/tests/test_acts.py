@@ -690,7 +690,9 @@ def test_module_daemon_switch_failure_exits_1(fake, notes, monkeypatch):
     monkeypatch.setattr(moxi.config, "set",
                         lambda *a, **k: [Applied(change, False, ("Job failed",))])
     out = acts.enable("notes/snapshot")
-    assert out.code == 1 and "Job failed" in out.lines
+    # The core printed the unit's lines as it applied them; they are kept apart, so a
+    # verb does not print them twice.
+    assert out.code == 1 and "Job failed" in out.said and "Job failed" not in out.lines
 
 
 def test_module_timer_run_now_with_its_switch_off_says_so(fake, notes, monkeypatch):

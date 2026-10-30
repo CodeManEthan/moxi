@@ -83,10 +83,21 @@ class Outcome:
     code: int
     lines: tuple[str, ...] = ()
     fix: str | None = None
+    #: Lines the core printed itself while the act ran (a module daemon switch's units
+    #: applied by `moxi.config.set`), kept apart so a verb does not print them twice.
+    said: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
         return self.code == moxi.exit.OK
+
+
+class _Lines(list):
+    """An act's lines, and apart from them (`said`) the lines the core printed itself."""
+
+    def __init__(self):
+        super().__init__()
+        self.said: list[str] = []
 
 
 class _Done(Exception):
@@ -108,18 +119,21 @@ def _outcome(act: str) -> Callable:
         @wraps(fn)
         def run(target, *args, **kwargs) -> Outcome:
             ident = _ident(target)
-            lines: list[str] = []
+            lines = _Lines()
             try:
                 code, fix = fn(target, *args, lines=lines, **kwargs)
             except _Done as done:
-                return Outcome(ident, act, done.code, tuple(lines) + done.lines, done.fix)
+                return Outcome(ident, act, done.code, tuple(lines) + done.lines, done.fix,
+                               tuple(lines.said))
             except ServicesError as exc:
-                return Outcome(ident, act, exc.exit_code, (*lines, exc.reason), exc.fix)
+                return Outcome(ident, act, exc.exit_code, (*lines, exc.reason), exc.fix,
+                               tuple(lines.said))
             except moxi.config.ConfigError as exc:
                 code = moxi.exit.TEMPFAIL if exc.exit_code == moxi.exit.TEMPFAIL \
                     else moxi.exit.REFUSED
-                return Outcome(ident, act, code, (*lines, str(exc)), exc.fix)
-            return Outcome(ident, act, code, tuple(lines), fix)
+                return Outcome(ident, act, code, (*lines, str(exc)), exc.fix,
+                               tuple(lines.said))
+            return Outcome(ident, act, code, tuple(lines), fix, tuple(lines.said))
         return run
     return decorate
 
@@ -373,7 +387,8 @@ def _switch_module(row: ModuleRow, on: bool, by: str, lines: list[str]):
                       f"with `moxi uninstall {row.module}`")
     applied = moxi.config.set(row.module, row.switch, on, by=by)
     lines.append(f"{row.module} {row.switch} set to {str(on).lower()}")
-    if not _applied(applied, lines):
+    # `moxi.config.set` prints the lines of a daemon switch's units as it applies them.
+    if not _applied(applied, lines.said):
         return moxi.exit.ERROR, f"moxi install {row.module}"
     return moxi.exit.OK, None
 

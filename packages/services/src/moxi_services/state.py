@@ -90,6 +90,15 @@ def read(rows: Iterable[Row]) -> dict[str, units.UnitState | None]:
 
     A row of another system, and a row the read did not cover, map to None. With no
     supervisor here every row read is `nobackend`."""
+    return read_with_sockets(rows)[0]
+
+
+def read_with_sockets(rows: Iterable[Row]
+                      ) -> tuple[dict[str, units.UnitState | None],
+                                 dict[str, units.UnitState]]:
+    """`read`, and beside it the listening-socket state of each module daemon that
+    declares a socket, by row id. Such a daemon reads `inactive` while it is idle under
+    its socket, so its verdict needs both."""
     rows = list(rows)
     modules: set[str] = set()
     foreign: list[str] = []
@@ -103,11 +112,13 @@ def read(rows: Iterable[Row]) -> dict[str, units.UnitState | None]:
         elif row.unit not in foreign:
             foreign.append(row.unit)
     if not modules and not foreign:
-        return {row.id: None for row in rows}
+        return {row.id: None for row in rows}, {}
     states = units.status(sorted(modules), foreign=foreign)
     by_unit: dict[tuple[str | None, str], units.UnitState] = {}
+    sockets: dict[tuple[str | None, str], units.UnitState] = {}
     for state in states:
         if state.kind == "socket":
+            sockets.setdefault((state.module, state.name), state)
             continue
         by_unit.setdefault((state.module, state.name), state)
     out: dict[str, units.UnitState | None] = {}
@@ -120,7 +131,9 @@ def read(rows: Iterable[Row]) -> dict[str, units.UnitState | None]:
             out[row.id] = by_unit.get((MODULE, row.name))
         else:
             out[row.id] = by_unit.get((None, row.unit))
-    return out
+    found = {row.id: sockets[(row.module, row.name)] for row in rows
+             if isinstance(row, ModuleRow) and (row.module, row.name) in sockets}
+    return out, found
 
 
 def read_one(row: Row) -> units.UnitState | None:
@@ -205,4 +218,4 @@ def flag(row: Row, settings: Mapping[str, bool] | None = None) -> bool | None:
 
 __all__ = [
     "TABLE", "HEALTH_SECONDS", "key", "is_wrapped", "schema", "key_on", "switch_on",
-    "read", "read_one", "health", "run_health", "last_runs", "flag"]
+    "read", "read_with_sockets", "read_one", "health", "run_health", "last_runs", "flag"]

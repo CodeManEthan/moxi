@@ -180,6 +180,17 @@ class FakeUnits:
         out = []
         for module in modules:
             if module == "services":
+                # As the core reads a module: every declared unit, a missing one
+                # `missing`, then the marked units no longer declared.
+                declared = services_units.declared()
+                names = [n for key in ("daemons", "timers")
+                         for n in declared.get(key, {})]
+                for name in names:
+                    if name not in self.written:
+                        kind = "daemon" if name in declared.get("daemons", {}) else "timer"
+                        out.append(UnitState(module, name, kind, self.supervisor,
+                                             "missing" if self.supervisor else "nobackend",
+                                             detail="not installed"))
                 units = sorted(self.written.items())
             else:
                 units = sorted((name, unit) for (m, name), unit in self.modules.items()

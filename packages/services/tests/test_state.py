@@ -47,9 +47,9 @@ def test_a_row_of_another_system_is_not_read(fake, monkeypatch):
     assert fake.calls == []
 
 
-def test_a_written_row_with_no_unit_reads_none(fake):
+def test_a_written_row_with_no_unit_reads_missing(fake):
     add(**written("web"))
-    assert state.read_one(row("web")) is None
+    assert state.read_one(row("web")).state == "missing"
 
 
 def test_no_supervisor_reads_nobackend(fake):

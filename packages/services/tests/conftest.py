@@ -101,7 +101,7 @@ def fake(monkeypatch):
     lock is held by services' act."""
     from fake_units import FakeUnits
 
-    from moxi_services import acts, state
+    from moxi_services import acts, lifecycle, state, verdict
 
     units = FakeUnits()
     depth = [0]
@@ -121,5 +121,6 @@ def fake(monkeypatch):
     units.probe = lambda: depth[0] > 0
     monkeypatch.setattr(acts, "_locked", watched)
     monkeypatch.setattr(acts, "units", units)
-    monkeypatch.setattr(state, "units", units)
+    for module in (state, verdict, lifecycle):
+        monkeypatch.setattr(module, "units", units)
     return units

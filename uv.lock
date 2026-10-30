@@ -258,6 +258,7 @@ version = "0.1.0"
 source = { editable = "packages/services" }
 dependencies = [
     { name = "moxi" },
+    { name = "psutil" },
 ]
 
 [package.optional-dependencies]
@@ -275,6 +276,7 @@ dev = [
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
+    { name = "psutil", specifier = ">=5.9" },
 ]
 provides-extras = ["projects"]
 

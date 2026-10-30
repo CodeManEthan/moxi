@@ -5,7 +5,7 @@ description = "Moxi's services: one list of every daemon and timer on the machin
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
-dependencies = ["moxi>=0.1,<0.2"]
+dependencies = ["moxi>=0.1,<0.2", "psutil>=5.9"]
 
 [project.optional-dependencies]
 # Project keys on services and projects' remove check. services reaches projects only
