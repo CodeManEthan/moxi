@@ -72,12 +72,14 @@ def test_no_claimant_is_absent(site):
     assert found.api is None
 
 
-def test_two_claimants_are_broken_naming_both(site):
+def test_two_claimants_are_broken_naming_both_in_the_full_scan(site):
     site.module("alpha", dist="moxi-alpha")
     site.distribution("other-alpha", "2.0", entry_points={"alpha": "moxi_alpha.module"})
-    found = modules.load("alpha")
+    (found,) = [f for f in modules.scan() if f.name == "alpha"]
     assert found.state == BROKEN
     assert "moxi-alpha 0.1.0" in found.reason and "other-alpha 2.0" in found.reason
+    # load reads moxi-alpha alone, so it never sees the second claimant.
+    assert modules.load("alpha").state == PRESENT
 
 
 def test_a_core_verb_is_broken_naming_the_clash(site):
@@ -87,11 +89,13 @@ def test_a_core_verb_is_broken_naming_the_clash(site):
     assert "verbs" in found.reason and "moxi check" in found.reason
 
 
-def test_a_name_that_breaks_the_rule_is_broken(site):
+def test_a_name_that_breaks_the_rule_is_broken_in_the_scan_and_absent_to_load(site):
     site.module("my_mod", package="mymod")
-    found = modules.load("my_mod")
-    assert found.state == BROKEN
+    (found,) = modules.scan()
+    assert found.name == "my_mod" and found.state == BROKEN
     assert "not a Moxi module name" in found.reason
+    found = modules.load("my_mod")
+    assert found.state == ABSENT and "not a Moxi module name" in found.reason
 
 
 def test_an_entry_point_naming_an_attribute_is_broken(site):
@@ -110,11 +114,11 @@ def test_an_announcement_that_fails_to_import_is_broken(site):
     assert "RuntimeError: no good" in found.reason
 
 
-def test_an_announcement_missing_names_is_broken_naming_them(site):
+def test_an_announcement_missing_names_takes_their_defaults(site):
     site.module("alpha", drop=("SETUP", "SEGMENT"))
     found = modules.load("alpha")
-    assert found.state == BROKEN
-    assert "SETUP, SEGMENT" in found.reason
+    assert found.state == PRESENT
+    assert found.setup is None and found.segment is None
 
 
 @pytest.mark.parametrize("name, value, words", [
@@ -173,10 +177,10 @@ def test_one_record_per_name_per_process_until_reset(site):
 def test_load_never_raises(site, monkeypatch):
     import importlib.metadata
 
-    def boom(**kwargs):
+    def boom(*args, **kwargs):
         raise OSError("metadata unreadable")
 
-    monkeypatch.setattr(importlib.metadata, "entry_points", boom)
+    monkeypatch.setattr(importlib.metadata, "distribution", boom)
     found = modules.load("alpha")
     assert found.state == BROKEN
     assert "metadata unreadable" in found.reason

@@ -142,6 +142,20 @@ def test_a_private_name_from_an_api_is_refused(repo):
     assert "a name starting with _" in repo.findings("1")[0]
 
 
+def test_the_core_modules_another_module_may_import(repo):
+    shared = ("names", "paths", "config", "modules", "cli", "files", "store", "proc", "log",
+              "exit", "aio", "ipc", "units", "doctor", "place", "contract")
+    assert contract.CORE_MODULES == frozenset(shared)
+    repo.src("core.py", "".join(f"import moxi.{m}\n" for m in shared)
+             + "from moxi import files, doctor\nfrom moxi.doctor import Row\n")
+    assert repo.findings("1") == []
+    own = ("install", "uninstall", "run", "catalogue", "strays", "home")
+    repo.src("core.py", "".join(f"import moxi.{m}\n" for m in own)
+             + "import moxi._settle\nimport moxi._win\nimport moxi._vendor\n")
+    found = repo.findings("1")
+    assert len(found) == len(own) + 3, found
+
+
 def test_internals_in_tests_are_refused_too(repo):
     repo.write("tests/test_core.py", "import moxi_beta.module\n")
     assert repo.findings("1")[0].startswith("tests/test_core.py:1:")
@@ -515,9 +529,79 @@ def test_the_announcement_defines_every_name_as_a_literal(repo):
     repo.src("module.py", announcement(drop=("SEGMENT",), API="make()",
                                        SUMMARY="'two\\nlines'"))
     found = repo.findings("7")
-    assert any("does not define SEGMENT" in m for m in found)
+    assert not any("SEGMENT" in m for m in found)
     assert any("defines API by an expression" in m for m in found)
     assert any("one non-empty line" in m for m in found)
+
+
+def test_the_checker_reads_the_one_list_of_names():
+    from moxi import modules
+
+    assert contract.KNOWN is modules.KNOWN
+    assert not hasattr(contract, "ANNOUNCEMENT")
+
+
+def test_an_announcement_may_leave_any_name_out(repo):
+    repo.src("module.py", "")
+    assert repo.findings("7") == []
+
+
+def test_every_new_name_present_is_held_to_load_s_checks(repo):
+    repo.src("module.py", announcement(
+        DAEMONS="{'relay': {'command': 'moxi-alpha-relay', 'restart': 'always'}}",
+        TIMERS="{'sweep': {'command': 'moxi-alpha-sweep', 'every': '5m'}}",
+        BUDGETS="{'import_ms': 2}",
+        PAGE="'moxi_alpha.page'",
+        RESERVED_NAMES="['bot', 'bot']",
+        SESSION_ENV="{'MOXI_ALPHA_NAME': 'stamped'}"))
+    found = repo.findings("7")
+    path = "src/moxi_alpha/module.py:0: the announcement has "
+    assert all(m.startswith(path) for m in found), found
+    for words in ("key 'restart', which this moxi does not know", "no switch",
+                  "BUDGETS key 'import_ms'", "PAGE", "no name twice",
+                  "own prefix MOXI_ALPHA_, and INTERNAL_ENV does not declare it"):
+        assert any(words in m for m in found), (words, found)
+
+
+def test_every_new_name_that_keeps_the_contract_passes(repo):
+    repo.src("module.py", announcement(
+        ANNOUNCES="1",
+        DAEMONS="{'relay': {'command': 'moxi-alpha-relay', 'stop': 'process', "
+                "'socket': {'setting': 'port', 'addresses': ['127.0.0.1']}}}",
+        TIMERS="{'sweep': {'command': 'moxi-alpha-sweep', 'at': ['09:00'], "
+               "'days': ['mon'], 'switch': 'sweep.enabled'}}",
+        HEALTH="{'relay': 'moxi_alpha.health:relay'}",
+        STORES="dict(record={'root': 'state', 'path': 'record.db', 'kind': 'sqlite'})",
+        BUDGETS="{'idle_cpu': 0.01, 'rss': '150M'}",
+        SKILLS="'skills'", COMPONENTS="{'panel': {}}", TEARDOWN="'moxi_alpha.s:down'",
+        SESSION_ENV="{'MOXI_ALPHA_NAME': 'stamped'}",
+        INTERNAL_ENV="{'MOXI_ALPHA_NAME': 'stamped'}",
+        QUESTIONS="{'sweep.enabled': 'Sweep each morning?'}"))
+    assert repo.findings("7") == []
+
+
+def test_a_newer_schema_is_one_finding(repo):
+    repo.src("module.py", announcement(ANNOUNCES="2", DAEMONS="{'x': {'later': 1}}"))
+    assert repo.findings("7") == [
+        "src/moxi_alpha/module.py:0: the announcement announces schema 2; this moxi "
+        "knows up to 1; upgrade moxi"]
+
+
+@pytest.mark.parametrize("name", ["installs", "runtime", "set", "unset"])
+def test_a_module_named_by_a_name_the_core_keeps(tmp_path, name):
+    r = Repo(tmp_path / name, name)
+    r.write("pyproject.toml", pyproject(f"moxi-{name}"))
+    r.src("__init__.py")
+    r.src("module.py", announcement())
+    assert "a name the core keeps for itself" in r.findings("7")[0]
+
+
+def test_a_module_named_by_a_new_verb(tmp_path):
+    r = Repo(tmp_path / "doctor", "doctor")
+    r.write("pyproject.toml", pyproject("moxi-doctor"))
+    r.src("__init__.py")
+    r.src("module.py", announcement())
+    assert "one of the umbrella's own verbs" in r.findings("7")[0]
 
 
 def test_the_cli_target_takes_argv_and_prog(repo):

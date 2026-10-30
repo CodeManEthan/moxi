@@ -214,6 +214,9 @@ def render(module: str, root: Path, *, summary: str | None = None,
     if module in names.VERBS:
         raise Refused(f"{module!r} is one of the core's own verbs; a module needs another "
                       "name")
+    if module in names.RESERVED:
+        raise Refused(f"{module!r} is a name the core keeps for itself; a module needs "
+                      "another name")
     summary = summary or f"Moxi's {module} module."
     if "\n" in summary or not summary.strip():
         raise Refused("the summary is one non-empty line")

@@ -498,6 +498,8 @@ class Installer:
                                f"and digits only")
         if module in names.VERBS:
             raise InstallError(f"{module!r} is one of moxi's own commands, not a module")
+        if module in names.RESERVED:
+            raise InstallError(f"{module!r} is a name moxi keeps for itself, not a module")
         both = sorted(set(self.yes) & set(self.no))
         if both:
             raise InstallError(f"--with and --without both name {', '.join(both)}")

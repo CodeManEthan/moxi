@@ -28,9 +28,12 @@ The checks, numbered as each finding names them:
    literal nor a module-level string constant, unless it falls under a prefix entry of
    `INTERNAL_ENV`; a key starting `MOXI_` that `INTERNAL_ENV` does not declare.
 6. A module's own console script looked up on PATH with `shutil.which` (in `src/`).
-7. The names: the `moxi.modules` entry point, the distribution and import names, the
-   console scripts, the announcement's ten names, the `CLI` target's `argv` and `prog`
-   parameters and the `SETTINGS` schema.
+7. The names: the `moxi.modules` entry point, the distribution and import names (no
+   module may take a core verb or a name the core keeps for itself), the console
+   scripts, the announcement, the `CLI` target's `argv` and `prog` parameters and the
+   `SETTINGS` schema. Each name of `moxi.modules.KNOWN` the announcement defines is read
+   as a literal and held to the checks `moxi.modules.load` runs; a name it leaves out
+   passes, as it takes its default.
 
 `segment` findings hold a status line segment to showing only: the import-time closure of
 the announcement's `SEGMENT` module, within the module's package, may not import
@@ -56,16 +59,18 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from . import names
+from .modules import KNOWN, _check, _TooNew
 
 #: The distribution and import name of the core.
 CORE = names.HARNESS
 #: The entry-point group a module announces itself in (as `moxi.modules.GROUP`).
 GROUP = "moxi.modules"
-#: The core modules another module may import (the core's table of what it holds).
-CORE_MODULES = frozenset({"names", "paths", "config", "modules", "contract", "cli"})
-#: The names an announcement defines (as `moxi.modules.ANNOUNCEMENT`).
-ANNOUNCEMENT = ("INTERFACES", "API", "CLI", "SUMMARY", "OPTIONAL", "GATED", "INTERNAL_ENV",
-                "SETTINGS", "SETUP", "SEGMENT")
+#: The core modules another module may import (the core's table of what it holds). The
+#: core's other modules (install, uninstall, run, catalogue, strays, home and the
+#: underscored ones) are its own.
+CORE_MODULES = frozenset({"names", "paths", "config", "modules", "cli", "files", "store",
+                          "proc", "log", "exit", "aio", "ipc", "units", "doctor", "place",
+                          "contract"})
 #: The core's one console script.
 CORE_SCRIPT = ("moxi", "moxi.cli:main")
 #: Inside these core modules check 5 does not apply.
@@ -542,9 +547,8 @@ class _Repo:
         self.announcement_source = source
         bound = _assignments(source.tree)
         values: dict[str, object] = {}
-        for name in ANNOUNCEMENT:
+        for name in KNOWN:
             if name not in bound:
-                self.announcement_problems.append(f"does not define {name}")
                 continue
             try:
                 values[name] = _literal(bound[name])
@@ -887,6 +891,9 @@ class _Repo:
         elif name in names.VERBS:
             self.add(here, 0, "7", f"names the module {name!r}, one of the umbrella's own "
                                    "verbs; `moxi " + name + "` could never reach it")
+        elif name in names.RESERVED:
+            self.add(here, 0, "7", f"names the module {name!r}, a name the core keeps for "
+                                   "itself; the module needs another name")
         if name and self.own_import not in self.src_tops:
             self.add(here, 0, "7", f"has no src/{self.own_import}: module {name!r} is "
                                    f"imported as {self.own_import}")
@@ -944,37 +951,13 @@ class _Repo:
         self._check_settings(source)
 
     def _check_announcement_values(self, source: _Source) -> None:
-        values = self.announcement or {}
-
-        def bad(field: str, what: str) -> None:
-            self.add(source.path, 0, "7",
-                     f"the announcement has {field} = {values[field]!r}; it must be {what}")
-
-        if "INTERFACES" in values:
-            v = values["INTERFACES"]
-            if not isinstance(v, frozenset) or not all(
-                    isinstance(i, int) and not isinstance(i, bool) for i in v):
-                bad("INTERFACES", "a frozenset of integers")
-        if "SUMMARY" in values:
-            v = values["SUMMARY"]
-            if not isinstance(v, str) or not v.strip() or "\n" in v:
-                bad("SUMMARY", "one non-empty line")
-        for field, pattern, what in (("API", _DOTTED, "a dotted module name"),
-                                     ("SEGMENT", _DOTTED, "a dotted module name"),
-                                     ("CLI", _TARGET, '"package.module:function"'),
-                                     ("SETUP", _TARGET, '"package.module:function"'),
-                                     ("SETTINGS", None, "a resource name")):
-            if field in values and values[field] is not None:
-                v = values[field]
-                if not isinstance(v, str) or not v or (pattern and not pattern.fullmatch(v)):
-                    bad(field, f"{what} or None")
-        for field in ("OPTIONAL", "GATED", "INTERNAL_ENV"):
-            if field in values:
-                v = values[field]
-                if not isinstance(v, Mapping) or not all(
-                        isinstance(k, str) and k and isinstance(x, str)
-                        for k, x in v.items()):
-                    bad(field, "a dict of names to strings")
+        """The checks `moxi.modules.load` runs, over the literals read from the source."""
+        try:
+            _, problems = _check(self.announcement or {}, self.name)
+        except _TooNew as exc:
+            problems = [str(exc)]
+        for problem in problems:
+            self.add(source.path, 0, "7", f"the announcement {problem}")
 
     def _check_cli_target(self, source: _Source) -> None:
         target = self.ann("CLI")
@@ -1261,5 +1244,5 @@ if __name__ == "__main__":
     sys.exit(main())
 
 
-__all__ = ["CORE", "GROUP", "CORE_MODULES", "ANNOUNCEMENT", "CORE_SCRIPT", "CheckError",
+__all__ = ["CORE", "GROUP", "CORE_MODULES", "CORE_SCRIPT", "CheckError",
            "Finding", "check", "main"]
