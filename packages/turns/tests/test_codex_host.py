@@ -16,7 +16,7 @@ from moxi_turns.client import Session
 from moxi_turns.codex import CodexHarness
 from moxi_turns.endpoint import Endpoint
 from moxi_turns.results import Ended, Lost, Refused, Started, StopFacts
-from conftest import bare, steer_first
+from conftest import bare
 
 
 class FakeAppServer:
@@ -158,13 +158,13 @@ def test_a_submitted_delivery_is_tied_to_the_app_servers_turn(turns_env):
         endpoint.stop("the test ended")
 
 
-def test_a_steering_delivery_uses_turn_steer_and_ends_with_that_turn(turns_env):
+def test_a_steer_uses_turn_steer_and_ends_with_that_turn(turns_env):
     endpoint, harness, app = _host(turns_env)
     session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
     try:
         first = session.deliver("first", only_if_idle=True)
         assert first.wait_started(2).turn_id == "turn-1"
-        steered = steer_first(endpoint, "now")
+        steered = session.steer("now")
         assert steered.wait_started(2).turn_id == "turn-1"
         assert any(method == "turn/steer" for method, _ in app.calls)
         app.complete("interrupted")
@@ -179,22 +179,6 @@ def test_stopping_the_endpoint_reaps_the_owned_children_and_runtime_dir(turns_en
     endpoint.stop("the test ended")
     assert not harness.app_server.alive
     assert not directory.exists()
-
-
-def test_a_steer_that_races_the_turn_end_becomes_one_new_turn(turns_env):
-    endpoint, harness, app = _host(turns_env)
-    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
-    try:
-        first = session.deliver("first", only_if_idle=True)
-        assert first.wait_started(2).turn_id == "turn-1"
-        app.miss_steer = True
-        delivery = steer_first(endpoint, "after the boundary")
-        assert delivery.wait_started(2).turn_id == "turn-2"
-        app.complete()
-        assert delivery.wait_ended(2).turn_id == "turn-2"
-        assert _turn_texts(app) == ["first", "after the boundary"]
-    finally:
-        endpoint.stop("the test ended")
 
 
 def test_a_plain_steer_that_races_the_turn_end_refuses_idle(turns_env):
@@ -310,36 +294,6 @@ def test_unaccepted_resume_gates_input_and_publishes_its_reason(turns_env):
         thread.join(2)
         assert queued.wait_started(2).turn_id == "turn-1"
         assert "trouble" not in endpoint.session()
-    finally:
-        accept_resume.set()
-        endpoint.stop("the test ended")
-
-
-def test_steer_first_delivery_waits_at_gate_while_old_turn_is_open(turns_env):
-    resume_entered = threading.Event()
-    accept_resume = threading.Event()
-    endpoint, harness, first = _host(turns_env)
-    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
-    running = session.deliver("running", only_if_idle=True)
-    assert running.wait_started(2).turn_id == "turn-1"
-
-    def verify(answer):
-        resume_entered.set()
-        assert accept_resume.wait(2)
-
-    harness.verify = verify
-    first.close()
-    thread = threading.Thread(target=harness._connect)
-    thread.start()
-    assert resume_entered.wait(2)
-    queued = steer_first(endpoint, "after reload")
-    try:
-        with pytest.raises(TimeoutError):
-            queued.wait_started(0.05)
-        accept_resume.set()
-        thread.join(2)
-        assert running.wait_ended(2).outcome == "error"
-        assert queued.wait_started(2).turn_id == "turn-2"
     finally:
         accept_resume.set()
         endpoint.stop("the test ended")
@@ -495,8 +449,8 @@ def test_exhausted_steer_mismatches_refuse_instead_of_claiming_delivery(turns_en
     app.call = call
     try:
         delivery = session.steer("follow-up")
-        assert delivery.wait_started(2).reason == "gone"
-        assert delivery.wait_ended(2).reason == "gone"
+        assert delivery.wait_started(2).reason == "unsupported"
+        assert delivery.wait_ended(2).reason == "unsupported"
         assert _turn_texts(app) == ["first"]
     finally:
         endpoint.stop("the test ended")
@@ -726,53 +680,6 @@ def _capture_error(call, errors):
         errors.append(exc)
 
 
-def test_steer_first_delivery_held_at_gate_steers_the_turn_the_load_shows(turns_env):
-    harness = None
-    made = []
-    hold, release = threading.Event(), threading.Event()
-
-    class ActiveResume(FakeClient):
-        def call(self, method, params=None, timeout=None):
-            if method == "thread/resume":
-                self.calls.append((method, params))
-                hold.set()
-                assert release.wait(5)
-                return {"thread": {"id": "thread-1", "status": {"type": "active"}}}
-            return super().call(method, params, timeout)
-
-    def clients(**kwargs):
-        client = (ActiveResume if made else FakeClient)(harness, **kwargs)
-        if made:
-            client.live_turn = made[0].live_turn
-        made.append(client)
-        return client
-
-    harness = CodexHarness(turns_env, window=False, ping=["/env/bin/moxi-turns-ping"],
-                           client_factory=clients, app_server_factory=FakeAppServer)
-    endpoint = Endpoint(harness, session_id=None).open()
-    harness.start()
-    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
-    try:
-        running = session.deliver("running", only_if_idle=True)
-        assert running.wait_started(2).turn_id == "turn-1"
-        made[0].close()
-        thread = threading.Thread(target=harness._connect)
-        thread.start()
-        assert hold.wait(2)
-        queued = steer_first(endpoint, "urgent")
-        release.set()
-        thread.join(5)
-        assert queued.wait_started(2).turn_id == "turn-1"
-        assert [p["input"][0]["text"] for m, p in made[1].calls
-                if m == "turn/steer"] == ["urgent"]
-        made[1].complete()
-        assert queued.wait_ended(2).turn_id == "turn-1"
-        assert not [m for m, _ in made[1].calls if m == "turn/start"]
-    finally:
-        release.set()
-        endpoint.stop("the test ended")
-
-
 def test_a_refused_priming_turn_closes_its_candidate_and_retries(turns_env):
     harness = None
     made = []
@@ -970,57 +877,6 @@ def test_a_non_string_verify_answer_fails_the_load(turns_env, answer):
         endpoint.stop("the test ended")
 
 
-def test_gate_held_steer_goes_into_a_different_turn_the_load_shows(turns_env):
-    # The accepted resume shows a running turn other than the one the ledger holds.
-    # The old turn ends `error`, and nothing held at the gate is started as a new turn
-    # in between: the steer-first delivery goes into the turn the load shows.
-    harness = None
-    made = []
-    hold, release = threading.Event(), threading.Event()
-
-    class OtherActiveResume(FakeClient):
-        def call(self, method, params=None, timeout=None):
-            if method == "thread/resume":
-                self.calls.append((method, params))
-                hold.set()
-                assert release.wait(5)
-                self.live_turn = "turn-9"
-                return {"thread": {"id": "thread-1", "status": {"type": "active"}}}
-            return super().call(method, params, timeout)
-
-    def clients(**kwargs):
-        client = (OtherActiveResume if made else FakeClient)(harness, **kwargs)
-        made.append(client)
-        return client
-
-    harness = CodexHarness(turns_env, window=False, ping=["/env/bin/moxi-turns-ping"],
-                           client_factory=clients, app_server_factory=FakeAppServer)
-    endpoint = Endpoint(harness, session_id=None).open()
-    harness.start()
-    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
-    try:
-        running = session.deliver("running", only_if_idle=True)
-        assert running.wait_started(2).turn_id == "turn-1"
-        made[0].close()
-        thread = threading.Thread(target=harness._connect)
-        thread.start()
-        assert hold.wait(2)
-        queued = steer_first(endpoint, "urgent")
-        release.set()
-        thread.join(5)
-        assert running.wait_ended(2).outcome == "error"
-        assert queued.wait_started(2).turn_id == "turn-9"
-        assert not [m for m, _ in made[1].calls if m == "turn/start"]
-        assert [p["input"][0]["text"] for m, p in made[1].calls
-                if m == "turn/steer"] == ["urgent"]
-        made[1].complete()
-        assert queued.wait_ended(2).turn_id == "turn-9"
-        assert endpoint.facts().turn_open is False
-    finally:
-        release.set()
-        endpoint.stop("the test ended")
-
-
 # -- A Codex turn closes only on Codex's own word ------------------------------------
 
 
@@ -1037,39 +893,6 @@ def _hook(monkeypatch, harness, event, turn_id):
     monkeypatch.setattr(sys, "stdout", output)
     assert codex_hooks.main(["--socket", str(harness.hook_server.socket_path), event]) == 0
     return output.getvalue()
-
-
-def test_a_steer_after_an_unblocked_stop_starts_a_new_turn_after_the_completion(
-        monkeypatch, turns_env):
-    # Stop is Codex asking whether the turn may end, not its end, so the ledger keeps
-    # the turn open until turn/completed. A live probe showed Codex taking a steer in
-    # the last ms before turn/completed and never answering it, so after an unblocked
-    # Stop the turn is ending: a steer-first delivery waits and starts a new turn once
-    # Codex completes this one.
-    monkeypatch.setattr(codex_module, "TURN_STARTED_WAIT", 0.01)
-    endpoint, harness, app = _host(turns_env)
-    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
-    try:
-        first = session.deliver("first", only_if_idle=True)
-        assert first.wait_started(2).turn_id == "turn-1"
-        assert _hook(monkeypatch, harness, "Stop", "turn-1") == ""
-        assert endpoint.facts().turn_open
-        delivery = steer_first(endpoint, "x")
-        with pytest.raises(TimeoutError):
-            delivery.wait_started(0.1)
-        assert endpoint.facts().turn_open
-        assert not [m for m, _ in app.calls if m == "turn/steer"]
-        assert _turn_texts(app) == ["first"] and app.absorbed == []
-        app.complete()
-        assert bare(first.wait_ended(2)) == Ended("turn-1", "answer")
-        assert bare(delivery.wait_started(2)) == Started("turn-2")
-        assert _turn_texts(app) == ["first", "x"] and app.absorbed == []
-        assert not [m for m, _ in app.calls if m == "turn/steer"]
-        app.complete()
-        assert bare(delivery.wait_ended(2)) == Ended("turn-2", "answer")
-        assert not endpoint.facts().turn_open
-    finally:
-        endpoint.stop("the test ended")
 
 
 def test_a_plain_steer_after_an_unblocked_stop_reads_idle(monkeypatch, turns_env):
@@ -1097,66 +920,13 @@ def test_a_blocked_stop_leaves_the_turn_open_to_steers(monkeypatch, turns_env):
         first = session.deliver("first", only_if_idle=True)
         assert first.wait_started(2).turn_id == "turn-1"
         assert "reply first" in _hook(monkeypatch, harness, "Stop", "turn-1")
-        delivery = steer_first(endpoint, "x")
+        delivery = session.steer("x")
         assert bare(delivery.wait_started(2)) == Started("turn-1")
         assert [p["input"][0]["text"] for m, p in app.calls if m == "turn/steer"] == ["x"]
         app.complete()
         assert bare(delivery.wait_ended(2)) == Ended("turn-1", "answer")
     finally:
         hold.close()
-        endpoint.stop("the test ended")
-
-
-def test_a_gate_held_steer_first_delivery_waits_out_an_ending_turn(
-        monkeypatch, turns_env):
-    # Endpoint._pump hands a steer-first delivery held at the load gate to the open
-    # turn. While that turn is ending it must neither steer into it nor go to submit
-    # (a turn/start Codex would absorb into the ending turn): it waits for the end.
-    hold, release = threading.Event(), threading.Event()
-
-    class SlowActiveResume(_ActiveResume):
-        def call(self, method, params=None, timeout=None):
-            if method == "thread/resume":
-                hold.set()
-                assert release.wait(5)
-            return super().call(method, params, timeout)
-
-    harness = None
-    made = []
-
-    def clients(**kwargs):
-        client = (SlowActiveResume if made else FakeClient)(harness, **kwargs)
-        if made:
-            client.live_turn = made[0].live_turn
-        made.append(client)
-        return client
-
-    harness = CodexHarness(turns_env, window=False, ping=["/env/bin/moxi-turns-ping"],
-                           client_factory=clients, app_server_factory=FakeAppServer)
-    endpoint = Endpoint(harness, session_id=None).open()
-    harness.start()
-    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
-    try:
-        running = session.deliver("running", only_if_idle=True)
-        assert running.wait_started(2).turn_id == "turn-1"
-        assert _hook(monkeypatch, harness, "Stop", "turn-1") == ""
-        made[0].close()
-        thread = threading.Thread(target=harness._connect)
-        thread.start()
-        assert hold.wait(2)
-        queued = steer_first(endpoint, "urgent")   # held at the load gate
-        release.set()
-        thread.join(5)
-        with pytest.raises(TimeoutError):
-            queued.wait_started(0.2)
-        assert not [m for m, _ in made[1].calls if m in ("turn/steer", "turn/start")]
-        assert made[1].absorbed == [] and endpoint.facts().turn_open
-        made[1].complete()
-        assert bare(running.wait_ended(2)) == Ended("turn-1", "answer")
-        assert bare(queued.wait_started(2)) == Started("turn-2")
-        assert _turn_texts(made[1]) == ["urgent"]
-    finally:
-        release.set()
         endpoint.stop("the test ended")
 
 
@@ -1182,18 +952,13 @@ def test_the_stop_answer_waits_for_a_steer_codex_has_not_yet_answered(
 
     app.call = call
     try:
-        holder = []
-        thread = threading.Thread(
-            target=lambda: holder.append(steer_first(endpoint, "x")))
-        thread.start()
+        delivery = session.steer("x")            # answered at once; turn/steer on the worker
         assert steering.wait(2)
         timer = threading.Timer(0.3, gate.set)    # Codex answers the steer later
         timer.start()
         assert _hook(monkeypatch, harness, "Stop", "turn-1") == ""   # the ping runs here
         order.append("stop answered")
-        thread.join(3)
         assert order == ["steer answered", "stop answered"]
-        delivery = holder[0]
         assert bare(delivery.wait_started(2)) == Started("turn-1")
         app.complete()
         assert bare(delivery.wait_ended(2)) == Ended("turn-1", "answer")
@@ -1204,9 +969,9 @@ def test_the_stop_answer_waits_for_a_steer_codex_has_not_yet_answered(
 
 def test_a_steer_the_endpoint_tied_before_the_stop_and_sent_after_it_waits(
         monkeypatch, turns_env):
-    # The other side of that race: the endpoint put the steer on turn-1 before the Stop,
-    # but its turn/steer had not gone out when the Stop was answered. It must not go
-    # out after: it moves to the deliver path and starts a new turn after the end.
+    # The other side of that race: the endpoint recorded the steer on turn-1 before the
+    # Stop, but its turn/steer had not gone out when the Stop was answered. It must not go
+    # out after: it reads `idle`, and the caller delivers it as a new turn if it wants.
     endpoint, harness, app = _host(turns_env)
     session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
     first = session.deliver("first", only_if_idle=True)
@@ -1221,22 +986,16 @@ def test_a_steer_the_endpoint_tied_before_the_stop_and_sent_after_it_waits(
 
     harness._inject = inject
     try:
-        holder = []
-        steer = threading.Thread(
-            target=lambda: holder.append(steer_first(endpoint, "x")))
-        steer.start()
+        delivery = session.steer("x")
         assert entered.wait(2)
         assert _hook(monkeypatch, harness, "Stop", "turn-1") == ""
         gate.set()
-        steer.join(3)
-        delivery = holder[0]
-        with pytest.raises(TimeoutError):
-            delivery.wait_started(0.1)
+        assert bare(delivery.wait_started(2)) == bare(delivery.wait_ended(2)) == Refused("idle")
         assert not [m for m, _ in app.calls if m == "turn/steer"]
+        assert endpoint.facts().turn_open
         app.complete()
         assert bare(first.wait_ended(2)) == Ended("turn-1", "answer")
-        assert bare(delivery.wait_started(2)) == Started("turn-2")
-        assert _turn_texts(app) == ["first", "x"]
+        assert _turn_texts(app) == ["first"] and app.absorbed == []
     finally:
         gate.set()
         endpoint.stop("the test ended")
@@ -1346,7 +1105,7 @@ _RAISES = [
 def _check(delivery, reading):
     started, ended = delivery.wait_started(2), delivery.wait_ended(2)
     if reading == "refused":
-        assert bare(started) == bare(ended) == Refused("gone")
+        assert bare(started) == bare(ended) == Refused("unsupported")
     else:
         assert isinstance(started, Lost) and started.untied and ended == started
 
@@ -1387,7 +1146,7 @@ def test_a_raising_turn_steer_reads_refused_only_when_codex_did_not_take_it(
 
     app.call = call
     try:
-        _check(steer_first(endpoint, "now"), reading)
+        _check(session.steer("now"), reading)
         assert endpoint.facts().turn_open
         app.complete()
         assert bare(first.wait_ended(2)) == Ended("turn-1", "answer")

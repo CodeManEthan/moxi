@@ -371,13 +371,13 @@ def test_a_5xx_post_is_tried_again(host, monkeypatch):
     assert len(world.posts()) == 2
 
 
-def test_a_4xx_post_refuses_gone_and_ends_the_endpoint(host):
+def test_a_4xx_post_refuses_and_ends_the_endpoint(host):
     s, h, world = host()
     world.fake.post_answers.append((400, {"name": "BadRequest"}))
-    # The endpoint ends with the delivery: its own word if it answers first, else the
-    # wait finds nothing serving.
+    # The server turned the text down, so it never ran: `unsupported`, settled before the
+    # endpoint ends. A wait that connects only after the end finds nothing serving.
     got = bare(s.deliver("x", only_if_idle=True).wait_started(5))
-    assert got in (Refused("gone"), Lost("gone"), Lost("unanswered"))
+    assert got in (Refused("unsupported"), Lost("unanswered"))
     assert until(lambda: h.endpoint.is_gone)
     assert "400" in h.endpoint._gone
 

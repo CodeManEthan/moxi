@@ -81,7 +81,8 @@ def test_the_first_line_and_no_hello_before_the_session_id(claude):
     ep.open()
     s = turns.find(session_id="s-9")
     assert s is not None and s.harness == "claude"
-    assert s.capabilities == frozenset(turns.CAPABILITIES)
+    assert s.capabilities == frozenset({"deliver", "only-if-idle", "steer", "stop-handler",
+                                        "clear", "exit"})
     assert s.info["mod_version"] == "0.1.0"
 
 
@@ -181,16 +182,17 @@ def test_another_plugin_drop_reads_dropped_and_releases_the_held_turn(claude):
 
 
 @pytest.mark.parametrize("code", ["gone", "unsupported"])
-def test_a_drop_the_endpoint_did_not_record_reads_the_plugins_own_code(claude, code):
+def test_a_drop_the_endpoint_did_not_record_reads_unsupported(claude, code):
     # The gate's 1 s timeout or a fault (`gone`), a missing gate (`unsupported`): the
-    # runner reads the code from the drop's line, and the delivery reads it.
+    # runner reads the code from the drop's line. The text never ran, and `gone` is no
+    # refusal a delivery reads, so either reads `unsupported`.
     ep, runner = claude()
     s = turns.find(session_id="s-1")
     d = s.deliver("x", only_if_idle=True)
     runner.next_line()
     runner.close(d.id, leg.END_DROP, code)
-    assert bare(d.wait_started(2)) == turns.Refused(code)
-    assert bare(d.wait_ended(1)) == turns.Refused(code)
+    assert bare(d.wait_started(2)) == turns.Refused("unsupported")
+    assert bare(d.wait_ended(1)) == turns.Refused("unsupported")
 
 
 def test_the_gate_refusal_and_the_next_submit_waits_for_the_close(claude):
@@ -270,15 +272,21 @@ def test_live_facts_come_from_the_runner_and_an_unanswered_read_holds(claude):
     assert (f.agents, f.draft) == (2, True)
     runner.agents = None                         # $.agent.list() could not be read
     assert s.facts().agents is None
-    d = s.deliver("x", only_if_idle=True, refuse_agents=True)
-    assert bare(d.wait_started(1)) == turns.Refused("busy-agents")
     runner.agents = 0
     runner.answer_live = False
     t0 = time.monotonic()
     f = s.facts()
     assert f.draft is True and f.agents is None and time.monotonic() - t0 < 1.8
-    d = s.deliver("x", only_if_idle=True, refuse_draft=True)
-    assert bare(d.wait_started(1)) == turns.Refused("draft")
+    # A start's own checks are the gate's, from what it reads at entry: an unreadable
+    # subagent list counts as busy and an unreadable box holds.
+    for checks, reason in (({"refuse_agents": True}, "busy-agents"),
+                           ({"refuse_draft": True}, "draft")):
+        d = s.deliver("x", only_if_idle=True, **checks)
+        line = runner.next_line()
+        answer = runner.enter(line["nonce"], draft=None, agents=None)
+        assert answer["verdict"] == "drop" and answer["reason"] == reason
+        assert bare(d.wait_started(1)) == turns.Refused(reason)
+        runner.close(d.id, leg.END_DROP, answer["text"])
 
 
 def test_holding_answers_the_stop_ask_within_hold_wait(claude, turns_env):
@@ -388,7 +396,12 @@ def test_steer_appends_and_a_failed_append_refuses_idle(claude):
     runner.turn_start("T")
     d = s.steer("also this")
     assert runner.next_line() == {"op": "append", "delivery": d.id, "text": "also this"}
+    with pytest.raises(TimeoutError):
+        d.wait_started(0.2)                      # started only at the runner's word
+    runner.report(leg.R_APPEND_DONE, delivery=d.id)
     assert bare(d.wait_started(1)) == turns.Started("T")
+    d = s.steer("and this")
+    assert runner.next_line()["delivery"] == d.id
     runner.report(leg.R_APPEND_FAILED, delivery=d.id, reason="no turn running")
     assert bare(d.wait_ended(1)) == turns.Refused("idle")
 
@@ -540,16 +553,16 @@ def test_the_bound_after_admission_changes_nothing(claude):
     assert runner.next_line()["delivery"] == d2.id
 
 
-def test_the_gate_dropping_an_admitted_prompt_reads_its_own_code(claude):
+def test_the_gate_dropping_an_admitted_prompt_reads_unsupported(claude):
     # The endpoint admitted it, but the answer missed the gate's 1 s: the gate drops it
-    # `gone`, and the admitted window closes by that drop.
+    # `gone`, and the admitted window closes by that drop. The text never ran.
     ep, runner = claude()
     s = turns.find(session_id="s-1")
     d = s.deliver("mail")
     line = runner.next_line()
     assert runner.enter(line["nonce"])["verdict"] == "pass"
     runner.close(d.id, leg.END_DROP, "gone")
-    assert bare(d.wait_ended(2)) == turns.Refused("gone")
+    assert bare(d.wait_ended(2)) == turns.Refused("unsupported")
 
 
 def test_a_lost_report_fails_even_an_admitted_window(claude):

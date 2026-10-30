@@ -109,7 +109,7 @@ def test_only_if_idle_refuses_from_the_ledger_in_the_answer(make_endpoint, conne
     busy = client.call("deliver", {"text": "b", "only_if_idle": True, "ref": "r"},
                        timeout=5)
     assert R.from_wire(busy["result"]) == R.Refused("busy-turn", busy["delivery"], "r")
-    fake.enter(fake.submitted[0])
+    fake.enter(fake.handed(1)[0])
     fake.end_turn()
     stale = client.call("deliver", {"text": "c", "only_if_idle": True,
                                     "if_turn_number": 0}, timeout=5)
