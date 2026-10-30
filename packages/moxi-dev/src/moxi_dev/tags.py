@@ -4,14 +4,16 @@ Code, tests and docs say a reason in plain words. A tag is the shorthand of the 
 change was planned in, which a reader of the repository cannot follow: a short capital id
 with a number in square brackets, one of a few capital letters with a number in
 parentheses, a decision id (a D and two digits, perhaps a letter after), a section sign
-with a number, a design version, a severity with a number, or a round named by its home
+with a number, a design version, a severity with a number, a round named by its home
 and slug, one of the two hyphenated (two plain words with a slash between, after
-"round", are as likely prose). No example
-of one is written here, so this file passes its own check. Hook laws written
-`L4` and other plain ids are not tags.
+"round", are as likely prose), or a finding id, an L and a number, bare or bracketed.
+No example of one is written here, so this file passes its own check.
 
-Two kinds of text are let through. The argument of a finding mark,
-`@pytest.mark.finding("L50")`, is data a tool reads. And a line of the root's
+Two kinds of text are let through. A finding mark's arguments,
+`@pytest.mark.finding("L50")`, are data a tool reads, and a finding id is let through
+there and nowhere else: in a comment, a docstring or a string it is a tag like the rest,
+so a label of that shape (a numbered rule, say) is written another way. And a line of
+the root's
 `.residue-allow`, `<path> TAB <exact text> TAB <why>`, lets that text stand in that file,
 for a tag that is itself data (a pattern's test input, say); the repository's commit scan
 reads the same file.
@@ -36,10 +38,12 @@ TAG = re.compile(
     r"|\bdesign v[0-9]"
     r"|\b(?:MINOR|MAJOR|BLOCKER) [0-9]"
     r"|\b[Rr]ound (?:[a-z0-9]+-[a-z0-9-]+/[a-z0-9-]+|[a-z0-9-]+/[a-z0-9]+-[a-z0-9-]+)"
+    r"|\bL[0-9]+\b"
 )
 
-#: A finding mark's argument, which is data.
-FINDING_MARK = re.compile(r"""mark\.finding\(\s*(["'])[^"'\n]*\1\s*\)""")
+#: A finding mark with its arguments, one or more strings, which are data.
+FINDING_MARK = re.compile(
+    r"""mark\.finding\(\s*(["'])[^"'\n]*\1(?:\s*,\s*(["'])[^"'\n]*\2)*\s*,?\s*\)""")
 
 #: The file that declares allowed text, and files that are not prose or code.
 ALLOW_FILE = ".residue-allow"
@@ -73,7 +77,7 @@ def allowed(root: Path) -> set[tuple[str, str]]:
 
 
 def tags_in(text: str) -> list[tuple[int, str]]:
-    """Each tag in `text`, with its line number; finding marks' arguments excepted."""
+    """Each tag in `text`, with its line number; a finding mark's arguments excepted."""
     found = []
     for number, line in enumerate(text.splitlines(), 1):
         line = FINDING_MARK.sub("mark.finding()", line)

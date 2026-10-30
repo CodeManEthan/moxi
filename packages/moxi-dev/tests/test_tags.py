@@ -22,13 +22,30 @@ def test_each_shape_is_a_tag(tag):
 
 
 @pytest.mark.parametrize("text", [
-    "the hooks' law L4 holds", "L10 No module's words", "x[0] = y[1]", "D3 and D100",
+    "the hooks' law 4 holds", "def test_l5_holds():", "--finding L<n>", "L1x and XL12",
+    "x[0] = y[1]", "D3 and D100",
     "a list [a1] of things", "version 3.12", "X11 sockets", "around home/slug",
     "@pytest.mark.finding(\"L50\")", "pytest.mark.finding('L7')",
+    "@pytest.mark.finding('L7', \"L8\")", "@pytest.mark.finding( 'L7' , )",
     "a round trip/second", "around home-one/slug", "D07bc",
 ])
 def test_plain_text_and_a_finding_mark_are_not_tags(text):
     assert tags_in(text) == []
+
+
+@pytest.mark.parametrize("text", [
+    'def test_it():\n    """Fixes L12: the record is kept."""\n',
+    "# see L12\n", "FIX = 'L12'\n", "the [L12] note\n",
+])
+def test_a_finding_id_anywhere_but_a_finding_mark_is_a_tag(text):
+    found = tags_in(text)
+    assert [tag for _, tag in found] in (["L12"], ["[L12]"])
+
+
+def test_only_the_mark_s_own_argument_is_let_through():
+    line = '@pytest.mark.finding("L12")  # fixes L13\n'
+    assert tags_in(line) == [(1, "L13")]
+    assert tags_in('finding("L12")\n') == [(1, "L12")]
 
 
 def test_line_numbers_count_from_one():

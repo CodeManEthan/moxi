@@ -12,3 +12,18 @@ packages/moxi-dev/tests/test_tags.py	Round home-one/slug	data: the tag check's o
 packages/moxi-dev/tests/test_tags.py	D07b	data: the tag check's own tests feed this to the pattern they test
 packages/moxi-dev/tests/test_tags.py	D07	data: the tag check's own tests feed this to the pattern they test
 packages/moxi-dev/tests/test_tags.py	round trip/second	data: prose the tag check must let through; the commit scan's wider round shape reads it as a round
+packages/moxi-dev/tests/test_check.py	L1	data: a finding's name the check's tests pass to --finding or the kit's variable
+packages/moxi-dev/tests/test_check.py	L3	data: a finding's name the check's tests pass to --finding or the kit's variable
+packages/moxi-dev/tests/test_check.py	L4	data: a finding's name the check's tests pass to --finding or the kit's variable
+packages/moxi-dev/tests/test_check.py	L9	data: a finding's name the check's tests pass to --finding or the kit's variable
+packages/moxi-dev/tests/test_check.py	L50	data: a finding's name the check's tests pass to --finding or the kit's variable
+packages/moxi-dev/tests/test_check.py	L51	data: a finding's name the check's tests pass to --finding or the kit's variable
+packages/moxi-dev/tests/test_selection.py	L7	data: a finding's name the selection tests put in the kit's variable
+packages/moxi-dev/tests/test_selection.py	L8	data: a finding's name the selection tests put in the kit's variable
+packages/moxi-dev/tests/test_selection.py	L99	data: a finding's name the selection tests put in the kit's variable
+packages/moxi-dev/tests/test_tags.py	L7	data: the tag check's own tests feed this to the pattern they test
+packages/moxi-dev/tests/test_tags.py	L8	data: the tag check's own tests feed this to the pattern they test
+packages/moxi-dev/tests/test_tags.py	L12	data: the tag check's own tests feed this to the pattern they test
+packages/moxi-dev/tests/test_tags.py	[L12]	data: the tag check's own tests feed this to the pattern they test
+packages/moxi-dev/tests/test_tags.py	L13	data: the tag check's own tests feed this to the pattern they test
+packages/moxi-dev/tests/test_tags.py	L50	data: the tag check's own tests feed this to the pattern they test
