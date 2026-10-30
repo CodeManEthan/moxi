@@ -657,9 +657,7 @@ def held_lock():
         proc.wait(timeout=30)
 
 
-def test_a_held_lock_makes_no_wait_exit_75(readings, roots, held_lock, monkeypatch,
-                                           capsys):
-    monkeypatch.setitem(sys.modules, "moxi_usage.readings", readings)
+def test_a_held_lock_makes_no_wait_exit_75(readings, roots, held_lock, capsys):
     assert cli.main(["index", "--no-wait"]) == 75
     assert "another pass holds the index" in capsys.readouterr().err
     with pytest.raises(moxi.files.LockTimeout):
@@ -680,11 +678,6 @@ def test_the_wait_for_the_lock_runs_on_the_injected_clock(readings, held_lock):
 
 
 CONCURRENT = textwrap.dedent("""
-    import sys, types
-    readings = types.ModuleType("moxi_usage.readings")
-    readings.add_codex = lambda records, *, now, env=None: len(list(records))
-    readings.prune = lambda *, now, env=None: 0
-    sys.modules["moxi_usage.readings"] = readings
     from moxi_usage import cli
     raise SystemExit(cli.main(["index", "--no-wait", "--json"]))
 """)
@@ -794,13 +787,13 @@ def test_one_lane_runs_alone(readings, roots):
 
 # --- the verb ---------------------------------------------------------------------------
 
-def test_the_index_verb_runs_the_pass_and_checks_the_claims(readings, roots, monkeypatch,
-                                                            capsys):
-    monkeypatch.setitem(sys.modules, "moxi_usage.readings", readings)
+def test_the_index_verb_runs_the_pass_and_checks_the_claims(roots, capsys):
     transcript(roots["claude"], SESSION_A).write()
     assert cli.main(["index", "--check"]) == 0
     out = capsys.readouterr().out
     assert "1 read" in out and "agree" in out
+    assert "claude           online   1 files, 2 requests" in out
+    assert "index: 1 files, 2 requests, 0 duplicates" in out and "version 1" in out
 
     conn = store.connect()
     try:
@@ -810,6 +803,74 @@ def test_the_index_verb_runs_the_pass_and_checks_the_claims(readings, roots, mon
     assert cli.main(["index", "--check", "--json"]) == 1
     doc = index.json.loads(capsys.readouterr().out)
     assert doc["check"]["agree"] is False and len(doc["check"]["keys"]) == 2
+    assert doc["pass"]["reused"] == 1 and doc["status"]["kind"] == "status"
+    assert doc["status"]["total"]["files"] == 1 and doc["status"]["index"]["passed"]
+
+
+def test_status_shows_each_lane_its_holds_duplicates_and_imports(readings, roots,
+                                                                 tmp_path):
+    from moxi_usage import api, reports
+
+    one, two = tmp_path / "one", tmp_path / "two"
+    for archive in (one, two):
+        transcript(archive / "projects", SESSION_A).write()
+    write_config(f'[[claude.archive_roots]]\npath = "{one}"\nid = "one"\n'
+                 f'[[claude.archive_roots]]\npath = "{two}"\nid = "two"\n')
+    rollout(roots["codex"], THREAD_A)
+    imported = CodexRollout(roots["codex"], thread_id=THREAD_B, imported=True)
+    imported.turn()
+    imported.request(token_usage(output=7))
+    imported.write()
+    run(readings)
+    shutil.rmtree(two)                                     # the second drive unplugged
+    run(readings)
+
+    found = api.report("status", fresh=False)
+    lanes = {row["lane"]: row for row in found.rows}
+    assert [row["lane"] for row in found.rows] == [
+        "claude", "codex", "opencode", "archive:one", "archive:two"]
+    assert (lanes["codex"]["files"], lanes["codex"]["excluded"],
+            lanes["codex"]["requests"]) == (2, 1, 1)
+    assert lanes["codex"]["imports_reason"] == "imports file not found"
+    assert lanes["archive:one"]["duplicates"] == 0
+    two_row = lanes["archive:two"]
+    assert (two_row["state"], two_row["held"], two_row["duplicates"]) == ("offline", 1, 2)
+    [(reason, count)] = two_row["held_reasons"].items()
+    assert "could not be listed" in reason and count == 1
+    total = found.total
+    assert (total["files"], total["requests"], total["duplicates"], total["held"],
+            total["excluded"]) == (4, 5, 2, 1, 1)
+    assert [row["lane"] for row in total["held_rows"]] == ["archive:two"]
+    assert total["held_rows"][0]["reason"] == reason
+    assert total["index_version"] == store.INDEX_VERSION
+    assert total["last_pass"] == NOW == found.index["last_pass"]
+    assert [row["lane"] for row in api.report("status", harness="codex",
+                                              fresh=False).rows] == ["codex"]
+    with pytest.raises(reports.ReportError, match="takes no since"):
+        api.report("status", since="2026-10-01", fresh=False)
+
+
+def test_status_with_no_index_yet_is_empty_and_says_so():
+    from moxi_usage import api
+
+    found = api.report("status", fresh=False)
+    assert found.rows == [] and found.total["files"] == 0
+    assert found.total["last_pass"] is None and "no index yet" in found.index["note"]
+
+
+def test_a_pass_with_no_readings_given_stores_codex_limits_in_the_readings_store(roots):
+    from moxi_usage import readings
+
+    rollout(roots["codex"], THREAD_A, start=NOW - 600)
+    result = index.pass_(now=NOW, projects=None, workers=1)
+    assert result.readings_error is None and result.readings_added > 0
+    conn = readings.open_store()
+    try:
+        stored = conn.execute("SELECT harness, source, session_id FROM readings").fetchall()
+    finally:
+        conn.close()
+    assert len(stored) == result.readings_added
+    assert {tuple(row) for row in stored} == {("codex", "rollout", THREAD_A)}
 
 
 def test_the_index_verb_maps_a_refused_schema_to_3(readings, monkeypatch, capsys):

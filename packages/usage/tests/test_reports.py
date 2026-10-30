@@ -415,10 +415,11 @@ def test_no_report_reads_projects(conn, monkeypatch):
 
 
 def test_an_empty_index_gives_an_empty_report(conn):
-    for fn in reports.REPORTS.values():
+    for kind, fn in reports.REPORTS.items():
         report = fn(conn, table=table())
-        assert report.rows == [] and report.total["requests"] == 0
-        assert report.total["cost"] == 0 and report.complete
+        assert report.rows == [] and report.total["requests"] == 0 and report.complete
+        if kind != "status":
+            assert report.total["cost"] == 0
 
 
 def test_a_range_read_uses_the_won_and_time_index(conn):
@@ -467,6 +468,14 @@ def test_report_reads_the_index_as_it_is_when_another_pass_holds_it(conn, monkey
     assert "pid 4242" in report.index["note"]
 
 
+def test_a_fresh_report_runs_the_real_pass_under_its_env(tmp_path):
+    env = {**os.environ, "MOXI_USAGE_HOME": str(tmp_path / "elsewhere")}
+    assert store.index_path(env) != store.index_path()
+    report = api.report("daily", env=env)
+    assert report.index["passed"] and report.index["last_pass"] is not None
+    assert store.index_path(env).exists() and not store.index_path().exists()
+
+
 def test_report_with_no_index_is_empty_and_says_so(monkeypatch):
     monkeypatch.setattr(reports, "run_pass", lambda *, env=None: None)
     report = api.report("daily", fresh=False)
@@ -476,8 +485,8 @@ def test_report_with_no_index_is_empty_and_says_so(monkeypatch):
         api.report("weekly", fresh=False)
 
 
-def test_report_kinds_are_the_designed_five():
-    assert api.KINDS == ("daily", "monthly", "sessions", "models", "projects")
+def test_report_kinds_are_the_designed_six():
+    assert api.KINDS == ("daily", "monthly", "sessions", "models", "projects", "status")
 
 
 # --- the verbs ---------------------------------------------------------------------------
@@ -498,7 +507,7 @@ def test_report_verbs_print_json_and_no_pass_skips_the_pass(conn, monkeypatch, c
     assert data["kind"] == "daily" and data["tz"] == "UTC"
     assert data["unpriced_models"] == ["mystery-9"]
     assert [r["day"] for r in data["rows"]] == ["2026-10-01", "2026-10-01"]
-    for verb in reports.KINDS:
+    for verb in cli.REPORT_VERBS:
         assert cli.main([verb, "--no-pass"]) == 0
         out = capsys.readouterr().out
         assert "u: 1.1k tokens are unpriced" in out, out and "mystery-9" in out

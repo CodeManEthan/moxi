@@ -46,6 +46,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from moxi_sessions.api import UNKNOWN
+
 from . import readings as store
 from .readings import CLAUDE, CODEX, FIVE_HOUR, SEVEN_DAY, Reading
 
@@ -85,28 +87,30 @@ class Row:
     """One window, in one state (`fresh`, `reset` or `unavailable`, with `reason` for the
     last two), from its winning reading.
 
-    `used_percent`, `resets_at`, `observed_at` (epoch seconds) and the rest are None
-    where the reading did not say, or where no reading was found. `age_seconds` is
-    `now - observed_at`. `full_at` is the projection's time the window reaches 100%,
-    with `projection` saying why there is none; `fit` counts the readings it fitted.
-    `note` says why no newer reading came when one was wanted. `extra` holds what else
-    the reading said (a spend limit's dollars, say).
+    What the reading gives (`window_minutes`, `slot`, `used_percent`, `resets_at`,
+    `observed_at` in epoch seconds, `age_seconds`, `source`, `session_id`, `plan_type`)
+    is `UNKNOWN` where the reading did not say, and all of it where no reading was found;
+    the state and `reason` say which. `age_seconds` is `now - observed_at`. `full_at` is
+    the projection's time the window reaches 100%, None with `projection` saying why
+    there is none; `fit` counts the readings it fitted. `reason` and `note` are None when
+    there is nothing to say; `note` says why no newer reading came when one was wanted.
+    `extra` holds what else the reading said (a spend limit's dollars, say).
     """
 
     harness: str
     limit_id: str
-    window_minutes: int | None
+    window_minutes: Any = UNKNOWN
     label: str
     state: str
     reason: str | None = None
-    slot: str | None = None
-    used_percent: float | None = None
-    resets_at: float | None = None
-    observed_at: float | None = None
-    age_seconds: float | None = None
-    source: str | None = None
-    session_id: str | None = None
-    plan_type: str | None = None
+    slot: Any = UNKNOWN
+    used_percent: Any = UNKNOWN
+    resets_at: Any = UNKNOWN
+    observed_at: Any = UNKNOWN
+    age_seconds: Any = UNKNOWN
+    source: Any = UNKNOWN
+    session_id: Any = UNKNOWN
+    plan_type: Any = UNKNOWN
     full_at: float | None = None
     projection: str | None = None
     fit: int = 0
@@ -114,11 +118,13 @@ class Row:
     extra: Mapping[str, Any] = field(default_factory=dict)
 
     @property
-    def window(self) -> tuple[str, str, int | None]:
+    def window(self) -> tuple[str, str, Any]:
         return (self.harness, self.limit_id, self.window_minutes)
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        """JSON-ready: times as ISO 8601 UTC, and an `UNKNOWN` value left out and named
+        in `"unknown"`."""
+        out: dict[str, Any] = {
             "harness": self.harness, "limit_id": self.limit_id,
             "window_minutes": self.window_minutes, "label": self.label,
             "state": self.state, "reason": self.reason, "slot": self.slot,
@@ -129,6 +135,12 @@ class Row:
             "projection": self.projection, "fit": self.fit, "note": self.note,
             "extra": dict(self.extra),
         }
+        unknown = [name for name, value in out.items() if value is UNKNOWN]
+        for name in unknown:
+            del out[name]
+        if unknown:
+            out["unknown"] = unknown
+        return out
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -231,8 +243,8 @@ def harness_rows(harness: str, found: list[Reading], *, now: float, days: float,
     for minutes in (FIVE_HOUR, SEVEN_DAY):
         if (harness, main, minutes) not in by_window:
             rows.append(_missing(harness, minutes, _no_reading(harness, days)))
-    rows.sort(key=lambda r: (r.limit_id != main, r.limit_id, r.window_minutes is None,
-                             r.window_minutes or 0))
+    rows.sort(key=lambda r: (r.limit_id != main, r.limit_id, r.window_minutes is UNKNOWN,
+                             0 if r.window_minutes is UNKNOWN else r.window_minutes))
     return rows
 
 
@@ -248,14 +260,19 @@ def window_row(harness: str, found: list[Reading], *, now: float,
         full_at, projection, fit = project(found, winner, now=now,
                                            minutes=projection_minutes)
     return Row(harness=harness, limit_id=winner.limit_id,
-               window_minutes=winner.window_minutes,
+               window_minutes=_said(winner.window_minutes),
                label=label(winner.window_minutes, winner.limit_id, winner.slot),
-               state=state, reason=reason, slot=winner.slot,
-               used_percent=winner.used_percent, resets_at=winner.resets_at,
+               state=state, reason=reason, slot=_said(winner.slot),
+               used_percent=_said(winner.used_percent), resets_at=_said(winner.resets_at),
                observed_at=winner.observed_at, age_seconds=now - winner.observed_at,
-               source=winner.source, session_id=winner.session_id,
-               plan_type=winner.plan_type, full_at=full_at, projection=projection,
+               source=winner.source, session_id=_said(winner.session_id),
+               plan_type=_said(winner.plan_type), full_at=full_at, projection=projection,
                fit=fit, extra=_load_extra(winner.extra))
+
+
+def _said(value: Any) -> Any:
+    """A stored reading's value, `UNKNOWN` where the store holds NULL (not said)."""
+    return UNKNOWN if value is None else value
 
 
 # --- picking, states, projection ------------------------------------------------------
@@ -473,7 +490,7 @@ def _with_note(row: Row, now: float, after: float, why: str | None) -> Row:
 
     if row.harness != CODEX:
         return row
-    if row.observed_at is not None and now - row.observed_at < after:
+    if row.observed_at is not UNKNOWN and now - row.observed_at < after:
         return row
     return replace(row, note=f"no newer reading: {why}")
 
@@ -493,10 +510,10 @@ def _describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
 
 
-def iso(epoch: float | None) -> str | None:
-    """Epoch seconds as ISO 8601 UTC, or None."""
-    if epoch is None:
-        return None
+def iso(epoch: Any) -> Any:
+    """Epoch seconds as ISO 8601 UTC; None and `UNKNOWN` as they are."""
+    if epoch is None or epoch is UNKNOWN:
+        return epoch
     return datetime.fromtimestamp(epoch, timezone.utc).isoformat().replace("+00:00", "Z")
 
 

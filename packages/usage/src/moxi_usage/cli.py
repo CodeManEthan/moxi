@@ -22,11 +22,12 @@ from the index (`moxi_usage.reports`). Days are local time, or UTC with `--utc`;
 and `--until` are dates (`YYYY-MM-DD`), both included. A cost the model table cannot give
 is never printed as $0: the row is marked and the tokens are counted as unpriced.
 
-`index` runs the token index's pass (`moxi_usage.index`) and prints what it did: exit 75
-when another pass holds the index past `index.wait_seconds` (at once with `--no-wait`), 3
-when the index's schema can't move (`--rebuild --force` drops offline archive lanes'
-rows to let it), and with `--check` 1 when the stored claims differ from the `claimed`
-view, naming the keys.
+`index` runs the token index's pass (`moxi_usage.index`), prints what it did in one line,
+then the index's `status` report, lane by lane (with `--json`, both). It exits 75 when
+another pass holds the index past `index.wait_seconds` (at once with `--no-wait`), 3 when
+the index's schema can't move (`--rebuild --force` drops offline archive lanes' rows to
+let it), and with `--check` 1 when the stored claims differ from the `claimed` view,
+naming the keys.
 """
 
 from __future__ import annotations
@@ -202,189 +203,7 @@ def _print_facts(facts: Any) -> None:
         print(f"  unknown         {', '.join(data['unknown'])}")
 
 
-# --- limits ---------------------------------------------------------------------------
-
-def _limits(args: argparse.Namespace, prog: str, *, now: float | None = None) -> int:
-    from moxi.store import StoreTooNew
-
-    from . import limits
-
-    try:
-        result = limits.limits(harness=args.harness, now=now, pull=args.pull)
-    except StoreTooNew as exc:
-        print(f"{prog} limits: {exc}", file=sys.stderr)
-        return exc.exit_code
-    if args.json:
-        print(json.dumps(result.as_dict(), indent=2))
-        return codes.OK
-    for line in limits_lines(result):
-        print(line)
-    return codes.OK
-
-
-def limits_lines(result: Any) -> list[str]:
-    """The text of `moxi usage limits`: per harness one line of cells, the oldest age on
-    it, then any note under it."""
-    lines = []
-    harnesses = list(dict.fromkeys(row.harness for row in result.rows))
-    for harness in harnesses:
-        rows = result.of(harness)
-        cells = [f"{harness:<7}"] + [_cell(row, result.now) for row in rows]
-        line = "   ".join(cells)
-        ages = [row.age_seconds for row in rows if row.age_seconds is not None]
-        if ages:
-            line += f"   as of {format_age(max(ages))} ago"
-        lines.append(line)
-        for note in dict.fromkeys(row.note for row in rows if row.note):
-            lines.append(f"{'':<7}   {note}")
-    for note in result.notes:
-        lines.append(f"note: {note}")
-    return lines
-
-
-def _cell(row: Any, now: float) -> str:
-    # The percent is the percent USED, and the word says so: the harnesses' own apps
-    # show what is left, and a bare number reads as that.
-    extra = ""
-    if row.extra:
-        extra = " (" + ", ".join(f"{k} {v}" for k, v in sorted(row.extra.items())) + ")"
-    if row.state == "fresh":
-        text = (f"{row.label} {row.used_percent:.0f}% used, resets "
-                f"{format_reset(row.resets_at, now)}")
-        if row.full_at is not None:
-            text += f", full by {format_reset(row.full_at, now)}"
-        return text + extra
-    if row.state == "reset":
-        return f"{row.label} reset since the last reading{extra}"
-    return f"{row.label} unavailable ({row.reason}){extra}"
-
-
-def format_age(seconds: float) -> str:
-    """`40s`, `4m05s`, `1h04m`, `3d04h`, rounded down so a reading never looks fresher
-    than it is."""
-    seconds = max(int(seconds), 0)
-    if seconds < 60:
-        return f"{seconds}s"
-    if seconds < 3600:
-        return f"{seconds // 60}m{seconds % 60:02d}s"
-    if seconds < 86400:
-        return f"{seconds // 3600}h{(seconds % 3600) // 60:02d}m"
-    return f"{seconds // 86400}d{(seconds % 86400) // 3600:02d}h"
-
-
-def format_reset(epoch: float | None, now: float) -> str:
-    """Local wall time, as coarse as the distance allows: `18:20` today, `Fri 09:00`
-    within the week, `Nov 06 09:00` beyond it."""
-    from datetime import datetime
-
-    if epoch is None:
-        return "unknown"
-    when = datetime.fromtimestamp(epoch)
-    today = datetime.fromtimestamp(now)
-    if when.date() == today.date():
-        return when.strftime("%H:%M")
-    if abs((when - today).days) < 7:
-        return when.strftime("%a %H:%M")
-    return when.strftime("%b %d %H:%M")
-# --- index ----------------------------------------------------------------------------
-
-#: How many keys `index --check` names before it counts the rest.
-KEYS_SHOWN = 20
-
-
-def _index_parser(verbs: Any) -> None:
-    index = verbs.add_parser(
-        "index", help="read what changed in the harnesses' records into the token index",
-        description="Run the token index's pass: read every source that changed since the "
-                    "last pass, and print what it did.")
-    index.add_argument("--rebuild", action="store_true",
-                       help="read every source again from its start")
-    index.add_argument("--force", action="store_true",
-                       help="let a schema change drop the rows of offline archive lanes")
-    index.add_argument("--no-wait", action="store_true",
-                       help="exit 75 at once when another pass holds the index")
-    index.add_argument("--check", action="store_true",
-                       help="after the pass, compare the stored claims with the claimed "
-                            "view; exit 1 naming the keys that differ")
-    index.add_argument("--json", action="store_true", help="print one JSON object")
-
-
-def _index(args: argparse.Namespace, prog: str) -> int:
-    import moxi.files
-    import moxi.store
-
-    from . import index, store
-
-    try:
-        result = index.pass_(rebuild=args.rebuild, force=args.force,
-                             wait=0.0 if args.no_wait else None)
-    except moxi.files.LockTimeout as exc:
-        print(f"{prog} index: another pass holds the index: {exc}", file=sys.stderr)
-        return codes.TEMPFAIL
-    except moxi.store.StoreTooNew as exc:
-        print(f"{prog} index: {exc}", file=sys.stderr)
-        return codes.REFUSED
-    except store.MigrationRefused as exc:
-        print(f"{prog} index: refused: {exc}", file=sys.stderr)
-        return exc.exit_code
-    differ: list[int] = []
-    if args.check:
-        conn = store.connect()
-        try:
-            differ = store.check(conn)
-        finally:
-            conn.close()
-    doc = result.as_dict()
-    if args.check:
-        doc["check"] = {"agree": not differ, "keys": differ}
-    if args.json:
-        print(json.dumps(doc, indent=2))
-    else:
-        _print_pass(result)
-        if args.check:
-            _print_check(differ)
-    return codes.ERROR if differ else codes.OK
-
-
-def _print_pass(result: Any) -> None:
-    what = "rebuilt" if result.rebuild else "pass"
-    print(f"{what}: {result.listed} sources listed, {result.read} read, "
-          f"{result.reused} unchanged, {result.excluded} imported, {result.deleted} "
-          f"gone, {result.held} held")
-    for lane, state in result.lanes.items():
-        line = f"  {lane:<16} {state['state']:<8} {state['listed']} listed"
-        if state["held"]:
-            line += f", {state['held']} held"
-        if state.get("imported"):
-            line += f", {state['imported']} imported"
-        if state.get("compressed"):
-            line += f", {state['compressed']} compressed"
-        print(line)
-        if state.get("reason"):
-            print(f"  {'':<16} {state['reason']}")
-    for lane in result.dropped_lanes:
-        print(f"  dropped {lane}: its archive root left the config")
-    if result.migration_dropped:
-        print(f"  dropped offline lanes to move the schema: "
-              f"{', '.join(result.migration_dropped)}")
-    for line in result.unreadable[:KEYS_SHOWN]:
-        print(f"  unreadable: {line}")
-    if result.readings_error:
-        print(f"  limits readings not stored: {result.readings_error}")
-    if result.cancelled:
-        print("  cancelled: what was read so far is kept")
-
-
-def _print_check(differ: list[int]) -> None:
-    if not differ:
-        print("check: the stored claims agree with the claimed view")
-        return
-    shown = ", ".join(str(key) for key in differ[:KEYS_SHOWN])
-    more = f" and {len(differ) - KEYS_SHOWN} more" if len(differ) > KEYS_SHOWN else ""
-    print(f"check: {len(differ)} keys differ from the claimed view: {shown}{more}")
-
-
-# --- prices update ----------------------------------------------------------------------
+# --- prices update --------------------------------------------------------------------
 
 def _update(args: argparse.Namespace, prog: str, *, fetcher: Any = None,
             now: float | None = None) -> int:
@@ -442,7 +261,97 @@ def _print_in_index(found: Any) -> None:
         print(f"    {name:<9} {len(ids)}{': ' if ids else ''}{shown}{more}")
 
 
-# --- reports ----------------------------------------------------------------------------
+# --- limits ---------------------------------------------------------------------------
+
+def _limits(args: argparse.Namespace, prog: str, *, now: float | None = None) -> int:
+    from moxi.store import StoreTooNew
+
+    from . import limits
+
+    try:
+        result = limits.limits(harness=args.harness, now=now, pull=args.pull)
+    except StoreTooNew as exc:
+        print(f"{prog} limits: {exc}", file=sys.stderr)
+        return exc.exit_code
+    if args.json:
+        print(json.dumps(result.as_dict(), indent=2))
+        return codes.OK
+    for line in limits_lines(result):
+        print(line)
+    return codes.OK
+
+
+def limits_lines(result: Any) -> list[str]:
+    """The text of `moxi usage limits`: per harness one line of cells, the oldest age on
+    it, then any note under it."""
+    from moxi_sessions.api import UNKNOWN
+
+    lines = []
+    harnesses = list(dict.fromkeys(row.harness for row in result.rows))
+    for harness in harnesses:
+        rows = result.of(harness)
+        cells = [f"{harness:<7}"] + [_cell(row, result.now) for row in rows]
+        line = "   ".join(cells)
+        ages = [row.age_seconds for row in rows if row.age_seconds is not UNKNOWN]
+        if ages:
+            line += f"   as of {format_age(max(ages))} ago"
+        lines.append(line)
+        for note in dict.fromkeys(row.note for row in rows if row.note):
+            lines.append(f"{'':<7}   {note}")
+    for note in result.notes:
+        lines.append(f"note: {note}")
+    return lines
+
+
+def _cell(row: Any, now: float) -> str:
+    # The percent is the percent USED, and the word says so: the harnesses' own apps
+    # show what is left, and a bare number reads as that.
+    extra = ""
+    if row.extra:
+        extra = " (" + ", ".join(f"{k} {v}" for k, v in sorted(row.extra.items())) + ")"
+    if row.state == "fresh":
+        text = (f"{row.label} {row.used_percent:.0f}% used, resets "
+                f"{format_reset(row.resets_at, now)}")
+        if row.full_at is not None:
+            text += f", full by {format_reset(row.full_at, now)}"
+        return text + extra
+    if row.state == "reset":
+        return f"{row.label} reset since the last reading{extra}"
+    return f"{row.label} unavailable ({row.reason}){extra}"
+
+
+def format_age(seconds: float) -> str:
+    """`40s`, `4m05s`, `1h04m`, `3d04h`, rounded down so a reading never looks fresher
+    than it is."""
+    seconds = max(int(seconds), 0)
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m{seconds % 60:02d}s"
+    if seconds < 86400:
+        return f"{seconds // 3600}h{(seconds % 3600) // 60:02d}m"
+    return f"{seconds // 86400}d{(seconds % 86400) // 3600:02d}h"
+
+
+def format_reset(epoch: Any, now: float) -> str:
+    """Local wall time, as coarse as the distance allows: `18:20` today, `Fri 09:00`
+    within the week, `Nov 06 09:00` beyond it; `unknown` for None or `UNKNOWN`."""
+    from datetime import datetime
+
+    from moxi_sessions.api import UNKNOWN
+
+    if epoch is None or epoch is UNKNOWN:
+        return "unknown"
+    when = datetime.fromtimestamp(epoch)
+    today = datetime.fromtimestamp(now)
+    if when.date() == today.date():
+        return when.strftime("%H:%M")
+    if abs((when - today).days) < 7:
+        return when.strftime("%a %H:%M")
+    return when.strftime("%b %d %H:%M")
+
+
+# --- reports --------------------------------------------------------------------------
 
 REPORT_VERBS = {
     "daily": "tokens and cost by day and model",
@@ -580,3 +489,130 @@ def _print_report(found: Any) -> None:
 
 def _cut(text: str, width: int) -> str:
     return text if len(text) <= width else text[:width - 1] + "~"
+
+
+# --- index ----------------------------------------------------------------------------
+
+#: How many keys `index --check` names before it counts the rest.
+KEYS_SHOWN = 20
+#: How many reasons for held rows `index` prints per lane before it counts the rest.
+REASONS_SHOWN = 5
+
+
+def _index_parser(verbs: Any) -> None:
+    index = verbs.add_parser(
+        "index", help="read what changed in the harnesses' records into the token index",
+        description="Run the token index's pass: read every source that changed since the "
+                    "last pass, then print the index's status, lane by lane.")
+    index.add_argument("--rebuild", action="store_true",
+                       help="read every source again from its start")
+    index.add_argument("--force", action="store_true",
+                       help="let a schema change drop the rows of offline archive lanes")
+    index.add_argument("--no-wait", action="store_true",
+                       help="exit 75 at once when another pass holds the index")
+    index.add_argument("--check", action="store_true",
+                       help="after the pass, compare the stored claims with the claimed "
+                            "view; exit 1 naming the keys that differ")
+    index.add_argument("--json", action="store_true", help="print one JSON object")
+
+
+def _index(args: argparse.Namespace, prog: str) -> int:
+    import moxi.files
+    import moxi.store
+
+    from . import index, reports, store
+
+    try:
+        result = index.pass_(rebuild=args.rebuild, force=args.force,
+                             wait=0.0 if args.no_wait else None)
+    except moxi.files.LockTimeout as exc:
+        print(f"{prog} index: another pass holds the index: {exc}", file=sys.stderr)
+        return codes.TEMPFAIL
+    except moxi.store.StoreTooNew as exc:
+        print(f"{prog} index: {exc}", file=sys.stderr)
+        return codes.REFUSED
+    except store.MigrationRefused as exc:
+        print(f"{prog} index: refused: {exc}", file=sys.stderr)
+        return exc.exit_code
+    status = reports.read("status", passed=not result.cancelled)
+    differ: list[int] = []
+    if args.check:
+        conn = store.connect()
+        try:
+            differ = store.check(conn)
+        finally:
+            conn.close()
+    if args.json:
+        doc = {"status": status.as_dict(), "pass": result.as_dict()}
+        if args.check:
+            doc["check"] = {"agree": not differ, "keys": differ}
+        print(json.dumps(doc, indent=2))
+    else:
+        _print_pass(result)
+        _print_status(status)
+        if args.check:
+            _print_check(differ)
+    return codes.ERROR if differ else codes.OK
+
+
+def _print_pass(result: Any) -> None:
+    """What the pass did, in one line, then anything it met that `status` doesn't show."""
+    what = "rebuilt" if result.rebuild else "pass"
+    print(f"{what}: {result.listed} sources listed, {result.read} read, "
+          f"{result.reused} unchanged, {result.excluded} imported, {result.deleted} "
+          f"gone, {result.held} held")
+    for lane in result.dropped_lanes:
+        print(f"  dropped {lane}: its archive root left the config")
+    if result.migration_dropped:
+        print(f"  dropped offline lanes to move the schema: "
+              f"{', '.join(result.migration_dropped)}")
+    for line in result.unreadable[:KEYS_SHOWN]:
+        print(f"  unreadable: {line}")
+    if result.readings_error:
+        print(f"  limits readings not stored: {result.readings_error}")
+    if result.cancelled:
+        print("  cancelled: what was read so far is kept")
+
+
+def _print_status(found: Any) -> None:
+    """The `status` report: one line per lane, its reasons under it, then the totals."""
+    total = found.total
+    for row in found.rows:
+        line = (f"  {row['lane']:<16} {row['state'] or '?':<8} {row['files']} files, "
+                f"{row['requests']} requests")
+        for name in ("duplicates", "excluded", "held"):
+            if row[name]:
+                line += f", {row[name]} {name}"
+        if row.get("compressed"):
+            line += f", {row['compressed']} compressed"
+        print(line)
+        if row.get("reason") and row["state"] != "absent":     # absent: never there
+            print(f"  {'':<16} {row['reason']}")
+        reasons = list(row["held_reasons"].items())
+        for reason, count in reasons[:REASONS_SHOWN]:
+            print(f"  {'':<16} held ({count}): {reason}")
+        if len(reasons) > REASONS_SHOWN:
+            print(f"  {'':<16} held for {len(reasons) - REASONS_SHOWN} more reasons")
+    last = total["last_pass"]
+    when = "never" if last is None else _local(last)
+    print(f"index: {total['files']} files, {total['requests']} requests, "
+          f"{total['duplicates']} duplicates, {total['excluded']} excluded, "
+          f"{total['held']} held; last pass {when}; version {total['index_version']}")
+    note = found.index.get("note")
+    if note:
+        print(note)
+
+
+def _local(epoch: float) -> str:
+    from datetime import datetime
+
+    return datetime.fromtimestamp(epoch).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _print_check(differ: list[int]) -> None:
+    if not differ:
+        print("check: the stored claims agree with the claimed view")
+        return
+    shown = ", ".join(str(key) for key in differ[:KEYS_SHOWN])
+    more = f" and {len(differ) - KEYS_SHOWN} more" if len(differ) > KEYS_SHOWN else ""
+    print(f"check: {len(differ)} keys differ from the claimed view: {shown}{more}")

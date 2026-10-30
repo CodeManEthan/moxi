@@ -19,7 +19,8 @@ Limits (`moxi_usage.limits`):
   the age of its reading and, when the window is filling, `full_at`, the time it
   reaches 100% at the recent rate. With `pull`, a Codex reading older than
   `limits.codex_pull_after` is refreshed through turns when turns is installed. Returns
-  `Limits`, whose `pull` says what the pull did.
+  `Limits`, whose `pull` says what the pull did. What a reading did not say, and every
+  fact of a window with no reading, is `UNKNOWN`; the state's reason says which.
 
 Reports (`moxi_usage.reports`):
 
@@ -28,7 +29,9 @@ Reports (`moxi_usage.reports`):
   (`daily`, `monthly`, `sessions`, `models`, `projects`), as a `Report`. With `fresh` the
   index's pass runs first. `tz` is the zone days are cut in, local time when None.
   Cost is worked out when the report runs; tokens the table cannot price are counted in
-  `unpriced_tokens`, never as $0.
+  `unpriced_tokens`, never as $0. The sixth kind, `status`, is the index itself: one
+  row per lane with its state, files, excluded, held and duplicate counts, and the
+  last pass and schema version in `total`; it takes only `harness`.
 
 `UNKNOWN` is sessions' sentinel: a fact the table does not know. It is neither None nor
 0, and refuses to be read as true or false, so an unknown price never turns into $0.
