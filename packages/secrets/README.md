@@ -149,9 +149,11 @@ tests/	credentials/*	*	2026-11-02	fixtures
   author and committer headers).
 - `set/rule` is `<set>/<rule id>`, `<set>/*` or `*`.
 - `match` is `*`, `sha256:` with exactly 16 hex digits (the hit's fingerprint), or
-  `text:<text>`. A `text:` value and the hit's text are compared casefolded, with each
-  whitespace run collapsed to one space, `_` read as `-`, and separators trimmed from both
-  ends.
+  `text:<text>`. A `text:` value and a hit's text are both normalised the same way before
+  they are compared: `str.casefold()`, then every run of whitespace, `-` and `_` that holds
+  a whitespace character becomes one space, `_` becomes `-`, and whitespace, `-` and `_`
+  are trimmed from both ends. So `text:Alexa-Quill` keeps the hits `alexa_quill` and
+  `ALEXA-QUILL`, not `alexa quill`.
 
 There are two files, read with `Allowlist.read(public, private)`:
 
