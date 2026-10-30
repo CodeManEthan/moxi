@@ -1,0 +1,29 @@
+# The root of the uv workspace: the repository's root, a virtual one that names every
+# package under packages/ as a member and holds no project of its own.
+# Members are named one by one, never by a glob, and declare no [tool.uv.sources] of
+# their own, so a package built or installed alone resolves its siblings from the index;
+# the sources below exist only here, and make each member resolve to its directory in
+# this tree. uv.lock beside this file is committed; .venv is derived and ignored.
+
+[tool.uv.workspace]
+members = [
+    "packages/moxi",
+    "packages/sessions",
+    "packages/turns",
+    "packages/cache",
+    "packages/comms",
+    "packages/moxi-dev",
+]
+
+[tool.uv.sources]
+moxi = { workspace = true }
+moxi-sessions = { workspace = true }
+moxi-turns = { workspace = true }
+moxi-cache = { workspace = true }
+moxi-comms = { workspace = true }
+moxi-dev = { workspace = true }
+
+# The contributor's tools: `uv sync` installs moxi-dev, whose `moxi-dev check` runs the
+# checks a change must pass.
+[dependency-groups]
+dev = ["moxi-dev"]
