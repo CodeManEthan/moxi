@@ -17,7 +17,7 @@ def test_the_schema_parses_and_its_overrides_are_spelled_with_the_prefix():
     schema.check_env("comms")
     assert {k.env for k in schema.live() if k.env} == {
         "MOXI_COMMS_BACKEND", "MOXI_COMMS_LOCAL_RECORD", "MOXI_COMMS_LOCAL_RETAIN_DAYS",
-        "MOXI_COMMS_TOKEN_STORE"}
+        "MOXI_COMMS_TOKEN_STORE", "MOXI_COMMS_DELIVERY_EXPIRY"}
     assert not set(module.INTERNAL_ENV) & {k.env for k in schema.live()}
 
 
@@ -84,6 +84,9 @@ operator = "alice"
 messages = 10
 hours = 2
 
+[delivery]
+expiry = "6h"
+
 [codex.defaults]
 sandbox = "workspace-write"
 
@@ -97,7 +100,8 @@ cwd = "/src/x"
 """
 
 
-def test_the_file_sets_every_table():
+def test_the_file_sets_every_table(monkeypatch):
+    monkeypatch.delenv("MOXI_COMMS_DELIVERY_EXPIRY")
     path = write_config(None, EVERY_TABLE)
     cfg = config.load()
     assert cfg.source == str(path) == str(config.config_path())
@@ -110,6 +114,7 @@ def test_the_file_sets_every_table():
     assert cfg.policy.labels == {"console@acme": "the build console's send-only identity"}
     assert cfg.provision.operator == "alice"
     assert (cfg.replay.messages, cfg.replay.seconds) == (10, 7200)
+    assert (cfg.delivery.expiry, cfg.delivery.expiry_seconds) == ("6h", 21600)
     assert cfg.codex["defaults"] == {"sandbox": "workspace-write"}
     assert cfg.codex["agents"]["planner@proj-a"] == {"model": "gpt-x",
                                                      "cwd": "/src/proj-a"}
@@ -460,6 +465,8 @@ def test_the_text_entry_types_the_values_as_the_loader_does(monkeypatch):
         return typed(settings, path)
 
     monkeypatch.setattr(config, "_typed", spy)
+    # The test environment sets the expiry's override; the text entry reads no environment.
+    monkeypatch.delenv("MOXI_COMMS_DELIVERY_EXPIRY")
     write_config(None, EVERY_TABLE)
     config.load()
     config.check_text(EVERY_TABLE)
