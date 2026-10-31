@@ -430,7 +430,7 @@ class Daemon:
         #: The endpoint (`mcp.server.Endpoint`) once it serves.
         self.mcp_endpoint = None
         #: What adds the tools to the endpoint's server, given the SDK's server; None
-        #: serves the endpoint with no tools.
+        #: serves comms' six tools (`mcp.tools`).
         self.mcp_tools = None
         #: Where the tools' calls run (`mcp.inprocess.Calls`), made with the endpoint.
         self.tool_calls = None
@@ -718,6 +718,7 @@ class Daemon:
         port = mcp.port if self._mcp_port is None else self._mcp_port
         try:
             from .mcp import server as mcp_server
+            from .mcp import tools as mcp_tools
         except Exception as e:                                   # noqa: BLE001
             self.mcp_why = "failed"
             log.error("comms' tools aren't served: the MCP libraries didn't load: %s: %s",
@@ -737,7 +738,8 @@ class Daemon:
         # Where tool calls run: on the host's pool, a few at a time, so adapters' and
         # the verbs' methods always find threads free. Made before the tools are added.
         self.tool_calls = inprocess.Calls(self.host)
-        endpoint = mcp_server.Endpoint(sock, verifier, tools=self.mcp_tools,
+        tools = self.mcp_tools if self.mcp_tools is not None else mcp_tools.adder(self)
+        endpoint = mcp_server.Endpoint(sock, verifier, tools=tools,
                                        on_failure=self._endpoint_failed)
         # Set before the start, so a start that runs late is still stopped with the host.
         self.host.stop_hook = endpoint.stop

@@ -90,6 +90,10 @@ INTERRUPT_IGNORED_OPERATOR = ("NOTE: --interrupt was ignored for operator: the o
                               "has no session to steer, so it went to him as an ordinary "
                               "message.")
 
+INTERRUPT_IGNORED_OPERATOR_TOOL = ("NOTE: interrupt was ignored for operator: the operator "
+                                   "has no session to steer, so it went to him as an "
+                                   "ordinary message.")
+
 #: `--interrupt` beside `--held`: one says go into a running turn, the other wait for
 #: the next release point.
 INTERRUPT_WITH_HELD = ("--interrupt asks for the message to go into a running turn, and "
@@ -299,10 +303,18 @@ class Context:
     `daemon` is the client every daemon call goes through, in place of a new socket
     connection per call: comms' tools pass the daemon's in-process client
     (`mcp.inprocess`). None connects to the daemon socket, as the verbs do.
+
+    `cures` is the vocabulary a refusal or a note names its cure in (`CURES`): `cli`,
+    the verb's command lines and flags, or `tool`, the names and parameters of comms'
+    tools, so an agent that has only the tools can act on every cure it is given.
     """
 
     def __init__(self, record=None, db_path=None, socket_path=None, env=None, out=None,
-                 backend=None, clock=None, deadline: float | None = None, daemon=None):
+                 backend=None, clock=None, deadline: float | None = None, daemon=None,
+                 cures: str = "cli"):
+        if cures not in CURES:
+            raise ValueError(f"cures must be one of {', '.join(CURES)}, not {cures!r}")
+        self.cures = cures
         self.env = env if env is not None else os.environ
         self.deadline = deadline
         self._client = daemon
@@ -390,6 +402,18 @@ class Context:
         self.say(text)
 
 
+#: The vocabularies a cure is named in: the verb's command lines and flags, or the
+#: names and parameters of comms' tools.
+CURES_CLI, CURES_TOOL = "cli", "tool"
+CURES = (CURES_CLI, CURES_TOOL)
+
+
+def _tool(ctx) -> bool:
+    """Does `ctx` name cures in the tools' words? A caller's own stand-in context, with
+    no `cures`, names them as the verb does."""
+    return getattr(ctx, "cures", CURES_CLI) == CURES_TOOL
+
+
 def _keep(ctx, **facts) -> None:
     """Keep facts of the send (its plan, its message id) for its `SendResult`, when a
     capture is open."""
@@ -451,6 +475,13 @@ REPLY_OWN_UNREADABLE = ("msg {id} is your own, and comms cannot read whom it was
 #: A reply to your own message that went to no one but you.
 REPLY_OWN_ALONE = ("msg {id} is your own and went to no one but you, so a reply has no one "
                    "to go to. Send it as a new message with moxi comms send. Nothing was sent.")
+#: The two above, with the cure in the tools' words.
+REPLY_OWN_UNREADABLE_TOOL = ("msg {id} is your own, and comms cannot read whom it was sent "
+                             "to, so a reply has no one to go to. Send it as a new message "
+                             "with the send tool. Nothing was sent.")
+REPLY_OWN_ALONE_TOOL = ("msg {id} is your own and went to no one but you, so a reply has no "
+                        "one to go to. Send it as a new message with the send tool. Nothing "
+                        "was sent.")
 
 
 def _identity_named(tag: str) -> str:
@@ -473,7 +504,9 @@ def _reply_targets(ctx: Context, sender, author, referent):
             f"({author.tier}, {attribution.rendered(author.attribution)}) in {NAMES}")
     ml = machine_line.parse(referent.content)
     if ml is None:
-        _refuse(ctx, "reply-own-unreadable", REPLY_OWN_UNREADABLE.format(id=referent.id))
+        _refuse(ctx, "reply-own-unreadable",
+                (REPLY_OWN_UNREADABLE_TOOL if _tool(ctx) else REPLY_OWN_UNREADABLE)
+                .format(id=referent.id))
         return _REFUSED
     seen, tags = set(), []
     for tag in ml.recipients:
@@ -483,7 +516,9 @@ def _reply_targets(ctx: Context, sender, author, referent):
         seen.add(identity)
         tags.append(tag)
     if not tags:
-        _refuse(ctx, "reply-own-alone", REPLY_OWN_ALONE.format(id=referent.id))
+        _refuse(ctx, "reply-own-alone",
+                (REPLY_OWN_ALONE_TOOL if _tool(ctx) else REPLY_OWN_ALONE)
+                .format(id=referent.id))
         return _REFUSED
     names = ", ".join(_identity_named(t) for t in tags)
     return tags, (f"replying to your own msg {referent.id}, so it goes to that message's "
@@ -827,7 +862,7 @@ def _post_from_claim(ctx: Context, path, sender: SenderIdentity, token: str,
                 raise
         return answer["message_id"]
     except DaemonNoAnswer:
-        _refuse(ctx, "post-no-answer", NO_ANSWER)
+        _refuse(ctx, "post-no-answer", _no_answer(ctx))
         return _UNKNOWN
     except VersionMismatch as error:
         _refuse(ctx, "protocol-mismatch", str(error))
@@ -883,7 +918,7 @@ def _post_bound(ctx: Context, sender: SenderIdentity, bound: Sender, content: st
                 raise
         return answer["message_id"]
     except DaemonNoAnswer:
-        _refuse(ctx, "post-no-answer", NO_ANSWER)
+        _refuse(ctx, "post-no-answer", _no_answer(ctx))
         return _UNKNOWN
     except VersionMismatch as error:
         _refuse(ctx, "protocol-mismatch", str(error))
@@ -915,6 +950,12 @@ def _send_refused(ctx: Context, error: DaemonError) -> int:
 #: sent.
 NO_ANSWER = ("the daemon did not answer, so this message may have been sent; check "
              "`moxi comms history` before sending it again")
+NO_ANSWER_TOOL = ("the daemon did not answer, so this message may have been sent; check "
+                  "the history tool before sending it again")
+
+
+def _no_answer(ctx) -> str:
+    return NO_ANSWER_TOOL if _tool(ctx) else NO_ANSWER
 
 
 def _post_reserved(ctx: Context, sender: SenderIdentity, token: str, content: str):
@@ -936,7 +977,7 @@ def _post_reserved(ctx: Context, sender: SenderIdentity, token: str, content: st
             raise
         return answer["message_id"]
     except DaemonNoAnswer:
-        _refuse(ctx, "post-no-answer", NO_ANSWER)
+        _refuse(ctx, "post-no-answer", _no_answer(ctx))
         return _UNKNOWN
     except VersionMismatch as error:
         _refuse(ctx, "protocol-mismatch", str(error))
@@ -967,7 +1008,7 @@ def _post_as_operator(ctx: Context, user_id: str, token: str, content: str):
             raise
         return answer["message_id"]
     except DaemonNoAnswer:
-        _refuse(ctx, "post-no-answer", NO_ANSWER)
+        _refuse(ctx, "post-no-answer", _no_answer(ctx))
         return _UNKNOWN
     except VersionMismatch as error:
         _refuse(ctx, "protocol-mismatch", str(error))
@@ -1085,8 +1126,9 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
         # The token IS the machine line: a non-digit id would fail line zero's own
         # grammar, and the post would land in the record as prose -- addressed to
         # nobody, routed nowhere, with nothing said about it. Refuse at the verb.
+        flag = "reply_to" if _tool(ctx) else "--reply-to"
         _refuse(ctx, "reply-to-shape",
-                f"--reply-to {reply_to!r} is not a message id (message ids are "
+                f"{flag} {reply_to!r} is not a message id (message ids are "
                 "digits). The reply token rides the machine line, so a malformed id "
                 "would make the whole line prose and the message would reach no one. "
                 "Nothing was sent.")
@@ -1108,10 +1150,14 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
     exempt = _exempt(sender)
     new_send = reply_to is None
     if new_send and typed is None and not exempt:
-        _refuse(ctx, "posture-required", POSTURE_REQUIRED)
+        _refuse(ctx, "posture-required",
+                POSTURE_REQUIRED_TOOL if _tool(ctx) else POSTURE_REQUIRED)
         return _USAGE, None
     if getattr(args, "new", False) and reply_to is not None:
         _refuse(ctx, "new-with-reply-to",
+                "new says this message is not a reply, and reply_to makes it one. "
+                "Nothing was sent. Drop new to send the reply, or drop reply_to to send "
+                "a new message." if _tool(ctx) else
                 "--new says this message is not a reply, and --reply-to makes it one. "
                 "Nothing was sent. Drop --new to send the reply, or drop --reply-to to "
                 "send a new message.")
@@ -1137,7 +1183,8 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
         try:
             expires_in = expiry_seconds(expires)
         except ValueError as e:
-            _refuse(ctx, "expires-shape", f"--expires: {e}. Nothing was sent.")
+            _refuse(ctx, "expires-shape", f"expires: {e}. Nothing was sent." if _tool(ctx)
+                    else f"--expires: {e}. Nothing was sent.")
             return _USAGE, None
     if _blocked(ctx):
         # Advisory only: enforcement is at daemon routing. Refusing here is a
@@ -1209,7 +1256,7 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
                 # that cannot read the binding history answers no `ever_bound`, and the send goes
                 # on as before. The operator is always known, standing row or not: a box
                 # provisioned by default writes none, and sending to it keeps working.
-                _refuse(ctx, "never-bound", _never_bound_refusal(tag, r))
+                _refuse(ctx, "never-bound", _never_bound_refusal(tag, r, tool=_tool(ctx)))
                 return _REFUSED, None
             resolved.append(r["qualified"])
             tiers[r["qualified"]] = r.get("tier")
@@ -1246,7 +1293,8 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
         ask_notes += read_notes
         if open_asks:
             _refuse(ctx, "single-reply",
-                    _ask_refusal(open_asks, tags, resolved, now=ctx.clock(), args=args))
+                    _ask_refusal(open_asks, tags, resolved, now=ctx.clock(), args=args,
+                                 tool=_tool(ctx)))
             return _REFUSED, None
 
     # ---- 4. the reply checks --------------------------------------------------------
@@ -1310,7 +1358,8 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
     # `[interrupt]` likewise: the operator has no session to steer.
     interrupt = interrupt_typed and any(q != OPERATOR for q in resolved)
     if interrupt_typed and OPERATOR in resolved:
-        notes.append(INTERRUPT_IGNORED_OPERATOR)
+        notes.append(INTERRUPT_IGNORED_OPERATOR_TOOL if _tool(ctx)
+                     else INTERRUPT_IGNORED_OPERATOR)
     held = [] if flagged else [state for state in states if state.kind == cache.COLD]
     # The send's cold-at, which the daemon reads when its own read is unknown: on every
     # line zero without `[held]`, never beside it. One value per tag, in line zero's tag order.
@@ -1337,11 +1386,17 @@ NEVER_BOUND = ("{tag}: comms has never seen {name} bound, so no agent of that na
                "started. If it has not started yet, send it again with --new-name and the "
                "message waits for its first session; if it has, check the name (moxi comms "
                "agents lists who you can message).{seen} Nothing was sent.")
+#: `NEVER_BOUND` with the cures in the tools' words.
+NEVER_BOUND_TOOL = ("{tag}: comms has never seen {name} bound, so no agent of that name has "
+                    "started. If it has not started yet, send it again with new_name: true "
+                    "and the message waits for its first session; if it has, check the "
+                    "name (the agents tool lists who you can message).{seen} Nothing was "
+                    "sent.")
 #: Added to `NEVER_BOUND` when the binding history has seen the same name bound in other scopes.
 NEVER_BOUND_SEEN = " {name} was seen bound only as {seen}; address {that} if it is who you mean."
 
 
-def _never_bound_refusal(tag: str, r: dict) -> str:
+def _never_bound_refusal(tag: str, r: dict, *, tool: bool = False) -> str:
     """`NEVER_BOUND` for one resolve answer, naming the identities of the same name the
     binding history has seen bound elsewhere (`seen_as`), when the daemon lists any."""
     name = r["qualified"]
@@ -1351,7 +1406,7 @@ def _never_bound_refusal(tag: str, r: dict) -> str:
         that = (f"that identity as {seen_as[0]}" if len(seen_as) == 1 else
                 "that identity by its full name")
         seen = NEVER_BOUND_SEEN.format(name=name, seen=_and(seen_as), that=that)
-    return NEVER_BOUND.format(tag=tag, name=name, seen=seen)
+    return (NEVER_BOUND_TOOL if tool else NEVER_BOUND).format(tag=tag, name=name, seen=seen)
 
 
 def expiry_seconds(expires) -> int | None:
@@ -1409,13 +1464,14 @@ def _open_line(cap, no_cap: bool, ctx: Context) -> str:
     """What an open thread's opener is told after its `sent` line: the cap and how to
     change it."""
     if no_cap:
-        return OPEN_SENT_NO_CAP
+        return OPEN_SENT_NO_CAP_TOOL if _tool(ctx) else OPEN_SENT_NO_CAP
     if cap is None:
         try:
             cap = _configured_cap(ctx)
         except Exception:  # noqa: BLE001 -- the line informs; the check reads it again
             cap = constants.DEFAULT_REPLY_CAP
-    return OPEN_SENT.format(n=cap, replies="reply" if cap == 1 else "replies")
+    return (OPEN_SENT_TOOL if _tool(ctx) else OPEN_SENT).format(
+        n=cap, replies="reply" if cap == 1 else "replies")
 
 
 # ------------------------------------------------------------------ the posture texts
@@ -1425,6 +1481,10 @@ POSTURE_REQUIRED = ("Every new moxi comms send states what it wants back with --
                     "for no reply, optional for a reply only if you have something to "
                     "add, once for a single answer, or open for a back-and-forth. Nothing "
                     "was sent.")
+POSTURE_REQUIRED_TOOL = ("Every new send states what it wants back with posture: none for "
+                         "no reply, optional for a reply only if you have something to add, "
+                         "once for a single answer, or open for a back-and-forth. Nothing "
+                         "was sent.")
 #: A reply to a verified `[no reply]`.
 NO_REPLY_REFUSED = ("msg {id} from {author} is marked [no reply], so it takes no reply. If "
                     "you have something new, send it as a new message: moxi comms send "
@@ -1447,6 +1507,23 @@ CLOSED_BY_IDLE = ("msg {root} opened an open thread that has had no message for 
 CLOSED_BY_NONE = ("msg {root} opened an open thread that {closer} closed with msg {id}. To "
                   "go on, start a new send: moxi comms send {names}{new} --posture "
                   'none|optional|once|open "text". Nothing was sent.')
+#: The four above with their cures in the tools' words: `{names}` the recipients as words,
+#: `{new}` " and new: true" when a plain send would meet the single-reply refusal.
+NO_REPLY_REFUSED_TOOL = ("msg {id} from {author} is marked [no reply], so it takes no "
+                         "reply. If you have something new, send it as a new message: the "
+                         "send tool to {names} with posture none, optional, once or "
+                         "open{new}. Nothing was sent.")
+ONCE_NOT_OPEN_TOOL = ("A reply to a {what} closes it: leave out posture, or set posture: "
+                      "once to ask something back. A back-and-forth starts with a new send: "
+                      "the send tool to {names} with posture: open{new}. Nothing was sent.")
+_CLOSED_TOOL_CURE = ("To go on, start a new send: the send tool to {names} with posture "
+                     "none, optional, once or open{new}. Nothing was sent.")
+CLOSED_BY_CAP_TOOL = ("msg {root} opened an open thread that has had its {cap} replies, so "
+                      "it is closed. " + _CLOSED_TOOL_CURE)
+CLOSED_BY_IDLE_TOOL = ("msg {root} opened an open thread that has had no message for over "
+                       "an hour, so it is closed. " + _CLOSED_TOOL_CURE)
+CLOSED_BY_NONE_TOOL = ("msg {root} opened an open thread that {closer} closed with msg "
+                       "{id}. " + _CLOSED_TOOL_CURE)
 #: The `--cap` and `--no-cap` refusals.
 CAP_BOTH = "--cap and --no-cap say opposite things. Pass one of them. Nothing was sent."
 CAP_SHAPE = "--cap takes a whole number of replies, 1 or more. Nothing was sent."
@@ -1462,6 +1539,12 @@ OPEN_SENT = ("Sent. Open thread, closes after {n} {replies}; change it with --ca
              "--no-cap on any reply of yours in this thread.")
 OPEN_SENT_NO_CAP = ("Sent. Open thread, no reply cap; change it with --cap N on any reply "
                     "of yours in this thread.")
+#: The two above for comms' tools, which have no cap parameter: the cap is the command
+#: line's.
+OPEN_SENT_TOOL = ("Sent. Open thread, closes after {n} {replies}. Its reply cap is changed "
+                  "only from the command line, `moxi comms`.")
+OPEN_SENT_NO_CAP_TOOL = ("Sent. Open thread, no reply cap. Its reply cap is changed only "
+                         "from the command line, `moxi comms`.")
 ONE_LEFT_SENT = "Sent. One reply left in this thread."
 LAST_SENT = "Sent. That was this thread's last reply; it is now closed."
 #: The open-thread check could not run; the reply goes through.
@@ -1544,15 +1627,22 @@ def _reply_checks(args, ctx: Context, *, sender, exempt, typed, cap, no_cap,
             author = attribution.from_record(db, referent)
         verified = author.attribution == attribution.VERIFIED
 
+    tool = _tool(ctx)
+    if tool:
+        # The cures in the tools' words: the names as words, `new` as its parameter.
+        names_text = _and([t for t in names_text.split(",") if t] or ["them"])
+
     def new_flag() -> str:
-        return _new_flag(ctx, sender, resolved)
+        flag = _new_flag(ctx, sender, resolved)
+        return (" and new: true" if flag else "") if tool else flag
 
     # A reply to `[no reply]`, before anything else is read.
     if (ml is not None and verified and ml.posture == machine_line.POSTURE_NONE
             and not exempt):
         _refuse(ctx, "no-reply",
-                NO_REPLY_REFUSED.format(id=referent.id, author=author.qualified,
-                                        names=names_text, new=new_flag()))
+                (NO_REPLY_REFUSED_TOOL if tool else NO_REPLY_REFUSED).format(
+                    id=referent.id, author=author.qualified, names=names_text,
+                    new=new_flag()))
         return _REFUSED
 
     notes = []
@@ -1587,19 +1677,21 @@ def _reply_checks(args, ctx: Context, *, sender, exempt, typed, cap, no_cap,
         what = (OPTIONAL_MESSAGE if ml.posture == machine_line.POSTURE_OPTIONAL
                 else ONCE_ASK)
         _refuse(ctx, "once-not-open",
-                ONCE_NOT_OPEN.format(what=what, names=names_text, new=new_flag()))
+                (ONCE_NOT_OPEN_TOOL if tool else ONCE_NOT_OPEN).format(
+                    what=what, names=names_text, new=new_flag()))
         return _REFUSED
     if posture == REFUSE_CLOSED:
         root = thread.root.id
         if thread.closed == "cap":
-            text = CLOSED_BY_CAP.format(root=root, cap=thread.closed_cap, names=names_text,
-                                        new=new_flag())
+            text = (CLOSED_BY_CAP_TOOL if tool else CLOSED_BY_CAP).format(
+                root=root, cap=thread.closed_cap, names=names_text, new=new_flag())
         elif thread.closed == "idle":
-            text = CLOSED_BY_IDLE.format(root=root, names=names_text, new=new_flag())
+            text = (CLOSED_BY_IDLE_TOOL if tool else CLOSED_BY_IDLE).format(
+                root=root, names=names_text, new=new_flag())
         else:
             closer, closed_by = thread.closer
-            text = CLOSED_BY_NONE.format(root=root, closer=closer, id=closed_by,
-                                         names=names_text, new=new_flag())
+            text = (CLOSED_BY_NONE_TOOL if tool else CLOSED_BY_NONE).format(
+                root=root, closer=closer, id=closed_by, names=names_text, new=new_flag())
         _refuse(ctx, "thread-closed", text)
         return _REFUSED
 
@@ -1889,14 +1981,26 @@ def open_for(db, ask, sender, *, now: float, names_channel, replies, record=None
     return asker
 
 
-def _cure_flags(args) -> str:
+def _cure_flags(args, *, tool: bool = False) -> str:
     """The flags the sender typed that the reply also takes, as they go on the cure line:
     `--held` (every recipient takes it), `--standing`, and `--posture` when it was none,
     optional or once. A reply to a once ask refuses `--posture open`, so it is not
     carried.
-    `--audience` is left out: a reply takes the ask's."""
+    `--audience` is left out: a reply takes the ask's.
+
+    `tool`: the same, as the tools' parameters (`, interrupt: true`). A tool passes no
+    `--held` or `--standing`, so only `interrupt`, `expires` and `posture` can be named."""
     if args is None:
         return ""
+    if tool:
+        params = ["interrupt: true"] if getattr(args, "interrupt", False) else []
+        if getattr(args, "expires", None) is not None:
+            params.append(f"expires: {args.expires}")
+        typed = getattr(args, "posture", None)
+        if typed in (machine_line.POSTURE_NONE, machine_line.POSTURE_OPTIONAL,
+                     machine_line.POSTURE_ONCE):
+            params.append(f"posture: {typed}")
+        return "".join(f", {param}" for param in params)
     flags = ["--held"] if getattr(args, "held", False) else []
     if getattr(args, "interrupt", False):
         flags.append("--interrupt")
@@ -1911,15 +2015,25 @@ def _cure_flags(args) -> str:
     return "".join(f" {flag}" for flag in flags)
 
 
-def _ask_refusal(open_asks, tags, resolved, *, now: float, args=None) -> str:
-    """What a refused plain send prints: who asked, when, and both cures."""
+def _ask_refusal(open_asks, tags, resolved, *, now: float, args=None,
+                 tool: bool = False) -> str:
+    """What a refused plain send prints: who asked, when, and both cures, as command
+    lines or, with `tool`, as the tools and their parameters."""
     from .daemon import _epoch
     open_asks = sorted(open_asks, key=lambda pair: int(pair[0].id), reverse=True)
     newest = open_asks[0][0].id
-    cure = (f'moxi comms reply {newest} "text"' if len(resolved) == 1 else
-            f'moxi comms send {",".join(tags)} --reply-to {newest} "text"') + _cure_flags(args)
-    tail = ("If it is something else, add --new and it goes as a new message. Nothing "
-            "was sent.")
+    if tool:
+        cure = (f"the reply tool with message_id: {newest}" if len(resolved) == 1 else
+                f"the send tool to {_and(tags)} with reply_to: {newest}"
+                ) + _cure_flags(args, tool=True)
+        tail = ("If it is something else, set new: true and it goes as a new message. "
+                "Nothing was sent.")
+    else:
+        cure = (f'moxi comms reply {newest} "text"' if len(resolved) == 1 else
+                f'moxi comms send {",".join(tags)} --reply-to {newest} "text"'
+                ) + _cure_flags(args)
+        tail = ("If it is something else, add --new and it goes as a new message. Nothing "
+                "was sent.")
     if len(open_asks) == 1:
         ask, asker = open_asks[0]
         return "\n".join([
@@ -2236,6 +2350,8 @@ DELETE_EXIT_CODES = {DELETE_DELETED: moxi_exit.OK, OUTCOME_REFUSED: moxi_exit.RE
 #: What a delete says when its request was written and no answer came.
 DELETE_NO_ANSWER = ("the daemon did not answer, so the message may have been withdrawn; "
                     "check `moxi comms explain` for a recipient before deleting it again")
+DELETE_NO_ANSWER_TOOL = ("the daemon did not answer, so the message may have been "
+                         "withdrawn; check the history tool before deleting it again")
 
 
 @dataclass(frozen=True)
@@ -2352,7 +2468,8 @@ def _delete(ctx: Context, mid: str, *, bound=None):
         client = ctx.daemon()
         return _OK, client.delete(who, token, mid, user=user)
     except DaemonNoAnswer:
-        _refuse(ctx, "delete-no-answer", DELETE_NO_ANSWER)
+        _refuse(ctx, "delete-no-answer",
+                DELETE_NO_ANSWER_TOOL if _tool(ctx) else DELETE_NO_ANSWER)
         return _UNKNOWN, None
     except VersionMismatch as error:
         _refuse(ctx, "protocol-mismatch", str(error))
