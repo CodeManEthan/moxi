@@ -24,9 +24,10 @@ import pytest
 
 import moxi.modules
 import moxi_repo
-from moxi_repo import _records, api, committer, gitconf
+from moxi_repo import _records, api, committer, gitconf, shim
 from moxi_repo import install as repo_install
-from tests.conftest import POSIX_ONLY, change, commit, git, problems
+from tests.conftest import (GIT_FOUND, NEEDS_CONFIG_GIT, POSIX_ONLY, change, commit, git,
+                            problems)
 from tests.test_committer import deny, make_remote, spec, write
 from tests.test_records import OPEN, doctor_records, key, left
 
@@ -162,6 +163,77 @@ def test_an_upgrade_that_moves_targets_is_rewritten_and_keeps_every_other_key(
     assert commit(beta).returncode == 0 and demo.ids() == []
 
 
+# A version that moves the gate to another event, and the next, which also turns an open
+# piece, alone on its event, closed.
+MOVES_V1 = '''
+GATE = {"event": "pre-commit", "target": "demo_pieces.hooks:gate", "fail": "closed",
+        "order": 20, "doc": "A closed gate."}
+LINT = {"event": "prepare-commit-msg", "target": "demo_pieces.hooks:lint", "fail": "open",
+        "order": 30, "doc": "An open check."}
+'''
+MOVES_V2 = '''
+GATE = {"event": "commit-msg", "target": "demo_pieces.hooks:gate", "fail": "closed",
+        "order": 20, "doc": "A closed gate."}
+LINT = {"event": "prepare-commit-msg", "target": "demo_pieces.hooks:lint", "fail": "closed",
+        "order": 30, "doc": "A closed check."}
+'''
+
+
+def what_runs(repo: Path) -> dict[str, str]:
+    """Event -> the config entry's command or the shim's text: what git runs of repo's."""
+    state = gitconf.read(gitconf.resolve(repo))
+    shims = shim.our_shims(repo / ".git" / "hooks")
+    assert not (state.entries and shims)
+    return state.entries or {event: path.read_text(encoding="utf-8")
+                             for event, [path] in shims.items()}
+
+
+def guard(repo: Path, mode: str, event: str, code: int) -> str:
+    """The entry or shim repo writes for `event` with the guard's exit status `code`."""
+    python, runner, root = gitconf.interpreter(), gitconf.runner_file(), shim.sh_path(repo)
+    if mode == "config":
+        return shim.entry_command(event, python, runner, root, code)
+    return shim.shim_text(event, python, runner, root, code, False)
+
+
+@pytest.mark.parametrize("mode", [pytest.param("config", marks=NEEDS_CONFIG_GIT), "shim"])
+def test_an_upgrade_that_moves_a_piece_or_closes_one_moves_its_entry_or_shim(
+        demo, ears, mode, capsys):
+    repo = demo.repo()
+    ears.site.write("ears_m1.py", MOVES_V1)
+    ears.site.write("ears_m2.py", MOVES_V2)
+    ears.entries({"gate": "ears_m1:GATE", "lint": "ears_m1:LINT"})
+    api.add(repo, ["ears/gate", "ears/lint"], mode=mode)
+    assert what_runs(repo) == {"pre-commit": guard(repo, mode, "pre-commit", 1),
+                               "prepare-commit-msg": guard(repo, mode, "prepare-commit-msg",
+                                                           0)}
+    # Open, the check's failure lets the commit through.
+    demo.act(lint="raise")
+    change(repo)
+    assert commit(repo).returncode == 0
+    capsys.readouterr()
+
+    ears.entries({"gate": "ears_m2:GATE", "lint": "ears_m2:LINT"})
+    installed("ears")
+    assert capsys.readouterr().out.splitlines() == [
+        f"rewrote ears/gate (commit-msg, closed) in {repo}",
+        f"rewrote ears/lint (prepare-commit-msg, closed) in {repo}"]
+    assert what_runs(repo) == {"commit-msg": guard(repo, mode, "commit-msg", 1),
+                               "prepare-commit-msg": guard(repo, mode, "prepare-commit-msg",
+                                                           1)}
+    # Closed now, the same failure refuses; and the gate refuses at commit-msg.
+    demo.runs()
+    change(repo, text="2\n")
+    assert commit(repo).returncode != 0
+    assert [r["event"] for r in demo.runs()] == ["prepare-commit-msg"]
+    demo.act(lint="ok", gate="refuse")
+    assert commit(repo).returncode != 0
+    assert [(r["id"], r["event"]) for r in demo.runs()] == [
+        ("demo/lint", "prepare-commit-msg"), ("demo/gate", "commit-msg")]
+    demo.act(gate="ok")
+    assert commit(repo).returncode == 0
+
+
 def test_a_moved_closed_target_no_longer_refuses_once_rewritten(demo, ears, capsys):
     """Without the rewrite, a closed piece whose function moved refuses every commit."""
     repo = demo.repo()
@@ -273,7 +345,10 @@ def test_on_uninstall_removes_the_modules_pieces_and_specs_with_their_records(
     assert gitconf.read(gitconf.resolve(beta)).pieces == {}
     assert committer.saved_names(cgd) == []
     assert set(committer.read_state(cgd)["specs"]) == {"demo/snap"}
-    # beta's only piece is gone, and so is its entry; nothing refuses a commit there.
+    # beta's only piece is gone, and so is its entry or shim; nothing refuses a commit
+    # there.
+    assert gitconf.read(gitconf.resolve(beta)).entries == {}
+    assert shim.our_shims(beta / ".git" / "hooks") == {}
     assert commit(beta).returncode == 0
     assert not [r for r in problems() if r.name.startswith(("hooks ", "ledger "))]
     # Uninstalling it again finds nothing.
@@ -305,7 +380,7 @@ def test_a_piece_whose_module_went_is_reported_and_on_uninstall_removes_it(demo,
 
 def _everything(demo):
     """Repos of every kind with records open: alpha in shim mode over an existing git hook,
-    beta in config mode, gamma through the launcher with its chain line in the manager's
+    beta in config mode (shim mode under a git that runs no config entry), gamma through the launcher with its chain line in the manager's
     git hook, and delta indexed and then deleted. Returns them and alpha's own hook text."""
     alpha, beta = demo.repo("alpha-notes"), demo.repo("beta-code")
     gamma, delta = demo.repo("gamma-docs"), demo.repo("delta-gone")
@@ -315,7 +390,10 @@ def _everything(demo):
     hook.chmod(0o755)
     api.add(alpha, ["demo/gate", "demo/lint"], mode="shim")
     assert (alpha / ".git" / "hooks" / "pre-commit.local").read_text() == mine
-    api.add(beta, ["demo/lint", "demo/watch"], mode="config")
+    # Config mode where this git runs config entries, else shim mode, so the run holds
+    # under an old git too.
+    beta_mode = "config" if GIT_FOUND and GIT_FOUND >= gitconf.CONFIG_FROM else "shim"
+    api.add(beta, ["demo/lint", "demo/watch"], mode=beta_mode)
     git(gamma, "config", "core.hooksPath", ".githooks")
     report = api.add(gamma, ["demo/gate", "demo/push-check"], mode="shim")
     managed = gamma / ".githooks" / "pre-commit"
@@ -466,20 +544,20 @@ def test_teardown_leaves_a_moved_hook_whose_slot_was_taken_and_no_longer_records
     assert local.read_text() == mine and hook.read_text() == theirs
 
 
-def _two_with_records(demo):
-    alpha, beta = demo.repo("alpha-notes"), demo.repo("beta-code")
-    for r in (alpha, beta):
+def _with_records(demo, *names: str) -> list[Path]:
+    repos = [demo.repo(name) for name in names]
+    for r in repos:
         api.add(r, ["demo/lint"])
     demo.act(lint="raise")
-    for r in (alpha, beta):
+    for r in repos:
         change(r)
         commit(r)
-    return alpha, beta
+    return repos
 
 
 def test_a_repo_teardown_cannot_read_stops_the_uninstall_before_anything_is_removed(
         demo, capsys):
-    alpha, beta = _two_with_records(demo)
+    alpha, beta = _with_records(demo, "alpha-notes", "beta-code")
     before = ours_in_config(beta)
     config = alpha / ".git" / "config"
     config.write_text(config.read_text(encoding="utf-8") + "[broken\n", encoding="utf-8")
@@ -500,7 +578,8 @@ def test_a_repo_teardown_cannot_read_stops_the_uninstall_before_anything_is_remo
 
 def test_a_step_that_fails_once_removing_began_stops_there_and_names_the_repos_cleaned(
         demo, capsys):
-    alpha, beta = _two_with_records(demo)
+    alpha, beta, gamma = _with_records(demo, "alpha-notes", "beta-code", "gamma-docs")
+    before = ours_in_config(gamma)
     real = gitconf.remove_all
 
     def remove_all(repo, state=None, **kw):
@@ -518,9 +597,10 @@ def test_a_step_that_fails_once_removing_began_stops_there_and_names_the_repos_c
     last = err.splitlines()[-1]
     assert last.startswith("repo: already cleaned and dropped from the index")
     assert last.endswith(f": {alpha}")
-    assert ours_in_config(alpha) == ""
-    assert set(api.indexed()) == {gitconf.key_of(beta / ".git")}
-    assert set(_records.ledger()) == {_records.piece_key(beta / ".git", "demo/lint")}
+    assert ours_in_config(alpha) == "" and ours_in_config(gamma) == before
+    assert set(api.indexed()) == {gitconf.key_of(r / ".git") for r in (beta, gamma)}
+    assert set(_records.ledger()) == {_records.piece_key(r / ".git", "demo/lint")
+                                      for r in (beta, gamma)}
 
 
 def test_an_unreadable_index_fails_the_teardown(demo, capsys):
