@@ -8,7 +8,8 @@ steer.
 A turn is open in the ledger from its start until Codex says it is over:
 ``turn/completed``; a ``thread/status/changed`` to a non-active status with no
 ``turn/completed`` within ``TURN_COMPLETED_GRACE``; a load whose answer shows it gone; or
-a dead app-server. No hook closes a turn. A delivery reads ``Refused`` only when Codex
+a dead app-server. No hook closes a turn, and neither does a turn or status notification
+that names another thread (a spawned subagent's, on the same connection). A delivery reads ``Refused`` only when Codex
 did not take its text (the request was never sent, or Codex answered it with an error);
 once the request went out it reads ``Started`` on a turn the host has just learned of,
 or ``Lost("untied: ...")`` at once.
@@ -1013,7 +1014,23 @@ class CodexHarness(Harness):
             self.endpoint.turn_started(turn_id, command=command)
         return True
 
+    def _other_thread(self, method: str, params) -> bool:
+        """Whether a turn or status notification names a thread other than the
+        session's: a spawned subagent's own thread, whose turns run on the same
+        connection and are never the session's turns. One that names no thread counts
+        as the session's."""
+        thread = params.get("threadId") if isinstance(params, dict) else None
+        with self._lock:
+            main = self.session_id
+        if not isinstance(thread, str) or main is None or thread == main:
+            return False
+        self.foreign_hook(method, thread)
+        return True
+
     def _on_notification(self, method: str, params: dict, rid=None) -> None:
+        if (method in ("turn/started", "turn/completed", "thread/status/changed")
+                and self._other_thread(method, params)):
+            return
         if method == "turn/started":
             turn = params.get("turn") or {}
             turn_id = turn.get("id")
@@ -1148,7 +1165,8 @@ class CodexHarness(Harness):
             if session_id in self._foreign_threads:
                 return
             self._foreign_threads.add(session_id)
-        log.info("ignoring %s from another Codex thread %r", event, session_id)
+        log.info("ignoring %s from another Codex thread %r (logged once per thread)",
+                 event, session_id)
 
     def window_closed(self, status: int | None) -> None:
         self.endpoint.gone(f"the Codex window closed with status {status or 0}")

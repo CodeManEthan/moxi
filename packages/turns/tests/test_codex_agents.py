@@ -5,6 +5,7 @@ rebuilt from the thread's history at a resumed load, and background terminals li
 from __future__ import annotations
 
 import sys
+import threading
 import time
 
 import pytest
@@ -154,6 +155,52 @@ def test_a_final_notice_inside_an_open_turn_reads_final_before_the_turn_ends(hos
     assert a.entries == (Agent("sub-1", "subagent", "done", True),)
     assert f.agents == 0
     app.complete()
+
+
+def test_a_spawned_childs_own_turn_neither_opens_nor_closes_the_sessions_turn(host):
+    # The live sequence: the session's turn spawns a subagent, whose own thread raises
+    # turn/started, status changes and turn/completed on the same connection.
+    s, endpoint, harness, app = host()
+    events = []
+    threading.Thread(target=lambda: events.extend(s.watch()), daemon=True).start()
+    time.sleep(0.2)
+    d = s.deliver("spawn one and wait")
+    assert d.wait_started(3).turn_id == "turn-1"
+    item(app, "completed", collab(["sub-1"], {"sub-1": "pendingInit"}))
+    child = "sub-1"
+    app.on_notification("thread/status/changed",
+                        {"threadId": child, "status": {"type": "active"}}, None)
+    app.on_notification("turn/started", {"threadId": child, "turn": {"id": "child-t"}},
+                        None)
+    f = s.facts()
+    assert f.turn_open and f.turn.turn_id == "turn-1"
+    app.on_notification("thread/status/changed",
+                        {"threadId": child, "status": {"type": "idle"}}, None)
+    app.on_notification("turn/completed", {"threadId": child, "turn": {
+        "id": "child-t", "status": "completed"}}, None)
+    f = s.facts()
+    assert f.turn_open and f.turn.turn_id == "turn-1"
+    assert harness._grace is None           # the child's idle set no backstop
+    item(app, "completed", collab(["sub-1"], {"sub-1": "completed"}, tool="wait",
+                                  item_id="call-2"))
+    app.complete()
+    ended = d.wait_ended(3)
+    assert (ended.turn_id, ended.outcome) == ("turn-1", "answer")
+    assert wait_for(lambda: any(type(e).__name__ == "TurnEnded" for e in events))
+    turns = [(type(e).__name__, e.turn_number) for e in events
+             if type(e).__name__ in ("TurnStarted", "TurnEnded")]
+    assert len(turns) == 2 and turns[0][0] == "TurnStarted" and turns[1][0] == "TurnEnded"
+    assert turns[0][1] == turns[1][1]
+
+
+def test_turn_notifications_naming_the_sessions_thread_still_count(host):
+    s, endpoint, harness, app = host()
+    app.on_notification("turn/started", {"threadId": "thread-1",
+                                         "turn": {"id": "own-t"}}, None)
+    assert wait_for(lambda: s.facts().turn_open)
+    app.on_notification("turn/completed", {"threadId": "thread-1", "turn": {
+        "id": "own-t", "status": "completed"}}, None)
+    assert wait_for(lambda: not s.facts().turn_open)
 
 
 def _reconnect(harness, first):
