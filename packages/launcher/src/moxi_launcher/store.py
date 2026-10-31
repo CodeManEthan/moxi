@@ -797,6 +797,13 @@ def resolve(conn: sqlite3.Connection, session_id: str) -> LaunchRow | None:
     return _row(cursor, cursor.fetchone(), newest_session_id=newest[0])
 
 
+def seen_at(conn: sqlite3.Connection, request_id: str, session_id: str) -> str | None:
+    """When the launch first became known by `session_id`, or None when it never was."""
+    found = conn.execute("SELECT seen_at FROM session_ids WHERE request_id = ? AND "
+                         "session_id = ?", (request_id, session_id)).fetchone()
+    return None if found is None else found[0]
+
+
 def session_ids(conn: sqlite3.Connection, request_id: str) -> list[tuple[str, str]]:
     """Every session id a launch is known by, with its source, oldest first."""
     return [(sid, source) for sid, source in conn.execute(
@@ -972,7 +979,8 @@ def insert_run(conn: sqlite3.Connection, *, kind: str, mode: str, request_id: st
                handoff_path: str | None = None, slot: str | None = None,
                pane_id: str | None = None, turn_number: int | None = None,
                repair_of: str | None = None, crossing_key: str | None = None,
-               gone: Callable[[str], bool] | None = None, at: str | None = None) -> Run:
+               gone: Callable[[str], bool] | None = None, at: str | None = None,
+               run_id: str | None = None) -> Run:
     """Insert a run for a launch and return it, or raise `RunOpen` naming the launch's
     open run.
 
@@ -981,6 +989,9 @@ def insert_run(conn: sqlite3.Connection, *, kind: str, mode: str, request_id: st
     runs before the write lock is taken, and the end is conditional on the run being as
     it was read, so a job that wrote its run in between is alive and keeps it. `state`
     is where the run starts (`armed`, or `acting` for an act that starts at once).
+
+    `run_id` is the run's id when the caller minted it (`new_run_id`) to name its job
+    before the insert, so the run is written with its job; else one is minted here.
     """
     if kind not in RUN_KINDS:
         raise ValueError(f"unknown run kind {kind!r}")
@@ -994,9 +1005,11 @@ def insert_run(conn: sqlite3.Connection, *, kind: str, mode: str, request_id: st
         if current is not None:
             if not (stale and current == seen and _end_stale(conn, current, at)):
                 raise RunOpen(current)
-        run_id = new_run_id()
-        while conn.execute("SELECT 1 FROM runs WHERE run_id = ?", (run_id,)).fetchone():
+        if run_id is None:
             run_id = new_run_id()
+            while conn.execute("SELECT 1 FROM runs WHERE run_id = ?",
+                               (run_id,)).fetchone():
+                run_id = new_run_id()
         row = Run(run_id=run_id, kind=kind, mode=mode, request_id=request_id,
                   session_id=session_id, actor=actor, handoff_path=handoff_path, slot=slot,
                   pane_id=pane_id, turn_number=turn_number, new_request_id=None,
@@ -1157,5 +1170,5 @@ __all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "FACTS", "HARNESSES", "HOWS", "JOB_GO
            "advance_run", "claim", "connect", "cut", "end_run", "endpoint_gone", "events",
            "get", "get_run", "insert", "insert_run", "learn_session", "log", "log_lines",
            "new_run_id", "now", "open_run", "parse_endpoint", "parse_time", "path", "picked",
-           "prune", "resolve", "run_events", "run_stale", "runs", "session_ids", "set_facts",
-           "set_state", "stale_after_s", "stamp"]
+           "prune", "resolve", "run_events", "run_stale", "runs", "seen_at", "session_ids",
+           "set_facts", "set_state", "stale_after_s", "stamp"]
