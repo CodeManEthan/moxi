@@ -23,7 +23,8 @@ loses nothing.
 - **State.** A module's `moxi.state` is `starting` while its upstream first opens or a new
   version starts after a drain, `up` while it streams, and `down` with a detail when it
   failed or dropped: `busy` when the module refused the stream for its own cap. A down
-  upstream is tried again after 1, 2, 5, 10 and then every 30 s.
+  upstream is tried again after 1, 2, 5, 10 and then every 30 s; the steps start over
+  only once an upstream has stayed up for 30 s.
 - **The shell's own topics** are `ui.servers` (the page servers' rows, published from the
   starter set while a stream asks for it) and `ui.modules` (published by the shell's
   snapshot through `publish`).
@@ -37,6 +38,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
@@ -54,6 +56,7 @@ __all__ = [
     "REOPEN_AFTER",
     "SERVERS_EVERY",
     "STATE_EVENT",
+    "STAYED_UP",
     "BadTopics",
     "Push",
     "read_topics",
@@ -66,6 +69,9 @@ MAX_STREAMS = 16
 REOPEN_AFTER = 0.05
 #: Seconds before each try to open a down upstream again; the last repeats.
 BACKOFF = (1.0, 2.0, 5.0, 10.0, 30.0)
+#: Seconds an upstream must stay up before its next drop starts the backoff over, so a
+#: module that crashes soon after each start is not started again every second.
+STAYED_UP = 30.0
 #: Seconds between two comment lines on an open browser stream.
 HEARTBEAT = 20.0
 #: The most topics one stream may ask for.
@@ -341,9 +347,11 @@ class _Upstream:
                     else:
                         self.asking = topics
                         self.set_state("up")
-                        failures = 0
+                        up_at = time.monotonic()
                         ended = await self._read(response)
                         self.asking = frozenset()
+                        if time.monotonic() - up_at >= STAYED_UP:
+                            failures = 0
                         if ended == "cut":
                             # A drain for a new version: the next request waits for it,
                             # then starts the new server.
