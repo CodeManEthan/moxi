@@ -15,7 +15,7 @@ One more test runs both in one process and holds them under the 15 ms ceiling to
 A module's own imports are held by that module's test. The hook path's own `sys.modules`
 check is in test_hook_path.py.
 
-How the timed tests (tier `slow`) measure: 51 pairs, each a `python -I -c pass` start (the
+How the timed tests (tier `slow`, marked `timed`) measure: 51 pairs, each a `python -I -c pass` start (the
 floor) followed at once by a `python -I` run of the code. Each pair gives the code's run
 minus the floor's, and the test takes the lower quartile of those 51 differences.
 
@@ -130,6 +130,7 @@ def _record(name: str, ms: float) -> None:
 
 
 @pytest.mark.slow
+@pytest.mark.timed
 def test_the_hook_path_for_an_absent_module(tmp_path):
     ms = _over_floor(HOOK.format(root=str(tmp_path), name="nosuchmodule", there=False,
                                  state="absent"))
@@ -138,6 +139,7 @@ def test_the_hook_path_for_an_absent_module(tmp_path):
 
 
 @pytest.mark.slow
+@pytest.mark.timed
 def test_the_hook_path_for_a_one_line_module(one_line_module):
     ms = _over_floor(HOOK.format(root=str(one_line_module), name="hookcost", there=True,
                                  state="present"))
@@ -158,6 +160,7 @@ def config_file(tmp_path):
 
 
 @pytest.mark.slow
+@pytest.mark.timed
 def test_config_import_and_one_load(config_file):
     ms = _over_floor(CONFIG.format(schema=SCHEMA, path=str(config_file)))
     _record("import moxi.config + one load()", ms)
@@ -165,6 +168,7 @@ def test_config_import_and_one_load(config_file):
 
 
 @pytest.mark.slow
+@pytest.mark.timed
 def test_the_hook_path_and_config_together_stay_under_a_hooks_ceiling(one_line_module,
                                                                       config_file):
     code = "; ".join([

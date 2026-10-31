@@ -71,11 +71,21 @@ The fsync seam: `os.fsync` (and `os.fdatasync`) is a no-op in every test that is
 marked `honest_fsync`; the no-op still refuses a closed descriptor. Code must call
 `os.fsync(...)` through the module for the seam to reach it.
 
-Markers registered here: `browser`, `live`, `slow`, `build`, `touches`, `finding` and
-`honest_fsync`. A package's `addopts` deselects the four tiers in `TIERS`; a `live` test
-also needs `MOXI_TEST_LIVE=1` in the environment pytest starts with, else it is skipped.
+Markers registered here: `browser`, `live`, `slow`, `build`, `touches`, `finding`,
+`timed` and `honest_fsync`. A package's `addopts` deselects the four tiers in `TIERS`; a
+`live` test also needs `MOXI_TEST_LIVE=1` in the environment pytest starts with, else it
+is skipped.
 
-Selection. Three variables, read from the environment pytest starts with, change what
+Timed tests. A test that asserts a wall-clock budget (a median under so many
+milliseconds, an import under its share of a hook's ceiling) is marked `timed`, whatever
+its tier. Beside other tests on a loaded machine such a test measures the machine, so
+`moxi-dev check` never runs one beside another: its parallel pass holds the timed tests
+back and a serial pass afterwards runs them alone. A test whose bound only tells a
+deadline or timeout that fired from one that never did (a 0.3 s timeout that must return
+in under 0.9 s) is not timed. A plain `pytest`, with neither of the values below, runs a
+timed test where it falls, like any other.
+
+Selection. Four variables, read from the environment pytest starts with, change what
 runs; `moxi-dev check` sets them for each suite, and a contributor may set them by hand:
 
 - `MOXI_TEST_TIERS=all` puts back every test of the `browser`, `slow` and `build` tiers
@@ -88,13 +98,21 @@ runs; `moxi-dev check` sets them for each suite, and a contributor may set them 
 - `MOXI_TEST_FINDING=L<n>[,L<n>...]` runs only the tests marked `finding` with one of
   those arguments, a tier test among them put back as above; every other test is
   deselected.
+- `MOXI_TEST_TIMED=hold` deselects every `timed` test the run would otherwise run, and
+  the run's `durations.json` names them under `held` (under xdist the workers collect,
+  and each hands its list to the controller). `MOXI_TEST_TIMED=only` deselects every
+  test that is not `timed`. Both apply after the rest of the selection and the run's own
+  `-m` and `-k`, so with the same other variables an `only` run runs exactly the tests a
+  `hold` run held.
 
 A test put back gets the marker `lifted`, and the run's `-m` expression becomes
 `(<expression>) or lifted`, so pytest's own deselection keeps it and `-k` still applies.
 
 Durations. Each run writes `durations.json`: every test's seconds by phase (`setup`,
 `call`, `teardown`), its outcome and, for a test this run put back, `lifted` with its
-tiers, from the reports the main process sees (under xdist, the controller's). It goes to the path in `MOXI_TEST_DURATIONS`, else to
+tiers, from the reports the main process sees (under xdist, the controller's), and,
+under `MOXI_TEST_TIMED=hold`, the `held` tests' ids. It goes to the path in
+`MOXI_TEST_DURATIONS`, else to
 `moxi-dev/durations.json` in pytest's cache directory; with neither (the cache plugin
 off) nothing is written.
 
@@ -144,6 +162,8 @@ MARKERS = {
     "touches(*globs)": "the repository paths whose change puts this test back in "
                        "moxi-dev check",
     "finding(tag)": "the finding this test holds",
+    "timed": "asserts a wall-clock budget; moxi-dev check runs it alone, in a serial "
+             "pass after the parallel one",
     "honest_fsync": "os.fsync is the real one in this test",
 }
 
@@ -158,6 +178,14 @@ CHANGED_ENV = "MOXI_TEST_CHANGED"
 FINDING_ENV = "MOXI_TEST_FINDING"
 #: Where `durations.json` goes.
 DURATIONS_ENV = "MOXI_TEST_DURATIONS"
+#: `hold` or `only`: what a run does with the `timed` tests (module doc, Selection).
+TIMED_ENV = "MOXI_TEST_TIMED"
+TIMED_MODES = ("hold", "only")
+
+#: The marker of a test that asserts a wall-clock budget (module doc, Timed tests).
+TIMED = "timed"
+#: The key under which an xdist worker hands the controller the tests it held.
+_HELD_KEY = "moxi_dev_held"
 
 #: Where every `touches` glob starts: the changed paths are the repository's, and each
 #: package is under it.
@@ -503,6 +531,7 @@ def pytest_configure(config: pytest.Config) -> None:
     # Per run, from the environment this pytest started with; a pytest run inside a
     # fenced test sees the fenced one, so the outer run's selection never reaches it.
     config.stash[_SELECTION] = selection(os.environ)
+    config.pluginmanager.register(_TimedSplit(), "moxi-dev-timed")
     if not hasattr(config, "workerinput"):          # an xdist worker reports to the main
         config.pluginmanager.register(_Durations(config), "moxi-dev-durations")
     # Read once, from the environment this process started with: a pytest run inside a
@@ -527,6 +556,7 @@ class Selection:
     all_tiers: bool = False
     changed: tuple[str, ...] = ()
     findings: frozenset[str] = frozenset()
+    timed: str = ""                     # "", "hold" or "only"
 
     def lifts(self, item: pytest.Item) -> bool:
         """Whether this run puts `item` back: a `browser`, `slow` or `build` test, never
@@ -564,7 +594,12 @@ def selection(environ: Mapping[str, str]) -> Selection:
     if bad:
         raise pytest.UsageError(f"{FINDING_ENV} names findings as L<n>, comma-separated; "
                                 f"{', '.join(map(repr, bad))} is not one")
-    return Selection(all_tiers=tiers == "all", changed=changed, findings=frozenset(names))
+    timed = environ.get(TIMED_ENV, "").strip()
+    if timed not in ("", *TIMED_MODES):
+        raise pytest.UsageError(f"{TIMED_ENV} is {' or '.join(map(repr, TIMED_MODES))} or "
+                                f"unset; it is {timed!r}")
+    return Selection(all_tiers=tiers == "all", changed=changed, findings=frozenset(names),
+                     timed=timed)
 
 
 def findings_of(item: pytest.Item) -> set[str]:
@@ -646,6 +681,33 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         config.option.markexpr = f"({config.option.markexpr}) or {LIFTED}"
 
 
+_HELD = pytest.StashKey[list[str]]()
+
+
+class _TimedSplit:
+    """Holds the `timed` tests back, or keeps only them (module doc, Selection)."""
+
+    @pytest.hookimpl(trylast=True)
+    def pytest_collection_modifyitems(self, config: pytest.Config,
+                                      items: list[pytest.Item]) -> None:
+        # trylast: after the kit's own selection and after pytest's -m and -k, so what is
+        # held is what this run would otherwise have run.
+        chosen = config.stash.get(_SELECTION, None)
+        if chosen is None or not chosen.timed:
+            return
+        timed = [item for item in items if item.get_closest_marker(TIMED)]
+        rest = [item for item in items if not item.get_closest_marker(TIMED)]
+        keep, dropped = (rest, timed) if chosen.timed == "hold" else (timed, rest)
+        if dropped:
+            config.hook.pytest_deselected(items=dropped)
+            items[:] = keep
+        if chosen.timed == "hold":
+            held = [item.nodeid for item in timed]
+            config.stash[_HELD] = held
+            if hasattr(config, "workeroutput"):
+                config.workeroutput[_HELD_KEY] = held
+
+
 # --- durations -------------------------------------------------------------------------
 
 class _Durations:
@@ -654,6 +716,13 @@ class _Durations:
     def __init__(self, config: pytest.Config) -> None:
         self.config = config
         self.tests: dict[str, dict[str, Any]] = {}
+        self.held: set[str] = set()
+
+    @pytest.hookimpl(optionalhook=True)
+    def pytest_testnodedown(self, node: Any, error: Any) -> None:
+        """An xdist worker is done: keep the tests it held back."""
+        output = getattr(node, "workeroutput", None) or {}
+        self.held.update(output.get(_HELD_KEY) or ())
 
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
         entry = self.tests.setdefault(report.nodeid, {})
@@ -680,8 +749,12 @@ class _Durations:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
         part = path.with_name(path.name + ".part")
-        part.write_text(json.dumps({"format": 1, "tests": self.tests}, indent=1,
-                                   sort_keys=True) + "\n", encoding="utf-8")
+        body: dict[str, Any] = {"format": 1, "tests": self.tests}
+        chosen = self.config.stash.get(_SELECTION, None)
+        if chosen is not None and chosen.timed == "hold":
+            body["held"] = sorted(self.held | set(self.config.stash.get(_HELD, [])))
+        part.write_text(json.dumps(body, indent=1, sort_keys=True) + "\n",
+                        encoding="utf-8")
         os.replace(part, path)
 
 
@@ -960,6 +1033,6 @@ def _statements(script: str) -> Iterator[str]:
 
 __all__ = ["CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence", "FenceError",
            "HARNESS_HOMES", "KEPT_ENV", "LIFTED", "LIVE_ENV", "MARKERS", "SHUTDOWN_POLL",
-           "Seam", "Selection", "TIERS", "TIERS_ENV", "fence", "findings_of", "param_id",
-           "selection", "served", "short_dir", "touches_match", "uv_env", "wait_for",
-           "write_sqlite"]
+           "Seam", "Selection", "TIERS", "TIERS_ENV", "TIMED", "TIMED_ENV", "fence",
+           "findings_of", "param_id", "selection", "served", "short_dir", "touches_match",
+           "uv_env", "wait_for", "write_sqlite"]

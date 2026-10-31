@@ -442,6 +442,7 @@ LINE = re.compile(
     r"packages: (?P<packages>[^|]+) \| lock (pass|fail|not run) \| "
     r"tags (pass|fail|not run) \| sync (pass|fail|skipped|not run) \| "
     r"lint (?P<lint>pass|none|not run|fail \([^)]+\)) \| (?P<suites>[^|]+) \| "
+    r"timed (?P<timed>[^|]+) \| "
     r"(?P<durations>durations none|durations \d+\.\d+s, slowest 5% \d+%, delta "
     r"(none|[+-]\d+\.\d+s vs [0-9a-f]{12}( \([^)]+\))?)) \| "
     r"total \d+\.\d+s \| exit (?P<code>\d)$")
@@ -548,23 +549,42 @@ def test_full_hands_the_suites_every_tier(repo):
 class Timed(Runs):
     """A step runner whose suites write the kit's durations file: `seconds` maps a
     package to its tests' call seconds, each a number or (seconds, the tiers of a test
-    the kit put back)."""
+    the kit put back). `held` maps a package to its `timed` tests' seconds, in the same
+    shape: the parallel pass (`MOXI_TEST_TIMED=hold`) names them held, and the serial
+    pass (`only`) runs them and nothing else."""
 
-    def __init__(self, seconds, codes=None, write=True):
+    def __init__(self, seconds, codes=None, write=True, held=None):
         super().__init__(codes)
         self.seconds = seconds
         self.write = write
+        self.held = held or {}
+
+    @staticmethod
+    def tests(name, seconds):
+        tests = {}
+        for i, secs in enumerate(seconds):
+            secs, lifted = secs if isinstance(secs, tuple) else (secs, None)
+            tests[f"tests/test_{name}.py::test_{i}"] = {
+                "setup": 0.0, "call": secs, "teardown": 0.0, "outcome": "passed",
+                **({"lifted": lifted} if lifted else {})}
+        return tests
 
     def __call__(self, cmd, cwd, env):
         code = super().__call__(cmd, cwd, env)
-        if "pytest" in cmd and self.write and Path(cwd).name in self.seconds:
-            tests = {}
-            for i, secs in enumerate(self.seconds[Path(cwd).name]):
-                secs, lifted = secs if isinstance(secs, tuple) else (secs, None)
-                tests[f"tests/test_it.py::test_{i}"] = {
-                    "setup": 0.0, "call": secs, "teardown": 0.0, "outcome": "passed",
-                    **({"lifted": lifted} if lifted else {})}
-            Path(env[testing.DURATIONS_ENV]).write_text(json.dumps({"tests": tests}))
+        name = Path(cwd).name
+        if "pytest" not in cmd or not self.write:
+            return code
+        mode = env.get(testing.TIMED_ENV)
+        timed = self.tests("timed", self.held.get(name, []))
+        if mode == "only":
+            body = {"tests": timed}
+        elif name in self.seconds or name in self.held:
+            body = {"tests": self.tests("it", self.seconds.get(name, []))}
+            if mode == "hold":
+                body["held"] = sorted(timed)
+        else:
+            return code
+        Path(env[testing.DURATIONS_ENV]).write_text(json.dumps(body))
         return code
 
 
@@ -811,3 +831,138 @@ def test_main_reads_the_finding(repo, monkeypatch):
     monkeypatch.chdir(repo)
     check.main(["--finding", "L4", "--finding", "L9"])
     assert seen["finding"] == ["L4", "L9"]
+
+
+# --- the serial pass of the timed tests --------------------------------------------------------
+
+def pytest_calls(runs):
+    """Each pytest run: (package, its xdist arguments, its MOXI_TEST_TIMED, its env)."""
+    return [(cwd.name, cmd[3:], env.get(testing.TIMED_ENV), env)
+            for cmd, cwd, env in runs.calls if "pytest" in cmd]
+
+
+def test_full_runs_the_held_timed_tests_alone_after_every_parallel_suite(
+        ignoring, monkeypatch):
+    monkeypatch.setattr(check, "cpu_count", lambda: 6)
+    runs = Timed({name: [1.0] for name in LAYOUT},
+                 held={"turns": [0.5], "moxi": [0.25, 0.25]})
+    result = run_check(ignoring, runs, full=True)
+    assert result.code == 0
+    calls = pytest_calls(runs)
+    parallel, serial = calls[:len(LAYOUT)], calls[len(LAYOUT):]
+    assert [(name, args, mode) for name, args, mode, _ in parallel] == [
+        (name, ["-n", "6"], "hold") for name in LAYOUT]
+    # in the packages' order, one at a time, no workers, only the timed tests
+    assert [(name, args, mode) for name, args, mode, _ in serial] == [
+        ("moxi", ["-n", "0"], "only"), ("turns", ["-n", "0"], "only")]
+    for _, _, _, env in serial:
+        assert env[testing.TIERS_ENV] == "all" and testing.CHANGED_ENV not in env
+        assert env[testing.DURATIONS_ENV] != parallel[0][3][testing.DURATIONS_ENV]
+    assert re.search(r"\| timed moxi pass \d+\.\d+s, turns pass \d+\.\d+s \|",
+                     result.line()), result.line()
+    assert LINE.match(result.line()), result.line()
+
+
+def test_a_picked_run_hands_the_serial_pass_the_same_changed_paths(ignoring):
+    commit_file(ignoring, "packages/sessions/x.py")
+    runs = Timed({"sessions": [1.0], "cache": [1.0], "comms": [1.0]},
+                 held={"sessions": [0.5], "comms": [0.5]})
+    result = run_check(ignoring, runs)
+    assert result.code == 0
+    calls = pytest_calls(runs)
+    assert [(name, mode) for name, _, mode, _ in calls] == [
+        ("sessions", "hold"), ("cache", "hold"), ("comms", "hold"),
+        ("sessions", "only"), ("comms", "only")]
+    listed = {env[testing.CHANGED_ENV] for _, _, _, env in calls}
+    assert len(listed) == 1
+    assert Path(listed.pop()).read_text() == "packages/sessions/x.py\0"
+    for _, _, _, env in calls:
+        assert testing.TIERS_ENV not in env
+    assert "| timed sessions pass" in result.line()
+
+
+def test_a_timed_failure_fails_the_check_and_its_package_keeps_no_record(ignoring):
+    commit_file(ignoring, "packages/cache/x.py")
+    serial_cache = (lambda cmd, cwd: "pytest" in cmd and cwd.name == "cache"
+                    and cmd[3:] == ["-n", "0"])
+    runs = Timed({"cache": [1.0], "comms": [2.0]}, {serial_cache: 1},
+                 held={"cache": [0.5], "comms": [0.5]})
+    result = run_check(ignoring, runs)
+    assert result.code == 1
+    assert [(name, ok) for name, ok, _ in result.suites] == [("cache", True),
+                                                              ("comms", True)]
+    assert [(name, ok) for name, ok, _ in result.timed] == [("cache", False),
+                                                             ("comms", True)]
+    line = result.line()
+    assert re.search(r"\| timed cache fail \d+\.\d+s, comms pass \d+\.\d+s \|", line), line
+    assert line.endswith("exit 1") and LINE.match(line)
+    record = json.loads(result.kept.read_text())
+    assert list(record["packages"]) == ["comms"]
+
+
+def test_a_parallel_failure_still_runs_the_package_s_timed_tests(ignoring):
+    commit_file(ignoring, "packages/cache/x.py")
+    parallel_cache = (lambda cmd, cwd: "pytest" in cmd and cwd.name == "cache"
+                      and cmd[3:] != ["-n", "0"])
+    runs = Timed({"cache": [1.0], "comms": [2.0]}, {parallel_cache: 1},
+                 held={"cache": [0.5]})
+    result = run_check(ignoring, runs)
+    assert result.code == 1
+    assert [(name, ok) for name, ok, _ in result.timed] == [("cache", True)]
+    assert list(json.loads(result.kept.read_text())["packages"]) == ["comms"]
+
+
+def test_the_timed_tests_join_their_package_s_durations_and_record(ignoring):
+    commit_file(ignoring, "packages/cache/x.py")
+    runs = Timed({"cache": [1.0], "comms": [2.0]},
+                 held={"cache": [0.5, (4.0, ["slow"])]})
+    result = run_check(ignoring, runs)
+    assert "| durations 7.5s, " in result.line()
+    cache = json.loads(result.kept.read_text())["packages"]["cache"]
+    assert sorted(cache["tests"]) == ["tests/test_it.py::test_0",
+                                      "tests/test_timed.py::test_0",
+                                      "tests/test_timed.py::test_1"]
+    assert cache["tiers"] == "plain+slow"
+
+
+def test_no_held_test_runs_no_serial_pass_and_says_none(ignoring):
+    commit_file(ignoring, "packages/cache/x.py")
+    runs = Timed({"cache": [1.0], "comms": [2.0]})
+    result = run_check(ignoring, runs)
+    assert [mode for _, _, mode, _ in pytest_calls(runs)] == ["hold", "hold"]
+    assert "| timed none |" in result.line()
+
+
+def test_a_check_that_stops_before_the_suites_says_timed_not_run(repo):
+    runs = Runs({lambda cmd, cwd: cmd[:2] == ["uv", "lock"]: 1})
+    assert "| no suites run | timed not run |" in run_check(repo, runs, full=True).line()
+
+
+def test_a_package_whose_chosen_tests_are_all_timed_is_none_in_the_parallel_pass(ignoring):
+    commit_file(ignoring, "packages/cache/x.py")
+    parallel_cache = (lambda cmd, cwd: "pytest" in cmd and cwd.name == "cache"
+                      and cmd[3:] != ["-n", "0"])
+    runs = Timed({"comms": [2.0]}, {parallel_cache: 5}, held={"cache": [0.5]})
+    result = run_check(ignoring, runs)
+    assert result.code == 0
+    assert re.search(r"\| cache none \S+, comms pass \S+ \| timed cache pass \S+ \|",
+                     result.line()), result.line()
+    assert sorted(json.loads(result.kept.read_text())["packages"]) == ["cache", "comms"]
+
+
+def test_a_finding_only_timed_tests_carry_passes_in_the_serial_pass(ignoring):
+    commit_file(ignoring, "packages/sessions/x.py")
+    parallel = lambda cmd, cwd: "pytest" in cmd and cmd[3:] != ["-n", "0"]
+    runs = Timed({"cache": [], "comms": []}, {parallel: 5}, held={"sessions": [0.5]})
+    result = run_check(ignoring, runs, finding=["L50"])
+    assert result.code == 0
+    serial = [env for name, _, mode, env in pytest_calls(runs) if mode == "only"]
+    assert len(serial) == 1 and serial[0][testing.FINDING_ENV] == "L50"
+    assert "| timed sessions pass" in result.line()
+
+
+def test_the_suites_drop_a_caller_s_timed_setting(repo):
+    runs = Runs()
+    run_check(repo, runs, full=True,
+              environ={"PATH": "/usr/bin", testing.TIMED_ENV: "only"})
+    assert {env[testing.TIMED_ENV] for _, _, _, env in pytest_calls(runs)} == {"hold"}

@@ -166,7 +166,8 @@ def test_a_finding_no_test_carries_runs_nothing(package, monkeypatch):
     (testing.FINDING_ENV, "L7,Z5", "names findings as L<n>"),
     (testing.FINDING_ENV, "50", "names findings as L<n>"),
     (testing.TIERS_ENV, "slow", "is 'all' or unset"),
-    (testing.CHANGED_ENV, "/no/such/file", "can't read")])
+    (testing.CHANGED_ENV, "/no/such/file", "can't read"),
+    (testing.TIMED_ENV, "serial", "is 'hold' or 'only' or unset")])
 def test_a_bad_selection_is_a_usage_error(package, monkeypatch, var, value, says):
     monkeypatch.setenv(var, value)
     result = package.runpytest("-p", "no:cacheprovider")
@@ -243,6 +244,113 @@ def test_the_durations_name_the_tiers_a_changed_path_put_back(package, monkeypat
     assert {name for name, entry in tests.items() if "lifted" in entry} == {
         "test_slow_touches"}
     assert tests["test_slow_touches"]["lifted"] == ["slow"]
+
+
+# --- timed tests ---------------------------------------------------------------------------
+
+TIMED = """\
+import pytest
+
+def test_unit():
+    pass
+
+@pytest.mark.timed
+def test_plain_timed():
+    pass
+
+@pytest.mark.slow
+@pytest.mark.timed
+def test_slow_timed():
+    pass
+
+@pytest.mark.slow
+@pytest.mark.timed
+@pytest.mark.touches("packages/p/src/**")
+def test_slow_timed_touches():
+    pass
+
+@pytest.mark.live
+@pytest.mark.timed
+@pytest.mark.touches("packages/p/**")
+def test_live_timed():
+    pass
+
+@pytest.mark.slow
+def test_slow():
+    pass
+
+@pytest.mark.timed
+@pytest.mark.finding("L7")
+def test_timed_holds_l7():
+    pass
+"""
+
+
+@pytest.fixture
+def timed_package(pytester):
+    pytester.makeconftest('pytest_plugins = ["moxi_dev.testing"]\n')
+    pytester.makeini(INI)
+    pytester.makepyfile(test_timed=TIMED)
+    return pytester
+
+
+def held(path) -> set[str]:
+    return {nodeid.rsplit("::", 1)[1] for nodeid in json.loads(path.read_text())["held"]}
+
+
+def test_a_plain_run_runs_a_timed_test_where_it_falls(timed_package):
+    result = timed_package.runpytest("-p", "no:cacheprovider")
+    assert ran(result) == {"test_unit", "test_plain_timed", "test_timed_holds_l7"}
+
+
+@pytest.mark.parametrize("var, value, timed", [
+    (None, None, {"test_plain_timed", "test_timed_holds_l7"}),
+    (testing.TIERS_ENV, "all", {"test_plain_timed", "test_slow_timed",
+                                "test_slow_timed_touches", "test_timed_holds_l7"}),
+    (testing.CHANGED_ENV, "packages/p/src/p/x.py", {"test_plain_timed",
+                                                    "test_slow_timed_touches",
+                                                    "test_timed_holds_l7"}),
+    (testing.FINDING_ENV, "L7", {"test_timed_holds_l7"})],
+    ids=["plain", "every-tier", "changed", "finding"])
+def test_hold_leaves_out_what_only_runs(timed_package, monkeypatch, var, value, timed):
+    """What a hold run leaves out and names is exactly what an only run with the same
+    selection runs, under every tier, a changed path and a finding alike."""
+    if var == testing.CHANGED_ENV:
+        value = changed(timed_package, value)
+    if var is not None:
+        monkeypatch.setenv(var, value)
+    out = timed_package.path / "held.json"
+    monkeypatch.setenv(testing.DURATIONS_ENV, str(out))
+    monkeypatch.setenv(testing.TIMED_ENV, "hold")
+    everything = ran(timed_package.runpytest("-p", "no:cacheprovider"))
+    assert not everything & timed and "test_live_timed" not in everything
+    assert held(out) == timed
+    assert set(json.loads(out.read_text())["tests"]) == {
+        f"test_timed.py::{name}" for name in everything}
+    monkeypatch.setenv(testing.TIMED_ENV, "only")
+    monkeypatch.setenv(testing.DURATIONS_ENV, str(timed_package.path / "only.json"))
+    result = timed_package.runpytest("-p", "no:cacheprovider")
+    assert ran(result) == timed
+    assert "held" not in json.loads((timed_package.path / "only.json").read_text())
+
+
+def test_hold_names_the_held_tests_under_workers(timed_package, monkeypatch):
+    out = timed_package.path / "out" / "durations.json"
+    monkeypatch.setenv(testing.TIERS_ENV, "all")
+    monkeypatch.setenv(testing.TIMED_ENV, "hold")
+    monkeypatch.setenv(testing.DURATIONS_ENV, str(out))
+    result = timed_package.runpytest_subprocess("-p", "no:cacheprovider", "-n", "2")
+    result.assert_outcomes(passed=2)
+    assert held(out) == {"test_plain_timed", "test_slow_timed", "test_slow_timed_touches",
+                         "test_timed_holds_l7"}
+
+
+def test_hold_with_nothing_timed_names_none(package, monkeypatch):
+    out = package.path / "durations.json"
+    monkeypatch.setenv(testing.TIMED_ENV, "hold")
+    monkeypatch.setenv(testing.DURATIONS_ENV, str(out))
+    assert ran(package.runpytest("-p", "no:cacheprovider")) == PLAIN
+    assert json.loads(out.read_text())["held"] == []
 
 
 # --- durations ---------------------------------------------------------------------------

@@ -23,14 +23,14 @@ worker count or base stops it there, before any step runs. Then, in order:
 5. For each picked package, the contract's import rules: import-linter and deptry, run
    in that environment with a configuration written from the package's declarations
    (`moxi_dev.lint`, which writes it under `.moxi-dev/lint/`).
-6. Run each picked package's tests in a pytest session of its own, from the package's
-   directory (each has its own conftest, and test names repeat across packages), always
-   spread over workers: `-n N`, where N is the CPUs this process may run on, at most
-   `MOXI_TEST_WORKERS` when that is set, and never less than one. A serial run is not a
-   pass, so N is passed explicitly: pytest-xdist's `PYTEST_XDIST_AUTO_NUM_WORKERS` (which
-   can turn `-n auto` into a serial run) and the caller's `PYTEST_ADDOPTS` are dropped
-   from the suites' environment, and an option that would undo the workers (`--pdb`)
-   makes pytest refuse the run.
+6. The parallel pass: run each picked package's tests in a pytest session of its own,
+   from the package's directory (each has its own conftest, and test names repeat across
+   packages), always spread over workers: `-n N`, where N is the CPUs this process may
+   run on, at most `MOXI_TEST_WORKERS` when that is set, and never less than one. This
+   pass is never serial, so N is passed explicitly: pytest-xdist's
+   `PYTEST_XDIST_AUTO_NUM_WORKERS` (which can turn `-n auto` into a serial run) and the
+   caller's `PYTEST_ADDOPTS` are dropped from the suites' environment, and an option that
+   would undo the workers (`--pdb`) makes pytest refuse the run.
 
    What runs is the package's plain `pytest` (its `-m` deselects the `browser`, `slow`,
    `build` and `live` tiers), and besides it, through the test kit's variables
@@ -39,15 +39,31 @@ worker count or base stops it there, before any step runs. Then, in order:
    with that finding, whatever their tier but `live`. Under `--finding` a package where
    no test carries it counts as `none`, not as a failure, but a check where no package
    has one fails. A `live` test never runs here.
-7. Read each suite's durations (the kit writes them), keep the commit's record and find
-   the newest record on `main` to compare with (`moxi_dev.durations`).
-8. Print one summary line, the last line of the output: the commit, the packages, the
-   lock, tag, sync and lint results, each package's tests and seconds, the tests' own
-   seconds with the slowest 5 %'s share of them and the delta against main, the total
-   and the exit code.
 
-The tags, each package's lint and each package's tests all run even when one before them
-failed, so one run shows every failure.
+   A test marked `timed` asserts a wall-clock budget, which sixteen workers beside every
+   other suite would break (`moxi_dev.testing`, Timed tests). The parallel pass holds
+   back every timed test it would have run (`MOXI_TEST_TIMED=hold`), and the kit names
+   them in the suite's durations.
+7. The serial pass, once every package's parallel pass has finished: for each package
+   whose parallel pass held a timed test, in the packages' order, one pytest session
+   with no workers (`-n 0`) and the same selection, running only the timed tests
+   (`MOXI_TEST_TIMED=only`): under `--full` every timed test but a `live` one, under a
+   picked run the plain ones and the tier ones a changed path puts back, under
+   `--finding` the ones that carry it. Nothing else of the check runs meanwhile. A
+   failure here fails the check as one in the parallel pass does. A package whose
+   parallel pass ran nothing because every test it chose was timed counts as `none`
+   there.
+8. Read each suite's durations (the kit writes them; a package's two passes are one
+   package), keep the commit's record and find the newest record on `main` to compare
+   with (`moxi_dev.durations`).
+9. Print one summary line, the last line of the output: the commit, the packages, the
+   lock, tag, sync and lint results, each package's tests and seconds, the serial pass's
+   packages with their results and seconds (`timed none` when no package held a timed
+   test, `timed not run` when the suites never ran), the tests' own seconds with the
+   slowest 5 %'s share of them and the delta against main, the total and the exit code.
+
+The tags, each package's lint and each package's tests (both passes) all run even when
+one before them failed, so one run shows every failure.
 
 The exit code is 0 only when every step passed, 1 when one failed, and 2 when the check
 could not start or a step could not be run (not in a workspace, a member with no readable
@@ -69,13 +85,16 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from . import durations, lint, tags
-from .testing import CHANGED_ENV, DURATIONS_ENV, FINDING_ENV, FINDING_NAME, TIERS_ENV
+from .testing import (CHANGED_ENV, DURATIONS_ENV, FINDING_ENV, FINDING_NAME, TIERS_ENV,
+                      TIMED_ENV)
 
 PYTHON = "3.12"
 ENV_DIR = Path(".moxi-dev") / f"env-{PYTHON}"
 LINT_DIR = Path(".moxi-dev") / "lint"
 RUN_DIR = Path(".moxi-dev") / "run"       # this run's changed paths and suites' durations
 WORKERS_VAR = "MOXI_TEST_WORKERS"
+#: pytest-xdist's arguments for the serial pass of the timed tests: no workers.
+SERIAL = ("-n", "0")
 
 # A step's command, run from `cwd` with `env`; returns the exit code. Tests replace it.
 Run = Callable[[Sequence[str], Path, Mapping[str, str]], int]
@@ -231,7 +250,7 @@ def _base_env(environ: Mapping[str, str]) -> dict[str, str]:
 #: than the package's own configuration says; the kit's selection and durations
 #: variables are the check's own to set.
 SUITE_DROPPED_ENV = ("PYTEST_XDIST_AUTO_NUM_WORKERS", "PYTEST_ADDOPTS", TIERS_ENV,
-                     CHANGED_ENV, FINDING_ENV, DURATIONS_ENV)
+                     CHANGED_ENV, FINDING_ENV, DURATIONS_ENV, TIMED_ENV)
 
 #: pytest's exit code when it ran no test.
 NO_TESTS = 5
@@ -248,6 +267,9 @@ class Result:
     #: (package, passed, seconds); passed is None under --finding when no test there
     #: carries the finding.
     suites: list[tuple[str, bool | None, float]] = field(default_factory=list)
+    #: The serial pass of the timed tests, (package, passed, seconds) for each package
+    #: whose parallel pass held one; None when the suites never ran.
+    timed: list[tuple[str, bool, float]] | None = None
     durations: durations.Summary | None = None
     delta: durations.Delta | None = None
     kept: Path | None = None             # the commit's durations record, when kept
@@ -271,6 +293,11 @@ class Result:
         word = {True: "pass", False: "fail", None: "none"}
         suites = ", ".join(f"{name} {word[ok]} {secs:.1f}s"
                            for name, ok, secs in self.suites) or "no suites run"
+        if self.timed is None:
+            timed = "not run"
+        else:
+            timed = ", ".join(f"{name} {word[ok]} {secs:.1f}s"
+                              for name, ok, secs in self.timed) or "none"
         if self.lint is None:
             linted = "not run"
         elif not self.lint:
@@ -280,8 +307,8 @@ class Result:
             linted = f"fail ({', '.join(failed)})" if failed else "pass"
         return (f"moxi-dev check: commit {self.commit} | packages: {names} | "
                 f"lock {self.lock} | tags {self.tags} | sync {self.sync} | "
-                f"lint {linted} | {suites} | {self.timing()} | total {self.seconds:.1f}s | "
-                f"exit {self.code}")
+                f"lint {linted} | {suites} | timed {timed} | {self.timing()} | "
+                f"total {self.seconds:.1f}s | exit {self.code}")
 
 
 def _commit(root: Path) -> str:
@@ -385,38 +412,62 @@ class _Steps:
 
     def suites(self, chosen: Sequence[Package], venv: Path,
                suite_env: Mapping[str, str]) -> bool:
-        """Each picked package's tests, then the durations; True when every suite passed
-        (and, under --finding, some package had a test that carries it)."""
+        """Each picked package's tests in the parallel pass, then the timed tests it held
+        in the serial pass, then the durations; True when every suite passed (and, under
+        --finding, some package had a test that carries it)."""
         run, result = self.run, self.result
         work = self.root / RUN_DIR
         work.mkdir(parents=True, exist_ok=True)
         env = {**suite_env, **self.selection_env(work)}
-        ok, ran, timed = True, False, {}
+        python = str(venv / "bin" / "python")
+        ok, ran = True, False
+        # Each package's (passed, tests) over both passes; passed None: it ran nothing.
+        runs: dict[str, tuple[bool | None, dict | None]] = {}
+        holding: list[Package] = []
+        result.timed = []
         for package in chosen:
             where = work / f"{package.dir}.durations.json"
             where.unlink(missing_ok=True)
             began = time.monotonic()
-            code = run([str(venv / "bin" / "python"), "-m", "pytest", *self.workers],
-                       package.path, {**env, DURATIONS_ENV: str(where)})
+            code = run([python, "-m", "pytest", *self.workers], package.path,
+                       {**env, TIMED_ENV: "hold", DURATIONS_ENV: str(where)})
             tests = durations.load_run(where)
+            held = durations.load_held(where)
             passed: bool | None = code == 0
             if self.findings and tests is None and code in (0, NO_TESTS):
                 print(f"moxi-dev check: {package.dir}: its tests don't load "
                       f"moxi_dev.testing, so --finding can't choose them", flush=True)
                 passed = False
-            elif self.findings and code == NO_TESTS:
+            elif code == NO_TESTS and (self.findings or held):
                 passed = None
             result.suites.append((package.dir, passed, time.monotonic() - began))
             ok = ok and passed is not False
             ran = ran or passed is True
-            if tests is not None:
-                timed[package.dir] = (passed, durations.PackageRun(
-                    tiers=durations.tiers_of(tests, full=self.changed is None),
-                    tests=tests))
+            runs[package.dir] = (passed, tests)
+            if held:
+                holding.append(package)
+        for package in holding:
+            # The serial pass: no workers, one package at a time, nothing else running.
+            where = work / f"{package.dir}.timed.durations.json"
+            where.unlink(missing_ok=True)
+            began = time.monotonic()
+            code = run([python, "-m", "pytest", *SERIAL], package.path,
+                       {**env, TIMED_ENV: "only", DURATIONS_ENV: str(where)})
+            passed = code == 0
+            result.timed.append((package.dir, passed, time.monotonic() - began))
+            ok = ok and passed
+            ran = ran or passed
+            before, tests = runs[package.dir]
+            both = False if before is False else passed
+            runs[package.dir] = (both, durations.merged(tests, durations.load_run(where)))
         if self.findings and not ran and ok:
             print(f"moxi-dev check: no test in {', '.join(p.dir for p in chosen)} carries "
                   f"{', '.join(self.findings)}", flush=True)
             ok = False
+        timed = {name: (passed, durations.PackageRun(
+                     tiers=durations.tiers_of(tests, full=self.changed is None),
+                     tests=tests))
+                 for name, (passed, tests) in runs.items() if tests is not None}
         self.timings({name: one for name, (_, one) in timed.items()},
                      {name: one for name, (passed, one) in timed.items() if passed})
         return ok

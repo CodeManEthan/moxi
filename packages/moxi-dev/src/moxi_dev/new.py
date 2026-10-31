@@ -7,7 +7,8 @@ declares `[tool.uv.workspace]`). It writes `packages/<module>/`:
 
 - `pyproject.toml` declaring `moxi-<module>` and its `moxi.modules` entry point (no
   `moxi` console script: only the core declares it), a dev group with `pytest` and
-  `moxi-dev`, and pytest options that deselect the browser, slow, build and live tiers;
+  `moxi-dev`, and pytest options that deselect the browser, slow, build and live tiers
+  (a comment there says how the check runs the tiers and the `timed` tests);
 - `conftest.py`, which loads the test kit (`moxi_dev.testing`), so every test runs
   inside its fence;
 - `src/moxi_<module>/` with an announcement that offers nothing yet;

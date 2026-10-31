@@ -9,7 +9,9 @@ each package whose suite passed, the tiers it ran and each test's seconds. The t
 for one whose changed paths put some back (`plain+slow`), from the tests the kit marks
 `lifted`. A later run at the same commit replaces the packages it ran and keeps the rest.
 A run on a tree with changes of its own, or one that ran a finding's tests only, keeps
-no record: its times are not the commit's.
+no record: its times are not the commit's. A package's `timed` tests run in the check's
+serial pass, after its parallel one; their times join the package's in the same record,
+and the package counts as passed only when both passes did.
 
 Two checks can keep the same commit's record at once, from two worktrees of one clone.
 Each writes its own part file and replaces the record with it, and on a system with
@@ -94,6 +96,27 @@ def load_run(path: Path) -> dict[str, dict[str, Any]] | None:
         return None
     tests = data.get("tests") if isinstance(data, dict) else None
     return tests if isinstance(tests, dict) else None
+
+
+def load_held(path: Path) -> list[str]:
+    """The `timed` tests a run held back (`MOXI_TEST_TIMED=hold`), as its `durations.json`
+    names them; none when it names none or there is no file."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    held = data.get("held") if isinstance(data, dict) else None
+    return [nodeid for nodeid in held if isinstance(nodeid, str)] \
+        if isinstance(held, list) else []
+
+
+def merged(first: Mapping[str, Mapping[str, Any]] | None,
+           second: Mapping[str, Mapping[str, Any]] | None) -> dict[str, Any] | None:
+    """One package's tests from its two passes (the parallel one and the serial timed
+    one), or None when neither wrote any."""
+    if first is None and second is None:
+        return None
+    return {**(first or {}), **(second or {})}
 
 
 def summarize(runs: Mapping[str, PackageRun]) -> Summary:
