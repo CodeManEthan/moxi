@@ -716,6 +716,12 @@ def test_check_refusals(text, where, key, code):
     assert all(str(p).startswith("error: ") for p in found)
 
 
+def test_an_empty_default_harness_reads_as_the_shipped_one_in_check_and_resolve():
+    text = '[defaults]\nharness = ""\n[seat.s]\nmodel = "opus"\n'
+    assert errors(text) == []
+    assert resolve(text, seat="s").harness == "claude"
+
+
 def test_check_returns_every_problem_in_file_order():
     found = errors('[defaults]\nnope = 1\n[seat.a]\nmodel = 1\n[seat.b]\neffort = "x"\n'
                    '[project.p]\ntarget = "x"\n')

@@ -318,7 +318,8 @@ def check(file: str | os.PathLike | None = None, *, env: Mapping[str, str] | Non
     avail = _avail(available)
     found = presets if presets is not None else read(file, env=env)
     defaults, problems = _check_defaults(found.defaults, avail)
-    base_harness = defaults.get("harness", catalog.launcher()["harness"].default)
+    # An empty harness is unset, as `resolve` reads it: the shipped default.
+    base_harness = defaults.get("harness") or catalog.launcher()["harness"].default
     for preset in found.all():
         values, more = _check_preset(preset, base_harness, avail)
         problems += more
@@ -807,9 +808,8 @@ def resolve(request, *, presets: Presets | None = None,
 
     chosen_preset: dict = {}
     if preset is not None:
-        chosen_preset, problems = _check_preset(preset, defaults.get("harness",
-                                                                      shipped_harness),
-                                                avail, harness=harness)
+        chosen_preset, problems = _check_preset(preset, defaults.get("harness")
+                                                or shipped_harness, avail, harness=harness)
         errors = [p for p in problems if p.level == ERROR]
         if errors:
             raise BadPreset(errors[0])
