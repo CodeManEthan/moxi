@@ -1102,16 +1102,24 @@ def test_module_names_restrict_the_placement_rows(pl):
     assert not placement_rows(pl.rows("moxi"))
 
 
-def test_a_ledger_that_is_not_json_is_one_warn_row_and_the_rest_run(pl):
+def test_a_ledger_that_is_not_json_is_one_fail_row_and_the_rest_run(pl):
     path = moxi.paths.core().state_dir() / place.LEDGER
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{not json")
     got = pl.rows()
     row = got[("moxi", "placements")]
-    assert row.state == "warn" and str(path) in row.detail and "move it aside" in row.detail
+    assert row.state == "fail"
+    assert row.detail.startswith(f"{path} does not read as JSON (")
+    assert "move it aside" not in row.detail
+    assert row.fix.startswith(f"move {path} aside, then run moxi install <module> "
+                              "--replace")
+    assert "reads as unmarked without its ledger entry" in row.fix
     assert ("moxi", "check placements") not in got
     assert got[("demo", "module")].state == "ok"
     assert path.read_text() == "{not json"
+    path.write_text("[]")
+    row = pl.rows()[("moxi", "placements")]
+    assert (row.state, row.detail) == ("fail", f"{path} is not a JSON object")
 
 
 def test_a_harness_name_with_no_row_and_a_skipped_row_warn_on_moxi(pl, capsys):

@@ -67,7 +67,10 @@ What `plan` decides (`Step.action`, with `cause` for a `refuse`):
     update   the owner's placement with a changed source and an unmodified copy, a
              link to an older source, or in another form than the one resolved now
     remove   an entry of the owner's ledger that no item's target names
-    skip     a target the owner handed to another (`adopt`)
+    skip     a target the owner handed to another (`adopt`), while any other owner's
+             ledger places it (the taker, or one it handed the target on to); once no
+             owner does, the item plans as any other, and `apply` drops the lapsed
+             hand-over when it places the target
     refuse   source (missing), io (an OSError reading this item), held, duplicate,
              harness (no such row, or no folder of the item's kind), name (not a
              single path part), occupant (an unmarked path, a modified copy, or a
@@ -395,8 +398,9 @@ class _Planner:
         self.named.add(key)
         if duplicate:
             return self._step(item, key, "refuse", "duplicate", f"two items place {key}")
-        if key in self.handed:
-            to = self.handed[key].get("to", "another owner")
+        handed = self.handed.get(key)
+        if handed is not None and _held_by_another(self.ledger, self.owner, key):
+            to = handed.get("to", "another owner")
             return self._step(item, key, "skip", None,
                               f"{item.name} was handed to {to}; skipped")
         other = self._other_owner(key)
@@ -551,6 +555,13 @@ class _Planner:
                                     f"{item.name} is no longer wanted at {key}",
                                     form=entry.get("form", "link")))
         return steps
+
+
+def _held_by_another(ledger: dict, owner: str, key: str) -> bool:
+    """Whether an owner other than `owner` places `key` now: while one does, a hand-over
+    of `key` by `owner` stands, even when it was handed on again since."""
+    return any(name != owner and isinstance(record, dict)
+               and key in record.get("placed", {}) for name, record in ledger.items())
 
 
 def _entry_item(key: str, entry: dict) -> Item:
@@ -794,8 +805,10 @@ def apply(steps: Sequence[Step], *, replace: bool = False,
     over), read back after.
 
     A `remove` step removes the placement as `remove` does and drops its ledger entry. A
-    `refuse` and a `skip` say their line and change nothing, except that `replace=True`
-    moves the occupant of a `refuse` with cause `occupant` to
+    step that places a target the owner handed over is skipped while any other owner
+    places it, and otherwise drops that lapsed hand-over. A `refuse` and a
+    `skip` say their line and change nothing, except that `replace=True` moves the
+    occupant of a `refuse` with cause `occupant` to
     `DATA/moxi/displaced/<UTC stamp>/<harness>/<name>` and places the item. An `OSError`
     on one step says one line and leaves that step's placement as it was; the rest go on.
     """
@@ -831,10 +844,27 @@ def apply(steps: Sequence[Step], *, replace: bool = False,
 
 
 def _apply_one(step: Step, ledger: dict, replace: bool, stamp: str, say) -> Placed | None:
-    item, key, owner = step.item, step.target, step.owner
+    """One step. A step that places a target this owner handed over first checks the
+    hand-over: while any other owner places the target the step is skipped, and once
+    the target is placed the lapsed `handed` entry is dropped."""
     if step.action == "skip":
         say(step.reason)
         return None
+    key = str(step.target)
+    handed = ledger.get(step.owner, {}).get("handed", {})
+    if step.target is not None and key in handed and step.action != "remove":
+        if _held_by_another(ledger, step.owner, key):
+            to = handed[key].get("to", "another owner")
+            say(f"{step.item.name} was handed to {to}; skipped")
+            return None
+    placed = _apply_step(step, ledger, replace, stamp, say)
+    if placed is not None:
+        ledger.get(step.owner, {}).get("handed", {}).pop(key, None)
+    return placed
+
+
+def _apply_step(step: Step, ledger: dict, replace: bool, stamp: str, say) -> Placed | None:
+    item, key, owner = step.item, step.target, step.owner
     if step.action == "refuse":
         if not (replace and step.cause == "occupant" and step.occupant is not None):
             say(f"{item.name} for {item.harness} not placed: {step.reason}")
@@ -1078,11 +1108,14 @@ def adopt(from_owner: str, to_owner: str, placements: Iterable[Placed], *,
 
     Each placement's ledger entry moves to `to_owner`, a copied folder's mark is
     rewritten to name `to_owner`, and `from_owner`'s `handed` map gains `{target: {kind,
-    harness, name, "to": to_owner}}`, so its later plans skip the target and its
-    `remove` leaves it. `to_owner`'s `handed` map drops the target, so handing an item
-    back gives it back whole. Nothing on disk moves. A placement that is not
-    `from_owner`'s is refused with a line and the rest go on. Returns the placements now
-    `to_owner`'s.
+    harness, name, "to": to_owner}}`, so its later plans skip the target while another
+    owner's ledger places it (`to_owner`, or an owner it handed the target on to), and
+    its `remove` leaves it. Once no owner places the target (it was removed, or handed
+    back and then removed), the entry has lapsed: `from_owner`'s plan treats the item as
+    any other, and `apply` drops the entry when it places the target. `to_owner`'s
+    `handed` map drops the target, so handing an item back gives it back whole. Nothing
+    on disk moves. A placement that is not `from_owner`'s is refused with a line and the
+    rest go on. Returns the placements now `to_owner`'s.
     """
     from . import files
 

@@ -857,9 +857,14 @@ def _skills(step: Settle) -> bool:
     placed, none handed over), `skills_wanted` asks first, and a no places nothing. When
     it has some, there is no question: the plan updates, adds and removes them as the
     package's `SKILLS` say now, so a module that drops a skill, or `SKILLS` altogether,
-    has it removed, and one handed to another owner is skipped. `apply` runs in a held
-    span. Returns False when the skills can't be read or a placement was refused or
-    failed."""
+    has it removed. One handed to another owner is skipped while any other owner places
+    it; once none does, the skill is placed again with no question. A name in
+    `skills.harnesses` whose harness row is skipped or missing still makes its items:
+    the placer refuses each (cause `harness`) with a line and keeps what was placed
+    there, so a broken row never removes skills and never fails the step (the doctor
+    warns about it); a name taken out of the setting removes them. `apply` runs in a
+    held span. Returns False when the skills can't be read or a placement was refused
+    for another cause or failed."""
     from . import place
 
     module, found = step.module, step.found
@@ -871,12 +876,12 @@ def _skills(step: Settle) -> bool:
         if skills is None:
             say(f"{module}: skills not placed: {source}", err=True)
             return False
-        harnesses, lines = place.chosen()
-        for line in lines:
-            say(f"{module}: {line}", err=True)
+        # Every name, with a row or not: see above.
+        harnesses = list(dict.fromkeys(place._core_settings()["skills.harnesses"]))
         items = [place.Item(source / name, harness, name)
                  for name in skills for harness in harnesses]
         planned = place.plan(module, items)
+        handed = place._read_ledger().get(module, {}).get("handed", {})
     except Exception as exc:  # noqa: BLE001 - a broken core config or ledger
         say(f"{module}: skills not placed: {_one_line(exc)}", err=True)
         return False
@@ -884,8 +889,11 @@ def _skills(step: Settle) -> bool:
         s for s in planned[len(items):]
         if s.action == "remove" and place.from_package(found, s.item.source)]
     held_now = {str(p.path) for p in placed}
+    labels = {(p.harness, p.kind, p.name) for p in placed}
     own = len(steps) > len(items) or any(
-        s.action == "skip" or str(s.target) in held_now for s in steps)
+        s.action == "skip" or str(s.target) in held_now or str(s.target) in handed
+        or (s.cause == "harness" and (s.item.harness, s.item.kind, s.item.name) in labels)
+        for s in steps)
     if not own and (not items or not skills_wanted(step, skills, harnesses)):
         return True
     with held():
@@ -923,8 +931,9 @@ def _skill_folders(found) -> tuple[list[str] | None, object]:
 
 def _skills_report(module: str, steps, done, replace: bool) -> bool:
     """One line per placement the plan added, updated or removed; True when every step
-    went through (a skip counts), False on a refusal `replace` didn't place over or a
-    step `apply` couldn't carry out (it said why)."""
+    went through (a skip counts, and so does a refusal for a broken harness row, which
+    `apply` said), False on another refusal `replace` didn't place over or a step
+    `apply` couldn't carry out (it said why)."""
     from . import place
 
     left = {str(p.path) for p in done}
@@ -944,7 +953,7 @@ def _skills_report(module: str, steps, done, replace: bool) -> bool:
                 say(f"{module}: {verb} skill {item.name} for {item.harness} ({target})")
             else:
                 ok = False
-        elif s.action == "refuse":
+        elif s.action == "refuse" and s.cause != "harness":
             ok = False
         elif s.action == "keep" and target not in left:
             ok = False
