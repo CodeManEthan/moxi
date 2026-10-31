@@ -475,6 +475,22 @@ def test_a_relaunch_carries_no_terminal_names(work, harness, no_exec, monkeypatc
     assert not set(TERMINAL) & set(no_exec[-1]["env"])
 
 
+def test_an_option_the_install_no_longer_offers_is_not_replayed(work, harness, no_exec):
+    # Launched keeping warm and recycling on expiry; turns (which both need) is gone now.
+    api.launch(request(work))
+    old = row("r1")
+    stored = {**old.values, "keep_warm": "on", "recycle_on_expiry": "clear"}
+    got = api.launch(ReplayRequest(dataclasses.replace(old, values_json=json.dumps(stored)),
+                                   relaunch_of="r1", request_id="r2", actor="ann"))
+    new = row("r2").values
+    assert (new["keep_warm"], new["recycle_on_expiry"]) == ("off", "off")
+    assert "keep_warm on is not applied: keep_warm needs turns" in got.warnings
+    assert "recycle_on_expiry clear is not applied: recycle_on_expiry needs turns" in \
+        got.warnings
+    env = no_exec[-1]["env"]
+    assert common.KEEP_WARM not in env and common.RECYCLE_ON_EXPIRY not in env
+
+
 def test_a_fresh_launch_reports_no_base(work, harness, no_exec):
     assert api.launch(request(work)).base is None
 

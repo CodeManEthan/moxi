@@ -35,11 +35,13 @@ file, so `preview` is not free of side effects outside the launcher; and for a C
 under turns' host it shows the host's command, not the `codex` command the host builds.
 
 **A replay** takes its values from the stored row's `values_json` as they are, with no
-preset read, and its own request id (and, but for a resume, its own Claude session id).
-It keeps the row's directory, a scratch one too. It never sends the row's brief: a self
-relaunch's first turn is its handoff alone, under the header `Handoff from launcher,
-relaunched by <actor>: <path>`, and a director's relaunch or a resume sends none. **A
-replay's environment is built from the row and the settings only**: the row's recorded
+preset read, and its own request id (and, but for a resume, its own Claude session id). It
+keeps the row's directory, a scratch one too. An option row (keep-warm, recycling) the
+install no longer offers, or whose value's needs it no longer meets, goes back to its
+default with a warning, as a comms name does without comms. It never sends the row's
+brief: a self relaunch's first turn is its handoff alone, under the header `Handoff from
+launcher, relaunched by <actor>: <path>`, and a director's relaunch or a resume sends
+none. **A replay's environment is built from the row and the settings only**: the row's recorded
 base (`base_env_json`: the short list slots' server keeps, the core's locators, the
 keep-lists' and provider names classed recorded, on Windows the names a process needs
 to start; `common.base_env`), then each name the user lists, read from the replaying
@@ -345,6 +347,33 @@ def _resolve(request, environ: Mapping[str, str] | None = None):
 _NOT_REPLAYED = ("mode", "not_applied", "off_posture")
 
 
+#: The option rows a replay sets back to their default, with a warning, when the
+#: install no longer offers them or no longer meets their value's needs: stamped, they
+#: would promise a timer or a crossing that never comes.
+_OPTION_ROWS = ("keep_warm", "recycle_on_expiry", "recycle_at_limit")
+
+
+def _unoffered_option(harness: str, target: str, values: dict, name: str) -> str | None:
+    """Set the option row `name` in `values` back to its default when it is set and this
+    install doesn't offer it, or doesn't meet what its value needs; return the warning,
+    or None."""
+    row_ = catalog.row(harness, name)
+    value = values.get(name)
+    if row_ is None or value in (None, "", row_.default):
+        return None
+    why = row_.unoffered(slots.links, harness)
+    need = row_.when.get(value) if isinstance(value, str) else None
+    if why is None and need is not None:
+        try:
+            catalog.refuse_values(harness, {"target": target, name: value})
+        except catalog.Refused as refused:
+            why = (refused.problem, "")
+    if why is None:
+        return None
+    values[name] = row_.default
+    return f"{name} {value} is not applied: {why[0]}"
+
+
 def _replayed(request: ReplayRequest) -> Replayed:
     """A replay's resolved values: the stored row's `values_json` as they are, its brief
     left out, its handoff the replay's, its slot the replay's, with the mode worked out
@@ -371,6 +400,10 @@ def _replayed(request: ReplayRequest) -> Replayed:
         warnings.append(f"identity {identity} is ignored: comms is not installed")
         identity = scope = None
         values["identity"], values["scope"] = "", ""
+    for name in _OPTION_ROWS:
+        dropped = _unoffered_option(harness, target, values, name)
+        if dropped is not None:
+            warnings.append(dropped)
     mode, turns, more = presets.mode_of(harness, target, identity=identity)
     warnings += more
     posture = row.posture if request.posture is None else request.posture
