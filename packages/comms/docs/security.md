@@ -66,7 +66,8 @@ the keychain may not be reachable from a service). When a send under a reserved 
 finds no token it can use, comms leaves a record that `moxi doctor` shows, naming the
 process, until a send under that name works again or `moxi comms reserved renew NAME`
 mints a new token. Renew from the environment that failed: a token minted in your shell's
-keychain may still be out of the service's reach.
+keychain may still be out of the service's reach. comms' uninstall removes every
+reserved-name token it can find, including one a freed name left behind.
 
 comms' config file, `config.toml`, holds non-secret values only. comms refuses to load
 it when a key looks like a token.

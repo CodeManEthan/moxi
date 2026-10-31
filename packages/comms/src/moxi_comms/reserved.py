@@ -210,14 +210,57 @@ def reconcile(gone: str | None = None, *, declared=None, chain=None, env=None,
 def release_all(*, chain=None, env=None, target=None, clock=time.time) -> Result:
     """comms' own uninstall: free every `active` row and remove every token comms
     minted, so no token outlives the code that checks it. Conflict and unowned rows stay
-    as they are; the rows stay in comms.db until a purge takes it."""
+    as they are; the rows stay in comms.db until a purge takes it.
+
+    A token can outlive its row's hash: a freed name whose token couldn't be removed, a
+    mint whose commit failed. So after the frees, the token of every name any row or
+    installed module names goes too, and every reserved-name token in the file store
+    whatever names it."""
+    from .secrets import SecretError
+
     chain = _chain(chain, env)
     result = Result()
     with _held(target, env) as conn:
-        for name, row in rows(conn).items():
+        found = rows(conn)
+        for name, row in found.items():
             if row["state"] == ACTIVE and row["freed_at"] is None:
                 _free(conn, chain, name, row["module"], clock, result)
+    done = set(result.freed)
+    for name, module in sorted(_minted(chain, found) - done):
+        try:
+            if chain.delete(secret_id(name), owner=owner(module)):
+                result.lines.append(f"{module}: {name}'s leftover token removed")
+        except SecretError as e:
+            result.lines.append(f"{module}: {name}'s token couldn't be removed: {e}")
+            log.warning("%s's token for %s couldn't be removed: %s", name, module, e)
     return result
+
+
+def _minted(chain, found: dict) -> set:
+    """(name, module) for every reserved-name token comms may have minted: each row's,
+    each installed module's declared names, and each one the file store holds."""
+    pairs = {(name, row["module"]) for name, row in found.items() if row["module"]}
+    try:
+        declared = declared_names()
+    except Exception as e:                                       # noqa: BLE001
+        log.warning("the installed modules couldn't be read: %s", e)
+        declared = {}
+    pairs |= {(name, module) for module, names in declared.items() if names
+              for name in names}
+    from .tokens import TokenOwner
+
+    for step in getattr(chain, "steps", ()):
+        store = getattr(step, "store", None)
+        if store is None:
+            continue
+        try:
+            for holder in store.owners_present():
+                for key in store.secret_ids(TokenOwner(tuple(holder.split("/")))):
+                    if key.startswith(SECRET_PREFIX) and "/" not in holder:
+                        pairs.add((key[len(SECRET_PREFIX):], holder))
+        except Exception as e:                                   # noqa: BLE001
+            log.warning("the token store couldn't be listed: %s", e)
+    return pairs
 
 
 def renew(name: str, *, chain=None, env=None, target=None, clock=time.time) -> Result:

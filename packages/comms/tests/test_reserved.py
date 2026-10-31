@@ -123,6 +123,21 @@ def test_comms_own_uninstall_leaves_no_reserved_token(chain, store, monkeypatch)
                 if k.startswith(reserved.SECRET_PREFIX)]
 
 
+def test_comms_own_uninstall_removes_tokens_no_active_row_holds(chain, store, monkeypatch):
+    """A token left behind (a freed name whose token couldn't be removed, a mint whose
+    commit failed) goes with comms too."""
+    reserved.reconcile(declared=LAUNCHER, chain=chain)
+    reserved.reconcile(declared={}, chain=chain)
+    assert row("console")["freed_at"] is not None
+    store.write_secret(reserved.owner("launcher"), reserved.secret_id("console"), "left")
+    store.write_secret(reserved.owner("pager"), reserved.secret_id("pager"), "orphan")
+    monkeypatch.setattr(reserved, "_chain", lambda c, env: chain)
+    monkeypatch.setattr(reserved, "declared_names", lambda gone=None: {})
+    reserved.on_uninstall("comms")
+    assert token_of(store, "launcher", "console") is None
+    assert token_of(store, "pager", "pager") is None
+
+
 def test_a_standing_identity_is_a_conflict_not_a_reservation(chain, capsys):
     write("INSERT INTO identities(name, scope, created_at) VALUES ('console', 'global', "
           "'2026-01-01T00:00:00Z')")
