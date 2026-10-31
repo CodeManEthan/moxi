@@ -10,6 +10,8 @@ TCP sockets take the same flags everywhere: on Windows `SO_EXCLUSIVEADDRUSE` and
 `SO_REUSEADDR`, which there lets another socket take the port; on Linux and macOS
 `SO_REUSEADDR`, so a restart binds its own fixed port while the last run's connections
 sit in TIME_WAIT, and never `SO_REUSEPORT`, which would let a second socket hold it.
+They are made with `IPPROTO_TCP`, which asyncio must see before it turns `TCP_NODELAY`
+on for the connections a listener accepts.
 
 Every upstream connection goes through `open_connection` or `call`, and both prove the
 server first: they send `GET /api/prove` with a fresh nonce and no token, and go on only
@@ -218,7 +220,7 @@ def browser_names(sockets: Iterable[socket.socket]) -> frozenset[str]:
 
 
 def _tcp_socket(family: int) -> socket.socket:
-    sock = socket.socket(family, socket.SOCK_STREAM)
+    sock = socket.socket(family, socket.SOCK_STREAM, socket.IPPROTO_TCP)
     try:
         if _WINDOWS:
             sock.setsockopt(socket.SOL_SOCKET, _SO_EXCLUSIVEADDRUSE, 1)
