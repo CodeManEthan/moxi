@@ -76,7 +76,7 @@ read = "use"
 [relaunch.fallback]
 type = "string"
 default = ""
-doc = "A comms identity told of a failed relaunch when the launch has no director to tell."
+doc = "A comms identity told of a failed relaunch when the launch has no director to tell, or when the notice to its directors is refused or fails (not while comms is offline)."
 read = "use"
 needs = "comms"
 

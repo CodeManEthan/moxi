@@ -307,7 +307,7 @@ Set with `moxi config set launcher <key> <value>`:
   to be let go.
 - `relaunch.follow_s` (300): how long a director's relaunch, or a repair, follows its run.
 - `relaunch.fallback` (empty): a comms identity told of a failed relaunch when the launch
-  has no director.
+  has no director, or when the notice to its directors is refused or fails.
 - `relaunch.pass_env` (empty): variable names a self relaunch, a repair or a resume
   carries from the environment of the process running it into the new session. If you
   sign in with a token or key in the environment (`CLAUDE_CODE_OAUTH_TOKEN`,
