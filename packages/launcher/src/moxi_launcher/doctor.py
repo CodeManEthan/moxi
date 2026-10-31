@@ -5,7 +5,7 @@ one row per harness, `catalog.<harness>`: the installed harness's `--help` again
 shipped flag catalog (`moxi_launcher.catalog.diff`).
 
 * `fail`: a flag a catalog row spells is no longer listed, so a launch that sets the row
-  would be refused by the harness.
+  would be refused by the harness. This holds when another `--help` could not be read.
 * `warn`: the help lists flags the catalog does not know, or no longer lists one the
   catalog recorded as there; or the help could not be read. Nothing a launch composes
   breaks; the new flags pass on after `--`.
@@ -38,15 +38,16 @@ def catalog_row(diff: catalog.Diff) -> Row:
     name = f"catalog.{diff.harness}"
     if diff.missing:
         return Row(MODULE, name, "off", f"{diff.harness} is not on PATH")
+    # A help that could not be read doesn't hide a flag removed from one that could.
     errors = [h.error for h in diff.helps if h.error]
-    if errors:
-        return Row(MODULE, name, "warn", "; ".join(errors))
     removed = [f"{h.command} no longer lists {_flags(h.removed)}"
-               for h in diff.helps if h.removed]
+               for h in diff.helps if h.removed and not h.error]
     if removed:
-        return Row(MODULE, name, "fail", "; ".join(removed) + _version(diff),
+        return Row(MODULE, name, "fail", "; ".join(removed + errors) + _version(diff),
                    "update moxi-launcher, or install the harness version its catalog "
                    "was checked against")
+    if errors:
+        return Row(MODULE, name, "warn", "; ".join(errors))
     said = []
     for h in diff.helps:
         if h.added:

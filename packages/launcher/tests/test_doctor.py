@@ -32,6 +32,22 @@ def test_a_removed_flag_fails_with_a_fix():
     assert row.fix
 
 
+def test_a_removed_flag_fails_though_the_other_help_could_not_be_read():
+    helps = {**matching("claude"), **matching("codex")}
+    helps[("codex", "--help")] = help_text(expected_flags("codex", "codex") - {"-m"})
+    fake = FakeHarness(helps)
+
+    def read(argv):
+        if tuple(argv) == ("codex", "exec", "--help"):
+            raise OSError("permission denied")
+        return fake(argv)
+
+    row = rows_for(read)["catalog.codex"]
+    assert row.state == "fail" and row.fix
+    assert "codex --help no longer lists -m" in row.detail
+    assert "permission denied" in row.detail
+
+
 def test_an_added_flag_warns_and_names_it():
     helps = {**matching("claude"), **matching("codex")}
     helps[("codex", "exec", "--help")] = help_text(expected_flags("codex", "exec")
