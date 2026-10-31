@@ -641,7 +641,7 @@ class Delivery:
         delivery, and returns its value when settled, None when it is still pending (the
         wait then goes on by id). Settles the delivery as `known` when there is nothing to
         wait for. Raises `TimeoutError` when the deadline passes with the outcome still
-        unknown."""
+        unknown, and at once with no deadline when a connection cannot be made."""
         if self.ref is None:
             self._known = Lost(LOST_UNANSWERED)
             return self._known
@@ -657,7 +657,9 @@ class Delivery:
                     if exc.not_serving:
                         self._known = Lost(LOST_UNANSWERED, ref=self.ref)
                         return self._known
-                    if deadline is not None and time.monotonic() >= deadline:
+                    # With no deadline a wait that cannot connect would ask again
+                    # forever; it hands the caller a TimeoutError to decide on instead.
+                    if deadline is None or time.monotonic() >= deadline:
                         raise self._timed_out(until, deadline) from None
                     time.sleep(0.05)
                     continue
@@ -696,15 +698,18 @@ class Delivery:
 
     def _wait_id(self, until: str, deadline: float | None):
         """Wait by id on a connection of its own. A connection that closes while the
-        endpoint lives is replaced once."""
+        endpoint lives is replaced once. `Lost` `unanswered` only when nothing listens at
+        the address; any other connect that fails raises `TimeoutError`."""
         reconnected = False
         while True:
             try:
                 client, _, _ = _connect(self.session.address)
             except _NotWritten as exc:
-                if reconnected and not exc.not_serving:
-                    raise self._timed_out(until, deadline) from None
-                return Lost(LOST_UNANSWERED, delivery=self.id, ref=self.ref)
+                if exc.not_serving:
+                    return Lost(LOST_UNANSWERED, delivery=self.id, ref=self.ref)
+                # The endpoint listens but did not get through the hello or `session`:
+                # that says nothing of a delivery an earlier call recorded.
+                raise self._timed_out(until, deadline) from None
             left = self._left(deadline)
             try:
                 answer = _call(client, "wait", {"delivery": self.id, "until": until,

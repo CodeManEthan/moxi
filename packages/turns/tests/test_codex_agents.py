@@ -285,6 +285,38 @@ def test_a_resumed_load_rebuilds_the_record_from_the_threads_history(host):
                          Agent("sub-2", "subagent", "pending", False))
 
 
+def test_a_grandchild_tracked_live_outlives_a_rebuild_and_is_busy_until_confirmed(host):
+    s, endpoint, harness, app = host()
+    item(app, "completed", collab(["sub-1"], {"sub-1": "completed"}))
+    item(app, "completed", collab(["sub-2"], {"sub-2": "running"}, sender="sub-1"),
+         thread="sub-1")
+    before = s.agents()
+    assert before.complete and s.facts().agents == 1      # the grandchild runs: busy
+    # The session's own history names only sub-1: sub-2 was spawned on sub-1's thread.
+    harness.fake_history = [collab(["sub-1"], {"sub-1": "completed"})]
+    _reconnect(harness, app)
+    after = s.agents()
+    assert after.entries == (Agent("sub-1", "subagent", "done", True),
+                             Agent("sub-2", "subagent", "running", False, None, "sub-1"))
+    assert after.complete is False and s.facts().agents is None   # unknown is busy
+    # The grandchild's end arrives live on its parent's thread: the list is whole again.
+    item(app, "completed", collab(["sub-2"], {"sub-2": "completed"}, sender="sub-1",
+                                  tool="wait", item_id="call-2"), thread="sub-1")
+    assert s.agents().complete is True and s.facts().agents == 0
+
+
+def test_a_grandchild_that_had_ended_outlives_a_rebuild_and_leaves_it_whole(host):
+    s, endpoint, harness, app = host()
+    item(app, "completed", collab(["sub-1"], {"sub-1": "completed"}))
+    item(app, "completed", collab(["sub-2"], {"sub-2": "completed"}, sender="sub-1"),
+         thread="sub-1")
+    harness.fake_history = [collab(["sub-1"], {"sub-1": "completed"})]
+    _reconnect(harness, app)
+    a = s.agents()
+    assert [e.id for e in a.entries] == ["sub-1", "sub-2"]
+    assert a.complete is True and s.facts().agents == 0
+
+
 def test_a_history_that_cannot_be_read_leaves_the_list_not_complete(host):
     s, endpoint, harness, app = host()
     item(app, "completed", collab(["sub-1"], {"sub-1": "running"}))

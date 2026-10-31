@@ -131,6 +131,9 @@ class FakeEndpoint:
         self.stop_handler = None               # the Connection handling stops
         self.handlers = 0                      # stops.handle requests answered ok
         self.stop_answers: dict[int, object] = {}
+        #: A stalled endpoint that still listens: while this is an unset Event, once a
+        #: hand-in is recorded, each new connection's `session` waits until it is set.
+        self.session_gate: threading.Event | None = None
         self._ids = itertools.count(1)
         self._turns = itertools.count(1)
         self._asks = itertools.count(1)
@@ -333,6 +336,9 @@ class FakeEndpoint:
         if self._stopped:
             raise ipc.RpcError(ERROR_GONE, "the endpoint is ending")
         if method == "session":
+            gate = self.session_gate
+            if gate is not None and self.calls:
+                await asyncio.to_thread(gate.wait, 10)
             return self.info()
         if method == "facts":
             with self._lock:

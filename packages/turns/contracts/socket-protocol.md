@@ -548,8 +548,13 @@ written on it, so the library can tell where a failure fell:
 
 - **Never written.** Nothing listens at the address, or the connection failed during
   `rpc.hello` or `session`. Nothing can have acted on the request. `deliver`, `steer` and
-  `command` read `refused` `gone`; `wait` reads `lost` `unanswered`; `session`, `facts`
-  and `agents` raise an error.
+  `command` read `refused` `gone`; `session`, `facts` and `agents` raise an error. `wait`
+  reads `lost` `unanswered` only when nothing listens at the address. Any other failure
+  before a wait's line went out (a stalled `rpc.hello` or `session` on an endpoint that
+  still listens) raises a timeout: the delivery the wait names was recorded by an earlier
+  call, so a connection that fails short of that says nothing about it. What ends such
+  waits is the caller's own deadline, or the endpoint going, which leaves nothing
+  listening.
 - **Refused.** The `gone` error reads `refused` `gone` on `deliver`, `steer` and `command`,
   `lost` on `wait`, and an error on `session`, `facts` and `agents`. A value in an answer is
   returned as given.

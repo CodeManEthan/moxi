@@ -264,6 +264,11 @@ class CodexHarness(Harness):
         #: Set for the session's life once a spawn came as an item turns cannot read
         #: (``subAgentActivity``), live or in the history: the record is then never whole.
         self._unreadable_spawns = False
+        #: Subagents spawned from a subagent's own thread, whose last live notice was not
+        #: final when a resumed load rebuilt the record: the session's history does not
+        #: hold them, so the record keeps them as they stood and is not whole until a live
+        #: notice names each again.
+        self._unconfirmed: set[str] = set()
 
     def attach(self, endpoint) -> None:
         super().attach(endpoint)
@@ -473,6 +478,8 @@ class CodexHarness(Harness):
                     self.session_id = thread_id
                     self.thread_active = active
                     self.active_turn_id = turn_id
+                    if not starting:
+                        self._carry_nested(collab)
                     self._collab, self._collab_whole = collab, whole
                     # Sticky: a history that no longer shows the item does not clear it.
                     self._unreadable_spawns = self._unreadable_spawns or unreadable
@@ -594,6 +601,7 @@ class CodexHarness(Harness):
         with self._lock:
             ws, thread_id = self.ws, self.session_id
             whole = (self._collab_whole and not self._unreadable_spawns
+                     and not self._unconfirmed
                      and ws is not None and bool(thread_id))
             subagents = [Agent(agent_id, "subagent", state, final, None, parent)
                          for agent_id, (state, final, parent) in self._collab.items()]
@@ -627,6 +635,17 @@ class CodexHarness(Harness):
                         "list is not complete for the session's life")
         return record, True, unreadable
 
+    def _carry_nested(self, collab: dict) -> None:
+        """Keep in a rebuilt record the subagents the host tracked from a subagent's own
+        thread. The rebuild reads only the session's thread, which never names them; one
+        whose last notice was not final may still run, so it stays unconfirmed. Called
+        under the lock."""
+        carried = {agent_id: entry for agent_id, entry in self._collab.items()
+                   if entry[2] is not None and agent_id not in collab}
+        collab.update(carried)
+        self._unconfirmed = {agent_id for agent_id, entry in carried.items()
+                             if entry[1] is not True}
+
     def _track_collab(self, params: dict) -> None:
         """An item's start or end: a collab tool call's notices update the record. Items
         of the session's thread count, and those of a subagent's own thread (its spawns)."""
@@ -646,6 +665,9 @@ class CodexHarness(Harness):
                 self._unreadable_spawns = True
                 return
             _apply_collab(self._collab, item, main)
+            self._unconfirmed.difference_update(
+                agent_id for agent_id, status, _ in proto.collab_notices(item)
+                if status is not None)
 
     def submit(self, delivery: Delivery) -> None:
         threading.Thread(

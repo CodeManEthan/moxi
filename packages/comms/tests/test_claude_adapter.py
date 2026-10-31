@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import time
 
 import pytest
@@ -720,6 +721,36 @@ def test_an_unknown_whose_endpoint_no_longer_serves_is_unhandled_only_then(
     ep.go_away("the endpoint ended")
     assert wait_until(lambda: turn_frames(frames, "unhandled_ids"))
     assert len(ep.calls) == 1
+
+
+def test_a_wait_whose_connect_stalls_keeps_the_digest_open_and_hands_it_in_once(
+        rig, adapter, endpoints, frames, monkeypatch):
+    """The endpoint records the delivery, then stalls: it still listens, and each new
+    connection's `session` goes unanswered past the library's read bound. The wait reads
+    that as a timeout, never as lost, so the digest stays open, the endpoint is kept, and
+    the text runs once when the stall clears."""
+    monkeypatch.setattr("moxi_turns.client.READ_S", 0.3)
+    ep = endpoints(auto=False)                   # the delivery stays pending
+    a = adapter()
+    assert found(a, ep)
+    stall = threading.Event()
+    ep.session_gate = stall
+    try:
+        send(rig, "run me once")
+        assert wait_until(lambda: len(ep.calls) == 1)
+        time.sleep(1.5)                          # several stalled waits, each paced
+        assert not turn_frames(frames, "unhandled_ids"), "a stalled connect is not lost"
+        assert a.hands, "the digest stays open"
+        assert a.looks == 1, "the endpoint was kept"
+    finally:
+        stall.set()
+    ep.start_turn(ep.calls[0][1])
+    ep.end_turn("answer")
+    assert wait_until(lambda: turn_frames(frames, "handled_ids"))
+    time.sleep(0.5)
+    assert len(ep.calls) == 1, "the text was handed in once"
+    assert len([t for t in ep.texts if "run me once" in t]) == 1
+    assert not turn_frames(frames, "unhandled_ids")
 
 
 def test_a_steer_the_harness_takes_past_the_read_bound_is_acked_once(
