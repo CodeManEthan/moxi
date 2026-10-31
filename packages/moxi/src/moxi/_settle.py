@@ -857,9 +857,12 @@ def _skills(step: Settle) -> bool:
     placed, none handed over), `skills_wanted` asks first, and a no places nothing. When
     it has some, there is no question: the plan updates, adds and removes them as the
     package's `SKILLS` say now, so a module that drops a skill, or `SKILLS` altogether,
-    has it removed, and one handed to another owner is skipped. `apply` runs in a held
-    span. Returns False when the skills can't be read or a placement was refused or
-    failed."""
+    has it removed, and one handed to another owner is skipped. A name in
+    `skills.harnesses` whose harness row is skipped or missing still makes its items:
+    the placer refuses each (cause `harness`) and keeps what was placed there, so a
+    broken row never removes skills; a name taken out of the setting removes them.
+    `apply` runs in a held span. Returns False when the skills can't be read or a
+    placement was refused or failed."""
     from . import place
 
     module, found = step.module, step.found
@@ -871,9 +874,8 @@ def _skills(step: Settle) -> bool:
         if skills is None:
             say(f"{module}: skills not placed: {source}", err=True)
             return False
-        harnesses, lines = place.chosen()
-        for line in lines:
-            say(f"{module}: {line}", err=True)
+        # Every name, with a row or not: see above.
+        harnesses = list(dict.fromkeys(place._core_settings()["skills.harnesses"]))
         items = [place.Item(source / name, harness, name)
                  for name in skills for harness in harnesses]
         planned = place.plan(module, items)
@@ -884,8 +886,11 @@ def _skills(step: Settle) -> bool:
         s for s in planned[len(items):]
         if s.action == "remove" and place.from_package(found, s.item.source)]
     held_now = {str(p.path) for p in placed}
+    labels = {(p.harness, p.kind, p.name) for p in placed}
     own = len(steps) > len(items) or any(
-        s.action == "skip" or str(s.target) in held_now for s in steps)
+        s.action == "skip" or str(s.target) in held_now
+        or (s.cause == "harness" and (s.item.harness, s.item.kind, s.item.name) in labels)
+        for s in steps)
     if not own and (not items or not skills_wanted(step, skills, harnesses)):
         return True
     with held():

@@ -1612,6 +1612,57 @@ def test_a_skill_handed_over_is_skipped_and_counts_as_placed(sk, capsys, monkeyp
     assert os.path.islink(sk.claude("demo-send"))
 
 
+def test_a_broken_harness_row_keeps_its_placements_and_says_why(sk, capsys, monkeypatch):
+    """A name in `skills.harnesses` whose row is skipped, or that has no row at all,
+    still reaches the placer, which refuses it and leaves what it placed there."""
+    from moxi.doctor import _run
+
+    sk.skills("demo-send")
+    place_settle(sk, capsys, skills=True)
+    claude = sk.claude("demo-send")
+    before = owned(sk)["placed"]
+    assert str(claude) in before
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    config.set("moxi", "harnesses", [{"name": "claude", "skills": "relative/skills"},
+                                     {"name": "codex"}], by="test")
+    code, out = place_settle(sk, capsys)
+    assert code == 1
+    assert ("demo: demo-send for claude not placed: harness claude has no row in "
+            "harnesses (some rows are skipped: moxi config moxi shows the table)") in out
+    assert "removed skill" not in out
+    assert os.path.islink(claude) and owned(sk)["placed"] == before
+    assert [(r.name, r.state) for r in _run._harness_rows()] == [
+        ("harnesses", "warn"), ("skills.harnesses claude", "warn")]
+
+    config.unset("moxi", "harnesses", by="test")
+    config.set("moxi", "skills.harnesses", ["claude", "codex", "cluade"], by="test")
+    code, out = place_settle(sk, capsys)
+    assert code == 1
+    assert ("demo: demo-send for cluade not placed: harness cluade has no row in "
+            "harnesses") in out
+    assert "removed skill" not in out and owned(sk)["placed"] == before
+    assert [r.name for r in _run._harness_rows()] == ["skills.harnesses cluade"]
+
+
+def test_a_name_taken_out_of_skills_harnesses_removes_its_placements(sk, capsys,
+                                                                     monkeypatch):
+    sk.skills("demo-send")
+    place_settle(sk, capsys, skills=True)
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    config.set("moxi", "skills.harnesses", ["codex"], by="test")
+    code, out = place_settle(sk, capsys)
+    assert code == 0, out
+    assert (f"demo: removed skill demo-send for claude ({sk.claude('demo-send')})"
+            in out)
+    assert not os.path.lexists(sk.claude("demo-send"))
+    assert [p.harness for p in sk.place.status("demo")] == ["codex"]
+    # Its only placements on a broken row still count as its own: no question.
+    config.set("moxi", "harnesses", [{"name": "codex", "skills": "relative"}], by="test")
+    code, out = place_settle(sk, capsys)
+    assert code == 1 and "skills not placed; place them with" not in out
+    assert [p.harness for p in sk.place.status("demo")] == ["codex"]
+
+
 def test_a_reinstall_keeps_placements_the_module_did_not_make_from_its_package(
         sk, capsys, monkeypatch, tmp_path):
     """A module that also places for a user (a project manager, say) owns placements
