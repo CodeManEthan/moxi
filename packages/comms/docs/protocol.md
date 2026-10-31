@@ -529,8 +529,9 @@ with no owner. An empty `session_id` is refused. The read changes nothing. `moxi
 owner <session-id> --json` prints it with `"ok": true` and exits 0, owner or none. A read
 that fails exits non-zero and, with `--json`, prints `{"ok": false, "session_id": ...,
 "error": ..., "detail": ...}`: `refused` (exit 2) for an empty id, which never reaches
-the daemon; `offline` (exit 75) when the daemon is down or drops the connection;
-`timeout` or `failed` (exit 1) when it doesn't answer or answers an error.
+the daemon; `offline` (exit 75) when the daemon is down or drops the connection, or
+(exit 1) when it speaks a comms wire version this comms doesn't; `timeout` or `failed`
+(exit 1) when it doesn't answer or answers an error.
 
 `readable` tells the send verb when a replier could first read each message
 of an open thread, for the idle close:

@@ -458,12 +458,13 @@ def cmd_owner(args, ctx: Context) -> int:
     It posts nothing, writes nothing, reaches no credential, and changes no hold, pend,
     delivery or ask.
 
-    Exit 0 is an answer, with or without an owner: a session no live binding holds is
+    Exit `OK` is an answer, with or without an owner: a session no live binding holds is
     an answer (`owner` null), not a failure. Every other exit is a read that failed:
-    2 an empty session id, refused before the daemon is asked; 4 the daemon is down or
-    closed the connection, or speaks another verb protocol; 5 the daemon timed out or
-    answered an error. With `--json` each of these prints one JSON
-    object on stdout, `ok` true with the answer or false with `error` and `detail`.
+    `USAGE` an empty session id, refused before the daemon is asked; `TEMPFAIL` the
+    daemon is down or closed the connection; `ERROR` the daemon speaks a comms wire
+    version this comms doesn't, timed out, or answered an error. With `--json` each of
+    these prints one JSON object on stdout, `ok` true with the answer or false with
+    `error` and `detail`.
     """
     sid = args.session_id.strip()
 
