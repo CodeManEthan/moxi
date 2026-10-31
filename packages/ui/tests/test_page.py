@@ -9,8 +9,9 @@ import time
 
 import psutil
 import pytest
+from moxi.paths import python
 
-from moxi_ui import page
+from moxi_ui import doctor, health, page
 
 
 def _shell_row(answer):
@@ -65,3 +66,61 @@ def test_a_doctor_run_past_its_time_is_killed_with_what_it_started(tmp_path):
         time.sleep(0.05)
     else:
         pytest.fail("the doctor's own child outlived the time limit")
+
+
+class _Call:
+    def __init__(self, **query):
+        self.query = query
+
+
+def test_the_doctor_route_runs_moxi_doctor_from_the_runtime_dir_without_the_log_variable(
+        tmp_path, monkeypatch):
+    from moxi.paths import Layout
+
+    from moxi_ui.starter import LOG_FILE_VARIABLE, Starters
+
+    monkeypatch.setenv(LOG_FILE_VARIABLE, str(tmp_path / "shell.log"))
+    layout = Layout("ui")
+    starters = Starters(runtime_dir=layout.runtime_dir(create=True),
+                        state_dir=layout.state_dir(), log=tmp_path / "shell.log")
+    shell = type("Shell", (), {"layout": layout, "starters": starters})()
+    runs = []
+
+    async def run_doctor(argv, *, cwd, env, timeout):
+        runs.append((argv, cwd, env, timeout))
+        return 0, b'[{"module": "ui", "name": "shell", "state": "ok", "detail": "running"}]'
+
+    monkeypatch.setattr(page, "run_doctor", run_doctor)
+
+    async def ask(**query):
+        token = page._shell.set(shell)
+        try:
+            return await page.doctor(_Call(**query))
+        finally:
+            page._shell.reset(token)
+
+    answer = asyncio.run(ask(module="ui"))
+    assert answer == {"rows": [{"module": "ui", "name": "shell", "state": "ok",
+                                "detail": "running", "fix": None}], "error": None}
+    argv, cwd, env, timeout = runs.pop()
+    assert argv == [str(python()), "-P", "-m", "moxi", "doctor", "ui", "--json"]
+    assert argv == page.doctor_argv("ui") and page.doctor_argv() == argv[:5] + ["--json"]
+    assert cwd == str(layout.runtime_dir()) and timeout == page.DOCTOR_TIMEOUT
+    assert LOG_FILE_VARIABLE not in env and env == starters.child_env()
+    assert asyncio.run(ask(module="Not A Name")) == {"rows": [], "error": "not a module name"}
+    assert runs == []
+
+
+def test_the_page_rows_come_from_a_real_shells_servers_data(ui_shell):
+    session = ui_shell.session()
+    assert session.get("/m/fixture/api/summary")[0] == 200
+    ui_shell.wait_server("fixture", "running")
+    status, data = ui_shell.call("GET", "/m/ui/api/servers")
+    assert status == 200
+    for row in data["servers"]:
+        assert set(row) == set(page.SERVER_ROW.items), "the row keeps its declared shape"
+    found = health.Probe("running", servers=data, port=data["shell"]["port"])
+    rows = {row.name: row for row in doctor.page_rows(found, now=time.time())}
+    fixture = rows["page:fixture"]
+    assert fixture.module == "ui" and fixture.state == "ok", fixture
+    assert fixture.detail.startswith("running")

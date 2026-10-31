@@ -307,6 +307,71 @@ def test_a_free_lock_ignores_a_left_runtime_file_and_a_listening_socket_is_not_c
     assert health.shell_row(health.probe()).state == "fail"
 
 
+
+def test_a_held_lock_reads_a_runtime_file_whose_start_is_off_the_pids_and_compares_no_clock(
+        site, monkeypatch):
+    import psutil
+    from datetime import UTC, datetime
+
+    info = write_runtime("ui", transport="tcp", address="127.0.0.1", port=8460, version="0")
+    path = Layout("ui").runtime_dir() / "page.json"
+    data = json.loads(path.read_text())
+    created = psutil.Process(os.getpid()).create_time()
+    data["started_at"] = datetime.fromtimestamp(created + 5, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    files.atomic_write(path, json.dumps(data), mode=0o600)
+    called = []
+    monkeypatch.setattr(health, "_servers", lambda found, timeout: called.append(found) or {
+        "shell": {"pid": os.getpid(), "port": 8460}, "servers": []})
+    with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout=0):
+        found = health.probe(wait=0.3)
+    assert found.state == "running" and [c.server_id for c in called] == [info.server_id]
+
+
+@pytest.mark.parametrize("held", [False, True])
+@pytest.mark.parametrize("written", [False, True])
+def test_the_lock_is_tried_before_the_runtime_file_is_read(site, monkeypatch, held, written):
+    if written:
+        write_runtime("ui", transport="tcp", address="127.0.0.1", port=8460, version="0")
+    order = []
+    lock_held, read = health.cli.lock_held, health.read_runtime
+    monkeypatch.setattr(health.cli, "lock_held", lambda: order.append("lock") or lock_held())
+    monkeypatch.setattr(health, "read_runtime", lambda module: order.append("file") or read(module))
+    monkeypatch.setattr(health, "_servers", lambda found, timeout: None)
+    _units(monkeypatch, [])
+    _no_connect(monkeypatch)
+    if held:
+        with files.lock(Layout("ui").runtime_dir() / "page.lock", timeout=0):
+            health.probe(wait=0.1)
+    else:
+        health.probe(wait=0.1)
+    assert order[0] == "lock" and (order[1:2] == ["file"]) == held
+    assert held or "file" not in order, "a free lock reads no runtime file"
+
+
+def test_the_look_is_every_2_s_over_site_packages_and_the_childrens_pythonpath(tmp_path):
+    import sysconfig
+
+    import moxi_ui.snapshot as snapshot_mod
+
+    extra = tmp_path / "extra"
+    extra.mkdir()
+    paths = sysconfig.get_paths()
+    env = {"PYTHONPATH": os.pathsep.join([str(extra), paths["purelib"], str(extra)])}
+    assert snapshot_mod.watched_dirs(env) == list(dict.fromkeys(
+        [paths["purelib"], paths["platlib"], str(extra)]))
+    now = [100.0]
+    snap = ModuleSnapshot(cwd=tmp_path, env=env, clock=lambda: now[0])
+    assert snap.every == snapshot_mod.EVERY == 2.0 and snap.dirs() == snapshot_mod.watched_dirs(env)
+    snap._marks = snapshot_mod._mtimes(snap.dirs())
+    asked = []
+    snap.request = lambda: asked.append(now[0])
+    snap.touch()
+    os.utime(extra, (1, 1))
+    for step in (1.0, 0.9, 0.1):
+        now[0] += step
+        snap.touch()
+    assert asked == [102.0], "the change is seen at the first look 2 s after the last"
+
 @pytest.mark.parametrize("task, state", [
     (None, "warn"),
     (SimpleNamespace(state="inactive", enabled=False, last=None), "warn"),
