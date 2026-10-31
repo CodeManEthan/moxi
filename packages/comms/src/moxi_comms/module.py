@@ -17,6 +17,7 @@ OPTIONAL = {
     "cache": "The cold-send hold: mail to an agent whose prompt cache went cold waits for "
              "its next turn, and a cache comms cannot read refuses the send. Without it "
              "every agent reads as having no cache and gets its mail live.",
+    "ui": "The comms panel and its roster of agents in the browser UI shell.",
 }
 GATED = {"moxi-comms-codex": "codex"}
 #: Each variable of comms' prefix it reads outside moxi.paths and moxi.config, and why.
@@ -63,3 +64,13 @@ STORES = {
 #: The delivery daemon, which `moxi install comms` writes as a unit through the core's
 #: writer. `moxi comms service` still writes today's unmarked unit, as it always has.
 DAEMONS = {"daemon": {"command": "moxi-comms-daemon", "doc": "the delivery daemon"}}
+#: comms' page server, which the browser UI shell starts. Nothing here imports it.
+PAGE = "moxi_comms.page:PAGE"
+#: What comms offers the browser UI shell: its panel, and the roster any home view or
+#: page may place.
+COMPONENTS = {
+    "page": {"script": "page.js", "title": "Comms", "contract": 1, "place": "page",
+             "doc": "Who can be messaged, and who waits on whom"},
+    "roster": {"script": "roster.js", "title": "Agents", "contract": 1, "place": "block",
+               "home": True, "doc": "Names held by live sessions, and standing names"},
+}

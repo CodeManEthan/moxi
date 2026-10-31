@@ -30,6 +30,9 @@ codex = ["moxi-turns[codex]>=0.2,<0.3"]
 # The cold-send hold reads each agent's prompt cache through the cache module, an
 # optional Moxi module comms reaches only through moxi.modules.load("cache").
 cache = ["moxi-cache>=0.1,<0.2"]
+# The browser UI shell: with it, comms' panel and its roster of agents show there.
+# Loopback, which comms' page server runs on, comes with it.
+ui = ["moxi-ui>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/moxihq/moxi"
@@ -71,8 +74,12 @@ opencode = "moxi_comms.kinds:OPENCODE"
 [dependency-groups]
 # The suite runs the Codex adapter over turns' real Codex host against a stub app-server,
 # and exercises the cache seam, so the dev environment carries `websockets` (the one
-# dependency of turns' `codex` extra) and `moxi-cache` beside pytest.
-dev = ["pytest", "websockets>=17.0.1", "moxi-cache>=0.1,<0.2"]
+# dependency of turns' `codex` extra) and `moxi-cache` beside pytest. moxi-ui's pytest
+# plugin runs comms' pages in a real shell, and its testing extra brings the browser; the
+# browser tests import Playwright themselves, so it is named too. moxi-dev brings
+# pytest-xdist.
+dev = ["pytest", "websockets>=17.0.1", "moxi-cache>=0.1,<0.2", "moxi-dev",
+       "moxi-ui[testing]", "playwright>=1.50,<2"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -86,7 +93,11 @@ packages = ["src/moxi_comms"]
 # Only the published paths go into a source distribution, whatever branch it is built
 # from (hatchling adds pyproject.toml and .gitignore itself).
 only-include = ["CHANGELOG.md", "CONTRIBUTING.md", "LICENSE", "README.md", "docs", "scripts",
-                "src/moxi_comms", "tests"]
+                "src/moxi_comms", "tests", "web"]
 
+# A plain `pytest` leaves out the browser tests, and so does `moxi-dev check` when
+# Playwright's Chromium can't start; `pytest -m browser` runs them.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not browser'"
+markers = ["browser: drives a browser; deselected by a plain pytest run"]

@@ -454,10 +454,16 @@ cache = [
 codex = [
     { name = "moxi-turns", extra = ["codex"] },
 ]
+ui = [
+    { name = "moxi-ui" },
+]
 
 [package.dev-dependencies]
 dev = [
     { name = "moxi-cache" },
+    { name = "moxi-dev" },
+    { name = "moxi-ui", extra = ["testing"] },
+    { name = "playwright" },
     { name = "pytest" },
     { name = "websockets" },
 ]
@@ -469,13 +475,17 @@ requires-dist = [
     { name = "moxi-cache", marker = "extra == 'cache'", editable = "packages/cache" },
     { name = "moxi-turns", editable = "packages/turns" },
     { name = "moxi-turns", extras = ["codex"], marker = "extra == 'codex'", editable = "packages/turns" },
+    { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
     { name = "psutil", specifier = ">=5.9" },
 ]
-provides-extras = ["codex", "cache"]
+provides-extras = ["codex", "cache", "ui"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "moxi-cache", editable = "packages/cache" },
+    { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
+    { name = "playwright", specifier = ">=1.50,<2" },
     { name = "pytest" },
     { name = "websockets", specifier = ">=17.0.1" },
 ]
