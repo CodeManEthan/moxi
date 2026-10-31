@@ -88,6 +88,13 @@ describe('the non-interactive rule', () => {
     expect(w.spawned).toEqual([ROOT_ARGV])
     expect(w.reads.filter(p => p.endsWith('/endpoint.json')).length).toBe(1)
   })
+
+  test('an env read that throws counts as unset, and endpoint.json is read', async ($: E, on) => {
+    const w = world(on, { envFails: true })
+    await start($)
+    expect(w.spawned).toEqual([ROOT_ARGV])
+    expect(w.reads.filter(p => p.endsWith('/endpoint.json')).length).toBe(1)
+  })
 })
 
 describe('the report queue', () => {

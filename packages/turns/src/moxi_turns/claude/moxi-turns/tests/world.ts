@@ -21,10 +21,17 @@ export function commandRow($: any, text: string) {
   })
 }
 
-export function world(on: On, options: { surfaces?: string[]; endpointJson?: string | null; env?: Record<string, string>; gate?: boolean; spinMs?: number } = {}) {
+export function world(on: On, options: { surfaces?: string[]; endpointJson?: string | null; env?: Record<string, string>; envFails?: boolean; gate?: boolean; spinMs?: number } = {}) {
   const clock = mock.clock(on, { now: 1_000 })
   // The session's environment: only what the test names, never the one the tests run in.
-  mock.env(on, options.env ?? {})
+  // With `envFails`, every `$.env.get` throws instead.
+  if (options.envFails) {
+    on('env.get', async () => {
+      throw new Error('the environment cannot be read')
+    })
+  } else {
+    mock.env(on, options.env ?? {})
+  }
   const w = {
     clock,
     surfaces: options.surfaces ?? ['terminal'],

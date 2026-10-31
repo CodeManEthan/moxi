@@ -9,7 +9,8 @@
 // The endpoint command: `MOXI_TURNS_ENDPOINT` in the session's environment, which a launch
 // through turns' launch additions sets; else the one `endpoint.json` beside this plugin
 // names, which turns' setup writes for a user-scope install. A variable that is set but
-// not an absolute path is no endpoint, and the file is not read then.
+// not an absolute path is no endpoint, and the file is not read then. A read of the
+// variable that throws counts as unset, so the file is read.
 //
 // The internal leg (not the socket contract; it changes only with the package). The
 // endpoint's half, moxi_turns.claude_leg, states it in full; the runner's part:
@@ -684,7 +685,9 @@ function endpointEnded($: Dollar, why: string): void {
 
 async function readArgv($: Dollar): Promise<string[] | undefined> {
   // The launch's own name for the endpoint wins. Set but not absolute is no endpoint: the
-  // file beside the plugin may name another environment's command.
+  // file beside the plugin may name another environment's command. A `$.env.get` that
+  // throws says nothing about whether the variable is set; it counts as unset, and the
+  // file is read.
   let named: string | undefined
   try {
     named = await $.env.get('MOXI_TURNS_ENDPOINT')
