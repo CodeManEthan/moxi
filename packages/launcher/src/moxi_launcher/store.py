@@ -1216,7 +1216,8 @@ def _end(conn: sqlite3.Connection, run_id: str, outcome: str, *, word: str | Non
         if cursor.rowcount != 1:
             return False, run_id, None
         kept = _merge_blocked(conn, run, word, cut(detail), at) if merge else run_id
-        picked = _take_pending(conn, run, outcome, values.get("new_request_id"), at)
+        picked = _take_pending(conn, run, outcome, values.get("new_request_id"), at,
+                               word=word)
     return True, kept, picked
 
 
@@ -1242,8 +1243,10 @@ def _merge_blocked(conn: sqlite3.Connection, run: Run, word: str | None,
 # its launch leaves a pending compact (one per launch, the newest crossing wins), and
 # whatever ends a run on the launch takes it in the same transaction as the end. When the
 # run left the session's context fresh (it relaunched, cleared, compacted or exited the
-# session), the pending compact is dropped with an event; otherwise its compact run is
-# inserted there and its job started once the end is written.
+# session), or left no session to compact (the session is gone, or the run's exit ran, so
+# it is down or at its exit dialog), the pending compact is dropped with an event;
+# otherwise its compact run is inserted there and its job started once the end is
+# written.
 
 #: The outcomes after which a launch's session needs no compact a crossing left pending.
 FRESH_CONTEXT = ("relaunched", "first-turn-not-sent", "cleared", "compacted", "exited")
@@ -1281,15 +1284,33 @@ def pending_compact(conn: sqlite3.Connection, request_id: str) -> tuple[str, str
     return None if found is None else (found[0], found[1])
 
 
+def _session_left(conn: sqlite3.Connection, run: Run, outcome: str | None,
+                  word: str | None) -> bool:
+    """Whether `run` left no session to compact: it ended on the session being gone, it
+    was a repair (made only once the session is down), or its exit command ran, a refusal
+    other than turns' `gone` aside, so the session is down or at its exit dialog."""
+    if outcome == "gone" or word == "gone" or run.mode == "repair":
+        return True
+    for (detail,) in conn.execute("SELECT detail_json FROM run_events "
+                                  "WHERE run_id = ? AND kind = 'exit-result'",
+                                  (run.run_id,)):
+        result = json.loads(detail) if detail else {}
+        if result.get("kind") != "refused" or result.get("reason") == "gone":
+            return True
+    return False
+
+
 def _take_pending(conn: sqlite3.Connection, run: Run, outcome: str | None,
-                  new_request_id: str | None, at: str) -> Run | None:
+                  new_request_id: str | None, at: str, *,
+                  word: str | None = None) -> Run | None:
     found = pending_compact(conn, run.request_id)
     if found is None:
         return None
     key, pended = found
     conn.execute("DELETE FROM pending_compacts WHERE request_id = ?", (run.request_id,))
     session_id = key.split("|", 1)[0] or run.session_id
-    if new_request_id or outcome in FRESH_CONTEXT:
+    if (new_request_id or outcome in FRESH_CONTEXT
+            or _session_left(conn, run, outcome, word)):
         conn.execute("INSERT INTO events (request_id, session_id, at, kind, detail_json) "
                      "VALUES (?, ?, ?, 'pending-compact-dropped', ?)",
                      (run.request_id, session_id, at,

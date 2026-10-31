@@ -652,6 +652,49 @@ def test_an_end_that_left_the_context_fresh_drops_the_pending_compact(conn, star
     assert store.open_run(conn, "r1") is None
 
 
+@pytest.mark.parametrize("result, outcome, word", [
+    ({"kind": "ran", "reason": None}, "exit-pending", "person"),
+    ({"kind": "ran", "reason": None}, "relaunch-failed", "name-held"),
+    ({"kind": "ran", "reason": None}, "error", "OSError"),
+    ({"kind": "error", "reason": "gone"}, "relaunch-failed", "gone"),
+    ({"kind": "refused", "reason": "gone"}, "relaunch-failed", "gone"),
+    ({"kind": "ran", "reason": None}, "not-exited", "no-dialog"),
+])
+def test_an_end_after_the_exit_ran_drops_the_pending_compact(conn, started, result,
+                                                            outcome, word):
+    run = open_run(conn)
+    store.add_run_event(conn, run.run_id, "exit", {"turn_number": 3})
+    store.add_run_event(conn, run.run_id, "exit-result", result)
+    store.pend_compact(conn, "r1", f"{SID}|1x|t")
+    store.end_run(conn, run.run_id, outcome, word=word)
+    assert started == [] and store.pending_compact(conn, "r1") is None
+    assert [e for e in store.events(conn, "r1") if e.kind == "pending-compact-dropped"]
+    assert store.open_run(conn, "r1") is None
+
+
+@pytest.mark.parametrize("kind, mode, outcome, word", [
+    ("relaunch", "self", "gone", "gone"),
+    ("relaunch", "repair", "relaunch-failed", "slots-busy"),
+    ("compact", "limit", "failed", "gone"),
+])
+def test_an_end_with_no_session_left_drops_the_pending_compact(conn, started, kind, mode,
+                                                              outcome, word):
+    run = open_run(conn, kind=kind, mode=mode)
+    store.pend_compact(conn, "r1", f"{SID}|1x|t")
+    store.end_run(conn, run.run_id, outcome, word=word)
+    assert started == [] and store.pending_compact(conn, "r1") is None
+
+
+def test_an_exit_refused_leaves_the_session_and_the_end_takes_the_pending_compact(
+        conn, started):
+    run = open_run(conn)
+    store.add_run_event(conn, run.run_id, "exit-result", {"kind": "refused",
+                                                          "reason": "busy"})
+    store.pend_compact(conn, "r1", f"{SID}|1x|t")
+    store.end_run(conn, run.run_id, "not-exited", word="busy")
+    assert len(started) == 1
+
+
 def test_a_dropped_run_takes_the_pending_compact_too(conn, started):
     run = open_run(conn, kind="clear", mode="expiry")
     store.pend_compact(conn, "r1", f"{SID}|1x|t")
