@@ -22,7 +22,7 @@ outside comms.
 
 * `ClaimServer`, for send-only identities held by a process of their own.
 * Reads: `attributed(message_id)`, `session(identity)`, `roster()`, `owner(session_id)`,
-  `record_dir()`, `daemon_socket()`.
+  `identity_state(name, scope=None)`, `record_dir()`, `daemon_socket()`.
 * Names: `GLOBAL`, `qualify`, `split_tag`, `NAME_RE`.
 * `replay()`: the reader catch-up bound in force, `(messages, seconds)`.
 * `DaemonError`, `DaemonOffline`: what a read raises when the daemon refuses or is down.
@@ -42,9 +42,10 @@ from .. import directory as _directory
 from .. import machine_line as _machine_line
 from .. import paths as _paths
 from .. import sending as _sending
+from .. import wire as _wire
 from ..claimhold import ClaimServer
 from ..client import DaemonError, DaemonOffline
-from ..scoping import GLOBAL, NAME_RE, qualify, split_tag
+from ..scoping import GLOBAL, NAME_RE, is_auto_name, qualify, split_tag
 from ..sending import (DELIVERIES, EXIT_CODES, OUTCOMES, DeleteResult, Recipient, Refusal,
                        Sender, SendResult)
 
@@ -187,12 +188,15 @@ class Agent:
 
 @dataclass(frozen=True)
 class Standing:
-    """A standing identity's directory row. `kind` is `agent` or `send-only`."""
+    """A standing identity's directory row. `kind` is `agent` or `send-only`; `module`
+    names the module the name is reserved for, when it is one (None for a name no module
+    owns)."""
 
     qualified: str
     name: str
     scope: str
     kind: str
+    module: str | None = None
 
 
 @dataclass(frozen=True)
@@ -242,12 +246,43 @@ def roster(*, deadline: float = READ_DEADLINE) -> Roster:
     conn = _directory.connect(_paths.comms_db(), read_only=True)
     try:
         rows = _directory.standing_rows(conn)
-        standing = tuple(Standing(qualified=qualify(r["name"], r["scope"]), name=r["name"],
-                                  scope=r["scope"], kind=_directory.kind_of(r))
-                         for r in rows)
+        reserved = _reserved_rows(conn)
+        standing = tuple(Standing(qualified=q, name=r["name"], scope=r["scope"],
+                                  kind=_directory.kind_of(r),
+                                  module=reserved.get(q))
+                         for r in rows
+                         for q in (qualify(r["name"], r["scope"]),))
     finally:
         conn.close()
     return Roster(bound=bound, standing=standing)
+
+
+def _reserved_rows(conn) -> dict:
+    """qualified -> the module each reserved name is reserved for (None when no module
+    owns it), for every row not freed."""
+    return {row["name"]: row["module"] for row in conn.execute(
+        "SELECT name, module FROM reserved WHERE freed_at IS NULL")}
+
+
+def _reserved(qualified: str) -> tuple[bool, str | None]:
+    """Whether `qualified` is a reserved name (a `reserved` row not freed: active, in
+    conflict or unowned, each of which the daemon's bind refuses), and its module. A
+    store that can't be read holds none."""
+    import sqlite3
+
+    from ..store.open import Unmoved
+
+    try:
+        conn = _directory.connect(_paths.comms_db(), read_only=True)
+    except (sqlite3.Error, Unmoved, OSError):
+        return False, None
+    try:
+        rows = _reserved_rows(conn)
+    except sqlite3.Error:
+        return False, None
+    finally:
+        conn.close()
+    return (qualified in rows), rows.get(qualified)
 
 
 def owner(session_id: str, *, deadline: float = READ_DEADLINE) -> Owner:
@@ -263,6 +298,94 @@ def owner(session_id: str, *, deadline: float = READ_DEADLINE) -> Owner:
                  adapter=answer.get("adapter"),
                  directors=_declared_directors().get(identity, ()) if identity else (),
                  awaiting=tuple(answer.get("awaiting") or ()))
+
+
+#: What `identity_state` says of a name.
+IDENTITY_STATES = ("free", "held", "standing", "reserved", "retired", "offline")
+
+
+@dataclass(frozen=True)
+class Holder:
+    """The live binding that holds a name: its adapter kind and its session's id (None
+    while the binding has reported none)."""
+
+    adapter: str | None
+    session_id: str | None
+
+    def __str__(self) -> str:
+        if self.session_id:
+            return f"{self.adapter or 'a'} session {self.session_id}"
+        return f"a {self.adapter} session" if self.adapter else "a live session"
+
+
+@dataclass(frozen=True)
+class IdentityState:
+    """Whether a name is free for a launch to take, and if not, why.
+
+    `state` is one of `IDENTITY_STATES`: `free`; `held` by a live binding (`holder`, a
+    `Holder`); `standing` (a standing identity's directory row, not bound now);
+    `reserved` for a module (`module`, None for a name no module owns); `retired`; or
+    `offline`, when the daemon can't be asked (`reason` says why). Branch on `state`,
+    never on text."""
+
+    qualified: str
+    state: str
+    holder: Holder | None = None
+    module: str | None = None
+    reason: str | None = None
+
+
+def identity_state(name: str, scope: str | None = None, *,
+                   deadline: float = READ_DEADLINE) -> IdentityState:
+    """Whether `name` (in `scope`, else the global identity) is free for a launch to
+    claim, from the daemon's `resolve` and `session` answers and the store's reserved
+    names. `name` may be qualified (`name@scope`) when `scope` is None. Raises
+    `ValueError` for what is not a name a launch can claim, and `DaemonError` for an
+    answer it can't read as a state."""
+    name, scope = _launch_name(name, scope)
+    qualified = qualify(name, scope)
+    try:
+        client = _daemon(deadline)
+    except DaemonOffline as e:
+        return IdentityState(qualified, "offline", reason=str(e))
+    try:
+        try:
+            answer = client.call("resolve", {"name": qualified})
+        except DaemonError as e:
+            if e.code == _wire.NAME_RETIRED:
+                return IdentityState(qualified, "retired", reason=str(e))
+            raise
+        if answer.get("bound"):
+            held = client.call("session", {"identity": qualified})
+            return IdentityState(qualified, "held", holder=Holder(
+                adapter=held.get("adapter"), session_id=held.get("session_id")))
+    except DaemonOffline as e:
+        return IdentityState(qualified, "offline", reason=str(e))
+    finally:
+        client.close()
+    reserved, module = _reserved(qualified)
+    if reserved:
+        return IdentityState(qualified, "reserved", module=module)
+    if answer.get("standing_row"):
+        return IdentityState(qualified, "standing")
+    return IdentityState(qualified, "free")
+
+
+def _launch_name(name, scope) -> tuple[str, str]:
+    """(name, scope) of what a launch would claim, checked as the wrappers check it."""
+    name = str(name)
+    if "@" in name:
+        if scope is not None:
+            raise ValueError(f"{name!r} names its scope; pass the bare name with scope=")
+        name, scope = split_tag(name)
+    scope = GLOBAL if scope in (None, "") else str(scope)
+    if not NAME_RE.match(name) or (scope != GLOBAL and not NAME_RE.match(scope)):
+        raise ValueError(f"{qualify(name, scope)!r} is not a name: a comms identity is "
+                         f"{NAME_RE.pattern}")
+    if is_auto_name(name):
+        raise ValueError(f"{name!r} is an agent-N name, which the daemon mints and no "
+                         "launch claims")
+    return name, scope
 
 
 def record_dir() -> Path:
@@ -288,7 +411,8 @@ __all__ = [
     "INTERFACE", "send", "check", "delete", "DeleteResult", "Sender", "SendResult",
     "Recipient", "Refusal",
     "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
-    "session", "roster", "owner", "Roster", "Agent", "Standing", "Owner", "record_dir",
+    "session", "roster", "owner", "Roster", "Agent", "Standing", "Owner",
+    "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "record_dir",
     "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE", "replay",
     "DaemonError", "DaemonOffline",
 ]

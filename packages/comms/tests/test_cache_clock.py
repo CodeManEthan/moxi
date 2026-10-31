@@ -722,7 +722,7 @@ from moxi_comms.adapters import opencode_roster  # noqa: E402
 from moxi_comms.adapters.codex import CodexAdapter  # noqa: E402
 from moxi_comms.adapters.codex_roster import CodexAgent  # noqa: E402
 from fake_opencode import FakeOpenCode, install  # noqa: E402
-from fake_turns import FakeSession, fake_launch  # noqa: E402
+from fake_turns import FakeSession, fake_find  # noqa: E402
 
 
 def watch_reports(adapter):
@@ -749,7 +749,7 @@ def codex_wrapper(rig, tmp_path):
         agent = CodexAgent(qualified=CODER_Q, name="coder", scope="proj-a",
                            cwd=str(tmp_path), thread_file=codex_threads.path(CODER_Q))
         adapter = CodexAdapter(
-            agent, launch=fake_launch(session), autoreconnect=autoreconnect,
+            agent, find=fake_find(session), autoreconnect=autoreconnect,
             backoff=__import__("itertools").repeat(0.05), clock=rig.clock,
             status_sink=lambda text: None)
         adapter.fake = session

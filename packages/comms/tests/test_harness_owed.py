@@ -15,7 +15,7 @@ from moxi_comms.adapters.codex_roster import CodexAgent
 from moxi_comms.adapters.opencode import OpenCodeAdapter
 from moxi_comms.adapters.opencode_roster import OpenCodeAgent
 from fake_opencode import FakeOpenCode
-from fake_turns import FakeSession, fake_launch
+from fake_turns import FakeSession, fake_find
 
 CODEX = "planner@proj-a"
 OPENCODE = "coder@proj-a"
@@ -41,7 +41,7 @@ def codex(rig, tmp_path):
     session = FakeSession()
     row = CodexAgent(qualified=CODEX, name="planner", scope="proj-a",
                      cwd=str(tmp_path), thread_file=codex_threads.path(CODEX))
-    adapter = CodexAdapter(row, launch=fake_launch(session), autoreconnect=False,
+    adapter = CodexAdapter(row, find=fake_find(session), autoreconnect=False,
                            clock=rig.clock)
     adapter.fake = session
     adapter.start()

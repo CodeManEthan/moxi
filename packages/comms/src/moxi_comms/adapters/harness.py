@@ -189,6 +189,9 @@ class HarnessAdapter:
     #: `TurnLedger` kept), so a delivered digest's ids stay held until then. A port that
     #: reports none has finished the digest's turn when `deliver` returns.
     HOLDS_UNTIL_TURN_ENDS: bool = False
+    #: A launch into a name another session holds waits for it. A wrapper that refuses
+    #: such a launch before its harness starts turns this off.
+    WAIT_WHEN_HELD: bool = True
     #: The port's own logger.
     log: logging.Logger = logging.getLogger("comms.harness")
 
@@ -313,7 +316,8 @@ class HarnessAdapter:
                 self.connect_daemon()
         except DaemonError as e:
             holder = (e.data.get("holder") or {}).get("qualified")
-            if not (self.autoreconnect and e.refused and holder == self.agent.qualified):
+            if not (self.autoreconnect and self.WAIT_WHEN_HELD and e.refused
+                    and holder == self.agent.qualified):
                 raise
             self.claims.name_refused(holder)
             self.status_sink(f"comms unbound: {self.agent.qualified} is held by another "

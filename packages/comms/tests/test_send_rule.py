@@ -35,7 +35,7 @@ from moxi_comms.claimhold import CLAIM_SOCKET_ENV, NOT_INSIDE, ClaimServer
 from moxi_comms.client import DaemonClient
 from moxi_comms.membership import TREE, root_of
 from moxi_comms.paths import daemon_socket
-from fake_turns import FakeSession, fake_launch
+from fake_turns import FakeSession, fake_find
 
 BOB = "bob@proj-a"
 ALICE = "alice@proj-a"
@@ -237,7 +237,7 @@ def test_a_claude_shim_session_sends_and_replies_as_on_main(rig):
 def test_a_codex_session_sends_and_replies_as_on_main(rig, tmp_path):
     agent = CodexAgent(qualified=ALICE, name="alice", scope="proj-a",
                        cwd=str(tmp_path), thread_file=codex_threads.path(ALICE), directors=[])
-    adapter = CodexAdapter(agent, launch=fake_launch(FakeSession()), autoreconnect=False,
+    adapter = CodexAdapter(agent, find=fake_find(FakeSession()), autoreconnect=False,
                            clock=rig.clock)
     try:
         adapter.start()
