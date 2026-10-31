@@ -471,7 +471,9 @@ def learn_session(conn: sqlite3.Connection, request_id: str, session_id: str,
     new.
 
     The id joins `session_ids` unless it is there already, and becomes the row's
-    `session_id` when the row has none. The state is not touched.
+    `session_id` when the row has none. An id another launch is known by stays that
+    launch's: it joins nothing and the row's column is left as it is, so `resolve` and
+    the claim read the same owner. The state is not touched.
     """
     if source not in SOURCES:
         raise ValueError(f"unknown session id source {source!r}")
@@ -484,8 +486,9 @@ def learn_session(conn: sqlite3.Connection, request_id: str, session_id: str,
             "VALUES (?, ?, ?, ?)", (session_id, request_id, source, at))
         added = cursor.rowcount == 1
         conn.execute("UPDATE launches SET session_id = ?, updated_at = ? "
-                     "WHERE request_id = ? AND session_id IS NULL",
-                     (session_id, at, request_id))
+                     "WHERE request_id = ? AND session_id IS NULL AND EXISTS ("
+                     "SELECT 1 FROM session_ids WHERE session_id = ? AND request_id = ?)",
+                     (session_id, at, request_id, session_id, request_id))
         return added
 
 

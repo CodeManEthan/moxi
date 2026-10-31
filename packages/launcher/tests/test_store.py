@@ -379,6 +379,15 @@ def test_an_id_held_by_another_launch_stays_with_it(conn):
     codex(conn)
     assert not store.learn_session(conn, "c1", CLAUDE_ID, "startup")
     assert store.resolve(conn, CLAUDE_ID).request_id == "r1"
+    # The other launch's column is left empty too, so nothing reads it as c1's.
+    assert store.get(conn, "c1").session_id is None
+    assert store.session_ids(conn, "c1") == []
+    # A Codex thread first learned by one launch is not taken by another.
+    codex(conn, request_id="c2")
+    assert store.learn_session(conn, "c1", "thread-1", "startup")
+    assert not store.learn_session(conn, "c2", "thread-1", "startup")
+    assert store.get(conn, "c2").session_id is None
+    assert store.resolve(conn, "thread-1").request_id == "c1"
 
 
 def test_learning_for_a_missing_launch_or_an_unknown_source(conn):
