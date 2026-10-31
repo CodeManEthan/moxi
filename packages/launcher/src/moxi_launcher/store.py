@@ -1272,10 +1272,59 @@ def chain(conn: sqlite3.Connection, request_id: str) -> list[str]:
 
 def open_holds(conn: sqlite3.Connection, request_id: str) -> list[str]:
     """The names of the open holds of a launch's whole chain, sorted."""
+    return sorted({hold.name for hold in holds(conn, request_id)})
+
+
+@dataclass(frozen=True)
+class Hold:
+    """One `warm_holds` row: the launch that opened it, its name, when it was opened, and
+    when it was released (None while it is open)."""
+
+    request_id: str
+    name: str
+    opened_at: str
+    released_at: str | None
+
+    def as_json(self) -> dict[str, Any]:
+        return {f.name: getattr(self, f.name) for f in fields(self)}
+
+
+def holds(conn: sqlite3.Connection, request_id: str) -> list[Hold]:
+    """The open holds of a launch's whole chain, by name, then oldest first."""
     ids = chain(conn, request_id)
-    return [name for (name,) in conn.execute(
-        f"SELECT DISTINCT name FROM warm_holds WHERE released_at IS NULL "
-        f"AND request_id IN ({', '.join('?' * len(ids))}) ORDER BY name", ids)]
+    return [Hold(*values) for values in conn.execute(
+        f"SELECT request_id, name, opened_at, released_at FROM warm_holds "
+        f"WHERE released_at IS NULL AND request_id IN ({', '.join('?' * len(ids))}) "
+        f"ORDER BY name, opened_at, rowid", ids)]
+
+
+def open_hold(conn: sqlite3.Connection, request_id: str, name: str, *,
+              at: str | None = None) -> tuple[Hold, bool]:
+    """Open the hold `name` on a launch: `(the open hold, whether this call opened it)`.
+    A name already open anywhere in the launch's chain is left as it is, and that hold
+    is returned."""
+    with _writing(conn):
+        found = next((hold for hold in holds(conn, request_id) if hold.name == name), None)
+        if found is not None:
+            return found, False
+        opened = Hold(request_id, name, at or now(), None)
+        conn.execute("INSERT INTO warm_holds (request_id, name, opened_at) VALUES (?, ?, ?)",
+                     (request_id, name, opened.opened_at))
+    return opened, True
+
+
+def release_hold(conn: sqlite3.Connection, request_id: str, name: str, *,
+                 at: str | None = None) -> list[Hold]:
+    """Release the hold `name` wherever it is open in a launch's chain, and return the
+    holds released (none when it was not open)."""
+    at = at or now()
+    with _writing(conn):
+        found = [hold for hold in holds(conn, request_id) if hold.name == name]
+        for hold in found:
+            conn.execute("UPDATE warm_holds SET released_at = ? WHERE request_id = ? "
+                         "AND name = ? AND released_at IS NULL",
+                         (at, hold.request_id, hold.name))
+    return [Hold(h.request_id, h.name, h.opened_at, at) for h in found]
 
 
 def add_run_event(conn: sqlite3.Connection, run_id: str, kind: str,
@@ -1431,16 +1480,16 @@ def log_lines(*, limit: int | None = None, before: str | datetime | None = None,
     return [_encode(row.as_json(stale_after=after, now=moment)) for row in rows]
 
 
-__all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "EXIT_COLUMNS", "FACTS", "FRESH_CONTEXT",
-           "HARNESSES", "HOWS", "JOB_GONE", "LAUNCHER", "LEAVES", "PRUNE_LIMIT", "RECLAIMED", "RUN_COLUMNS", "RUN_FIELDS",
-           "RUN_GRACE_S", "RUN_KINDS", "RUN_LEAVES", "RUN_STATES", "SOURCES", "STATES",
-           "STEPS", "TARGETS", "VERDICTS", "Busy", "Event", "ExitRow", "Inserted",
-           "LaunchRow", "Run", "RunEvent", "RunOpen", "SessionTaken", "TooLarge",
-           "add_event", "add_exit", "add_pick", "add_run_event", "advance_run", "chain",
-           "claim", "connect", "crossing_key", "crossing_known", "cut", "drop_run",
-           "end_blocked", "end_run", "endpoint_gone", "events", "exits_log", "get",
-           "get_run", "insert", "insert_run", "learn_session", "log", "log_lines",
-           "new_run_id", "now", "open_holds", "open_run", "parse_endpoint", "parse_time",
-           "path", "pend_compact", "pending_compact", "picked", "prune", "resolve",
-           "run_events", "run_stale", "runs", "seen_at", "session_ids", "set_facts",
-           "set_run_job", "set_state", "stale_after_s", "stamp"]
+__all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "EXIT_COLUMNS", "FACTS", "FRESH_CONTEXT", "HARNESSES",
+           "HOWS", "JOB_GONE", "LAUNCHER", "LEAVES", "PRUNE_LIMIT", "RECLAIMED", "RUN_COLUMNS",
+           "RUN_FIELDS", "RUN_GRACE_S", "RUN_KINDS", "RUN_LEAVES", "RUN_STATES", "SOURCES",
+           "STATES", "STEPS", "TARGETS", "VERDICTS", "Busy", "Event", "ExitRow", "Inserted", "Hold",
+           "LaunchRow", "Run", "RunEvent", "RunOpen", "SessionTaken", "TooLarge", "add_event",
+           "add_exit", "add_pick", "add_run_event", "advance_run", "chain", "claim", "connect",
+           "crossing_key", "crossing_known", "cut", "drop_run", "end_blocked", "end_run",
+           "endpoint_gone", "events", "exits_log", "get", "get_run", "holds", "insert",
+           "insert_run", "learn_session", "log", "log_lines", "new_run_id", "now", "open_hold",
+           "open_holds", "open_run", "parse_endpoint", "parse_time", "path", "pend_compact",
+           "pending_compact", "picked", "prune", "release_hold", "resolve", "run_events",
+           "run_stale", "runs", "seen_at", "session_ids", "set_facts", "set_run_job", "set_state",
+           "stale_after_s", "stamp"]

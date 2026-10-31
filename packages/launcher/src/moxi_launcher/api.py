@@ -3,6 +3,8 @@
     launch(request) -> LaunchResult     # resolve, check, compose, log, start
     check(request) -> list[Refusal]     # the live-state checks; writes nothing
     preview(request) -> Composition     # resolve and compose; starts nothing
+    open_hold(request_id, name)         # a keep-warm hold on a launch (`keepwarm`)
+    release_hold(request_id, name)
 
 A request is a `LaunchRequest` (presets and flags, resolved here) or a `ReplayRequest`
 (a stored launch made again: a relaunch or a resume, its values the stored row's).
@@ -55,11 +57,13 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import sqlite3
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
+from typing import TYPE_CHECKING
 
 from moxi import exit as exits
 from moxi import files
@@ -67,6 +71,9 @@ from moxi import modules as moxi_modules
 
 from . import catalog, compose, first, handoffs, identity, presets, slots, store, targets
 from .compose import Composition, common
+
+if TYPE_CHECKING:
+    from . import keepwarm
 
 log = logging.getLogger("moxi.launcher.api")
 
@@ -530,6 +537,25 @@ def _make_files(composition: Composition, environ: Mapping[str, str] | None = No
         common.write_prompt(composition.prompt_file)
 
 
+def open_hold(request_id: str, name: str, *,
+              conn: sqlite3.Connection | None = None) -> keepwarm.Held:
+    """Open the keep-warm hold `name` on the launch `request_id` (a no-op when the name is
+    open anywhere in the launch's chain), for a caller that knows the launch. Raises a
+    refusal when the launch is unknown, does not keep warm, or the name is bad."""
+    from . import keepwarm
+
+    return keepwarm.open_hold(request_id, name, conn=conn)
+
+
+def release_hold(request_id: str, name: str, *,
+                 conn: sqlite3.Connection | None = None) -> list[store.Hold]:
+    """Release the keep-warm hold `name` wherever it is open in the chain of the launch
+    `request_id`, and return the holds released (none when it was not open)."""
+    from . import keepwarm
+
+    return keepwarm.release_hold(request_id, name, conn=conn)
+
+
 def _result(composition: Composition, request_id: str, session_id: str | None,
             started: targets.Started, warnings: tuple[str, ...],
             base: str | None = None) -> LaunchResult:
@@ -555,4 +581,5 @@ def _stored(row: store.LaunchRow) -> LaunchResult:
 
 __all__ = ["TAKEN", "CommsOffline", "CommsUnanswered", "IdentityRefused", "IdentityTaken",
            "LaunchRequest", "LaunchResult", "NoDirectory", "Refusal", "ReplayRequest",
-           "Replayed", "ScratchRoot", "check", "exit_code", "launch", "preview"]
+           "Replayed", "ScratchRoot", "check", "exit_code", "launch", "open_hold", "preview",
+           "release_hold"]

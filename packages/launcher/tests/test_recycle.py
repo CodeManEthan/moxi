@@ -178,8 +178,13 @@ def test_the_timer_subscription_is_found_through_cache_s_entry_point_group():
     assert found[0].load().TIMERS is cachetimers.TIMERS
 
 
+def expiry_sub():
+    [sub] = [t for t in cachetimers.TIMERS if t["name"] == "launcher.recycle-on-expiry"]
+    return sub
+
+
 def test_the_subscription_asks_from_expiry_every_two_minutes_for_the_stamped_session():
-    [sub] = cachetimers.TIMERS
+    sub = expiry_sub()
     assert sub == {"name": "launcher.recycle-on-expiry", "at": 0, "every": 120,
                    "requires_env": {"MOXI_LAUNCHER_RECYCLE_ON_EXPIRY": "*"},
                    "run": ["moxi-launcher-job", "expiry", "{session}"]}
@@ -187,10 +192,10 @@ def test_the_subscription_asks_from_expiry_every_two_minutes_for_the_stamped_ses
 
 
 def test_the_subscription_runs_the_launcher_s_own_console_script_by_bare_name():
-    [sub] = cachetimers.TIMERS
-    assert "/" not in sub["run"][0]
-    found = paths.script(sub["run"][0])
-    assert os.access(found, os.X_OK)
+    for sub in cachetimers.TIMERS:
+        assert "/" not in sub["run"][0]
+        found = paths.script(sub["run"][0])
+        assert os.access(found, os.X_OK)
 
 
 def test_the_subscription_module_imports_nothing_outside_the_standard_library():

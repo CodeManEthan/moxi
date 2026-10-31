@@ -207,7 +207,7 @@ def _expiry(conn: sqlite3.Connection, session_id: str, turns: Any, slots_api: An
         if not found.live or found.session is None:
             return Verdict(None, "not-live", f"session {session_id} is not live")
         sid = found.session_id or session_id
-        clock = _cache_read(cache, row, sid, env)
+        clock = cache_read(cache, row, sid, env)
         kind = getattr(clock, "kind", None) if clock is not None else None
         if kind != "cold":
             return Verdict(None, kind or "no-cache",
@@ -316,7 +316,7 @@ def end(conn: sqlite3.Connection, run: store.Run, verdict: Verdict) -> Verdict:
     return Verdict(verdict.outcome, verdict.word, verdict.detail, run.run_id)
 
 
-def _cache_read(cache: Any, row: store.LaunchRow, session_id: str,
+def cache_read(cache: Any, row: store.LaunchRow, session_id: str,
                 env: Mapping[str, str]) -> Any | None:
     """Cache's read of the session, through cache's public API; None without cache."""
     if cache is LOOK:
@@ -454,5 +454,5 @@ def _words(error: BaseException) -> str:
 
 __all__ = ["BLOCKED_REFUSALS", "BUSY_WORDS", "COMPACT_LINE", "CROSSING_BUSY_S", "EXPIRY",
            "FAILED_REFUSALS", "QUIET_REFUSALS", "RAN", "RELAUNCH_LINE", "SHELLS_IDLE_S",
-           "STOP_SHELLS", "UNCONFIRMED", "Verdict", "ask_expiry", "codex_sessions",
+           "STOP_SHELLS", "UNCONFIRMED", "Verdict", "ask_expiry", "cache_read", "codex_sessions",
            "crossing_line", "end", "on_crossing", "start_compact", "verdict_of"]

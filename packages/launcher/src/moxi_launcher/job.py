@@ -1,17 +1,18 @@
 """`moxi-launcher-job`: the launcher's detached runs, one process per run.
 
-    moxi-launcher-job relaunch RUN     # a relaunch run, self or director
-    moxi-launcher-job repair RUN       # a repair run, from a failed run's record
-    moxi-launcher-job expiry SESSION   # an expiry ask, started by cache's timer
-    moxi-launcher-job compact RUN      # a compact at the context limit
+    moxi-launcher-job relaunch RUN        # a relaunch run, self or director
+    moxi-launcher-job repair RUN          # a repair run, from a failed run's record
+    moxi-launcher-job expiry SESSION      # an expiry ask, started by cache's timer
+    moxi-launcher-job keep-warm SESSION   # a keep-warm ask, started by cache's timer
+    moxi-launcher-job compact RUN         # a compact at the context limit
 
 Internal, never typed. A relaunch and a repair are spawned as slots jobs
 (`relaunch-<run>`, `repair-<run>`) by `moxi launcher relaunch`. A slots job is a child of
 slots' own tmux server, so it runs outside every session from its first instant: it
 outlives the session it exits, and comms takes its notices under the launcher's reserved
-name. Cache's timer starts an expiry ask (`recycle.ask_expiry`), and a crossing or the end
-of a run that took a pending compact spawns a compact detached (`moxi.proc.spawn`); each
-records its own process as its run's job.
+name. Cache's timer starts an expiry ask (`recycle.ask_expiry`) and a keep-warm ask
+(`keepwarm.ask`), and a crossing or the end of a run that took a pending compact spawns a
+compact detached (`moxi.proc.spawn`); each records its own process as its run's job.
 
 **The relaunch run** takes these steps, each writing its event before the next starts:
 
@@ -80,7 +81,9 @@ from . import notices, quiet, slots, store
 log = logging.getLogger("moxi.launcher.job")
 
 #: The runs this script runs.
-KINDS = ("relaunch", "repair", "expiry", "compact")
+KINDS = ("relaunch", "repair", "expiry", "compact", "keep-warm")
+#: The kinds that are an ask of a session, by its id.
+ASKS = ("expiry", "keep-warm")
 #: Refusals of the exit that clear by themselves.
 TRANSIENT = ("busy-turn", "draft", "busy-agents", "stale-turn", "rate", "in-flight",
              "loading")
@@ -857,11 +860,11 @@ class CompactJob(RelaunchJob):
         """A compact tells no one: its run is its record."""
 
 
-#: The job each run kind runs; `expiry` is an ask of a session (`recycle.ask_expiry`).
+#: The job each run kind runs; `expiry` and `keep-warm` are asks of a session (`ASKS`).
 JOBS: dict[str, type[RelaunchJob]] = {"relaunch": RelaunchJob, "repair": RepairJob,
                                       "compact": CompactJob}
 #: The outcomes a job exits 0 with.
-DONE = ("relaunched", "cleared", "compacted")
+DONE = ("relaunched", "cleared", "compacted", "nudged")
 
 
 def run(kind: str, run_id: str, *, signals: bool = False, **seams: Any) -> str:
@@ -880,21 +883,22 @@ def run(kind: str, run_id: str, *, signals: bool = False, **seams: Any) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """`moxi-launcher-job KIND ARG`: 0 when the run relaunched, cleared or compacted its
-    session, or an expiry ask ended with nothing to do; 1 for any other end; 2 for bad
-    arguments."""
+    """`moxi-launcher-job KIND ARG`: 0 when the run relaunched, cleared, compacted or
+    nudged its session, or an ask ended with nothing to do; 1 for any other end; 2 for
+    bad arguments."""
     parser = argparse.ArgumentParser(
         prog="moxi-launcher-job",
         description="Internal: run one of the launcher's detached runs to its end.")
     parser.add_argument("kind", choices=KINDS, help="the run's kind")
     parser.add_argument("arg", metavar="ARG",
-                        help="the run's id; for expiry, the session's id")
+                        help="the run's id; for expiry and keep-warm, the session's id")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s")
-    if args.kind == "expiry":
-        from . import recycle
+    if args.kind in ASKS:
+        from . import keepwarm, recycle
 
-        verdict = recycle.ask_expiry(args.arg)
+        asked = recycle.ask_expiry if args.kind == "expiry" else keepwarm.ask
+        verdict = asked(args.arg)
         print(f"session {args.arg}: {verdict.line}", flush=True)
         return 0 if verdict.outcome is None or verdict.outcome in DONE else 1
     outcome = run(args.kind, args.arg, signals=True)
@@ -906,7 +910,7 @@ def _words(error: BaseException) -> str:
     return str(error) or type(error).__name__
 
 
-__all__ = ["ACTED", "DONE", "GONE", "JOBS", "KINDS", "LOOK", "NOT_SETTLED", "POLL_S",
+__all__ = ["ACTED", "ASKS", "DONE", "GONE", "JOBS", "KINDS", "LOOK", "NOT_SETTLED", "POLL_S",
            "REPAIRABLE", "RETRY_S", "SETTLE_S", "TERMINAL", "TRANSIENT", "Choice",
            "CompactJob", "Ended", "RelaunchJob", "RepairJob",
            "chain_of", "choose_slot", "gone", "job_name", "main", "repairable", "root_run",
