@@ -416,6 +416,46 @@ def test_last_used_is_written_at_most_once_an_hour(tmp_path):
     assert path.read_bytes() != written
 
 
+def test_a_watch_is_called_once_however_its_session_ends(tmp_path):
+    clock = Clock()
+    store = open_store(tmp_path, None, clock=clock)
+    called = []
+
+    def watched():
+        session_id, _ = store.mint()
+        id_hash = hashlib.sha256(session_id.encode()).hexdigest()
+        store.watch(id_hash, lambda: called.append(session_id))
+        return session_id
+
+    # Ended by id (a worker's update check), and by a signout.
+    first = watched()
+    store.end([first])
+    store.end([first])
+    assert called == [first]
+    second = watched()
+    store.clear()
+    assert called == [first, second]
+    # Evicted past the limit.
+    third = watched()
+    for _ in range(LIMIT):
+        store.mint()
+    assert called[-1] == third
+    # Found expired.
+    store.clear()
+    fourth = watched()
+    clock.now += IDLE
+    assert store.live() == 0 and called[-1] == fourth
+    # Already gone: called at once. A dropped watch is never called.
+    store.watch("0" * 64, lambda: called.append("gone"))
+    assert called[-1] == "gone"
+    session_id, _ = store.mint()
+    stop = store.watch(hashlib.sha256(session_id.encode()).hexdigest(),
+                       lambda: called.append("dropped"))
+    stop()
+    store.clear()
+    assert "dropped" not in called and len(called) == 5
+
+
 def test_signout_while_no_shell_runs_keeps_the_epoch(tmp_path):
     store = open_store(tmp_path, "e")
     session_id, _ = store.mint()

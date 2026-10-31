@@ -33,6 +33,10 @@ Sessions are kept in memory, or, for a shell with an epoch, also in
 `<state_dir>/sessions.json` tagged with that epoch. A shell whose epoch differs from the
 file's honours none of the file's sessions. A shell with no epoch never reads or writes
 the file, so its sessions end with it. Only hashes of the session id and key are kept.
+
+A request a session admitted is marked with that session (`admitted`), and the store
+calls back when a session ends (`SessionStore.watch`), so the router can end a push
+stream or a proxied request opened under it.
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import logging
 import os
 import re
 import secrets
@@ -92,6 +97,8 @@ WORKER_PATH = "/m/ui/api/worker"
 TOKEN_PATHS = frozenset({HEALTH_PATH, SERVERS_PATH, STOP_PATH, SIGNOUT_API})
 _OPEN_PATHS = frozenset({SIGNIN_PATH, SIGNIN_API, PROVE_PATH})
 
+_log = logging.getLogger("moxi.ui")
+
 _TOKEN_SHAPE = re.compile(r"\A[A-Za-z0-9_-]{43}\Z")
 _STORE_FORMAT = 1
 _BROWSER_HEADERS = (b"cookie", b"origin", b"referer")
@@ -101,6 +108,10 @@ _BROWSER_HEADERS = (b"cookie", b"origin", b"referer")
 #: which sees only the request view, can run the owner check.
 connection: contextvars.ContextVar[tuple[Any, Any] | None] = contextvars.ContextVar(
     "moxi_ui_connection", default=None)
+#: The id hash of the session that admitted the current request, set by the session
+#: callable inside `check`, so the router can end a long-lived request with its session.
+admitted: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "moxi_ui_admitted", default=None)
 
 
 # --- the request's headers ------------------------------------------------------------
@@ -347,6 +358,9 @@ class SessionStore:
     With an `epoch` and a `path`, every change is written to the file, tagged with the
     epoch, and the last-used time at most once an hour; without an epoch, nothing is.
     Build one with `open_store`.
+
+    `watch` calls back when a session ends, however it ends: signed out, ended by a
+    worker's update check, evicted past the limit, or found expired.
     """
 
     def __init__(self, *, epoch: str | None, path: Path | None,
@@ -355,6 +369,8 @@ class SessionStore:
         self.path = path if epoch is not None else None
         self.clock = clock
         self._sessions: dict[str, _Record] = {}
+        self._watches: dict[str, list[Callable[[], None]]] = {}
+        self._ending: list[Callable[[], None]] = []
         self._lock = threading.Lock()
 
     # The file.
@@ -392,8 +408,46 @@ class SessionStore:
         gone = [h for h, r in self._sessions.items()
                 if now - r.created >= MAX_AGE or now - r.used >= IDLE]
         for id_hash in gone:
-            del self._sessions[id_hash]
+            self._drop(id_hash)
         return bool(gone)
+
+    def _drop(self, id_hash: str) -> bool:
+        """Remove one session, holding the lock; its watches are called once the lock is
+        let go (`_ended`)."""
+        if self._sessions.pop(id_hash, None) is None:
+            return False
+        self._ending.extend(self._watches.pop(id_hash, ()))
+        return True
+
+    def _ended(self) -> None:
+        """Call the watches of the sessions dropped under the lock just let go."""
+        with self._lock:
+            calls, self._ending = self._ending, []
+        for call in calls:
+            try:
+                call()
+            except Exception:  # noqa: BLE001 - one watch never stops the others
+                _log.exception("a session watch failed")
+
+    def watch(self, id_hash: str, on_end: Callable[[], None]) -> Callable[[], None]:
+        """Call `on_end()` once, from whichever thread ends it, when the session
+        `id_hash` ends; at once when it is already gone. Returns the call that drops the
+        watch, for a request that ended first."""
+        with self._lock:
+            if id_hash in self._sessions:
+                self._watches.setdefault(id_hash, []).append(on_end)
+
+                def stop() -> None:
+                    with self._lock:
+                        found = self._watches.get(id_hash)
+                        if found is not None and on_end in found:
+                            found.remove(on_end)
+                            if not found:
+                                del self._watches[id_hash]
+
+                return stop
+        on_end()
+        return lambda: None
 
     def mint(self) -> tuple[str, str]:
         """A new session: `(session id, key)`. The oldest is evicted past the limit."""
@@ -402,56 +456,65 @@ class SessionStore:
         with self._lock:
             self._prune()
             while len(self._sessions) >= LIMIT:
-                oldest = min(self._sessions, key=lambda h: self._sessions[h].created)
-                del self._sessions[oldest]
+                self._drop(min(self._sessions, key=lambda h: self._sessions[h].created))
             self._sessions[_hash(session_id)] = _Record(_hash(key), now, now, now)
             self._save()
+        self._ended()
         return session_id, key
 
     def find(self, session_ids: Sequence[str], key: str | None = None, *,
              need_key: bool) -> str | None:
         """The id hash of the first live session among `session_ids` (and, with
         `need_key`, whose key is `key`), marked used; or None."""
-        with self._lock:
-            if self._prune():
-                self._save()
-            for session_id in session_ids:
-                id_hash = _hash(session_id)
-                record = self._sessions.get(id_hash)
-                if record is None:
-                    continue
-                if need_key and (key is None or not hmac.compare_digest(record.key, _hash(key))):
-                    continue
-                now = self.clock()
-                record.used = now
-                if now - record.saved_used >= TOUCH_EVERY:
+        try:
+            with self._lock:
+                if self._prune():
                     self._save()
-                return id_hash
-        return None
+                for session_id in session_ids:
+                    id_hash = _hash(session_id)
+                    record = self._sessions.get(id_hash)
+                    if record is None:
+                        continue
+                    if need_key and (key is None
+                                     or not hmac.compare_digest(record.key, _hash(key))):
+                        continue
+                    now = self.clock()
+                    record.used = now
+                    if now - record.saved_used >= TOUCH_EVERY:
+                        self._save()
+                    return id_hash
+            return None
+        finally:
+            self._ended()
 
     def end(self, session_ids: Iterable[str]) -> int:
         """End the sessions these ids name; returns how many there were."""
         with self._lock:
             gone = 0
             for session_id in session_ids:
-                if self._sessions.pop(_hash(session_id), None) is not None:
+                if self._drop(_hash(session_id)):
                     gone += 1
             if gone:
                 self._save()
+        self._ended()
         return gone
 
     def clear(self) -> None:
         """End every session."""
         with self._lock:
-            self._sessions.clear()
+            for id_hash in list(self._sessions):
+                self._drop(id_hash)
             self._save()
+        self._ended()
 
     def live(self) -> int:
         """How many sessions are live now."""
         with self._lock:
             if self._prune():
                 self._save()
-            return len(self._sessions)
+            count = len(self._sessions)
+        self._ended()
+        return count
 
 
 def _read_store(path: Path) -> dict[str, Any] | None:
@@ -527,22 +590,30 @@ class Sessions:
         self.token = token
 
     def __call__(self, view: RequestView, entry: Entry | None) -> bool:
-        """Gate 4 of `check`: True to admit, by the class of the one entry `check` found."""
+        """Gate 4 of `check`: True to admit, by the class of the one entry `check` found.
+        A request a session admits has that session's id hash in `admitted`."""
+        admitted.set(None)
         headers = view.headers
         if entry is not None and entry.raw_path == WORKER_PATH:
             return entry.method == "GET" and is_worker_request(headers)
         if is_navigation(view.method, headers):
             return True
         if entry is None:
-            return self.signed_in(headers) is not None
+            return self._admit(self.signed_in(headers))
         path = entry.raw_path
         if path in _OPEN_PATHS:
             return True
         if path in TOKEN_PATHS:
             return self._token_class(view)
         if entry.kind == "asset" or path == "/" or _is_module_door(path):
-            return self.signed_in(headers) is not None
-        return self.signed_in(headers, need_key=True) is not None
+            return self._admit(self.signed_in(headers))
+        return self._admit(self.signed_in(headers, need_key=True))
+
+    def _admit(self, id_hash: str | None) -> bool:
+        if id_hash is None:
+            return False
+        admitted.set(id_hash)
+        return True
 
     def _token_class(self, view: RequestView) -> bool:
         token = self.token()

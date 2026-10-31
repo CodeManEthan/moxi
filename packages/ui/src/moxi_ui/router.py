@@ -21,10 +21,15 @@ The router, in order, for a request `check` passed:
 6. `/m/ui/<rest>`: the shell's own page, served in process, given only the browser
    headers the proxy would pass upstream;
 7. `/m/<module>/<rest>`: the proxy.
+
+A push stream or a proxied request ends when the session that admitted it ends (a
+signout, a worker's update check, an eviction or an expiry): from then on it reads as if
+the browser had left, and an open push stream's answer is finished.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -259,7 +264,7 @@ class Router:
 
         # 5. The push channel.
         if raw == PUSH_PATH.encode():
-            await self._pass(self.push, scope, receive, send)
+            await self._held(self.push, scope, receive, send, finish=True)
             return
 
         # 6. The shell's own page, with only the forwarded headers.
@@ -269,7 +274,7 @@ class Router:
 
         # 7. A module's page, by proxy.
         if raw.startswith(b"/m/"):
-            await self._pass(self.proxy, scope, receive, send)
+            await self._held(self.proxy, scope, receive, send, finish=False)
             return
 
         await _send(send, _plain(404))
@@ -280,6 +285,58 @@ class Router:
             await _send(send, _plain(404))
         else:
             await inner(scope, receive, send)
+
+    async def _held(self, inner: ASGIApp | None, scope: dict[str, Any],
+                    receive: Callable[..., Any], send: Callable[..., Any], *,
+                    finish: bool) -> None:
+        """`inner` for a request a session admitted, held only while that session lives.
+        Once it ends, `receive` gives `http.disconnect`, as if the browser had left, so
+        the push or the proxy ends the request itself. With `finish`, an answer `inner`
+        left open is then finished, so a push stream ends cleanly; a proxied answer is
+        left cut, as the proxy leaves one that breaks off."""
+        id_hash = _session.admitted.get()
+        if inner is None or id_hash is None:
+            await self._pass(inner, scope, receive, send)
+            return
+        loop = asyncio.get_running_loop()
+        ended = asyncio.Event()
+
+        def on_end() -> None:
+            try:
+                loop.call_soon_threadsafe(ended.set)
+            except RuntimeError:  # The loop has closed.
+                pass
+
+        async def receiving() -> dict[str, Any]:
+            if ended.is_set():
+                return {"type": "http.disconnect"}
+            message = asyncio.ensure_future(receive())
+            ending = asyncio.ensure_future(ended.wait())
+            try:
+                await asyncio.wait({message, ending}, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                ending.cancel()
+            if message.done():
+                return message.result()
+            message.cancel()
+            return {"type": "http.disconnect"}
+
+        answer = {"started": False, "done": False}
+
+        async def sending(message: dict[str, Any]) -> None:
+            if message.get("type") == "http.response.start":
+                answer["started"] = True
+            elif message.get("type") == "http.response.body" and not message.get("more_body"):
+                answer["done"] = True
+            await send(message)
+
+        stop = self.sessions.store.watch(id_hash, on_end)
+        try:
+            await inner(scope, receiving, sending)
+        finally:
+            stop()
+        if finish and ended.is_set() and answer["started"] and not answer["done"]:
+            await send({"type": "http.response.body", "body": b""})
 
     async def _sign_in(self, receive: Callable[..., Any]) -> Static:
         body = await _read_body(receive, _SIGNIN_BODY_CAP)

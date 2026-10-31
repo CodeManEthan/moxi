@@ -3,6 +3,8 @@ with the shell's real profile."""
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from moxi_ui.router import fallback, shell_table
 from shell_kit import FETCH, NAVIGATE, WORKER, Harness, Recorder
@@ -104,6 +106,64 @@ def test_localhost_is_admitted_only_while_the_listeners_name_it(tmp_path, names)
         answer = shell.send("GET", "/m/fixture/api/summary", headers=[cookie, key, *FETCH],
                             host=host)
         assert answer.status == (299 if admitted else 403), host
+
+
+class Held:
+    """A stand-in for the push or the proxy: opens its answer, then holds it until its
+    browser leaves."""
+
+    def __init__(self):
+        self.opened = asyncio.Event()
+        self.left = False
+
+    async def __call__(self, sc, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"open", "more_body": True})
+        self.opened.set()
+        while (await receive())["type"] != "http.disconnect":
+            pass
+        self.left = True
+
+
+@pytest.mark.parametrize(("path", "finished"), [("/m/ui/api/push", True),
+                                                ("/m/fixture/api/events", False)])
+@pytest.mark.parametrize("ending", ["signout", "worker"])
+def test_a_held_request_ends_when_its_session_does(tmp_path, path, finished, ending):
+    from shell_kit import scope
+
+    shell = Harness(tmp_path / "state")
+    held = Held()
+    shell.router.push = shell.router.proxy = held
+    cookie, key = shell.sign_in()
+    other, _ = shell.sign_in()
+    sent = []
+
+    async def browser_stays():
+        await asyncio.Event().wait()
+
+    async def record(message):
+        sent.append(message)
+
+    async def run():
+        request = asyncio.ensure_future(
+            shell.asgi(scope("GET", path, headers=[cookie, key, *FETCH]), browser_stays, record))
+        await asyncio.wait_for(held.opened.wait(), 5)
+        assert not request.done()
+        if ending == "signout":
+            shell.store.clear()
+        else:
+            # Another session ending leaves the request open.
+            shell.store.end([other[1].decode().split("=", 1)[1]])
+            await asyncio.sleep(0.05)
+            assert not request.done()
+            shell.store.end([cookie[1].decode().split("=", 1)[1]])
+        await asyncio.wait_for(request, 5)
+
+    asyncio.run(run())
+    assert held.left
+    last = sent[-1]
+    assert (last == {"type": "http.response.body", "body": b""}) is finished
+    assert [m.get("body") for m in sent[1:]] == ([b"open", b""] if finished else [b"open"])
 
 
 def test_the_fallback_answers_navigations_only():

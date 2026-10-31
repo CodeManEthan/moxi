@@ -137,6 +137,40 @@ def test_sign_in_and_a_navigation_pass_under_a_full_cookie_jar(shell):
     assert status == 200 and b"not signed in" in page
 
 
+def _read_until(sock, marker, wait=5.0):
+    sock.settimeout(wait)
+    data = b""
+    try:
+        while marker not in data:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+    except TimeoutError:
+        pass
+    return data
+
+
+def test_a_push_stream_ends_when_every_browser_is_signed_out(shell):
+    port = shell.listeners.port
+    session_id, key = shell.sessions.store.mint()
+    shell._loop.call_soon_threadsafe(shell.push.publish, "modules", {"v": 1})
+    head = _head(port, "GET", "/m/ui/api/push?topics=ui.modules", [
+        b"Cookie: moxi-ui=" + session_id.encode(), b"X-Moxi-Key: " + key.encode(),
+        b"Sec-Fetch-Site: same-origin", b"Sec-Fetch-Mode: cors", b"Sec-Fetch-Dest: empty"])
+    with socket.create_connection(("127.0.0.1", port), timeout=10) as stream:
+        stream.sendall(head)
+        first = _read_until(stream, b'{"v":1}')
+        assert first.startswith(b"HTTP/1.1 200") and b'{"v":1}' in first
+        shell.sessions.store.clear()
+        rest = _read_until(stream, b"0\r\n\r\n")
+        assert rest.endswith(b"0\r\n\r\n")
+    deadline = time.monotonic() + 5
+    while shell.push.streams and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert shell.push.streams == 0
+
+
 def test_the_runtime_file_names_the_listener(shell):
     from moxi_loopback.api import call, read_runtime
 
