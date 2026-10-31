@@ -106,6 +106,11 @@ class _Ended(Exception):
     """The run has ended, here or under the job."""
 
 
+#: Raised by a run's `end` (and when the run was ended under it) to stop its steps; a
+#: run that takes the relaunch's steps in its own order catches it.
+Ended = _Ended
+
+
 class _Again(Exception):
     """A self run goes back to its wait."""
 
@@ -503,20 +508,21 @@ class RelaunchJob:
             raise _Again(word, detail)
         self.end("held", word, detail)
 
-    def exit(self, number: int | None) -> None:
-        """Step 3: exit the session through turns."""
+    def exit(self, number: int | None) -> tuple[str, str | None]:
+        """Step 3: exit the session through turns. Returns the result's kind and reason
+        when the steps go on to the pane (`ran`, a `failed`, turns' `gone` or its error)."""
         self.event("exit", {"turn_number": number})
         try:
             result = self.target.session.command("exit", if_turn_number=number)
         except Exception as error:  # noqa: BLE001  (turns' error reads as gone)
             self.event("exit-result", {"kind": "error", "reason": GONE,
                                        "why": _words(error)})
-            return
+            return "error", GONE
         kind = getattr(result, "KIND", type(result).__name__.lower())
         reason = getattr(result, "reason", None)
         self.event("exit-result", {"kind": kind, "reason": reason})
         if kind != "refused" or reason == GONE:
-            return
+            return kind, reason
         if reason in TRANSIENT:
             self._transient(reason, f"turns refused the exit: {reason}")
         self.end("not-exited", reason, f"turns refused the exit: {reason}")
@@ -822,7 +828,7 @@ def _words(error: BaseException) -> str:
 
 
 __all__ = ["ACTED", "GONE", "JOBS", "KINDS", "LOOK", "NOT_SETTLED", "POLL_S", "REPAIRABLE",
-           "SETTLE_S", "TERMINAL", "TRANSIENT", "Choice", "RelaunchJob", "RepairJob",
+           "SETTLE_S", "TERMINAL", "TRANSIENT", "Choice", "Ended", "RelaunchJob", "RepairJob",
            "chain_of", "choose_slot", "gone", "job_name", "main", "repairable", "root_run",
            "run"]
 

@@ -1094,12 +1094,77 @@ def run_events(conn: sqlite3.Connection, run_id: str) -> list[RunEvent]:
                             "WHERE run_id = ? ORDER BY at, id", (run_id,))]
 
 
+# -- the exit log ------------------------------------------------------------------------
+
+#: The verdicts an exit-session writes: the session exited; it was held (a word says by
+#: what); it is at Claude's exit dialog for a person to answer; it did not exit; or the
+#: exit was refused before it was tried.
+VERDICTS = ("exited", "held", "at-dialog", "not-exited", "refused")
+
+
+@dataclass(frozen=True)
+class ExitRow:
+    """One `exits` row. `run_id` is None for an exit refused before its run was written."""
+
+    id: int
+    at: str
+    run_id: str | None
+    request_id: str
+    session_id: str
+    verdict: str
+    word: str | None
+    detail: str | None
+    slot: str | None
+    pane_id: str | None
+
+    def as_json(self) -> dict[str, Any]:
+        return {f.name: getattr(self, f.name) for f in fields(self)}
+
+
+EXIT_COLUMNS = tuple(f.name for f in fields(ExitRow))
+
+
+def add_exit(conn: sqlite3.Connection, *, request_id: str, session_id: str, verdict: str,
+             run_id: str | None = None, word: str | None = None, detail: str | None = None,
+             slot: str | None = None, pane_id: str | None = None,
+             at: str | None = None) -> ExitRow:
+    """Write one `exits` row and return it. `detail` is cut to `DETAIL_CAP` from the
+    front."""
+    if verdict not in VERDICTS:
+        raise ValueError(f"not an exit's verdict: {verdict!r}")
+    at, detail = at or now(), cut(detail)
+    with _writing(conn):
+        cursor = conn.execute(
+            "INSERT INTO exits (at, run_id, request_id, session_id, verdict, word, detail, "
+            "slot, pane_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (at, run_id, request_id, session_id, verdict, word, detail, slot, pane_id))
+        return ExitRow(int(cursor.lastrowid), at, run_id, request_id, session_id, verdict,
+                       word, detail, slot, pane_id)
+
+
+def exits_log(conn: sqlite3.Connection, *, limit: int | None = None,
+              before: str | datetime | None = None) -> list[ExitRow]:
+    """Exit rows newest first, at most `limit`, only those written before `before` when
+    it is given."""
+    sql, params = f"SELECT {', '.join(EXIT_COLUMNS)} FROM exits", []
+    if before is not None:
+        moment = before if isinstance(before, datetime) else parse_time(before)
+        sql += " WHERE at < ?"
+        params.append(stamp(moment))
+    sql += " ORDER BY at DESC, id DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(int(limit))
+    return [ExitRow(*values) for values in conn.execute(sql, params)]
+
+
 def prune(conn: sqlite3.Connection, keep_days: float, *, at: str | None = None,
           limit: int = PRUNE_LIMIT) -> dict[str, int]:
     """Delete what is older than `keep_days` and say how many rows of each table went:
-    ended runs, with their events and `exits` rows, and released holds. At most `limit`
-    rows of each table go in one call; a run whose events or exits are not all gone yet
-    is kept for the next. Open runs and open holds are never deleted by age."""
+    ended runs, with their events and `exits` rows, `exits` rows of an exit refused
+    before it had a run, and released holds. At most `limit` rows of each table go in
+    one call; a run whose events or exits are not all gone yet is kept for the next.
+    Open runs and open holds are never deleted by age."""
     moment = parse_time(at) if at else datetime.now(timezone.utc)
     cutoff = stamp(moment - timedelta(days=keep_days))
     with _writing(conn):
@@ -1120,6 +1185,9 @@ def prune(conn: sqlite3.Connection, keep_days: float, *, at: str | None = None,
                 "AND NOT EXISTS (SELECT 1 FROM run_events e WHERE e.run_id = runs.run_id) "
                 "AND NOT EXISTS (SELECT 1 FROM exits x WHERE x.run_id = runs.run_id)",
                 old).rowcount
+        gone["exits"] += conn.execute(
+            "DELETE FROM exits WHERE id IN (SELECT id FROM exits WHERE run_id IS NULL "
+            "AND at < ? LIMIT ?)", (cutoff, max(limit - gone["exits"], 0))).rowcount
         gone["warm_holds"] = conn.execute(
             "DELETE FROM warm_holds WHERE rowid IN (SELECT rowid FROM warm_holds "
             "WHERE released_at IS NOT NULL AND released_at < ? LIMIT ?)",
@@ -1162,13 +1230,14 @@ def log_lines(*, limit: int | None = None, before: str | datetime | None = None,
     return [_encode(row.as_json(stale_after=after, now=moment)) for row in rows]
 
 
-__all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "FACTS", "HARNESSES", "HOWS", "JOB_GONE", "LEAVES",
-           "PRUNE_LIMIT", "RECLAIMED", "RUN_COLUMNS", "RUN_FIELDS", "RUN_GRACE_S",
-           "RUN_KINDS", "RUN_LEAVES", "RUN_STATES", "SOURCES", "STATES", "STEPS", "TARGETS",
-           "Busy", "Event", "Inserted", "LaunchRow", "Run", "RunEvent", "RunOpen",
-           "SessionTaken", "TooLarge", "add_event", "add_pick", "add_run_event",
-           "advance_run", "claim", "connect", "cut", "end_run", "endpoint_gone", "events",
-           "get", "get_run", "insert", "insert_run", "learn_session", "log", "log_lines",
+__all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "EXIT_COLUMNS", "FACTS", "HARNESSES", "HOWS",
+           "JOB_GONE", "LEAVES", "PRUNE_LIMIT", "RECLAIMED", "RUN_COLUMNS", "RUN_FIELDS",
+           "RUN_GRACE_S", "RUN_KINDS", "RUN_LEAVES", "RUN_STATES", "SOURCES", "STATES",
+           "STEPS", "TARGETS", "VERDICTS", "Busy", "Event", "ExitRow", "Inserted",
+           "LaunchRow", "Run", "RunEvent", "RunOpen", "SessionTaken", "TooLarge",
+           "add_event", "add_exit", "add_pick", "add_run_event", "advance_run", "claim",
+           "connect", "cut", "end_run", "endpoint_gone", "events", "exits_log", "get",
+           "get_run", "insert", "insert_run", "learn_session", "log", "log_lines",
            "new_run_id", "now", "open_run", "parse_endpoint", "parse_time", "path", "picked",
            "prune", "resolve", "run_events", "run_stale", "runs", "seen_at", "session_ids",
            "set_facts", "set_state", "stale_after_s", "stamp"]
