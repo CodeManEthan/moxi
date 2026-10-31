@@ -298,8 +298,9 @@ def _declared_directors() -> dict:
 
 
 def roster(*, deadline: float = READ_DEADLINE) -> Roster:
-    """The bound agents with their declared directors, and the standing rows of
-    the directory. Raises `DaemonOffline` or `DaemonError`."""
+    """The bound agents with their declared directors, and the standing names: the
+    directory's standing rows and the reserved send-only names, as the daemon's `agents`
+    answer lists them. Raises `DaemonOffline` or `DaemonError`."""
     client = _daemon(deadline)
     try:
         answer = client.call("agents")
@@ -310,26 +311,15 @@ def roster(*, deadline: float = READ_DEADLINE) -> Roster:
                         tier=b.get("tier"), adapter=b.get("adapter"),
                         directors=directors.get(b["qualified"], ()))
                   for b in answer.get("bindings") or ())
-    conn = _directory.connect(_paths.comms_db(), read_only=True)
-    try:
-        rows = _directory.standing_rows(conn)
-        reserved = _reserved_rows(conn)
-    finally:
-        conn.close()
-    standing = [Standing(qualified=q, name=r["name"], scope=r["scope"],
-                         kind=_directory.KIND_AGENT, module=reserved.get(q, (None,))[0])
-                for r in rows for q in (qualify(r["name"], r["scope"]),)]
-    seen = {s.qualified for s in standing}
-    for q, (module, state) in reserved.items():
-        if q not in seen and state in (_reserved_mod.ACTIVE, _reserved_mod.UNOWNED):
-            name, scope = split_tag(q)
-            standing.append(Standing(qualified=q, name=name, scope=scope or GLOBAL,
-                                     kind=SEND_ONLY, module=module))
-    return Roster(bound=bound, standing=tuple(standing))
+    standing = tuple(Standing(qualified=s["qualified"], name=s.get("name"),
+                              scope=s.get("scope"), kind=s.get("kind"),
+                              module=s.get("module"))
+                     for s in answer.get("standing") or ())
+    return Roster(bound=bound, standing=standing)
 
 
 #: The kind a reserved name reads as in `roster().standing`.
-SEND_ONLY = "send-only"
+SEND_ONLY = _reserved_mod.SEND_ONLY
 
 
 def _reserved_rows(conn) -> dict:

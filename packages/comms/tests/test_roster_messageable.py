@@ -240,6 +240,67 @@ def test_the_unanswered_line_still_rides_the_authors_delta(monkeypatch, tmp_path
     assert envelope == "(comms: agent-3 ended a turn without answering your msg 9001.)"
 
 
+# ------------------------------------------------------------------- send-only names
+
+CONSOLE = {"qualified": "console", "name": "console", "scope": "global",
+           "kind": "send-only", "module": "launcher"}
+RELAY = {"qualified": "relay", "name": "relay", "scope": "global", "kind": "send-only",
+         "module": None}
+HERALD = {"qualified": "herald", "name": "herald", "scope": "global", "kind": "agent",
+          "module": None}
+SEND_ONLY_ROWS = [
+    "console                  send-only, reserved for launcher",
+    "relay                    send-only, no module holds it (kept from an older comms)"]
+
+
+def test_a_reserved_name_is_a_send_only_row_after_the_bindings():
+    """A send-only name follows the bindings in both views; a standing agent row isn't
+    one (a standing name shows when it is bound)."""
+    info = answer(standing=[HERALD, CONSOLE, RELAY])
+    assert roster_view.render_agents(info, now=NOW).splitlines() == [
+        *DEFAULT.splitlines(), *SEND_ONLY_ROWS]
+    seats = roster_view.render_agents(info, seats=True, now=NOW).splitlines()
+    assert seats[:5] == [*DEFAULT.splitlines(), *SEND_ONLY_ROWS]
+
+
+def test_send_only_rows_show_below_the_empty_roster():
+    info = answer(bindings=(), standing=[CONSOLE])
+    assert roster_view.render_agents(info, now=NOW).splitlines() == [
+        roster_view.NO_BINDINGS, SEND_ONLY_ROWS[0]]
+
+
+def test_a_standing_list_of_the_wrong_shape_renders_no_rows():
+    for bad in ({"console": CONSOLE}, ["console"], None):
+        assert roster_view.render_agents(answer(standing=bad), now=NOW) == DEFAULT
+
+
+def test_the_daemon_lists_a_reserved_name_and_the_verb_shows_it(rig):
+    """The daemon's `standing` list carries an active and an unowned reserved name as
+    send-only; a conflict row and a freed one aren't listed, and `agents` renders it."""
+    from moxi_comms import reserved, secrets
+    from moxi_comms.store import open_write
+    from moxi.store import transaction
+
+    reserved.reconcile(declared={"launcher": ["console"]}, chain=secrets.from_config())
+    conn = open_write()
+    try:
+        with transaction(conn) as c:
+            c.execute("INSERT INTO reserved(name, state) VALUES ('relay', 'unowned')")
+            c.execute("INSERT INTO reserved(name, module, state, note) "
+                      "VALUES ('held', 'pager', 'conflict', 'a live binding holds it')")
+            c.execute("INSERT INTO reserved(name, module, state, freed_at) VALUES "
+                      "('old', 'gone', 'active', '2026-01-01T00:00:00Z')")
+    finally:
+        conn.close()
+    got = {s["qualified"]: s for s in rig.daemon._agents_query({})["standing"]}
+    assert got["console"] == CONSOLE and got["relay"] == RELAY
+    assert got["herald"]["kind"] == "agent"
+    assert "held" not in got and "old" not in got
+    code, out = rig.cli(["agents"])
+    assert code == 0, out
+    assert out.splitlines()[-2:] == SEND_ONLY_ROWS
+
+
 # ------------------------------------------------------------------- help
 
 def _agents_help():

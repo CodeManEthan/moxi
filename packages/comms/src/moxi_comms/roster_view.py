@@ -19,6 +19,12 @@ import time
 #: The empty roster: no binding anyone can message.
 NO_BINDINGS = "no live bindings — nothing is addressable right now."
 
+#: The kind a reserved name has in the `agents` answer's `standing` list.
+SEND_ONLY = "send-only"
+
+#: A reserved name no module owns: one an older comms kept.
+UNOWNED_ROW = "send-only, no module holds it (kept from an older comms)"
+
 #: The `--seats` waiting block's header: what one of its rows means.
 WAITING_HEADER = ("waiting (queued for each name until its next session start, /clear, "
                   "compaction, or a turn of its own on a warm cache):")
@@ -30,10 +36,11 @@ def render_agents(info, *, seats: bool = False, now: float | None = None) -> str
     output verbatim by construction — one rendering exists and cannot drift from
     what an agent sees when it re-runs the verb.
 
-    The default view is the names an agent can message, one row each, and nothing else:
-    it reads `bindings` alone. `seats=True` (the `--seats` flag, the operator's view)
-    lists every binding, then the mail waiting for each name
-    (`waiting`) and the unanswered rows. The snapshot never asks for `--seats`. `now`
+    The default view is the names an agent can message, one row each, then one row for
+    each reserved send-only name (`standing` entries of kind `send-only`): a module
+    sends under it and nobody mails it, and the row says which module. `seats=True` (the
+    `--seats` flag, the operator's view) lists the same rows, then the mail waiting for
+    each name (`waiting`) and the unanswered rows. The snapshot never asks for `--seats`. `now`
     (default: the wall clock) ages the waiting rows.
     """
     rows = info["bindings"]
@@ -41,6 +48,12 @@ def render_agents(info, *, seats: bool = False, now: float | None = None) -> str
     for b in rows:
         lines.append(f"{b['qualified']:<24} {b['tier']:<10} "
                      f"adapter {b['adapter']}")
+    standing = info.get("standing")
+    for s in standing if isinstance(standing, list) else ():
+        if isinstance(s, dict) and s.get("kind") == SEND_ONLY:
+            module = s.get("module")
+            what = f"send-only, reserved for {module}" if module else UNOWNED_ROW
+            lines.append(f"{s['qualified']:<24} {what}")
     if not seats:
         return "\n".join(lines)
     now = time.time() if now is None else now

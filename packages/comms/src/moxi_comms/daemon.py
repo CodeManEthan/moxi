@@ -1349,8 +1349,38 @@ class Daemon:
         # queue holds offline, cold and flagged mail alike and no reason is stored.
         # `pending` stays in the answer, always empty and read by nothing here: an
         # adapter started before the queue checks for it before it renders a roster.
+        # `standing`: the standing names, bound or not, read from comms.db per call.
         return {"bindings": bindings, "waiting": waiting, "pending": {},
-                "unanswered": unanswered}
+                "unanswered": unanswered, "standing": self._standing_view()}
+
+    def _standing_view(self) -> list:
+        """The standing names, for `agents`: each directory row (kind `agent`), then
+        each reserved name not freed that is active or kept from an older comms (kind
+        `send-only`), as {qualified, name, scope, kind, module}. `module` is the module
+        a name is reserved for, or declared by when it is in conflict, and None when no
+        module owns it. A conflict row isn't reserved, so it is no send-only name. A
+        store that can't be read lists none."""
+        try:
+            with self._db() as db:
+                rows = directory.standing_rows(db)
+                held = {r["name"]: (r["module"], r["state"]) for r in db.execute(
+                    "SELECT name, module, state FROM reserved WHERE freed_at IS NULL")}
+        except sqlite3.Error:
+            log.exception("agents: the standing names couldn't be read")
+            return []
+        out = []
+        for r in rows:
+            q = qualify(r["name"], r["scope"])
+            out.append({"qualified": q, "name": r["name"], "scope": r["scope"],
+                        "kind": directory.KIND_AGENT, "module": held.get(q, (None,))[0]})
+        seen = {e["qualified"] for e in out}
+        for q, (module, state) in sorted(held.items()):
+            if q in seen or state not in (reserved_mod.ACTIVE, reserved_mod.UNOWNED):
+                continue
+            name, scope = split_tag(q)
+            out.append({"qualified": q, "name": name, "scope": scope or GLOBAL,
+                        "kind": reserved_mod.SEND_ONLY, "module": module})
+        return out
 
     def _last_digest_query(self, frame: dict) -> dict:
         """The LAST DIGEST a live identity was shown: what `moxi comms explain` reads to

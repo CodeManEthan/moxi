@@ -475,6 +475,21 @@ def test_a_standing_row_names_the_module_it_is_reserved_for(rig):
     assert main.module is None
 
 
+def test_roster_lists_a_reserved_name_as_send_only_from_the_daemons_answer(rig):
+    """`roster().standing` comes from the daemon's `agents` answer: a reserved name is
+    there as kind `send-only` with its module, an unowned one with none, and a conflict
+    row isn't send-only."""
+    _store("INSERT INTO reserved(name, module, state, reserved_at) "
+           "VALUES ('console', 'launcher', 'active', '2026-01-01T00:00:00+00:00')")
+    _store("INSERT INTO reserved(name, state) VALUES ('relay', 'unowned')")
+    _store("INSERT INTO reserved(name, module, state) VALUES ('held', 'pager', 'conflict')")
+    got = {s.qualified: s for s in api.roster().standing}
+    assert got["console"] == api.Standing("console", "console", "global", api.SEND_ONLY,
+                                          "launcher")
+    assert (got["relay"].kind, got["relay"].module) == ("send-only", None)
+    assert "held" not in got
+
+
 def test_identity_state_is_offline_when_the_daemon_cannot_be_asked(env):
     got = api.identity_state("anyone")
     assert (got.qualified, got.state) == ("anyone", "offline")

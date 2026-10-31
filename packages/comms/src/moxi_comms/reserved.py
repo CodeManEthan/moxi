@@ -47,6 +47,9 @@ from .scoping import GLOBAL, NAME_RE, is_auto_name
 log = logging.getLogger("comms.reserved")
 
 ACTIVE, CONFLICT, UNOWNED = "active", "conflict", "unowned"
+#: The kind a reserved name reads as among the standing names (`agents`' `standing`,
+#: `api.roster().standing`).
+SEND_ONLY = "send-only"
 
 #: The secret id a reserved name's token rests under, for its owning module.
 SECRET_PREFIX = "comms/reserved/"
