@@ -31,6 +31,11 @@ It is refused, with nothing written, when:
   call, whatever the list said;
 - its liveness can't be read (`liveness-unread`, exit 1).
 
+The check that the session is not live is made again as the new launch's row is written,
+in the same store transaction: while another launch of the session is still starting, or
+its process runs, the resume is refused `live` and writes nothing. So two resumes of one
+session at once launch it once.
+
 **Where it goes is the original's target.** A launch in this terminal resumes in this
 terminal (on Linux and macOS the process becomes the harness, so `resume` does not
 return). A slot launch goes back to its slot when that slot is launchable, else to the
@@ -247,10 +252,13 @@ def resume(session_id: str, *, slot: int | str | None = None,
     request = api.ReplayRequest(row, resume_of=row.request_id,
                                 request_id=request_id or str(uuid.uuid4()),
                                 session_id=newest, actor=first.actor(env), slot=chosen)
-    if launch is None:
-        result = api.launch(request, environ=environ, warn=warn)
-    else:
-        result = launch(request, environ=environ, warn=warn)
+    try:
+        if launch is None:
+            result = api.launch(request, environ=environ, warn=warn)
+        else:
+            result = launch(request, environ=environ, warn=warn)
+    except store.SessionLive as met:
+        raise met_refusal(met) from None
     lines = (result.line,)
     if result.outcome is not None and result.outcome.line() != result.line:
         lines += (result.outcome.line(),)
@@ -259,6 +267,20 @@ def resume(session_id: str, *, slot: int | str | None = None,
         "state": result.state, "reason": result.reason, "request_id": result.request_id,
         "session_id": result.session_id, "resume_of": row.request_id,
         "target": result.target, "slot": result.slot, "duplicate": result.duplicate})
+
+
+def met_refusal(met: store.SessionLive) -> Refused:
+    """The `live` refusal of a resume that met, as it wrote its row, another launch of
+    the session still starting or running (two resumes at once, say)."""
+    holder = met.holder
+    if met.how == "starting":
+        return Refused("live", f"session {met.session_id} is being launched again by launch "
+                               f"{holder.request_id}, which is still starting",
+                       "wait for it to start, then attach to it")
+    hint = (ATTACH_SLOT.format(slot=holder.slot) if holder.target == "slot" and holder.slot
+            else ATTACH_TERMINAL)
+    return Refused("live", f"session {met.session_id} is live, run by launch "
+                           f"{holder.request_id}", hint)
 
 
 def choose_slot(api: Any | None, row: store.LaunchRow,
@@ -335,5 +357,5 @@ def _close(session: Any) -> None:
 
 
 __all__ = ["ATTACH_SLOT", "ATTACH_TERMINAL", "Past", "Refused", "Result", "choose_slot",
-           "entry", "live_refusal", "liveness", "resume", "session_line", "sessions",
-           "static_refusal"]
+           "entry", "live_refusal", "liveness", "met_refusal", "resume", "session_line",
+           "sessions", "static_refusal"]

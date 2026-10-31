@@ -295,6 +295,21 @@ class SessionTaken(store.StoreError):
         super().__init__(f"session id {session_id} already belongs to launch {request_id}")
 
 
+class SessionLive(store.StoreError):
+    """A resume met another launch of the same session that is still starting or whose
+    process runs: two resumes of one session never both launch. `holder` is that launch's
+    row, and `how` is `starting` or `live`."""
+
+    exit_code = exits.REFUSED
+
+    def __init__(self, session_id: str, holder: LaunchRow, how: str):
+        self.session_id = session_id
+        self.holder = holder
+        self.how = how
+        said = "is still starting it" if how == "starting" else "runs it"
+        super().__init__(f"session {session_id}: launch {holder.request_id} {said}")
+
+
 @dataclass(frozen=True)
 class LaunchRow:
     """One `launches` row, its columns by name.
@@ -483,7 +498,7 @@ def insert(conn: sqlite3.Connection, *, request_id: str, actor: str, harness: st
            brief: str | None = None, handoff_path: str | None = None,
            handoff_key: str | None = None, relaunch_of: str | None = None,
            resume_of: str | None = None, base_env: Mapping[str, str] | None = None,
-           at: str | None = None) -> Inserted:
+           starting_s: float | None = None, at: str | None = None) -> Inserted:
     """Write a launch's row in state `spawning`, before anything is started.
 
     One transaction, with `synchronous=FULL` so the row is on disk before the spawn,
@@ -496,7 +511,10 @@ def insert(conn: sqlite3.Connection, *, request_id: str, actor: str, harness: st
     A resume (`resume_of` set) keeps the session id it resumes: that id may already
     belong to the launch it resumes, and joins `session_ids` again for this launch with
     source `resume`, for a Codex thread as for Claude. Any other launch holding it is
-    `SessionTaken`.
+    `SessionTaken`. The same transaction refuses the resume, `SessionLive`, while any
+    launch holding the id is still starting (`spawning` with no process recorded, made
+    less than `starting_s` ago: `stale_after_s()` when None) or its recorded process or
+    claimed endpoint runs, so two resumes of one session at once launch it once.
 
     `env` holds the stamped literals only, never a secret; `base_env` the child's values
     for the base names (paths and locale names), recorded so a replay can start from
@@ -520,6 +538,8 @@ def insert(conn: sqlite3.Connection, *, request_id: str, actor: str, harness: st
     _check_size("values_json", values_json)
     _check_size("argv_json", argv_json)
     at = at or now()
+    if resume_of is not None and session_id and starting_s is None:
+        starting_s = stale_after_s()
     row = {
         "request_id": request_id, "created_at": at, "actor": actor, "harness": harness,
         "preset_kind": preset_kind, "preset_name": preset_name, "target": target,
@@ -543,6 +563,12 @@ def insert(conn: sqlite3.Connection, *, request_id: str, actor: str, harness: st
                     (session_id,))]
                 if holders and not (resume_of is not None and resume_of in holders):
                     raise SessionTaken(session_id, holders[0])
+                if resume_of is not None:
+                    for holder in holders:
+                        held = get(conn, holder)
+                        how = _running(held, parse_time(at), starting_s or 0.0)
+                        if how is not None:
+                            raise SessionLive(session_id, held, how)
             conn.execute(f"INSERT INTO launches ({', '.join(COLUMNS)}) "
                          f"VALUES ({', '.join('?' * len(COLUMNS))})",
                          [row[name] for name in COLUMNS])
@@ -558,6 +584,27 @@ def insert(conn: sqlite3.Connection, *, request_id: str, actor: str, harness: st
     finally:
         conn.execute("PRAGMA synchronous = NORMAL")
     return Inserted(LaunchRow(**row), True)
+
+
+def _running(row: LaunchRow, at: datetime, starting_s: float) -> str | None:
+    """`starting` when the launch `row` is still `spawning` with no process recorded,
+    made less than `starting_s` before `at`; `live` when its recorded process, or the
+    endpoint that claimed it, runs; else None."""
+    from moxi import proc
+
+    if row.pid:
+        if row.pid_started is None:
+            alive = proc.identity(row.pid) is not None
+        else:
+            alive = proc.alive(proc.ProcId(row.pid, row.pid_started))
+        if alive:
+            return "live"
+    elif row.state == "spawning" and (
+            at - parse_time(row.created_at)).total_seconds() < starting_s:
+        return "starting"
+    if row.endpoint and not endpoint_gone(row.endpoint):
+        return "live"
+    return None
 
 
 def set_state(conn: sqlite3.Connection, request_id: str, state: str, *,
@@ -1558,8 +1605,9 @@ __all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "EXIT_COLUMNS", "FACTS", "FRESH_CONTE
            "HOWS", "JOB_GONE", "LAUNCHER", "LEAVES", "PRUNE_LIMIT", "RECLAIMED", "RUN_COLUMNS",
            "RUN_FIELDS", "RUN_GRACE_S", "RUN_KINDS", "RUN_LEAVES", "RUN_STATES", "SOURCES",
            "STATES", "STEPS", "TABLES", "TARGETS", "VERDICTS", "Busy", "Event", "ExitRow",
-           "Inserted", "Hold", "LaunchRow", "Run", "RunEvent", "RunOpen", "SessionTaken",
-           "TooLarge", "add_event", "add_exit", "add_pick", "add_run_event", "advance_run", "chain",
+           "Inserted", "Hold", "LaunchRow", "Run", "RunEvent", "RunOpen", "SessionLive",
+           "SessionTaken", "TooLarge", "add_event", "add_exit", "add_pick", "add_run_event",
+           "advance_run", "chain",
            "claim", "connect", "crossing_key", "crossing_known", "cut", "drop_run", "end_blocked",
            "end_run", "endpoint_gone", "events", "exits_log", "get", "get_run", "holds", "insert",
            "holds_log", "insert_run", "learn_session", "log", "log_lines", "made_by", "new_run_id",

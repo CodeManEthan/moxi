@@ -180,7 +180,9 @@ starts a new thread each time), its harness is no longer launched, or a later la
 resumed it since. `moxi launcher resume SESSION_ID` launches it again from its launch's
 values, resumed, keeping its session id: in its own slot when that can take it, else
 the lowest that can (`--slot N` picks one), or in this terminal for a terminal launch.
-It sends no first turn.
+It sends no first turn. Liveness is checked again as the new launch is written: while
+another launch of the session is still starting or running, the resume is refused, so two
+resumes of one session at once launch it once.
 
 **Recycle.** Two launch options let a session be cleared or compacted on the launcher's
 own reads:

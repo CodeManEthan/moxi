@@ -93,6 +93,16 @@ def row(rid: str = "r1") -> store.LaunchRow:
     return found
 
 
+def ended(rid: str = "r1") -> None:
+    """The launch's session has ended: its recorded process (this one, as a terminal launch
+    records it) reads as not running, so a resume of it may launch."""
+    conn = store.connect(create=False)
+    try:
+        conn.execute("UPDATE launches SET pid_started = 1.0 WHERE request_id = ?", (rid,))
+    finally:
+        conn.close()
+
+
 def settings_file(text: str) -> None:
     path = Layout("launcher").config_file()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -320,6 +330,7 @@ def test_a_scratch_replay_keeps_the_rows_directory(harness, tmp_path, no_exec):
                              session_id=SID, actor="ann"))
     where = row("r1").cwd
     assert where == str(common.scratch_dir("r1"))
+    ended()
     got = api.launch(ReplayRequest(row("r1"), resume_of="r1", request_id="r2",
                                    actor="ann"))
     assert row("r2").cwd == where and no_exec[-1]["cwd"] == where
@@ -370,6 +381,7 @@ def test_a_relaunch_with_no_handoff_has_no_relaunch_stamp(work, harness, no_exec
 
 def test_a_resume_keeps_the_session_id_and_is_found_by_it(work, harness, no_exec):
     api.launch(request(work))
+    ended()
     conn = store.connect()
     try:
         found = store.resolve(conn, SID)
@@ -390,6 +402,7 @@ def test_a_resume_keeps_the_session_id_and_is_found_by_it(work, harness, no_exec
 
 def test_a_resume_takes_the_newest_id_the_launch_was_known_by(work, harness, no_exec):
     api.launch(request(work))
+    ended()
     conn = store.connect()
     try:
         store.learn_session(conn, "r1", SID2, "clear")

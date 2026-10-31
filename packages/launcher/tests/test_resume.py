@@ -6,6 +6,7 @@ and, through `api.launch`, a resume that keeps the session id and is found by it
 from __future__ import annotations
 
 import json
+import threading
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -618,4 +619,86 @@ def test_a_resume_that_failed_before_its_claim_is_skipped(work, harness, rig):
     assert [(e["request_id"], e["held_by"]) for e in listed] == [("r2", "r1"), ("r1", None)]
     rig.plan(start="ok")
     resume.resume(SID, request_id="r3", turns=None)
+    assert with_store(lambda c: store.get(c, "r3")).resume_of == "r1"
+
+
+def test_two_resumes_of_one_session_at_once_launch_it_once(work, harness, no_exec,
+                                                           monkeypatch):
+    """Both resumes read the session ended before either writes its row. The first to
+    write it launches; the second, finding that launch of the session still starting, is
+    refused `live` with nothing written, and the session is launched once."""
+    first_launch(work)
+    both_read = threading.Barrier(2, timeout=10)
+    real_liveness = resume.liveness
+
+    def read_then_wait(*args, **kwargs):
+        found = real_liveness(*args, **kwargs)
+        both_read.wait()
+        return found
+    monkeypatch.setattr(resume, "liveness", read_then_wait)
+    # The first launch to write its row waits, before it starts, until the other resume
+    # has finished: so the other meets it while it is still starting.
+    other_done = threading.Event()
+    wrote = []
+    real_files = api._make_files
+
+    def files_then_wait(*args, **kwargs):
+        wrote.append(threading.current_thread().name)
+        if len(wrote) == 1:
+            other_done.wait(10)
+        return real_files(*args, **kwargs)
+    monkeypatch.setattr(api, "_make_files", files_then_wait)
+    outcomes = {}
+
+    def one(rid):
+        try:
+            outcomes[rid] = resume.resume(SID, request_id=rid, turns=None, slots_api=None)
+        except Exception as error:  # noqa: BLE001  (the refusal is the outcome)
+            outcomes[rid] = error
+        finally:
+            if wrote and wrote[0] != rid:
+                other_done.set()
+    threads = [threading.Thread(target=one, args=(rid,), name=rid) for rid in ("r2", "r3")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(30)
+    assert wrote and len(wrote) == 1, wrote
+    winner = wrote[0]
+    [loser] = {"r2", "r3"} - {winner}
+    assert outcomes[winner].exit_code == 0, outcomes[winner]
+    refused = outcomes[loser]
+    assert isinstance(refused, resume.Refused), refused
+    assert refused.code == "live" and api.exit_code(refused) == 3
+    assert f"launch {winner}" in refused.problem
+    assert with_store(lambda c: store.get(c, loser)) is None
+    # The first launch and the winning resume became the harness; the loser did not.
+    assert len(no_exec) == 2
+
+
+def test_a_resume_while_the_last_resume_runs_is_refused_live(work, harness, no_exec):
+    """A resume whose session a later launch now runs (its process live) is refused at
+    the insert even when the check before it read the session ended."""
+    first_launch(work)
+    resume.resume(SID, request_id="r2", turns=None, slots_api=None)
+    # The new launch runs (this process, as a terminal launch records it); the session's
+    # original launch is ended. A resume through the original's row meets the new one.
+    row = with_store(lambda c: store.get(c, "r1"))
+    with pytest.raises(store.SessionLive) as refused:
+        api.launch(api.ReplayRequest(row, resume_of="r1", request_id="r3",
+                                     session_id=SID, actor="ann"))
+    assert (refused.value.holder.request_id, refused.value.how) == ("r2", "live")
+    assert with_store(lambda c: store.get(c, "r3")) is None
+
+
+def test_a_launch_that_failed_or_was_left_starting_long_ago_does_not_block_a_resume(
+        work, harness, no_exec):
+    first_launch(work)
+    with_store(lambda c: c.execute(
+        "UPDATE launches SET state = 'spawning', pid = NULL, created_at = "
+        "'2026-01-01T00:00:00.000000Z' WHERE request_id = 'r1'"))
+    resume.resume(SID, request_id="r2", turns=None, slots_api=None)
+    with_store(lambda c: store.set_state(c, "r2", "failed", reason="spawn-failed"))
+    ended("r2")
+    resume.resume(SID, request_id="r3", turns=None, slots_api=None)
     assert with_store(lambda c: store.get(c, "r3")).resume_of == "r1"
