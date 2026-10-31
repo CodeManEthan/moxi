@@ -43,6 +43,11 @@ out of the harness. This package is turns' whole public API, the announcement's
                                          # `codex` extra is installed); imports nothing
     s = turns.opencode.launch(cwd, *, instructions=None, env=None, options=None,
                               additions=None)   # an OpenCode host, experimental
+    turns.Guard(name, calls, *, who="any", match=None, match_flags="", judge=None,
+                deny="", wants=(), on_error="allow", deadline_ms=500, switch=None,
+                doc="")       # a guard, declared in a module's GUARDS (group
+                              # moxi.turns.guards); its judge takes a ToolCall (prompts:
+                              # Prompt values) and answers None | Allow(line) | Deny(reason)
 
 A request the endpoint never got reads as refused (`Refused("gone")`); one it got and
 did not answer in time has an unknown outcome, never a refusal (the `Delivery` above,
@@ -72,6 +77,7 @@ _WHERE = {
                      "StopFacts", "SessionEvent", "CAPABILITIES", "OUTCOMES",
                      "DELIVERY_REFUSALS", "COMMAND_REFUSALS", "READY_SOURCES", "COMMANDS"),
                     "results"),
+    **dict.fromkeys(("Guard", "ToolCall", "Prompt", "Allow", "Deny"), "guards"),
 }
 
 __all__ = [
@@ -82,7 +88,7 @@ __all__ = [
     "Shells", "LeftShell", "Failed", "Ready", "TurnStarted", "TurnSteered", "TurnEnded",
     "DeliveryRef", "Gone", "StopFacts", "SessionEvent",
     "CAPABILITIES", "OUTCOMES", "DELIVERY_REFUSALS", "COMMAND_REFUSALS", "READY_SOURCES",
-    "COMMANDS",
+    "COMMANDS", "Guard", "ToolCall", "Prompt", "Allow", "Deny",
 ]
 
 
