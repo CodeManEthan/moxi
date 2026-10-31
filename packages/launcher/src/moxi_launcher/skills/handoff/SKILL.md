@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Write a handoff, the short file the next session of your seat reads first. Use when you are asked to write a handoff or hand off, and when you stop with work left for the next session of the same seat.
+description: Write a handoff, the short file the next session of your seat reads first. Use when you are asked to write a handoff or hand off, when you stop with work left for the next session of the same seat, when the context notice says this launch recycles at its limit, and when your posture reads relaunched.
 ---
 
 # Handoff
@@ -44,3 +44,20 @@ shows your next session the newest handoff of your key it hasn't been shown yet,
 handoff never overwrites an old one.
 
 `moxi launcher handoffs --key <key>` lists the handoffs of a key and which are waiting.
+
+## Recycling yourself
+
+Recycle only when the context notice says this launch recycles at its limit and you are
+mid-work with more to do. Otherwise finish and stop as usual.
+
+1. Reach a pause point, and let your subagents finish.
+2. Write the handoff, as above.
+3. Run `moxi launcher relaunch --self --handoff <file>` in your session's shell.
+4. End the turn. The launcher exits the session once it is idle and starts it again in
+   the same place, with your handoff as its first turn.
+
+If a turn comes before the exit, answer only what can't wait and end the turn again. If a
+note from the launcher says the relaunch did not run, carry on with your work.
+
+After a recycle your identity block's posture reads `relaunched`: read the handoff it
+names before anything else.

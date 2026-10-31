@@ -51,13 +51,17 @@ def test_its_doctor_target_answers_with_rows(found):
 
 
 def test_session_env_names_the_exact_stamps_not_the_prefix(found):
-    assert set(found.session_env) == {"MOXI_LAUNCHER_REQUEST", "MOXI_LAUNCHER_RELAUNCH"}
+    assert set(found.session_env) == {"MOXI_LAUNCHER_REQUEST", "MOXI_LAUNCHER_RELAUNCH",
+                                     "MOXI_LAUNCHER_KEEP_WARM",
+                                     "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY",
+                                     "MOXI_USAGE_CROSSING_AT", "MOXI_USAGE_WARN_AT"}
     assert not any(name.endswith("_") for name in found.session_env)
     assert {"MOXI_LAUNCHER_REQUEST", "MOXI_LAUNCHER_RELAUNCH"} <= modules.session_env()
 
 
 def test_the_stamps_it_reads_are_declared_internal(found):
-    assert set(found.session_env) <= set(found.internal_env)
+    own = {name for name in found.session_env if name.startswith("MOXI_LAUNCHER_")}
+    assert own <= set(found.internal_env)
 
 
 def test_its_stores_are_the_launch_log_runs_and_handoffs(found):

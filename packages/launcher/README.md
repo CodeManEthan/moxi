@@ -115,6 +115,115 @@ when the launcher gave it to a launch of its seat or showed it to one, so a sess
 by hand never hides a seat's handoff. The launcher ships a `handoff` skill, which
 `moxi install launcher` offers to place for Claude Code and Codex.
 
+## Acting on launched sessions
+
+The launcher can act on a session it launched: relaunch it, exit it, resume it, recycle it
+and keep it warm. Every act finds its session the same way, through the launch log and
+the turns endpoint that claimed the launch, so it acts only on a session the launcher
+started, and only on the one it started. turns does every act inside the session (the
+exit, a clear, a compact, a delivered turn); slots does what lies outside it (the pane,
+Claude Code's exit dialog, a job that outlives the session). Each act but keep-warm
+waits for the session to be quiet first: no turn open, no subagent at work, no draft in
+the prompt, and nobody using its pane or opening a turn in the last 2 minutes
+(`relaunch.person_s`). Keep-warm takes its own reads instead (below), since it nudges
+because subagents are at work. A background shell never holds an act.
+
+A launch has one act open at a time. A second one is refused (`run-open`, exit 3), naming
+the open run. Each act is a run in the launch log, with its events and its outcome.
+
+**Relaunch** puts a fresh session in the same slot. It needs turns and slots, and a
+Claude Code launch in a slot; comms is needed only for a director's relaunch.
+
+    moxi launcher relaunch --self --handoff FILE
+
+An agent runs this in its own turn, with a handoff it has just written. The launcher
+checks the handoff (a readable file of at most 64 KiB, written since this session
+started) and that no subagent is running, starts a job outside the session and prints
+what it waits for; the agent then ends its turn. Once the session is quiet the job exits
+it, answers the exit dialog, and starts the new session in the same pane with the same
+launch values, none of the old session's environment, and the handoff as its first turn.
+Its environment is what the launch recorded: the system's basic names and temporary folder, the core's
+locations, and your configuration names (a configuration folder, a provider switch, a
+region or profile), never a token, key, password or endpoint URL; those come back only
+through `relaunch.pass_env` (below).
+A relaunch that can't go ahead (the session never goes quiet within
+`relaunch.wait_s`, the slot can't be held) leaves the session alone and tells it so in
+one turn.
+
+    moxi launcher relaunch SESSION_ID
+    moxi launcher relaunch IDENTITY
+
+A director relaunches a session it directs, named by its session id or its comms name.
+The caller's comms identity must be one of the directors the session was launched with;
+a session whose cache is still warm is refused (`warm`: send it a message instead), and a
+session that isn't quiet now is held (exit 75). The new session starts with the `with:`
+posture of its director and no first turn. The call follows the run for
+`relaunch.follow_s` and prints how it ended; past that it exits 75 and names the run.
+
+    moxi launcher relaunch --status RUN
+    moxi launcher relaunch --from-record RUN
+
+`--status` shows a run and its events, what it waits on first. A relaunch that exited the
+session and failed to start the new one tells the session's directors (or the comms
+identity in `relaunch.fallback`) through comms, naming the command that repairs it:
+`--from-record` starts the session again from the run's record, in its slot, or the
+lowest free one when someone outside the session's own line of launches has taken it. It
+refuses when the slot already runs the relaunched session, and when the session itself is
+still live.
+
+**Exit-session** exits one launched session, once it is quiet: `moxi launcher
+exit-session SESSION_ID`. Anyone with a shell may run it; the consent is the launch's own,
+the commands it granted turns. In a slot the exit dialog is answered too; elsewhere the
+session is left at the dialog for a person (`at-dialog`). Every exit tried writes a row to
+the exit log, `moxi launcher exits`: `exited`, `held` (with what held it), `at-dialog`,
+`not-exited` or `refused`.
+
+**Resume.** `moxi launcher sessions` lists past launches, newest first, each with whether
+it is live and whether it can be resumed, and why not: it is live (attach to its slot
+instead), it ran headless, it never learned a session id (a Codex launch made without
+turns' host: use `codex resume`), it ran Codex under a comms name (comms' Codex wrapper
+starts a new thread each time), its harness is no longer launched, or a later launch
+resumed it since. `moxi launcher resume SESSION_ID` launches it again from its launch's
+values, resumed, keeping its session id: in its own slot when that can take it, else
+the lowest that can (`--slot N` picks one), or in this terminal for a terminal launch,
+where it adds your terminal's names (`TERM`, `COLORTERM`, `TERM_PROGRAM`,
+`TERM_PROGRAM_VERSION`) and nothing else of your shell's. It sends no first turn. Liveness is checked again as the new launch is written: while
+another launch of the session is still starting or running, the resume is refused, so two
+resumes of one session at once launch it once. While a relaunch, exit or recycle of the
+launch is under way, the resume is refused `run-open` (exit 3), naming the run.
+
+**Recycle.** Two launch options let a session be cleared or compacted on the launcher's
+own reads:
+
+- `--recycle-on-expiry clear|compact` (needs turns and cache): once the session's prompt
+  cache has gone cold and the session is quiet, clear or compact it. A clear waits while
+  a named hold is open (below). A session idle for an hour has its background shells
+  stopped by the clear.
+- `--recycle-at-limit relaunch|compact` with `--limit-at 1x|1.5x|2x` (needs turns and
+  usage): once the context passes the mark, tell the agent to relaunch itself with a
+  handoff (`relaunch` also needs slots and a slot launch), or compact it once it is idle,
+  waiting up to `recycle.limit_wait_s`.
+
+**Keep-warm.** `--keep-warm on` (needs turns and cache) nudges a session shortly before
+its prompt cache would expire while it waits on work it handed out: running subagents, or
+open named holds. The nudge is a short turn delivered only when the session is idle. A
+run of nudges stops at its cap (`keep_warm.subagent_cap`, `keep_warm.director_cap`) and
+shows `blocked`. A session that hands out work other than subagents names each piece
+with a hold, from its own tool shell:
+
+    moxi launcher keep-warm hold NAME
+    moxi launcher keep-warm release NAME
+    moxi launcher keep-warm holds
+
+A hold stays open until it is released, across a relaunch or a resume of the session.
+Keep-warm and recycle on expiry are offered where cache can read a session's
+environment: Linux, macOS and WSL2, for Claude Code sessions.
+
+**State.** `moxi launcher state [SESSION_ID]` shows a launched session's relaunch,
+recycle and keep-warm state (this session's when none is named). It reads red, with
+`failed` or `blocked` and why, when the latest run on the launch failed or was blocked
+and nothing has gone well since; a session merely waiting is never red.
+
 ## Commands
 
 | Command | Does |
@@ -122,29 +231,47 @@ by hand never hides a seat's handoff. The launcher ships a `handoff` skill, whic
 | `moxi launcher run [--seat N \| --project-preset N] [flags] [-- extra]` | launch a session |
 | `moxi launcher preview ... [--json]` | print the command and environment a launch would use |
 | `moxi launcher log [--limit N] [--before TIME] [--json]` | the launch log, newest first; `--json` prints one row per line |
+| `moxi launcher log --table runs\|exits\|holds [...]` | the runs (with their events), the exit log, or every hold, newest first |
 | `moxi launcher presets [list \| show NAME \| check] [--json]` | list, show or check the presets |
 | `moxi launcher presets --project KEY [--json]` | a project's agents, each beside the seat whose identity is its name (needs projects) |
 | `moxi launcher catalog [HARNESS] [--json]` | the flag rows this install offers |
 | `moxi launcher handoff dir [--json]` | this session's handoff folder |
 | `moxi launcher handoffs [--key KEY] [--json]` | a key's handoffs, newest first, and which still wait |
 | `moxi launcher deliver REQUEST_ID --pid PID` | internal: the detached process that sends a launch's first turn |
+| `moxi launcher relaunch --self --handoff FILE [--dry-run] [--json]` | arm a relaunch of this session, with its handoff |
+| `moxi launcher relaunch SESSION_ID \| IDENTITY [--dry-run] [--json]` | relaunch a session you direct |
+| `moxi launcher relaunch --status RUN [--json]` | a run and its events |
+| `moxi launcher relaunch --from-record RUN [--json]` | start again the session a failed relaunch exited |
+| `moxi launcher exit-session SESSION_ID [--dry-run] [--json]` | exit a launched session |
+| `moxi launcher exits [--limit N] [--before TIME] [--json]` | the exit log, newest first |
+| `moxi launcher sessions [--limit N] [--before TIME] [--json]` | past launches, and which can be resumed |
+| `moxi launcher resume SESSION_ID [--slot N]` | launch a past session again, resumed |
+| `moxi launcher keep-warm hold NAME`, `release NAME`, `holds [--json]` | this session's named holds |
+| `moxi launcher state [SESSION_ID] [--json]` | a launched session's state, and whether it needs a look |
 
-Exit codes: 0 done; 1 a start that failed; 2 bad arguments or a bad value; 3 refused (with
-nothing written when it was refused before the launch's row, else the row says why); 75 a
-lock held past its wait (the launch log's, slots' or projects'), or comms' daemon not
-answering, when trying again may work.
+`--dry-run` takes an act's checks and writes nothing. `--json` prints the verb's data, its
+outcome word among it.
+
+Exit codes: 0 done (a relaunch armed or relaunched, a session exited); 1 a start that
+failed, or an act that ended in a failed outcome (`at-dialog` among them); 2 bad
+arguments or a bad value; 3 refused (with nothing written when it was refused before the
+launch's row, else the row says why); 75 a lock held past its wait (the launch log's,
+slots' or projects'), comms' daemon not answering, an act held because the session is not
+quiet now, or a run still going when the call stopped following it: trying again may
+work.
 A refusal prints one line ending in a short code, such as `[off-posture]`, and a hint.
 
 ## Optional links
 
 | Module | With it | Without it |
 |---|---|---|
-| turns | the first turn delivered once the session is ready; Codex session ids learned; a Codex seat's instructions in its start context; the handoff pointer at a seat's start | the brief is the opening prompt; no readiness, no pointer; a Codex seat gets only its `AGENTS.md`; Codex session ids unknown |
-| comms | identities, scopes, directors and the `with:` start posture | plain harness launches; `with:` and `director` refused |
-| slots | `--target slot`, `--slot`, and answering the startup screens you turn on | `terminal` and `headless` only |
+| turns | the first turn delivered once the session is ready; Codex session ids learned; a Codex seat's instructions in its start context; the handoff pointer at a seat's start; every act on a launched session | the brief is the opening prompt; no readiness, no pointer; a Codex seat gets only its `AGENTS.md`; Codex session ids unknown; no relaunch, exit-session, recycle or keep-warm |
+| comms | identities, scopes, directors and the `with:` start posture; a director's relaunch, and notices of a failed relaunch | plain harness launches; `with:` and `director` refused; relaunch with `--self` only, its failures recorded only |
+| slots | `--target slot`, `--slot`, and answering the startup screens you turn on; relaunch, and answering the exit dialog | `terminal` and `headless` only; no relaunch, and an exit stops at the exit dialog |
+| cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm | neither row is offered |
 | projects | `project` keys, a project's agent listing, a directory's project key | `cwd` paths and scratch launches only |
 | notes | the `notes_dir` row, and notes' handoff folder | the launcher's own handoff folder |
-| usage | the `warn_at` row | the row is not offered |
+| usage | the `warn_at`, `recycle_at_limit` and `limit_at` rows | the rows are not offered |
 
 An agent role a preset names is looked for in the harness's own agent folders, the user's
 and the project's.
@@ -174,3 +301,28 @@ Set with `moxi config set launcher <key> <value>`:
   presses a key only on a screen it has just seen.
 - `startup.wait_s` (20): how long a slot launch watches for those screens.
 - `runs.keep_days` (30): how long run logs and prompt files are kept.
+- `relaunch.wait_s` (900): how long a self relaunch waits for its session to be quiet.
+- `relaunch.person_s` (120): how recently a person's use of the pane, or a turn no
+  delivery opened, holds an act.
+- `relaunch.dialog_s` (60): how long a relaunch or an exit waits at the exit dialog.
+- `relaunch.name_wait_s` (15): how long a relaunch waits for the old session's comms name
+  to be let go.
+- `relaunch.follow_s` (300): how long a director's relaunch, or a repair, follows its run.
+- `relaunch.fallback` (empty): a comms identity told of a failed relaunch when the launch
+  has no director, or when the notice to its directors is refused or fails.
+- `relaunch.pass_env` (empty): variable names a self relaunch, a repair or a resume
+  carries from the environment of the process running it into the new session. If you
+  sign in with a token or key in the environment (`CLAUDE_CODE_OAUTH_TOKEN`,
+  `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, a provider's keys), list it here: the launcher
+  never records a credential, so without this a relaunched or resumed session starts
+  signed out.
+- `relaunch.director_pass_env` (empty): the same for a director's relaunch, read from
+  the director's environment. Empty, nothing of the director's reaches the session.
+- `relaunch.notice_retry_s` (30): how long a refused notice is tried again.
+- `recycle.limit_wait_s` (1800): how long a compact at the limit waits for the session to
+  be idle.
+- `keep_warm.subagent_cap` (3) and `keep_warm.director_cap` (10): how many nudges in a row
+  each case gets; `keep_warm.subagent_texts` and `keep_warm.director_texts` are their
+  words.
+- `records.keep_days` (90): how long ended runs, their events, exits and released holds
+  are kept.

@@ -47,6 +47,11 @@ has a row of its own), Codex's `--dangerously-bypass-approvals-and-sandbox` and
 passed on (`-c`, `--config`, `--option`) or as a `config` item (`catalog.POSTURE_FLAGS`,
 `catalog.POSTURE_KEYS`). The host's own `--resume`, `--no-window`, `--options-file` and
 `--instructions-file` are refused too (`catalog.HELD_FLAGS`).
+
+A resume (`Context.resume`, the session id the Codex thread's) is the host's own
+`--resume THREAD_ID`, after the rows. Only the host resumes a thread: a resume in another
+mode, or with an identity (comms' Codex wrapper starts a new thread every launch), is
+refused.
 """
 
 from __future__ import annotations
@@ -120,11 +125,14 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     cwd = common.cwd_of(values)
     host = mode_ == "host"
 
-    posture = str(values.get("posture") or "") or None
+    posture = ctx.posture_of(values) or None
+    if ctx.resume:
+        _resumable(mode_, identity, ctx)
     text = common.first_turn(ctx.actor, brief=ctx.brief,
                              handoff=values.get("handoff") or None,
                              handoff_text=ctx.handoff_text,
-                             posture=None if host else posture)
+                             posture=None if host else posture,
+                             relaunched=ctx.relaunched)
     prompt, first = (None, text) if host else (text, None)
     if mode_ == "exec" and prompt is None:
         raise NoBrief("brief", "a headless launch needs a brief or a handoff to run",
@@ -147,6 +155,8 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     for name in HOST_ORDER if host else ORDER:
         if name in fit.applied and not (identity and name == "cwd"):
             flags += rows[name].tokens(mode_, fit.applied[name], cwd=cwd)
+    if ctx.resume:
+        flags += ["--resume", str(ctx.session_id)]
 
     if identity:
         argv = [ctx.moxi, "comms", HARNESS, "--name", identity]
@@ -163,7 +173,9 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
 
     env = common.stamps(ctx.request_id, turns="turns" in ctx.modules,
                         warn_at=str(values.get("warn_at") or "") or None,
-                        notes_dir=str(values.get("notes_dir") or "") or None)
+                        notes_dir=str(values.get("notes_dir") or "") or None,
+                        granted=common.commands(values),
+                        options=ctx.options(values))
     recorded = common.recorded(HARNESS, values, mode_, not_applied)
     common.check_sizes(argv, values=recorded, brief=ctx.brief, env=env, prompt=prompt,
                        windows=ctx.windows)
@@ -172,6 +184,21 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
                        env=env, values=recorded, prompt=prompt, first=first,
                        brief=ctx.brief,
                        not_applied=not_applied, warnings=tuple(warnings))
+
+
+def _resumable(mode_: str, identity: str | None, ctx: Context) -> None:
+    """Refuse a Codex resume that turns' host can't make: one with no thread id, one in a
+    mode other than `host`, or one with an identity."""
+    if not ctx.session_id:
+        raise ValueError("a Codex resume needs the thread id it resumes")
+    if identity:
+        raise NotYet("identity", "comms' Codex wrapper starts a new thread at every launch, "
+                     "so a Codex launch with an identity can't be resumed",
+                     "resume it with codex resume, outside the launcher")
+    if mode_ != "host":
+        raise NotYet("resume", "only turns' Codex host resumes a Codex thread, and this "
+                     f"launch runs in {mode_} mode",
+                     "install moxi-turns with its codex extra, or use codex resume")
 
 
 __all__ = ["HARNESS", "HOST_ORDER", "ORDER", "comms_identity", "compose", "mode"]

@@ -40,6 +40,11 @@ INTERNAL_ENV = {
                              "this session",
     "MOXI_LAUNCHER_RELAUNCH": "launcher stamp: the session is a relaunch, whose handoff "
                               "comes in its first turn",
+    "MOXI_LAUNCHER_KEEP_WARM": "launcher stamp: the launch keeps its session warm, read by "
+                               "cache's timer",
+    "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY": "launcher stamp: the launch clears or compacts its "
+                                       "session once its cache expires, read by cache's "
+                                       "timer",
     "MOXI_LAUNCHER_TURNS": "test seam: the import name of a module that stands in for "
                            "turns' API in the first-turn sender",
     "MOXI_LAUNCHER_SLOTS": "test seam: the import name of a module that stands in for "
@@ -78,4 +83,11 @@ SESSION_ENV = {
     "MOXI_LAUNCHER_REQUEST": "the request id of the launch that started the session",
     "MOXI_LAUNCHER_RELAUNCH": "set on a relaunch, so the session's start shows no handoff "
                               "pointer",
+    "MOXI_LAUNCHER_KEEP_WARM": "set when the launch keeps its session warm",
+    "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY": "set to clear or compact when the launch recycles its "
+                                       "session on cache expiry",
+    "MOXI_USAGE_CROSSING_AT": "usage's crossing mark, set when the launch recycles at its "
+                              "limit; scrubbed even without usage installed",
+    "MOXI_USAGE_WARN_AT": "usage's warning mark, set from warn_at; scrubbed even without "
+                          "usage installed",
 }

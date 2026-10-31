@@ -20,6 +20,10 @@ With comms and an identity, comms' wrapper runs claude, with the claude argv aft
 The claude argv then carries neither `-n` (the native name goes to `--native-name`) nor
 turns' launch additions, which the wrapper asks for itself.
 
+A resume (`Context.resume`) passes `--resume <U>` where `--session-id` goes and no
+`--session-id` to claude, so the session keeps the id it resumes. With comms the wrapper
+still names that same id with its own `--session-id`, which it takes from `--resume`.
+
 **No positional word follows a flag.** The opening prompt comes right after the command
 (and `-p`), before every flag, and begins with its header line, so no flag placed later
 can take it as a value. `--remote-control`, whose value is optional, goes out as
@@ -38,8 +42,9 @@ from .common import Composition, Context, NoBrief, NotYet, PromptFile
 HARNESS = "claude"
 #: Where the launch additions go among the rows.
 ADDITIONS = "<launch additions>"
-#: The rows in the order they are composed. `resume` is not offered by part 1.
-ORDER = ("session_id", "append_system_prompt_file", "agent", "model", "effort", "tools",
+#: The rows in the order they are composed. A launch sets one of `session_id` and
+#: `resume`, the second only on a resume.
+ORDER = ("session_id", "resume", "append_system_prompt_file", "agent", "model", "effort", "tools",
          "allowed_tools", "disallowed_tools", "plugin_dir", ADDITIONS, "mcp_config",
          "add_dir", "native_name", "remote_control", "permission_mode")
 #: Rows the comms wrapper sets itself: they leave the claude argv.
@@ -72,8 +77,8 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     """Compose one Claude launch. Pure: reads only `values` and `ctx`."""
     values = common.with_defaults(HARNESS, values)
     if catalog.is_set(values.get("resume")):
-        raise catalog.Refused("resume", "resume is not offered by this launcher yet",
-                              "leave resume out")
+        raise catalog.Refused("resume", "resume is not a value a launch sets",
+                              "resume a session with moxi launcher resume")
     if not ctx.session_id:
         raise ValueError("a Claude launch needs its session id")
     mode_ = mode(values, ctx)
@@ -87,7 +92,7 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
 
     text = common.first_turn(ctx.actor, brief=ctx.brief,
                              handoff=values.get("handoff") or None,
-                             handoff_text=ctx.handoff_text)
+                             handoff_text=ctx.handoff_text, relaunched=ctx.relaunched)
     on_argv = mode_ == "print" or not turns
     prompt, first = (text, None) if on_argv else (None, text)
     if mode_ == "print" and prompt is None:
@@ -95,14 +100,15 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
                       "give it --brief, --brief-file or --handoff")
 
     block = common.identity_block(
-        session_id=ctx.session_id, cwd=cwd, posture=str(values.get("posture") or ""),
+        session_id=ctx.session_id, cwd=cwd, posture=ctx.posture_of(values),
         project_key=ctx.project_key, identity=identity, scope=scope,
         handoff_dir=ctx.handoff_dir,
-        agent_role=common.agent_role(str(values.get("agent") or ""), ctx.role_found))
+        agent_role=common.agent_role(str(values.get("agent") or ""), ctx.role_found),
+        keep_warm=values.get("keep_warm") == "on")
     prompt_file = PromptFile(common.prompt_path(ctx.runs_dir, ctx.request_id),
                              common.seat_text(block, ctx.instructions))
 
-    owned = {"session_id": ctx.session_id,
+    owned = {"resume" if ctx.resume else "session_id": ctx.session_id,
              "append_system_prompt_file": prompt_file.path}
     fit = catalog.fit(HARNESS, mode_, {**values, **owned}, ctx.chosen)
     additions = ctx.additions if (turns and not identity) else None
@@ -135,7 +141,9 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
         warnings += list(additions.notes)
     env = common.stamps(ctx.request_id, turns=turns, additions=additions,
                         warn_at=str(values.get("warn_at") or "") or None,
-                        notes_dir=str(values.get("notes_dir") or "") or None)
+                        notes_dir=str(values.get("notes_dir") or "") or None,
+                        granted=common.commands(values),
+                        options=ctx.options(values))
     recorded = common.recorded(HARNESS, values, mode_, fit.not_applied)
     common.check_sizes(argv, values=recorded, brief=ctx.brief, env=env, prompt=prompt,
                        windows=ctx.windows)

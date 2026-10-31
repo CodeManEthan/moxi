@@ -35,9 +35,17 @@ launcher = "moxi_launcher.module"
 [project.entry-points."moxi.turns.listeners"]
 launcher = "moxi_launcher.listeners"
 
-# No console script: only the core declares `moxi`, and the launcher's commands run as
-# `moxi launcher <verb>`, the detached first-turn sender (`moxi launcher deliver`) among
-# them.
+# The launcher's subscriptions to cache's timer (recycle on expiry, keep-warm), read by
+# cache's watcher. usage's crossings group gets the crossing handler once usage is built.
+[project.entry-points."moxi.cache.timers"]
+launcher = "moxi_launcher.cachetimers"
+
+# The launcher's commands run as `moxi launcher <verb>` (only the core declares `moxi`),
+# the detached first-turn sender (`moxi launcher deliver`) among them. One console script
+# of its own: the detached runs (a relaunch, a repair, an expiry or keep-warm ask, a limit
+# compact), spawned and never typed, found through `moxi.paths.script`.
+[project.scripts]
+moxi-launcher-job = "moxi_launcher.job:main"
 
 [dependency-groups]
 dev = ["pytest", "moxi-dev"]

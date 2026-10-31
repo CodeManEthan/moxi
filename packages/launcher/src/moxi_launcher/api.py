@@ -3,6 +3,11 @@
     launch(request) -> LaunchResult     # resolve, check, compose, log, start
     check(request) -> list[Refusal]     # the live-state checks; writes nothing
     preview(request) -> Composition     # resolve and compose; starts nothing
+    open_hold(request_id, name)         # a keep-warm hold on a launch (`keepwarm`)
+    release_hold(request_id, name)
+
+A request is a `LaunchRequest` (presets and flags, resolved here) or a `ReplayRequest`
+(a stored launch made again: a relaunch or a resume, its values the stored row's).
 
 `launch` runs one launch in this order: resolve its values (`presets.resolve`), check the
 live state (`check`), compose it (`compose.build`, the call `preview` makes), find the
@@ -29,6 +34,28 @@ comms asks turns for its launch additions, which write nothing. One limit: for a
 launch under turns' host it shows the host's command, not the `codex` command the host
 builds.
 
+**A replay** takes its values from the stored row's `values_json` as they are, with no
+preset read, and its own request id (and, but for a resume, its own Claude session id). It
+keeps the row's directory, a scratch one too. An option row (keep-warm, recycling) the
+install no longer offers, or whose value's needs it no longer meets, goes back to its
+default with a warning, as a comms name does without comms. It never sends the row's
+brief: a self relaunch's first turn is its handoff alone, under the header `Handoff from
+launcher, relaunched by <actor>: <path>`, and a director's relaunch or a resume sends
+none. **A replay's environment is built from the row and the settings only**: the row's recorded
+base (`base_env_json`: the short list slots' server keeps, the core's locators, the
+keep-lists' and provider names classed recorded, on Windows the names a process needs
+to start; `common.base_env`), then each name the user lists, read from the replaying
+process: `relaunch.pass_env`, or `relaunch.director_pass_env` in a director's relaunch,
+since there that process is the director's. A credential (a token, key, secret,
+password, or proxy, endpoint or base URL) is never recorded, so it reaches a replay only
+that way; when the base shows a provider switch on or a credential set at launch and
+nothing was passed, `LaunchResult.base` says `no-credentials`. A row made before the base
+was recorded takes the short list alone from the replaying process, and
+`LaunchResult.base` says `job`. A resume into the caller's own terminal adds the
+caller's terminal names (`TERM`, `COLORTERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERSION`).
+Then the scrub and the stamps. No other variable of the replaying process reaches the
+child.
+
 A launch in this terminal does not return on Linux and macOS: the process becomes the
 harness. On Windows it returns when the harness exits, with the harness's exit code; if
 the first turn's deliverer could not start, the row ended `failed` while the harness ran,
@@ -40,18 +67,23 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import sqlite3
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
+from typing import TYPE_CHECKING
 
 from moxi import exit as exits
 from moxi import files
 from moxi import modules as moxi_modules
 
-from . import catalog, compose, first, handoffs, identity, presets, store, targets
+from . import catalog, compose, first, handoffs, identity, presets, slots, store, targets
 from .compose import Composition, common
+
+if TYPE_CHECKING:
+    from . import keepwarm
 
 log = logging.getLogger("moxi.launcher.api")
 
@@ -98,6 +130,57 @@ class LaunchRequest:
 
 
 @dataclass(frozen=True)
+class ReplayRequest:
+    """A stored launch made again: `row` is its launch log row.
+
+    `relaunch_of` or `resume_of` names the launch it makes again (the row's request id),
+    and goes on the new row. A resume's session id is `session_id`, else the row's newest
+    (`row.newest_session_id`, which `store.resolve` sets), else the row's; it is passed
+    with `--resume`, never minted. `request_id` and `actor` are as `LaunchRequest`'s.
+
+    `posture` is the start posture the identity block shows in place of the row's
+    (`common.RELAUNCHED` for a self relaunch, `with:<director>` for a director's); it goes
+    in the new row's `posture` and never in its `values_json`. `handoff` is the handoff a
+    self relaunch carries as its first turn, `run` the relaunch's run id, stamped as
+    `MOXI_LAUNCHER_RELAUNCH` when there is a handoff. `director` marks a director's
+    relaunch, whose credentials come from `relaunch.director_pass_env`.
+
+    For a slot launch: `slot` is the slot it goes to, else the row's own when `respawn`,
+    else the one the row's values name; `hold` is the slot hold the caller has, which
+    lets the launch into the slot it holds and ends with the start; `respawn` starts it
+    in the slot's ended run pane, keeping the pane (a relaunch); `chain` is the first
+    request id of the chain of relaunches, which the slot's `meta` keeps (default: the
+    first launch reached through `relaunch_of`, for a relaunch; else the new launch's
+    own id)."""
+
+    row: store.LaunchRow
+    relaunch_of: str | None = None
+    resume_of: str | None = None
+    request_id: str | None = None
+    session_id: str | None = None
+    actor: str | None = None
+    posture: str | None = None
+    handoff: str | None = None
+    run: str | None = None
+    slot: int | str | None = None
+    hold: str | None = None
+    respawn: bool = False
+    chain: str | None = None
+    director: bool = False
+
+    #: Marks a request whose values are a stored row's, not resolved from presets.
+    replay = True
+
+
+@dataclass(frozen=True)
+class Replayed(presets.Resolved):
+    """A replay's values, as `presets.resolve` gives a fresh launch's, with the slot hold
+    the replay comes with."""
+
+    hold: str | None = None
+
+
+@dataclass(frozen=True)
 class LaunchResult:
     """What one launch did, as its row in the launch log says.
 
@@ -123,6 +206,7 @@ class LaunchResult:
     line: str = ""
     outcome: first.Outcome | None = None
     slot: str | None = None
+    base: str | None = None
 
 
 def launch(request, *, environ: Mapping[str, str] | None = None,
@@ -145,12 +229,15 @@ def launch(request, *, environ: Mapping[str, str] | None = None,
         raise refusals[0]
 
     ids = _with_ids(request, resolved.harness)
-    composition = compose.build(ids, resolved, environ=environ, create=True)
+    child, base = _child_base(request, caller)
+    composition = compose.build(ids, resolved, environ=environ, child_environ=child,
+                                create=True)
     target = targets.get(composition.target)
-    env = common.environment(caller, composition, moxi_modules.session_env())
+    env = common.environment(child, composition, moxi_modules.session_env())
     command = target.prepare(composition, env)
     values = composition.values
-    session_id = ids.session_id if composition.harness == "claude" else None
+    resume = bool(getattr(request, "resume_of", None))
+    session_id = ids.session_id if composition.harness == "claude" or resume else None
 
     handoff_key = handoffs.key_of_row(SimpleNamespace(
         identity=resolved.identity, preset_kind=resolved.preset_kind,
@@ -167,12 +254,16 @@ def launch(request, *, environ: Mapping[str, str] | None = None,
             project_key=resolved.project_key,
             identity=resolved.identity, scope=resolved.scope, brief=composition.brief,
             handoff_path=str(values.get("handoff") or "") or None,
-            handoff_key=handoff_key)
+            handoff_key=handoff_key, base_env=common.base_env(env),
+            relaunch_of=getattr(request, "relaunch_of", None),
+            resume_of=getattr(request, "resume_of", None))
         if not inserted.new:
             return _stored(inserted.row)
 
         rid = ids.request_id
         warnings = _warnings(resolved, composition)
+        if base == "no-credentials":
+            warnings += (NO_CREDENTIALS,)
         try:
             _make_files(composition, environ, handoff_key)
         except OSError as error:
@@ -187,8 +278,11 @@ def launch(request, *, environ: Mapping[str, str] | None = None,
             warn(line)
         started = target.start(targets.Launch(
             conn=conn, request_id=rid, composition=composition, argv=composition.argv,
-            command=command, env=env, cwd=str(values["cwd"]), deliverer_env=caller))
-        return _result(composition, rid, session_id, started, warnings)
+            command=command, env=env, cwd=str(values["cwd"]), deliverer_env=caller,
+            hold=getattr(request, "hold", None),
+            respawn=bool(getattr(request, "respawn", False)),
+            chain=_chain(conn, request, rid)))
+        return _result(composition, rid, session_id, started, warnings, base)
     finally:
         conn.close()
 
@@ -221,7 +315,13 @@ def preview(request, *, environ: Mapping[str, str] | None = None) -> Composition
     if bad_id is not None:
         raise bad_id
     resolved = _resolve(request, environ)
-    composition = compose.build(request, resolved, environ=environ)
+    if getattr(request, "replay", False):
+        caller = dict(os.environ if environ is None else environ)
+        child, _ = _child_base(request, caller)
+        composition = compose.build(_with_ids(request, resolved.harness), resolved,
+                                    environ=environ, child_environ=child)
+    else:
+        composition = compose.build(request, resolved, environ=environ)
     return dataclasses.replace(composition,
                                warnings=_warnings(resolved, composition))
 
@@ -236,7 +336,143 @@ def exit_code(error: BaseException) -> int:
 
 
 def _resolve(request, environ: Mapping[str, str] | None = None):
+    if getattr(request, "replay", False):
+        return _replayed(request)
     return presets.resolve(request, env=environ)
+
+
+#: What a replay does not take from the stored values as values: the composer's own
+#: record of the mode and the rows it left out, and `--off-posture`, which goes back on
+#: its own field.
+_NOT_REPLAYED = ("mode", "not_applied", "off_posture")
+
+
+#: The option rows a replay sets back to their default, with a warning, when the
+#: install no longer offers them or no longer meets their value's needs: stamped, they
+#: would promise a timer or a crossing that never comes.
+_OPTION_ROWS = ("keep_warm", "recycle_on_expiry", "recycle_at_limit")
+
+
+def _unoffered_option(harness: str, target: str, values: dict, name: str) -> str | None:
+    """Set the option row `name` in `values` back to its default when it is set and this
+    install doesn't offer it, or doesn't meet what its value needs; return the warning,
+    or None."""
+    row_ = catalog.row(harness, name)
+    value = values.get(name)
+    if row_ is None or value in (None, "", row_.default):
+        return None
+    why = row_.unoffered(slots.links, harness)
+    need = row_.when.get(value) if isinstance(value, str) else None
+    if why is None and need is not None:
+        try:
+            catalog.refuse_values(harness, {"target": target, name: value})
+        except catalog.Refused as refused:
+            why = (refused.problem, "")
+    if why is None:
+        return None
+    values[name] = row_.default
+    return f"{name} {value} is not applied: {why[0]}"
+
+
+def _replayed(request: ReplayRequest) -> Replayed:
+    """A replay's resolved values: the stored row's `values_json` as they are, its brief
+    left out, its handoff the replay's, its slot the replay's, with the mode worked out
+    again for the modules installed now. A comms identity is dropped, with a warning, when
+    comms is no longer installed, as a fresh launch's is."""
+    row = request.row
+    if request.relaunch_of and request.resume_of:
+        raise ValueError("a replay is a relaunch or a resume, not both")
+    if request.respawn and row.target != "slot":
+        raise catalog.BadValue("target", f"launch {row.request_id} ran in its {row.target}"
+                                         ", and only a slot launch is respawned",
+                               "replay it without respawn")
+    stored = row.values
+    values = {k: v for k, v in stored.items() if k not in _NOT_REPLAYED}
+    values.update(brief="", brief_file="", handoff=request.handoff or "")
+    slot = request.slot if request.slot is not None else (
+        row.slot if request.respawn else None)
+    if slot is not None:
+        values["slot"] = str(slot)
+    harness, target = row.harness, row.target
+    warnings: list[str] = []
+    identity, scope = row.identity or None, row.scope or None
+    if identity and not slots.links("comms"):
+        warnings.append(f"identity {identity} is ignored: comms is not installed")
+        identity = scope = None
+        values["identity"], values["scope"] = "", ""
+    for name in _OPTION_ROWS:
+        dropped = _unoffered_option(harness, target, values, name)
+        if dropped is not None:
+            warnings.append(dropped)
+    mode, turns, more = presets.mode_of(harness, target, identity=identity)
+    warnings += more
+    posture = row.posture if request.posture is None else request.posture
+    links = {name for name, on in (
+        ("turns", turns), ("comms", identity is not None),
+        ("projects", bool(row.project_key)), ("slots", target == "slot"),
+        ("notes", catalog.is_set(values.get("notes_dir"))),
+        ("usage", catalog.is_set(values.get("warn_at")))) if on}
+    return Replayed(
+        harness=harness, mode=mode, values=MappingProxyType(values),
+        sources=MappingProxyType({}), chosen=frozenset(),
+        preset_kind=row.preset_kind, preset_name=row.preset_name, cwd=row.cwd,
+        scratch=bool(values.get("scratch")), project_key=row.project_key, agents=(),
+        identity=identity, scope=scope, posture=str(posture or ""), target=target,
+        off_posture=bool(stored.get("off_posture", False)), links=frozenset(links),
+        warnings=tuple(warnings), hold=request.hold)
+
+
+def _child_base(request, caller: Mapping[str, str]) -> tuple[dict[str, str], str | None]:
+    """The environment the child's is built from, and where its base came from: the
+    caller's whole environment for a fresh launch (None); for a replay
+    (`common.replay_env`), the row's recorded base (`row`, or `no-credentials` when it
+    shows a sign-in that nothing passed), or the caller's short list for a row that has
+    none (`job`)."""
+    if not getattr(request, "replay", False):
+        return caller, None
+    names = _pass_env(director=bool(getattr(request, "director", False)))
+    terminal = bool(request.resume_of) and request.row.target == "terminal"
+    stored = request.row.base_env
+    if stored is None:
+        return common.replay_env(common.short_env(caller), caller, names,
+                                 terminal=terminal), "job"
+    passed = [name for name in names if name in caller]
+    where = "no-credentials" if common.no_credentials(stored, passed) else "row"
+    return common.replay_env(stored, caller, names, terminal=terminal), where
+
+
+#: The warning of a replay that may start signed out.
+NO_CREDENTIALS = ("the launch signed in through its environment or another provider, and "
+                  "no sign-in variable was passed to this one: list the names in "
+                  "relaunch.pass_env (relaunch.director_pass_env for a director's "
+                  "relaunch) if it starts signed out")
+
+
+def _pass_env(*, director: bool = False) -> list[str]:
+    """The names `relaunch.pass_env` lists, or `relaunch.director_pass_env` for a
+    director's relaunch."""
+    from . import settings
+
+    key = "relaunch.director_pass_env" if director else "relaunch.pass_env"
+    return [str(name) for name in settings.current()[key]]
+
+
+def _chain(conn, request, request_id: str) -> str:
+    """The first request id of the launch's chain of relaunches: the request's `chain`,
+    else, for a relaunch, the first launch reached through `relaunch_of`, else the
+    launch's own id."""
+    given = getattr(request, "chain", None)
+    if given:
+        return str(given)
+    first_id = getattr(request, "relaunch_of", None)
+    seen = {request_id}
+    while first_id and first_id not in seen:
+        seen.add(first_id)
+        row = store.get(conn, first_id)
+        if row is None or not row.relaunch_of:
+            break
+        first_id = row.relaunch_of
+    return first_id or request_id
 
 
 def _request_id_refusal(request_id: str | None) -> Refusal | None:
@@ -299,9 +535,23 @@ def _comms_api():
     return presets.comms_api()
 
 
-def _with_ids(request, harness: str) -> SimpleNamespace:
+def _with_ids(request, harness: str):
     """`request` with its request id, and a Claude launch's session id, minted when it
-    gives none."""
+    gives none. A resume's session id is the one it resumes, never minted; a replay that
+    has none to resume is refused."""
+    if getattr(request, "replay", False):
+        session_id = request.session_id
+        if request.resume_of:
+            session_id = session_id or request.row.newest_session_id or request.row.session_id
+            if not session_id:
+                raise Refusal("resume", f"launch {request.row.request_id} has no session id "
+                                        "to resume", "a Codex launch made without turns' "
+                                                     "host has none: use codex resume")
+        elif harness == "claude" and not session_id:
+            session_id = str(uuid.uuid4())
+        return dataclasses.replace(request,
+                                   request_id=request.request_id or str(uuid.uuid4()),
+                                   session_id=session_id)
     names = ("seat", "project_preset", "typed", "extra", "off_posture", "cwd", "actor")
     given = {name: getattr(request, name, None) for name in names}
     request_id = getattr(request, "request_id", None) or str(uuid.uuid4())
@@ -347,15 +597,35 @@ def _make_files(composition: Composition, environ: Mapping[str, str] | None = No
         common.write_prompt(composition.prompt_file)
 
 
+def open_hold(request_id: str, name: str, *,
+              conn: sqlite3.Connection | None = None) -> keepwarm.Held:
+    """Open the keep-warm hold `name` on the launch `request_id` (a no-op when the name is
+    open anywhere in the launch's chain), for a caller that knows the launch. Raises a
+    refusal when the launch is unknown, does not keep warm, or the name is bad."""
+    from . import keepwarm
+
+    return keepwarm.open_hold(request_id, name, conn=conn)
+
+
+def release_hold(request_id: str, name: str, *,
+                 conn: sqlite3.Connection | None = None) -> list[store.Hold]:
+    """Release the keep-warm hold `name` wherever it is open in the chain of the launch
+    `request_id`, and return the holds released (none when it was not open)."""
+    from . import keepwarm
+
+    return keepwarm.release_hold(request_id, name, conn=conn)
+
+
 def _result(composition: Composition, request_id: str, session_id: str | None,
-            started: targets.Started, warnings: tuple[str, ...]) -> LaunchResult:
+            started: targets.Started, warnings: tuple[str, ...],
+            base: str | None = None) -> LaunchResult:
     return LaunchResult(
         request_id=request_id, harness=composition.harness, target=composition.target,
         state=started.state, exit_code=started.exit_code, session_id=session_id,
         mode=composition.mode, reason=started.reason, pid=started.pid,
         argv=composition.argv, warnings=warnings,
         line=started.line or f"launch {request_id} {started.state}",
-        outcome=started.outcome, slot=started.slot)
+        outcome=started.outcome, slot=started.slot, base=base)
 
 
 def _stored(row: store.LaunchRow) -> LaunchResult:
@@ -370,5 +640,6 @@ def _stored(row: store.LaunchRow) -> LaunchResult:
 
 
 __all__ = ["TAKEN", "CommsOffline", "CommsUnanswered", "IdentityRefused", "IdentityTaken",
-           "LaunchRequest", "LaunchResult", "NoDirectory", "Refusal", "ScratchRoot", "check",
-           "exit_code", "launch", "preview"]
+           "LaunchRequest", "LaunchResult", "NoDirectory", "Refusal", "ReplayRequest",
+           "Replayed", "ScratchRoot", "check", "exit_code", "launch", "open_hold", "preview",
+           "release_hold"]

@@ -147,7 +147,8 @@ def test_a_launch_naming_no_slot_takes_the_lowest_free_one(work, harness, rig,
     # No slot named: slots takes the lowest launchable one, or makes the next.
     assert call["slot"] is None and call["create"] is True
     assert call["label"] == "launcher:r1"
-    assert call["meta"] == {"request_id": "r1", "session_id": SID}
+    assert call["meta"] == {"request_id": "r1", "session_id": SID, "chain": "r1"}
+    assert call["hold"] is None
     assert call["cwd"] == str(work)
     # The whole child environment goes to slots, scrubbed and stamped.
     assert call["env"]["MOXI_LAUNCHER_REQUEST"] == "r1"
@@ -1191,8 +1192,8 @@ def test_the_core_runs_setup_in_a_process_of_its_own(rig, tmp_path):
 # -- the fake against slots as built ----------------------------------------------------------
 
 #: Every name the launcher reads from slots' API module.
-USED = ("supported", "show", "start", "read_screen", "answer_screen", "SlotsError",
-        "Refused", "TryAgain", "TmuxError", "RegistryError", "UsageError",
+USED = ("supported", "show", "create", "start", "read_screen", "answer_screen",
+        "SlotsError", "Refused", "TryAgain", "TmuxError", "RegistryError", "UsageError",
         "CLAUDE_TRUST_FOLDER", "CLAUDE_DEV_CHANNELS")
 #: The shapes the launcher reads, as the fake gives them.
 SHAPES = ("Support", "Hold", "Last", "Slot", "Placed", "Screen", "Seen", "Answer")
@@ -1252,7 +1253,7 @@ def test_the_fakes_errors_are_slots_own(real_slots):
 def test_the_fakes_calls_take_slots_own_arguments(real_slots):
     import inspect
 
-    for name in ("supported", "show", "start", "read_screen", "answer_screen"):
+    for name in ("supported", "show", "create", "start", "read_screen", "answer_screen"):
         mine = inspect.signature(getattr(fake, name)).parameters
         theirs = inspect.signature(getattr(real_slots, name)).parameters
         assert [(p.name, p.kind, p.default) for p in mine.values()] == [

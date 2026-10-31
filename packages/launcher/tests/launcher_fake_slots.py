@@ -1,5 +1,6 @@
-"""A stand-in for slots' API, as the launcher calls it: `supported`, `show`, `start` (which
-claims a slot and starts the command there), and the screen calls `read_screen` and
+"""A stand-in for slots' API, as the launcher calls it: `supported`, `show`, `create`
+(which makes slots), `start` (which claims a slot and starts the command there), `respawn` (which starts it in the slot's
+ended run pane), and the screen calls `read_screen` and
 `answer_screen`, with slots' errors and result shapes, field for field (`test_slot` holds
 them against slots' own when slots is installed).
 
@@ -24,6 +25,11 @@ The script's keys, each with its default:
   `label` and `meta` for `occupied`), `try-again`, `error` or `registry`. As slots does,
   `start` raises `UsageError` for a relative `cwd` and for `create=True` with a slot
   named.
+- `create`: `ok` (each number made: its slot reads `free` and launchable from then on),
+  `refused` (raises `Refused` from `refused`: `in-use`, `name-taken`, `no-free-slot`),
+  `try-again`, `error` or `registry`. It returns the numbers made.
+- `respawn`: as `start`, for `respawn`, which names its slot and reuses its run pane;
+  `refused` raises `Refused` from `refused` (`live-pane`, `missing`, `held`).
 - `placed`: the slot a start that names none takes (1).
 - `exec`: `started`, `failed` or `unconfirmed`, with `exec_line` and `dead_status`
   (null while the pane lives).
@@ -281,6 +287,26 @@ def _raise(how: str, tmux_call: str) -> None:
         raise UsageError("a slot name is 1-32 lower-case letters, digits and '-'")
 
 
+def create(numbers=None, *, count=1, name=None) -> list[int]:
+    record("create", numbers=None if numbers is None else list(numbers), count=count,
+           name=name)
+    plan = script()
+    how = plan.get("create", "ok")
+    if how == "refused":
+        given = plan.get("refused", {})
+        raise Refused(given.get("reason", "in-use"), given.get("words", "slot exists"),
+                      given.get("holder"))
+    if how == "try-again":
+        raise TryAgain("the slots lock was not had in 10 s")
+    _raise(how, "new-session")
+    made = list(numbers) if numbers else [plan.get("placed", 1) + i for i in range(count)]
+    listed = plan.setdefault("slots", {})
+    for number in made:
+        listed[str(number)] = {"state": "free", "launchable": True}
+    (_dir() / "script.json").write_text(json.dumps(plan))
+    return made
+
+
 def start(slot, argv, *, env, cwd, label, meta=None, hold=None, create=False) -> Placed:
     record("start", slot=slot, argv=list(argv), env=dict(env), cwd=cwd, label=label,
            meta=meta, hold=hold, create=create)
@@ -307,6 +333,30 @@ def start(slot, argv, *, env, cwd, label, meta=None, hold=None, create=False) ->
     _turns.placed[str(number)] = {"label": label, "meta": meta, "pid": pid}
     verdict = plan.get("exec", "started")
     return Placed(number, "%7", "@3", verdict,
+                  plan.get("exec_line", "exec" if verdict == "started" else "taken"),
+                  plan.get("dead_status"))
+
+
+def respawn(slot, argv, *, env, cwd, label, meta=None, hold=None) -> Placed:
+    record("respawn", slot=slot, argv=list(argv), env=dict(env), cwd=cwd, label=label,
+           meta=meta, hold=hold)
+    if slot is None:
+        raise UsageError("respawn names the slot whose run pane it reuses")
+    if not os.path.isabs(os.fspath(cwd)):
+        raise UsageError(f"cwd is an absolute path, not {cwd!r}")
+    plan = script()
+    how = plan.get("respawn", "ok")
+    if how == "refused":
+        given = plan.get("refused", {})
+        raise Refused(given.get("reason", "live-pane"), given.get("words", "pane live"),
+                      given.get("holder"))
+    if how == "try-again":
+        raise TryAgain("the slots lock was not had in 10 s")
+    _raise(how, "respawn-pane")
+    pid = plan.get("pane_pid", 4343)
+    _turns.placed[str(slot)] = {"label": label, "meta": meta, "pid": pid}
+    verdict = plan.get("exec", "started")
+    return Placed(slot, "%7", "@3", verdict,
                   plan.get("exec_line", "exec" if verdict == "started" else "taken"),
                   plan.get("dead_status"))
 

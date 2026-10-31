@@ -480,6 +480,10 @@ def test_a_slot_launch_with_turns_gets_its_brief_as_the_first_turn(harness, live
     needs_turns()
     if harness == "codex":
         needs_host()
+    # The work dir is new, so Claude asks whether to trust it: the launcher answers that
+    # screen through slots, as in the slot launch without turns.
+    config.set("launcher", "startup.trust_dialog", True, by="launcher live test")
+    config.set("launcher", "startup.wait_s", 15, by="launcher live test")
     brief, answer = words()
     typed = {**flags(harness), "target": "slot", "brief": brief, "cwd": str(work)}
     if harness == "codex":
@@ -551,13 +555,14 @@ def test_claude_print_with_turns_records_its_id_and_shows_no_pointer(live_env, w
     assert result.state == "started", result.line
     wait_for(lambda: run_log_holds(result.request_id, answer), timeout=ANSWER_S,
              what=lambda: f"{answer} in {targets.run_log(result.request_id)}")
-    row = wait_for(lambda: (r := launch_row(result.request_id)) is not None
-                   and r.endpoint and r, timeout=60, what="the claim")
+    # turns starts no endpoint in a headless run, so nothing claims the launch: the id is
+    # the one the launcher passed as --session-id and recorded at insert.
+    row = launch_row(result.request_id)
+    assert row is not None and not row.endpoint
     conn = store.connect(create=False)
     try:
         ids = store.session_ids(conn, result.request_id)
-        assert (result.session_id, "minted") in ids
-        assert any(source != "minted" for _, source in ids), ids
+        assert ids == [(result.session_id, "minted")], ids
         assert store.resolve(conn, result.session_id).request_id == result.request_id
         assert store.picked(conn, "liveprint") == []
     finally:
