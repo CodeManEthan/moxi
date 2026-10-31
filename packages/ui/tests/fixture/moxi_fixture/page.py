@@ -1,9 +1,33 @@
-"""The fixture's page: two reads (one that waits while a test holds it), an act and a
-stream of two topics, and its components' scripts in `web/`."""
+"""The fixture's page: two reads (one that waits while a test holds it), an act, a
+confirmed act and its status route, a stream of two topics, and its components' scripts
+in `web/`.
 
+The page server records the header names of each request to the confirmed act, so a
+test can see what reached the module (`confirm-headers` in the state directory)."""
+
+import json
+
+from moxi.paths import Layout
+from moxi_loopback import server as _server
 from moxi_loopback.api import Field, Out, Page, Route
 
 H = "moxi_fixture.handlers"
+CONFIRM_PATH = b"/api/confirm"
+
+_check = _server.check
+
+
+def _record(view, profile):
+    if view.raw_path == CONFIRM_PATH:
+        state = Layout("fixture").state_dir()
+        state.mkdir(parents=True, exist_ok=True)
+        with open(state / "confirm-headers", "a", encoding="utf-8") as out:
+            out.write(json.dumps([name.decode("latin-1").lower() for name, _ in view.headers])
+                      + "\n")
+    return _check(view, profile)
+
+
+_server.check = _record
 
 PAGE = Page(
     routes=(
@@ -14,6 +38,13 @@ PAGE = Page(
               body={"by": Field("int", required=False),
                     "note": Field("string", required=False)},
               returns={"count": Out("int")}),
+        Route("/api/job", "read", H + ":job", query={"job": Field("string", max=64)},
+              returns={"job": Out("string"), "state": Out("string")}),
+        Route("/api/confirm", "act", H + ":confirm",
+              body={"by": Field("int", required=False),
+                    "mode": Field("string", required=False),
+                    "pad": Field("string", required=False)},
+              returns={}, confirmed=True, status="/api/job"),
         Route("/api/events", "read", H + ":events", stream=True,
               topics={"count": Out("table", items={"n": Out("int")}),
                       "note": Out("table", items={"text": Out("string")})}),

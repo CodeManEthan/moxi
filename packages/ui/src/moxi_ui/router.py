@@ -64,9 +64,11 @@ ASGIApp = Callable[[dict[str, Any], Callable[..., Awaitable[Any]], Callable[...,
 
 #: The browser headers passed on to a page served behind the shell, in process or by
 #: proxy. `Cookie`, `Origin`, `Referer`, `Sec-Fetch-*`, the key and any token are not.
+#: `Idempotency-Key` goes on so a confirmed act runs at most once for the key its caller
+#: sent.
 FORWARDED_HEADERS = frozenset({
     b"accept", b"accept-language", b"content-type", b"content-length", b"if-none-match",
-    b"last-event-id",
+    b"last-event-id", b"idempotency-key",
 })
 
 #: The largest sign-in request body read.
