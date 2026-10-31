@@ -2,6 +2,7 @@
 
     moxi install <module> [--with EXTRA,...] [--without EXTRA,...] [--all | --none]
                           [--from SPEC]... [--third-party] [--replace]
+                          [--skills | --no-skills] [--skills-form auto|link|copy]
 
 0. The catalogue (`moxi.catalogue`): a name it lists installs its first-party
    distribution. Any other name is refused with the nearest listed names, unless a
@@ -20,7 +21,10 @@
    distribution the module needs that the environment lacks.
 3. Run the settle step of each module the step installed, in a fresh process
    (`moxi._settle`): the move of its data out of an old host folder, its `SETUP`, and its
-   units, with every daemon the move stopped started again however the step ends.
+   units, with every daemon the move stopped started again however the step ends; then
+   its skills, its install questions, and every `moxi.installs` listener.
+   `--skills` and `--no-skills` answer the skills question ahead for each module;
+   `--skills-form` sets the core's `skills.form` before the first settle step.
 4. Offer each optional extra of the module not yet installed, one by one.
 5. Install the chosen extras by step 2's route, and set up each new module.
 6. Report.
@@ -258,8 +262,11 @@ _TOOL_FILES = {"constraints": "--constraints", "overrides": "--overrides",
 
 
 def tool_command(receipt: dict, prefix: Path, added: list[Req], uv: str,
-                 scratch: Path) -> tuple[list[str], dict[str, str], list[Req]]:
+                 scratch: Path, *, without: str | None = None
+                 ) -> tuple[list[str], dict[str, str], list[Req]]:
     """The `uv tool install` re-run that keeps everything `receipt` holds and adds `added`.
+    With `without` (a module name), it leaves out that module's distribution and every
+    extra named by it on another requirement, as `moxi uninstall` does.
 
     Returns the argv, the environment variables to set, and the requirements it installs.
     Files for the receipt's constraints, overrides and excludes are written in `scratch`.
@@ -275,6 +282,12 @@ def tool_command(receipt: dict, prefix: Path, added: list[Req], uv: str,
     if not isinstance(held, list) or not held:
         raise InstallError("the uv receipt names no requirement")
     reqs = union([receipt_entry(e) for e in held], added)
+    if without is not None:
+        from .uninstall import without as leave_out
+
+        reqs = leave_out(reqs, without)
+        if not reqs:
+            raise InstallError("the uv receipt would name no requirement")
     head, rest = reqs[0], reqs[1:]
     argv = [uv, "tool", "install"]
     argv += ["--editable", head.editable] if head.editable else [head.text()]
@@ -432,13 +445,15 @@ def snapshot(python: str) -> dict:
         raise InstallError("`moxi modules --json` printed no JSON") from None
 
 
-def run_settle(python: str, module: str, *, replace: bool = False):
+def run_settle(python: str, module: str, *, replace: bool = False,
+               skills: bool | None = None):
     """Run module `module`'s settle step in a fresh process under this install's hold of
     the core lock, and wait for it however long it takes (`moxi._settle.run_child`).
     Returns its `moxi._settle.Outcome`."""
     from . import _settle
 
-    return _settle.run_child(_settle.child_argv(python, module, replace=replace))
+    return _settle.run_child(_settle.child_argv(python, module, replace=replace,
+                                                skills=skills))
 
 
 # -- the installer ------------------------------------------------------------------------
@@ -467,8 +482,16 @@ def _parser(prog: str):
                         help="install moxi-<module> from the index though Moxi's catalogue "
                              "doesn't list it: a module that isn't first-party")
     parser.add_argument("--replace", action="store_true",
-                        help="move a unit file moxi did not write out of the way of the "
-                             "module's own (to DATA/moxi/displaced/)")
+                        help="move a unit file or a placed skill moxi did not write out "
+                             "of the way of the module's own (to DATA/moxi/displaced/)")
+    answer = parser.add_mutually_exclusive_group()
+    answer.add_argument("--skills", dest="skills", action="store_true", default=None,
+                        help="place each module's skills without asking")
+    answer.add_argument("--no-skills", dest="skills", action="store_false",
+                        help="place no module's skills, without asking")
+    parser.add_argument("--skills-form", choices=("auto", "link", "copy"),
+                        help="set how skills are placed (the core's skills.form) "
+                             "before setting the modules up")
     return parser
 
 
@@ -500,6 +523,8 @@ class Installer:
         self.froms = [parse_from(spec) for spec in args.from_]
         self.third_party = bool(getattr(args, "third_party", False))
         self.replace = bool(getattr(args, "replace", False))
+        self.skills = getattr(args, "skills", None)
+        self.skills_form = getattr(args, "skills_form", None)
         #: The module's catalogue entry, when the catalogue lists it.
         self.listed = None
         self.setup_failed: list[str] = []
@@ -527,6 +552,7 @@ class Installer:
     def _run(self, module: str) -> int:
         env = environment()
         self.env = env
+        self._set_skills_form()
         before = snapshot(env.python)
         present = _by_name(before)
 
@@ -680,7 +706,8 @@ class Installer:
                 self.setup_failed.append(name)
                 continue
             guard_streams()
-            outcome = run_settle(self.env.python, name, replace=self.replace)
+            outcome = run_settle(self.env.python, name, replace=self.replace,
+                                 skills=self.skills)
             if outcome.interrupted:
                 raise InstallError(f"interrupted in {name}'s settle step; no later step "
                                    f"ran. Run `moxi install {self.module}` again to finish.")
@@ -688,6 +715,18 @@ class Installer:
                 say(f"setup {name}: failed (exit {outcome.code}). The install stays; run "
                     f"`moxi install {name}` again once the cause is fixed.", err=True)
                 self.setup_failed.append(name)
+
+    def _set_skills_form(self) -> None:
+        """`--skills-form`: set the core's `skills.form` before any settle step."""
+        if self.skills_form is None:
+            return
+        from . import config
+
+        try:
+            config.set(names.HARNESS, "skills.form", self.skills_form, by="moxi install")
+        except config.ConfigError as exc:
+            raise InstallError(f"skills.form was not set: {exc}") from None
+        print(f"skills.form set to {self.skills_form}")
 
     # step 4 ------------------------------------------------------------------------
     def _check_answers(self, item: dict) -> None:

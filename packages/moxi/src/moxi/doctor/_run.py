@@ -15,7 +15,7 @@
      4. units: `moxi.units.plan` against what is written, the supervisor's state from one
         `moxi.units.status` call, each timer's switch and newest run line, each active
         daemon's `HEALTH`, a `HEALTH` key that names no daemon, and each wrap the module
-        holds on a foreign timer;
+        holds on a foreign timer (a daemon with a `socket`: see `_daemon_seen`);
      5. stores: each declared store's existence, mode and size cap, and the core's own
         stores in the module's state directory (`runs.jsonl`, `logs/`, `doctor.json`);
      6. home: a state or cache directory still read in place under a host folder;
@@ -23,9 +23,12 @@
      8. setup versions: a module whose installed version differs from the one its `SETUP`
         last ran at;
      9. records left by `moxi.doctor.record`;
-    10. each `moxi.doctor` extension entry's rows;
-    11. each module's `DOCTOR` rows;
-    12. with `costs=True`, each module's active daemons against its `BUDGETS`.
+    10. placements: each placement `moxi.place` holds that is `stale`, `modified` or
+        `missing` (a gone source reads "source missing: <path>"), and each harness row and
+        `skills.harnesses` name the placer skips, on module `moxi`;
+    11. each `moxi.doctor` extension entry's rows;
+    12. each module's `DOCTOR` rows;
+    13. with `costs=True`, each module's active daemons against its `BUDGETS`.
 
 Module names restrict the rows to those modules; `moxi` names the core's own rows. A
 `DOCTOR` target and a `moxi.doctor` entry run in a worker thread with `DOCTOR_SECONDS`
@@ -33,7 +36,8 @@ each, a `HEALTH` target with `HEALTH_SECONDS`; one that overruns, raises or retu
 another type is a `fail` row naming it, and a thread that overran is left to finish on
 its own (a daemon thread, its result dropped).
 
-The checks only read, with one exception: `--costs` appends one sample per measured
+The checks only read (the placements too: the doctor never places or removes one), with one
+exception: `--costs` appends one sample per measured
 daemon to `STATE/moxi/costs.jsonl`, the history its idle CPU rate is taken against.
 """
 
@@ -85,7 +89,7 @@ def run(modules: Iterable[str] | None = None, *, costs: bool = False,
     failed: list[Row] = []
     checks = [_check_modules, _check_settings, _check_extensions, _check_units,
               _check_stores, _check_home, _check_strays, _check_setup, _check_records,
-              _check_entries, _check_doctors]
+              _check_placements, _check_entries, _check_doctors]
     if costs:
         checks.append(_check_costs)
     for check in checks:
@@ -299,15 +303,21 @@ def _module_units(found, by_unit: Mapping) -> list[Row]:
                                                  f"{_describe(exc)}"))
         return rows
     daemons = decl.daemons if decl is not None else found.daemons
+    socket_rows = {change.name for change in changes if change.kind == "socket"}
     for change in changes:
         state = by_unit.get((module, change.name, change.kind))
-        rows.append(_unit_row(change, state, _shared_fix(found, change, changes)))
+        socket = (by_unit.get((module, change.name, "socket"))
+                  if change.kind == "daemon" else None)
+        rows.append(_unit_row(change, state, _shared_fix(found, change, changes),
+                              socket=socket, socket_row=change.name in socket_rows))
         if change.kind == "timer" and change.action in ("keep", "change"):
             label = f"timer {change.name}"
             if change.switch is not None:
                 rows.append(_switch_row(found, label, change.switch))
             rows.append(_last_row(module, label, _run_line(state, module, change.name),
                                   state.log if state is not None else None))
+        # Only a running daemon's HEALTH runs, so a daemon idle under its listening socket
+        # has no health row until a connection starts it.
         if (change.kind == "daemon" and state is not None and state.state == "active"
                 and change.name in daemons):
             rows.append(_health_row(module, change.name, found.health.get(change.name)))
@@ -336,20 +346,30 @@ def _shared_fix(found, change, changes) -> str | None:
             f"moxi config set {module} {switch} true")
 
 
-def _unit_row(change, state, install: str | None = None) -> Row:
+def _unit_row(change, state, install: str | None = None, *, socket=None,
+              socket_row: bool = True) -> Row:
     """The row for one planned unit, with the supervisor's state folded in where a unit
     is written. `install` replaces the plain `moxi install <module>` fix of a unit that is
-    not installed or stale."""
+    not installed or stale. `socket` is a daemon's socket state, None for a daemon with
+    no `socket` and for every other kind; `socket_row` is False where the plan gives the
+    socket no change of its own (launchd), so its state shows in the daemon's row
+    (`_daemon_seen`).
+
+    A change whose IPv6 addresses `plan` left out keeps that note in its row, and a
+    socket change names the units it drops."""
     module = change.module
     label = f"{change.kind} {change.name}"
     install = install or f"moxi install {module}"
     action, cause = change.action, change.cause
+    note = _left_out(change)
     if action == "keep":
-        planned = ("ok", "up to date", None)
+        planned = ("ok", "up to date" + note, None)
     elif action == "add":
-        planned = ("warn", "not installed", install)
+        planned = ("warn", "not installed" + note, install)
     elif action == "change":
-        planned = ("warn", _stale(change), install)
+        drops = (f" (drops {', '.join(path.name for path in change.dropped)})"
+                 if change.dropped else "")
+        planned = ("warn", _stale(change) + drops + note, install)
     elif action == "remove":
         planned = ("warn", "switched off, unit still installed" if cause == "switch"
                    else "no longer declared", install)
@@ -369,9 +389,59 @@ def _unit_row(change, state, install: str | None = None) -> Row:
         planned = ("off", change.reason, None)
     if state is None or action not in ("keep", "change", "remove"):
         return Row(module, label, *planned)
-    seen = _state_of(change, state)
+    if change.kind == "daemon" and socket is not None:
+        seen = _daemon_seen(change, state, socket, socket_row)
+    else:
+        seen = _state_of(change, state)
     worse = seen if _RANK[seen[0]] > _RANK[planned[0]] else planned
     return Row(module, label, worse[0], f"{planned[1]}; {seen[1]}", worse[2])
+
+
+#: The end of the note `plan` adds to each change of a daemon whose IPv6 addresses it left
+#: out, after "; " and the addresses.
+LEFT_OUT = "left out: no IPv6 loopback on this system"
+
+
+def _left_out(change) -> str:
+    """`plan`'s note on a change whose IPv6 addresses were left out, with its "; ", or
+    the empty string."""
+    _, sep, tail = change.reason.rpartition("; ")
+    return f"; {tail}" if sep and tail.endswith(LEFT_OUT) else ""
+
+
+def _daemon_seen(change, state, socket, socket_row: bool) -> tuple[str, str, str | None]:
+    """A daemon with a `socket`, read beside its socket's state. Like a timer between
+    runs, a daemon whose socket listens is waiting, not down: its process `inactive`
+    under a socket `active` is `ok`, "idle, socket listening". Every other pair reads the
+    daemon by `_state_of`, so a daemon `failed` under a listening socket is still `fail`,
+    and one `inactive` under a socket that isn't `active` is still `warn`.
+
+    Where the socket has a row of its own (systemd, which plans its socket units as one
+    `socket` change), its state shows there: a `failed` socket is a `fail` row naming
+    each failed unit, with its `journalctl` line. Where it has none (launchd, which holds
+    the sockets in the daemon's own job), its state shows here, folded in when it isn't
+    `active`. On launchd that state is the job's: `active` while the label is loaded,
+    since launchd then holds its sockets whether the daemon runs or not. launchd says
+    nothing of a socket it could not bind, so its socket is never `failed` and no row
+    reads a failed socket there. A socket daemon's label that is loaded with no pid and a
+    non-zero last exit (killed, or crashed) reads `failed`, so this row is `fail`, and it
+    stays so until its next connection starts it again. On Task Scheduler the socket is
+    `off` (the daemon binds its own), and the daemon's row is any daemon's.
+
+    On systemd, `moxi install` starts a socket daemon's service each time it writes it (a
+    new daemon, a set that gains or loses a unit), idle or not, and stops and starts a
+    running one around a changed set, so after an install the daemon can read `active`
+    until it exits; on launchd it stays idle until a connection. Only an active daemon's
+    `HEALTH` runs, so one idle under its socket has no health row.
+    """
+    if state.state == "inactive" and socket.state == "active":
+        return "ok", "idle, socket listening", None
+    seen = _state_of(change, state)
+    if socket_row or socket.state in ("active", "off", "nobackend"):
+        return seen
+    held = _state_of(change, socket)
+    worse = held if _RANK[held[0]] > _RANK[seen[0]] else seen
+    return worse[0], f"{seen[1]}; its socket: {held[1]}", worse[2]
 
 
 def _state_of(change, state) -> tuple[str, str, str | None]:
@@ -379,8 +449,17 @@ def _state_of(change, state) -> tuple[str, str, str | None]:
     `active` ok, `failed` fail, `inactive` warn (ok for a unit declared `enabled = false`),
     `missing` warn with the install line, `unknown` warn. A timer's state is its schedule
     on every backend, so a timer whose last run failed is `active` here; that run shows
-    only in its run-line row."""
+    only in its run-line row. A systemd socket's `failed` and `inactive` name the units
+    that are so, from its `detail`, and `failed` gives its `journalctl` line."""
     what = state.state
+    if state.kind == "socket" and what in ("failed", "inactive") and state.detail:
+        if what == "failed":
+            return "fail", state.detail, state.log
+        if not change.enabled:
+            return "ok", f"inactive: declared enabled = false ({state.detail})", None
+        detail = f"inactive ({state.detail})" + (
+            ", not enabled" if state.enabled is False else "")
+        return "warn", detail, state.log
     if what == "active":
         detail = "active"
         if state.since:
@@ -765,7 +844,113 @@ def _check_records(ctx: _Context) -> list[Row]:
     return rows
 
 
-# -- 10. moxi.doctor entries, 11. DOCTOR ----------------------------------------------------------
+# -- 10. placements -------------------------------------------------------------------------------
+
+def _check_placements(ctx: _Context) -> list[Row]:
+    from .. import names
+
+    rows = _harness_rows() if ctx.wanted(names.HARNESS) else []
+    return rows + _placement_rows(ctx)
+
+
+def _harness_rows() -> list[Row]:
+    """A `warn` row on module `moxi` for each harness row the placer skips and each name in
+    `skills.harnesses` that has no row. A core config that can't be read is row 2's."""
+    import shlex
+
+    from .. import config, names, place
+
+    try:
+        settings = place._core_settings()
+        rows_by_name, skipped = place.harnesses(settings)
+        _, unnamed = place.chosen(settings)
+    except config.ConfigError:
+        return []
+    where = settings.file
+    edit = (f"edit or remove that row of harnesses in {where}" if where is not None
+            else "edit or remove that row of harnesses: moxi config moxi")
+    rows = [Row(names.HARNESS, "harnesses", "warn", line, edit) for line in skipped]
+    # chosen() says one line per name with no row, in the setting's order.
+    missing = [name for name in settings["skills.harnesses"] if name not in rows_by_name]
+    for name, line in zip(missing, unnamed):
+        quoted = shlex.quote(str(name))
+        rows.append(Row(names.HARNESS, f"skills.harnesses {name}", "warn", line,
+                        f"moxi config set moxi skills.harnesses --remove {quoted}, or add "
+                        f"its row: moxi config set moxi harnesses --add "
+                        f"'{{name = \"{name}\", skills = \"...\", agents = \"...\"}}'"))
+    return rows
+
+
+def _placement_rows(ctx: _Context) -> list[Row]:
+    """Each owner's placements read against the disk (`moxi.place.status`): a `warn` row for
+    each that is `stale`, `modified` or `missing`, and one `ok` row per owner whose
+    placements all read `ok`. A ledger that can't be read is one `fail` row, since every
+    install and uninstall then fails to place or remove skills."""
+    from .. import names, place
+
+    path = place._ledger_path()
+    try:
+        ledger = place._read_ledger()
+    except ValueError as exc:
+        # The placer's text up to its advice, which the fix line gives in full.
+        return [Row(names.HARNESS, "placements", "fail", str(exc).partition("; ")[0],
+                    f"move {path} aside, then run moxi install <module> --replace for each "
+                    f"module whose skills are links: a link the placer made reads as "
+                    f"unmarked without its ledger entry (a copied folder is known by its "
+                    f"mark)")]
+    except OSError as exc:
+        return [Row(names.HARNESS, "placements", "fail", f"{path} cannot be read: {exc}")]
+    rows = []
+    for owner in sorted(ledger):
+        entries = ledger[owner].get("placed", {})
+        if not entries or not ctx.wanted(owner):
+            continue
+        found = ctx.found.get(owner)
+        bad = [placed for placed in place.status(owner) if placed.state != "ok"]
+        for placed in bad:
+            entry = entries.get(str(placed.path), {})
+            rows.append(_placement_row(placed, entry, found, ctx.is_present(owner)))
+        if not bad:
+            count = len(entries)
+            rows.append(Row(owner, "placements", "ok",
+                            f"{count} placement{'s' if count != 1 else ''}, each as placed"))
+    return rows
+
+
+def _placement_row(placed, entry: Mapping, found, present: bool) -> Row:
+    """One placement that isn't `ok`, as a `warn` row. Its fix is a `moxi install` line only
+    when the owner is an installed module whose own package the source lies in, since only
+    then is the placement one that `moxi install` makes; another owner's tool (a project
+    manager placing a project's skills, say) manages the rest."""
+    source = str(entry.get("source", ""))
+    path = placed.path
+    if placed.state == "missing":
+        detail = f"{path} is gone"
+    elif placed.state == "stale" and not os.path.exists(source):
+        detail = f"source missing: {source} (placed at {path})"
+    elif placed.state == "stale":
+        detail = (f"{path} is stale: its source {source} changed after it was copied"
+                  if placed.form == "copy"
+                  else f"{path} is stale: it no longer resolves to its source {source}")
+    elif placed.form == "copy":
+        detail = f"{path} was edited after it was copied"
+    else:
+        detail = f"{path} no longer points at its source {source}"
+    from .. import place
+
+    fix = None
+    if present and place.from_package(found, source):
+        fix = f"moxi install {placed.owner}"
+        if placed.state == "modified":
+            from .. import paths
+
+            fix += (" --replace, which moves it to "
+                    f"{paths.core().data_dir() / 'displaced'}")
+    return Row(placed.owner, f"placement {placed.harness} {placed.name}", "warn", detail,
+               fix)
+
+
+# -- 11. moxi.doctor entries, 12. DOCTOR ----------------------------------------------------------
 
 def _check_entries(ctx: _Context) -> list[Row]:
     from .. import modules
@@ -861,7 +1046,7 @@ def _describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {lines[0]}" if lines else type(exc).__name__
 
 
-# -- 12. costs ---------------------------------------------------------------------------------
+# -- 13. costs ---------------------------------------------------------------------------------
 
 _floor: list[float] = []
 

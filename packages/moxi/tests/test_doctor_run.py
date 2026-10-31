@@ -5,20 +5,24 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
 import textwrap
 import time
 import types
+from pathlib import Path
 
 import pytest
 
+import moxi.config
 import moxi.paths
-from moxi import cli, doctor, files, modules, strays, units
+from moxi import cli, doctor, files, modules, place, strays, units
 from moxi.doctor import Row, _run
 from moxi.units import _backend, _state
 from moxi.units._fake import FakeBackend, FakeSupervisor
+from moxi.units._launchd import LaunchdBackend
 from moxi.units._types import UnitChange, UnitState, Wrapped
 
 SETTINGS = """
@@ -506,6 +510,227 @@ def test_a_disabled_timer_warns_unless_declared_disabled(enabled, state):
     assert _run._unit_row(change, read).state == state
 
 
+# -- a daemon's sockets ------------------------------------------------------------------------
+
+STEM = "moxi-demo-relay"
+
+
+def sockets(*addresses):
+    return ("{'relay': {'command': 'moxi-demo-relay', 'socket': {'setting': 'port', "
+            f"'addresses': {list(addresses)!r}}}}}}}")
+
+
+@pytest.fixture
+def ipv6(monkeypatch):
+    """This box has no IPv6 loopback, so a test that renders `::1` says whether one is
+    there."""
+    held = {"loopback": True}
+    monkeypatch.setattr(units._plan, "ipv6_loopback", lambda: held["loopback"])
+    return held
+
+
+def test_an_idle_daemon_under_a_listening_socket_is_ok_with_no_health_row(d, ipv6):
+    d.installed(DAEMONS=sockets("127.0.0.1", "::1"),
+                HEALTH="{'relay': 'moxi_demo.health:ok'}",
+                files_={"health.py": """\
+                    from moxi.doctor import Row
+                    def ok():
+                        return Row("demo", "x", "ok", "fine")
+                    """})
+    # The install started the service; it exits and waits on its sockets.
+    d.sup.state(f"{STEM}.service")["active"] = False
+    got = d.rows("demo")
+    relay = got[("demo", "daemon relay")]
+    assert (relay.state, relay.detail, relay.fix) == (
+        "ok", "up to date; idle, socket listening", None)
+    sock = got[("demo", "socket relay")]
+    assert sock.state == "ok" and sock.detail.startswith("up to date; active")
+    assert ("demo", "daemon relay health") not in got
+    # A connection starts it: active, with its health row.
+    d.sup.state(f"{STEM}.service")["active"] = True
+    got = d.rows("demo")
+    assert got[("demo", "daemon relay")].detail.startswith("up to date; active")
+    assert got[("demo", "daemon relay health")].detail == "fine"
+    assert cli.main(["doctor", "demo"]) == 0
+
+
+def test_a_failed_socket_unit_is_a_fail_socket_row_naming_it(d, ipv6):
+    d.installed(DAEMONS=sockets("127.0.0.1", "::1"))
+    d.sup.state(f"{STEM}.service")["active"] = False
+    d.sup.props[f"{STEM}-1.socket"] = {"ActiveState": "failed"}
+    got = d.rows("demo")
+    sock = got[("demo", "socket relay")]
+    assert (sock.state, sock.detail) == ("fail", f"up to date; failed: {STEM}-1.socket")
+    assert sock.fix == f"journalctl --user -u {STEM}.socket -u {STEM}-1.socket"
+    # Its service is inactive under a socket that isn't active: still warn.
+    relay = got[("demo", "daemon relay")]
+    assert relay.state == "warn" and relay.detail.startswith("up to date; inactive")
+    assert cli.main(["doctor", "demo"]) == 1
+
+
+def test_an_inactive_socket_names_the_units_not_active(d, ipv6):
+    d.installed(DAEMONS=sockets("127.0.0.1", "::1"))
+    d.sup.state(f"{STEM}-1.socket")["active"] = False
+    sock = d.rows("demo")[("demo", "socket relay")]
+    assert (sock.state, sock.detail) == (
+        "warn", f"up to date; inactive (not active: {STEM}-1.socket)")
+
+
+def test_a_daemon_failed_under_a_listening_socket_still_fails(d, ipv6):
+    d.installed(DAEMONS=sockets("127.0.0.1"))
+    d.sup.props[f"{STEM}.service"] = {"ActiveState": "failed"}
+    got = d.rows("demo")
+    relay = got[("demo", "daemon relay")]
+    assert relay.state == "fail" and relay.detail.startswith("up to date; failed")
+    assert got[("demo", "socket relay")].state == "ok"
+
+
+def test_an_address_taken_out_names_the_unit_the_set_drops(d, ipv6):
+    d.installed(DAEMONS=sockets("127.0.0.1", "::1"))
+    d.module(DAEMONS=sockets("127.0.0.1"))
+    got = d.rows("demo")
+    sock = got[("demo", "socket relay")]
+    assert sock.state == "warn" and sock.fix == "moxi install demo"
+    assert sock.detail.startswith(f"stale (drops {STEM}-1.socket); active")
+    assert got[("demo", "daemon relay")].detail.startswith("stale; ")
+
+
+def test_a_changed_port_and_a_dropped_unit_in_one_row(d, ipv6):
+    d.installed(DAEMONS=sockets("127.0.0.1", "::1"))
+    path = moxi.paths.Layout("demo").config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("port = 8471\n")
+    d.module(DAEMONS=sockets("127.0.0.1"))
+    sock = d.rows("demo")[("demo", "socket relay")]
+    assert sock.detail.startswith(
+        f"port 8470 written, setting says 8471 (drops {STEM}-1.socket); active")
+
+
+def test_an_ipv6_address_left_out_says_so_in_each_row(d, ipv6):
+    ipv6["loopback"] = False
+    note = "; ::1 left out: no IPv6 loopback on this system"
+    d.script("moxi-demo-relay")
+    d.module(DAEMONS=sockets("127.0.0.1", "::1"))
+    got = d.rows("demo")
+    for label in ("daemon relay", "socket relay"):
+        assert (got[("demo", label)].state, got[("demo", label)].detail) == (
+            "warn", "not installed" + note)
+    d.installed(DAEMONS=sockets("127.0.0.1", "::1"))
+    assert [p.name for p in units.plan("demo")[1].paths] == [f"{STEM}.socket"]
+    got = d.rows("demo")
+    for label in ("daemon relay", "socket relay"):
+        assert got[("demo", label)].state == "ok"
+        assert got[("demo", label)].detail.startswith("up to date" + note + "; active")
+    # The loopback back: the set grows by the unit for ::1, and the note goes.
+    ipv6["loopback"] = True
+    sock = d.rows("demo")[("demo", "socket relay")]
+    assert sock.state == "warn" and sock.detail.startswith("stale; active")
+
+
+def test_a_daemon_left_with_no_address_fails(d, ipv6):
+    ipv6["loopback"] = False
+    d.script("moxi-demo-relay")
+    d.module(DAEMONS=sockets("::1"))
+    got = d.rows("demo")
+    relay = got[("demo", "daemon relay")]
+    assert relay.state == "fail" and relay.fix is None
+    assert relay.detail == ("demo/relay: its socket has no address left to listen on "
+                            "(::1 left out: no IPv6 loopback on this system)")
+    assert ("demo", "socket relay") not in got
+
+
+def launchd_rows(d, monkeypatch, daemon: UnitState, socket: UnitState) -> dict:
+    """The doctor's rows for a socket daemon whose plan and status are launchd's: one
+    `daemon` change and no `socket` change, and the two states its print gives."""
+    d.script("moxi-demo-relay")
+    d.module(DAEMONS=sockets("127.0.0.1", "::1"))
+    keep = UnitChange("demo", "relay", "daemon", "keep", None, (), None, "up to date",
+                      entry={"argv": ["/x"], "socket": {"setting": "port",
+                                                        "addresses": ["127.0.0.1"]}})
+    monkeypatch.setattr(units, "plan", lambda module: [keep])
+    monkeypatch.setattr(units, "status", lambda *a, **k: [daemon, socket])
+    return {k: r for k, r in d.rows("demo").items() if k[1].startswith(("daemon", "socket"))}
+
+
+def launchd(kind, state, **kw):
+    return UnitState("demo", "relay", kind, "launchd", state,
+                     log="/state/logs/relay.log", **kw)
+
+
+def test_on_launchd_a_loaded_idle_label_is_ok_and_there_is_no_socket_row(d, monkeypatch):
+    got = launchd_rows(d, monkeypatch, launchd("daemon", "inactive", detail="loaded"),
+                       launchd("socket", "active", detail="loaded"))
+    assert set(got) == {("demo", "daemon relay")}
+    assert (got[("demo", "daemon relay")].state, got[("demo", "daemon relay")].detail) == (
+        "ok", "up to date; idle, socket listening")
+
+
+def test_on_launchd_a_socket_daemon_whose_last_exit_was_not_zero_fails(d, monkeypatch):
+    # No KeepAlive: killed, it stays so until its next connection starts it.
+    got = launchd_rows(d, monkeypatch,
+                       launchd("daemon", "failed", detail="loaded, last exit 9"),
+                       launchd("socket", "active", detail="loaded"))
+    row = got[("demo", "daemon relay")]
+    assert (row.state, row.fix) == ("fail", "/state/logs/relay.log")
+    assert set(got) == {("demo", "daemon relay")}
+
+
+def test_on_launchd_a_label_not_loaded_shows_its_socket_in_the_daemon_row(d, monkeypatch):
+    got = launchd_rows(d, monkeypatch,
+                       launchd("daemon", "inactive", detail="not loaded"),
+                       launchd("socket", "inactive", detail="not loaded"))
+    row = got[("demo", "daemon relay")]
+    assert (row.state, row.detail) == (
+        "warn", "up to date; inactive; its socket: inactive (not loaded)")
+
+
+def test_on_launchd_the_recorded_print_of_an_idle_label_gives_the_same_rows(d, tmp_path,
+                                                                           monkeypatch):
+    """The launchd backend's own plan and status, its `status` reading the recorded
+    print of a loaded socket daemon that has not run yet: the daemon row is `ok`, idle
+    with its socket listening, and there is no socket row."""
+    monkeypatch.syspath_prepend(str(Path(__file__).parent))
+    from test_units_launchd import SOCKETS_PRINTED, UID
+
+    calls = []
+
+    def run(cmd, *, env=None, timeout=None):
+        calls.append(cmd)
+        assert cmd == ["launchctl", "print", f"gui/{UID}"]
+        return subprocess.CompletedProcess(cmd, 0, SOCKETS_PRINTED, "")
+
+    agents = tmp_path / "LaunchAgents"
+    agents.mkdir()
+    d.script("moxi-demo-relay")
+    d.module(DAEMONS="{'idle': {'command': 'moxi-demo-relay', 'socket': {'setting': 'port', "
+                     "'addresses': ['127.0.0.1']}}}")
+    with _backend.use(LaunchdBackend(agents=agents, uid=UID, runner=run)):
+        [change] = units.plan("demo")
+        assert (change.kind, change.action) == ("daemon", "add")
+        files.atomic_write(change.paths[0], change.text)
+        got = {k: r for k, r in d.rows("demo", runner=run).items()
+               if k[1].startswith(("daemon", "socket"))}
+    assert set(got) == {("demo", "daemon idle")}
+    assert (got[("demo", "daemon idle")].state, got[("demo", "daemon idle")].detail) == (
+        "ok", "up to date; idle, socket listening")
+    assert calls == [["launchctl", "print", f"gui/{UID}"]]
+
+
+@pytest.mark.parametrize("seen, state", [("inactive", "warn"), ("active", "ok"),
+                                         ("failed", "fail")])
+def test_on_task_scheduler_the_daemon_row_is_any_daemon_s(seen, state):
+    """The socket is `off` there (the daemon binds its own) and has no row; the daemon's
+    row reads as if it had no socket."""
+    off = UnitState("demo", "relay", "socket", "schtasks", "off",
+                    detail="the socket is skipped on Windows; the daemon binds its own")
+    read = UnitState("demo", "relay", "daemon", "schtasks", seen, log="C:/logs/relay.log")
+    change = unit_change(entry={"argv": ["/x"], "socket": {"setting": "port",
+                                                           "addresses": ["127.0.0.1"]}})
+    with_socket = _run._unit_row(change, read, socket=off, socket_row=False)
+    assert with_socket == _run._unit_row(change, read)
+    assert with_socket.state == state
+
+
 # -- HEALTH ------------------------------------------------------------------------------------
 
 HEALTHS = """\
@@ -758,6 +983,174 @@ def test_records_are_fail_rows_until_cleared(d):
     assert ("moxi", "record k") not in d.rows()
 
 
+# -- 10. placements ------------------------------------------------------------------------------
+
+@pytest.fixture
+def pl(d, tmp_path, monkeypatch):
+    """`d` with a home of its own, so the harness folders are under tmp, and module `demo`
+    shipping skill `demo-send` in its package."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # what `~` reads on Windows
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    d.module(settings=None, SKILLS="'skills'",
+             files_={"skills/demo-send/SKILL.md": "# send\n"})
+    d.home = home
+    d.source = d.site.root / "moxi_demo" / "skills" / "demo-send"
+    d.claude = home / ".claude" / "skills" / "demo-send"
+    return d
+
+
+def place_demo(pl, *, owner="demo", form=None, source=None):
+    source = source or pl.source
+    steps = place.plan(owner, [place.Item(source, "claude", "demo-send")], form=form)
+    place.apply(steps, say=lambda line: None)
+    return pl.home / ".claude" / "skills" / "demo-send"
+
+
+def placement_rows(rows):
+    return {key: row for key, row in rows.items()
+            if key[1].startswith("placement") or key[1] == "placements"}
+
+
+def test_placements_as_placed_are_one_ok_row_per_owner(pl):
+    place_demo(pl)
+    got = placement_rows(pl.rows())
+    assert got == {("demo", "placements"): Row("demo", "placements", "ok",
+                                                "1 placement, each as placed")}
+
+
+def test_a_gone_source_warns_source_missing_and_the_dangling_link_is_left(pl, capsys):
+    target = place_demo(pl)
+    shutil.rmtree(pl.source)
+    ledger = (moxi.paths.core().state_dir() / place.LEDGER).read_bytes()
+    row = pl.rows()[("demo", "placement claude demo-send")]
+    assert row.state == "warn"
+    assert row.detail == f"source missing: {pl.source} (placed at {target})"
+    assert row.fix == "moxi install demo"
+    assert ("demo", "placements") not in pl.rows()
+    # The doctor only reads: the link still dangles there and the ledger is as it was.
+    assert target.is_symlink() and not target.exists()
+    assert (moxi.paths.core().state_dir() / place.LEDGER).read_bytes() == ledger
+    assert cli.main(["doctor", "demo"]) == 0
+
+
+def test_a_missing_placement_warns(pl):
+    target = place_demo(pl)
+    target.unlink()
+    row = pl.rows()[("demo", "placement claude demo-send")]
+    assert (row.state, row.detail, row.fix) == ("warn", f"{target} is gone",
+                                                "moxi install demo")
+
+
+def test_an_edited_copy_warns_modified_with_the_replace_line(pl):
+    target = place_demo(pl, form="copy")
+    (target / "SKILL.md").write_text("# mine now\n")
+    row = pl.rows()[("demo", "placement claude demo-send")]
+    assert row.state == "warn"
+    assert row.detail == f"{target} was edited after it was copied"
+    displaced = moxi.paths.core().data_dir() / "displaced"
+    assert row.fix == f"moxi install demo --replace, which moves it to {displaced}"
+    assert (target / "SKILL.md").read_text() == "# mine now\n"
+
+
+def test_a_copy_whose_source_changed_is_stale(pl):
+    target = place_demo(pl, form="copy")
+    (pl.source / "SKILL.md").write_text("# send v2\n")
+    row = pl.rows()[("demo", "placement claude demo-send")]
+    assert row.state == "warn"
+    assert row.detail == (f"{target} is stale: its source {pl.source} changed after it "
+                          "was copied")
+    assert (target / "SKILL.md").read_text() == "# send\n"
+
+
+def test_a_link_pointed_elsewhere_warns_modified(pl, tmp_path):
+    target = place_demo(pl)
+    target.unlink()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    target.symlink_to(elsewhere)
+    row = pl.rows()[("demo", "placement claude demo-send")]
+    assert row.detail == f"{target} no longer points at its source {pl.source}"
+    assert row.fix.startswith("moxi install demo --replace")
+
+
+def test_another_owner_s_placement_has_no_install_fix(pl, tmp_path):
+    other = tmp_path / "project" / "skills" / "demo-send"
+    other.mkdir(parents=True)
+    (other / "SKILL.md").write_text("# project\n")
+    place_demo(pl, owner="loadout", source=other)
+    shutil.rmtree(other)
+    row = pl.rows()[("loadout", "placement claude demo-send")]
+    assert row.state == "warn" and row.detail.startswith(f"source missing: {other}")
+    assert row.fix is None
+
+
+def test_a_placement_whose_source_is_outside_its_owner_s_package_has_no_fix(pl, tmp_path):
+    other = tmp_path / "elsewhere" / "demo-send"
+    other.mkdir(parents=True)
+    (other / "SKILL.md").write_text("# x\n")
+    target = place_demo(pl, source=other)
+    target.unlink()
+    assert pl.rows()[("demo", "placement claude demo-send")].fix is None
+
+
+def test_module_names_restrict_the_placement_rows(pl):
+    target = place_demo(pl)
+    target.unlink()
+    assert ("demo", "placement claude demo-send") in pl.rows("demo")
+    assert not placement_rows(pl.rows("moxi"))
+
+
+def test_a_ledger_that_is_not_json_is_one_fail_row_and_the_rest_run(pl):
+    path = moxi.paths.core().state_dir() / place.LEDGER
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json")
+    got = pl.rows()
+    row = got[("moxi", "placements")]
+    assert row.state == "fail"
+    assert row.detail.startswith(f"{path} does not read as JSON (")
+    assert "move it aside" not in row.detail
+    assert row.fix.startswith(f"move {path} aside, then run moxi install <module> "
+                              "--replace")
+    assert "reads as unmarked without its ledger entry" in row.fix
+    assert ("moxi", "check placements") not in got
+    assert got[("demo", "module")].state == "ok"
+    assert path.read_text() == "{not json"
+    path.write_text("[]")
+    row = pl.rows()[("moxi", "placements")]
+    assert (row.state, row.detail) == ("fail", f"{path} is not a JSON object")
+    # a ledger that can't be opened at all fails the same way
+    path.unlink()
+    path.mkdir()
+    row = pl.rows()[("moxi", "placements")]
+    assert row.state == "fail" and str(path) in row.detail
+
+
+def test_a_harness_name_with_no_row_and_a_skipped_row_warn_on_moxi(pl, capsys):
+    moxi.config.set("moxi", "skills.harnesses", ["claude", "opencode"], by="test")
+    moxi.config.add_item("moxi", "harnesses", {"name": "Bad Name", "skills": "/x"},
+                         by="test")
+    got = pl.rows()
+    row = got[("moxi", "skills.harnesses opencode")]
+    assert row.state == "warn"
+    assert row.detail == "skills.harnesses names opencode, which has no row in harnesses"
+    assert row.fix.startswith("moxi config set moxi skills.harnesses --remove opencode")
+    assert "harnesses --add '{name = \"opencode\"" in row.fix
+    skipped = got[("moxi", "harnesses")]
+    assert skipped.state == "warn"
+    assert skipped.detail.startswith("harnesses row 3 is skipped: its name 'Bad Name'")
+    assert str(moxi.config.load("moxi", moxi.config._core_schema()).file) in skipped.fix
+    assert ("moxi", "harnesses") not in pl.rows("demo")
+    assert cli.main(["doctor"]) == 0
+
+
+def test_the_default_harness_table_gives_no_harness_rows(pl):
+    got = pl.rows()
+    assert not [key for key in got if key[1].startswith(("harnesses", "skills.harnesses"))]
+
+
 # -- 10, 11: moxi.doctor entries and DOCTOR --------------------------------------------------------
 
 CHECKS = """\
@@ -931,3 +1324,24 @@ def test_a_supervisor_read_that_raises_is_a_fail_row_per_module(d, monkeypatch):
     row = got[("demo", "units")]
     assert row.state == "fail" and "RuntimeError: the bus is gone" in row.detail
     assert got[("demo", "daemon relay")] == Row("demo", "daemon relay", "ok", "up to date")
+
+
+def test_the_install_fix_follows_the_placer_s_own_package_test(pl, tmp_path):
+    """A project folder named like the owner's package is not its package, so no
+    `moxi install` fix; a source where an older install of the package lay is."""
+    project = tmp_path / "proj" / "moxi_demo" / "skills" / "demo-send"
+    project.mkdir(parents=True)
+    (project / "SKILL.md").write_text("# project\n")
+    target = place_demo(pl, source=project)
+    target.unlink()
+    assert pl.rows()[("demo", "placement claude demo-send")].fix is None
+    place.remove("demo", say=lambda line: None)
+    old = (tmp_path / "old" / "lib" / "python3.11" / "site-packages" / "moxi_demo"
+           / "skills" / "demo-send")
+    old.mkdir(parents=True)
+    (old / "SKILL.md").write_text("# send\n")
+    place_demo(pl, source=old)
+    shutil.rmtree(old)
+    row = pl.rows()[("demo", "placement claude demo-send")]
+    assert row.detail.startswith(f"source missing: {old}")
+    assert row.fix == "moxi install demo"

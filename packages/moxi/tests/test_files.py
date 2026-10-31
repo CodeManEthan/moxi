@@ -1034,6 +1034,68 @@ def test_private_dir_refuses_a_dangling_symbolic_link_and_makes_nothing(tmp_path
     assert link.is_symlink() and not (tmp_path / "nowhere").exists()
 
 
+# -- the directories made on the way to a file -------------------------------------------
+
+@pytest.fixture
+def open_umask():
+    """A umask that takes no bits away, so a directory made with the default mode is
+    plainly open to everyone."""
+    old = os.umask(0)
+    yield
+    os.umask(old)
+
+
+def _take_lock(target: Path) -> None:
+    with files.lock(target / "f.lock"):
+        pass
+
+
+MAKERS = {
+    "atomic_write": lambda target: files.atomic_write(target / "f", "x"),
+    "lock": _take_lock,
+    "append_record": lambda target: files.append_record(target / "log.jsonl", {"a": 1}),
+    "private_dir": files.private_dir,
+}
+
+
+@POSIX
+@pytest.mark.parametrize("maker", MAKERS)
+def test_each_missing_directory_on_the_way_is_made_0700(tmp_path, open_umask, maker):
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    os.chmod(shared, 0o775)
+    target = shared / "a" / "b" / "c"
+    MAKERS[maker](target)
+    for each in (shared / "a", shared / "a" / "b", target):
+        assert mode_of(each) == 0o700, each
+    assert mode_of(shared) == 0o775
+
+
+@POSIX
+def test_making_directories_leaves_an_existing_one_as_it_is(tmp_path, open_umask):
+    middle = tmp_path / "a" / "b"
+    middle.mkdir(parents=True)
+    os.chmod(tmp_path / "a", 0o751)
+    os.chmod(middle, 0o755)
+    files.atomic_write(middle / "c" / "f", "x")
+    assert mode_of(tmp_path / "a") == 0o751
+    assert mode_of(middle) == 0o755
+    assert mode_of(middle / "c") == 0o700
+
+
+@POSIX
+def test_a_directory_made_without_privacy_gets_the_default_mode(tmp_path, open_umask):
+    files._make_dirs(tmp_path / "a" / "b", private=False)
+    assert mode_of(tmp_path / "a") == 0o777
+    assert mode_of(tmp_path / "a" / "b") == 0o777
+
+
+def test_making_directories_refuses_a_file_in_the_way(tmp_path):
+    (tmp_path / "a").write_text("")
+    with pytest.raises(FileExistsError):
+        files._make_dirs(tmp_path / "a")
+
+
 @WINDOWS
 def test_private_dir_on_windows_grants_only_this_user(tmp_path):
     made = files.private_dir(tmp_path / "d")
