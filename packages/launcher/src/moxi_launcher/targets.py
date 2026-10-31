@@ -23,10 +23,14 @@ The pid and its start time are recorded, and the launch returns at once.
 
 **A tmux slot** (`slot`; Linux, macOS and WSL2, with slots installed). A launch that names
 a slot (a number or a name) goes only there, and `check` refuses it when slots says it is
-not launchable: as taken, naming who has it, when it is held or occupied, and as missing
+not launchable: as taken, naming who has it, when it is occupied or held (by a hold not
+the launch's own: a replay may come with the hold on its slot), and as missing
 when slots has no such slot (a session of its name with no registry row included) or its
 session is gone. One that names none takes the lowest launchable slot or a new one. slots claims the slot and opens the window in one step (`start`), with the
-launch's environment on that command only. The row records the slot, the pane and the
+launch's environment on that command only; a relaunch goes back into its slot's ended run
+pane (`respawn`), which keeps the pane, and a launch with the slot's hold passes it, which
+ends with the start. slots keeps the launch's request id, session id and chain (the first
+request id of its relaunches) as the slot's `meta`. The row records the slot, the pane and the
 pane's pid (the harness's, since slots' trampoline execs it), and `started` once slots says
 the command started, or `started` with reason `unconfirmed` when slots could not confirm it
 either way (the ready wait decides), or `failed` with slots' exec line. A slot taken since
@@ -199,7 +203,12 @@ class Launch:
     its first word, which the target runs it as. `env` is the child's whole environment,
     `cwd` its directory. `deliverer_env` is the launcher's own environment, the one the
     detached deliverer runs in and the one the launch's files are placed by (the launch
-    log, the run files), None for this process's."""
+    log, the run files), None for this process's.
+
+    For the slot target: `hold` is the slot hold the launch comes with, which lets it into
+    the slot it holds and ends with its start; `respawn` starts it in the slot's ended run
+    pane, keeping the pane; `chain` is the first request id of its chain of relaunches,
+    kept in the slot's `meta` (None reads as the launch's own id)."""
 
     conn: sqlite3.Connection
     request_id: str
@@ -209,6 +218,9 @@ class Launch:
     env: Mapping[str, str]
     cwd: str
     deliverer_env: Mapping[str, str] | None = None
+    hold: str | None = None
+    respawn: bool = False
+    chain: str | None = None
 
     @property
     def first_owed(self) -> bool:
@@ -379,7 +391,7 @@ class Slot(Target):
             return [SlotMissing(named, f"there is no slot {found.number} (a session of "
                                        "that name runs with no registry row)",
                                 f"moxi slots create {found.number} makes it")]
-        if found.launchable:
+        if found.launchable or _own_hold(found, getattr(resolved, "hold", None)):
             return []
         if found.state == "missing":
             return [SlotMissing(named, f"slot {named} is missing: its tmux session is gone",
@@ -410,11 +422,18 @@ class Slot(Target):
             return fail(conn, rid, SPAWN_FAILED, "slots can't be loaded")
         named = named_slot(launch.composition.values)
         row = store.get(conn, rid)
-        meta = {"request_id": rid, "session_id": row.session_id if row else None}
+        meta = {"request_id": rid, "session_id": row.session_id if row else None,
+                "chain": launch.chain or rid}
+        place = dict(env=dict(launch.env), cwd=launch.cwd, label=f"launcher:{rid}",
+                     meta=meta, hold=launch.hold)
         try:
-            placed = api.start(named, list(launch.argv), env=dict(launch.env),
-                               cwd=launch.cwd, label=f"launcher:{rid}", meta=meta,
-                               create=named is None)
+            if launch.respawn:
+                if named is None:
+                    return fail(conn, rid, SPAWN_FAILED,
+                                "a respawn names the slot whose run pane it reuses")
+                placed = api.respawn(named, list(launch.argv), **place)
+            else:
+                placed = api.start(named, list(launch.argv), **place, create=named is None)
         except api.Refused as refused:
             holder = _refused_holder(refused.reason, refused.holder)
             words = refused.words or f"slots refused the slot: {refused.reason}"
@@ -673,6 +692,13 @@ def _dead_status(api: Any, slot: Any, placed: Any) -> int | None:
         return None
     status = found.dead_status if found is not None else None
     return None if status is None else int(status)
+
+
+def _own_hold(found: Any, hold: str | None) -> bool:
+    """Whether a slot takes a launch only because the hold on it is the launch's own: it
+    is free or ended, and held by `hold`."""
+    return bool(hold) and found.state in ("free", "ended") and found.hold is not None \
+        and found.hold.holder == hold
 
 
 def named_slot(values: Mapping[str, object]) -> int | str | None:

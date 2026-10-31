@@ -147,7 +147,8 @@ def test_a_launch_naming_no_slot_takes_the_lowest_free_one(work, harness, rig,
     # No slot named: slots takes the lowest launchable one, or makes the next.
     assert call["slot"] is None and call["create"] is True
     assert call["label"] == "launcher:r1"
-    assert call["meta"] == {"request_id": "r1", "session_id": SID}
+    assert call["meta"] == {"request_id": "r1", "session_id": SID, "chain": "r1"}
+    assert call["hold"] is None
     assert call["cwd"] == str(work)
     # The whole child environment goes to slots, scrubbed and stamped.
     assert call["env"]["MOXI_LAUNCHER_REQUEST"] == "r1"
