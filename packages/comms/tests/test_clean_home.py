@@ -62,6 +62,8 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from moxi import exit as moxi_exit
+from moxi_comms.paths import comms_db
 
 TESTS = Path(__file__).resolve().parent
 REPO = TESTS.parent
@@ -431,7 +433,9 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
         doctor = run(["moxi", "comms", "doctor"], env, cwd=home)
         assert not any(line.startswith("slots") for line in doctor.stdout.splitlines())
         assert "daemon      answers at " in doctor.stdout
-        db = home / ".local" / "share" / "moxi" / "comms" / "directory.db"
+        # comms' one store, where comms' own path helper puts it for this environment.
+        db = comms_db(env)
+        assert db.is_relative_to(home), db
         conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         try:
             tables = {row[0] for row in conn.execute(
@@ -495,7 +499,7 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
         stamped = run(["moxi", "comms", "send", "bob", "a stamp alone"],
                       {**env, "MOXI_COMMS_NAME": "alice", "MOXI_COMMS_GLOBAL": "1"},
                       cwd=home)
-        assert stamped.returncode == 2, stamped.stdout + stamped.stderr
+        assert stamped.returncode == moxi_exit.REFUSED, stamped.stdout + stamped.stderr
         assert ("this process is not inside the session that holds alice — nothing was "
                 "sent.") in stamped.stdout, stamped.stdout
         sent = run(["moxi", "comms", "send", "alice", "please ping bob"], operator_env, cwd=home)
