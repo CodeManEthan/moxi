@@ -182,7 +182,20 @@ def test_values_and_argv_past_the_cap_are_refused():
     assert refused.value.field == "values_json"
     with pytest.raises(store.TooLarge) as refused:
         common.check_sizes(["claude", "y" * store.CAP], values={}, windows=False)
-    assert refused.value.field == "argv_json"
+    assert refused.value.field == "argv_json" and refused.value.largest is None
+
+
+def test_a_brief_under_its_cap_that_fills_values_json_is_named_in_the_refusal():
+    # The inline brief is kept in values_json as well, so one under its own cap can
+    # still fill it: the refusal names the brief as what to shorten.
+    brief = "b" * (store.CAP - 100)
+    with pytest.raises(store.TooLarge) as refused:
+        common.check_sizes(["claude"], values={"harness": "claude", "brief": brief,
+                                               "instructions": "i" * 200},
+                           brief=brief, windows=False)
+    assert refused.value.field == "values_json"
+    assert refused.value.largest == ("brief", len(brief) + 2)
+    assert f"the largest part brief ({len(brief) + 2} bytes)" in str(refused.value)
 
 
 def test_one_word_past_the_system_limit_is_refused():

@@ -428,11 +428,16 @@ def check_sizes(argv: Sequence[str], *, values: Mapping[str, object],
                 prompt: str | None = None, windows: bool = os.name == "nt") -> None:
     """Refuse a launch past a limit: `store.TooLarge` for a brief, `values_json` or
     `argv_json` past the launch log's cap, `TooLong` for a command line past the
-    system's."""
+    system's. A `values_json` refusal names its largest value too, which is the one to
+    shorten (an inline brief or instructions, most often)."""
     for name, text in (("brief", brief), ("values_json", encode(dict(values))),
                        ("argv_json", encode(list(argv)))):
         if text is not None and (size := len(text.encode("utf-8"))) > store.CAP:
-            raise store.TooLarge(name, size)
+            largest = None
+            if name == "values_json" and values:
+                largest = max(((key, len(encode(value).encode("utf-8")))
+                               for key, value in values.items()), key=lambda kv: kv[1])
+            raise store.TooLarge(name, size, largest)
     if windows:
         line = subprocess.list2cmdline(list(argv))
         if len(line) + 1 > WINDOWS_LINE:

@@ -141,11 +141,14 @@ class TooLarge(store.StoreError):
 
     exit_code = exits.REFUSED
 
-    def __init__(self, field: str, size: int):
+    def __init__(self, field: str, size: int, largest: tuple[str, int] | None = None):
         self.field = field
         self.size = size
-        super().__init__(f"{field} is {size} bytes, past the launch log's cap of {CAP}; "
-                         "it is refused, not cut")
+        self.largest = largest
+        part = (f", the largest part {largest[0]} ({largest[1]} bytes)"
+                if largest is not None else "")
+        super().__init__(f"{field} is {size} bytes, past the launch log's cap of {CAP}"
+                         f"{part}; it is refused, not cut")
 
 
 class Busy(store.StoreError):
