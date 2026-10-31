@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from moxi_cache import table
+from moxi_cache import table, timer
 from moxi_sessions.api import testing
 
 HOUR = 3600
@@ -40,6 +40,19 @@ def own_roots(tmp_path, monkeypatch) -> Path:
     # The systemd user unit folder lives under XDG_CONFIG_HOME: never the user's own.
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
     return home
+
+
+@pytest.fixture(autouse=True)
+def no_module_subscriptions(monkeypatch) -> None:
+    """No module installed beside cache declares a timer subscription here, so what the
+    watcher, `timers` and `doctor` find is the test's own config. A test that reads
+    modules' subscriptions hands `from_modules` its entry points."""
+    real = timer.from_modules
+
+    def from_modules(entry_points=None, find=None):
+        return real([] if entry_points is None else entry_points, find)
+
+    monkeypatch.setattr(timer, "from_modules", from_modules)
 
 
 @pytest.fixture(autouse=True)
