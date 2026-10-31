@@ -213,6 +213,31 @@ def test_the_deliverer_goes_on_to_the_first_turn_once_bound(conn, monkeypatch):
     assert first.deliver("r1", pid=os.getpid(), out=out) == exits.OK and sent == ["r1"]
 
 
+@pytest.mark.parametrize("ready_s, bind_bound, left", [(60, 15.0, 50.0), (8, 8.0, 0.0)])
+def test_the_bind_wait_comes_out_of_the_ready_wait(conn, monkeypatch, ready_s, bind_bound,
+                                                   left):
+    """The deliverer never runs longer than `ready.wait_s` plus `first.wait_s`: the bind
+    wait is bounded by `ready.wait_s` too, and the ready wait gets what is left."""
+    launch_row(conn, brief="go")
+    now = [100.0]
+    seen = {}
+
+    def settle_bind(conn, rid, *, pid=None, wait_s):
+        seen["bind"] = wait_s
+        now[0] += 10.0
+        return None
+
+    monkeypatch.setattr(first, "_waits", lambda r, f: (float(ready_s), 120.0))
+    monkeypatch.setattr(first, "_clock", lambda: now[0])
+    monkeypatch.setattr(targets, "settle_bind", settle_bind)
+    monkeypatch.setattr(first, "send", lambda conn, rid, **k: seen.update(k) or
+                        first.Outcome(rid, "sent", "first-sent"))
+    out = SimpleNamespace(write=lambda text: None, flush=lambda: None)
+    assert first.deliver("r1", pid=os.getpid(), out=out) == exits.OK
+    assert seen["bind"] == bind_bound
+    assert (seen["ready_wait_s"], seen["first_wait_s"]) == (left, 120.0)
+
+
 def test_a_terminal_launch_with_an_identity_starts_the_deliverer(tmp_path, monkeypatch):
     # No first turn owed, but the deliverer watches the bind.
     if not modules.available("comms"):
