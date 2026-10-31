@@ -306,9 +306,13 @@ def limits_lines(result: Any) -> list[str]:
 def _cell(row: Any, now: float) -> str:
     # The percent is the percent USED, and the word says so: the harnesses' own apps
     # show what is left, and a bare number reads as that.
+    # Of what else the reading said, only a spend limit's dollars are worth the line.
+    from .limits import dollars
+
+    shown = dollars(row.extra)
     extra = ""
-    if row.extra:
-        extra = " (" + ", ".join(f"{k} {v}" for k, v in sorted(row.extra.items())) + ")"
+    if shown:
+        extra = " (" + ", ".join(f"{name} ${value:,.2f}" for name, value in shown) + ")"
     if row.state == "fresh":
         text = (f"{row.label} {row.used_percent:.0f}% used, resets "
                 f"{format_reset(row.resets_at, now)}")

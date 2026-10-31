@@ -105,3 +105,49 @@ def test_an_unknown_harness_is_a_usage_error(capsys):
                                            (3840, "1h04m"), (273600, "3d04h"), (-3, "0s")])
 def test_ages_round_down(seconds, text):
     assert cli.format_age(seconds) == text
+
+
+CODEX_EXTRA = {"credits": {"has_credits": False, "unlimited": False, "balance": "0"},
+               "individual_limit": None, "spend_control_reached": None}
+
+
+def test_a_codex_cell_leaves_out_what_is_not_a_dollar_figure(capsys):
+    now = time.time()
+    put(Reading("codex", "codex", 300, "primary", 31.0, now + 2 * HOUR, now - MIN,
+                "rollout", "t1", extra=json.dumps(CODEX_EXTRA)))
+    assert cli.main(["limits", "--harness", "codex", "--no-pull"]) == 0
+    line = capsys.readouterr().out.splitlines()[0]
+    assert "5h 31% used, resets " in line
+    assert "credits" not in line and "individual_limit" not in line
+    assert "$" not in line
+    assert cli.main(["limits", "--harness", "codex", "--no-pull", "--json"]) == 0
+    five = json.loads(capsys.readouterr().out)["rows"][0]
+    assert five["extra"] == CODEX_EXTRA                   # JSON keeps all of it
+
+
+def test_a_spend_limits_dollars_are_printed(capsys):
+    now = time.time()
+    spend = {**CODEX_EXTRA, "individual_limit": {"limit_usd": 100, "used_usd": 12.5}}
+    put(Reading("codex", "codex", 300, "primary", 31.0, now + 2 * HOUR, now - MIN,
+                "rollout", "t1", extra=json.dumps(spend)))
+    readings.add_claude([{"kind": "spend_limit", "usedDollars": 4.5, "limitDollars": 50,
+                          "note": "monthly"}],
+                        observed_at=now - MIN, session_id="s1", now=now)
+    assert cli.main(["limits", "--no-pull"]) == 0
+    claude_line, codex_line = capsys.readouterr().out.splitlines()[:2]
+    assert "(individual_limit limit_usd $100.00, individual_limit used_usd $12.50)" in \
+        codex_line and "credits" not in codex_line
+    assert "spend_limit unavailable (the reading has no percent for this window) " \
+           "(limitDollars $50.00, usedDollars $4.50)" in claude_line
+    assert "monthly" not in claude_line
+
+
+@pytest.mark.parametrize("extra, found", [
+    ({"usedDollars": 4.5, "limit_usd": 9, "dollars": 1}, [("usedDollars", 4.5),
+                                                         ("limit_usd", 9.0),
+                                                         ("dollars", 1.0)]),
+    ({"unused": 3, "thousand": 2, "usedDollars": "4.5", "spent_usd": True}, []),
+    ({"credits": {"balanceUsd": 2}}, [("credits balanceUsd", 2.0)]),
+])
+def test_dollar_fields_are_named_by_a_word_of_their_key(extra, found):
+    assert limits.dollars(extra) == found

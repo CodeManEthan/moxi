@@ -40,6 +40,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -73,6 +74,9 @@ PULL_TIMEOUT = 3.0
 PRUNE_EVERY = 3600.0
 #: Readings a projection needs.
 MIN_FIT = 3
+#: Where a key splits into words: an underscore, a hyphen, or a lower-case letter
+#: followed by a capital.
+_WORDS = re.compile(r"[_-]|(?<=[a-z])(?=[A-Z])")
 #: Slack, in seconds, between a rollout's mtime and the time on its newest reading.
 _MTIME_SLACK = 60.0
 
@@ -94,7 +98,8 @@ class Row:
     the projection's time the window reaches 100%, None with `projection` saying why
     there is none; `fit` counts the readings it fitted. `reason` and `note` are None when
     there is nothing to say; `note` says why no newer reading came when one was wanted.
-    `extra` holds what else the reading said (a spend limit's dollars, say).
+    `extra` holds what else the reading said (a spend limit's dollars, say);
+    `dollars(extra)` picks the dollar figures out of it.
     """
 
     harness: str
@@ -320,6 +325,7 @@ def project(found: list[Reading], winner: Reading, *, now: float,
     Fits the readings of the winner's period (`resets_at` within half the window of the
     winner's) observed in the last `minutes` minutes, by least squares of percent over
     time. Needs at least `MIN_FIT` of them, at two times or more, and a rising line.
+    `full_at` is given only when it falls after `now` and before the winner's reset.
     """
     if winner.window_minutes is None:
         return None, "the window's duration is unknown", 0
@@ -344,6 +350,10 @@ def project(found: list[Reading], winner: Reading, *, now: float,
     if slope <= 0:
         return None, "not rising", count
     full_at = mean_t + (100.0 - mean_p) / slope
+    if full_at <= now:
+        # The line through older readings crossed 100% already while the window has not
+        # filled: they no longer say when it will.
+        return None, "the fit reaches 100% before now", count
     if full_at >= winner.resets_at:
         return None, "resets first", count
     return full_at, None, count
@@ -495,6 +505,33 @@ def _with_note(row: Row, now: float, after: float, why: str | None) -> Row:
     return replace(row, note=f"no newer reading: {why}")
 
 
+def dollars(extra: Mapping[str, Any]) -> list[tuple[str, float]]:
+    """The dollar fields of a reading's `extra`, in the order written: each number whose
+    key names dollars (`usedDollars`, `limit_usd`), at the top or one table down (a
+    nested key is named `outer inner`). Everything else a harness sends beside a window
+    (Codex's `credits`, an empty `individual_limit`) is kept in `extra` but is not a
+    dollar figure."""
+    found: list[tuple[str, float]] = []
+
+    def take(name: str, key: str, value: Any) -> None:
+        if (_names_dollars(key) and isinstance(value, (int, float))
+                and not isinstance(value, bool)):
+            found.append((name, float(value)))
+
+    for key, value in extra.items():
+        if isinstance(value, Mapping):
+            for inner, deeper in value.items():
+                take(f"{key} {inner}", str(inner), deeper)
+        else:
+            take(str(key), str(key), value)
+    return found
+
+
+def _names_dollars(key: str) -> bool:
+    """True when `key` names a dollar figure: a word of it is dollar(s) or usd."""
+    return any(word.lower() in ("dollar", "dollars", "usd") for word in _WORDS.split(key))
+
+
 def _load_extra(text: str | None) -> Mapping[str, Any]:
     if not text:
         return {}
@@ -518,4 +555,4 @@ def iso(epoch: Any) -> Any:
 
 
 __all__ = ["limits", "Limits", "Row", "Pull", "pick", "row_state", "project", "label",
-           "harness_rows", "window_row", "FRESH", "RESET", "UNAVAILABLE"]
+           "dollars", "harness_rows", "window_row", "FRESH", "RESET", "UNAVAILABLE"]

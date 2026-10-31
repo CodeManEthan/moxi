@@ -92,7 +92,9 @@ its minutes. A per-model weekly cap is its own row (`7d opus`). Each row is `fre
 future reset time (on a tie the highest percent), so an idle session's old number never
 passes for fresh; Codex's takes the newest reading. When a window has three or more
 readings of its current period in the last `limits.projection_minutes` (60), a straight
-line through them says when it reaches 100%, given only when that comes before the reset.
+line through them says when it reaches 100%, given only when that comes after now and
+before the reset. Of what else a reading says, the line prints only a spend limit's
+dollars; `--json` keeps all of it.
 
 ## The token index
 
@@ -186,6 +188,26 @@ one per core, up to 8). A schema change that would drop the rows of an archive l
 drive is offline is refused (exit 3) until the drive is back, or until `--rebuild --force`
 drops them. `--check` compares the stored claims with the claimed view and exits 1 naming
 the keys that differ.
+
+## Stores and the doctor
+
+usage keeps its files in Moxi's roots, each made by its first write and readable only by
+you: the token index `STATE/usage/index.db`, the limits readings `STATE/usage/readings.db`
+(kept 8 days) and the model snapshot `DATA/usage/models-snapshot.json`. `marks/`,
+`ceiling/` and `restart-point.json` under `STATE/usage` are declared for the context marks,
+the worker ceiling and the restart-point measure, which are still to come. `moxi paths
+usage` lists them all.
+
+`moxi doctor usage` checks each store and adds usage's own rows, none of which writes:
+
+- `models.snapshot`: the model table in effect is older than `prices.max_age_days` (120),
+  or a snapshot on disk can't be read; the fix is `moxi usage prices update`.
+- `models.unpriced`: each model the index saw in the last 30 days with no price or no window.
+- `index`: the last pass and the counts; a warning for an offline archive lane, held rows
+  (each lane's reasons) or a last pass more than 7 days old.
+- `codex.imports`: a warning when the last pass couldn't read Codex's imports file, or
+  counted rollouts whose only import mark is the desktop app's originator.
+- `turns`: off when turns is not installed, since Claude limits need it.
 
 ## From Python
 

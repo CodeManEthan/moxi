@@ -209,6 +209,17 @@ def test_a_window_that_resets_before_it_fills_says_resets_first():
     assert (five.full_at, five.projection) == (None, "resets first")
 
 
+def test_a_fit_that_reaches_100_percent_before_now_gives_no_full_at():
+    # 1.5% a minute through readings 45 to 55 minutes old reaches 100% 42 minutes ago,
+    # while the newest reading says 95%
+    put(*(codex(p, 300, NOW + 4 * HOUR, NOW - m * MIN)
+          for p, m in ((80.0, 55), (90.0, 50), (95.0, 45))))
+    five = row(limits.limits(harness="codex", now=NOW, pull=False), "codex", "5h")
+    assert (five.state, five.used_percent) == ("fresh", 95.0)
+    assert (five.full_at, five.projection, five.fit) == (
+        None, "the fit reaches 100% before now", 3)
+
+
 def test_a_flat_window_does_not_project():
     put(*(codex(10.0, 300, NOW + HOUR, NOW - m * MIN) for m in (30, 20, 10)))
     five = row(limits.limits(harness="codex", now=NOW, pull=False), "codex", "5h")
