@@ -297,6 +297,18 @@ def test_an_overlong_identity_post_writes_nothing_on_both_backends(rig):
     assert rig.record.history(rig.names_channel) == []
 
 
+def test_a_reserved_name_post_writes_one_reserved_row_on_both_backends(rig):
+    message = rig.record.post_as_reserved("console", rig.names_channel, "a module's post")
+
+    assert (message.author_kind, message.author_id, message.author_display) == \
+        ("reserved", "console", "console")
+    assert rig.record.history(rig.names_channel) == [message]
+    with pytest.raises(RecordError, match="cap on one message"):
+        rig.record.post_as_reserved("console", rig.names_channel,
+                                    "x" * (rig.record.max_content_length + 1))
+    assert rig.record.history(rig.names_channel) == [message]
+
+
 def test_the_reader_denial_is_a_real_check(gw):
     channel = gw.create_channel("#names")
     reader = gw.register_principal("comms-reader")

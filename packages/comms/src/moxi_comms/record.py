@@ -20,6 +20,10 @@ The interface, in full:
                                                               backend checks the token
                  post_as_identity(qualified, channel_id, content)
                                                            -- daemon-stamped agent post
+                 post_as_reserved(name, channel_id, content)
+                                                           -- a module's post under a
+                                                              name it reserved, after
+                                                              the daemon checked its token
                  max_content_length -> int   (attribute, not a method)
                  history_bound -> int | None (attribute: the most messages an
                                               unbounded `history(after=)` returns, or
@@ -59,8 +63,9 @@ import time
 from dataclasses import asdict, dataclass, field
 
 #: A message's `author_kind`, who posted it: an agent the daemon checked against its live
-#: binding, or the operator through the operator's lane.
-AUTHOR_IDENTITY, AUTHOR_OPERATOR = "identity", "operator"
+#: binding, the operator through the operator's lane, or a module under a name it
+#: reserved, with that name's token.
+AUTHOR_IDENTITY, AUTHOR_OPERATOR, AUTHOR_RESERVED = "identity", "operator", "reserved"
 #: The operator's kind as older stores spell it: comms 0.2's record, and comms.db before
 #: its schema's second step. The 0.2 move and that step rewrite it to `operator`, and
 #: nothing writes it any more. Attribution still reads it, for a store a read-only open
@@ -104,7 +109,8 @@ class Message:
     id: str
     channel_id: str
     author_id: str            # webhook id, operator user id, or qualified identity
-    author_kind: str          # 'identity' | 'operator'; an older row may say 'webhook'
+    author_kind: str          # 'identity' | 'operator' | 'reserved'; an older row may
+                              # say 'webhook'
     author_display: str       # webhook override, user display, or qualified identity
     content: str
     timestamp: str
@@ -266,7 +272,7 @@ def open_record(explicit: str | None = None, *, role: str = "reader", env=None,
                         busy_timeout=busy_timeout)
 
 
-__all__ = ["AUTHOR_IDENTITY", "AUTHOR_OPERATOR", "AUTHOR_OPERATOR_OLD",
+__all__ = ["AUTHOR_IDENTITY", "AUTHOR_OPERATOR", "AUTHOR_RESERVED", "AUTHOR_OPERATOR_OLD",
            "MAX_CONTENT_LENGTH", "RecordError", "RateLimited", "Forbidden", "Fatal",
            "Message", "Subscription", "MOCK", "LOCAL", "BACKENDS",
            "BackendChoice", "SOURCE_FLAG", "SOURCE_ENV", "SOURCE_CONFIG", "SOURCE_DEFAULT",

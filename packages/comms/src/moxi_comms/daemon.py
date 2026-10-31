@@ -1097,7 +1097,7 @@ class Daemon:
         if not row["token_hash"] or not hmac.compare_digest(row["token_hash"], given):
             raise Refusal("posting credential refused", code=wire.CREDENTIAL,
                           credential=True)
-        message = self.record.post_as_identity(name, self._names_channel(), content)
+        message = self.record.post_as_reserved(name, self._names_channel(), content)
         log.info("send %s under %s, reserved for %s", message.id, name, row["module"])
         return {"message_id": str(message.id)}
 

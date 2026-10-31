@@ -34,6 +34,7 @@ from pathlib import Path
 from .record import (
     AUTHOR_IDENTITY,
     AUTHOR_OPERATOR,
+    AUTHOR_RESERVED,
     MAX_CONTENT_LENGTH,
     Fatal,
     Forbidden,
@@ -215,14 +216,22 @@ class MockRecord:
 
     def post_as_identity(self, qualified: str, channel_id: str, content: str) -> Message:
         """Write an agent post after the daemon has checked its live binding."""
+        return self._post(AUTHOR_IDENTITY, qualified, channel_id, content)
+
+    def post_as_reserved(self, name: str, channel_id: str, content: str) -> Message:
+        """Write a module's post under a name it reserved, after the daemon has checked
+        the name's token."""
+        return self._post(AUTHOR_RESERVED, name, channel_id, content)
+
+    def _post(self, kind: str, author: str, channel_id: str, content: str) -> Message:
         if len(content) > self.max_content_length:
             raise RecordError(
                 f"content is {len(content)} characters, "
                 f"over the {self.max_content_length}-character cap on one message")
         with self._txn(write=True) as st:
             msg = Message(
-                id=self._next_id(st), channel_id=channel_id, author_id=qualified,
-                author_kind=AUTHOR_IDENTITY, author_display=qualified,
+                id=self._next_id(st), channel_id=channel_id, author_id=author,
+                author_kind=kind, author_display=author,
                 content=content, timestamp=self._now(),
             )
             st.messages.append(msg.to_dict())

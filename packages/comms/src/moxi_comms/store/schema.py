@@ -64,7 +64,7 @@ CREATE TABLE messages (
     id             INTEGER PRIMARY KEY,
     room_id        TEXT NOT NULL,
     author_id      TEXT NOT NULL,
-    author_kind    TEXT NOT NULL,      -- identity, or operator (the operator's lane)
+    author_kind    TEXT NOT NULL,      -- identity, operator, or reserved (a module's name)
     author_display TEXT NOT NULL,
     content        TEXT NOT NULL,
     timestamp      TEXT NOT NULL,
