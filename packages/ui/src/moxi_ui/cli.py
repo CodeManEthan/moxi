@@ -13,9 +13,11 @@ hands its sign-in URL to the browser:
 2. A shell that answers its health route is up. A held `page.lock` means one is starting:
    wait for it. A runtime file whose server fails the proof may be stale; wait briefly for
    a new one, then refuse.
-3. A socket of this user that is listening holds the port; the first browser connection
-   starts the shell. Its units must have been written with the port setting: a socket
-   that still listens on an older port is refused, naming it.
+3. A supervisor that could not be read is refused, with no connect, since a socket of
+   this user may hold the port (not on Windows, which has no socket). A socket of this
+   user that is listening holds the port; the first browser connection starts the shell.
+   Its units must have been written with the port setting: a socket that still listens
+   on an older port is refused, naming it.
 4. Otherwise, if anything accepts a connection on the port, another program holds it.
    Else start the shell: through the logon task on Windows where it is installed and
    enabled, otherwise as a detached child, and wait for it to answer.
@@ -102,13 +104,14 @@ def _wsl() -> bool:
     return sys.platform == "linux" and session.is_wsl()
 
 
-def _units_status() -> list[Any]:
+def _units_status() -> list[Any] | None:
+    """The ui module's units, or None when the supervisor can't be asked."""
     from moxi import units
 
     try:
         return list(units.status([MODULE]))
-    except Exception:  # noqa: BLE001 - no supervisor read means no unit to account for
-        return []
+    except Exception:  # noqa: BLE001 - the caller says it could not read them
+        return None
 
 
 def _units_start() -> list[Any]:
@@ -391,13 +394,31 @@ def _wait_restart(first_last: Any, started: float, say: Callable[[str], Any]) ->
             raise _failed_to_start("the logon task did not restart the shell")
         if now >= next_status:
             next_status = now + STATUS_POLL
-            row = task_row(_units_status())
+            row = task_row(_units_status() or [])
             last = getattr(row, "last", None) if row is not None else None
             at = _run_line_at(last)
             if (last and last != first_last and at is not None and at >= int(started)
                     and last.get("exit") not in (0, None)):
                 raise _failed_to_start(f"the shell failed again (exit {last.get('exit')})")
         _sleep(POLL)
+
+
+def _check_supervisor(rows: Sequence[Any] | None, port: int) -> None:
+    """Refuse when the supervisor could not be read (`rows` None, or a unit `unknown`):
+    a socket of this user may hold the port, so a connect could start the shell and then
+    blame another program. Windows has no socket, so there the start goes on."""
+    if _platform() == "win32":
+        return
+    if rows is None:
+        detail = ""
+    else:
+        unknown = [row for row in rows if getattr(row, "module", None) == MODULE
+                   and row.state == "unknown"]
+        if not unknown:
+            return
+        detail = f" ({unknown[0].detail})" if getattr(unknown[0], "detail", "") else ""
+    raise Refused(f"the supervisor could not be read{detail}, so a socket of yours may hold "
+                  f"port {port}; try again in a moment, or see `moxi doctor ui`")
 
 
 def _check_written_port(port: int) -> None:
@@ -414,7 +435,8 @@ def ensure_shell(port: int, *, environ: Mapping[str, str] | None = None,
     None when this user's socket holds the port and no shell runs yet. Raises `Refused`."""
     started = _clock()
     environ = os.environ if environ is None else environ
-    rows = _units_status()
+    read = _units_status()
+    rows = read or []
     _check_locators(rows, environ)
 
     state, info = probe()
@@ -440,6 +462,7 @@ def ensure_shell(port: int, *, environ: Mapping[str, str] | None = None,
                 raise Refused(_held_text(info.port))
             _sleep(POLL)
 
+    _check_supervisor(read, port)
     sock = socket_row(rows)
     if sock is not None and sock.state == "active":
         _check_written_port(port)
@@ -576,7 +599,7 @@ def cmd_status(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
         if status == 200:
             report["servers"] = data
     report["units"] = [{"kind": row.kind, "state": row.state, "detail": row.detail}
-                       for row in _units_status()
+                       for row in _units_status() or []
                        if getattr(row, "module", None) == MODULE]
     if args.json:
         say(json.dumps(report, sort_keys=True))

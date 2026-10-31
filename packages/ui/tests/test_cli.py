@@ -144,6 +144,23 @@ def test_a_socket_that_holds_only_127_0_0_1_needs_no_start_and_no_connect(monkey
     assert "localhost" in world.said[0] and "moxi install ui" in world.said[0]
 
 
+@pytest.mark.parametrize("read", [None, [socket_unit("unknown", "systemctl timed out")]])
+def test_a_supervisor_that_cannot_be_read_is_refused_with_no_connect(monkeypatch, read):
+    world = World(monkeypatch, probes=("down",))
+    dialled = []
+    monkeypatch.setattr(cli, "_units_status", lambda: read)
+    monkeypatch.setattr(cli, "_port_taken", lambda port: dialled.append(port) or False)
+    with pytest.raises(Refused, match="supervisor could not be read") as refused:
+        world.ensure()
+    assert world.spawned == [] and dialled == []
+    assert ("systemctl timed out" in str(refused.value)) is (read is not None)
+    # Windows has no socket: the start goes on.
+    world = World(monkeypatch, platform="win32", probes=("down", "up"))
+    monkeypatch.setattr(cli, "_units_status", lambda: read)
+    world.ensure()
+    assert world.spawned == [True]
+
+
 @pytest.mark.parametrize("row", [socket_unit("active"), socket_unit("failed", f"failed: {V6}")])
 def test_a_socket_written_with_another_port_is_refused_with_no_connect(monkeypatch, row):
     world = World(monkeypatch, [row], probes=("down",))
