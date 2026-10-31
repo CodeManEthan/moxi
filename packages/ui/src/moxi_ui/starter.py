@@ -20,7 +20,8 @@ A start follows loopback's spawn contract:
    deadline.
 4. Exit 75 means another server holds the module's lock: its runtime file is read and the
    server used once it passes the proof. If the proof fails that server was stopping, and
-   the starter starts once more.
+   the starter starts once more; a holder that is the shell's own child is stopped first,
+   since it may be hung and would hold the lock until the shell stops.
 5. Any other exit, or no ready line: the child and its descendants are killed and the
    starter is `failed` for 10 s, during which a request gets the same failure at once and
    nothing is started.
@@ -79,6 +80,8 @@ DRAIN_WAIT = 30.0
 #: Seconds the starter waits for a child to exit once its lifeline is closed, before it
 #: kills it. A page server's own stop ends by 2.5 s.
 STOP_WAIT = 3.0
+#: Seconds at most the proof of a server that holds the lock may take.
+HELD_PROOF_WAIT = 5.0
 #: Seconds the `/servers` data waits for one child's health answer.
 HEALTH_WAIT = 2.0
 #: Threads that take the `/servers` data's samples and health calls. They are the
@@ -551,7 +554,8 @@ class Starter:
         """`server` failed a connect or a proof with nothing sent: forget it, so the next
         `ensure()` starts a new one. A child of it that still runs is left to stop on its
         own (a server that refuses connections is one that is stopping) and is still
-        watched; if it turns out to hold the lock, the new start uses it again."""
+        watched; if it turns out to hold the lock, the new start uses it again when it
+        passes the proof, and stops it when it fails it."""
         if server is self._server:
             _log.info("%s's server %s is unreachable; the next request starts another",
                       self.module, server.info.server_id)
@@ -689,7 +693,9 @@ class Starter:
             await asyncio.sleep(RETRY_EVERY)
 
     async def _held(self, deadline: float, *, retry: bool) -> Server | None:
-        """Exit 75: use the server that holds the lock once it passes the proof."""
+        """Exit 75: use the server that holds the lock once it passes the proof. A child of
+        the shell's own that holds it and fails the proof is stopped before the one more
+        start."""
         loop = asyncio.get_running_loop()
         while True:
             info = await asyncio.to_thread(read_runtime, self.module)
@@ -698,15 +704,19 @@ class Starter:
             await asyncio.sleep(RETRY_EVERY)
         reason = "another server holds the lock and has no runtime file"
         if info is not None:
+            mine = next((c for c in self._children
+                         if c.alive and c.server_id == info.server_id), None)
             try:
                 reader, writer = await open_connection(
-                    info, timeout=max(min(5.0, deadline - loop.time()), 0.5))
+                    info, timeout=max(min(HELD_PROOF_WAIT, deadline - loop.time()), 0.5))
             except (NotOurServer, OSError, TimeoutError) as err:
                 reason = f"another server holds the lock and fails its proof ({err})"
+                if mine is not None:
+                    _log.warning("%s: %s, and it is the shell's own; stopping it",
+                                 self.module, reason)
+                    await mine.stop(STOP_WAIT)
             else:
                 handoff = Conn(reader, writer, time.monotonic())
-                mine = next((c for c in self._children
-                             if c.alive and c.server_id == info.server_id), None)
                 server = Server(self.module, info, mine, started=self._pool.clock(),
                                 handoff=handoff)
                 if mine is not None:

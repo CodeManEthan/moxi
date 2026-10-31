@@ -588,3 +588,37 @@ def test_exit_75_on_tcp(shell_dirs):
     finally:
         squatter.thread.join(5)
     _squatter_saw_only_the_proof(squatter)
+
+
+
+def _spawns(*kinds):
+    """A `spawn` seam: each start in turn is a real page server (`real`) or a child that
+    exits 75 at once (`held`), as a runner does after its lock wait; then real ones."""
+    kinds = list(kinds)
+
+    def spawn(argv, **kwargs):
+        if kinds and kinds.pop(0) == "held":
+            argv = [str(python()), "-c", f"raise SystemExit({starter_mod.LOCK_HELD})"]
+        return proc.spawn(argv, **kwargs)
+
+    return spawn
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="SIGSTOP")
+def test_a_hung_child_of_its_own_that_holds_the_lock_is_stopped(shell_dirs, monkeypatch):
+    import signal
+
+    monkeypatch.setattr(starter_mod, "HELD_PROOF_WAIT", 0.5)
+    monkeypatch.setattr(starter_mod, "STOP_WAIT", 0.5)
+    starters = make(shell_dirs, spawn=_spawns("real", "held"))
+
+    async def body(starters):
+        hung = await starters.ensure("stpage")
+        child = hung.child
+        os.kill(child.pid, signal.SIGSTOP)
+        starters.lost(hung)
+        fresh = await starters.ensure("stpage")
+        assert fresh.info.server_id != hung.info.server_id and fresh.child.alive
+        assert not child.alive and starters.get("stpage").record.starts == 3
+
+    drive(starters, body)
