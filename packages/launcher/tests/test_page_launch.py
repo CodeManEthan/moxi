@@ -270,7 +270,12 @@ def test_a_ticket_holds_only_for_its_request_until_it_expires(work):
     _, late = pagehandlers.verify({**body, "ticket": issued}, now=1601.0)
     assert late["code"] == "expired"
     changed = headless(work, model="opus")
-    for bad in ({**changed, "ticket": issued}, {**body, "ticket": "r2" + issued[2:]},
+    # Each part of the request the ticket was issued for binds it: the values, the seat,
+    # the project preset, the posture allowance and the request id.
+    for bad in ({**changed, "ticket": issued}, {**body, "seat": "other", "ticket": issued},
+                {**body, "project_preset": "other", "ticket": issued},
+                {**body, "off_posture": True, "ticket": issued},
+                {**body, "ticket": "r2" + issued[2:]},
                 {**body, "ticket": "nonsense"}, {**body, "ticket": "../x.1.ab"}):
         rid, refused = pagehandlers.verify(bad, now=1000.0)
         assert rid is None and refused["code"] == "bad-ticket"
