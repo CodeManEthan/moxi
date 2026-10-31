@@ -130,10 +130,10 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     owned = {"cwd": cwd, "update_check": True,
              "skip_git_check": bool(values.get("scratch")) and mode_ == "exec"}
     extra = [str(token) for token in values.get(catalog.EXTRA) or ()]
-    catalog.refuse_passthrough(HARNESS, extra)
+    catalog.refuse_passthrough(HARNESS, extra, mode_)
     fit = catalog.fit(HARNESS, mode_, {**values, **owned}, ctx.chosen)
     not_applied = fit.not_applied
-    catalog.refuse_posture_keys(HARNESS, fit.applied.get("config") or ())
+    catalog.refuse_posture_keys(HARNESS, fit.applied.get("config") or (), mode_)
 
     rows = catalog.load(HARNESS).rows
     flags: list[str] = []

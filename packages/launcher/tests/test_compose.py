@@ -337,7 +337,15 @@ def test_a_config_key_or_flag_that_sets_a_posture_row_is_refused_in_every_mode(
         codex.compose(codex_values(**more, **values),
                       ctx(session_id=None, modules=links, host=host, brief="b"))
     assert raised.value.row == row and raised.value.code == "owned"
-    assert raised.value.exit_code == 3 and f"--{row}" in raised.value.hint
+    assert raised.value.exit_code == 3
+    # The hint names the row's own option only where the mode takes the row: exec and
+    # the host take no approval.
+    if row == "approval" and mode != "interactive":
+        assert f"--{row}" not in raised.value.hint
+        assert raised.value.hint.endswith(f"{catalog.COMMANDS['codex', mode]} takes no "
+                                          "approval setting")
+    else:
+        assert f"set {row} with --{row}" in raised.value.hint
 
 
 @pytest.mark.parametrize("mode", list(CODEX_MODES))

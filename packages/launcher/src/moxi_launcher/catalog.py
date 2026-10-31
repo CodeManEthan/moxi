@@ -183,47 +183,70 @@ class NotTaken(Refused):
 
 class Owned(Refused):
     """A pass-through flag that spells a row the launcher sets itself, or a posture
-    row, which is set through its own option so the posture check sees it."""
+    row, which is set through its own option so the posture check sees it. `mode`, when
+    the launch's mode is known, keeps the hint from naming an option that mode does not
+    take."""
 
     code = "owned"
 
-    def __init__(self, row: "Row", token: str):
+    def __init__(self, row: "Row", token: str, mode: str | None = None):
         self.token = token
         if row.owned:
             problem = f"{token} sets {row.name}, which the launcher sets itself"
             hint = f"leave {token} out of the flags passed on"
         else:
             problem = f"{token} sets {row.name}, a permission posture row"
-            hint = f"set it with {row.option}, so the posture check sees it"
+            hint = _posture_hint(row.harness, row.name, token, mode)
         super().__init__(row.name, problem, hint)
 
 
 class PostureFlag(Owned):
     """A pass-through flag with no row that sets what a posture row sets."""
 
-    def __init__(self, row: str, token: str):
+    def __init__(self, row: str, token: str, harness: str | None = None,
+                 mode: str | None = None):
         self.token = token
         Refused.__init__(self, row, f"{token} sets what the posture row {row} sets, and "
                                     "has no row of its own for the posture check to see",
-                         f"leave {token} out, and set {row} with {_option(row)} instead, "
-                         "so the posture check sees it")
+                         _posture_hint(harness, row, token, mode))
 
 
 class PostureKey(Owned):
     """A config override or setting whose key sets what a posture row sets, which the
     posture check can't see there."""
 
-    def __init__(self, row: str, key: str):
+    def __init__(self, row: str, key: str, harness: str | None = None,
+                 mode: str | None = None):
         self.token = key
         Refused.__init__(self, row, f"the config key {key} sets what the posture row "
                                     f"{row} sets, where the posture check can't see it",
-                         f"leave {key} out, and set {row} with {_option(row)} instead, "
-                         "so the posture check sees it")
+                         _posture_hint(harness, row, key, mode))
 
 
 def _option(row_name: str) -> str:
     """The launcher's option for a row: its name, dashed."""
     return "--" + row_name.replace("_", "-")
+
+
+def _posture_hint(harness: str | None, row_name: str, token: str,
+                  mode: str | None) -> str:
+    """The hint for a posture set around its row: set the row with its own option, but
+    only where the row is taken. In a mode that does not take it, the hint says so; with
+    the mode not known yet, it names the commands that take it."""
+    use = f"set {row_name} with {_option(row_name)} instead, so the posture check sees it"
+    found = row(harness, row_name) if harness else None
+    if found is None:
+        return f"leave {token} out, and {use}"
+    if mode is not None:
+        if mode in found.modes:
+            return f"leave {token} out, and {use}"
+        return f"leave {token} out: {COMMANDS[harness, mode]} takes no {row_name} setting"
+    taking = [m for m in MODES[harness] if m in found.modes]
+    if len(taking) == len(MODES[harness]):
+        return f"leave {token} out, and {use}"
+    where = " or ".join(COMMANDS[harness, m] for m in taking)
+    return (f"leave {token} out; where {row_name} is taken ({where}), set it with "
+            f"{_option(row_name)} instead, so the posture check sees it")
 
 
 class NeedsModule(Refused):
@@ -856,13 +879,15 @@ def typed_harness(argv: Sequence[str]) -> str | None:
     return namespace.harness
 
 
-def refuse_passthrough(harness: str, tokens: Sequence[str]) -> None:
+def refuse_passthrough(harness: str, tokens: Sequence[str],
+                       mode: str | None = None) -> None:
     """Raise `Owned` when a token of `tokens`, flags passed on to `harness`, spells an
     owned or a posture row in any of its modes, `PostureFlag` when it is a flag with
     no row that sets what a posture row sets (`POSTURE_FLAGS`), and `PostureKey` when it
     is a config override or a settings string whose key does (`POSTURE_KEYS`,
     `POSTURE_SETTINGS`). A templated spelling (Codex's `-c
-    check_for_update_on_startup=false`) matches only when the value's key does."""
+    check_for_update_on_startup=false`) matches only when the value's key does. `mode`
+    is the launch's mode when it is known, for the refusal's hint."""
     rows = [r for r in load(harness) if r.owned or r.posture]
     standing_in = POSTURE_FLAGS.get(harness, {})
     key_flags, _ = POSTURE_KEYS.get(harness, ((), {}))
@@ -872,19 +897,20 @@ def refuse_passthrough(harness: str, tokens: Sequence[str]) -> None:
         if flag is None:
             continue
         if flag in standing_in:
-            raise PostureFlag(standing_in[flag], flag)
+            raise PostureFlag(standing_in[flag], flag, harness, mode)
         value = attached if attached is not None else (
             tokens[i + 1] if i + 1 < len(tokens) else None)
         for row_ in rows:
             if _spells(row_, flag, value):
-                raise Owned(row_, flag)
+                raise Owned(row_, flag, mode)
         if value is not None and flag in key_flags:
-            refuse_posture_keys(harness, [value])
+            refuse_posture_keys(harness, [value], mode)
         if value is not None and flag == SETTINGS_FLAG:
-            refuse_posture_settings(harness, value)
+            refuse_posture_settings(harness, value, mode)
 
 
-def refuse_posture_keys(harness: str, items: Iterable[object]) -> None:
+def refuse_posture_keys(harness: str, items: Iterable[object],
+                        mode: str | None = None) -> None:
     """Raise `PostureKey` when a `key=value` config override of `items` has a key that
     sets what a posture row of `harness` sets (`POSTURE_KEYS`). A key that only starts
     with one is another key."""
@@ -892,10 +918,10 @@ def refuse_posture_keys(harness: str, items: Iterable[object]) -> None:
     for item in items:
         key = str(item).partition("=")[0].strip()
         if key in keys:
-            raise PostureKey(keys[key], key)
+            raise PostureKey(keys[key], key, harness, mode)
 
 
-def refuse_posture_settings(harness: str, value: str) -> None:
+def refuse_posture_settings(harness: str, value: str, mode: str | None = None) -> None:
     """Raise `PostureKey` when `value`, given to Claude's `--settings`, is a JSON string
     whose `permissions` table has an entry that sets what a posture row sets
     (`POSTURE_SETTINGS`). A value that is not a JSON object is a settings file, which is
@@ -912,7 +938,7 @@ def refuse_posture_settings(harness: str, value: str) -> None:
         return
     for entry, row_name in entries.items():
         if entry in permissions:
-            raise PostureKey(row_name, f"permissions.{entry}")
+            raise PostureKey(row_name, f"permissions.{entry}", harness, mode)
 
 
 def _split_flag(token: str) -> tuple:

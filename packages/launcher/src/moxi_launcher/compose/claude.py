@@ -107,7 +107,7 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     fit = catalog.fit(HARNESS, mode_, {**values, **owned}, ctx.chosen)
     additions = ctx.additions if (turns and not identity) else None
     extra = [str(token) for token in values.get(catalog.EXTRA) or ()]
-    catalog.refuse_passthrough(HARNESS, extra)
+    catalog.refuse_passthrough(HARNESS, extra, mode_)
 
     rows = catalog.load(HARNESS).rows
     flags: list[str] = []

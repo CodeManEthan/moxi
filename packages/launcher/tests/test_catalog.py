@@ -457,7 +457,20 @@ def test_a_flag_that_skips_or_hands_off_the_permission_checks_is_refused(harness
         catalog.parse(argv, harness, available=everything)
     assert raised.value.row == row and raised.value.exit_code == 3
     assert raised.value.token == argv[-1]
-    assert f"set {row} with --{row.replace('_', '-')}" in raised.value.hint
+    assert f"with --{row.replace('_', '-')} instead" in raised.value.hint
+
+
+def test_with_the_mode_not_known_the_hint_names_where_the_row_is_taken():
+    # Only plain codex takes approval, so the hint says where its option applies.
+    with pytest.raises(catalog.PostureKey) as raised:
+        catalog.parse(["--", "-c", "approval_policy=never"], "codex", available=everything)
+    assert raised.value.hint == ("leave approval_policy out; where approval is taken "
+                                 "(codex), set it with --approval instead, so the posture "
+                                 "check sees it")
+    with pytest.raises(catalog.PostureKey) as raised:
+        catalog.parse(["--", "-c", "sandbox_mode=read-only"], "codex", available=everything)
+    assert raised.value.hint == ("leave sandbox_mode out, and set sandbox with --sandbox "
+                                 "instead, so the posture check sees it")
 
 
 @pytest.mark.parametrize("argv, key, row", [
