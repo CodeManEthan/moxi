@@ -3,10 +3,14 @@ tool-permission rendering, the doctor's rows, and the hosts' one call."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 import moxi_turns as turns
+from conftest import write_config
 from moxi import doctor as moxi_doctor
+from moxi import paths
 from moxi_turns import additions, codex, opencode
 from moxi_turns.additions import Contribution, LaunchAdditions
 
@@ -70,13 +74,73 @@ def test_the_public_api_has_the_call_and_not_the_plugin_dirs():
     assert turns.LaunchAdditions is LaunchAdditions and turns.Contribution is Contribution
 
 
-def test_claude_gets_both_plugin_dirs_after_endpoint_json_is_written(group, claude_root):
+def _tree(root):
+    return sorted(str(p.relative_to(root)) for p in root.rglob("*"))
+
+
+def test_claude_gets_both_plugin_dirs_and_the_endpoint_and_writes_nothing(group, claude_root):
+    before = _tree(claude_root)
     got = adds("claude")
     runner = (claude_root / "moxi-turns").resolve()
     gate = (claude_root / "moxi-turns-gate").resolve()
     assert got.argv == ("--plugin-dir", str(runner), "--plugin-dir", str(gate))
-    assert (runner / "endpoint.json").is_file()
-    assert got.env == {} and got.options == {} and got.notes == ()
+    assert got.env == {"MOXI_TURNS_ENDPOINT": str(paths.script("moxi-turns-endpoint"))}
+    assert Path(got.env["MOXI_TURNS_ENDPOINT"]).is_absolute()
+    assert got.options == {} and got.notes == ()
+    assert _tree(claude_root) == before
+    assert not (runner / "endpoint.json").exists()
+
+
+def test_claude_launches_from_a_read_only_install(group, claude_root):
+    folders = [claude_root, claude_root / "moxi-turns", claude_root / "moxi-turns-gate"]
+    for folder in folders:
+        folder.chmod(0o555)
+    try:
+        got = adds("claude")
+    finally:
+        for folder in folders:
+            folder.chmod(0o755)
+    assert "MOXI_TURNS_ENDPOINT" in got.env
+    assert not (claude_root / "moxi-turns" / "endpoint.json").exists()
+
+
+def test_claude_launches_in_parallel_all_succeed(group, claude_root):
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        got = list(pool.map(lambda _: adds("claude"), range(64)))
+    want = str(paths.script("moxi-turns-endpoint"))
+    assert all(g.env["MOXI_TURNS_ENDPOINT"] == want for g in got)
+    assert len({g.argv for g in got}) == 1
+    assert not list((claude_root / "moxi-turns").glob("*endpoint.json*"))
+
+
+def test_claude_endpoint_names_the_configured_command(group, turns_env):
+    write_config(turns_env, '[claude]\nendpoint = "/opt/elsewhere/moxi-turns-endpoint"\n')
+    assert adds("claude").env["MOXI_TURNS_ENDPOINT"] == "/opt/elsewhere/moxi-turns-endpoint"
+    write_config(turns_env, '[claude]\nendpoint = "relative/endpoint"\n')
+    with pytest.raises(turns.TurnsError, match="absolute"):
+        adds("claude")
+
+
+def test_claude_endpoint_reads_the_config_from_this_process_not_the_launch_env(
+        group, turns_env, tmp_path):
+    # The launch's env names another config home; the endpoint is still the one this
+    # process's own environment gives, as turns' setup reads it.
+    (tmp_path / "turns").mkdir()
+    (tmp_path / "turns" / "config.toml").write_text(
+        '[claude]\nendpoint = "/opt/other/moxi-turns-endpoint"\n')
+    got = adds("claude", env={"MOXI_TURNS_CONFIG_HOME": str(tmp_path)})
+    assert got.env["MOXI_TURNS_ENDPOINT"] == str(paths.script("moxi-turns-endpoint"))
+
+
+def test_claude_raises_when_there_is_no_endpoint_script(group, monkeypatch):
+    def missing(name):
+        raise FileNotFoundError(f"no {name} in this environment")
+
+    monkeypatch.setattr(paths, "script", missing)
+    with pytest.raises(turns.TurnsError, match="moxi-turns-endpoint"):
+        adds("claude")
 
 
 def test_claude_raises_when_the_plugin_cannot_be_set_up(group, claude_root):
@@ -96,8 +160,10 @@ def test_the_hosts_get_no_argv_and_no_options(group, harness, claude_root):
 
 @pytest.mark.parametrize("harness", ["claude", "codex", "opencode"])
 def test_commands_render_the_grant_in_a_fixed_order(group, harness):
-    assert adds(harness, commands=("compact", "exit", "compact")).env == {
-        "MOXI_TURNS_COMMANDS": "exit,compact"}
+    env = dict(adds(harness, commands=("compact", "exit", "compact")).env)
+    if harness == "claude":
+        assert env.pop("MOXI_TURNS_ENDPOINT")
+    assert env =={"MOXI_TURNS_COMMANDS": "exit,compact"}
     assert "MOXI_TURNS_COMMANDS" not in adds(harness, commands=()).env
 
 

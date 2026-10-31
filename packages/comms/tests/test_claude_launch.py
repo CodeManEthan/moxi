@@ -70,7 +70,7 @@ def test_the_launch_forks_a_bound_adapter_before_claude_and_it_ends_with_claude(
                    f"--plugin-dir {turns_plugins / 'moxi-turns-gate'}")
         assert lines[2] == f"args --session-id {SID} {plugins} --model haiku -n {NAME}", \
             "the launch names its id to claude, then turns' plugins, then the passthrough"
-        assert (turns_plugins / "moxi-turns" / "endpoint.json").exists()
+        assert not (turns_plugins / "moxi-turns" / "endpoint.json").exists()
         b = binding(rig)
         assert b is not None, "bound before claude started"
         assert b.endpoint is False, "the session has no turns endpoint"
