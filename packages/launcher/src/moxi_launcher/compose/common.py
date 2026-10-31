@@ -1,6 +1,5 @@
 """What both composers share: the shapes they take and give, the identity block and the
-files a launch writes before its start, the opening prompt, the child's environment, and
-the size limits.
+system prompt file, the opening prompt, the child's environment, and the size limits.
 
 Everything here but `write_prompt` is pure: values in, text, argv and environment out.
 
@@ -154,9 +153,7 @@ class Context:
 
 @dataclass(frozen=True)
 class PromptFile:
-    """A file a launch writes before its start, readable by its owner only: where it goes
-    and what it holds. Claude's system prompt file is one, turns' Codex host's options
-    file another."""
+    """The system prompt file a Claude launch appends: where it goes and what it holds."""
 
     path: str
     text: str
@@ -173,9 +170,8 @@ class Composition:
     `brief` is the brief's text as the launch read it (inline or from its file), which the
     launch log keeps for the sender. `values` are the launch's values as the launch
     records them (`values_json`): the resolved values with the `mode` and the rows
-    `not_applied`. `prompt_file` is Claude's system prompt file and `options_file` turns'
-    Codex host's options file, each written before the start. `warnings` are one line
-    each.
+    `not_applied`. `prompt_file` is Claude's system prompt file, written before the
+    start. `warnings` are one line each.
     """
 
     harness: str
@@ -188,7 +184,6 @@ class Composition:
     first: str | None = None
     brief: str | None = None
     prompt_file: PromptFile | None = None
-    options_file: PromptFile | None = None
     not_applied: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 
@@ -260,15 +255,8 @@ def prompt_path(runs_dir: str | os.PathLike, request_id: str) -> str:
     return str(Path(runs_dir) / f"{request_id}.prompt.md")
 
 
-def options_path(runs_dir: str | os.PathLike, request_id: str) -> str:
-    """Where a launch's options file for turns' Codex host goes:
-    `<runs>/<request id>.options.json`."""
-    return str(Path(runs_dir) / f"{request_id}.options.json")
-
-
 def write_prompt(prompt_file: PromptFile) -> None:
-    """Write a file a launch makes before its start (its system prompt file, or its
-    host's options file), readable by its owner only, its folder 0700."""
+    """Write a launch's system prompt file, readable by its owner only, its folder 0700."""
     files.private_dir(Path(prompt_file.path).parent)
     files.atomic_write(prompt_file.path, prompt_file.text, mode=0o600)
 
@@ -376,5 +364,5 @@ __all__ = ["COMMANDS", "HEADER", "NOTES_DIR", "REQUEST", "SCRUB_NAMES", "SCRUB_P
            "TURNS_COMMANDS", "USAGE_WARN_AT", "WINDOWS_LINE", "WORD", "Additions",
            "Composition", "Context", "NoBrief", "NotYet", "PromptFile", "TooLong",
            "TurnsAdditions", "Unreadable", "agent_role", "check_sizes", "encode",
-           "environment", "first_turn", "identity_block", "options_path", "prompt_path",
+           "environment", "first_turn", "identity_block", "prompt_path",
            "scratch_dir", "scrub", "seat_text", "stamps", "write_prompt"]

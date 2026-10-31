@@ -18,9 +18,9 @@ with that reason, and a headless one is refused until comms takes its headless f
     exec         codex exec <prompt> -c check_for_update_on_startup=false -C <cwd>
                    [-m M] -s <S> [--skip-git-repo-check] [other rows] [extra flags]
     host         moxi-turns-codex-host --cwd <cwd> [--model M] --sandbox <S>
-                   [--option ...] [--options-file F] [extra flags]
+                   [--option ...] [extra flags]
     host, comms  moxi comms codex --name N [--scope S] [--director D ...] [--model M]
-                   --sandbox <S> [--option ...] [--options-file F] [extra flags]
+                   --sandbox <S> [--option ...] [extra flags]
 
 The host runs with its window, and applies turns' launch additions itself; the launcher
 passes none. A Codex session under the host gets its identity block and instructions from
@@ -28,12 +28,11 @@ the launcher's `start` listener, never on the argv. Without turns, or in `exec` 
 gets neither, and a seat with instructions says so in one warning line; the posture line
 then goes on the opening prompt's second line.
 
-In `host` mode `add_dir` and `trust_cwd` go in the host's options file, a JSON object
-the launch writes before its start (`<runs>/<request id>.options.json`), as nested
-`config` entries: `config.projects["<cwd>"].trust_level` and
-`config.sandbox_workspace_write.writable_roots`. The host's `--option` splits its key at
-every dot and keeps quotes, so a directory with a dot in it, or quoted, would not come
-through as one key.
+In `host` mode `add_dir` and `trust_cwd` are `--option` items whose key is a TOML dotted
+key: `projects."<cwd>".trust_level` and `sandbox_workspace_write.writable_roots`. The
+host reads the key as TOML does, so the quoted directory stays one part, dots and all,
+and its quotes come off. Plain `codex -c` splits a key at every dot and keeps the quotes,
+which is why the other modes trust the directory with an inline table instead.
 
 Extra flags go to the command line as given, in every mode, except a flag or config
 override that sets what a posture row sets, which is refused like that row so the posture
@@ -46,22 +45,17 @@ passed on (`-c`, `--config`, `--option`) or as a `config` item (`catalog.POSTURE
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 
 from .. import catalog
 from . import common
-from .common import Composition, Context, NoBrief, NotYet, PromptFile
+from .common import Composition, Context, NoBrief, NotYet
 
 HARNESS = "codex"
 #: The rows in the order they are composed, per mode.
 ORDER = ("update_check", "cwd", "model", "sandbox", "approval", "skip_git_check",
          "profile", "search", "add_dir", "config", "trust_cwd")
 HOST_ORDER = ("cwd", "model", "sandbox", "update_check", "add_dir", "config", "trust_cwd")
-#: The rows the host takes in its options file, not as an `--option`.
-OPTIONS_FILE_ROWS = ("add_dir", "trust_cwd")
-#: The host's options file flag.
-HOST_OPTIONS_FILE = "--options-file"
 
 
 def comms_identity(values: Mapping[str, object], ctx: Context) -> str | None:
@@ -144,16 +138,8 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     rows = catalog.load(HARNESS).rows
     flags: list[str] = []
     for name in HOST_ORDER if host else ORDER:
-        if name in fit.applied and not (identity and name == "cwd") and not (
-                host and name in OPTIONS_FILE_ROWS):
+        if name in fit.applied and not (identity and name == "cwd"):
             flags += rows[name].tokens(mode_, fit.applied[name], cwd=cwd)
-    options_file = None
-    if host:
-        options = host_options(fit.applied, cwd)
-        if options is not None:
-            options_file = PromptFile(common.options_path(ctx.runs_dir, ctx.request_id),
-                                      json.dumps(options, ensure_ascii=False, indent=2))
-            flags += [HOST_OPTIONS_FILE, options_file.path]
 
     if identity:
         argv = [ctx.moxi, "comms", HARNESS, "--name", identity]
@@ -177,22 +163,8 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     return Composition(harness=HARNESS, mode=mode_,
                        target=str(values.get("target") or "terminal"), argv=tuple(argv),
                        env=env, values=recorded, prompt=prompt, first=first,
-                       brief=ctx.brief, options_file=options_file,
+                       brief=ctx.brief,
                        not_applied=not_applied, warnings=tuple(warnings))
 
 
-def host_options(applied: Mapping[str, object], cwd: str) -> dict | None:
-    """The host's options file for the rows it takes there (`OPTIONS_FILE_ROWS`), in the
-    shape its `--options-file` reads: `{"config": {...}}` of nested Codex config entries.
-    None when no such row is set."""
-    config: dict[str, object] = {}
-    if catalog.is_set(applied.get("trust_cwd")):
-        config["projects"] = {cwd: {"trust_level": "trusted"}}
-    if catalog.is_set(applied.get("add_dir")):
-        config["sandbox_workspace_write"] = {
-            "writable_roots": [str(item) for item in applied["add_dir"]]}
-    return {"config": config} if config else None
-
-
-__all__ = ["HARNESS", "HOST_OPTIONS_FILE", "HOST_ORDER", "OPTIONS_FILE_ROWS", "ORDER",
-           "comms_identity", "compose", "host_options", "mode"]
+__all__ = ["HARNESS", "HOST_ORDER", "ORDER", "comms_identity", "compose", "mode"]

@@ -4,16 +4,16 @@ and system prompt file, and what a launch records."""
 
 from __future__ import annotations
 
-import json
+import sys
 
 import pytest
+from moxi import modules
 
 from moxi_launcher import catalog, compose
 from moxi_launcher.compose import Additions, Context, claude, codex, common
 
 SID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
 PF = "/state/runs/r1.prompt.md"
-OF = "/state/runs/r1.options.json"
 HOST = "/env/bin/moxi-turns-codex-host"
 CLAUDE_HEAD = ["--session-id", SID, "--append-system-prompt-file", PF]
 CLAUDE_TAIL = ["--permission-mode", "default"]
@@ -215,11 +215,13 @@ CODEX_ROWS = {
                               *UPDATE_OPTION]),
         ({"sandbox": "read-only"}, ["--sandbox", "read-only", *UPDATE_OPTION]),
         ({"add_dir": ["/a", "/b"]},
-         ["--sandbox", "workspace-write", *UPDATE_OPTION, "--options-file", OF]),
+         ["--sandbox", "workspace-write", *UPDATE_OPTION, "--option",
+          'sandbox_workspace_write.writable_roots=["/a", "/b"]']),
         ({"config": ["x.y=1"]},
          ["--sandbox", "workspace-write", *UPDATE_OPTION, "--option", "x.y=1"]),
         ({"trust_cwd": True},
-         ["--sandbox", "workspace-write", *UPDATE_OPTION, "--options-file", OF]),
+         ["--sandbox", "workspace-write", *UPDATE_OPTION, "--option",
+          'projects."/work".trust_level="trusted"']),
     ],
 }
 CODEX_CASES = [(mode, values, flags) for mode, rows in CODEX_ROWS.items()
@@ -284,34 +286,26 @@ def test_every_codex_row_composed_at_once_in_each_mode():
         "--image", "/i.png"]
 
 
-@pytest.mark.parametrize("cwd", ["/work", "/home/me/my.repo", '/a"b.c'])
-def test_under_the_host_trust_and_add_dir_go_in_the_options_file_as_nested_config(cwd):
-    # The host's --option splits its key at each dot and keeps quotes, so the launch's
-    # directory goes as one key of a JSON object, whatever it holds.
+@pytest.mark.skipif(sys.platform == "win32", reason="the names hold a quote")
+@pytest.mark.parametrize("name", ["work", "my.repo", 'a"b.c', "a=b\\c.d", "del\x7f.d"])
+def test_under_the_host_trust_and_add_dir_read_back_as_one_nested_config(tmp_path, name):
+    # The host reads an --option key as a TOML dotted key, so the quoted directory is one
+    # part whatever it holds; turns' own reader of the host's flags says what it gets.
+    found = modules.load("turns", interface=compose.TURNS_INTERFACE)
+    if not found.ok:
+        pytest.skip("needs a turns that offers the interface the launcher calls")
+    cwd = str(tmp_path / name)
+    (tmp_path / name).mkdir()
     got = codex.compose(codex_values(cwd=cwd, trust_cwd=True, add_dir=["/a", "/b.c"],
                                      config=["sandbox_workspace_write.network_access=true"]),
                         ctx(session_id=None, modules=frozenset({"turns"}), host=HOST))
-    assert got.mode == "host" and got.options_file.path == OF
-    assert list(got.argv) == [HOST, "--cwd", cwd, "--sandbox", "workspace-write",
-                              *UPDATE_OPTION, "--option",
-                              "sandbox_workspace_write.network_access=true",
-                              "--options-file", OF]
-    assert json.loads(got.options_file.text) == {"config": {
+    assert got.mode == "host" and got.argv[:3] == (HOST, "--cwd", cwd)
+    read = found.api.codex.launch_args(list(got.argv[1:]))
+    assert read["options"]["config"] == {
+        "check_for_update_on_startup": False,
         "projects": {cwd: {"trust_level": "trusted"}},
-        "sandbox_workspace_write": {"writable_roots": ["/a", "/b.c"]}}}
-    assert not any("trust_level" in word or "writable_roots" in word for word in got.argv)
-
-
-def test_without_trust_or_add_dir_the_host_gets_no_options_file():
-    got = codex.compose(codex_values(config=["x=1"]),
-                        ctx(session_id=None, modules=frozenset({"turns"}), host=HOST))
-    assert got.options_file is None and "--options-file" not in got.argv
-    for mode, links in (("interactive", frozenset()), ("exec", frozenset())):
-        other = codex.compose(codex_values(trust_cwd=True, add_dir=["/a"],
-                                           target="headless" if mode == "exec" else
-                                           "terminal"),
-                              ctx(session_id=None, modules=links, brief="b"))
-        assert other.mode == mode and other.options_file is None
+        "sandbox_workspace_write": {"writable_roots": ["/a", "/b.c"],
+                                    "network_access": True}}
 
 
 #: The three Codex modes, as (links, host, values) for `codex.compose`.
@@ -384,9 +378,7 @@ def test_the_codex_host_with_comms_takes_the_hosts_flags_without_its_directory()
     assert list(got.argv) == [
         "moxi", "comms", "codex", "--name", "coder", "--scope", "moxi",
         "--director", "lead", "--model", "gpt-5", *UPDATE_OPTION,
-        "--options-file", OF, "--no-window"]
-    assert json.loads(got.options_file.text) == {
-        "config": {"sandbox_workspace_write": {"writable_roots": ["/a"]}}}
+        "--option", 'sandbox_workspace_write.writable_roots=["/a"]', "--no-window"]
     assert got.mode == "host" and got.first is not None
 
 

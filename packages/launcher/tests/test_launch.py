@@ -490,20 +490,6 @@ def test_turns_failing_to_give_its_additions_is_a_refusal_before_the_row(
     assert nothing_written() and harness.runs() == []
 
 
-def test_a_host_launch_writes_its_options_file_before_the_start(work):
-    composition = codex.compose(
-        {"harness": "codex", "cwd": str(work), "trust_cwd": True},
-        Context(request_id="r1", runs_dir=str(targets.runs_dir()),
-                modules=frozenset({"turns"}), host="/env/bin/moxi-turns-codex-host"))
-    api._make_files(composition)
-    written = Path(common.options_path(targets.runs_dir(), "r1"))
-    assert composition.argv[-2:] == ("--options-file", str(written))
-    assert json.loads(written.read_text()) == {
-        "config": {"projects": {str(work): {"trust_level": "trusted"}}}}
-    if os.name != "nt":
-        assert stat.S_IMODE(written.stat().st_mode) == 0o600
-
-
 def test_a_passed_on_permissions_profile_is_refused_from_a_preset_too(work, harness):
     write_presets('[seat.coder]\nharness = "codex"\nextra_flags = ["--permissions", "p"]\n')
     with pytest.raises(catalog.Refused) as raised:
@@ -747,15 +733,14 @@ def running_row(conn, rid: str) -> None:
 def test_the_sweep_removes_old_run_files_and_keeps_the_rest():
     old_log = runs_file("old.log", age_days=31)
     old_prompt = runs_file("old.prompt.md", age_days=31)
-    old_options = runs_file("old.options.json", age_days=31)
     new_log = runs_file("new.log", age_days=29)
     other = runs_file("notes.txt", age_days=90)
     conn = store.connect()
     running_row(conn, "live")
     live = runs_file("live.log", age_days=31)
     swept = targets.sweep(conn, keep_days=30)
-    assert sorted(swept.removed) == ["old.log", "old.options.json", "old.prompt.md"]
-    assert not old_log.exists() and not old_prompt.exists() and not old_options.exists()
+    assert sorted(swept.removed) == ["old.log", "old.prompt.md"]
+    assert not old_log.exists() and not old_prompt.exists()
     assert new_log.exists() and other.exists() and live.exists()
 
 

@@ -284,14 +284,12 @@ def _actor(request, caller: Mapping[str, str]) -> str:
 
 
 def _make_files(composition: Composition) -> None:
-    """What a launch makes before its start: Claude's system prompt file, turns' Codex
-    host's options file, and a scratch launch's directory (0700, never removed by the
-    launcher)."""
+    """What a launch makes before its start: Claude's system prompt file, and a scratch
+    launch's directory (0700, never removed by the launcher)."""
     if composition.values.get("scratch"):
         files.private_dir(Path(str(composition.values["cwd"])))
-    for made in (composition.prompt_file, composition.options_file):
-        if made is not None:
-            common.write_prompt(made)
+    if composition.prompt_file is not None:
+        common.write_prompt(composition.prompt_file)
 
 
 def _result(composition: Composition, request_id: str, session_id: str | None,

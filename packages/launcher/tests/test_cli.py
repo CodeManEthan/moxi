@@ -315,21 +315,6 @@ def test_turns_failing_to_give_its_additions_prints_a_refusal_not_a_traceback(
     assert "Traceback" not in err and rows() == [] and harness.runs() == []
 
 
-def test_preview_shows_the_hosts_options_file(work, monkeypatch, capsys):
-    monkeypatch.setattr(api, "preview", lambda request, **kw: common.Composition(
-        harness="codex", mode="host", target="terminal",
-        argv=("/h", "--options-file", "/runs/r-1.options.json"),
-        env={common.REQUEST: "r-1"}, values={},
-        options_file=common.PromptFile("/runs/r-1.options.json",
-                                       '{\n  "config": {}\n}')))
-    code, out, _ = run(["preview"], capsys)
-    assert code == codes.OK
-    assert "options file, written at launch: /runs/r-1.options.json" in out
-    code, out, _ = run(["preview", "--json"], capsys)
-    assert json.loads(out)["options_file"] == {"path": "/runs/r-1.options.json",
-                                               "options": {"config": {}}}
-
-
 def test_run_into_a_named_slot_needs_slots(work, harness, no_slots, capsys):
     status, _, err = run(["run", "--slot", "2"], capsys)
     assert status == codes.REFUSED and "slot needs slots" in err

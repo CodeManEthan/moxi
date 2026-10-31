@@ -75,7 +75,7 @@ LOG_CAP = 8 * 1024 * 1024
 #: The line a cut run log starts with.
 CUT_LINE = "[the launcher cut {size} bytes from the front of this log]\n"
 #: The suffixes of a launch's run files, after its request id.
-RUN_FILES = (".log", ".prompt.md", ".options.json")
+RUN_FILES = (".log", ".prompt.md")
 #: Reasons a row ends `failed` with when a start fails outright (exit 1).
 SPAWN_FAILED = "spawn-failed"
 NO_DELIVERER = "no-deliverer"

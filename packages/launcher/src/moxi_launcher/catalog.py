@@ -253,7 +253,8 @@ def toml_literal(value: object) -> str:
         return repr(value)
     if isinstance(value, (list, tuple)):
         return "[" + ", ".join(toml_literal(item) for item in value) + "]"
-    return json.dumps(str(value), ensure_ascii=False)
+    # A JSON string is a TOML basic string but for DEL, which TOML wants escaped.
+    return json.dumps(str(value), ensure_ascii=False).replace("\x7f", "\\u007f")
 
 
 @dataclass(frozen=True)

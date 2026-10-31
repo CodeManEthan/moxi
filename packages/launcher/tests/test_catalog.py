@@ -188,6 +188,9 @@ def test_the_trust_override_names_the_launch_directory_as_a_toml_key():
     key, _, value = word.partition("=")
     assert key == "projects"
     assert tomllib.loads(f"v = {value}")["v"] == {'/a"b.c d': {"trust_level": "trusted"}}
+    # TOML wants DEL escaped in a string, which a JSON string leaves bare.
+    word = row.tokens("host", True, cwd="/a\x7fb.c")[1]
+    assert tomllib.loads(word)["projects"] == {"/a\x7fb.c": {"trust_level": "trusted"}}
     with pytest.raises(ValueError, match="directory"):
         row.tokens("exec", True)
 
