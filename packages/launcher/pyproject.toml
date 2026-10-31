@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 # The launcher requires the core only. Every other module it works with (turns, comms,
-# slots, projects, notes, usage, loadout) is an optional link it reaches through
+# slots, projects, notes, usage, loadout, ui) is an optional link it reaches through
 # moxi.modules.load where a feature needs it, and never imports.
 dependencies = ["moxi>=0.1,<0.2"]
 
@@ -20,6 +20,9 @@ comms = ["moxi-comms>=0.2,<0.3"]
 projects = ["moxi-projects>=0.1,<0.2"]
 # The tmux slot target, and the startup screens answered there.
 slots = ["moxi-slots>=0.1,<0.2"]
+# The browser UI shell: with it, the launcher's page shows there. Loopback, which the
+# launcher's page server runs on, comes with it.
+ui = ["moxi-ui>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/moxihq/moxi"
@@ -48,7 +51,9 @@ launcher = "moxi_launcher.cachetimers"
 moxi-launcher-job = "moxi_launcher.job:main"
 
 [dependency-groups]
-dev = ["pytest", "moxi-dev"]
+# moxi-ui's pytest plugin runs the launcher's page in a real shell; its testing extra brings
+# the browser. The browser tests import Playwright themselves, so it is named too.
+dev = ["pytest", "moxi-dev", "moxi-ui[testing]", "playwright>=1.56,<2"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -59,7 +64,7 @@ packages = ["src/moxi_launcher"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_launcher", "tests"]
+only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_launcher", "tests", "web"]
 
 # A plain `pytest` runs the units and contract seams, and so does `moxi-dev check`: the
 # tiers are deselected here. Run one by hand with `pytest -m <tier>` (a live test also

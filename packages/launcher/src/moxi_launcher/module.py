@@ -2,8 +2,9 @@
 
 Standard library only, and imports nothing of the launcher. The launcher is a library
 with a command: `moxi launcher <verb>` runs `cli.main` in its own process, with no
-service and no socket. Every other Moxi module it works with is an optional link, asked
-through `moxi.modules.load` where the feature needs it.
+service and no socket of its own. Its page is served by loopback's page server, which the
+browser UI shell starts and loopback stops when idle. Every other Moxi module it works with
+is an optional link, asked through `moxi.modules.load` where the feature needs it.
 """
 
 #: The API module: `launch`, `check` and `preview`. No interface number is offered yet.
@@ -28,6 +29,9 @@ OPTIONAL = {
                 "instead of a path, a launch records the key of the project its directory "
                 "is in, and presets --project lists a project's agents beside their seats. "
                 "Without it a launch's place is a path or scratch.",
+    "ui": "The launcher's page in the browser UI shell: launch from presets over the "
+          "catalog, resume past sessions and watch each launched session's state. Without "
+          "it the launcher is its command only.",
 }
 GATED = {}
 #: Each Moxi variable the launcher reads outside moxi.paths and moxi.config, and why: the
@@ -54,6 +58,9 @@ SETTINGS = "settings.toml"
 #: Asks the two startup-screen questions when slots is installed.
 SETUP = "moxi_launcher.startup:setup"
 SEGMENT = None
+#: The launcher's page, served by loopback's page server once the UI shell asks for it.
+#: Only that server and loopback's export import it.
+PAGE = "moxi_launcher.page:PAGE"
 
 # The announcement's version, and the optional names it declares.
 ANNOUNCES = 1

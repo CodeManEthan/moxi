@@ -65,6 +65,10 @@ TARGETS = ("terminal", "headless", "slot")
 PRESET_KINDS = ("seat", "project")
 #: The event a claim that moved to a new endpoint records.
 RECLAIMED = "reclaimed"
+#: The event a launch made from the page records, under its request id, when it is refused
+#: before its row is written: no launch row exists to hold the refusal. Its detail is the
+#: refusal's `code`, `row`, `problem` and `hint`.
+LAUNCH_REFUSED = "launch-refused"
 #: Every state, in the order a launch moves through them; `failed` may end any but the last
 #: of the others.
 STATES = ("spawning", "started", "ready", "sending", "first-sent", "failed")
@@ -1650,7 +1654,8 @@ def table_lines(name: str, *, limit: int | None = None, before: str | datetime |
 
 
 __all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "EXIT_COLUMNS", "FACTS", "FRESH_CONTEXT", "HARNESSES",
-           "HOWS", "JOB_GONE", "LAUNCHER", "LEAVES", "PRUNE_LIMIT", "RECLAIMED", "RUN_COLUMNS",
+           "HOWS", "JOB_GONE", "LAUNCHER", "LAUNCH_REFUSED", "LEAVES", "PRUNE_LIMIT", "RECLAIMED",
+           "RUN_COLUMNS",
            "RUN_FIELDS", "RUN_GRACE_S", "RUN_KINDS", "RUN_LEAVES", "RUN_STATES", "SOURCES",
            "STATES", "STEPS", "TABLES", "TARGETS", "VERDICTS", "Busy", "Event", "ExitRow",
            "Inserted", "Hold", "LaunchRow", "Run", "RunEvent", "RunOpen", "SessionLive",
