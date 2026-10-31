@@ -1,10 +1,14 @@
 """The clean-home install test.
 
-Builds comms' wheel and the core's (`moxi`, from its directory beside this one: Moxi's
-members declare no sources), installs both into a fresh venv inside a temp HOME, and
-runs everything from that install with an environment built from nothing: HOME and every
-XDG root in the temp home, TMPDIR there too, no `MOXI_COMMS_*`, so nothing in the
-developer's shell can pick the backend or a root.
+Builds the wheels of comms and of every workspace package it requires, followed through
+their own requirements (the core, `moxi`, and turns, each from its directory beside this
+one: Moxi's members declare no sources), installs those wheels into a fresh venv inside
+a temp HOME, and runs everything from that install. The index supplies only the
+third-party requirements: each workspace package is installed from the wheel this tree
+built, never from what is published, and the test checks the venv holds exactly those
+wheels at this tree's versions. Everything runs with an environment built from nothing:
+HOME and every XDG root in the temp home, TMPDIR there too, no `MOXI_COMMS_*`, so
+nothing in the developer's shell can pick the backend or a root.
 
 Part one is the documented install and nothing else. `moxi comms doctor` runs first and must
 say the `local` backend by default, with no slots yet.
@@ -43,6 +47,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 import shlex
 import shutil
 import sqlite3
@@ -53,22 +58,60 @@ import tempfile
 import termios
 import threading
 import time
+import tomllib
 from pathlib import Path
 
 import pytest
 
 TESTS = Path(__file__).resolve().parent
 REPO = TESTS.parent
-#: The core's package directory, beside this one under packages/.
-CORE = REPO.parent / "moxi"
+#: The workspace's packages directory: comms and its siblings.
+PACKAGES = REPO.parent
 UV = shutil.which("uv")
 
-#: A change to what the wheels are built from (comms' and the core's pyproject: their
-#: build backend, entry points and scripts) or to this test puts it back in
-#: moxi-dev check.
+
+def _normal(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _project(directory: Path) -> dict:
+    with (directory / "pyproject.toml").open("rb") as f:
+        return tomllib.load(f)["project"]
+
+
+def workspace_members() -> dict[str, Path]:
+    """Every package under packages/, by normalized name, with its directory."""
+    return {_normal(_project(pyproject.parent)["name"]): pyproject.parent
+            for pyproject in sorted(PACKAGES.glob("*/pyproject.toml"))}
+
+
+def required_packages(members: dict[str, Path]) -> dict[str, Path]:
+    """comms and every workspace package its required dependencies reach, by normalized
+    name, each with its directory. Optional extras are not followed: the documented
+    install is the bare package."""
+    found, todo = {}, [_normal(_project(REPO)["name"])]
+    while todo:
+        name = todo.pop()
+        if name in found:
+            continue
+        found[name] = members[name]
+        for requirement in _project(members[name]).get("dependencies", []):
+            dep = _normal(re.match(r"[A-Za-z0-9._-]+", requirement).group(0))
+            if dep in members:
+                todo.append(dep)
+    return found
+
+
+MEMBERS = workspace_members()
+#: The workspace packages the install builds and installs: comms, the core and turns.
+REQUIRED = required_packages(MEMBERS)
+
+#: A change to what the wheels are built from (each built package's pyproject: its
+#: requirements, build backend, entry points and scripts) or to this test puts it back
+#: in moxi-dev check.
 pytestmark = [pytest.mark.build,
-              pytest.mark.touches("packages/comms/pyproject.toml",
-                                  "packages/moxi/pyproject.toml",
+              pytest.mark.touches(*(f"packages/{d.name}/pyproject.toml"
+                                    for d in REQUIRED.values()),
                                   "packages/comms/tests/test_clean_home.py"),
               pytest.mark.skipif(UV is None, reason="the clean-home test needs uv")]
 
@@ -259,23 +302,33 @@ def installed(fence, uv_env):
     home = base / "home"
     home.mkdir()
     dist = base / "dist"
-    build = subprocess.run([UV, "build", "--wheel", "--out-dir", str(dist), str(REPO)],
-                           capture_output=True, text=True, timeout=300, env=uv_env)
-    assert build.returncode == 0, build.stderr
-    [wheel] = dist.glob("moxi_comms-*.whl")
-    core = subprocess.run([UV, "build", "--wheel", "--out-dir", str(dist), str(CORE)],
-                          capture_output=True, text=True, timeout=300, env=uv_env)
-    assert core.returncode == 0, core.stderr
-    [core_wheel] = dist.glob("moxi-*.whl")
+    wheels = {}
+    for name, directory in REQUIRED.items():
+        out = dist / name
+        build = subprocess.run([UV, "build", "--wheel", "--out-dir", str(out),
+                                str(directory)],
+                               capture_output=True, text=True, timeout=300, env=uv_env)
+        assert build.returncode == 0, build.stderr
+        [wheels[name]] = out.glob("*.whl")
+    wheel = wheels["moxi-comms"]
     venv = home / ".local" / "share" / "moxi-comms-venv"
     made = subprocess.run([UV, "venv", "--python", sys.executable, str(venv)],
                           capture_output=True, text=True, timeout=120, env=uv_env)
     assert made.returncode == 0, made.stderr
     py = venv / "bin" / "python"
-    got = subprocess.run([UV, "pip", "install", "--python", str(py), str(wheel),
-                          str(core_wheel)],
+    # Every workspace package is named by its wheel's path, so uv takes it from that
+    # file; the index is left only the third-party requirements.
+    got = subprocess.run([UV, "pip", "install", "--python", str(py),
+                          *(str(w) for w in wheels.values())],
                          capture_output=True, text=True, timeout=300, env=uv_env)
     assert got.returncode == 0, got.stderr
+    listed = subprocess.run([str(py), "-c", "import importlib.metadata as m, json; print("
+                             "json.dumps({d.metadata['Name']: d.version "
+                             "for d in m.distributions()}))"],
+                            capture_output=True, text=True, check=True).stdout
+    ours = {_normal(n): v for n, v in json.loads(listed).items()
+            if _normal(n) in MEMBERS}
+    assert ours == {n: _project(d)["version"] for n, d in REQUIRED.items()}, ours
     site = subprocess.run([str(py), "-c", "import sysconfig; "
                            "print(sysconfig.get_path('purelib'))"],
                           capture_output=True, text=True, check=True).stdout.strip()
@@ -330,8 +383,8 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
         return code
 
     try:
-        # The install is the package and the core, nothing else: no websockets (the
-        # `codex` extra's).
+        # The install is the package and the workspace packages it requires, nothing
+        # else: no websockets (the `codex` extra's).
         mods = run([str(installed["py"]), "-c", "import importlib.util as u; print("
                     "[m for m in ('moxi', 'websockets') if u.find_spec(m)])"],
                    env)
