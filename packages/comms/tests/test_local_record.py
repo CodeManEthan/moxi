@@ -10,6 +10,7 @@ daemon refusing a `--backend` flag that disagrees with the box.
 from __future__ import annotations
 
 import os
+import sqlite3
 import subprocess
 import sys
 import time
@@ -17,6 +18,7 @@ import time
 import pytest
 from conftest import wait_until, write_config
 
+from moxi import exit as moxi_exit
 from moxi_comms import config, daemon as daemon_mod, record as record_mod, paths
 from moxi_comms.record import Forbidden, RecordError
 from moxi_comms.local_record import (
@@ -421,6 +423,46 @@ def test_two_subscriptions_each_see_every_id_exactly_once(gw):
         assert sub.next_event(timeout=0.1) is None, "and nothing twice"
     gw.unsubscribe(first)
     gw.unsubscribe(second)
+
+
+def _busy_once(record, monkeypatch):
+    """The record's next push to its subscriptions finds the store busy, once."""
+    real, calls = record._fanout, []
+
+    def push():
+        calls.append(1)
+        if len(calls) == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real()
+
+    monkeypatch.setattr(record, "_fanout", push)
+
+
+def test_a_push_that_fails_after_the_commit_still_answers_the_post(gw, monkeypatch):
+    """The post is committed before the push, so the caller gets its message, and the
+    pump pushes it on its next pass."""
+    channel = gw.create_channel("#names")
+    sub = gw.subscribe(from_id="0")
+    assert sub.next_event(timeout=1.0)["t"] == "READY"
+    _busy_once(gw, monkeypatch)
+    message = post(gw, channel, "once")
+    assert gw.history(channel) == [message]
+    event = sub.next_event(timeout=2.0)
+    assert event["t"] == "MESSAGE_CREATE" and event["d"]["id"] == message.id
+    gw.unsubscribe(sub)
+
+
+def test_a_send_whose_push_fails_after_the_commit_is_sent_once(rig, monkeypatch):
+    """The send verb's try-again exit means nothing was sent; a post that committed
+    before its push failed was sent, and a retry would post it twice."""
+    if rig.backend != "local":
+        pytest.skip("only the local record pushes after its own commit")
+    before = len(rig.record.history(rig.names_channel))
+    _busy_once(rig.record, monkeypatch)
+    code, _ = rig.cli(["send", "--posture", "none", "main@proj-a", "hello once"],
+                      name="captain", scope="proj-a")
+    assert code == moxi_exit.OK
+    assert len(rig.record.history(rig.names_channel)) == before + 1
 
 
 def test_a_subscription_says_ready_first_so_the_daemon_sees_the_shapes_it_knows(gw):
