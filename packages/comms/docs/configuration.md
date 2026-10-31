@@ -9,7 +9,10 @@ On Windows the script is `Scripts\<script>.exe` in the same tool directory; in P
 `& "$(uv tool dir)\moxi\Scripts\<script>.exe"`.
 
 Most installs set nothing at all. With no config file and no variables, comms runs on
-the `local` backend, and the daemon provisions itself on its first start.
+the `local` backend. `moxi install comms` provisions it (the operator identity) before
+it starts the daemon, and moves comms 0.2's files when it finds them; a move it refuses
+fails the install with the reason. While comms 0.2's daemon still runs, the new daemon's
+first start does both instead.
 `moxi comms doctor` prints what this box resolved and where each answer came from, and
 `moxi config comms` prints every key with its value and source.
 

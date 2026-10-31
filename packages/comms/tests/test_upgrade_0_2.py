@@ -387,6 +387,62 @@ def test_older_directory_shapes_are_carried_as_0_2_read_them(soon):
     assert any("#conference" in line for line in said)
 
 
+# --------------------------------------------------------------------------- the install
+
+def run_setup():
+    """comms' `SETUP` as the installer runs it: the announcement's target, called with
+    nothing, and its result read as an exit code (an int is one, a text is 1 and is
+    said, anything else is 0)."""
+    import importlib
+
+    from moxi_comms import module
+    assert module.SETUP, "comms declares a SETUP"
+    name, _, attr = module.SETUP.partition(":")
+    try:
+        result = getattr(importlib.import_module(name), attr)()
+    except SystemExit as e:
+        result = e.code
+    if isinstance(result, int) and not isinstance(result, bool):
+        return result, None
+    return (1, result) if isinstance(result, str) else (0, None)
+
+
+def test_setup_fails_the_install_when_the_move_refuses(capsys):
+    zero_two_home()
+    store_path = store.path()
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(store_path)
+    conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    conn.close()
+    before = contents()
+    code, said = run_setup()
+    assert code == 1
+    assert "wasn't made by moving them" in said
+    assert contents() == before
+
+
+def test_setup_leaves_the_move_to_the_daemon_while_0_2s_daemon_answers(capsys):
+    zero_two_home()
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    paths.old_daemon_socket().parent.mkdir(parents=True, exist_ok=True)
+    s.bind(str(paths.old_daemon_socket()))
+    s.listen(1)
+    before = contents()
+    try:
+        assert run_setup() == (0, None)
+    finally:
+        s.close()
+    assert provision.SETUP_WAITS in capsys.readouterr().out
+    assert contents() == before and not store.path().exists()
+
+
+def test_setup_moves_0_2s_files_and_provisions(soon, capsys):
+    found = zero_two_home()
+    assert run_setup() == (0, None)
+    assert all(upgrade_0_2.moved_name(p).exists() for p in found.values())
+    assert rows("SELECT value FROM meta WHERE key = 'migrated_from'") == [("0.2",)]
+
+
 # --------------------------------------------------------------------------- readers
 
 def test_migrate_dry_run_writes_nothing_and_migrate_moves(soon, capsys):
