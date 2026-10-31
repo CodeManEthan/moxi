@@ -19,8 +19,10 @@ for a tag that is itself data (a pattern's test input, say); the repository's co
 reads the same file.
 
 `scan(root)` reads every tracked and untracked-but-not-ignored file that is UTF-8 text,
-and returns what it found. A file under a `_vendor` directory is a released library
-kept as released (the core vendors two), so it is not read.
+and returns what it found. A file under the core's `packages/moxi/src/moxi/_vendor/` is a
+released library kept as released (the core vendors two), so it is not read; the
+contract check and deptry skip the same directory. Any other `_vendor` directory, a
+module's own, is read like the rest.
 """
 
 from __future__ import annotations
@@ -29,6 +31,9 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from .contract import CORE
+from .contract import VENDORED as _CORE_VENDORED
 
 #: The shapes of a tag.
 TAG = re.compile(
@@ -50,8 +55,9 @@ FINDING_MARK = re.compile(
 #: The file that declares allowed text, and files that are not prose or code.
 ALLOW_FILE = ".residue-allow"
 SKIPPED = frozenset({ALLOW_FILE, "uv.lock"})
-#: A directory of vendored copies of released libraries, whose text is not ours.
-VENDORED = "_vendor"
+#: The core's directory of vendored copies of released libraries, whose text is not ours,
+#: as a path from the workspace root.
+VENDORED = f"packages/{CORE}/{_CORE_VENDORED}"
 
 
 @dataclass(frozen=True, order=True)
@@ -110,7 +116,7 @@ def scan(root: Path) -> list[Hit]:
     allow = allowed(root)
     hits = []
     for path in _files(root):
-        if (path in SKIPPED or VENDORED in path.split("/")[:-1]
+        if (path in SKIPPED or path.startswith(VENDORED)
                 or not (root / path).is_file()):
             continue
         try:

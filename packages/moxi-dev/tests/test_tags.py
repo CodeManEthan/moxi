@@ -89,11 +89,22 @@ def test_scan_skips_binary_files_the_lock_and_the_allow_file(repo):
     assert scan(repo) == []
 
 
-def test_scan_skips_vendored_copies(repo):
-    (repo / "src" / "_vendor" / "lib").mkdir(parents=True)
-    (repo / "src" / "_vendor" / "lib" / "a.py").write_text("# per D07\n")
-    (repo / "src" / "_vendor.py").write_text("# per D07\n")
-    assert scan(repo) == [Hit("src/_vendor.py", 1, "D07")]
+def test_scan_skips_the_core_s_vendored_copies(repo):
+    vendored = repo / "packages" / "moxi" / "src" / "moxi" / "_vendor"
+    (vendored / "lib").mkdir(parents=True)
+    (vendored / "lib" / "a.py").write_text("# per D07\n")
+    (vendored.parent / "_vendor.py").write_text("# per D07\n")
+    assert scan(repo) == [Hit("packages/moxi/src/moxi/_vendor.py", 1, "D07")]
+
+
+def test_scan_reads_a_module_s_own_vendor_directory(repo):
+    own = repo / "packages" / "cache" / "src" / "moxi_cache" / "_vendor"
+    own.mkdir(parents=True)
+    (own / "a.py").write_text("# per D07\n")
+    (repo / "src" / "_vendor").mkdir(parents=True)
+    (repo / "src" / "_vendor" / "b.py").write_text("# per D07\n")
+    assert scan(repo) == [Hit("packages/cache/src/moxi_cache/_vendor/a.py", 1, "D07"),
+                          Hit("src/_vendor/b.py", 1, "D07")]
 
 
 def test_the_allow_file_lets_exact_text_stand_in_one_file(repo):
