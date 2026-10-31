@@ -1047,3 +1047,26 @@ def test_the_api_module_is_the_announced_one():
     assert found.api is api
     for name in ("launch", "check", "preview", "LaunchRequest", "LaunchResult"):
         assert hasattr(found.api, name)
+
+
+@pytest.mark.parametrize("rid", ["../x", "a/b", "..", ".", "r 1"])
+def test_a_request_id_that_is_not_a_plain_name_is_refused_before_anything(
+        harness, tmp_path, rid):
+    temp = Path(common.scratch_root()).parent
+    before = stat.S_IMODE(temp.stat().st_mode)
+    [refused] = api.check(scratch_request(tmp_path, rid))
+    assert isinstance(refused, catalog.BadValue) and refused.row == "request_id"
+    assert refused.exit_code == exits.USAGE
+    with pytest.raises(catalog.BadValue):
+        api.launch(scratch_request(tmp_path, rid))
+    assert not store.path().exists() and harness.runs() == []
+    # Nothing outside the launcher's own folders is touched.
+    assert stat.S_IMODE(temp.stat().st_mode) == before
+    assert not common.scratch_root().exists()
+
+
+def test_the_scratch_folder_of_a_request_id_that_is_not_a_plain_name_is_refused():
+    for rid in ("../x", "a/b", "..", "."):
+        with pytest.raises(ValueError):
+            common.scratch_dir(rid)
+    assert common.scratch_dir("r-1.a_b").name == "r-1.a_b"

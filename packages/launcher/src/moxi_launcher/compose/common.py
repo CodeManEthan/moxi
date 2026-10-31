@@ -331,10 +331,22 @@ def scratch_root() -> Path:
     return Path(os.path.abspath(tempfile.gettempdir())) / f"moxi-scratch-{who}"
 
 
+_PLAIN_NAME = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def plain_name(name: str) -> bool:
+    """Whether `name` is one plain file name: letters, digits, `.`, `_` and `-`, and not
+    `.` or `..`."""
+    return bool(_PLAIN_NAME.fullmatch(name)) and name not in (".", "..")
+
+
 def scratch_dir(request_id: str) -> Path:
     """Where a scratch launch works: a folder named by its request id under
     `scratch_root()`, always as an absolute path (a slot launch is refused a relative
-    one). Only the path: the launch makes the folder."""
+    one). Only the path: the launch makes the folder. Raises ValueError for a request id
+    that is not a plain name, which would put the folder outside `scratch_root()`."""
+    if not plain_name(request_id):
+        raise ValueError(f"request id {request_id!r} is not a plain name")
     return scratch_root() / request_id
 
 

@@ -133,6 +133,9 @@ def launch(request, *, environ: Mapping[str, str] | None = None,
     `warn` is called with each warning line just before the session starts, the last
     moment a launch in this terminal can show one; the result carries them too."""
     caller = dict(os.environ if environ is None else environ)
+    bad_id = _request_id_refusal(getattr(request, "request_id", None))
+    if bad_id is not None:
+        raise bad_id
     known = _known(getattr(request, "request_id", None), environ)
     if known is not None:
         return _stored(known)
@@ -200,6 +203,9 @@ def check(request, *, environ: Mapping[str, str] | None = None) -> list[Refusal]
     and the target's (for a slot launch: slots not installed or not supported here, or a
     named slot that is held, occupied or missing)."""
     caller = dict(os.environ if environ is None else environ)
+    bad_id = _request_id_refusal(getattr(request, "request_id", None))
+    if bad_id is not None:
+        return [bad_id]
     try:
         resolved = _resolve(request, environ)
     except Refusal as refusal:
@@ -228,6 +234,17 @@ def exit_code(error: BaseException) -> int:
 
 def _resolve(request, environ: Mapping[str, str] | None = None):
     return presets.resolve(request, env=environ)
+
+
+def _request_id_refusal(request_id: str | None) -> Refusal | None:
+    """A refusal for a request id a caller gives that is not one plain file name, or None.
+    The id names the launch's scratch folder and run log, so one holding a separator or
+    `..` would put them outside the launcher's own folders."""
+    if not request_id or common.plain_name(request_id):
+        return None
+    return catalog.BadValue("request_id", f"request id {request_id!r} is not a plain name",
+                            "give letters, digits, '.', '_' or '-' only, or leave it out "
+                            "and the launcher makes one")
 
 
 def _known(request_id: str | None,
@@ -318,7 +335,7 @@ def _make_files(composition: Composition, environ: Mapping[str, str] | None = No
     values = composition.values
     if values.get("scratch"):
         where = Path(str(values["cwd"]))
-        files.private_dir(where.parent)
+        files.private_dir(common.scratch_root())
         files.private_dir(where)
     if handoff_key and values.get("cwd"):
         handoffs.folder(str(values["cwd"]), notes_dir=values.get("notes_dir") or None,
