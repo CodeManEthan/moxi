@@ -8,6 +8,7 @@ import sqlite3
 
 import pytest
 
+from moxi import modules
 from moxi.store import transaction
 from moxi_comms import reserved, secrets
 from moxi_comms.paths import comms_db
@@ -167,6 +168,65 @@ def test_a_scoped_or_malformed_declaration_is_refused(chain, name):
     assert [c[0] for c in result.conflicts] == [name]
     assert row(name)["state"] == "conflict"
     assert result.reserved == []
+
+
+class Found:
+    """A stand-in for one module the core's scan finds."""
+
+    def __init__(self, name, state, names=()):
+        self.name, self.state, self.reserved_names = name, state, names
+
+
+def scanning(monkeypatch, *found):
+    monkeypatch.setattr(modules, "scan", lambda: list(found))
+
+
+def test_a_broken_module_keeps_its_names_and_tokens(chain, store, monkeypatch):
+    scanning(monkeypatch, Found("launcher", modules.PRESENT, ("console",)))
+    reserved.reconcile(chain=chain)
+    before = (row("console")["token_hash"], token_of(store, "launcher", "console"))
+    # The launcher is still installed, but its announcement no longer imports.
+    scanning(monkeypatch, Found("launcher", modules.BROKEN))
+    result = reserved.reconcile(chain=chain)
+    assert (result.freed, result.lines) == ([], [])
+    r = row("console")
+    assert (r["state"], r["module"], r["freed_at"]) == ("active", "launcher", None)
+    assert (r["token_hash"], token_of(store, "launcher", "console")) == before
+    assert intervals("console")[-1]["released_at"] is None
+
+
+def test_a_broken_module_keeps_its_names_from_a_second_declarer(chain, monkeypatch):
+    scanning(monkeypatch, Found("launcher", modules.PRESENT, ("console",)))
+    reserved.reconcile(chain=chain)
+    scanning(monkeypatch, Found("launcher", modules.BROKEN),
+             Found("pager", modules.PRESENT, ("console",)))
+    result = reserved.reconcile(chain=chain)
+    assert result.conflicts == [("console", "pager", "launcher has it")]
+    assert (row("console")["state"], row("console")["module"]) == ("active", "launcher")
+
+
+def test_an_absent_or_uninstalled_module_loses_its_names(chain, store, monkeypatch):
+    scanning(monkeypatch, Found("launcher", modules.PRESENT, ("console",)))
+    reserved.reconcile(chain=chain)
+    scanning(monkeypatch, Found("launcher", modules.BROKEN))
+    assert reserved.reconcile(gone="launcher", chain=chain).freed == [
+        ("console", "launcher")]
+    assert token_of(store, "launcher", "console") is None
+    scanning(monkeypatch, Found("launcher", modules.PRESENT, ("console",)))
+    reserved.reconcile(chain=chain)
+    scanning(monkeypatch, Found("launcher", modules.ABSENT))
+    assert reserved.reconcile(chain=chain).freed == [("console", "launcher")]
+    assert row("console")["freed_at"] is not None
+
+
+@pytest.mark.parametrize("name", ["operator", "auto"])
+def test_a_name_the_daemon_keeps_is_never_reserved_and_gets_no_row(chain, store, name):
+    result = reserved.reconcile(declared={"pager": [name]}, chain=chain)
+    assert [c[:2] for c in result.conflicts] == [(name, "pager")]
+    assert result.lines == [f"pager: {name} isn't reserved: {result.conflicts[0][2]}"]
+    assert result.reserved == []
+    assert row(name) is None
+    assert token_of(store, "pager", name) is None
 
 
 def test_an_unowned_row_is_adopted_by_the_first_module_that_declares_it(chain, store):

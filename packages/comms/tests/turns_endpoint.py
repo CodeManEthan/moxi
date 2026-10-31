@@ -30,7 +30,7 @@ What a hand-in's outcome will be is scripted ahead of it, one entry per hand-in,
 A steer with no script entry is taken at once (`steer_auto`), and a steer while no turn
 runs is refused `idle` in its answer, as the contract says.
 
-The Codex adapter's slice reaches this endpoint the same way: build it with
+The Codex adapter's tests reach this endpoint the same way: build it with
 `harness="codex"` and `capabilities=CODEX`, and drive the turns by hand.
 """
 

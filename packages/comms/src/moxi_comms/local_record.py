@@ -43,6 +43,7 @@ from __future__ import annotations
 import contextlib
 import json
 import hashlib
+import logging
 import secrets
 import sqlite3
 import threading
@@ -65,6 +66,8 @@ from .record import (
 )
 from .store import open_write
 from .store.schema import ID_BASE, META_NEXT_ID
+
+log = logging.getLogger("comms.record")
 
 #: Days of message bodies kept; `0` disables the trim. One owner: the schema's default
 #: for `[local] retain_days` (settings.toml), read through `config`.
@@ -264,8 +267,7 @@ class LocalRecord:
                                author_kind=AUTHOR_OPERATOR,
                                author_display=row[0] if row else "operator",
                                content=content)
-        self._fanout()
-        self.nudge()
+        self._announce()
         return msg
 
     def post_as_identity(self, qualified: str, channel_id: str, content: str) -> Message:
@@ -285,9 +287,19 @@ class LocalRecord:
         with self._write() as conn:
             msg = self._insert(conn, channel_id=str(channel_id), author_id=author,
                                author_kind=kind, author_display=author, content=content)
-        self._fanout()
-        self.nudge()
+        self._announce()
         return msg
+
+    def _announce(self) -> None:
+        """Push a committed post to the subscriptions, and wake the pump. The post is
+        written by now, so a push that fails is logged and left to the pump's next pass:
+        its caller still gets the message, and never reads the post as not done."""
+        try:
+            self._fanout()
+        except Exception:  # noqa: BLE001 - the post stands whatever the push does
+            log.warning("pushing a committed post failed; the pump pushes it next",
+                        exc_info=True)
+        self.nudge()
 
     def _insert(self, conn: sqlite3.Connection, *, channel_id: str, author_id: str,
                 author_kind: str, author_display: str, content: str) -> Message:

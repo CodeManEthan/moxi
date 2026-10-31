@@ -146,6 +146,15 @@ def test_the_daemon_refuses_mail_to_a_reserved_name_with_the_verb_bypassed(
     assert len(history(rig)) == before
 
 
+def test_a_module_declaring_the_operators_name_leaves_his_mail_alone(rig, client):
+    reserved.reconcile(declared={"pager": ["operator"]}, chain=secrets.from_config())
+    assert not rig.daemon.resolve("operator").send_only
+    token = client.bind(name="planner", scope="proj-a")["token"]
+    before = len(history(rig))
+    client.send("planner@proj-a", token, machine_line.compose(["operator"], "report"))
+    assert len(history(rig)) == before + 1
+
+
 # --------------------------------------------------------------------------- send under
 
 def test_a_binding_token_never_sends_under_a_reserved_name(console, client):

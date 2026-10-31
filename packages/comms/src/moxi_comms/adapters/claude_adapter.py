@@ -607,28 +607,30 @@ def wait_for_exit(fd: int, stop: threading.Event | None = None) -> None:
             return
 
 
-def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, ready=None,
+def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
           turns=None) -> int:
-    """The adapter process's life: bind, say ready, deliver until `claude` ends, close.
+    """The adapter process's life: bind, give the wrapper its word, deliver until
+    `claude` ends, close.
 
-    `ready()` is called once the bind has been tried (bound, or the daemon not there and
-    the supervisor left to bind when it returns) and the claim socket listens, so the
-    wrapper can exec `claude`. A register the daemon refused for good (an unknown kind,
-    an invalid name) ends the adapter with its one line in the log: the session runs
-    without comms, as a dead shim's did."""
-    from ..client import DaemonError
+    `say(code, reason)` gives the wrapper its word (`adapters.word`): `BOUND` once the
+    bind has been tried (bound, or the daemon not there and the supervisor left to bind
+    when it returns) and the claim socket listens, so the wrapper can exec `claude`. A
+    bind the daemon refused (the name held by another session, or reserved) or failed is
+    said with the daemon's words, and the wrapper ends the launch before `claude`
+    starts."""
+    from .word import BOUND, exit_of, word_for
 
+    say = say or (lambda code, reason="": None)
     adapter = ClaudeAdapter(shim, harness_pid, turns=turns)
     try:
         adapter.start(tolerate_offline=True)
-    except DaemonError as e:
-        log.warning("this session did not get its comms binding: %s", e)
-        if ready is not None:
-            ready()
+    except Exception as e:                                  # noqa: BLE001
+        log.warning("the launch of this session failed: %s", e)
+        word = word_for(e)
+        say(word, str(e))
         shim.stop(remove_claim_file=True)
-        return 2
-    if ready is not None:
-        ready()
+        return exit_of(word)
+    say(BOUND)
     log.info("adapter for claude pid %d is up (pid %d)", harness_pid, os.getpid())
     try:
         wait_for_exit(harness_fd)

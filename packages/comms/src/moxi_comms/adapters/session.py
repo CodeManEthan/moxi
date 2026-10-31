@@ -58,7 +58,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import select
 import shutil
 import sys
 from pathlib import Path
@@ -68,7 +67,8 @@ from moxi import exit as moxi_exit
 from .. import directors as directors_mod
 from ..context import COMMAND_ENV, own_comms
 from ..paths import claim_socket, log_dir, runtime_root
-from ..scoping import GLOBAL, NAME_RE, project_key
+from ..scoping import GLOBAL, NAME_RE, project_key, qualify
+from .word import BOUND, FAILED, await_word, exit_of, teller
 
 #: The old wrapper stamp, scrubbed from a child's environment so a nested session
 #: does not inherit its parent's (no comms code reads it).
@@ -562,8 +562,7 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
         return 2
     sys.stdout.flush()
     sys.stderr.flush()
-    launch(session, binary, cmd, env, prog=prog)   # pragma: no cover - replaces this process
-    return 0
+    return launch(session, binary, cmd, env, prog=prog)
 
 
 # ----------------------------------------------------------------- the adapter fork
@@ -571,14 +570,17 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
 def launch(session: Session, binary: str, cmd: list[str], env: dict, *,
            prog: str = "moxi-comms-claude", ready_wait: float = READY_WAIT,
            exec_=os.execve):
-    """Fork the session's adapter, wait for it to be ready, and exec `claude`.
+    """Fork the session's adapter, wait for its word, and exec `claude`.
 
     This process takes a pidfd on itself first: it becomes `claude` at the exec, keeping
     its pid, so the handle is the adapter's watch on `claude`, and a reused pid cannot
     stand in for it. The adapter is forked twice over (its first parent leaves at once),
     so it is never `claude`'s child and is not left a zombie under it, and it runs in a
-    session of its own. The wrapper waits for its ready byte, at most `ready_wait`
-    seconds, then execs whatever it heard; past the bound it says so on stderr."""
+    session of its own. The wrapper waits for its word (`adapters.word`), at most
+    `ready_wait` seconds. A refusal the adapter reports (the name held by another session,
+    or reserved) ends the launch here, before `claude` starts: the daemon's words on
+    stderr, and its exit code. Past the bound `claude` starts anyway, and the wrapper says
+    so on stderr."""
     from .terminal import pidfd_open   # not at the top: it needs termios, and the listener
     #                                    imports this module
 
@@ -603,23 +605,19 @@ def launch(session: Session, binary: str, cmd: list[str], env: dict, *,
     os.close(w)
     os.waitpid(child, 0)
     os.close(handle)
-    ready = _await_ready(r, ready_wait)
+    word = await_word(r, ready_wait)
     os.close(r)
-    if not ready:
+    if word is None:
         print(f"{prog}: the session's comms adapter was not ready after {ready_wait:g}s; "
               f"starting claude anyway (its log: {session.log_path()})", file=sys.stderr)
+    elif word[0] != BOUND:
+        code, why = word
+        who = qualify(session.name, session.scope) if session.name else "the session"
+        print(f"{prog}: {who} was not launched: "
+              f"{why or 'the adapter ended before it bound'} (its log: "
+              f"{session.log_path()})", file=sys.stderr)
+        return exit_of(code)
     return exec_(binary, cmd, env)
-
-
-def _await_ready(fd: int, timeout: float) -> bool:
-    """True when the adapter wrote its ready byte within `timeout` seconds."""
-    ready, _, _ = select.select([fd], [], [], timeout)
-    if not ready:
-        return False
-    try:
-        return os.read(fd, 1) == b"1"
-    except OSError:
-        return False
 
 
 def _adapter_process(session: Session, env: dict, harness_pid: int, handle: int,
@@ -644,18 +642,13 @@ def _adapter_process(session: Session, env: dict, harness_pid: int, handle: int,
     logging.basicConfig(level="INFO", stream=sys.stderr, force=True,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
-    def ready() -> None:
-        try:
-            os.write(ready_fd, b"1")
-            os.close(ready_fd)
-        except OSError:
-            pass
-
     from . import claude_adapter
-    shim = adapter_shim(session, harness_pid)
+    say = teller(ready_fd)
     try:
-        return claude_adapter.serve(shim, harness_pid, handle, ready=ready)
+        shim = adapter_shim(session, harness_pid)
+        return claude_adapter.serve(shim, harness_pid, handle, say=say)
     finally:
+        say(FAILED, "the adapter ended")
         # The session has ended: its directory (the roster memory's) goes with it, and
         # its claim socket if the adapter did not close it.
         from ..claimhold import remove_socket
@@ -670,7 +663,8 @@ def adapter_shim(session: Session, harness_pid: int, **extra):
     the claim's root, and its supervisor on. The session id is the one the launch named
     to `claude`, stated from the bind until the first look replaces it; an
     unnamed resume states none. Never an inherited `CLAUDE_CODE_SESSION_ID` (a wrapper
-    run inside another session carries that session's)."""
+    run inside another session carries that session's). A name another session holds is
+    refused, not waited for: the wrapper ends that launch before `claude` starts."""
     from ..membership import TREE, root_of
     from .claude_shim import ClaudeShim
 
@@ -682,6 +676,7 @@ def adapter_shim(session: Session, harness_pid: int, **extra):
                       claim_socket=session.claim_socket,
                       claim_roots=[root] if root else [], listen_claims=True, **extra)
     shim.session_id = session.stated_id
+    shim.WAIT_WHEN_HELD = False
     return shim
 
 

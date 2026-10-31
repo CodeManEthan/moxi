@@ -3,10 +3,10 @@ and the daemon's no-endpoint state as a sender and the doctor read it.
 
 The launch runs for real in a child process, with a stand-in `claude` that records what
 it found when it started and then exits: the adapter is up, bound and listening on the
-claim socket before `claude` starts (the wrapper waits for its ready byte), its claim's
+claim socket before `claude` starts (the wrapper waits for its word), its claim's
 root is the `claude` process (the wrapper's pid, kept across the exec), it reports no
 endpoint while the session has none, and it deregisters and cleans up when `claude`
-exits.
+exits. A name the daemon refuses ends the launch before `claude` starts.
 """
 
 from __future__ import annotations
@@ -21,8 +21,9 @@ import textwrap
 import pytest
 from conftest import wait_until
 
-from moxi_comms import claimfile, paths
-from moxi_comms.adapters import session
+from moxi import exit as moxi_exit
+from moxi_comms import claimfile, paths, reserved, secrets
+from moxi_comms.adapters import session, word
 
 NAME = "launched"
 #: The id the launch names to `claude`, and its session dir's name.
@@ -89,18 +90,65 @@ def test_the_launch_forks_a_bound_adapter_before_claude_and_it_ends_with_claude(
     assert "claude pid" in log.read_text()
 
 
-def test_the_wrapper_waits_a_bounded_time_and_then_starts_claude(capsys, monkeypatch):
-    """A ready byte that never comes holds `claude` up by `ready_wait` and no more."""
-    s = session.Session("fk2", name=NAME, project="proj-a")
-    s.write()
+def test_the_wrapper_waits_a_bounded_time_for_the_adapters_word():
+    """A word that never comes holds `claude` up by `ready_wait` and no more; a refusal
+    comes with its reason, and an adapter that ended without a word reads as failed."""
     r, w = os.pipe()
     try:
-        assert session._await_ready(r, 0.05) is False
-        os.write(w, b"1")
-        assert session._await_ready(r, 0.05) is True
+        assert word.await_word(r, 0.05) is None
+        word.teller(w)(word.REFUSED, "console is reserved for launcher")
+        assert word.await_word(r, 0.05) == (word.REFUSED,
+                                            "console is reserved for launcher")
     finally:
         os.close(r)
-        os.close(w)
+    r, w = os.pipe()
+    say = word.teller(w)
+    say(word.BOUND)
+    say(word.FAILED, "the adapter ended")
+    assert word.await_word(r, 0.05) == (word.BOUND, "")
+    os.close(r)
+    r, w = os.pipe()
+    os.close(w)
+    assert word.await_word(r, 0.05) == (word.FAILED, "")
+    os.close(r)
+
+
+def run_wrapper(turns_plugins, script, name, sid, *extra):
+    """The wrapper's `main` in a child process, to its end."""
+    from conftest import TURNS_PLUGINS_PATCH
+    code = (TURNS_PLUGINS_PATCH.format(root=str(turns_plugins))
+            + "from moxi_comms.adapters import session; raise SystemExit(session.main("
+            f"['--name', {name!r}, *{list(extra)!r}, '--session-id', {sid!r}, "
+            f"'--claude', {str(script)!r}]))")
+    return subprocess.run([sys.executable, "-c", code], env=dict(os.environ),
+                          capture_output=True, text=True, timeout=60)
+
+
+def test_a_reserved_name_is_refused_before_claude_starts(rig, fake_claude, turns_plugins):
+    script, out, release = fake_claude
+    release.touch()                     # a claude that did start would end at once
+    reserved.reconcile(declared={"launcher": ["console"]}, chain=secrets.from_config())
+    sid = "5e55a1d0-0000-4000-8000-0000000000a1"
+    proc = run_wrapper(turns_plugins, script, "console", sid, "--global")
+    assert proc.returncode == moxi_exit.REFUSED, proc.stderr
+    assert "console was not launched: console is reserved for launcher" in proc.stderr
+    assert not out.exists(), "claude never started"
+    assert binding(rig, "console") is None
+    assert wait_until(lambda: not (session.sessions_dir() / sid).exists(), timeout=5)
+
+
+def test_a_held_name_is_refused_before_claude_starts(rig, fake_claude, turns_plugins):
+    script, out, release = fake_claude
+    release.touch()
+    rig.shim(name="heldname", global_=True)
+    holder = binding(rig, "heldname")
+    assert holder is not None
+    proc = run_wrapper(turns_plugins, script, "heldname",
+                       "5e55a1d0-0000-4000-8000-0000000000a2", "--global")
+    assert proc.returncode == moxi_exit.REFUSED, proc.stderr
+    assert "heldname was not launched: heldname is already bound" in proc.stderr
+    assert not out.exists(), "claude never started"
+    assert binding(rig, "heldname") is holder, "the holder keeps its name"
 
 
 # ------------------------------------------------------------- the wrapper's pidfd
