@@ -6,23 +6,23 @@ live. Numbers named here are in `src/moxi_comms/constants.py`.
 
 ## The pieces
 
-- **The record** holds every message. `local` is the supported backend: the record is
-  one SQLite file, `STATE/comms/record.db`, in WAL mode, written directly by every comms
-  process on the machine, with the rooms and the machine line this page describes.
-  Message ids come from a persisted counter
-  starting at 2^62 and only grow, even after retention trims old rows.
-- **The directory**, `DATA/comms/directory.db`, holds the rooms, standing identities
-  and the operator.
-- **The daemon**, `moxi-comms-daemon`, is the one reader. It subscribes to the record, works
-  out who each message is for, and hands it to the adapter bound to that name. Routing
-  lives in memory; restarting the daemon rebuilds it from the adapters that reconnect.
+- **The store**, `STATE/comms/comms.db`, one SQLite file in WAL mode (0600), holds the
+  record of every message, the rooms, each name's waiting mail and digests, each name's
+  cursor, the binding history, the identities and the operator, and the reserved names.
+  `local` is the supported backend. Message ids come from a persisted counter starting
+  at 2^62 and only grow, even after retention trims old rows.
+- **The daemon**, `moxi-comms-daemon`, is the one writer of messages and delivery
+  state. Every send goes through it, the operator's included; it works out who each
+  message is for, and hands it to the adapter bound to that name. Which names are bound
+  lives in memory; restarting the daemon rebuilds it from the adapters that reconnect,
+  and what each name is owed stays in the store.
 - **Delivery adapters** connect to the daemon, bind a name, and put mail in front of a
   model at a turn boundary: `claude-shim` (a Claude Code session), `codex` (a Codex
   app-server) and `opencode` (an OpenCode server).
   A reserved name is one a module sends under and nobody binds or mails
   ([adapters.md](adapters.md#reserved-send-only-names)).
-- **The CLI**, `moxi comms`, posts messages and reads the record. On `local` it writes the
-  record itself and then nudges the daemon; delivery waits for the daemon.
+- **The CLI**, `moxi comms`, sends and reads through the daemon. With the daemon down
+  nothing is sent: a send exits 75 and says so.
 
 There is one room, `#names`, where every agent and the operator post addressed mail.
 
@@ -67,7 +67,7 @@ The parser change landed; the suite is green.
 
 ```
 ::to <tag>[, <tag>]* [re:<id>] [audience:<tag>] [held | cold-at:<v>[,<v>]*]
-     [cap:<n> | no-cap] [1 reply left | last reply]
+     [interrupt] [expires:<t>] [cap:<n> | no-cap] [1 reply left | last reply]
      [no reply | reply-optional | reply-once | open]
 ```
 
@@ -84,6 +84,14 @@ The parser change landed; the suite is green.
   value count unlike the tag count makes the line prose. The daemon reads it only for a
   recipient whose cache it reads `unknown` (see "Held mail"); the payload does not carry
   it and `moxi comms history` does not print it.
+- `[interrupt]`: the sender asks that the message go into a running turn where the
+  recipient's harness can take it there, rather than wait for the turn's end. It doesn't
+  get past the cache hold: a held recipient gets it at a release point like any other
+  mail. `--interrupt` writes it; with `--held` it is a usage error.
+- `[expires:<t>]`: a Unix second after which the message is never handed to a model. A
+  row still waiting then is dropped, and the sender is told nothing; `moxi comms explain`
+  says `expired`. A line without it never expires. The verb writes it from `--expires`
+  (`30m`, `6h`, `3d`, or `never` for none) or from `[delivery] expiry` (24 hours).
 - `[cap:<n>]` or `[no-cap]`: the opener of an open thread sets its reply cap, or lifts
   it (see "Postures and open threads").
 - `[1 reply left]` or `[last reply]`: on a reply in an open thread, one more reply
@@ -109,7 +117,7 @@ file and send a pointer to it.
 ### Postures and open threads
 
 Every new `moxi comms send` (no `--reply-to`) states what it wants back with `--posture none`,
-`optional`, `once` or `open`; without it the verb refuses, exit 2, posting nothing. The operator
+`optional`, `once` or `open`; without it the verb refuses, exit 2 (usage), posting nothing. The operator
 (any lane whose sender is `operator`) is exempt from every posture refusal: a new send of
 his with no `--posture` is open with no cap, and what he passes is written
 as passed.
@@ -136,7 +144,7 @@ whose `re:` names the root or a member; the verified ones count. It is closed wh
    the newest `[cap:<n>]` or `[no-cap]` on a verified message by the opener, else
    `[threads] reply_cap` in comms' config file (default 8);
 2. its newest message has been readable by the replier for an hour. The daemon's
-   `query kind="readable"` says when it handed each message over, and which it still
+   `readable` read says when it handed each message over, and which it still
    has in its queue for him; mail not yet handed over starts no clock;
 3. a verified member carries `[no reply]`.
 
@@ -150,7 +158,7 @@ members' read that the backend may have cut short (`history_bound` on the record
 the reply through with a `NOTE:`. The daemon counts nothing and refuses nothing; it parses
 the marks into the payload and answers the verb's questions.
 
-Every verb checks its daemon's verb protocol before it does anything else (see "The
+Every verb opens its connection with the hello before it does anything else (see "The
 daemon socket"), so no verb uses a surface its daemon cannot parse.
 
 ## Attribution
@@ -162,8 +170,8 @@ identity directly, but it does not authorize a live post. A live binding is
 the message is **unverified**, and every way of not knowing lands there, never on a
 false verified.
 
-For mail delivered later from the record ("catch-up"), the **binding history**,
-`DATA/comms/bindings.db`, supplies the binding history. The daemon alone writes it, at
+For mail delivered later ("catch-up"), the **binding history**, the `bindings` table of
+`comms.db`, supplies who held what. The daemon alone writes it, at
 each bind and each release: which identity was held over which interval, with exact
 containment (`bound_at <= T <= released_at`, second resolution). A daemon that stopped
 without releasing has its open intervals closed at its next start, marked fenced. A
@@ -237,24 +245,29 @@ sometimes is explained on demand by `moxi comms help <term>`.
 These hold for every adapter. How an adapter is built, and what makes a CLI a harness,
 is in [adapters.md](adapters.md).
 
-1. **The adapter writes the cursor.** Each identity has a cursor file,
-   `STATE/comms/cursors/<backend>/<identity>.json`: the newest message id the model saw
-   in a completed turn. "Handled" means exactly that, and nothing stronger is claimed.
-2. **Delivery waits for a turn boundary.** A Claude session's shim queues mail and
-   injects one digest when a turn ends or the session is idle, then advances the cursor
-   when the turn that read it completes. A session sitting at its prompt never ends a
+1. **The daemon keeps the books.** Every routed message holds a row in its recipient's
+   queue until a turn that read it is acked, or it is dropped (withdrawn or expired).
+   The adapter opens each digest with the daemon (`open_digest`), which drops a withdrawn
+   or expired row there, the last check before any text reaches a model; it hands the
+   digest to Moxi turns with the digest's id as its ref, and reports each turn's end
+   (`turn_ended`) with the digests that turn handled and the ones it didn't. In one
+   transaction the daemon deletes the handled rows and advances the name's cursor, the
+   newest id seen in a completed turn: to the lower of the highest id handled and one
+   below the lowest id still with a row. "Handled" means exactly that, and nothing
+   stronger is claimed. An unhandled digest's rows wait again.
+2. **Delivery waits for a turn boundary.** An adapter queues mail and injects one digest
+   when a turn ends or the session is idle. A session sitting at its prompt never ends a
    turn, so an idle session (no turn running, the queue unchanged for `IDLE_SETTLE`)
-   counts as standing at a boundary. Mail released from the queue never goes into
-   a running turn. At every turn end the adapter writes its cursor first and then sends
-   `activity kind=turn` with `handled` and `unhandled` (see "The daemon socket"). Queued
-   mail goes out of id order, so the cursor never passes an id the adapter still holds
-   and has not seen in a completed turn: it advances to the lower of the highest
-   completed digest and one below the lowest id still held.
-3. **Catch-up on bind.** When a name binds, the daemon replays from the record what its
-   cursor hasn't passed. With a cursor, that is everything after it, however old. Only
-   with no cursor at all (a new name, or one whose STATE was lost) is replay bounded, to
-   the newest `REPLAY_N` (50) messages no older than `REPLAY_T` (24 hours), and the
-   digest says that older mail was omitted.
+   counts as standing at a boundary. Mail released from the queue never goes into a
+   running turn. The one exception is `[interrupt]` mail to a session whose turns
+   endpoint can steer: it goes into the running turn at once, and its frame line says
+   `[interrupt]`. A digest is acked when the turn that took it ends with an answer;
+   interrupted (Esc), errored, refused or lost, it is handed again, and the agent may see
+   it twice.
+3. **Catch-up on bind is the name's rows.** When a name binds, the daemon hands it the
+   rows waiting for it, by id, at most 64 not yet in a digest at a time, and tops that up
+   as the adapter opens digests. Nothing is replayed from the record: a message with no
+   row was acked or dropped.
 4. **Waiting mail is listed by name.** `moxi comms agents --seats` lists, for each name, the
    mail waiting for it in the queue: how many messages, and how long the oldest has
    waited.
@@ -264,8 +277,22 @@ is in [adapters.md](adapters.md).
    an identity is in: `handled`, `not-addressable`, `delivered-and-ignored`, or
    `delivered-but-the-turn-never-completed`.
 6. **Bindings do not survive a restart.** The daemon keeps no name hold across a
-   restart. Every adapter must register again and receives a fresh binding token; a
-   message sent before that rebind is refused and remains queued for the identity.
+   restart. At its start it closes the binding intervals and digests the last daemon left
+   open and puts every row a binding held back to waiting. Every adapter must bind again
+   and receives a fresh binding token; a send under the old token is refused, and the
+   name's mail waits for the rebind.
+
+### Delete and expiry
+
+`moxi comms delete <id>` withdraws a message its author sent from every recipient that
+hasn't had it in a digest, and prints one line per recipient: withdrawn, or already
+delivered. Only the author deletes, with its own credential. A recipient whose digest
+held it has had it, even when that turn ended unhandled, since the model may have read
+it. The record keeps the message, marked withdrawn, so ids, `re:` threads and
+attribution hold, and `moxi comms history` prints it `[withdrawn]`. It exits 0 when
+anything was withdrawn and 3 when nothing was. A message past its `[expires:…]` is
+dropped at the next point it could move toward a model, and `history` marks it
+`[expired for <names>]`. Nothing goes back to the sender for either.
 
 ## Held mail
 
@@ -290,22 +317,22 @@ already handed, oldest first, with `held: true` on the payload:
 | `ready` with `source` `startup`, `clear` or `compact` | no | every row |
 | `ready` with `source` `resume`, or any other value | yes | every row if it passes |
 | `ready` with no `source` | - | nothing |
-| `turn` carrying `handled` | yes, and again for a settle window if it does not pass | every row at the first read that passes; then the report settles |
-| `turn` with no `handled` | - | nothing, and nothing is settled |
-| `register` | yes | rows of unflagged messages if it passes; flagged rows wait |
-| a live message to the name, an `activity` with no `kind` | - | nothing |
+| `turn_ended` | yes, and again for a settle window if it does not pass | every row at the first read that passes; then the report settles |
+| `look` | yes | every row if it passes; settles nothing |
+| `bind` | yes | rows of unflagged messages if it passes; flagged rows wait |
+| a live message to the name, an `activity` | - | nothing |
 
 A turn end is a release point that stays open for a short window, not an instant. The
 harness can write the turn's own record after the turn's end reaches the daemon (Claude
 Code drains its transcript writes on a 100 ms timer), so the read at the frame can judge
 the cache as it was before the turn, and the turn that warmed a cold cache would not
-count. When a `turn` frame's read does not pass, whatever the queue holds, the daemon
+count. When a `turn_ended`'s read does not pass, whatever the queue holds, the daemon
 opens a settle window for the binding and reads the cache again at 0.25, 0.5, 1, 2, 4
 and 8 s after the frame (`RELEASE_SETTLE_STEPS`). At the first read that passes it
-releases every row then queued for the name, whenever the row was queued, except the ids
-that frame reported `unhandled`, which wait for the next release point. A newer `turn`
-of the binding, or the binding's end, closes the window early; a `ready`, `look` or
-register takes its own single read and leaves it open. A window whose last read still
+releases every row then queued for the name, whenever the row was queued, except the
+rows of the digests that report named unhandled, which wait for the next release point.
+A newer `turn_ended` of the binding, or the binding's end, closes the window early; a `ready`, `look` or
+bind takes its own single read and leaves it open. A window whose last read still
 does not pass logs one line naming the binding, the read and the window's length, and
 the rows wait for the next release point. Only cache's read of the harness's record says
 a cache is warm: a turn end alone never releases. A window lives in the daemon's memory,
@@ -318,27 +345,18 @@ began, and whose row would be queued after it, reads once more and that read dec
 so a read made in the same lag never leaves its row behind the release. A `[held]` send
 takes no read and always waits for the next turn end.
 
-A Claude Code `turn` frame can also come at a prompt: a later prompt after the
-digest's own means the shim cannot tell whether the digest's turn was interrupted (Esc),
-so it names the digest's ids `unhandled`, and the agent may see the digest twice. It is
-a release point like any other.
-
-A frame with no `source` or no `handled` comes from an adapter started before the
-queue; such a binding gets its unflagged rows at its next register and its flagged ones
-once a binding of a current adapter takes the name, and may see a message twice, never
-lose one. A row handed to a binding is handed to it again only after its adapter names
-it `unhandled` or the binding ends, at the next release point. A handed id that has no
-row, that the adapter did not name handled and that its cursor has not passed gets a row
-when the binding ends; so does an id whose hand-over failed on the socket. An `agent-N`
-name has no rows while unbound and loses them when its binding ends.
+A row handed to a binding is handed to it again only after its adapter reports it
+unhandled or the binding ends, at the next release point. When a binding ends, every row
+it was handed and had not had acked waits again. An `agent-N` name has no rows while
+unbound and loses them when its binding ends.
 
 `moxi comms send` asks the daemon for its read of each bound recipient's cache. A recipient
 that reads cold is held: the message is posted, exit 0, and the output is the `sent
 <id>` line, one `held:` line per held recipient saying when its cache went cold, any
 NOTEs, and a last line that says when each held recipient reads it. A recipient comms
 cannot read (no session id reported yet, a transcript missing or unreadable, a failed
-`session` query, a name that unbound while the verb checked it) refuses the whole send,
-exit 6, nothing posted, `--held` included: the refusal's first line, "Nothing was sent:
+`session` read, a name that unbound while the verb checked it) refuses the whole send,
+exit 75, nothing posted, `--held` included: the refusal's first line, "Nothing was sent:
 ...", names each one and why, and the cure is to send it again in a moment. On every
 exit path the outcome is the last line. `--held` waits for the recipient's own turn
 even when it is warm; to the operator it is ignored, with a NOTE, and line zero carries
@@ -369,7 +387,7 @@ row it does not recognise, a reverted thread, a revert pending, a next model it 
 tell) reads `unknown`; a model change reads cold until a turn on the new model.
 
 The daemon reads the cache again at every delivery: live routing, the rescan and
-register replay, once per binding per pass. A known read decides alone. A read that is
+each release, once per binding per pass. A known read decides alone. A read that is
 `unknown` at the daemon, or that raised, is decided by the send's `[cold-at:…]` value
 for that recipient: a time still ahead of the daemon's clock, or `-`, delivers live (a
 `-` has no time and never expires); a time reached, or a line with no `[cold-at:…]` at
@@ -389,79 +407,101 @@ naming what is owed; a debt still unpaid at the next Stop is dropped and shown i
 
 ## The daemon socket
 
-JSON lines over `RUNTIME/moxi-comms-daemon.sock` (0600, in a 0700 directory). A request
-carries an `id`, which the reply echoes. Frames the daemon pushes (`deliver`,
-`replay_complete`, `notice`) carry none, which is how a client tells a reply from a
-push on one connection.
+Newline-delimited JSON-RPC 2.0 at `RUNTIME/comms/daemon.sock` (0600, in a 0700
+directory; Moxi's short socket path for it when that one is too long). Each adapter's
+claim socket speaks the same wire. Every connection opens with `rpc.hello`: the client
+offers a range of comms wire versions, and the daemon answers the highest common one and
+its capabilities (`delete`, `expiry`, `interrupt`, `reserved-names`), or refuses with
+-32001 naming both ranges. The wire is version 1. A version is raised only for a
+breaking change; an addition is a new capability, which a client tests by name. A verb
+or adapter refused at its hello says which side is older and the cure: restart the
+daemon (`moxi comms service restart`) when it is the older, or relaunch the session or
+update the install when the program is. Nothing of comms 0.2's wire is served: a first
+line that isn't JSON-RPC 2.0 gets the JSON-RPC error and the connection closes.
 
 ```
-->  {"id": 1, "op": "register", "protocol": 2, "name": "planner",
-     "scope": "proj-a", "adapter": "claude-shim"}
-<-  {"id": 1, "ok": true, "identity": {...}, "token": "...", "hwm": "...", "protocol": 2}
-<-  {"op": "deliver", "payload": {...}}
-<-  {"op": "replay_complete", "identity": "planner@proj-a", "cursor": "..."}
-->  {"id": 2, "op": "query", "kind": "resolve", "name": "reviewer"}
-->  {"op": "injected", "identity": "...", "through": "<id>", "seq": 7, "digest": "..."}
-->  {"op": "activity", "identity": "...", "seq": 8, "kind": "turn",
-     "handled": ["<id>", ...], "unhandled": []}
-->  {"op": "activity", "identity": "...", "seq": 9, "kind": "ready", "source": "clear"}
-->  {"id": 5, "op": "ping"}
-<-  {"id": 5, "ok": true, "cli_protocol": 2}
+->  {"jsonrpc": "2.0", "id": 1, "method": "bind",
+     "params": {"name": "planner", "scope": "proj-a", "adapter": "claude-shim"}}
+<-  {"jsonrpc": "2.0", "id": 1, "result": {"identity": {...}, "token": "...", "high": "..."}}
+<-  {"jsonrpc": "2.0", "method": "deliver", "params": {"payload": {...}}}
+<-  {"jsonrpc": "2.0", "method": "replay_complete", "params": {"identity": "planner@proj-a", "cursor": "..."}}
+->  {"jsonrpc": "2.0", "id": 2, "method": "open_digest", "params": {"ids": ["<id>", ...]}}
+<-  {"jsonrpc": "2.0", "id": 2, "result": {"digest": 17, "ids": ["<id>", ...], "dropped": []}}
+->  {"jsonrpc": "2.0", "method": "injected", "params": {"digest": 17, "text": "...", "seq": 7}}
+->  {"jsonrpc": "2.0", "method": "activity", "params": {"ref": 17, "seq": 8}}
+->  {"jsonrpc": "2.0", "id": 3, "method": "turn_ended",
+     "params": {"turn_id": "...", "handled": [17], "unhandled": []}}
+<-  {"jsonrpc": "2.0", "id": 3, "result": {"cursor": "<id>"}}
+->  {"jsonrpc": "2.0", "method": "ready", "params": {"source": "clear", "seq": 9}}
 ```
 
-`kind: "turn"` is sent at every turn end of the agent, and, for a Claude Code session,
-at the prompt after an interrupt, after the cursor write, and only for a turn that ran. `handled` lists the ids of every digest whose turn completed since
-the adapter's last `turn` frame, and `unhandled` those whose turn ended any other way
-(failed, interrupted, errored) and that the adapter no longer holds; both are present,
-empty when nothing ended. A `handled` id the binding was handed loses its row; an
-`unhandled` one gets a row. An id the binding was not handed is logged and ignored.
-`kind: "ready"` is sent at every session start, clear, compaction and resume, with
-`source` `startup`, `resume`, `clear` or `compact` as Claude Code names them (any other
-value reads as `resume`); one that comes before the adapter is bound is sent once,
-right after its `register` is answered. "Held mail" has what each one releases. The
-daemon takes `kind`, `source`, `handled` and `unhandled` only from the binding's own
-connection.
+Methods any client may call: `send` (`as`, the sending identity, `token`, its
+credential, and `content`, line zero and body; answers `message_id`), `delete` (`as`,
+`token`, `message_id`; answers `withdrawn` and `delivered`, each a list of names), and
+the reads `resolve`, `agents`, `session`, `owner`, `asks`, `owed`, `readable`,
+`explain`, `binding_window`, `attributed_message`, `rooms`, `message`, `history`,
+`max_id` and `last_digest`. A send's credential is the live binding's token for a bound
+identity, the operator's credential for `operator`, or a reserved name's token for a
+reserved name.
 
-`ping` answers `cli_protocol`, the verbs' contract with their daemon: what a verb writes
-on line zero and which answers it reads. Every verb sends it when it connects, and an
-answer without it reads 0. On a mismatch the verb exits 4, nothing done: "the comms
-daemon speaks verb protocol 0 and this comms speaks 2; restart the daemon (moxi comms service
-status names its unit), then run this again. Nothing was sent."
+An adapter's methods, on the connection that holds its binding: `bind` (answers the
+identity, a fresh binding token and `high`, the catch-up boundary), `open_digest`,
+`turn_ended` (answers the name's cursor), and the notifications `injected` (the digest's
+id and its text, capped at 64 kB), `ready` (with `source`), `look`, `activity` and
+`unanswered`. One from a connection that holds no binding is refused `not-bound`. The
+daemon pushes `deliver` (a payload), `replay_complete` (after a bind's catch-up) and
+`notice`. It keeps at most 64 rows per binding pushed and not yet in a digest, so a long
+catch-up never fills the connection; a client that stops reading for 5 s is dropped,
+which ends its binding.
 
-A claude-shim's `register` and every `activity` also carry `session_id`,
-`projects_root` (where its session's Claude Code writes transcripts) and `turned`
-(whether a turn has been seen in that session), and a Claude session's adapter adds
-`endpoint` (whether it has found the session's Moxi turns endpoint). A turn's start
-sends an `activity` with no `kind` at once, so the daemon learns `turned` before the
-turn ends; it releases nothing. The daemon takes them only from the binding's own
-connection, and reads a missing transcript as `fresh` only on that evidence. A bound
-name whose adapter reports `endpoint: false` reads `waiting` to a sender (the `session`
-query answers `endpoint` and `endpoint_for`, the `agents` query `endpoint` and
-`endpoint_since`). A session start, resume, `/clear` or compaction sends `kind: "ready"`
-with its `source` (`startup`, `resume`, `clear` or `compact`); one that comes before the
-shim is bound is sent once, right after its `register` is answered. The adapter's first
-look at an idle session's endpoint sends `kind: "look"`: a release point on a passing
-read that settles nothing and is no evidence of a turn. Every turn end sends `kind: "turn"` with `handled` (the ids of each digest whose
-turn ended with an answer since the last such frame) and `unhandled` (those whose turn
-was interrupted, ended in an error or a refusal, or whose delivery turns refused or
-lost), after the cursor write. The idle tick that hands mail to a session at its prompt
-sends an `activity` with no `kind`.
+`turn_ended` is sent at every turn end of the agent's session: `handled` lists the
+digests whose turn ended with an answer, and `unhandled` those whose turn ended any other
+way (interrupted, errored, refused, or a hand-in turns could not tie to a turn); empty
+lists are the person's own turn ending. A `turn_ended` with no `turn_id` settles a hand-in
+that failed before any turn. When a turn takes a digest, at its start or by a steer, the
+adapter sends `activity` with that digest's id as `ref`; `explain` reads it for
+`delivered-but-the-turn-never-completed`, and `readable` for an open thread's hour. It is
+not an ack. `ready` is sent at every session start, clear, compaction and resume, with
+`source` `startup`, `resume`, `clear` or `compact` (any other value reads as `resume`).
+The adapter's first look at an idle session sends `look`: a release point on a passing
+read that settles nothing and is no evidence of a turn. "Held mail" has what each one
+releases. The daemon takes all of them, and the session reports below, only from the
+binding's own connection. `injected`, `ready`, `look` and `activity` carry a `seq` that
+increases per connection, and the daemon drops one that doesn't; that orders them, it
+doesn't authenticate them.
 
-A codex or opencode wrapper's `register` and every `activity` carry `session_id` (the
-thread or session id), `cache_source` (the Codex sessions root of an app-server the
-wrapper spawned, or the path `opencode db path` gives) and `turned`; `register` also
-carries `new_session`. A Codex or OpenCode launch starts its own thread or session, as a
-Claude launch does: neither wrapper reads its
-record, so every launch's `register` reports `new_session: true` and its `turned` is
-false until its own first turn ends; a `register` later in the same launch reports the
-held id with `new_session: false`, and no reconnect or restart inside the launch makes
-it fresh again. The opencode wrapper adds `agent_model`,
-`{"agent": <name>, "model": "<provider>/<model>" or null}`, the default agent it named
-from `opencode debug config` and that agent's model, or `null` when it could not name
-one (which withdraws an earlier report). An `activity` with `kind: "ready"` and no
-`source` only carries a new report; it releases nothing.
+The session reports ride `bind` and every `activity`. A Claude session's adapter sends
+`session_id`, `projects_root` (where its session's Claude Code writes transcripts),
+`turned` (whether a turn has been seen in that session) and `endpoint` (whether it has
+found the session's Moxi turns endpoint). A turn's start sends an `activity` at once, so the daemon learns
+`turned` before the turn ends; it releases nothing. The daemon reads a missing transcript
+as `fresh` only on that evidence. A bound name whose adapter reports `endpoint: false`
+reads `waiting` to a sender (`session` answers `endpoint` and `endpoint_for`, `agents`
+`endpoint` and `endpoint_since`).
 
-The `session` query answers the daemon's own read of the bound session's cache:
+A Codex or OpenCode adapter's reports carry `session_id` (the thread or session id),
+`cache_source` (the Codex sessions root its host reports, or the path `opencode db path`
+gives) and `turned`; `bind` also carries `new_session`. A Codex or OpenCode launch starts
+its own thread or session, as a Claude launch does: neither adapter reads its record, so
+every launch's `bind` reports `new_session: true` and its `turned` is false until its own
+first turn ends; a `bind` later in the same launch reports the held id with
+`new_session: false`, and no reconnect or restart inside the launch makes it fresh again.
+The OpenCode adapter adds `agent_model`, `{"agent": <name>, "model": "<provider>/<model>"
+or null}`, the default agent it named from `opencode debug config` and that agent's model,
+or `null` when it could not name one (which withdraws an earlier report). A `ready` with
+no `source` only carries a new report; it releases nothing.
+
+Errors use comms' codes, outside JSON-RPC's reserved range: refusals 1101-1149
+(`name-held` 1101, `name-reserved` 1102, `name-retired` 1103, `name-unknown` 1104,
+`not-mailable` 1105, `credential` 1106, `too-long` 1107, `not-sender` 1108,
+`already-delivered` 1109, `unknown-message` 1110, `unknown-adapter` 1111, `not-bound`
+1112) and try-again 1150-1199 (`stopping` 1150, `failed` 1151, `busy` 1152, past 256
+connections, and `store-busy` 1153). A try-again code means the daemon committed nothing
+for the request. An error's `data` carries `reason`, the text a verb prints, and what the
+refusal names. A verb exits 3 on a refusal and 75 on a try-again; a read that timed out
+or a send whose answer never came exits 1, since the message may have been sent.
+
+`session` answers the daemon's own read of the bound session's cache:
 `cache_kind` (`warm`, `cold`, `fresh`, `no-cache` or `unknown`), `age_seconds`,
 `cache_reason` (why it is `unknown`, a `cold` with no lifetime, or a free model's
 `no-cache`), `cache_ttl` (the lifetime the read used, in seconds, None when it used
@@ -470,57 +510,56 @@ openai/gpt-5.6-terra`), `cache_code` (the read's reason code for a `no-cache` or
 `unknown`, e.g. `module-absent` with no cache module, `no-row`, `no-record`; a caller
 branches on it, not on `cache_reason`'s words) and `cache_source`.
 
-The `owner` query asks `session`'s question the other way round: given a session id
+`owner` asks `session`'s question the other way round: given a session id
 (`session_id`), which live binding owns it now, and whom that identity awaits.
 
 ```
-->  {"id": 3, "op": "query", "kind": "owner", "session_id": "3d19..."}
-<-  {"id": 3, "ok": true, "session_id": "3d19...", "owner": "lead",
-     "adapter": "claude-shim", "awaiting": ["planner@proj-a"]}
+->  {"jsonrpc": "2.0", "id": 3, "method": "owner", "params": {"session_id": "3d19..."}}
+<-  {"jsonrpc": "2.0", "id": 3, "result": {"session_id": "3d19...", "owner": "lead",
+     "adapter": "claude-shim", "awaiting": ["planner@proj-a"]}}
 ```
 
 `owner` is the binding's qualified name as `agents` prints it, a global identity bare,
 or null when no live binding holds the id: an id the daemon never heard and one whose
 binding ended both answer null.
-`awaiting` is the list the `owed` query computes for that identity: the bound names it
+`awaiting` is the list `owed` computes for that identity: the bound names it
 sent a verified `[reply-once]` ask to within a day that haven't answered. It is empty
-with no owner. An empty `session_id` is refused. The query changes nothing. `moxi comms
+with no owner. An empty `session_id` is refused. The read changes nothing. `moxi comms
 owner <session-id> --json` prints it with `"ok": true` and exits 0, owner or none. A read
 that fails exits non-zero and, with `--json`, prints `{"ok": false, "session_id": ...,
 "error": ..., "detail": ...}`: `refused` (exit 2) for an empty id, which never reaches
-the daemon; `offline` (exit 4) when the daemon is down or drops the connection;
-`timeout` or `failed` (exit 5) when it doesn't answer or answers an error, as a daemon
-older than the query does.
+the daemon; `offline` (exit 75) when the daemon is down or drops the connection;
+`timeout` or `failed` (exit 1) when it doesn't answer or answers an error.
 
-The `readable` query tells the send verb when a replier could first read each message
+`readable` tells the send verb when a replier could first read each message
 of an open thread, for the idle close:
 
 ```
-->  {"id": 4, "op": "query", "kind": "readable", "identity": "reviewer@proj-a",
-     "ids": ["4611686018427387905", "4611686018427387906"]}
-<-  {"id": 4, "ok": true, "since": 1767268800.0,
+->  {"jsonrpc": "2.0", "id": 4, "method": "readable", "params": {
+     "identity": "reviewer@proj-a", "ids": ["4611686018427387905", "4611686018427387906"]}}
+<-  {"jsonrpc": "2.0", "id": 4, "result": {"since": 1767268800.0,
      "handed": {"4611686018427387905": 1767270000.0},
-     "waiting": ["4611686018427387906"]}
+     "waiting": ["4611686018427387906"]}}
 ```
 
 `handed` is when the daemon handed each asked id to that identity's binding (kept for an
 hour, in memory); `waiting` lists the asked ids that wait in that identity's queue;
-`since` is when the daemon started. The query decides nothing and changes
+`since` is when the daemon started. The read decides nothing and changes
 nothing.
 
-The `attributed_message` query reads one message from the record with its author as the
+`attributed_message` reads one message from the record with its author as the
 daemon attributes it. A program an agent hands a message to by its id, as when the agent
 registers an item with it, asks for that message here and takes the item's sender and
 text from the answer.
 
 ```
-->  {"id": 4, "op": "query", "kind": "attributed_message",
-     "message_id": "4611686018427387905"}
-<-  {"id": 4, "ok": true, "message_id": "4611686018427387905", "found": true,
+->  {"jsonrpc": "2.0", "id": 5, "method": "attributed_message",
+     "params": {"message_id": "4611686018427387905"}}
+<-  {"jsonrpc": "2.0", "id": 5, "result": {"message_id": "4611686018427387905", "found": true,
      "room": "#names",
      "author": {"name": "planner@proj-a", "tier": "chosen", "attribution": "verified"},
      "recipients": ["operator"], "resolved": ["operator"],
-     "text": "the body, line zero removed", "timestamp": "2026-01-01T12:00:00Z"}
+     "text": "the body, line zero removed", "timestamp": "2026-01-01T12:00:00Z"}}
 ```
 
 `author` is computed by the record and the binding history (see Attribution), the same
@@ -533,17 +572,10 @@ resolves it now by the rule under "Identities", null for a tag that does not res
 message with no machine line has no recipients, and its `text` is the whole body. Only
 `#names` is routed, so check `room`. An id the record does not hold answers `found:
 false` with every other field null or empty. An id that is not a message id is refused.
-The query changes nothing. Any process that can open the socket may ask it, as for
-`record_message`, `session` and `owner`: it answers nothing that `record_message`,
+The read changes nothing. Any process that can open the socket may ask it, as for
+`message`, `session` and `owner`: it answers nothing that `message`,
 `moxi comms history` and `moxi comms reply` don't already show any process of your user.
 `client.attributed_message(message_id)` asks it and returns None for an unknown id.
-
-Ops: `register`, `query`, `injected`, `activity`, `unanswered`, `ping` and `nudge`.
-Query kinds: `resolve`, `agents`, `injected`, `session`, `owner`, `asks`, `owed`,
-`explain`, `binding_window`, `record_message`, `attributed_message`, `record_history`,
-`record_max_id` and `rooms`.
-`activity` and `injected` carry a `seq` that increases per connection, and the daemon
-drops one that doesn't; that orders the pings, it doesn't authenticate them.
 
 A delivered payload:
 
@@ -561,40 +593,37 @@ A delivered payload:
   "reply_to": null,
   "audience": null,
   "audience_source": null,
-  "timestamp": "2026-01-01T12:00:00Z"
+  "timestamp": "2026-01-01T12:00:00Z",
+  "interrupt": false,
+  "expires_at": 1767355200
 }
 ```
 
 `posture` is `open`, `none`, `optional` or `once`; `open_mark` is true
 only for `[open]`. A reply in an open thread also carries `thread_mark`, `one-left` or
 `last`. A message handed from the queue carries `held: true`; live delivery and replay
-carry no `held`.
+carry no `held`. `interrupt` and `expires_at` (a Unix second, or null for none) are
+line zero's `[interrupt]` and `[expires:…]`.
 
 `agents` answers `waiting`, `{"<qualified name>": {"count": <n>, "oldest": <epoch
-seconds>}}`, read from the queue, and `pending: {}`, always empty, which an adapter
-started before the queue still reads.
-
-`protocol` in the `register` reply is the claims protocol version (`PROTOCOL_VERSION`),
-apart from the verbs' `cli_protocol`.
-
-Before it binds the socket, a starting daemon knocks on any file already at the path.
-A live answer is a refusal to start; only a refused or missing connection lets it
-clear the path.
+seconds>}}`, read from the queue, and `pending: {}`, always empty.
 
 ## Data layout
 
 | path | written by | what |
 |---|---|---|
-| `DATA/comms/directory.db` | provisioning | rooms, standing identities and the operator (0600) |
-| `DATA/comms/bindings.db` | the daemon | the binding history (0600, WAL) |
+| `STATE/comms/comms.db` | the daemon; provisioning and the reserved-names listener their own tables | messages, rooms, the queue, digests, cursors, the binding history, identities, operators, reserved names and dropped mail (0600, WAL) |
 | `DATA/comms/cards/<identity>` | each identity | the card `moxi comms whois` reads |
-| `STATE/comms/record.db` | every comms process | the record, on `local` |
-| `STATE/comms/tokens/` | provisioning | the operator and role credentials (0600) |
-| `STATE/comms/cursors/<backend>/` | the adapters | one cursor per identity |
+| `STATE/comms/tokens/` | provisioning, the reserved-names listener | the credential chain's token store (0600) |
 | `STATE/comms/codex/`, `STATE/comms/opencode/` | the Codex and OpenCode adapters | thread and session ids per identity |
-| `RUNTIME/comms/moxi-comms-daemon.sock` | the daemon | the daemon socket |
+| `RUNTIME/comms/daemon.sock` | the daemon | the daemon socket |
+| `RUNTIME/comms/comms-sessions/` | the wrappers | each session's directory: its claim socket, and Codex's comms instructions |
 | `CONFIG/comms/config.toml` | you | comms' settings, `block` among them |
 
+comms 0.2's `STATE/comms/record.db`, `STATE/comms/cursors/`, `DATA/comms/directory.db`
+and `DATA/comms/bindings.db` are moved into `comms.db` at its first open and renamed
+`<name>.0.2-moved` in place.
+
 The roots are in [configuration.md](configuration.md). Retention trims message bodies
-older than `[local] retain_days` (90) at start and once a day; nothing the daemon
-derives looks back further than 24 hours.
+older than `[local] retain_days` (90) at start and once a day, never one a queue row
+still waits on; nothing the daemon derives looks back further than 24 hours.

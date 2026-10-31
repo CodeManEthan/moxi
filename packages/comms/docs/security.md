@@ -11,15 +11,13 @@ running as your user said so, and nothing more.
 
 Any process running as your user can:
 
-- read the token store (`STATE/comms/tokens/`) and post as any holder in it, the
-  operator included;
-- read and write the record (`STATE/comms/record.db`) and the directory
-  (`DATA/comms/directory.db`) directly;
-- connect to the daemon's socket and register as any name that isn't held;
+- read the credential chain's token store (`STATE/comms/tokens/`) or the user's
+  keychain, and post as any holder in it, the operator and a module's reserved name
+  included;
+- read and write comms' store (`STATE/comms/comms.db`) directly;
+- connect to the daemon's socket and bind any name that isn't held or reserved;
 - connect to a session's Moxi turns endpoint and report a turn end that never happened,
-  which advances that identity's cursor past mail the model never saw;
-- send the daemon an `activity` ping for an identity, which changes what `moxi comms
-  explain` reports for it.
+  which acks mail the model never saw.
 
 So the trust boundary is your user account. comms keeps agents from confusing each
 other by accident and makes who-said-what visible. It does not protect one agent from a
@@ -33,12 +31,8 @@ keep an honest agent on its own lane and make a forged claim take deliberate wor
 - The daemon socket and every control socket are mode 0600 in a 0700 directory.
 - Token store files are 0600 in a 0700 directory. comms refuses to read a token file or
   store directory with any group or other permission bit set.
-- `directory.db` and `bindings.db` are 0600.
-- `record.db`, which holds message bodies, and the cursor files are created with your
-  umask. With the common umask of 022 they are readable by other local users. On a
-  shared machine, set `umask 077` for the daemon (for the user service,
-  `UMask=0077` with `systemctl --user edit moxi-comms-daemon.service`), or keep
-  `STATE` under a 0700 directory.
+- `comms.db`, which holds message bodies, is created 0600, and so are its WAL and
+  shared-memory files.
 
 ## Credentials
 
@@ -49,15 +43,23 @@ the next register gets a new one. No binding token is written to the state direc
 or to a log.
 
 The operator is different: its posting token is stored at rest because the operator
-lane is not a live agent binding. The configured resolver chain reads that token from
-the environment first and the store second. A token copied off the machine is still a
+lane is not a live agent binding. The credential chain reads that token from the
+environment first, then the user's keychain, then the token store. A token copied off the machine is still a
 credential for this same-user trust boundary, not a new identity system.
 
 Files from the 0.1.x posting-key layout that remain in a store outside comms' own
 store are not accepted by the 0.2.0 posting path. The migration removes the retired
 files from comms' own store when they match the old format, while leaving unrelated
-files alone. `post_as_identity` is a record write used after the daemon has checked a
-live binding; it is not a credential door.
+files alone. Every message is written by the daemon, after it has checked the sender's
+credential: a live binding's token, the operator's, or a reserved name's.
+
+A reserved name's token is minted when its module installs and rests in the credential
+chain for that module, as `comms/reserved/<name>`. No session is given it. The daemon
+refuses a send under a reserved name presented with a session's binding token, and
+refuses one from any process inside a live session, or one whose ancestry it can't
+read. That keeps an honest agent off a module's name; a process of your user that reads
+the token and leaves every session's process tree can still send under it, as it can
+forge the operator's lane.
 
 comms' config file, `config.toml`, holds non-secret values only. comms refuses to load
 it when a key looks like a token.

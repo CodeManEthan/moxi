@@ -19,16 +19,23 @@ comms keeps its files in its own five directories under Moxi's roots:
 
 | directory | default | holds |
 |---|---|---|
-| DATA/comms | `~/.local/share/moxi/comms/` | `directory.db`, `bindings.db`, `cards/` |
-| STATE/comms | `~/.local/state/moxi/comms/` | `record.db`, `cursors/`, `tokens/`, `cold-gate.json`, `codex/`, `opencode/`, `logs/` |
+| DATA/comms | `~/.local/share/moxi/comms/` | `cards/` |
+| STATE/comms | `~/.local/state/moxi/comms/` | `comms.db`, `tokens/`, `codex/`, `opencode/`, `logs/` |
 | CONFIG/comms | `~/.config/moxi/comms/` | `config.toml` |
 | CACHE/comms | `~/.cache/moxi/comms/` | nothing yet |
-| RUNTIME/comms | `$XDG_RUNTIME_DIR/moxi/comms/` | `moxi-comms-daemon.sock`, session directories, `opencode/` launch files |
+| RUNTIME/comms | `$XDG_RUNTIME_DIR/moxi/comms/` | `daemon.sock`, session directories (each with its claim socket), `opencode/` launch files |
 
 With no `XDG_RUNTIME_DIR` and no `MOXI_COMMS_RUNTIME_DIR`, the runtime root is under the
 state root, `runtime/`. State and cache directories left under a host folder by an older
 layout (`~/.local/state/moxi/<host>/comms/`) are read where they are; a later release of
 moxi moves them. `moxi paths comms` prints every directory.
+
+`comms.db` is comms' one store: the record of messages, each name's waiting mail and
+cursor, the binding history, the identities and the reserved names. An install that
+still has comms 0.2's files (`record.db`, `cursors/`, and `directory.db` and
+`bindings.db` under DATA) moves them into it at the first open, and renames each to
+`<name>.0.2-moved` in place; `moxi comms migrate --dry-run` says what it would move, and
+`moxi doctor` lists the leftovers until you remove them.
 
 | variable | what it does |
 |---|---|
@@ -46,7 +53,8 @@ A per-root variable wins over `MOXI_COMMS_HOME`, which wins over `MOXI_HOME`, wh
 over XDG.
 
 comms uses a claim or daemon socket only when it lies inside RUNTIME/comms. The daemon's
-socket is always `RUNTIME/comms/moxi-comms-daemon.sock`, and no variable moves it. A
+socket is `RUNTIME/comms/daemon.sock`, or Moxi's short socket path for it when that path
+is too long for a Unix socket, and no variable moves it. A
 `MOXI_COMMS_CLAIM_SOCKET` that names a socket anywhere else is refused, naming the
 variable and the directory.
 
@@ -68,7 +76,7 @@ token store.
 backend = "local"                     # local or mock
 
 [local]
-record      = "/path/to/record.db"    # empty: STATE/comms/record.db
+record      = "/path/to/comms.db"     # empty: STATE/comms/comms.db
 retain_days = 90                      # days of message bodies kept; 0 keeps them all
 
 [threads]
@@ -86,10 +94,6 @@ labels = { "notifier@proj" = "the notifier, which only sends" }
 [provision]
 operator = "operator"                 # the human's identity name
 
-[replay]
-messages = 50                         # a reader's catch-up bound with no cursor
-hours    = 24
-
 [delivery]
 expiry = "24h"                        # how long a send waits before it is dropped
 ```
@@ -97,7 +101,7 @@ expiry = "24h"                        # how long a send waits before it is dropp
 | key | default | override | what it does |
 |---|---|---|---|
 | `backend` | `local` | `MOXI_COMMS_BACKEND` | which record backend every comms process on this box uses: `local` (a SQLite record) or `mock` (a JSON test double) |
-| `[local] record` | `STATE/comms/record.db` | `MOXI_COMMS_LOCAL_RECORD` | where the local record lives |
+| `[local] record` | `STATE/comms/comms.db` | `MOXI_COMMS_LOCAL_RECORD` | where comms' store lives |
 | `[local] retain_days` | `90` | `MOXI_COMMS_LOCAL_RETAIN_DAYS` | the daemon trims older message bodies at start and once a day; `0` turns trimming off |
 | `[threads] reply_cap` | `8` | | how many replies a thread opened with `moxi comms send --posture open` takes before it closes, unless its opener set its own with `--cap N` or `--no-cap`. A whole number, 1 or more. The send verb reads it at each reply. |
 | `[credentials] chain` | `["env", "keychain", "store"]` | | the order the credential chain tries. The steps are `env`, `keychain` (the user's keychain through `keyring`; a box with no usable keychain backend misses here) and `store`; anything else, or an empty list, is refused. A write goes to the keychain when it has a backend, else the store. A file that still has the old `[secrets]` table is refused. |
@@ -106,7 +110,6 @@ expiry = "24h"                        # how long a send waits before it is dropp
 | `[policy] cache_callers` | `["operator"]` | | the identities `moxi comms cache` answers, by qualified name. The list is whole: a box that adds a caller lists `operator` too. |
 | `[policy] labels` | `{}` | | send-only identities by qualified name, each mapped to the words the send and reply verbs use when they refuse it as a recipient. Without a label it is "a send-only identity". |
 | `[provision] operator` | `operator` | | the human's identity name, provisioned at first start |
-| `[replay] messages`, `hours` | `50`, `24` | | a reader with no cursor catches up on at most this many messages, none older than this many hours. The daemon reads them at use, so a change needs no restart. |
 | `[delivery] expiry` | `24h` | `MOXI_COMMS_DELIVERY_EXPIRY` | how long a sent message may wait undelivered before it is dropped, when the send names no `--expires`: a whole number with `s`, `m`, `h` or `d` (`30m`, `6h`, `3d`), or `never`. The send verb writes the expiry on the message's first line, so a change touches only later sends. Nothing goes back to the sender when a message expires; `moxi comms explain` says `expired`. Read at each send. |
 | `[cache] required` | `false` | | makes the daemon refuse to start when the cache module is absent or broken (`moxi install comms --with cache` installs it), so the cold-send hold cannot switch off without a word. With this off, an absent or broken cache makes every agent read as having no cache and get its mail live. Read at the daemon's start. |
 | `block` | `false` | | stops all routing: while it is true the daemon neither delivers to nor routes from any identity, and `moxi comms send` says so and sends nothing. Read at every use, so a change needs no restart. |
@@ -116,9 +119,10 @@ expiry = "24h"                        # how long a send waits before it is dropp
 Retired keys, still declared so a file that sets one is told what to do: `[claude]
 channel` (comms passes Claude Code no channel),
 `[policy] never_held` (no sender is exempt from the cold-cache hold) and
-`[policy] next_turn_refused` (`--held` is accepted for every recipient). The old
-`[provision] slots` key and roster `slot` key are also retired; remove them. Remove
-all retired keys.
+`[policy] next_turn_refused` (`--held` is accepted for every recipient) and `[replay]
+messages` and `hours` (catch-up is a name's waiting mail, which no count or age bounds).
+The old `[provision] slots` key and roster `slot` key are also retired; remove them.
+Remove all retired keys.
 
 ### Choosing the backend
 
@@ -130,10 +134,10 @@ unless you name it, and it needs `MOXI_COMMS_MOCK_BACKEND`.
 from the one the environment and config resolve, because every other comms process
 resolves without a flag. The exception is `--backend mock --backend-store <file>`.
 
-A daemon on `local` whose directory isn't provisioned provisions it before it listens:
+A daemon on `local` whose store isn't provisioned provisions it before it listens:
 the operator identity `[provision] operator`, which is what
 `moxi-comms-provision` makes with no flags. A token store that has lost tokens
-the record expects is a refusal, not a first start (see [security.md](security.md)).
+the store expects is a refusal, not a first start (see [security.md](security.md)).
 
 ### The Codex and OpenCode rosters (experimental)
 
