@@ -14,7 +14,7 @@ import pytest
 from conftest import queued, wait_until
 
 import moxi_turns
-from moxi_comms import listener, roster_view, scoping
+from moxi_comms import listener, paths, roster_view, scoping
 from moxi_comms.adapters import claude_shim, session, shim_roster
 from moxi_comms.paths import daemon_socket
 
@@ -297,7 +297,7 @@ def test_the_session_env_stamps_the_project_and_the_claim_socket_only():
     s = session.Session("lch3", name="reviewer", scope="proj-a", project="proj-a")
     env = s.env(base={"MOXI_COMMS_SHIM_SOCKET": "/old.sock"})
     assert env["MOXI_COMMS_PROJECT"] == "proj-a"
-    assert env["MOXI_COMMS_CLAIM_SOCKET"] == str(s.dir / "claim.sock")
+    assert env["MOXI_COMMS_CLAIM_SOCKET"] == str(paths.claim_socket("lch3"))
     assert "MOXI_COMMS_SHIM_SOCKET" not in env
     assert not [k for k in env if "CHANNEL" in k or "LAUNCH_PID" in k]
 

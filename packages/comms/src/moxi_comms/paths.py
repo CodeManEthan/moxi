@@ -17,7 +17,8 @@ without one.
 `refuse_outside_runtime` is the guard on a socket path handed in from the environment:
 a claim or daemon socket outside RUNTIME/comms is refused, naming the variable and the
 directory, so a stamp inherited from another program's session cannot point comms at
-that program's sockets.
+that program's sockets. A claim socket the core moved to its short path passes only by
+`claimhold.checked_socket`, which finds it recorded in this comms' own claim files.
 """
 
 from __future__ import annotations
@@ -155,6 +156,28 @@ def daemon_socket(env=None) -> Path:
 
         return Path(ipc.address(MODULE, "daemon"))
     return runtime_dir(env) / "daemon.sock"
+
+
+def claim_socket(key: str) -> Path:
+    """The claim socket of the holder keyed `key`, `moxi.ipc.address("comms",
+    "claim-<key>")`: on POSIX RUNTIME/comms/claim-<key>.sock, or the core's short hashed
+    path when that is too long for a Unix socket (a long runtime root, or macOS's long
+    `$TMPDIR`)."""
+    from moxi import ipc
+
+    return Path(ipc.address(MODULE, f"claim-{key}"))
+
+
+def short_socket_dir() -> Path | None:
+    """The directory the core puts a socket in when its path in a runtime directory is
+    too long (`moxi.paths.socket_path`'s short path), or None where there is none: on
+    Windows, or when the core refuses it (another user owns it)."""
+    from moxi import paths as core
+
+    try:
+        return Path(core.socket_path(MODULE, "x" * core.SOCKET_MAX)).parent
+    except (NotImplementedError, OSError):
+        return None
 
 
 def old_daemon_socket(env=None) -> Path:

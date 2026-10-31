@@ -19,8 +19,8 @@ What the wrapper does, in order:
   1. builds the host's line: `--cwd` (the current directory, or the row's), the settings
      flags, then what comms adds (below), and checks it whole with turns' own parser, so
      a flag the host would refuse refuses the launch before anything starts (exit 2);
-  2. makes the session's runtime directory (0700), which holds the claim socket and
-     layer one;
+  2. makes the session's runtime directory (0700), which holds layer one; the claim
+     socket is beside it in comms' runtime directory (`paths.claim_socket`);
   3. forks the session's adapter (`codex.CodexAdapter`). The adapter binds the name with
      the daemon and listens on the claim socket, `MOXI_COMMS_CLAIM_SOCKET`, with this
      process as the claim's root, then says so. The wrapper waits for its word, at most
@@ -81,7 +81,7 @@ from .. import directors as directors_mod
 from ..claimhold import CLAIM_SOCKET_ENV
 from ..config import ConfigError
 from ..context import BARE_COMMS, own_comms
-from ..paths import codex_threads_dir, log_dir
+from ..paths import claim_socket, codex_threads_dir, log_dir
 from ..scoping import GLOBAL, NAME_RE, qualify
 from . import codex_roster
 from .harness import plan_comms, plan_head
@@ -95,9 +95,8 @@ READY_WAIT = 10.0
 MULTI_AGENT_OFF = "agents.enabled=false"
 #: The sandbox a launch gets when it names neither a sandbox nor a profile.
 DEFAULT_SANDBOX = codex_roster.DEFAULT_SANDBOX
-#: Layer one's file and the claim socket's, in the session's runtime directory.
+#: Layer one's file, in the session's runtime directory.
 INSTRUCTIONS_NAME = "instructions.md"
-CLAIM_SOCKET_NAME = "claim.sock"
 
 #: The adapter's word to the wrapper, its first byte; any text after it is the reason.
 BOUND, OFFLINE, REFUSED, TRY_AGAIN, FAILED = "B", "O", "R", "T", "E"
@@ -238,7 +237,8 @@ class Launch:
 
     @property
     def claim_socket(self) -> Path:
-        return self.dir / CLAIM_SOCKET_NAME
+        """The adapter's claim socket, named for the session's directory."""
+        return claim_socket(self.dir.name)
 
     @property
     def instructions(self) -> Path:
@@ -527,7 +527,7 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
         print(f"{prog}: {launch.agent.qualified} was not launched: "
               f"{why or 'the adapter ended before it bound'} (its log: "
               f"{launch.log_path()})", file=sys.stderr)
-        shutil.rmtree(launch.dir, ignore_errors=True)
+        _remove(launch)
         return _EXIT_OF.get(code, moxi_exit.ERROR)
     info = roster if roster is not None else fetch_roster()
     launch.write_instructions(layer_one_text(info, launch.comms_path or BARE_COMMS,
@@ -657,7 +657,15 @@ def _adapter_process(launch: Launch, env: dict, harness_pid: int, handle: int,
         return serve(adapter, handle, say=say)
     finally:
         say(FAILED, "the adapter ended")
-        shutil.rmtree(launch.dir, ignore_errors=True)
+        _remove(launch)
+
+
+def _remove(launch: Launch) -> None:
+    """The session's runtime directory, and its claim socket if no adapter serves it."""
+    from ..claimhold import remove_socket
+
+    shutil.rmtree(launch.dir, ignore_errors=True)
+    remove_socket(launch.claim_socket)
 
 
 __all__ = ["HOST", "Launch", "MULTI_AGENT_OFF", "PROG", "READY_WAIT", "Refused",

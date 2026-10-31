@@ -617,7 +617,8 @@ seconds>}}`, read from the queue, and `pending: {}`, always empty.
 | `STATE/comms/tokens/` | provisioning, the reserved-names listener | the credential chain's token store (0600) |
 | `STATE/comms/codex/`, `STATE/comms/opencode/` | the Codex and OpenCode adapters | thread and session ids per identity |
 | `RUNTIME/comms/daemon.sock` | the daemon | the daemon socket |
-| `RUNTIME/comms/comms-sessions/` | the wrappers | each session's directory: its claim socket, and Codex's comms instructions |
+| `RUNTIME/comms/claim-<key>.sock` | each adapter | its session's claim socket (Moxi's short socket path when this one is too long) |
+| `RUNTIME/comms/comms-sessions/` | the wrappers | each session's directory: the listener's roster memory, and Codex's comms instructions |
 | `CONFIG/comms/config.toml` | you | comms' settings, `block` among them |
 
 comms 0.2's `STATE/comms/record.db`, `STATE/comms/cursors/`, `DATA/comms/directory.db`

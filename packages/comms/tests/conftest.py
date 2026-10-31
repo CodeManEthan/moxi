@@ -106,6 +106,10 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setenv("MOXI_COMMS_HOME", str(home))
     monkeypatch.setenv("MOXI_COMMS_DEVICE", "testbox")
     monkeypatch.setenv("MOXI_COMMS_RUNTIME_DIR", str(runtime))
+    # A socket path too long for its directory falls back to the core's short path:
+    # this test's own, never the machine's shared one.
+    from moxi import paths as moxi_paths
+    monkeypatch.setattr(moxi_paths, "_SHORT_ROOT", str(runtime))
     # Sends write no expiry unless a test asks for one, so line zero reads as the
     # tests that pin it expect; the expiry tests set it back.
     monkeypatch.setenv("MOXI_COMMS_DELIVERY_EXPIRY", "never")

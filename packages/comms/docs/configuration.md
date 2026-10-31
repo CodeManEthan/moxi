@@ -23,7 +23,7 @@ comms keeps its files in its own five directories under Moxi's roots:
 | STATE/comms | `~/.local/state/moxi/comms/` | `comms.db`, `tokens/`, `codex/`, `opencode/`, `logs/` |
 | CONFIG/comms | `~/.config/moxi/comms/` | `config.toml` |
 | CACHE/comms | `~/.cache/moxi/comms/` | nothing yet |
-| RUNTIME/comms | `$XDG_RUNTIME_DIR/moxi/comms/` | `daemon.sock`, session directories (each with its claim socket), `opencode/` launch files |
+| RUNTIME/comms | `$XDG_RUNTIME_DIR/moxi/comms/` | `daemon.sock`, each adapter's claim socket (`claim-<key>.sock`), session directories, `opencode/` launch files |
 
 With no `XDG_RUNTIME_DIR` and no `MOXI_COMMS_RUNTIME_DIR`, the runtime root is under the
 state root, `runtime/`. State and cache directories left under a host folder by an older
@@ -52,11 +52,12 @@ still has comms 0.2's files (`record.db`, `cursors/`, and `directory.db` and
 A per-root variable wins over `MOXI_COMMS_HOME`, which wins over `MOXI_HOME`, which wins
 over XDG.
 
-comms uses a claim or daemon socket only when it lies inside RUNTIME/comms. The daemon's
-socket is `RUNTIME/comms/daemon.sock`, or Moxi's short socket path for it when that path
-is too long for a Unix socket, and no variable moves it. A
-`MOXI_COMMS_CLAIM_SOCKET` that names a socket anywhere else is refused, naming the
-variable and the directory.
+comms' sockets are `RUNTIME/comms/daemon.sock` and one `RUNTIME/comms/claim-<key>.sock`
+per adapter, each replaced by Moxi's short socket path for it when its path is too long
+for a Unix socket (a long runtime root, or macOS's long `$TMPDIR`); no variable moves
+them. A `MOXI_COMMS_CLAIM_SOCKET` that names a socket anywhere else, or a short path that
+no claim file of this comms records as its socket, is refused, naming the variable and
+the directory.
 
 ## The config file
 
