@@ -64,7 +64,9 @@ class FakeDaemon:
         self._loop = asyncio.new_event_loop()
         self._server = self._loop.run_until_complete(ipc.serve(
             str(path), self._handle, hello=ipc.Hello(wire.VERSIONS, wire.CAPABILITIES)))
-        threading.Thread(target=self._loop.run_forever, daemon=True).start()
+        self._thread = threading.Thread(target=self._loop.run_forever, daemon=True,
+                                        name="fake-daemon-loop")
+        self._thread.start()
 
     async def _handle(self, conn, method, params):
         params = params if isinstance(params, dict) else {}
@@ -124,8 +126,13 @@ class FakeDaemon:
         return [f for f in out if f.get("kind") == kind]
 
     def close(self):
+        """Stop as the daemon does: its connections end (so each client's reader thread
+        does, a connection its shim no longer holds included), then the server and its
+        loop."""
+        self.drop()
         self._on_loop(self._server.close)
         self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(5.0)
 
 
 def payload(mid):

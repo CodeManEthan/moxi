@@ -105,6 +105,7 @@ def test_a_delivery_turns_cannot_place_is_not_injected_twice(rig, tmp_path, fram
         assert len(fake.delivered) == 1
     finally:
         adapter.stop()
+        fake.gone("the test ended")     # a hung hand-in's wait ends with its session
 
 
 def test_the_daemon_supervisor_survives_an_unexpected_error(rig, tmp_path):
