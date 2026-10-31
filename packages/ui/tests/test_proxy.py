@@ -611,6 +611,28 @@ def test_the_client_alone_gives_a_stream_that_a_drain_ends():
     run(body)
 
 
+def test_a_stream_cancelled_while_its_connection_is_proved_is_not_counted():
+    async def body():
+        async with Upstream(_stream_upstream(asyncio.Event())) as up:
+            starters = FakeStarters(up)
+            server = await starters.ensure("pxfake")
+            connect = server.connect
+
+            async def slow(**kwargs):
+                await asyncio.sleep(0.5)
+                return await connect(**kwargs)
+
+            server.connect = slow
+            request = asyncio.ensure_future(Client(starters).request(
+                "pxfake", "GET", "/api/events?topics=tick", stream=True))
+            await until(lambda: server.streams == 1, what="the stream's count")
+            request.cancel()
+            await asyncio.gather(request, return_exceptions=True)
+            assert server.streams == 0 and server._quiet.is_set()
+
+    run(body)
+
+
 # --- through the shell to real page servers ---------------------------------------------
 
 
@@ -863,6 +885,77 @@ def test_a_post_that_meets_a_closed_listener_is_started_again_and_acts_once(shel
         assert got.status == 200 and got.json() == {"count": 1}
         assert lost == [old] and rig.acts() == 1
         assert rig.starters.get("pxpage").record.starts == 2
+
+    drive(rig, body)
+
+
+class Squat:
+    """Another process's listener on a port a dead page server held: it records every
+    byte it gets and answers each request with a wrong proof."""
+
+    def __init__(self, port: int):
+        deadline = time.monotonic() + 3
+        while True:
+            try:
+                self.sock = socket.create_server(("127.0.0.1", port))
+                break
+            except OSError:
+                assert time.monotonic() < deadline, "the dead server's port stayed bound"
+                time.sleep(0.02)
+        self.sock.settimeout(0.2)
+        self.got: list[bytes] = []
+        self.done = False
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _run(self):
+        while not self.done:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                continue
+            conn.settimeout(1.0)
+            data = b""
+            try:
+                while chunk := conn.recv(65536):
+                    data += chunk
+                    if b"\r\n\r\n" in data:
+                        conn.sendall(b"HTTP/1.1 204 No Content\r\nx-moxi-proof: nope\r\n\r\n")
+            except OSError:
+                pass
+            self.got.append(data)
+            conn.close()
+
+    def close(self):
+        self.done = True
+        self.thread.join(2)
+        self.sock.close()
+
+
+def test_on_tcp_a_port_bound_by_another_process_after_the_exit_sees_only_a_proof(
+        shell, tmp_path):
+    rig = Rig(shell, tmp_path, child_args=("--tcp",))
+
+    async def body(rig):
+        old = await rig.starters.ensure("pxpage")
+        assert old.info.transport == "tcp"
+        lost = []
+        real_lost = rig.starters.lost
+        rig.starters.lost = lambda server: (lost.append(server), real_lost(server))
+        _kill_and_wait(old.child.pid)
+        squat = Squat(old.info.port)
+        try:
+            assert not old.gone, "the shell has not seen the exit yet"
+            browser = rig.browser("POST", "/m/pxpage/api/act", body=b"{}")
+            await browser.run()
+            got = browser.collected()
+        finally:
+            squat.close()
+        assert got.status == 200 and got.json() == {"count": 1} and rig.acts() == 1
+        assert lost == [old] and rig.starters.get("pxpage").record.starts == 2
+        assert squat.got and all(data.startswith(b"GET /api/prove ") for data in squat.got)
+        assert not any(old.info.token.encode() in data or b"moxi-ui=" in data
+                       for data in squat.got)
 
     drive(rig, body)
 

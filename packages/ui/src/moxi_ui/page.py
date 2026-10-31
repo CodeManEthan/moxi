@@ -20,11 +20,15 @@ The settings view's routes are declared by `settings.py` and joined here as
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import json
 import os
+import signal
 import subprocess
+import sys
 import time
+import weakref
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -33,6 +37,7 @@ from moxi_loopback.api import Field, Out, Page, Route
 from . import settings as _settings
 
 __all__ = [
+    "DOCTOR_AT_ONCE",
     "DOCTOR_TIMEOUT",
     "MODULES_SHAPE",
     "PAGE",
@@ -41,11 +46,14 @@ __all__ = [
     "SETTINGS_ROUTES",
     "current",
     "doctor_argv",
+    "run_doctor",
     "serving",
 ]
 
 #: Seconds `moxi doctor --json` may run for the modules view's check.
 DOCTOR_TIMEOUT = 60.0
+#: `moxi doctor` runs the doctor route runs at once; a Check past them waits its turn.
+DOCTOR_AT_ONCE = 2
 _HERE = "moxi_ui.page"
 
 _shell: contextvars.ContextVar[Any] = contextvars.ContextVar("moxi_ui_shell")
@@ -136,11 +144,8 @@ DOCTOR_SHAPE = {"rows": Out("list", items=_ROW), "error": _STRING}
 async def servers(call: Any) -> dict[str, Any]:
     """`/servers`: every page server's row with one sample each, taken now, and the
     shell's own row with its own sample and budget."""
-    import asyncio
-
     from .health import SHELL_BUDGET
     from .snapshot import budget_of
-    from .starter import sample
 
     shell = current()
     data = await shell.starters.servers()
@@ -161,7 +166,7 @@ async def servers(call: Any) -> dict[str, Any]:
         "localhost": "localhost" in names,
         "children": shell.starters.children(),
         "streams": push if isinstance(push, int) else 0,
-        "sample": await asyncio.to_thread(sample, os.getpid()),
+        "sample": await shell.starters.sample(os.getpid()),
         "budget": dict(SHELL_BUDGET),
         "snapshot_error": view.error if view is not None else None,
     }
@@ -196,29 +201,94 @@ def doctor_argv(module: str | None = None) -> list[str]:
     return [str(python()), "-P", "-m", "moxi", "doctor", *([module] if module else []), "--json"]
 
 
-def doctor(call: Any) -> dict[str, Any]:
-    """`moxi doctor [module] --json`, run in a fresh process from the shell's runtime
-    dir. Blocking: the base runs it on a worker thread."""
+_turns: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+    weakref.WeakKeyDictionary())
+
+
+def _turn() -> asyncio.Semaphore:
+    """The running loop's semaphore of `DOCTOR_AT_ONCE` doctor runs."""
+    loop = asyncio.get_running_loop()
+    turn = _turns.get(loop)
+    if turn is None:
+        turn = _turns[loop] = asyncio.Semaphore(DOCTOR_AT_ONCE)
+    return turn
+
+
+async def run_doctor(argv: list[str], *, cwd: str, env: dict[str, str],
+                     timeout: float) -> tuple[int, bytes]:
+    """Run `argv` to its end as an asyncio child and give `(exit code, stdout)`. stdin is
+    closed and stderr dropped; the child starts in a session (on Windows, a process group)
+    of its own, holds no lifeline, and is killed with everything it started when `timeout`
+    passes (`TimeoutError`) or the request is cancelled. No thread is held meanwhile."""
     from moxi import proc
+
+    options: dict[str, Any] = {}
+    if sys.platform == "win32":
+        options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        options["start_new_session"] = True
+    env = {key: value for key, value in env.items() if key != proc.LIFELINE_ENV}
+    child = await asyncio.create_subprocess_exec(
+        *argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, cwd=cwd, env=env, **options)
+    try:
+        async with asyncio.timeout(timeout):
+            out, _ = await child.communicate()
+    except BaseException:
+        _kill_tree(child.pid)
+        await asyncio.shield(child.wait())
+        raise
+    return child.returncode if child.returncode is not None else -1, out
+
+
+def _kill_tree(pid: int) -> None:
+    """Kill process `pid` and every process below it. On POSIX it leads a group of its
+    own (the shell's own group is never signalled); on Windows its tree is walked."""
+    if sys.platform != "win32":
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except OSError:
+            pass
+        return
+    try:
+        import psutil
+
+        top = psutil.Process(pid)
+        below = top.children(recursive=True)
+    except Exception:  # noqa: BLE001 - psutil.Error, or it is already gone
+        return
+    for process in (top, *below):
+        try:
+            process.kill()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+async def doctor(call: Any) -> dict[str, Any]:
+    """`moxi doctor [module] --json`, run in a fresh process from the shell's runtime
+    dir, at most `DOCTOR_AT_ONCE` at once. It holds no worker thread: the doctor calls the
+    shell's `/servers` back, and a Check that held one could leave that call none."""
     from moxi.names import is_module_name
 
     shell = current()
     module = call.query.get("module")
     if module is not None and not is_module_name(module):
         return {"rows": [], "error": "not a module name"}
+    async with _turn():
+        try:
+            code, out = await run_doctor(doctor_argv(module), timeout=DOCTOR_TIMEOUT,
+                                         cwd=str(shell.layout.runtime_dir()),
+                                         env=shell.starters.child_env())
+        except TimeoutError:
+            return {"rows": [], "error": f"moxi doctor ran past {DOCTOR_TIMEOUT:g} s"}
+        except OSError as err:
+            return {"rows": [], "error": f"moxi doctor could not run: {err}"}
     try:
-        done = proc.run(doctor_argv(module), timeout=DOCTOR_TIMEOUT,
-                        cwd=str(shell.layout.runtime_dir()), env=shell.starters.child_env())
-    except subprocess.TimeoutExpired:
-        return {"rows": [], "error": f"moxi doctor ran past {DOCTOR_TIMEOUT:g} s"}
-    except OSError as err:
-        return {"rows": [], "error": f"moxi doctor could not run: {err}"}
-    try:
-        listed = json.loads(done.stdout)
+        listed = json.loads(out)
         if not isinstance(listed, list):
             raise TypeError("not a list")
     except (ValueError, TypeError):
-        return {"rows": [], "error": f"moxi doctor exited {done.returncode} with no answer"}
+        return {"rows": [], "error": f"moxi doctor exited {code} with no answer"}
     rows = []
     for item in listed:
         if isinstance(item, dict) and all(isinstance(item.get(key), str)

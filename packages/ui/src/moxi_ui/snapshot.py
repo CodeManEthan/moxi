@@ -17,7 +17,10 @@ A refresh runs at the shell's start, and again when a directory modules are inst
 changes its mtime: the environment's site-packages and each `PYTHONPATH` entry the
 children see. That is looked at on a request that needs the snapshot, at most every 2 s,
 and the request goes on with the table it found; it never waits for the refresh, except
-for the first one after the shell starts.
+for the first one after the shell starts. A refresh whose listing or any export failed
+(a command that timed out at a busy logon, a module caught half-written by an upgrade) is
+run again on such a look, after 2 s and then twice as long each time, up to 60 s, until
+one succeeds.
 
 A module's components (`COMPONENTS`) are checked here, every rule of the contract. A bad
 one is not placed; the modules view lists it with the reason. A module whose export
@@ -51,6 +54,7 @@ __all__ = [
     "FIRST_WAIT",
     "MODULES_TIMEOUT",
     "OWN_MODULE",
+    "RETRY_MAX",
     "ModuleSnapshot",
     "View",
     "budget_of",
@@ -65,6 +69,8 @@ __all__ = [
 CONTRACTS = frozenset({1})
 #: The fewest seconds between two looks at the watched directories.
 EVERY = 2.0
+#: The longest wait, in seconds, before a failed refresh is run again.
+RETRY_MAX = 60.0
 #: Seconds `moxi modules --json` may run.
 MODULES_TIMEOUT = 10.0
 #: Seconds a request that needs the snapshot waits for the first one after the start.
@@ -364,6 +370,8 @@ class ModuleSnapshot:
         self.refreshes = 0
         self._marks: tuple[float | None, ...] | None = None
         self._looked: float | None = None
+        self._retry_at: float | None = None
+        self._retry_wait = 0.0
         self._task: asyncio.Task[None] | None = None
         self._again = False
         self._ready: asyncio.Event | None = None
@@ -395,12 +403,18 @@ class ModuleSnapshot:
 
     def touch(self) -> None:
         """A request needs the snapshot: at most every `every` seconds, look at the
-        watched directories, and refresh in the background when one changed."""
+        watched directories, and refresh in the background when one changed or when the
+        last refresh failed and its retry is due."""
         now = self.clock()
         if self._looked is not None and now - self._looked < self.every:
             return
         self._looked = now
-        if self._marks is not None and _mtimes(self.dirs()) != self._marks:
+        if self._marks is None:
+            return
+        if self._retry_at is not None and now >= self._retry_at:
+            self._retry_at = None
+            self.request()
+        elif _mtimes(self.dirs()) != self._marks:
             self.request()
 
     async def ready(self, timeout: float = FIRST_WAIT) -> bool:
@@ -440,6 +454,8 @@ class ModuleSnapshot:
             except Exception:  # noqa: BLE001 - one failed refresh keeps the last view
                 _log.exception("the module snapshot failed")
                 view = None
+            self._retry(failed=view is None or view.error is not None
+                        or bool(view.exports.errors))
             if view is not None and not self._closed:
                 self.current = view
                 self.refreshes += 1
@@ -451,6 +467,15 @@ class ModuleSnapshot:
             self._event().set()
             if not self._again or self._closed:
                 return
+
+    def _retry(self, *, failed: bool) -> None:
+        """After a refresh: when it failed, the time the next look runs it again, each
+        wait twice the last from `every` up to `RETRY_MAX`; when it succeeded, none."""
+        if not failed:
+            self._retry_at, self._retry_wait = None, 0.0
+            return
+        self._retry_wait = min(max(self._retry_wait * 2, self.every), RETRY_MAX)
+        self._retry_at = self.clock() + self._retry_wait
 
     def read(self) -> View:
         """One refresh's commands and checks: blocking, so the shell runs it on a worker

@@ -335,6 +335,11 @@ class Client:
                     continue
                 raise UpstreamError(502, {"error": "unreachable", "module": module,
                                           "log": self.starters.log}) from None
+            except BaseException:
+                # Cancelled (or failed otherwise) while the connection was proved: end the
+                # request's count, or a drain would wait for a request that is gone.
+                response._discard()
+                raise
             sent = _framed(upstream_headers(browser, host=_host(server), token=server.info.token),
                            method, body)
             try:

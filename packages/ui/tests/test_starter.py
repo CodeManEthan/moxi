@@ -278,6 +278,23 @@ def test_an_export_command_that_fails_gives_every_module_its_reason(shell_dirs):
     assert found.errors["a"].startswith("its export is refused")
 
 
+
+def test_an_export_command_past_its_time_is_run_again_for_each_module_alone(shell_dirs):
+    calls = []
+
+    def one_slow(argv, **kwargs):
+        modules = argv[4:]
+        calls.append(modules)
+        if "stslow" in modules:
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return proc.run(argv, **kwargs)
+
+    found = export_tables(["stpage", "stslow", "stnopage"], cwd=shell_dirs[0], run=one_slow)
+    assert calls == [["stpage", "stslow", "stnopage"], ["stpage"], ["stslow"], ["stnopage"]]
+    assert list(found.mounts) == ["stpage"]
+    assert found.errors["stslow"] == "the export command ran past 10 s"
+    assert "declares no PAGE" in found.errors["stnopage"]
+
 # --- real page servers ------------------------------------------------------------------
 
 
@@ -588,3 +605,140 @@ def test_exit_75_on_tcp(shell_dirs):
     finally:
         squatter.thread.join(5)
     _squatter_saw_only_the_proof(squatter)
+
+
+
+def _spawns(*kinds):
+    """A `spawn` seam: each start in turn is a real page server (`real`) or a child that
+    exits 75 at once (`held`), as a runner does after its lock wait; then real ones."""
+    kinds = list(kinds)
+
+    def spawn(argv, **kwargs):
+        if kinds and kinds.pop(0) == "held":
+            argv = [str(python()), "-c", f"raise SystemExit({starter_mod.LOCK_HELD})"]
+        return proc.spawn(argv, **kwargs)
+
+    return spawn
+
+
+def test_a_holder_of_another_version_is_not_used(shell_dirs):
+    """A drained server the shell didn't start can't be stopped: the next start finds it
+    holding the lock and does not use it while the snapshot says another version."""
+    holder, holder_id = _hand_run("stheld", shell_dirs[0])
+    clock = Clock()
+    starters = make(shell_dirs, clock=clock, spawn=_spawns(*["held"] * 4))
+
+    async def body(starters):
+        held = await starters.ensure("stheld")
+        assert held.info.server_id == holder_id and held.child is None
+        await asyncio.gather(*starters.set_versions({"stheld": "0.2.0"}))
+        assert held.gone
+        with pytest.raises(StartFailed) as failed:
+            await starters.ensure("stheld")
+        assert failed.value.exit == starter_mod.LOCK_HELD
+        assert "of version 0.1.0" in failed.value.reason
+        assert starters.get("stheld").record.starts == 3 and holder.poll() is None
+        starters.set_versions({"stheld": "0.1.0"})
+        clock.offset += FAILED_FOR
+        again = await starters.ensure("stheld")
+        assert again.info.server_id == holder_id
+
+    try:
+        drive(starters, body)
+    finally:
+        holder.lifeline.close()
+        holder.wait(5)
+
+
+def test_a_start_that_comes_up_on_the_version_before_a_new_snapshot_is_started_again(
+        shell_dirs, tmp_path, monkeypatch):
+    own = tmp_path / "own-site"
+    _module(own, "stver")
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([os.environ["PYTHONPATH"], str(own)]))
+    starters = make(shell_dirs)
+    snapshots, children = [], []
+    runtime = starter_mod.Starter._runtime
+
+    async def snapshot_meanwhile(self, server_id, deadline):
+        info = await runtime(self, server_id, deadline)
+        children.append(self._children[-1])
+        if snapshots:
+            version, install = snapshots.pop(0)
+            if install:
+                _dist(own, "stver", version)
+            starters.set_versions({"stver": version})
+        return info
+
+    monkeypatch.setattr(starter_mod.Starter, "_runtime", snapshot_meanwhile)
+
+    async def body(starters):
+        starter = starters.get("stver")
+        # The upgrade lands, and its snapshot is taken, while the old code starts.
+        snapshots.append(("0.2.0", True))
+        server = await starters.ensure("stver")
+        assert server.info.version == "0.2.0" and starter.record.starts == 2
+        old, new = children
+        assert old.code == 0 and new.alive and starter.record.crashes == 0
+        # A snapshot that names a version nothing installs drains once, not in a loop.
+        starter.lost(server)
+        await new.stop()
+        snapshots.append(("0.3.0", False))
+        server = await starters.ensure("stver")
+        assert server.info.version == "0.2.0" and starter.record.starts == 4
+
+    drive(starters, body)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="SIGSTOP")
+def test_a_hung_child_of_its_own_that_holds_the_lock_is_stopped(shell_dirs, monkeypatch):
+    import signal
+
+    monkeypatch.setattr(starter_mod, "HELD_PROOF_WAIT", 0.5)
+    monkeypatch.setattr(starter_mod, "STOP_WAIT", 0.5)
+    starters = make(shell_dirs, spawn=_spawns("real", "held"))
+
+    async def body(starters):
+        hung = await starters.ensure("stpage")
+        child = hung.child
+        os.kill(child.pid, signal.SIGSTOP)
+        starters.lost(hung)
+        fresh = await starters.ensure("stpage")
+        assert fresh.info.server_id != hung.info.server_id and fresh.child.alive
+        assert not child.alive and starters.get("stpage").record.starts == 3
+
+    drive(starters, body)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="process groups")
+def test_a_kill_ends_the_child_and_what_it_started_and_never_signals_the_group(
+        tmp_path, monkeypatch):
+    signalled = []
+    monkeypatch.setattr(os, "killpg", lambda *args: signalled.append(args))
+    script = ("import pathlib, subprocess, sys, time\n"
+              "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+              "pathlib.Path('below').write_text(str(child.pid))\n"
+              "time.sleep(60)\n")
+
+    async def body():
+        popen = proc.spawn([str(python()), "-c", script], lifeline="stdin",
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=str(tmp_path))
+        assert os.getpgid(popen.pid) == os.getpgid(0), "the child runs in the shell's group"
+        child = starter_mod.Child("stpage", popen, asyncio.get_running_loop(),
+                                  lambda child, code: None)
+        await until(lambda: (tmp_path / "below").exists(), what="the grandchild")
+        below = int((tmp_path / "below").read_text())
+        child.kill()
+        assert await asyncio.wait_for(child.exited, 5) == -9
+        await until(lambda: _gone(below), what="the grandchild's end")
+
+    asyncio.run(asyncio.wait_for(body(), 20))
+    assert signalled == []
+
+
+def _gone(pid: int) -> bool:
+    import psutil
+
+    try:
+        return psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return True

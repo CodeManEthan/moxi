@@ -380,6 +380,7 @@ def test_a_dropped_upstream_is_down_then_up_and_retried_after_1_2_5_10_then_30_s
         await asyncio.sleep(0.02)  # Long enough for the stream to send each state.
 
     monkeypatch.setattr(push_mod._Upstream, "_wait", wait)
+    monkeypatch.setattr(push_mod, "STAYED_UP", 0.2)
 
     async def body():
         push, client = fake_push()
@@ -406,7 +407,14 @@ def test_a_dropped_upstream_is_down_then_up_and_retried_after_1_2_5_10_then_30_s
         client.live()[0].end("end")
         assert (await reader.until("moxi.state", state("down")))["detail"] == "stopped"
         await reader.until("moxi.state", state("up"))
-        assert waits == [1.0], "a stream that came up resets the backoff"
+        assert waits == [30.0], "a stream that drops soon after it came up keeps the backoff"
+
+        waits.clear()
+        await asyncio.sleep(push_mod.STAYED_UP)
+        client.live()[0].end("end")
+        await reader.until("moxi.state", state("down"))
+        await reader.until("moxi.state", state("up"))
+        assert waits == [1.0], "a stream that stayed up starts the backoff over"
 
         client.delay = 0.05  # As a drain holds the next start.
         client.live()[0].end("cut")

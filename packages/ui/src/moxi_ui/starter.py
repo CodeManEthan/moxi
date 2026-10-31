@@ -19,11 +19,17 @@ A start follows loopback's spawn contract:
 3. `read_runtime(module)` must give the same `server_id`, tried every 20 ms until the same
    deadline.
 4. Exit 75 means another server holds the module's lock: its runtime file is read and the
-   server used once it passes the proof. If the proof fails that server was stopping, and
-   the starter starts once more.
+   server used once it passes the proof and is of the snapshot's version. If the proof
+   fails that server was stopping, and the starter starts once more; a holder that is the
+   shell's own child is stopped first, since it may be hung and would hold the lock until
+   the shell stops. A holder of another version is not used either, so the mounted export
+   and the running table are of one version.
 5. Any other exit, or no ready line: the child and its descendants are killed and the
    starter is `failed` for 10 s, during which a request gets the same failure at once and
    nothing is started.
+
+A start that comes up on another version than a snapshot taken while it started (the
+old code was imported before an upgrade landed) is drained once and started again.
 
 A child that exits 0 after `ready` stopped itself (its idle exit, or a lifeline close); one
 that exits otherwise crashed. Either way the starter drops its runtime info and pooled
@@ -49,6 +55,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -78,8 +85,14 @@ DRAIN_WAIT = 30.0
 #: Seconds the starter waits for a child to exit once its lifeline is closed, before it
 #: kills it. A page server's own stop ends by 2.5 s.
 STOP_WAIT = 3.0
+#: Seconds at most the proof of a server that holds the lock may take.
+HELD_PROOF_WAIT = 5.0
 #: Seconds the `/servers` data waits for one child's health answer.
 HEALTH_WAIT = 2.0
+#: Threads that take the `/servers` data's samples and health calls. They are the
+#: starters' own, not the shell's shared pool: the doctor calls `/servers` back while the
+#: shell may be busy, and that call must not wait for the shell's other work.
+SAMPLE_THREADS = 4
 #: Seconds the export command may take.
 EXPORT_TIMEOUT = 10.0
 #: The page-server runner's exit code when another server holds the module's lock.
@@ -370,8 +383,9 @@ class Child:
                 pass
 
     def kill(self) -> None:
-        """Kill the child and every process below it. (The child shares the shell's
-        process group, so the group itself is never signalled.)"""
+        """Kill the child and every process below it, each by its pid. The child runs in
+        the shell's own process group (its stdin lifeline needs no group of its own), so
+        signalling that group would kill the shell too; it is never signalled."""
         self.stopping = True
         try:
             import psutil
@@ -483,6 +497,7 @@ class Starter:
         self._draining: asyncio.Task[None] | None = None
         self._failure: StartFailed | None = None
         self._failed_until = 0.0
+        self._drained_for: int | None = None
         self._children: list[Child] = []
 
     @property
@@ -546,7 +561,8 @@ class Starter:
         """`server` failed a connect or a proof with nothing sent: forget it, so the next
         `ensure()` starts a new one. A child of it that still runs is left to stop on its
         own (a server that refuses connections is one that is stopping) and is still
-        watched; if it turns out to hold the lock, the new start uses it again."""
+        watched; if it turns out to hold the lock, the new start uses it again when it
+        passes the proof, and stops it when it fails it."""
         if server is self._server:
             _log.info("%s's server %s is unreachable; the next request starts another",
                       self.module, server.info.server_id)
@@ -591,14 +607,35 @@ class Starter:
 
     # -- the start ---------------------------------------------------------------------
 
+    @property
+    def wanted(self) -> str | None:
+        """The version the last snapshot gave this module, or None before one did."""
+        return self._pool.versions.get(self.module)
+
     async def _start(self) -> Server:
+        begun = self._pool.generation
         try:
-            for attempt in (1, 2):
-                server = await self._one_start(retry=attempt == 1)
-                if server is not None:
-                    self._started(server)
+            while True:
+                server = await self._one_start(retry=True)
+                if server is None:
+                    server = await self._one_start(retry=False)
+                if server is None:  # pragma: no cover - a last try raises instead
+                    raise AssertionError("not reached")
+                self._started(server)
+                generation = self._pool.generation
+                if (generation == begun or self.wanted in (None, server.info.version)
+                        or self._drained_for == generation):
                     return server
-            raise AssertionError("not reached")  # pragma: no cover
+                # A snapshot taken while this server started gives another version: it
+                # may have imported the old code. Drain it once for that snapshot, so a
+                # stale snapshot can't make a loop of starts, and start again.
+                _log.info("%s's server %s came up on version %s and the snapshot says %s; "
+                          "starting it again", self.module, server.info.server_id,
+                          server.info.version, self.wanted)
+                self._drained_for = begun = generation
+                drain = self.drain()
+                if drain is not None:
+                    await asyncio.shield(drain)
         except StartFailed as failure:
             self._failed(failure)
             raise
@@ -684,7 +721,9 @@ class Starter:
             await asyncio.sleep(RETRY_EVERY)
 
     async def _held(self, deadline: float, *, retry: bool) -> Server | None:
-        """Exit 75: use the server that holds the lock once it passes the proof."""
+        """Exit 75: use the server that holds the lock once it passes the proof and is of
+        the snapshot's version. A child of the shell's own that holds it and is not used
+        is stopped before the one more start."""
         loop = asyncio.get_running_loop()
         while True:
             info = await asyncio.to_thread(read_runtime, self.module)
@@ -693,22 +732,31 @@ class Starter:
             await asyncio.sleep(RETRY_EVERY)
         reason = "another server holds the lock and has no runtime file"
         if info is not None:
-            try:
-                reader, writer = await open_connection(
-                    info, timeout=max(min(5.0, deadline - loop.time()), 0.5))
-            except (NotOurServer, OSError, TimeoutError) as err:
-                reason = f"another server holds the lock and fails its proof ({err})"
+            mine = next((c for c in self._children
+                         if c.alive and c.server_id == info.server_id), None)
+            wanted = self.wanted
+            if wanted is not None and info.version != wanted:
+                reason = (f"another server, of version {info.version}, holds the lock; "
+                          f"the snapshot says {wanted}")
             else:
-                handoff = Conn(reader, writer, time.monotonic())
-                mine = next((c for c in self._children
-                             if c.alive and c.server_id == info.server_id), None)
-                server = Server(self.module, info, mine, started=self._pool.clock(),
-                                handoff=handoff)
-                if mine is not None:
-                    mine.server = server
-                _log.info("%s: using the server %s that holds the lock", self.module,
-                          info.server_id)
-                return server
+                try:
+                    reader, writer = await open_connection(
+                        info, timeout=max(min(HELD_PROOF_WAIT, deadline - loop.time()), 0.5))
+                except (NotOurServer, OSError, TimeoutError) as err:
+                    reason = f"another server holds the lock and fails its proof ({err})"
+                else:
+                    handoff = Conn(reader, writer, time.monotonic())
+                    server = Server(self.module, info, mine, started=self._pool.clock(),
+                                    handoff=handoff)
+                    if mine is not None:
+                        mine.server = server
+                    _log.info("%s: using the server %s that holds the lock", self.module,
+                              info.server_id)
+                    return server
+            if mine is not None:
+                _log.warning("%s: %s, and it is the shell's own; stopping it", self.module,
+                             reason)
+                await mine.stop(STOP_WAIT)
         if retry:
             _log.info("%s: %s; starting once more", self.module, reason)
             return None
@@ -815,6 +863,11 @@ class Starters:
         self.clock = clock
         self.wall = wall
         self.closing = False
+        #: The last snapshot's versions, module to version, and how many snapshots gave
+        #: versions so far.
+        self.versions: dict[str, str] = {}
+        self.generation = 0
+        self._sampling: ThreadPoolExecutor | None = None
         self._starters: dict[str, Starter] = {}
         self._records = {name: Record.from_data(data)
                          for name, data in read_servers(self.path).items()}
@@ -856,7 +909,11 @@ class Starters:
 
     def set_versions(self, versions: Mapping[str, str]) -> list[asyncio.Task[None]]:
         """Take a new snapshot's versions, module to version: every running server whose
-        runtime-file version differs from its module's is drained. Returns the drains."""
+        runtime-file version differs from its module's is drained. Returns the drains. A
+        start in flight checks its server against them when it comes up, and a server
+        that holds the lock is used only when it is of its module's version."""
+        self.versions = dict(versions)
+        self.generation += 1
         drains = []
         for module, starter in self._starters.items():
             server = starter.server
@@ -905,11 +962,21 @@ class Starters:
             row["open"] = None
             if server is None:
                 return
-            row["sample"] = await asyncio.to_thread(sample, server.info.pid)
-            row["open"] = await asyncio.to_thread(_health_open, server.info)
+            row["sample"] = await self.sample(server.info.pid)
+            row["open"] = await self._offload(_health_open, server.info)
 
         await asyncio.gather(*(sampled(row) for row in rows))
         return {"servers": rows}
+
+    async def sample(self, pid: int) -> dict[str, Any] | None:
+        """`sample(pid)`, taken on the starters' own threads."""
+        return await self._offload(sample, pid)
+
+    def _offload(self, fn: Callable[..., Any], *args: Any) -> asyncio.Future[Any]:
+        if self._sampling is None:
+            self._sampling = ThreadPoolExecutor(SAMPLE_THREADS,
+                                                thread_name_prefix="moxi-ui-servers")
+        return asyncio.get_running_loop().run_in_executor(self._sampling, fn, *args)
 
     async def aclose(self, wait: float = STOP_WAIT) -> None:
         """The shell is stopping: close every child's lifeline and wait for each to exit,
@@ -922,6 +989,9 @@ class Starters:
             starter._drop()
             tasks.extend(child.stop(wait) for child in starter.children)
         await asyncio.gather(*tasks, return_exceptions=True)
+        if self._sampling is not None:
+            self._sampling.shutdown(wait=False, cancel_futures=True)
+            self._sampling = None
         self.save()
 
 
@@ -975,7 +1045,9 @@ def export_tables(modules: Sequence[str], *, cwd: str | os.PathLike,
 
     Each export the command gave and a route table takes goes in `mounts`, ready for
     `router.shell_table(modules, mounts)`; every other module is in `errors` with its
-    reason. Blocking: the shell runs it on a worker thread.
+    reason. A command that runs past `timeout` for several modules is run again for each
+    alone, so one module's slow import costs only its own mount. Blocking: the shell runs
+    it on a worker thread.
     """
     found = Exports()
     if not modules:
@@ -984,6 +1056,12 @@ def export_tables(modules: Sequence[str], *, cwd: str | os.PathLike,
     try:
         done = run(argv, timeout=timeout, cwd=str(cwd))
     except subprocess.TimeoutExpired:
+        if len(modules) > 1:
+            for module in modules:
+                one = export_tables([module], cwd=cwd, timeout=timeout, run=run)
+                found.mounts.update(one.mounts)
+                found.errors.update(one.errors)
+            return found
         return Exports(errors={m: f"the export command ran past {timeout:g} s" for m in modules})
     except OSError as err:
         return Exports(errors={m: f"the export command could not run: {err}" for m in modules})
