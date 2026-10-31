@@ -263,7 +263,8 @@ def _list(args) -> int:
             if info.get("chain_line") == "present":
                 print("    chain line present")
             elif info.get("chain_line") == "needed":
-                print(f"    chain line needed in {repo.get('hooks_dir')}/{event}:\n"
+                hook = info.get("hook") or f"{repo.get('hooks_dir')}/{event}"
+                print(f"    chain line needed in {hook}:\n"
                       f"      {info.get('line')}")
         for problem in repo["problems"]:
             print(f"  problem: {problem}")

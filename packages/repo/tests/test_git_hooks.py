@@ -433,6 +433,70 @@ def test_config_mode_under_a_managers_hooks_path_runs_both(demo):
     assert demo.ids() == ["demo/gate", "husky"]
 
 
+# Husky 9's layout, as `husky` writes it: `core.hooksPath` is `.husky/_`, whose files husky
+# writes again on each run and gitignores; each runs the user's `.husky/<event>` through `h`.
+HUSKY_H = """#!/usr/bin/env sh
+n=$(basename "$0")
+s=$(dirname "$(dirname "$0")")/$n
+[ ! -f "$s" ] && exit 0
+[ "${HUSKY-}" = "0" ] && exit 0
+export PATH="node_modules/.bin:$PATH"
+sh -e "$s" "$@"
+c=$?
+[ $c != 0 ] && echo "husky - $n script failed (code $c)"
+exit $c
+"""
+
+
+def fake_husky(repo: Path) -> Path:
+    """Husky 9's generated `.husky/_` in `repo`, with `core.hooksPath` pointing at it."""
+    gen = repo / ".husky" / "_"
+    gen.mkdir(parents=True)
+    (gen / ".gitignore").write_text("*\n", encoding="utf-8")
+    (gen / "h").write_text(HUSKY_H, encoding="utf-8")
+    for event in ("pre-commit", "pre-push"):
+        (gen / event).write_text('#!/usr/bin/env sh\n. "$(dirname "$0")/h"\n',
+                                 encoding="utf-8")
+        (gen / event).chmod(0o755)
+    git(repo, "config", "core.hooksPath", ".husky/_")
+    return repo / ".husky"
+
+
+def test_under_husky_9_the_chain_line_goes_in_the_users_hook_not_the_generated_one(
+        demo, capsys):
+    from moxi_repo import install as repo_install
+
+    repo = demo.repo()
+    husky = fake_husky(repo)
+    report = api.add(repo, ["demo/gate"], mode="shim")
+    [(_, event, hook, line, present)] = report.chain
+    assert (event, hook, present) == ("pre-commit", str(husky / "pre-commit"), False)
+    [needed] = problems(f"hooks {repo}")
+    assert needed.detail == (f"pre-commit: chain line needed in {husky / 'pre-commit'}, so "
+                             "the pieces don't run")
+    assert needed.fix.startswith(f"add this line to {husky / 'pre-commit'}, before ")
+    manager_hook(husky / "pre-commit", demo.log, "husky-user", before=line)
+    info = api.status(repo)[0]["events"]["pre-commit"]
+    assert info["chain_line"] == "present" and info["hook"] == str(husky / "pre-commit")
+    assert problems() == []
+    demo.act(gate="refuse")
+    change(repo)
+    assert commit(repo).returncode != 0
+    assert demo.ids() == ["demo/gate"]
+    demo.act(gate="ok")
+    assert commit(repo).returncode == 0
+    assert demo.ids() == ["demo/gate", "husky-user"]
+    # A chain line in the generated file reads as present too, and teardown names both.
+    (husky / "_" / "pre-commit").write_text(
+        f'#!/usr/bin/env sh\n{line}\n. "$(dirname "$0")/h"\n', encoding="utf-8")
+    capsys.readouterr()
+    assert repo_install.teardown() == 0
+    out = capsys.readouterr().out
+    for held in (husky / "pre-commit", husky / "_" / "pre-commit"):
+        assert (f"{held} still holds repo's chain line for pre-commit, which does nothing "
+                "now; delete that line") in out
+
+
 def test_a_hooks_dir_two_repos_share_gets_nothing_written_and_each_its_own_launcher(demo):
     shared = demo.tmp / "shared-hooks"
     shared.mkdir()

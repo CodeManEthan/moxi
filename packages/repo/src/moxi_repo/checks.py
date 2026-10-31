@@ -168,7 +168,7 @@ def _hook_rows(status: dict) -> list[Row]:
                        getattr(problem, "detail", str(problem)), getattr(problem, "fix", None)))
     for event, info in sorted(status["events"].items()):
         if info.get("chain_line") == "needed":
-            hook = Path(status["hooks_dir"]) / event
+            hook = info.get("hook") or Path(status["hooks_dir"]) / event
             out.append(Row(MODULE, name, "warn",
                            f"{event}: chain line needed in {hook}, so the pieces don't run",
                            f"add this line to {hook}, before any line that reads stdin: "

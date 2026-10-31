@@ -726,12 +726,9 @@ def chain_holders(repo: Repo) -> list[tuple[str, Path]]:
     repo's chain line."""
     if repo.hooks_inside:
         return []
-    out = []
-    for event in sorted(EVENTS):
-        hook, _, present = gitconf.chain_state(repo, event)
-        if present:
-            out.append((event, hook))
-    return out
+    return [(event, hook) for event in sorted(EVENTS)
+            for hook in gitconf.chain_hooks(repo, event)
+            if gitconf.holds_chain_line(hook, event)]
 
 
 def _wrote_in(repo: Repo, state: gitconf.State) -> bool:
@@ -985,8 +982,9 @@ def _status_of(repo: Repo, in_index: bool, version, good: dict) -> dict:
                 info["existing"] = f"{local}, run by the shim after the pieces"
         else:
             info["via"] = "launcher"
-            _, line, present = gitconf.chain_state(repo, event)
+            chain_hook, line, present = gitconf.chain_state(repo, event)
             info["chain_line"] = "present" if present else "needed"
+            info["hook"] = str(chain_hook)
             info["existing"] = str(hook) if hook.exists() else None
             if not present:
                 info["line"] = line

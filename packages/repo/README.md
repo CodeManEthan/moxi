@@ -157,7 +157,9 @@ The line names no path of your install. On a clone without the launcher (a teamm
 job) it does nothing and the commit goes on; where the launcher is, the pieces run and a
 refusal stops the hook's later lines. For an event with stdin (pre-push) the printed line
 saves stdin first, so the lines after it still read every ref; put it before any line that
-reads stdin. `git-hooks list` says "chain line needed" until the line is there.
+reads stdin. `git-hooks list` says "chain line needed" until the line is there. Under
+husky 9, whose hooks directory is `.husky/_`, the line goes in `.husky/<event>`, the hook
+you edit: husky writes the files in `.husky/_` again on its next run, and they run yours.
 
 ### Skipping the git hooks for one command
 

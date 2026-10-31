@@ -439,14 +439,31 @@ class Sync:
         self.chain: dict[str, tuple[Path, str, bool]] = {}
 
 
-def chain_state(repo: Repo, event: str) -> tuple[Path, str, bool]:
-    """(the manager's git hook for `event`, its chain line, whether the line is there)."""
+def chain_hooks(repo: Repo, event: str) -> list[Path]:
+    """The git hook files that may hold the chain line for `event`, the one the user edits
+    first: `<hooks dir>/<event>`, and before it `.husky/<event>` when the hooks dir is
+    husky 9's `.husky/_`, whose files husky writes again on its next run and which run
+    `.husky/<event>`."""
     hook = repo.hooks_dir / event
+    if repo.hooks_dir.name == "_" and repo.hooks_dir.parent.name == ".husky":
+        return [repo.hooks_dir.parent / event, hook]
+    return [hook]
+
+
+def holds_chain_line(path: Path, event: str) -> bool:
     try:
-        text = hook.read_text(encoding="utf-8", errors="replace")
+        text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        text = ""
-    return hook, shim.chain_line(event, event in STDIN_EVENTS), shim.has_chain_line(text, event)
+        return False
+    return shim.has_chain_line(text, event)
+
+
+def chain_state(repo: Repo, event: str) -> tuple[Path, str, bool]:
+    """(the manager's git hook for `event`: the one holding the chain line, else the one to
+    add it to; the chain line; whether the line is there)."""
+    hooks = chain_hooks(repo, event)
+    held = [hook for hook in hooks if holds_chain_line(hook, event)]
+    return (held or hooks)[0], shim.chain_line(event, event in STDIN_EVENTS), bool(held)
 
 
 def check_shims(repo: Repo, state: State, events) -> list[str]:
@@ -597,5 +614,5 @@ def remove_all(repo: Repo, state: State | None = None, *, final: bool = False) -
 __all__ = ["Repo", "GitDirOnly", "git_dir_only", "State", "Sync", "NotARepo", "GitError", "FLOOR", "CONFIG_FROM",
            "resolve", "read", "register", "set_enabled", "clear_recorded", "apply_settings", "remove_piece",
            "set_mode", "sync", "remove_all", "pick_mode", "git_version", "parse_version",
-           "interpreter", "runner_file", "chain_state", "check_shims", "key_of", "worktrees",
+           "interpreter", "runner_file", "chain_state", "chain_hooks", "holds_chain_line", "check_shims", "key_of", "worktrees",
            "leftovers"]
