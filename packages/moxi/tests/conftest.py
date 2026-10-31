@@ -138,6 +138,15 @@ def _no_real_core_roots(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture
+def work(tmp_path) -> Path:
+    """An empty directory of the test's own. The fence keeps its HOME in `tmp_path`, so a
+    test that lists what it wrote there lists this instead."""
+    path = tmp_path / "work"
+    path.mkdir()
+    return path
+
+
+@pytest.fixture
 def site(tmp_path, monkeypatch):
     """A fresh site on `sys.path` for the test's fake distributions.
 

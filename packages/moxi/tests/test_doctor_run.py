@@ -989,7 +989,7 @@ def test_records_are_fail_rows_until_cleared(d):
 def pl(d, tmp_path, monkeypatch):
     """`d` with a home of its own, so the harness folders are under tmp, and module `demo`
     shipping skill `demo-send` in its package."""
-    home = tmp_path / "home"
+    home = tmp_path / "user-home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))  # what `~` reads on Windows
