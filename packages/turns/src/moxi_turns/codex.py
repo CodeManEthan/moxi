@@ -14,6 +14,13 @@ did not take its text (the request was never sent, or Codex answered it with an 
 once the request went out it reads ``Started`` on a turn the host has just learned of,
 or ``Lost("untied: ...")`` at once.
 
+Subagents. The host lists Codex's collab subagents from the ``collabAgentToolCall``
+items it sees, rebuilt from the thread's history at each resumed load. A spawn that comes
+as a ``subAgentActivity`` item (Codex's ``multi_agent_v2``) carries no state turns can
+follow, so from the first one, live or in the history, the list is not complete for the
+session's life: the agent count reads unknown, and every check that waits for no busy
+subagent (``refuse_agents``, ``compact``) refuses, even with none running.
+
 Steers. The endpoint records a steer and answers its caller at once; ``append`` runs on
 the endpoint's ordered worker, so steers reach ``turn/steer`` one at a time in the order
 recorded. ``steering`` (called as the steer is recorded) puts its id in ``_steering``, and
@@ -253,6 +260,9 @@ class CodexHarness(Harness):
         #: Whether that record holds every subagent: False once a resumed load could not
         #: read the history, until one can.
         self._collab_whole = True
+        #: Set for the session's life once a spawn came as an item turns cannot read
+        #: (``subAgentActivity``), live or in the history: the record is then never whole.
+        self._unreadable_spawns = False
 
     def attach(self, endpoint) -> None:
         super().attach(endpoint)
@@ -444,7 +454,8 @@ class CodexHarness(Harness):
                 thread = result.get("thread") or {}
                 # A fresh thread has spawned nothing yet; a resumed one may have, before
                 # this connection or this host saw its items.
-                collab, whole = ({}, True) if starting else self._read_collab(ws, thread_id)
+                collab, whole, unreadable = ({}, True, False) if starting \
+                    else self._read_collab(ws, thread_id)
                 active = False if starting else proto.thread_is_active(thread)
                 turn_id = None
                 if active:
@@ -461,6 +472,8 @@ class CodexHarness(Harness):
                     self.thread_active = active
                     self.active_turn_id = turn_id
                     self._collab, self._collab_whole = collab, whole
+                    # Sticky: a history that no longer shows the item does not clear it.
+                    self._unreadable_spawns = self._unreadable_spawns or unreadable
                     if active:
                         # The load shows Codex running: a status backstop timer set
                         # before the reconnect no longer speaks for it.
@@ -566,7 +579,9 @@ class CodexHarness(Harness):
         """The collab subagents as the host recorded Codex's notices, and the background
         terminals as `shell`, read from Codex now. Not complete while the app-server is not
         connected, when a resumed load could not read the history, or when the terminals
-        could not be listed."""
+        could not be listed; and never again once the session spawned a subagent as a
+        ``subAgentActivity`` item (seen live or in the history), whose state turns cannot
+        read. The entries it can read still list."""
         subagents, whole, shells = self._read_agents()
         return Agents(tuple(subagents) + tuple(shells or ()),
                       whole and shells is not None, time.time())
@@ -576,7 +591,8 @@ class CodexHarness(Harness):
         could not be listed)."""
         with self._lock:
             ws, thread_id = self.ws, self.session_id
-            whole = self._collab_whole and ws is not None and bool(thread_id)
+            whole = (self._collab_whole and not self._unreadable_spawns
+                     and ws is not None and bool(thread_id))
             subagents = [Agent(agent_id, "subagent", state, final, None, parent)
                          for agent_id, (state, final, parent) in self._collab.items()]
         try:
@@ -588,31 +604,44 @@ class CodexHarness(Harness):
         return subagents, whole, shells
 
     def _read_collab(self, ws, thread_id: str
-                     ) -> tuple[dict[str, tuple[str, bool | None, str | None]], bool]:
-        """The collab record rebuilt from the thread's history (`thread/read`), and True;
-        on any failure the record as it stands, and False."""
+                     ) -> tuple[dict[str, tuple[str, bool | None, str | None]], bool, bool]:
+        """The collab record rebuilt from the thread's history (`thread/read`), True, and
+        whether the history holds a spawn turns cannot read; on any failure the record as
+        it stands, False, and False (the flag already set stays set)."""
         try:
             items = proto.thread_items(ws.call("thread/read", proto.read_params(thread_id)))
         except Exception as exc:  # noqa: BLE001 - the record is then not whole
             log.warning("the thread's history could not be read (%s); its subagent list "
                         "is not complete", exc)
             with self._lock:
-                return dict(self._collab), False
+                return dict(self._collab), False, False
         record: dict[str, tuple[str, bool | None, str | None]] = {}
+        unreadable = False
         for item in items:
             _apply_collab(record, item, thread_id)
-        return record, True
+            unreadable = unreadable or _unreadable_spawn(item)
+        if unreadable:
+            log.warning("the thread's history holds a subAgentActivity spawn; its subagent "
+                        "list is not complete for the session's life")
+        return record, True, unreadable
 
     def _track_collab(self, params: dict) -> None:
         """An item's start or end: a collab tool call's notices update the record. Items
         of the session's thread count, and those of a subagent's own thread (its spawns)."""
         item = params.get("item")
-        if not isinstance(item, dict) or item.get("type") != proto.COLLAB_ITEM:
+        if not isinstance(item, dict) or item.get("type") not in (
+                proto.COLLAB_ITEM, proto.SUBAGENT_ACTIVITY_ITEM):
             return
         thread = params.get("threadId")
         with self._lock:
             main = self.session_id
             if isinstance(thread, str) and thread != main and thread not in self._collab:
+                return
+            if _unreadable_spawn(item):
+                if not self._unreadable_spawns:
+                    log.warning("a subagent spawned as a subAgentActivity item; the "
+                                "subagent list is not complete for the session's life")
+                self._unreadable_spawns = True
                 return
             _apply_collab(self._collab, item, main)
 
@@ -1247,6 +1276,12 @@ def _apply_collab(record: dict, item, main: str | None) -> None:
         parent = prev[2] if prev is not None else (
             sender if sender and sender != main else None)
         record[agent_id] = (state, final, parent)
+
+
+def _unreadable_spawn(item) -> bool:
+    """A ``subAgentActivity`` item: Codex's ``multi_agent_v2`` spawn, whose subagent's
+    state turns cannot follow."""
+    return isinstance(item, dict) and item.get("type") == proto.SUBAGENT_ACTIVITY_ITEM
 
 
 def _no_reply(exc: BaseException) -> str:

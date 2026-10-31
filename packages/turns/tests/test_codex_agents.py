@@ -203,6 +203,62 @@ def test_turn_notifications_naming_the_sessions_thread_still_count(host):
     assert wait_for(lambda: not s.facts().turn_open)
 
 
+def activity(thread_id="sub-v2", kind="started", item_id="act-1"):
+    """A `subAgentActivity` item, a spawn as Codex's multi_agent_v2 reports it."""
+    return {"type": "subAgentActivity", "id": item_id, "agentThreadId": thread_id,
+            "agentPath": "/root/worker", "kind": kind}
+
+
+def test_a_live_subagent_activity_item_leaves_the_list_not_complete_for_good(host):
+    s, endpoint, harness, app = host()
+    item(app, "completed", collab(["sub-1"], {"sub-1": "running"}))
+    item(app, "started", activity())
+    a = s.agents()
+    assert a.complete is False and a.busy() is None
+    assert a.entries == (Agent("sub-1", "subagent", "running", False),)
+    assert s.facts().agents is None
+    # A final notice for every readable entry does not make it whole again.
+    item(app, "completed", activity(kind="completed"))
+    item(app, "completed", collab(["sub-1"], {"sub-1": "completed"}, tool="wait",
+                                  item_id="call-2"))
+    a = s.agents()
+    assert a.complete is False
+    assert a.entries == (Agent("sub-1", "subagent", "done", True),)
+    assert s.facts().agents is None
+    d = s.deliver("x", only_if_idle=True, refuse_agents=True)
+    assert d.wait_started(3) == Refused("busy-agents", d.id)
+
+
+def test_a_subagent_activity_item_of_a_foreign_thread_is_ignored(host):
+    s, endpoint, harness, app = host()
+    item(app, "started", activity(), thread="other")
+    assert s.agents().complete and s.facts().agents == 0
+
+
+def test_a_rebuild_that_finds_a_subagent_activity_item_stays_not_complete(host):
+    s, endpoint, harness, app = host()
+    harness.fake_history = [
+        collab(["sub-1"], {"sub-1": "completed"}),
+        activity(),
+    ]
+    _reconnect(harness, app)
+    a = s.agents()
+    assert a.complete is False
+    assert a.entries == (Agent("sub-1", "subagent", "done", True),)
+    assert s.facts().agents is None
+    # A later load whose history no longer shows it does not clear it.
+    harness.fake_history = [collab(["sub-1"], {"sub-1": "completed"})]
+    _reconnect(harness, harness.ws)
+    assert s.agents().complete is False and s.facts().agents is None
+
+
+def test_a_history_of_collab_items_only_stays_complete(host):
+    s, endpoint, harness, app = host()
+    harness.fake_history = [collab(["sub-1"], {"sub-1": "completed"})]
+    _reconnect(harness, app)
+    assert s.agents().complete is True and s.facts().agents == 0
+
+
 def _reconnect(harness, first):
     harness.app_server.alive = False
     first.connected = False
@@ -291,3 +347,14 @@ def test_a_live_subagent_holds_a_compact_that_stops_shells(compacting):
     s, harness, app = compacting()
     item(app, "completed", collab(["sub-1"], {"sub-1": "running"}))
     assert s.command("compact", stop_shells=True) == Refused("busy-agents")
+
+
+def test_a_subagent_activity_item_refuses_compact_with_no_subagent_running(compacting):
+    s, harness, app = compacting()
+    item(app, "started", activity())
+    item(app, "completed", activity(kind="completed"))
+    assert s.facts().agents is None
+    assert s.command("compact") == Refused("busy-agents")
+    assert s.command("compact", stop_shells=True) == Refused("busy-agents")
+    d = s.deliver("x", only_if_idle=True, refuse_agents=True)
+    assert d.wait_started(3) == Refused("busy-agents", d.id)
