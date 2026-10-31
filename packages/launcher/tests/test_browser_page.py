@@ -205,6 +205,10 @@ def test_a_headless_launch_runs_the_harness_and_its_row_arrives_by_push(ui_shell
     ui_page.on("request", lambda request: reads.append(request.url)
                if request.url.endswith(kit.LAUNCHES) else None)
     panel = kit.open_panel(ui_page)
+    # The panel and its sessions block each read the launch log once as they open. The
+    # page's events reach the list only while Playwright runs, hence the short waits.
+    wait_for(lambda: ui_page.wait_for_timeout(20) or len(reads) == 2, 10,
+             what=lambda: f"two reads of the launch log; {reads}")
     fill_launch(panel, target="headless", cwd=str(work), brief=BRIEF)
     preview = panel.locator('[data-part="preview"]')
     expect(preview).to_have_attribute("data-target", "headless")
@@ -219,8 +223,8 @@ def test_a_headless_launch_runs_the_harness_and_its_row_arrives_by_push(ui_shell
     expect(row).to_have_class("mine")
     expect(row.locator('[data-field="cwd"]')).to_have_text(str(work))
     expect(launched.locator('[data-follow="row"]')).to_be_visible()
-    # The launch log was read once, as the panel opened: the row came by the topic.
-    assert len(reads) == 1, reads
+    # The launch log was read only as the panel opened: the row came by the topic.
+    assert len(reads) == 2, reads
     # The job ran the fake harness found on the shell's PATH, in the directory, with the
     # brief; its output went to the launch's run log.
     [run] = wait_for(lambda: [run for run in harness.runs() if run["cwd"] == str(work)], 10,
