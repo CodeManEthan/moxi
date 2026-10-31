@@ -31,7 +31,8 @@ OPTIONAL = {
 }
 GATED = {}
 #: Each Moxi variable the launcher reads outside moxi.paths and moxi.config, and why: the
-#: two stamps it sets on the sessions it starts, and comms' identity stamp.
+#: two stamps it sets on the sessions it starts, comms' identity stamp, and the two test
+#: seams that let tests stand a module in for turns' and slots' APIs.
 INTERNAL_ENV = {
     "MOXI_COMMS_NAME": "comms stamp: the session's comms name, the handoff key of a "
                        "session the launcher did not start",
