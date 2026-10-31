@@ -1612,6 +1612,19 @@ def test_a_skill_handed_over_is_skipped_and_counts_as_placed(sk, capsys, monkeyp
     assert os.path.islink(sk.claude("demo-send"))
 
 
+def test_a_skill_handed_to_an_owner_since_removed_is_placed_again(sk, capsys, monkeypatch):
+    sk.skills("demo-send")
+    place_settle(sk, capsys, skills=True)
+    sk.place.adopt("demo", "loadout", sk.place.status("demo"), say=lambda line: None)
+    sk.place.remove("loadout", say=lambda line: None)
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    code, out = place_settle(sk, capsys)
+    assert code == 0, out
+    assert f"demo: placed skill demo-send for claude ({sk.claude('demo-send')})" in out
+    assert [p.state for p in sk.place.status("demo")] == ["ok", "ok"]
+    assert not owned(sk)["handed"]
+
+
 def test_a_broken_harness_row_keeps_its_placements_and_says_why(sk, capsys, monkeypatch):
     """A name in `skills.harnesses` whose row is skipped, or that has no row at all,
     still reaches the placer, which refuses it and leaves what it placed there."""

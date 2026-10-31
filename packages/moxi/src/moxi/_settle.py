@@ -857,7 +857,8 @@ def _skills(step: Settle) -> bool:
     placed, none handed over), `skills_wanted` asks first, and a no places nothing. When
     it has some, there is no question: the plan updates, adds and removes them as the
     package's `SKILLS` say now, so a module that drops a skill, or `SKILLS` altogether,
-    has it removed, and one handed to another owner is skipped. A name in
+    has it removed. One handed to another owner is skipped while that owner places it;
+    once it doesn't, the skill is placed again with no question. A name in
     `skills.harnesses` whose harness row is skipped or missing still makes its items:
     the placer refuses each (cause `harness`) and keeps what was placed there, so a
     broken row never removes skills; a name taken out of the setting removes them.
@@ -879,6 +880,7 @@ def _skills(step: Settle) -> bool:
         items = [place.Item(source / name, harness, name)
                  for name in skills for harness in harnesses]
         planned = place.plan(module, items)
+        handed = place._read_ledger().get(module, {}).get("handed", {})
     except Exception as exc:  # noqa: BLE001 - a broken core config or ledger
         say(f"{module}: skills not placed: {_one_line(exc)}", err=True)
         return False
@@ -888,7 +890,7 @@ def _skills(step: Settle) -> bool:
     held_now = {str(p.path) for p in placed}
     labels = {(p.harness, p.kind, p.name) for p in placed}
     own = len(steps) > len(items) or any(
-        s.action == "skip" or str(s.target) in held_now
+        s.action == "skip" or str(s.target) in held_now or str(s.target) in handed
         or (s.cause == "harness" and (s.item.harness, s.item.kind, s.item.name) in labels)
         for s in steps)
     if not own and (not items or not skills_wanted(step, skills, harnesses)):

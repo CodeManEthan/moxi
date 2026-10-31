@@ -527,6 +527,16 @@ def test_a_skill_handed_over_stays_and_a_hand_back_in_teardown_is_removed(
     assert set(ledger["turns"]["handed"]) == {read}
     assert ledger["loadout"]["handed"][send]["to"] == "turns"
     assert send not in ledger["loadout"]["placed"]
+    # turns no longer places what it was handed back, so loadout's entry has lapsed and
+    # loadout may place that target; turns' entry for what loadout holds still skips.
+    for name in ("turns-send", "turns-read"):      # the package went: put them back
+        skilled.site.write(f"moxi_turns/skills/{name}/SKILL.md", f"# {name}\n")
+    source = skilled.site.root / "moxi_turns" / "skills"
+    assert [s.action for s in place.plan("loadout", [
+        place.Item(source / name, "claude", name)
+        for name in ("turns-send", "turns-read")])] == ["add", "keep"]
+    assert [s.action for s in place.plan("turns", [
+        place.Item(source / "turns-read", "claude", "turns-read")])] == ["skip"]
 
 
 def test_a_placement_that_cannot_go_fails_the_step_and_the_package_still_goes(
