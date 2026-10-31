@@ -461,6 +461,10 @@ def render_digest(payloads: list, notice: str | None = None, directors=(), *,
 
 
 class ClaudeShim:
+    #: A first bind into a name another session holds waits for it. A wrapper that
+    #: refuses such a launch before its harness starts turns this off.
+    WAIT_WHEN_HELD: bool = True
+
     def __init__(self, *, name=None, scope=None, global_=False,
                  project=None, injector=None, socket_path=None, status_sink=None,
                  autoreconnect: bool = False, backoff=None, directors=(),
@@ -673,8 +677,10 @@ class ClaudeShim:
             self._report("offline", TOLERATED_OFFLINE_MESSAGE)
         except DaemonError as e:
             # A launch into a name another session holds waits for it and cannot send
-            # while it waits. Any other refusal ends the adapter, with one line.
-            if not self.autoreconnect or self.refusal_kind(e) != NAME_REFUSAL:
+            # while it waits, unless its wrapper refuses that launch instead. Any other
+            # refusal ends the adapter, with one line.
+            if (not self.autoreconnect or not self.WAIT_WHEN_HELD
+                    or self.refusal_kind(e) != NAME_REFUSAL):
                 raise
             self.claims.name_refused((e.data.get("holder") or {}).get("qualified"))
             self._report("refused", REFUSED_WAITING)

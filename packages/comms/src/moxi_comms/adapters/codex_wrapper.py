@@ -85,6 +85,7 @@ from ..paths import claim_socket, codex_threads_dir, log_dir
 from ..scoping import GLOBAL, NAME_RE, qualify
 from . import codex_roster
 from .harness import plan_comms, plan_head
+from .word import BOUND, FAILED, await_word, exit_of, teller, word_for
 
 PROG = "moxi-comms-codex"
 #: turns' Codex host, the console script the wrapper execs.
@@ -97,11 +98,6 @@ MULTI_AGENT_OFF = "agents.enabled=false"
 DEFAULT_SANDBOX = codex_roster.DEFAULT_SANDBOX
 #: Layer one's file, in the session's runtime directory.
 INSTRUCTIONS_NAME = "instructions.md"
-
-#: The adapter's word to the wrapper, its first byte; any text after it is the reason.
-BOUND, OFFLINE, REFUSED, TRY_AGAIN, FAILED = "B", "O", "R", "T", "E"
-_EXIT_OF = {OFFLINE: moxi_exit.TEMPFAIL, REFUSED: moxi_exit.REFUSED,
-            TRY_AGAIN: moxi_exit.TEMPFAIL, FAILED: moxi_exit.ERROR}
 
 log = logging.getLogger("comms.codex.wrapper")
 
@@ -517,7 +513,7 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
     os.close(w)
     os.waitpid(child, 0)
     os.close(handle)
-    word = _await_word(r, ready_wait)
+    word = await_word(r, ready_wait)
     os.close(r)
     if word is None:
         print(f"{prog}: the session's comms adapter was not ready after {ready_wait:g}s; "
@@ -528,7 +524,7 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
               f"{why or 'the adapter ended before it bound'} (its log: "
               f"{launch.log_path()})", file=sys.stderr)
         _remove(launch)
-        return _EXIT_OF.get(code, moxi_exit.ERROR)
+        return exit_of(code)
     info = roster if roster is not None else fetch_roster()
     launch.write_instructions(layer_one_text(info, launch.comms_path or BARE_COMMS,
                                              directors=launch.agent.directors))
@@ -536,50 +532,11 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
     return exec_(str(host), argv, env)
 
 
-def _await_word(fd: int, timeout: float):
-    """The adapter's word, `(code, reason)`, once it has written it; `(FAILED, "")` when
-    it ended without one; None when `timeout` passed first."""
-    ready, _, _ = select.select([fd], [], [], timeout)
-    if not ready:
-        return None
-    chunks = []
-    while True:
-        try:
-            chunk = os.read(fd, 4096)
-        except OSError:
-            break
-        if not chunk:
-            break
-        chunks.append(chunk)
-        if chunks[0][:1] == BOUND.encode():
-            break
-    text = b"".join(chunks).decode("utf-8", "replace")
-    if not text:
-        return (FAILED, "")
-    return (text[0], text[1:])
-
-
 def _ended(handle: int) -> bool:
     """Whether the process the pidfd `handle` refers to has ended."""
     poller = select.poll()
     poller.register(handle, select.POLLIN)
     return bool(poller.poll(0))
-
-
-def word_for(error: BaseException) -> str:
-    """The adapter's word for a start that raised `error`."""
-    from ..client import DaemonError, DaemonOffline, VersionMismatch
-
-    if isinstance(error, VersionMismatch):
-        return FAILED
-    if isinstance(error, DaemonOffline):
-        return OFFLINE
-    if isinstance(error, DaemonError):
-        if error.refused:
-            return REFUSED
-        if error.try_again:
-            return TRY_AGAIN
-    return FAILED
 
 
 def serve(adapter, handle: int, *, say=None) -> int:
@@ -606,7 +563,7 @@ def serve(adapter, handle: int, *, say=None) -> int:
             log.warning("the launch of %s failed: %s", adapter.agent.qualified, e)
             word = word_for(e)
             say(word, str(e))
-            return _EXIT_OF.get(word, moxi_exit.ERROR)
+            return exit_of(word)
         log.info("adapter for codex host pid %s is up (pid %d)", adapter.harness_pid,
                  os.getpid())
         wait_for_exit(handle, stopping)
@@ -638,18 +595,7 @@ def _adapter_process(launch: Launch, env: dict, harness_pid: int, handle: int,
     sys.stderr = os.fdopen(2, "w", buffering=1)
     logging.basicConfig(level="INFO", stream=sys.stderr, force=True,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    said = []
-
-    def say(code: str, reason: str = "") -> None:
-        if said:
-            return
-        said.append(code)
-        try:
-            os.write(word_fd, (code + reason).encode("utf-8")[:4096])
-            os.close(word_fd)
-        except OSError:
-            pass
-
+    say = teller(word_fd)
     adapter = CodexAdapter(launch.agent, harness_pid=harness_pid,
                            claim_socket=launch.claim_socket, comms_path=launch.comms_path,
                            wait_when_held=False)

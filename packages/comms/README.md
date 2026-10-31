@@ -110,7 +110,9 @@ moxi comms claude --name reviewer
 
 `moxi comms claude` stamps the session's identity, starts the session's comms adapter
 (it binds the name before `claude` starts, and its log is under comms' state directory)
-and starts `claude`; everything after `--` goes to `claude` unchanged. The launch names
+and starts `claude`; everything after `--` goes to `claude` unchanged. A name another
+session holds, or one a module reserved, is refused before `claude` starts: the wrapper
+prints why and exits 3. The launch names
 its session id to `claude`: the one after `--` (`--session-id <uuid>`, or `--resume <uuid>`
 without `--fork-session`), else the wrapper's own `--session-id <uuid>`, else a new one,
 added as `--session-id`. A resume that names no id (`--continue`, `--resume` with no id,
