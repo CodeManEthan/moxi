@@ -1,0 +1,465 @@
+"""A stored launch made again (`api.ReplayRequest`): the replay's argv against a fresh
+launch of the same values, the environment built from the row and the settings only, a
+scratch launch's directory kept, the brief left out, a self relaunch's handoff header and
+stamp, a director's posture, a resume's argv and session id, and a respawn into the slot
+the relaunch holds."""
+
+from __future__ import annotations
+
+import dataclasses
+import json
+import os
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from moxi.paths import Layout
+
+import launcher_fake_slots as fake
+import launcher_fake_turns as fake_turns
+from launcher_fake_harness import Harness
+from moxi_launcher import api, catalog, first, slots, store, targets
+from moxi_launcher.api import LaunchRequest, ReplayRequest
+from moxi_launcher.compose import Context, claude, codex, common
+
+TESTS = Path(__file__).resolve().parent
+SID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
+SID2 = "0b1c2d3e-4f50-4617-8899-aabbccddeeff"
+BRIEF = "Read the design and start the build."
+
+
+@pytest.fixture(autouse=True)
+def no_turns(monkeypatch):
+    fake_turns.hide(monkeypatch)
+
+
+@pytest.fixture
+def harness(tmp_path, monkeypatch) -> Harness:
+    return Harness.on_path(tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def work(tmp_path) -> Path:
+    path = tmp_path / "work"
+    path.mkdir()
+    return path
+
+
+@pytest.fixture
+def no_exec(monkeypatch):
+    """exec stood in for: records what it was handed."""
+    seen = []
+
+    def execve(command, argv, env):
+        seen.append({"command": command, "argv": argv, "env": env, "cwd": os.getcwd()})
+
+    monkeypatch.setattr(targets, "_execve", execve)
+    here = os.getcwd()
+    yield seen
+    os.chdir(here)
+
+
+@pytest.fixture
+def rig(tmp_path, monkeypatch):
+    directory = tmp_path / "fake-slots"
+    directory.mkdir()
+    monkeypatch.setenv(slots.SEAM, "launcher_fake_slots")
+    monkeypatch.setenv(fake.DIR, str(directory))
+    monkeypatch.syspath_prepend(str(TESTS))
+    fake.reset()
+    script = directory / "script.json"
+
+    def plan(**keys):
+        now = json.loads(script.read_text()) if script.exists() else {}
+        script.write_text(json.dumps({**now, **keys}))
+
+    return SimpleNamespace(dir=directory, plan=plan,
+                           calls=lambda name=None: fake.calls(directory, name))
+
+
+def request(work: Path, *, rid: str = "r1", sid: str | None = SID,
+            **typed) -> LaunchRequest:
+    return LaunchRequest(typed=typed, cwd=str(work), request_id=rid, session_id=sid,
+                         actor="ann")
+
+
+def row(rid: str = "r1") -> store.LaunchRow:
+    conn = store.connect(create=False)
+    try:
+        found = store.get(conn, rid)
+    finally:
+        conn.close()
+    assert found is not None
+    return found
+
+
+def settings_file(text: str) -> None:
+    path = Layout("launcher").config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def without_ids(argv, *ids) -> list[str]:
+    """`argv` with each id, and the system prompt file named by one, put as `<id>`."""
+    out = []
+    for word in argv:
+        for given in ids:
+            word = word.replace(given, "<id>")
+        out.append(word)
+    return out
+
+
+# -- the composers ----------------------------------------------------------------------
+
+
+def ctx(**fields) -> Context:
+    base = {"request_id": "r2", "session_id": SID, "actor": "ann", "runs_dir": "/state/runs",
+            "moxi": "moxi"}
+    return Context(**{**base, **fields})
+
+
+def test_a_claude_resume_passes_resume_where_the_session_id_goes():
+    got = claude.compose({"harness": "claude", "cwd": "/work", "model": "opus"},
+                         ctx(resume=True))
+    assert got.argv[:5] == ("claude", "--resume", SID, "--append-system-prompt-file",
+                            common.prompt_path("/state/runs", "r2"))
+    assert "--session-id" not in got.argv
+    # The recorded values keep no owned row: a later replay resumes by its own id.
+    assert "resume" not in got.values and "session_id" not in got.values
+
+
+def test_a_claude_resume_with_comms_names_the_same_id_to_the_wrapper():
+    got = claude.compose({"harness": "claude", "cwd": "/work", "identity": "planner"},
+                         ctx(resume=True, modules=frozenset({"comms"})))
+    argv = list(got.argv)
+    tail = argv[argv.index("--") + 1:]
+    assert argv[argv.index("--session-id") + 1] == SID
+    assert tail[:2] == ["--resume", SID] and "--session-id" not in tail
+
+
+def test_a_codex_resume_under_the_host_passes_the_thread_id():
+    got = codex.compose({"harness": "codex", "cwd": "/work"},
+                        ctx(session_id="thread-7", resume=True, mode="host",
+                            host="/bin/moxi-turns-codex-host",
+                            modules=frozenset({"turns"})))
+    assert got.argv[-2:] == ("--resume", "thread-7")
+
+
+@pytest.mark.parametrize("fields, words", [
+    ({"mode": "interactive"}, "only turns' Codex host resumes"),
+    ({"mode": "host", "host": "/bin/h", "modules": frozenset({"turns", "comms"}),
+      "comms_codex": True}, "starts a new thread"),
+])
+def test_a_codex_resume_the_host_cant_make_is_refused(fields, words):
+    values = {"harness": "codex", "cwd": "/work"}
+    if "comms" in fields.get("modules", ()):
+        values["identity"] = "planner"
+    with pytest.raises(catalog.Refused, match=words):
+        codex.compose(values, ctx(session_id="thread-7", resume=True, **fields))
+
+
+def test_the_posture_a_replay_gives_shows_in_the_block_and_not_in_the_values():
+    got = claude.compose({"harness": "claude", "cwd": "/work", "posture": "fresh"},
+                         ctx(posture="relaunched (handoff: /h/one.md)"))
+    assert "start posture: relaunched (handoff: /h/one.md)" in got.prompt_file.text
+    assert got.values["posture"] == "fresh"
+
+
+def test_a_relaunch_header_and_its_stamp():
+    got = claude.compose(
+        {"harness": "claude", "cwd": "/work", "handoff": "/h/one.md"},
+        ctx(handoff_text="where it stands", relaunched=True,
+            extra_stamps={common.RELAUNCH: "run1"}))
+    assert got.prompt == "Handoff from launcher, relaunched by ann: /h/one.md\n\n" \
+                         "where it stands"
+    assert got.env[common.RELAUNCH] == "run1"
+    assert first.on_argv(got.argv)
+
+
+def test_the_first_turn_text_of_a_relaunch(tmp_path):
+    handoff = tmp_path / "h.md"
+    handoff.write_text("state\n")
+    assert first.text(actor="ann", handoff=handoff, relaunched=True) == \
+        f"Handoff from launcher, relaunched by ann: {handoff}\n\nstate"
+    assert first.text(actor="ann", handoff=handoff).startswith(
+        "Handoff from launcher, launched by ann: ")
+
+
+# -- the environment ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN",
+                                  "MOXI_HOME", "MOXI_DEVICE", "MOXI_LAUNCHER_HOME",
+                                  "MOXI_COMMS_STATE_HOME", "MOXI_SLOTS_RUNTIME_DIR",
+                                  "MOXI_TURNS_DEVICE"])
+def test_the_users_own_names(name):
+    assert common.own_names(name)
+
+
+@pytest.mark.parametrize("name", ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "MOXI_HOMEX",
+                                  "MOXI_LAUNCHER_REQUEST", "MOXI_COMMS_NAME", "AWS_SECRET",
+                                  "FOO_HOME"])
+def test_names_that_are_not_the_users_own(name):
+    assert not common.own_names(name)
+
+
+def test_a_replay_env_is_the_base_then_the_own_names_then_pass_env():
+    caller = {"PATH": "/now/bin", "HOME": "/home/now", "MOXI_HOME": "/m", "TOKEN": "t",
+              "ARMED": "1", "CLAUDE_CONFIG_DIR": "/c", "CLAUDECODE": "1"}
+    got = common.replay_env({"PATH": "/then/bin", "HOME": "/home/then"}, caller, ["TOKEN",
+                                                                                 "GONE"])
+    assert got == {"PATH": "/then/bin", "HOME": "/home/then", "MOXI_HOME": "/m",
+                   "CLAUDE_CONFIG_DIR": "/c", "TOKEN": "t"}
+
+
+# -- a replay through the launch ------------------------------------------------------------
+
+
+def test_a_replay_composes_the_argv_a_fresh_launch_of_its_values_does(work, harness,
+                                                                     no_exec):
+    typed = {"model": "opus", "effort": "high", "add_dir": [str(work)],
+             "native_name": "lead"}
+    api.launch(request(work, **typed))
+    replayed = api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2",
+                                        actor="ann"))
+    fresh = api.launch(request(work, rid="r3", sid=SID2, **typed))
+    assert replayed.session_id not in (None, SID)
+    assert without_ids(replayed.argv, "r2", replayed.session_id) == \
+        without_ids(fresh.argv, "r3", SID2)
+    new = row("r2")
+    assert (new.relaunch_of, new.resume_of, new.session_id) == ("r1", None,
+                                                               replayed.session_id)
+    assert new.values == {**row("r1").values}
+
+
+def test_a_replay_env_holds_no_variable_of_the_replaying_shell(work, harness, no_exec,
+                                                              monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/config/then")
+    api.launch(request(work))
+    stored_path = row("r1").base_env["PATH"]
+    # The arming shell: a variable no scrub names, a session stamp, a changed PATH, and
+    # the user's own names as they are now.
+    monkeypatch.setenv("ARMED_IN_SHELL", "1")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("MOXI_LAUNCHER_REQUEST", "old")
+    monkeypatch.setenv("API_TOKEN", "secret")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/config/now")
+    monkeypatch.setenv("PATH", "/elsewhere/bin" + os.pathsep + stored_path)
+    settings_file('[relaunch]\npass_env = ["API_TOKEN"]\n')
+    got = api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2",
+                                   actor="ann"))
+    env = no_exec[-1]["env"]
+    assert "ARMED_IN_SHELL" not in env and "CLAUDECODE" not in env
+    assert env["MOXI_LAUNCHER_REQUEST"] == "r2"
+    assert env["API_TOKEN"] == "secret"
+    assert env["CLAUDE_CONFIG_DIR"] == "/config/now"
+    # The test fence's own home for the modules: the user's location names.
+    located = {k: v for k, v in os.environ.items() if k.startswith("MOXI_")
+               and common.own_names(k)}
+    assert located and all(env[k] == v for k, v in located.items())
+    assert env["PATH"] == stored_path
+    assert got.base == "row"
+    # The new row records the base it used and no secret.
+    new = row("r2")
+    assert new.base_env["PATH"] == stored_path
+    assert "API_TOKEN" not in new.base_env_json and "API_TOKEN" not in new.env_json
+
+
+def test_a_row_with_no_base_takes_the_base_names_from_the_replaying_process(
+        work, harness, no_exec, monkeypatch):
+    api.launch(request(work))
+    old = row("r1")
+    monkeypatch.setenv("ARMED_IN_SHELL", "1")
+    got = api.launch(ReplayRequest(dataclasses.replace(old, base_env_json=None),
+                                   relaunch_of="r1", request_id="r2", actor="ann"))
+    env = no_exec[-1]["env"]
+    assert got.base == "job" and "ARMED_IN_SHELL" not in env
+    assert env["PATH"] == os.environ["PATH"]
+
+
+def test_a_fresh_launch_reports_no_base(work, harness, no_exec):
+    assert api.launch(request(work)).base is None
+
+
+def test_a_scratch_replay_keeps_the_rows_directory(harness, tmp_path, no_exec):
+    api.launch(LaunchRequest(typed={"scratch": True}, cwd=str(tmp_path), request_id="r1",
+                             session_id=SID, actor="ann"))
+    where = row("r1").cwd
+    assert where == str(common.scratch_dir("r1"))
+    got = api.launch(ReplayRequest(row("r1"), resume_of="r1", request_id="r2",
+                                   actor="ann"))
+    assert row("r2").cwd == where and no_exec[-1]["cwd"] == where
+    assert not common.scratch_dir("r2").exists()
+    assert got.state == "started"
+
+
+def test_a_replay_never_sends_the_brief(work, harness, no_exec):
+    api.launch(request(work, brief=BRIEF))
+    assert row("r1").brief == BRIEF
+    got = api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2",
+                                   actor="boss", posture="with:boss"))
+    new = row("r2")
+    assert new.brief is None and new.handoff_path is None
+    assert not first.on_argv(got.argv)
+    assert BRIEF not in " ".join(got.argv)
+    # The director's posture is the row's column; the values keep the original's.
+    assert new.posture == "with:boss"
+    assert new.values.get("posture") == row("r1").values.get("posture")
+
+
+def test_a_self_relaunch_carries_its_handoff_alone(work, harness, no_exec, tmp_path):
+    handoff = tmp_path / "handoff.md"
+    handoff.write_text("where the work stands\n")
+    api.launch(request(work, brief=BRIEF))
+    got = api.launch(ReplayRequest(
+        row("r1"), relaunch_of="r1", request_id="r2", actor="planner",
+        posture=common.RELAUNCHED.format(path=handoff), handoff=str(handoff),
+        run="run1"))
+    opening = got.argv[1]
+    assert opening == (f"Handoff from launcher, relaunched by planner: {handoff}\n\n"
+                       "where the work stands")
+    assert BRIEF not in opening
+    assert no_exec[-1]["env"][common.RELAUNCH] == "run1"
+    new = row("r2")
+    assert new.handoff_path == str(handoff) and new.brief is None
+    assert new.posture == f"relaunched (handoff: {handoff})"
+    assert new.env[common.RELAUNCH] == "run1"
+    prompt = Path(common.prompt_path(targets.runs_dir(), "r2")).read_text()
+    assert f"start posture: relaunched (handoff: {handoff})" in prompt
+
+
+def test_a_relaunch_with_no_handoff_has_no_relaunch_stamp(work, harness, no_exec):
+    api.launch(request(work))
+    api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2", run="run1"))
+    assert common.RELAUNCH not in no_exec[-1]["env"]
+
+
+def test_a_resume_keeps_the_session_id_and_is_found_by_it(work, harness, no_exec):
+    api.launch(request(work))
+    conn = store.connect()
+    try:
+        found = store.resolve(conn, SID)
+    finally:
+        conn.close()
+    got = api.launch(ReplayRequest(found, resume_of="r1", request_id="r2", actor="ann"))
+    assert got.session_id == SID
+    assert list(got.argv[1:3]) == ["--resume", SID] and "--session-id" not in got.argv
+    new = row("r2")
+    assert (new.session_id, new.resume_of, new.relaunch_of) == (SID, "r1", None)
+    conn = store.connect()
+    try:
+        assert store.resolve(conn, SID).request_id == "r2"
+        assert store.session_ids(conn, "r2") == [(SID, "resume")]
+    finally:
+        conn.close()
+
+
+def test_a_resume_takes_the_newest_id_the_launch_was_known_by(work, harness, no_exec):
+    api.launch(request(work))
+    conn = store.connect()
+    try:
+        store.learn_session(conn, "r1", SID2, "clear")
+        found = store.resolve(conn, SID)
+    finally:
+        conn.close()
+    got = api.launch(ReplayRequest(found, resume_of="r1", request_id="r2"))
+    assert got.session_id == SID2 and list(got.argv[1:3]) == ["--resume", SID2]
+
+
+def test_a_resume_of_a_launch_with_no_session_id_is_refused(work, harness, no_exec):
+    api.launch(request(work, sid=None, harness="codex", target="headless", brief=BRIEF))
+    with pytest.raises(api.Refusal, match="no session id to resume"):
+        api.launch(ReplayRequest(row("r1"), resume_of="r1", request_id="r2"))
+    conn = store.connect()
+    try:
+        assert store.get(conn, "r2") is None
+    finally:
+        conn.close()
+
+
+def test_a_preview_of_a_resume_shows_the_resumed_id(work, harness, no_exec):
+    api.launch(request(work))
+    shown = api.preview(ReplayRequest(row("r1"), resume_of="r1", request_id="r2"))
+    assert list(shown.argv[1:3]) == ["--resume", SID]
+
+
+def test_a_replay_of_a_request_id_already_logged_starts_nothing(work, harness, no_exec):
+    api.launch(request(work))
+    first_try = api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2"))
+    again = api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2"))
+    assert again.duplicate and again.session_id == first_try.session_id
+    assert len(no_exec) == 2
+
+
+def test_a_respawn_of_a_launch_not_in_a_slot_is_refused(work, harness, no_exec):
+    api.launch(request(work))
+    with pytest.raises(catalog.BadValue, match="only a slot launch is respawned"):
+        api.launch(ReplayRequest(row("r1"), relaunch_of="r1", respawn=True))
+
+
+# -- the slot target ------------------------------------------------------------------------
+
+
+def slot_launch(work: Path, rig, number: int = 3) -> None:
+    rig.plan(slots={str(number): {"state": "free", "launchable": True}})
+    api.launch(LaunchRequest(typed={"target": "slot", "slot": str(number)}, cwd=str(work),
+                             request_id="r1", session_id=SID, actor="ann"))
+
+
+def ended_and_held(rig, number: int = 3, holder: str = "run1") -> None:
+    rig.plan(slots={str(number): {"state": "ended", "launchable": False,
+                                  "hold": {"holder": holder, "until": 1.9e9}}})
+
+
+def test_a_relaunch_respawns_its_slot_under_its_hold(work, harness, rig):
+    slot_launch(work, rig)
+    ended_and_held(rig)
+    got = api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2",
+                                   hold="run1", respawn=True))
+    [call] = rig.calls("respawn")
+    assert call["slot"] == 3 and call["hold"] == "run1"
+    assert call["meta"] == {"request_id": "r2", "session_id": got.session_id,
+                            "chain": "r1"}
+    assert call["label"] == "launcher:r2" and call["cwd"] == str(work)
+    assert len(rig.calls("start")) == 1
+    assert (got.state, got.slot) == ("started", "3")
+    assert row("r2").slot == "3"
+
+
+def test_the_chain_is_the_first_launch_of_the_relaunches(work, harness, rig):
+    slot_launch(work, rig)
+    ended_and_held(rig)
+    api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2", hold="run1",
+                             respawn=True))
+    ended_and_held(rig, holder="run2")
+    api.launch(ReplayRequest(row("r2"), relaunch_of="r2", request_id="r3", hold="run2",
+                             respawn=True))
+    assert [c["meta"]["chain"] for c in rig.calls("respawn")] == ["r1", "r1"]
+
+
+def test_a_resume_into_a_slot_starts_a_chain_of_its_own(work, harness, rig):
+    slot_launch(work, rig)
+    rig.plan(slots={"5": {"state": "free", "launchable": True}})
+    api.launch(ReplayRequest(row("r1"), resume_of="r1", request_id="r2", slot=5))
+    start = rig.calls("start")[-1]
+    assert start["slot"] == 5 and start["meta"]["chain"] == "r2"
+    assert start["argv"][1:3] == ["--resume", SID]
+
+
+def test_a_slot_held_by_another_is_refused_even_with_a_hold(work, harness, rig):
+    slot_launch(work, rig)
+    ended_and_held(rig, holder="someone")
+    with pytest.raises(targets.SlotTaken, match="held by someone"):
+        api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2",
+                                 hold="run1", respawn=True))
+    assert rig.calls("respawn") == []
+
+
+def test_a_respawn_slots_refuses_fails_the_row(work, harness, rig):
+    slot_launch(work, rig)
+    ended_and_held(rig)
+    rig.plan(respawn="refused", refused={"reason": "live-pane", "words": "the pane is live"})
+    got = api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2",
+                                   hold="run1", respawn=True))
+    assert (got.state, got.reason) == ("failed", "live-pane")
+    assert row("r2").state == "failed"

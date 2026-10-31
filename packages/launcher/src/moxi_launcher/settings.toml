@@ -84,7 +84,7 @@ needs = "comms"
 type = "list"
 default = []
 items = "str"
-doc = "Variable names a relaunch carries from its job's environment into the new session."
+doc = "Variable names a relaunch or a resume carries from the environment of the process running it into the new session."
 read = "use"
 
 [relaunch.notice_retry_s]
