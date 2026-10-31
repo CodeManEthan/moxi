@@ -12,6 +12,8 @@ that has cache as an optional module reaches this module only through
 * `projects_root(environ)`: sessions' rule for Claude Code's projects root in an
   environment, re-exported, so a caller states a session's root without reaching sessions.
 * `Clock`: what `read` gives back.
+* `clock_records()`: every clock record the watcher keeps, as written, for display
+  (`moxi cache timers` and cache's page both list them through it).
 * `segment(session_id, now=None)` and `Segment`: a Claude session's status line segment,
   from the watcher's clock record (`moxi_cache.segment`). Imported on first use, so loading
   this module does not load the segment module, which a renderer loads inside its audit
@@ -24,7 +26,7 @@ import time
 
 from moxi_sessions.api import projects_root as _sessions_projects_root
 
-from . import claude, codex, opencode
+from . import claude, codex, opencode, records
 from . import clock as _clock
 from . import table as _table
 from .clock import CODES, KINDS, MISSING, NO_CACHE, Clock, unknown
@@ -100,6 +102,27 @@ def _read(harness, session_id, *, now, projects_root, turned, cache_source, new_
                  code=_clock.UNKNOWN_HARNESS)
 
 
+def clock_records() -> list[dict]:
+    """Every clock record in the watcher's directory that holds to the format
+    (`records.valid`), as written, sorted by `session`. A missing or unreadable directory
+    gives `[]`.
+
+    A record is for display: it can lag the transcript by a tick, so a caller that decides
+    calls `read`. A record an older watcher wrote lacks `warn_before` and `stale_after`
+    and is still listed.
+    """
+    found = []
+    try:
+        for path in records.record_dir().iterdir():
+            if path.suffix == ".json":
+                record = records.load(path)
+                if record is not None:
+                    found.append(record)
+    except OSError:
+        return []
+    return sorted(found, key=lambda record: record["session"])
+
+
 def __getattr__(name):
     if name in ("segment", "Segment"):
         from . import segment as _segment
@@ -116,4 +139,4 @@ def projects_root(environ=None) -> str:
 
 
 __all__ = ["read", "KINDS", "CODES", "MISSING", "open_store", "projects_root", "Clock",
-           "HARNESSES", "segment", "Segment"]
+           "HARNESSES", "clock_records", "segment", "Segment"]

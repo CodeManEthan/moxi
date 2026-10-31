@@ -10,7 +10,7 @@
                                          [--audience NAME] [--held] [--interrupt]
                                          [--expires DURATION|never] [--check]
     moxi comms delete <message-id>            [--json]
-    moxi comms agents                         [--seats]
+    moxi comms agents                         [--seats | --json]
     moxi comms history <identity>             [--limit N]
     moxi comms help [<term>]
     moxi comms whois <name>
@@ -136,6 +136,7 @@ message over it is refused with nothing posted. Comms does not split a message.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import logging
 import os
@@ -146,7 +147,7 @@ import time
 
 from moxi import exit as moxi_exit
 
-from . import (attribution, cache, cards, claimfile, claimhold, config,
+from . import (api, attribution, cache, cards, claimfile, claimhold, config,
                directory, glossary, machine_line, policy, sending)
 from .client import DaemonClient, DaemonError, DaemonOffline, DaemonTimeout, VersionMismatch
 from .store import books
@@ -216,6 +217,18 @@ def _render(ctx: Context, result: sending.SendResult) -> int:
 
 
 def cmd_agents(args, ctx: Context) -> int:
+    """`moxi comms agents`: who can be messaged.
+
+    The text forms, with and without `--seats`, render the daemon's `agents` answer
+    through `roster_view.render_agents`, the function the session-start snapshot calls,
+    so the snapshot is this verb's text by construction; they stay on that answer.
+    `--seats` adds the mail waiting for each name, which no API function carries.
+
+    `--json` prints `api.roster_rows()`, the rows comms' page shows, as one object:
+    `ok` true with `rows`, or `ok` false with `error` (`offline`, `timeout` or
+    `failed`) and `detail`. Its exits are `owner --json`'s."""
+    if getattr(args, "json", False):
+        return _agents_json(ctx)
     try:
         client = ctx.daemon()
     except DaemonOffline as e:
@@ -226,6 +239,27 @@ def cmd_agents(args, ctx: Context) -> int:
     finally:
         client.close()
     ctx.say(render_agents(info, seats=getattr(args, "seats", False), now=ctx.clock()))
+    return moxi_exit.OK
+
+
+def _deadline(ctx: Context) -> float:
+    return api.READ_DEADLINE if ctx.deadline is None else ctx.deadline
+
+
+def _agents_json(ctx: Context) -> int:
+    def fail(code: int, error: str, detail: str) -> int:
+        ctx.say(json.dumps({"ok": False, "error": error, "detail": detail}))
+        return code
+
+    try:
+        rows = api.roster_rows(deadline=_deadline(ctx))
+    except DaemonOffline as e:
+        return fail(_offline(e), "offline", str(e))
+    except DaemonTimeout as e:
+        return fail(moxi_exit.ERROR, "timeout", str(e))
+    except DaemonError as e:
+        return fail(moxi_exit.ERROR, "failed", str(e))
+    ctx.say(json.dumps({"ok": True, "rows": [dataclasses.asdict(row) for row in rows]}))
     return moxi_exit.OK
 
 
@@ -453,10 +487,11 @@ def cmd_owner(args, ctx: Context) -> int:
     """Which comms identity owns one session id now, and whom it awaits.
 
     A READING verb, for a program that nudges idle sessions, which asks it whether a
-    session it may nudge is a director with an ask out: one `owner` query to the daemon, which answers from
-    `session_owner` and computes `awaiting` exactly as the Stop hook's `owed` query does.
-    It posts nothing, writes nothing, reaches no credential, and changes no hold, pend,
-    delivery or ask.
+    session it may nudge is a director with an ask out. It prints `api.owner()`: one
+    `owner` query to the daemon, which answers from `session_owner` and computes
+    `awaiting` exactly as the Stop hook's `owed` query does. A claim file it can't read
+    leaves only the directors empty, which the verb doesn't print. It posts nothing,
+    writes nothing, reaches no credential, and changes no hold, pend, delivery or ask.
 
     Exit `OK` is an answer, with or without an owner: a session no live binding holds is
     an answer (`owner` null), not a failure. Every other exit is a read that failed:
@@ -479,22 +514,15 @@ def cmd_owner(args, ctx: Context) -> int:
     if not sid:
         return fail(moxi_exit.USAGE, "refused", "a session id is required")
     try:
-        client = ctx.daemon()
+        got = api.owner(sid, deadline=_deadline(ctx))
     except DaemonOffline as e:
         return fail(_offline(e), "offline", str(e))
-    try:
-        answer = client.call("owner", {"session_id": sid})
-    except DaemonOffline as e:
-        return fail(moxi_exit.TEMPFAIL, "offline", str(e))
     except DaemonTimeout as e:
         return fail(moxi_exit.ERROR, "timeout", str(e))
     except DaemonError as e:
         return fail(moxi_exit.ERROR, "failed", str(e))
-    finally:
-        client.close()
-    out = {"ok": True, "session_id": answer.get("session_id", sid),
-           "owner": answer.get("owner"), "adapter": answer.get("adapter"),
-           "awaiting": list(answer.get("awaiting") or [])}
+    out = {"ok": True, "session_id": got.session_id, "owner": got.identity,
+           "adapter": got.adapter, "awaiting": list(got.awaiting)}
     if args.json:
         ctx.say(json.dumps(out))
     elif out["owner"] is None:
@@ -1047,8 +1075,12 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
     dl.set_defaults(func=cmd_delete)
 
     a = sub.add_parser("agents", help="who you can message")
-    a.add_argument("--seats", action="store_true",
-                   help="operator view: also show the mail waiting for each name")
+    shown = a.add_mutually_exclusive_group()
+    shown.add_argument("--seats", action="store_true",
+                       help="operator view: also show the mail waiting for each name")
+    shown.add_argument("--json", action="store_true",
+                       help="one JSON object on stdout: ok and rows, one per address, "
+                            "live names first; or ok false with error and detail")
     a.set_defaults(func=cmd_agents)
 
     h = sub.add_parser("history", help="an identity's record, with honest attribution")

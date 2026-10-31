@@ -16,7 +16,7 @@ import pytest
 from conftest import wait_until
 
 from moxi import exit as moxi_exit
-from moxi_comms import cli
+from moxi_comms import api, claimfile, cli
 from moxi_comms.client import DaemonClient, DaemonError, DaemonTimeout
 from moxi_comms.paths import daemon_socket
 
@@ -205,3 +205,68 @@ def test_a_daemon_that_never_answers_is_a_failed_read_exit_1(rig, monkeypatch):
     code, out = owner_json(rig, "0b9f6a1e-0000-4000-8000-000000000000")
     assert code == moxi_exit.ERROR
     assert (out["ok"], out["error"]) == (False, "timeout")
+
+
+# --------------------------------------------------------------------------- through the API
+
+def test_the_verb_prints_what_api_owner_answers(rig, monkeypatch):
+    """The verb is `api.owner()` rendered: the same fields as before, the directors the
+    read carries left out."""
+    asked = []
+
+    def answer(session_id, *, deadline):
+        asked.append((session_id, deadline))
+        return api.Owner(session_id=session_id, identity=R, adapter="codex",
+                         directors=("lead",), awaiting=(P, "critic"))
+
+    monkeypatch.setattr(api, "owner", answer)
+    code, out = owner_json(rig, " s-1 ")
+    assert code == moxi_exit.OK
+    assert out == {"ok": True, "session_id": "s-1", "owner": R, "adapter": "codex",
+                   "awaiting": [P, "critic"]}
+    code, text = owner_cli(rig, "s-1")
+    assert (code, text.strip()) == (0, f"s-1: owned by {R} (codex); awaiting {P}, critic.")
+    assert asked == [("s-1", api.READ_DEADLINE)] * 2
+
+
+def _holding(rig, name):
+    from conftest import _stamp_of
+
+    return rig.session_holding(_stamp_of({"MOXI_COMMS_PROJECT": "proj-a",
+                                          "MOXI_COMMS_NAME": name}))
+
+
+def test_an_unreadable_claim_directory_leaves_only_the_directors_empty(rig):
+    reviewer = rig.shim(**REVIEWER, directors=(P,))
+    bound(rig, R)
+    claims = claimfile.claim_dir()
+    with _holding(rig, R):
+        assert api.owner(reviewer.session_id).directors == (P,)
+        mode = claims.stat().st_mode
+        claims.chmod(0o300)        # the daemon's socket answers; the files can't be listed
+        try:
+            got = api.owner(reviewer.session_id)
+            code, out = owner_json(rig, reviewer.session_id)
+            text_code, text = owner_cli(rig, reviewer.session_id)
+        finally:
+            claims.chmod(mode)
+    assert (got.identity, got.adapter, got.directors) == (R, "claude-shim", ())
+    assert code == moxi_exit.OK
+    assert out == {"ok": True, "session_id": reviewer.session_id, "owner": R,
+                   "adapter": "claude-shim", "awaiting": []}
+    assert (text_code, text.strip()) == (
+        0, f"{reviewer.session_id}: owned by {R} (claude-shim); awaiting nobody.")
+
+
+def test_a_claim_read_that_raises_leaves_only_the_directors_empty(rig, monkeypatch):
+    reviewer = rig.shim(**REVIEWER, directors=(P,))
+    bound(rig, R)
+
+    def unreadable(*a, **kw):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(claimfile, "live_records", unreadable)
+    got = api.owner(reviewer.session_id)
+    assert (got.identity, got.directors) == (R, ())
+    code, out = owner_json(rig, reviewer.session_id)
+    assert code == moxi_exit.OK and out["owner"] == R

@@ -158,7 +158,7 @@ meets.
 | `moxi comms send <name> --posture none\|optional\|once\|open "text"` | message one or more names (comma-separated) |
 | `moxi comms reply <message-id> "text"` | answer a message |
 | `moxi comms delete <message-id>` | take back a message you sent from whoever hasn't had it yet |
-| `moxi comms agents` | who you can message (`--seats`: bindings and waiting mail) |
+| `moxi comms agents` | who you can message (`--seats`: bindings and waiting mail; `--json`: one row per address, as comms' browser panel lists them) |
 | `moxi comms history <name>` | an identity's record |
 | `moxi comms help [term]` | explain a comms word |
 | `moxi comms whois <name>` | the card an identity wrote about itself |
