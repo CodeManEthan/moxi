@@ -1072,9 +1072,210 @@ def advance_run(conn: sqlite3.Connection, run_id: str, state: str, *,
 def end_run(conn: sqlite3.Connection, run_id: str, outcome: str, *, word: str | None = None,
             detail: str | None = None, at: str | None = None, **values: Any) -> bool:
     """End an open run with its `outcome`, and say whether this call ended it; a run
-    already ended is left as it was."""
-    return advance_run(conn, run_id, "ended", outcome=outcome, word=word, detail=detail,
-                       at=at, **values)
+    already ended is left as it was.
+
+    The end takes a compact a crossing left pending on the launch, in the same
+    transaction (`_take_pending`), and once the end is written starts that compact's job.
+    """
+    ended, _kept, picked = _end(conn, run_id, outcome, word=word, detail=detail, at=at,
+                                values=values)
+    if picked is not None:
+        _start_picked(conn, picked)
+    return ended
+
+
+def end_blocked(conn: sqlite3.Connection, run_id: str, word: str,
+                detail: str | None = None, *, at: str | None = None) -> str | None:
+    """End an open run `blocked` with its `word`, and return the id of the run that now
+    carries the verdict, or None when the run was not open.
+
+    **A repeated `blocked` updates one run**: when the launch's run before this one has
+    the same kind, mode and word and ended `blocked`, that run's `repeats` and
+    `updated_at` move on and its detail is the new one, and this run is deleted with its
+    events, so a block that lasts is one run whose `created_at` is when it began.
+    """
+    ended, kept, picked = _end(conn, run_id, "blocked", word=word, detail=detail, at=at,
+                               values={}, merge=True)
+    if picked is not None:
+        _start_picked(conn, picked)
+    return kept if ended else None
+
+
+def drop_run(conn: sqlite3.Connection, run_id: str, *, at: str | None = None) -> bool:
+    """Delete an open run and its events, for an act that ended with nothing done and
+    leaves no row; say whether it was dropped. It ends the run as far as a pending
+    compact goes: one left on the launch is taken, as an end takes it."""
+    at = at or now()
+    with _writing(conn):
+        run = get_run(conn, run_id)
+        if run is None or not run.open:
+            return False
+        conn.execute("DELETE FROM run_events WHERE run_id = ?", (run_id,))
+        if conn.execute("DELETE FROM runs WHERE run_id = ? AND state <> 'ended'",
+                        (run_id,)).rowcount != 1:
+            return False
+        picked = _take_pending(conn, run, None, None, at)
+    if picked is not None:
+        _start_picked(conn, picked)
+    return True
+
+
+def set_run_job(conn: sqlite3.Connection, run_id: str, job: str) -> bool:
+    """Record an open run's job (`proc:<pid>@<start>`), for a spawner that records it
+    after its spawn; say whether the run was open."""
+    with _writing(conn):
+        return conn.execute("UPDATE runs SET job = ?, updated_at = ? "
+                            "WHERE run_id = ? AND state <> 'ended'",
+                            (job, now(), run_id)).rowcount == 1
+
+
+def _end(conn: sqlite3.Connection, run_id: str, outcome: str, *, word: str | None,
+         detail: str | None, at: str | None, values: Mapping[str, Any],
+         merge: bool = False) -> tuple[bool, str, Run | None]:
+    """The end's one transaction: (whether this call ended the run, the run that carries
+    the verdict, the compact run picked up from the launch's pending compact)."""
+    if bad := [name for name in values if name not in RUN_FIELDS]:
+        raise ValueError(f"not a field of a run: {', '.join(bad)}")
+    at = at or now()
+    sets = {"outcome": outcome, "word": word, "detail": cut(detail), **values}
+    names = list(sets)
+    leaving = RUN_LEAVES["ended"]
+    with _writing(conn):
+        run = get_run(conn, run_id)
+        if run is None:
+            return False, run_id, None
+        cursor = conn.execute(
+            f"UPDATE runs SET state = 'ended', updated_at = ?"
+            f"{''.join(f', {name} = ?' for name in names)} "
+            f"WHERE run_id = ? AND state IN ({', '.join('?' * len(leaving))})",
+            (at, *(sets[n] for n in names), run_id, *leaving))
+        if cursor.rowcount != 1:
+            return False, run_id, None
+        kept = _merge_blocked(conn, run, word, cut(detail), at) if merge else run_id
+        picked = _take_pending(conn, run, outcome, values.get("new_request_id"), at)
+    return True, kept, picked
+
+
+def _merge_blocked(conn: sqlite3.Connection, run: Run, word: str | None,
+                   detail: str | None, at: str) -> str:
+    before = _run(conn.execute(
+        f"{_SELECT_RUN} WHERE request_id = ? AND run_id <> ? "
+        "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        (run.request_id, run.run_id)).fetchone())
+    if (before is None or before.open or before.outcome != "blocked"
+            or (before.kind, before.mode, before.word) != (run.kind, run.mode, word)):
+        return run.run_id
+    conn.execute("UPDATE runs SET repeats = repeats + 1, updated_at = ?, detail = ? "
+                 "WHERE run_id = ?", (at, detail, before.run_id))
+    conn.execute("DELETE FROM run_events WHERE run_id = ?", (run.run_id,))
+    conn.execute("DELETE FROM runs WHERE run_id = ?", (run.run_id,))
+    return before.run_id
+
+
+# -- pending compacts, launch chains and holds -------------------------------------------
+#
+# **A compact crossing is never dropped silently.** A crossing that finds a run open on
+# its launch leaves a pending compact (one per launch, the newest crossing wins), and
+# whatever ends a run on the launch takes it in the same transaction as the end. When the
+# run left the session's context fresh (it relaunched, cleared, compacted or exited the
+# session), the pending compact is dropped with an event; otherwise its compact run is
+# inserted there and its job started once the end is written.
+
+#: The outcomes after which a launch's session needs no compact a crossing left pending.
+FRESH_CONTEXT = ("relaunched", "first-turn-not-sent", "cleared", "compacted", "exited")
+#: The actor of the runs the launcher starts on its own reads.
+LAUNCHER = "launcher"
+
+
+def crossing_key(session_id: str, mark: Any, at: Any) -> str:
+    """A crossing's key, `<session id>|<mark>|<at>`: one crossing writes once."""
+    return f"{session_id}|{mark}|{at}"
+
+
+def crossing_known(conn: sqlite3.Connection, key: str) -> bool:
+    """Whether a crossing already wrote: a run or a pending compact carries its key."""
+    return conn.execute(
+        "SELECT 1 FROM runs WHERE crossing_key = ? "
+        "UNION ALL SELECT 1 FROM pending_compacts WHERE crossing_key = ? LIMIT 1",
+        (key, key)).fetchone() is not None
+
+
+def pend_compact(conn: sqlite3.Connection, request_id: str, key: str, *,
+                 at: str | None = None) -> None:
+    """Leave a compact pending on a launch for the crossing `key`; the newest wins."""
+    with _writing(conn):
+        conn.execute(
+            "INSERT INTO pending_compacts (request_id, crossing_key, at) VALUES (?, ?, ?) "
+            "ON CONFLICT (request_id) DO UPDATE SET crossing_key = excluded.crossing_key, "
+            "at = excluded.at", (request_id, key, at or now()))
+
+
+def pending_compact(conn: sqlite3.Connection, request_id: str) -> tuple[str, str] | None:
+    """The compact pending on a launch, `(crossing key, at)`, or None."""
+    found = conn.execute("SELECT crossing_key, at FROM pending_compacts WHERE request_id = ?",
+                         (request_id,)).fetchone()
+    return None if found is None else (found[0], found[1])
+
+
+def _take_pending(conn: sqlite3.Connection, run: Run, outcome: str | None,
+                  new_request_id: str | None, at: str) -> Run | None:
+    found = pending_compact(conn, run.request_id)
+    if found is None:
+        return None
+    key, pended = found
+    conn.execute("DELETE FROM pending_compacts WHERE request_id = ?", (run.request_id,))
+    session_id = key.split("|", 1)[0] or run.session_id
+    if new_request_id or outcome in FRESH_CONTEXT:
+        conn.execute("INSERT INTO events (request_id, session_id, at, kind, detail_json) "
+                     "VALUES (?, ?, ?, 'pending-compact-dropped', ?)",
+                     (run.request_id, session_id, at,
+                      _encode({"crossing_key": key, "pended_at": pended,
+                               "run_id": run.run_id, "outcome": outcome})))
+        return None
+    if conn.execute("SELECT 1 FROM runs WHERE crossing_key = ?", (key,)).fetchone():
+        return None
+    run_id = new_run_id()
+    while conn.execute("SELECT 1 FROM runs WHERE run_id = ?", (run_id,)).fetchone():
+        run_id = new_run_id()
+    picked = Run(run_id=run_id, kind="compact", mode="limit", request_id=run.request_id,
+                 session_id=session_id, actor=LAUNCHER, handoff_path=None, slot=run.slot,
+                 pane_id=run.pane_id, turn_number=None, new_request_id=None, repair_of=None,
+                 crossing_key=key, job=None, state="armed", outcome=None, word=None,
+                 detail=None, repeats=0, created_at=at, updated_at=at)
+    conn.execute(f"INSERT INTO runs ({', '.join(RUN_COLUMNS)}) "
+                 f"VALUES ({', '.join('?' * len(RUN_COLUMNS))})",
+                 [getattr(picked, name) for name in RUN_COLUMNS])
+    conn.execute("INSERT INTO run_events (run_id, at, kind, detail_json) "
+                 "VALUES (?, ?, 'picked', ?)",
+                 (run_id, at, _encode({"crossing_key": key, "pended_at": pended,
+                                       "after_run": run.run_id})))
+    return picked
+
+
+def _start_picked(conn: sqlite3.Connection, run: Run) -> None:
+    from . import recycle
+
+    recycle.start_compact(conn, run)
+
+
+def chain(conn: sqlite3.Connection, request_id: str) -> list[str]:
+    """A launch's chain: the launch itself and each launch it replaced, followed back
+    through `relaunch_of` and `resume_of`."""
+    return [rid for (rid,) in conn.execute(
+        "WITH RECURSIVE chain(id) AS (SELECT ? UNION "
+        "SELECT CASE n.k WHEN 0 THEN l.relaunch_of ELSE l.resume_of END "
+        "FROM launches l JOIN chain c ON l.request_id = c.id "
+        "CROSS JOIN (SELECT 0 AS k UNION ALL SELECT 1) n "
+        "WHERE (CASE n.k WHEN 0 THEN l.relaunch_of ELSE l.resume_of END) IS NOT NULL) "
+        "SELECT id FROM chain", (request_id,))]
+
+
+def open_holds(conn: sqlite3.Connection, request_id: str) -> list[str]:
+    """The names of the open holds of a launch's whole chain, sorted."""
+    ids = chain(conn, request_id)
+    return [name for (name,) in conn.execute(
+        f"SELECT DISTINCT name FROM warm_holds WHERE released_at IS NULL "
+        f"AND request_id IN ({', '.join('?' * len(ids))}) ORDER BY name", ids)]
 
 
 def add_run_event(conn: sqlite3.Connection, run_id: str, kind: str,
@@ -1230,14 +1431,16 @@ def log_lines(*, limit: int | None = None, before: str | datetime | None = None,
     return [_encode(row.as_json(stale_after=after, now=moment)) for row in rows]
 
 
-__all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "EXIT_COLUMNS", "FACTS", "HARNESSES", "HOWS",
-           "JOB_GONE", "LEAVES", "PRUNE_LIMIT", "RECLAIMED", "RUN_COLUMNS", "RUN_FIELDS",
+__all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "EXIT_COLUMNS", "FACTS", "FRESH_CONTEXT",
+           "HARNESSES", "HOWS", "JOB_GONE", "LAUNCHER", "LEAVES", "PRUNE_LIMIT", "RECLAIMED", "RUN_COLUMNS", "RUN_FIELDS",
            "RUN_GRACE_S", "RUN_KINDS", "RUN_LEAVES", "RUN_STATES", "SOURCES", "STATES",
            "STEPS", "TARGETS", "VERDICTS", "Busy", "Event", "ExitRow", "Inserted",
            "LaunchRow", "Run", "RunEvent", "RunOpen", "SessionTaken", "TooLarge",
-           "add_event", "add_exit", "add_pick", "add_run_event", "advance_run", "claim",
-           "connect", "cut", "end_run", "endpoint_gone", "events", "exits_log", "get",
+           "add_event", "add_exit", "add_pick", "add_run_event", "advance_run", "chain",
+           "claim", "connect", "crossing_key", "crossing_known", "cut", "drop_run",
+           "end_blocked", "end_run", "endpoint_gone", "events", "exits_log", "get",
            "get_run", "insert", "insert_run", "learn_session", "log", "log_lines",
-           "new_run_id", "now", "open_run", "parse_endpoint", "parse_time", "path", "picked",
-           "prune", "resolve", "run_events", "run_stale", "runs", "seen_at", "session_ids",
-           "set_facts", "set_state", "stale_after_s", "stamp"]
+           "new_run_id", "now", "open_holds", "open_run", "parse_endpoint", "parse_time",
+           "path", "pend_compact", "pending_compact", "picked", "prune", "resolve",
+           "run_events", "run_stale", "runs", "seen_at", "session_ids", "set_facts",
+           "set_run_job", "set_state", "stale_after_s", "stamp"]

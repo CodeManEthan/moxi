@@ -2,11 +2,16 @@
 
     moxi-launcher-job relaunch RUN     # a relaunch run, self or director
     moxi-launcher-job repair RUN       # a repair run, from a failed run's record
+    moxi-launcher-job expiry SESSION   # an expiry ask, started by cache's timer
+    moxi-launcher-job compact RUN      # a compact at the context limit
 
-Internal: spawned as a slots job (`relaunch-<run>`, `repair-<run>`) by `moxi launcher
-relaunch`, never typed. A slots job is a child of slots' own tmux server, so it runs
-outside every session from its first instant: it outlives the session it exits, and comms
-takes its notices under the launcher's reserved name.
+Internal, never typed. A relaunch and a repair are spawned as slots jobs
+(`relaunch-<run>`, `repair-<run>`) by `moxi launcher relaunch`. A slots job is a child of
+slots' own tmux server, so it runs outside every session from its first instant: it
+outlives the session it exits, and comms takes its notices under the launcher's reserved
+name. Cache's timer starts an expiry ask (`recycle.ask_expiry`), and a crossing or the end
+of a run that took a pending compact spawns a compact detached (`moxi.proc.spawn`); each
+records its own process as its run's job.
 
 **The relaunch run** takes these steps, each writing its event before the next starts:
 
@@ -75,7 +80,7 @@ from . import notices, quiet, slots, store
 log = logging.getLogger("moxi.launcher.job")
 
 #: The runs this script runs.
-KINDS = ("relaunch", "repair")
+KINDS = ("relaunch", "repair", "expiry", "compact")
 #: Refusals of the exit that clear by themselves.
 TRANSIENT = ("busy-turn", "draft", "busy-agents", "stale-turn", "rate", "in-flight",
              "loading")
@@ -91,6 +96,8 @@ SETTLE_S = 0.5
 NOT_SETTLED = "not-settled"
 #: How often the name wait asks comms again, in seconds.
 NAME_POLL_S = 0.5
+#: How long a compact waits after a refusal of turns' before it reads the session again.
+RETRY_S = 5.0
 #: How often, and how many times, a job tries its run's first read.
 FIRST_READS, FIRST_READ_S = 5, 0.2
 #: The outcomes after which a run's session is down and its record can launch it again.
@@ -444,13 +451,15 @@ class RelaunchJob:
     def pane_id(self) -> str | None:
         return self.run.pane_id or (self.row.pane_id if self.row else None)
 
-    def wait(self) -> int | None:
+    def wait(self, wait_s: float | None = None, expired: str = "expired") -> int | None:
         """Step 1: wait for the session to be quiet; return the turn number the last
-        read saw."""
+        read saw. Past `wait_s` after the run's insert (`relaunch.wait_s` when None) the
+        run ends with the outcome `expired`, worded by what still held."""
         session = self.target.session
         person_s = float(self.setting("relaunch.person_s"))
-        bound = store.parse_time(self.run.created_at).timestamp() + float(
-            self.setting("relaunch.wait_s"))
+        if wait_s is None:
+            wait_s = float(self.setting("relaunch.wait_s"))
+        bound = store.parse_time(self.run.created_at).timestamp() + wait_s
         if self.watch is None:
             try:
                 self.watch = quiet.Watch(session, clock=self.wall)
@@ -475,7 +484,7 @@ class RelaunchJob:
                 return reading.turn_number
             left = bound - self.wall()
             if left <= 0:
-                self.end("expired", first.word, first.detail)
+                self.end(expired, first.word, first.detail)
             now = watch.wait(seen, min(POLL_S, left))
             if now > seen or watch.gone is not None:
                 seen = now
@@ -789,8 +798,70 @@ class RepairJob(RelaunchJob):
             super()._tell()
 
 
-#: The job each run kind runs.
-JOBS: dict[str, type[RelaunchJob]] = {"relaunch": RelaunchJob, "repair": RepairJob}
+class CompactJob(RelaunchJob):
+    """One compact at the context limit: the session's quiet read, waited for up to
+    `recycle.limit_wait_s` after the crossing, then turns' `compact` with the turn number
+    that read saw. Its end is `compacted`, `blocked` (still held at the bound, or turns'
+    `draft` or `busy-agents` then), `failed` (turns' `not-allowed`, `unsupported`, `gone`
+    or `failed`, or the session not live), or `unconfirmed` (turns' answer did not come).
+    A refusal of turns' that may clear (`busy-turn`, `stale-turn`, `rate`, `in-flight`,
+    `loading`, `draft`, `busy-agents`) sends it back to the wait. It passes no
+    `stop_shells`: the session is at work, not idle an hour."""
+
+    kind = "compact"
+    #: Outcomes the relaunch's shared steps end with, as a compact's.
+    OUTCOMES = {"gone": "failed"}
+
+    def steps(self) -> None:
+        from . import recycle
+        from .exits import own_job
+
+        run = self.run
+        if run.job is None:
+            store.set_run_job(self.conn, run.run_id, own_job())
+        self.target = self._find()
+        if run.state == "armed":
+            if not store.advance_run(self.conn, run.run_id, "waiting", leaving=("armed",)):
+                self._ended_under()
+        wait_s = float(self.setting("recycle.limit_wait_s"))
+        bound = store.parse_time(run.created_at).timestamp() + wait_s
+        while True:
+            number = self.wait(wait_s, expired="blocked")
+            self.check_stop()
+            self.guard()
+            self.acting = True
+            self.event("compact", {"turn_number": number})
+            try:
+                result = self.target.session.command("compact", if_turn_number=number)
+            except Exception as error:  # noqa: BLE001  (turns' error is the verdict)
+                result = error
+            verdict = recycle.verdict_of("compact", result)
+            self.event("result", {"outcome": verdict.outcome, "word": verdict.word,
+                                  "detail": verdict.detail})
+            self.acting = False
+            if verdict.outcome not in (None, "blocked"):
+                self.end(verdict.outcome, verdict.word, verdict.detail)
+            if self.wall() >= bound:
+                self.end("blocked", verdict.word, verdict.detail)
+            self.event("again", {"word": verdict.word})
+            self.sleep(RETRY_S)
+
+    def end(self, outcome: str, word: str | None = None, detail: str | None = None,
+            **fields: Any) -> None:
+        mapped = self.OUTCOMES.get(outcome, outcome)
+        if mapped != outcome and word is None:
+            word = outcome
+        super().end(mapped, word, detail, **fields)
+
+    def _tell(self) -> None:
+        """A compact tells no one: its run is its record."""
+
+
+#: The job each run kind runs; `expiry` is an ask of a session (`recycle.ask_expiry`).
+JOBS: dict[str, type[RelaunchJob]] = {"relaunch": RelaunchJob, "repair": RepairJob,
+                                      "compact": CompactJob}
+#: The outcomes a job exits 0 with.
+DONE = ("relaunched", "cleared", "compacted")
 
 
 def run(kind: str, run_id: str, *, signals: bool = False, **seams: Any) -> str:
@@ -809,26 +880,35 @@ def run(kind: str, run_id: str, *, signals: bool = False, **seams: Any) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """`moxi-launcher-job KIND RUN`: 0 when the run relaunched its session, 1 for any
-    other end, 2 for bad arguments."""
+    """`moxi-launcher-job KIND ARG`: 0 when the run relaunched, cleared or compacted its
+    session, or an expiry ask ended with nothing to do; 1 for any other end; 2 for bad
+    arguments."""
     parser = argparse.ArgumentParser(
         prog="moxi-launcher-job",
         description="Internal: run one of the launcher's detached runs to its end.")
     parser.add_argument("kind", choices=KINDS, help="the run's kind")
-    parser.add_argument("run_id", metavar="RUN", help="the run's id")
+    parser.add_argument("arg", metavar="ARG",
+                        help="the run's id; for expiry, the session's id")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s")
-    outcome = run(args.kind, args.run_id, signals=True)
-    print(f"run {args.run_id}: {outcome}", flush=True)
-    return 0 if outcome == "relaunched" else 1
+    if args.kind == "expiry":
+        from . import recycle
+
+        verdict = recycle.ask_expiry(args.arg)
+        print(f"session {args.arg}: {verdict.line}", flush=True)
+        return 0 if verdict.outcome is None or verdict.outcome in DONE else 1
+    outcome = run(args.kind, args.arg, signals=True)
+    print(f"run {args.arg}: {outcome}", flush=True)
+    return 0 if outcome in DONE else 1
 
 
 def _words(error: BaseException) -> str:
     return str(error) or type(error).__name__
 
 
-__all__ = ["ACTED", "GONE", "JOBS", "KINDS", "LOOK", "NOT_SETTLED", "POLL_S", "REPAIRABLE",
-           "SETTLE_S", "TERMINAL", "TRANSIENT", "Choice", "Ended", "RelaunchJob", "RepairJob",
+__all__ = ["ACTED", "DONE", "GONE", "JOBS", "KINDS", "LOOK", "NOT_SETTLED", "POLL_S",
+           "REPAIRABLE", "RETRY_S", "SETTLE_S", "TERMINAL", "TRANSIENT", "Choice",
+           "CompactJob", "Ended", "RelaunchJob", "RepairJob",
            "chain_of", "choose_slot", "gone", "job_name", "main", "repairable", "root_run",
            "run"]
 
