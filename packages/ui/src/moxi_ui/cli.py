@@ -280,19 +280,34 @@ def socket_row(rows: Sequence[Any]) -> Any | None:
     return row if row is not None and row.state not in _NO_SOCKET else None
 
 
+_UNITS = r"[^\s,;:]+\.socket(?:, [^\s,;:]+\.socket)*"
+#: The core's `detail` for a systemd socket state that isn't `active`: the failed units,
+#: then any other unit not active (inactive or missing); or, with none failed, the units
+#: not active.
+_NOT_ACTIVE = {
+    "failed": re.compile(rf"failed: ({_UNITS})(?:; not active: ({_UNITS}))?"),
+    "inactive": re.compile(rf"not active: ({_UNITS})"),
+}
+
+
 def socket_holds_v4(row: Any | None) -> bool:
     """Whether the socket state `row` holds `127.0.0.1:<port>` for the shell: True when
-    it is `active`; on systemd also when it is `failed` or `inactive` and the socket
-    units it names as not active leave out the first one, so only `::1` is not held.
-    The shell then starts on a connection to `127.0.0.1` and refuses `localhost`."""
+    it is `active`; on systemd also when it is `failed` or `inactive` and the first
+    socket unit is positively active. The core names every unit that isn't active in
+    `detail`, so the first one is active only when `detail` is in the core's form for the
+    state and leaves it out. Then only `::1` is not held: the shell starts on a
+    connection to `127.0.0.1` and refuses `localhost`."""
     if row is None:
         return False
     if row.state == "active":
         return True
-    if getattr(row, "backend", None) != "systemd" or row.state not in ("failed", "inactive"):
+    if getattr(row, "backend", None) != "systemd" or row.state not in _NOT_ACTIVE:
         return False
-    named = set(re.split(r"[\s,:;()]+", getattr(row, "detail", "") or ""))
-    return any(name.endswith(".socket") for name in named) and FIRST_SOCKET_UNIT not in named
+    found = _NOT_ACTIVE[row.state].fullmatch(getattr(row, "detail", "") or "")
+    if found is None:
+        return False
+    named = {unit for group in found.groups() if group for unit in group.split(", ")}
+    return FIRST_SOCKET_UNIT not in named
 
 
 def task_row(rows: Sequence[Any]) -> Any | None:

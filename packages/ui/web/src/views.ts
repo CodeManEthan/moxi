@@ -57,7 +57,8 @@ function count(n: number, one: string, many: string): string {
 }
 
 /** One page server's row in words: its state, the counts, its last exit, a crash in the
- * last hour, and three failed starts in a row, as the doctor's `page:<module>` row. */
+ * last hour, and three failed starts in a row, with the tone of the doctor's
+ * `page:<module>` row. */
 export function serverView(row: ServerRow, now: number): ServerView {
   const lines: ServerView["lines"] = [];
   let tone: Tone;
@@ -83,9 +84,11 @@ export function serverView(row: ServerRow, now: number): ServerView {
       lines.push({ tone: null, text: "Another version is installed: open requests finish, then the next request starts it." });
       break;
     case "failed":
-      tone = "fail";
-      state = "failed to start";
-      if (row.reason) lines.push({ tone: "fail", text: row.reason });
+      // One or two failed starts are no warning, as in the doctor: the next start tries
+      // again, and the third in a row makes the fail below.
+      tone = "off";
+      state = "not running";
+      lines.push({ tone: null, text: `The last start failed${row.reason ? `: ${row.reason}` : "."}` });
       lines.push({ tone: null, text: "The next request after 10 s tries again." });
       break;
     case "idle":
