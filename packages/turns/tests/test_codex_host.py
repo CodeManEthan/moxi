@@ -1365,7 +1365,7 @@ def test_a_turn_a_load_reports_before_turn_start_answers_does_not_count_as_its_s
 # -- the internal sockets' paths ------------------------------------------------------
 
 def test_the_codex_sockets_sit_in_the_endpoint_directory_when_their_paths_are_short(
-        turns_env):
+        turns_env, short_runtime):
     endpoint, harness, app = _host(turns_env)
     try:
         assert harness.app_socket == endpoint.dir / protocol.CODEX_APP_SOCK

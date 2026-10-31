@@ -748,7 +748,8 @@ def test_a_stop_the_runner_turned_down_reads_unsupported(claude, monkeypatch):
 
 # -- mod.sock's path ------------------------------------------------------------------
 
-def test_mod_sock_sits_in_the_endpoint_directory_when_its_path_is_short(turns_env):
+def test_mod_sock_sits_in_the_endpoint_directory_when_its_path_is_short(
+        turns_env, short_runtime):
     from moxi_turns.claude_endpoint import mod_sock_path
 
     ep = Endpoint(ClaudeHarness(open(os.devnull, "wb"), pid=os.getpid()), registry=Registry())

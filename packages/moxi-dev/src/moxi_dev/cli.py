@@ -20,6 +20,8 @@ def _parser() -> argparse.ArgumentParser:
                      help="run the checks a change must pass before it merges")
     verbs.add_parser("new", add_help=False,
                      help="new <module>: start a new package under packages/")
+    verbs.add_parser("stamp", add_help=False,
+                     help="check that each web page's build stamp matches its sources")
     return parser
 
 
@@ -30,6 +32,9 @@ def main(argv: list[str] | None = None) -> int:
     if verb == "check":
         from moxi_dev import check
         return check.main(args[1:])
+    if verb == "stamp":
+        from moxi_dev import stamp
+        return stamp.main(args[1:])
     from moxi_dev import new
     return new.main(args[1:])
 
