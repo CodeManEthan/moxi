@@ -7,18 +7,18 @@ import subprocess
 
 import pytest
 
-from moxi_dev import check, cli, new
+from moxi_dev import check, cli, new, stamp
 
 
-def test_help_lists_both_verbs():
+def test_help_lists_every_verb():
     exe = shutil.which("moxi-dev")
     assert exe, "moxi-dev is not installed in this environment"
     proc = subprocess.run([exe, "--help"], capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, proc.stderr
-    assert "check" in proc.stdout and "new" in proc.stdout
+    assert all(verb in proc.stdout for verb in ("check", "new", "stamp"))
 
 
-@pytest.mark.parametrize("verb, module", [("check", check), ("new", new)])
+@pytest.mark.parametrize("verb, module", [("check", check), ("new", new), ("stamp", stamp)])
 def test_each_verb_gets_the_arguments_after_it(monkeypatch, verb, module):
     seen = []
     monkeypatch.setattr(module, "main", lambda argv: seen.append(argv) or 7)
