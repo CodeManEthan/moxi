@@ -357,7 +357,7 @@ def _catalog(args: argparse.Namespace, prog: str) -> int:
             elif row["name"] == catalog.EXTRA:
                 where = "the words after --"
             elif not row["offered"]:
-                where = f"needs {row['requires']}"
+                where = row["unoffered"] or f"needs {row['requires']}"
             else:
                 where = row["option"] or ""
             modes = f" [{', '.join(row['modes'])}]" if row["modes"] else ""

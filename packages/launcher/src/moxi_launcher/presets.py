@@ -324,8 +324,27 @@ def check(file: str | os.PathLike | None = None, *, env: Mapping[str, str] | Non
         values, more = _check_preset(preset, base_harness, avail)
         problems += more
         if not any(p.level == ERROR for p in more):
+            problems += _value_rules(preset, values, defaults, base_harness, avail)
+        if not any(p.level == ERROR for p in more):
             problems += _check_deep(preset, values, defaults, base_harness, avail, env)
     return problems
+
+
+def _value_rules(preset: Preset, values: Mapping[str, object],
+                 defaults: Mapping[str, object], base_harness: str,
+                 avail) -> list[Problem]:
+    """The rules between rows (`catalog.refuse_values`) over what a launch of the preset
+    resolves to with nothing typed: the shipped defaults, `[defaults]`, then the preset."""
+    harness = preset.harness if preset.harness in catalog.HARNESSES else base_harness
+    rows = catalog.offered(harness, avail)
+    effective = {name: row.default for name, row in rows.items()}
+    effective.update({k: v for k, v in defaults.items() if k in rows})
+    effective.update({k: v for k, v in values.items() if k in rows})
+    try:
+        catalog.refuse_values(harness, effective, chosen=values, available=avail)
+    except Refused as exc:
+        return [Problem.of(preset.where, exc.row, exc)]
+    return []
 
 
 def _check_defaults(table: Mapping[str, object], avail) -> tuple[dict, list[Problem]]:
@@ -410,7 +429,7 @@ def _check_preset(preset: Preset, base_harness: str, avail,
                                     "launcher row", f"moxi launcher catalog {harness} "
                                     f"lists them{extra}", "unknown-key"))
             continue
-        problem = _row_problem(where, key, row, value, avail)
+        problem = _row_problem(where, key, row, value, avail, harness)
         if problem is not None:
             problems.append(problem)
             continue
@@ -435,14 +454,15 @@ def _check_preset(preset: Preset, base_harness: str, avail,
     return values, problems
 
 
-def _row_problem(where, key, row, value, avail) -> Problem | None:
+def _row_problem(where, key, row, value, avail, harness=None) -> Problem | None:
     if row.retired is not None:
         return Problem(where, key, f"{key} is retired", row.retired, "retired")
     if row.owned:
         return Problem(where, key, f"{key} is set by the launcher itself",
                        f"leave {key} out", "owned", ERROR, codes.REFUSED)
-    if not row.offered(avail):
-        return Problem.of(where, key, NeedsModule(row))
+    why = row.unoffered(avail, harness)
+    if why is not None:
+        return Problem.of(where, key, NeedsModule(row, *why))
     try:
         row.check(value)
     except BadValue as exc:
@@ -820,8 +840,8 @@ def resolve(request, *, presets: Presets | None = None,
     for key in typed:
         if key not in rows:
             row = catalog.row(harness, key)
-            if row is not None and row.settable and not row.offered(avail):
-                raise NeedsModule(row)
+            if row is not None and row.settable and not row.offered(avail, harness):
+                raise NeedsModule(row, *(row.unoffered(avail, harness) or ()))
             raise BadValue(key, f"{key} is not a {harness} row or a launcher row",
                            f"moxi launcher catalog {harness} lists them")
 
@@ -856,6 +876,7 @@ def resolve(request, *, presets: Presets | None = None,
     values["project"] = project.key if project is not None else ""
 
     _check_posture_rows(harness, values, sources, defaults, off_posture)
+    catalog.refuse_values(harness, values, chosen=chosen, available=avail)
 
     posture = values.get("posture") or ""
     if posture:

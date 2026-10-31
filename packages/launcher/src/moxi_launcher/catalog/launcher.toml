@@ -98,3 +98,41 @@ type = "string"
 default = ""
 requires = "usage"
 doc = "The context mark at which usage warns the session, such as 1x or 1.5x."
+
+[keep_warm]
+type = "enum"
+default = "off"
+values = ["off", "on"]
+requires = ["turns", "cache"]
+condition = "cache-timer"
+doc = "Nudge the session before its prompt cache expires while it waits on work it handed out."
+
+[recycle_on_expiry]
+type = "enum"
+default = "off"
+values = ["off", "clear", "compact"]
+requires = ["turns", "cache"]
+condition = "cache-timer"
+doc = "Clear or compact the session, once idle, when its prompt cache has expired."
+
+[recycle_at_limit]
+type = "enum"
+default = "off"
+values = ["off", "relaunch", "compact"]
+requires = ["turns", "usage"]
+doc = "Relaunch the session with its handoff, or compact it, once its context passes limit_at."
+
+[recycle_at_limit.when.relaunch]
+requires = ["slots"]
+condition = "slots-here"
+target = "slot"
+refused = "relaunch at limit needs slots and a slot launch"
+hint = "launch it in a slot (--target slot) where tmux slots run, or recycle with compact"
+
+[limit_at]
+type = "enum"
+default = "1x"
+values = ["1x", "1.5x", "2x"]
+requires = "usage"
+offered_with = "recycle_at_limit"
+doc = "The context mark at which recycle_at_limit acts, such as 1x or 1.5x."
