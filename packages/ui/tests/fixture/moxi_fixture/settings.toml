@@ -1,0 +1,71 @@
+# The fixture's config schema: one key of each type, and a switch table.
+
+[greeting]
+type = "string"
+default = "hello"
+doc = "A string the page reads at each use."
+read = "use"
+
+[limit]
+type = "int"
+default = 10
+doc = "An int read at each use."
+read = "use"
+
+[workers]
+type = "int"
+default = 2
+doc = "An int read when the page server starts."
+read = "start"
+
+[ratio]
+type = "float"
+default = 0.5
+doc = "A float."
+read = "use"
+
+[loud]
+type = "bool"
+default = false
+doc = "A bool."
+read = "use"
+
+[colour]
+type = "enum"
+values = ["red", "green", "blue"]
+default = "green"
+doc = "An enum."
+read = "use"
+
+[folder]
+type = "path"
+default = ""
+doc = "A path; empty means none."
+read = "use"
+
+[tags]
+type = "list"
+items = "str"
+default = []
+doc = "A list of strings."
+read = "use"
+
+[extra]
+type = "table"
+default = {}
+doc = "A table that is not a switch table."
+read = "use"
+
+[peer]
+type = "string"
+default = ""
+doc = "A key that works only with a module no test installs."
+read = "use"
+needs = "nosuch"
+
+[rows]
+type = "table"
+items = "bool"
+default = {}
+doc = "One switch per row."
+read = "use"

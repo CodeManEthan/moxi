@@ -19,13 +19,13 @@ import time
 from dataclasses import dataclass
 
 from . import constants, directory, secrets, tokens
-from .gateway import RateLimited
+from .record import RateLimited
 from .provision import NAMES
 from .scoping import GLOBAL, qualify
 
 log = logging.getLogger("comms.send")
 
-#: The operator lane's trigger. A stamp the launcher never passes to a
+#: The operator lane's trigger. A stamp the wrapper never passes to a
 #: session: it is typed in the operator's own terminal and nowhere else.
 OPERATOR_VAR = "MOXI_COMMS_OPERATOR"
 
@@ -85,7 +85,7 @@ def operator_from_env(env) -> str | None:
     """The operator's user id when this shell IS the operator's lane, else None.
 
     The terminal is the operator's lane, and `MOXI_COMMS_OPERATOR=<user_id>` is how a
-    terminal says so. The launcher never passes it to a session, so nothing an agent
+    terminal says so. The wrapper never passes it to a session, so nothing an agent
     runs inherits it.
 
     A CLAIMED session is never the operator. `MOXI_COMMS_NAME` beside the trigger raises
@@ -120,10 +120,10 @@ def operator_credential(db, room: str = NAMES, *, store=None, env=None):
     holder = tokens.owner_for_role(tokens.ROLE_OPERATOR)
     chain = secrets.from_config(env=env, store=store)
     token = chain.get(tokens.OPERATOR_SECRET_ID, owner=holder)["value"]
-    return token, room_row["channel_id"]
+    return token, room_row["room_id"]
 
 
-def post_as_operator(gateway, user_id: str, channel_id: str, content: str, *, token: str,
+def post_as_operator(record, user_id: str, channel_id: str, content: str, *, token: str,
                      attempts: int = constants.RETRY_ATTEMPTS, sleep=time.sleep):
     """The operator's post: the same message, a different door, and a credential.
 
@@ -133,11 +133,11 @@ def post_as_operator(gateway, user_id: str, channel_id: str, content: str, *, to
     MESSAGE and not of the posting route.
 
     The token rides down as a keyword and the backend decides what it is worth: the local
-    gateway compares it against `meta('operator_token_hash')`, while the mock accepts
+    record compares it against `meta('operator_token_hash')`, while the mock accepts
     and ignores it so the seam is one shape on both. The bounded
     retry is the posting policy for this lane.
     """
-    return _bounded(lambda: gateway.post_as_user(user_id, channel_id, content, token=token),
+    return _bounded(lambda: record.post_as_user(user_id, channel_id, content, token=token),
                     as_=f"operator {user_id}", attempts=attempts, sleep=sleep)
 
 

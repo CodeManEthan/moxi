@@ -14,11 +14,13 @@ members = [
     "packages/comms",
     "packages/moxi-dev",
     "packages/launcher",
+    "packages/repo",
     "packages/secrets",
     "packages/projects",
     "packages/loopback",
     "packages/slots",
     "packages/services",
+    "packages/ui",
 ]
 
 [tool.uv.sources]
@@ -29,11 +31,13 @@ moxi-cache = { workspace = true }
 moxi-comms = { workspace = true }
 moxi-dev = { workspace = true }
 moxi-launcher = { workspace = true }
+moxi-repo = { workspace = true }
 moxi-secrets = { workspace = true }
 moxi-projects = { workspace = true }
 moxi-loopback = { workspace = true }
 moxi-slots = { workspace = true }
 moxi-services = { workspace = true }
+moxi-ui = { workspace = true }
 
 # The contributor's tools: `uv sync` installs moxi-dev, whose `moxi-dev check` runs the
 # checks a change must pass.

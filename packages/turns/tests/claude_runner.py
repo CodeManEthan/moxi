@@ -13,6 +13,10 @@ import threading
 
 from moxi_turns import claude_leg as leg
 
+#: A line only a test writes, through the endpoint's own line writer: the runner's reader
+#: parks on it until `resume()`, so the endpoint's next lines fill the pipe and block.
+LINE_PAUSE = "test.pause"
+
 
 class UnixHTTP(http.client.HTTPConnection):
     def __init__(self, path: str, timeout: float = 5.0):
@@ -38,7 +42,8 @@ def post(sock_path: str, path: str, body: dict, timeout: float = 5.0) -> tuple[i
 
 class FakeRunner:
     """Reads the endpoint's lines from `stream` (a binary file); answers `live` lines
-    itself from `agents` and `draft` unless `answer_live` is off."""
+    itself from `agents` and `draft` unless `answer_live` is off, and `agents` lines from
+    `agent_list` (`$.agent.list()` as the engine gives it; None: unreadable)."""
 
     def __init__(self, stream):
         self.stream = stream
@@ -46,9 +51,12 @@ class FakeRunner:
         self.lines: queue.Queue = queue.Queue()
         self.agents = 0
         self.draft = False
+        self.agent_list: list | None = []
         self.answer_live = True
         self._seq = itertools.count(1)
         self._first = threading.Event()
+        self.parked = threading.Event()
+        self._resume = threading.Event()
         self.thread = threading.Thread(target=self._read, daemon=True)
         self.thread.start()
 
@@ -59,6 +67,17 @@ class FakeRunner:
                 self.first = line
                 self._first.set()
                 continue
+            if line.get("op") == LINE_PAUSE:
+                self.parked.set()
+                self._resume.wait()
+                self.parked.clear()
+                continue
+            if line.get("op") == leg.LINE_AGENTS:
+                if self.answer_live:
+                    threading.Thread(target=self.post, args=(leg.PATH_AGENTS, {
+                        "ask": line["ask"], "entries": self.agent_list}),
+                        daemon=True).start()
+                continue
             if line.get("op") == leg.LINE_LIVE:
                 if self.answer_live:
                     threading.Thread(target=self.post, args=(leg.PATH_LIVE, {
@@ -66,6 +85,15 @@ class FakeRunner:
                         daemon=True).start()
                 continue
             self.lines.put(line)
+
+    def pause(self, lines: leg.LineWriter, timeout: float = 5.0) -> None:
+        """Park the reader: the endpoint's lines after this one stay in the pipe."""
+        self._resume.clear()
+        assert lines.write({"op": LINE_PAUSE}), "the endpoint's line is closed"
+        assert self.parked.wait(timeout), "the runner did not park"
+
+    def resume(self) -> None:
+        self._resume.set()
 
     def wait_first(self, timeout: float = 5.0) -> dict:
         assert self._first.wait(timeout), "no first line from the endpoint"

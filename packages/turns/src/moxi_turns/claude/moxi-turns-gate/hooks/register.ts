@@ -1,7 +1,8 @@
 // moxi-turns-gate, the gate.
 //
 // It acts only on what the moxi-turns runner submitted or queued, and passes everything
-// else untouched: the person's prompts and typed /clear and /exit, other plugins' runs.
+// else untouched: the person's prompts and typed /clear, /exit and /compact, other
+// plugins' runs.
 //
 // The entry rule: a runner prompt enters only as the prompt of the window now open,
 // admitted once by the endpoint; every other runner prompt is dropped at entry, logged, and
@@ -21,11 +22,16 @@
 // it, and the gate logs each drop it decides itself.
 //
 // A session command's re-check, which lets it run only with consent and from an idle
-// snapshot. For a /clear or /exit the runner queued (its
+// snapshot. For a /clear, /exit or /compact the runner queued (its
 // `command` mark), the gate reads the subagents and the box, then asks the endpoint
 // (POST /gate/command {request, agents, draft}), which records the decision before the
 // gate passes; a drop, or no answer within 1 s (`gone`), withdraws the run without `next`,
 // its one line "moxi-turns-gate: /<name> was refused (<reason>)".
+//
+// Hook times: each of the gate's hooks times its own work, from entry to return less the
+// time spent in `next`, and the samples go to the endpoint (POST /hook-times {samples:
+// [{event, ms}]}, events named `gate <event>`) once a minute, while the runner's mod.sock
+// path is in $.state.
 //
 // Calls: $.state.get (the runner's two values), $.http.fetch (the endpoint's mod.sock),
 // $.agent.list, $.prompt.read, $.clock.after, $.command.register, $.ui.log.
@@ -43,6 +49,11 @@ const ENDPOINT = { plugin: 'moxi-turns', key: 'endpoint' } as const
 const COMMAND = { plugin: 'moxi-turns', key: 'command' } as const
 /** The runner prompt's first line: the window nonce, 128 bits in hex. */
 const NONCE = /^moxi-turns-window: ([0-9a-f]{32})(?:\n|$)/
+const HOOK_TIMES_MS = 60_000
+const HOOK_TIMES_MAX = 1000
+
+let samples: { event: string; ms: number }[] = []
+let samplesArmed = false
 
 const isRunner = (origin: PromptOrigin): boolean => origin.kind === 'plugin' && origin.name === RUNNER
 
@@ -106,6 +117,41 @@ async function ask($: Dollar, sock: string, path: string, body: Json): Promise<J
   return Promise.race([sent, late])
 }
 
+/** A hook's watch: its own time is entry to return, less the time spent in `next`. */
+type Watch = { start: number; away: number }
+const watch = (): Watch => ({ start: performance.now(), away: 0 })
+
+/** `value`, counting the time since `since` as spent behind the hook (in `next`). */
+function behind<T>(w: Watch, since: number, value: T): T {
+  w.away += performance.now() - since
+  return value
+}
+
+/** Keeps one hook's time; the batch goes to the endpoint a minute after its first. */
+function timeHook($: Dollar, event: string, w: Watch): void {
+  const ms = performance.now() - w.start - w.away
+  if (!Number.isFinite(ms) || ms < 0) return
+  if (samples.length >= HOOK_TIMES_MAX) samples.shift()
+  samples.push({ event: `gate ${event}`, ms: Math.round(ms * 1000) / 1000 })
+  if (samplesArmed) return
+  samplesArmed = true
+  $.clock.after(HOOK_TIMES_MS, () => {
+    samplesArmed = false
+    const batch = samples
+    samples = []
+    void (async () => {
+      const mark = (await $.state.get(ENDPOINT)).value
+      if (mark === undefined || mark === null || batch.length === 0) return
+      await $.http.fetch('http://moxi-turns/hook-times', {
+        method: 'POST',
+        socketPath: mark.sock,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ samples: batch }),
+      })
+    })().catch(err => log($, `hook times not sent: ${String(err)}`))
+  })
+}
+
 /** The endpoint's verdict: null to pass, else the one line to answer with. */
 function verdict(answer: Json | undefined, refusedLine: (reason: string) => string): string | null {
   if (answer === undefined) return refusedLine('gone')
@@ -116,8 +162,13 @@ function verdict(answer: Json | undefined, refusedLine: (reason: string) => stri
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'moxi-turns-gate', description: 'moxi-turns-gate is loaded (runs nothing)' })
-    return next(e)
+    const hook = watch()
+    try {
+      await $.command.register({ name: 'moxi-turns-gate', description: 'moxi-turns-gate is loaded (runs nothing)' })
+      return behind(hook, performance.now(), await next(e))
+    } finally {
+      timeHook($, 'session.start', hook)
+    }
   })
 
   // The presence check the runner reads in $.command.list(): hidden, and it runs nothing.
@@ -125,27 +176,37 @@ export const register: Register = on => {
   on('command.run', { command: 'moxi-turns-gate' }, () => ({ text: `${GATE}: loaded` }))
 
   on('prompt.submit', async ($, e, next) => {
-    if (!isRunner(e.origin)) return next(e)
-    const mark = (await $.state.get(ENDPOINT)).value
-    if (mark === undefined || mark === null) return gateDrop($, 'no mod.sock path in $.state')
-    const nonce = NONCE.exec(e.text)
-    if (nonce === null) return gateDrop($, 'no window nonce on its first line')
-    const read = await readings($, true, true)
-    const answer = await ask($, mark.sock, '/gate/entry', { nonce: nonce[1], ...read })
-    if (answer === undefined) return gateDrop($, 'the endpoint did not answer within 1 s')
-    const line = verdict(answer, dropLine)
-    if (line !== null) return { drop: line }
-    // Admitted: the nonce line comes off; the origin and the context stay.
-    return next({ ...e, text: e.text.slice(nonce[0].length) })
+    const hook = watch()
+    try {
+      if (!isRunner(e.origin)) return behind(hook, performance.now(), await next(e))
+      const mark = (await $.state.get(ENDPOINT)).value
+      if (mark === undefined || mark === null) return gateDrop($, 'no mod.sock path in $.state')
+      const nonce = NONCE.exec(e.text)
+      if (nonce === null) return gateDrop($, 'no window nonce on its first line')
+      const read = await readings($, true, true)
+      const answer = await ask($, mark.sock, '/gate/entry', { nonce: nonce[1], ...read })
+      if (answer === undefined) return gateDrop($, 'the endpoint did not answer within 1 s')
+      const line = verdict(answer, dropLine)
+      if (line !== null) return { drop: line }
+      // Admitted: the nonce line comes off; the origin and the context stay.
+      return behind(hook, performance.now(), await next({ ...e, text: e.text.slice(nonce[0].length) }))
+    } finally {
+      timeHook($, 'prompt.submit', hook)
+    }
   }).catch(($, e, next) => (next.called || !isRunner(e.origin) ? next(e) : gateDrop($, 'a fault in the hook')))
 
-  on('command.run', { command: ['clear', 'exit'] }, async ($, e, next) => {
-    if (!isRunner(e.origin)) return next(e)
-    const mark = (await $.state.get(COMMAND)).value
-    if (mark === undefined || mark === null || mark.name !== e.command) return withdrawn(e.command, 'no-pending')
-    const read = await readings($, true, true)
-    const answer = await ask($, mark.sock, '/gate/command', { request: mark.request, ...read })
-    const line = verdict(answer, reason => withdrawn(e.command, reason).text)
-    return line === null ? next(e) : { text: line }
+  on('command.run', { command: ['clear', 'exit', 'compact'] }, async ($, e, next) => {
+    const hook = watch()
+    try {
+      if (!isRunner(e.origin)) return behind(hook, performance.now(), await next(e))
+      const mark = (await $.state.get(COMMAND)).value
+      if (mark === undefined || mark === null || mark.name !== e.command) return withdrawn(e.command, 'no-pending')
+      const read = await readings($, true, true)
+      const answer = await ask($, mark.sock, '/gate/command', { request: mark.request, ...read })
+      const line = verdict(answer, reason => withdrawn(e.command, reason).text)
+      return line === null ? behind(hook, performance.now(), await next(e)) : { text: line }
+    } finally {
+      timeHook($, 'command.run', hook)
+    }
   }).catch(($, e, next) => (next.called || !isRunner(e.origin) ? next(e) : withdrawn(e.command, 'gone')))
 }

@@ -117,7 +117,7 @@ def test_the_verb_makes_no_socket_call(monkeypatch):
 
     monkeypatch.setattr(cli.Context, "daemon", boom)
     monkeypatch.setattr(cli.Context, "db", boom)
-    monkeypatch.setattr(cli.Context, "gateway", property(boom))
+    monkeypatch.setattr(cli.Context, "record", property(boom))
     monkeypatch.setattr(cli.DaemonClient, "connect", boom)
     import socket
     monkeypatch.setattr(socket.socket, "connect", boom)

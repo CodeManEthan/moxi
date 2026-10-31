@@ -15,7 +15,7 @@ from fake_codex import calls, control_call, events, install
 
 
 IDENTITY = "hosted@proj-a"
-#: How long a launcher gets to stop on SIGTERM before it is killed.
+#: How long a wrapper gets to stop on SIGTERM before it is killed.
 STOP_GRACE = 20
 PR_SET_PDEATHSIG = 1                  # linux/prctl.h
 
@@ -40,11 +40,11 @@ def die_with_parent():
 
 @pytest.fixture
 def spawn():
-    """`subprocess.Popen` for the launchers, which nothing else reaps. Each one dies
+    """`subprocess.Popen` for the wrappers, which nothing else reaps. Each one dies
     with this worker (the parent-death signal: a worker killed past its timeout runs no
     teardown), and the teardown stops every one still running, SIGTERM then SIGKILL,
     and waits for it, however the test ended. turns' host gives the app-server the same
-    signal, so it goes with its launcher."""
+    signal, so it goes with its wrapper."""
     procs = []
 
     def _spawn(argv, **kwargs):
@@ -58,7 +58,7 @@ def spawn():
 
 
 def stop(proc) -> str:
-    """Stop a launcher, SIGTERM then SIGKILL after `STOP_GRACE`, and wait for it.
+    """Stop a wrapper, SIGTERM then SIGKILL after `STOP_GRACE`, and wait for it.
     Returns its output (a second call returns it again)."""
     if proc.poll() is None:
         proc.send_signal(signal.SIGTERM)
@@ -70,7 +70,7 @@ def stop(proc) -> str:
     return output or ""
 
 
-def launcher(spawn, records, tmp_path):
+def wrapper(spawn, records, tmp_path):
     """`moxi-comms-codex` for IDENTITY over turns' real host and the fake `codex`."""
     binary = install(tmp_path / "bin")
     work = tmp_path / "work"
@@ -100,11 +100,11 @@ def digest_with(records, message_id) -> list:
 def test_mail_sent_through_the_daemon_reaches_the_hosted_thread_and_settles(
         rig, tmp_path, monkeypatch, spawn):
     """comms' own path over turns' real host: `moxi comms send`, the daemon, the
-    launcher, turns' host and the app-server. The cursor moves when the turn ends."""
+    wrapper, turns' host and the app-server. The cursor moves when the turn ends."""
     clock_reads_warm(monkeypatch, "codex")
     records = tmp_path / "records"
     records.mkdir()
-    proc = launcher(spawn, records, tmp_path)
+    proc = wrapper(spawn, records, tmp_path)
     try:
         assert wait_until(lambda: IDENTITY in rig.daemon.bindings, 20), \
             proc.stdout.read() if proc.poll() is not None else "no binding"
@@ -130,7 +130,7 @@ def test_mail_sent_through_the_daemon_reaches_the_hosted_thread_and_settles(
     assert proc.returncode == 0, output
 
 
-def test_the_launcher_runs_turns_real_host_and_passes_the_roster_options(
+def test_the_wrapper_runs_turns_real_host_and_passes_the_roster_options(
         rig, tmp_path, spawn):
     records = tmp_path / "records"
     records.mkdir()

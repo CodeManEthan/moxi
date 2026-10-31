@@ -1,4 +1,5 @@
-"""turns' Claude plugin on disk: `SETUP`, `claude_plugin_dirs()`, and its doctor rows.
+"""turns' Claude plugin on disk: `SETUP`, the plugin folders for one launch, and its
+doctor rows.
 
 The plugin ships inside the package as a folder marketplace, `moxi_turns/claude/`,
 holding `.claude-plugin/marketplace.json` and two plugins: the runner (`moxi-turns`)
@@ -14,9 +15,10 @@ and the gate (`moxi-turns-gate`).
 2. `claude plugin marketplace add <folder>`, then install both plugins at user scope,
    skipping each one already done.
 
-Every load of the plugin needs step 1; only a user-scope install needs step 2. A
-launcher that loads the plugins for one launch calls `claude_plugin_dirs()`, which does
-step 1 for the environment it runs in and returns both plugin folders for `--plugin-dir`.
+Every load of the plugin needs step 1; only a user-scope install needs step 2. A launch
+that loads the plugins for itself gets them from `moxi_turns.launch_additions("claude",
+...)`, which calls `claude_plugin_dirs()` here: step 1 for the environment it runs in,
+then both plugin folders for `--plugin-dir`.
 """
 
 from __future__ import annotations
@@ -122,7 +124,8 @@ def read_endpoint_file(root: Path | None = None) -> dict | None:
 
 
 def claude_plugin_dirs() -> tuple[Path, Path]:
-    """The runner's and the gate's folders, for a per-launch `--plugin-dir` each.
+    """The runner's and the gate's folders, for a per-launch `--plugin-dir` each. Internal:
+    a launch reaches it through `launch_additions`.
 
     First writes `endpoint.json` for the environment this runs in (SETUP's first step),
     so a per-launch load gets both plugins and an endpoint with no user-scope install.
@@ -231,7 +234,9 @@ def rows() -> list:
     """`check()`'s Claude rows: each plugin's presence and version, whether
     `endpoint.json` names the command the config and the environment give now, and the
     Claude Code version against the ones the probes passed."""
-    from .doctor import Row
+    from moxi.doctor import Row
+
+    from .doctor import MODULE
 
     root = claude_root()
     out = []
@@ -240,44 +245,47 @@ def rows() -> list:
         try:
             manifest = json.loads((folder / ".claude-plugin" / "plugin.json")
                                   .read_text("utf-8"))
-            out.append(Row(f"claude plugin {plugin}", True,
+            out.append(Row(MODULE, f"claude plugin {plugin}", "ok",
                            f"version {manifest.get('version', '?')} at {folder}"))
         except (OSError, ValueError) as exc:
-            out.append(Row(f"claude plugin {plugin}", False,
-                           f"missing from the package at {folder}: {exc}"))
+            out.append(Row(MODULE, f"claude plugin {plugin}", "fail",
+                           f"missing from the package at {folder}: {exc}",
+                           "reinstall turns"))
     written = read_endpoint_file(root)
     try:
         want = str(endpoint_command())
     except SetupError as exc:
         want = None
-        out.append(Row("claude endpoint.json", False, f"no endpoint command: {exc}"))
+        out.append(Row(MODULE, "claude endpoint.json", "fail",
+                       f"no endpoint command: {exc}"))
     if want is not None:
         if written is None:
-            out.append(Row("claude endpoint.json", False,
-                           "missing: the plugin spawns no endpoint; run `moxi install "
-                           "turns` (or a launcher's claude_plugin_dirs())"))
+            out.append(Row(MODULE, "claude endpoint.json", "fail",
+                           "missing: a plugin installed at user scope spawns no endpoint "
+                           "until it is written, as `moxi install turns` or a launch "
+                           "through launch_additions does", "moxi install turns"))
         elif written.get("command") != want:
-            out.append(Row("claude endpoint.json", False,
+            out.append(Row(MODULE, "claude endpoint.json", "fail",
                            f"names {written.get('command')!r}, but the config and this "
-                           f"environment give {want!r}; run `moxi install turns`"))
+                           f"environment give {want!r}", "moxi install turns"))
         else:
-            out.append(Row("claude endpoint.json", True, f"names {want}"))
-    out.append(_version_row(Row))
+            out.append(Row(MODULE, "claude endpoint.json", "ok", f"names {want}"))
+    out.append(_version_row(Row, MODULE))
     return out
 
 
-def _version_row(Row):
+def _version_row(Row, module):
     claude = _claude()
     if claude is None:
-        return Row("claude code", False, "`claude` is not on PATH")
+        return Row(module, "claude code", "off", "`claude` is not on PATH")
     try:
         done = _run([claude, "--version"])
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return Row("claude code", False, f"`claude --version` failed: {exc}")
+        return Row(module, "claude code", "fail", f"`claude --version` failed: {exc}")
     version = (done.stdout.split() or ["?"])[0]
     if version in PASSED_VERSIONS:
-        return Row("claude code", True, f"{version}, which the probes passed")
-    return Row("claude code", False,
+        return Row(module, "claude code", "ok", f"{version}, which the probes passed")
+    return Row(module, "claude code", "warn",
                f"{version}, which the probes have not seen (passed: "
                f"{', '.join(PASSED_VERSIONS)})")
 

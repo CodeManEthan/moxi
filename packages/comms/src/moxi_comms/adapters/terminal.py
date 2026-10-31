@@ -1,8 +1,8 @@
-"""The terminal a launcher's window borrows, the children a launcher spawns, and the pidfd a
-launcher takes on a process, shared by the launchers.
+"""The terminal a wrapper's window borrows, the children a wrapper spawns, and the pidfd a
+wrapper takes on a process, shared by the wrappers.
 
-A window is a CLI's own full-screen interface, run as the launcher's child in the
-launcher's terminal. The launcher gives the window the terminal's foreground, takes it
+A window is a CLI's own full-screen interface, run as the wrapper's child in the
+wrapper's terminal. The wrapper gives the window the terminal's foreground, takes it
 back when the window ends, and puts the screen back the way a person expects it.
 """
 
@@ -28,7 +28,7 @@ LEAVE_ALT_SCREEN = b"\x1b[?1049l"
 SHOW_CURSOR = b"\x1b[?25h"
 RESTORE_SCREEN = ENTER_ALT_SCREEN + LEAVE_ALT_SCREEN + SHOW_CURSOR
 
-#: The signals a window launcher ignores in every phase, so Ctrl-Z never suspends it
+#: The signals a window wrapper ignores in every phase, so Ctrl-Z never suspends it
 #: and it can take the terminal's foreground back from a background group.
 JOB_CONTROL_SIGNALS = (signal.SIGTSTP, signal.SIGTTIN, signal.SIGTTOU)
 
@@ -41,7 +41,7 @@ PR_SET_PDEATHSIG = 1                  # linux/prctl.h
 def die_with_parent(parent_pid: int):
     """preexec_fn: ask the kernel to SIGTERM the child when the spawning thread exits,
     and close the race where it already did before we asked. Linux only, by name;
-    elsewhere it is None and the child outlives a launcher that dies without stopping
+    elsewhere it is None and the child outlives a wrapper that dies without stopping
     it."""
     if not sys.platform.startswith("linux"):
         return None
@@ -79,7 +79,7 @@ def pidfd_open(pid: int) -> int:
 
 
 def terminal_fd():
-    """The launcher's controlling terminal, or None when it has none."""
+    """The wrapper's controlling terminal, or None when it has none."""
     for fd in (0, 1, 2):
         with contextlib.suppress(OSError):
             if os.isatty(fd):
@@ -90,7 +90,7 @@ def terminal_fd():
 
 
 def in_terminal_foreground(fd) -> bool:
-    """True when the launcher's process group is the terminal's foreground group."""
+    """True when the wrapper's process group is the terminal's foreground group."""
     if fd is None:
         return False
     try:
@@ -102,7 +102,7 @@ def in_terminal_foreground(fd) -> bool:
 class Terminal:
     """The terminal the window borrows: its foreground group and its mode."""
 
-    #: Where a failure to take the terminal back is said; a launcher sets its own.
+    #: Where a failure to take the terminal back is said; a wrapper sets its own.
     log = log
 
     def __init__(self, fd):
@@ -121,7 +121,7 @@ class Terminal:
             os.tcsetpgrp(self.fd, pgid)
 
     def take_back(self) -> None:
-        """Foreground and mode back to the launcher, then the main screen and a visible
+        """Foreground and mode back to the wrapper, then the main screen and a visible
         cursor. Skipped on a terminal that has hung up."""
         if self.hung_up:
             return

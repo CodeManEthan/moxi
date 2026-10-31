@@ -1,20 +1,20 @@
-"""A launcher's window: the harness CLI the person sits in, run as the launcher's child.
+"""A wrapper's window: the harness CLI the person sits in, run as the wrapper's child.
 
 `moxi-comms-opencode --window` runs one (`opencode_window.OpenCodeWindow`). The Codex
 window is turns' now (its Codex host opens it); this is the lifecycle comms keeps for the
 harness whose delivery is still its own.
 
-One rule governs the window's lifecycle. **The launcher alone owns the window, and it
+One rule governs the window's lifecycle. **The wrapper alone owns the window, and it
 knows why every window ends.** Before it ends a window for a reason of its own (the
-server connection is lost, or the launcher is stopping) it records that cause on the
+server connection is lost, or the wrapper is stopping) it records that cause on the
 window. A window that exits with no cause recorded, while the generation it was opened
-on still answers, was closed by the person, and the launcher then stops, so the identity
+on still answers, was closed by the person, and the wrapper then stops, so the identity
 goes offline. A window opens only on the current generation, once that generation is
 ready. Every wait has a deadline, and every give-up exits loudly with its reason.
 
 Everything here runs on the main thread. The kernel's parent-death signal follows the
 thread that spawned a child, so the thread that spawns windows is the one that lives as
-long as the launcher; and with one thread both recording causes and sending signals,
+long as the wrapper; and with one thread both recording causes and sending signals,
 the cause is always recorded before the signal is sent.
 """
 
@@ -37,7 +37,7 @@ from .terminal import (ENTER_ALT_SCREEN, JOB_CONTROL_SIGNALS, LEAVE_ALT_SCREEN,
 
 log = logging.getLogger("comms.window")
 
-#: How long a wait for a ready generation lasts before the launcher gives up. A priming
+#: How long a wait for a ready generation lasts before the wrapper gives up. A priming
 #: turn takes a few seconds; the deadline covers a slow first start with room to spare.
 READY_WAIT = 180.0
 #: How long the generation check waits for an answer before it reads the generation as
@@ -45,10 +45,10 @@ READY_WAIT = 180.0
 GENERATION_CHECK_WAIT = 5.0
 #: The main thread's poll interval while a window runs and while it waits.
 POLL = 0.1
-#: Exit status when the launcher gives up waiting for a window it can show.
+#: Exit status when the wrapper gives up waiting for a window it can show.
 EXIT_GAVE_UP = 3
 
-#: The causes the launcher records on a window it ends.
+#: The causes the wrapper records on a window it ends.
 CAUSE_LOST = "generation lost"
 CAUSE_SHUTDOWN = "shutdown"
 CAUSE_HANGUP = "hangup"
@@ -67,7 +67,7 @@ class Terminal(terminal.Terminal):
 
 class Window:
     """One window: its process, the generation it was opened on, and the cause the
-    launcher recorded before ending it (None until then)."""
+    wrapper recorded before ending it (None until then)."""
 
     def __init__(self, proc: subprocess.Popen, generation):
         self.proc = proc
@@ -89,11 +89,11 @@ class WindowSession:
     """The main thread's loop for `--window`: wait for a ready generation, show a window
     on it, and act on how the window ended.
 
-    A launcher for another CLI subclasses it with its own window command (`argv`) and
+    A wrapper for another CLI subclasses it with its own window command (`argv`) and
     its own wording (the class attributes below); the lifecycle is the same."""
 
-    #: What the launcher says to the terminal, each formatted with `prog` (the
-    #: launcher's name), `identity`, `wait`, `status` and `log_path`.
+    #: What the wrapper says to the terminal, each formatted with `prog` (the
+    #: wrapper's name), `identity`, `wait`, `status` and `log_path`.
     WAITING = ("{prog}: waiting for {identity}'s session to be ready (up to {wait:.0f}s; "
                "Ctrl-C stops)")
     LOST = ("{prog}: the server was lost; the window closed and reopens when the server "
@@ -122,7 +122,7 @@ class WindowSession:
 
     # ------------------------------------------------------------------ the loop
     def run(self) -> int:
-        """Returns the launcher's exit status. Raises GaveUp at a deadline."""
+        """Returns the wrapper's exit status. Raises GaveUp at a deadline."""
         while True:
             generation = self.wait_ready()
             if generation is None:
@@ -133,7 +133,7 @@ class WindowSession:
             return 0
 
     def wait_ready(self):
-        """The current generation once it is ready, or None when the launcher is
+        """The current generation once it is ready, or None when the wrapper is
         stopping. The deadline runs from the start of this wait."""
         deadline = time.monotonic() + self.ready_wait
         said = False
@@ -154,7 +154,7 @@ class WindowSession:
     def show(self, generation) -> str:
         """One window on `generation`. Returns "lost" when it ended with its generation
         (a new one is waited for), "operator" when the operator closed it, and "stop"
-        when the launcher is stopping."""
+        when the wrapper is stopping."""
         window = self.spawn(generation)
         while True:
             if self.hangup.is_set():
@@ -210,7 +210,7 @@ class WindowSession:
 
         def preexec():
             os.setpgid(0, 0)
-            # The launcher ignores SIGTTOU, and the child inherits that until exec, so it
+            # The wrapper ignores SIGTTOU, and the child inherits that until exec, so it
             # can make its own group the foreground before the CLI touches the terminal.
             with contextlib.suppress(OSError):
                 os.tcsetpgrp(fd, os.getpid())
@@ -234,7 +234,7 @@ class WindowSession:
     def poll(self, window: Window) -> bool:
         """True once the window has exited. A window that stopped itself (a CLI such as Codex stops
         its own process group on Ctrl-Z) is continued, so it never sits stopped in front
-        of a launcher that cannot be suspended."""
+        of a wrapper that cannot be suspended."""
         if window.exited:
             return True
         try:
@@ -291,7 +291,7 @@ class WindowSession:
             return False
 
     def restore(self, window: Window) -> None:
-        """The terminal back to the launcher after a window ends, whatever ended it."""
+        """The terminal back to the wrapper after a window ends, whatever ended it."""
         self.terminal.take_back()
 
 

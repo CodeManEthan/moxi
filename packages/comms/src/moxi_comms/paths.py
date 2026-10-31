@@ -17,7 +17,8 @@ without one.
 `refuse_outside_runtime` is the guard on a socket path handed in from the environment:
 a claim or daemon socket outside RUNTIME/comms is refused, naming the variable and the
 directory, so a stamp inherited from another program's session cannot point comms at
-that program's sockets.
+that program's sockets. A claim socket the core moved to its short path passes only by
+`claimhold.checked_socket`, which finds it recorded in this comms' own claim files.
 """
 
 from __future__ import annotations
@@ -87,17 +88,26 @@ def refuse_outside_runtime(path, variable: str, env=None) -> Path:
         f"or unset {variable}.")
 
 
+def comms_db(env=None) -> Path:
+    """STATE/comms/comms.db -- comms' one store (`store/`): the record, the delivery
+    books, the binding history, the directory and the reserved names.
+
+    STATE and deliberately not DATA: DATA is the sync surface, and a live database is
+    never continuous-file-synced. Open it only through `store.open_write` or
+    `store.open_read`.
+    """
+    return state_dir(env) / "comms.db"
+
+
 def directory_db(env=None) -> Path:
+    """DATA/comms/directory.db -- comms 0.2's directory, which comms.db replaces. Read
+    only by the move of 0.2's files into comms.db."""
     return data_dir(env) / "directory.db"
 
 
 def bindings_db(env=None) -> Path:
-    """DATA/comms/bindings.db -- the binding custody journal, beside directory.db.
-
-    DATA and deliberately not STATE, though a binding is a live-session fact: what the
-    journal records is used to INTERPRET the record, and the record is device-agnostic.
-    An attribution answer must not depend on which box is asking.
-    """
+    """DATA/comms/bindings.db -- comms 0.2's binding history, which comms.db replaces.
+    Read only by the move of 0.2's files into comms.db."""
     return data_dir(env) / "bindings.db"
 
 
@@ -105,8 +115,7 @@ def cards_dir(env=None) -> Path:
     """DATA/comms/cards -- holder-authored peer-facing agent cards, one per identity.
 
     DATA and deliberately not STATE: a card is durable user data and device-agnostic --
-    who someone IS does not depend on which box is asking, the same argument
-    `bindings_db()` makes above. It is not derived (nothing can regenerate a card; only
+    who someone IS does not depend on which box is asking. It is not derived (nothing can regenerate a card; only
     its holder can write one), so it is not CACHE; it is content, not config; and it
     outlives a login, so it is not RUNTIME. comms creates nothing here: the reader is
     read-only and the first holder to write a card makes the directory.
@@ -115,20 +124,9 @@ def cards_dir(env=None) -> Path:
 
 
 def cursors_dir(env=None) -> Path:
+    """STATE/comms/cursors: comms 0.2's cursor files, which the move into comms.db
+    reads. Nothing writes there now."""
     return state_dir(env) / "cursors"
-
-
-def cold_gate(env=None) -> Path:
-    """STATE/comms/cold-gate.json -- the cold-cache gate file an older daemon kept.
-
-    `{"held": {name: [ids]}, "refused": {name: [ids]}}`: the ids that daemon's gate held
-    for a name's own next turn, and the ids it refused for an adapter that takes no
-    delayed mail. Nothing writes it now. A daemon reads it once, at its first boot with
-    the delivery queue: the held ids become queue rows, the refused half is dropped, and
-    the file is deleted, as is the local record's `cold_refusals` table
-    (`Daemon._migrate_queue`). STATE, not DATA: it describes this box's daemon.
-    """
-    return state_dir(env) / "cold-gate.json"
 
 
 def tokens_dir(env=None) -> Path:
@@ -136,7 +134,7 @@ def tokens_dir(env=None) -> Path:
 
     STATE and deliberately not DATA: a stored credential is a DEVICE credential, and DATA
     is THE sync surface, so a token there would ride a future sync to boxes it was never
-    minted for. CONFIG holds no tokens at all. `[secrets] store` in config.toml (or
+    minted for. CONFIG holds no tokens at all. `[credentials] store` in config.toml (or
     `MOXI_COMMS_TOKEN_STORE`) overrides this path -- `MOXI_COMMS_HOME` collapses every
     root, so an alternate-home recipe needs a way to still name the real store.
     """
@@ -144,36 +142,66 @@ def tokens_dir(env=None) -> Path:
 
 
 def record_db(env=None) -> Path:
-    """STATE/comms/record.db -- the local backend's record, beside the cursors and tokens.
-
-    STATE and deliberately not DATA: DATA is the sync surface, and a live database is
-    never continuous-file-synced. The record is the BOX's, one file per device, the same
-    reasoning as for per-device credentials.
-    `[local] record` in config.toml and `MOXI_COMMS_LOCAL_RECORD` override it.
-    """
+    """STATE/comms/record.db -- comms 0.2's local record, which comms.db replaces. Read
+    only by the move of 0.2's files into comms.db."""
     return state_dir(env) / "record.db"
 
 
 def daemon_socket(env=None) -> Path:
-    """RUNTIME/comms/moxi-comms-daemon.sock -- the daemon's one listening socket."""
+    """The daemon's socket, `moxi.ipc.address("comms", "daemon")`: on POSIX
+    RUNTIME/comms/daemon.sock, or the core's short hashed path when that is too long.
+    With `env` given, RUNTIME/comms/daemon.sock under that environment's roots."""
+    if env is None:
+        from moxi import ipc
+
+        return Path(ipc.address(MODULE, "daemon"))
+    return runtime_dir(env) / "daemon.sock"
+
+
+def claim_socket(key: str) -> Path:
+    """The claim socket of the holder keyed `key`, `moxi.ipc.address("comms",
+    "claim-<key>")`: on POSIX RUNTIME/comms/claim-<key>.sock, or the core's short hashed
+    path when that is too long for a Unix socket (a long runtime root, or macOS's long
+    `$TMPDIR`)."""
+    from moxi import ipc
+
+    return Path(ipc.address(MODULE, f"claim-{key}"))
+
+
+def short_socket_dir() -> Path | None:
+    """The directory the core puts a socket in when its path in a runtime directory is
+    too long (`moxi.paths.socket_path`'s short path), or None where there is none: on
+    Windows, or when the core refuses it (another user owns it)."""
+    from moxi import paths as core
+
+    try:
+        return Path(core.socket_path(MODULE, "x" * core.SOCKET_MAX)).parent
+    except (NotImplementedError, OSError):
+        return None
+
+
+def old_daemon_socket(env=None) -> Path:
+    """RUNTIME/comms/moxi-comms-daemon.sock -- comms 0.2's daemon socket. This build
+    never binds, removes or renames it; the move of 0.2's files only connects to it, to
+    see that no 0.2 daemon still answers there."""
     return runtime_dir(env) / "moxi-comms-daemon.sock"
 
 
 def codex_threads_dir(env=None) -> Path:
-    """STATE/comms/codex -- thread-id <-> identity, beside the cursors: the thread of
-    each identity's current launch."""
+    """STATE/comms/codex -- thread-id <-> identity: the thread of each identity's
+    current launch."""
     return state_dir(env) / "codex"
 
 
 def opencode_runtime_dir(env=None) -> Path:
-    """RUNTIME/comms/opencode -- what an `opencode` launcher writes for its own server's launch:
+    """RUNTIME/comms/opencode -- what an `opencode` wrapper writes for its own server's launch:
     the layer-one instructions file the server reads by absolute path."""
     return runtime_dir(env) / "opencode"
 
 
 def opencode_sessions_dir(env=None) -> Path:
     """STATE/comms/opencode -- session-id <-> identity for the `opencode` adapter, and
-    the launcher's log and status lines.
+    the wrapper's log and status lines.
 
     The same category as `codex_threads_dir` (the adapter writes it, the daemon never
     does). It holds the session of the identity's current launch: each launch creates
@@ -184,5 +212,5 @@ def opencode_sessions_dir(env=None) -> Path:
 
 
 def log_dir(env=None) -> Path:
-    """STATE/comms/logs -- the daemon's and the launchers' logs."""
+    """STATE/comms/logs -- the daemon's and the wrappers' logs."""
     return state_dir(env) / "logs"

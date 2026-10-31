@@ -3,10 +3,13 @@
     moxi comms send <name[,name...]> "text"   --posture none|optional|once|open
                                          [--cap N | --no-cap] [--standing]
                                          [--reply-to ID] [--audience NAME] [--held]
+                                         [--interrupt] [--expires DURATION|never]
                                          [--new] [--new-name] [--check]
     moxi comms reply <message-id> "text"      [--posture none|optional|once|open]
                                          [--cap N | --no-cap] [--standing]
-                                         [--audience NAME] [--held] [--check]
+                                         [--audience NAME] [--held] [--interrupt]
+                                         [--expires DURATION|never] [--check]
+    moxi comms delete <message-id>            [--json]
     moxi comms agents                         [--seats]
     moxi comms history <identity>             [--limit N]
     moxi comms help [<term>]
@@ -14,6 +17,7 @@
     moxi comms explain <identity> [<message-id>]
     moxi comms cache [<name> | <session-id>] ...   (the policy's cache callers only)
     moxi comms doctor
+    moxi comms migrate [--dry-run]
 
 The fence the verbs keep: nothing agent-facing reaches the provisioner credential, and
 the verbs that ACT stay four (`send`, `reply`, `agents`, `history`).
@@ -28,11 +32,11 @@ table. A card is written with an ordinary file write and never with a comms verb
 exactly how the card surface avoids becoming a fifth ACTING verb.
 
 `explain` is a diagnostic for whoever is at the terminal when an agent has gone quiet:
-it asks the daemon every live fact behind one identity's delivery and reads one cursor
-file, and it acts on nothing. It touches no credential. It differs from the other two
+it asks the daemon every live fact behind one identity's delivery, the cursor among
+them, and it acts on nothing. It touches no credential. It differs from the other two
 readers in reaching the daemon at all, so it is the first reading verb that can be told
-"comms offline" -- and when it is, it prints the cursor anyway, because the cursor is a
-file and the one durable fact.
+"comms offline" -- and when it is, it prints the cursor anyway, read from comms' store,
+because the cursor is the one durable fact.
 
 `cache` reads any agent's prompt-cache state. It answers only a caller the config file's
 `[policy] cache_callers` names (the operator by default), found the way `send` finds a
@@ -43,13 +47,13 @@ changes nothing.
 comms' five directories under Moxi's roots (`moxi.paths`), the config file, the backend
 and where it came from, the secrets chain, the adapter binaries
 on PATH and whether the daemon answers. It writes nothing, posts nothing, and exits 0
-unless the daemon is configured (a config file or `MOXI_COMMS_GATEWAY`) and down.
+unless the daemon is configured (a config file or `MOXI_COMMS_BACKEND`) and down.
 
 Send boundary, enforced here:
   * an unbound EPHEMERAL name is an honest error at the verb -- a retired agent-N is
     nobody and the number is never reused;
   * a CHOSEN name accepts, deferring when unbound, with an explicit notice -- declared
-    latency, never a silent success. A `moxi comms send` to an identity the custody journal
+    latency, never a silent success. A `moxi comms send` to an identity the binding history
     has never seen bound (a bare name is the global identity; `x@S` is x@S), with no
     standing row, is refused unless the sender passes `--new-name`;
   * an UNDECLARED STANDING name is an honest error too -- but nothing in a bare name
@@ -108,12 +112,12 @@ first, one `held:` line per held recipient with when its cache went cold, and th
 line says when each held recipient reads it.
 Recipients that pass get the message now. An agent comms has no clock for, a model with
 no lifetime row included, reads `no-cache` and gets its mail live. A read comms cannot
-make refuses the whole post -- nothing posted, exit 6 (`EXIT_COLD`) -- and the refusal
+make refuses the whole post -- nothing posted, exit 75 (`TEMPFAIL`, outcome `cache-unread`) -- and the refusal
 opens with "Nothing was sent:" and each refused recipient's reason, and closes with
 "Nothing was sent.": a bound recipient whose read is `unknown` (no session id yet, a
 transcript comms cannot read), a failed `session` query, and a name that unbound while
 comms checked it. There is no size exception and no sender exemption: the operator's
-lane and every send-only identity are held like any agent. There is no
+lane and every reserved name are held like any agent. There is no
 override. On every exit path the outcome line is last and every NOTE comes before it,
 so the last line tells the truth. The verb's check decides what it says; the daemon
 checks again at every delivery, and that check is the enforcement.
@@ -124,7 +128,7 @@ wakes it for this message alone. It holds a warm recipient too. It reads the rec
 caches like any send and is accepted for every recipient; to the operator it is ignored,
 with a NOTE.
 
-Length is the verb's business too. The gateway seam declares `max_content_length`, the
+Length is the verb's business too. The record seam declares `max_content_length`, the
 one cap on one message; the verb checks it before any credential is resolved, and a
 message over it is refused with nothing posted. Comms does not split a message.
 """
@@ -135,29 +139,32 @@ import argparse
 import json
 import logging
 import os
+import sqlite3
 import sys
 import textwrap
 import time
 
-from . import (attribution, cache, cards, claimfile, claimhold, config, cursors,
+from moxi import exit as moxi_exit
+
+from . import (attribution, cache, cards, claimfile, claimhold, config,
                directory, glossary, machine_line, policy, sending)
-from .client import DaemonClient, DaemonError, DaemonOffline, DaemonTimeout
-from .gateway import GatewayError
+from .client import DaemonClient, DaemonError, DaemonOffline, DaemonTimeout, VersionMismatch
+from .store import books
+from .record import RecordError
 from .provision import NAMES
 from .roster_view import render_agents
 from .scoping import identity_of, is_auto_name, project_key
 from .sender import MalformedStamp, OperatorRefused, operator_from_env, sender_from_env
 # The send path lives in `sending`, the library under this verb and under
 # `moxi_comms.api.send`. These names stay readable as `cli.<name>`: callers and rigs
-# read the exit codes, the verb's words and `_bodies` here.
+# read the verb's words and `_bodies` here. Every verb exits with `moxi.exit`'s codes.
 from .sending import (  # noqa: F401
-    ASK_CHECK_NO_ANSWER, CLOSED_BY_CAP, CLOSED_BY_IDLE, CLOSED_BY_NONE, EXIT_BLOCKED,
-    EXIT_COLD, EXIT_FAILED, EXIT_OFFLINE, EXIT_OK, EXIT_REFUSED, HELD_IGNORED_OPERATOR,
+    ASK_CHECK_NO_ANSWER, CLOSED_BY_CAP, CLOSED_BY_IDLE, CLOSED_BY_NONE, HELD_IGNORED_OPERATOR,
     HELD_NOTE, HELD_NOTE_SESSION_ONLY, NO_REPLY_REFUSED, NOT_BOUND_NOTE, ONCE_ASK,
     ONCE_NOT_OPEN, ONE_LEFT_SENT, OPERATOR, POSTURE_REQUIRED, THREAD_NOTE_MISSING,
-    TIER_EPHEMERAL, TIER_STANDING, VERB_PROTOCOL_MISMATCH, WOULD_SEND, Context, SendPlan,
-    VerbProtocolMismatch, _ago, _bodies, _claim_sender, _cure_flags, _hold_text,
-    _nudge_daemon, _open_asks, _refusal_reason, _refused_tag, _reply_checks,
+    TIER_EPHEMERAL, TIER_STANDING, WOULD_SEND, Context, SendPlan,
+    _ago, _bodies, _claim_sender, _cure_flags, _hold_text,
+    _open_asks, _refusal_reason, _refused_tag, _reply_checks,
     _reply_targets, _say_notes, _say_would_send, _send, _send_checks, _send_resolved,
     _tag_matches, open_for, send_only_refusal)
 
@@ -170,6 +177,13 @@ PROG = "moxi comms"
 
 # --------------------------------------------------------------------------- verbs
 
+def _offline(e: DaemonOffline) -> int:
+    """A verb's exit when it could not ask the daemon: `TEMPFAIL` for a daemon that
+    didn't answer, and `ERROR` for one whose wire this comms doesn't speak, which trying
+    again won't cure until one side is restarted or updated."""
+    return moxi_exit.ERROR if isinstance(e, VersionMismatch) else moxi_exit.TEMPFAIL
+
+
 def cmd_send(args, ctx: Context) -> int:
     """`moxi comms send`: the library's send, rendered. It decides nothing of its own."""
     tags = [t.strip() for t in args.to.split(",") if t.strip()]
@@ -179,6 +193,19 @@ def cmd_send(args, ctx: Context) -> int:
 def cmd_reply(args, ctx: Context) -> int:
     """`moxi comms reply`: the library's reply, rendered."""
     return _render(ctx, sending.run(ctx, args))
+
+
+def cmd_delete(args, ctx: Context) -> int:
+    """`moxi comms delete`: withdraw one of your messages from every recipient that
+    hasn't had it yet. One line per recipient; exit `OK` when it was withdrawn from
+    anyone, `REFUSED` when from no one, `TEMPFAIL` with the daemon down."""
+    result = sending.delete(ctx, args.message_id)
+    if getattr(args, "json", False):
+        ctx.say(json.dumps(result.to_dict(), sort_keys=True))
+        return result.exit_code
+    for line in result.lines():
+        ctx.say(line)
+    return result.exit_code
 
 
 def _render(ctx: Context, result: sending.SendResult) -> int:
@@ -193,13 +220,13 @@ def cmd_agents(args, ctx: Context) -> int:
         client = ctx.daemon()
     except DaemonOffline as e:
         ctx.say(f"{e}\nNothing is addressable while the daemon is down.")
-        return EXIT_OFFLINE
+        return _offline(e)
     try:
-        info = client.query("agents")
+        info = client.call("agents")
     finally:
         client.close()
     ctx.say(render_agents(info, seats=getattr(args, "seats", False), now=ctx.clock()))
-    return EXIT_OK
+    return moxi_exit.OK
 
 
 def cmd_history(args, ctx: Context) -> int:
@@ -212,20 +239,20 @@ def cmd_history(args, ctx: Context) -> int:
         try:
             client = ctx.daemon()
             try:
-                window = client.query("binding_window", name=identity)["window"]
+                window = client.call("binding_window", {"name": identity})["window"]
             finally:
                 client.close()
         except (DaemonOffline, DaemonError):
             ctx.say("comms offline: agent-N history is time-scoped to its binding and "
                     "the daemon holds that window. Showing nothing rather than guessing.")
-            return EXIT_OFFLINE
+            return moxi_exit.TEMPFAIL
         if window is None:
             ctx.say(f"{identity}: no binding this daemon has seen. agent-N names are "
                     "never reused, so there is no history to show.")
-            return EXIT_OK
+            return moxi_exit.OK
     with ctx.db() as db:
         room = directory.room_by_name(db, NAMES)
-        msgs = ctx.gateway.history(room["channel_id"], limit=args.limit)
+        msgs = ctx.record.history(room["room_id"], limit=args.limit)
         rows = []
         # The effective audience of every message IN THIS PAGE, oldest first (the seam's
         # `history` is ascending), so a hand-typed reply can show the audience it
@@ -238,13 +265,14 @@ def cmd_history(args, ctx: Context) -> int:
                 continue
             effective[m.id] = ml.audience or (effective.get(ml.reply_to)
                                               if ml.reply_to else None)
-            author = attribution.from_record(db, m, record=ctx.gateway)
+            author = attribution.from_record(db, m)
             if window is not None and not _in_window(m, window):
                 continue
             addressed = any(_tag_matches(t, identity) for t in ml.recipients)
             if author.qualified != identity and not addressed:
                 continue
             rows.append((m, ml, author, "from" if author.qualified == identity else "to"))
+        dropped = _history_dropped(db, [m.id for m, *_ in rows])
     if not rows:
         ctx.say(f"no {NAMES} history for {identity}.")
     for m, ml, author, direction in rows:
@@ -258,13 +286,14 @@ def cmd_history(args, ctx: Context) -> int:
                 f"  -> {', '.join(ml.recipients)}"
                 + (f" re:{ml.reply_to}" if ml.reply_to else "")
                 + _history_audience(ml, effective)
-                + _history_marks(ml))
+                + _history_marks(ml)
+                + _history_gone(m, dropped.get(str(m.id), {})))
         for line in ml.text.splitlines():
             ctx.say(f"      {line}")
     if window is not None:
         ctx.say(f"(time-scoped to the {identity} binding: {window[0]} .. "
                 f"{window[1] if window[1] is not None else 'now'})")
-    return EXIT_OK
+    return moxi_exit.OK
 
 
 def _history_marks(ml) -> str:
@@ -275,6 +304,32 @@ def _history_marks(ml) -> str:
         bits.append(machine_line.OPEN_TOKEN)
     elif ml.posture != machine_line.POSTURE_OPEN:
         bits.append(machine_line.POSTURE_TOKENS[ml.posture])
+    return "".join(f" {bit}" for bit in bits)
+
+
+def _history_dropped(db, ids) -> dict:
+    """Which of the page's messages left a recipient's queue undelivered, and why: the
+    store's `dropped` rows. An older store without them reads as none."""
+    try:
+        return books.dropped_by_message(db, ids)
+    except sqlite3.Error:
+        return {}
+
+
+def _history_gone(m, dropped: dict) -> str:
+    """`[withdrawn]` for a message its author deleted (the record keeps it, marked),
+    `[expired for <names>]` for the recipients it expired before reaching, and
+    `[dropped for <names>: reserved]` for those it waited for until a module reserved
+    their name."""
+    bits = []
+    if getattr(m, "withdrawn_at", None) or books.WITHDRAWN in dropped.values():
+        bits.append("[withdrawn]")
+    expired = [name for name, why in dropped.items() if why == books.EXPIRED]
+    if expired:
+        bits.append(f"[expired for {', '.join(expired)}]")
+    reserved = [name for name, why in dropped.items() if why == books.RESERVED]
+    if reserved:
+        bits.append(f"[dropped for {', '.join(reserved)}: reserved]")
     return "".join(f" {bit}" for bit in bits)
 
 
@@ -291,7 +346,7 @@ def _history_audience(ml, effective: dict) -> str:
 def cmd_help(args, ctx: Context) -> int:
     """The vocabulary lookup. Reads `glossary.TERMS` and nothing else.
 
-    Note what this function does NOT touch: `ctx.daemon()`, `ctx.gateway`, `ctx.db()`.
+    Note what this function does NOT touch: `ctx.daemon()`, `ctx.record`, `ctx.db()`.
     That is the whole point -- an agent that met `(unverified)` in a frame needs the
     word explained, and whether the daemon is up has no bearing on what the word means.
     Every other verb has a reason to be offline-fragile; this one must never acquire
@@ -301,14 +356,15 @@ def cmd_help(args, ctx: Context) -> int:
     term = getattr(args, "term", None)
     if term is None:
         ctx.say(glossary.render_terms())
-        return EXIT_OK
+        return moxi_exit.OK
     entry = glossary.lookup(term)
     if entry is None:
-        # EXIT_REFUSED, not a failure code: the verb worked, the word did not exist.
+        # USAGE, not a failure code: the verb worked, the word it was given does not
+        # exist.
         ctx.say(glossary.render_unknown(term))
-        return EXIT_REFUSED
+        return moxi_exit.USAGE
     ctx.say(glossary.render_entry(entry))
-    return EXIT_OK
+    return moxi_exit.OK
 
 
 def cmd_whois(args, ctx: Context) -> int:
@@ -317,19 +373,19 @@ def cmd_whois(args, ctx: Context) -> int:
     Same posture as `cmd_help`, and for a sharper reason: an agent runs this at the
     moment it is about to message someone, which is also the moment the context is worth
     spending -- and whether the daemon is up has no bearing on who someone is. So this
-    function touches `ctx.daemon()`, `ctx.gateway` and `ctx.db()` exactly as much as
+    function touches `ctx.daemon()`, `ctx.record` and `ctx.db()` exactly as much as
     `cmd_help` does, which is not at all, and `EXIT_OFFLINE` is unreachable from here.
 
-    Absence answers EXIT_OK, deliberately diverging from `help`'s exit-2 miss: a glossary
+    Absence answers moxi_exit.OK, deliberately diverging from `help`'s exit-2 miss: a glossary
     miss is a typo against a closed table, while a missing card is the DEFAULT
     state of the world for most identities and a permanent one for parked holders.
-    EXIT_REFUSED is kept for a request comms will not answer at all (a malformed name, an
-    ephemeral); EXIT_FAILED for a card that is there and cannot be read.
+    moxi_exit.REFUSED is kept for a request comms will not answer at all (a malformed name, an
+    ephemeral); moxi_exit.ERROR for a card that is there and cannot be read.
     """
     result = cards.answer(args.name, claimhold.claim_overlay(ctx.env))
     ctx.say(result.text)
-    return {cards.OK: EXIT_OK, cards.MISS: EXIT_OK,
-            cards.REFUSED: EXIT_REFUSED, cards.UNREADABLE: EXIT_FAILED}[result.status]
+    return {cards.OK: moxi_exit.OK, cards.MISS: moxi_exit.OK,
+            cards.REFUSED: moxi_exit.REFUSED, cards.UNREADABLE: moxi_exit.ERROR}[result.status]
 
 
 def cmd_explain(args, ctx: Context) -> int:
@@ -342,12 +398,15 @@ def cmd_explain(args, ctx: Context) -> int:
 
     A READING verb. It posts nothing, advances nothing, and records nothing: asking does
     not change a single fact it reports, and comms keeps no receipts ledger for it to
-    write to. What it does touch, and `help` and `whois` do not, is the daemon and one
-    cursor file. It reaches no credential, no network and no provisioner secret.
+    write to. What it does touch, and `help` and `whois` do not, is the daemon, and with
+    the daemon down comms' store, read-only. It reaches no credential, no network and no
+    provisioner secret.
 
     With the daemon down it still prints the cursor, which is the one durable fact,
     and says plainly that the rest is unknowable rather than showing a blank where a
-    binding would be.
+    binding would be. Asked about one message, it also reads from the store whether
+    that message was dropped for this name, withdrawn, expired or reserved, which is
+    durable too.
     """
     identity = args.identity
     try:
@@ -356,27 +415,38 @@ def cmd_explain(args, ctx: Context) -> int:
         ctx.say(str(e))
         ctx.say("\n".join(_wrap(
             "The binding, the adapter kind and the last delivery are daemon memory, so "
-            "with the daemon down there is nothing to read them out of. The cursor is a "
-            "file and survives, so here is that much.", 76)))
+            "with the daemon down there is nothing to read them out of. The cursor is in "
+            "comms' store and survives, so here is that much.", 76)))
         ctx.say("")
-        ctx.say(_render_cursor(cursors.explain(identity_of(identity))))
-        return EXIT_OFFLINE
+        qualified = identity_of(identity)
+        if args.message_id is not None:
+            dropped = books.read_dropped(qualified, args.message_id)
+            if dropped is not None:
+                from .daemon import CASE_REASONS
+
+                ctx.say(f"{qualified}   {dropped}   message {args.message_id}")
+                ctx.say("")
+                ctx.say("\n".join(_wrap(CASE_REASONS[dropped], 74, "  ")))
+                ctx.say("")
+        ctx.say(_render_cursor(books.explain_cursor(books.read_cursor(qualified))))
+        return _offline(e)
     try:
         try:
-            qualified = client.query("resolve", name=identity)["qualified"]
+            qualified = client.call("resolve", {"name": identity})["qualified"]
         except DaemonError as e:
             # The daemon refuses a retired identity (an agent-N whose binding ended, or
             # an `x@S` retired in the directory) by name, and that refusal is already the
             # whole answer to "why did my message not land". Print it as it came.
             ctx.say(_refused_tag(identity, e))
-            return EXIT_REFUSED
-        info = client.query("explain", identity=qualified, message_id=args.message_id)
+            return moxi_exit.REFUSED
+        info = client.call("explain", {"identity": qualified,
+                                       "message_id": args.message_id})
     finally:
         client.close()
     ctx.say(_render_explain(info))
-    for line in _launcher_status(qualified, ctx.env):
+    for line in _wrapper_status(qualified, ctx.env):
         ctx.say(line)
-    return EXIT_OK
+    return moxi_exit.OK
 
 
 def cmd_owner(args, ctx: Context) -> int:
@@ -388,12 +458,13 @@ def cmd_owner(args, ctx: Context) -> int:
     It posts nothing, writes nothing, reaches no credential, and changes no hold, pend,
     delivery or ask.
 
-    Exit 0 is an answer, with or without an owner: a session no live binding holds is
+    Exit `OK` is an answer, with or without an owner: a session no live binding holds is
     an answer (`owner` null), not a failure. Every other exit is a read that failed:
-    2 an empty session id, refused before the daemon is asked; 4 the daemon is down or
-    closed the connection, or speaks another verb protocol; 5 the daemon timed out or
-    answered an error. With `--json` each of these prints one JSON
-    object on stdout, `ok` true with the answer or false with `error` and `detail`.
+    `USAGE` an empty session id, refused before the daemon is asked; `TEMPFAIL` the
+    daemon is down or closed the connection; `ERROR` the daemon speaks a comms wire
+    version this comms doesn't, timed out, or answered an error. With `--json` each of
+    these prints one JSON object on stdout, `ok` true with the answer or false with
+    `error` and `detail`.
     """
     sid = args.session_id.strip()
 
@@ -406,19 +477,19 @@ def cmd_owner(args, ctx: Context) -> int:
         return code
 
     if not sid:
-        return fail(EXIT_REFUSED, "refused", "a session id is required")
+        return fail(moxi_exit.USAGE, "refused", "a session id is required")
     try:
         client = ctx.daemon()
     except DaemonOffline as e:
-        return fail(EXIT_OFFLINE, "offline", str(e))
+        return fail(_offline(e), "offline", str(e))
     try:
-        answer = client.query("owner", session_id=sid)
+        answer = client.call("owner", {"session_id": sid})
     except DaemonOffline as e:
-        return fail(EXIT_OFFLINE, "offline", str(e))
+        return fail(moxi_exit.TEMPFAIL, "offline", str(e))
     except DaemonTimeout as e:
-        return fail(EXIT_FAILED, "timeout", str(e))
+        return fail(moxi_exit.ERROR, "timeout", str(e))
     except DaemonError as e:
-        return fail(EXIT_FAILED, "failed", str(e))
+        return fail(moxi_exit.ERROR, "failed", str(e))
     finally:
         client.close()
     out = {"ok": True, "session_id": answer.get("session_id", sid),
@@ -431,17 +502,17 @@ def cmd_owner(args, ctx: Context) -> int:
     else:
         waits = ", ".join(out["awaiting"]) or "nobody"
         ctx.say(f"{sid}: owned by {out['owner']} ({out['adapter']}); awaiting {waits}.")
-    return EXIT_OK
+    return moxi_exit.OK
 
 
-#: How many of a launcher's newest status lines `moxi comms explain` prints.
-LAUNCHER_STATUS_SHOWN = 5
+#: How many of a wrapper's newest status lines `moxi comms explain` prints.
+WRAPPER_STATUS_SHOWN = 5
 
 
-def _launcher_status(qualified: str, env) -> list:
-    """The newest lines of an `opencode` launcher's status line for this name: what it
+def _wrapper_status(qualified: str, env) -> list:
+    """The newest lines of an `opencode` wrapper's status line for this name: what it
     said while its window covered its own terminal. Read from the session file the
-    launcher writes; nothing when there is none."""
+    wrapper writes; nothing when there is none."""
     from .adapters import opencode, opencode_roster
     from .config import ConfigError
 
@@ -452,7 +523,7 @@ def _launcher_status(qualified: str, env) -> list:
             path = agent.session_file
     except ConfigError:
         pass
-    lines = opencode.status_lines(path)[-LAUNCHER_STATUS_SHOWN:]
+    lines = opencode.status_lines(path)[-WRAPPER_STATUS_SHOWN:]
     if not lines:
         return []
     return ["", "moxi-comms-opencode status (newest last):"] + [
@@ -510,7 +581,7 @@ def cmd_cache(args, ctx: Context) -> int:
     caller = _cache_caller(ctx)
     if caller is None:
         ctx.say(_cache_refused(ctx))
-        return EXIT_REFUSED
+        return moxi_exit.REFUSED
     try:
         client = ctx.daemon()
     except DaemonOffline as e:
@@ -518,25 +589,25 @@ def cmd_cache(args, ctx: Context) -> int:
                 "down, only a raw session id can be read.")
         ids = [a for a in args.targets if cache.SESSION_ID_RE.match(a)]
         if not ids:
-            return EXIT_OFFLINE
+            return _offline(e)
         for i in ids:
             ctx.say(cache.spoken_line(cache.kind_of(cache.target_for_session_id(i))))
-        return EXIT_OFFLINE
+        return _offline(e)
     targets = []
-    refused = False         # a name resolution refused (retired): exit 2
+    refused = False         # a name resolution refused (retired): exit 3
     try:
         wanted = list(args.targets)
         if not wanted:
-            wanted = [b["qualified"] for b in client.query("agents").get("bindings", [])]
+            wanted = [b["qualified"] for b in client.call("agents").get("bindings", [])]
             if not wanted:
                 ctx.say("no live bindings; there is no agent to read.")
-                return EXIT_OK
+                return moxi_exit.OK
         for arg in wanted:
             if cache.SESSION_ID_RE.match(arg):
                 targets.append(cache.target_for_session_id(arg))
                 continue
             try:
-                qualified = client.query("resolve", name=arg)["qualified"]
+                qualified = client.call("resolve", {"name": arg})["qualified"]
             except DaemonError as e:
                 targets.append(cache.target_for_name(arg, error=str(e)))
                 refused = True
@@ -546,7 +617,7 @@ def cmd_cache(args, ctx: Context) -> int:
         client.close()
     for target in targets:
         ctx.say(cache.spoken_line(cache.kind_of(target)))
-    return EXIT_REFUSED if refused else EXIT_OK
+    return moxi_exit.REFUSED if refused else moxi_exit.OK
 
 
 
@@ -592,7 +663,7 @@ def cmd_doctor(args, ctx: Context) -> int:
     """What this box's comms is and where it lives. Read-only."""
     import shutil
 
-    from . import gateway as gw, secrets
+    from . import record as gw, secrets
     from .paths import LAYOUT, daemon_socket
 
     def row(label: str, value: str) -> None:
@@ -604,7 +675,7 @@ def cmd_doctor(args, ctx: Context) -> int:
     for name in DOCTOR_DIRS:
         row(f"  {name.upper()}", str(getattr(LAYOUT, f"{name}_dir")()))
 
-    configured = bool(ctx.env.get("MOXI_COMMS_GATEWAY"))
+    configured = bool(ctx.env.get("MOXI_COMMS_BACKEND"))
     try:
         cfg = config.load(env=ctx.env)
         configured = configured or cfg.source != "defaults"
@@ -612,11 +683,11 @@ def cmd_doctor(args, ctx: Context) -> int:
             else f"none ({config.config_path(ctx.env)} does not exist)")
         choice = gw.backend_choice(None, env=ctx.env)
         row("backend", f"{choice.name} ({choice.describe()})")
-        row("secrets", ", ".join(cfg.secrets.chain)
-            + ("" if tuple(cfg.secrets.chain) != tuple(secrets.default_chain())
+        row("credentials", ", ".join(cfg.credentials.chain)
+            + ("" if tuple(cfg.credentials.chain) != tuple(secrets.default_chain())
                else " (the default)"))
         required = cfg.cache.required
-    except (config.ConfigError, GatewayError) as e:
+    except (config.ConfigError, RecordError) as e:
         row("config", f"ERROR: {e}")
         required = False
 
@@ -635,11 +706,8 @@ def cmd_doctor(args, ctx: Context) -> int:
 
     socket_path = ctx.socket_path or daemon_socket()
     try:
-        client = DaemonClient(socket_path, timeout=2.0).connect()
-        try:
-            client.request("ping")
-        finally:
-            client.close()
+        # The hello is the whole question: the daemon answers, and speaks this wire.
+        DaemonClient(socket_path, timeout=2.0).connect().close()
         daemon_up, detail = True, f"answers at {socket_path}"
     except (DaemonOffline, DaemonError, OSError) as e:
         daemon_up, detail = False, f"not answering at {socket_path} ({e})"
@@ -647,13 +715,84 @@ def cmd_doctor(args, ctx: Context) -> int:
     if daemon_up:
         for line in _waiting_rows(socket_path):
             row("waiting", line)
-    # Can comms reach a session? turns answers: its config, the listeners registered with
-    # it (comms' among them), the live endpoints, and its Claude plugins.
-    for found in _turns_rows():
-        row("turns", found)
+    for line in _store_rows(ctx.env):
+        row("store", line)
+    # turns' own rows (its config, the listeners registered with it, the live endpoints,
+    # its Claude plugins) are turns' to declare; `moxi doctor` runs them. comms keeps the
+    # bound sessions that have no endpoint, above.
     if configured and not daemon_up:
-        return EXIT_OFFLINE
-    return EXIT_OK
+        return moxi_exit.TEMPFAIL
+    return moxi_exit.OK
+
+
+def cmd_migrate(args, ctx: Context) -> int:
+    """Move comms 0.2's files into comms.db now, through the store's one opener, or with
+    `--dry-run` say what that would do and write nothing."""
+    from moxi import exit as moxi_exit
+    from moxi.files import LockTimeout
+    from moxi.store import StoreError
+
+    from .store import StoreRefused, open_write, upgrade_0_2, zero_two_files
+
+    try:
+        if args.dry_run:
+            lines = upgrade_0_2.dry_run(env=ctx.env)
+        elif not zero_two_files(ctx.env):
+            lines = upgrade_0_2.dry_run(env=ctx.env)
+        else:
+            lines = []
+            open_write(env=ctx.env, report=lines.extend).close()
+    except StoreRefused as e:
+        ctx.say(f"refused: {e}")
+        return e.exit_code
+    except LockTimeout as e:
+        ctx.say(f"another comms process holds the store's lock ({e}); nothing was "
+                "moved. Try again in a moment")
+        return moxi_exit.TEMPFAIL
+    except StoreError as e:
+        ctx.say(f"refused: {e}")
+        return getattr(e, "exit_code", moxi_exit.ERROR)
+    for line in lines:
+        ctx.say(line)
+    return moxi_exit.OK
+
+
+def cmd_reserved(args, ctx: Context) -> int:
+    """`moxi comms reserved renew NAME`: a fresh token for a reserved name, minted into
+    the first writable step of this process's credential chain, its hash committed. The
+    one repair for a token a context can't read; nothing else ever replaces one."""
+    from moxi.files import LockTimeout
+    from moxi.store import StoreError
+
+    from . import reserved, secrets
+
+    try:
+        result = reserved.renew(args.name, env=ctx.env)
+    except KeyError:
+        ctx.say(f"{args.name} isn't reserved for a module; nothing was changed")
+        return moxi_exit.REFUSED
+    except LockTimeout as e:
+        ctx.say(f"another comms process holds the reserved names' lock ({e}); nothing "
+                "was changed. Try again in a moment")
+        return moxi_exit.TEMPFAIL
+    except (StoreError, secrets.SecretError, config.ConfigError) as e:
+        ctx.say(f"refused: {e}")
+        return getattr(e, "exit_code", moxi_exit.ERROR)
+    for line in result.lines:
+        ctx.say(line)
+    return moxi_exit.OK if not result.failed else moxi_exit.ERROR
+
+
+def _store_rows(env) -> list[str]:
+    """The store's doctor rows: the move of comms 0.2's files and what it left."""
+    from .store import upgrade_0_2
+
+    try:
+        found = upgrade_0_2.doctor_rows(env)
+    except Exception as e:                                     # noqa: BLE001
+        return [f"NOT OK  could not be checked: {type(e).__name__}: {e}"]
+    return [f"{'ok' if r.state == 'ok' else 'NOT OK'}  {r.detail}"
+            + (f" (fix: {r.fix})" if r.fix else "") for r in found]
 
 
 def _waiting_rows(socket_path) -> list[str]:
@@ -663,7 +802,7 @@ def _waiting_rows(socket_path) -> list[str]:
     try:
         client = DaemonClient(socket_path, timeout=2.0).connect()
         try:
-            bindings = client.query("agents").get("bindings") or []
+            bindings = client.call("agents").get("bindings") or []
         finally:
             client.close()
     except (DaemonOffline, DaemonError, OSError) as e:
@@ -681,18 +820,6 @@ def _waiting_rows(socket_path) -> list[str]:
     return lines or ["none (every bound session that reports one has its endpoint)"]
 
 
-def _turns_rows() -> list[str]:
-    """turns' own rows (`moxi_turns.check()`), each `ok` or `NOT OK`, name, detail."""
-    try:
-        import moxi_turns
-        found = moxi_turns.check()
-    except Exception as e:                                     # noqa: BLE001
-        return [f"NOT OK  turns could not be checked: {type(e).__name__}: {e}"]
-    return [f"{'ok' if r.ok else 'NOT OK'}  {r.name}: {r.detail}" for r in found]
-
-
-
-
 def _field(label: str, first: str, *rest: str) -> list[str]:
     """One labelled field, continuation lines aligned under the first."""
     pad = " " * 17
@@ -707,20 +834,13 @@ def _wrap(text: str, width: int = 60, indent: str = "") -> list[str]:
 def _render_cursor(cursor: dict) -> str:
     """The cursor block on its own, so the offline path can print it alone."""
     lines = []
-    where = f"backend {cursor['backend']}" if cursor["backend"] else "no backend resolved"
     if cursor["cursor"] is None:
-        lines += _field("cursor", f"none on this box ({where})", cursor["read_path"])
+        lines += _field("cursor", "none yet")
     else:
-        written = cursor["updated_at"] or "no timestamp in the file"
-        lines += _field("cursor", f"{cursor['cursor']}, written {written}",
-                        f"{where}, {cursor['read_path']}")
-    if cursor["path"] != cursor["read_path"]:
-        lines += _field("", f"the next advance writes {cursor['path']}")
+        written = cursor["updated_at"] or "no time kept"
+        lines += _field("cursor", f"{cursor['cursor']}, moved {written}")
     if cursor["reason"]:
         lines += _field("reason", cursor["reason"], *_wrap(cursor["sentence"]))
-    if cursor["backend_reason"]:
-        lines += _field("also", cursor["backend_reason"],
-                        *_wrap(cursor["backend_sentence"]))
     return "\n".join(lines)
 
 
@@ -742,7 +862,7 @@ def _render_explain(info: dict) -> str:
     if info["case"]:
         # the classifier's four cases, or the waiting one, whose sentence is the named reason
         # the cursor has not reached it
-        reason = CASE_REASONS.get(info["case"]) or cursors.REASONS.get(info["case"], "")
+        reason = CASE_REASONS.get(info["case"]) or books.REASONS.get(info["case"], "")
         lines += _wrap(reason, 74, "  ") + [""]
     if info["case_error"]:
         lines += _wrap(f"comms could not classify this message: "
@@ -787,16 +907,6 @@ def _render_explain(info: dict) -> str:
                          f"{', '.join(waiting[:5])}")
     lines += _render_cursor(info["cursor"]).splitlines()
 
-    # Only where a write could plausibly have been the thing that failed. In the handled
-    # case the cursor moved, so nothing declined to move it and this would be noise.
-    if d is not None and info["cursor"]["reason"] != cursors.ALREADY_PAST:
-        lines += ["", "  Two more reasons never reach this command. They happen inside "
-                      "the session",
-                  "  that writes the cursor and leave nothing behind to read. Grep that "
-                  "session's",
-                  "  log for them by name:"]
-        lines += [f"    {name}" for name in cursors.WRITE_SIDE_REASONS]
-
     if info["digest"]:
         lines += ["", "  the text this identity was shown, verbatim:"]
         lines += _digest_lines(info["digest"])
@@ -836,6 +946,13 @@ CAP_HELP = ("on an open thread you opened: close it after N replies. On the send
 NO_CAP_HELP = ("on an open thread you opened: no reply limit (it still closes after an "
                "hour with no message). On the send, or on any reply of yours in the thread")
 
+INTERRUPT_HELP = ("go into the recipient's running turn where its harness can take it "
+                  "there, instead of waiting for the turn to end. A recipient whose cache "
+                  "is cold still gets it at its next release point. Not with --held")
+EXPIRES_HELP = ("drop the message undelivered if it still waits after this long: a whole "
+                "number with s, m, h or d (30m, 6h, 3d), or never. The default is the "
+                "config's [delivery] expiry (24h). The sender is not told")
+
 CHECK_HELP = ("run every check this send makes before posting and then stop: posts, nudges "
               "and records nothing. Prints \"would send N message(s) to NAMES\", any "
               "held: lines and every NOTE the post would print, exit 0; or the send's own "
@@ -843,18 +960,22 @@ CHECK_HELP = ("run every check this send makes before posting and then stop: pos
 
 def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog=prog, description="agent-to-agent comms")
-    ap.add_argument("--gateway", choices=("mock",),
+    ap.add_argument("--backend", choices=("mock",),
                     help="which backend to talk to: mock (default: "
-                         "MOXI_COMMS_GATEWAY, then the config file, then local)")
+                         "MOXI_COMMS_BACKEND, then the config file, then local)")
     sub = ap.add_subparsers(dest="verb", required=True)
 
-    # `claude` is the launcher (`adapters/session.py`), with a parser of its own; `main`
-    # hands it every argument after the verb, `--` and what follows included. Listed here
-    # so `--help` names it.
+    # `claude` and `codex` are the wrappers (`adapters/session.py`,
+    # `adapters/codex_wrapper.py`), each with a parser of its own; `main` hands it every
+    # argument after the verb. Listed here so `--help` names them.
     sub.add_parser("claude", add_help=False,
                    help="start a Claude Code session with a comms identity "
                         "(`claude --help` for its options). The options of "
-                        "`moxi comms` itself, such as --gateway, do not apply to it")
+                        "`moxi comms` itself, such as --backend, do not apply to it")
+    sub.add_parser("codex", add_help=False,
+                   help="start a Codex session with a comms identity, through turns' "
+                        "Codex host (`codex --help` for its options). The options of "
+                        "`moxi comms` itself, such as --backend, do not apply to it")
 
     s = sub.add_parser("send", help="message an identity by name")
     s.add_argument("to", help="name, or a comma-separated list (one post, one thread)")
@@ -872,6 +993,8 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
                    help="hold the message until the recipient's next turn, or until its "
                         "session starts, is cleared or is compacted; nothing wakes it for "
                         "this message")
+    s.add_argument("--interrupt", action="store_true", help=INTERRUPT_HELP)
+    s.add_argument("--expires", metavar="DURATION", help=EXPIRES_HELP)
     s.add_argument("--posture", choices=machine_line.POSTURES,
                    help="required on a new message: what you want back. none: no reply "
                         "(a reply to it is refused). optional: a reply is welcome but not "
@@ -906,6 +1029,8 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
                    help="hold the message until the recipient's next turn, or until its "
                         "session starts, is cleared or is compacted; nothing wakes it for "
                         "this message")
+    r.add_argument("--interrupt", action="store_true", help=INTERRUPT_HELP)
+    r.add_argument("--expires", metavar="DURATION", help=EXPIRES_HELP)
     r.add_argument("--posture", choices=machine_line.POSTURES,
                    help="leave it out: a reply takes its posture from the message it "
                         "answers. once asks something back; none closes an open thread")
@@ -914,10 +1039,16 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
     r.add_argument("--check", action="store_true", help=CHECK_HELP)
     r.set_defaults(func=cmd_reply, reply_to=None)
 
+    dl = sub.add_parser("delete", help="withdraw a message you sent from every recipient "
+                                       "that hasn't had it yet")
+    dl.add_argument("message_id")
+    dl.add_argument("--json", action="store_true",
+                    help="print the outcome and each recipient's state as one JSON object")
+    dl.set_defaults(func=cmd_delete)
+
     a = sub.add_parser("agents", help="who you can message")
     a.add_argument("--seats", action="store_true",
-                   help="operator view: also show send-only identities and the mail "
-                        "waiting for each name")
+                   help="operator view: also show the mail waiting for each name")
     a.set_defaults(func=cmd_agents)
 
     h = sub.add_parser("history", help="an identity's record, with honest attribution")
@@ -970,6 +1101,20 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
                             "daemon (read-only)")
     d.set_defaults(func=cmd_doctor)
 
+    m = sub.add_parser("migrate",
+                       help="move comms 0.2's files into comms.db now (the daemon's start "
+                            "does it too)")
+    m.add_argument("--dry-run", dest="dry_run", action="store_true",
+                   help="say what would move, and write nothing")
+    m.set_defaults(func=cmd_migrate)
+
+    rs = sub.add_parser("reserved", help="the send-only names modules reserve")
+    rs_sub = rs.add_subparsers(dest="action", required=True)
+    rn = rs_sub.add_parser("renew", help="mint a fresh token for a reserved name into "
+                                         "this process's credential chain")
+    rn.add_argument("name")
+    rs.set_defaults(func=cmd_reserved)
+
     wh = sub.add_parser("whoami", help="what comms identity this session holds")
     wh.set_defaults(func=cmd_whoami)
     v = sub.add_parser("service",
@@ -1008,14 +1153,17 @@ def main(argv=None, ctx: Context | None = None, *, prog: str = PROG) -> int:
     if argv[:1] == ["claude"]:
         from .adapters import session
         return session.main(argv[1:], prog=f"{prog} claude")
+    if argv[:1] == ["codex"]:
+        from .adapters import codex_wrapper
+        return codex_wrapper.main(argv[1:], prog=f"{prog} codex")
     args = build_parser(prog).parse_args(argv)
-    ctx = ctx or Context(backend=getattr(args, "gateway", None))
+    ctx = ctx or Context(backend=getattr(args, "backend", None))
     try:
         return args.func(args, ctx)
     except config.ConfigError as e:
         # A config file that does not load refuses the verb, naming the key and the fix.
         ctx.say(str(e))
-        return EXIT_REFUSED
+        return moxi_exit.REFUSED
 
 
 

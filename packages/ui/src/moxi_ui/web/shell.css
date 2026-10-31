@@ -1,0 +1,106 @@
+/* The shell document's own layout: the bar, the menu and the panel. Components style
+   only their own shadow roots, with the --moxi-* tokens of theme.css. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--moxi-bg);
+  color: var(--moxi-text);
+  font-family: var(--moxi-font-sans);
+  font-size: var(--moxi-font-size);
+  line-height: 1.45;
+}
+
+code { font-family: var(--moxi-font-mono); }
+
+#moxi-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.moxi-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--moxi-gap);
+  padding: 8px 16px;
+  background: var(--moxi-bg-raised);
+  border-bottom: 1px solid var(--moxi-border);
+}
+
+.moxi-brand {
+  color: var(--moxi-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.moxi-menu ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.moxi-menu a {
+  display: block;
+  padding: 4px 10px;
+  border-radius: var(--moxi-radius);
+  color: var(--moxi-text-dim);
+  text-decoration: none;
+}
+
+.moxi-menu a:hover { background: var(--moxi-bg-hover); color: var(--moxi-text); }
+.moxi-menu a[aria-current="page"] { background: var(--moxi-accent-soft); color: var(--moxi-text); }
+
+.moxi-menu-button {
+  display: none;
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid var(--moxi-border-strong);
+  border-radius: var(--moxi-radius);
+  background: var(--moxi-bg);
+  color: var(--moxi-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+a:focus-visible, button:focus-visible {
+  outline: 2px solid var(--moxi-accent);
+  outline-offset: 2px;
+}
+
+.moxi-notice, .moxi-status {
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--moxi-border);
+}
+
+.moxi-notice { background: var(--moxi-error-soft); color: var(--moxi-error); }
+.moxi-status { background: var(--moxi-warn-soft); color: var(--moxi-warn); }
+[hidden] { display: none !important; }
+
+.moxi-panel {
+  flex: 1;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 16px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.moxi-message h1 { margin: 0 0 8px; font-size: 1.25em; }
+.moxi-message p { margin: 0 0 8px; color: var(--moxi-text-dim); }
+
+/* At a phone's width the menu collapses to one button. */
+@media (max-width: 640px) {
+  .moxi-menu-button { display: block; }
+  .moxi-menu { display: none; width: 100%; }
+  .moxi-menu-open .moxi-menu { display: block; }
+  .moxi-menu ul { flex-direction: column; }
+  .moxi-panel { padding: 12px; }
+}

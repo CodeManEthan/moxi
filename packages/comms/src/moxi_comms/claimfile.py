@@ -22,11 +22,11 @@ from __future__ import annotations
 import json
 import os
 import threading
+import socket
 from pathlib import Path
 
 from .membership import DEFAULT_PROC, TREE, ProcView, Root
 from .paths import runtime_root
-from .protocol import PROBE_LIVE, probe
 
 PREFIX, SUFFIX = "comms-claim-", ".json"
 
@@ -37,8 +37,8 @@ STATES = (BOUND, OFFLINE, WAITING, STANDBY)
 HOLDS = (BOUND, OFFLINE)
 
 
-def claim_dir() -> Path:
-    return runtime_root()
+def claim_dir(env=None) -> Path:
+    return runtime_root(env)
 
 
 def file_for(key: str) -> Path:
@@ -95,11 +95,12 @@ def remove(key: str) -> None:
         pass
 
 
-def all_records() -> list:
-    """Every claim file readable in the runtime dir, as (key, record)."""
+def all_records(env=None) -> list:
+    """Every claim file readable in the runtime dir (`env`'s, else this process's), as
+    (key, record)."""
     out = []
     try:
-        entries = sorted(claim_dir().glob(f"{PREFIX}*{SUFFIX}"))
+        entries = sorted(claim_dir(env).glob(f"{PREFIX}*{SUFFIX}"))
     except OSError:
         return out
     for p in entries:
@@ -113,15 +114,26 @@ def roots_of(record: dict) -> list:
     return [r for r in (Root.from_dict(x) for x in record.get("roots") or ()) if r]
 
 
+#: How long `socket_answers` waits for a connect: a blocking connect onto a full
+#: listen backlog would otherwise wait forever.
+PROBE_TIMEOUT = 0.5
+
+
 def socket_answers(record: dict) -> bool:
+    """Whether something listens on the claim record's socket now: a connect and a
+    close, nothing sent. Any failure reads as no."""
     sock = record.get("socket")
     if not sock:
         return False
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(PROBE_TIMEOUT)
     try:
-        verdict, _ = probe(Path(sock))
+        s.connect(str(Path(sock)))
     except Exception:                                           # noqa: BLE001
         return False
-    return verdict == PROBE_LIVE
+    finally:
+        s.close()
+    return True
 
 
 def tree_root_alive(record: dict, proc: ProcView | None = None) -> bool:

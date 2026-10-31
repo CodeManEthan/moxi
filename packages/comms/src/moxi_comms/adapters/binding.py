@@ -26,7 +26,7 @@ def register_and_install(owner, *, client_type, on_close, register, install, led
 
     `client_type` builds the connection (the caller's module's `DaemonClient`, read at
     call time). `on_close` is the connection's close handler. `register(client)` sends
-    the caller's register frame and returns the answer. `accept(answer)`, when given,
+    the caller's `bind` and returns the answer. `accept(answer)`, when given,
     runs before anything is installed and may raise to refuse the answer. Any failure
     from connect to `accept` closes the connection and is raised again.
 
@@ -34,7 +34,7 @@ def register_and_install(owner, *, client_type, on_close, register, install, led
     or when the connection has already closed (DROPPED); the connection is closed and
     the reason returned. Otherwise `install(client, answer)` takes the client (the
     owner's own attribute for it, and whatever else it keeps from the answer), the
-    reply `ledger` takes the first registration's `hwm`, the claim holder is told it is
+    reply `ledger` takes the first registration's `high`, the claim holder is told it is
     bound, and `identity`, `tier` and `offline` are set. Returns the answer.
 
     `bound(answer)`, when given, runs right after the claim holder is told it is bound and
@@ -90,10 +90,10 @@ def register_and_install(owner, *, client_type, on_close, register, install, led
                 owner.replaying = False
             return DROPPED
         install(client, resp)
-        if ledger.hwm is None and resp.get("hwm") is not None:
+        if ledger.hwm is None and resp.get("high") is not None:
             # The first registration's catch-up boundary: a `re:` at or below it was
             # sent before this process could see payments.
-            ledger.hwm = str(resp["hwm"])
+            ledger.hwm = str(resp["high"])
         owner.claims.bound(resp)
         if bound is not None:
             bound(resp)
@@ -110,8 +110,8 @@ def query_owed(socket_path, identity: str, authors: dict, referents: list, *,
     client = client_type(socket_path, timeout=constants.OWED_QUERY_TIMEOUT)
     client.connect()
     try:
-        return client.query("owed", identity=identity, authors=authors,
-                            referents=referents)
+        return client.call("owed", {"identity": identity, "authors": authors,
+                                    "referents": referents})
     finally:
         client.close()
 

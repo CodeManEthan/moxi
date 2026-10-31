@@ -121,7 +121,7 @@ def test_a_person_kind_and_an_adapter_with_no_clock_answer_without_the_module(
     module_not_asked(monkeypatch)
     person = cache.clock_state("person-kind", None, kinds=registry())
     assert (person.kind, person.code) == (cache.NO_CACHE, cache.PERSON)
-    for adapter in ("send-only", "no-such-kind", None):
+    for adapter in ("no-such-kind", None):
         clock = cache.clock_state(adapter, "x", kinds=registry())
         assert (clock.kind, clock.code) == (cache.NO_CACHE, cache.NO_CLOCK)
         assert clock.reason == cache.no_clock(adapter)
@@ -295,11 +295,11 @@ def test_required_and_absent_refuses_the_start(rig, monkeypatch):
     rig.daemon.stop()
     write_config(None, "[cache]\nrequired = true\n")
     cache_absent(monkeypatch)
-    daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     with pytest.raises(RuntimeError, match=r"\[cache\] required = true") as e:
         daemon.start()
     assert cache.INSTALL in str(e.value)
-    assert not daemon.bound and not daemon_socket().exists()
+    assert daemon.host is None and not daemon_socket().exists()
 
 
 def test_required_and_broken_refuses_the_start(rig, monkeypatch):
@@ -307,16 +307,16 @@ def test_required_and_broken_refuses_the_start(rig, monkeypatch):
     write_config(None, "[cache]\nrequired = true\n")
     cache_absent(monkeypatch, "broken")
     with pytest.raises(RuntimeError, match="does not load"):
-        Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+        Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
 
 
 def test_required_and_present_starts(rig):
     cache_api()
     rig.daemon.stop()
     write_config(None, "[cache]\nrequired = true\n")
-    daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+    daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     try:
-        assert daemon.bound
+        assert daemon.host is not None
     finally:
         daemon.stop()
 
@@ -324,9 +324,9 @@ def test_required_and_present_starts(rig):
 def test_not_required_and_absent_starts_without_the_hold(rig, monkeypatch):
     rig.daemon.stop()
     cache_absent(monkeypatch)
-    daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+    daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     try:
-        assert daemon.bound and daemon.cache_store is None
+        assert daemon.host is not None and daemon.cache_store is None
     finally:
         daemon.stop()
 
@@ -370,7 +370,7 @@ def test_a_store_handed_in_is_kept_open_at_stop(rig):
     rig.daemon.stop()
     store = api.open_store(learn=True)
     try:
-        daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False,
+        daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False,
                         cache_store=store).start()
         assert daemon.cache_store is store
         daemon.stop()

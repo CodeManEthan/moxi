@@ -13,7 +13,7 @@ dependencies = ["moxi>=0.1,<0.2"]
 
 [project.optional-dependencies]
 # The first turn, readiness, Codex ids, and the start listeners.
-turns = ["moxi-turns>=0.1,<0.2"]
+turns = ["moxi-turns>=0.2,<0.3"]
 # Identities, scopes, directors, the with: posture and the console name.
 comms = ["moxi-comms>=0.2,<0.3"]
 # Project keys for a launch's place, a directory's key on its row, and a project's agents.

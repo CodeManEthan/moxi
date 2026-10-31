@@ -7,7 +7,8 @@ anywhere else in the body is prose and is never routed on.
 Grammar:
 
     ::to <tag>[, <tag>]* [re:<message_id>] [audience:<tag>] [operator-words] [via-phone]
-         [held | next-turn] [cold-at:<t>|-,...] [cap:<n> | no-cap]
+         [held | next-turn] [cold-at:<t>|-,...] [interrupt] [expires:<t>]
+         [cap:<n> | no-cap]
          [1 reply left | last reply] [speaker]
          [no reply | reply-optional | reply-once | open]
 
@@ -42,6 +43,14 @@ Grammar:
     (posted before 2026-10, or not by the verb). A value count unlike the tag count makes
     the line prose. The daemon reads it only when its own read of a bound recipient is
     ``unknown`` (``cold_at``).
+  * ``[interrupt]`` is the INTERRUPT MARK: the sender asks that the message go into a
+    running turn where the recipient's harness can take it there, rather than wait for
+    the turn's end. It doesn't get past the cache hold: a held recipient gets it at a
+    release point like any other mail. The send verb writes it (``--interrupt``).
+  * ``[expires:<t>]`` is the EXPIRY: a whole-second Unix time after which the message
+    is never handed to a model. A row still waiting then is dropped, and the sender is
+    told nothing. A line without it never expires. The send verb writes it from
+    ``--expires`` or the config's default.
   * ``[cap:<n>]`` (n a whole number, 1 or more) or ``[no-cap]`` is the CAP TOKEN: the
     opener of an open thread sets its reply cap, or lifts it. Read back only from the
     opener's verified messages in a thread whose root carries ``[open]``.
@@ -94,6 +103,11 @@ COLD_AT_PREFIX = "[cold-at:"
 #: live. Never "no reading": that is a line with no token at all.
 COLD_AT_LIVE = "-"
 
+#: The interrupt mark, right after the cold-at.
+INTERRUPT_TOKEN = "[interrupt]"
+#: The expiry token: `[expires:<unix second>]`, after the interrupt mark.
+EXPIRES_PREFIX = "[expires:"
+
 #: The four postures: open, none, optional and once. `POSTURES` is in the order the
 #: start text names them.
 POSTURE_OPEN, POSTURE_NONE, POSTURE_ONCE = "open", "none", "once"
@@ -126,6 +140,8 @@ _LINE_RE = re.compile(
     r"(?:[ \t]+\[via-phone\])?"        # a mark an older comms wrote; read and ignored
     r"(?:[ \t]+(?P<held>\[(?:held|next-turn)\]))?"
     r"(?:[ \t]+\[cold-at:(?P<cold_at>(?:[0-9]+|-)(?:,(?:[0-9]+|-))*)\])?"
+    r"(?:[ \t]+(?P<interrupt>\[interrupt\]))?"
+    r"(?:[ \t]+\[expires:(?P<expires>[0-9]+)\])?"
     r"(?:[ \t]+\[(?:cap:(?P<cap>[1-9][0-9]*)|(?P<no_cap>no-cap))\])?"
     r"(?:[ \t]+\[(?P<thread_mark>1 reply left|last reply)\])?"
     r"(?:[ \t]+\[speaker\])?"          # a mark an older comms wrote; read and ignored
@@ -156,6 +172,9 @@ class MachineLine:
     #: The send's cold-at, one entry per tag: an int (a Unix time) or `COLD_AT_LIVE`;
     #: None when the line carries no token, so no reading.
     cold_at: tuple | None = None
+    interrupt: bool = False      # `[interrupt]`: into a running turn where it can go
+    #: `[expires:<t>]`'s Unix second; None when the line has none (it never expires).
+    expires_at: int | None = None
 
 
 def parse(body: str) -> MachineLine | None:
@@ -184,7 +203,10 @@ def parse(body: str) -> MachineLine | None:
                        open_mark=token == "open",
                        cap=int(cap) if cap else None,
                        no_cap=m.group("no_cap") is not None,
-                       thread_mark=_THREAD_MARK_OF.get(mark), cold_at=cold_at)
+                       thread_mark=_THREAD_MARK_OF.get(mark), cold_at=cold_at,
+                       interrupt=m.group("interrupt") is not None,
+                       expires_at=(int(m.group("expires")) if m.group("expires")
+                                   else None))
 
 
 def normalize_audience(value: str | None) -> str | None:
@@ -210,12 +232,14 @@ def resolve_posture(posture: str | None = None) -> str:
 def format_line(recipients, *, reply_to: str | None = None, audience: str | None = None,
                 next_turn: bool = False, posture: str | None = None,
                 open_mark: bool = False, cap: int | None = None, no_cap: bool = False,
-                thread_mark: str | None = None, cold_at=None) -> str:
+                thread_mark: str | None = None, cold_at=None, interrupt: bool = False,
+                expires_at: int | None = None) -> str:
     """Line zero. Every parameter after `recipients` is keyword-only, and each defaults
     to writing nothing. `open_mark` writes `[open]` in the posture slot, and only beside
     the open posture. `next_turn` writes `[held]` (the keyword keeps its old name: callers
     outside comms pass it so). `cold_at` writes `[cold-at:…]`: one value per recipient, an int or
-    `COLD_AT_LIVE`, and never beside `[held]`."""
+    `COLD_AT_LIVE`, and never beside `[held]`. `interrupt` writes `[interrupt]`;
+    `expires_at`, a whole-second Unix time, writes `[expires:…]`."""
     recipients = list(recipients)
     tags = ", ".join(recipients)
     resolved = resolve_posture(posture)
@@ -226,12 +250,17 @@ def format_line(recipients, *, reply_to: str | None = None, audience: str | None
     if thread_mark is not None and thread_mark not in THREAD_MARKS:
         raise ValueError(f"thread_mark must be one of {', '.join(THREAD_MARKS)}")
     cold = _cold_at_token(cold_at, len(recipients), held=next_turn)
+    if expires_at is not None and (isinstance(expires_at, bool)
+                                   or not isinstance(expires_at, int) or expires_at < 0):
+        raise ValueError(f"an expiry is a whole-second Unix time, got {expires_at!r}")
     token = OPEN_TOKEN if open_mark else POSTURE_TOKENS[resolved]
     return (f"{SIGIL} {tags}"
             + (f" {REPLY_PREFIX}{reply_to}" if reply_to else "")
             + (f" {AUDIENCE_PREFIX}{audience}]" if audience else "")
             + (f" {HELD_TOKEN}" if next_turn else "")
             + (f" {cold}" if cold else "")
+            + (f" {INTERRUPT_TOKEN}" if interrupt else "")
+            + (f" {EXPIRES_PREFIX}{expires_at}]" if expires_at is not None else "")
             + (f" {CAP_PREFIX}{int(cap)}]" if cap is not None else "")
             + (f" {NO_CAP_TOKEN}" if no_cap else "")
             + (f" {THREAD_MARKS[thread_mark]}" if thread_mark else "")
@@ -260,9 +289,11 @@ def _cold_at_token(cold_at, count: int, *, held: bool) -> str:
 def compose(recipients, text: str, *, reply_to: str | None = None,
             audience: str | None = None, next_turn: bool = False,
             posture: str | None = None, open_mark: bool = False, cap: int | None = None,
-            no_cap: bool = False, thread_mark: str | None = None, cold_at=None) -> str:
+            no_cap: bool = False, thread_mark: str | None = None, cold_at=None,
+            interrupt: bool = False, expires_at: int | None = None) -> str:
     """Build a postable body: machine line at position zero, then the human text."""
     line = format_line(recipients, reply_to=reply_to, audience=audience,
                        next_turn=next_turn, posture=posture, open_mark=open_mark, cap=cap,
-                       no_cap=no_cap, thread_mark=thread_mark, cold_at=cold_at)
+                       no_cap=no_cap, thread_mark=thread_mark, cold_at=cold_at,
+                       interrupt=interrupt, expires_at=expires_at)
     return f"{line}\n{text}"

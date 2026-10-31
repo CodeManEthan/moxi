@@ -153,7 +153,7 @@ def test_reply_to_an_old_message_posts_as_to_the_same_one_unmarked(rig, tokens, 
         code, out = rig.cli(["reply", ask.id, "the answer"], **REVIEWER)
         replies[name] = (code, re.sub(r"\d{10,}", "<id>", out))
         if code == 0:
-            reply = machine_line.parse(rig.gateway.history(rig.names_channel)[-1].content)
+            reply = machine_line.parse(rig.record.history(rig.names_channel)[-1].content)
             assert reply.reply_to == ask.id
             replies[name] += (reply.posture, reply.audience, reply.recipients)
     assert replies["marked"] == replies["plain"]
@@ -168,7 +168,7 @@ def test_a_boot_rescan_routes_a_pending_old_message(rig, tokens):
     rig.daemon.stop()
     old = rig.post_as(P, old_line(R, tokens, audience="operator", posture="reply-once")
                    + "\nposted while the daemon was down", raw=True)
-    rig.daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+    rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     assert old.id in queued(rig.daemon, R), "the rescan queues it"
     shim = rig.shim(**REVIEWER)
     (payload,) = wait_for_queue(shim, 1)

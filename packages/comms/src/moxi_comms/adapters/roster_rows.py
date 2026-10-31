@@ -1,6 +1,6 @@
 """What the codex and opencode rosters share: the roster itself, reading it from comms'
 config file, the `[*.defaults]` refusals, the head of every row, its `directors`, and
-the identity a row stamps into what its launcher spawns.
+the identity a row stamps into what its wrapper spawns.
 
 Each harness keeps its own keys, its defaults, its agent dataclass and the words its
 refusals use for what it runs; the checks and their order are here once.
@@ -126,7 +126,7 @@ def parse_directors(where: str, section: dict) -> list:
 
 
 def stamped_env(agent, base=None) -> dict:
-    """A row's identity stamped into its launcher's spawn environment, scrubbed first
+    """A row's identity stamped into its wrapper's spawn environment, scrubbed first
     (`session.stamped_env`)."""
     from .session import stamped_env as stamp     # one implementation of the stamp
 

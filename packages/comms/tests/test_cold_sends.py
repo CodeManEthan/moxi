@@ -26,22 +26,22 @@ import itertools
 import json
 import os
 import re
-import socket
 import tempfile
 import threading
 import time
 
 import pytest
-from conftest import (projects_root, send_ready, send_turn, wait_for_queue, wait_until,
-                      write_config, write_transcript)
+from conftest import (cursor_of, projects_root, put_cursor, raw_connection, record_rows, send_ready, send_turn, settle,
+                      wait_for_queue, wait_until, write_config, write_transcript)
 
-from moxi_comms import cache, cli, constants, cursors, machine_line
+from moxi import exit as moxi_exit
+from moxi_comms.store import books as books_mod
+from moxi_comms import cache, cli, constants, machine_line
 from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.claimhold import ClaimServer
 from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import Daemon, Refusal
 from moxi_comms.paths import daemon_socket
-from moxi_comms.protocol import LineConn
 
 import shim_drive
 
@@ -106,7 +106,7 @@ def reviewer_with_session(rig, session_id=SESS_REVIEWER, **kwargs):
 
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def sent_id(out):
@@ -134,7 +134,7 @@ def reboot():
 
     def _reboot(rig):
         rig.daemon.stop()
-        rig.daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+        rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
         started.append(rig.daemon)
         return rig.daemon
 
@@ -197,8 +197,8 @@ def test_the_shim_starts_from_its_spawn_environment(rig, monkeypatch):
 def test_the_session_query_answers_bound_and_unbound(rig):
     reviewer_with_session(rig)
     with _client() as c:
-        bound = c.query("session", identity=REVIEWER_Q)
-        unbound = c.query("session", identity="nobody@proj-a")
+        bound = c.call("session", {"identity": REVIEWER_Q})
+        unbound = c.call("session", {"identity": "nobody@proj-a"})
     assert bound["bound"] is True and bound["adapter"] == "claude-shim"
     assert bound["session_id"] == SESS_REVIEWER and bound["bound_at"] is not None
     assert bound["bound_for"] >= 0
@@ -221,16 +221,10 @@ class _client:
 def test_a_forged_activity_from_another_connection_changes_nothing(rig):
     reviewer = reviewer_with_session(rig)
     held = next_turn(rig)
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.connect(str(daemon_socket()))
-    conn = LineConn(s)
-    try:
-        conn.send({"op": "activity", "identity": REVIEWER_Q, "session_id": SESS_OTHER,
-                   "kind": "turn", "handled": [held], "unhandled": [], "seq": 1})
-        conn.send({"id": 1, "op": "ping"})
-        assert conn.recv()["ok"] is True
-    finally:
-        conn.close()
+    with raw_connection() as conn:
+        conn.notify("turn_ended", {"identity": REVIEWER_Q, "session_id": SESS_OTHER,
+                                   "handled": [held], "unhandled": [], "seq": 1})
+        settle(conn)
     assert rig.daemon.bindings[REVIEWER_Q].session_id == SESS_REVIEWER
     assert held_of(rig) == {held} and reviewer.queue == [], "a forged turn releases nothing"
 
@@ -355,7 +349,7 @@ def test_a_failed_read_refuses_the_post(rig):
         code, out = send(rig, REVIEWER_Q)
     finally:
         path.chmod(0o600)
-    assert code == cli.EXIT_COLD and posted(rig) == [], out
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == [], out
     lines = out.splitlines()
     assert lines[0].startswith("Nothing was sent: comms could not read reviewer@proj-a's "
                                "cache (the transcript could not be read")
@@ -370,7 +364,7 @@ def test_no_session_id_refuses_the_post_young_or_old(rig):
     rig.shim(**REVIEWER, session_id=None)
     for _ in range(2):
         code, out = send(rig, REVIEWER_Q)
-        assert code == cli.EXIT_COLD and posted(rig) == [], out
+        assert code == moxi_exit.TEMPFAIL and posted(rig) == [], out
         assert out.splitlines()[0] == ("Nothing was sent: comms could not read "
                                        "reviewer@proj-a's cache (no session id reported "
                                        "yet).")
@@ -388,7 +382,7 @@ def test_a_failed_session_query_refuses_the_post(rig, monkeypatch):
 
     monkeypatch.setattr(rig.daemon, "_session_query", refuse)
     code, out = send(rig, REVIEWER_Q)
-    assert code == cli.EXIT_COLD and posted(rig) == []
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == []
     assert out.splitlines()[0] == ("Nothing was sent: comms could not ask the daemon about "
                                    "reviewer@proj-a (the session query failed (unknown "
                                    "query kind 'session')).")
@@ -410,7 +404,7 @@ def test_no_rerun_line_beside_archivist_the_operator_or_codex(rig, bind):
         assert "--held" not in out, other
         assert out.splitlines()[-1] == HELD_LAST, other
     code, out = send(rig, "reviewer@proj-a,coder@proj-a")
-    assert code == cli.EXIT_COLD and "--held" not in out
+    assert code == moxi_exit.TEMPFAIL and "--held" not in out
     lines = out.splitlines()
     assert lines[0].startswith("Nothing was sent: comms could not read coder@proj-a's "
                                "cache (")
@@ -431,7 +425,7 @@ def test_no_sender_is_exempt(rig, bind):
     if rig.backend == "local":
         assert code == 0 and out.splitlines()[-1].startswith(HELD_LAST), out
     else:   # the mock keeps no operator credential: the post fails after the check
-        assert code == cli.EXIT_FAILED and "posting credential" in out, out
+        assert code == moxi_exit.ERROR and "posting credential" in out, out
     bind_archivist(bind, session_id="")
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "from archivist"], name="archivist",
                         env={"MOXI_COMMS_GLOBAL": "1"})
@@ -565,7 +559,7 @@ def test_comms_cache_refuses_any_other_caller_and_reads_nothing(rig, who):
     reviewer_with_session(rig)
     write_transcript(SESS_REVIEWER, 60)
     code, out = cache_cli(rig, "reviewer@proj-a", SESS_OTHER, **who)
-    assert code == 2
+    assert code == 3
     assert out.strip().endswith("nothing was read."), out
 
 
@@ -630,17 +624,17 @@ def test_a_newer_message_goes_alone_and_the_row_waits(rig):
     assert held_of(rig) == {held}
 
 
-def test_a_cursor_past_a_held_id_leaves_its_row(rig):
-    """Rows do not need the cursor: live mail past a queued id moves the
-    cursor past it, and the row stays until a `turn` names it handled."""
+def test_live_mail_acked_above_a_held_id_leaves_its_row_and_the_cursor_below_it(rig):
+    """Live mail above a queued id is acked; the cursor stops below the row, and the
+    row stays until a turn end names it handled."""
     reviewer = rig.shim(**REVIEWER)
     held = next_turn(rig)
     for i in range(3):
         send(rig, REVIEWER_Q, f"plain {i}")
     wait_for_queue(reviewer, 3)
     reviewer.on_turn_boundary(idle=True)     # the idle tick injects the live mail
-    reviewer.on_turn_boundary()              # its Stop: cursor written, then `turn`
-    assert int(cursors.read(REVIEWER_Q)) > int(held)
+    reviewer.on_turn_boundary()              # its Stop: `turn_ended`, the ack
+    assert int(cursor_of(REVIEWER_Q)) == int(held) - 1
     assert held_of(rig) == {held}
     # First digest only: the Stop's warm release (`handled=[]`) may land before its flush.
     assert held not in reviewer.injected[0]
@@ -661,7 +655,7 @@ def test_a_ready_with_no_source_releases_nothing_and_a_clear_releases(rig):
 def test_an_activity_with_no_kind_releases_nothing(rig):
     reviewer = rig.shim(**REVIEWER)
     mid = next_turn(rig)
-    reviewer._client.notify("activity", identity=REVIEWER_Q)      # an older shim's frame
+    reviewer._client.notify("activity", {"identity": REVIEWER_Q})      # an older shim's frame
     time.sleep(0.2)
     assert reviewer.queue == [] and held_of(rig) == {mid}
 
@@ -691,17 +685,16 @@ def test_a_row_already_handed_is_not_handed_again(rig):
 
 
 def test_queued_mail_is_never_bounded_and_the_flagged_row_waits(rig):
-    """Bounded replay is for mail with no row: offline rows past REPLAY_N and
-    older than REPLAY_T all go at the bind's release; the flagged one waits for a real
-    boundary."""
+    """No count or age bounds a name's rows: sixty offline rows, the oldest two days
+    old, all go at the bind's release; the flagged one waits for a real boundary."""
     mid = next_turn(rig)
     rig.age_message(mid, time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                        time.gmtime(rig.clock() - 2 * 86400)))
-    offline = post_many(rig, [REVIEWER_Q], constants.REPLAY_N + 10)
-    assert wait_until(lambda: len(held_of(rig)) == constants.REPLAY_N + 11)
+    offline = post_many(rig, [REVIEWER_Q], 60)
+    assert wait_until(lambda: len(held_of(rig)) == 61)
     reviewer = rig.shim(**REVIEWER)
     wait_until(lambda: not reviewer.replaying)
-    wait_for_queue(reviewer, constants.REPLAY_N + 10)
+    wait_for_queue(reviewer, 60)
     assert queued_ids(reviewer) == [m.id for m in offline]
     assert reviewer.replay_notice is None, "nothing was bounded"
     assert mid not in queued_ids(reviewer)
@@ -728,8 +721,7 @@ def test_a_daemon_restart_rebuilds_held_and_the_reconnect_releases_nothing(rig, 
     assert reviewer.queue == [] and held_of(rig) == {mid}
 
 
-def test_a_reconnect_whose_replay_finds_only_holding_duplicates_releases_nothing(
-        rig, reboot):
+def test_a_reconnect_after_a_restart_gets_its_unflagged_row_once(rig, reboot):
     reviewer = rig.shim(**REVIEWER, autoreconnect=True, backoff=fast_backoff())
     code, out = send(rig, REVIEWER_Q, "queued, not yet shown")
     plain = sent_id(out)
@@ -739,10 +731,10 @@ def test_a_reconnect_whose_replay_finds_only_holding_duplicates_releases_nothing
     wait_until(lambda: REVIEWER_Q in daemon.bindings and not reviewer.offline)
     time.sleep(0.3)
     assert queued_ids(reviewer) == [plain]
-    # The boot rescan found plain to an unbound name: a row, which the reconnect's
-    # `holding` claims, so no release hands it again; it waits for `handled`.
+    # The boot fence made plain's handed row wait; the reconnect held nothing, and its
+    # bind released plain once. The flagged row waits for a real boundary.
     assert held_of(rig) == {held, plain}
-    assert plain in daemon.bindings[REVIEWER_Q].delivered, "claimed from `holding`"
+    assert plain in daemon.bindings[REVIEWER_Q].delivered, "released at the bind"
 
 
 def test_the_boot_read_finds_held_mail_past_the_rescan_limit(rig, reboot):
@@ -787,15 +779,16 @@ def test_the_trim_keeps_held_mail_past_retention(rig):
     rig.age_message(mid, stamp)
     rig.age_message(old.id, stamp)
     rig.daemon.trim_record()
-    assert rig.gateway.get_message(mid) is not None
-    assert rig.gateway.get_message(old.id) is None
+    assert rig.record.get_message(mid) is not None
+    assert rig.record.get_message(old.id) is None
 
 
-def test_the_queue_load_runs_before_the_socket_listens(rig, monkeypatch):
-    """Nothing can register, and so nothing can be handed, until every row is loaded.
-    Live mail posted inside the boot window waits as a row and goes at the
-    bind; the flagged row waits for a real boundary."""
-    from moxi_comms.client import DaemonOffline
+def test_the_queue_load_runs_before_any_method_is_answered(rig, monkeypatch):
+    """Nothing can register, and so nothing can be handed, until every row is loaded:
+    the socket takes a connection and its hello, and its methods wait. Live mail posted
+    inside the boot window waits as a row and goes at the bind; the flagged row waits
+    for a real boundary."""
+    from moxi_comms.client import DaemonTimeout
     held = next_turn(rig)
     rig.daemon.stop()
     entered, go = threading.Event(), threading.Event()
@@ -807,13 +800,17 @@ def test_the_queue_load_runs_before_the_socket_listens(rig, monkeypatch):
         return real(self)
 
     monkeypatch.setattr(Daemon, "_load_queue", gated)
-    daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     boot = threading.Thread(target=daemon.start)
     boot.start()
     try:
         assert entered.wait(5)
-        with pytest.raises(DaemonOffline):
-            DaemonClient(daemon_socket()).connect()      # not listening yet
+        early = DaemonClient(daemon_socket(), timeout=0.5).connect()
+        try:
+            with pytest.raises(DaemonTimeout):
+                early.call("max_id")                     # waits for the queue
+        finally:
+            early.close()
         live = rig.post_as("planner@proj-a", [REVIEWER_Q], "live, inside the boot window")
     finally:
         go.set()
@@ -832,7 +829,7 @@ def test_the_trim_waits_for_the_queue_load(rig, monkeypatch, reboot):
     if rig.backend != "local":
         pytest.skip("only the local record trims")
     mid = next_turn(rig)
-    assert wait_until(lambda: (mid, REVIEWER_Q) in rig.gateway.queue_rows())
+    assert wait_until(lambda: (mid, REVIEWER_Q) in record_rows(rig.record))
     # Stopped before `ancient` is posted: a live daemon would route it to the unbound
     # name and give it a row whenever its pass beat the cursor below.
     rig.daemon.stop()
@@ -840,26 +837,26 @@ def test_the_trim_waits_for_the_queue_load(rig, monkeypatch, reboot):
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(rig.clock() - 200 * 86400))
     rig.age_message(mid, stamp)
     rig.age_message(ancient.id, stamp)
-    cursors.advance("main@proj-b", ancient.id)     # handled: the boot rescan gives no row
-    unloaded = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    put_cursor("main@proj-b", ancient.id)          # handled: the boot rescan gives no row
+    unloaded = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     assert unloaded._queue_loaded is False
     unloaded.trim_record()
-    assert rig.gateway.get_message(mid) is not None
-    assert rig.gateway.get_message(ancient.id) is not None, "skipped, not partial"
+    assert rig.record.get_message(mid) is not None
+    assert rig.record.get_message(ancient.id) is not None, "skipped, not partial"
 
     def broken(self):
         raise RuntimeError("the boot read failed")
 
     with monkeypatch.context() as patched:
-        patched.setattr(rig.gateway, "queue_rows", lambda: broken(None))
+        patched.setattr(books_mod.Books, "rows", lambda *a, **k: broken(None))
         with pytest.raises(RuntimeError):
-            Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+            Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     assert os.environ["CLAUDE_CONFIG_DIR"].startswith(tempfile.gettempdir())
     daemon = reboot(rig)
     assert daemon._queue_loaded is True
     daemon.trim_record()
-    assert rig.gateway.get_message(mid) is not None
-    assert rig.gateway.get_message(ancient.id) is None
+    assert rig.record.get_message(mid) is not None
+    assert rig.record.get_message(ancient.id) is None
 
 
 def test_the_release_order_is_kept_per_name_not_across_names(rig):
@@ -892,7 +889,7 @@ def test_held_to_a_shim_with_no_session_id_is_refused(rig):
     rig.shim(**REVIEWER, session_id=None)      # like a shim built before this comms
     rig.clock.advance(constants.SESSION_ID_GRACE + 1)
     code, out = send(rig, REVIEWER_Q, "later", "--held")
-    assert code == cli.EXIT_COLD and posted(rig) == [], out
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == [], out
     assert out.splitlines()[0] == ("Nothing was sent: comms could not read "
                                    "reviewer@proj-a's cache (no session id reported yet).")
 
@@ -903,8 +900,8 @@ class Pushes:
     def __init__(self):
         self.frames = []
 
-    def __call__(self, frame):
-        self.frames.append(frame)
+    def __call__(self, method, params):
+        self.frames.append({"op": method, **params})
 
     def delivered(self):
         return [f["payload"] for f in self.frames if f.get("op") == "deliver"]
@@ -931,13 +928,13 @@ def test_flagged_mail_waits_at_every_adapters_bind_but_the_operators(
     pushes = Pushes()
     c = DaemonClient(daemon_socket(), on_push=pushes).connect()
     try:
-        c.register(**kw)
+        c.bind(**kw)
         if at_register:
             assert wait_until(lambda: pushes.delivered())
         else:
             time.sleep(0.2)
             assert pushes.delivered() == []
-            c.notify("activity", identity=q, kind="ready", source="startup")
+            c.notify("ready", {"identity": q, "source": "startup"})
             assert wait_until(lambda: pushes.delivered())
         (payload,) = pushes.delivered()
         assert payload["message_id"] == held.id and payload["held"] is True
@@ -956,7 +953,7 @@ def test_comms_agents_and_comms_explain_name_queued_mail(rig):
     rig.clock.advance(2 * 86400 + 3 * HOUR)
     c = DaemonClient(daemon_socket()).connect()
     try:
-        view = c.query("agents")
+        view = c.call("agents")
     finally:
         c.close()
     assert view["pending"] == {} and "held" not in view
@@ -966,10 +963,10 @@ def test_comms_agents_and_comms_explain_name_queued_mail(rig):
     assert f"  {'reviewer@proj-a':<24} 1 message(s), oldest waiting 2d 3h" in out
     assert "pending" not in out
     code, out = rig.cli(["explain", REVIEWER_Q, mid], **PLANNER)
-    assert code == 0 and out.splitlines()[0].startswith(f"{REVIEWER_Q}   {cursors.WAITING}")
-    assert "This message waits in the queue for the name's next release point" in \
+    assert code == 0 and out.splitlines()[0].startswith(f"{REVIEWER_Q}   {books_mod.WAITING}")
+    assert "This message waits in the name's rows for its next release point" in \
         out.replace("\n  ", " ")
-    assert cursors.BEHIND not in out
+    assert books_mod.BEHIND not in out
 
 
 def test_held_is_accepted_for_archivist_and_ignored_for_the_operator(rig, bind):
@@ -1022,7 +1019,7 @@ def test_comms_cache_answers_the_operator_alone_by_default(rig):
     reviewer_with_session(rig)
     write_transcript(SESS_REVIEWER, 60)
     code, out = cache_cli(rig, "reviewer@proj-a", **AS_ARCHIVIST)
-    assert code == 2 and out.strip().endswith("nothing was read."), out
+    assert code == 3 and out.strip().endswith("nothing was read."), out
     code, out = cache_cli(rig, "reviewer@proj-a", **AS_OPERATOR)
     assert code == 0 and out.startswith("reviewer@proj-a: cache warm"), out
 
