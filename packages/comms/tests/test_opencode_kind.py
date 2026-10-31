@@ -13,6 +13,7 @@ from pathlib import Path
 
 from conftest import wait_until
 
+from moxi import exit as moxi_exit
 from moxi_comms import cache, cli, machine_line
 from moxi_comms.daemon import ADAPTER_KINDS
 
@@ -53,7 +54,7 @@ def test_held_is_taken_by_an_opencode_name(rig, bind, monkeypatch):
                          "--held"], **PLANNER)
     assert code == 0, out
     assert cli.HELD_NOTE.format(name="coder@proj-a") in out.splitlines()
-    (msg,) = rig.gateway.history(rig.names_channel)
+    (msg,) = rig.record.history(rig.names_channel)
     assert machine_line.parse(msg.content).held
 
 
@@ -63,7 +64,7 @@ def test_a_cold_opencode_name_is_posted_and_held(rig, bind, monkeypatch):
     code, out = rig.cli(["send", "--posture", "none", "coder@proj-a", "hello"], **PLANNER)
     assert code == 0, out
     assert out.splitlines()[1].startswith("held: coder@proj-a's cache went cold")
-    assert len(rig.gateway.history(rig.names_channel)) == 1
+    assert len(rig.record.history(rig.names_channel)) == 1
 
 
 def test_an_opencode_name_takes_the_daemons_verdict(rig, bind):
@@ -90,18 +91,18 @@ def test_a_send_to_an_opencode_name_with_no_session_id_is_refused(rig, bind):
     bind(**CODER)
     for flags in ([], ["--held"]):
         code, out = rig.cli(["send", "--posture", "none", "coder@proj-a", "hello", *flags], **PLANNER)
-        assert code == cli.EXIT_COLD, out
+        assert code == moxi_exit.TEMPFAIL, out
         assert out.splitlines() == [
             "Nothing was sent: comms could not read coder@proj-a's cache (no session id "
             "reported yet).",
             "Send it again in a moment; a read that succeeds holds or delivers it.",
             "Nothing was sent."]
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 def doctor(env):
     out = io.StringIO()
-    ctx = cli.Context(gateway=object(), env=env, socket_path=None, out=out,
+    ctx = cli.Context(record=object(), env=env, socket_path=None, out=out,
                       db_path=Path("/nonexistent/db"))
     cli.main(["doctor"], ctx=ctx)
     return out.getvalue()

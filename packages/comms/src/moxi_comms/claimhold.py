@@ -21,29 +21,50 @@ and can never be sent as (`state`). There is no other op.
 
 from __future__ import annotations
 
+import itertools
 import logging
 import os
-import socket
-import struct
 import subprocess
 import sys
 import threading
 from pathlib import Path
 
-from . import claimfile
+from moxi import ipc
+
+from . import claimfile, wire
 from .claimfile import BOUND, HOLDS, OFFLINE, STANDBY, WAITING
 from .client import DaemonClient, DaemonError, DaemonOffline, DaemonTimeout
 from .membership import DEFAULT_PROC, SELF, TREE, ProcView, Root, root_of, sessions_of
-from .protocol import PROTOCOL_VERSION, LineConn, ProtocolError
 
 log = logging.getLogger("comms.claim")
+
+
+class ClaimUnreachable(OSError):
+    """Nothing answers at a claim socket: its adapter is gone, or never served there."""
+
+
+class AdapterMismatch(Exception):
+    """The claim socket's adapter doesn't speak this comms' wire: a comms 0.2 adapter
+    (its answer isn't JSON-RPC), or one whose wire version this comms doesn't share. Its
+    text says so, and that relaunching the session is the cure."""
+
+
+#: What a send inside a session launched before the upgrade says, whose adapter still
+#: speaks comms 0.2's claim socket.
+OLD_ADAPTER = ("this session's comms adapter is from comms 0.2 and speaks the old wire; "
+               "relaunch the session. Nothing was sent.")
 
 #: The one variable every adapter stamps into what it spawns.
 CLAIM_SOCKET_ENV = "MOXI_COMMS_CLAIM_SOCKET"
 
+#: The claim socket's methods, beside the hello: `claim` answers only inside the session,
+#: `state` any local caller.
 CLAIM_OPS = ("claim",)
 STATE_OPS = ("state",)
 OPS = CLAIM_OPS + STATE_OPS
+
+#: The threads one claim socket's methods run on.
+WORKERS = 4
 
 #: The fields a current claim file may carry. Rebuilding at compatibility boundaries
 #: drops fields written by older releases without teaching live code their names.
@@ -76,26 +97,6 @@ def send_line(record: dict | None) -> str | None:
     if record.get("lost"):
         return f"{record['lost']} is held by another session"
     return "this session holds no comms identity"
-
-
-# --------------------------------------------------------------------------- peer
-
-def peer_pid(sock: socket.socket) -> int | None:
-    """The connecting process's pid (`SO_PEERCRED`)."""
-    try:
-        creds = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED,
-                                struct.calcsize("3i"))
-        pid, _uid, _gid = struct.unpack("3i", creds)
-        return pid
-    except (OSError, AttributeError):
-        return None
-
-
-class _Conn:
-    """What one socket connection holds: its caller."""
-
-    def __init__(self, pid):
-        self.pid = pid
 
 
 def _current_claim(claim: dict) -> dict:
@@ -140,14 +141,13 @@ class ClaimHolder:
         self.token: str | None = None
         #: One register in flight: the adapter's supervisor's.
         self.register_lock = threading.Lock()
-        self._server: socket.socket | None = None
+        self._host: wire.Host | None = None
         self._stop = threading.Event()
         #: Closed with its file removed (`close()`): `save` writes nothing from then on,
         #: so a late event (a harness's reader thread running `went_offline` after its
         #: `stop()`) cannot put back the file. A shim's `close(remove_file=False)` keeps
         #: its file, and its writes.
         self._removed = False
-        self._threads: list = []
 
     # ------------------------------------------------------------------ the record
     def record(self) -> dict:
@@ -274,11 +274,10 @@ class ClaimHolder:
     def claim_answer(self) -> dict:
         with self.lock:
             claim = dict(self.claim) if self.claim else None
-            answer = {"ok": True, "protocol": PROTOCOL_VERSION,
-                      "state": self.state, "claim": claim,
-                    "hold": self.hold, "launch_session": self.launch_session,
-                    "kind": self.kind, "key": self.key,
-                    "line": send_line(self.record())}
+            answer = {"ok": True, "state": self.state, "claim": claim,
+                      "hold": self.hold, "launch_session": self.launch_session,
+                      "kind": self.kind, "key": self.key,
+                      "line": send_line(self.record())}
             if self.state == BOUND and self.token is not None:
                 answer["token"] = self.token
             return answer
@@ -303,23 +302,14 @@ class ClaimHolder:
 
     # ------------------------------------------------------------------ the socket
     def listen(self) -> None:
-        """Serve the claim socket on its own thread (harness adapters, ClaimServer)."""
-        path = self.socket_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        os.chmod(path.parent, 0o700)
-        path.unlink(missing_ok=True)
-        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        srv.bind(str(path))
-        os.chmod(path, 0o600)
-        srv.listen(16)
-        srv.settimeout(0.2)
-        self._server = srv
-        self._spawn(self._accept_loop)
-
-    def _spawn(self, target) -> None:
-        t = threading.Thread(target=target, daemon=True)
-        t.start()
-        self._threads.append(t)
+        """Serve the claim socket, JSON-RPC 2.0 through `moxi.ipc`, on a loop of its own
+        thread (harness adapters, the shim, ClaimServer). Raises
+        `moxi.ipc.AlreadyServing` when another live holder serves the path."""
+        host = wire.Host(str(self.socket_path), self._call, lambda conn: None,
+                         capabilities=(), workers=WORKERS, name="comms-claim")
+        host.start()
+        host.open()
+        self._host = host
 
     def close(self, *, remove_file: bool = True) -> None:
         # Set under the lock every write takes: one that took it first has written
@@ -328,138 +318,178 @@ class ClaimHolder:
             self._stop.set()
             self._removed = self._removed or remove_file
             self.token = None
-        if self._server is not None:
-            try:
-                self._server.close()
-            except OSError:
-                pass
-            self.socket_path.unlink(missing_ok=True)
-            self._server = None
+        host, self._host = self._host, None
+        if host is not None:
+            host.close()
+            # The lock file beside the socket is this process's alone (its path carries
+            # the holder's key), so it goes with the socket.
+            Path(ipc_lock_path(str(self.socket_path))).unlink(missing_ok=True)
         if remove_file:
             claimfile.remove(self.key)
 
-    def _accept_loop(self) -> None:
-        while not self._stop.is_set():
-            try:
-                sock, _ = self._server.accept()
-            except (socket.timeout, TimeoutError):
-                continue
-            except OSError:
-                break
-            pid = peer_pid(sock)
-            threading.Thread(target=self.serve, args=(LineConn(sock), pid),
-                             daemon=True).start()
+    def _call(self, conn, method: str, params: object):
+        return self.dispatch(method, conn.peer.pid)
 
-    def serve(self, conn: LineConn, pid, first: dict | None = None) -> None:
-        """One connection: frames until EOF."""
-        ctx = _Conn(pid)
+    def dispatch(self, method: str, pid=None) -> dict:
+        """One method from a caller whose pid is `pid` (None when it can't be read):
+        its answer. `claim` answers only a caller inside this holder's session; any other
+        caller gets `ok` false with `not_inside`."""
+        if method not in OPS:
+            raise ipc.RpcError(wire.METHOD_NOT_FOUND,
+                               f"method not found: {method}; the claim socket answers "
+                               + ", ".join(OPS))
         try:
-            frame = first if first is not None else conn.recv()
-            while frame is not None:
-                conn.send(self.dispatch(frame, ctx))
-                frame = conn.recv()
-        except (ProtocolError, OSError):
-            pass
-        finally:
-            conn.close()
-
-    def dispatch(self, frame, ctx: _Conn | None = None) -> dict:
-        ctx = ctx or _Conn(os.getpid())
-        if not isinstance(frame, dict):
-            return {"ok": False, "error": "a claim frame is a JSON object"}
-        op = frame.get("op")
-        if op not in OPS:
-            return {"ok": False, "error": f"unknown claim op {op!r}; expected one of "
-                                          + ", ".join(OPS)}
-        try:
-            if op == "state":
+            if method == "state":
                 return self.state_answer()
-            if self.key not in self.caller_sessions(ctx.pid):
+            if self.key not in self.caller_sessions(pid):
                 return {"ok": False, "error": NOT_INSIDE, "not_inside": True}
             return self.claim_answer()
         except Exception as e:                                   # noqa: BLE001
-            log.exception("claim op %s failed", op)
+            log.exception("claim method %s failed", method)
             return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def ipc_lock_path(address: str) -> str:
+    """The lock file `moxi.ipc.serve` holds beside a socket while it serves it."""
+    return address + ".lock"
 
 
 # --------------------------------------------------------------------------- client
 
-class ClaimConn:
-    """A connection to a claim socket: frames in order, one answer each."""
+def call(path, method: str, timeout: float = 15.0) -> dict:
+    """Ask the claim socket at `path` `method`, after a hello: its answer.
 
-    def __init__(self, path, timeout: float = 15.0):
-        self.path = str(path)
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        sock.connect(self.path)
-        self.conn = LineConn(sock)
-
-    def call(self, op: str, **fields) -> dict:
-        self.conn.send({"op": op, **fields})
-        answer = self.conn.recv()
-        if answer is None:
-            raise ProtocolError("the claim socket closed without answering")
-        return answer
-
-    def close(self) -> None:
-        self.conn.close()
-
-
-def call(path, op: str, timeout: float = 15.0, **fields) -> dict:
-    c = ClaimConn(path, timeout=timeout)
+    Raises `ClaimUnreachable` when nothing answers there, and `AdapterMismatch` when the
+    adapter there doesn't speak this comms' wire (a comms 0.2 adapter, or another wire
+    version)."""
     try:
-        return c.call(op, **fields)
+        client = ipc.connect(str(path), timeout=timeout)
+    except (ipc.IpcError, OSError) as e:
+        raise ClaimUnreachable(f"no claim socket answers at {path}: {e}") from None
+    try:
+        client.hello(wire.VERSIONS)
+        answer = client.call(method, {}, timeout=timeout)
+    except ipc.NotRpc:
+        raise AdapterMismatch(OLD_ADAPTER) from None
+    except ipc.RpcError as e:
+        if e.code == wire.VERSION_REFUSED:
+            raise AdapterMismatch(_version_text(e.data)) from None
+        raise ClaimUnreachable(f"the claim socket at {path} refused {method}: "
+                               f"{e.message}") from None
+    except (ipc.IpcError, OSError) as e:
+        raise ClaimUnreachable(f"the claim socket at {path} did not answer: {e}") from None
     finally:
-        c.close()
+        client.close()
+    return answer if isinstance(answer, dict) else {}
+
+
+def _version_text(data) -> str:
+    """The claim socket's version refusal, in the words a send says."""
+    theirs = data.get("server") if isinstance(data, dict) else None
+    ours = f"{wire.VERSIONS[0]}-{wire.VERSIONS[1]}"
+    if isinstance(theirs, list) and len(theirs) == 2:
+        return (f"this session's comms adapter speaks comms wire {theirs[0]}-{theirs[1]} "
+                f"and this comms speaks {ours}; relaunch the session. Nothing was sent.")
+    return (f"this session's comms adapter refused this comms' wire {ours}; relaunch the "
+            "session. Nothing was sent.")
 
 
 def socket_from_env(env=None) -> Path | None:
     """The claim socket `env` (else this process) names, or None when it names none.
 
-    A path outside comms' runtime directory raises `paths.OutsideRuntime`, naming the
-    variable and the directory: a socket stamped by another copy of comms, or by hand,
-    is never asked who this process is. The directory is this process's own; a stamp
-    cannot move it.
+    A path that is not one of this comms' claim sockets raises `paths.OutsideRuntime`
+    (`checked_socket`), naming the variable and the directory: a socket stamped by
+    another copy of comms, or by hand, is never asked who this process is. The
+    directory is this process's own; a stamp cannot move it.
     """
-    from .paths import refuse_outside_runtime
-
     value = (env if env is not None else os.environ).get(CLAIM_SOCKET_ENV)
-    return refuse_outside_runtime(value, CLAIM_SOCKET_ENV) if value else None
+    return checked_socket(value) if value else None
+
+
+def checked_socket(path, env=None) -> Path:
+    """`path` when it is one of this comms' claim sockets, else raise
+    `paths.OutsideRuntime` naming `MOXI_COMMS_CLAIM_SOCKET` and the directory.
+
+    One of comms' own is a path inside RUNTIME/comms (`env`'s, else this process's), or
+    a short path the core gave a holder whose path there was too long
+    (`paths.claim_socket`): in the core's short socket directory, and recorded as its
+    socket by the holder's claim file in RUNTIME/comms. A short path no claim file of
+    this comms records is another program's, and is refused.
+    """
+    from .paths import OutsideRuntime, refuse_outside_runtime, runtime_dir, short_socket_dir
+
+    try:
+        return refuse_outside_runtime(path, CLAIM_SOCKET_ENV, env)
+    except OutsideRuntime:
+        short = short_socket_dir()
+        if (short is not None
+                and os.path.realpath(Path(path).parent) == os.path.realpath(short)
+                and record_at(path, env) is not None):
+            return Path(path)
+        root = runtime_dir(env)
+        raise OutsideRuntime(
+            f"{CLAIM_SOCKET_ENV} names {path}, which is outside comms' runtime directory "
+            f"{root} and is no claim socket of this comms; comms uses only its own "
+            f"sockets. Start the session from `moxi comms` or unset "
+            f"{CLAIM_SOCKET_ENV}.") from None
+
+
+def record_at(path, env=None) -> tuple | None:
+    """(key, record) of the claim file in RUNTIME/comms that records `path` as its
+    socket, or None when none does."""
+    want = str(path)
+    for key, record in claimfile.all_records(env):
+        if record.get("socket") == want:
+            return key, record
+    return None
+
+
+def remove_socket(path) -> None:
+    """Remove the claim socket at `path` and its lock file once no holder serves it:
+    what a holder that ended without closing left behind. A live holder's are left."""
+    try:
+        verdict = ipc.sweep(str(path))
+    except NotImplementedError:
+        return
+    if verdict != "live":
+        Path(ipc_lock_path(str(path))).unlink(missing_ok=True)
 
 
 # --------------------------------------------------------------------------- whoami
 
-def whoami(env=None, say=print, opener=None, proc=None) -> int:
+def whoami(env=None, say=print, proc=None) -> int:
     """`moxi comms whoami`: what this session holds, `<qualified> (<state>)`,
     or the line a send would refuse with; then `session <id>` when the claim records
-    its launch session. 0 when it holds an identity, 2 when it holds none."""
+    its launch session. `OK` when it holds an identity; `REFUSED` when it holds none, the
+    code a send from the same process exits with; `ERROR` for an adapter that speaks
+    another comms wire, as for a send."""
+    from moxi import exit as moxi_exit
+
     from .paths import OutsideRuntime
 
     env = env if env is not None else os.environ
-    opener = opener or ClaimConn
     try:
         path = socket_from_env(env)
     except OutsideRuntime as e:
         say(f"{e} Nothing was asked.")
-        return 2
+        return moxi_exit.REFUSED
     if not path:
         say("this process has no claim socket: it is inside no comms session and holds "
             "no comms identity")
-        return 2
+        return moxi_exit.REFUSED
     try:
-        conn = opener(path)
-        try:
-            answer = conn.call("claim")
-        finally:
-            conn.close()
-    except (OSError, ProtocolError):
+        answer = call(path, "claim")
+    except AdapterMismatch as e:
+        say(str(e).replace(" Nothing was sent.", ""))
+        return moxi_exit.ERROR
+    except ClaimUnreachable:
         answer = dead_adapter_answer(path, proc=proc)
         if answer is None:
             say("this session's comms adapter is gone and it holds no comms identity")
-            return 2
+            return moxi_exit.REFUSED
     if not answer.get("ok"):
         say(answer.get("error"))
-        return 2
+        return moxi_exit.REFUSED
     claim = answer.get("claim") or {}
     line = answer.get("line")
     if line is None:
@@ -468,7 +498,7 @@ def whoami(env=None, say=print, opener=None, proc=None) -> int:
         say(line)
     if answer.get("launch_session"):
         say(f"session {answer['launch_session']}")
-    return 0 if line is None else 2
+    return moxi_exit.OK if line is None else moxi_exit.REFUSED
 
 
 def dead_adapter_answer(path, proc=None, pid=None) -> dict | None:
@@ -502,9 +532,13 @@ _GATE = ("import os,sys\n"
          "os.execvp(sys.argv[2], sys.argv[2:])\n")
 
 
+#: Numbers each `ClaimServer`'s socket in this process.
+_SERVER_SOCKETS = itertools.count(1)
+
+
 class ClaimServer:
-    """A claim socket for a binding held by a module's own process (its own loop, a
-    send-only console). Its roots are the holder, reach `self`, and any child roots the
+    """A claim socket for a binding held by a module's own process (its own loop). Its
+    roots are the holder, reach `self`, and any child roots the
     holder adds for this binding. It answers `claim` inside its session and `state` to
     any local caller.
 
@@ -517,7 +551,7 @@ class ClaimServer:
     def __init__(self, name: str, scope: str, *, kind: str,
                  directors=(), socket_path=None, arm: bool = False, daemon_socket=None,
                  proc=None, global_: bool = False, backoff=None):
-        from .paths import runtime_root
+        from .paths import claim_socket
         from .scoping import GLOBAL, qualify
 
         self.proc = proc or DEFAULT_PROC
@@ -529,7 +563,9 @@ class ClaimServer:
                                                               else scope),
                       "tier": None, "directors": list(directors)}
         key = f"srv-{me}-{start}-{self.claim['qualified']}"
-        path = socket_path or runtime_root() / f"comms-claimsrv-{me}-{abs(hash(key)) % 10**8}.sock"
+        # Numbered per server: two servers for one name in one process (one waiting on
+        # the other) each serve a socket of their own.
+        path = socket_path or claim_socket(f"{key}-{next(_SERVER_SOCKETS)}")
         self.holder = ClaimHolder(kind=kind, key=key, socket_path=path, proc=self.proc,
                                   keying="server", roots=[Root(me, start, SELF)])
         self.holder.claim = dict(self.claim)
@@ -663,8 +699,7 @@ class ClaimServer:
             if self.refusal != str(e):
                 log.warning("the daemon refused %s: %s", c["qualified"], e)
             self.refusal = str(e)
-            response = getattr(e, "response", None) or {}
-            held = (response.get("holder") or {}).get("qualified") == c["qualified"]
+            held = (e.data.get("holder") or {}).get("qualified") == c["qualified"]
             self.set_waiting(None if held else self.refusal)
             return False
         # The arm reads `bound` only while the connection its register was answered on
@@ -693,9 +728,9 @@ class ClaimServer:
         return True
 
     def _register(self, client, c) -> dict:
-        return client.register(name=c["name"], scope=c["scope"],
-                               global_=c.get("global", False), project=c["scope"],
-                               adapter=self.kind)
+        return client.bind(name=c["name"], scope=c["scope"],
+                           global_=c.get("global", False), project=c["scope"],
+                           adapter=self.kind)
 
     def _on_close(self) -> None:
         if not self._stop.is_set():
@@ -714,9 +749,11 @@ class ClaimServer:
             self._stop.wait(next(delays))
 
 
-__all__ = ["CLAIM_OPS", "CLAIM_SOCKET_ENV", "ClaimConn", "STAMP_VARS", "claim_overlay",
-           "ClaimHolder", "ClaimServer", "NOT_INSIDE", "OPS", "STATE_OPS", "call",
-           "dead_adapter_answer", "peer_pid", "send_line", "socket_from_env", "whoami"]
+__all__ = ["AdapterMismatch", "CLAIM_OPS", "CLAIM_SOCKET_ENV", "ClaimUnreachable",
+           "STAMP_VARS", "claim_overlay", "ClaimHolder", "ClaimServer", "NOT_INSIDE",
+           "OLD_ADAPTER", "OPS", "STATE_OPS", "call", "checked_socket",
+           "dead_adapter_answer", "record_at", "remove_socket", "send_line",
+           "socket_from_env", "whoami"]
 
 
 STAMP_VARS = ("MOXI_COMMS_NAME", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL")
@@ -741,7 +778,9 @@ def claim_overlay(env) -> dict:
         return out
     try:
         answer = call(path, "claim", timeout=5.0)
-    except (OSError, ProtocolError):
+    except AdapterMismatch:
+        return out
+    except ClaimUnreachable:
         answer = dead_adapter_answer(path)
     if not answer or not answer.get("ok") or answer.get("line") is not None:
         return out

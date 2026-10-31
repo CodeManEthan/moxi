@@ -277,6 +277,409 @@ def test_a_holder_with_no_pid_is_named_as_another_process(tmp_path):
     assert err.holder is None and "another process" in str(err)
 
 
+# -- the core lock: nested calls and the install's claim ---------------------------------
+
+NO_PASS_FDS = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="hands the claim over with pass_fds; Windows hands a handle (run on Windows)")
+
+
+@pytest.fixture
+def core(tmp_path, monkeypatch):
+    """The core lock's path under a tmp `MOXI_HOME`, with no claim adopted yet."""
+    from moxi import paths
+
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path / "moxi"))
+    monkeypatch.delenv(files.CLAIM_VARIABLE, raising=False)
+    monkeypatch.setattr(files, "_claim", None)
+    monkeypatch.setattr(files, "_adopted", False)
+    return paths.core_lock()
+
+
+def named(fd: int) -> str:
+    """The variable's text for descriptor `fd`: the descriptor, or on Windows its handle."""
+    if sys.platform == "win32":
+        import msvcrt
+
+        return str(msvcrt.get_osfhandle(fd))
+    return str(fd)
+
+
+def taken_elsewhere(path: Path) -> bool:
+    """Whether another process finds `path` locked."""
+    code = ("import sys\nfrom moxi import files\n"
+            "try:\n    with files.lock(sys.argv[1], timeout=0): pass\n"
+            "except files.LockTimeout: sys.exit(3)\n")
+    result = subprocess.run([sys.executable, "-c", code, str(path)], timeout=30)
+    return result.returncode == 3
+
+
+def test_nested_on_any_other_path_raises_before_taking_anything(core, tmp_path):
+    other = tmp_path / "other.lock"
+    with pytest.raises(ValueError, match="core lock alone"):
+        files.lock(other, nested=True)
+    assert not other.exists()
+    with pytest.raises(ValueError):
+        files.lock(core.parent / "install.lock.x", nested=True)
+
+
+def test_nested_compares_the_path_made_absolute(core, monkeypatch):
+    core.parent.mkdir(parents=True)
+    monkeypatch.chdir(core.parent.parent)
+    with files.lock(Path(core.parent.name) / ".." / core.parent.name / core.name,
+                    nested=True, timeout=0):
+        assert core.read_text().strip() == str(os.getpid())
+
+
+def test_a_standalone_nested_call_takes_the_lock(core):
+    with files.lock(core, nested=True, timeout=0):
+        assert core.read_text().strip() == str(os.getpid())
+        assert taken_elsewhere(core)
+    assert not taken_elsewhere(core)
+
+
+def test_a_standalone_nested_call_waits_for_an_install(core, holder):
+    proc = holder(core)
+    started = time.monotonic()
+    with pytest.raises(files.LockTimeout) as caught:
+        with files.lock(core, nested=True, timeout=0.3):
+            pass
+    assert time.monotonic() - started >= 0.3
+    assert caught.value.holder == proc.pid
+    proc.kill()
+    proc.wait()
+    with files.lock(core, nested=True):
+        pass
+
+
+def test_under_the_installs_own_hold_nested_yields_on_every_thread(core):
+    """The install's process holds the lock without `nested`: a nested call from that
+    thread or any other neither waits nor raises, and takes nothing."""
+    seen = []
+
+    def other():
+        try:
+            with files.lock(core, nested=True, timeout=0):
+                seen.append("yielded")
+        except Exception as exc:  # noqa: BLE001 - collected for the assertion
+            seen.append(repr(exc))
+
+    with files.lock(core):
+        with files.lock(core, nested=True, timeout=0):
+            with files.lock(core, nested=True, timeout=0):
+                pass
+        thread = threading.Thread(target=other)
+        thread.start()
+        thread.join(10)
+        assert seen == ["yielded"]
+        assert taken_elsewhere(core)
+    assert not taken_elsewhere(core)
+
+
+def test_a_nested_call_inside_a_standalone_nested_hold_yields_on_its_thread(core):
+    """A standalone caller holds the lock around several core calls that take it too."""
+    with files.lock(core, nested=True, timeout=0):
+        with files.lock(core, nested=True, timeout=0):
+            pass
+        assert taken_elsewhere(core)
+    assert not taken_elsewhere(core)
+
+
+def test_another_thread_of_a_standalone_caller_waits_its_turn(core):
+    """A standalone caller's hold covers its own thread only: a second thread's nested
+    call waits for it (never sharing the span, never raising), within its timeout."""
+    events = []
+    inside = threading.Event()
+    release = threading.Event()
+
+    def first():
+        with files.lock(core, nested=True):
+            events.append("first in")
+            inside.set()
+            release.wait(10)
+            events.append("first out")
+
+    def second(timeout):
+        try:
+            with files.lock(core, nested=True, timeout=timeout):
+                events.append("second in")
+        except files.LockTimeout:
+            events.append("second timed out")
+
+    one = threading.Thread(target=first)
+    one.start()
+    inside.wait(10)
+    started = time.monotonic()
+    second(0.2)
+    assert time.monotonic() - started >= 0.2
+    two = threading.Thread(target=second, args=(None,))
+    two.start()
+    time.sleep(0.3)
+    assert events == ["first in", "second timed out"]
+    release.set()
+    one.join(10)
+    two.join(10)
+    assert events == ["first in", "second timed out", "first out", "second in"]
+
+
+def test_a_thread_still_waiting_to_take_the_lock_covers_no_other(core, holder):
+    """While one thread of a standalone caller waits for another process's hold, a
+    second thread's nested call waits too; it never yields on a lock nobody here holds."""
+    proc = holder(core, seconds=1.0)
+    events = []
+
+    def first():
+        with files.lock(core, nested=True):
+            events.append("first in")
+
+    one = threading.Thread(target=first)
+    one.start()
+    time.sleep(0.2)
+    with pytest.raises(files.LockTimeout):
+        with files.lock(core, nested=True, timeout=0.2):
+            events.append("second in")
+    one.join(10)
+    proc.wait()
+    assert events == ["first in"]
+
+
+def test_a_plain_take_still_waiting_covers_no_nested_call(core, holder):
+    """While one thread waits on a plain take of the core lock, another process holding
+    it, a second thread's nested call never yields: a take not yet made covers nothing.
+    The nested call then meets the plain take as any second take does, and is refused."""
+    proc = holder(core, seconds=1.0)
+    events = []
+
+    def first():
+        with files.lock(core):
+            events.append("first in")
+
+    one = threading.Thread(target=first)
+    one.start()
+    time.sleep(0.2)
+    with pytest.raises(RuntimeError, match="another thread of this process"):
+        with files.lock(core, nested=True, timeout=0.2):
+            events.append("second in")
+    one.join(10)
+    proc.wait()
+    assert events == ["first in"]
+
+
+def test_the_install_hold_refuses_a_second_plain_take(core):
+    with files.lock(core, nested=True):
+        with pytest.raises(RuntimeError, match="not re-entrant"):
+            with files.lock(core):
+                pass
+
+
+def test_descriptor_names_the_held_lock_file(core, tmp_path):
+    with pytest.raises(RuntimeError):
+        files._descriptor(core)
+    with files.lock(core):
+        fd = files._descriptor(core)
+        assert files._same_file(fd, core)
+    with pytest.raises(RuntimeError):
+        files._descriptor(core)
+
+
+CHILD = textwrap.dedent("""
+    import json, os, subprocess, sys, threading, time
+    from moxi import files, paths
+
+    GRANDCHILD = '''
+    import json, os, sys, time
+    from moxi import files, paths
+    path = paths.core_lock()
+    out = {"variable": os.environ.get(files.CLAIM_VARIABLE),
+           "descriptor": files._same_file(int(sys.argv[1]), path),
+           "adopted": files.adopt_core_claim(path)}
+    started = time.monotonic()
+    try:
+        with files.lock(path, nested=True, timeout=0.3):
+            out["took"] = True
+    except files.LockTimeout as exc:
+        out["waited"] = time.monotonic() - started
+        out["holder"] = exc.holder
+    print(json.dumps(out))
+    '''
+
+    path = paths.core_lock()
+    named = os.environ[files.CLAIM_VARIABLE]
+    out = {"adopted": files.adopt_core_claim(path),
+           "variable": os.environ.get(files.CLAIM_VARIABLE)}
+    out["again"] = files.adopt_core_claim(path)
+    out["inheritable"] = os.get_inheritable(int(named))
+    started = time.monotonic()
+    with files.lock(path, nested=True, timeout=0):
+        with files.lock(path, nested=True, timeout=0):
+            pass
+    seen = []
+    def other():
+        with files.lock(path, nested=True, timeout=0):
+            seen.append(True)
+    thread = threading.Thread(target=other)
+    thread.start()
+    thread.join(10)
+    out["thread"] = seen == [True]
+    out["seconds"] = time.monotonic() - started
+    grand = subprocess.run([sys.executable, "-c", GRANDCHILD, named],
+                           capture_output=True, text=True, timeout=60)
+    out["grandchild"] = json.loads(grand.stdout or "null") or grand.stderr
+    print(json.dumps(out))
+""")
+
+
+def start_child(core, script, value):
+    """A child of this process, started as the install starts its settle child: the
+    lock's descriptor passed to it alone and named in its environment alone."""
+    fd = files._descriptor(core)
+    env = {**os.environ, files.CLAIM_VARIABLE: value(fd)}
+    return subprocess.run([sys.executable, "-c", script], env=env, pass_fds=(fd,),
+                          capture_output=True, text=True, timeout=60)
+
+
+@NO_PASS_FDS
+def test_a_child_that_adopts_the_claim_works_under_its_parents_lock(core):
+    with files.lock(core):
+        child = start_child(core, CHILD, str)
+        assert child.returncode == 0, child.stderr
+        out = json.loads(child.stdout)
+        assert files.CLAIM_VARIABLE not in os.environ
+        assert taken_elsewhere(core)
+    assert out["adopted"] is True and out["again"] is True
+    assert out["variable"] is None
+    assert out["inheritable"] is False
+    assert out["thread"] is True
+    assert out["seconds"] < 2
+    grand = out["grandchild"]
+    assert isinstance(grand, dict), grand
+    assert grand["variable"] is None
+    assert grand["descriptor"] is False
+    assert grand["adopted"] is False
+    assert "took" not in grand
+    assert grand["waited"] >= 0.3 and grand["holder"] == os.getpid()
+
+
+FORGED = textwrap.dedent("""
+    import json, os, sys
+    from moxi import files, paths
+    path = paths.core_lock()
+    out = {"adopted": files.adopt_core_claim(path),
+           "variable": os.environ.get(files.CLAIM_VARIABLE)}
+    try:
+        with files.lock(path, nested=True, timeout=0.3):
+            out["took"] = True
+    except files.LockTimeout as exc:
+        out["holder"] = exc.holder
+    print(json.dumps(out))
+""")
+
+
+@NO_PASS_FDS
+@pytest.mark.parametrize("value", [
+    pytest.param(lambda fd: "999", id="a closed descriptor"),
+    pytest.param(lambda fd: "0", id="a descriptor open on another file"),
+    pytest.param(lambda fd: "seven", id="not a number"),
+    pytest.param(lambda fd: "-1", id="a negative number"),
+    pytest.param(lambda fd: "\u00b2", id="a superscript digit"),
+    pytest.param(lambda fd: "\u0663", id="a digit that is not ASCII"),
+])
+def test_a_forged_claim_is_never_honoured(core, value):
+    with files.lock(core):
+        child = start_child(core, FORGED, value)
+    assert child.returncode == 0, child.stderr
+    out = json.loads(child.stdout)
+    assert out == {"adopted": False, "variable": None, "holder": os.getpid()}
+
+
+def test_a_child_with_no_claim_variable_holds_no_claim(core):
+    assert files.adopt_core_claim(core) is False
+    with files.lock(core, nested=True, timeout=0):
+        assert core.read_text().strip() == str(os.getpid())
+
+
+def test_lock_never_reads_the_variable(core, holder, monkeypatch):
+    """A standalone process whose environment names a descriptor open on the lock file
+    still takes the lock: only adopt_core_claim reads the variable."""
+    proc = holder(core)
+    fd = os.open(core, os.O_RDONLY)
+    try:
+        monkeypatch.setenv(files.CLAIM_VARIABLE, str(fd))
+        with pytest.raises(files.LockTimeout) as caught:
+            with files.lock(core, nested=True, timeout=0.2):
+                pass
+        assert caught.value.holder == proc.pid
+        assert os.environ[files.CLAIM_VARIABLE] == str(fd)
+    finally:
+        os.close(fd)
+
+
+def test_adoption_deletes_the_variable_and_a_second_call_reads_nothing(core, tmp_path,
+                                                                        monkeypatch):
+    core.parent.mkdir(parents=True)
+    core.touch()
+    fd = os.open(core, os.O_RDONLY)
+    try:
+        os.set_inheritable(fd, True)
+        monkeypatch.setenv(files.CLAIM_VARIABLE, named(fd))
+        assert files.adopt_core_claim(core) is True
+        assert files.CLAIM_VARIABLE not in os.environ
+        if sys.platform != "win32":
+            assert os.get_inheritable(fd) is False
+        monkeypatch.setenv(files.CLAIM_VARIABLE, "999")
+        assert files.adopt_core_claim(core) is True
+        assert os.environ[files.CLAIM_VARIABLE] == "999"
+    finally:
+        os.close(fd)
+
+
+def test_a_failed_adoption_stays_failed(core, monkeypatch):
+    monkeypatch.setenv(files.CLAIM_VARIABLE, "999")
+    assert files.adopt_core_claim(core) is False
+    assert files.CLAIM_VARIABLE not in os.environ
+    assert files.adopt_core_claim(core) is False
+
+
+def test_an_adopted_claim_lets_nested_calls_yield(core, holder):
+    """In process: a claim open on the lock file yields while another process holds it."""
+    proc = holder(core)
+    fd = os.open(core, os.O_RDONLY)
+    try:
+        os.environ[files.CLAIM_VARIABLE] = named(fd)
+        assert files.adopt_core_claim(core) is True
+        with files.lock(core, nested=True, timeout=0):
+            pass
+        assert core.read_text().strip() == str(proc.pid)
+    finally:
+        os.close(fd)
+
+
+@NO_PASS_FDS
+def test_a_claim_that_no_longer_checks_is_dropped_with_a_warning(core, tmp_path, capfd):
+    """Code in the child that closes the claim's descriptor, or opens another file on its
+    number, leaves no claim: the lock is taken as a standalone caller takes it."""
+    core.parent.mkdir(parents=True)
+    core.touch()
+    fd = os.open(core, os.O_RDONLY)
+    os.environ[files.CLAIM_VARIABLE] = str(fd)
+    assert files.adopt_core_claim(core) is True
+    other = os.open(tmp_path / "elsewhere", os.O_RDWR | os.O_CREAT, 0o600)
+    os.dup2(other, fd, inheritable=False)
+    os.close(other)
+    try:
+        with files.lock(core, nested=True, timeout=0):
+            assert core.read_text().strip() == str(os.getpid())
+            assert taken_elsewhere(core)
+        err = capfd.readouterr().err
+        assert err.count("\n") == 1 and "lock claim" in err
+        assert files.adopt_core_claim(core) is False
+        with files.lock(core, nested=True, timeout=0):
+            pass
+        assert capfd.readouterr().err == ""
+    finally:
+        os.close(fd)
+
+
 # -- update ------------------------------------------------------------------------------
 
 def test_update_reads_changes_and_writes(tmp_path):
@@ -629,6 +1032,68 @@ def test_private_dir_refuses_a_dangling_symbolic_link_and_makes_nothing(tmp_path
     with pytest.raises(PermissionError, match="symbolic link"):
         files.private_dir(link)
     assert link.is_symlink() and not (tmp_path / "nowhere").exists()
+
+
+# -- the directories made on the way to a file -------------------------------------------
+
+@pytest.fixture
+def open_umask():
+    """A umask that takes no bits away, so a directory made with the default mode is
+    plainly open to everyone."""
+    old = os.umask(0)
+    yield
+    os.umask(old)
+
+
+def _take_lock(target: Path) -> None:
+    with files.lock(target / "f.lock"):
+        pass
+
+
+MAKERS = {
+    "atomic_write": lambda target: files.atomic_write(target / "f", "x"),
+    "lock": _take_lock,
+    "append_record": lambda target: files.append_record(target / "log.jsonl", {"a": 1}),
+    "private_dir": files.private_dir,
+}
+
+
+@POSIX
+@pytest.mark.parametrize("maker", MAKERS)
+def test_each_missing_directory_on_the_way_is_made_0700(tmp_path, open_umask, maker):
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    os.chmod(shared, 0o775)
+    target = shared / "a" / "b" / "c"
+    MAKERS[maker](target)
+    for each in (shared / "a", shared / "a" / "b", target):
+        assert mode_of(each) == 0o700, each
+    assert mode_of(shared) == 0o775
+
+
+@POSIX
+def test_making_directories_leaves_an_existing_one_as_it_is(tmp_path, open_umask):
+    middle = tmp_path / "a" / "b"
+    middle.mkdir(parents=True)
+    os.chmod(tmp_path / "a", 0o751)
+    os.chmod(middle, 0o755)
+    files.atomic_write(middle / "c" / "f", "x")
+    assert mode_of(tmp_path / "a") == 0o751
+    assert mode_of(middle) == 0o755
+    assert mode_of(middle / "c") == 0o700
+
+
+@POSIX
+def test_a_directory_made_without_privacy_gets_the_default_mode(tmp_path, open_umask):
+    files._make_dirs(tmp_path / "a" / "b", private=False)
+    assert mode_of(tmp_path / "a") == 0o777
+    assert mode_of(tmp_path / "a" / "b") == 0o777
+
+
+def test_making_directories_refuses_a_file_in_the_way(tmp_path):
+    (tmp_path / "a").write_text("")
+    with pytest.raises(FileExistsError):
+        files._make_dirs(tmp_path / "a")
 
 
 @WINDOWS

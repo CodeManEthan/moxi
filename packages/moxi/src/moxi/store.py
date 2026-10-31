@@ -2,7 +2,9 @@
 
 - `connect` opens a store with the same settings everywhere: write-ahead logging on a
   store it creates, `synchronous=NORMAL`, a busy timeout, foreign keys on, and no implicit
-  transactions. A store it creates is private to its owner from its first byte.
+  transactions. A store it creates is private to its owner from its first byte, and so
+  is each directory it creates on the way; a directory that is already there is left as
+  it is.
 - `transaction` runs a block in one `BEGIN IMMEDIATE` transaction.
 - `migrate` walks the store's `user_version` forward through a list of steps, each step
   and its version bump in one transaction, so two processes never run a step twice.
@@ -15,17 +17,20 @@ one. `sqlite3` is imported only inside the functions, so importing this module i
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar
 
+TYPE_CHECKING = False
 if TYPE_CHECKING:
     import sqlite3
+    from typing import TypeVar
 
-T = TypeVar("T")
+    T = TypeVar("T")
 
 _BINARY = getattr(os, "O_BINARY", 0)
+_WINDOWS = sys.platform == "win32"
 
 
 class StoreError(Exception):
@@ -53,13 +58,31 @@ def connect(path: str | os.PathLike, *, private: bool = True, create: bool = Tru
             timeout: float = 5.0, check_same_thread: bool = True) -> sqlite3.Connection:
     """Open the SQLite store at `path` and return its connection.
 
-    A missing file raises `StoreError` with `create=False`. With `create=True` its parent
-    directory is made (only its owner may enter it when `private`), the file is created
-    0600 before SQLite opens it, and the store is switched to write-ahead logging.
+    A missing file raises `StoreError` with `create=False`. With `create=True` each
+    missing directory on the way to it is made, one level at a time, the file is created
+    0600 before SQLite opens it (on Windows with an access list that grants only the
+    current user), and the store is switched to write-ahead logging.
+
+    `private` covers only what this call creates: with `private=True` each directory it
+    makes is 0700 (on Windows given the owner-only access list), and with `private=False`
+    it gets the default mode. A directory that already exists is never changed, its mode,
+    owner and access list kept, and a symbolic link on the way is followed as any open
+    follows it. So a store placed in a shared or linked directory the user chose opens
+    there, private as a file, and the directory stays as the user set it.
+
+    SQLite makes the store's `-wal` and `-shm` files itself. On POSIX they take the store
+    file's mode, so they are 0600 too. On Windows they take the access list their
+    directory passes down: in a directory this call creates that list is owner-only, so
+    they are owner-only as well, but in an existing directory whose list lets others read,
+    those others can read them, and the `-wal` holds the latest writes until a checkpoint
+    moves them into the owner-only store file. Nothing here changes that: a store placed
+    in a shared Windows directory takes that directory's list for these two files.
 
     An existing store is opened as it is: nothing is written to it. Its journal mode is
-    read, and one warning is logged when it is not `wal`. An empty file (another process
-    created it a moment ago and has not yet opened it) counts as one this call creates.
+    read, and one warning is logged when it is not `wal`. With `create=True`, an empty
+    file (another process created it a moment ago and has not yet opened it) counts as
+    one this call creates; with `create=False` it is opened as it is, like any other, so
+    a call that may not create writes nothing.
 
     Every connection then gets `synchronous=NORMAL`, a busy timeout of `timeout` seconds
     and foreign keys on, and runs with no implicit transactions (`isolation_level=None`):
@@ -79,13 +102,15 @@ def connect(path: str | os.PathLike, *, private: bool = True, create: bool = Tru
     if not path.exists():
         if not create:
             raise StoreError(f"{path} does not exist")
-        _make_parent(path.parent, private)
+        from .files import _make_dirs
+
+        _make_dirs(path.parent, private=private)
         try:
-            os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o600))
+            _create_file(path)
             fresh = True
         except FileExistsError:
             pass  # another process created it first; it is opened below like any other
-    if not fresh:
+    if not fresh and create:
         try:
             fresh = path.stat().st_size == 0
         except FileNotFoundError:
@@ -111,13 +136,15 @@ def connect(path: str | os.PathLike, *, private: bool = True, create: bool = Tru
     return conn
 
 
-def _make_parent(directory: Path, private: bool) -> None:
-    if private:
-        from .files import private_dir
+def _create_file(path: Path) -> None:
+    """Create the empty file `path`, readable and writable only by its owner. Raises
+    `FileExistsError` when something is there already."""
+    if _WINDOWS:
+        from . import _win
 
-        private_dir(directory)
-    else:
-        directory.mkdir(parents=True, exist_ok=True)
+        _win.private_file(path)
+        return
+    os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o600))
 
 
 @contextmanager

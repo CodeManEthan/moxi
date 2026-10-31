@@ -2,47 +2,80 @@
 
 ``launch`` owns one app-server, one thread, its hook socket, and an optional Codex
 window. The app-server link reconnects and resumes the same thread after a connection
-or child failure. Calls into the endpoint settle every submitted delivery; steering is
-best effort because the endpoint has already tied it to the turn that was open.
+or child failure. Calls into the endpoint settle every submitted delivery and every
+steer.
 
 A turn is open in the ledger from its start until Codex says it is over:
 ``turn/completed``; a ``thread/status/changed`` to a non-active status with no
 ``turn/completed`` within ``TURN_COMPLETED_GRACE``; a load whose answer shows it gone; or
-a dead app-server. No hook closes a turn. A delivery reads ``Refused`` only when Codex
+a dead app-server. No hook closes a turn, and neither does a turn or status notification
+that names another thread (a spawned subagent's, on the same connection). A delivery reads ``Refused`` only when Codex
 did not take its text (the request was never sent, or Codex answered it with an error);
 once the request went out it reads ``Started`` on a turn the host has just learned of,
 or ``Lost("untied: ...")`` at once.
 
+Subagents. The host lists Codex's collab subagents from the ``collabAgentToolCall``
+items it sees, rebuilt from the thread's history at each resumed load. A spawn that comes
+as a ``subAgentActivity`` item (Codex's ``multi_agent_v2``) carries no state turns can
+follow, so from the first one, live or in the history, the list is not complete for the
+session's life: the agent count reads unknown, and every check that waits for no busy
+subagent (``refuse_agents``, ``compact``) refuses, even with none running.
+
+Steers. The endpoint records a steer and answers its caller at once; ``append`` runs on
+the endpoint's ordered worker, so steers reach ``turn/steer`` one at a time in the order
+recorded. ``steering`` (called as the steer is recorded) puts its id in ``_steering``, and
+a ``turn/completed`` that comes while any id is there is held until that steer settles:
+the hold starts at record, not when the worker reaches the steer, so a steer recorded
+while the turn ran is either taken into that turn or refused ``idle``, and ``turn.ended``
+lists it when taken. ``turn/steer`` answered reports ``steered``; "no active turn" reports
+``refused`` ``idle``; no answer within the app-server client's bound reports ``lost``. A
+steer the endpoint settles meanwhile (its own bound) goes to ``expired``, which drops it
+from ``_steering`` and runs the completions it held. Its ``turn/steer``, if already sent,
+may still be taken by Codex: the caller read ``lost``, and Codex's late answer changes
+nothing.
+
+Compaction. ``command`` runs ``compact`` on the endpoint's worker: with ``stop_shells`` it
+first lists the background terminals (a method-not-found refuses ``unsupported``; any
+other failure leaves a list turns cannot vouch for), then re-checks the ledger and the
+live facts, and sends ``thread/compact/start``. Codex runs the compaction as a turn of its
+own, which the host reports with ``command`` ``compact``. Its ``PostCompact`` hook raises
+``Ready(compact)``, which settles the command in the core; with ``stop_shells`` the host
+then terminates the terminals it lists at that moment, lists them again, and reports
+what it stopped (``command_ran``), all within ``SHELL_STOP_S``.
+
 The ending form: once a Stop is answered unblocked, Codex may complete the turn
 at any moment, and a steer it takes in that gap can be written into the turn and never
 answered. So the turn is marked ending: it stays open, but no ``turn/steer`` for it goes
-out after the Stop answer. A steer-first delivery waits and starts a new turn after
-``turn/completed``; a plain steer reads ``idle``. A ``turn/steer`` already on its way
-when the hold answers is let finish first, so it reaches Codex inside the hook.
+out after the Stop answer, and a steer reads ``idle``. A ``turn/steer`` already on its
+way when the hold answers is let finish first, so it reaches Codex inside the hook.
 """
 
 from __future__ import annotations
 
 import atexit
 import contextlib
-import importlib.util
 import logging
 import os
 import random
 import shutil
 import threading
+import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
+from moxi import doctor as moxi_doctor
 from moxi.paths import script
 
 from . import client as turns_client
 from . import codex_hooks
 from . import codex_protocol as proto
-from .doctor import Row
+from . import protocol
+from .doctor import MODULE
 from .endpoint import Endpoint
-from .harness import CommandRequest, Delivery, Harness, Live
-from .results import Failed, StopFacts
+from .harness import SHELL_STOP_S, CommandRequest, Delivery, Harness, Live
+from .results import (SHELL_UNLISTED, Agent, Agents, Failed, LeftShell, Refused, Shells,
+                      StopFacts)
 
 log = logging.getLogger("moxi.turns.codex")
 
@@ -62,10 +95,51 @@ BACKOFF_MAX = 30.0
 BACKOFF_FACTOR = 2.0
 BACKOFF_JITTER = 0.2
 VERIFY_WAIT = 30.0
+#: How long one ``thread/backgroundTerminals/list`` may take, in seconds.
+TERMINALS_WAIT = 2.0
 PRIMING_TEXT = "The hosted session is ready. Wait for the next instruction."
 OWNED_OPTIONS = frozenset({
     "cwd", "developerInstructions", "threadId", "excludeTurns", "approvalPolicy",
 })
+#: The sandbox modes a thread may ask for, and the policy type a load answer reports
+#: for each.
+SANDBOX_POLICY_TYPES = {"read-only": "readOnly", "workspace-write": "workspaceWrite",
+                        "danger-full-access": "dangerFullAccess"}
+
+
+def verify_options(options: Mapping, answer: Mapping | None, cwd) -> str | None:
+    """Why a load's answer does not report the sandbox `options` asked for, or None.
+
+    `options` are the thread parameters the load sent, `answer` is the `thread/start`
+    or `thread/resume` result, and `cwd` the thread's working directory. Only a
+    top-level `sandbox` is checked: its policy type, and for `workspace-write` the
+    network access and writable roots under `config["sandbox_workspace_write"]`. A
+    `permissions` profile, or an answer that reports no sandbox, is not checked. The
+    app-server leaves the working directory out of the writable roots, since
+    workspace-write grants it, so the answer's cwd and `cwd` both count as granted.
+    """
+    mode = options.get("sandbox")
+    reported = (answer or {}).get("sandbox")
+    if not mode or not isinstance(reported, Mapping):
+        return None
+    want = SANDBOX_POLICY_TYPES.get(mode)
+    if want and reported.get("type") != want:
+        return f"sandbox is {reported.get('type')!r}, not {want!r}"
+    if want != "workspaceWrite":
+        return None
+    settings = (options.get("config") or {}).get("sandbox_workspace_write") or {}
+    if bool(reported.get("networkAccess")) != bool(settings.get("network_access")):
+        return (f"network access is {'on' if reported.get('networkAccess') else 'off'}, "
+                f"not {'on' if settings.get('network_access') else 'off'}")
+    have = {os.path.realpath(str(root)) for root in reported.get("writableRoots") or []}
+    for granted in ((answer or {}).get("cwd"), cwd):
+        if granted:
+            have.add(os.path.realpath(str(granted)))
+    missing = [str(root) for root in settings.get("writable_roots") or []
+               if os.path.realpath(str(root)) not in have]
+    if missing:
+        return f"writable roots lack {', '.join(missing)}"
+    return None
 
 
 def _backoff_delays(rng=random):
@@ -93,18 +167,34 @@ class _TurnEnding(RuntimeError):
     """The steer's turn had its Stop answered unblocked: the text is not sent."""
 
 
+@dataclass
+class _Compaction:
+    """A ``compact`` the host sent, until its Ready."""
+
+    request: CommandRequest
+    #: The terminals listed before the send, or None when the list could not be read.
+    listed: list[str] | None
+    sent_at: float
+    #: The turn Codex ran the compaction as, once reported.
+    turn_id: str | None = None
+
+
 class CodexHarness(Harness):
     name = "codex"
-    can = frozenset({"start", "steer", "hold"})
+    can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "compact",
+                     "agents", "stop-shells"})
     mod_version = None
 
     def __init__(self, cwd, *, instructions: str | None = None, env=None,
                  window: bool = True, options=None, verify=None,
                  binary: str = BINARY, ping=None, client_factory=None,
                  app_server_factory=None, window_factory=None,
-                 verify_wait: float = VERIFY_WAIT, backoff_factory=None):
+                 verify_wait: float = VERIFY_WAIT, backoff_factory=None,
+                 resume: str | None = None):
         if options is not None and not isinstance(options, Mapping):
             raise TypeError("options must be a mapping")
+        if resume is not None and (not isinstance(resume, str) or not resume.strip()):
+            raise ValueError("resume names a Codex thread id")
         conflicts = OWNED_OPTIONS.intersection(options or ())
         if conflicts:
             names = ", ".join(sorted(conflicts))
@@ -112,6 +202,10 @@ class CodexHarness(Harness):
         self.cwd = str(Path(cwd).resolve())
         self.instructions = instructions
         self.options = dict(options or {})
+        if verify is None and self.options.get("sandbox"):
+            # The default check reads the very options each load sends.
+            sent, where = self.options, self.cwd
+            verify = lambda answer: verify_options(sent, answer, where)  # noqa: E731
         self.verify = verify
         self.verify_wait = verify_wait
         self.env = dict(os.environ)
@@ -126,7 +220,9 @@ class CodexHarness(Harness):
         self._backoff_factory = backoff_factory or _backoff_delays
 
         self.pid = os.getpid()
-        self.session_id: str | None = None
+        #: The thread: None until a fresh thread is started; a resume names it from
+        #: the start, so the first load is a `thread/resume`.
+        self.session_id: str | None = resume
         self.active_turn_id: str | None = None
         self.thread_active = False
         self.ws = None
@@ -157,16 +253,33 @@ class CodexHarness(Harness):
         self._supervisor: threading.Thread | None = None
         self._accepted = threading.Event()
         self._priming = False        # a fresh thread's priming turn is not yet accepted
+        self._compacting: _Compaction | None = None
+        #: The session's collab subagents by thread id, `(state, final, parent_id)`: the
+        #: host's record of Codex's own notices, kept from the item stream and rebuilt from
+        #: the thread's history at each resumed load.
+        self._collab: dict[str, tuple[str, bool | None, str | None]] = {}
+        #: Whether that record holds every subagent: False once a resumed load could not
+        #: read the history, until one can.
+        self._collab_whole = True
+        #: Set for the session's life once a spawn came as an item turns cannot read
+        #: (``subAgentActivity``), live or in the history: the record is then never whole.
+        self._unreadable_spawns = False
+        #: Subagents spawned from a subagent's own thread, whose last live notice was not
+        #: final when a resumed load rebuilt the record: the session's history does not
+        #: hold them, so the record keeps them as they stood and is not whole until a live
+        #: notice names each again.
+        self._unconfirmed: set[str] = set()
 
     def attach(self, endpoint) -> None:
         super().attach(endpoint)
-        self.app_socket = endpoint.dir / "codex-app.sock"
+        self.app_socket = Path(protocol.endpoint_socket(endpoint.dir,
+                                                        protocol.CODEX_APP_SOCK))
         hook_socket = codex_hooks.hooks_socket(endpoint.dir)
         ping = self.ping
         if ping is None:
             ping = [str(script("moxi-turns-ping"))]
         flags, self.hook_keys = codex_hooks.session_flags(
-            list(ping), hook_socket, hold_wait_s=endpoint.hold_wait_s,
+            list(ping), hook_socket, hold_wait_s=endpoint.stop_wait_s,
             listen_wait_s=endpoint.listen_wait_s,
         )
 
@@ -346,6 +459,10 @@ class CodexHarness(Harness):
                     log.warning("thread/start reports different settings: %s", warning)
 
                 thread = result.get("thread") or {}
+                # A fresh thread has spawned nothing yet; a resumed one may have, before
+                # this connection or this host saw its items.
+                collab, whole, unreadable = ({}, True, False) if starting \
+                    else self._read_collab(ws, thread_id)
                 active = False if starting else proto.thread_is_active(thread)
                 turn_id = None
                 if active:
@@ -361,6 +478,11 @@ class CodexHarness(Harness):
                     self.session_id = thread_id
                     self.thread_active = active
                     self.active_turn_id = turn_id
+                    if not starting:
+                        self._carry_nested(collab)
+                    self._collab, self._collab_whole = collab, whole
+                    # Sticky: a history that no longer shows the item does not clear it.
+                    self._unreadable_spawns = self._unreadable_spawns or unreadable
                     if active:
                         # The load shows Codex running: a status backstop timer set
                         # before the reconnect no longer speaks for it.
@@ -453,17 +575,99 @@ class CodexHarness(Harness):
             self.settle_turn(self.active_turn_id, "error")
 
     def live(self) -> Live:
-        ws, thread_id = self.ws, self.session_id
-        if ws is None or not thread_id:
-            return Live()
+        """The count derived from `agents()`'s list, read the same way. A terminal list
+        that fails leaves the count unknown, never 0; the subagents alone stay known for a
+        command with `stop_shells`, which leaves the terminals out."""
+        subagents, whole, shells = self._read_agents()
+        busy = sum(1 for a in subagents if a.busy) if whole else None
+        if busy is None or shells is None:
+            return Live(None, False, without_shells=busy)
+        return Live(busy + len(shells), False, shells=len(shells))
+
+    def agents(self) -> Agents:
+        """The collab subagents as the host recorded Codex's notices, and the background
+        terminals as `shell`, read from Codex now. Not complete while the app-server is not
+        connected, when a resumed load could not read the history, or when the terminals
+        could not be listed; and never again once the session spawned a subagent as a
+        ``subAgentActivity`` item (seen live or in the history), whose state turns cannot
+        read. The entries it can read still list."""
+        subagents, whole, shells = self._read_agents()
+        return Agents(tuple(subagents) + tuple(shells or ()),
+                      whole and shells is not None, time.time())
+
+    def _read_agents(self) -> tuple[list[Agent], bool, list[Agent] | None]:
+        """The subagents, whether they are all of them, and the terminals (None: they
+        could not be listed)."""
+        with self._lock:
+            ws, thread_id = self.ws, self.session_id
+            whole = (self._collab_whole and not self._unreadable_spawns
+                     and not self._unconfirmed
+                     and ws is not None and bool(thread_id))
+            subagents = [Agent(agent_id, "subagent", state, final, None, parent)
+                         for agent_id, (state, final, parent) in self._collab.items()]
         try:
-            result = ws.call(
-                "thread/backgroundTerminals/list", {"threadId": thread_id}, timeout=2.0
-            )
-        except Exception:
-            return Live()
-        data = result.get("data") if isinstance(result, dict) else None
-        return Live(len(data) if isinstance(data, list) else 0, False)
+            shells = [Agent(pid, "shell", "running", False)
+                      for pid in self._terminals(ws, thread_id)]
+        except Exception as exc:  # noqa: BLE001 - an unread list is unknown, never empty
+            log.info("the background terminals could not be listed: %s", exc)
+            shells = None
+        return subagents, whole, shells
+
+    def _read_collab(self, ws, thread_id: str
+                     ) -> tuple[dict[str, tuple[str, bool | None, str | None]], bool, bool]:
+        """The collab record rebuilt from the thread's history (`thread/read`), True, and
+        whether the history holds a spawn turns cannot read; on any failure the record as
+        it stands, False, and False (the flag already set stays set)."""
+        try:
+            items = proto.thread_items(ws.call("thread/read", proto.read_params(thread_id)))
+        except Exception as exc:  # noqa: BLE001 - the record is then not whole
+            log.warning("the thread's history could not be read (%s); its subagent list "
+                        "is not complete", exc)
+            with self._lock:
+                return dict(self._collab), False, False
+        record: dict[str, tuple[str, bool | None, str | None]] = {}
+        unreadable = False
+        for item in items:
+            _apply_collab(record, item, thread_id)
+            unreadable = unreadable or _unreadable_spawn(item)
+        if unreadable:
+            log.warning("the thread's history holds a subAgentActivity spawn; its subagent "
+                        "list is not complete for the session's life")
+        return record, True, unreadable
+
+    def _carry_nested(self, collab: dict) -> None:
+        """Keep in a rebuilt record the subagents the host tracked from a subagent's own
+        thread. The rebuild reads only the session's thread, which never names them; one
+        whose last notice was not final may still run, so it stays unconfirmed. Called
+        under the lock."""
+        carried = {agent_id: entry for agent_id, entry in self._collab.items()
+                   if entry[2] is not None and agent_id not in collab}
+        collab.update(carried)
+        self._unconfirmed = {agent_id for agent_id, entry in carried.items()
+                             if entry[1] is not True}
+
+    def _track_collab(self, params: dict) -> None:
+        """An item's start or end: a collab tool call's notices update the record. Items
+        of the session's thread count, and those of a subagent's own thread (its spawns)."""
+        item = params.get("item")
+        if not isinstance(item, dict) or item.get("type") not in (
+                proto.COLLAB_ITEM, proto.SUBAGENT_ACTIVITY_ITEM):
+            return
+        thread = params.get("threadId")
+        with self._lock:
+            main = self.session_id
+            if isinstance(thread, str) and thread != main and thread not in self._collab:
+                return
+            if _unreadable_spawn(item):
+                if not self._unreadable_spawns:
+                    log.warning("a subagent spawned as a subAgentActivity item; the "
+                                "subagent list is not complete for the session's life")
+                self._unreadable_spawns = True
+                return
+            _apply_collab(self._collab, item, main)
+            self._unconfirmed.difference_update(
+                agent_id for agent_id, status, _ in proto.collab_notices(item)
+                if status is not None)
 
     def submit(self, delivery: Delivery) -> None:
         threading.Thread(
@@ -473,10 +677,12 @@ class CodexHarness(Harness):
 
     def _submit(self, delivery: Delivery) -> None:
         reason = self.endpoint.entering(delivery.id)
-        if reason is None and delivery.refuse_agents and self.live().agents:
-            reason = "busy-agents"
-        if reason is None and delivery.refuse_draft and self.live().draft:
-            reason = "draft"
+        if reason is None and (delivery.refuse_agents or delivery.refuse_draft):
+            live = self.live()
+            if delivery.refuse_agents and live.busy():   # an unknown count is busy
+                reason = "busy-agents"
+            elif delivery.refuse_draft and live.draft:
+                reason = "draft"
         if reason is not None:
             self.endpoint.refused(delivery.id, reason)
             return
@@ -498,7 +704,7 @@ class CodexHarness(Harness):
             # Never sent, or Codex answered it with an error.
             self._drop_pending(delivery.id)
             log.warning("Codex refused delivery %s: %s", delivery.id, exc)
-            self.endpoint.refused(delivery.id, "gone")
+            self.endpoint.refused(delivery.id, "unsupported")
             return
         if turn_id is None:
             log.warning("Codex took delivery %s's turn/start but named no turn the host "
@@ -514,38 +720,227 @@ class CodexHarness(Harness):
                 return True
             return False
 
+    def steering(self, delivery_id: str) -> None:
+        """A steer is being recorded, under the endpoint's lock: from here a
+        ``turn/completed`` waits for it. No harness call, and the host never calls the
+        endpoint while it holds its own lock, so the two locks cannot deadlock."""
+        with self._lock:
+            self._steering.add(delivery_id)
+
     def append(self, delivery: Delivery) -> None:
-        """Steer while the endpoint call waits, so a miss can be re-admitted before
-        the caller can observe which turn started the delivery."""
+        """On the endpoint's worker: ``turn/steer`` the text into the running turn and
+        report what Codex said. Blocks the worker until Codex answers, at most the
+        app-server client's request bound."""
         with self._lock:
             self._steering.add(delivery.id)
         try:
             self._inject(delivery.text)
         except (proto.NoActiveTurn, _TurnEnding):
             # Codex has no turn to steer, or its turn is ending: the text never went out.
-            if not delivery.fallback:
-                self.endpoint.refused(delivery.id, "idle")
-            elif not self.endpoint.steer_missed(delivery.id):
-                log.warning("Codex steer %s missed after its delivery had settled",
-                            delivery.id)
+            self.endpoint.refused(delivery.id, "idle")
         except proto.NoReply as exc:
             log.warning("Codex did not answer steer %s: %s; it reads lost",
                         delivery.id, exc)
             self.endpoint.lost(delivery.id, _no_reply(exc))
         except Exception as exc:
             log.warning("Codex could not steer delivery %s: %s", delivery.id, exc)
-            self.endpoint.refused(delivery.id, "gone")
+            self.endpoint.refused(delivery.id, "unsupported")
+        else:
+            self.endpoint.steered(delivery.id)
         finally:
-            with self._lock:
-                self._steering.discard(delivery.id)
-                pending = self._pending_completions if not self._steering else []
-                if pending:
-                    self._pending_completions = []
-            for params in pending:
-                self._turn_completed(params)
+            self._release(delivery.id)
+
+    def expired(self, delivery_id: str) -> None:
+        """The endpoint settled a steer without the host's word (its bound), or its worker
+        skipped one that had settled: stop holding ``turn/completed`` for it."""
+        self._release(delivery_id)
+
+    def _release(self, delivery_id: str) -> None:
+        """Drop a steer from ``_steering``; once none is left, report the completions held
+        for it."""
+        with self._lock:
+            self._steering.discard(delivery_id)
+            pending = self._pending_completions if not self._steering else []
+            if pending:
+                self._pending_completions = []
+        for params in pending:
+            self._turn_completed(params)
 
     def command(self, request: CommandRequest) -> None:
-        self.endpoint.command_settled(request.id, Failed("unsupported"))
+        """On the endpoint's worker: ``compact`` through ``thread/compact/start``. Blocks
+        the worker until Codex answers the send, so a hand-off recorded after the command
+        goes out after it. ``clear`` and ``exit`` are not offered."""
+        if request.name != "compact":
+            self.endpoint.command_settled(request.id, Failed("unsupported"))
+            return
+        with self._lock:
+            thread_id, ws = self.session_id, self.ws
+        if ws is None or not thread_id or self.loading():
+            self.endpoint.command_settled(request.id, Refused("loading"))
+            return
+        listed = None
+        if request.stop_shells:
+            # Nothing is stopped yet. A Codex without the list call turns the stop down;
+            # a list that fails otherwise is reported once the compaction has run.
+            try:
+                listed = self._terminals(ws, thread_id)
+            except Exception as exc:  # noqa: BLE001 - every failure is reported
+                if proto.method_missing(exc):
+                    log.warning("Codex has no background terminal list (%s); /compact "
+                                "with stop_shells refuses unsupported", exc)
+                    self.endpoint.command_settled(request.id, Refused("unsupported"))
+                    return
+                log.warning("the background terminals could not be listed before "
+                            "/compact (%s); none will be stopped", exc)
+        # The re-check, just before the send: the ledger, the turn Codex runs, and the
+        # live facts (a stop_shells command leaves the terminals out).
+        if self.endpoint.command_entering(request.id) is not None:
+            return
+        with self._lock:
+            running = self.active_turn_id is not None
+        if running:
+            self.endpoint.command_settled(request.id, Refused("busy-turn"))
+            return
+        if self.live().busy(shells=not request.stop_shells):
+            self.endpoint.command_settled(request.id, Refused("busy-agents"))
+            return
+        compaction = _Compaction(request, listed, time.monotonic())
+        with self._lock:
+            self._compacting = compaction
+        try:
+            ws.call("thread/compact/start", proto.compact_params(thread_id))
+        except proto.NoReply as exc:
+            # The request went out and Codex may be compacting: its Ready settles the
+            # command, or the core's bound does.
+            log.warning("Codex did not answer /compact %s: %s", request.id, exc)
+        except Exception as exc:  # noqa: BLE001 - the command settles on every road
+            with self._lock:
+                if self._compacting is compaction:
+                    self._compacting = None
+            if proto.method_missing(exc):
+                result = Refused("unsupported")
+            elif isinstance(exc, proto.CodexError):
+                result = Failed(f"Codex refused the compaction: {exc}")
+            elif isinstance(exc, proto.AppServerOffline):
+                result = Refused("loading")     # never sent
+            else:
+                result = Failed(f"the compaction could not be sent: "
+                                f"{self._failure_reason(exc)}")
+            log.warning("/compact %s did not run: %s", request.id, exc)
+            self.endpoint.command_settled(request.id, result)
+
+    def compacted(self) -> None:
+        """A Ready with source ``compact`` was raised (the core settles a plain
+        compaction there). The compaction the host sent has taken effect: with
+        ``stop_shells`` the stop begins, on a thread of its own, so the hook that raised
+        the Ready is answered at once."""
+        with self._lock:
+            compaction, self._compacting = self._compacting, None
+        if compaction is None or not compaction.request.stop_shells:
+            return
+        threading.Thread(target=self._stop_shells, args=(compaction,), daemon=True,
+                         name="turns-codex-stop-shells").start()
+
+    def _stop_shells(self, compaction: _Compaction) -> None:
+        request = compaction.request
+        deadline = time.monotonic() + SHELL_STOP_S
+        if not self.endpoint.command_took_effect(request.id):
+            log.info("/compact %s settled before its Ready; no terminal is stopped",
+                     request.id)
+            return
+        try:
+            shells = self._stop_terminals(compaction.listed, deadline)
+        except Exception:  # noqa: BLE001 - an unread stop is reported as unvouched
+            log.exception("stopping the background terminals failed")
+            shells = None
+        self.endpoint.command_ran(request.id, shells=shells)
+
+    def _terminals(self, ws, thread_id: str | None,
+                   deadline: float | None = None) -> list[str]:
+        """The background terminals' process ids, read from Codex. Raises on any failure,
+        a list of another shape included: never an empty list in place of an error."""
+        if ws is None or not thread_id:
+            raise proto.AppServerOffline("the Codex app-server is not connected")
+        timeout = TERMINALS_WAIT
+        if deadline is not None:
+            timeout = min(timeout, deadline - time.monotonic())
+            if timeout <= 0:
+                raise proto.NoReply("no time was left to list the background terminals")
+        result = ws.call("thread/backgroundTerminals/list",
+                         proto.terminals_params(thread_id), timeout=timeout)
+        return proto.terminal_ids(result)
+
+    def _stop_terminals(self, listed: list[str] | None, deadline: float) -> Shells:
+        """Terminate each background terminal and read what is left, by `deadline`."""
+        if listed is None:
+            # No list before the command: nothing is stopped, and the report says so.
+            return Shells((), (LeftShell(None, SHELL_UNLISTED),), False)
+        with self._lock:
+            thread_id, ws = self.session_id, self.ws
+        complete = True
+        try:
+            # Read as the stop begins, after the compaction took effect.
+            ids = self._terminals(ws, thread_id, deadline)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("the background terminals could not be listed as the stop "
+                        "began (%s); the list from before /compact is used", exc)
+            ids, complete = list(listed), False
+        terminated: dict[str, bool] = {}
+        why: dict[str, str] = {}
+        for process_id in ids:
+            if process_id in why:
+                continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or ws is None:
+                why[process_id] = ("timeout" if remaining <= 0
+                                   else "the Codex app-server is not connected")
+                continue
+            try:
+                result = ws.call("thread/backgroundTerminals/terminate",
+                                 proto.terminate_params(thread_id, process_id),
+                                 timeout=remaining)
+            except Exception as exc:  # noqa: BLE001 - each entry reports its own words
+                if proto.method_missing(exc):
+                    for rest in ids:
+                        if rest not in terminated:
+                            why.setdefault(rest, "unsupported")
+                    break
+                why[process_id] = ("timeout" if isinstance(exc, proto.NoReply)
+                                   and time.monotonic() >= deadline
+                                   else self._failure_reason(exc))
+                continue
+            terminated[process_id] = (isinstance(result, dict)
+                                      and result.get("terminated") is True)
+        try:
+            still: set[str] | None = set(self._terminals(ws, thread_id, deadline))
+            list_error = None
+        except Exception as exc:  # noqa: BLE001
+            still = None
+            list_error = ("timeout" if time.monotonic() >= deadline
+                          else self._failure_reason(exc))
+            log.warning("the background terminals could not be listed after the stop: "
+                        "%s", list_error)
+        stopped: list[str] = []
+        left: list[LeftShell] = []
+        for process_id in ids:
+            if still is None:
+                # No second list: Codex's own answer decides.
+                if terminated.get(process_id):
+                    stopped.append(process_id)
+                else:
+                    left.append(LeftShell(process_id, why.get(process_id) or list_error))
+            elif process_id in still:
+                left.append(LeftShell(process_id, why.get(process_id) or (
+                    "still listed after terminate" if terminated.get(process_id)
+                    else "Codex did not terminate it")))
+            elif terminated.get(process_id):
+                stopped.append(process_id)
+            # Otherwise it ended by itself: in neither list.
+        for process_id in sorted((still or set()) - set(ids)):
+            left.append(LeftShell(process_id, "started during the stop"))
+        if not complete:
+            left.append(LeftShell(None, SHELL_UNLISTED))
+        return Shells(tuple(stopped), tuple(left), complete)
 
     def _inject(self, text: str) -> str | None:
         with self._lock:
@@ -638,8 +1033,10 @@ class CodexHarness(Harness):
         """Report a turn Codex started, tied to `delivery_id` while that delivery is
         still the one waiting (or, with `claim`, to whichever is; with `answered_only`
         too, only once its turn/start has answered, since before that the text may not
-        have gone out). False when the turn was already reported, and then nothing is
-        said: a second `turn_started` for it would close it as `error`."""
+        have gone out). A turn no delivery took while a compaction the host sent waits
+        for its Ready is that compaction's. False when the turn was already reported, and
+        then nothing is said: a second `turn_started` for it would close it as
+        `error`."""
         with self._lock:
             if turn_id in self._reported_turns:
                 return False
@@ -655,12 +1052,38 @@ class CodexHarness(Harness):
                 delivery_id = None   # settled meanwhile: the turn counts as the person's
             if delivery_id is not None:
                 self._pending_delivery = None
+            command = None
+            compaction = self._compacting
+            if (delivery_id is None and compaction is not None
+                    and compaction.turn_id is None
+                    and time.monotonic() - compaction.sent_at
+                    < getattr(self.endpoint, "pending_ttl_s", 300.0)):
+                compaction.turn_id, command = turn_id, "compact"
             self._started_turn = turn_id
             self._started.set()
-        self.endpoint.turn_started(turn_id, delivery_id)
+        if command is None:
+            self.endpoint.turn_started(turn_id, delivery_id)
+        else:
+            self.endpoint.turn_started(turn_id, command=command)
+        return True
+
+    def _other_thread(self, method: str, params) -> bool:
+        """Whether a turn or status notification names a thread other than the
+        session's: a spawned subagent's own thread, whose turns run on the same
+        connection and are never the session's turns. One that names no thread counts
+        as the session's."""
+        thread = params.get("threadId") if isinstance(params, dict) else None
+        with self._lock:
+            main = self.session_id
+        if not isinstance(thread, str) or main is None or thread == main:
+            return False
+        self.foreign_hook(method, thread)
         return True
 
     def _on_notification(self, method: str, params: dict, rid=None) -> None:
+        if (method in ("turn/started", "turn/completed", "thread/status/changed")
+                and self._other_thread(method, params)):
+            return
         if method == "turn/started":
             turn = params.get("turn") or {}
             turn_id = turn.get("id")
@@ -669,6 +1092,8 @@ class CodexHarness(Harness):
             self._report_started(turn_id, claim=True)
         elif method == "turn/completed":
             self._completed(params)
+        elif method in ("item/started", "item/completed"):
+            self._track_collab(params)
         elif method == "thread/status/changed":
             active = (params.get("status") or {}).get("type") == "active"
             with self._lock:
@@ -691,8 +1116,9 @@ class CodexHarness(Harness):
             log.warning("unanswered app-server request %s; approvals are disabled", method)
 
     def _completed(self, params: dict) -> None:
-        """A turn's end, by Codex's word: held while a steer is in flight, so a steer
-        that missed is re-admitted before the end is reported."""
+        """A turn's end, by Codex's word: held while a steer recorded by the endpoint
+        is unsettled, so that steer is taken into the turn (or refused) before the end is
+        reported, and ``turn.ended`` lists it."""
         with self._lock:
             if self._steering:
                 self._pending_completions.append(params)
@@ -792,7 +1218,8 @@ class CodexHarness(Harness):
             if session_id in self._foreign_threads:
                 return
             self._foreign_threads.add(session_id)
-        log.info("ignoring %s from another Codex thread %r", event, session_id)
+        log.info("ignoring %s from another Codex thread %r (logged once per thread)",
+                 event, session_id)
 
     def window_closed(self, status: int | None) -> None:
         self.endpoint.gone(f"the Codex window closed with status {status or 0}")
@@ -856,6 +1283,31 @@ class CodexHarness(Harness):
             self._supervisor.join(timeout=2.0)
 
 
+def _apply_collab(record: dict, item, main: str | None) -> None:
+    """Apply a collab item's notices to `record`, in order. An agent's latest status is
+    its state; one named with no status yet is pending, with no notice to call final.
+    Its parent is the thread that first named it, when that is not the session's own."""
+    for agent_id, status, sender in proto.collab_notices(item):
+        if agent_id == main:
+            continue
+        prev = record.get(agent_id)
+        if status is not None:
+            state, final = proto.collab_state(status)
+        elif prev is not None:
+            state, final = prev[0], prev[1]
+        else:
+            state, final = "pending", None
+        parent = prev[2] if prev is not None else (
+            sender if sender and sender != main else None)
+        record[agent_id] = (state, final, parent)
+
+
+def _unreadable_spawn(item) -> bool:
+    """A ``subAgentActivity`` item: Codex's ``multi_agent_v2`` spawn, whose subagent's
+    state turns cannot follow."""
+    return isinstance(item, dict) and item.get("type") == proto.SUBAGENT_ACTIVITY_ITEM
+
+
 def _no_reply(exc: BaseException) -> str:
     return f"untied: Codex was sent the text and did not answer ({exc})"
 
@@ -865,13 +1317,41 @@ _HOSTS_LOCK = threading.Lock()
 
 
 def launch(cwd, *, instructions: str | None = None, env=None,
-           window: bool = True, options=None, verify=None):
-    """Launch a hosted Codex thread and return its live turns ``Session``."""
+           window: bool = True, options=None, verify=None, additions=None,
+           resume: str | None = None):
+    """Launch a hosted Codex thread and return its live turns ``Session``.
+
+    ``options`` are the thread parameters each load sends: top-level ``sandbox`` or
+    ``permissions`` and ``model``, and a nested ``config`` of Codex config overrides.
+    ``additions`` is the launch's ``LaunchAdditions`` for ``codex``; without it the host
+    asks ``launch_additions`` once itself, and with it asks nothing. Its variables go
+    over ``env`` and its options under ``options``. A key turns owns in either is refused
+    with ``ValueError``. ``resume`` names a thread to resume instead of starting one.
+
+    ``verify(answer) -> str | None`` checks each load's answer; a reason fails a resume
+    (the app-server is stopped and the load retried) and is logged for a new thread.
+    Without it, options that name a ``sandbox`` are checked by ``verify_options``.
+
+    The host runs inside the calling process until that process ends. The entry
+    ``moxi-turns-codex-host`` runs it as a process of its own; ``launch_args`` turns
+    that entry's flags into this call's keywords.
+    """
+    return _launch(cwd, instructions=instructions, env=env, window=window,
+                   options=options, verify=verify, additions=additions,
+                   resume=resume)[0]
+
+
+def _launch(cwd, *, instructions=None, env=None, window=True, options=None, verify=None,
+            additions=None, resume=None):
+    """`launch`, returning the endpoint beside the session, for the host entry."""
+    from .additions import for_host
+
     path = Path(cwd).resolve()
     if not path.is_dir():
         raise FileNotFoundError(f"Codex working directory does not exist: {path}")
+    env, options = for_host("codex", additions, cwd=path, env=env, options=options)
     harness = CodexHarness(path, instructions=instructions, env=env, window=window,
-                           options=options, verify=verify)
+                           options=options, verify=verify, resume=resume)
     endpoint = Endpoint(harness, env=harness.env).open()
     try:
         harness.start()
@@ -884,23 +1364,37 @@ def launch(cwd, *, instructions: str | None = None, env=None,
         raise
     with _HOSTS_LOCK:
         _HOSTS.append((endpoint, harness))
-    return session
+    return session, endpoint
 
 
-def rows() -> list[Row]:
-    installed = importlib.util.find_spec("websockets") is not None
-    output = [Row("Codex extra", installed,
-                  "websockets is installed" if installed
-                  else "install turns with the codex extra")]
+def launch_args(argv) -> dict:
+    """The keywords of `launch` (``cwd``, ``options``, ``instructions``, ``resume``,
+    ``window``) from the flags of ``moxi-turns-codex-host``. A bad flag raises
+    ``moxi_turns.codex_host.UsageError``, a ``ValueError``."""
+    from .codex_host import launch_args as parse
+
+    return parse(argv)
+
+
+def rows() -> list[moxi_doctor.Row]:
+    """The Codex host's doctor rows. The host is optional: a missing extra or binary is
+    `off`; a missing hook command in an installed turns is a fault."""
+    from .codex_host import EXTRA_IMPORT, codex_host_available
+
+    installed = codex_host_available()
+    output = [moxi_doctor.Row(
+        MODULE, "Codex extra", "ok" if installed else "off",
+        f"{EXTRA_IMPORT} is installed" if installed else "the Codex host is not installed",
+        None if installed else "moxi install turns --with codex")]
     binary = shutil.which(BINARY)
-    output.append(Row("Codex binary", binary is not None,
-                      binary or "codex is not on PATH"))
+    output.append(moxi_doctor.Row(MODULE, "Codex binary", "ok" if binary else "off",
+                                  binary or "codex is not on PATH"))
     try:
         ping = script("moxi-turns-ping")
     except FileNotFoundError as exc:
-        output.append(Row("Codex hook command", False, str(exc)))
+        output.append(moxi_doctor.Row(MODULE, "Codex hook command", "fail", str(exc)))
     else:
-        output.append(Row("Codex hook command", True, str(ping)))
+        output.append(moxi_doctor.Row(MODULE, "Codex hook command", "ok", str(ping)))
     return output
 
 
@@ -914,4 +1408,5 @@ def _close_hosts() -> None:
 
 atexit.register(_close_hosts)
 
-__all__ = ["launch"]
+__all__ = ["OWNED_OPTIONS", "SANDBOX_POLICY_TYPES", "launch", "launch_args",
+           "verify_options"]

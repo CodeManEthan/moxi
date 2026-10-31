@@ -1,7 +1,8 @@
 """`moxi install`: install a module and its required modules, set them up, offer extras.
 
     moxi install <module> [--with EXTRA,...] [--without EXTRA,...] [--all | --none]
-                          [--from SPEC]... [--third-party]
+                          [--from SPEC]... [--third-party] [--replace]
+                          [--skills | --no-skills] [--skills-form auto|link|copy]
 
 0. The catalogue (`moxi.catalogue`): a name it lists installs its first-party
    distribution. Any other name is refused with the nearest listed names, unless a
@@ -18,12 +19,23 @@
    depending module's version range applies. `--from` gives requirements with a direct
    URL (`moxi-turns @ git+...`), for before PyPI holds the modules: give one for each Moxi
    distribution the module needs that the environment lacks.
-3. Run the `SETUP` of each module the step installed, in a fresh process.
+3. Run the settle step of each module the step installed, in a fresh process
+   (`moxi._settle`): the move of its data out of an old host folder, its `SETUP`, and its
+   units, with every daemon the move stopped started again however the step ends; then
+   its skills, its install questions, and every `moxi.installs` listener.
+   `--skills` and `--no-skills` answer the skills question ahead for each module;
+   `--skills-form` sets the core's `skills.form` before the first settle step.
 4. Offer each optional extra of the module not yet installed, one by one.
 5. Install the chosen extras by step 2's route, and set up each new module.
 6. Report.
 
-A module already present skips step 2 and has its setup run again.
+A module already present skips step 2 and has its settle step run again.
+
+From the catalogue check on, the install holds the core lock (`moxi.paths.core_lock()`),
+so two installs never interleave; a second waits for the first. Each settle child works
+under that hold. An interrupt (Ctrl-C, SIGTERM, a hang-up) never kills a settle child:
+the install forwards it, waits for the child to start its stopped units again, runs no
+later step and exits 1.
 """
 
 from __future__ import annotations
@@ -250,8 +262,11 @@ _TOOL_FILES = {"constraints": "--constraints", "overrides": "--overrides",
 
 
 def tool_command(receipt: dict, prefix: Path, added: list[Req], uv: str,
-                 scratch: Path) -> tuple[list[str], dict[str, str], list[Req]]:
+                 scratch: Path, *, without: str | None = None
+                 ) -> tuple[list[str], dict[str, str], list[Req]]:
     """The `uv tool install` re-run that keeps everything `receipt` holds and adds `added`.
+    With `without` (a module name), it leaves out that module's distribution and every
+    extra named by it on another requirement, as `moxi uninstall` does.
 
     Returns the argv, the environment variables to set, and the requirements it installs.
     Files for the receipt's constraints, overrides and excludes are written in `scratch`.
@@ -267,6 +282,12 @@ def tool_command(receipt: dict, prefix: Path, added: list[Req], uv: str,
     if not isinstance(held, list) or not held:
         raise InstallError("the uv receipt names no requirement")
     reqs = union([receipt_entry(e) for e in held], added)
+    if without is not None:
+        from .uninstall import without as leave_out
+
+        reqs = leave_out(reqs, without)
+        if not reqs:
+            raise InstallError("the uv receipt would name no requirement")
     head, rest = reqs[0], reqs[1:]
     argv = [uv, "tool", "install"]
     argv += ["--editable", head.editable] if head.editable else [head.text()]
@@ -410,13 +431,6 @@ def _quote(arg: str) -> str:
 
 _SNAPSHOT = "import sys\nfrom moxi.cli import main\nsys.exit(main(['modules', '--json']))\n"
 
-_SETUP = """\
-import importlib, sys
-module, _, attr = sys.argv[1].partition(":")
-result = getattr(importlib.import_module(module), attr)()
-sys.exit(result if isinstance(result, int) and not isinstance(result, bool) else 0)
-"""
-
 
 def snapshot(python: str) -> dict:
     """`moxi modules --json`, read by a fresh process so it sees what was just installed."""
@@ -431,13 +445,15 @@ def snapshot(python: str) -> dict:
         raise InstallError("`moxi modules --json` printed no JSON") from None
 
 
-def run_setup(python: str, target: str) -> int:
-    """Run a module's `SETUP` target in a fresh process; returns its exit code."""
-    try:
-        return subprocess.run([python, "-c", _SETUP, target], check=False).returncode
-    except OSError as exc:
-        print(f"moxi install: cannot run {python}: {exc}", file=sys.stderr)
-        return 127
+def run_settle(python: str, module: str, *, replace: bool = False,
+               skills: bool | None = None):
+    """Run module `module`'s settle step in a fresh process under this install's hold of
+    the core lock, and wait for it however long it takes (`moxi._settle.run_child`).
+    Returns its `moxi._settle.Outcome`."""
+    from . import _settle
+
+    return _settle.run_child(_settle.child_argv(python, module, replace=replace,
+                                                skills=skills))
 
 
 # -- the installer ------------------------------------------------------------------------
@@ -465,6 +481,17 @@ def _parser(prog: str):
     parser.add_argument("--third-party", action="store_true",
                         help="install moxi-<module> from the index though Moxi's catalogue "
                              "doesn't list it: a module that isn't first-party")
+    parser.add_argument("--replace", action="store_true",
+                        help="move a unit file or a placed skill moxi did not write out "
+                             "of the way of the module's own (to DATA/moxi/displaced/)")
+    answer = parser.add_mutually_exclusive_group()
+    answer.add_argument("--skills", dest="skills", action="store_true", default=None,
+                        help="place each module's skills without asking")
+    answer.add_argument("--no-skills", dest="skills", action="store_false",
+                        help="place no module's skills, without asking")
+    parser.add_argument("--skills-form", choices=("auto", "link", "copy"),
+                        help="set how skills are placed (the core's skills.form) "
+                             "before setting the modules up")
     return parser
 
 
@@ -495,6 +522,9 @@ class Installer:
         self.every = True if args.all else False if args.none else None
         self.froms = [parse_from(spec) for spec in args.from_]
         self.third_party = bool(getattr(args, "third_party", False))
+        self.replace = bool(getattr(args, "replace", False))
+        self.skills = getattr(args, "skills", None)
+        self.skills_form = getattr(args, "skills_form", None)
         #: The module's catalogue entry, when the catalogue lists it.
         self.listed = None
         self.setup_failed: list[str] = []
@@ -516,8 +546,13 @@ class Installer:
         if both:
             raise InstallError(f"--with and --without both name {', '.join(both)}")
         self._catalogue_gate(module)
+        with _core_lock():
+            return self._run(module)
+
+    def _run(self, module: str) -> int:
         env = environment()
         self.env = env
+        self._set_skills_form()
         before = snapshot(env.python)
         present = _by_name(before)
 
@@ -659,25 +694,39 @@ class Installer:
 
     # step 3 ------------------------------------------------------------------------
     def _setup(self, items: list[dict]) -> None:
+        """Each module's settle step, in order, each in its own child. An interrupted
+        child ends the install: no later module is settled."""
+        from ._settle import guard_streams, say
+
         for item in items:
-            target = item.get("setup")
             name = item["name"]
             if item.get("state") != "present":
-                print(f"setup {name}: skipped, the module is {item.get('state')}: "
-                      f"{item.get('reason')}", file=sys.stderr)
+                say(f"setup {name}: skipped, the module is {item.get('state')}: "
+                    f"{item.get('reason')}", err=True)
                 self.setup_failed.append(name)
                 continue
-            if not target:
-                continue
-            print(f"setup {name}: running {target}", flush=True)
-            code = run_setup(self.env.python, target)
-            if code == 0:
-                print(f"setup {name}: done")
-            else:
-                print(f"setup {name}: failed (exit {code}). The install stays; run "
-                      f"`moxi install {name}` again once the cause is fixed.",
-                      file=sys.stderr)
+            guard_streams()
+            outcome = run_settle(self.env.python, name, replace=self.replace,
+                                 skills=self.skills)
+            if outcome.interrupted:
+                raise InstallError(f"interrupted in {name}'s settle step; no later step "
+                                   f"ran. Run `moxi install {self.module}` again to finish.")
+            if outcome.code != 0:
+                say(f"setup {name}: failed (exit {outcome.code}). The install stays; run "
+                    f"`moxi install {name}` again once the cause is fixed.", err=True)
                 self.setup_failed.append(name)
+
+    def _set_skills_form(self) -> None:
+        """`--skills-form`: set the core's `skills.form` before any settle step."""
+        if self.skills_form is None:
+            return
+        from . import config
+
+        try:
+            config.set(names.HARNESS, "skills.form", self.skills_form, by="moxi install")
+        except config.ConfigError as exc:
+            raise InstallError(f"skills.form was not set: {exc}") from None
+        print(f"skills.form set to {self.skills_form}")
 
     # step 4 ------------------------------------------------------------------------
     def _check_answers(self, item: dict) -> None:
@@ -739,6 +788,28 @@ class Installer:
             print(f"setup failed for {name}; see above", file=sys.stderr)
 
 
+def _core_lock():
+    """The core lock, taken once for the whole install; a second install waits for the
+    first, saying so."""
+    from contextlib import ExitStack, contextmanager
+
+    from . import files, paths
+
+    @contextmanager
+    def held():
+        path = paths.core_lock()
+        with ExitStack() as stack:
+            try:
+                stack.enter_context(files.lock(path, timeout=0))
+            except files.LockTimeout as exc:
+                who = f"pid {exc.holder}" if exc.holder else "another process"
+                print(f"waiting for another install or uninstall ({who}) to finish",
+                      file=sys.stderr, flush=True)
+                stack.enter_context(files.lock(path))
+            yield
+    return held()
+
+
 def _prompt(question: str) -> bool:
     try:
         answer = input(question)
@@ -794,4 +865,4 @@ def _setup_order(items: list[dict], last: str) -> list[dict]:
 
 __all__ = ["main", "Installer", "InstallError", "Req", "union", "parse_from",
            "receipt_entry", "receipt_options", "tool_command", "environment",
-           "installed_source", "snapshot", "run", "run_setup"]
+           "installed_source", "snapshot", "run", "run_settle"]

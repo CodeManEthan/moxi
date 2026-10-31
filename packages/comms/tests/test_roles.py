@@ -1,9 +1,9 @@
 """The token store's role holders: comms' own four, and the ones a box names in
-`[secrets] roles`.
+`[credentials] roles`.
 
 comms keeps its own roles in code: `reader` and `daemon` (one holder, the daemon
 process), `operator` (the local backend's operator lane) and `provisioner` (which exists
-only to be refused). A role the box adds is a name in `[secrets] roles`; it keys under
+only to be refused). A role the box adds is a name in `[credentials] roles`; it keys under
 its own name, in the store and as a holder string, and a role the config does not list
 is unknown, with no store path, like any name the store has never heard of. The names
 below (`calendar`, `mailer`) are placeholders for whatever modules a box keeps
@@ -24,7 +24,7 @@ ADDED = ("calendar", "mailer")
 
 @pytest.fixture
 def listed():
-    write_config(None, '[secrets]\nroles = ["calendar", "mailer"]\n')
+    write_config(None, '[credentials]\nroles = ["calendar", "mailer"]\n')
 
 
 # ------------------------------------------------------------------- unlisted: unknown
@@ -32,7 +32,7 @@ def listed():
 @pytest.mark.parametrize("role", ADDED)
 def test_an_unlisted_role_is_unknown(role, tmp_path):
     """What any unknown role gets: an owner with no parts, no holder string, no path."""
-    assert config.load().secrets.roles == ()
+    assert config.load().credentials.roles == ()
     owner = tokens.owner_for_role(role)
     assert owner == tokens.TokenOwner((), role=role)
     assert not owner.refused
@@ -46,7 +46,7 @@ def test_an_unlisted_role_is_unknown(role, tmp_path):
 
 
 def test_listing_one_role_leaves_the_others_unknown(tmp_path):
-    write_config(None, '[secrets]\nroles = ["calendar"]\n')
+    write_config(None, '[credentials]\nroles = ["calendar"]\n')
     assert tokens.owner_for_role("calendar").parts == ("calendar",)
     assert tokens.owner_for_role("mailer").parts == ()
     assert tokens.owner_of_holder("comms/mailer") is None
@@ -108,7 +108,7 @@ def test_the_roles_are_read_from_the_environment_a_caller_passes(tmp_path):
     """`owner_for_role(role, env=...)` reads the config file under the roots that env
     names, as every other reader of the config does."""
     other = {"MOXI_COMMS_CONFIG_HOME": str(tmp_path / "cfg"), "HOME": str(tmp_path)}
-    write_config(other, '[secrets]\nroles = ["calendar"]\n')
+    write_config(other, '[credentials]\nroles = ["calendar"]\n')
     assert tokens.owner_for_role("calendar", env=other).parts == ("calendar",)
     assert tokens.owner_of_holder("comms/calendar", env=other).parts == ("calendar",)
     assert tokens.box_roles(other) == ("calendar",)
@@ -129,19 +129,19 @@ def test_comms_own_roles_need_no_listing(tmp_path):
 
 @pytest.mark.parametrize("role", config.BUILTIN_ROLES)
 def test_the_config_may_not_list_one_of_comms_own_roles(role):
-    write_config(None, f'[secrets]\nroles = ["{role}"]\n')
+    write_config(None, f'[credentials]\nroles = ["{role}"]\n')
     with pytest.raises(config.ConfigError) as caught:
         config.load()
-    assert caught.value.key == "secrets.roles"
+    assert caught.value.key == "credentials.roles"
     assert "comms' own" in str(caught.value)
 
 
 @pytest.mark.parametrize("bad", ["..", ".", "a/b", "with space", ""])
 def test_a_listed_role_must_be_a_token_store_name(bad):
-    write_config(None, f'[secrets]\nroles = ["{bad}"]\n')
+    write_config(None, f'[credentials]\nroles = ["{bad}"]\n')
     with pytest.raises(config.ConfigError) as caught:
         config.load()
-    assert caught.value.key == "secrets.roles"
+    assert caught.value.key == "credentials.roles"
 
 
 def test_the_provisioner_stays_fenced_whatever_the_config_says(listed, tmp_path):

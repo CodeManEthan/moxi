@@ -1,5 +1,5 @@
 """The adapters as their sessions' claim holders: a shim respawned inside its live
-session comes back holding its recorded claim, a session never inherits its launcher's claim socket, and the codex app-server is
+session comes back holding its recorded claim, a session never inherits its wrapper's claim socket, and the codex app-server is
 stamped with its adapter's own."""
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from moxi_comms.adapters.codex import CodexAdapter
 from moxi_comms.adapters.codex_roster import CodexAgent
 from moxi_comms.claimhold import CLAIM_SOCKET_ENV
 from moxi_comms.membership import TREE, Root
-from fake_turns import FakeSession, launcher
+from fake_turns import FakeSession, fake_find
 
 PLANNER = "planner@proj-a"
 
@@ -39,7 +39,7 @@ def test_a_respawned_shim_comes_back_holding_its_recorded_claim(rig):
     assert claimfile.read("sess-r")["state"] == "bound"
 
 
-def test_a_session_never_inherits_its_launchers_claim_socket():
+def test_a_session_never_inherits_its_wrappers_claim_socket():
     env = session.stamped_env({CLAIM_SOCKET_ENV: "/parent.sock", "PATH": "/bin"}, name="a")
     assert CLAIM_SOCKET_ENV not in env
     assert env["MOXI_COMMS_NAME"] == "a" and env["PATH"] == "/bin"
@@ -47,13 +47,25 @@ def test_a_session_never_inherits_its_launchers_claim_socket():
 
 # --------------------------------------------------------------------------- codex
 
-def test_the_codex_adapter_stamps_its_own_claim_socket_on_the_app_server(rig, tmp_path):
+def test_the_codex_adapter_listens_on_the_wrappers_socket_rooted_at_the_host(
+        rig, tmp_path):
+    """The wrapper names the claim socket it stamps on the host, and the host (the
+    wrapper's pid, kept across its exec) is the claim's only root: the adapter is forked
+    away from it."""
+    import os
+
+    from moxi_comms.membership import root_of
+
+    sock = tmp_path / "session" / "claim.sock"
+    sock.parent.mkdir()
     codex = CodexAdapter(CodexAgent(qualified="coder@proj-a", name="coder", scope="proj-a",
                                     cwd=str(tmp_path), thread_file=tmp_path / "coder.json"),
-                         launch=launcher(FakeSession()), autoreconnect=False)
+                         find=fake_find(FakeSession()), harness_pid=os.getppid(),
+                         claim_socket=sock, autoreconnect=False)
     try:
         codex.start()
-        env = codex._launch.calls[0]["env"]
-        assert env[CLAIM_SOCKET_ENV] == str(codex.claims.socket_path)
+        assert codex.claims.socket_path == sock and sock.is_socket()
+        assert codex.claims.roots == [root_of(os.getppid())]
+        assert codex._find.calls[0]["pid"] == os.getppid()
     finally:
         codex.stop()

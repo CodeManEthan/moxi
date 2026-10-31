@@ -1,20 +1,21 @@
 """The turn ledger: one per endpoint, the one place idle and ran are read from.
 
 The adapter feeds it every main-loop turn start and end with the harness's turn id, and
-says which delivery a turn took (the tie, per harness). `facts()`, a start's
-preconditions and every `wait_ended` read it; nothing reads a timer, a status line or a
-guess from outside the session.
+says which delivery a turn took (the tie, per harness). `facts()`, an only-if-idle
+delivery's preconditions and every `wait_ended` read it; nothing reads a timer, a status
+line or a guess from outside the session.
 
-`epoch` is the current session's count of main-loop turns started. A new session id (a
-`/clear`, a resume into another session) starts it again at 0, so it answers "has this
+`turn_number` is the current session's count of main-loop turns started. A new session id
+(a `/clear`, a resume into another session) starts it again at 0, so it answers "has this
 session run a turn". `version` moves on every change, a new session id included, so a
-start that checked one reading and lands at another knows the ledger moved under it.
+delivery that checked one reading and lands at another knows the ledger moved under it.
 
 The ledger holds no lock of its own: the endpoint's lock guards it.
 """
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 
@@ -24,7 +25,7 @@ class Reading:
 
     version: int
     session_id: str | None
-    epoch: int
+    turn_number: int
     turn_open: bool
     turn_id: str | None
 
@@ -35,8 +36,18 @@ class Turn:
 
     turn_id: str | None
     session_id: str | None
+    #: The delivery that opened the turn, or None (the person's own turn, or a turns
+    #: command's turn when `command` is set).
     delivery_id: str | None = None
+    #: The deliveries steered into the turn, in the order taken.
     steered: list[str] = field(default_factory=list)
+    #: The session's turn number this turn took when it opened.
+    turn_number: int = 0
+    #: The wall-clock time (Unix seconds) the ledger opened the turn. A turn held for its
+    #: tie keeps it once tied.
+    started_at: float = 0.0
+    #: The turns command the harness ran this turn for (`compact`), or None.
+    command: str | None = None
     outcome: str | None = None
     #: The turn's events wait for a decision about which delivery, if any, it took:
     #: the ledger has it open or ended, `watch()` has not seen it yet.
@@ -53,11 +64,11 @@ class TurnLedger:
         self.version = 0
         self.session_id = session_id
         self.earlier: list[str] = []
-        self.epoch = 0
+        self.turn_number = 0
         self.open: Turn | None = None
 
     def read(self) -> Reading:
-        return Reading(self.version, self.session_id, self.epoch, self.open is not None,
+        return Reading(self.version, self.session_id, self.turn_number, self.open is not None,
                        self.open.turn_id if self.open else None)
 
     def new_session(self, session_id: str | None) -> bool:
@@ -76,21 +87,24 @@ class TurnLedger:
         if self.session_id not in self.earlier:
             self.earlier.append(self.session_id)
         self.session_id = session_id
-        self.epoch = 0
+        self.turn_number = 0
         self.version += 1
         return True
 
     def started(self, turn_id: str | None, delivery_id: str | None, *,
-                held: bool = False) -> tuple[Turn | None, Turn]:
+                held: bool = False, command: str | None = None) -> tuple[Turn | None, Turn]:
         """A main-loop turn started. Returns `(previous, turn)`: `previous` is a turn left
         open without an end (a missed end), which this closes with outcome `error`.
-        `held`: the turn's events wait for the tie."""
+        `held`: the turn's events wait for the tie. `command`: the turns command the
+        harness runs this turn for."""
         previous = None
         if self.open is not None:
             previous = self.open
             previous.outcome = "error"
-        self.open = Turn(turn_id, self.session_id, delivery_id, held=held)
-        self.epoch += 1
+        self.turn_number += 1
+        self.open = Turn(turn_id, self.session_id, delivery_id, held=held,
+                         turn_number=self.turn_number, started_at=time.time(),
+                         command=command)
         self.version += 1
         return previous, self.open
 

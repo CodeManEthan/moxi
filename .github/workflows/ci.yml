@@ -1,6 +1,13 @@
 # The same check a contributor runs before asking for a merge: `moxi-dev check`.
 # Linux runs on every push to any branch; Windows and macOS run on pushes to main,
-# after the merge, and gate nothing while the packages are Linux-only.
+# after the merge, and gate nothing while the packages are Linux-only. secrets
+# supports Windows, so its tests also run on Windows, on the same terms: on pushes
+# to main, gating nothing, with only secrets and what it needs installed.
+# The web job runs on all three systems on every push: the web pages' built files must be
+# what the pinned Node toolchain makes from their sources, byte for byte.
+# The browser jobs run ui's browser tests: Chromium and Firefox on Linux on every push,
+# gating; Chromium on Windows and macOS and WebKit on macOS on pushes to main, gating
+# nothing.
 # Actions are pinned to a release commit, with its version beside it.
 
 name: check
@@ -50,5 +57,131 @@ jobs:
         with:
           version: "0.12.19"
           python-version: "3.12"
+      - name: install tmux, which the slots tests drive
+        if: runner.os == 'macOS'
+        run: brew install tmux
       - run: uv sync --locked
       - run: uv run --locked moxi-dev check --full
+
+  web:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      # A checkout that converts line endings must leave the built files and the stamp's
+      # inputs alone, so conversion is turned on before it, on every system, rather than
+      # left to the image's default.
+      - run: git config --global core.autocrlf true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: npm ci
+      - name: type-check each page, build into a temp directory, compare with the tree
+        run: npm run check
+      - name: each page's own Node tests
+        run: npm test --workspaces --if-present
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      # The pre-commit check's own code, standard library only: its stamp must equal the
+      # one the build wrote, on this system too.
+      - name: the build stamps, recomputed without Node
+        env:
+          PYTHONPATH: packages/moxi-dev/src
+        run: uv run --no-project --python 3.12 python -m moxi_dev.stamp
+
+  browser:
+    # ui's browser tests, in a real browser through Playwright: Chromium and Firefox on
+    # Linux, on every push, gating. moxi-dev check runs them only where Chromium is
+    # installed, which the linux job's runner is not.
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, firefox]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      - run: uv sync --locked --package moxi-ui
+      - name: install the browser and the system libraries it needs
+        working-directory: packages/ui
+        run: uv run --locked --package moxi-ui playwright install --with-deps ${{ matrix.engine }}
+      - name: the browser tests
+        working-directory: packages/ui
+        run: uv run --locked --package moxi-ui pytest -m browser --ui-browser ${{ matrix.engine }} -n auto --ui-traces ui-traces
+      - name: a failed test's Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: ui-traces-${{ matrix.engine }}
+          path: packages/ui/ui-traces
+          if-no-files-found: ignore
+
+  browser-other:
+    # The same tests in Chromium on Windows and macOS, and in WebKit on macOS. Like the
+    # other non-Linux runs, on pushes to main, gating nothing.
+    if: github.ref == 'refs/heads/main'
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            engine: chromium
+          - os: macos-latest
+            engine: chromium
+          - os: macos-latest
+            engine: webkit
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      - run: uv sync --locked --package moxi-ui
+      - name: install the browser and the system libraries it needs
+        working-directory: packages/ui
+        run: uv run --locked --package moxi-ui playwright install --with-deps ${{ matrix.engine }}
+      - name: the browser tests
+        working-directory: packages/ui
+        run: uv run --locked --package moxi-ui pytest -m browser --ui-browser ${{ matrix.engine }} -n auto --ui-traces ui-traces
+      - name: a failed test's Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: ui-traces-${{ matrix.os }}-${{ matrix.engine }}
+          path: packages/ui/ui-traces
+          if-no-files-found: ignore
+
+  secrets-windows:
+    # The secrets rule files are compared byte for byte (the pin's sha256, the
+    # sets.json regeneration). A Windows checkout that rewrites line endings must
+    # leave them alone, so line-ending conversion is turned on before the checkout.
+    # Only secrets is synced, so another package failing on Windows does not fail
+    # this job.
+    if: github.ref == 'refs/heads/main'
+    continue-on-error: true
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - run: git config --global core.autocrlf true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      - run: uv sync --locked --package moxi-secrets
+      - name: the secrets tests
+        working-directory: packages/secrets
+        run: uv run --locked --package moxi-secrets pytest

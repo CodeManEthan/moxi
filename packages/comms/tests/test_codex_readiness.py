@@ -6,11 +6,11 @@ from conftest import clock_reads_warm
 
 from moxi_comms import codex_threads
 from moxi_comms.adapters import codex as codex_mod
-from moxi_comms.adapters.codex import CodexAdapter, layer_one_hash, layer_one_text, own_comms
+from moxi_comms.adapters.codex import CodexAdapter, layer_one_hash, layer_one_text
 from moxi_comms.adapters.codex_roster import CodexAgent
-from moxi_comms.context import CONTEXT_BLOCK
+from moxi_comms.context import CONTEXT_BLOCK, own_comms
 
-from fake_turns import FakeSession, launcher
+from fake_turns import FakeSession, fake_find
 
 
 IDENTITY = "pilot@proj-a"
@@ -33,18 +33,16 @@ def test_layer_one_is_the_block_then_the_comms_path_then_the_roster():
     assert offline.startswith(CONTEXT_BLOCK) and "offline at session start" in offline
 
 
-def test_a_new_thread_is_born_with_layer_one_as_developer_instructions(
+def test_the_thread_record_carries_the_hash_of_the_layer_one_it_was_given(
         rig, tmp_path, monkeypatch):
+    """The wrapper gives the host layer one; the adapter records its hash with the
+    thread, for the comms path and directors it was launched with."""
     clock_reads_warm(monkeypatch, "codex")
     fake = FakeSession()
-    launch = launcher(fake)
-    adapter = CodexAdapter(row(tmp_path), launch=launch, comms_path=COMMS,
+    adapter = CodexAdapter(row(tmp_path), find=fake_find(fake), comms_path=COMMS,
                            autoreconnect=False, clock=rig.clock)
     try:
         adapter.start()
-        call = launch.calls[0]
-        assert call["instructions"].startswith(CONTEXT_BLOCK)
-        assert COMMS in call["instructions"] and IDENTITY in call["instructions"]
         record = codex_threads.read_meta(IDENTITY)
         assert record["thread_id"] == fake.session_id
         assert record["layer_one"] == layer_one_hash(COMMS)
@@ -55,12 +53,10 @@ def test_a_new_thread_is_born_with_layer_one_as_developer_instructions(
 def test_layer_one_can_be_omitted_without_writing_its_hash(rig, tmp_path, monkeypatch):
     clock_reads_warm(monkeypatch, "codex")
     fake = FakeSession()
-    launch = launcher(fake)
-    adapter = CodexAdapter(row(tmp_path), launch=launch, layer_one=False,
+    adapter = CodexAdapter(row(tmp_path), find=fake_find(fake), layer_one=False,
                            autoreconnect=False, clock=rig.clock)
     try:
         adapter.start()
-        assert launch.calls[0]["instructions"] is None
         assert "layer_one" not in codex_threads.read_meta(IDENTITY)
     finally:
         adapter.stop()

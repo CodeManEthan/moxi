@@ -17,11 +17,13 @@ import stat
 import subprocess
 import sys
 
+import keyring.backend
+import keyring.errors
 import pytest
 from conftest import write_config
 
 from moxi_comms import config, secrets
-from moxi_comms.gateway import GatewayError
+from moxi_comms.record import RecordError
 from moxi_comms.sender import operator_credential
 from moxi_comms.tokens import OPERATOR_SECRET_ID, TokenStore, owner_for_role
 
@@ -40,7 +42,7 @@ def test_env_beats_store_and_a_miss_falls_through_to_the_next(tmp_path):
     env = {secrets.env_key(SECRET_ID): "FROM-THE-ENVIRONMENT"}
 
     chain = secrets.build(secrets.DEFAULT_CHAIN, env=env, store=store)
-    assert chain.names == ("env", "store")
+    assert chain.names == ("env", "keychain", "store")
     assert chain.get(SECRET_ID, owner=OWNER)["value"] == "FROM-THE-ENVIRONMENT"
 
     fell = secrets.build(secrets.DEFAULT_CHAIN, env={}, store=store)
@@ -105,7 +107,7 @@ def test_the_all_miss_error_names_the_steps_tried_and_the_holder(tmp_path):
     tried, in order, and WHOSE credential was being looked for. No path, no key, no
     value."""
     chain = secrets.build(["env", "store"], env={}, store=tmp_path / "tokens")
-    with pytest.raises(GatewayError) as e:            # SecretNotFound IS a GatewayError
+    with pytest.raises(RecordError) as e:            # SecretNotFound IS a RecordError
         chain.get(SECRET_ID, owner=OWNER)
     said = str(e.value)
     assert f"cannot resolve the posting credential {SECRET_ID}" in said
@@ -125,9 +127,9 @@ def test_an_env_only_chain_says_nothing_beyond_its_steps_was_tried():
 
 # --------------------------------------------------------- the steps are env and store
 
-def test_the_steps_are_exactly_env_and_store():
-    """The package has two steps, `env` and `store`; a chain naming any other is refused."""
-    assert secrets.STEPS == ("env", "store")
+def test_the_steps_are_exactly_env_keychain_and_store():
+    """The package has three steps; a chain naming any other is refused."""
+    assert secrets.STEPS == ("env", "keychain", "store")
     with pytest.raises(secrets.SecretError, match="unknown secret resolver 'vault'"):
         secrets.build(["env", "store", "vault"])
 
@@ -139,7 +141,7 @@ from moxi_comms import config, secrets, tokens
 
 store_root, secret_id = sys.argv[1:3]
 cfg = config.load()
-assert list(cfg.secrets.chain) == ["env", "store"], cfg.secrets.chain
+assert list(cfg.credentials.chain) == ["env", "keychain", "store"], cfg.credentials.chain
 got = secrets.from_config(cfg, env={}, store=store_root).get(
     secret_id, owner=tokens.owner_for_role("operator"))
 assert got == {"value": "STORED-TOKEN", "note": ""}, got
@@ -148,8 +150,9 @@ print("ok")
 
 
 def test_a_box_with_no_table_resolves_env_then_store_in_a_fresh_process(tmp_path):
-    """In a fresh interpreter under the test's tmp roots: a box with no config file
-    loads its defaults, builds `env, store` and resolves a real credential."""
+    """In a fresh interpreter under the test's tmp roots, with no usable keychain: a box
+    with no config file loads its defaults, builds `env, keychain, store` and resolves a
+    real credential from the store."""
     TokenStore(tmp_path / "tokens").write_secret(OWNER, SECRET_ID, "STORED-TOKEN")
     out = subprocess.run([sys.executable, "-c", CHILD_DEFAULT, str(tmp_path / "tokens"),
                           SECRET_ID], capture_output=True, text=True, timeout=60)
@@ -161,31 +164,31 @@ def test_a_box_with_no_table_resolves_env_then_store_in_a_fresh_process(tmp_path
 
 def test_the_chain_is_declared_in_the_config_and_defaults_to_env_then_store():
     """Absent means `env, store`; a box that wants one step writes the line."""
-    assert secrets.default_chain() == ("env", "store")
-    assert config.load().secrets.chain == ("env", "store")
-    assert config.SecretsConfig().chain == ("env", "store")
-    assert secrets.build().names == ("env", "store")
+    assert secrets.default_chain() == ("env", "keychain", "store")
+    assert config.load().credentials.chain == ("env", "keychain", "store")
+    assert config.CredentialsConfig().chain == ("env", "keychain", "store")
+    assert secrets.build().names == ("env", "keychain", "store")
 
-    write_config(None, '[secrets]\nchain = ["store"]\n')
-    assert config.load().secrets.chain == ("store",)
+    write_config(None, '[credentials]\nchain = ["store"]\n')
+    assert config.load().credentials.chain == ("store",)
     assert secrets.from_config(config.load()).names == ("store",)
 
 
 def test_config_refuses_a_step_name_that_is_not_a_resolver():
     """A typo fails the box's first read of its own config, not the first send of the
     day; so does a step this package does not have."""
-    for step in ("vault", "keyring"):
-        write_config(None, f'[secrets]\nchain = ["env", "{step}"]\n')
+    for step in ("vault", "keyring", "secrets"):
+        write_config(None, f'[credentials]\nchain = ["env", "{step}"]\n')
         with pytest.raises(config.ConfigError) as e:
             config.load()
         assert f"'{step}'" in str(e.value)
-        assert "env, store" in str(e.value)
+        assert "env, keychain, store" in str(e.value)
 
-    write_config(None, '[secrets]\nchain = []\n')
+    write_config(None, '[credentials]\nchain = []\n')
     with pytest.raises(config.ConfigError, match="empty"):
         config.load()
 
-    write_config(None, '[secrets]\nchain = "env"\n')
+    write_config(None, '[credentials]\nchain = "env"\n')
     with pytest.raises(config.ConfigError):
         config.load()
 
@@ -196,11 +199,11 @@ def test_config_refuses_a_step_name_that_is_not_a_resolver():
 def test_the_secrets_table_may_not_hold_a_token_like_every_other_table():
     """`refuse_secrets` walks `[secrets]` with the rest of the file: the table declares
     WHERE credentials come from and never what they are."""
-    write_config(None, '[secrets]\nchain = ["store"]\nwebhook_url = "https://example/x/y"\n')
+    write_config(None, '[credentials]\nchain = ["store"]\nwebhook_url = "https://example/x/y"\n')
     with pytest.raises(config.ConfigError, match="looks like a secret"):
         config.load()
 
-    write_config(None, '[secrets]\naccess_token = "T"\n')
+    write_config(None, '[credentials]\naccess_token = "T"\n')
     with pytest.raises(config.ConfigError, match="looks like a secret"):
         config.load()
 
@@ -239,7 +242,7 @@ def test_the_operator_credential_takes_the_environment_step_first(tmp_path):
 def test_the_operator_credential_store_only_chain_ignores_the_environment(tmp_path):
     from moxi_comms import directory
 
-    write_config(None, '[secrets]\nchain = ["store"]\n')
+    write_config(None, '[credentials]\nchain = ["store"]\n')
     db = directory.init(tmp_path / "directory.db")
     db.execute("INSERT INTO rooms VALUES ('names', '#names', 'names', '2026-01-01')")
     db.commit()
@@ -263,3 +266,90 @@ def test_every_step_returns_one_json_shape(tmp_path):
         got = chain.get(SECRET_ID, owner=OWNER)
         assert sorted(got) == ["note", "value"], got
         assert isinstance(json.dumps(got), str)
+
+
+# --------------------------------------------------------------------------- the keychain
+
+class FakeKeychain(keyring.backend.KeyringBackend):
+    """A keyring backend held in memory: never the user's own keychain."""
+
+    priority = 1
+
+    def __init__(self):
+        super().__init__()
+        self.kept = {}
+
+    def get_password(self, service, username):
+        return self.kept.get((service, username))
+
+    def set_password(self, service, username, password):
+        self.kept[(service, username)] = password
+
+    def delete_password(self, service, username):
+        self.kept.pop((service, username))
+
+
+class BrokenKeychain(FakeKeychain):
+    def get_password(self, service, username):
+        raise keyring.errors.KeyringError("the keychain is locked")
+
+
+def test_the_keychain_step_reads_and_writes_the_keychain_before_the_store(tmp_path):
+    store = TokenStore(tmp_path / "tokens")
+    fake = FakeKeychain()
+    chain = secrets.build(secrets.DEFAULT_CHAIN, env={}, store=store, keychain=fake)
+    assert chain.put(SECRET_ID, "IN-THE-KEYCHAIN", owner=OWNER) == "keychain"
+    assert fake.kept == {(secrets.KEYCHAIN_SERVICE, f"{OWNER}:{SECRET_ID}"):
+                         "IN-THE-KEYCHAIN"}
+    assert store.read_secret(OWNER, SECRET_ID) is None
+    assert chain.get(SECRET_ID, owner=OWNER)["value"] == "IN-THE-KEYCHAIN"
+    assert chain.delete(SECRET_ID, owner=OWNER) == ["keychain"]
+    assert fake.kept == {}
+
+
+def test_a_keychain_with_no_usable_backend_is_a_miss_and_writes_go_to_the_store(tmp_path):
+    import keyring.backends.fail
+    import keyring.backends.null
+
+    store = TokenStore(tmp_path / "tokens")
+    for backend in (None, keyring.backends.null.Keyring(), keyring.backends.fail.Keyring()):
+        chain = secrets.build(secrets.DEFAULT_CHAIN, env={}, store=store, keychain=backend)
+        assert chain.put(SECRET_ID, "IN-THE-STORE", owner=OWNER) == "store"
+        assert chain.get(SECRET_ID, owner=OWNER)["value"] == "IN-THE-STORE"
+        assert chain.delete(SECRET_ID, owner=OWNER) == ["store"]
+
+
+def test_a_keychain_backend_that_raises_is_a_failure_naming_the_step(tmp_path):
+    store = TokenStore(tmp_path / "tokens")
+    store.write_secret(OWNER, SECRET_ID, "IN-THE-STORE")
+    chain = secrets.build(secrets.DEFAULT_CHAIN, env={}, store=store,
+                          keychain=BrokenKeychain())
+    with pytest.raises(secrets.SecretStepFailed, match="the keychain step failed"):
+        chain.get(SECRET_ID, owner=OWNER)
+
+
+def test_the_old_secrets_table_is_refused_naming_the_new_one():
+    write_config(None, '[secrets]\nchain = ["store"]\n')
+    with pytest.raises(config.ConfigError, match=r"rename the table \[credentials\]"):
+        config.load()
+    with pytest.raises(config.ConfigError, match=r"\[credentials\]"):
+        config.check_text('[secrets]\nroles = ["calendar"]\n')
+
+
+def test_on_windows_the_store_is_private_under_the_profile_whatever_the_mode(tmp_path,
+                                                                             monkeypatch):
+    from moxi_comms import tokens
+
+    profile = tmp_path / "profile"
+    store = TokenStore(profile / "tokens")
+    store.write_secret(OWNER, SECRET_ID, "T")
+    store.path_for(OWNER).chmod(0o644)
+    monkeypatch.setattr(tokens, "_PLATFORM", "win32")
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    assert tokens.private_file(store.path_for(OWNER))
+    assert store.read_secret(OWNER, SECRET_ID) == "T"
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "elsewhere"))
+    assert not tokens.private_file(store.path_for(OWNER))
+    with pytest.raises(tokens.TokenStoreError, match="outside it"):
+        store.read_secret(OWNER, SECRET_ID)

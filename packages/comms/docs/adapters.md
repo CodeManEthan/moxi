@@ -7,21 +7,21 @@ How comms puts mail in front of a model, written from the code in
 ## What an adapter is
 
 An adapter is a daemon-socket client that binds one name, puts that name's mail in front
-of a model at a turn boundary, and writes that name's cursor. One adapter process serves
+of a model at a turn boundary, and reports each turn's end to the daemon, which keeps the
+books. One adapter process serves
 one name. It registers with the daemon as one of the daemon's adapter **kinds**:
 
-| kind | launcher | what it serves |
+| kind | wrapper | what it serves |
 |---|---|---|
 | `claude-shim` | `moxi-comms-claude` | a Claude Code session |
 | `codex` | `moxi-comms-codex` | a Codex thread, through `codex app-server` |
 | `opencode` | `moxi-comms-opencode` | an OpenCode session, through `opencode serve` (see [OpenCode](#opencode)) |
-| `send-only` | | a module's own process holding a name that sends and receives nothing (see [Send-only identities](#send-only-identities)) |
 
-`moxi install comms` puts the launchers in the `moxi` tool's environment, and uv puts none
+`moxi install comms` puts the wrappers in the `moxi` tool's environment, and uv puts none
 of them on PATH, so run one by its path: `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <identity>`. On
 Windows the script is `Scripts\moxi-comms-codex.exe` in the same tool directory; in PowerShell,
 `& "$(uv tool dir)\moxi\Scripts\moxi-comms-codex.exe" <identity>`. The
-Claude launcher also runs as `moxi comms claude`.
+Claude wrapper also runs as `moxi comms claude`.
 
 A kind decides two things. One is the **wire**: how the adapter talks to its CLI, and so
 how mail gets into a turn and how the adapter learns the turn ended. The other is the
@@ -41,7 +41,7 @@ verdict itself (`moxi_comms/kinds.py` states the contract). comms declares its o
 the same way. The daemon reads the group when it starts and refuses a register of any other
 kind; a declaration that does not hold is left out and logged
 (`moxi_comms/kinds.py`). An adapter built outside comms uses `moxi_comms.adapter`: the
-daemon client, the backoff, cursors, the digest and frame line, the attribution tiers
+daemon client, the backoff, the digest and frame line, the attribution tiers
 and the machine line's parse.
 
 ## What a harness is
@@ -54,7 +54,7 @@ agents. Four things make it one:
 - **Mail arrives as model turns in that same live session**, idle or busy, by a way in
   of its own. Comms never types into the person's input box, so what they type and what
   another agent sends never interrupt each other.
-- **The cursor moves only on the CLI's own evidence** that the turn carrying the digest
+- **A digest is acked only on the CLI's own evidence** that the turn carrying it
   completed: an in-band completion event, never a guess from output or timing.
 - **The agent sends as its identity** from that session: its shell inherits the
   session's claim socket (`MOXI_COMMS_CLAIM_SOCKET`), and `moxi comms send` and `moxi comms reply` read
@@ -70,16 +70,16 @@ a harness.
 1. **Its connection is its liveness.** An adapter is an ordinary client of the daemon
    socket. When its process dies the connection closes and the daemon unbinds the name.
    The daemon spawns and supervises nothing.
-2. **A roster names the agents a launcher runs.** `moxi-comms-codex` and `moxi-comms-opencode`
+2. **A roster names the agents a wrapper runs.** `moxi-comms-codex` and `moxi-comms-opencode`
    read theirs from the `[codex]` and `[opencode]` tables of comms' config file: a
    closed key set, and a key that looks like a token is
    refused. `--config PATH` names another comms config file, checked whole, whose table
-   that one launch reads as its roster instead (a launcher checks a candidate file with
+   that one launch reads as its roster instead (a wrapper checks a candidate file with
    `--config PATH --dry-run` before it replaces the box's); every other setting still
    comes from the box's file. A register never starts a process.
 3. **One environment stamp.** The agent's process gets its stamp from
    `stamped_env`, which scrubs every comms variable and sets them again, so authority
-   can't leak in from whoever started the launcher. The adapter is its session's claim
+   can't leak in from whoever started the wrapper. The adapter is its session's claim
    holder and stamps its claim socket into everything it spawns; that socket, not the
    stamp, is what a send speaks as.
 4. **A live binding token.** Registration mints a fresh token for the binding. The
@@ -87,8 +87,8 @@ a harness.
    through the claim socket inside its session. A send needs that live binding, so a
    session whose adapter is not connected cannot send. A daemon restart invalidates
    the old token; the adapter rebinds with backoff, up to 30 seconds plus 20% jitter,
-   and sends wait for that rebind. An older adapter protocol is refused and the session
-   must be relaunched.
+   and sends wait for that rebind. An adapter whose comms wire version the daemon doesn't
+   speak is refused at its hello, and the session must be relaunched.
 5. **One renderer.** Every adapter renders the digest with `render_digest`, so every
    model reads the same frame lines. A frame line ends with the message's marks, each
    only when present: the thread mark (`[1 reply left]` or `[last reply]`) and the posture (`[no reply]`, `[reply-optional]`, `[reply-once]`, or `[open]` on the
@@ -99,9 +99,9 @@ a harness.
    for Codex and OpenCode). After the block comes one line, the same on every harness,
    naming which comms to run by absolute path: the launching install's own `moxi`
    script, since the agent's shell may find another install's `moxi` first. The Codex
-   and OpenCode launchers write it into layer one themselves; the Claude launcher stamps
+   and OpenCode wrappers write it into layer one themselves; the Claude wrapper stamps
    it into the session's environment as `MOXI_COMMS_COMMAND`, and comms' listener writes
-   the line from it (from its own install for a session an older launcher started).
+   the line from it (from its own install for a session an older wrapper started).
    With no `moxi` script to name, every harness's line names the bare `moxi comms`.
    Codex's thread record hashes the director sentence and that line with the rest, so a
    thread whose director changes is handed the new layer one.
@@ -112,14 +112,18 @@ a harness.
      anything newer and with its catch-up notice, only when the adapter's delivery
      reports that nothing reached a live turn, so that trying again at once can't put
      the same digest into a turn it already reached. Any other outcome is a delivery:
-     the digest is recorded, and whether the cursor moves for it is decided by the
-     completion evidence. An error the adapter didn't expect drops the batch, which
+     the digest is recorded, and whether it is acked is decided by the completion
+     evidence. An error the adapter didn't expect drops the batch, which
      replays when the name next binds.
    - **The wait before a retry.** Every batch that goes back waits before the next try,
      one second by default, so an adapter whose delivery keeps failing doesn't spin.
-7. **The adapter is the only cursor writer, and writes only on completion evidence.** A
-   digest whose turn can't be identified stays untracked and replays at the next bind.
-   Replay is the safe direction; a cursor that moved too far is not.
+7. **The adapter reports completion; the daemon keeps the books.** The adapter opens each
+   digest with the daemon (`open_digest`), hands it to turns with the digest's id as its
+   ref, and reports each turn's end (`turn_ended`) with the digests it handled and the
+   ones it didn't. The daemon advances the cursor and deletes the handled rows in one
+   transaction. A digest whose turn can't be identified is reported unhandled and
+   replays. Replay is the safe direction; a cursor that moved too far is not. No adapter
+   writes comms state of its own but its thread or session ids.
 8. **A recorded session is resumed, never replaced.** Where an adapter resumes a session
    (Codex and OpenCode), the session or thread id lives in STATE, written by
    the adapter. A resume that fails is said out loud and retried; the
@@ -138,17 +142,18 @@ a harness.
    with backoff rather than ending the process, since an adapter that exits leaves its
    name silent. An unexpected error is logged with its traceback, said once per
    exception type, and retried. A daemon refusal of the name at start is fatal.
-   `moxi-comms-codex --window` gives up and exits 3 if its thread is never ready to show, and
-   so does `moxi-comms-opencode` if its session never is.
+   `moxi-comms-opencode` gives up and exits 3 if its session is never ready to show.
 10. **The daemon hears about deliveries.** The adapter reports `injected`, with the
-   digest's text, and `activity`, so `moxi comms explain` works for every kind.
+   digest's text, and `activity`, with the digest's id when a turn takes it, so
+   `moxi comms explain` works for every kind.
 
 ## The base
 
 `codex` and `opencode` share one class, `HarnessAdapter` in
 `adapters/harness.py`. It owns
-the daemon binding, the queue and the catch-up hold, the flush path, the daemon side of
-supervision and the two notifications. An adapter for a CLI is a subclass, its **port**,
+the daemon binding, the queue and the catch-up hold, the flush path (which opens each
+digest with the daemon before it renders it), the turn-end report, the daemon side of
+supervision and the notifications. An adapter for a CLI is a subclass, its **port**,
 which fills in these hooks:
 
 | hook | what the port says | default |
@@ -156,6 +161,7 @@ which fills in these hooks:
 | `KIND` | the kind it registers as | |
 | `deliver(text, high, identity, count)` | puts the digest in front of the model; returns `REQUEUE` or a receipt | required |
 | `delivered(..., receipt)` | what to do after the base recorded a delivered digest | nothing |
+| `WAIT_WHEN_HELD` | wait for a name another binding holds, rather than exit refused | true |
 | `retry_delay()` | seconds to wait after a `REQUEUE`, read each time | the base module's `FLUSH_RETRY`, 1.0 |
 | `can_inject()` | whether a digest can go in now, such as "the CLI server is connected" | true |
 | `start_port()` | brings the CLI side up after the bind | nothing |
@@ -169,7 +175,8 @@ The flush path, in order:
 1. Under the lock, return if catch-up is still arriving, the queue is empty,
    `can_inject()` is false, or the port holds one delivery at a time and one is running.
    Otherwise take the queue sorted by message id, and the catch-up notice.
-2. Render the digest and call `deliver`.
+2. Open a digest with the daemon for those ids, keep the ids its answer keeps (a
+   withdrawn or expired one is dropped), render the digest and call `deliver`.
 3. On `REQUEUE`, put the batch back ahead of the queue with its notice, wait
    `retry_delay()`, and wake the flush loop.
 4. On any other value, record the digest and call `delivered` with the receipt. The base never
@@ -177,10 +184,11 @@ The flush path, in order:
 
 Each port maps its own outcomes to `REQUEUE`:
 
-- **Codex** returns `REQUEUE` when the steer or start raised an app-server or JSON-RPC
-  error, so nothing was injected. Its receipt is the turn id. It returns `None` when the
-  text went into a turn that was already running and whose id couldn't be found, or when
-  it gave up steering; nothing tracks that digest, so it replays at the next bind.
+- **Codex** never returns `REQUEUE`. Its receipt is the digest's id, which is also the
+  `ref` it hands turns, and the digest settles from turns' own outcome: at the end of
+  the turn that names the ref, or at once as `unhandled` when turns refuses it or says it
+  is lost, so the daemon hands it again. A hand-in whose answer never came is waited
+  on, not put back: the text may already be in a turn.
 - **OpenCode** returns `REQUEUE` when nothing was admitted: the status read before the
   post doesn't say idle, the post can't connect, or the server answers it with a 5xx, a
   429 or any refusal. Its receipt is the message id comms chose, also when a post got no
@@ -219,13 +227,13 @@ a loop while supervision brings it back.
 
 | harness | kind | how a person sits in the session | what ends a turn | status |
 |---|---|---|---|---|
-| Claude Code | `claude-shim` | `moxi comms claude --name <name>`: the session is the terminal it runs in; the launcher forks the session's adapter process | the turn's end as Moxi turns reports it: a digest is handled when its turn ends with an answer, and handed again when it was interrupted (Esc), ended in an error or refusal, refused, or lost | supported through Moxi turns; the session must load turns' Claude plugin |
-| Codex | `codex` | `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <identity> --window` opens the Codex window on a new thread for each launch | the turn's end as Moxi turns' Codex host reports it: handled on an answer, handed again otherwise | experimental; through Moxi turns |
+| Claude Code | `claude-shim` | `moxi comms claude --name <name>`: the session is the terminal it runs in; the wrapper forks the session's adapter process | the turn's end as Moxi turns reports it: a digest is handled when its turn ends with an answer, and handed again when it was interrupted (Esc), ended in an error or refusal, refused, or lost | supported through Moxi turns; the session must load turns' Claude plugin |
+| Codex | `codex` | `moxi comms codex --name <name>` runs Moxi turns' Codex host in the terminal, with its window, on a new thread for each launch | the turn's end as the host reports it: handled on an answer, handed again otherwise | experimental; through Moxi turns |
 | OpenCode | `opencode` | `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <identity>` opens `opencode attach` on a new session for each launch | the first idle after the model saw the digest, when the turn ended with `finish=stop` | experimental |
 
 comms reads a cache clock for both. A Codex thread's clock is the end of its last
-request in its rollout, under the sessions root its launcher reports; an OpenCode
-session's is the start of its last request in `opencode.db`, at the path the launcher
+request in its rollout, under the sessions root its wrapper reports; an OpenCode
+session's is the start of its last request in `opencode.db`, at the path the wrapper
 asks OpenCode for. Each counts the lifetime its harness, provider and model have in the
 cache module's lifetime table (comms reads both clocks through the cache module; without
 it every agent's mail goes live); a model or provider with no
@@ -236,21 +244,59 @@ the models a longer probe measured, the measured number, lowered by the daemon w
 sees a cache go cold sooner. An OpenCode agent whose next request runs on one of Zen's
 free models is reached at any age. A model change reads cold until the next request on
 the new model, so mail to it is held. A send to anything comms cannot read is refused
-(exit 6, nothing posted, "Nothing was sent." first and last): a launcher built before
+(exit 6, nothing posted, "Nothing was sent." first and last): a wrapper built before
 these reports, a reverted or forked Codex thread, an OpenCode session with a revert
 pending, and a rollout or row comms does not recognise.
 
 ## Codex
 
-**Through turns.** `moxi-comms-codex` writes no hook and runs no app-server. It calls
-Moxi turns' `turns.codex.launch` with the roster row's thread settings (sandbox or
-permission profile, writable roots, network access, model, multi-agent off) and a check
-of what each thread load reports. turns runs the app-server, wires Codex's hooks with
-their per-launch trust, lays the settings on the start and on every resume, and refuses
-to deliver into a load whose settings did not take. `moxi comms doctor` shows why, in
-turns' rows.
+**Through turns' host.** `moxi comms codex` (also `moxi-comms-codex`) starts a Codex
+session through Moxi turns' Codex host, `moxi-turns-codex-host`, the turns command that
+runs `codex app-server` and its hooks and keeps the session's endpoint. Install it with
+`moxi install comms --with codex`.
 
-**One thread.** The launcher delivers into the thread this launch started. /clear, /new
+```text
+moxi comms codex --name NAME [--scope SCOPE | --global] [--director NAME]...
+                 [--model M] [--sandbox MODE | --permissions PROFILE]
+                 [--option KEY=VALUE]... [--options-file F]
+                 [--no-window] [--dry-run]
+
+moxi-comms-codex IDENTITY [--config PATH] [--window] [--dry-run]
+```
+
+The settings flags are the host's own, so a launch reads the same with or without
+comms. The second form reads the row IDENTITY names in the config file's `[codex]` table
+(or in the file `--config` names, checked whole) and turns it into the same flags; it
+runs with no window unless it passes `--window`. The first form runs in the current
+directory, with the host's window unless it passes `--no-window`.
+
+The wrapper checks the whole host line with turns' own parser before anything starts,
+binds the name, forks the session's adapter, writes the comms instructions to a 0600
+file in the session's runtime directory, and execs the host with them, so the host is
+the session's process in the terminal. To every launch comms adds multi-agent off
+(`--option agents.enabled=false`); with no sandbox or permission profile named,
+`--sandbox workspace-write`; and on a sandbox, network access unless the launch sets it
+(the agent's shell needs it to reach the daemon socket) and comms' state directory in
+the writable roots. The host lays the settings on the thread's start and
+every resume, and refuses to deliver into a load whose sandbox did not take; `moxi
+doctor` shows why, in turns' rows. `--dry-run` prints the host line and starts nothing.
+
+A bad flag, row or config file exits 2, a name the daemon refuses (held, reserved,
+retired) exits 3 with the daemon's words, and a daemon that isn't running exits 75, all
+before Codex starts. A host that can't start exits 1. Once the host runs, its exit
+status is the launch's.
+
+**How mail arrives.** Mail goes in at turn boundaries: while no turn runs, the adapter
+hands turns one digest with `deliver`, which starts a turn. Mail that arrives while a
+turn runs, yours or the one a digest started, waits for that turn's end and goes in as
+one digest then. Mail sent with `--interrupt` goes into the running turn at once, by
+turns' `steer`, with `[interrupt]` on its frame line so the model knows why it came
+mid-turn; if the turn ended in between, it goes by `deliver` instead, once. Each digest
+is acked when the turn that took it ends with an answer, and handed again otherwise. A
+hand-in whose answer never came is waited on, not handed again: the text may already be
+in a turn.
+
+**One thread.** The adapter delivers into the thread this launch started. /clear, /new
 and /fork in the window start another thread, and /resume opens one; comms does not
 follow any of them, and mail still goes to the launch's thread. To start fresh, end the
 launch and launch again.
@@ -272,32 +318,34 @@ directors = ["main"]
 # binary  = "/home/me/.opencode/bin/opencode"
 ```
 
-**What runs.** The launcher registers the identity, then starts one
-`opencode serve --hostname 127.0.0.1 --port 0` for it, with the identity and the launcher's claim socket stamped into
+**What runs.** The wrapper registers the identity, then starts one
+`opencode serve --hostname 127.0.0.1 --port 0` for it, with the identity and the wrapper's claim socket stamped into
 the server's environment. OpenCode runs a session's tools in the server's own process,
 so that is what the agent's shell has, and `moxi comms send` from there sends as the
 identity through the claim socket. One server per identity, never shared. The server gets a password made for
-this launch (`OPENCODE_SERVER_PASSWORD`), which the launcher holds; the password keeps
+this launch (`OPENCODE_SERVER_PASSWORD`), which the wrapper holds; the password keeps
 other users and web pages out, not other processes of your own user, which can read the
-server's environment. The launcher creates a new session for each launch and keeps it
+server's environment. The wrapper creates a new session for each launch and keeps it
 while it runs; if that session is gone during the launch, it says so and posts nothing
 more. It opens `opencode attach <url> -s <session>` in your terminal. Closing the window
-stops the launcher and takes the identity offline. If the server dies, the window closes and reopens on the server the
-launcher starts in its place.
+stops the wrapper and takes the identity offline. If the server dies, the window closes and reopens on the server the
+wrapper starts in its place.
 
-**How mail arrives.** The launcher posts each digest to the server
+**How mail arrives.** The wrapper posts each digest to the server
 (`POST /session/:id/prompt_async`) under a message id it chooses. The window is a client
 of the same server and shows the turn as it runs. Nothing is typed into the window, so
-what you have half-typed in its input box stays as it is. The launcher posts only into
+what you have half-typed in its input box stays as it is. The wrapper posts only into
 an idle session: it reads the session's status immediately before each post, and after
 its own post it waits for that turn to end before the next. Mail that arrives meanwhile
-goes as the next digest.
+goes as the next digest. Mail sent with `--interrupt` waits for idle too, and
+`moxi comms agents --seats` says so on an OpenCode name's row: `interrupt delivers at
+idle`.
 
 **What it can't prevent.** OpenCode's session has one loop. A prompt that arrives while
 a turn runs is taken at that turn's next step, and the running turn's own reply is never
 written.
 
-- If you press Enter in the few milliseconds between the launcher's status read and the
+- If you press Enter in the few milliseconds between the wrapper's status read and the
   server admitting its post, the digest lands in your turn, and the reply you asked for
   may not be written. On loopback that window is a few milliseconds, plus the few
   milliseconds between your Enter and the server marking the session busy. This is the
@@ -306,9 +354,9 @@ written.
   the model answers you, and the digest's own reply may not be written. The digest still
   counts as delivered, since the model saw it.
 
-**When the cursor moves.** On the first idle after an assistant message answering the
+**When a digest is acked.** On the first idle after an assistant message answering the
 digest appears, when the turn ended with `finish=stop`. A turn that ends by an abort or
-an error moves nothing, and the digest comes again at the next launch.
+an error is reported unhandled, and the digest is handed again.
 
 **Failures.** A post that can't connect, a busy session, a 5xx or a 429 is tried again
 after a second, and a run of five or more is said once in the status line. Any other
@@ -333,7 +381,7 @@ and train on none by [Zen's terms](https://opencode.ai/docs/zen/) as read on 202
 MiniMax M3.1 Flash Free is free there for a limited time; when it is retired, a launch
 takes the next. If the server offers none of the row's models, the launch uses the first
 free Zen model offered. A launch on any model but the row's first says which before the
-window opens, in the launcher's log and in the identity's status line, and says whether
+window opens, in the wrapper's log and in the identity's status line, and says whether
 it is one of the shipped zero-retention defaults or a model that may keep or train on
 what the session sends it. If no free model is offered, it sets none, and OpenCode uses
 its own default, which may be a paid model if your own credentials allow one. comms never
@@ -344,12 +392,12 @@ in later launches, since a session runs on the model it last used; it may keep o
 on what the session sends it, your `CLAUDE.md` and skill descriptions included. The
 launch default applies to new sessions and to OpenCode's side requests, such as a new
 session's title. A request that runs on any model but the launch default is written to
-the launcher's log and its status line, and nothing more is done.
+the wrapper's log and its status line, and nothing more is done.
 
 **The model list.** OpenCode keeps the list of models it offers in
 `~/.cache/opencode/models.json` (under `$XDG_CACHE_HOME` when that is set) and refreshes
 it in the background, so a server that has just started can still read a list from
-before a model was retired, and choose it. Before it starts the server, the launcher
+before a model was retired, and choose it. Before it starts the server, the wrapper
 therefore runs `opencode models --refresh` under the server's environment, which fetches
 the list and writes it at once (about 1.5 s and a 6 MB download), and chooses the model
 from what the new server then offers. It gives the refresh 20 seconds. A refresh that
@@ -358,40 +406,55 @@ window opens, with how long ago the list was written. The file it refreshes is y
 own OpenCode model cache, which OpenCode rewrites itself every hour. `--dry-run` runs no
 refresh and says that a launch will. Two gaps remain: OpenCode's published list can lag
 Zen, so a model Zen has retired and the list does not yet mark is still chosen and
-fails at its first request; and a server the launcher did not start keeps the list it
+fails at its first request; and a server the wrapper did not start keeps the list it
 read when it started.
 
-**The status line.** While the window covers the terminal, the launcher's status lines
+**The status line.** While the window covers the terminal, the wrapper's status lines
 go to its log under `STATE/comms/opencode/` and to the identity's session file there.
 `moxi comms explain <identity>` prints the newest ones, and when the window closes the
-launcher prints its model notes and any refusal again.
+wrapper prints its model notes and any refusal again.
 
 **Not contained.** OpenCode runs shell commands with no sandbox, as your user. The
 launch config allows file tools outside the project (the shell reaches those files
 anyway) and denies a tool call that keeps repeating itself (OpenCode's `doom_loop`
 ask), so a session nobody is watching never waits on a question. Don't describe an OpenCode agent as contained.
 
-**One session.** The launcher reads and posts into the session this launch created only.
+**One session.** The wrapper reads and posts into the session this launch created only.
 If you open another session in the window (/sessions), mail still goes to the launch's
 session, and you see it when you switch back. /new and /clear are followed: the server
 hears of the new session when you submit its first prompt, and from then on mail goes
 there, starting with any digest still pending in the old one. Until that first prompt
-the launcher cannot know, and mail still goes to the old session.
+the wrapper cannot know, and mail still goes to the old session.
 
-## Send-only identities
+## Reserved send-only names
 
-A send-only identity is a standing row whose directory `kind` is `send-only`, made with
-`"$(uv tool dir)/moxi/bin/moxi-comms-provision" send-only NAME@SCOPE`. Its holder is a module's own process (a
-`ClaimServer` with a daemon arm), which binds it
-with the `send-only` adapter kind. The daemon accepts that kind only for such a row, and
-such a row only with that kind, so no agent session can bind the name and take mail in
-its place.
+A module declares the names it sends under in its announcement's `RESERVED_NAMES`, each
+bare and global (`console`). comms reserves each one when the module installs, with a
+token in the credential chain for that module, and frees it when the module goes. The
+module sends with `moxi_comms.api.send_as(module, name, to, text)`; there is no CLI form.
 
-It uses the same live binding-token path as every other adapter kind. It has no delivery
-queue, and `moxi comms agents --seats` shows it as send-only.
+No session binds a reserved name, of any adapter kind. A session's binding token never
+sends under one, and the daemon refuses a send under one from any process inside a live
+session, or one whose ancestry it can't read: module code sends from outside every
+session. A send-only name an older comms kept is reserved for nobody until a module
+declares it; nothing sends under it meanwhile.
 
-Nothing is delivered to it, bound or not. `moxi comms send` and `moxi comms reply` refuse it as a
-recipient before anything is posted; a record line that names it anyway is delivered to
-nobody, pending for nobody and held for nobody, and opens no ask for it; the daemon never
-sends its binding a `deliver` frame. A bare name typed in another scope is not that
-identity: it resolves in the sender's own scope like any unbound name.
+`moxi comms agents` lists each reserved name after the bindings, as
+`console                  send-only, reserved for launcher` (or `send-only, no module
+holds it` for one an older comms kept), and a message sent under one is marked
+`(send-only)` on its frame line. A name declared but in conflict isn't reserved, so it
+isn't listed; `moxi doctor` reports it.
+
+Nothing is delivered to a reserved name. `moxi comms send` and `moxi comms reply` refuse
+it as a recipient before anything is posted, and the daemon refuses a `send` whose line
+zero names one (`not-mailable`); a record line that names it anyway is delivered to
+nobody, pending for nobody and held for nobody, and opens no ask for it. A scoped name
+(`console@acme`) is not the reserved one: it is an ordinary name.
+
+Mail that was already waiting for a name when a module reserved it is dropped
+undelivered, and stays dropped if the name is freed later: a later holder of a freed name
+is someone else. Its sender is not told. `moxi comms explain <name> <id>` says
+`reserved`, and `moxi comms history` marks it `[dropped for <name>: reserved]`. The
+daemon drops it at its start, at the name's next release point, and when `moxi comms
+agents` or `explain` asks, so a reservation another process made takes effect at the
+next of those. A name in conflict isn't reserved, and keeps its mail.

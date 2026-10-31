@@ -1,27 +1,27 @@
-"""The comms daemon: one gateway connection, one routing table, in memory only.
+"""The comms daemon: one record connection, one routing table, in memory only.
 
 Contract anchors:
   * routing lives in daemon MEMORY ONLY, rebuilt from live connections;
   * addressability = something that can deliver is connected right now;
   * the connection IS the liveness signal (close == deregistration);
   * the `block` setting is enforced HERE, symmetric, read at use;
-  * catch-up replays past the cursor, bounded when the cursor is absent/stale, then
-    `replay_complete`;
-  * a gateway reconnect that could not RESUME triggers the #names rescan;
+  * catch-up at a bind is the name's rows, then `replay_complete`; nothing is replayed
+    from the record, since every routed message holds a row until it is acked or
+    dropped;
+  * a record reconnect that could not RESUME triggers the #names rescan;
   * the queue: every message to a name is delivered live or waits
-    in the name's queue, one table in the record (`queue`) mirrored in `queue` here.
+    in the name's queue, the delivery books' rows in comms.db mirrored in `queue` here.
     Live means: the name is bound, its cache reads `warm`, `fresh` or `no-cache` (or
     `unknown` while the send's `[cold-at:…]` for it is still ahead, or is `-`), and the
     message is not flagged `[held]`. Anything else waits: offline, cold, or flagged. A
     queued message goes out only at the name's next release point (a `ready` with a
-    `source`, a `turn` carrying `handled`, or a register on a passing read), never
-    because another message to the name went out. A turn end whose read does not pass
+    `source`, a `turn_ended`, or a bind on a passing read), never because another
+    message to the name went out. A turn end whose read does not pass
     stays open for a settle window (`RELEASE_SETTLE_STEPS`), read again until
-    a read passes or the window ends. A row is deleted only when the adapter names its
-    id `handled` on a `turn` frame from the binding that was handed it; never by cursor
-    and never at unbind. An `unhandled` id, an id handed and not past the cursor at
-    unbind, and a hand-off whose socket send failed get a row. Rows are never trimmed
-    by age;
+    a read passes or the window ends. A row is deleted only when a `turn_ended` from
+    the binding names the digest that holds it `handled`; never by cursor and never
+    at unbind. An unhandled digest's rows, the rows a binding held at its unbind, and
+    a hand-off whose socket send failed wait again. Rows are never trimmed by age;
   * the audience mark: an absent audience on a reply is
     filled in at `_deliver` from an in-memory index of effective audiences, and what
     the index cannot answer is delivered as `unknown`, never fetched. The index holds
@@ -54,9 +54,9 @@ Contract anchors:
     the owing binding ends; `moxi comms agents` lists them and the author's next prompt delta
     shows the ones naming it. No timer runs anywhere.
 
-Routing stays memory-only. What the daemon also does is JOURNAL custody
-(`bindings.py`): the two moments it alone witnesses -- the bind, and the
-    connection-close release -- are appended to `DATA/comms/bindings.db`. The journal is
+Routing stays memory-only. What the daemon also does is record custody in the binding
+history (`bindings.py`): the two moments it alone witnesses -- the bind, and the
+    connection-close release -- are appended to comms.db's `bindings`. The binding history is
     evidence and never a routing input: after the old record's one-time conversion it is
     read only for whether an identity has existed, and no lookup in it can make anything
     addressable.
@@ -70,29 +70,33 @@ import bisect
 import contextlib
 import hashlib
 import hmac
-import json
 import logging
 import os
 import secrets
 import signal
-import socket
+import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import (attribution, bindings, cache, config, constants, cursors, directory,
-               protocol)
+from moxi import ipc
+
+from . import (attribution, bindings, cache, claimfile, config, constants, directory,
+               membership, wire)
+from .store import books as books_mod
 from .attribution import Author
-from .machine_line import (COLD_AT_LIVE, HELD_TOKEN, NEXT_TURN_TOKEN, POSTURE_NONE,
+from .machine_line import (COLD_AT_LIVE, POSTURE_NONE,
                            POSTURE_ONCE, parse as parse_machine_line)
-from .gateway import Message
+from .record import AUTHOR_IDENTITY, AUTHOR_OPERATOR, Message
 from . import kinds as kinds_mod
-from .paths import cold_gate, daemon_socket, directory_db
-from .protocol import CLI_PROTOCOL, PROTOCOL_VERSION, LineConn
+from . import reserved as reserved_mod
+from .paths import comms_db, daemon_socket
+from .record import Forbidden
 from .provision import NAMES
-from .scoping import GLOBAL, NAME_RE, is_auto_name, qualify, split_tag, tag_matches
+from .scoping import (GLOBAL, NAME_RE, OPERATOR_NAME, is_auto_name, qualify, split_tag,
+                      tag_matches)
 
 log = logging.getLogger("comms.daemon")
 
@@ -103,11 +107,6 @@ TIER_STANDING = attribution.TIER_STANDING
 #: comms' own adapter kinds (`kinds.BUILT_IN`). A module adds kinds through the
 #: `moxi.comms.kinds` group; the daemon accepts these and those (`Daemon.kinds`).
 ADAPTER_KINDS = tuple(kinds_mod.BUILT_IN)
-
-#: The kind a send-only identity binds with: a module's own process holding a name that
-#: sends and receives nothing. The daemon takes it only for a directory row of kind
-#: `send-only`, and takes such a row only with it.
-SEND_ONLY_ADAPTER = "send-only"
 
 #: The sent index is trimmed by age once per this many entries fed, so the cut is paid
 #: rarely rather than once per message.
@@ -156,7 +155,14 @@ CASE_TURN_INCOMPLETE = "delivered-but-the-turn-never-completed"
 #: Not one of the four: the message waits in the name's queue, so nothing has handed it
 #: out since it was queued. `moxi comms explain` checks it before the cursor, so a queued id
 #: never reads `cursor-behind-it`.
-CASE_WAITING = cursors.WAITING
+CASE_WAITING = books_mod.WAITING
+#: Two more: the message left the name's queue undelivered, past its expiry or withdrawn
+#: by its author. Read from the books' `dropped` rows, before every other case.
+CASE_EXPIRED = books_mod.EXPIRED
+CASE_WITHDRAWN = books_mod.WITHDRAWN
+#: And one more, read the same way: the message waited for a name that a module then
+#: reserved, so it was dropped.
+CASE_RESERVED = books_mod.RESERVED
 
 #: The `kind` of an `activity` notify for a turn that ran and ended. With `handled` on
 #: it, it is a release point and settles the ids it names.
@@ -179,17 +185,19 @@ SOURCES_UNREAD = ("startup", "clear", "compact")
 #: before the turn. 8 s, the last step, is eighty times that timer and leaves room for a
 #: loaded machine; a window costs at most this many reads.
 RELEASE_SETTLE_STEPS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
-#: The operator's identity. He has no session to hold mail for, so `[held]` is read as
-#: absent for him: his mail is live when a session of his is bound and waits as offline
-#: mail otherwise.
-OPERATOR_NAME = "operator"
+# The operator's identity, `OPERATOR_NAME`. He has no session to hold mail for, so
+# `[held]` is read as absent for him: his mail is live when a session of his is bound and
+# waits as offline mail otherwise.
 
-#: The record's meta key that says the queue's one-time migration has run.
-META_QUEUE_MIGRATED = "queue_migrated"
+#: The doctor record a daemon that can't open comms.db leaves, and a start that opens it
+#: clears.
+STORE_RECORD = "store"
 
 #: The key a routing pass keeps in its memo beside the cursors: the cache's one read per
 #: binding per pass.
 _GATE_MEMO = "\0gate"
+#: The key a rescan keeps in its memo for the routed mark it read as it began.
+_ROUTED_MEMO = "\0routed"
 
 #: What each case means, for the person reading `moxi comms explain` because an agent has
 #: gone quiet. These live beside the constants so there is one wording and it cannot
@@ -208,6 +216,16 @@ CASE_REASONS = {
         "The adapter reported the message reaching the model and no turn has completed "
         "since. The cursor moves on the adapter's turn boundary and on nothing else, "
         "so a session that died mid-turn stops exactly here."),
+    CASE_EXPIRED: (
+        "The message waited past its expiry and was dropped before it reached the "
+        "model. Its sender was not told; the expiry is on its line zero."),
+    CASE_WITHDRAWN: (
+        "Its author withdrew the message (moxi comms delete) before it reached the "
+        "model, so it was never handed over."),
+    CASE_RESERVED: (
+        "The message was waiting for this name when a module reserved it as a send-only "
+        "name. Nobody receives mail under a reserved name, so it was dropped undelivered, "
+        "and its sender was not told."),
 }
 
 
@@ -247,9 +265,19 @@ class SettleWindow:
         return self.opened + self.steps[self.taken]
 
 
+#: The most bytes of an `injected` digest's text the daemon keeps.
+INJECTED_CAP = 64 * 1024
+
+#: The most `deliver` frames one binding may have out that its adapter hasn't yet taken
+#: into a digest. A push past it waits in the binding's overflow and goes out, by id, as
+#: the adapter takes what it has, so a long catch-up never fills the connection's queue
+#: of frames and drops it.
+WINDOW = 64
+
+
 @dataclass
 class Binding:
-    conn: LineConn
+    conn: object          # the `moxi.ipc.Connection` that holds the binding
     qualified: str
     name: str
     scope: str
@@ -259,7 +287,7 @@ class Binding:
     token_hash: bytes = b""
     replay_hwm: str = "0"     # the record's high-water mark when this binding was made
     delivered: set = field(default_factory=set)
-    journal_id: int | None = None   # the custody interval to close at deregistration
+    history_id: int | None = None   # the custody interval to close at deregistration
     #: The live Claude session behind this binding, as its own adapter last reported it,
     #: and when. Written only from the connection that holds this binding: an
     #: `activity` frame's identity is not authenticated, and a forged id would point
@@ -276,7 +304,7 @@ class Binding:
     turned: bool = False
     #: A codex or opencode binding's evidence for its cache clock, taken only from this
     #: binding's own connection: where its harness keeps the record the clock reads (the
-    #: Codex sessions root, the OpenCode database), the launcher's word on `register`
+    #: Codex sessions root, the OpenCode database), the wrapper's word on `register`
     #: that its own attempt found no record and starts a new thread or session (cleared
     #: once an id is held), and the opencode default agent and its model, `MISSING`
     #: until reported and kept apart from a reported agent with no model.
@@ -284,8 +312,7 @@ class Binding:
     new_session: bool = False
     agent_model: object = cache.MISSING
     #: The newest id CLAIMED for this binding since it registered (what the `owed`
-    #: query reads as undelivered mail). The ids a shim listed in `holding` at register
-    #: are not claims, so a reconnect with no `injected_through` yet reads no mail waiting.
+    #: query reads as undelivered mail).
     handed_max: str = "0"
     #: The ids this binding's adapter named `handled` on a `turn` frame. Their rows are
     #: gone, and an unbind does not queue them again: a queued id can be handled while
@@ -305,6 +332,14 @@ class Binding:
     #: (`_route_recipients`), so a read made in the record's lag never queues a row
     #: behind the release that read past it.
     releases_begun: int = 0
+    #: The ids pushed to the adapter that it hasn't yet taken into a digest (at most
+    #: `WINDOW`), and the claimed ids waiting for room, oldest first, with what their
+    #: `deliver` frame needs.
+    window: set = field(default_factory=set)
+    overflow: dict = field(default_factory=dict)
+    #: The ids a turn of this binding left unhandled, back to `waiting` until the next
+    #: release point. A live send above one waits with them (`_behind_returned`).
+    returned: set = field(default_factory=set)
 
 
 @dataclass
@@ -318,8 +353,8 @@ class Resolution:
     resolvable: bool = True
     deferred: bool = False
     hint: str | None = None       # why it is unresolvable, in the sender's terms
-    #: the directory row at (name, scope) is a send-only identity: never a recipient,
-    #: bound or not
+    #: (name, scope) is a reserved name, active or kept from an older comms: never a
+    #: recipient
     send_only: bool = False
 
 
@@ -328,16 +363,16 @@ def _config_kept(exc) -> None:
 
 
 class Daemon:
-    def __init__(self, gateway, *, db_path=None, socket_path=None, clock=time.time,
-                 start_trim_thread: bool = True, journal_path=None,
-                 first_start=None, migrate=None, gate_path=None, kinds=None, settings=None,
+    def __init__(self, record, *, db_path=None, socket_path=None, clock=time.time,
+                 start_trim_thread: bool = True, history_path=None,
+                 first_start=None, kinds=None, settings=None,
                  cache_store=cache.MISSING):
-        self.gateway = gateway
+        self.record = record
         #: The adapter kinds a register may name: the built-in four and each kind the
         #: `moxi.comms.kinds` group declares (`kinds.load`), read once at construction.
         self.kinds = kinds if kinds is not None else kinds_mod.load()
         #: comms' settings, read at use with the last good kept (`config.Config`): a
-        #: bad edit to the config file mid-run leaves `block` and `[replay]` as they
+        #: bad edit to the config file mid-run leaves `block` and the rest as they
         #: were, and the error is logged once per change of the file. `main` starts it
         #: before anything else, so a file that is bad at start refuses the start.
         if settings is None:
@@ -345,18 +380,12 @@ class Daemon:
             settings.start()
         self.settings = settings
         #: A step `start()` runs after the single-instance probe and before anything
-        #: else, given (gateway, db_path): a daemon on the local backend provisions its
+        #: else, given (record, db_path): a daemon on the local backend provisions its
         #: directory here (`provision.first_start`). None elsewhere.
         self.first_start = first_start
-        #: The local backend's one-time record conversion and idempotent credential-file
-        #: cleanup.  It runs after the journal's boot fence and before the queue load.
-        self.migrate = migrate
-        self.db_path = Path(db_path or directory_db())
+        self.db_path = Path(db_path or comms_db())
         self.socket_path = Path(socket_path or daemon_socket())
         self.clock = clock
-        #: The cold-cache gate file an older daemon kept (`paths.cold_gate`): read once,
-        #: by the queue's migration, and then deleted.
-        self.gate_path = Path(gate_path or cold_gate())
         #: cache's drift store (`cache.open_store(learn=True)`), opened at `start()`:
         #: the daemon is the learner in practice, and cache writes a lowering before the
         #: read that found it returns. None while not started, and when cache is not
@@ -369,32 +398,38 @@ class Daemon:
         self._drift_said: set = set()
         self._drift_lock = threading.Lock()
         self._start_trim_thread = start_trim_thread
-        # custody, journalled: the daemon is the only writer, and the only witness
-        self.journal = bindings.Journal(journal_path, clock=clock)
+        #: How the daemon reads a sender's process ancestry for a send under a reserved
+        #: name; a test hands in its own.
+        self.proc_view: membership.ProcView = membership.DEFAULT_PROC
+        # custody, recorded: the daemon is the only writer, and the only witness
+        self.binding_history = bindings.BindingHistory(history_path, clock=clock)
 
         self._lock = threading.RLock()
         self.bindings: dict[str, Binding] = {}
         #: The newest #names id the ROUTER has taken responsibility for. It is what makes
-        #: the catch-up boundary exact now that the boundary's gateway read happens
+        #: the catch-up boundary exact now that the boundary's record read happens
         #: OUTSIDE the lock: see `_register`.
         self._seen_max = "0"
+        #: The lowest `#names` id the `block` setting kept from routing, or None. The
+        #: routed mark stays below it until a rescan routes it, so the next rescan (at
+        #: boot, too) still finds it. `_skips` counts every such skip, so a rescan knows
+        #: whether the block skipped anything while it ran. Both under `_lock`.
+        self._unrouted: int | None = None
+        self._skips = 0
         #: Set under `_lock` by `stop()` before anything closes. From then on a register
         #: is answered with a close.
         self._stopping = False
         self._auto_seq = 0
         self.auto_windows: dict[str, list] = {}        # agent-N -> [start, end|None]
         #: The queue: qualified -> {message id: the message's epoch, or None until it is
-        #: read}. Every message waiting for a name, offline, cold or flagged alike; the
-        #: record's `queue` table is the durable copy, loaded at boot before the socket
-        #: listens, and memory is the authority for the running daemon.
+        #: read}. Every message waiting for a name, offline, cold or flagged alike: the
+        #: `waiting` rows of the delivery books, loaded at boot before any method is
+        #: answered and written through on every change.
         self.queue: dict[str, dict[str, float | None]] = {}
-        #: (qualified, message id) -> True (add) or False (remove): queue changes the
-        #: record has not taken yet. Written at the end of the change's pass and retried
-        #: at every later one; the last change to a row wins.
-        self._queue_unwritten: dict[tuple[str, str], bool] = {}
-        #: One writer of the queue's record rows at a time, so an older change never
-        #: lands after a newer one.
-        self._queue_write_lock = threading.Lock()
+        #: The delivery books in comms.db (`store.books`): every routed message's row
+        #: per recipient, waiting, handed or in a digest. Each change to `queue` above
+        #: and each hand-over is written through to it at once; opened at boot.
+        self.books = books_mod.Books(self.db_path, clock=clock)
         #: message ids a record line addressed to a send-only identity, logged once
         #: each so a rescan does not say it again. Bounded (`_note_send_only`).
         self.send_only_seen: dict[str, None] = {}
@@ -452,6 +487,19 @@ class Daemon:
         #: It names no standing: it says which message went unanswered, by whom.
         self.unanswered: dict[tuple, dict] = {}
         self.injected_through: dict[str, str] = {}
+        #: Message ids withdrawn by their author in this daemon's life (`delete`). A
+        #: withdrawn message is never handed again: routing, a release and a push all
+        #: check it under `_lock`, and the record's `withdrawn_at` says the same after a
+        #: restart.
+        self.withdrawn: set[str] = set()
+        #: message id -> its line zero's `[expires:...]` Unix second, for every message
+        #: this daemon has parsed that has one and may still hold a row. The expiry
+        #: sweep's timer waits for the soonest after `_swept_at`, the clock of the last
+        #: sweep; a sweep forgets an expired id no binding still holds. Both under
+        #: `_expiry_cond`.
+        self.expires: dict[str, int] = {}
+        self._swept_at = 0.0
+        self._expiry_cond = threading.Condition()
         #: The LAST DIGEST TEXT each live identity was shown.
         #: Carried on the `injected` ping and readable back out with
         #: `query kind="injected"`, so the explainer can show the input and not only
@@ -472,15 +520,32 @@ class Daemon:
         #: have become readable since (`query kind="readable"`).
         self.started_at = self.clock()
 
-        self._server: socket.socket | None = None
-        #: Did THIS daemon actually bind the path? Only a daemon that did may unlink it.
-        #: An old daemon's `stop()` used to delete whatever file was at the path, which
-        #: could be a NEWER daemon's live socket -- and a listening fd cannot be
-        #: re-linked to a name, so the only recovery was a restart.
-        self.bound = False
+        #: The daemon socket's server (`wire.Host`), made at `start()`. `moxi.ipc.serve`
+        #: holds the lock beside the socket for the daemon's life, so a second daemon
+        #: refuses, and removes only the socket it bound.
+        self.host: wire.Host | None = None
         self._threads: list[threading.Thread] = []
         self._stop = threading.Event()
         self._sub = None
+        #: comms' methods on the daemon socket, by name: the reads any client may call,
+        #: `send`, and the adapter's methods on the connection that holds its binding.
+        self._methods = {
+            "send": self._send,
+            "bind": self._bind,
+            # The reads take no connection.
+            **{name: _read(self, f"_{name}_query") for name in (
+                "resolve", "agents", "session", "owner", "asks", "owed", "readable",
+                "explain", "binding_window", "attributed_message", "rooms", "message",
+                "history", "max_id", "last_digest")},
+            "delete": self._delete,
+            "open_digest": self._open_digest,
+            "turn_ended": self._turn_ended,
+            "injected": self._injected,
+            "ready": self._ready,
+            "look": self._look,
+            "activity": self._activity,
+            "unanswered": self._note_unanswered,
+        }
 
     # ------------------------------------------------------------------ directory
     @contextlib.contextmanager
@@ -497,63 +562,85 @@ class Daemon:
             row = directory.room_by_name(conn, NAMES)
             if row is None:
                 raise RuntimeError(f"{NAMES} is not provisioned")
-            return row["channel_id"]
+            return row["room_id"]
 
     # ------------------------------------------------------------------ lifecycle
     def start(self) -> "Daemon":
         # `[cache] required`: a box that says its cold-send hold must hold refuses to
-        # start without the cache module, before anything is probed or written.
+        # start without the cache module, before anything is served or written.
         refusal = cache.required_refusal(self.settings.use("cache").required)
         if refusal:
             raise RuntimeError(refusal)
-        # The PROBE comes first, before anything is written or fenced or unlinked: it is
-        # the one question the rest of boot assumes the answer to. Ask it by knocking.
-        self._probe_or_refuse()
+        # The socket first, before anything is written or fenced: serving it takes the
+        # lock beside it, which is the one question the rest of boot assumes the answer
+        # to. A second daemon refuses here. Clients may connect from now on; their hello
+        # is answered and their first method waits until boot has loaded the queue.
+        self.host = wire.Host(str(self.socket_path), self._call, self._deregister)
+        try:
+            self.host.start()
+        except ipc.AlreadyServing as e:
+            self.host = None
+            who = f"pid {e.holder}" if e.holder else "another process"
+            raise RuntimeError(
+                f"a live comms daemon ({who}) is serving at {self.socket_path}; refusing "
+                f"to start a second one. Stop the running daemon first.") from None
+        except OSError as e:
+            self.host = None
+            raise RuntimeError(f"the comms daemon can't serve {self.socket_path}: {e}") \
+                from None
+        try:
+            self._boot()
+        except BaseException:
+            self.host.close()
+            self.host = None
+            self.books.close()
+            raise
+        return self
+
+    def _boot(self) -> None:
         self.started_at = self.clock()
-        # First-start provisioning, when this daemon has it, runs only now: the probe
-        # has shown that no other daemon holds the socket, so two daemons starting on
-        # one empty home cannot both provision it. It may refuse (RuntimeError).
+        # First-start provisioning, when this daemon has it, runs only now: the lock
+        # shows that no other daemon serves the socket, so two daemons starting on one
+        # empty home cannot both provision it. It may refuse (RuntimeError).
         if self.first_start is not None:
-            self.first_start(self.gateway, self.db_path)
-        # The fence comes after the probe and before the bind. The probe proves no other
-        # daemon can still own an open interval. Live readers use the journal only for
-        # never-bound checks, while the one-time conversion reads older intervals through
-        # its frozen compatibility reader before a new binding can open.
-        if self.journal.open():
-            fenced = self.journal.fence()
+            self.first_start(self.record, self.db_path)
+        # The fence comes after the lock and before any method is answered. The lock
+        # proves no other daemon can still own an open interval. Live readers use the
+        # binding history only for never-bound checks, while the one-time conversion
+        # reads older intervals through its frozen compatibility reader before a new
+        # binding can open.
+        if self.binding_history.open():
+            fenced = self.binding_history.fence()
             if fenced:
                 log.warning("boot fence: closed %d custody interval(s) left open by a "
                             "daemon that did not shut down cleanly", fenced)
-        if self.migrate is not None:
-            self.migrate(self.gateway, self.db_path, self.journal._resolved())
-        # boot: the queue, BEFORE the socket listens, so no register or routing pass can
-        # hand a queued id as live mail. The first boot of this daemon moves the mail an
-        # older daemon held into it first (`_migrate_queue`). A read that RAISES stops
-        # the start here: routing without the queue would hand queued mail as if it
-        # were new.
+        # boot: the reserved names, brought in line with what the installed modules
+        # declare, which catches a module installed before comms and a store restored
+        # from a backup. A failure is logged; the names stay as they were.
+        self._reconcile_reserved()
+        # boot: the delivery books, fenced BEFORE any method is answered: every row a
+        # binding of the last daemon held (handed, or in a digest whose turn never
+        # reported) waits again, and every digest it left open ends `fenced`. Then the
+        # queue, so no bind or routing pass can hand a queued id as live mail. An open
+        # or a read that RAISES stops the start here: routing without the books would
+        # hand queued mail as if it were new.
+        self.books.open()
+        rows, digests = self.books.fence()
+        if rows or digests:
+            log.warning("boot fence: %d row(s) handed by the last daemon wait again, and "
+                        "%d digest(s) it left open are closed", rows, digests)
         self._load_queue()
         # boot: cache's drift store, opened to learn; every lowering is written by it.
         if self._own_store:
             self.cache_store = cache.open_store(learn=True)
-        # boot: the sent index, also before the socket listens, so no `owed` query is
+        # boot: the sent index, also before any method is answered, so no `owed` query is
         # ever answered from a half-read record.
         self._rebuild_sent_logged()
-        self.socket_path.parent.mkdir(parents=True, exist_ok=True)
-        os.chmod(self.socket_path.parent, 0o700)          # RUNTIME dir posture
-        self.socket_path.unlink(missing_ok=True)          # the probe said: stale
-        self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._server.bind(str(self.socket_path))
-        # Before the chmod, not after the listen: from the instant `bind()` returns, the
-        # file at that path is this daemon's, and a failure in chmod or listen must still
-        # leave a daemon that knows to take it away again.
-        self.bound = True
-        os.chmod(self.socket_path, 0o600)                  # 0600 in a 0700 dir
-        self._server.listen(64)
-        self._server.settimeout(0.2)
         self._spawn(self._window_loop)
-        self._spawn(self._accept_loop)
+        self._spawn(self._expiry_loop)
+        self.host.open()
 
-        self._sub = self.gateway.subscribe()
+        self._sub = self.record.subscribe()
         self._spawn(self._event_loop)
         self.trim_record()                                 # boot: retention
         try:
@@ -562,38 +649,25 @@ class Daemon:
             # The rescan queues mail posted to unbound names while no daemon ran. A
             # daemon that cannot do it is still a daemon that can deliver, and refusing
             # to boot would take live routing down with it -- so this is
-            # log-and-continue, exactly as the event loop's rescan already is. Replay
-            # past each name's cursor still finds that mail at its next bind.
-            log.exception("boot rescan failed; replay at each name's next bind finds "
-                          "what it would have queued")
+            # log-and-continue, exactly as the event loop's rescan already is. The
+            # routed mark is held where it stands, so the next rescan or the next boot
+            # still finds what this one would have queued.
+            log.exception("boot rescan failed; the next rescan or boot queues what it "
+                          "would have")
+            self._hold_routed()
         if self._start_trim_thread:
             self._spawn(self._trim_loop)
-        return self
 
-    def _probe_or_refuse(self) -> None:
-        """Knock before taking the path away from whatever is behind it.
+    def _reconcile_reserved(self) -> None:
+        from . import reserved
 
-        A file at `socket_path` used to be treated as debris and unlinked on sight. It
-        may be a LIVE daemon's socket, and unlinking it leaves that daemon LISTENing on
-        an inode with no name: `moxi comms send` gets ENOENT while `ss -xlp` shows the daemon
-        alive, and nothing short of a restart can re-link a listening fd to a name.
-
-        Only two answers let boot continue, and neither of them is silence.
-        """
-        if not self.socket_path.exists():
+        try:
+            result = reserved.reconcile(target=Path(self.db_path))
+        except Exception:                                        # noqa: BLE001
+            log.exception("reserved names: the reconcile at start failed")
             return
-        verdict, error = protocol.probe(self.socket_path)
-        if verdict == protocol.PROBE_LIVE:
-            raise RuntimeError(
-                f"a live comms daemon is listening on {self.socket_path}; refusing to "
-                f"take the path from it. Stop the running daemon first -- "
-                f"`ss -xlp | grep comms` names its pid.")
-        if verdict != protocol.PROBE_STALE:
-            raise RuntimeError(
-                f"{self.socket_path} exists and could not be probed "
-                f"({type(error).__name__}, errno {error.errno}); refusing to unlink a "
-                f"path this daemon cannot show is dead. Find out what holds it -- "
-                f"`ss -xlp` lists unix listeners -- and clear the path by hand.")
+        for line in result.lines:
+            log.info("reserved names: %s", line)
 
     def _spawn(self, target) -> None:
         t = threading.Thread(target=target, daemon=True)
@@ -601,168 +675,257 @@ class Daemon:
         self._threads.append(t)
 
     def stop(self) -> None:
+        """Stop: new `bind` and `send` are answered `stopping`, the socket stops
+        accepting, and every connection closes without waiting on a peer past the write
+        deadline. Each binding's release runs as its connection closes; then the binding
+        history and cache's store close. It takes at most the write deadline and the
+        releases."""
         with self._lock:
             self._stopping = True
         self._stop.set()
         with self._window_cond:
             self._window_cond.notify_all()
-        if self._server:
-            with contextlib.suppress(OSError):
-                self._server.close()
+        with self._expiry_cond:
+            self._expiry_cond.notify_all()
+        if self.host is not None:
+            if not self.host.close():
+                log.warning("the daemon socket did not close within %.0f s",
+                            wire.CLOSE_WAIT)
+            self.host = None
         if self._sub is not None:
-            self.gateway.unsubscribe(self._sub)
-        with self._lock:
-            for b in list(self.bindings.values()):
-                b.conn.close()
+            self.record.unsubscribe(self._sub)
         for t in self._threads:
             t.join(timeout=1.0)
-        # after the serve threads have had their chance to journal their releases; a
-        # write that lands after this is a no-op, and the next boot's fence closes it
-        self.journal.close()
+        # after the connections' releases; a write that lands after this is a no-op,
+        # and the next boot's fence closes it
+        self.binding_history.close()
+        self.books.close()
         if self._own_store and self.cache_store is not None:
             cache.close_store(self.cache_store)      # the learning lock goes with it
             self.cache_store = None
-        # You only remove the socket you put there. A daemon whose `start()` refused, or
-        # was never called, removes nothing -- the file at that path is someone else's.
-        if self.bound:
-            with contextlib.suppress(OSError):
-                self.socket_path.unlink(missing_ok=True)
-            self.bound = False
 
-    # ------------------------------------------------------------------ connections
-    def _accept_loop(self) -> None:
-        while not self._stop.is_set():
-            try:
-                sock, _ = self._server.accept()
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-            self._spawn(lambda s=sock: self._serve(LineConn(s)))
-
-    def _serve(self, conn: LineConn) -> None:
+    # ------------------------------------------------------------------ the wire
+    def _call(self, conn, method: str, params: object):
+        """One comms method from `conn`, on a pool thread: its answer, or the
+        `RpcError` it is refused with. A refusal names its code; an accident is logged
+        and answered `failed`, which a client may try again."""
+        handler = self._methods.get(method)
+        if handler is None:
+            raise ipc.RpcError(wire.METHOD_NOT_FOUND, f"method not found: {method}")
+        if params is None:
+            params = {}
+        if not isinstance(params, dict):
+            raise ipc.RpcError(wire.INVALID_PARAMS, f"{method}: params is an object")
         try:
-            while not self._stop.is_set():
-                frame = conn.recv()
-                if frame is None:
-                    break
-                self._handle(conn, frame)
-        except Exception:
-            log.exception("connection handler failed")
-        finally:
-            self._deregister(conn)
-            conn.close()
-
-    def _handle(self, conn: LineConn, frame: dict) -> None:
-        op = frame.get("op")
-        rid = frame.get("id")
-        try:
-            if op == "register":
-                result = self._register(conn, frame)
-                conn.send({"id": rid, "ok": True, **result})
-                bound = self.bindings[result["identity"]["qualified"]]
-                # Register runs replay first, then its release: the unflagged rows, on a
-                # passing read. Flagged rows wait for a real boundary.
-                self._replay(bound)
-                self._on_register(bound)
-            elif op == "post":
-                conn.send({"id": rid, "ok": True, **self._post(frame)})
-            elif op == "query":
-                conn.send({"id": rid, "ok": True, **self._query(frame)})
-            elif op == "injected":
-                if self._ping_ordered(conn, frame):
-                    with self._lock:
-                        self.injected_through[frame["identity"]] = str(frame["through"])
-                        digest = frame.get("digest")
-                        if digest is not None:
-                            self.injected_digest[frame["identity"]] = str(digest)
-            elif op == "activity":
-                if self._ping_ordered(conn, frame):
-                    kind = frame.get("kind")
-                    turn = kind == ACTIVITY_TURN
-                    with self._lock:
-                        self.activity[frame["identity"]] = self.clock()
-                        # The session id rides the notify, and is taken only
-                        # from the connection that holds this binding: the frame's
-                        # identity is a claim, the connection is not. So are
-                        # `projects_root` and `turned`, and a `kind: turn` sets
-                        # `turned` whatever the frame says. So are `source`,
-                        # `handled` and `unhandled`: a forged frame releases and
-                        # settles nothing.
-                        b = self.bindings.get(frame["identity"])
-                        own = b is not None and b.conn is conn
-                        if own:
-                            self._take_session(b, frame, at=self.clock(), turn=turn)
-                    if own and kind == ACTIVITY_READY:
-                        self._on_ready(b, frame.get("source"))
-                    elif own and kind == ACTIVITY_LOOK:
-                        self._on_look(b)
-                    elif own and turn:
-                        self._on_turn(b, frame)
-            elif op == "unanswered":
-                # Reply enforcement: a shim dropped a debt whose reminder was ignored.
-                # A notify, no reply; accepted only from the connection that holds the
-                # owing binding, since the frame's identity is a claim.
-                self._note_unanswered(conn, frame)
-            elif op == "ping":
-                # The verbs' version check (`protocol.CLI_PROTOCOL`).
-                conn.send({"id": rid, "ok": True, "cli_protocol": CLI_PROTOCOL})
-            elif op == "nudge":
-                # Fanout layer 2.
-                # A CLI process writes the local record itself, so nothing in here knows
-                # the row landed; this frame says so and the pump fans out at once
-                # instead of at the next poll. NO REPLY: it is fire-and-forget
-                # (`DaemonClient.notify`), nobody waits for one, and a frame back would
-                # arrive at a socket already closed.
-                # Only the local gateway has a `nudge`; the mock fans out in-process, so
-                # on the mock this op does nothing.
-                if hasattr(self.gateway, "nudge"):
-                    self.gateway.nudge()
-            else:
-                conn.send({"id": rid, "ok": False, "error": f"unknown op {op!r}"})
+            return handler(conn, params)
+        except ipc.RpcError:
+            raise
         except DaemonStopping:
-            # The freeze turned this register away: close, and say nothing
-            # on the wire. The client reads the close as `DaemonOffline` and retries.
-            log.info("register turned away: the daemon is stopping")
-            conn.close()
+            raise wire.error(wire.STOPPING, "the comms daemon is stopping; try again in "
+                             "a moment") from None
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) and "busy" not in str(e):
+                log.exception("%s failed", method)
+                raise wire.error(wire.FAILED, f"{type(e).__name__}: {e}") from None
+            # comms.db's busy timeout passed: nothing of this method was committed.
+            raise wire.error(wire.STORE_BUSY, "comms' store is busy; try again in a "
+                             "moment") from None
         except Refusal as e:
-            # The daemon's own NO: a name somebody else holds, an address that
-            # cannot resolve. `refused` is the word a shim may act on for good.
-            if op == "register":
+            if method == "bind":
                 # One journal line per refused attempt, naming what was asked. A waiting
-                # shim at the backoff ceiling adds about two a minute; that is the price of
-                # the journal showing the attempt at all.
-                log.warning("register refused: %s: %s", _asked(frame), e)
-            conn.send({"id": rid, "ok": False, "error": str(e), "refused": True,
-                       **e.extra})
-        except Exception as e:  # never take the daemon down for one bad frame
-            # An ACCIDENT, not a refusal: a gateway read that 429'd, a broken socket.
-            # Marked `transient` so a shim that has held its name keeps retrying instead
-            # of reading it as a rival claim (a restart once had three boundary reads
-            # 429 in a burst, and three sessions gave up their names for good).
-            log.exception("op %s failed", op)
-            conn.send({"id": rid, "ok": False, "error": f"{type(e).__name__}: {e}",
-                       "transient": True})
+                # shim at the backoff ceiling adds about two a minute; that is the price
+                # of the journal showing the attempt at all.
+                log.warning("bind refused: %s: %s", _asked(params), e)
+            raise wire.error(e.code, str(e), **e.extra) from None
+        except Exception as e:  # never take the daemon down for one bad message
+            # An ACCIDENT, not a refusal: a record read that failed, say. Answered
+            # `failed`, in the try-again range, so a shim that has held its name keeps
+            # retrying instead of reading it as a rival claim.
+            log.exception("%s failed", method)
+            raise wire.error(wire.FAILED, f"{type(e).__name__}: {e}") from None
+
+    def _own_binding(self, conn, params: dict) -> Binding | None:
+        """The binding `conn` holds that `params` speaks for: the one its `identity`
+        names, or the connection's one binding when it names none. None when the
+        connection holds no such binding."""
+        identity = params.get("identity")
+        with self._lock:
+            if identity:
+                b = self.bindings.get(str(identity))
+                return b if b is not None and b.conn is conn else None
+            mine = [b for b in self.bindings.values() if b.conn is conn]
+        return mine[0] if len(mine) == 1 else None
+
+    @staticmethod
+    def _not_bound(b: Binding | None) -> None:
+        """An adapter's method answers `not-bound` when its connection holds no binding
+        it speaks for. A notification's answer is never written, so an adapter that
+        notifies sees nothing; what the method keeps from an unbound connection, it has
+        kept before this."""
+        if b is None:
+            raise Refusal("this connection holds no binding", code=wire.NOT_BOUND)
+        return None
+
+    def _bind(self, conn, params: dict):
+        """`bind`: the binding, answered with its identity, token and catch-up boundary.
+        Its catch-up follows the answer: the release of the name's unflagged rows on a
+        passing read, then `replay_complete`. Flagged rows wait for a real boundary."""
+        result = self._register(conn, params)
+        bound = self.bindings[result["identity"]["qualified"]]
+
+        def catch_up() -> None:
+            self._on_register(bound)
+            self._replay_complete(bound)
+
+        return wire.Then(result, catch_up)
+
+    def _open_digest(self, conn, params: dict) -> dict:
+        """`open_digest`: the adapter is about to put `ids` in one digest. The rows it
+        may still deliver go in a new digest, whose id the adapter hands turns as the
+        delivery's ref; withdrawn and expired ones are dropped and named. The ids leave
+        the binding's window, which is topped up."""
+        b = self._own_binding(conn, params)
+        self._not_bound(b)
+        ids = params.get("ids")
+        if not isinstance(ids, list):
+            raise Refusal("open_digest: `ids` lists the message ids of the digest",
+                          code=wire.INVALID_PARAMS)
+        asked = {str(i) for i in ids}
+        # Only what this binding was handed goes in its digest: a turn end acks the
+        # digest's rows, and a row the binding never got is not its to ack.
+        with self._lock:
+            mine = [mid for mid in dict.fromkeys(str(i) for i in ids)
+                    if mid in b.delivered]
+        if len(mine) < len(asked):
+            log.info("open_digest from %s names %s, which it was not handed; left out",
+                     b.qualified, ", ".join(sorted(asked - set(mine), key=_as_id)))
+        with self._expiry_cond:
+            expires = {mid: self.expires.get(mid) for mid in mine}
+        opened = self.books.open_digest(b.qualified, b.history_id, mine, expires=expires)
+        if opened.dropped:
+            with self._lock:
+                rows = self.queue.get(b.qualified, {})
+                for gone in opened.dropped:
+                    rows.pop(gone["id"], None)
+                    b.delivered.discard(gone["id"])
+                if not rows:
+                    self.queue.pop(b.qualified, None)
+        self._window_take(b, lambda mid: mid in asked)
+        return {"digest": opened.digest, "ids": opened.ids, "dropped": opened.dropped}
+
+    def _injected(self, conn, params: dict) -> None:
+        """`injected`: the adapter put the digest `digest` names in. Its text is kept on
+        the digest and for `last_digest`, and its highest id is what `explain` reads as
+        injected."""
+        b = self._own_binding(conn, params)
+        if b is None:
+            return self._not_bound(b)
+        identity = b.qualified
+        if not self._ping_ordered(conn, identity, "injected", params.get("seq")):
+            return None
+        text = params.get("text")
+        if isinstance(text, str) and len(text.encode()) > INJECTED_CAP:
+            text = text.encode()[:INJECTED_CAP].decode(errors="ignore")
+        try:
+            digest = int(params.get("digest"))
+        except (TypeError, ValueError):
+            digest = None
+        found = None
+        if digest is not None:
+            try:
+                found = self.books.digest(digest)
+            except Exception:                                      # noqa: BLE001
+                log.exception("could not read digest %s of %s", digest, identity)
+            if found is not None and found["name"] != identity:
+                found = None
+        ids = [] if found is None else found["ids"]
+        with self._lock:
+            if ids:
+                self.injected_through[identity] = max(ids, key=_as_id)
+            if text is not None:
+                self.injected_digest[identity] = str(text)
+        if found is not None and text is not None:
+            self._book("keep the digest text of", identity,
+                       lambda: self.books.injected(identity, digest, str(text)))
+        return None
+
+    def _ready(self, conn, params: dict) -> None:
+        return self._activity(conn, params, kind=ACTIVITY_READY)
+
+    def _look(self, conn, params: dict) -> None:
+        return self._activity(conn, params, kind=ACTIVITY_LOOK)
+
+    def _turn_ended(self, conn, params: dict) -> dict:
+        """`turn_ended`, the ack: a turn of the binding's session ended, answering the
+        digests `handled` names and not the ones `unhandled` names (both digest ids;
+        `turn_id` names the turn, and none is a hand-in that failed before any turn).
+        The books delete the handled digests' rows and advance the cursor, and put the
+        unhandled ones' rows back to waiting, in one transaction. It is a release point
+        with its settle window, and empty lists are the person's own turn ending.
+        Answered with the name's cursor."""
+        b = self._own_binding(conn, params)
+        self._not_bound(b)
+        lists = {}
+        for key in ("handled", "unhandled"):
+            got = params.get(key)
+            if got is None:
+                got = []
+            if not isinstance(got, list):
+                raise Refusal(f"turn_ended: `{key}` lists digest ids",
+                              code=wire.INVALID_PARAMS)
+            lists[key] = got
+        with self._lock:
+            self.activity[b.qualified] = self.clock()
+            self._take_session(b, params, at=self.clock(), turn=True)
+        ended = self.books.turn_ended(b.qualified, lists["handled"], lists["unhandled"])
+        self._on_turn(b, ended)
+        return {"cursor": ended.cursor}
+
+    def _activity(self, conn, params: dict, kind: str | None = None) -> None:
+        """`activity` and its kinds: the session reports, from the binding's own
+        connection, and the release points (`ready`, `look`, a turn's end)."""
+        b = self._own_binding(conn, params)
+        identity = b.qualified if b is not None else str(params.get("identity") or "")
+        method = kind or "activity"
+        if not identity or not self._ping_ordered(conn, identity, method,
+                                                  params.get("seq")):
+            return self._not_bound(b)
+        with self._lock:
+            self.activity[identity] = self.clock()
+            # The session id rides the notification, and is taken only from the
+            # connection that holds this binding: the identity a message names is a
+            # claim, the connection is not. So are `projects_root`, `turned` and
+            # `source`: a forged message releases nothing.
+            if b is not None:
+                self._take_session(b, params, at=self.clock())
+        if b is None:
+            return self._not_bound(b)
+        ref = params.get("ref")
+        if ref is not None:
+            # A turn took this digest: it started, or a steer went in. Not an ack.
+            refs = ref if isinstance(ref, list) else [ref]
+            self._book("mark the digest started of", identity,
+                       lambda: self.books.started(identity, refs))
+        if kind == ACTIVITY_READY:
+            self._on_ready(b, params.get("source"))
+        elif kind == ACTIVITY_LOOK:
+            self._on_look(b)
+        return None
 
     # ------------------------------------------------------------------ register
-    def _register(self, conn: LineConn, frame: dict) -> dict:
-        if frame.get("protocol") != PROTOCOL_VERSION:
-            raise Refusal(
-                "this session's comms adapter is from an older comms release "
-                "(claims protocol 1) and cannot bind to this daemon (protocol 2). "
-                "Relaunch the session to start the current adapter.")
+    def _register(self, conn, frame: dict) -> dict:
         adapter = frame.get("adapter") or "claude-shim"
         if adapter not in self.kinds:
             raise Refusal(f"unknown adapter kind {adapter!r}; expected one of "
-                          f"{', '.join(self.kinds.names())}")
-        # The catch-up boundary is READ BEFORE THE LOCK. It is a gateway round trip -- a
+                          f"{', '.join(self.kinds.names())}", code=wire.UNKNOWN_ADAPTER)
+        # The catch-up boundary is READ BEFORE THE LOCK. It is a record round trip -- a
         # file read, local or mock -- and taking it under the daemon's ONE lock made every register
         # wait out every other register's network call, and every router, resolver and
         # query wait with them.
         #
         # The read is deferred-raise rather than plain, so the REFUSAL ORDER is unchanged:
         # a name that is already bound is refused with the daemon's own words even
-        # when the gateway is also broken, exactly as when the call sat below those checks.
+        # when the record is also broken, exactly as when the call sat below those checks.
         hwm, hwm_error = self._high_water_mark()
         with self._lock, self._db() as db:
             if self._stopping:
@@ -774,43 +937,39 @@ class Daemon:
                 self._auto_seq += 1                     # monotonic; NEVER reused
                 name, scope, tier = f"agent-{self._auto_seq}", GLOBAL, TIER_EPHEMERAL
             else:
-                if not NAME_RE.match(name):
-                    raise Refusal(f"{name!r} is not a valid name")
+                if not isinstance(name, str) or not NAME_RE.match(name):
+                    raise Refusal(f"{name!r} is not a valid name", code=wire.INVALID_PARAMS)
                 if is_auto_name(name):
                     raise Refusal(
                         f"{name!r} is refused: the agent-N namespace is reserved for the "
-                        "auto-namer in every scope")
+                        "auto-namer in every scope", code=wire.NAME_RESERVED, name=name)
                 # A register that names no scope binds global. The frame's `project` is
                 # the session's project, never its scope.
                 scope = GLOBAL if frame.get("global") else (frame.get("scope") or GLOBAL)
                 if directory.retired(db, name, scope):
                     raise Refusal(directory.RETIRED_BIND.format(q=qualify(name, scope),
-                                                                name=name))
+                                                                name=name),
+                                  code=wire.NAME_RETIRED, name=qualify(name, scope))
                 tier = TIER_STANDING if directory.standing_row(db, name, scope) else TIER_CHOSEN
             q = qualify(name, scope)
-            # A send-only identity binds only as what it is, and only it binds that way:
-            # an agent session that bound its name would be handed mail in its place,
-            # and a send-only binding of any other name would take mail nobody reads.
-            send_only_row = tier == TIER_STANDING and directory.is_send_only(db, name, scope)
-            if adapter == SEND_ONLY_ADAPTER and not send_only_row:
-                raise Refusal(
-                    f"{q} is not a send-only identity: the {SEND_ONLY_ADAPTER} adapter kind "
-                    "binds only a name whose directory row is send-only")
-            if send_only_row and adapter != SEND_ONLY_ADAPTER:
-                raise Refusal(
-                    f"{q} is a send-only identity and receives no mail: it binds only "
-                    f"with the {SEND_ONLY_ADAPTER} adapter kind, never as {adapter}")
+            held_for = reserved_mod.lookup(db, q)
+            if held_for is not None:
+                # No session binds a reserved name, of any adapter kind: one in conflict
+                # or kept from an older comms included, so it is still free to reserve
+                # once whatever stood in its way has gone.
+                raise Refusal(reserved_mod.bind_refusal(held_for), code=wire.NAME_RESERVED,
+                              name=q)
             if q in self.bindings:
                 held = self.bindings[q]
                 raise Refusal(
-                    f"{q} is already bound (adapter {held.adapter})",
-                    holder={"qualified": q, "adapter": held.adapter})
+                    f"{q} is already bound (adapter {held.adapter})", code=wire.NAME_HELD,
+                    name=q, holder={"qualified": q, "adapter": held.adapter})
             # The catch-up boundary, FIXED here -- at the same instant the binding becomes
             # visible, and under the same lock. Everything at or below it is replay's
             # business (bounded, possibly dropped); everything above it is live. Without
             # this line a lagging event loop would re-deliver what the bound just omitted.
             #
-            # The gateway's answer above was read before the lock, so it can be stale by
+            # The record's answer above was read before the lock, so it can be stale by
             # the width of the round trip; `_seen_max` is what closes that gap. A message
             # the router handled while this register was in flight was resolved against a
             # table with no binding in it, so live routing will never deliver it -- and if
@@ -835,67 +994,259 @@ class Daemon:
             # binding's own connection by construction. With it, the shim's evidence for
             # `fresh`; an id another live binding holds is refused.
             self._take_session(binding, frame, at=binding.bound_at, register=True)
-            # `holding`: ids the adapter already has queued or injected. Claimed for
-            # this binding at once, so neither replay nor a release hands them again and
-            # a reconnect whose replay finds only these sets nothing off. An id with a
-            # row keeps it: the row goes only when this binding names it `handled`.
-            for mid in frame.get("holding") or ():
-                mid = str(mid)
-                if not mid.isdigit():
-                    continue
-                binding.delivered.add(mid)
-            if adapter == SEND_ONLY_ADAPTER:
-                # Anything queued for the name from before its row was send-only is for
-                # nobody now: a send-only binding is never handed mail.
-                dropped = sorted(self.queue.get(q, {}), key=_as_id)
-                if dropped:
-                    self._queue_drop(q, dropped)
-                    log.info("bind %s: dropped %d message(s) queued for it from before its "
-                             "row was send-only, delivered to nobody: %s", q,
-                             len(dropped), ", ".join(dropped))
             token = secrets.token_urlsafe(32)
             binding.token_hash = hashlib.sha256(token.encode()).digest()
             self.bindings[q] = binding
             if tier == TIER_EPHEMERAL:
                 self.auto_windows[name] = [binding.bound_at, None]
-            # custody, journalled at the moment only the daemon sees it. An `agent-N` is
-            # a binding like any other and is journalled like any other; a failed write
+            # custody, recorded at the moment only the daemon sees it. An `agent-N` is
+            # a binding like any other and is recorded like any other; a failed write
             # returns None and the binding proceeds regardless (evidence, not product).
-            binding.journal_id = self.journal.bind(
+            binding.history_id = self.binding_history.bind(
                 qualified=q, name=name, scope=scope, tier=tier,
                 adapter=adapter, at=binding.bound_at)
             log.info("bind %s tier=%s adapter=%s", q, tier, adapter)
-        # `hwm`, the catch-up boundary: the shim's registration
-        # high-water id. A `re:` below it was sent before that shim could see payments.
-        # `protocol`, this daemon's claims-protocol version: a plugin shim ships its own
-        # copy of the source and checks it on connect.
+        # `high`, the catch-up boundary: the shim's registration high-water id. A `re:`
+        # below it was sent before that shim could see payments.
         return {"identity": {"name": name, "scope": scope, "tier": tier, "qualified": q},
-                "hwm": hwm, "protocol": PROTOCOL_VERSION,
-                "token": token}
+                "high": hwm, "token": token}
 
-    def _post(self, frame: dict) -> dict:
-        """Write one identity row after checking the live binding's credential."""
-        identity = frame.get("identity")
-        token = frame.get("token")
-        content = frame.get("content")
+    def _send(self, conn, params: dict) -> dict:
+        """`send`: one message, written by the daemon, under the credential `as` and
+        `token` present. A bound identity's token is its live binding's; the operator's
+        is the operator's credential, which the record checks."""
+        who = params.get("as")
+        token = params.get("token")
+        content = params.get("content")
+        if not isinstance(who, str) or not who:
+            raise Refusal("send: `as` names the sending identity", code=wire.INVALID_PARAMS)
+        if not isinstance(content, str):
+            raise Refusal("send: `content` is the message's text", code=wire.INVALID_PARAMS)
+        if len(content) > self.record.max_content_length:
+            raise Refusal(
+                f"content is {len(content)} characters, over the "
+                f"{self.record.max_content_length}-character cap on one message",
+                code=wire.TOO_LONG)
+        self._refuse_unmailable(content)
+        with self._lock:
+            # Until the operator's name is reserved, an agent may hold a binding under
+            # it: a live binding of that name sends as itself, with its binding's token.
+            # A send that names the operator's `user` is the operator's own lane, and is
+            # checked against the operator's credential whoever holds the name.
+            operator = who == OPERATOR_NAME and (params.get("user") is not None
+                                                 or who not in self.bindings)
+        if operator:
+            return self._send_as_operator(params, token, content)
         with self._lock, self._db() as db:
             if self._stopping:
-                raise Refusal("the daemon is stopping")
-            binding = self.bindings.get(identity)
+                raise DaemonStopping()
+            row = reserved_mod.lookup(db, who)
+        if row is not None:
+            return self._send_reserved(conn, row, token, content)
+        with self._lock, self._db() as db:
+            if self._stopping:
+                raise DaemonStopping()
+            binding = self.bindings.get(who)
             given = (hashlib.sha256(token.encode()).digest()
                      if isinstance(token, str) else b"")
             if binding is None or not hmac.compare_digest(binding.token_hash, given):
-                raise Refusal("posting credential refused", credential=True)
+                raise Refusal("posting credential refused", code=wire.CREDENTIAL,
+                              credential=True)
             if directory.retired(db, binding.name, binding.scope):
-                raise Refusal(f"{binding.qualified} is retired")
-            if not isinstance(content, str):
-                raise Refusal("post content must be text")
-            if len(content) > self.gateway.max_content_length:
-                raise Refusal(
-                    f"content is {len(content)} characters, over the "
-                    f"{self.gateway.max_content_length}-character cap on one message")
+                raise Refusal(f"{binding.qualified} is retired", code=wire.NAME_RETIRED,
+                              name=binding.qualified)
             qualified = binding.qualified
-        message = self.gateway.post_as_identity(qualified, self._names_channel(), content)
+        message = self.record.post_as_identity(qualified, self._names_channel(), content)
+        return {"message_id": str(message.id)}
+
+    def _refuse_unmailable(self, content: str) -> None:
+        """Refuse a `send` whose line zero names a name nobody mails: a reserved one,
+        active or kept from an older comms. The verbs refuse it first, in their own
+        words; this makes it hold for every sender."""
+        ml = parse_machine_line(content)
+        if ml is None:
+            return
+        for tag in ml.recipients:
+            r = self.resolve(tag)
+            if r.resolvable and r.send_only:
+                raise Refusal(f"{r.qualified} receives no mail: it is a send-only name",
+                              code=wire.NOT_MAILABLE, name=r.qualified)
+
+    def _send_reserved(self, conn, row, token, content: str) -> dict:
+        """A `send` under a reserved name: only its owning module's token sends under it,
+        and never from inside a session. A name an older comms kept, or one in conflict,
+        sends nothing."""
+        name = row["name"]
+        if row["state"] != reserved_mod.ACTIVE:
+            raise Refusal(f"{name} is a reserved name no module holds; nothing sends "
+                          "under it", code=wire.NAME_RESERVED, name=name)
+        given_raw = (hashlib.sha256(token.encode()).digest()
+                     if isinstance(token, str) else None)
+        if given_raw is not None:
+            with self._lock:
+                session_token = any(hmac.compare_digest(b.token_hash, given_raw)
+                                    for b in self.bindings.values() if b.token_hash)
+            if session_token:
+                raise Refusal(f"{name} is reserved for {row['module']}: a session's token "
+                              "never sends under it", code=wire.NAME_RESERVED, name=name)
+        self._refuse_session_peer(conn, name)
+        given = reserved_mod.token_hash(token) if isinstance(token, str) else ""
+        if not row["token_hash"] or not hmac.compare_digest(row["token_hash"], given):
+            raise Refusal("posting credential refused", code=wire.CREDENTIAL,
+                          credential=True)
+        message = self.record.post_as_reserved(name, self._names_channel(), content)
+        log.info("send %s under %s, reserved for %s", message.id, name, row["module"])
+        return {"message_id": str(message.id)}
+
+    def _refuse_session_peer(self, conn, name: str) -> None:
+        """Refuse a send under the reserved `name` from any process inside a live session:
+        the connection's peer, walked up its ancestry against every live claim's roots.
+        A peer the daemon can't place is refused too, never read as outside."""
+        peer = getattr(conn, "peer", None)
+        pid = getattr(peer, "pid", None)
+        ident = getattr(peer, "proc", None)
+        unplaced = Refusal(f"comms can't tell whether this process is inside a session, so "
+                           f"it sends nothing under {name}", code=wire.NAME_RESERVED,
+                           name=name)
+        if not pid or ident is None:
+            raise unplaced
+        from moxi import proc as moxi_proc
+
+        if not moxi_proc.alive(ident):
+            raise unplaced
+        view = self.proc_view
+        try:
+            inside = membership.sessions_of(
+                pid, claimfile.membership_table(claimfile.live_records(view)), view,
+                strict=True)
+        except membership.Unplaceable as e:
+            log.info("send under %s refused: process %s's ancestry stops at %s, which "
+                     "can't be read", name, pid, e.pid)
+            raise unplaced from None
+        if inside:
+            raise Refusal(f"a send under a reserved name from inside a session: {name} "
+                          "sends only from a process outside every session",
+                          code=wire.NAME_RESERVED, name=name)
+
+    def _delete(self, conn, params: dict) -> dict:
+        """`delete`: the author withdraws `message_id` from every recipient that hasn't
+        had it in a digest. Refused `not-sender` for anyone but its author,
+        `already-delivered` when every recipient has had it, `unknown-message` for an
+        id the record doesn't hold. A message withdrawn again answers as the first time
+        did. The record keeps the message, marked withdrawn."""
+        who = params.get("as")
+        token = params.get("token")
+        mid = params.get("message_id")
+        if not isinstance(who, str) or not who:
+            raise Refusal("delete: `as` names the deleting identity",
+                          code=wire.INVALID_PARAMS)
+        if mid is None or not str(mid).isdigit():
+            raise Refusal("delete: `message_id` is a message id",
+                          code=wire.INVALID_PARAMS)
+        mid = str(mid)
+        with self._lock:
+            if self._stopping:
+                raise DaemonStopping()
+            operator = who == OPERATOR_NAME and (params.get("user") is not None
+                                                 or who not in self.bindings)
+        if operator:
+            user = self._operator_user(params)
+            if not self.record.operator_token_ok(token if isinstance(token, str)
+                                                 else None):
+                raise Refusal("the operator's credential was refused",
+                              code=wire.CREDENTIAL, credential=True)
+            author = (AUTHOR_OPERATOR, user)
+        else:
+            with self._lock:
+                binding = self.bindings.get(who)
+                given = (hashlib.sha256(token.encode()).digest()
+                         if isinstance(token, str) else b"")
+                if binding is None or not hmac.compare_digest(binding.token_hash, given):
+                    raise Refusal("posting credential refused", code=wire.CREDENTIAL,
+                                  credential=True)
+                author = (AUTHOR_IDENTITY, binding.qualified)
+        msg = self.record.get_message(mid)
+        if msg is None:
+            raise _unknown_message(mid)
+        if (msg.author_kind, str(msg.author_id)) != author:
+            raise Refusal(f"message {mid} is not yours to delete: only its author may "
+                          "withdraw it", code=wire.NOT_SENDER, message_id=mid)
+        ml = parse_machine_line(msg.content)
+        names = []
+        if ml is not None:
+            for tag in ml.recipients:
+                r = self.resolve(tag)
+                if r.resolvable and not r.send_only and r.qualified not in names:
+                    names.append(r.qualified)
+        # Under the lock, so routing (which checks `withdrawn` under it before it
+        # queues or hands a row) and this delete see one order. A name with no row
+        # that routing hasn't reached yet is withdrawn from too; one routing passed
+        # (acked, or at or below its cursor) had it.
+        with self._lock:
+            through = self.books.routed_through()
+            routed = (through is not None and int(mid) <= through
+                      and not (self._unrouted is not None and int(mid) >= self._unrouted))
+            unrouted = [] if routed else [
+                q for q in names if not self._past_cursor(q, mid, {})]
+            done = self.books.withdraw(mid, unrouted=unrouted)
+            if done.written:
+                self.withdrawn.add(mid)
+                for q in done.withdrawn:
+                    rows_q = self.queue.get(q)
+                    if rows_q is not None:
+                        rows_q.pop(mid, None)
+                        if not rows_q:
+                            self.queue.pop(q, None)
+                    b = self.bindings.get(q)
+                    if b is not None and b.overflow.pop(mid, None) is not None:
+                        b.delivered.discard(mid)
+        if done.written:
+            self._book("mark withdrawn", mid,
+                       lambda: self.record.withdraw(mid, books_mod.stamp(self.clock())))
+            log.info("delete %s by %s: withdrawn from %s; delivered to %s", mid,
+                     author[1], ", ".join(done.withdrawn) or "nobody",
+                     ", ".join(done.delivered) or "nobody")
+        delivered = [q for q in names if q not in done.withdrawn and q not in done.expired]
+        if not done.withdrawn:
+            raise Refusal(f"message {mid} has already reached every recipient; nothing was "
+                          "withdrawn", code=wire.ALREADY_DELIVERED, message_id=mid,
+                          delivered=delivered, expired=list(done.expired))
+        return {"message_id": mid, "withdrawn": list(done.withdrawn),
+                "delivered": delivered, "expired": list(done.expired)}
+
+    def _operator_user(self, params: dict) -> str:
+        """The operator's user id: `user`, or the directory's one operator."""
+        user = params.get("user")
+        if isinstance(user, str) and user:
+            return user
+        with self._db() as db:
+            rows = db.execute("SELECT user_id FROM operators").fetchall()
+        if len(rows) != 1:
+            raise Refusal("the operator's lane: `user` names the operator's user id",
+                          code=wire.INVALID_PARAMS)
+        return rows[0][0]
+
+    def _send_as_operator(self, params: dict, token, content: str) -> dict:
+        """The operator's send. `user` names the operator's user id; without it, the
+        directory's one operator."""
+        with self._lock:
+            if self._stopping:
+                raise DaemonStopping()
+        user = params.get("user")
+        if not isinstance(user, str) or not user:
+            with self._db() as db:
+                rows = db.execute("SELECT user_id FROM operators").fetchall()
+            if len(rows) != 1:
+                raise Refusal("send as the operator: `user` names the operator's user id",
+                              code=wire.INVALID_PARAMS)
+            user = rows[0][0]
+        try:
+            message = self.record.post_as_user(user, self._names_channel(), content,
+                                               token=token if isinstance(token, str)
+                                               else None)
+        except Forbidden as e:
+            raise Refusal(f"the operator's credential was refused: {e}",
+                          code=wire.CREDENTIAL, credential=True) from None
         return {"message_id": str(message.id)}
 
     def _high_water_mark(self):
@@ -903,15 +1254,16 @@ class Daemon:
 
         One read per register, concurrent with every other register's: no register
         waits out another's round trip. A failed read fails the register `transient`, and
-        the shim's backoff retries it a moment later. See `_handle`.
+        the shim's backoff retries it a moment later. See `_register`.
         """
         try:
-            return self.gateway.max_message_id(self._names_channel()) or "0", None
+            return self.record.max_message_id(self._names_channel()) or "0", None
         except Exception as e:            # re-raised by the caller, in the old call's place
             return "0", e
 
-    def _ping_ordered(self, conn: LineConn, frame: dict) -> bool:
-        """Is this `activity` / `injected` ping newer than the last from its source?
+    def _ping_ordered(self, conn, identity: str, method: str, raw) -> bool:
+        """Is this ordered notification (`activity` and its kinds, `injected`) newer
+        than the last from its source? `raw` is its `seq`.
 
         The SOURCE is `(connection, identity)` -- one adapter process's attachment to
         this daemon, reporting on one name. That is the grain the sender numbers at
@@ -927,25 +1279,26 @@ class Daemon:
         the counter alone. These pings are hints, and dropping a real one costs the same as
         losing it.
         """
-        raw = frame.get("seq")
         if raw is None:
             return True
         try:
             seq = int(raw)
         except (TypeError, ValueError):
             return True
-        identity = frame.get("identity")
         with self._lock:
             seen = self._ping_seq.setdefault(conn, {})
             last = seen.get(identity)
             if last is not None and seq <= last:
                 log.debug("dropped a stale %s ping for %s: seq %s is not past %s",
-                          frame.get("op"), identity, seq, last)
+                          method, identity, seq, last)
                 return False
             seen[identity] = seq
         return True
 
-    def _deregister(self, conn: LineConn) -> None:
+    def _deregister(self, conn) -> None:
+        """A connection closed: each binding it held ends. Its handed mail not yet
+        handled is queued again for the name's next binding. A peer that stopped reading
+        is dropped by `moxi.ipc` after the write deadline, and ends here the same way."""
         with self._lock:
             # The ping counters die with the connection that fed them: the next
             # process to hold this name comes in on a new connection and starts its
@@ -970,86 +1323,107 @@ class Daemon:
                     del self.unanswered[key]
                 # the close of the custody interval: the connection IS the liveness
                 # signal, so the connection's end is the release, here and nowhere else
-                self.journal.release(b.journal_id)
-                log.info("unbind %s", b.qualified)
+                self.binding_history.release(b.history_id)
+                log.info("unbind %s: its connection from pid %s ended (a peer that stops "
+                         "reading is dropped after %.0f s)", b.qualified,
+                         getattr(getattr(conn, "peer", None), "pid", None),
+                         wire.WRITE_DEADLINE)
         if gone:
             self._queue_flush()
 
     # ------------------------------------------------------------------ query
-    def _query(self, frame: dict) -> dict:
-        kind = frame.get("kind")
-        if kind == "resolve":
-            return self._resolve_query(frame)
-        if kind == "agents":
-            with self._lock:
-                bindings = [{"qualified": b.qualified, "name": b.name, "scope": b.scope,
-                             "tier": b.tier, "adapter": b.adapter,
-                             "endpoint": b.endpoint, "endpoint_since": b.endpoint_since}
-                            for b in sorted(self.bindings.values(), key=lambda x: x.qualified)]
-                now = self.clock()
-                waiting = self._waiting_view(now)
-                unanswered = self._unanswered_rows(now)
-            # `waiting`: what waits in the queue for each name, one count, since one
-            # queue holds offline, cold and flagged mail alike and no reason is stored.
-            # `pending` stays in the answer, always empty and read by nothing here: an
-            # adapter started before the queue checks for it before it renders a roster.
-            return {"bindings": bindings, "waiting": waiting, "pending": {},
-                    "unanswered": unanswered}
-        if kind == "injected":
-            # The LAST DIGEST a live identity was shown. The read surface
-            # `moxi comms explain` reads to show the INPUT and not only the
-            # verdict. `identity` is a qualified name, exactly as `kind="agents"`
-            # prints it -- nothing is resolved here, because an explainer asking about
-            # a name is asking about the binding it just listed.
-            #
-            #     -> {"op": "query", "kind": "injected", "identity": "planner@proj-a"}
-            #     <- {"ok": true, "identity": "planner@proj-a", "bound": true,
-            #         "through": "1552...", "digest": "<the text>"}
-            #
-            # `digest` is None when nothing has been injected into this binding yet,
-            # and the whole row is empty once the binding ends: this is runtime state
-            # for a LIVE identity, not a history. It is never a refusal to ask about a
-            # name that is not bound -- `bound: false` is the answer.
-            identity = str(frame.get("identity") or "")
-            with self._lock:
-                return {"identity": identity,
-                        "bound": identity in self.bindings,
-                        "through": self.injected_through.get(identity),
-                        "digest": self.injected_digest.get(identity)}
-        if kind == "session":
-            return self._session_query(frame)
-        if kind == "owner":
-            return self._owner_query(frame)
-        if kind == "asks":
-            return self._asks_query(frame)
-        if kind == "owed":
-            return self._owed_query(frame)
-        if kind == "readable":
-            return self._readable_query(frame)
-        if kind == "explain":
-            return self._explain_query(frame)
-        if kind == "binding_window":
-            with self._lock:
-                window = self.auto_windows.get(frame.get("name"))
-            return {"window": window}
-        # --- record reads, for callers outside comms --------------------------------
-        # Comms' own CLI opens the record directly. Other modules (`record_history`,
-        # `attributed_message`) read it through these queries.
-        if kind == "record_message":
-            msg = self.gateway.get_message(str(frame.get("message_id")))
-            return {"message": msg.to_dict() if msg else None}
-        if kind == "attributed_message":
-            return self._attributed_message_query(frame)
-        if kind == "record_history":
-            channel_id = frame.get("channel_id") or self._names_channel()
-            msgs = self.gateway.history(str(channel_id), after=frame.get("after"),
-                                        limit=frame.get("limit"))
-            return {"messages": [m.to_dict() for m in msgs]}
-        if kind == "record_max_id":
-            channel_id = frame.get("channel_id")
-            return {"message_id": self.gateway.max_message_id(
-                str(channel_id) if channel_id else None)}
-        raise Refusal(f"unknown query kind {kind!r}")
+    def _agents_query(self, frame: dict) -> dict:
+        self._drop_reserved()
+        with self._lock:
+            bindings = [{"qualified": b.qualified, "name": b.name, "scope": b.scope,
+                         "tier": b.tier, "adapter": b.adapter,
+                         "endpoint": b.endpoint, "endpoint_since": b.endpoint_since}
+                        for b in sorted(self.bindings.values(), key=lambda x: x.qualified)]
+            now = self.clock()
+            waiting = self._waiting_view(now)
+            unanswered = self._unanswered_rows(now)
+        # `waiting`: what waits in the queue for each name, one count, since one
+        # queue holds offline, cold and flagged mail alike and no reason is stored.
+        # `pending` stays in the answer, always empty and read by nothing here: an
+        # adapter started before the queue checks for it before it renders a roster.
+        # `standing`: the standing names, bound or not, read from comms.db per call.
+        return {"bindings": bindings, "waiting": waiting, "pending": {},
+                "unanswered": unanswered, "standing": self._standing_view()}
+
+    def _standing_view(self) -> list:
+        """The standing names, for `agents`: each directory row (kind `agent`), then
+        each reserved name not freed that is active or kept from an older comms (kind
+        `send-only`), as {qualified, name, scope, kind, module}. `module` is the module
+        a name is reserved for, or declared by when it is in conflict, and None when no
+        module owns it. A conflict row isn't reserved, so it is no send-only name. A
+        store that can't be read lists none."""
+        try:
+            with self._db() as db:
+                rows = directory.standing_rows(db)
+                held = {r["name"]: (r["module"], r["state"]) for r in db.execute(
+                    "SELECT name, module, state FROM reserved WHERE freed_at IS NULL")}
+        except sqlite3.Error:
+            log.exception("agents: the standing names couldn't be read")
+            return []
+        out = []
+        for r in rows:
+            q = qualify(r["name"], r["scope"])
+            out.append({"qualified": q, "name": r["name"], "scope": r["scope"],
+                        "kind": directory.KIND_AGENT, "module": held.get(q, (None,))[0]})
+        seen = {e["qualified"] for e in out}
+        for q, (module, state) in sorted(held.items()):
+            if q in seen or state not in (reserved_mod.ACTIVE, reserved_mod.UNOWNED):
+                continue
+            name, scope = split_tag(q)
+            out.append({"qualified": q, "name": name, "scope": scope or GLOBAL,
+                        "kind": reserved_mod.SEND_ONLY, "module": module})
+        return out
+
+    def _last_digest_query(self, frame: dict) -> dict:
+        """The LAST DIGEST a live identity was shown: what `moxi comms explain` reads to
+        show the INPUT and not only the verdict. `identity` is a qualified name, exactly
+        as `agents` prints it; nothing is resolved here.
+
+        `digest` is None when nothing has been injected into this binding yet, and the
+        whole row is empty once the binding ends: this is runtime state for a LIVE
+        identity, not a history. It is never a refusal to ask about a name that is not
+        bound: `bound: false` is the answer."""
+        identity = str(frame.get("identity") or "")
+        with self._lock:
+            return {"identity": identity,
+                    "bound": identity in self.bindings,
+                    "through": self.injected_through.get(identity),
+                    "digest": self.injected_digest.get(identity)}
+
+    def _binding_window_query(self, frame: dict) -> dict:
+        with self._lock:
+            window = self.auto_windows.get(frame.get("name"))
+        return {"window": window}
+
+    def _rooms_query(self, frame: dict) -> dict:
+        """The rooms the directory names: id, name and kind."""
+        with self._db() as db:
+            rows = db.execute("SELECT room_id, name, kind FROM rooms ORDER BY name").fetchall()
+        return {"rooms": [{"room_id": r[0], "name": r[1], "kind": r[2]} for r in rows]}
+
+    # --- record reads, for callers outside comms ------------------------------------
+    def _message_query(self, frame: dict) -> dict:
+        mid = str(frame.get("message_id"))
+        msg = self.record.get_message(mid)
+        if msg is None:
+            raise _unknown_message(mid)
+        return {"message": msg.to_dict()}
+
+    def _history_query(self, frame: dict) -> dict:
+        channel_id = frame.get("channel_id") or self._names_channel()
+        msgs = self.record.history(str(channel_id), after=frame.get("after"),
+                                   limit=frame.get("limit"))
+        return {"messages": [m.to_dict() for m in msgs]}
+
+    def _max_id_query(self, frame: dict) -> dict:
+        channel_id = frame.get("channel_id")
+        return {"message_id": self.record.max_message_id(
+            str(channel_id) if channel_id else None)}
 
     def _session_query(self, frame: dict) -> dict:
         """Which live session sits behind one bound name, and since when.
@@ -1112,8 +1486,7 @@ class Daemon:
         live binding holds the id: a session this daemon never heard of and one whose
         binding has ended both answer the same, since the daemon keeps nothing for an
         id once its binding lets go.
-        `adapter` is that binding's kind, null with no owner; a `send-only` binding
-        answers here only if its own register carried a session id. `awaiting` is the
+        `adapter` is that binding's kind, null with no owner. `awaiting` is the
         owner's list as `owed` computes it (`_awaiting`, the same call under the same
         lock), empty with no owner.
 
@@ -1140,7 +1513,7 @@ class Daemon:
 
             -> {"op": "query", "kind": "attributed_message",
                 "message_id": "4611686018427387905"}
-            <- {"ok": true, "message_id": "4611686018427387905", "found": true,
+            <- {"message_id": "4611686018427387905",
                 "room": "#names",
                 "author": {"name": "planner@proj-a", "tier": "chosen",
                            "attribution": "verified"},
@@ -1148,7 +1521,7 @@ class Daemon:
                 "text": "the body, line zero removed",
                 "timestamp": "2026-01-01T12:00:00Z"}
 
-        `author` is `attribute(msg, live=False)`: the record and the custody journal,
+        `author` is `attribute(msg, live=False)`: the record and the binding history,
         the function replay delivers by and `moxi comms history` and `moxi comms reply` print. It
         answers for who held the posting seat at the message's own timestamp, never for
         whoever holds it now, so it can never say `verified` where live delivery said
@@ -1159,8 +1532,8 @@ class Daemon:
         no machine line has no recipients, and its `text` is the whole body. `room` is the
         room's name; only `#names` is routed.
 
-        An id the record does not hold answers `found: false` with every other field
-        null or empty; never a refusal. An id that is not a message id is refused.
+        An id the record does not hold is refused `unknown-message`, naming the id. An
+        id that is not a message id is refused as a bad param.
 
         A READ. It changes no hold, pend, delivery, cursor or ask state. Who may ask:
         any process that can open this socket, as for `record_message`, `session` and
@@ -1172,10 +1545,9 @@ class Daemon:
         mid = str(raw).strip() if isinstance(raw, (str, int)) else ""
         if not mid.isdigit():
             raise Refusal("attributed_message: `message_id` must be a message id")
-        msg = self.gateway.get_message(mid)
+        msg = self.record.get_message(mid)
         if msg is None:
-            return {"message_id": mid, "found": False, "room": None, "author": None,
-                    "recipients": [], "resolved": [], "text": None, "timestamp": None}
+            raise _unknown_message(mid)
         author = self.attribute(msg, live=False)
         ml = parse_machine_line(msg.content)
         tags = list(ml.recipients) if ml is not None else []
@@ -1183,8 +1555,8 @@ class Daemon:
         for tag in tags:
             r = self.resolve(tag)
             resolved.append(r.qualified if r.resolvable else None)
-        return {"message_id": msg.id, "found": True,
-                "room": self.gateway.channel_name(msg.channel_id) or msg.channel_id,
+        return {"message_id": msg.id,
+                "room": self.record.channel_name(msg.channel_id) or msg.channel_id,
                 "author": {"name": author.qualified, "tier": author.tier,
                            "attribution": author.attribution},
                 "recipients": tags, "resolved": resolved,
@@ -1209,7 +1581,10 @@ class Daemon:
           cursor and the hand-over times `handed_at` still holds, and that is what makes
           the not-addressable case answerable at all.
         * **Not a ledger.** Nothing is recorded because this was asked. Asking costs two
-          cursor read (`moxi comms explain` is not on any hot path).
+          cursor read (`moxi comms explain` is not on any hot path). The one write it
+          can cause is the books catching up with a reservation another process made:
+          mail queued for the name before it was reserved is dropped first, as the next
+          release would drop it, so the answer says `reserved` rather than `waiting`.
 
         `identity` is a qualified name, taken literally, exactly as `kind="agents"`
         prints it. `message_id` names the message to explain; without one the daemon
@@ -1218,6 +1593,7 @@ class Daemon:
         """
         identity = str(frame.get("identity") or "")
         asked = frame.get("message_id")
+        self._drop_reserved(identity)
         now = self.clock()
         with self._lock:
             b = self.bindings.get(identity)
@@ -1247,15 +1623,31 @@ class Daemon:
             # is still explainable and its delivery age is not. Said, not guessed at.
             "delivered_for": None if handed_at is None else now - handed_at,
             "asked_for": asked is not None}
-        cursor = cursors.explain(identity, message_id)
+        try:
+            row = self.books.cursor_row(identity) if self.books.is_open else None
+        except Exception:                                          # noqa: BLE001
+            log.exception("explain: could not read the cursor of %s", identity)
+            row = None
+        cursor = books_mod.explain_cursor(row, message_id)
         case = case_error = None
-        if message_id is not None and message_id in waiting:
+        dropped = None
+        if message_id is not None and self.books.is_open:
+            try:
+                dropped = self.books.dropped_reason(identity, message_id)
+            except (TypeError, ValueError):
+                dropped = None
+            except Exception:                                      # noqa: BLE001
+                log.exception("explain: could not read why %s left %s's queue",
+                              message_id, identity)
+        if dropped is not None:
+            case = dropped
+        elif message_id is not None and message_id in waiting:
             # Queued BEFORE the cursor: a queued id is not `cursor-behind-it`, whose
             # sentence says a turn that would advance it has not completed -- not why
             # it waits.
             case = CASE_WAITING
-            cursor = {**cursor, "reason": cursors.WAITING,
-                      "sentence": cursors.REASONS[cursors.WAITING]}
+            cursor = {**cursor, "reason": books_mod.WAITING,
+                      "sentence": books_mod.REASONS[books_mod.WAITING]}
         elif message_id is not None:
             try:
                 case = self.classify(identity, message_id)
@@ -1287,17 +1679,18 @@ class Daemon:
         if not r.resolvable:
             raise Refusal(r.hint or (
                 f"{tag}: no such ephemeral identity. agent-N names are never reused and a "
-                "retired one is nobody -- there is nothing to deliver to."))
+                "retired one is nobody -- there is nothing to deliver to."),
+                code=wire.NAME_RETIRED if r.hint else wire.NAME_UNKNOWN, name=r.qualified)
         bound = r.binding is not None
-        ever = True if bound else self.journal.ever_bound(r.name, r.scope)
+        ever = True if bound else self.binding_history.ever_bound(r.name, r.scope)
         answer = {"tier": r.tier, "route": NAMES, "qualified": r.qualified,
                   "bound": bound, "deferred": r.deferred,
                   "send_only": r.send_only,
                   # the directory fact, read at the SAME (name, scope) the send resolved
                   # to -- not the live binding's tier, which can predate a row being added
                   "standing_row": self.has_standing_row(r.name, r.scope),
-                  # has this exact identity ever been bound (the custody journal)? None
-                  # when the journal cannot say; the send's never-bound check reads it
+                  # has this exact identity ever been bound (the binding history)? None
+                  # when the binding history cannot say; the send's never-bound check reads it
                   "ever_bound": ever}
         if ever is False:
             # The identities of this name that were bound, for that refusal to name:
@@ -1307,15 +1700,15 @@ class Daemon:
         return answer
 
     def _seen_as(self, name: str, scope: str) -> list:
-        """The other identities of `name` the journal has seen bound, most recent first,
+        """The other identities of `name` the binding history has seen bound, most recent first,
         leaving out retired and send-only ones."""
-        scopes = [sc for sc in self.journal.known_scopes(name) if sc != scope]
+        scopes = [sc for sc in self.binding_history.known_scopes(name) if sc != scope]
         if not scopes:
             return []
         with self._db() as db:
             return [qualify(name, sc) for sc in scopes
                     if not directory.retired(db, name, sc)
-                    and not directory.is_send_only(db, name, sc)]
+                    and not reserved_mod.unmailable(db, qualify(name, sc))]
 
     def has_standing_row(self, name: str, scope: str) -> bool:
         """Is there an active standing row at this exact (name, scope)? Read per call."""
@@ -1328,9 +1721,9 @@ class Daemon:
         send-only or retired."""
         with self._lock, self._db() as db:
             r = self._resolve(db, tag)
-            # The row decides, bound or not: a send-only identity is never a recipient.
-            if r.resolvable and r.tier == TIER_STANDING:
-                r.send_only = directory.is_send_only(db, r.name, r.scope)
+            # The row decides, bound or not: a reserved name is never a recipient.
+            if r.resolvable and reserved_mod.unmailable(db, r.qualified):
+                r.send_only = True
             return r
 
     def _resolve(self, db, tag: str) -> Resolution:
@@ -1350,7 +1743,7 @@ class Daemon:
         tier = TIER_STANDING if directory.standing_row(db, name, scope) else TIER_CHOSEN
         return Resolution(tag, name, scope, q, tier, b, deferred=b is None)
 
-    # ------------------------------------------------------------------ gateway
+    # ------------------------------------------------------------------ record events
     def _event_loop(self) -> None:
         while not self._stop.is_set():
             event = self._sub.next_event(timeout=0.2)
@@ -1362,19 +1755,37 @@ class Daemon:
                 elif event["t"] == "READY" and not event.get("resumed"):
                     # fresh IDENTIFY: events in the gap are gone from the socket. The
                     # record still has them -- re-derive rather than continue blind.
-                    log.warning("gateway reconnected without RESUME; rescanning %s", NAMES)
+                    log.warning("record reconnected without RESUME; rescanning %s", NAMES)
                     self.rescan()
             except Exception:
                 log.exception("event handling failed")
 
     def rescan(self) -> None:
-        """Route the record's newest `RESCAN_LIMIT` messages again: mail to an unbound
-        name gets a row, and mail a bound name has not been handed is routed as live."""
+        """Route the record again: every message above the routed mark, however many,
+        and the newest `RESCAN_LIMIT` for the indexes. Mail to an unbound name gets a
+        row, and mail a bound name has not been handed is routed as live. With no
+        routed mark (a home that has routed nothing since its migration) the pass is
+        the newest `RESCAN_LIMIT`, gated by each name's cursor alone."""
         channel_id = self._names_channel()
-        msgs = self.gateway.history(channel_id, limit=constants.RESCAN_LIMIT)
+        msgs = self.record.history(channel_id, limit=constants.RESCAN_LIMIT)
         with self._lock:
             self.rescans += 1
-        memo: dict[str, str | None] = {}   # one cursor read per name for THIS pass only
+            skips = self._skips
+        memo: dict = {}   # one cursor read per name for THIS pass only
+        # The ids routed before this pass began have their rows, or had them until they
+        # were acked: the pass routes only what is above them.
+        try:
+            through = self.books.routed_through() if self.books.is_open else None
+        except Exception:                                          # noqa: BLE001
+            log.exception("rescan: could not read the routed mark; every message is "
+                          "routed by its cursor alone")
+            through = None
+        memo[_ROUTED_MEMO] = through
+        if (through is not None and len(msgs) >= constants.RESCAN_LIMIT
+                and _as_id(msgs[0].id) > through + 1):
+            # The newest window does not reach down to the mark: everything above the
+            # mark is read, so no message the daemon never routed is left behind.
+            msgs = self.record.history(channel_id, after=str(through))
         try:
             for m in msgs:
                 try:
@@ -1385,6 +1796,15 @@ class Daemon:
                     # re-reads the same record and has the same reason to.
                     log.exception("rescan: routing message %s failed",
                                   getattr(m, "id", "?"))
+            # The pass routed what the block had kept back, unless the block skipped
+            # more while it ran: the mark may rise past those ids now.
+            last = _as_id(msgs[-1].id) if msgs else -1
+            with self._lock:
+                cleared = self._skips == skips and self._unrouted is not None
+                if cleared:
+                    self._unrouted = None
+            if cleared and last > 0:
+                self._raise_routed(last)
         finally:
             self._end_pass(memo)
 
@@ -1398,11 +1818,23 @@ class Daemon:
         becomes a row, never a delivery; and no row is written for an id at or below
         the name's cursor. A row that exists is never re-created or dropped here."""
         opening = None          # decided at the first recipient: does this pass create it?
+        through = memo.get(_ROUTED_MEMO) if backlog else None
+        routed = through is not None and _as_id(msg.id) <= through
         for position, tag in enumerate(ml.recipients):
             r = self.resolve(tag)
             if opens or ml.reply_to is not None:
                 opening = self._index_ask(msg, ml, author, r, opens=opens, opening=opening)
+            if routed:
+                # Routed before this pass: its rows are in the books, or it was acked.
+                continue
             q = r.qualified
+            gone = self._gone(msg.id, ml, msg)
+            if gone is not None and not r.send_only and r.resolvable and (
+                    r.binding is not None or r.tier in (TIER_CHOSEN, TIER_STANDING)):
+                # Withdrawn, or past its expiry: no name gets it, and `explain` says why.
+                self._book("drop at routing for", q,
+                           lambda q=q, gone=gone: self.books.drop_gone(q, [msg.id], gone))
+                continue
             if r.send_only:
                 # A record line that names a send-only identity (typed by hand, or from
                 # an older client): delivered to nobody, queued for nobody. The verbs
@@ -1412,18 +1844,22 @@ class Daemon:
             if r.binding is None:
                 # An unbound chosen or standing name: the message waits in its queue,
                 # unless the name already handled it before it unbound (past its
-                # cursor). A dead agent-N is inert, not misdelivered.
-                if r.resolvable and r.tier in (TIER_CHOSEN, TIER_STANDING):
-                    if not self._past_cursor(q, msg.id, memo):
-                        with self._lock:
-                            self._queue_add(q, msg.id, _epoch(msg.timestamp))
-                continue
+                # cursor). A dead agent-N is inert, not misdelivered. A binding made
+                # since the resolve takes it as live mail: its bind's catch-up may
+                # already have read the rows.
+                if not (r.resolvable and r.tier in (TIER_CHOSEN, TIER_STANDING)):
+                    continue
+                with self._lock:
+                    late = self.bindings.get(q)
+                    if late is None and not self._past_cursor(q, msg.id, memo):
+                        self._queue_add(q, msg.id, _epoch(msg.timestamp))
+                if late is None:
+                    continue
+                r.binding = late
             if backlog:
                 # one guarded reading of "handled?" for bound and unbound alike
                 if self._past_cursor(q, msg.id, memo):
                     continue
-            elif int(msg.id) <= int(r.binding.replay_hwm):
-                continue                              # catch-up owns everything below
             with self._lock:
                 if msg.id in self.queue.get(q, {}) or msg.id in r.binding.delivered:
                     # A row waits for a release point; a handed id is not handed again.
@@ -1448,6 +1884,12 @@ class Daemon:
                         if backlog or not self._past_cursor(q, msg.id, memo):
                             self._queue_add(q, msg.id, _epoch(msg.timestamp))
                         live = False
+                    elif not backlog and self._behind_returned(r.binding, msg.id):
+                        # Rows a turn of this binding left unhandled wait below this
+                        # one: it waits with them for the next release point, and goes
+                        # out after them by id.
+                        self._queue_add(q, msg.id, _epoch(msg.timestamp))
+                        live = False
                     else:
                         live = self._claim(r.binding, msg.id)
                 break
@@ -1459,26 +1901,28 @@ class Daemon:
                 self._deliver(r.binding, msg, ml, author, backlog=backlog)
 
     # ------------------------------------------------------------------ routing
+    def _cursor(self, qualified: str) -> str | None:
+        """The name's cursor in the books; None when it has none, or the books are
+        closed or can't be read (no cursor degrades toward delivery, never loss)."""
+        if not self.books.is_open:
+            return None
+        try:
+            return self.books.cursor(qualified)
+        except Exception:                                          # noqa: BLE001
+            log.exception("could not read the cursor of %s; treating it as unset",
+                          qualified)
+            return None
+
     def _past_cursor(self, qualified: str, message_id: str, memo: dict) -> bool:
-        """Has this identity's cursor already passed this message? The cursor is the one
-        durable "handled?" fact and the daemon only ever READS it -- `memo` is scoped
-        to a single routing pass so a rescan does not re-read one file per message, and
-        nothing survives the pass to go stale."""
+        """Has this identity's cursor already passed this message? The cursor moves
+        only at an ack, in the books; `memo` is scoped to a single routing pass so a
+        rescan does not read it once per message."""
         if qualified not in memo:
-            memo[qualified] = cursors.read(qualified)
+            memo[qualified] = self._cursor(qualified)
         cursor = memo[qualified]
         if cursor is None:
             return False
-        try:
-            return int(message_id) <= int(cursor)
-        except (TypeError, ValueError):
-            # A cursor file whose `cursor` is not a number is unreadable, not authority.
-            # Treating it as no-cursor degrades toward replay and pending -- the daemon
-            # would rather show a message twice than let a corrupt file swallow it, and
-            # it must never be a reason boot cannot finish.
-            log.warning("cursor for %s is not a message id (%r); treating it as unset",
-                        qualified, cursor)
-            return False
+        return _as_id(message_id) <= _as_id(cursor)
 
     def _route(self, msg, *, backlog: bool, cursor_memo: dict | None = None) -> None:
         if msg.channel_id != self._names_channel():
@@ -1505,10 +1949,17 @@ class Daemon:
         if ml is None:
             return                                    # no machine line at position zero
         self._index_audience(msg, ml)                 # at parse, before any claim
+        self._note_message(msg, ml)
         if self.settings.use("block"):
             # symmetric: a blocked identity is neither delivered to nor routed from.
-            # The setting is a bare bool, read at use, so it blocks all routing.
+            # The setting is a bare bool, read at use, so it blocks all routing. The
+            # message is not routed yet: the routed mark stays below it.
             log.info("block on: not routing message %s", msg.id)
+            if seen is not None:
+                with self._lock:
+                    self._skips += 1
+                    if self._unrouted is None or seen < self._unrouted:
+                        self._unrouted = seen
             return
         author = self.attribute(msg, live=not backlog)
         memo = {} if cursor_memo is None else cursor_memo
@@ -1518,6 +1969,8 @@ class Daemon:
         opens = ml.posture == POSTURE_ONCE and author.attribution == attribution.VERIFIED
         try:
             self._route_recipients(msg, ml, author, memo, opens, backlog)
+            if seen is not None:
+                self._raise_routed(seen)
         finally:
             # The sent index is fed AFTER the recipients are claimed (the claim that
             # hands a message to a recipient's binding precedes the lock section that
@@ -1528,6 +1981,32 @@ class Daemon:
             if cursor_memo is None:
                 # A live message is a pass of its own; a rescan ends its pass itself.
                 self._end_pass(memo)
+
+    def _hold_routed(self) -> None:
+        """Keep the routed mark where it stands until a rescan completes: what lies
+        above it was not routed."""
+        try:
+            through = self.books.routed_through() if self.books.is_open else None
+        except Exception:                                          # noqa: BLE001
+            log.exception("could not read the routed mark to hold it")
+            return
+        if through is None:
+            return
+        with self._lock:
+            self._skips += 1
+            if self._unrouted is None or through + 1 < self._unrouted:
+                self._unrouted = through + 1
+
+    def _raise_routed(self, through: int) -> None:
+        """Raise the routed mark to `through`, but never to or past a message the block
+        kept from routing: a rescan must still find that one."""
+        with self._lock:
+            hold = self._unrouted
+        if hold is not None:
+            through = min(through, hold - 1)
+        if through > 0 and self.books.is_open:
+            self._book("raise the routed mark for", str(through),
+                       lambda: self.books.routed(through))
 
     def _index_ask(self, msg, ml, author: Author, r: Resolution, *, opens: bool,
                    opening: bool | None) -> bool | None:
@@ -1658,7 +2137,7 @@ class Daemon:
             if b is None or b.conn is not conn:
                 log.info("dropped an unanswered notify for %s from a connection that does "
                          "not hold it", identity)
-                return
+                return self._not_bound(None)
             if any(self._pays(e, identity, author, message_id)
                    for e in self.sent.get(identity, ())):
                 return          # paid already, between the shim's query and this notify
@@ -1707,10 +2186,10 @@ class Daemon:
 
     def rebuild_sent(self) -> int:
         """Boot: one read of every `#names` message of the last `OWED_TTL`, unbounded,
-        through the gateway's `since`. The floor is that window's start.
+        through the record's `since`. The floor is that window's start.
         """
         now = self.clock()
-        since = self.gateway.since
+        since = self.record.since
         floor = now - constants.OWED_TTL
         stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(floor))
         count = 0
@@ -1839,104 +2318,264 @@ class Daemon:
         return False
 
     def _queue_unbound(self, b: Binding) -> None:
-        """At unbind: every id this binding was handed that has no row, that its adapter
-        did not name `handled`, and that its cursor has not passed gets a row, so the
-        name's next binding gets it at a release point. Rows are never deleted here. An
-        `agent-N` gets no deferred mail: its rows go with its binding, since a later
-        session numbered the same is someone else. Called under the lock."""
+        """At unbind, the release: every row the binding held, handed or in a digest,
+        waits again for the name's next binding, and its open digests end. An `agent-N`
+        gets no deferred mail: its rows go with its binding, since a later session
+        numbered the same is someone else. Called under the lock."""
         if b.tier == TIER_EPHEMERAL:
             dropped = sorted(self.queue.get(b.qualified, {}), key=_as_id)
             if dropped:
-                self._queue_drop(b.qualified, dropped)
+                self.queue.pop(b.qualified, None)
+            self._book("release the rows of", b.qualified,
+                       lambda: self.books.release(b.qualified, ephemeral=True))
             return
-        memo: dict = {}
-        back = [mid for mid in b.delivered
-                if mid not in b.handled and mid not in self.queue.get(b.qualified, {})
-                and not self._past_cursor(b.qualified, mid, memo)]
-        # Written here, not through `_queue_add`: the binding is still in `bindings`
-        # (the caller queues before it drops it), and `_queue_add` refuses every id the
-        # live binding was handed -- which is every id here. Epochs fill in at the flush.
+        released: list = []
+
+        def release() -> None:
+            released.extend(self.books.release(b.qualified))
+
+        self._book("release the rows of", b.qualified, release)
+        # And what this binding was handed with no row (the ids its adapter said it held
+        # at bind) and never handled: it waits again too.
+        back = set(released) | {mid for mid in b.delivered if mid not in b.handled}
+        # A withdrawn or expired message doesn't wait again: its row is dropped.
+        gone = {}
         for mid in back:
-            self.queue.setdefault(b.qualified, {})[mid] = None
-            self._queue_unwritten[(b.qualified, mid)] = True
-        if back:
+            why = self._gone(mid)
+            if why is not None:
+                gone.setdefault(why, []).append(mid)
+        for why, ids in gone.items():
+            back -= set(ids)
+            self._book("drop rows of", b.qualified,
+                       lambda why=why, ids=ids: self.books.drop_gone(b.qualified, ids, why))
+        rows = self.queue.setdefault(b.qualified, {})
+        memo: dict = {}
+        # A row that waited before this binding took it waits again whatever the
+        # cursor says (a held row can sit below an acked one); a live hand-over the
+        # cursor has passed was handled.
+        past = [mid for mid in back if mid not in rows
+                and self._past_cursor(b.qualified, mid, memo)]
+        if past:
+            self._book("drop rows of", b.qualified,
+                       lambda: self.books.drop(b.qualified, past))
+        added = sorted((mid for mid in back - set(past) if mid not in rows), key=_as_id)
+        for mid in added:
+            rows[mid] = None
+            if mid not in released:
+                self._book("queue a row for", b.qualified,
+                           lambda mid=mid: self.books.add(b.qualified, mid))
+        if not rows:
+            self.queue.pop(b.qualified, None)
+        if added:
             log.info("unbind %s: %d handed message(s) not yet handled are queued again",
-                     b.qualified, len(back))
+                     b.qualified, len(added))
 
     def _claim(self, binding: Binding, message_id: str) -> bool:
         """Atomically claim a message for a binding. Live routing, catch-up and a release
         race by construction; the claim is what makes at-least-once not mean
         twice-in-one-breath."""
         with self._lock:
-            if message_id in binding.delivered:
+            if message_id in binding.delivered or message_id in self.withdrawn:
                 return False
             binding.delivered.add(message_id)
+            binding.returned.discard(message_id)
             if _as_id(message_id) > _as_id(binding.handed_max):
                 binding.handed_max = message_id      # the `owed` query's `undelivered`
+            # Its row, handed to this binding: made for a live send, taken from
+            # `waiting` for a release. The row stays until the name acks it.
+            self._book("hand a row of", binding.qualified,
+                       lambda: self.books.hand(binding.qualified, message_id,
+                                               binding.history_id))
             return True
 
+    # ------------------------------------------------------------------ gone mail
+    def _note_message(self, msg, ml) -> None:
+        """What a parsed message says about whether it may still go: its expiry, kept
+        for the sweep's timer, and the record's withdrawn mark."""
+        if getattr(msg, "withdrawn_at", None):
+            with self._lock:
+                self.withdrawn.add(str(msg.id))
+        if ml is None or ml.expires_at is None:
+            return
+        with self._expiry_cond:
+            mid = str(msg.id)
+            if mid in self.expires:
+                return
+            soonest = self._next_expiry()
+            self.expires[mid] = ml.expires_at
+            if soonest is None or ml.expires_at < soonest:
+                self._expiry_cond.notify_all()
+
+    def _next_expiry(self) -> int | None:
+        """The soonest expiry the last sweep did not pass. Under `_expiry_cond`."""
+        return min((at for at in self.expires.values() if at > self._swept_at),
+                   default=None)
+
+    def _gone(self, message_id, ml=None, msg=None, *, expires_at=None) -> str | None:
+        """`withdrawn` or `expired` for a message that may no longer be handed to a
+        model, by this daemon's clock; None while it may. `ml` and `msg` are the parsed
+        message when the caller has it; `expires_at` an expiry it already holds."""
+        mid = str(message_id)
+        if mid in self.withdrawn or (msg is not None and getattr(msg, "withdrawn_at", None)):
+            return books_mod.WITHDRAWN
+        if ml is not None and ml.expires_at is not None:
+            expires_at = ml.expires_at
+        if expires_at is None:
+            with self._expiry_cond:
+                expires_at = self.expires.get(mid)
+        if expires_at is not None and expires_at <= self.clock():
+            return books_mod.EXPIRED
+        return None
+
+    def _drop_rows(self, qualified: str, ids, reason: str) -> None:
+        """Rows that may no longer go to `qualified`: out of the queue and the books,
+        with why."""
+        ids = [str(i) for i in ids]
+        with self._lock:
+            rows = self.queue.get(qualified, {})
+            for mid in ids:
+                rows.pop(mid, None)
+            if not rows:
+                self.queue.pop(qualified, None)
+        self._book("drop rows of", qualified,
+                   lambda: self.books.drop_gone(qualified, ids, reason))
+        log.info("dropped %s for %s: %s", ", ".join(ids), qualified, reason)
+
+    def sweep_expired(self) -> int:
+        """The expiry sweep: every waiting row past its message's expiry is dropped, in
+        the books and in memory. Run by the timer for the soonest expiry and at every
+        release; returns how many rows went."""
+        now = self.clock()
+        with self._expiry_cond:
+            due = {mid: at for mid, at in self.expires.items() if at <= now}
+        if not self.books.is_open:
+            return 0
+        try:
+            gone = self.books.sweep(now, due)
+        except Exception:                                          # noqa: BLE001
+            log.exception("the expiry sweep failed; the next one tries again")
+            return 0
+        with self._lock:
+            for q, mid in gone:
+                rows = self.queue.get(q)
+                if rows is not None:
+                    rows.pop(mid, None)
+                    if not rows:
+                        self.queue.pop(q, None)
+            # An expired id a binding still holds (handed, or in a digest) is kept: its
+            # next move (`open_digest`, a release) checks it. The rest are forgotten.
+            held = {mid for rows in self.queue.values() for mid in rows}
+            for b in self.bindings.values():
+                held |= b.delivered
+        with self._expiry_cond:
+            self._swept_at = max(self._swept_at, now)
+            for mid in due:
+                if mid not in held:
+                    self.expires.pop(mid, None)
+        if gone:
+            log.info("expiry sweep: dropped %d row(s) past their expiry: %s", len(gone),
+                     ", ".join(f"{mid} for {q}" for q, mid in gone[:10]))
+        return len(gone)
+
+    def _drop_reserved(self, name: str | None = None) -> int:
+        """Mail that waited for a name before a module reserved it: dropped, in the
+        books and in memory, with reason `reserved` (`Books.drop_reserved`). The daemon
+        does it, as the books' one writer, at boot, at each release and when `agents` or
+        `explain` asks, so a reserve made by another process (the doctor, an install)
+        takes effect at the next of those. `name` limits it to one name. Never raises;
+        returns how many rows went."""
+        if not self.books.is_open:
+            return 0
+        try:
+            gone = self.books.drop_reserved(name)
+        except Exception:                                          # noqa: BLE001
+            log.exception("dropping mail queued for a reserved name failed; the next "
+                          "check tries again")
+            return 0
+        if not gone:
+            return 0
+        with self._lock:
+            for q, mid in gone:
+                rows = self.queue.get(q)
+                if rows is not None:
+                    rows.pop(mid, None)
+                    if not rows:
+                        self.queue.pop(q, None)
+        log.info("dropped %d row(s) queued before their name was reserved: %s", len(gone),
+                 ", ".join(f"{mid} for {q}" for q, mid in gone[:10]))
+        return len(gone)
+
+    def _expiry_loop(self) -> None:
+        """One timer, set for the soonest expiry this daemon knows of, never a poll:
+        it sleeps until then (or until a sooner one is noted) and sweeps."""
+        while not self._stop.is_set():
+            with self._expiry_cond:
+                soonest = self._next_expiry()
+                wait = None if soonest is None else soonest - self.clock()
+                if wait is None or wait > 0:
+                    # A clock that moves by hand (a test's) is re-read at least once a
+                    # minute; the real clock wakes at the expiry.
+                    self._expiry_cond.wait(None if wait is None else min(wait, 60.0))
+                    continue
+            self.sweep_expired()
+
     # ------------------------------------------------------------------ the queue
+    def _book(self, what: str, qualified: str, write) -> None:
+        """One write to the delivery books. Never raises: a write that fails is logged,
+        and memory stays the authority for this daemon's life. The row it would have
+        changed is wrong in the store until the next change to it, and the next boot's
+        fence and rescan read the store as it is."""
+        try:
+            write()
+        except Exception:                                          # noqa: BLE001
+            log.exception("could not %s %s in the delivery books; this daemon keeps "
+                          "going on what it holds in memory", what, qualified)
+
     def _queue_add(self, qualified: str, message_id: str, epoch: float | None) -> None:
         """One row: `message_id` waits for `qualified`. A row that exists is left as it
         is. An id the name's live binding was handed gets none (a reader that raced the
         hand-over). An `agent-N` gets a row only while it is bound. Under the lock; the
-        record write follows at `_queue_flush`."""
+        row is written through to the books at once (a handed row waits again)."""
         rows = self.queue.get(qualified)
         if rows is not None and message_id in rows:
             return
+        if message_id in self.withdrawn:
+            return                          # its author withdrew it
         b = self.bindings.get(qualified)
         if b is not None and message_id in b.delivered:
             return
         if b is None and is_auto_name(split_tag(qualified)[0]):
             return
         self.queue.setdefault(qualified, {})[message_id] = epoch
-        self._queue_unwritten[(qualified, message_id)] = True
+        self._book("queue a row for", qualified,
+                   lambda: self.books.add(qualified, message_id))
 
     def _queue_drop(self, qualified: str, ids) -> None:
-        """Delete rows. Only a `handled` report deletes a row of a name that can still
-        be handed it; the other callers drop rows nobody can take (an `agent-N`'s at its
-        unbind or at boot, a send-only name's). Under the lock."""
+        """Delete rows. Only an ack deletes a row of a name that can still be handed
+        it; the other callers drop rows nobody can take (an `agent-N`'s at its unbind or
+        at boot, a send-only name's). Under the lock."""
+        ids = list(ids)
         rows = self.queue.get(qualified, {})
         for mid in ids:
             rows.pop(mid, None)
-            self._queue_unwritten[(qualified, mid)] = False
         if not rows:
             self.queue.pop(qualified, None)
+        self._book("drop rows of", qualified, lambda: self.books.drop(qualified, ids))
 
     def _queue_flush(self) -> None:
-        """Write the queue's changes to the record, then fill in the epoch of any row
-        added without one. Never raises: a write that fails is logged, kept, and tried
-        again at the next pass, and memory stays the authority meanwhile."""
-        with self._queue_write_lock:
-            with self._lock:
-                todo = dict(self._queue_unwritten)
-            if todo:
-                adds, removes = {}, {}
-                for (q, mid), add in todo.items():
-                    (adds if add else removes).setdefault(q, []).append(mid)
-                try:
-                    for q, ids in removes.items():
-                        self.gateway.queue_remove(q, ids)
-                    for q, ids in adds.items():
-                        self.gateway.queue_add(q, ids)
-                except Exception:                                  # noqa: BLE001
-                    log.exception("the record write of %d queue change(s) failed; kept in "
-                                  "memory and tried again at the next pass", len(todo))
-                else:
-                    with self._lock:
-                        for key, add in todo.items():
-                            if self._queue_unwritten.get(key) is add:
-                                del self._queue_unwritten[key]
+        """Fill in the epoch of any row added without one. Never raises. The rows
+        themselves are written as they change (`_queue_add`, `_queue_drop`)."""
         with self._lock:
             unknown = [(q, mid) for q, rows in self.queue.items()
                        for mid, at in rows.items() if at is None]
         for q, mid in unknown:
             try:
-                msg = self.gateway.get_message(mid)
+                msg = self.record.get_message(mid)
             except Exception:                                      # noqa: BLE001
                 continue
             if msg is None:
                 continue
+            self._note_message(msg, parse_machine_line(msg.content))
             with self._lock:
                 rows = self.queue.get(q)
                 if rows is not None and rows.get(mid, 0) is None:
@@ -1955,9 +2594,12 @@ class Daemon:
         return view
 
     def queued_ids(self) -> set:
-        """Every id with a row for any name: what the retention trim keeps."""
+        """Every id with a row for any name, in any state: what the retention trim
+        keeps."""
         with self._lock:
-            return {mid for rows in self.queue.values() for mid in rows}
+            ids = {mid for rows in self.queue.values() for mid in rows}
+        # A stopped daemon's books are closed; it trims with the queue it loaded.
+        return ids | self.books.held_ids() if self.books.is_open else ids
 
     # ------------------------------------------------------------------ send-only lines
     def _note_send_only(self, qualified: str, message_id: str) -> None:
@@ -2011,7 +2653,7 @@ class Daemon:
         if isinstance(source, str) and source:
             b.cache_source = source
         if "agent_model" in frame:
-            # A launcher that re-read its config and could not name the default agent
+            # A wrapper that re-read its config and could not name the default agent
             # sends null: the report it made before may be stale, so it is withdrawn.
             reported = frame.get("agent_model")
             b.agent_model = dict(reported) if isinstance(reported, dict) else cache.MISSING
@@ -2162,30 +2804,29 @@ class Daemon:
             return
         self._release(b, flagged=True)
 
-    def _on_turn(self, b: Binding, frame: dict) -> None:
-        """`activity kind=turn` from the binding's own connection. Carrying `handled`, it
-        is a release point that stays open for a settle window, then settles.
-        Its read passing, it releases every row at once and opens no window. Its read
-        not passing, whatever the queue holds, it opens the binding's window
+    def _on_turn(self, b: Binding, ended) -> None:
+        """A `turn_ended` from the binding's own connection, after the books took the
+        ack (`ended`: the message ids acked and the ids back to waiting). A release point
+        that stays open for a settle window. Its read passing, it releases every row at
+        once and opens no window. Its read not passing, it opens the binding's window
         (`RELEASE_SETTLE_STEPS`): the harness may not have written the turn yet, and a
         send can queue a row a moment later in the same lag. The window releases every
-        row then queued at its first read that passes, except the ids this frame names
-        `unhandled`. A newer `turn` of the binding closes the window before its own
-        read; a `ready`, `look` or register leaves it open. Without `handled` the frame
-        comes from an adapter started before the queue: it releases nothing and deletes
-        nothing."""
+        row then queued at its first read that passes, except the ids this turn left
+        unhandled. A newer turn end of the binding closes the window before its own
+        read; a `ready`, `look` or bind leaves it open. The acked ids leave memory
+        before the release; the unhandled ones wait again after it, so not this
+        release but the next hands them."""
         opened = time.monotonic()
         self._close_window(b)
-        handled = frame.get("handled")
-        if not isinstance(handled, list):
-            return
-        unhandled = frame.get("unhandled")
-        unhandled = unhandled if isinstance(unhandled, list) else []
+        named = set(ended.handled) | set(ended.unhandled)
+        if named:
+            self._window_take(b, lambda mid: mid in named)
+        self._settle(b, handled=ended.handled)
         if self._passing(b):
             self._release(b, flagged=True)
         else:
-            self._open_window(b, opened, unhandled)
-        self._settle(b, handled, unhandled)
+            self._open_window(b, opened, ended.unhandled)
+        self._settle(b, unhandled=ended.unhandled)
 
     def _on_look(self, b: Binding) -> None:
         """`activity kind=look` from the binding's own connection: its adapter found the
@@ -2219,6 +2860,18 @@ class Daemon:
                  self._describe(clock))
         return False
 
+    def _behind_returned(self, binding: Binding, message_id: str) -> bool:
+        """Whether a row this binding's turns left unhandled still waits below
+        `message_id`. A live send behind one gets a row instead of a push, so it never
+        overtakes mail already handed to the name once. Rows that never went out (a
+        `[held]` message's, one queued while the cache was cold) don't hold it back:
+        those wait for their own release point while live mail goes alone. Under the
+        lock."""
+        rows = self.queue.get(binding.qualified, {})
+        binding.returned &= rows.keys()
+        mid = _as_id(message_id)
+        return any(_as_id(m) < mid for m in binding.returned)
+
     def _release(self, binding: Binding, *, flagged: bool, exclude=()) -> int:
         """Hand the name's rows this binding was not handed already, oldest first, each
         with `held: true`. `flagged=False` leaves the rows of `[held]` messages; ids in
@@ -2233,6 +2886,8 @@ class Daemon:
         """
         q = binding.qualified
         handed = 0
+        self.sweep_expired()
+        self._drop_reserved(q)
         with self._name_lock(q):
             with self._lock:
                 if self.bindings.get(q) is not binding:
@@ -2243,7 +2898,7 @@ class Daemon:
                                key=_as_id)
             for n, mid in enumerate(order):
                 try:
-                    msg = self.gateway.get_message(mid)
+                    msg = self.record.get_message(mid)
                 except Exception:                                  # noqa: BLE001
                     log.exception("release for %s: reading %s failed; %d row(s) wait for "
                                   "the next release point", q, mid, len(order) - n)
@@ -2258,6 +2913,12 @@ class Daemon:
                                     "is skipped at every release", mid, q,
                                     "gone from the record" if msg is None
                                     else "not a machine line the daemon can read")
+                    continue
+                self._note_message(msg, ml)
+                gone = self._gone(mid, ml, msg)
+                if gone is not None:
+                    # Past its expiry, or withdrawn: dropped here, never handed.
+                    self._drop_rows(q, [mid], gone)
                     continue
                 if not flagged and _flagged(ml, q):
                     continue
@@ -2351,122 +3012,62 @@ class Daemon:
                      "the rows wait for the next release point", q, self._describe(clock),
                      w.steps[-1])
 
-    def _settle(self, binding: Binding, handled, unhandled) -> None:
-        """A `turn` frame's report, after its release. Each `handled` id this binding was
-        handed loses its row. Each `unhandled` id it was handed gets a row (an
-        `agent-N` too, while it is bound) and leaves `delivered`, so the next release
-        point hands it again; not the release of the frame that reported it, which ran
-        first. An id this binding was not handed is ignored and logged."""
+    def _settle(self, binding: Binding, handled=(), unhandled=()) -> None:
+        """An ack, in memory, after the books took it: each `handled` id has no row now
+        and is this binding's handled; each `unhandled` id waits again (while the
+        binding is the name's) and leaves `delivered`, so the next release point hands
+        it again."""
         q = binding.qualified
         with self._lock:
-            for raw in handled:
-                mid = str(raw)
-                if mid not in binding.delivered:
-                    log.info("turn from %s names msg=%s handled, which it was not handed; "
-                             "ignored", q, mid)
-                    continue
+            rows = self.queue.get(q, {})
+            for mid in handled:
                 binding.handled.add(mid)
-                if mid in self.queue.get(q, {}):
-                    self._queue_drop(q, [mid])
-            for raw in unhandled:
-                mid = str(raw)
-                if mid not in binding.delivered:
-                    log.info("turn from %s names msg=%s unhandled, which it was not "
-                             "handed; ignored", q, mid)
-                    continue
+                rows.pop(mid, None)
+            if not rows:
+                self.queue.pop(q, None)
+            for mid in unhandled:
                 binding.delivered.discard(mid)
-                if self.bindings.get(q) is binding and mid not in self.queue.get(q, {}):
-                    self.queue.setdefault(q, {})[mid] = None
-                    self._queue_unwritten[(q, mid)] = True
-        self._queue_flush()
+                if self.bindings.get(q) is binding:
+                    self.queue.setdefault(q, {}).setdefault(mid, None)
+                    binding.returned.add(mid)
+        if unhandled:
+            self._queue_flush()
 
     def _end_pass(self, memo: dict) -> None:
-        """The end of one routing pass, rescan or replay: the cache reads it kept go, and
-        the queue's changes reach the record. Never raises."""
+        """The end of one routing pass: the cache reads it kept go, and the rows' times
+        are filled in. Never raises."""
         memo.pop(_GATE_MEMO, None)
+        memo.pop(_ROUTED_MEMO, None)
         self._queue_flush()
 
     # ------------------------------------------------------------------ boot
     def _load_queue(self) -> None:
-        """Boot, before the socket listens: the migration once, then every row. A row
-        for an `agent-N` is dropped: its numbering restarts with the daemon, so the name
-        would be a later, unrelated session's. A read that RAISES stops the start."""
-        if self.gateway.meta_get(META_QUEUE_MIGRATED) is None:
-            self._migrate_queue()
-        rows = list(self.gateway.queue_rows())
-        dropped = []
+        """Boot, after the fence and before any method is answered: every row, all of
+        them waiting now. A row for an `agent-N` is dropped: its numbering restarts with
+        the daemon, so the name would be a later, unrelated session's. A read that
+        RAISES stops the start."""
+        rows = self.books.rows(states=[books_mod.WAITING])
+        dropped: dict[str, list] = {}
         with self._lock:
             self.queue = {}
-            for mid, q in rows:
-                mid, q = str(mid), str(q)
+            for row in rows:
+                q, mid = row.name, row.message_id
                 if is_auto_name(split_tag(q)[0]):
-                    dropped.append((q, mid))
+                    dropped.setdefault(q, []).append(mid)
                     continue
                 self.queue.setdefault(q, {})[mid] = None
-            for q, mid in dropped:
-                self._queue_unwritten[(q, mid)] = False
             self._queue_loaded = True
+        for q, ids in dropped.items():
+            self._book("drop the rows of", q, lambda q=q, ids=ids: self.books.drop(q, ids))
         self._queue_flush()
+        # After the reconcile at start: mail that waited for a name now reserved.
+        self._drop_reserved()
         n = sum(len(v) for v in self.queue.values())
         if n:
             log.info("boot: %d queued message row(s) for %d name(s)", n, len(self.queue))
         if dropped:
             log.info("boot: %d queue row(s) for agent-N names dropped: an agent-N ends "
-                     "with its binding", len(dropped))
-
-    def _migrate_queue(self) -> None:
-        """Once, at the first boot of a daemon with the queue: the mail an older daemon
-        held moves into it. The gate file's `held` ids, past neither the cursor nor gone
-        from the record, become rows (its `refused` half is dropped: refused mail was
-        never to be delivered). Every `[held]` or `[next-turn]` message gets a row for
-        each recipient that resolves, is not an `agent-N` or send-only, and has not
-        passed it. Then the gate file goes, the refusals table goes, and the record
-        says it is done. No row is written for an id at or below a name's cursor."""
-        memo: dict = {}
-        rows: dict[str, set] = {}
-        try:
-            raw = json.loads(self.gate_path.read_text())
-        except FileNotFoundError:
-            raw = {}
-        except (OSError, ValueError) as e:
-            log.warning("queue migration: %s could not be read (%s); read as empty",
-                        self.gate_path, e)
-            raw = {}
-        held = raw.get("held") if isinstance(raw, dict) else None
-        for q, ids in (held.items() if isinstance(held, dict) else ()):
-            if not isinstance(ids, list) or is_auto_name(split_tag(str(q))[0]):
-                continue
-            for mid in (str(i) for i in ids):
-                if not mid.isdigit() or self._past_cursor(str(q), mid, memo):
-                    continue
-                if self.gateway.get_message(mid) is None:
-                    continue
-                rows.setdefault(str(q), set()).add(mid)
-        # A box with no directory has never routed a message: there is nothing to scan.
-        channel_id = self._names_channel() if self.db_path.exists() else None
-        found = {m.id: m for token in (HELD_TOKEN, NEXT_TURN_TOKEN)
-                 for m in (self.gateway.marked(channel_id, token) if channel_id else ())}
-        for m in sorted(found.values(), key=lambda m: int(m.id)):
-            ml = parse_machine_line(m.content)
-            if ml is None or not ml.held:
-                continue                     # the token in prose, not on line zero
-            for tag in ml.recipients:
-                r = self.resolve(tag)
-                if not r.resolvable or r.tier == TIER_EPHEMERAL or r.send_only:
-                    continue
-                if not _flagged(ml, r.qualified):
-                    continue
-                if not self._past_cursor(r.qualified, m.id, memo):
-                    rows.setdefault(r.qualified, set()).add(m.id)
-        for q, ids in rows.items():
-            self.gateway.queue_add(q, sorted(ids, key=_as_id))
-        self.gate_path.unlink(missing_ok=True)
-        drop = getattr(self.gateway, "drop_refusals", None)
-        if drop is not None:
-            drop()
-        self.gateway.meta_set(META_QUEUE_MIGRATED, str(int(self.clock())))
-        log.info("boot: queue migration made %d row(s) from held mail",
-                 sum(len(v) for v in rows.values()))
+                     "with its binding", sum(len(v) for v in dropped.values()))
 
     def _name_lock(self, qualified: str) -> threading.RLock:
         with self._lock:
@@ -2489,7 +3090,7 @@ class Daemon:
         payload = {
             "message_id": msg.id,
             "channel_id": msg.channel_id,
-            "room": self.gateway.channel_name(msg.channel_id) or msg.channel_id,
+            "room": self.record.channel_name(msg.channel_id) or msg.channel_id,
             "author": {"name": author.qualified, "tier": author.tier,
                        "attribution": author.attribution},
             "recipients": list(ml.recipients),
@@ -2506,43 +3107,83 @@ class Daemon:
             "audience": audience,
             "audience_source": audience_source,
             "timestamp": msg.timestamp,
+            # line zero's `[interrupt]`: the sender asks for a running turn where the
+            # harness can take it there.
+            "interrupt": ml.interrupt,
+            # line zero's `[expires:...]`, a Unix second; None never expires.
+            "expires_at": ml.expires_at,
         }
         if ml.thread_mark:
             # "one-left" or "last", the thread mark the send verb wrote on a reply in an
             # open thread; absent otherwise.
             payload["thread_mark"] = ml.thread_mark
-        if binding.adapter == SEND_ONLY_ADAPTER:
-            # Never a deliver frame to a send-only binding, whatever path got here.
-            log.warning("not delivering msg=%s to %s: a send-only binding receives "
-                        "nothing", msg.id, binding.qualified)
-            with self._lock:
-                binding.delivered.discard(msg.id)
-            return
         if held:
             # Handed from the queue: the recipient is told it waited, and how long.
             # Replay and live delivery send no `held`.
             payload["held"] = True
-        try:
-            binding.conn.send({"op": "deliver", "payload": payload})
-        except Exception:
-            # A failed hand-off is queued, not dropped: the id leaves `delivered`, and
-            # the name's next release point hands it again. Not for an `agent-N`, whose
-            # mail ends with its binding.
-            log.warning("delivery to %s failed (socket gone); msg=%s is queued",
-                        binding.qualified, msg.id)
+        with self._lock:
+            if len(binding.window) >= WINDOW or binding.overflow:
+                # The window is full, or older mail already waits for room in it: this
+                # one waits behind it, so a live message never overtakes an older one.
+                binding.overflow[msg.id] = payload
+                return
+            binding.window.add(msg.id)
+        self._push(binding, payload)
+
+    def _push(self, binding: Binding, payload: dict) -> None:
+        """Hand one `deliver` frame to the binding's connection, whose writer sends it
+        without blocking this thread. A connection already closing takes nothing: the
+        id leaves `delivered` and is queued, and the name's next release point hands it
+        again. Not for an `agent-N`, whose mail ends with its binding. A frame the
+        connection drops after this is queued at its unbind, which re-queues every id
+        handed and not handled."""
+        mid = payload["message_id"]
+        if binding.conn.closed:
+            log.warning("delivery to %s failed (connection closed); msg=%s is queued",
+                        binding.qualified, mid)
             with self._lock:
-                binding.delivered.discard(msg.id)
+                binding.delivered.discard(mid)
+                binding.window.discard(mid)
                 if binding.tier != TIER_EPHEMERAL:
-                    self._queue_add(binding.qualified, msg.id, _epoch(msg.timestamp))
+                    self._queue_add(binding.qualified, mid, _epoch(payload["timestamp"]))
             self._queue_flush()
             return
+        binding.conn.notify_threadsafe("deliver", {"payload": payload})
         with self._lock:
             now = self.clock()
-            # The hand-over time, for `query kind="readable"` and `moxi comms explain`: live
-            # routing, released held mail and replay all hand over here.
-            self.handed_at[(binding.qualified, msg.id)] = now
+            # The hand-over time, for `readable` and `moxi comms explain`: live routing,
+            # released held mail and replay all hand over here.
+            self.handed_at[(binding.qualified, mid)] = now
         log.info("deliver msg=%s room=%s to=%s backlog=%s",
-                 msg.id, payload["room"], binding.qualified, backlog)
+                 mid, payload["room"], binding.qualified, payload["backlog"])
+
+    def _window_take(self, binding: Binding, taken) -> None:
+        """The adapter took into a digest every pushed id for which `taken(id)` is
+        true: they leave the binding's window, and the window is topped up from its
+        overflow, oldest first."""
+        with self._lock:
+            binding.window = {mid for mid in binding.window if not taken(mid)}
+            ready = []
+            while binding.overflow and len(binding.window) + len(ready) < WINDOW:
+                mid = min(binding.overflow, key=_as_id)
+                ready.append(binding.overflow.pop(mid))
+            binding.window.update(p["message_id"] for p in ready)
+        if not ready:
+            return
+        with self._name_lock(binding.qualified):
+            for payload in ready:
+                mid = payload["message_id"]
+                gone = self._gone(mid, expires_at=payload.get("expires_at"))
+                if gone is not None:
+                    # It waited for room past its expiry, or was withdrawn meanwhile.
+                    with self._lock:
+                        binding.window.discard(mid)
+                        binding.delivered.discard(mid)
+                    self._book("drop a row of", binding.qualified,
+                               lambda gone=gone, mid=mid: self.books.drop_gone(
+                                   binding.qualified, [mid], gone))
+                    continue
+                self._push(binding, payload)
 
     # ------------------------------------------------------------------ the audience
     def _index_audience(self, msg, ml) -> None:
@@ -2579,7 +3220,7 @@ class Daemon:
 
         Touches ABSENCE only: an audience on line zero is delivered as typed, even where
         it differs from the referent's, because the verb is where a change is refused and
-        the daemon polices no line zero. Nothing here reaches the gateway:
+        the daemon polices no line zero. Nothing here reaches the record:
         a referent the index does not hold, or holds as unknown, is `unknown`, said in the
         payload. A referent held as known none delivers no mark.
         """
@@ -2608,95 +3249,19 @@ class Daemon:
     def attribute(self, msg, *, live: bool) -> Author:
         """What the record proves."""
         with self._db() as db:
-            return attribution.from_record(db, msg, record=self.gateway)
+            return attribution.from_record(db, msg)
 
     # ------------------------------------------------------------------ catch-up
-    def _replay(self, binding: Binding) -> None:
-        """Replay past the cursor, then `replay_complete`.
+    def _replay_complete(self, binding: Binding) -> None:
+        """The end of a bind's catch-up: `replay_complete`, with the name's cursor.
 
-        Replay is for mail with no row: live mail handed to an earlier binding and not
-        handled when the daemon or the adapter died, and mail posted while the daemon
-        was down beyond the boot rescan's window. It skips every id with a row. A flagged
-        message it finds with no row becomes a row. The cache is read once, and each
-        other message is decided after it as live routing decides it: a passing read
-        delivers, an `unknown` read delivers by the message's own cold-at, and the rest
-        become rows. `replay_complete`'s cursor covers only what was handed.
-        """
-        if binding.adapter == SEND_ONLY_ADAPTER:
-            # Nothing was ever kept for it, so there is nothing to catch up on.
-            return
-        truncated = False
-        memo: dict = {}
+        Catch-up is the name's rows, which `_on_register` releases before this; nothing
+        is replayed from the record. Every routed message holds a row until it is acked
+        or dropped, so a message with no row is not one to deliver again."""
         q = binding.qualified
-        if binding.tier == TIER_EPHEMERAL:
-            # an ephemeral identity receives no deferred mail, ever -- nothing to replay
-            mine = []
-            cursor = None
-        else:
-            cursor = cursors.read(q)
-            channel_id = self._names_channel()
-            candidates = [m for m in self.gateway.history(channel_id, after=cursor)
-                          if int(m.id) <= int(binding.replay_hwm)]
-            parsed = [(m, parse_machine_line(m.content)) for m in candidates]
-            for m, ml in parsed:
-                if ml is not None:
-                    self._index_audience(m, ml)       # every line zero parsed, not just mine
-            mine = []
-            for m, ml in parsed:
-                position = None if ml is None else self._position(ml, binding, m)
-                if position is not None:
-                    mine.append((m, ml, position))
-            with self._lock:
-                rows = set(self.queue.get(q, {}))
-                for m, ml, _ in mine:
-                    if (_flagged(ml, q) and m.id not in rows
-                            and m.id not in binding.delivered):
-                        self._queue_add(q, m.id, _epoch(m.timestamp))
-                mine = [(m, ml, p) for m, ml, p in mine
-                        if m.id not in rows and not _flagged(ml, q)]
-            if cursor is None:
-                # Bounded replay is for an ABSENT cursor only: a first bind, or a
-                # cursor lost with STATE. It bounds mail with no row; queued mail is
-                # never bounded. A present cursor, however old, replays all that is
-                # past it. The bound is the `[replay]` setting, read at use.
-                replay = self.settings.use("replay")
-                bounded = mine[-replay.messages:]
-                now = self.clock()
-                bounded = [(m, ml, p) for (m, ml, p) in bounded
-                           if now - _epoch(m.timestamp) <= replay.seconds]
-                truncated = len(bounded) < len(mine)
-                mine = bounded
-            # The read, once per register, and only when something would be handed.
-            with self._lock:
-                fresh = [(m, ml, p) for m, ml, p in mine if m.id not in binding.delivered]
-            if fresh:
-                clock, now = self._read_memo(binding, memo)
-                with self._lock:
-                    for m, ml, p in fresh:
-                        if not _passes(ml, p, clock, now):
-                            self._queue_add(q, m.id, _epoch(m.timestamp))
-                    gated = {m.id for m, ml, p in fresh if not _passes(ml, p, clock, now)}
-                if gated:
-                    log.info("replay to %s queued %d message(s): cache %s", q, len(gated),
-                             self._describe(clock))
-                mine = [(m, ml, p) for m, ml, p in mine if m.id not in gated]
-        handed = []
-        for m, ml, _ in mine:
-            handed.append(m)
-            if not self._claim(binding, m.id):
-                continue          # `holding`, or live routing got there first
-            with self._name_lock(q):
-                self._deliver(binding, m, ml, self.attribute(m, live=False), backlog=True)
-        self._end_pass(memo)
-        # The highest id replay handed (or found the adapter already holding): never a
-        # queued id, so the adapter's cursor is never carried past queued mail.
-        high = max((m.id for m in handed), key=int, default=cursor)
-        frame = {"op": "replay_complete", "identity": q, "cursor": high,
-                 "truncated": truncated}
-        if truncated:
-            frame["notice"] = constants.replay_notice(replay.messages, replay.seconds)
-        with contextlib.suppress(Exception):
-            binding.conn.send(frame)
+        cursor = None if binding.tier == TIER_EPHEMERAL else self._cursor(q)
+        binding.conn.notify_threadsafe("replay_complete", {"identity": q, "cursor": cursor,
+                                                           "truncated": False})
 
     def _position(self, ml, binding: Binding, msg) -> int | None:
         """The position on line zero of the first tag that names this binding's
@@ -2721,7 +3286,7 @@ class Daemon:
         # once a day and not once a trim tick.
         self._last_trim = self.clock()
         self._trim_handed()
-        trim = getattr(self.gateway, "trim", None)
+        trim = getattr(self.record, "trim", None)
         if trim is None:
             return
         if not self._queue_loaded:
@@ -2748,7 +3313,7 @@ class Daemon:
 
     def classify(self, qualified: str, message_id: str) -> str:
         """`moxi comms explain`'s case for one message handed to one name, on demand."""
-        cursor = cursors.read(qualified)
+        cursor = self._cursor(qualified)
         if cursor is not None and int(cursor) >= int(message_id):
             return CASE_HANDLED
         with self._lock:
@@ -2762,23 +3327,33 @@ class Daemon:
 
 
 class DaemonStopping(Exception):
-    """A register that arrived after `stop()` began.
-
-    Not a refusal and not an accident: the daemon is going away. `_handle` answers it by
-    closing the connection with no reply, which the client reads as `DaemonOffline`, and
-    every adapter already treats that as "the daemon is not there" and retries. A named
-    exception rather than a bare close, so `_handle` catches it quietly: without it the
-    reply to a closed connection raised `ProtocolError`, and the accident arm logged a
-    traceback for a stop working as intended.
-    """
+    """A `bind` or `send` that arrived after `stop()` began: answered `stopping`, in the
+    try-again range. Every adapter already reads that as "the daemon is not there" and
+    retries."""
 
 
 class Refusal(Exception):
-    """A refusal that names the holder where there is one."""
+    """The daemon's own no, with its comms error `code` (`wire`), and in `extra` what
+    it names (the holder of a name, say), which goes in the error's `data`. A refusal
+    without a code is a request whose params don't fit the method."""
 
-    def __init__(self, message, **extra):
+    def __init__(self, message, *, code: int = wire.INVALID_PARAMS, **extra):
         super().__init__(message)
+        self.code = code
         self.extra = extra
+
+
+def _unknown_message(mid: str) -> Refusal:
+    """The refusal for a message id the record doesn't hold."""
+    return Refusal(f"no message {mid} in the record", code=wire.UNKNOWN_MESSAGE,
+                   message_id=mid)
+
+
+def _read(daemon, attr: str):
+    """A read method as the method table calls it, with the connection it ignores. The
+    read is looked up on the daemon at each call, so the table follows the daemon's own
+    attribute."""
+    return lambda conn, params: getattr(daemon, attr)(params)
 
 
 def _asked(frame: dict) -> str:
@@ -2839,21 +3414,26 @@ def _epoch(timestamp: str) -> float:
 def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
     import argparse
 
-    from .gateway import BACKENDS, LOCAL, MOCK, GatewayError, backend_choice, open_gateway
+    from moxi import doctor as moxi_doctor
+    from moxi.files import LockTimeout
+    from moxi.store import StoreError
 
-    from . import migration, provision, tokens
+    from .record import BACKENDS, LOCAL, MOCK, RecordError, backend_choice, open_record
+    from .release import MODULE
+
+    from . import provision, tokens
 
     ap = argparse.ArgumentParser(prog="moxi-comms-daemon")
-    ap.add_argument("--gateway", choices=BACKENDS,
+    ap.add_argument("--backend", choices=BACKENDS,
                     help="which backend to hold: local or mock; default: "
-                         "MOXI_COMMS_GATEWAY, then the config file, then local")
-    ap.add_argument("--gateway-store", help="JSON store of the mock gateway")
+                         "MOXI_COMMS_BACKEND, then the config file, then local")
+    ap.add_argument("--backend-store", help="JSON store of the mock record")
     ap.add_argument("--log-level", default="INFO")
     args = ap.parse_args(argv)
     logging.basicConfig(level=args.log_level,
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    if args.gateway_store:
-        os.environ["MOXI_COMMS_MOCK_GATEWAY"] = args.gateway_store
+    if args.backend_store:
+        os.environ["MOXI_COMMS_MOCK_BACKEND"] = args.backend_store
     # The flag may name a backend the box's config does not, and every adapter resolves the
     # backend WITHOUT a flag. A daemon holding one record while the shims and the CLI write
     # another is a fleet that looks connected and delivers nothing, so the disagreement is
@@ -2868,47 +3448,59 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
         raise SystemExit(str(e)) from None
     try:
         choice = backend_choice(None, env=os.environ)
-    except GatewayError as e:
+    except RecordError as e:
         raise SystemExit(str(e)) from None
     resolved = choice.name
-    if args.gateway and args.gateway != resolved and not (
-            args.gateway == MOCK and args.gateway_store):
+    if args.backend and args.backend != resolved and not (
+            args.backend == MOCK and args.backend_store):
         raise SystemExit(
-            f"--gateway {args.gateway} disagrees with this box's configured backend "
+            f"--backend {args.backend} disagrees with this box's configured backend "
             f"({resolved}). Every adapter and the CLI resolve the backend from the "
             f"config and the environment, with no flag, so a daemon started this way "
             f"would hold a record nothing else writes. Change `backend` in comms' config "
-            f"file (or MOXI_COMMS_GATEWAY) if the flip is what you meant, or drop the flag.")
+            f"file (or MOXI_COMMS_BACKEND) if the flip is what you meant, or drop the flag.")
     try:
-        gateway = open_gateway(args.gateway, role="reader")
-    except GatewayError as e:
+        record = open_record(args.backend, role="reader")
+    except RecordError as e:
         raise SystemExit(str(e)) from None
+    except (StoreError, LockTimeout) as e:
+        # The store's gate refused (comms 0.2's files can't be moved, or a store sits
+        # beside them that the move didn't make): the daemon doesn't start. The log has
+        # it, and so does the next doctor run, until a start opens the store.
+        log.error("comms.db can't be opened, so the daemon doesn't start: %s", e)
+        with contextlib.suppress(Exception):
+            moxi_doctor.record(MODULE, f"the daemon didn't start: {e}", key=STORE_RECORD,
+                               fix="moxi comms migrate --dry-run")
+        raise SystemExit(f"moxi-comms-daemon: {e}") from None
+    with contextlib.suppress(Exception):
+        moxi_doctor.clear(MODULE, STORE_RECORD)
     # systemd stops the unit with SIGTERM. Without a handler the process died before the
     # `finally`, every restart left its custody intervals open for the next boot's
     # fence, and the fence's warning could not tell a crash from a restart. Installed
     # before `start()` binds the socket, so no stop can land in a window the handler
     # does not cover.
     stopping = threading.Event()
-    for sig in (signal.SIGTERM, signal.SIGHUP):
-        signal.signal(sig, lambda *_: stopping.set())
+    # SIGHUP does not exist on Windows.
+    for sig in (signal.SIGTERM, getattr(signal, "SIGHUP", None)):
+        if sig is not None:
+            signal.signal(sig, lambda *_: stopping.set())
     # A daemon on the local backend provisions an empty directory itself, so an install
     # that names nothing ends with a working daemon; an existing directory is left alone
     # (`provision.first_start`). The mock keeps its own record. Built HERE,
     # in `main`: a Daemon constructed by a test, a smoke script or an embedding caller
     # provisions nothing.
     store = (tokens.TokenStore(None, env=os.environ)
-             if (args.gateway or resolved) == LOCAL else None)
+             if (args.backend or resolved) == LOCAL else None)
     first_start = provision.first_start(store) if store is not None else None
-    migrate = migration.startup(store) if store is not None else None
-    daemon = Daemon(gateway, first_start=first_start, migrate=migrate, settings=settings)
+    daemon = Daemon(record, first_start=first_start, settings=settings)
     try:
         daemon.start()
     except RuntimeError as e:
         # A refusal is an answer, not a crash: the operator gets the recovery sentence
-        # and systemd gets a clean nonzero exit, and the gateway connection this process
+        # and systemd gets a clean nonzero exit, and the record connection this process
         # opened does not leak past the `finally` it never reaches.
         with contextlib.suppress(Exception):
-            gateway.close()
+            record.close()
         raise SystemExit(str(e)) from None
     log.info("comms daemon listening on %s", daemon.socket_path)
     try:
@@ -2918,10 +3510,11 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
     finally:
         daemon.stop()
         with contextlib.suppress(Exception):
-            gateway.close()          # the process owns the socket it opened
+            record.close()          # the process owns the socket it opened
     return 0
 
 
 __all__ = ["Daemon", "Refusal", "Author", "Binding", "TRIM_INTERVAL", "TRIM_TICK",
            "CASE_HANDLED", "CASE_IGNORED", "CASE_NOT_ADDRESSABLE", "CASE_TURN_INCOMPLETE",
+           "CASE_EXPIRED", "CASE_WITHDRAWN", "CASE_RESERVED",
            "CASE_REASONS"]

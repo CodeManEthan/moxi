@@ -26,6 +26,7 @@ from conftest import projects_root, wait_for_queue, wait_until, write_config
 
 from moxi_comms import cli, constants, machine_line, scoping
 from moxi_comms.adapters.claude_shim import frame_line
+from moxi_comms import wire
 from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import Daemon
 from moxi_comms.paths import daemon_socket
@@ -47,7 +48,7 @@ OPERATOR_SID = "eeeeeeee-5555-4555-8555-555555555555"
 # --------------------------------------------------------------------------- helpers
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def last(rig):
@@ -61,8 +62,7 @@ def line_zero(msg):
 def query_owed(identity, authors=None, referents=()):
     client = DaemonClient(daemon_socket()).connect()
     try:
-        return client.query("owed", identity=identity, authors=authors or {},
-                            referents=list(referents))
+        return client.call("owed", {"identity": identity, "authors": authors or {}, "referents": list(referents)})
     finally:
         client.close()
 
@@ -104,7 +104,7 @@ def reboot():
 
     def _reboot(rig):
         rig.daemon.stop()
-        rig.daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+        rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
         started.append(rig.daemon)
         return rig.daemon
 
@@ -167,7 +167,7 @@ def test_bodies_keeps_its_bare_namespace_form():
     from types import SimpleNamespace
 
     class Ctx:
-        class gateway:
+        class record:
             max_content_length = 2000
 
     args = SimpleNamespace(text="hi")
@@ -241,8 +241,8 @@ def test_the_floor_is_the_boot_windows_start_and_older_mail_is_not_read(rig, reb
     assert query_owed(R)["floor"] == daemon.sent_floor
 
 
-def test_a_gateway_without_since_floors_at_boot(rig, monkeypatch, reboot):
-    monkeypatch.delattr(type(rig.gateway), "since")
+def test_a_record_without_since_floors_at_boot(rig, monkeypatch, reboot):
+    monkeypatch.delattr(type(rig.record), "since")
     daemon = reboot(rig)
     assert daemon.sent_floor == pytest.approx(rig.clock(), abs=1)
 
@@ -251,7 +251,7 @@ def test_a_failed_boot_read_floors_at_boot_and_the_daemon_still_starts(rig, monk
                                                                         reboot):
     def broken(*a, **k):
         raise RuntimeError("record unreadable")
-    monkeypatch.setattr(type(rig.gateway), "since", broken)
+    monkeypatch.setattr(type(rig.record), "since", broken)
     daemon = reboot(rig)
     assert daemon.sent_floor == pytest.approx(rig.clock(), abs=1)
 
@@ -301,12 +301,14 @@ def test_owed_referents_say_whose_message_and_its_posture(rig):
                     theirs.id: {"own": False, "posture": "open"}, "12345": None}
 
 
-def test_an_unknown_query_kind_is_what_an_old_daemon_answers(rig):
+def test_an_unknown_read_is_what_an_old_daemon_answers(rig):
+    """A read the daemon does not have is the wire's method-not-found."""
     client = DaemonClient(daemon_socket()).connect()
     try:
         from moxi_comms.client import DaemonError
-        with pytest.raises(DaemonError, match="unknown query kind 'nope'"):
-            client.query("nope")
+        with pytest.raises(DaemonError, match="method not found: nope") as refused:
+            client.call("nope")
+        assert refused.value.code == wire.METHOD_NOT_FOUND
     finally:
         client.close()
 
@@ -387,17 +389,23 @@ def test_mail_claimed_but_not_injected_is_undelivered_and_injection_clears_it(ri
     assert wait_until(lambda: query_owed(R)["undelivered"] is False)
 
 
-def test_a_reconnect_after_a_daemon_restart_whose_holding_ids_do_not_read_undelivered(
+def test_a_digest_open_across_a_daemon_restart_is_handed_again_and_reads_undelivered(
         rig, reboot):
+    """The restart's fence ends the open digest and its row waits; the reconnect holds
+    nothing, so the bind hands the message again and it reads undelivered until the
+    shim injects it again."""
     reviewer = rig.shim(**REVIEWER, autoreconnect=True, backoff=iter([0.05] * 200))
-    send(rig, "reviewer", "task")
+    sent = send(rig, "reviewer", "task")
     wait_for_queue(reviewer, 1)
     reviewer.on_turn_boundary()          # injected, turn not yet complete: held_ids
     assert reviewer.held_ids
     daemon = reboot(rig)
     assert wait_until(lambda: R in daemon.bindings, timeout=5)
-    assert daemon.bindings[R].handed_max == "0"
-    assert query_owed(R)["undelivered"] is False
+    assert wait_until(lambda: daemon.bindings[R].handed_max == sent.id)
+    assert wait_until(lambda: [p["message_id"] for p in reviewer.queue] == [sent.id])
+    assert query_owed(R)["undelivered"] is True
+    reviewer.on_turn_boundary()
+    assert wait_until(lambda: query_owed(R)["undelivered"] is False)
 
 
 # --------------------------------------------------------------- presence
@@ -473,8 +481,10 @@ def test_the_delta_announces_the_operator_joining_and_leaving(rig, bind, tmp_pat
 # ------------------------------------------------- the unanswered record
 
 def note_unanswered(shim, message_id, author, at=None):
-    shim._client.notify("unanswered", identity=shim.identity, message_id=message_id,
-                        author=author, **({"at": at} if at is not None else {}))
+    params = {"identity": shim.identity, "message_id": message_id, "author": author}
+    if at is not None:
+        params["at"] = at
+    shim._client.notify("unanswered", params)
 
 
 def unanswered(rig):
@@ -495,8 +505,8 @@ def test_a_forged_notify_from_another_connection_is_dropped(rig):
     task = send(rig, "reviewer", "build it")
     forger = DaemonClient(daemon_socket()).connect()
     try:
-        forger.notify("unanswered", identity=R, message_id=task.id, author=P)
-        forger.query("agents")                  # a round trip: the notify has landed
+        forger.notify("unanswered", {"identity": R, "message_id": task.id, "author": P})
+        forger.call("agents")                  # a round trip: the notify has landed
     finally:
         forger.close()
     assert unanswered(rig) == {}
@@ -519,7 +529,7 @@ def test_a_payment_already_in_the_index_records_nothing(rig):
     paid = reply(rig, task.id, "done", who=REVIEWER)
     indexed(rig, paid.id)
     note_unanswered(reviewer, task.id, P)
-    reviewer._client.query("agents")
+    reviewer._client.call("agents")
     assert unanswered(rig) == {}
 
 
@@ -574,7 +584,7 @@ def test_the_authors_delta_shows_each_record_naming_it_once(rig, tmp_path):
 
 def test_comms_writes_no_claude_hook_settings():
     """A Claude session's Stop reaches comms through turns' holder (`claude_adapter`),
-    so the launcher writes no hook settings at all."""
+    so the wrapper writes no hook settings at all."""
     from moxi_comms.adapters import session
     assert not hasattr(session, "hook_settings")
 
@@ -615,16 +625,37 @@ class Answers:
                 "floor": self.floor}
 
 
+class DigestsOnly:
+    """The one daemon a unit shim talks to: `open_digest` keeps every id, in a digest
+    of its own; turn ends and notifications go nowhere."""
+
+    connected = True
+
+    def __init__(self):
+        self.digests = 0
+
+    def call(self, method, params=None, **kw):
+        if method == "open_digest":
+            self.digests += 1
+            return {"digest": self.digests, "ids": list(params["ids"]), "dropped": []}
+        return {}
+
+    def notify(self, method, params=None):
+        return None
+
+
 @pytest.fixture
 def unit():
-    """A shim with no daemon: the `owed` query answered by `Answers`, a clock 5 minutes
-    past T0, reviewer declaring lead its director, registration high-water 100."""
+    """A shim with no daemon but one that opens digests: the `owed` query answered by
+    `Answers`, a clock 5 minutes past T0, reviewer declaring lead its director,
+    registration high-water 100."""
     from moxi_comms.adapters.claude_shim import ClaudeShim
     answers = Answers()
     clock = lambda: T0 + 300                                     # noqa: E731
     shim = ClaudeShim(injector=lambda text: None, directors=(LEAD_Q,), clock=clock,
                       owed_query=answers, session_id="sess-a")
     shim.identity = R
+    shim._client = DigestsOnly()
     shim.ledger.hwm = "100"
     shim.answers = answers
     yield shim
@@ -1163,7 +1194,7 @@ def test_the_first_table_every_exchange_the_rule_creates_ends(rig, pair):
     assert line_zero(m4).posture == "none"
     assert settle(rig, rev, m4.id) == [] and m4.id in rev.ledger.payments   # 4: pays 1
     code, out = rig.cli(["reply", m4.id, "good"], **LEAD)            # 5: takes no reply
-    assert code == 2 and "is marked [no reply]" in out
+    assert code == 3 and "is marked [no reply]" in out
 
 
 def test_the_second_table_an_unprompted_report(rig, pair):

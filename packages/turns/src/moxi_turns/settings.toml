@@ -3,8 +3,9 @@
 
 [commands.allow]
 type = "list"
+items = "str"
 default = []
-doc = "Session commands (clear, exit) every session may be asked to run; a launch may add more for itself."
+doc = "Session commands (clear, exit, compact) every session may be asked to run; a launch may add more for itself."
 read = "use"
 
 [claude.endpoint]
@@ -13,10 +14,10 @@ default = ""
 doc = "The endpoint command the Claude plugin spawns; empty means this environment's moxi-turns-endpoint."
 read = "use"
 
-[hold.wait_ms]
+[stop_handler.wait_ms]
 type = "int"
 default = 2000
-doc = "How long a Stop waits for the session's holder to answer before the turn ends, in milliseconds."
+doc = "How long a Stop waits for the session's stop handler to answer before the turn ends, in milliseconds."
 read = "start"
 
 [listen.wait_ms]
@@ -24,3 +25,26 @@ type = "int"
 default = 2000
 doc = "How long an event waits for the registered listeners to answer, in milliseconds."
 read = "start"
+
+# The start list: what adds context when a session starts, resumes, is cleared or is
+# compacted, in this order. An entry is a module name or a file path (one holding a `/`
+# or starting with `~`). A module not installed is skipped; a module not on the list adds
+# no start context. Setting the key replaces the whole list.
+[start.order]
+type = "list"
+items = "str"
+default = ["launcher", "comms", "notes", "memory"]
+doc = "What adds start context, in order: module names and file paths; setting it replaces the whole list."
+read = "start"
+
+[start.limit]
+type = "int"
+default = 0
+doc = "The most start context a session gets, in characters; 0 (or a value past the harness's ceiling) means the ceiling."
+read = "start"
+
+# Keys an earlier turns read, kept declared so a file that still sets one is told what to
+# do rather than refused as unknown.
+
+[hold.wait_ms]
+retired = "set stop_handler.wait_ms instead: the hold is now the stop handler"

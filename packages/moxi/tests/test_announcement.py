@@ -200,6 +200,25 @@ TIMER = "'command': 'moxi-alpha-sweep', 'every': '5m', 'switch': 'sweep.on'"
                  "['localhost']}}}" % DAEMON}, "socket"),
     ({"DAEMONS": "{'relay': {%s, 'socket': {'setting': 'port', 'addresses': "
                  "['127.0.0.1'], 'backlog': 5}}}" % DAEMON}, "socket"),
+    ({"DAEMONS": "{'relay': {%s, 'socket': {'setting': 'port', 'addresses': "
+                 "['::1', '127.0.0.1', '::1']}}}" % DAEMON}, "with ::1 given twice"),
+    ({"DAEMONS": "{'relay': {%s, 'socket': {'setting': 'port', 'addresses': "
+                 "['::1', '0:0::1']}}}" % DAEMON}, "with ::1 and 0:0::1 given twice"),
+    # a daemon's socket units are named for it and for <name>-1 .. <name>-<n-1>
+    ({"DAEMONS": "{'shell': {%s, 'socket': {'setting': 'port', 'addresses': "
+                 "['127.0.0.1', '::1']}}, 'shell-1': {%s, 'socket': {'setting': "
+                 "'port', 'addresses': ['127.0.0.1']}}}" % (DAEMON, DAEMON)},
+     "declares daemon 'shell-1' beside daemon 'shell'"),
+    ({"DAEMONS": "{'shell': {%s, 'socket': {'setting': 'port', 'addresses': "
+                 "['127.0.0.1', '::1']}}, 'shell-1': {%s}}" % (DAEMON, DAEMON)},
+     "declares daemon 'shell-1' beside daemon 'shell'"),
+    ({"DAEMONS": "{'shell': {%s, 'socket': {'setting': 'port', 'addresses': "
+                 "['127.0.0.1', '::1']}}}" % DAEMON,
+      "TIMERS": "{'shell-1': {%s}}" % TIMER},
+     "declares timer 'shell-1' beside daemon 'shell'"),
+    ({"DAEMONS": "{'shell': {%s, 'socket': {'setting': 'port', 'addresses': "
+                 "['127.0.0.1', '::1', '10.0.0.1']}}, 'shell-2': {%s}}" % (DAEMON, DAEMON)},
+     "its address 3"),
     # timers
     ({"TIMERS": "{'sweep': {'command': 'moxi-alpha-sweep', 'every': '5m'}}"},
      "no switch"),
@@ -243,6 +262,17 @@ TIMER = "'command': 'moxi-alpha-sweep', 'every': '5m', 'switch': 'sweep.on'"
                 "'owner': 'me'}}"}, "key 'owner', which this moxi does not know"),
     ({"STORES": "{'Record': {'root': 'state', 'path': 'r.db', 'kind': 'sqlite'}}"},
      "STORES name"),
+    # the core's own stores in a module's state directory
+    ({"STORES": "{'runs': {'root': 'state', 'path': 'runs.jsonl', 'kind': 'jsonl'}}"},
+     "that path is the core's"),
+    ({"STORES": "{'runs': {'root': 'state', 'path': './Runs.jsonl.1', 'kind': 'jsonl'}}"},
+     "that path is the core's"),
+    ({"STORES": "{'doc': {'root': 'state', 'path': 'doctor.json', 'kind': 'file'}}"},
+     "that path is the core's"),
+    ({"STORES": "{'logs': {'root': 'state', 'path': 'logs', 'kind': 'dir'}}"},
+     "that path is the core's"),
+    ({"STORES": "{'log': {'root': 'state', 'path': 'logs\\\\relay.log', "
+                "'kind': 'file'}}"}, "that path is the core's"),
     ({"BUDGETS": "{'import_ms': 3}"}, "BUDGETS key 'import_ms'"),
     ({"BUDGETS": "{'idle_cpu': 0}"}, "idle_cpu"),
     ({"BUDGETS": "{'idle_cpu': 1.5}"}, "idle_cpu"),
@@ -278,6 +308,13 @@ def test_a_new_name_of_the_wrong_shape_is_broken(site, names, words):
 
 
 @pytest.mark.parametrize("names", [
+    # shell's two socket units are named for shell and shell-1, never shell-2
+    {"DAEMONS": "{'shell': {%s, 'socket': {'setting': 'port', 'addresses': "
+                "['127.0.0.1', '::1']}}, 'shell-2': {%s, 'socket': {'setting': 'port', "
+                "'addresses': ['127.0.0.1']}}}" % (DAEMON, DAEMON),
+     "TIMERS": "{'shell-3': {%s}}" % TIMER},
+    {"DAEMONS": "{'shell': {%s, 'socket': {'setting': 'port', 'addresses': "
+                "['127.0.0.1']}}, 'shell-1': {%s}}" % (DAEMON, DAEMON)},
     {"SESSION_ENV": "{'MOXI_ALPHA_NAME': 'stamped'}",
      "INTERNAL_ENV": "{'MOXI_ALPHA_': 'every stamp'}"},
     {"SESSION_ENV": "{'MOXI_ALPHA_PIN_': 'pins'}",
@@ -287,6 +324,10 @@ def test_a_new_name_of_the_wrong_shape_is_broken(site, names, words):
     {"SESSION_ENV": "{'CLAUDE_X': 'the harness', 'MOXI_BETA_Y': 'beta'}"},
     {"STORES": "{'record': {'root': 'runtime', 'path': 'r', 'kind': 'file', "
                "'retention': '512K'}}"},
+    # the core's store names are only the core's in the state root, and only there
+    {"STORES": "{'runs': {'root': 'data', 'path': 'runs.jsonl', 'kind': 'jsonl'}}"},
+    {"STORES": "{'runs': {'root': 'state', 'path': 'sub/runs.jsonl', 'kind': 'jsonl'}}"},
+    {"STORES": "{'logs': {'root': 'state', 'path': 'mylogs', 'kind': 'dir'}}"},
     {"TIMERS": "{'sweep': {'command': 'x', 'switch': 's', 'every': '24h'}}"},
     {"TIMERS": "{'sweep': {'command': 'x', 'switch': 's', 'every': '1m'}}"},
     {"TIMERS": "{'sweep': {'command': 'x', 'switch': 's', 'at': ['00:00', '23:59']}}"},

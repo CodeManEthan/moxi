@@ -213,7 +213,7 @@ describe('entry: every runner prompt is admitted by the endpoint, or dropped', (
 describe('a session command\'s re-check', () => {
   const commandMark = (name = 'clear') => ({ command: { request: 'r1', name, sock: SOCK } })
 
-  for (const name of ['clear', 'exit']) {
+  for (const name of ['clear', 'exit', 'compact']) {
     test(`/${name} the runner queued runs when the endpoint passes it`, PLUGINS, async ($: E, on) => {
       const w = world(on)
       await w.boot($)

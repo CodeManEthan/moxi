@@ -194,11 +194,23 @@ class Layout:
         new = root / self.module
         if os.path.exists(new):
             return new
+        return self._legacy(root, environ) or new
+
+    def _legacy(self, root: Path, environ: Mapping[str, str]) -> Path | None:
+        """The module's old directory under a host folder in `root`, or None.
+
+        This is the one test for it: the read in place above, the home move
+        (`moxi.home`) and the doctor's home row all find the old directory here, so the
+        folder the module reads is the folder the move moves and the doctor names. It is
+        `<root>/<label>/<module>` for the first label tried (the module's device
+        variable, then the host name) where that path is a directory, a symbolic link to
+        a directory counting as one.
+        """
         for label in _legacy_labels(self.prefix, environ):
             old = root / label / self.module
             if os.path.isdir(old):
                 return old
-        return new
+        return None
 
 
 def core() -> Layout:
@@ -233,7 +245,7 @@ def device_id(env: Mapping[str, str] | None = None) -> str:
 
     from . import files
 
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    files._make_dirs(path.parent)
     # This process's threads queue for the lock rather than being refused by it.
     with files._gated_lock(path.with_name(f"{DEVICE_ID}.lock")):
         if found := _read_id(path):

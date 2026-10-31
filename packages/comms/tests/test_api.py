@@ -20,6 +20,7 @@ import pytest
 from conftest import wait_for_queue, write_config
 
 from moxi import modules
+from moxi import exit as moxi_exit
 from moxi_comms import adapter, api, cli, module, sending
 from moxi_comms.api import tokens as api_tokens
 from moxi_comms.claimhold import ClaimServer
@@ -56,7 +57,9 @@ def test_interface_2_holds_its_names():
         "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
         "session", "roster", "owner", "Roster", "Agent", "Standing", "Owner",
         "record_dir", "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
-        "replay", "DaemonError", "DaemonOffline"}
+        "DaemonError", "DaemonOffline", "delete", "DeleteResult",
+        "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "send_as",
+        "session_of", "caller_identity"}
     for name in api.__all__:
         assert hasattr(api, name), name
     assert api.ClaimServer is ClaimServer
@@ -70,7 +73,7 @@ def test_the_send_and_check_signatures():
         params = inspect.signature(fn).parameters
         assert list(params) == ["sender", "to", "text", "posture", "reply_to", "new",
                                 "audience", "held", "cap", "no_cap", "deadline",
-                                "standing", "new_name"], fn
+                                "standing", "new_name", "interrupt", "expires"], fn
         assert all(params[n].kind is inspect.Parameter.KEYWORD_ONLY
                    for n in list(params)[3:])
         assert params["posture"].default is inspect.Parameter.empty
@@ -82,14 +85,16 @@ def test_the_send_and_check_signatures():
 
 def test_the_outcomes_deliveries_and_exit_codes():
     assert api.OUTCOMES == ("sent", "would-send", "refused", "cache-unread", "blocked",
-                            "offline", "failed")
-    assert api.EXIT_CODES == {"sent": 0, "would-send": 0, "refused": 2, "blocked": 3,
-                              "offline": 4, "failed": 5, "cache-unread": 6}
-    assert api.EXIT_CODES["cache-unread"] == cli.EXIT_COLD
+                            "offline", "failed", "unknown")
+    assert api.EXIT_CODES == {"sent": 0, "would-send": 0, "refused": 3, "blocked": 3,
+                              "offline": 75, "failed": 1, "cache-unread": 75,
+                              "unknown": 1}
+    assert api.EXIT_CODES["cache-unread"] == moxi_exit.TEMPFAIL
+    assert api.EXIT_CODES["unknown"] == moxi_exit.ERROR, "never try-again: it may be sent"
     assert api.DELIVERIES == ("live", "held-cold", "held-flag", "waiting", "unbound",
                               "operator")
     assert [f.name for f in api.SendResult.__dataclass_fields__.values()] == [
-        "outcome", "message_id", "recipients", "refusal", "notes", "said"]
+        "outcome", "message_id", "recipients", "refusal", "notes", "said", "code"]
     assert list(api.Recipient.__dataclass_fields__) == ["qualified", "delivery",
                                                         "cold_at", "reason"]
     assert list(api.Refusal.__dataclass_fields__) == ["code", "text"]
@@ -107,12 +112,18 @@ def test_the_reads_and_names_are_pinned():
     for name, params in {"attributed": ["message_id", "deadline"],
                          "session": ["identity", "deadline"],
                          "roster": ["deadline"], "owner": ["session_id", "deadline"],
-                         "record_dir": [], "daemon_socket": [], "replay": []}.items():
+                         "identity_state": ["name", "scope", "deadline"],
+                         "record_dir": [], "daemon_socket": []}.items():
         assert list(inspect.signature(getattr(api, name)).parameters) == params, name
     assert list(api.Agent.__dataclass_fields__) == ["qualified", "name", "scope", "tier",
                                                     "adapter", "directors"]
     assert list(api.Standing.__dataclass_fields__) == ["qualified", "name", "scope",
-                                                       "kind"]
+                                                       "kind", "module"]
+    assert list(api.IdentityState.__dataclass_fields__) == ["qualified", "state", "holder",
+                                                            "module", "reason"]
+    assert list(api.Holder.__dataclass_fields__) == ["adapter", "session_id"]
+    assert api.IDENTITY_STATES == ("free", "held", "standing", "reserved", "retired",
+                                   "offline")
     assert list(api.Roster.__dataclass_fields__) == ["bound", "standing"]
     assert list(api.Owner.__dataclass_fields__) == ["session_id", "identity", "adapter",
                                                     "directors", "awaiting"]
@@ -130,25 +141,24 @@ def test_api_tokens_holds_the_store_calls():
 
 
 def test_a_box_role_keys_under_its_own_name(env):
-    write_config(None, '[secrets]\nroles = ["calendar"]\n')
+    write_config(None, '[credentials]\nroles = ["calendar"]\n')
     owner = api_tokens.owner_for_role("calendar")
     assert owner.key == "calendar"
     assert api_tokens.owner_for_role("not-listed").key == ""
 
 
 def test_the_adapter_surface():
-    from moxi_comms import attribution, client, cursors, machine_line
+    from moxi_comms import attribution, client, machine_line
     from moxi_comms.adapters import claude_shim
 
     assert set(adapter.__all__) == {
         "DaemonClient", "DaemonError", "DaemonOffline", "DaemonNoAnswer",
-        "backoff_delays", "cursors", "render_digest", "frame_line", "TIER_EPHEMERAL",
-        "TIER_CHOSEN", "TIER_STANDING", "TIER_OPERATOR", "TIER_UNKNOWN", "VERIFIED",
-        "LABELED", "UNVERIFIED", "parse_machine_line", "MachineLine"}
+        "backoff_delays", "render_digest", "frame_line", "TIER_EPHEMERAL",
+        "TIER_CHOSEN", "TIER_STANDING", "TIER_OPERATOR", "TIER_SEND_ONLY", "TIER_UNKNOWN",
+        "VERIFIED", "LABELED", "UNVERIFIED", "parse_machine_line", "MachineLine"}
     assert adapter.DaemonClient is client.DaemonClient
     assert adapter.DaemonNoAnswer is client.DaemonNoAnswer
     assert adapter.backoff_delays is client.backoff_delays
-    assert adapter.cursors is cursors
     assert adapter.render_digest is claude_shim.render_digest
     assert adapter.frame_line is claude_shim.frame_line
     assert adapter.parse_machine_line is machine_line.parse
@@ -198,8 +208,8 @@ def test_the_deadline_reaches_the_daemon_call_and_the_records_busy_timeout(env):
     finally:
         sending.DaemonClient = real
     assert seen["timeout"] == 2.5
-    assert ctx.gateway.busy_timeout_ms == 2500
-    assert sending.Context().gateway.busy_timeout_ms == 5000
+    assert ctx.record.busy_timeout_ms == 2500
+    assert sending.Context().record.busy_timeout_ms == 5000
 
 
 # --------------------------------------------------------------------------- the rig
@@ -237,7 +247,7 @@ def test_a_send_returns_its_data_and_the_verbs_lines(rig):
 def test_a_refusal_is_data_with_a_code(rig):
     rig.shim(name="planner")
     rig.shim(name="reviewer")
-    before = len(rig.gateway.history(rig.names_channel))
+    before = len(rig.record.history(rig.names_channel))
     with rig.session_holding(_sender(rig, "planner")) as path:
         got = api.send(api.Sender.socket(path), "reviewer", "x", posture=None)
     assert got.outcome == "refused" and got.exit_code == 2 and not got.posted
@@ -245,12 +255,12 @@ def test_a_refusal_is_data_with_a_code(rig):
     assert got.refusal.text == cli.POSTURE_REQUIRED
     assert got.lines() == [cli.POSTURE_REQUIRED]
     assert got.recipients == ()
-    assert len(rig.gateway.history(rig.names_channel)) == before
+    assert len(rig.record.history(rig.names_channel)) == before
 
 
 def test_check_posts_nothing_and_says_what_the_send_would(rig):
     rig.shim(name="planner")
-    before = len(rig.gateway.history(rig.names_channel))
+    before = len(rig.record.history(rig.names_channel))
     with rig.session_holding(_sender(rig, "planner")) as path:
         got = api.check(api.Sender.socket(path), "later-agent", "x", posture="none",
                         new_name=True)
@@ -261,7 +271,7 @@ def test_check_posts_nothing_and_says_what_the_send_would(rig):
     assert got.notes == (cli.NOT_BOUND_NOTE.format(name="later-agent"),)
     assert got.lines() == ["would send 1 message(s) to later-agent",
                            cli.NOT_BOUND_NOTE.format(name="later-agent")]
-    assert len(rig.gateway.history(rig.names_channel)) == before
+    assert len(rig.record.history(rig.names_channel)) == before
 
 
 def test_a_held_send_says_held_flag_per_recipient(rig):
@@ -347,7 +357,7 @@ def test_no_identity_and_the_offline_daemon_are_refusals(rig):
     with rig.session_holding(_sender(rig, "planner")) as path:
         rig.daemon.stop()
         got = api.send(api.Sender.socket(path), "reviewer", "x", posture="none")
-    assert (got.outcome, got.exit_code, got.refusal.code) == ("offline", 4, "offline")
+    assert (got.outcome, got.exit_code, got.refusal.code) == ("offline", 75, "offline")
 
 
 def test_the_operator_lane(rig):
@@ -402,16 +412,106 @@ def test_roster_and_owner_carry_declared_directors(rig):
         api.owner("")
 
 
-def test_the_paths_and_the_replay_bound(env, tmp_path):
+def _store(sql: str, *params) -> None:
+    from moxi_comms import directory
+    from moxi_comms.paths import comms_db
+
+    conn = directory.connect(comms_db())
+    try:
+        with conn:
+            conn.execute(sql, params)
+    finally:
+        conn.close()
+
+
+def test_identity_state_free_held_and_standing(rig):
+    """The launcher's name check: a name nobody holds is free; a bound one is held,
+    with its adapter and session id; a standing row not bound now is standing."""
+    reviewer = rig.shim(name="reviewer")
+    free = api.identity_state("nobody")
+    assert (free.qualified, free.state, free.holder) == ("nobody", "free", None)
+    held = api.identity_state("reviewer")
+    assert held.state == "held"
+    assert held.holder == api.Holder("claude-shim", reviewer.session_id)
+    assert str(held.holder) == f"claude-shim session {reviewer.session_id}"
+    standing = api.identity_state("main", scope="proj-a")
+    assert (standing.qualified, standing.state) == ("main@proj-a", "standing")
+    assert api.identity_state("main@proj-b").state == "standing"
+    assert api.identity_state("main", scope="proj-c").state == "free"
+    assert api.identity_state("herald").state == "standing"
+
+
+def test_identity_state_retired(rig):
+    _store("INSERT INTO identities(name, scope, status, created_at, kind) "
+           "VALUES ('gone', 'proj-a', 'retired', '2026-01-01T00:00:00+00:00', 'agent')")
+    got = api.identity_state("gone", scope="proj-a")
+    assert (got.state, got.holder, got.module) == ("retired", None, None)
+    assert "retired" in got.reason
+
+
+def test_identity_state_reserved_names_its_module(rig):
+    """A reserved row not freed is reserved, whatever its state: the daemon's bind
+    refuses an active, a conflict and an unowned name alike. A freed one is ordinary."""
+    _store("INSERT INTO reserved(name, module, state, reserved_at) "
+           "VALUES ('console', 'launcher', 'active', '2026-01-01T00:00:00+00:00')")
+    _store("INSERT INTO reserved(name, state, note) VALUES ('relay', 'unowned', 'moved')")
+    _store("INSERT INTO reserved(name, module, state, freed_at) "
+           "VALUES ('old', 'gone-module', 'active', '2026-01-02T00:00:00+00:00')")
+    console = api.identity_state("console")
+    assert (console.state, console.module) == ("reserved", "launcher")
+    relay = api.identity_state("relay")
+    assert (relay.state, relay.module) == ("reserved", None)
+    assert api.identity_state("old").state == "free"
+    assert api.identity_state("console", scope="proj-a").state == "free", \
+        "a reserved name is the global identity"
+
+
+def test_a_standing_row_names_the_module_it_is_reserved_for(rig):
+    _store("INSERT INTO reserved(name, module, state, reserved_at) "
+           "VALUES ('herald', 'launcher', 'conflict', '2026-01-01T00:00:00+00:00')")
+    (herald,) = [s for s in api.roster().standing if s.qualified == "herald"]
+    assert herald.module == "launcher"
+    (main,) = [s for s in api.roster().standing if s.qualified == "main@proj-a"]
+    assert main.module is None
+
+
+def test_roster_lists_a_reserved_name_as_send_only_from_the_daemons_answer(rig):
+    """`roster().standing` comes from the daemon's `agents` answer: a reserved name is
+    there as kind `send-only` with its module, an unowned one with none, and a conflict
+    row isn't send-only."""
+    _store("INSERT INTO reserved(name, module, state, reserved_at) "
+           "VALUES ('console', 'launcher', 'active', '2026-01-01T00:00:00+00:00')")
+    _store("INSERT INTO reserved(name, state) VALUES ('relay', 'unowned')")
+    _store("INSERT INTO reserved(name, module, state) VALUES ('held', 'pager', 'conflict')")
+    got = {s.qualified: s for s in api.roster().standing}
+    assert got["console"] == api.Standing("console", "console", "global", api.SEND_ONLY,
+                                          "launcher")
+    assert (got["relay"].kind, got["relay"].module) == ("send-only", None)
+    assert "held" not in got
+
+
+def test_identity_state_is_offline_when_the_daemon_cannot_be_asked(env):
+    got = api.identity_state("anyone")
+    assert (got.qualified, got.state) == ("anyone", "offline")
+    assert got.reason
+
+
+@pytest.mark.parametrize(("name", "scope"), [
+    ("a b", None), ("lead@proj-a", "proj-b"), ("lead", "bad scope"), ("agent-7", None),
+])
+def test_identity_state_refuses_what_no_launch_can_claim(env, name, scope):
+    with pytest.raises(ValueError):
+        api.identity_state(name, scope=scope)
+
+
+def test_the_paths(env, tmp_path):
     from moxi_comms import paths
 
     assert api.daemon_socket() == paths.daemon_socket()
-    assert api.record_dir() == paths.record_db().parent
-    assert api.replay() == (50, 24 * 3600)
-    write_config(None, f'[local]\nrecord = "{tmp_path / "r" / "record.db"}"\n'
-                       "[replay]\nmessages = 7\nhours = 2\n")
+    assert api.record_dir() == paths.comms_db().parent
+    write_config(None, f'[local]\nrecord = "{tmp_path / "r" / "record.db"}"\n')
     assert api.record_dir() == tmp_path / "r"
-    assert api.replay() == (7, 7200)
+    assert not hasattr(api, "replay")
 
 
 

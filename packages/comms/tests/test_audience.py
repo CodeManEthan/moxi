@@ -5,7 +5,7 @@ copies an ask's audience onto the reply, and refuses a reply that
 would change it. The daemon fills an absent audience in from its own index at
 `_deliver`, and the frame line and `moxi comms history` show it.
 
-Everything here runs against the gateway seam, on the mock and on the local backend
+Everything here runs against the record seam, on the mock and on the local backend
 (`BOTH_BACKENDS` in conftest), and never against the Discord implementation.
 The parser's own grammar is pinned in `test_machine_line.py`.
 """
@@ -19,18 +19,18 @@ from types import SimpleNamespace
 import pytest
 from conftest import no_cold_at, queued, wait_for_payload, wait_for_queue, wait_until
 
-from moxi_comms import constants, cursors, machine_line
+from moxi_comms import constants, machine_line
 from moxi_comms.client import DaemonOffline
 from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.daemon import AUDIENCE_INDEX_SLACK, AUDIENCE_INDEX_UNKNOWN, Daemon
-from moxi_comms.gateway import GatewayError
+from moxi_comms.record import RecordError
 
 PLANNER = dict(name="planner", scope="proj-a")
 REVIEWER = dict(name="reviewer", scope="proj-a")
 
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def line_zero(msg):
@@ -49,7 +49,7 @@ def reboot():
 
     def _reboot(rig):
         rig.daemon.stop()
-        rig.daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+        rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
         started.append(rig.daemon)
         return rig.daemon
 
@@ -59,7 +59,7 @@ def reboot():
 
 
 class ReadFails:
-    """A gateway whose record read raises -- everything else is the real one."""
+    """A record whose record read raises -- everything else is the real one."""
 
     def __init__(self, inner, error):
         self._inner = inner
@@ -141,7 +141,7 @@ def test_reply_table_row_5_a_different_audience_is_refused(rig):
     audience, says a reply cannot change it, and names the cure: a new send."""
     original = ask(rig, audience="operator")
     code, out = rig.cli(["reply", original.id, "answer.", "--audience", "archivist"], **REVIEWER)
-    assert code == 2
+    assert code == 3
     assert "'operator'" in out and "cannot change" in out
     assert "new message" in out and "Nothing was sent" in out
     assert posted(rig) == [original]
@@ -164,7 +164,7 @@ def test_send_reply_to_gets_the_same_table(rig):
     before = len(posted(rig))
     code, out = rig.cli(["send", "--new-name", "planner@proj-a", "c.", "--reply-to", marked.id,
                          "--audience", "archivist"], **REVIEWER)
-    assert code == 2 and "cannot change" in out
+    assert code == 3 and "cannot change" in out
     assert len(posted(rig)) == before
 
 
@@ -186,16 +186,16 @@ def test_a_failed_referent_read_refuses_in_both_verbs(rig):
     """A read that FAILED is not a referent that is missing: posting as typed would drop
     an audience the referent may carry, so both verbs refuse and say so."""
     original = ask(rig, audience="operator")
-    broken = ReadFails(rig.gateway, GatewayError("500 on GET: the record is unreadable"))
+    broken = ReadFails(rig.record, RecordError("500 on GET: the record is unreadable"))
     code, out = rig.cli(["send", "--new-name", "planner@proj-a", "hi", "--reply-to",
-                         original.id], **REVIEWER, gateway=broken)
-    assert code == 5 and "could not be read" in out and "Nothing was sent" in out
-    code, out = rig.cli(["reply", original.id, "hi"], **REVIEWER, gateway=broken)
-    assert code == 5 and "Nothing was sent" in out
-    offline = ReadFails(rig.gateway, DaemonOffline("comms offline"))
+                         original.id], **REVIEWER, record=broken)
+    assert code == 1 and "could not be read" in out and "Nothing was sent" in out
+    code, out = rig.cli(["reply", original.id, "hi"], **REVIEWER, record=broken)
+    assert code == 1 and "Nothing was sent" in out
+    offline = ReadFails(rig.record, DaemonOffline("comms offline"))
     code, out = rig.cli(["send", "--new-name", "planner@proj-a", "hi", "--reply-to",
-                         original.id], **REVIEWER, gateway=offline)
-    assert code == 4 and "Nothing was sent" in out
+                         original.id], **REVIEWER, record=offline)
+    assert code == 75 and "Nothing was sent" in out
     assert posted(rig) == [original]
 
 
@@ -247,7 +247,7 @@ def test_a_hand_typed_reply_inherits_the_asks_audience(rig):
     original = ask(rig, audience="operator")
     reply = reply_to_planner(rig, original.id)
     assert delivered(planner, reply.id) == ("operator", "inherited")
-    assert line_zero(rig.gateway.get_message(reply.id)).audience is None
+    assert line_zero(rig.record.get_message(reply.id)).audience is None
 
 
 def test_a_chain_of_hand_typed_replies_inherits_transitively(rig):
@@ -286,23 +286,6 @@ def test_a_reply_to_an_indexed_ask_with_no_audience_carries_none(rig):
     original = ask(rig)
     reply = reply_to_planner(rig, original.id)
     assert delivered(planner, reply.id) == (None, None)
-
-
-def test_register_replay_feeds_the_index_before_it_delivers(rig):
-    """Register replays the record past the cursor, then releases the queue;
-    both call `_deliver`, so the walk must index what it parses first. The reply
-    to the unbound planner is a queue row, handed by the register's release.
-    The index is emptied here to prove the ask was learned from the register's own walk."""
-    original = ask(rig, audience="operator")
-    reply = reply_to_planner(rig, original.id)
-    wait_until(lambda: reply.id in rig.daemon.audiences)
-    assert wait_until(lambda: reply.id in queued(rig.daemon, "planner@proj-a"))
-    with rig.daemon._lock:
-        rig.daemon.audiences.clear()
-    planner = rig.shim(**PLANNER)
-    payload = wait_for_payload(planner, reply.id)
-    assert payload["backlog"] is False and payload["held"] is True, "released, not replayed"
-    assert (payload["audience"], payload["audience_source"]) == ("operator", "inherited")
 
 
 def test_the_boot_rescan_rebuilds_the_index(rig, reboot):
@@ -372,12 +355,11 @@ def test_a_live_reply_racing_the_boot_rescan_delivers_as_unknown(rig, monkeypatc
     is dropped. Once the rescan has passed the referent, the next reply inherits."""
     original = ask(rig, audience="operator")
     rig.daemon.stop()
-    # planner has handled everything up to the ask, so its own catch-up walks nothing
-    # and cannot index the ask for it: only the rescan can.
-    cursors.advance("planner@proj-a", original.id)
+    # A bind's catch-up is the name's rows and walks no record, so it cannot index the
+    # ask: only the rescan can.
 
     gate = threading.Event()
-    daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     rescan = daemon.rescan
 
     def held_rescan():
@@ -389,7 +371,7 @@ def test_a_live_reply_racing_the_boot_rescan_delivers_as_unknown(rig, monkeypatc
     booting = threading.Thread(target=daemon.start, daemon=True)
     booting.start()
     try:
-        assert wait_until(lambda: daemon._sub is not None and daemon.bound)
+        assert wait_until(lambda: daemon._sub is not None and daemon.host is not None)
         planner = rig.shim(**PLANNER)
         early = reply_to_planner(rig, original.id, "raced the rescan.")
         assert delivered(planner, early.id) == (None, "unknown")
@@ -446,8 +428,6 @@ def test_the_second_hop_of_a_referent_older_than_the_window_stays_unknown(rig, r
     original = ask(rig, audience="operator")
     first = reply_to_planner(rig, original.id)
     rig.daemon.stop()
-    cursors.advance("planner@proj-a", first.id)
-    cursors.advance("reviewer@proj-a", first.id)
     old = constants.RESCAN_LIMIT
     constants.RESCAN_LIMIT = 1                      # the window holds the reply only
     try:
@@ -467,11 +447,9 @@ def _boot_racing_the_rescan(rig, monkeypatch, *, snapshot_first):
     the reply lands, so the rescan never re-parses it."""
     original = ask(rig, audience="operator")
     rig.daemon.stop()
-    cursors.advance("planner@proj-a", original.id)
-    cursors.advance("reviewer@proj-a", original.id)
-    daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     gate, snap = threading.Event(), {}
-    real_rescan, real_history = daemon.rescan, rig.gateway.history
+    real_rescan, real_history = daemon.rescan, rig.record.history
 
     def held_rescan():
         if snapshot_first:
@@ -483,18 +461,18 @@ def _boot_racing_the_rescan(rig, monkeypatch, *, snapshot_first):
         if snap["msgs"] is None:
             real_rescan()
             return
-        daemon.gateway = _Snapshot(rig.gateway, snap["msgs"])
+        daemon.record = _Snapshot(rig.record, snap["msgs"])
         try:
             real_rescan()
         finally:
-            daemon.gateway = rig.gateway
+            daemon.record = rig.record
 
     monkeypatch.setattr(daemon, "rescan", held_rescan)
     rig.daemon = daemon
     booting = threading.Thread(target=daemon.start, daemon=True)
     booting.start()
     try:
-        assert wait_until(lambda: daemon._sub is not None and daemon.bound and "msgs" in snap)
+        assert wait_until(lambda: daemon._sub is not None and daemon.host is not None and "msgs" in snap)
         planner = rig.shim(**PLANNER)
         reviewer = rig.shim(**REVIEWER)
         early = reply_to_planner(rig, original.id, "raced the rescan.")
@@ -507,7 +485,7 @@ def _boot_racing_the_rescan(rig, monkeypatch, *, snapshot_first):
 
 
 class _Snapshot:
-    """The real gateway, except that `history` answers from a snapshot taken earlier."""
+    """The real record, except that `history` answers from a snapshot taken earlier."""
 
     def __init__(self, inner, msgs):
         self._inner = inner
@@ -568,19 +546,16 @@ def test_a_rescan_does_not_overwrite_a_known_inherited_value_once_the_ask_aged_o
     assert delivered(reviewer, follow.id) == ("operator", "inherited")
 
 
-def test_register_replay_does_not_overwrite_a_known_inherited_value(rig):
-    """On its frequent path: a register whose cursor sits between the ask and the
-    reply re-parses the reply without the ask, and must keep what the index holds."""
-    original, reply = _inherited_pair_whose_ask_aged_out(rig)
-    cursors.advance("reviewer@proj-a", original.id)
+def test_a_register_keeps_a_known_inherited_value(rig):
+    """A register after the ask aged out of the index releases its rows and keeps what
+    the index holds for the reply."""
+    _, reply = _inherited_pair_whose_ask_aged_out(rig)
     marker = ask(rig, text="after the reply")       # a queue row for reviewer
     assert wait_until(lambda: marker.id in queued(rig.daemon, "reviewer@proj-a"))
     reviewer = rig.shim(**REVIEWER)
     payload = wait_for_payload(reviewer, marker.id)
-    # Register replays past the cursor first, then releases the row: the marker's
-    # release says the replay already walked past the reply
     assert payload["backlog"] is False and payload["held"] is True, \
-        "the register released the row after its replay walked past the reply"
+        "the register released the row"
     assert rig.daemon.audiences[reply.id] == "operator"
     follow = ask_re(rig, reply.id)
     assert delivered(reviewer, follow.id) == ("operator", "inherited")
@@ -592,10 +567,10 @@ def test_a_reconnect_without_resume_feeds_the_index(rig):
     planner = rig.shim(**PLANNER)
     reviewer = rig.shim(**REVIEWER)
     before = rig.daemon.rescans
-    rig.gateway.disconnect()
+    rig.record.disconnect()
     original = ask(rig, audience="operator")
     reply = reply_to_planner(rig, original.id)
-    rig.gateway.reconnect(resume=False)
+    rig.record.reconnect(resume=False)
     assert wait_until(lambda: rig.daemon.rescans > before)
     assert delivered(planner, reply.id) == ("operator", "inherited")
     assert rig.daemon.audiences[reply.id] == "operator"
@@ -606,7 +581,7 @@ def test_a_reconnect_without_resume_feeds_the_index(rig):
 def test_a_reconnect_without_resume_keeps_a_known_value_once_the_ask_aged_out(rig):
     """The non-RESUME READY path again, with the ask gone from the index and outside the
     window: the rescan re-parses the reply and keeps its inherited value. Reviewer is
-    bound first, so no register replay puts the ask back into the index."""
+    bound first."""
     reviewer = rig.shim(**REVIEWER)
     _, reply = _inherited_pair_whose_ask_aged_out(rig)
     wait_for_queue(reviewer, 1)
@@ -614,8 +589,8 @@ def test_a_reconnect_without_resume_keeps_a_known_value_once_the_ask_aged_out(ri
     old = constants.RESCAN_LIMIT
     constants.RESCAN_LIMIT = 1                      # the window holds the reply only
     try:
-        rig.gateway.disconnect()
-        rig.gateway.reconnect(resume=False)
+        rig.record.disconnect()
+        rig.record.reconnect(resume=False)
         assert wait_until(lambda: rig.daemon.rescans > before)
     finally:
         constants.RESCAN_LIMIT = old

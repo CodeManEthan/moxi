@@ -12,7 +12,7 @@ export type MoxiTurnsEndpoint = {
 export type MoxiTurnsCommand = {
   /** The request id the endpoint minted. */
   request: string
-  name: 'clear' | 'exit'
+  name: 'clear' | 'exit' | 'compact'
   sock: string
 }
 

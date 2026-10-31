@@ -240,6 +240,9 @@ class Fake:
         self.envs: list[dict] = []
         self.setups: list[str] = []
         self.fail_setup: set[str] = set()
+        self.interrupt: set[str] = set()
+        self.replaces: list[bool] = []
+        self.skills: list = []
         self.fail_run = False
         self.installed: set[str] = set()
         self.receipt = list(receipt)
@@ -248,7 +251,7 @@ class Fake:
         monkeypatch.setattr(install, "environment", self.environment)
         monkeypatch.setattr(install, "run", self.run)
         monkeypatch.setattr(install, "snapshot", self.snapshot)
-        monkeypatch.setattr(install, "run_setup", self.run_setup)
+        monkeypatch.setattr(install, "run_settle", self.run_settle)
         real_which = shutil.which
         monkeypatch.setattr(shutil, "which",
                             lambda name, *a, **k: "/fake/uv" if name == "uv"
@@ -268,9 +271,17 @@ class Fake:
         importlib.invalidate_caches()
         return cli.describe()
 
-    def run_setup(self, python, target):
-        self.setups.append(target)
-        return 1 if target in self.fail_setup else 0
+    def run_settle(self, python, module, *, replace=False, skills=None):
+        from moxi import _settle, files, paths
+
+        # The install holds the core lock while it settles each module.
+        files._descriptor(paths.core_lock())
+        self.setups.append(module)
+        self.replaces.append(replace)
+        self.skills.append(skills)
+        if module in self.interrupt:
+            return _settle.Outcome(_settle.INTERRUPTED)
+        return _settle.Outcome(1 if module in self.fail_setup else 0)
 
     def run(self, argv, env=None):
         self.runs.append(argv)
@@ -354,8 +365,8 @@ def test_install_a_module_with_its_required_modules_only(fake, capsys):
     assert fake.envs[0] == {"UV_TOOL_DIR": str(fake.prefix.parent),
                             "UV_TOOL_BIN_DIR": "/b"}
     assert fake.installed == {"moxi-comms", "moxi-turns"}
-    # turns is set up (comms declares no SETUP); required before requiring.
-    assert fake.setups == ["moxi_turns.setup:run"]
+    # Each new module is settled, required before requiring.
+    assert fake.setups == ["turns", "comms"]
     # Standard input is not a terminal: every extra is no, with the line that adds it.
     assert "comms [cache] not installed: Holds a cold send." in out
     assert "add it later with: moxi install comms --with cache" in out
@@ -372,7 +383,7 @@ def test_install_beside_a_depending_module_goes_through_its_extra(fake, capsys):
     assert code == 0, err
     assert "comms declares the extra cache (moxi-cache>=0.1,<0.2)" in out
     assert fake.runs[0][3:6] == ["moxi", "--with", "moxi-comms[cache]"]
-    assert fake.setups[-1] == "moxi_cache.setup:run"
+    assert fake.setups[-1] == "cache"
     assert "installed cache" in out
 
 
@@ -411,7 +422,7 @@ def test_install_a_present_module_re_runs_its_setup(fake, capsys):
     runs = len(fake.runs)
     code, out, _ = moxi_install(capsys, "turns", "--none")
     assert code == 0
-    assert fake.setups == ["moxi_turns.setup:run"] and len(fake.runs) == runs
+    assert fake.setups == ["turns"] and len(fake.runs) == runs
 
 
 def test_install_all_and_none(fake, capsys):
@@ -496,7 +507,7 @@ def test_install_failure_sets_nothing_up_and_names_the_closure(fake, capsys):
 
 
 def test_install_a_failed_setup_keeps_the_install(fake, capsys):
-    fake.fail_setup.add("moxi_turns.setup:run")
+    fake.fail_setup.add("turns")
     code, out, err = moxi_install(capsys, "comms", "--none")
     assert code == 1
     assert "setup turns: failed (exit 1). The install stays" in err
@@ -539,19 +550,82 @@ def test_install_in_a_plain_environment_keeps_a_direct_source(site, tmp_path, mo
     assert fake.runs[0][-1] == "moxi-comms[cache] @ git+https://h/comms@main"
 
 
-def test_install_snapshot_and_setup_run_in_a_fresh_process(tmp_path, monkeypatch):
-    """The real `snapshot`, `run_setup` and `run`, against this interpreter."""
+def test_install_snapshot_and_run_in_a_fresh_process(tmp_path, monkeypatch):
+    """The real `snapshot` and `run`, against this interpreter."""
     info = install.snapshot(sys.executable)
     assert info["python"] == sys.executable
-    pkg = tmp_path / "setupmod"
-    pkg.mkdir()
-    (pkg / "__init__.py").write_text("")
-    (pkg / "s.py").write_text("def ok():\n    print('did it')\n"
-                              "def bad():\n    return 3\n")
-    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
-    assert install.run_setup(sys.executable, "setupmod.s:ok") == 0
-    assert install.run_setup(sys.executable, "setupmod.s:bad") == 3
     assert install.run(["/nonexistent/uv"]) == 127
+
+
+def test_install_passes_replace_to_each_settle_step(fake, capsys):
+    code, _, err = moxi_install(capsys, "comms", "--replace")
+    assert code == 0, err
+    assert fake.setups == ["turns", "comms"] and fake.replaces == [True, True]
+
+
+@pytest.mark.parametrize("flag, answer", [("--skills", True), ("--no-skills", False),
+                                          (None, None)])
+def test_install_passes_the_skills_answer_to_each_settle_step(fake, capsys, flag, answer):
+    code, _, err = moxi_install(capsys, "comms", *([flag] if flag else []))
+    assert code == 0, err
+    assert fake.setups == ["turns", "comms"] and fake.skills == [answer, answer]
+
+
+def test_skills_and_no_skills_together_are_refused(fake, capsys):
+    code, _, err = moxi_install(capsys, "comms", "--skills", "--no-skills")
+    assert code == 2 and "not allowed with argument --skills" in err
+    assert fake.runs == []
+
+
+def test_skills_form_sets_the_core_setting_before_any_settle_step(fake, capsys, monkeypatch):
+    from moxi import config
+
+    seen = []
+    real = fake.run_settle
+
+    def settle(python, module, **kwargs):
+        seen.append(config.load("moxi", config._core_schema())["skills.form"])
+        return real(python, module, **kwargs)
+    monkeypatch.setattr(install, "run_settle", settle)
+    code, out, err = moxi_install(capsys, "comms", "--skills-form", "copy")
+    assert code == 0, err
+    assert "skills.form set to copy" in out
+    assert seen == ["copy", "copy"]
+    assert config.history("moxi", "skills.form")[-1]["by"] == "moxi install"
+    code, _, err = moxi_install(capsys, "comms", "--skills-form", "hardlink")
+    assert code == 2 and "invalid choice" in err
+
+
+def test_an_interrupted_settle_step_ends_the_install(fake, capsys):
+    fake.interrupt.add("turns")
+    code, out, err = moxi_install(capsys, "comms", "--none")
+    assert code == 1
+    assert fake.setups == ["turns"]            # comms' settle step never ran
+    assert "interrupted in turns's settle step; no later step ran" in err
+    assert "installed comms" not in out        # nor the report
+
+
+def test_a_second_install_waits_for_the_first(fake, capsys):
+    import subprocess
+    import textwrap
+
+    import moxi.paths
+
+    lock = moxi.paths.core_lock()
+    holder = subprocess.Popen([sys.executable, "-c", textwrap.dedent(f"""
+        import sys, time
+        from moxi import files
+        with files.lock({str(lock)!r}):
+            print("held", flush=True)
+            time.sleep(1.5)
+        """)], stdout=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout.readline().strip() == "held"
+        code, _, err = moxi_install(capsys, "turns", "--none")
+    finally:
+        holder.wait(10)
+    assert code == 0, err
+    assert f"waiting for another install or uninstall (pid {holder.pid}) to finish" in err
 
 
 def test_plain_environment_without_uv_uses_pip(monkeypatch):

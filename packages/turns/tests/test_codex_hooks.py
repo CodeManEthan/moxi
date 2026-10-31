@@ -18,7 +18,7 @@ from conftest import write_config
 
 class HookHarness(FakeHarness):
     name = "codex"
-    can = frozenset({"start", "steer", "hold"})
+    can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler"})
 
     def __init__(self):
         super().__init__(can=self.can)
@@ -49,9 +49,9 @@ def _registry():
         return f"context at {event.event}"
 
     listener = listeners.Listener(
-        "sample", frozenset({"ready", "prompt"}), "sample.module:answer", _fn=answer,
+        "sample", frozenset({"start", "prompt"}), "sample.module:answer", _fn=answer,
     )
-    return listeners.Registry((listener,))
+    return listeners.Registry((listener,), order=("sample",))
 
 
 def _ping(monkeypatch, path, event, data, *extra):
@@ -73,7 +73,7 @@ def test_session_hooks_render_listener_context_through_turns_hook_code(
         output = _ping(monkeypatch, server.socket_path, "SessionStart",
                        {"session_id": "thread-1", "source": "startup"})
         assert json.loads(output)["hookSpecificOutput"] == {
-            "hookEventName": "SessionStart", "additionalContext": "context at ready",
+            "hookEventName": "SessionStart", "additionalContext": "context at start",
         }
         output = _ping(monkeypatch, server.socket_path, "UserPromptSubmit",
                        {"session_id": "thread-1"})
@@ -88,8 +88,8 @@ def test_stop_blocks_only_after_the_ping_prints_the_reason(monkeypatch, turns_en
     harness = HookHarness()
     endpoint = Endpoint(harness, session_id=harness.session_id).open()
     server = codex_hooks.HookServer(harness, endpoint.dir / "hooks.sock").start()
-    session = Session(endpoint.dir, endpoint.hello())
-    hold = session.hold(lambda facts: "reply before stopping")
+    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
+    hold = session.handle_stops(lambda facts: "reply before stopping")
     harness.start_turn()
     try:
         output = _ping(monkeypatch, server.socket_path, "Stop", {
@@ -167,21 +167,21 @@ def test_hook_commands_carry_the_endpoints_event_budget():
 
 
 def test_holder_and_listener_may_answer_after_three_seconds(monkeypatch, turns_env):
-    write_config(turns_env, "hold.wait_ms = 4000\nlisten.wait_ms = 4000\n")
+    write_config(turns_env, "stop_handler.wait_ms = 4000\nlisten.wait_ms = 4000\n")
 
     def answer(event):
         time.sleep(3.05)
         return "late but in budget"
 
     registry = listeners.Registry((listeners.Listener(
-        "slow", frozenset({"ready"}), "slow:answer", _fn=answer,
-    ),))
+        "slow", frozenset({"start"}), "slow:answer", _fn=answer,
+    ),), order=("slow",))
     harness = HookHarness()
     endpoint = Endpoint(harness, registry=registry,
                         session_id=harness.session_id).open()
     server = codex_hooks.HookServer(harness, endpoint.dir / "hooks.sock").start()
-    session = Session(endpoint.dir, endpoint.hello())
-    hold = session.hold(lambda facts: (time.sleep(3.05), "hold in budget")[1])
+    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
+    hold = session.handle_stops(lambda facts: (time.sleep(3.05), "hold in budget")[1])
     harness.start_turn()
     try:
         output = _ping(monkeypatch, server.socket_path, "SessionStart",
@@ -199,21 +199,21 @@ def test_holder_and_listener_may_answer_after_three_seconds(monkeypatch, turns_e
 
 
 def test_late_hook_answers_produce_no_context_or_block(monkeypatch, turns_env):
-    write_config(turns_env, "hold.wait_ms = 50\nlisten.wait_ms = 50\n")
+    write_config(turns_env, "stop_handler.wait_ms = 50\nlisten.wait_ms = 50\n")
 
     def answer(event):
         time.sleep(0.2)
         return "too late"
 
     registry = listeners.Registry((listeners.Listener(
-        "slow", frozenset({"ready"}), "slow:answer", _fn=answer,
-    ),))
+        "slow", frozenset({"start"}), "slow:answer", _fn=answer,
+    ),), order=("slow",))
     harness = HookHarness()
     endpoint = Endpoint(harness, registry=registry,
                         session_id=harness.session_id).open()
     server = codex_hooks.HookServer(harness, endpoint.dir / "hooks.sock").start()
-    session = Session(endpoint.dir, endpoint.hello())
-    hold = session.hold(lambda facts: (time.sleep(0.2), "too late")[1])
+    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
+    hold = session.handle_stops(lambda facts: (time.sleep(0.2), "too late")[1])
     harness.start_turn()
     try:
         assert _ping(monkeypatch, server.socket_path, "SessionStart",
@@ -238,7 +238,7 @@ def test_load_hooks_ask_listeners_but_leave_ready_to_the_accepted_load(
                         session_id=harness.session_id).open()
     server = codex_hooks.HookServer(harness, endpoint.dir / "hooks.sock").start()
     events = []
-    session = Session(endpoint.dir, endpoint.hello())
+    session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
     watcher = threading.Thread(target=lambda: events.extend(session.watch()), daemon=True)
     watcher.start()
     time.sleep(0.2)
@@ -248,7 +248,7 @@ def test_load_hooks_ask_listeners_but_leave_ready_to_the_accepted_load(
             output = _ping(monkeypatch, server.socket_path, event,
                            {"session_id": "thread-1", "source": source})
             assert json.loads(output)["hookSpecificOutput"]["additionalContext"] == \
-                "context at ready"
+                "context at start"
         deadline = time.monotonic() + 2
         while len(events) < 2 and time.monotonic() < deadline:
             time.sleep(0.02)

@@ -3,18 +3,18 @@
 Every key is declared in `settings.toml` beside this file, with its type, default, one
 line of doc and, for a few, the one variable that overrides it for one process:
 
-    backend = "local"                       # or "mock"         MOXI_COMMS_GATEWAY
+    backend = "local"                       # or "mock"         MOXI_COMMS_BACKEND
     block = false                           # read at each use
 
     [local]
-    record      = "/var/lib/.../record.db"  # empty: STATE/comms/record.db
+    record      = "/var/lib/.../comms.db"   # empty: STATE/comms/comms.db
     retain_days = 90                        # 0 disables the trim
 
     [threads]
     reply_cap = 8                           # an open thread's default reply cap
 
-    [secrets]
-    chain = ["env", "store"]                # the resolver chain, in order
+    [credentials]
+    chain = ["env", "keychain", "store"]    # the credential chain, in order
     store = "~/.../tokens"                  # empty: STATE/comms/tokens
     roles = ["calendar"]                    # role holders this box adds
 
@@ -24,10 +24,6 @@ line of doc and, for a few, the one variable that overrides it for one process:
 
     [provision]
     operator = "operator"                   # the human's identity name
-
-    [replay]
-    messages = 50                           # a reader's catch-up bound with no cursor
-    hours = 24
 
     [cache]
     required = false                        # true: the daemon refuses to start
@@ -69,7 +65,7 @@ _TOKENISH = ("token", "secret_value", "password", "webhook_url")
 #: The schema's resource, in this package (the announcement's `SETTINGS`).
 SETTINGS = "settings.toml"
 
-#: comms' own role holders, which `[secrets] roles` may not name again.
+#: comms' own role holders, which `[credentials] roles` may not name again.
 BUILTIN_ROLES = ("reader", "daemon", "provisioner", "operator")
 
 
@@ -100,13 +96,13 @@ def _default(key: str):
     return schema().keys[key].default
 
 
-#: The local record's retention, owned by the schema: the gateway's default reads it.
+#: The local record's retention, owned by the schema: the record's default reads it.
 LOCAL_RETAIN_DAYS = _default("local.retain_days")
 
 
 @dataclass
 class LocalConfig:
-    """`[local]`. An empty `record` means `paths.record_db()`."""
+    """`[local]`. An empty `record` means `paths.comms_db()`."""
 
     record: str = ""
     retain_days: int = LOCAL_RETAIN_DAYS
@@ -121,11 +117,11 @@ class ThreadsConfig:
 
 
 @dataclass
-class SecretsConfig:
-    """`[secrets]`: WHICH resolvers this box has, in what order, where the token store
+class CredentialsConfig:
+    """`[credentials]`: WHICH steps the credential chain has, in what order, where the token store
     is (empty: `paths.tokens_dir()`), and the role holders this box adds."""
 
-    chain: tuple = tuple(_default("secrets.chain"))
+    chain: tuple = tuple(_default("credentials.chain"))
     store: str = ""
     roles: tuple = ()
 
@@ -146,16 +142,36 @@ class ProvisionConfig:
     operator: str = _default("provision.operator")
 
 
-@dataclass
-class ReplayConfig:
-    """`[replay]`: a reader's catch-up bound when it has no cursor."""
+#: The units a duration takes, in seconds: `30m`, `6h`, `3d`.
+DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+#: The duration that means no expiry.
+NEVER = "never"
 
-    messages: int = _default("replay.messages")
-    hours: int = _default("replay.hours")
+
+def parse_duration(text) -> int | None:
+    """A duration as `--expires` and `[delivery] expiry` spell it, in seconds: a whole
+    number, 1 or more, followed by s, m, h or d. `never` is None: no expiry. Anything
+    else raises ValueError."""
+    raw = str(text).strip().lower()
+    if raw == NEVER:
+        return None
+    number, unit = raw[:-1], raw[-1:]
+    if unit not in DURATION_UNITS or not number.isdigit() or int(number) < 1:
+        raise ValueError(f"{text!r} is not a duration: write a whole number with s, m, h "
+                         "or d (30m, 6h, 3d), or never")
+    return int(number) * DURATION_UNITS[unit]
+
+
+@dataclass
+class DeliveryConfig:
+    """`[delivery]`: the expiry a send writes when it names none (`--expires`). Kept as
+    typed, so `expiry_seconds` is its meaning: seconds, or None for never."""
+
+    expiry: str = _default("delivery.expiry")
 
     @property
-    def seconds(self) -> int:
-        return self.hours * 3600
+    def expiry_seconds(self) -> int | None:
+        return parse_duration(self.expiry)
 
 
 @dataclass
@@ -167,15 +183,24 @@ class CacheConfig:
 
 
 @dataclass
+class ReplayConfig:
+    """`[replay]`: comms 0.2's catch-up bound, read only by the move of its files."""
+
+    messages: int = _default("replay.messages")
+    hours: int = _default("replay.hours")
+
+
+@dataclass
 class CommsConfig:
     backend: str = _default("backend")
     local: LocalConfig = field(default_factory=LocalConfig)
     threads: ThreadsConfig = field(default_factory=ThreadsConfig)
-    secrets: SecretsConfig = field(default_factory=SecretsConfig)
+    credentials: CredentialsConfig = field(default_factory=CredentialsConfig)
     policy: PolicyConfig = field(default_factory=PolicyConfig)
     provision: ProvisionConfig = field(default_factory=ProvisionConfig)
-    replay: ReplayConfig = field(default_factory=ReplayConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
+    delivery: DeliveryConfig = field(default_factory=DeliveryConfig)
+    replay: ReplayConfig = field(default_factory=ReplayConfig)
     block: bool = _default("block")
     #: The rosters' tables, raw: `{"defaults": {...}, "agents": {...}}`.
     codex: dict = field(default_factory=dict)
@@ -185,9 +210,6 @@ class CommsConfig:
     #: Where each key's value came from: `default`, `file` or `env` (moxi.config).
     sources: dict = field(default_factory=dict)
 
-
-#: The name a pre-Moxi caller used for the whole.
-GatewayConfig = CommsConfig
 
 
 def config_path(env=None) -> Path:
@@ -261,7 +283,7 @@ def _read(path: Path, environ) -> CommsConfig:
 def check_text(text: str) -> None:
     """comms' whole read over config text `text` alone: the token refusal, the schema's
     checks and comms' own, as `load` makes them, then the codex and opencode roster
-    parsers' checks of their rows, as a launcher makes them, but with no path, no
+    parsers' checks of their rows, as a wrapper makes them, but with no path, no
     environment and no cache: nothing is read but the text (a path's `~` still expands to
     the user's home, as `moxi.config.check_text` expands it), and nothing is logged.
     Raises `ConfigError`, naming no file."""
@@ -338,7 +360,7 @@ class Config(_moxi_config.Config):
             return self._good
 
     def use(self, key: str):
-        """One table or key of the settings now, by attribute name (`block`, `replay`)."""
+        """One table or key of the settings now, by attribute name (`block`, `delivery`)."""
         return getattr(self.current(), key)
 
 
@@ -346,7 +368,7 @@ def load_file(path, env=None) -> CommsConfig:
     """A comms config file named on a command line (`moxi-comms-codex --config PATH`),
     read whole in place of the box's: the same schema, the same token refusal, the same
     checks, and every error names `path`. Nothing else in the process reads it; the
-    caller takes the table it named the file for (a launcher, its roster)."""
+    caller takes the table it named the file for (a wrapper, its roster)."""
     path = Path(os.path.expanduser(str(path)))
     if not path.is_absolute():
         path = Path.cwd() / path
@@ -374,9 +396,14 @@ def _typed(settings, path: Path | None) -> CommsConfig:
     if v["local.retain_days"] < 0:
         raise bad("local.retain_days", f"is {v['local.retain_days']}",
                   "set it to a whole number of days, or 0 to keep every message")
+    try:
+        parse_duration(v["delivery.expiry"])
+    except ValueError:
+        raise bad("delivery.expiry", f"is {v['delivery.expiry']!r}",
+                  "set it to a whole number with s, m, h or d (30m, 6h, 3d), or never") \
+            from None
     if v["replay.messages"] < 1:
-        raise bad("replay.messages", f"is {v['replay.messages']}",
-                  "set it to 1 or more")
+        raise bad("replay.messages", f"is {v['replay.messages']}", "set it to 1 or more")
     if v["replay.hours"] < 0:
         raise bad("replay.hours", f"is {v['replay.hours']}", "set it to 0 or more hours")
     operator = v["provision.operator"].strip()
@@ -388,15 +415,16 @@ def _typed(settings, path: Path | None) -> CommsConfig:
         local=LocalConfig(record=str(record) if record is not None else "",
                           retain_days=v["local.retain_days"]),
         threads=ThreadsConfig(reply_cap=v["threads.reply_cap"]),
-        secrets=SecretsConfig(chain=_chain(bad, v["secrets.chain"]),
-                              store=str(v["secrets.store"] or ""),
-                              roles=_roles(bad, v["secrets.roles"])),
+        credentials=CredentialsConfig(chain=_chain(bad, v["credentials.chain"]),
+                              store=str(v["credentials.store"] or ""),
+                              roles=_roles(bad, v["credentials.roles"])),
         policy=PolicyConfig(cache_callers=_names(bad, "policy.cache_callers",
                                                  v["policy.cache_callers"]),
                             labels=_labels(bad, v["policy.labels"])),
         provision=ProvisionConfig(operator=operator),
-        replay=ReplayConfig(messages=v["replay.messages"], hours=v["replay.hours"]),
         cache=CacheConfig(required=v["cache.required"]),
+        delivery=DeliveryConfig(expiry=str(v["delivery.expiry"]).strip().lower()),
+        replay=ReplayConfig(messages=v["replay.messages"], hours=v["replay.hours"]),
         block=v["block"],
         codex=_roster(bad, "codex", v),
         opencode=_roster(bad, "opencode", v),
@@ -406,7 +434,7 @@ def _typed(settings, path: Path | None) -> CommsConfig:
 
 
 def _chain(bad, chain) -> tuple:
-    """`[secrets] chain`, validated HERE: a name outside the steps is refused at config
+    """`[credentials] chain`, validated HERE: a name outside the steps is refused at config
     load, so a typo fails the box's first read of its own config and not the first send
     of the day."""
     from .secrets import STEPS
@@ -415,11 +443,11 @@ def _chain(bad, chain) -> tuple:
     for name in chain:
         text = str(name).strip()
         if text not in STEPS:
-            raise bad("secrets.chain", f"names {text!r}, which is not a resolver",
+            raise bad("credentials.chain", f"names {text!r}, which is not a resolver",
                       f"use the steps {', '.join(STEPS)}")
         names.append(text)
     if not names:
-        raise bad("secrets.chain", "is empty, so nothing on this box could resolve a "
+        raise bad("credentials.chain", "is empty, so nothing on this box could resolve a "
                   "credential", f"name at least one of {', '.join(STEPS)}, or remove "
                   "the key for the default")
     return tuple(names)
@@ -435,16 +463,16 @@ def _names(bad, key: str, value) -> tuple:
 
 
 def _roles(bad, value) -> tuple:
-    """`[secrets] roles`: each a token-store name of its own, and none of comms' own."""
+    """`[credentials] roles`: each a token-store name of its own, and none of comms' own."""
     from .tokens import COMPONENT_RE
 
     roles = []
-    for item in _names(bad, "secrets.roles", value):
+    for item in _names(bad, "credentials.roles", value):
         if item in (".", "..") or not COMPONENT_RE.match(item):
-            raise bad("secrets.roles", f"holds {item!r}, which is not a token-store "
+            raise bad("credentials.roles", f"holds {item!r}, which is not a token-store "
                       "name", "use letters, digits, dot, dash and underscore")
         if item in BUILTIN_ROLES:
-            raise bad("secrets.roles", f"holds {item!r}, one of comms' own roles",
+            raise bad("credentials.roles", f"holds {item!r}, one of comms' own roles",
                       "remove it; comms knows it already")
         roles.append(item)
     return tuple(roles)
@@ -473,8 +501,17 @@ def _roster(bad, table: str, v) -> dict:
     return out
 
 
+#: The table `[credentials]` was called before it was named for what it holds.
+OLD_CREDENTIALS_TABLE = "secrets"
+
+
 def refuse_secrets(path: Path | None, raw: dict) -> None:
-    """The refusal every comms config table shares: a token-shaped key is a hard stop."""
+    """The refusal every comms config table shares: a token-shaped key is a hard stop.
+    The table's old name, `[secrets]`, is refused too, naming the new one."""
+    if isinstance(raw.get(OLD_CREDENTIALS_TABLE), dict):
+        raise ConfigError(path, OLD_CREDENTIALS_TABLE, "is the old name of the "
+                          "credential chain's table", "rename the table [credentials]; "
+                          "its keys are the same")
     def walk(node, trail):
         if isinstance(node, dict):
             for k, v in node.items():
@@ -487,8 +524,8 @@ def refuse_secrets(path: Path | None, raw: dict) -> None:
     walk(raw, [])
 
 
-__all__ = ["Config", "ConfigError", "LocalConfig", "ThreadsConfig", "SecretsConfig", "PolicyConfig",
-           "ProvisionConfig", "ReplayConfig", "CommsConfig", "GatewayConfig",
+__all__ = ["Config", "ConfigError", "LocalConfig", "ThreadsConfig", "CredentialsConfig", "PolicyConfig",
+           "ProvisionConfig", "ReplayConfig", "CommsConfig",
            "BUILTIN_ROLES", "check_text", "config_path", "load", "load_file",
            "refuse_secrets", "schema",
            "LOCAL_RETAIN_DAYS"]
