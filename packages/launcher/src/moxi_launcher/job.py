@@ -19,6 +19,9 @@ compact detached (`moxi.proc.spawn`); each records its own process as its run's 
 1. Wait (self runs only). The quiet read of the session, taken when its watch opens and
    at each of the watch's events, and between events every 2 s the person's signs alone
    (the pane and the window of a turn no delivery opened, which change with no event).
+   While a turn is open nothing is read between events: its end is one. Any other hold
+   (a draft, subagents, a read that failed) is read whole every 2 s, since its end may
+   bring no event.
    Each change of the first word that holds is one `wait` event. Nothing holding goes on;
    `relaunch.wait_s` after the run was armed it ends `expired`.
 2. Hold the slot for the run (`slots.hold`, holder the run id). Refused: `not-held`.
@@ -498,9 +501,14 @@ class RelaunchJob:
             if now > seen or watch.gone is not None:
                 seen = now
                 reading = watch.read(**read)
+            elif first.word == "turn":
+                # An open turn ends with a watch event; nothing to read on the clock.
+                continue
             elif set(reading.words) <= {"person"}:
                 reading = watch.reread_person(reading, **read)
             else:
+                # A draft cleared, a subagent done or a read that failed again may come
+                # with no event: the whole read again.
                 reading = watch.read(**read)
 
     def hold(self) -> None:

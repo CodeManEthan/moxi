@@ -275,6 +275,33 @@ def test_a_self_wait_that_never_quiets_expires_and_is_noted(conn):
     assert got.slots.calls == []
 
 
+class CountingSession(FakeSession):
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.reads = 0
+
+    def facts(self):
+        self.reads += 1
+        return super().facts()
+
+
+def test_an_open_turn_is_not_read_on_the_clock_while_the_run_waits(conn, monkeypatch):
+    monkeypatch.setattr(job, "POLL_S", 0.01)
+    session = CountingSession(facts_seq=[facts(turn_open=True)])
+    got = go(conn, arm(conn), session=session, settings={"relaunch.wait_s": 1})
+    assert got.outcome == "expired" and got.run.word == "turn"
+    # The watch's own facts and the read when it opened; nothing on the clock.
+    assert session.reads <= 3
+
+
+def test_a_draft_is_read_again_on_the_clock_while_the_run_waits(conn, monkeypatch):
+    monkeypatch.setattr(job, "POLL_S", 0.01)
+    session = CountingSession(facts_seq=[facts(draft=True)])
+    got = go(conn, arm(conn), session=session, settings={"relaunch.wait_s": 1})
+    assert got.outcome == "expired" and got.run.word == "draft"
+    assert session.reads > 10
+
+
 def test_a_note_not_taken_is_told_to_the_directors(conn):
     comms = FakeComms()
     session = FakeSession(facts_seq=[facts(turn_open=True)], delivered="refused")
