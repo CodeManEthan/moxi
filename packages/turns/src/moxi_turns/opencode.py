@@ -18,8 +18,12 @@ then. OpenCode has no Stop to hold.
 **Compaction.** `compact` posts `POST /session/:id/summarize` with the model of the
 session's last assistant message, or the launch's `model` option; with neither it fails
 ("no model known yet"). Like a start, it runs on a thread of its own: the ledger re-check
-(`command_entering`), then the status read just before the post. A 404 (a server without
-the route) refuses it `unsupported`. The server's `session.compacted` raises
+(`command_entering`), then the status read just before the post. A server without the
+route refuses it `unsupported`: OpenCode 1.18.34 answers an unknown route with its web
+page (a 2xx whose body is not JSON), an older one with a plain 404. A 404 whose JSON body
+is OpenCode's `NotFoundError` is the session gone, not the route: the command fails and
+the endpoint ends, as when the session's messages read 404. The server's
+`session.compacted` raises
 `Ready(compact)`, which settles it in the core. OpenCode has no `clear`, `exit` or
 background shells to stop.
 
@@ -681,7 +685,19 @@ class OpenCodeHarness(Harness):
             # or the core's bound does.
             log.warning("/compact had no answer: %s", e)
             return
+        if 200 <= code < 300 and not _json_or_empty(answer):
+            # The web app's page: the server has no such route.
+            log.warning("the OpenCode server answered summarize %s with a page, not "
+                        "JSON (no such route); /compact refuses unsupported", code)
+            self.endpoint.command_settled(request.id, Refused("unsupported"))
+            return
         if 200 <= code < 300:
+            return
+        if code == 404 and _not_found_error(answer):
+            detail = str(answer or "").strip()[:300]
+            self.endpoint.command_settled(request.id, Failed(
+                f"the OpenCode server refused with 404 ({MEANINGS[404]}): {detail}"))
+            self._fatal(404, detail)
             return
         if code == 404:
             log.warning("the OpenCode server has no summarize route (404); /compact "
@@ -813,6 +829,28 @@ class OpenCodeHarness(Harness):
         log.error("%s", reason)
         threading.Thread(target=self.endpoint.gone, args=(reason,), daemon=True,
                          name="turns-opencode-gone").start()
+
+
+def _json_or_empty(raw) -> bool:
+    """Whether an answer's body is JSON, or empty: anything else is a page."""
+    text = str(raw or "").strip()
+    if not text:
+        return True
+    try:
+        json.loads(text)
+    except ValueError:
+        return False
+    return True
+
+
+def _not_found_error(raw) -> bool:
+    """Whether a body is OpenCode's own `NotFoundError`, the answer for a missing
+    session (a missing route answers otherwise)."""
+    try:
+        body = json.loads(str(raw or ""))
+    except ValueError:
+        return False
+    return isinstance(body, dict) and body.get("name") == "NotFoundError"
 
 
 def _brief(info: dict) -> dict:

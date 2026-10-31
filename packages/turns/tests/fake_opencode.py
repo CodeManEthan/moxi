@@ -8,8 +8,10 @@ busy; `GET /session/:id/children` lists child sessions; the event stream (`GET /
 carries `server.connected`, `server.heartbeat`, `message.updated` (the user message, then
 the assistant message parented to it, its final update sent twice), `session.status`,
 `session.idle`, `session.error` and `session.compacted`. `POST /session/:id/summarize`
-(off with `summarize_route = False`, a 404 as from a server without it) runs the loop busy,
-sends `session.compacted`, goes idle and answers `true`. Every id here is synthetic.
+runs the loop busy, sends `session.compacted`, goes idle and answers `true`; with
+`summarize_route = False` it is an unknown route. An unknown route gets
+`missing_route_answer`: by default 1.18.34's, a 200 `text/html` web page, never a 404.
+Every id here is synthetic.
 
 As an executable (`install`), it answers `opencode serve ...` and `opencode --version`,
 driven by `FAKE_OPENCODE_DIR` (records: `events.jsonl`, and `sessions.json`, kept across
@@ -46,6 +48,13 @@ def mint(prefix: str) -> str:
     return f"{prefix}_{(ms * 0x1000 + random.randint(1, 4000)) & 0xFFFFFFFFFFFF:012x}{tail}"
 
 
+#: What OpenCode 1.18.34 answers for a route it does not have: its web app's page.
+WEB_PAGE = (200, "text/html",
+            "<!doctype html><html><head><title>OpenCode</title></head><body></body></html>")
+#: What an older server answers for one: a plain-text 404.
+PLAIN_404 = (404, "text/plain", "404 Not Found")
+
+
 class FakeOpenCode:
     """One fake server. Thread-safe; every state change is one event or more."""
 
@@ -70,6 +79,8 @@ class FakeOpenCode:
         self.reply_to_prompts = True
         #: False: the server has no summarize route.
         self.summarize_route = True
+        #: (status, content type, raw body) for a route the server does not have.
+        self.missing_route_answer = WEB_PAGE
         #: (status, body) to answer the next summarize posts with, in place of running.
         self.summarize_answers: list = []
         if self.store and self.store.exists():
@@ -140,11 +151,12 @@ class FakeOpenCode:
         want = base64.b64encode(f"opencode:{self.password}".encode()).decode()
         return handler.headers.get("authorization") == f"Basic {want}"
 
-    def reply(self, handler, status: int, body=None, raw: str | None = None):
+    def reply(self, handler, status: int, body=None, raw: str | None = None,
+              content_type: str = "application/json"):
         data = (raw if raw is not None else
                 ("" if body is None else json.dumps(body))).encode()
         handler.send_response(status)
-        handler.send_header("content-type", "application/json")
+        handler.send_header("content-type", content_type)
         handler.send_header("content-length", str(len(data)))
         handler.end_headers()
         handler.wfile.write(data)
@@ -215,8 +227,8 @@ class FakeOpenCode:
                     return self.reply(handler, answer[0], answer[1])
                 self.summarize(sid)
                 return self.reply(handler, 200, True)
-        return self.reply(handler, 404, {"name": "NotFoundError", "data": {
-            "message": f"no route {method} {path}"}})
+        status, content_type, text = self.missing_route_answer
+        return self.reply(handler, status, raw=text, content_type=content_type)
 
     def serve_events(self, handler):
         q = queue.Queue()
