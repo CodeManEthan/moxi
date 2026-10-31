@@ -284,8 +284,7 @@ def shim(rig, sid=SESS_A, *, age="none", **kw):
 # its suite. What stays is comms' seam: what reads without the module, and
 # that a read never raises.
 
-@pytest.mark.parametrize("adapter", ["something-new", None, "harness-kind", "person-kind",
-                                     "send-only"])
+@pytest.mark.parametrize("adapter", ["something-new", None, "harness-kind", "person-kind"])
 def test_an_adapter_with_no_clock_reads_no_cache(adapter):
     """No clock, live: an adapter comms has no clock for reads
     `no-cache`, a passing read, with the reason naming the adapter; never `unknown`, so
@@ -366,8 +365,8 @@ REFUSED_STATES = ["no session id", "unreadable", "no evidence", "codex", "openco
 
 
 def _bind_lane(bind, who):
-    """The console's lane holds a binding of its own, as a send-only console does, so a
-    post that goes has a credential to go with."""
+    """The console's lane holds a binding of its own, as a module's own process does, so
+    a post that goes has a credential to go with."""
     if who is AS_CONSOLE:
         bind(name="console", scope="acme")
 

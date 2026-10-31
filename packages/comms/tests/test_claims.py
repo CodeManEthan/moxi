@@ -155,6 +155,6 @@ def test_register_still_refuses_an_unknown_adapter_kind(rig):
     finally:
         c.close()
     said = str(e.value)
-    for kind in ("claude-shim", "codex", "opencode", "send-only"):
+    for kind in ("claude-shim", "codex", "opencode"):
         assert kind in said
     assert "x@proj-a" not in rig.daemon.bindings   # refused at the frame: nothing bound

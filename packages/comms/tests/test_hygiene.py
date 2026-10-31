@@ -119,20 +119,20 @@ def test_the_verbs_that_act_stay_four():
                                                                     cli.cmd_owner}
 
 
-def test_the_built_in_adapter_kinds_stay_four():
+def test_the_built_in_adapter_kinds_stay_three():
     """The compiled-in enum against a literal, in the shape `test_the_verbs_that_act_stay
     _four` uses: a closed set stays closed by being written down twice, in two places that
     have to be changed together.
 
-    comms' own register kinds are `claude-shim | codex | opencode | send-only`; any other
-    kind comes from a module's entry point in `moxi.comms.kinds` (test_kinds.py). An
-    unknown kind is refused at the frame, not discovered later at delivery time.
-    `send-only` binds a name that receives nothing.
+    comms' own register kinds are `claude-shim | codex | opencode`; any other kind comes
+    from a module's entry point in `moxi.comms.kinds` (test_kinds.py). An unknown kind is
+    refused at the frame, not discovered later at delivery time. A name that sends and
+    receives nothing is a reserved name, which binds as no kind.
     """
     from moxi_comms.daemon import ADAPTER_KINDS
 
-    assert ADAPTER_KINDS == ("claude-shim", "codex", "opencode", "send-only")
-    assert len(set(ADAPTER_KINDS)) == 4
+    assert ADAPTER_KINDS == ("claude-shim", "codex", "opencode")
+    assert len(set(ADAPTER_KINDS)) == 3
 
 
 def test_the_daemon_holds_no_posting_credential(rig):

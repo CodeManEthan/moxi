@@ -2,7 +2,7 @@
 
 The shape:
   * one shared room agents post in, `#names`. No inbox rooms.
-  * standing and send-only identities are directory rows with no stored credential.
+  * standing identities are directory rows with no stored credential.
   * the daemon holds no writing credential.
 
 On the local backend provision writes only the operator's posting token. The record
@@ -79,10 +79,9 @@ def _operator_token(record, store) -> bool:
 
 
 def provision(record, db_path, *, standing=(), operator=("operator", "operator"),
-              writer: str = "provisioner", daemon_client=None, store=None,
-              send_only=()) -> ProvisionResult:
-    """Idempotent. `standing` and `send_only` are iterables of (name, scope); a
-    `send_only` pair is a standing row whose kind is `send-only`.
+              writer: str = "provisioner", daemon_client=None,
+              store=None) -> ProvisionResult:
+    """Idempotent. `standing` is an iterable of (name, scope).
 
     `store` is the local backend's operator-token writer. None on the mock, which keeps
     its own credential.
@@ -120,11 +119,6 @@ def provision(record, db_path, *, standing=(), operator=("operator", "operator")
         for name, scope in standing:
             add_standing(record, conn, name, scope, rooms=result.rooms,
                          daemon_client=daemon_client, store=store)
-            result.standing.append((name, scope))
-        for name, scope in send_only:
-            add_standing(record, conn, name, scope, rooms=result.rooms,
-                         daemon_client=daemon_client, store=store,
-                         kind=directory.KIND_SEND_ONLY)
             result.standing.append((name, scope))
     finally:
         conn.close()
@@ -279,33 +273,19 @@ def _names_only(rooms: dict) -> dict:
 
 
 def add_standing(record, conn, name: str, scope: str = GLOBAL, *, rooms=None,
-                 daemon_client=None, store=None, kind: str = directory.KIND_AGENT) -> None:
+                 daemon_client=None, store=None) -> None:
     """Create a standing row without a stored credential.
 
     Refuses `^agent-\\d+$` in every scope, and refuses a name currently live as a
     chosen binding in the same scope (release the binding first) when a daemon client is
     available to ask.
 
-    `kind` is the row's directory kind, `agent` or `send-only`. A row that already
-    exists with the other kind is refused, not converted: turning a name that receives
-    mail into one that refuses it (or back) is a decision about that identity, and a
-    re-run of the provisioner is not the place to make it by accident.
-
     The retired `rooms` and `store` arguments remain accepted until the old webhook
     helpers are removed. They are ignored.
     """
-    if kind not in directory.ROW_KINDS:
-        raise ProvisionError(f"{kind!r} is not a standing row kind; expected one of "
-                             f"{', '.join(directory.ROW_KINDS)}")
     if is_auto_name(name):
         raise ProvisionError(
             f"{name!r}: the agent-N namespace is reserved for the auto-namer, so a standing identity can't take one")
-    found = conn.execute("SELECT * FROM identities WHERE name = ? AND scope = ?",
-                         (name, scope)).fetchone()
-    if found is not None and directory.kind_of(found) != kind:
-        raise ProvisionError(
-            f"{name}@{scope} is already provisioned as a standing row of kind "
-            f"{directory.kind_of(found)!r}, not {kind!r}; nothing was changed")
     if daemon_client is not None:
         for b in daemon_client.call("agents")["bindings"]:
             if b["name"] == name and b["scope"] == scope and b["tier"] == "chosen":
@@ -313,114 +293,8 @@ def add_standing(record, conn, name: str, scope: str = GLOBAL, *, rooms=None,
                     f"{name}@{scope} is currently live as a chosen binding "
                     f"(adapter {b['adapter']}); release it first")
     conn.execute("INSERT OR IGNORE INTO identities(name, scope, status, created_at, kind) "
-                 "VALUES (?,?, 'active', ?, ?)", (name, scope, directory.now(), kind))
-
-
-# --------------------------------------------------------------------------- send-only
-
-def send_only_main(argv=None, *, record=None, store=None, env=None, out=None,
-                   daemon_client=None) -> int:
-    """`moxi-comms-provision send-only NAME@SCOPE` -- one send-only standing identity, alone.
-
-    A send-only identity is a standing row whose directory kind is `send-only`. It posts
-    with its live binding token when its holder is bound, and nothing is ever delivered
-    to it. This verb adds the row to a directory that is already provisioned and does
-    nothing else, so it can be run
-    against a live box without touching anything it was not asked about. It migrates
-    the directory's `agents` table to carry the `kind` column first, if it has none.
-
-    Re-running converges: a row that is already send-only changes nothing.
-    A row of the same name and scope whose kind is `agent` is refused, not converted.
-    """
-    import argparse
-    import os
-
-    from . import tokens
-    from .client import DaemonClient, DaemonOffline
-    from .record import BACKENDS, LOCAL, RecordError, backend_name, open_record
-    from .paths import comms_db, daemon_socket
-    from .scoping import NAME_RE
-
-    ap = argparse.ArgumentParser(
-        prog="moxi-comms-provision send-only",
-        description="add a send-only standing identity to an already provisioned "
-                    "directory")
-    ap.add_argument("identity", metavar="NAME@SCOPE",
-                    help="the identity, e.g. console@acme (no @SCOPE means global)")
-    ap.add_argument("--backend", choices=BACKENDS,
-                    help="local or mock; default: MOXI_COMMS_BACKEND, then the "
-                         "config file, then local")
-    ap.add_argument("--backend-store", help="JSON store, mock backend only")
-    ap.add_argument("--db", help="comms.db path (default: STATE/comms/comms.db)")
-    ap.add_argument("--store", help=f"token store directory, local backend only (default: "
-                                    f"${tokens.STORE_ENV_VAR} or the STATE path)")
-    args = ap.parse_args(argv)
-
-    env = env if env is not None else os.environ
-    say = out or print
-    name, sep, scope = args.identity.partition("@")
-    scope = scope if sep else GLOBAL
-    if not NAME_RE.match(name) or not NAME_RE.match(scope):
-        raise SystemExit(f"moxi-comms-provision send-only: {args.identity!r} is not NAME@SCOPE. "
-                         "Nothing was written.")
-    db_path = Path(args.db or comms_db())
-    if not db_path.exists():
-        raise SystemExit(f"moxi-comms-provision send-only: {db_path} does not exist. Provision "
-                         "the directory first (moxi-comms-provision); this verb adds one "
-                         "identity to it. Nothing was written.")
-    if args.backend_store:
-        env = dict(env, MOXI_COMMS_MOCK_BACKEND=args.backend_store)
-    backend = backend_name(args.backend, env=env)
-    opened = None
-    if record is None:
-        try:
-            opened = record = open_record(args.backend, role="provisioner", env=env)
-        except RecordError as e:
-            raise SystemExit(f"moxi-comms-provision send-only: {e}") from None
-        # The local backend mints its tokens and they have no other home; the other two
-        # keep their own (see `main`).
-        if store is None and backend == LOCAL:
-            store = tokens.TokenStore(args.store, env=env)
-    asked = None
-    if daemon_client is None:
-        # The daemon, when it is up, says whether the name is live as a chosen binding;
-        # a daemon that is down has no binding to collide with.
-        try:
-            asked = daemon_client = DaemonClient(daemon_socket()).connect()
-        except DaemonOffline:
-            daemon_client = None
-    conn = directory.init(db_path)
-    try:
-        rooms = _names_only({r["name"]: r["room_id"]
-                             for r in conn.execute("SELECT * FROM rooms")})
-        if not rooms:
-            raise SystemExit(f"moxi-comms-provision send-only: the directory has no "
-                             f"{NAMES} room. Provision the directory first "
-                             "(moxi-comms-provision). Nothing was written.")
-        found = conn.execute("SELECT status FROM identities WHERE name = ? AND scope = ?",
-                             (name, scope)).fetchone()
-        if found is not None and found["status"] != "active":
-            # Reactivating would bring back an identity someone retired; that is a
-            # decision about it, not something a provisioning re-run should make.
-            raise SystemExit(f"moxi-comms-provision send-only: {name}@{scope} is provisioned "
-                             f"but {found['status']}; nothing was changed. Reactivating "
-                             "a retired identity is not this verb's to do.")
-        add_standing(record, conn, name, scope, rooms=rooms, daemon_client=daemon_client,
-                     store=store, kind=directory.KIND_SEND_ONLY)
-    except (RecordError, ProvisionError) as e:
-        raise SystemExit(f"moxi-comms-provision send-only: {e}") from None
-    finally:
-        conn.close()
-        if asked is not None:
-            asked.close()
-        if opened is not None:
-            close = getattr(opened, "close", None)
-            if close:
-                close()
-    qualified = name if scope == GLOBAL else f"{name}@{scope}"
-    say(f"backend: {backend}")
-    say(f"send-only {qualified}: standing row, kind send-only")
-    return 0
+                 "VALUES (?,?, 'active', ?, ?)",
+                 (name, scope, directory.now(), directory.KIND_AGENT))
 
 
 # --------------------------------------------------------------------------- operator CLI
@@ -440,10 +314,6 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
     Re-running against an already-provisioned directory converges: rooms and directory
     rows are found by name, and only what is missing is created.
 
-    One SUBCOMMAND, dispatched before argparse sees anything: `moxi-comms-provision
-    send-only NAME@SCOPE` (one send-only standing identity, added to a provisioned
-    directory). A subparser would have moved the existing top-level invocation.
-
     With no flags it makes `[provision]`'s operator (`configured()`).
     """
     import argparse
@@ -457,14 +327,8 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
     from .scoping import GLOBAL
 
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] == "send-only":
-        return send_only_main(argv[1:])
-
     ap = argparse.ArgumentParser(
-        prog="moxi-comms-provision",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="subcommand (it has its own --help):\n"
-               "  moxi-comms-provision send-only NAME@SCOPE add one send-only standing identity")
+        prog="moxi-comms-provision")
     ap.add_argument("--backend", choices=BACKENDS,
                     help="local or mock; default: MOXI_COMMS_BACKEND, then the "
                          "config file, then local")

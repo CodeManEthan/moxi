@@ -222,7 +222,7 @@ BOTH_BACKENDS = (
     "test_claim_server.py",         # a binding held by a module's own process
     "test_claim_send.py",           # sending as the claim; ordinary sends unchanged
     "test_claim_adapters.py",       # the shim and codex as claim holders
-    "test_console_identity.py",     # send-only identities: console@acme
+    "test_console_identity.py",     # reserved send-only names: console
     "test_owner.py",                # the owner read: a session's binding and awaiting
     "test_send_rule.py",            # no env path: every kind sends through its claim
     "test_attributed_read.py",      # the attributed_message read: author and recipients

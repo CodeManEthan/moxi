@@ -32,8 +32,7 @@ def test_comms_declares_its_own_kinds_in_the_group():
     declared = PYPROJECT["project"]["entry-points"][kinds.GROUP]
     assert declared == {"claude-shim": "moxi_comms.kinds:CLAUDE_SHIM",
                         "codex": "moxi_comms.kinds:CODEX",
-                        "opencode": "moxi_comms.kinds:OPENCODE",
-                        "send-only": "moxi_comms.kinds:SEND_ONLY"}
+                        "opencode": "moxi_comms.kinds:OPENCODE"}
     assert tuple(declared) == tuple(kinds.BUILT_IN) == ADAPTER_KINDS
 
 
@@ -42,15 +41,14 @@ def test_the_installed_group_reads_as_the_built_ins():
     names = {ep.name for ep in entry_points(group=kinds.GROUP)}
     assert set(kinds.BUILT_IN) <= names
     got = kinds.load()
-    assert got.names()[:4] == ADAPTER_KINDS and got.broken == ()
+    assert got.names()[:3] == ADAPTER_KINDS and got.broken == ()
 
 
 def test_the_built_ins_are_known_with_no_metadata():
     got = kinds.load([])
     assert got.names() == ADAPTER_KINDS
     assert [(k.cache, k.harness) for k in got.kinds] == [
-        ("harness", "claude"), ("harness", "codex"), ("harness", "opencode"),
-        ("send-only", None)]
+        ("harness", "claude"), ("harness", "codex"), ("harness", "opencode")]
     assert all(k.built_in and k.evidence is None for k in got.kinds)
 
 
@@ -106,7 +104,7 @@ def test_the_daemon_accepts_a_declared_kind_and_refuses_an_unknown_one(rig):
             client.bind(name="planner", scope="proj-a",
                             adapter="no-such-kind")
         assert "unknown adapter kind 'no-such-kind'" in str(e.value)
-        assert "claude-shim, codex, opencode, send-only, person-kind" in str(e.value)
+        assert "claude-shim, codex, opencode, person-kind" in str(e.value)
         answer = client.bind(name="planner", scope="proj-a",
                                  adapter="person-kind")
         assert answer["identity"]["qualified"] == "planner@proj-a"

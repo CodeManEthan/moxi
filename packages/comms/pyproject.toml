@@ -67,7 +67,6 @@ comms = "moxi_comms.listeners"
 claude-shim = "moxi_comms.kinds:CLAUDE_SHIM"
 codex = "moxi_comms.kinds:CODEX"
 opencode = "moxi_comms.kinds:OPENCODE"
-send-only = "moxi_comms.kinds:SEND_ONLY"
 
 [dependency-groups]
 # The suite runs the Codex adapter over turns' real Codex host against a stub app-server,

@@ -22,7 +22,7 @@ outside comms.
 
 **The other surfaces.**
 
-* `ClaimServer`, for send-only identities held by a process of their own.
+* `ClaimServer`, for a binding held by a module's own process.
 * Reads: `attributed(message_id)`, `session(identity)`, `roster()`, `owner(session_id)`,
   `identity_state(name, scope=None)`, `record_dir()`, `daemon_socket()`.
 * Names: `GLOBAL`, `qualify`, `split_tag`, `NAME_RE`.
@@ -43,6 +43,7 @@ from .. import config as _config
 from .. import directory as _directory
 from .. import machine_line as _machine_line
 from .. import paths as _paths
+from .. import reserved as _reserved_mod
 from .. import sending as _sending
 from .. import wire as _wire
 from ..claimhold import ClaimServer
@@ -212,9 +213,10 @@ class Agent:
 
 @dataclass(frozen=True)
 class Standing:
-    """A standing identity's directory row. `kind` is `agent` or `send-only`; `module`
-    names the module the name is reserved for, when it is one (None for a name no module
-    owns)."""
+    """A standing identity: a directory row (`kind` `agent`), or a reserved name (`kind`
+    `send-only`: active, or kept from an older comms). `module` names the module the name
+    is reserved for, or declared by when it is in conflict; None for a name no module
+    owns."""
 
     qualified: str
     name: str
@@ -271,21 +273,29 @@ def roster(*, deadline: float = READ_DEADLINE) -> Roster:
     try:
         rows = _directory.standing_rows(conn)
         reserved = _reserved_rows(conn)
-        standing = tuple(Standing(qualified=q, name=r["name"], scope=r["scope"],
-                                  kind=_directory.kind_of(r),
-                                  module=reserved.get(q))
-                         for r in rows
-                         for q in (qualify(r["name"], r["scope"]),))
     finally:
         conn.close()
-    return Roster(bound=bound, standing=standing)
+    standing = [Standing(qualified=q, name=r["name"], scope=r["scope"],
+                         kind=_directory.KIND_AGENT, module=reserved.get(q, (None,))[0])
+                for r in rows for q in (qualify(r["name"], r["scope"]),)]
+    seen = {s.qualified for s in standing}
+    for q, (module, state) in reserved.items():
+        if q not in seen and state in (_reserved_mod.ACTIVE, _reserved_mod.UNOWNED):
+            name, scope = split_tag(q)
+            standing.append(Standing(qualified=q, name=name, scope=scope or GLOBAL,
+                                     kind=SEND_ONLY, module=module))
+    return Roster(bound=bound, standing=tuple(standing))
+
+
+#: The kind a reserved name reads as in `roster().standing`.
+SEND_ONLY = "send-only"
 
 
 def _reserved_rows(conn) -> dict:
-    """qualified -> the module each reserved name is reserved for (None when no module
-    owns it), for every row not freed."""
-    return {row["name"]: row["module"] for row in conn.execute(
-        "SELECT name, module FROM reserved WHERE freed_at IS NULL")}
+    """qualified -> (the module each reserved name is reserved for, or None when no
+    module owns it; its state), for every row not freed."""
+    return {row["name"]: (row["module"], row["state"]) for row in conn.execute(
+        "SELECT name, module, state FROM reserved WHERE freed_at IS NULL")}
 
 
 def _reserved(qualified: str) -> tuple[bool, str | None]:
@@ -306,7 +316,7 @@ def _reserved(qualified: str) -> tuple[bool, str | None]:
         return False, None
     finally:
         conn.close()
-    return (qualified in rows), rows.get(qualified)
+    return (qualified in rows), rows.get(qualified, (None,))[0]
 
 
 def owner(session_id: str, *, deadline: float = READ_DEADLINE) -> Owner:

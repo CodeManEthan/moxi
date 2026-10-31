@@ -117,7 +117,7 @@ opens with "Nothing was sent:" and each refused recipient's reason, and closes w
 "Nothing was sent.": a bound recipient whose read is `unknown` (no session id yet, a
 transcript comms cannot read), a failed `session` query, and a name that unbound while
 comms checked it. There is no size exception and no sender exemption: the operator's
-lane and every send-only identity are held like any agent. There is no
+lane and every reserved name are held like any agent. There is no
 override. On every exit path the outcome line is last and every NOTE comes before it,
 so the last line tells the truth. The verb's check decides what it says; the daemon
 checks again at every delivery, and that check is the enforcement.
@@ -1041,8 +1041,7 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
 
     a = sub.add_parser("agents", help="who you can message")
     a.add_argument("--seats", action="store_true",
-                   help="operator view: also show send-only identities and the mail "
-                        "waiting for each name")
+                   help="operator view: also show the mail waiting for each name")
     a.set_defaults(func=cmd_agents)
 
     h = sub.add_parser("history", help="an identity's record, with honest attribution")

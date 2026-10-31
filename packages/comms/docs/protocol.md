@@ -19,8 +19,8 @@ live. Numbers named here are in `src/moxi_comms/constants.py`.
 - **Delivery adapters** connect to the daemon, bind a name, and put mail in front of a
   model at a turn boundary: `claude-shim` (a Claude Code session), `codex` (a Codex
   app-server) and `opencode` (an OpenCode server).
-  A `send-only` binding is a name that sends and is never delivered to
-  ([adapters.md](adapters.md#send-only-identities)).
+  A reserved name is one a module sends under and nobody binds or mails
+  ([adapters.md](adapters.md#reserved-send-only-names)).
 - **The CLI**, `moxi comms`, posts messages and reads the record. On `local` it writes the
   record itself and then nudges the daemon; delivery waits for the daemon.
 

@@ -15,7 +15,6 @@ one name. It registers with the daemon as one of the daemon's adapter **kinds**:
 | `claude-shim` | `moxi-comms-claude` | a Claude Code session |
 | `codex` | `moxi-comms-codex` | a Codex thread, through `codex app-server` |
 | `opencode` | `moxi-comms-opencode` | an OpenCode session, through `opencode serve` (see [OpenCode](#opencode)) |
-| `send-only` | | a module's own process holding a name that sends and receives nothing (see [Send-only identities](#send-only-identities)) |
 
 `moxi install comms` puts the wrappers in the `moxi` tool's environment, and uv puts none
 of them on PATH, so run one by its path: `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <identity>`. On
@@ -387,20 +386,21 @@ hears of the new session when you submit its first prompt, and from then on mail
 there, starting with any digest still pending in the old one. Until that first prompt
 the wrapper cannot know, and mail still goes to the old session.
 
-## Send-only identities
+## Reserved send-only names
 
-A send-only identity is a standing row whose directory `kind` is `send-only`, made with
-`"$(uv tool dir)/moxi/bin/moxi-comms-provision" send-only NAME@SCOPE`. Its holder is a module's own process (a
-`ClaimServer` with a daemon arm), which binds it
-with the `send-only` adapter kind. The daemon accepts that kind only for such a row, and
-such a row only with that kind, so no agent session can bind the name and take mail in
-its place.
+A module declares the names it sends under in its announcement's `RESERVED_NAMES`, each
+bare and global (`console`). comms reserves each one when the module installs, with a
+token in the credential chain for that module, and frees it when the module goes. The
+module sends with `moxi_comms.api.send_as(module, name, to, text)`; there is no CLI form.
 
-It uses the same live binding-token path as every other adapter kind. It has no delivery
-queue, and `moxi comms agents --seats` shows it as send-only.
+No session binds a reserved name, of any adapter kind. A session's binding token never
+sends under one, and the daemon refuses a send under one from any process inside a live
+session, or one whose ancestry it can't read: module code sends from outside every
+session. A send-only name an older comms kept is reserved for nobody until a module
+declares it; nothing sends under it meanwhile.
 
-Nothing is delivered to it, bound or not. `moxi comms send` and `moxi comms reply` refuse it as a
-recipient before anything is posted; a record line that names it anyway is delivered to
-nobody, pending for nobody and held for nobody, and opens no ask for it; the daemon never
-sends its binding a `deliver` frame. A bare name typed in another scope is not that
-identity: it resolves in the sender's own scope like any unbound name.
+Nothing is delivered to a reserved name. `moxi comms send` and `moxi comms reply` refuse
+it as a recipient before anything is posted, and the daemon refuses a `send` whose line
+zero names one (`not-mailable`); a record line that names it anyway is delivered to
+nobody, pending for nobody and held for nobody, and opens no ask for it. A scoped name
+(`console@acme`) is not the reserved one: it is an ordinary name.

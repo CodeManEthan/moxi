@@ -6,10 +6,9 @@ Against the daemon's `agents` answer:
 the queue; these tests hand the renderers a fake answer of that shape, except the last
 section, which asks the daemon itself.
 
-The default view (the verb and the snapshot) is one row per live binding whose adapter is
-not `send-only`, and nothing else. `--seats` is the operator's view: every binding, one
-waiting block, and the unanswered rows. The operator is a row like any other. The deltas
-never name a send-only binding, nor announce one leaving from a memory written before.
+The default view (the verb and the snapshot) is one row per live binding, and nothing
+else. `--seats` is the operator's view: every binding, one waiting block, and the
+unanswered rows. The operator is a row like any other.
 """
 
 from __future__ import annotations
@@ -21,14 +20,11 @@ from conftest import wait_until
 from moxi_comms import cli, roster_view
 from moxi_comms.adapters import codex, opencode, shim_roster
 from moxi_comms.client import DaemonClient
-from moxi_comms.daemon import SEND_ONLY_ADAPTER
 from moxi_comms.paths import daemon_socket
 
 NOW = 1_800_000_000.0
 DAY, HOUR = 86400, 3600
 
-CONSOLE = {"qualified": "relay@proj-a", "name": "relay", "scope": "proj-a",
-           "tier": "standing", "adapter": "send-only"}
 OPERATOR = {"qualified": "operator", "name": "operator", "scope": "global",
             "tier": "standing", "adapter": "claude-shim"}
 EPHEMERAL = {"qualified": "agent-3", "name": "agent-3", "scope": "global",
@@ -37,7 +33,7 @@ REVIEWER = {"qualified": "reviewer@proj-b", "name": "reviewer", "scope": "proj-b
             "tier": "chosen", "adapter": "codex"}
 
 
-def answer(bindings=(CONSOLE, OPERATOR, EPHEMERAL, REVIEWER), **over):
+def answer(bindings=(OPERATOR, EPHEMERAL, REVIEWER), **over):
     """An `agents` answer in its one shape."""
     info = {
         "bindings": [dict(b) for b in bindings],
@@ -59,23 +55,18 @@ DEFAULT = ("operator                 standing   adapter claude-shim\n"
 # ------------------------------------------------------------------- the default view
 
 def test_the_default_view_is_the_messageable_names_and_nothing_else():
-    """One row per live binding that is not send-only, `agent-N` and the operator
-    included; no send-only row, no waiting mail, no unanswered rows, no keeps, no slot."""
+    """One row per live binding, `agent-N` and the operator included; no waiting mail,
+    no unanswered rows, no keeps, no slot."""
     out = roster_view.render_agents(answer(), now=NOW)
     assert out == DEFAULT
-    for absent in ("console", "send-only", "waiting", "curator", "unanswered", "9001",
+    for absent in ("waiting", "curator", "unanswered", "9001",
                    "slot", "keeps", "pending", "held"):
         assert absent not in out, absent
 
 
-def test_the_send_only_kind_is_the_daemons():
-    assert roster_view.SEND_ONLY_ADAPTER == SEND_ONLY_ADAPTER
-
-
-def test_a_roster_of_only_send_only_rows_is_the_empty_roster():
-    out = roster_view.render_agents(answer(bindings=(CONSOLE,)), now=NOW)
+def test_a_roster_of_no_bindings_is_the_empty_roster():
+    out = roster_view.render_agents(answer(bindings=()), now=NOW)
     assert out == "no live bindings — nothing is addressable right now."
-    assert roster_view.render_agents(answer(bindings=()), now=NOW) == out
 
 
 def test_the_default_view_reads_bindings_alone():
@@ -93,7 +84,6 @@ def test_the_operator_is_absent_when_unbound():
 # ------------------------------------------------------------------- --seats
 
 SEATS = (
-    "relay@proj-a             standing   adapter send-only\n"
     "operator                 standing   adapter claude-shim\n"
     "agent-3                  ephemeral  adapter claude-shim\n"
     "reviewer@proj-b          chosen     adapter codex\n"
@@ -106,7 +96,7 @@ SEATS = (
 
 
 def test_seats_is_every_binding_then_one_waiting_block_then_unanswered():
-    """Send-only rows are included; waiting rows show count and oldest wait."""
+    """Waiting rows show count and oldest wait."""
     assert roster_view.render_agents(answer(), seats=True, now=NOW) == SEATS
 
 
@@ -125,8 +115,7 @@ def test_the_old_headers_and_rows_are_gone():
 def test_no_waiting_block_when_nothing_waits():
     out = roster_view.render_agents(answer(waiting={}, unanswered=[]),
                                     seats=True, now=NOW)
-    assert out == ("relay@proj-a             standing   adapter send-only\n"
-                   "operator                 standing   adapter claude-shim\n"
+    assert out == ("operator                 standing   adapter claude-shim\n"
                    "agent-3                  ephemeral  adapter claude-shim\n"
                    "reviewer@proj-b          chosen     adapter codex")
 
@@ -155,16 +144,14 @@ def test_codex_and_opencode_layer_one_carry_the_same_view():
     for module in (codex, opencode):
         text = module.layer_one_text(answer())
         assert text.endswith(f"{shim_roster.LABEL}\n{DEFAULT}"), module.__name__
-        assert "relay@proj-a" not in text
 
 
-def test_the_race_line_tests_the_filtered_list():
-    """A roster of only send-only rows is empty to the session, so a stamped
-    session still gets the race line."""
+def test_the_race_line_follows_an_empty_roster():
+    """A stamped session that finds no binding at all gets the race line."""
     env = {"MOXI_COMMS_NAME": "rev"}
-    envelope, _ = shim_roster.render_snapshot(answer(bindings=(CONSOLE,)), env=env)
+    envelope, _ = shim_roster.render_snapshot(answer(bindings=()), env=env)
     assert envelope.endswith(shim_roster.OWN_BINDING_RACE.format(name="rev"))
-    envelope, _ = shim_roster.render_snapshot(answer(bindings=(CONSOLE, OPERATOR)), env=env)
+    envelope, _ = shim_roster.render_snapshot(answer(bindings=(OPERATOR,)), env=env)
     assert "may not have completed registration" not in envelope
 
 
@@ -218,7 +205,7 @@ def test_an_older_usable_accepts_the_answer_because_it_keeps_an_empty_pending():
 
 # ------------------------------------------------------------------- the deltas
 
-def test_roster_of_drops_send_only_bindings():
+def test_roster_of_is_every_binding():
     assert shim_roster.roster_of(answer()) == {
         "operator": {"tier": "standing", "adapter": "claude-shim"},
         "agent-3": {"tier": "ephemeral", "adapter": "claude-shim"},
@@ -227,30 +214,6 @@ def test_roster_of_drops_send_only_bindings():
 
 def fake_fetch(monkeypatch, info):
     monkeypatch.setattr(shim_roster, "fetch", lambda *a, **k: info)
-
-
-def test_a_delta_never_names_a_send_only_join(monkeypatch, tmp_path):
-    state = tmp_path / "roster.json"
-    shim_roster.write_state(state, {})
-    fake_fetch(monkeypatch, answer(bindings=(CONSOLE, REVIEWER)))
-    envelope, online = shim_roster.delta(None, state, env={})
-    assert online and envelope == (
-        "(comms roster update: reviewer@proj-b [chosen] is now reachable — "
-        "`moxi comms agents` is always current.)")
-    assert "console" not in state.read_text(), "the memory holds messageable names only"
-
-
-def test_an_older_memory_announces_no_send_only_leave(monkeypatch, tmp_path):
-    """The remembered side is filtered too: an old memory holding a send-only row whose
-    binding is still live, or gone, announces nothing about it."""
-    state = tmp_path / "roster.json"
-    old = {"relay@proj-a": {"tier": "standing", "adapter": "send-only"},
-           "reviewer@proj-b": {"tier": "chosen", "adapter": "codex"}}
-    for live in ((CONSOLE, REVIEWER), (REVIEWER,)):
-        shim_roster.write_state(state, old)
-        fake_fetch(monkeypatch, answer(bindings=live))
-        envelope, online = shim_roster.delta(None, state, env={})
-        assert online and envelope is None, live
 
 
 def test_an_operator_join_and_leave_ride_the_delta_like_any_name(monkeypatch, tmp_path):
@@ -290,7 +253,7 @@ def _agents_help():
 def test_the_agents_help_says_who_you_can_message():
     assert _agents_help() == (
         "who you can message",
-        "operator view: also show send-only identities and the mail waiting for each name")
+        "operator view: also show the mail waiting for each name")
 
 
 # ------------------------------------------------------------------- the daemon's answer

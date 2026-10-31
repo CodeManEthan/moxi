@@ -32,7 +32,7 @@ META_QUEUE_MIGRATED = "queue_migrated"
 #: The values a column may take, where the schema checks them.
 QUEUE_STATES = ("waiting", "handed", "in_digest")
 BINDING_KINDS = ("session", "reserved")
-IDENTITY_KINDS = ("agent", "send-only")
+IDENTITY_KINDS = ("agent",)
 IDENTITY_STATUSES = ("active", "retired")
 RESERVED_STATES = ("active", "conflict", "unowned")
 DROP_REASONS = ("expired", "withdrawn")
