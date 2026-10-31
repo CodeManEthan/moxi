@@ -23,8 +23,10 @@ directory, forks the session's adapter, and execs `claude`:
     goes through it adds none itself. Their words (turns' plugins as `--plugin-dir DIR`,
     and any module's tool permissions) go after the wrapper's own `--session-id` and
     before the passthrough, less any flag and value the passthrough already gives; their
-    variables go over the stamped environment. When turns cannot give them (its Claude
-    plugin cannot be set up), the launch is refused before anything starts, with
+    variables (`MOXI_TURNS_ENDPOINT`, the endpoint command turns' runner spawns, among
+    them) go over the stamped environment. Asking writes nothing into turns' package.
+    When turns cannot give them (its Claude plugin folder is missing or it has no
+    endpoint command), the launch is refused before anything starts, with
     `moxi.exit.ERROR`.
 
 It also passes the session's NATIVE LABEL: `-n`, rendered here by `native_name()`

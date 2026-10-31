@@ -17,9 +17,12 @@ their caller passed `additions=`, which then replaces that call.
 
 What turns itself adds, per harness:
 
-- Claude: `--plugin-dir` for the runner and for the gate, after writing the runner's
-  `endpoint.json` for the environment this runs in, so a launch loads both plugins and
-  gets an endpoint with no user-scope install.
+- Claude: `--plugin-dir` for the runner and for the gate, and `MOXI_TURNS_ENDPOINT`, the
+  absolute endpoint command the runner spawns, so a launch loads both plugins and gets
+  an endpoint with no user-scope install. The command is the one turns' config and this
+  Python environment give, read from this process's own environment as turns' setup
+  reads it, not from `env`. A launch writes nothing into turns' package: launches in
+  parallel share no write, and a read-only install launches.
 - every harness: `MOXI_TURNS_COMMANDS`, the session commands the launch grants, when
   `commands` is not empty.
 
@@ -184,11 +187,16 @@ def launch_additions(harness: str, *, cwd, env: Mapping[str, str],
     """What a launch of `harness` adds: argv words, environment variables, harness
     options and notes. `cwd` and `env` are the launch's as composed so far; `session_id`
     is the id the launcher minted, when it has one; `commands` the session commands this
-    launch grants.
+    launch grants. `env` goes to the contributors only; turns' own additions read no
+    variable from it.
+
+    For Claude, `env` of the result always holds `MOXI_TURNS_ENDPOINT`, the endpoint
+    command the runner spawns. Nothing is written for it.
 
     Raises `ValueError` for a harness or a command turns does not know, and
-    `moxi_turns.TurnsError` when Claude's plugin cannot be set up. A contribution that
-    fails is skipped with a note; it never fails the launch.
+    `moxi_turns.TurnsError` when Claude's plugin folder is missing, turns' config cannot
+    be read, or there is no endpoint command. A contribution that fails is skipped with a
+    note; it never fails the launch.
     """
     from .results import COMMANDS
 
@@ -208,10 +216,11 @@ def launch_additions(harness: str, *, cwd, env: Mapping[str, str],
     options: dict[str, object] = {}
     notes: list[str] = []
     if harness == "claude":
-        from .claude_setup import claude_plugin_dirs
+        from .claude_setup import ENDPOINT_ENV, claude_plugin_dirs, launch_endpoint
 
         runner, gate = claude_plugin_dirs()
         argv += ["--plugin-dir", str(runner), "--plugin-dir", str(gate)]
+        out_env[ENDPOINT_ENV] = launch_endpoint()
     if granted:
         from .config import COMMANDS_ENV
 

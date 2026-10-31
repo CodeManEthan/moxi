@@ -29,10 +29,10 @@ what its own first run holds, such as its comms name or its named slot; the inse
 uniqueness still catches two first runs that race.
 
 `preview` composes through the same `compose.build`, with the request's ids, so for one
-request it shows the argv the launch hands its target. Two limits: composing a Claude
-launch without comms asks turns for its launch additions, which writes turns' own endpoint
-file, so `preview` is not free of side effects outside the launcher; and for a Codex launch
-under turns' host it shows the host's command, not the `codex` command the host builds.
+request it shows the argv the launch hands its target. Composing a Claude launch without
+comms asks turns for its launch additions, which write nothing. One limit: for a Codex
+launch under turns' host it shows the host's command, not the `codex` command the host
+builds.
 
 **A replay** takes its values from the stored row's `values_json` as they are, with no
 preset read, and its own request id (and, but for a resume, its own Claude session id). It

@@ -128,6 +128,8 @@ def test_a_terminal_launch_with_turns_starts_the_deliverer_before_it_execs(
     assert not any(word.startswith("Brief from launcher") for word in run["argv"])
     assert list(fake_turns.ADDITIONS) == run["argv"][5:7]
     assert run["env"]["MOXI_TURNS_COMMANDS"] == "exit"
+    assert run["env"]["MOXI_TURNS_ENDPOINT"] == fake_turns.ENDPOINT, \
+        "turns' endpoint command reaches the environment claude starts with"
     # The deliverer waited on the session by its minted id, given the harness's pid,
     # which is the launcher's own, and sent the brief once.
     wait_for(lambda: (row("r2").state == "first-sent"), timeout=60)

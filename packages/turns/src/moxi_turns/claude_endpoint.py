@@ -1,9 +1,10 @@
 """The Claude Code endpoint: the endpoint core with the Claude half (`ClaudeHarness`).
 
 `moxi-turns-endpoint` runs this. The runner plugin spawns it at `session.start` with the
-absolute path `endpoint.json` names; it lives for the session and inherits the
-session's environment. It speaks to its runner over the leg in `claude_leg` and to every
-caller over the endpoint socket (`contracts/socket-protocol.md`).
+absolute path `MOXI_TURNS_ENDPOINT` names in the session's environment, else the one
+`endpoint.json` names; it lives for the session and inherits the session's environment.
+It speaks to its runner over the leg in `claude_leg` and to every caller over the
+endpoint socket (`contracts/socket-protocol.md`).
 
 The tie rule: each plugin submit has one window, opened when the endpoint hands
 the runner its `submit` line and closed exactly once, at the first end it accepts: the
