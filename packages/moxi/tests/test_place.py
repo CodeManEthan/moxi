@@ -535,7 +535,8 @@ def test_adopt_refuses_a_placement_not_the_givers_and_goes_on(tmp_path, skill):
 
 # -- the core lock ------------------------------------------------------------------------
 
-def test_a_standalone_apply_waits_for_the_core_lock(tmp_path, skill):
+def _hold_the_core_lock(seconds=1.0):
+    """Another process (a running install) holding the core lock for `seconds`."""
     lock = moxi.paths.core_lock()
     holder = subprocess.Popen(
         [sys.executable, "-c", textwrap.dedent(f"""\
@@ -543,17 +544,47 @@ def test_a_standalone_apply_waits_for_the_core_lock(tmp_path, skill):
             import moxi.files
             with moxi.files.lock({str(lock)!r}):
                 print("held", flush=True)
-                time.sleep(1.0)
+                time.sleep({seconds})
             """)],
         stdout=subprocess.PIPE, text=True, env=os.environ.copy())
+    assert holder.stdout.readline().strip() == "held"
+    return holder
+
+
+def test_a_standalone_apply_waits_for_the_core_lock(tmp_path, skill):
+    steps = place.plan("comms", [Item(skill(), "claude", "x")])
+    holder = _hold_the_core_lock()
     try:
-        assert holder.stdout.readline().strip() == "held"
-        steps = place.plan("comms", [Item(skill(), "claude", "x")])
         start = time.monotonic()
         place.apply(steps)
         assert time.monotonic() - start > 0.5
     finally:
         holder.wait(timeout=10)
+
+
+def test_a_standalone_remove_waits_for_the_core_lock(skill):
+    place.apply(place.plan("comms", [Item(skill(), "claude", "x")]))
+    holder = _hold_the_core_lock()
+    try:
+        start = time.monotonic()
+        place.remove("comms", say=lambda line: None)
+        assert time.monotonic() - start > 0.5
+    finally:
+        holder.wait(timeout=10)
+    assert ledger() == {}
+
+
+def test_a_standalone_adopt_waits_for_the_core_lock(skill):
+    place.apply(place.plan("comms", [Item(skill(), "claude", "x")]))
+    holder = _hold_the_core_lock()
+    try:
+        start = time.monotonic()
+        moved = place.adopt("comms", "loadout", place.status("comms"),
+                            say=lambda line: None)
+        assert time.monotonic() - start > 0.5
+    finally:
+        holder.wait(timeout=10)
+    assert len(moved) == 1 and "loadout" in ledger()
 
 
 def test_apply_inside_a_nested_hold_yields(skill):
