@@ -52,7 +52,8 @@ on Linux and macOS the launcher execs it, on Windows it starts the harness and w
 `--target headless` starts the harness's non-interactive mode (`claude -p`, `codex exec`)
 detached, with the brief as its prompt, its output going to the launch's run log; a
 headless launch needs a brief. `--target slot` starts the session in a tmux slot, and needs
-the slots module (Linux, macOS and WSL2).
+the slots module (Linux, macOS and WSL2). `--slot` names the slot; a launch with any other
+target that names one is refused, exit 2.
 
 **The brief.** Without turns, the brief (or the handoff) is the harness's opening prompt.
 With turns, a launch in this terminal or in a slot waits until the session is ready and

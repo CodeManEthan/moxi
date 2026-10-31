@@ -80,7 +80,7 @@ doc = "Where the session runs: this terminal, headless, or a tmux slot."
 type = "string"
 default = ""
 requires = "slots"
-doc = "The tmux slot to launch into; the lowest free one when unset."
+doc = "The tmux slot a slot launch goes into; the lowest free one when unset."
 
 [extra_flags]
 type = "list"

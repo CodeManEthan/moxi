@@ -179,6 +179,37 @@ def test_a_launch_naming_a_slot_goes_only_there(work, harness, rig, given, asked
     assert got.state == "started" and got.exit_code == 0
 
 
+@pytest.mark.parametrize("target, extra", [("terminal", {}),
+                                           ("headless", {"brief": BRIEF})])
+def test_a_slot_named_for_another_target_is_refused_as_a_usage_error(work, harness, rig,
+                                                                     target, extra,
+                                                                     monkeypatch):
+    execs = []
+    monkeypatch.setattr(targets, "_execve", lambda *a: execs.append(a))
+    monkeypatch.setattr(targets, "_spawn", lambda *a, **kw: execs.append(a) or 99)
+    rig.plan(slots={"3": {"state": "free", "launchable": True}})
+    asked = request(work, slot="3", target=target, **extra)
+    [refused] = api.check(asked)
+    assert isinstance(refused, catalog.BadValue) and refused.row == "slot"
+    assert api.exit_code(refused) == exits.USAGE
+    assert f"target is {target}" in refused.problem and "--target slot" in refused.hint
+    with pytest.raises(catalog.BadValue):
+        api.launch(asked)
+    assert nothing_written() and execs == []
+
+
+def test_run_with_a_slot_and_no_slot_target_exits_2(work, harness, rig, monkeypatch,
+                                                    capsys):
+    from moxi_launcher import cli
+
+    execs = []
+    monkeypatch.setattr(targets, "_execve", lambda *a: execs.append(a))
+    monkeypatch.chdir(work)
+    assert cli.main(["run", "--slot", "3"]) == exits.USAGE
+    assert "[bad-value]" in capsys.readouterr().err
+    assert execs == [] and rig.calls("start") == []
+
+
 def test_a_retried_launch_into_the_slot_its_first_run_took_gets_the_stored_outcome(
         work, harness, rig):
     rig.plan(slots={"3": {"state": "free", "launchable": True}})

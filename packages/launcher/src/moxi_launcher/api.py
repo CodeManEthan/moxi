@@ -191,7 +191,8 @@ def check(request, *, environ: Mapping[str, str] | None = None) -> list[Refusal]
     """The refusals `launch` would meet in the live state, without composing or writing
     anything: the resolver's own (an unknown preset or project, projects unreadable or
     busy, a posture off its default), a directory that does not exist, a scratch folder's
-    parent this user can't trust (a link, another user's, or open to others), a comms
+    parent this user can't trust (a link, another user's, or open to others), a slot
+    named for a launch whose target is not `slot` (exit 2, like a flag misused), a comms
     name that is held, reserved or retired (or that comms refuses, or can't answer on),
     and the target's (for a slot launch: slots not installed or not supported here, or a
     named slot that is held, occupied or missing)."""
@@ -252,6 +253,12 @@ def _check(resolved, caller: Mapping[str, str]) -> list[Refusal]:
             found.append(ScratchRoot(
                 "scratch", f"a scratch launch can't use its folder: {problem}",
                 "move that folder away, or launch in a directory of your own"))
+    named = targets.named_slot(getattr(resolved, "values", {}) or {})
+    if named is not None and resolved.target != "slot":
+        found.append(catalog.BadValue(
+            "slot", f"slot {named} is named, but the launch's target is {resolved.target} "
+                    "and only a slot launch takes a slot",
+            "launch with --target slot, or name no slot"))
     if resolved.identity:
         taken = _identity_taken(resolved.identity, resolved.scope)
         if taken is not None:
