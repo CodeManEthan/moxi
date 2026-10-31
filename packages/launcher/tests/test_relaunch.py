@@ -912,3 +912,95 @@ def test_a_slot_taken_outside_the_chain_or_missing_still_repairs(conn, view):
     failed = ended(conn, "relaunch-failed", events=("exit",))
     result = repair(conn, failed.run_id, slots_api=FakeSlots(shown=view))
     assert result.exit_code == 0 and result.run.slot == "3"
+
+
+def died(conn, *, events=("exit",)):
+    """A run whose job died: still open, its job gone, past the insert's grace."""
+    run = store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
+                           session_id=SID, actor="planner", handoff_path="/work/h.md",
+                           slot="3", pane_id="%9", turn_number=4, job="slots:relaunch-dead",
+                           at=LONG_AGO)
+    for kind in events:
+        store.add_run_event(conn, run.run_id, kind, {})
+    return run
+
+
+def test_a_run_whose_job_died_after_the_exit_is_repaired_and_ended_job_gone(conn):
+    run = died(conn)
+    result = repair(conn, run.run_id)
+    assert result.exit_code == 0 and result.run.repair_of == run.run_id
+    old = store.get_run(conn, run.run_id)
+    assert (old.outcome, old.word) == ("error", "job-gone")
+
+
+def test_a_run_whose_job_died_after_respawn_meets_its_chain_in_the_slot(conn):
+    run = died(conn, events=("exit", "respawn"))
+    slots_api = FakeSlots(shown=slot_view(state="occupied", chain="r1"))
+    with pytest.raises(relaunch.Refused) as caught:
+        repair(conn, run.run_id, slots_api=slots_api)
+    assert caught.value.code == "occupied-by-chain"
+    # Refused with nothing written: the run is left for the next insert to end.
+    assert store.get_run(conn, run.run_id).open
+    nothing_written(conn, slots_api, before=1)
+
+
+def test_a_run_whose_job_died_before_acting_is_not_repairable(conn):
+    run = died(conn, events=())
+    with pytest.raises(relaunch.Refused) as caught:
+        repair(conn, run.run_id)
+    assert caught.value.code == "not-repairable"
+    assert store.get_run(conn, run.run_id).open
+
+
+def test_an_open_run_whose_job_still_runs_is_not_repaired(conn):
+    run = died(conn)
+    with pytest.raises(relaunch.Refused) as caught:
+        repair(conn, run.run_id, slots_api=FakeSlots(shown=slot_view(),
+                                                     alive={"relaunch-dead"}))
+    assert caught.value.code == "run-open"
+
+
+def died(conn, *, events=("exit",)):
+    """A run whose job died: still open, its job gone, past the insert's grace."""
+    run = store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
+                           session_id=SID, actor="planner", handoff_path="/work/h.md",
+                           slot="3", pane_id="%9", turn_number=4, job="slots:relaunch-dead",
+                           at=LONG_AGO)
+    for kind in events:
+        store.add_run_event(conn, run.run_id, kind, {})
+    return run
+
+
+def test_a_run_whose_job_died_after_the_exit_is_repaired_and_ended_job_gone(conn):
+    run = died(conn)
+    result = repair(conn, run.run_id)
+    assert result.exit_code == 0 and result.run.repair_of == run.run_id
+    old = store.get_run(conn, run.run_id)
+    assert (old.outcome, old.word) == ("error", "job-gone")
+
+
+def test_a_run_whose_job_died_after_respawn_meets_its_chain_in_the_slot(conn):
+    run = died(conn, events=("exit", "respawn"))
+    slots_api = FakeSlots(shown=slot_view(state="occupied", chain="r1"))
+    with pytest.raises(relaunch.Refused) as caught:
+        repair(conn, run.run_id, slots_api=slots_api)
+    assert caught.value.code == "occupied-by-chain"
+    # Refused with nothing written: the run is left for the next insert to end.
+    assert store.get_run(conn, run.run_id).open
+    nothing_written(conn, slots_api, before=1)
+
+
+def test_a_run_whose_job_died_before_acting_is_not_repairable(conn):
+    run = died(conn, events=())
+    with pytest.raises(relaunch.Refused) as caught:
+        repair(conn, run.run_id)
+    assert caught.value.code == "not-repairable"
+    assert store.get_run(conn, run.run_id).open
+
+
+def test_an_open_run_whose_job_still_runs_is_not_repaired(conn):
+    run = died(conn)
+    with pytest.raises(relaunch.Refused) as caught:
+        repair(conn, run.run_id, slots_api=FakeSlots(shown=slot_view(),
+                                                     alive={"relaunch-dead"}))
+    assert caught.value.code == "run-open"

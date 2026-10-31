@@ -35,7 +35,8 @@ written. The call then follows the run for `relaunch.follow_s` and prints its ou
 past that it exits 75 naming `--status`.
 
 **A repair** (`--from-record`) is for a run that exited its session and did not relaunch
-it (`relaunch-failed`, `gone`, or `error` after the exit, and a repair that failed so). It
+it (`relaunch-failed`, `gone`, or `error` after the exit, and a repair that failed so),
+including a run left open by a job that died after the exit, whose job is gone. It
 writes a run of its own (`mode` `repair`, `repair_of` the run) and starts the job
 `repair-<run>`, which launches the row again from the record under the original run's
 hold. It is refused `occupied-by-chain` when the recorded slot already runs a session of
@@ -50,7 +51,7 @@ import stat
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -436,7 +437,10 @@ def from_record(run_id: str, *, follow: bool = True,
                 clock: Callable[[], float] = time.monotonic,
                 sleep: Callable[[float], None] = time.sleep) -> Result:
     """Launch the session of a run that exited it and did not relaunch it, again, from
-    the run's record, as the job `repair-<run>`. Raises a refusal with nothing written."""
+    the run's record, as the job `repair-<run>`. Raises a refusal with nothing written.
+
+    A run still open whose job is gone is judged as ended `error`, word `job-gone`, the
+    end the repair's own insert writes for it."""
     env = dict(os.environ if environ is None else environ)
     current = settings if settings is not None else _settings()
     with _store(conn) as c:
@@ -446,12 +450,18 @@ def from_record(run_id: str, *, follow: bool = True,
         if run.kind != "relaunch":
             raise Refused("not-relaunch", f"run {run_id} is a {run.kind} run, not a relaunch",
                           "only a relaunch run is repaired")
+        api = slots_api if slots_api is not None else slots.api()
+        judged = run
         if run.open:
-            raise Refused("run-open", f"run {run_id} is still {run.state}",
-                          f"moxi launcher relaunch --status {run_id} follows it")
-        if not job.repairable(run, store.run_events(c, run_id)):
+            # A run whose job is gone is judged as the repair's insert will end it.
+            if not store.run_stale(run, lambda j: job.gone(j, slots_api=api)):
+                raise Refused("run-open", f"run {run_id} is still {run.state}",
+                              f"moxi launcher relaunch --status {run_id} follows it")
+            outcome, word = store.JOB_GONE
+            judged = replace(run, state="ended", outcome=outcome, word=word)
+        if not job.repairable(judged, store.run_events(c, run_id)):
             raise Refused("not-repairable",
-                          f"run {run_id} ended {run.outcome}: only a run that exited its "
+                          f"run {run_id} ended {judged.outcome}: only a run that exited its "
                           "session and did not relaunch it is repaired (relaunch-failed, "
                           "gone, or error after the exit)",
                           "relaunch the session again instead")
@@ -462,7 +472,6 @@ def from_record(run_id: str, *, follow: bool = True,
                 raise Refused("repaired", f"run {root.run_id} was repaired already, by run "
                                           f"{other.run_id} (launch {other.new_request_id})",
                               "relaunch that launch instead")
-        api = slots_api if slots_api is not None else slots.api()
         if api is None or not api.supported().ok:
             raise Refused("no-slots", "a repair needs slots running here", "install moxi-slots")
         row = store.get(c, run.request_id)
