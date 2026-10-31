@@ -141,7 +141,7 @@ started) and that no subagent is running, starts a job outside the session and p
 what it waits for; the agent then ends its turn. Once the session is quiet the job exits
 it, answers the exit dialog, and starts the new session in the same pane with the same
 launch values, none of the old session's environment, and the handoff as its first turn.
-Its environment is what the launch recorded: the system's basic names, the core's
+Its environment is what the launch recorded: the system's basic names and temporary folder, the core's
 locations, and your configuration names (a configuration folder, a provider switch, a
 region or profile), never a token, key, password or endpoint URL; those come back only
 through `relaunch.pass_env` (below).

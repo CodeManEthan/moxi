@@ -262,7 +262,7 @@ def test_the_recorded_base_holds_each_recorded_name_set_and_no_credential():
     assert base == {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C", "XDG_STATE_HOME": "/s",
                     "MOXI_HOME": "/m", "MOXI_COMMS_STATE_HOME": "/cs",
                     "CLAUDE_CONFIG_DIR": "/c", "CLAUDE_CODE_USE_BEDROCK": "1",
-                    "AWS_REGION": "eu-west-1", "CODEX_HOME": "/x",
+                    "AWS_REGION": "eu-west-1", "CODEX_HOME": "/x", "TMPDIR": "/t",
                     # A credential set at launch is marked, never its value.
                     "CLAUDE_CODE_OAUTH_TOKEN": None, "AWS_SECRET_ACCESS_KEY": None,
                     "OPENAI_API_KEY": None}
@@ -292,6 +292,21 @@ def test_on_windows_the_base_keeps_the_system_names_a_process_needs_to_start():
     assert base["CLAUDE_CODE_OAUTH_TOKEN"] is None and "API_KEY" not in base
     # Recorded as the child's own spelling, which Windows reads without case.
     assert base["SystemRoot"] == "C:\\Windows" and base["Path"] == "C:\\Windows\\system32"
+
+
+def test_a_row_with_no_base_takes_the_short_list_and_tmpdir_from_the_job():
+    job = {"HOME": "/h", "PATH": "/bin", "TMPDIR": "/t", "LC_ALL": "C",
+           "CLAUDE_CONFIG_DIR": "/c", "SYSTEMROOT": "C:\\Windows", "ARMED": "1"}
+    assert common.short_env(job, windows=False) == {
+        "HOME": "/h", "PATH": "/bin", "TMPDIR": "/t", "LC_ALL": "C"}
+
+
+def test_on_windows_a_row_with_no_base_takes_the_start_names_from_the_job():
+    short = common.short_env(WINDOWS_CHILD, windows=True)
+    assert short["SystemRoot"] == "C:\\Windows" and short["ComSpec"].endswith("cmd.exe")
+    assert short["Path"] == "C:\\Windows\\system32" and short["TEMP"] == "C:\\Temp"
+    assert not {"API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "MOXI_LAUNCHER_REQUEST",
+                "SESSIONNAME"} & set(short)
 
 
 def test_elsewhere_the_base_leaves_the_windows_names_out():

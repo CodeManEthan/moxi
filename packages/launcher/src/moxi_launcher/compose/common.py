@@ -577,10 +577,11 @@ def environment(environ: Mapping[str, str], composition: Composition,
 
 
 #: The short list of names a launch records from its child's environment
-#: (`launches.base_env_json`), the ones slots' server keeps: besides these names, every
+#: (`launches.base_env_json`): the ones slots' server keeps, and `TMPDIR`, the private
+#: temporary directory the harness and its tools write to. Besides these names, every
 #: name starting with one of `BASE_PREFIXES`. A row made before the base was recorded
-#: takes these alone from the replaying process.
-BASE_NAMES = ("HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "TZ")
+#: takes these alone from the replaying process (and on Windows `WINDOWS_BASE_NAMES`).
+BASE_NAMES = ("HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "TZ", "TMPDIR")
 BASE_PREFIXES = ("LC_", "XDG_")
 #: The names a launch on Windows records besides those: the system's own locations and
 #: names, which a process there needs to start (`SYSTEMROOT` above all), and the user's
@@ -643,11 +644,11 @@ def base_env(environ: Mapping[str, str], *,
 
 def short_env(environ: Mapping[str, str], *,
               windows: bool = os.name == "nt") -> dict[str, str]:
-    """The short list alone (`BASE_NAMES`, `BASE_PREFIXES`) of `environ`: the base of a
-    replay of a row made before the base was recorded."""
+    """The short list alone (`BASE_NAMES`, `BASE_PREFIXES`) of `environ`, and on Windows
+    the names a process there needs to start (`WINDOWS_BASE_NAMES`): the base of a replay
+    of a row made before the base was recorded."""
     norm = str.upper if windows else (lambda name: name)
-    return {name: value for name, value in environ.items()
-            if norm(name) in BASE_NAMES or norm(name).startswith(BASE_PREFIXES)}
+    return {name: value for name, value in environ.items() if _short(norm(name), windows)}
 
 
 def replay_env(base: Mapping[str, str | None], environ: Mapping[str, str],
