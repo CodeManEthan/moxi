@@ -1,0 +1,3 @@
+{
+  "entries": {"page.js": "src/page.ts", "sessions.js": "src/sessions.ts", "state.js": "src/state.ts"}
+}

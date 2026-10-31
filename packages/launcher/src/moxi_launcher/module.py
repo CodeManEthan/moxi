@@ -61,6 +61,20 @@ SEGMENT = None
 #: The launcher's page, served by loopback's page server once the UI shell asks for it.
 #: Only that server and loopback's export import it.
 PAGE = "moxi_launcher.page:PAGE"
+#: What the launcher offers the browser UI shell: its panel, a block for the shell's home
+#: with each launched session's state, and one session's state that any host may place.
+#: Each script is a file the page's web build writes beside the page's assets.
+COMPONENTS = {
+    "page": {"script": "page.js", "title": "Launcher", "contract": 1, "place": "page",
+             "doc": "Launch, resume and watch sessions"},
+    "sessions": {"script": "sessions.js", "title": "Sessions", "contract": 1,
+                 "place": "block", "home": True,
+                 "doc": "Each launched session's recycle and keep-warm state"},
+    "state": {"script": "state.js", "title": "Session state", "contract": 1,
+              "place": "inline", "doc": "One session's state",
+              "attributes": {"session": {"type": "string", "required": True,
+                                         "doc": "a session id"}}},
+}
 
 # The announcement's version, and the optional names it declares.
 ANNOUNCES = 1
