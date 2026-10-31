@@ -18,7 +18,9 @@ binds a name whose row isn't freed, and nobody mails an `active` or `unowned` on
 `reconcile(gone=None)` is the one writer. It reads the declared names of every installed
 module except `gone`, and brings the table in line: a declared name with no row is
 reserved (a fresh token, a row, and a `bindings` interval of kind `reserved`), a row whose
-module no longer declares it is freed (its interval closed, its token removed). It never
+module no longer declares it is freed (its interval closed, its token removed). A module
+that is installed but reads as broken keeps its names: only an absent module, or the one
+being uninstalled, loses them. It never
 replaces a token it can't read: it mints only for a row that has no hash. `renew(name)`
 is the explicit repair.
 
@@ -95,14 +97,25 @@ class Result:
 
 # --------------------------------------------------------------------------- reads
 
+#: What `declared_names` gives for a module whose announcement can't be read: the names
+#: it declares aren't known, so the names reserved for it stay as they are.
+UNKNOWN = None
+
+
 def declared_names(gone: str | None = None) -> dict:
-    """module -> the names it declares, for every installed module but `gone`. A module
-    that isn't `present` (absent, or broken) declares nothing."""
+    """module -> the names it declares, for every installed module but `gone`. A `broken`
+    module is still installed, and its names aren't known: it maps to `UNKNOWN`, and
+    keeps what is reserved for it. Only an absent module, or `gone`, declares nothing."""
     from moxi import modules
 
     out = {}
     for found in modules.scan():
-        if found.state != modules.PRESENT or found.name == gone:
+        if found.name == gone:
+            continue
+        if found.state == modules.BROKEN:
+            out[found.name] = UNKNOWN
+            continue
+        if found.state != modules.PRESENT:
             continue
         names = tuple(found.reserved_names or ())
         if names:
@@ -180,13 +193,15 @@ def _blocked(conn, name: str) -> str | None:
 def reconcile(gone: str | None = None, *, declared=None, chain=None, env=None,
               target=None, clock=time.time) -> Result:
     """Bring the `reserved` table in line with the names every installed module but
-    `gone` declares. `declared` (module -> names) stands in for the installed modules;
-    `chain` for the credential chain the config names. Raises `StoreRefused` with
+    `gone` declares. `declared` (module -> names, or `UNKNOWN` for a module whose names
+    can't be read) stands in for the installed modules; `chain` for the credential chain
+    the config names. Raises `StoreRefused` with
     nothing written when comms.db can't be opened for writing."""
     if declared is None:
         declared = declared_names(gone)
     else:
-        declared = {m: tuple(n) for m, n in declared.items() if m != gone}
+        declared = {m: n if n is UNKNOWN else tuple(n)
+                    for m, n in declared.items() if m != gone}
     with _held(target, env) as conn:
         return _reconcile(conn, declared, _chain(chain, env), clock)
 
@@ -271,14 +286,22 @@ def _reconcile(conn, declared: dict, chain, clock) -> Result:
     result = Result()
     wanted: dict[str, list[str]] = {}
     bad = []
+    table = rows(conn)
     for module in sorted(declared):
+        if declared[module] is UNKNOWN:
+            # A module that is installed but can't be read keeps every name reserved
+            # for it, as though it declared them still.
+            for name, row in sorted(table.items()):
+                if (row["freed_at"] is None and row["state"] == ACTIVE
+                        and row["module"] == module):
+                    wanted.setdefault(name, []).append(module)
+            continue
         for name in declared[module]:
             why = _bad_name(str(name))
             if why:
                 bad.append((str(name), module, why))
             else:
                 wanted.setdefault(name, []).append(module)
-    table = rows(conn)
 
     # Frees first: a row whose module no longer declares it (or is gone), and a
     # conflict row nobody declares now.
@@ -516,6 +539,7 @@ def token_rows(*, env=None, chain=None, context: str = "this process's") -> list
     return out
 
 
-__all__ = ["ACTIVE", "CONFLICT", "UNOWNED", "SECRET_PREFIX", "Result", "declared_names",
-           "doctor_rows", "lookup", "on_install", "on_uninstall", "owner", "reconcile",
-           "release_all", "renew", "rows", "secret_id", "token_hash", "token_rows"]
+__all__ = ["ACTIVE", "CONFLICT", "UNOWNED", "UNKNOWN", "SECRET_PREFIX", "Result",
+           "declared_names", "doctor_rows", "lookup", "on_install", "on_uninstall",
+           "owner", "reconcile", "release_all", "renew", "rows", "secret_id", "token_hash",
+           "token_rows"]
