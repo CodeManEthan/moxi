@@ -9,7 +9,8 @@ side. Each share of it is held by its own test. The core's two shares are held h
 
 - the hook path (`import moxi.paths`, `available()` and `load()`) under 9 ms, for an
   absent module and for a module whose announcement is one line;
-- `import moxi.config` with one `load()` of a small file under 7 ms.
+- `import moxi.config` with one `load()` of a small file under 7 ms, or under 12 ms on
+  Python 3.12.
 
 One more test runs both in one process and holds them under the 15 ms ceiling together.
 A module's own imports are held by that module's test. The hook path's own `sys.modules`
@@ -58,8 +59,9 @@ HEAVY = ("psutil", "tomlkit", "moxi._vendor.tomlkit", "packaging", "moxi._vendor
 HOOK_CEILING_MS = 15.0
 #: The core's share of it for the hook path.
 HOOK_PATH_MS = 9.0
-#: The core's share of it for `import moxi.config` with one `load()`.
-CONFIG_MS = 7.0
+#: The core's share of it for `import moxi.config` with one `load()`. 3.12's `tomllib`
+#: and `pathlib` import `typing`, `string` and `urllib.parse`; 3.14's don't.
+CONFIG_MS = 12.0 if sys.version_info < (3, 13) else 7.0
 #: Floor-then-code pairs per timed test.
 PAIRS = 51
 
