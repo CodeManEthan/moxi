@@ -4,9 +4,13 @@ run, and run only with `MOXI_TEST_LIVE=1` (`pytest -m live`).
 Each one starts a real session, signed in with the harness's own account, and costs a
 few tokens. The launcher's state stays in the test's tmp; the harness runs with the real
 home, so it finds its sign-in, and keeps its own record of the session there as it does of
-any other. A launch without turns passes `--setting-sources project` on to Claude, so the
-user's own hooks do not run in it; a launch with turns needs them, since turns' hooks are
-how the session reports itself ready.
+any other. Every Claude launch passes `--setting-sources project` on, so the user's own
+settings and hooks do not run in it; turns' hooks come in its own plugin folders, which
+the launch names. A Codex launch without turns passes `--disable hooks`, so the user's
+Codex hooks do not run in it; one under turns' host keeps hooks on, since turns' hooks
+are how the session reports itself ready, and so the user's Codex hooks run there too.
+No launch here takes a comms identity, and comms' daemon socket follows the test's own
+`MOXI_HOME`, so the machine's comms daemon is never reached.
 
 What each needs, and is skipped without: the harness on PATH; for the launches with
 turns, a turns that offers the interface the launcher calls; for a Codex launch with turns
@@ -170,6 +174,19 @@ def flags(harness: str) -> dict[str, object]:
     return {"harness": harness, **({"model": CLAUDE_MODEL} if harness == "claude" else {})}
 
 
+#: What each launch passes on to keep the user's own settings and hooks out of it.
+CLAUDE_OWN = ("--setting-sources", "project")
+CODEX_NO_HOOKS = ("--disable", "hooks")
+
+
+def kept_out(harness: str, *, host: bool = False) -> tuple[str, ...]:
+    """The flags a launch passes on to keep the user's settings and hooks out: all of
+    Claude's but the project's, and Codex's hooks unless it runs under turns' host."""
+    if harness == "claude":
+        return CLAUDE_OWN
+    return () if host else CODEX_NO_HOOKS
+
+
 def launch_row(request_id: str | None = None) -> store.LaunchRow | None:
     """The launch `request_id`, or the newest launch."""
     if not store.path().exists():
@@ -274,6 +291,9 @@ def in_terminal(live_env, work, harness: str, brief: str, *more: str):
         argv += ["--model", CLAUDE_MODEL]
     else:
         argv += ["--trust-cwd"]
+    own = kept_out(harness, host=True)
+    if own:
+        argv += ["--", *own]
     term = Terminal(argv, live_env, work)
     row = wait_for(launch_row, timeout=60, what=lambda: f"the launch row; saw {term.text()}")
     return term, row
@@ -289,9 +309,8 @@ def test_a_launch_without_turns_has_the_brief_as_its_opening_prompt(
     monkeypatch.setattr(first, "turns_api", lambda quiet=False: None)
     brief, answer = words()
     typed = {**flags(harness), "target": "headless", "brief": brief}
-    extra: tuple[str, ...] = ()
+    extra = kept_out(harness)
     if harness == "claude":
-        extra = ("--setting-sources", "project")
         typed["cwd"] = str(work)
     else:
         typed["scratch"] = True
@@ -323,10 +342,8 @@ def test_a_slot_launch_without_turns_has_the_brief_as_its_opening_prompt(
     config.set("launcher", "startup.wait_s", 15, by="launcher live test")
     brief, answer = words()
     typed = {**flags(harness), "target": "slot", "brief": brief, "cwd": str(work)}
-    extra: tuple[str, ...] = ()
-    if harness == "claude":
-        extra = ("--setting-sources", "project")
-    else:
+    extra = kept_out(harness)
+    if harness == "codex":
         typed["trust_cwd"] = True
     result = api.launch(api.LaunchRequest(typed=typed, extra=extra, cwd=str(work)),
                         environ=live_env)
@@ -409,7 +426,7 @@ def test_a_terminal_launch_with_turns_gets_its_brief_as_the_first_turn(
         current = launch_row(row.request_id)
         assert (current.state, current.reason) == ("first-sent", None), current.reason
         [event] = first_turn_events(row.request_id)
-        assert event.detail["outcome"] == "sent"
+        assert event.detail["outcome"] == "started"
         wait_for(lambda: answer in term.text(), timeout=ANSWER_S, interval=0.25,
                  what=lambda: f"{answer} on the screen; saw {term.text()[-2000:]}")
         if harness == "codex":
@@ -425,7 +442,8 @@ def test_a_headless_launch_with_turns_runs_its_brief(harness, live_env, work):
     brief, answer = words()
     typed = {**flags(harness), "target": "headless", "brief": brief}
     typed.update({"cwd": str(work)} if harness == "claude" else {"scratch": True})
-    result = api.launch(api.LaunchRequest(typed=typed, cwd=str(work)), environ=live_env)
+    result = api.launch(api.LaunchRequest(typed=typed, extra=kept_out(harness),
+                                          cwd=str(work)), environ=live_env)
     assert result.state == "started", result.line
     # Headless, the brief is the harness's prompt even with turns: nothing is delivered.
     assert any(brief in word for word in result.argv)
@@ -445,7 +463,8 @@ def test_a_slot_launch_with_turns_gets_its_brief_as_the_first_turn(harness, live
     typed = {**flags(harness), "target": "slot", "brief": brief, "cwd": str(work)}
     if harness == "codex":
         typed["trust_cwd"] = True
-    result = api.launch(api.LaunchRequest(typed=typed, cwd=str(work)), environ=live_env)
+    result = api.launch(api.LaunchRequest(typed=typed, extra=kept_out(harness, host=True),
+                                          cwd=str(work)), environ=live_env)
     row = launch_row(result.request_id)
     try:
         assert result.outcome is not None and result.outcome.outcome == "sent", result.line
@@ -506,7 +525,7 @@ def test_claude_print_with_turns_records_its_id_and_shows_no_pointer(live_env, w
     brief, answer = words()
     result = api.launch(api.LaunchRequest(
         seat="liveprint", typed={"target": "headless", "brief": brief,
-                                 "model": CLAUDE_MODEL}, cwd=str(work)),
+                                 "model": CLAUDE_MODEL}, extra=CLAUDE_OWN, cwd=str(work)),
         environ=live_env)
     assert result.state == "started", result.line
     wait_for(lambda: run_log_holds(result.request_id, answer), timeout=ANSWER_S,
@@ -570,3 +589,73 @@ def test_codex_trusts_the_launch_directory_from_the_trust_row_even_with_a_dot_in
         words = row.tokens(mode, True, cwd=str(cwd))
         assert features(cwd, *words)[name] is True, (mode, words)
         assert features(projects["other"], *words)[name] is True, (mode, words)
+
+
+# -- comms' wrapper ending before the harness ---------------------------------------------
+
+
+def comms_isolated(env: dict[str, str]) -> None:
+    """Skip unless comms is installed and its daemon socket is the test's own (under a
+    temp dir, not the user's runtime dir) with no daemon serving it: the wrapper then
+    exits before the harness starts, and the machine's comms daemon is never reached and
+    no name is bound."""
+    api_ = presets.comms_api()
+    if api_ is None:
+        pytest.skip("needs comms")
+    socket = str(api_.daemon_socket())
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    if socket.startswith((runtime, "/run/user/")) or os.path.exists(socket):
+        pytest.skip(f"comms' daemon socket {socket} is not this test's own")
+
+
+def test_a_slot_launch_whose_comms_daemon_is_down_fails_comms_offline(live_env, work,
+                                                                      own_slots):
+    needs("claude")
+    comms_isolated(live_env)
+    request = api.LaunchRequest(typed={**flags("claude"), "target": "slot",
+                                       "identity": "probe", "scope": "launcherlive",
+                                       "cwd": str(work)},
+                                extra=CLAUDE_OWN, cwd=str(work))
+    assert api.check(request, environ=live_env) == [], "an offline daemon goes on"
+    result = api.launch(request, environ=live_env)
+    row = launch_row(result.request_id)
+    try:
+        assert (result.state, result.reason) == ("failed", targets.COMMS_OFFLINE), \
+            result.line
+        assert result.exit_code == 75 and "(exit 75)" in result.line
+        assert f"on slot {row.slot}'s pane" in result.line
+        assert (row.state, row.reason) == ("failed", targets.COMMS_OFFLINE)
+        # comms' own words stay on the dead pane.
+        assert "was not launched: comms offline" in " ".join(
+            pane_text(own_slots, row.pane_id, live_env).split())
+    finally:
+        if row is not None and row.pane_id:
+            subprocess.run(["tmux", "-S", own_slots, "kill-pane", "-t", row.pane_id],
+                           env=live_env, capture_output=True)
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_a_terminal_launch_whose_comms_daemon_is_down_fails_comms_offline(
+        harness, live_env, work):
+    needs(harness)
+    comms_isolated(live_env)
+    if harness == "codex":
+        needs_turns()
+        needs_host()
+    argv = [moxi_command(), "launcher", "run", "--harness", harness, "--cwd", str(work),
+            "--identity", "probe", "--scope", "launcherlive"]
+    if harness == "claude":
+        argv += ["--model", CLAUDE_MODEL, "--", *CLAUDE_OWN]
+    term = Terminal(argv, live_env, work)
+    try:
+        row = wait_for(launch_row, timeout=60, what=lambda: f"the row; saw {term.text()}")
+        failed = wait_for(lambda: (r := launch_row(row.request_id)) is not None
+                          and r.state == "failed" and r, timeout=60, interval=0.25,
+                          what=lambda: f"the row failed; saw {term.text()[-2000:]}")
+        assert failed.reason == targets.COMMS_OFFLINE
+        # comms' own words are in the terminal, and the deliverer's line in the run log.
+        wait_for(lambda: "was not launched: comms offline" in " ".join(term.text().split()),
+                 timeout=10, what=lambda: f"comms' words; saw {term.text()[-2000:]}")
+        assert run_log_holds(row.request_id, "the comms daemon is not running")
+    finally:
+        term.close()
