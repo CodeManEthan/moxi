@@ -472,6 +472,19 @@ def environment(environ: Mapping[str, str], composition: Composition,
     return env
 
 
+#: The base names a launch records from its child's environment (`launches.base_env_json`)
+#: and a replay starts from: paths and locale names, never a secret. Besides these names,
+#: every name starting with one of `BASE_PREFIXES`.
+BASE_NAMES = ("HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "TZ")
+BASE_PREFIXES = ("LC_", "XDG_")
+
+
+def base_env(environ: Mapping[str, str]) -> dict[str, str]:
+    """The values `environ` holds for the base names (`BASE_NAMES`, `BASE_PREFIXES`)."""
+    return {name: value for name, value in environ.items()
+            if name in BASE_NAMES or name.startswith(BASE_PREFIXES)}
+
+
 # -- sizes ------------------------------------------------------------------------------
 
 def encode(value: object) -> str:
@@ -507,7 +520,7 @@ def check_sizes(argv: Sequence[str], *, values: Mapping[str, object],
             raise TooLong(what, size, WORD, "bytes")
 
 
-__all__ = ["COMMANDS", "HEADER", "KEEP_WARM", "KEEP_WARM_LINE", "RECYCLE_ON_EXPIRY",
+__all__ = ["BASE_NAMES", "BASE_PREFIXES", "base_env", "COMMANDS", "HEADER", "KEEP_WARM", "KEEP_WARM_LINE", "RECYCLE_ON_EXPIRY",
            "RELAUNCH", "USAGE_CROSSING_AT", "commands", "option_stamps", "NOTES_DIR", "REQUEST", "SCRUB_NAMES", "SCRUB_PREFIXES",
            "TURNS_COMMANDS", "USAGE_WARN_AT", "WINDOWS_LINE", "WORD", "Additions",
            "Composition", "Context", "NoBrief", "NotYet", "PromptFile", "TooLong",

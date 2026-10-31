@@ -167,7 +167,7 @@ def launch(request, *, environ: Mapping[str, str] | None = None,
             project_key=resolved.project_key,
             identity=resolved.identity, scope=resolved.scope, brief=composition.brief,
             handoff_path=str(values.get("handoff") or "") or None,
-            handoff_key=handoff_key)
+            handoff_key=handoff_key, base_env=common.base_env(env))
         if not inserted.new:
             return _stored(inserted.row)
 

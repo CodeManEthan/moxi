@@ -482,7 +482,8 @@ def insert(conn: sqlite3.Connection, *, request_id: str, actor: str, harness: st
            identity: str | None = None, scope: str | None = None,
            brief: str | None = None, handoff_path: str | None = None,
            handoff_key: str | None = None, relaunch_of: str | None = None,
-           resume_of: str | None = None, at: str | None = None) -> Inserted:
+           resume_of: str | None = None, base_env: Mapping[str, str] | None = None,
+           at: str | None = None) -> Inserted:
     """Write a launch's row in state `spawning`, before anything is started.
 
     One transaction, with `synchronous=FULL` so the row is on disk before the spawn,
@@ -492,7 +493,14 @@ def insert(conn: sqlite3.Connection, *, request_id: str, actor: str, harness: st
     A request id already in the store writes nothing: the stored row comes back with
     `new` false, and the caller starts nothing, since that row's spawn may have run.
 
-    `env` holds the stamped literals only, never a secret. Raises `TooLarge` for a value
+    A resume (`resume_of` set) keeps the session id it resumes: that id may already
+    belong to the launch it resumes, and joins `session_ids` again for this launch with
+    source `resume`, for a Codex thread as for Claude. Any other launch holding it is
+    `SessionTaken`.
+
+    `env` holds the stamped literals only, never a secret; `base_env` the child's values
+    for the base names (paths and locale names), recorded so a replay can start from
+    them. Raises `TooLarge` for a value
     past `CAP`, `SessionTaken` when the session id is another launch's, `Busy` when the
     write lock is held past the timeout, and `ValueError` for a harness, target or preset
     kind the store doesn't know, or a Claude launch with no session id.
@@ -521,26 +529,28 @@ def insert(conn: sqlite3.Connection, *, request_id: str, actor: str, harness: st
         "posture": posture, "brief": brief, "handoff_path": handoff_path,
         "relaunch_of": relaunch_of, "resume_of": resume_of, "pid": None,
         "pid_started": None, "endpoint": None, "state": "spawning", "reason": None,
-        "updated_at": at, "base_env_json": None,
+        "updated_at": at,
+        "base_env_json": None if base_env is None else _encode(dict(base_env)),
     }
     conn.execute("PRAGMA synchronous = FULL")
     try:
         with _writing(conn):
             if (stored := get(conn, request_id)) is not None:
                 return Inserted(stored, False)
-            if harness == "claude":
-                holder = conn.execute(
+            if session_id:
+                holders = [r[0] for r in conn.execute(
                     "SELECT request_id FROM session_ids WHERE session_id = ?",
-                    (session_id,)).fetchone()
-                if holder is not None:
-                    raise SessionTaken(session_id, holder[0])
+                    (session_id,))]
+                if holders and not (resume_of is not None and resume_of in holders):
+                    raise SessionTaken(session_id, holders[0])
             conn.execute(f"INSERT INTO launches ({', '.join(COLUMNS)}) "
                          f"VALUES ({', '.join('?' * len(COLUMNS))})",
                          [row[name] for name in COLUMNS])
-            if harness == "claude":
+            if session_id and (harness == "claude" or resume_of is not None):
                 conn.execute("INSERT INTO session_ids (session_id, request_id, source, "
-                             "seen_at) VALUES (?, ?, 'minted', ?)",
-                             (session_id, request_id, at))
+                             "seen_at) VALUES (?, ?, ?, ?)",
+                             (session_id, request_id,
+                              "resume" if resume_of is not None else "minted", at))
             if handoff_path and handoff_key:
                 conn.execute("INSERT INTO picks (path, key, session_id, request_id, how, at) "
                              "VALUES (?, ?, ?, ?, 'given', ?)",
@@ -609,19 +619,24 @@ def learn_session(conn: sqlite3.Connection, request_id: str, session_id: str,
     `session_id` when the row has none. An id another launch is known by stays that
     launch's: it joins nothing and the row's column is left as it is, so `resolve` and
     the claim read the same owner. The table is keyed by the pair, which would hold the id
-    for both; this write keeps it with the launch that has it. The state is not touched.
+    for both; this write keeps it with the launch that has it, except for a resume: a
+    launch made to resume (`resume_of` set) learns a `resume` id whoever holds it, and
+    `resolve` then finds it, the newest. A pair already there is left as it is. The state
+    is not touched.
     """
     if source not in SOURCES:
         raise ValueError(f"unknown session id source {source!r}")
     at = at or now()
     with _writing(conn):
-        if get(conn, request_id) is None:
+        row = get(conn, request_id)
+        if row is None:
             return False
+        shared = source == "resume" and row.resume_of is not None
         cursor = conn.execute(
             "INSERT OR IGNORE INTO session_ids (session_id, request_id, source, seen_at) "
-            "SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM session_ids "
+            "SELECT ?, ?, ?, ? WHERE ? OR NOT EXISTS (SELECT 1 FROM session_ids "
             "WHERE session_id = ? AND request_id <> ?)",
-            (session_id, request_id, source, at, session_id, request_id))
+            (session_id, request_id, source, at, shared, session_id, request_id))
         added = cursor.rowcount == 1
         conn.execute("UPDATE launches SET session_id = ?, updated_at = ? "
                      "WHERE request_id = ? AND session_id IS NULL AND EXISTS ("
@@ -765,9 +780,15 @@ def resolve(conn: sqlite3.Connection, session_id: str) -> LaunchRow | None:
     A Claude launch resolves by the id minted for it. A Codex launch resolves only once a
     session id was learned for it, which needs turns' Codex host; a Codex launch made
     without turns, or in `exec` mode, never does.
+
+    An id more than one launch holds (a resumed session's, held by the launch that started
+    it and each that resumed it) belongs to the newest of them, skipping one that failed
+    before any endpoint claimed it; when every holder did, the newest of those.
     """
-    found = conn.execute("SELECT request_id FROM session_ids WHERE session_id = ?",
-                         (session_id,)).fetchone()
+    found = conn.execute(
+        "SELECT l.request_id FROM session_ids s JOIN launches l USING (request_id) "
+        "WHERE s.session_id = ? ORDER BY (l.state = 'failed' AND l.endpoint IS NULL), "
+        "l.created_at DESC, l.rowid DESC LIMIT 1", (session_id,)).fetchone()
     if found is None:
         return None
     newest = conn.execute("SELECT session_id FROM session_ids WHERE request_id = ? "
