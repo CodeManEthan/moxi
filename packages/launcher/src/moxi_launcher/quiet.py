@@ -160,9 +160,15 @@ def reread_person(last: Reading, *, slot: str | int | None = None,
 
 def judge(facts: Any | None, agents: Any | None, pane: Any | None, *,
           failures: Mapping[str, str] | None = None, person_turn_at: float | None = None,
-          now: float, person_s: float = PERSON_S) -> Reading:
+          now: float, person_s: float = PERSON_S,
+          own_output_from: float | None = None) -> Reading:
     """What holds, from what was read: the words in `WORDS` order, each with its words for
-    a person."""
+    a person.
+
+    `own_output_from` is the time from which the pane's output is the harness's own and
+    never a person's (at the exit dialog, the second the exit command was sent: the
+    dialog drawing itself is pane output). Copy mode and a client's activity hold
+    whenever they come."""
     failures = dict(failures or {})
     holds: list[Hold] = []
     if facts is not None and facts.turn_open:
@@ -181,7 +187,7 @@ def judge(facts: Any | None, agents: Any | None, pane: Any | None, *,
         holds.append(Hold("draft", "a draft is in the prompt box"))
     if facts is not None and person_turn(facts.turn):
         person_turn_at = _latest(person_turn_at, facts.turn.started_at)
-    if person := _person(pane, person_turn_at, now, person_s):
+    if person := _person(pane, person_turn_at, now, person_s, own_output_from):
         holds.append(Hold("person", person))
     if facts is not None and facts.stale:
         failures.setdefault("facts", "the facts moved while they were read (stale)")
@@ -190,15 +196,18 @@ def judge(facts: Any | None, agents: Any | None, pane: Any | None, *,
     return Reading(tuple(holds), facts, agents, pane, failures, person_turn_at, now)
 
 
-def _person(pane: Any | None, turn_at: float | None, now: float,
-            person_s: float) -> str | None:
+def _person(pane: Any | None, turn_at: float | None, now: float, person_s: float,
+            own_output_from: float | None = None) -> str | None:
     if pane is not None and getattr(pane, "pane_id", None) is not None:
         if pane.pane_in_mode:
             return "the pane is in copy mode"
         if pane.client_activity is not None and now - pane.client_activity < person_s:
             return f"a client was active {_ago(now, pane.client_activity)} ago"
-        if pane.pane_activity is not None and now - pane.pane_activity < person_s:
-            return f"the pane was active {_ago(now, pane.pane_activity)} ago"
+        output = pane.pane_activity
+        if own_output_from is not None and output is not None and output >= own_output_from:
+            output = None
+        if output is not None and now - output < person_s:
+            return f"the pane was active {_ago(now, output)} ago"
     if turn_at is not None and now - turn_at < person_s:
         return f"a turn no delivery opened, {_ago(now, turn_at)} ago"
     return None

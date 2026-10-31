@@ -243,6 +243,21 @@ def test_activity_older_than_the_window_holds_nothing():
     assert judge(pane=use, person_s=300).words == ("person",)
 
 
+def test_pane_output_from_the_harness_own_time_holds_nothing():
+    own = NOW - 10
+    assert judge(pane=PaneUse(pane_activity=own), own_output_from=own).quiet
+    assert judge(pane=PaneUse(pane_activity=NOW - 1), own_output_from=own).quiet
+    held = judge(pane=PaneUse(pane_activity=own - 1), own_output_from=own)
+    assert str(held.first) == "person: the pane was active 11 s ago"
+
+
+@pytest.mark.parametrize("use", [PaneUse(pane_in_mode=True, pane_activity=NOW - 1),
+                                 PaneUse(attached=1, client_activity=NOW - 1,
+                                         pane_activity=NOW - 1)])
+def test_copy_mode_and_a_client_hold_whatever_the_harness_own_time(use):
+    assert judge(pane=use, own_output_from=NOW - 10).words == ("person",)
+
+
 def test_a_pane_that_is_gone_holds_nothing():
     assert judge(pane=PaneUse(pane_id=None, pane_in_mode=True)).quiet
 

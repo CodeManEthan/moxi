@@ -31,7 +31,10 @@ compact detached (`moxi.proc.spawn`); each records its own process as its run's 
 4. The exit dialog. Within `relaunch.dialog_s`: a pane that ended goes on; once the dialog
    has fully matched on two reads at least 0.5 s apart, the last checks (turns' facts show
    the same turn number and no open turn; the pane shows no person) and then at once the
-   answer, with no other read between. A failed check presses nothing: `exit-pending`. A
+   answer, with no other read between. At the dialog, pane output written in or after
+   the second step 3 sent the exit command is the harness's own (the dialog drawing
+   itself) and never holds; copy mode and a client active within `relaunch.person_s`
+   still do. A failed check presses nothing: `exit-pending`. A
    turns that answers `gone` at the dialog leaves the pane check alone, recorded
    `turns-gone`. The answer: `ended` goes on, `mismatch` or `not-ended` end the run
    `not-exited`, `gone` or `no-pane` end it `relaunch-failed`. No dialog and no end of the
@@ -68,6 +71,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 import signal
 import sqlite3
 import sys
@@ -269,6 +273,8 @@ class RelaunchJob:
         self.holder = run_id
         self.held: str | None = None
         self.acting = False
+        #: When step 3 last sent the exit command (wall time), or None before it.
+        self.exit_sent_at: float | None = None
         self.stop_asked: str | None = None
         self._stop_noted = False
         self.outcome: str | None = None
@@ -524,6 +530,7 @@ class RelaunchJob:
         """Step 3: exit the session through turns. Returns the result's kind and reason
         when the steps go on to the pane (`ran`, a `failed`, turns' `gone` or its error)."""
         self.event("exit", {"turn_number": number})
+        self.exit_sent_at = self.wall()
         try:
             result = self.target.session.command("exit", if_turn_number=number)
         except Exception as error:  # noqa: BLE001  (turns' error reads as gone)
@@ -607,8 +614,13 @@ class RelaunchJob:
         except api.SlotsError as error:
             self.end("exit-pending", "unreadable", f"the pane could not be read at the "
                                                    f"exit dialog: {_words(error)}")
+        # The dialog drawing itself is pane output: output written in or after the second
+        # the exit command was sent is the harness's own, never a person's. tmux keeps
+        # the pane's activity in whole seconds.
+        own = math.floor(self.exit_sent_at) if self.exit_sent_at is not None else None
         person = quiet.judge(None, None, pane, now=self.wall(),
-                             person_s=float(self.setting("relaunch.person_s"))).hold("person")
+                             person_s=float(self.setting("relaunch.person_s")),
+                             own_output_from=own).hold("person")
         if person is not None:
             self.end("exit-pending", "person", f"{person.detail}; the exit dialog was left "
                                                "for them")

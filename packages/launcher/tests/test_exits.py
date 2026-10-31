@@ -101,7 +101,12 @@ class FakeSlots:
     def read_screen(self, slot, screens):
         name = self.screens[0] if len(self.screens) == 1 else self.screens.pop(0)
         screen = self.CLAUDE_EXIT_DIALOG if name == "dialog" else None
+        if screen is not None:
+            self.draw()
         return SimpleNamespace(screen=screen, full=True, dead=False)
+
+    def draw(self):
+        """The dialog drawing itself; real slots see it as the pane's output."""
 
     def pane_use(self, slot):
         return self.pane
@@ -184,6 +189,40 @@ def test_the_exit_dialog_is_answered_after_two_full_reads(conn):
                 slots_api=slots_api)
     assert result.data["outcome"] == "exited"
     assert ("answer", 0) in slots_api.calls
+
+
+class DrawingSlots(FakeSlots):
+    """Slots whose pane's activity moves to the job's wall time (1e9) each time the exit
+    dialog draws; `then` changes the pane the first time it draws."""
+
+    def __init__(self, then=None, **kw):
+        super().__init__(**kw)
+        self.then = then
+
+    def draw(self):
+        if self.then is not None:
+            self.pane, self.then = self.then, None
+        self.pane.pane_activity = 1e9
+
+
+def test_the_dialog_drawing_itself_is_not_a_person(conn):
+    slots_api = DrawingSlots()
+    result = go(conn, session=FakeSession(exits=(Result("failed", "not-exited"),)),
+                slots_api=slots_api)
+    assert result.data["outcome"] == "exited" and ("answer", 0) in slots_api.calls
+
+
+@pytest.mark.parametrize("then", [
+    SimpleNamespace(pane_id="%9", pane_in_mode=True, client_activity=None,
+                    pane_activity=None),
+    SimpleNamespace(pane_id="%9", pane_in_mode=False, client_activity=1e9 - 5,
+                    pane_activity=None),
+], ids=["copy-mode", "client"])
+def test_copy_mode_or_a_client_at_the_dialog_still_holds(conn, then):
+    slots_api = DrawingSlots(then=then)
+    result = go(conn, slots_api=slots_api)
+    assert result.data["outcome"] == "at-dialog" and result.run.word == "person"
+    assert ("answer", 0) not in slots_api.calls
 
 
 @pytest.mark.parametrize("answer", ["ended-without-screen"])
