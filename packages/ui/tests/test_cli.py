@@ -340,6 +340,21 @@ def test_status_lists_each_page_server_from_the_servers_rows(monkeypatch, capsys
     assert report["servers"] == data and report["units"][0]["kind"] == "socket"
 
 
+def test_signout_with_no_shell_clears_the_store_holding_page_lock(monkeypatch, capsys):
+    from moxi import files
+    from moxi_ui import session
+
+    monkeypatch.setattr(cli, "_running", lambda: None)
+    seen = []
+    monkeypatch.setattr(session, "clear_stored", lambda state_dir: seen.append(cli.lock_held()))
+    assert cli.main(["signout"]) == 0
+    assert seen == [True] and "signed out" in capsys.readouterr().out
+    # A shell starting holds the lock: nothing is cleared, and the exit is 75.
+    with files.lock(Layout("ui").runtime_dir(create=True) / "page.lock", timeout=0):
+        assert cli.main(["signout"]) == 75
+    assert seen == [True] and "starting or stopping" in capsys.readouterr().err
+
+
 # --- end to end ----------------------------------------------------------------------------
 
 

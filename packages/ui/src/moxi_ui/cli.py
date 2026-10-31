@@ -27,6 +27,7 @@ hands its sign-in URL to the browser:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -616,12 +617,22 @@ def cmd_signout(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
         status, _ = call(info, "POST", SIGNOUT_API, {})
         if status != 200:
             raise Refused(f"the shell refused the signout ({status})")
-    elif lock_held():
-        raise Refused("a shell is starting or stopping; try again in a moment", 75)
     else:
-        session.clear_stored(layout().state_dir())
+        _clear_stored()
     say("every browser is signed out")
     return 0
+
+
+def _clear_stored() -> None:
+    """Clear the stored sessions while holding `page.lock`, so no shell can start and load
+    the old sessions in between. A held lock (a shell starting or stopping) exits 75."""
+    with contextlib.ExitStack() as held:
+        try:
+            held.enter_context(files.lock(layout().runtime_dir(create=True) / LOCK_FILE,
+                                          timeout=0))
+        except (files.LockTimeout, RuntimeError):
+            raise Refused("a shell is starting or stopping; try again in a moment", 75) from None
+        session.clear_stored(layout().state_dir())
 
 
 def cmd_serve(args: argparse.Namespace, say: Callable[[str], Any]) -> int:
