@@ -1515,6 +1515,7 @@ def sk(w, monkeypatch):
     user = w.tmp / "user"
     user.mkdir()
     monkeypatch.setenv("HOME", str(user))
+    monkeypatch.setenv("USERPROFILE", str(user))  # what `~` reads on Windows
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     w.user = user

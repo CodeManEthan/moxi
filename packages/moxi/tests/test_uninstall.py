@@ -456,6 +456,7 @@ def skilled(fake, capsys, monkeypatch, tmp_path):
     user = tmp_path / "user"
     user.mkdir()
     monkeypatch.setenv("HOME", str(user))
+    monkeypatch.setenv("USERPROFILE", str(user))  # what `~` reads on Windows
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.setitem(CATALOG, "moxi-turns",
                         {**CATALOG["moxi-turns"], "TEARDOWN": "'moxi_turns.down:run'",

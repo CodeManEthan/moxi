@@ -30,6 +30,7 @@ def home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # what `~` reads on Windows
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     return home
 

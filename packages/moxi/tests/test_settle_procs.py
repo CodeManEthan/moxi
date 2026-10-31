@@ -145,7 +145,8 @@ class Box:
         user = tmp / "user"
         self.env = {**os.environ, "PYTHONPATH": str(site.root),
                     settle_procs.BOX: str(layout), settle_procs.LOG: str(self.log),
-                    "HOME": str(user), "XDG_CONFIG_HOME": str(user / ".config"),
+                    "HOME": str(user), "USERPROFILE": str(user),
+                    "XDG_CONFIG_HOME": str(user / ".config"),
                     "XDG_STATE_HOME": str(user / ".local/state"),
                     "XDG_DATA_HOME": str(user / ".local/share"),
                     "XDG_CACHE_HOME": str(user / ".cache"),
@@ -769,6 +770,7 @@ def placing(box, monkeypatch):
     user = box.tmp / "user"
     user.mkdir(exist_ok=True)
     monkeypatch.setenv("HOME", str(user))
+    monkeypatch.setenv("USERPROFILE", str(user))  # what `~` reads on Windows
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     box.env.pop("CLAUDE_CONFIG_DIR", None)
     box.site.write("moxi_demo/skills/demo-send/SKILL.md", "# send\n")
