@@ -499,6 +499,40 @@ def test_a_passed_on_permissions_profile_is_refused_from_a_preset_too(work, harn
     assert api.exit_code(raised.value) == exits.REFUSED and nothing_written()
 
 
+def test_a_launch_with_a_handoff_key_makes_its_handoff_folder_after_the_row(
+        work, harness, monkeypatch):
+    from moxi_launcher import handoffs
+
+    folder = handoffs.own_folder(create=False)
+    seen = []
+    monkeypatch.setattr(targets, "_spawn", lambda argv, **kw: seen.append(
+        (row(), folder.is_dir())) or 99)
+    real = handoffs.own_folder
+
+    def own_folder(env=None, *, create=True):
+        if create:
+            seen.append(("made", row() is not None))
+        return real(env, create=create)
+
+    monkeypatch.setattr(handoffs, "own_folder", own_folder)
+    write_presets('[seat.lead]\ntarget = "headless"\n')
+    api.launch(LaunchRequest(seat="lead", typed={"brief": BRIEF}, cwd=str(work),
+                             request_id="r1"))
+    # Made once the row is written, and there before the session starts.
+    assert seen[0] == ("made", True)
+    [(started_row, there)] = seen[1:]
+    assert started_row.state == "spawning" and there
+
+
+def test_a_refusal_from_the_composer_leaves_the_handoff_folder_unmade(work, harness):
+    from moxi_launcher import handoffs
+
+    write_presets('[seat.lead]\ntarget = "headless"\n')
+    with pytest.raises(catalog.Refused):
+        api.launch(LaunchRequest(seat="lead", cwd=str(work), request_id="r1"))
+    assert nothing_written() and not handoffs.own_folder(create=False).exists()
+
+
 # -- projects ------------------------------------------------------------------------------
 
 

@@ -125,14 +125,15 @@ def test_the_context_names_the_handoff_folder_only_with_a_key(tmp_path):
     assert ignored.handoff_dir is None
 
 
-def test_preview_leaves_the_handoff_folder_alone_and_a_launch_makes_it(tmp_path):
+def test_the_context_never_makes_the_launchers_own_handoff_folder(tmp_path):
+    """Neither preview nor a launch's compose makes it: a launch makes it with its other
+    files, after its row."""
     values = {"harness": "claude", "cwd": str(tmp_path)}
     folder = handoffs.own_folder(create=False)
-    compose.context(values, request_id="r1", modules=frozenset(), project_key="moxi")
-    assert not folder.exists()
-    compose.context(values, request_id="r1", modules=frozenset(), project_key="moxi",
-                    create=True)
-    assert folder.is_dir()
+    for create in (False, True):
+        got = compose.context(values, request_id="r1", modules=frozenset(),
+                              project_key="moxi", create=create)
+        assert got.handoff_dir == str(folder) and not folder.exists()
 
 
 def test_the_prompt_file_goes_in_the_runs_store():

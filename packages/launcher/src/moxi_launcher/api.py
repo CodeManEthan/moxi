@@ -147,6 +147,9 @@ def launch(request, *, environ: Mapping[str, str] | None = None,
     values = composition.values
     session_id = ids.session_id if composition.harness == "claude" else None
 
+    handoff_key = handoffs.key_of_row(SimpleNamespace(
+        identity=resolved.identity, preset_kind=resolved.preset_kind,
+        preset_name=resolved.preset_name, project_key=resolved.project_key))
     conn = store.connect(env=environ)
     try:
         inserted = store.insert(
@@ -159,16 +162,14 @@ def launch(request, *, environ: Mapping[str, str] | None = None,
             project_key=resolved.project_key,
             identity=resolved.identity, scope=resolved.scope, brief=composition.brief,
             handoff_path=str(values.get("handoff") or "") or None,
-            handoff_key=handoffs.key_of_row(SimpleNamespace(
-                identity=resolved.identity, preset_kind=resolved.preset_kind,
-                preset_name=resolved.preset_name, project_key=resolved.project_key)))
+            handoff_key=handoff_key)
         if not inserted.new:
             return _stored(inserted.row)
 
         rid = ids.request_id
         warnings = _warnings(resolved, composition)
         try:
-            _make_files(composition)
+            _make_files(composition, environ, handoff_key)
         except OSError as error:
             failed = targets.fail(conn, rid, targets.SPAWN_FAILED,
                                    f"the launch's files could not be made: {error}")
@@ -304,15 +305,22 @@ def _actor(request, caller: Mapping[str, str]) -> str:
     return getattr(request, "actor", None) or first.actor(caller)
 
 
-def _make_files(composition: Composition) -> None:
-    """What a launch makes before its start: Claude's system prompt file, and a scratch
-    launch's directory (0700, never removed by the launcher). The scratch folder's parent
-    is made private first, which refuses one that is a link or another user's, in case one
-    turned up since the check."""
-    if composition.values.get("scratch"):
-        where = Path(str(composition.values["cwd"]))
+def _make_files(composition: Composition, environ: Mapping[str, str] | None = None,
+                handoff_key: str | None = None) -> None:
+    """What a launch makes before its start: Claude's system prompt file, a scratch
+    launch's directory (0700, never removed by the launcher), and the handoff folder its
+    identity block names when it has a handoff key. The scratch folder's parent is made
+    private first, which refuses one that is a link or another user's, in case one turned
+    up since the check. The launcher's own handoff folder is made only here, after the row,
+    so a refusal leaves it unmade."""
+    values = composition.values
+    if values.get("scratch"):
+        where = Path(str(values["cwd"]))
         files.private_dir(where.parent)
         files.private_dir(where)
+    if handoff_key and values.get("cwd"):
+        handoffs.folder(str(values["cwd"]), notes_dir=values.get("notes_dir") or None,
+                        env=environ)
     if composition.prompt_file is not None:
         common.write_prompt(composition.prompt_file)
 

@@ -111,17 +111,19 @@ def own_folder(env: Mapping[str, str] | None = None, *, create: bool = True) -> 
 
 
 def folder(cwd: str | Path, *, notes_dir: str | None = None,
-           env: Mapping[str, str] | None = None, create: bool = True) -> Path:
+           env: Mapping[str, str] | None = None, create: bool = True,
+           create_own: bool | None = None) -> Path:
     """The handoff folder for a session working in `cwd`.
 
     With notes installed, notes' `handoffs/` folder for `cwd`, `notes_dir` (a launch's
     `notes_dir` value) passed as its override. Else, or when notes has no folder for `cwd`,
-    the launcher's own.
+    the launcher's own. `create` is passed to notes, and makes the launcher's own folder
+    unless `create_own` says otherwise.
     """
     notes_folder = _notes_folder(cwd, notes_dir, create)
     if notes_folder is not None:
         return Path(notes_folder)
-    return own_folder(env, create=create)
+    return own_folder(env, create=create if create_own is None else create_own)
 
 
 def folder_of_row(row, *, env: Mapping[str, str] | None = None,

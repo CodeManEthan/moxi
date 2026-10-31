@@ -84,8 +84,9 @@ def context(values: Mapping[str, object], *, request_id: str,
             environ: Mapping[str, str] | None = None,
             modules: frozenset[str] | None = None, create: bool = False) -> Context:
     """Gather the context of one launch. `mode` is the resolver's, None to let the
-    composer work it out. `create` makes the handoff folder when it is missing (a
-    launch); `preview` leaves it alone."""
+    composer work it out. `create` lets notes make its handoff folder when it is missing
+    (a launch); `preview` leaves it alone. The launcher's own handoff folder is never made
+    here: a launch makes it with its other files, after its row is written."""
     environ = dict(os.environ if environ is None else environ)
     links = installed() if modules is None else frozenset(modules)
     harness = values.get("harness") or "claude"
@@ -104,7 +105,8 @@ def context(values: Mapping[str, object], *, request_id: str,
     if key and values.get("cwd"):
         handoff_dir = str(handoffs.folder(str(values["cwd"]),
                                           notes_dir=values.get("notes_dir") or None,
-                                          env=environ, create=create))
+                                          env=environ, create=create,
+                                          create_own=False))
 
     role_found = None
     if values.get("agent"):
