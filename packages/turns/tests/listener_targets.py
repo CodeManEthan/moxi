@@ -78,3 +78,8 @@ def floor_slow(event):
 def hang(event):
     HOLD.wait(5.0)
     return "too late"
+
+
+def limits(event):
+    CALLS.append(("codex_limits", event.kind, event.payload, event.received_at,
+                  event.harness, event.session_id))

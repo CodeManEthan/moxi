@@ -44,6 +44,11 @@ out of the harness. This package is turns' whole public API, the announcement's
                                          # process of its own: wait_ready(pid=its pid)
     turns.codex_host_available()         # True when the Codex host can start (the
                                          # `codex` extra is installed); imports nothing
+    lim = turns.codex_rate_limits(timeout=3.0)   # CodexLimits(payload, received_at, via)
+                              # | None: a live Codex host's `usage.codex_limits` (via
+                              # "host"), else an app-server of its own ("app-server")
+    s.mcp_reload()            # a Codex host (capability mcp-token): settle its launch's
+                              # MCP servers, reloading a failed one; {reloaded, servers}
     s = turns.opencode.launch(cwd, *, instructions=None, env=None, options=None,
                               additions=None)   # an OpenCode host, experimental
     turns.Guard(name, calls, *, who="any", match=None, match_flags="", judge=None,
@@ -73,6 +78,7 @@ _WHERE = {
     **dict.fromkeys(("launch_additions", "LaunchAdditions", "Contribution",
                      "AdditionsRequest", "McpServer"), "additions"),
     "codex_host_available": "codex_host",
+    **dict.fromkeys(("codex_rate_limits", "CodexLimits"), "codex_appserver"),
     "opencode": "opencode",     # a host's namespace (`turns.opencode.launch`): the module
     **dict.fromkeys(("Facts", "Agents", "Agent", "OpenTurn", "Started", "Refused", "Lost",
                      "Ended", "Ran", "Shells", "LeftShell", "Failed", "Ready",
@@ -85,6 +91,7 @@ _WHERE = {
 
 __all__ = [
     "find", "sessions", "wait_ready", "codex", "codex_host_available", "opencode",
+    "codex_rate_limits", "CodexLimits",
     "launch_additions", "LaunchAdditions", "Contribution", "AdditionsRequest",
     "McpServer", "Session", "Delivery", "Watch", "StopHandler", "TurnsError", "VersionError",
     "Facts", "Agents", "Agent", "OpenTurn", "Started", "Refused", "Lost", "Ended", "Ran",

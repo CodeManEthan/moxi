@@ -20,6 +20,7 @@ from moxi_turns.codex import CodexHarness
 from moxi_turns.endpoint import Endpoint
 from moxi_turns.results import Ended, Lost, Refused, Started, StopFacts
 from conftest import bare
+from fake_codex import LIMITS
 
 
 class FakeAppServer:
@@ -104,6 +105,14 @@ class FakeClient:
             return {"turnId": self.live_turn}
         if method == "thread/backgroundTerminals/list":
             return {"data": []}
+        if method == "account/rateLimits/read":
+            error = getattr(self.harness, "fake_limits_error", None)
+            if error is not None:
+                raise error
+            return dict(getattr(self.harness, "fake_limits", LIMITS))
+        if method in ("mcpServerStatus/list", "config/mcpServer/reload"):
+            # The MCP settle's calls, answered by a test's own app-server stand-in.
+            return self.harness.fake_mcp(method, params, timeout)
         if method == "thread/read":
             # The thread's history: the collab items a test recorded on the harness.
             error = getattr(self.harness, "fake_read_error", None)

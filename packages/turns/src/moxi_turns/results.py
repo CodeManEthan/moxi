@@ -30,6 +30,11 @@ CAPABILITIES = ("deliver", "only-if-idle", "steer", "stop-handler", "clear", "ex
 #: The most names one `environ` call may ask.
 ENVIRON_MAX_NAMES = 64
 
+#: The deadline over one settle of a Codex host's MCP servers (`mcp.reload`, and at each
+#: ready), in seconds. An `mcp.reload` answers within it, or within twice it when the call
+#: waits behind a settle already past its first read.
+MCP_SETTLE_S = 10.0
+
 #: How a turn ended (`Ended.outcome`, `TurnEnded.outcome`).
 OUTCOMES = ("answer", "aborted", "error", "refusal")
 
@@ -611,7 +616,8 @@ def from_notification(method: str, params: Any):
         raise ValueError(f"malformed {method} notification: {exc}") from None
 
 
-__all__ = ["CAPABILITIES", "ENVIRON_MAX_NAMES", "OUTCOMES", "DELIVERY_REFUSALS", "COMMAND_REFUSALS",
+__all__ = ["CAPABILITIES", "ENVIRON_MAX_NAMES", "MCP_SETTLE_S", "OUTCOMES",
+           "DELIVERY_REFUSALS", "COMMAND_REFUSALS",
            "READY_SOURCES", "COMMANDS", "COMMAND_WAIT_S", "STOP_SHELLS_WAIT_S",
            "DELIVERY_HOW", "AGENT_KINDS", "AGENT_STATES",
            "BUSY_STATES", "REF_MAX_BYTES", "ERROR_GONE", "ERROR_CAPABILITY",

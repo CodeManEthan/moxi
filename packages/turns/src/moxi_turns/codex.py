@@ -84,6 +84,7 @@ from moxi.paths import script
 
 from . import client as turns_client
 from . import codex_hooks
+from .codex_appserver import LIMITS_READ, LIMITS_READ_S, LIMITS_UPDATED
 from . import codex_protocol as proto
 from . import protocol
 from .doctor import MODULE
@@ -199,7 +200,8 @@ class _Compaction:
 class CodexHarness(Harness):
     name = "codex"
     can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "compact",
-                     "agents", "stop-shells", "guards", "after-tool", "environ"})
+                     "agents", "stop-shells", "guards", "after-tool", "usage",
+                     "environ"})
     mod_version = None
 
     @staticmethod
@@ -251,6 +253,8 @@ class CodexHarness(Harness):
         self._usage: tuple[str, int] | None = None
         #: The current main turn's prompts, `(turn id, prompts)`, for guards that want them.
         self._prompts: tuple[str | None, tuple[Prompt, ...]] = (None, ())
+        #: The last rate-limits reading the host saw, `(payload, received_at, kind)`.
+        self._limits: tuple[dict, float, str] | None = None
 
         self.pid = os.getpid()
         #: The thread: None until a fresh thread is started; a resume names it from
@@ -653,6 +657,7 @@ class CodexHarness(Harness):
                 # refused priming turn fails the load and raises none.
                 self.endpoint.identify(thread_id, ready="startup" if starting else "resume")
                 self._accepted.set()
+                self._loaded(ws)
                 if old_turn and old_turn != turn_id:
                     if turn_id:
                         # The load shows another running turn. Reporting it ends the old
@@ -1242,6 +1247,9 @@ class CodexHarness(Harness):
             self._track_collab(params)
         elif method == "thread/tokenUsage/updated":
             self._token_usage(params)
+        elif method == LIMITS_UPDATED:
+            if isinstance(params, dict):
+                self._limits_seen(params, "updated")
         elif method == "thread/status/changed":
             active = (params.get("status") or {}).get("type") == "active"
             with self._lock:
@@ -1262,6 +1270,58 @@ class CodexHarness(Harness):
                     timer.start()
         elif rid is not None:
             log.warning("unanswered app-server request %s; approvals are disabled", method)
+
+    def _loaded(self, ws) -> None:
+        """An accepted load: read the account's rate limits once, on a thread of its own,
+        so the load does not wait for the answer."""
+        threading.Thread(target=self._read_limits_at_load, args=(ws,), daemon=True,
+                         name="turns-codex-limits").start()
+
+    def _read_limits_at_load(self, ws) -> None:
+        try:
+            payload = ws.call(LIMITS_READ, None, timeout=LIMITS_READ_S)
+        except Exception as exc:  # noqa: BLE001 - a reading is information; none is logged
+            log.info("the Codex rate limits could not be read after the load: %s", exc)
+            return
+        if isinstance(payload, dict):
+            self._limits_seen(payload, "read")
+
+    def _limits_seen(self, payload: dict, kind: str, *, tell: bool = True) -> float:
+        """Keep a rate-limits reading as the last one seen, and hand it to the
+        `codex_limits` rows unparsed (unless `tell` is false). Returns its time."""
+        at = time.time()
+        with self._lock:
+            self._limits = (payload, at, kind)
+        if tell:
+            self.endpoint.codex_limits(payload, kind=kind, received_at=at)
+        return at
+
+    def codex_limits(self, *, cached: bool = False) -> dict:
+        """`usage.codex_limits`: `{payload, received_at}` from `account/rateLimits/read`
+        now, or `{payload: null, received_at: null, reason}` when it could not be read.
+        With `cached`, the last reading the host saw (`{payload, received_at, kind}`, each
+        null before the first) and no request. A reading asked for here is kept as the
+        last one seen but not handed to the rows, which are told of the load's reading
+        and of Codex's pushes."""
+        if cached:
+            with self._lock:
+                last = self._limits
+            payload, at, kind = last if last is not None else (None, None, None)
+            return {"payload": payload, "received_at": at, "kind": kind}
+        with self._lock:
+            ws = self.ws
+        try:
+            if ws is None:
+                raise proto.AppServerOffline("the Codex app-server is not connected")
+            payload = ws.call(LIMITS_READ, None, timeout=LIMITS_READ_S)
+            if not isinstance(payload, dict):
+                raise proto.AppServerOffline(f"{LIMITS_READ} answered {payload!r}")
+        except Exception as exc:  # noqa: BLE001 - the caller reads the reason
+            reason = self._failure_reason(exc)
+            log.info("the Codex rate limits could not be read: %s", reason)
+            return {"payload": None, "received_at": None, "reason": reason}
+        return {"payload": payload,
+                "received_at": self._limits_seen(payload, "read", tell=False)}
 
     def _token_usage(self, params) -> None:
         """Keep the main thread's last context reading, `tokenUsage.last.totalTokens`;

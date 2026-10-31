@@ -657,6 +657,16 @@ class Endpoint:
             return
         self._ask(self._event("usage", usage=reading, received_at=time.time()))
 
+    def codex_limits(self, payload: dict[str, Any], *, kind: str,
+                     received_at: float | None = None) -> None:
+        """A Codex rate-limits reading, as given: `read` (the host asked) or `updated`
+        (Codex pushed it). The `codex_limits` rows are told, and not waited for."""
+        if self._gone is not None:
+            return
+        self._ask(self._event("codex_limits", payload=payload, kind=kind,
+                              received_at=time.time() if received_at is None
+                              else received_at))
+
     def _ask(self, event: SessionEvent, *, wait: bool = False) -> str | None:
         return turns_listeners.ask(self.registry, event, self.listen_wait_s, wait=wait,
                                    after=self.floors.after_call)

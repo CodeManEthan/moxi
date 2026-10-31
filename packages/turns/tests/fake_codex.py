@@ -17,6 +17,8 @@ Driven by the environment it inherits from the host:
                           the one the load asked for
     FAKE_CODEX_ECHO       a variable name: its value in the app-server's environment is
                           written into the app-server's start event
+    FAKE_CODEX_LIMITS     JSON: what `account/rateLimits/read` answers (else `LIMITS`);
+                          `error` answers it with an error
 
 Each event records the process's pid, parent, process group and session, and whether
 its stdin is a terminal.
@@ -35,6 +37,10 @@ import uuid
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+#: What `account/rateLimits/read` answers by default: the shape Codex 0.153 gave.
+LIMITS = {"rateLimits": {"limitId": "codex", "primary": {"usedPercent": 12,
+                                                         "windowDurationMins": 300}},
+          "accountId": "acct-fake", "planType": "pro"}
 
 
 def install(folder: Path) -> Path:
@@ -224,6 +230,11 @@ class AppServer:
             return {"thread": {"id": thread["id"], "turns": []}}
         if method == "thread/backgroundTerminals/list":
             return {"data": []}
+        if method == "account/rateLimits/read":
+            given = os.environ.get("FAKE_CODEX_LIMITS")
+            if given == "error":
+                raise _Error(-32603, "rate limits are not available")
+            return json.loads(given) if given else LIMITS
         raise _Error(-32601, f"method not found: {method}")
 
     def thread(self, params: dict) -> dict:

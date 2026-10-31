@@ -99,7 +99,7 @@ The session's capabilities:
 | `stop-shells` | yes | yes | no | `command` `clear` or `compact` with `stop_shells: true` |
 | `guards` | yes | yes | no | the guard list runs at the session's tool calls |
 | `after-tool` | yes | yes | no | an `after-tool` listener row's text reaches the model after the tool |
-| `usage` | yes | no | no | the session reports its usage to `usage` listener rows |
+| `usage` | yes | yes | no | Claude Code reports its usage to `usage` listener rows; the Codex host hands each rate-limits reading to `codex_limits` rows and answers `usage.codex_limits` |
 | `mcp-token` | no | no | no | `mcp.reload` |
 | `environ` | yes | yes | yes | `environ` |
 
@@ -125,7 +125,7 @@ conditional question: "no, a turn is open" is its answer, not a failure of the r
 | -32700 | parse error | a line that is not JSON |
 | -32600 | invalid request | not a JSON-RPC request, a batch, or a line over the cap |
 | -32601 | method not found | a method turns does not have |
-| -32602 | invalid params | params that break this contract: an empty or missing `text`; a `ref` that is not a string, or longer than 256 bytes as UTF-8; `if_turn_number`, `refuse_draft` or `refuse_agents` without `only_if_idle: true`, or of the wrong type; a bad `until` or `timeout_ms`; a `wait` with both or neither of `delivery` and `ref`; an unknown command name; `stop_shells` not a boolean, or given with `exit`; `environ`'s `names` not a list, longer than 64, or holding something that is not a variable name |
+| -32602 | invalid params | params that break this contract: an empty or missing `text`; a `ref` that is not a string, or longer than 256 bytes as UTF-8; `if_turn_number`, `refuse_draft` or `refuse_agents` without `only_if_idle: true`, or of the wrong type; a bad `until` or `timeout_ms`; a `wait` with both or neither of `delivery` and `ref`; an unknown command name; `stop_shells` not a boolean, or given with `exit`; `environ`'s `names` not a list, longer than 64, or holding something that is not a variable name; `cached` not a boolean |
 | -32001 | hello refused | no version in both ranges; `data` names both |
 | -32002 | hello required | a first request other than `rpc.hello`; the connection closes |
 | 1001 | `gone` | the endpoint is ending or has ended |
@@ -324,6 +324,7 @@ Params are an object; a missing optional param takes its default. In short:
 | `stops.handle` | `{}` | `{}`, then `stop.asked` notifications |
 | `stops.answer` | `{ask, reason}` | `{taken}` |
 | `environ` | `{names}` | `{values}` |
+| `usage.codex_limits` | `{cached?}` | `{payload, received_at}` |
 
 `text` is a non-empty string. `ref` is a string of at most 256 bytes as UTF-8, or absent
 or null.
@@ -331,8 +332,8 @@ or null.
 **No answer waits on the harness.** `session`, `deliver`, `steer`, `environ` and a `wait`
 with `timeout_ms` 0 answer from the endpoint's own record, at once. `facts` and `agents` answer
 within the harness's live bound (above) whatever the harness is doing. Only `wait` with a
-bound, `command` and the long-lived `watch` and `stops.handle` wait, each for its own
-reason.
+bound, `command`, `usage.codex_limits` (one app-server request, unless `cached`) and the
+long-lived `watch` and `stops.handle` wait, each for its own reason.
 
 ### `session`
 
@@ -530,6 +531,19 @@ the session's start, so the values are those the session started with, not a cha
 later inside a shell. The Codex and OpenCode hosts are the launch's own process, so theirs
 is the launch's environment. The endpoint's address is the user's alone, and any process
 of the same user can already read a session's environment, so this adds no reader.
+
+### `usage.codex_limits`
+
+`usage.codex_limits {cached?: bool}` answers a Codex host's reading of the account's rate
+limits: `{payload, received_at}`, `payload` being `account/rateLimits/read`'s answer from
+the host's own app-server as given, unparsed (the limits, with `accountId` and `planType`
+beside them), and `received_at` when it arrived (Unix seconds). No thread turn runs and no
+message reaches the model. When the read fails both are null and `reason` says why. With
+`cached: true` nothing is asked: the answer is the last reading the host saw (its read
+after each accepted load, a push from Codex, or an earlier `usage.codex_limits`) as
+`{payload, received_at, kind}`, `kind` being `read` or `updated`, each null before the
+first. Needs `usage`; a session of another harness that offers `usage` answers the
+`capability` error too. The library's pull, `moxi_turns.codex_rate_limits`, calls it.
 
 ## Notifications
 

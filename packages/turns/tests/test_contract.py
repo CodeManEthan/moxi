@@ -119,7 +119,7 @@ CAPABILITIES = {
     "stop-shells": (True, True, False),
     "guards": (True, True, False),
     "after-tool": (True, True, False),
-    "usage": (True, False, False),
+    "usage": (True, True, False),
     "mcp-token": (False, False, False),
     "environ": (True, True, True),
 }
@@ -139,6 +139,7 @@ METHODS = {
     "stops.handle": ("stop-handler", set()),
     "stops.answer": (None, {"taken"}),
     "environ": ("environ", {"values"}),
+    "usage.codex_limits": ("usage", {"payload", "received_at"}),
 }
 
 #: The fields of the `session` answer that may be absent.
@@ -430,6 +431,7 @@ INVALID_PARAMS = [
     ("environ", {"names": ["A-B"]}),
     ("environ", {"names": [""]}),
     ("environ", {"names": [f"V{n}" for n in range(65)]}),
+    ("usage.codex_limits", {"cached": "yes"}),
 ]
 
 #: Methods turns does not have, among them version 1's old ops.
@@ -447,6 +449,7 @@ CAPABILITY_ROWS = [
     ("command", {"name": "clear", "stop_shells": True}, "stop-shells"),
     ("command", {"name": "compact", "stop_shells": True}, "stop-shells"),
     ("environ", {"names": ["HOME"]}, "environ"),
+    ("usage.codex_limits", {}, "usage"),
 ]
 
 

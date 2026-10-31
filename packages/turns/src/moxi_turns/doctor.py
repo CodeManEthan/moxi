@@ -3,7 +3,8 @@
 `check()` yields `moxi.doctor.Row`s of module `turns`: its config, the start list, the
 registered listeners (an after-tool row's floor that does not import fails its module's
 row), the guards, the launch-additions contributors, the live endpoints (dead ones
-are swept on the way) and any version 1 endpoint directory left behind, the hook times,
+are swept on the way) and any version 1 endpoint directory left behind, when a live
+Codex host last saw the account's rate limits (`codex limits`), the hook times,
 and each harness adapter's rows (`ADAPTER_ROWS`: the Claude plugins, `endpoint.json`
 and the Claude Code version; Codex; the OpenCode host's binary). turns has no doctor
 command of its own.
@@ -68,6 +69,7 @@ def check() -> Iterator[moxi_doctor.Row]:
     yield from _guard_rows(settings)
     yield from _additions_rows()
     yield from _endpoint_rows()
+    yield _codex_limits_row()
     yield from _hook_rows()
     for target in ADAPTER_ROWS:
         module_name, _, attr = target.partition(":")
@@ -313,6 +315,44 @@ def _endpoint_rows() -> Iterator[moxi_doctor.Row]:
             "removes",
             "reload that session's plugins or restart it; once no turns 0.1 session "
             "runs, remove the directory")
+
+
+def _codex_limits_row() -> moxi_doctor.Row:
+    """`codex limits`, information: when a live Codex host last saw the account's rate
+    limits (its read after a load, a push from Codex, or a pull), the newest across the
+    live hosts; or that no Codex session is live. Each host answers from its own record
+    (`usage.codex_limits` with `cached`), so no app-server is asked."""
+    live = client.sessions()
+    newest = None
+    hosts = unread = 0
+    try:
+        for s in live:
+            if s.harness != "codex" or "usage" not in s.capabilities:
+                continue
+            hosts += 1
+            try:
+                answer = s.codex_limits(cached=True)
+            except Exception:  # noqa: BLE001 - a doctor reports, it does not raise
+                unread += 1
+                continue
+            at = answer.get("received_at")
+            if isinstance(at, (int, float)) and not isinstance(at, bool) \
+                    and (newest is None or at > newest[0]):
+                newest = (at, answer.get("kind"), s.pid)
+    finally:
+        for s in live:
+            s.close()
+    if not hosts:
+        return Row("codex limits", True, "no live Codex session")
+    if newest is None:
+        detail = f"no reading yet on {hosts} live Codex host{'s' if hosts > 1 else ''}"
+    else:
+        at, kind, pid = newest
+        when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(at))
+        detail = f"last reading {when} ({kind or 'read'}), Codex host pid {pid}"
+    if unread:
+        detail += f"; {unread} host{'s' if unread > 1 else ''} did not answer"
+    return Row("codex limits", True, detail)
 
 
 def _hook_rows() -> list[moxi_doctor.Row]:
