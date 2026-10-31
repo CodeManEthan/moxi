@@ -63,6 +63,8 @@ KINDS = ("seat", "project")
 HOME = "home"
 #: The row of config overrides, `key=value` each; one keyed as a posture row is refused.
 CONFIG = "config"
+#: The texts a launch takes inline or from a file: the pairs of rows that spell each.
+TWO_SPELLINGS = (("brief", "brief_file"), ("instructions", "instructions_file"))
 #: The rows (and the seat's `home`) that name where a session starts; a layer names one.
 PLACE = ("cwd", "project", "scratch", HOME)
 #: The launcher's share of Codex's start context, in characters. A Codex seat whose
@@ -415,10 +417,10 @@ def _check_preset(preset: Preset, base_harness: str, avail,
         problem = _passed_on_problem(where, key, values[key], (harness,))
         if problem is not None:
             problems.append(problem)
-    if values.get("instructions") and values.get("instructions_file"):
-        problems.append(Problem(where, "instructions", "both instructions and "
-                                "instructions_file are set", "keep one of them",
-                                "two-instructions"))
+    for inline, from_file in TWO_SPELLINGS:
+        if values.get(inline) and values.get(from_file):
+            problems.append(Problem(where, inline, f"both {inline} and {from_file} are "
+                                    "set", "keep one of them", f"two-{inline}"))
     problems += _check_place(where, values, allow_home=preset.kind == "seat")
     posture = values.get("posture")
     if posture:
@@ -831,6 +833,7 @@ def resolve(request, *, presets: Presets | None = None,
         for source, layer in layers:
             if name in layer:
                 values[name], sources[name] = _unset_as_default(row, layer[name]), source
+    _one_spelling(layers, rows, values, sources)
     chosen = frozenset(k for k in (*chosen_preset, *typed) if k in rows)
 
     # Where the session starts: taken whole from the latest layer that names a place.
@@ -886,6 +889,24 @@ def resolve(request, *, presets: Presets | None = None,
         agents=tuple(project.agents) if project is not None else (),
         identity=identity, scope=scope, posture=str(posture), target=target,
         off_posture=off_posture, links=frozenset(links), warnings=tuple(warnings))
+
+
+def _one_spelling(layers, rows, values: dict, sources: dict) -> None:
+    """Each text given inline or from a file (`TWO_SPELLINGS`) is taken from the latest
+    layer that gives it either way, so a typed `--instructions` replaces a seat's
+    `instructions_file`; the other spelling goes back to its default. One layer giving
+    both is refused, since one of them would go unread."""
+    for inline, from_file in TWO_SPELLINGS:
+        for source, layer in reversed(layers):
+            given = [k for k in (inline, from_file) if catalog.is_set(layer.get(k))]
+            if len(given) == 2:
+                raise BadValue(inline, f"both {inline} and {from_file} are given",
+                               "give one of them")
+            if given:
+                other = from_file if given[0] == inline else inline
+                if other in rows and sources.get(other) != source:
+                    values[other], sources[other] = _fresh(rows[other].default), SHIPPED
+                break
 
 
 def mode_of(harness: str, target: str, *, identity: str | None = None,

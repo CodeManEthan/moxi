@@ -660,6 +660,7 @@ def test_a_good_file_checks_clean(tmp_path):
      "bad-value"),
     ('[seat.s]\ninstructions = "a"\ninstructions_file = "/x.md"\n', "seat.s",
      "instructions", "two-instructions"),
+    ('[seat.s]\nbrief = "a"\nbrief_file = "/x.md"\n', "seat.s", "brief", "two-brief"),
     ('[seat.s]\nposture = "with:lead"\n', "seat.s", "posture", "needs-module"),
     ('[seat.s]\nposture = "eventually"\n', "seat.s", "posture", "bad-value"),
     ('[seat.s]\nextra_flags = ["--permission-mode", "plan"]\n', "seat.s",
@@ -805,3 +806,33 @@ def test_the_project_listing_refuses_an_unknown_key(projects):
     with pytest.raises(presets.UnknownProject):
         presets.project_agents("gone", presets=presets.read(write("")),
                                available=WITH_PROJECTS)
+
+
+# -- a text given inline or from a file ------------------------------------------------------
+
+
+def test_a_typed_inline_text_replaces_a_presets_file_and_the_other_way_round():
+    got = resolve('[seat.s]\ninstructions_file = "/seat.md"\n', seat="s",
+                  typed={"instructions": "typed"})
+    assert got.values["instructions"] == "typed" and got.values["instructions_file"] == ""
+    assert got.sources["instructions_file"] == presets.SHIPPED
+    got = resolve('[seat.s]\ninstructions = "seat"\n', seat="s",
+                  typed={"instructions_file": "/typed.md"})
+    assert got.values["instructions_file"] == "/typed.md" and got.values["instructions"] == ""
+    got = resolve('[defaults]\nbrief = "default"\n[seat.s]\nbrief_file = "/b.md"\n',
+                  seat="s")
+    assert got.values["brief_file"] == "/b.md" and got.values["brief"] == ""
+    # A later layer that gives neither leaves an earlier one's alone.
+    got = resolve('[seat.s]\ninstructions_file = "/seat.md"\n', seat="s",
+                  typed={"model": "opus"})
+    assert got.values["instructions_file"] == "/seat.md"
+
+
+@pytest.mark.parametrize("typed", [{"brief": "b", "brief_file": "/b.md"},
+                                   {"instructions": "i", "instructions_file": "/i.md"}])
+def test_a_text_given_both_ways_at_once_is_refused(typed):
+    with pytest.raises(catalog.BadValue) as raised:
+        resolve(typed=typed)
+    inline = next(iter(typed))
+    assert raised.value.row == inline
+    assert raised.value.problem == f"both {inline} and {inline}_file are given"
