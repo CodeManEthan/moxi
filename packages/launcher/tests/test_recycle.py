@@ -573,7 +573,9 @@ def test_a_crossing_of_a_launch_off_unknown_or_claimed_elsewhere_is_none(conn):
     assert recycle.crossing_line(conn, crossing(), pid=os.getppid()) is None
 
 
-def test_a_compact_crossing_writes_its_run_and_spawns_its_job(conn, script):
+def test_a_compact_crossing_writes_its_run_and_spawns_its_job(conn, script, monkeypatch):
+    # The handler runs in the session's endpoint, whose environment carries its stamps.
+    monkeypatch.setenv("MOXI_LAUNCHER_REQUEST", "r1")
     limit(conn, "compact")
     spawn = Spawned()
     line = recycle.crossing_line(conn, crossing(), pid=os.getpid(), spawn=spawn)
@@ -725,6 +727,13 @@ def test_an_exit_refused_leaves_the_session_and_the_end_takes_the_pending_compac
     store.pend_compact(conn, "r1", f"{SID}|1x|t")
     store.end_run(conn, run.run_id, "not-exited", word="busy")
     assert len(started) == 1
+
+
+def test_an_end_that_made_a_new_launch_drops_the_pending_compact(conn, started):
+    run = open_run(conn)
+    store.pend_compact(conn, "r1", f"{SID}|1x|t")
+    store.end_run(conn, run.run_id, "not-exited", word="busy", new_request_id="r2")
+    assert started == [] and store.pending_compact(conn, "r1") is None
 
 
 def test_a_dropped_run_takes_the_pending_compact_too(conn, started):

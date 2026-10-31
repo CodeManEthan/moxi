@@ -406,6 +406,32 @@ def test_an_exit_loses_at_insert_to_an_open_run_whose_job_lives(conn):
     assert store.get_run(conn, other.run_id).open
 
 
+def test_an_exit_loses_to_an_open_run_past_its_grace_whose_job_lives(conn):
+    other = store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1",
+                             session_id=SID, actor="cache", job=f"proc:{me()}",
+                             at="2026-01-01T00:00:00.000000Z")
+    session = FakeSession()
+    with pytest.raises(store.RunOpen):
+        go(conn, session=session)
+    assert session.commands == [] and store.get_run(conn, other.run_id).open
+
+
+def test_a_run_ended_under_the_exit_before_it_acts_exits_nothing(conn, monkeypatch):
+    advance = store.advance_run
+
+    def then_ended_under(conn_, run_id, state, **kw):
+        moved = advance(conn_, run_id, state, **kw)
+        if "turn_number" in kw:
+            store.end_run(conn_, run_id, "error", word="job-gone")
+        return moved
+
+    monkeypatch.setattr(store, "advance_run", then_ended_under)
+    session = FakeSession()
+    result = go(conn, session=session)
+    assert session.commands == []
+    assert result.data["outcome"] == "not-exited" and result.run.word == "job-gone"
+
+
 def test_an_exits_run_makes_every_other_act_lose_at_insert(conn):
     """While an exit runs, a keep-warm ask, an expiry clear or a relaunch arm can't start."""
     seen = {}
