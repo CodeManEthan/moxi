@@ -191,14 +191,19 @@ def test_the_first_turn_text_of_a_relaunch(tmp_path):
 @pytest.mark.parametrize("name", ["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN",
                                   "MOXI_HOME", "MOXI_DEVICE", "MOXI_LAUNCHER_HOME",
                                   "MOXI_COMMS_STATE_HOME", "MOXI_SLOTS_RUNTIME_DIR",
-                                  "MOXI_TURNS_DEVICE"])
+                                  "MOXI_TURNS_DEVICE", "CODEX_HOME", "CODEX_SQLITE_HOME",
+                                  "CODEX_API_KEY", "CODEX_ACCESS_TOKEN",
+                                  "CODEX_CA_CERTIFICATE", "OPENAI_API_KEY",
+                                  "OPENAI_FEDERATION_RULE_ID", "OPENAI_IDENTITY_TOKEN_FILE",
+                                  "OPENAI_WORKLOAD_IDENTITY_CONTEXT"])
 def test_the_users_own_names(name):
     assert common.own_names(name)
 
 
 @pytest.mark.parametrize("name", ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "MOXI_HOMEX",
                                   "MOXI_LAUNCHER_REQUEST", "MOXI_COMMS_NAME", "AWS_SECRET",
-                                  "FOO_HOME"])
+                                  "FOO_HOME", "CODEX_SANDBOX", "CODEX_THREAD_ID",
+                                  "CODEX_INSTALL_DIR", "OPENAI_OTHER"])
 def test_names_that_are_not_the_users_own(name):
     assert not common.own_names(name)
 

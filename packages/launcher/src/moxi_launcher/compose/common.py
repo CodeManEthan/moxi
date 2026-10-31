@@ -99,6 +99,21 @@ CLAUDE_KEEP = frozenset({
     "CLAUDE_CODE_SHELL", "CLAUDE_CODE_GIT_BASH_PATH",
 })
 
+#: Codex's own location, configuration and sign-in names, as Codex's environment
+#: variable reference documents them, with the API key its built-in OpenAI provider
+#: reads. A launch never scrubs them, so a replay takes them from the process running it
+#: as it takes `CLAUDE_KEEP`.
+CODEX_KEEP = frozenset({
+    # Where its state lives.
+    "CODEX_HOME", "CODEX_SQLITE_HOME",
+    # Sign-in.
+    "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "OPENAI_API_KEY",
+    "OPENAI_FEDERATION_RULE_ID", "OPENAI_IDENTITY_TOKEN_FILE",
+    "OPENAI_WORKLOAD_IDENTITY_CONTEXT",
+    # How it connects.
+    "CODEX_CA_CERTIFICATE",
+})
+
 #: The longest command line Windows takes, whole, in characters, its terminator included.
 WINDOWS_LINE = 32_767
 #: The longest single word (argument or environment entry) Linux and macOS take, in bytes,
@@ -535,10 +550,11 @@ _LOCATOR = re.compile(r"MOXI_[A-Z0-9_]+_(?:" + "|".join(paths.LOCATORS) + "|DEVI
 def own_names(name: str) -> bool:
     """Whether `name` is one of the user's own location, configuration and sign-in
     variables, which a replay takes from the process running it and no launch row
-    stores: the Claude Code names the scrub keeps (`CLAUDE_KEEP`), the core's home and
-    device label (`MOXI_HOME`, `MOXI_DEVICE`), and each module's own (`MOXI_<M>_HOME`,
-    `MOXI_<M>_STATE_HOME` and the other root variables, `MOXI_<M>_DEVICE`)."""
-    return (name in CLAUDE_KEEP or name in (paths.HOME, paths.DEVICE)
+    stores: the Claude Code names the scrub keeps (`CLAUDE_KEEP`), Codex's own
+    (`CODEX_KEEP`), the core's home and device label (`MOXI_HOME`, `MOXI_DEVICE`), and
+    each module's own (`MOXI_<M>_HOME`, `MOXI_<M>_STATE_HOME` and the other root
+    variables, `MOXI_<M>_DEVICE`)."""
+    return (name in CLAUDE_KEEP or name in CODEX_KEEP or name in (paths.HOME, paths.DEVICE)
             or bool(_LOCATOR.fullmatch(name)))
 
 
@@ -589,7 +605,7 @@ def check_sizes(argv: Sequence[str], *, values: Mapping[str, object],
             raise TooLong(what, size, WORD, "bytes")
 
 
-__all__ = ["BASE_NAMES", "BASE_PREFIXES", "COMMANDS", "HEADER", "KEEP_WARM",
+__all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "HEADER", "KEEP_WARM",
            "KEEP_WARM_LINE", "NOTES_DIR", "RECYCLE_ON_EXPIRY", "RELAUNCH", "RELAUNCHED",
            "REQUEST", "SCRUB_NAMES", "SCRUB_PREFIXES", "TURNS_COMMANDS",
            "USAGE_CROSSING_AT", "USAGE_WARN_AT", "WINDOWS_BASE_NAMES", "WINDOWS_LINE", "WORD",
