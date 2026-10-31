@@ -363,8 +363,9 @@ class LaunchRow:
         return json.loads(self.env_json)
 
     @property
-    def base_env(self) -> dict[str, str] | None:
-        """The base environment recorded for the launch, or None when none was."""
+    def base_env(self) -> dict[str, str | None] | None:
+        """The base environment recorded for the launch, or None when none was. A
+        credential that was set at launch is there with None in place of its value."""
         return None if self.base_env_json is None else json.loads(self.base_env_json)
 
     def stale(self, after_s: float, now: datetime | None = None) -> bool:
@@ -497,7 +498,7 @@ def insert(conn: sqlite3.Connection, *, request_id: str, actor: str, harness: st
            identity: str | None = None, scope: str | None = None,
            brief: str | None = None, handoff_path: str | None = None,
            handoff_key: str | None = None, relaunch_of: str | None = None,
-           resume_of: str | None = None, base_env: Mapping[str, str] | None = None,
+           resume_of: str | None = None, base_env: Mapping[str, str | None] | None = None,
            starting_s: float | None = None, at: str | None = None) -> Inserted:
     """Write a launch's row in state `spawning`, before anything is started.
 
@@ -517,8 +518,8 @@ def insert(conn: sqlite3.Connection, *, request_id: str, actor: str, harness: st
     claimed endpoint runs, so two resumes of one session at once launch it once.
 
     `env` holds the stamped literals only, never a secret; `base_env` the child's values
-    for the base names (paths and locale names), recorded so a replay can start from
-    them. Raises `TooLarge` for a value
+    for the recorded names (`compose.common.base_env`), recorded so a replay can start
+    from them, with None for each credential that was set and never its value. Raises `TooLarge` for a value
     past `CAP`, `SessionTaken` when the session id is another launch's, `Busy` when the
     write lock is held past the timeout, and `ValueError` for a harness, target or preset
     kind the store doesn't know, or a Claude launch with no session id.

@@ -141,6 +141,10 @@ started) and that no subagent is running, starts a job outside the session and p
 what it waits for; the agent then ends its turn. Once the session is quiet the job exits
 it, answers the exit dialog, and starts the new session in the same pane with the same
 launch values, none of the old session's environment, and the handoff as its first turn.
+Its environment is what the launch recorded: the system's basic names, the core's
+locations, and your configuration names (a configuration folder, a provider switch, a
+region or profile), never a token, key, password or endpoint URL; those come back only
+through `relaunch.pass_env` (below).
 A relaunch that can't go ahead (the session never goes quiet within
 `relaunch.wait_s`, the slot can't be held) leaves the session alone and tells it so in
 one turn.
@@ -179,8 +183,9 @@ turns' host: use `codex resume`), it ran Codex under a comms name (comms' Codex 
 starts a new thread each time), its harness is no longer launched, or a later launch
 resumed it since. `moxi launcher resume SESSION_ID` launches it again from its launch's
 values, resumed, keeping its session id: in its own slot when that can take it, else
-the lowest that can (`--slot N` picks one), or in this terminal for a terminal launch.
-It sends no first turn. Liveness is checked again as the new launch is written: while
+the lowest that can (`--slot N` picks one), or in this terminal for a terminal launch,
+where it adds your terminal's names (`TERM`, `COLORTERM`, `TERM_PROGRAM`,
+`TERM_PROGRAM_VERSION`) and nothing else of your shell's. It sends no first turn. Liveness is checked again as the new launch is written: while
 another launch of the session is still starting or running, the resume is refused, so two
 resumes of one session at once launch it once.
 
@@ -302,9 +307,14 @@ Set with `moxi config set launcher <key> <value>`:
 - `relaunch.follow_s` (300): how long a director's relaunch, or a repair, follows its run.
 - `relaunch.fallback` (empty): a comms identity told of a failed relaunch when the launch
   has no director.
-- `relaunch.pass_env` (empty): variable names a relaunch or a resume carries from the
-  environment of the process running it into the new session, such as an API key your
-  harness reads.
+- `relaunch.pass_env` (empty): variable names a self relaunch, a repair or a resume
+  carries from the environment of the process running it into the new session. If you
+  sign in with a token or key in the environment (`CLAUDE_CODE_OAUTH_TOKEN`,
+  `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, a provider's keys), list it here: the launcher
+  never records a credential, so without this a relaunched or resumed session starts
+  signed out.
+- `relaunch.director_pass_env` (empty): the same for a director's relaunch, read from
+  the director's environment. Empty, nothing of the director's reaches the session.
 - `relaunch.notice_retry_s` (30): how long a refused notice is tried again.
 - `recycle.limit_wait_s` (1800): how long a compact at the limit waits for the session to
   be idle.

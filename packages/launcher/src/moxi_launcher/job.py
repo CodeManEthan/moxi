@@ -664,10 +664,10 @@ class RelaunchJob:
         pane, under the run's hold."""
         return self._replay(mode=self.run.mode, handoff=self.run.handoff_path,
                             actor=self.run.actor, slot=self.slot, respawn=True,
-                            hold=self.holder)
+                            hold=self.holder, director=self.run.mode == "director")
 
     def _replay(self, *, mode: str, handoff: str | None, actor: str, slot: str | None,
-                respawn: bool, hold: str | None) -> Any:
+                respawn: bool, hold: str | None, director: bool = False) -> Any:
         from . import api
         from .compose import common
 
@@ -677,7 +677,7 @@ class RelaunchJob:
         return api.ReplayRequest(
             self.row, relaunch_of=self.row.request_id, request_id=str(uuid.uuid4()),
             actor=actor, posture=posture, handoff=handoff, run=self.run_id,
-            slot=slot, hold=hold, respawn=respawn)
+            slot=slot, hold=hold, respawn=respawn, director=director)
 
     def respawn(self, request: Any) -> None:
         """Steps 6 to 8: launch the row again; a self run's handoff goes as its first
@@ -696,8 +696,8 @@ class RelaunchJob:
             self.end("relaunch-failed", getattr(error, "code", None) or type(error).__name__,
                      _words(error))
         self.check_stop()
-        if result.base == "job":
-            self.event("base", {"base": "job"})
+        if result.base in ("job", "no-credentials"):
+            self.event("base", {"base": result.base})
         sent = result.outcome
         if request.handoff and sent is not None and sent.outcome not in ("sent",
                                                                          "unconfirmed"):

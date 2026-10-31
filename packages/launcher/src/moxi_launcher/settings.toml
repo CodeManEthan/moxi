@@ -84,7 +84,14 @@ needs = "comms"
 type = "list"
 default = []
 items = "str"
-doc = "Variable names a relaunch or a resume carries from the environment of the process running it into the new session."
+doc = "Variable names, such as a sign-in token or API key, that a self relaunch, a repair or a resume carries from the environment of the process running it into the new session. A launch never records a credential, so this is how one comes back."
+read = "use"
+
+[relaunch.director_pass_env]
+type = "list"
+default = []
+items = "str"
+doc = "Variable names a director's relaunch carries from the director's environment into the new session; empty, nothing of the director's comes in."
 read = "use"
 
 [relaunch.notice_retry_s]

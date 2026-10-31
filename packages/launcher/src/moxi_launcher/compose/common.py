@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
-from moxi import files, paths
+from moxi import files, names, paths
 
 from .. import catalog, store
 
@@ -101,8 +101,7 @@ CLAUDE_KEEP = frozenset({
 
 #: Codex's own location, configuration and sign-in names, as Codex's environment
 #: variable reference documents them, with the API key its built-in OpenAI provider
-#: reads. A launch never scrubs them, so a replay takes them from the process running it
-#: as it takes `CLAUDE_KEEP`.
+#: reads. A launch never scrubs them.
 CODEX_KEEP = frozenset({
     # Where its state lives.
     "CODEX_HOME", "CODEX_SQLITE_HOME",
@@ -113,6 +112,73 @@ CODEX_KEEP = frozenset({
     # How it connects.
     "CODEX_CA_CERTIFICATE",
 })
+
+#: The two classes of the keep-lists' names and the provider names, for a replay.
+RECORDED, CREDENTIAL = "recorded", "credential"
+
+#: Each name of the keep-lists (`CLAUDE_KEEP`, `CODEX_KEEP`), and each provider name a
+#: recorded switch needs that the scrub never touches, classed once. A name is a
+#: `credential` when its value can grant access or route traffic: a token, a key, a
+#: secret, a password, or a proxy, endpoint or base URL. Every other name (a directory or
+#: path, a user, shell or time-zone name, a region, profile or project name, an on/off
+#: switch, a device label) is `recorded`. A launch records a recorded name's value and a
+#: replay starts with it; a credential's value is never recorded, and reaches a replay
+#: only when the user lists it in `relaunch.pass_env` or `relaunch.director_pass_env`.
+ENV_CLASS = MappingProxyType({
+    # Claude Code: where the configuration lives.
+    "CLAUDE_CONFIG_DIR": RECORDED, "CLAUDE_CODE_PLUGIN_CACHE_DIR": RECORDED,
+    "CLAUDE_CODE_PLUGIN_SEED_DIR": RECORDED, "CLAUDE_CODE_TMPDIR": RECORDED,
+    # Claude Code: sign-in and the model provider.
+    "CLAUDE_CODE_OAUTH_TOKEN": CREDENTIAL, "CLAUDE_CODE_OAUTH_REFRESH_TOKEN": CREDENTIAL,
+    "CLAUDE_CODE_OAUTH_SCOPES": RECORDED, "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": RECORDED,
+    "CLAUDE_CODE_USE_BEDROCK": RECORDED, "CLAUDE_CODE_USE_VERTEX": RECORDED,
+    "CLAUDE_CODE_USE_FOUNDRY": RECORDED, "CLAUDE_CODE_USE_MANTLE": RECORDED,
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS": RECORDED,
+    "CLAUDE_CODE_SKIP_BEDROCK_AUTH": RECORDED, "CLAUDE_CODE_SKIP_VERTEX_AUTH": RECORDED,
+    "CLAUDE_CODE_SKIP_FOUNDRY_AUTH": RECORDED, "CLAUDE_CODE_SKIP_MANTLE_AUTH": RECORDED,
+    "CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH": RECORDED,
+    "CLAUDE_CODE_SKIP_AWS_CRED_CACHE": RECORDED,
+    "CLAUDE_CODE_AWS_CHAIN_RESOLVE_TIMEOUT_MS": RECORDED,
+    "CLAUDE_CODE_DISABLE_AUTH_REFRESH_LOCK": RECORDED,
+    "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST": RECORDED,
+    # Claude Code: how it connects. The certificate and key are paths to files; the
+    # passphrase opens the key.
+    "CLAUDE_CODE_CLIENT_CERT": RECORDED, "CLAUDE_CODE_CLIENT_KEY": RECORDED,
+    "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE": CREDENTIAL, "CLAUDE_CODE_CERT_STORE": RECORDED,
+    "CLAUDE_CODE_PROXY_RESOLVES_HOSTS": RECORDED,
+    # Claude Code: security and traffic choices, its commands' wrappers, its shell.
+    "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": RECORDED, "CLAUDE_CODE_SCRIPT_CAPS": RECORDED,
+    "CLAUDE_CODE_MCP_ALLOWLIST_ENV": RECORDED,
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": RECORDED,
+    "CLAUDE_CODE_SHELL_PREFIX": RECORDED, "CLAUDE_CODE_PROCESS_WRAPPER": RECORDED,
+    "CLAUDE_CODE_SHELL": RECORDED, "CLAUDE_CODE_GIT_BASH_PATH": RECORDED,
+    # Codex: where its state lives, sign-in, how it connects. The identity token file is
+    # a path; the workload identity context may carry the identity itself.
+    "CODEX_HOME": RECORDED, "CODEX_SQLITE_HOME": RECORDED,
+    "CODEX_API_KEY": CREDENTIAL, "CODEX_ACCESS_TOKEN": CREDENTIAL,
+    "OPENAI_API_KEY": CREDENTIAL, "OPENAI_FEDERATION_RULE_ID": RECORDED,
+    "OPENAI_IDENTITY_TOKEN_FILE": RECORDED, "OPENAI_WORKLOAD_IDENTITY_CONTEXT": CREDENTIAL,
+    "CODEX_CA_CERTIFICATE": RECORDED,
+    # The providers the switches above pick: their region, profile, project and resource
+    # names, and their keys, tokens and endpoints.
+    "AWS_REGION": RECORDED, "AWS_DEFAULT_REGION": RECORDED, "AWS_PROFILE": RECORDED,
+    "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION": RECORDED,
+    "CLOUD_ML_REGION": RECORDED, "ANTHROPIC_VERTEX_PROJECT_ID": RECORDED,
+    "GOOGLE_CLOUD_PROJECT": RECORDED, "ANTHROPIC_FOUNDRY_RESOURCE": RECORDED,
+    "AWS_ACCESS_KEY_ID": CREDENTIAL, "AWS_SECRET_ACCESS_KEY": CREDENTIAL,
+    "AWS_SESSION_TOKEN": CREDENTIAL, "AWS_BEARER_TOKEN_BEDROCK": CREDENTIAL,
+    "ANTHROPIC_BEDROCK_BASE_URL": CREDENTIAL, "ANTHROPIC_VERTEX_BASE_URL": CREDENTIAL,
+    "ANTHROPIC_FOUNDRY_BASE_URL": CREDENTIAL, "ANTHROPIC_FOUNDRY_API_KEY": CREDENTIAL,
+    "ANTHROPIC_API_KEY": CREDENTIAL, "ANTHROPIC_AUTH_TOKEN": CREDENTIAL,
+    "ANTHROPIC_BASE_URL": CREDENTIAL,
+})
+#: Provider names classed recorded by their start: Vertex's region for one model.
+RECORDED_PREFIXES = ("VERTEX_REGION_",)
+#: The switches that send Claude Code to another provider, whose sign-in then comes from
+#: that provider's names.
+PROVIDER_SWITCHES = ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+                     "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_MANTLE",
+                     "CLAUDE_CODE_USE_ANTHROPIC_AWS")
 
 #: The longest command line Windows takes, whole, in characters, its terminator included.
 WINDOWS_LINE = 32_767
@@ -510,14 +576,15 @@ def environment(environ: Mapping[str, str], composition: Composition,
     return env
 
 
-#: The base names a launch records from its child's environment (`launches.base_env_json`)
-#: and a replay starts from: paths and locale names, never a secret. Besides these names,
-#: every name starting with one of `BASE_PREFIXES`.
+#: The short list of names a launch records from its child's environment
+#: (`launches.base_env_json`), the ones slots' server keeps: besides these names, every
+#: name starting with one of `BASE_PREFIXES`. A row made before the base was recorded
+#: takes these alone from the replaying process.
 BASE_NAMES = ("HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "TZ")
 BASE_PREFIXES = ("LC_", "XDG_")
-#: The base names a launch on Windows records besides those: the system's own locations
-#: and names, which a process there needs to start (`SYSTEMROOT` above all), and the
-#: user's profile, data and temp folders. Paths and plain names, never a secret.
+#: The names a launch on Windows records besides those: the system's own locations and
+#: names, which a process there needs to start (`SYSTEMROOT` above all), and the user's
+#: profile, data and temp folders. Paths and plain names, never a secret.
 WINDOWS_BASE_NAMES = (
     "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "OS",
     "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "COMPUTERNAME",
@@ -526,48 +593,92 @@ WINDOWS_BASE_NAMES = (
     "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432",
     "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)", "COMMONPROGRAMW6432",
 )
+#: The caller's terminal names, which a resume into the caller's own terminal adds.
+TERMINAL_NAMES = ("TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION")
+
+#: The core's locators: its home and device label, and each module's per-root and device
+#: names (`MOXI_<M>_HOME`, `MOXI_<M>_STATE_HOME` and the other roots, `MOXI_<M>_DEVICE`),
+#: built from the core's own constants.
+_HARNESS = names.HARNESS.upper() + "_"
+_LOCATOR = re.compile(re.escape(_HARNESS) + "[A-Z0-9_]+_(?:" + "|".join(
+    re.escape(n) for n in (*paths.LOCATORS, paths.DEVICE.removeprefix(_HARNESS))) + ")")
+
+
+def locator(name: str) -> bool:
+    """Whether `name` is one of the core's locators."""
+    return name in (paths.HOME, paths.DEVICE) or bool(_LOCATOR.fullmatch(name))
+
+
+def env_class(name: str) -> str | None:
+    """`name`'s class for a replay (`RECORDED` or `CREDENTIAL`, from `ENV_CLASS` and
+    `RECORDED_PREFIXES`), or None for a name of neither."""
+    if (found := ENV_CLASS.get(name)) is not None:
+        return found
+    return RECORDED if name.startswith(RECORDED_PREFIXES) else None
+
+
+def _short(name: str, windows: bool) -> bool:
+    return (name in BASE_NAMES or name.startswith(BASE_PREFIXES)
+            or (windows and name in WINDOWS_BASE_NAMES))
 
 
 def base_env(environ: Mapping[str, str], *,
-             windows: bool = os.name == "nt") -> dict[str, str]:
-    """The values `environ` holds for the base names (`BASE_NAMES`, `BASE_PREFIXES`, and
-    on Windows `WINDOWS_BASE_NAMES`), each under the name as `environ` spells it. Windows
-    reads names without case, so there they are matched so too."""
-    if not windows:
-        return {name: value for name, value in environ.items()
-                if name in BASE_NAMES or name.startswith(BASE_PREFIXES)}
-    names = frozenset((*BASE_NAMES, *WINDOWS_BASE_NAMES))
+             windows: bool = os.name == "nt") -> dict[str, str | None]:
+    """What a launch records of its child's environment `environ`: the value of each name
+    of the recorded class that is set (the short list, `BASE_NAMES` and `BASE_PREFIXES`;
+    the core's locators; the names `ENV_CLASS` classes recorded; on Windows
+    `WINDOWS_BASE_NAMES`), and each credential that is set with None in place of its
+    value, which is never recorded. Each is kept under the name as `environ` spells it.
+    Windows reads names without case, so there they are matched so too."""
+    out: dict[str, str | None] = {}
+    for name, value in environ.items():
+        key = name.upper() if windows else name
+        kind = env_class(key)
+        if kind == CREDENTIAL:
+            out[name] = None
+        elif kind == RECORDED or _short(key, windows) or locator(key):
+            out[name] = value
+    return out
+
+
+def short_env(environ: Mapping[str, str], *,
+              windows: bool = os.name == "nt") -> dict[str, str]:
+    """The short list alone (`BASE_NAMES`, `BASE_PREFIXES`) of `environ`: the base of a
+    replay of a row made before the base was recorded."""
+    norm = str.upper if windows else (lambda name: name)
     return {name: value for name, value in environ.items()
-            if name.upper() in names or name.upper().startswith(BASE_PREFIXES)}
+            if norm(name) in BASE_NAMES or norm(name).startswith(BASE_PREFIXES)}
+
+
+def replay_env(base: Mapping[str, str | None], environ: Mapping[str, str],
+               pass_env: Sequence[str] = (), *,
+               terminal: bool = False) -> dict[str, str]:
+    """The environment a replay's child is built from, before the scrub and the stamps:
+    `base` (the row's recorded values; a credential recorded as set has no value and
+    adds nothing), then each name `pass_env` lists that `environ`, the replaying
+    process's environment, holds; for a resume into the caller's own terminal
+    (`terminal`), the caller's terminal names it holds (`TERMINAL_NAMES`). Nothing else of
+    `environ` comes in."""
+    env = {name: value for name, value in base.items() if value is not None}
+    if terminal:
+        env.update({name: environ[name] for name in TERMINAL_NAMES if name in environ})
+    env.update({name: environ[name] for name in pass_env if name in environ})
+    return env
+
+
+def no_credentials(base: Mapping[str, str | None], passed: Sequence[str]) -> bool:
+    """Whether a replay starts with no sign-in it may need: the recorded base shows a
+    provider switch on, or a credential that was set at launch, and `passed` (the names
+    the replay's pass list carried) is empty."""
+    if passed:
+        return False
+    switched = any((base.get(name) or "").strip().lower() not in ("", "0", "false")
+                   for name in PROVIDER_SWITCHES)
+    return switched or any(value is None for value in base.values())
 
 
 #: The start posture of a self relaunch, which names its handoff.
 RELAUNCHED = "relaunched (handoff: {path})"
-
-_LOCATOR = re.compile(r"MOXI_[A-Z0-9_]+_(?:" + "|".join(paths.LOCATORS) + "|DEVICE)")
-
-
-def own_names(name: str) -> bool:
-    """Whether `name` is one of the user's own location, configuration and sign-in
-    variables, which a replay takes from the process running it and no launch row
-    stores: the Claude Code names the scrub keeps (`CLAUDE_KEEP`), Codex's own
-    (`CODEX_KEEP`), the core's home and device label (`MOXI_HOME`, `MOXI_DEVICE`), and
-    each module's own (`MOXI_<M>_HOME`, `MOXI_<M>_STATE_HOME` and the other root
-    variables, `MOXI_<M>_DEVICE`)."""
-    return (name in CLAUDE_KEEP or name in CODEX_KEEP or name in (paths.HOME, paths.DEVICE)
-            or bool(_LOCATOR.fullmatch(name)))
-
-
-def replay_env(base: Mapping[str, str], environ: Mapping[str, str],
-               pass_env: Sequence[str] = ()) -> dict[str, str]:
-    """The environment a replay's child is built from, before the scrub and the stamps:
-    `base` (the stored row's base values), then the user's own names (`own_names`) that
-    `environ`, the replaying process's environment, holds, then each name `pass_env`
-    lists that it holds. Nothing else of `environ` comes in."""
-    env = dict(base)
-    env.update({name: value for name, value in environ.items() if own_names(name)})
-    env.update({name: environ[name] for name in pass_env if name in environ})
-    return env
 
 
 # -- sizes ------------------------------------------------------------------------------
@@ -605,13 +716,15 @@ def check_sizes(argv: Sequence[str], *, values: Mapping[str, object],
             raise TooLong(what, size, WORD, "bytes")
 
 
-__all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "HEADER", "KEEP_WARM",
-           "KEEP_WARM_LINE", "NOTES_DIR", "RECYCLE_ON_EXPIRY", "RELAUNCH", "RELAUNCHED",
-           "REQUEST", "SCRUB_NAMES", "SCRUB_PREFIXES", "TURNS_COMMANDS",
-           "USAGE_CROSSING_AT", "USAGE_WARN_AT", "WINDOWS_BASE_NAMES", "WINDOWS_LINE", "WORD",
-           "Additions", "Composition", "Context", "NoBrief", "NotYet", "PromptFile", "TooLong",
-           "TurnsAdditions", "Unreadable", "agent_role", "base_env", "check_sizes",
-           "commands", "encode", "environment", "first_turn", "identity_block",
-           "option_stamps", "own_names", "prompt_path", "replay_env", "scratch_dir",
-           "scratch_root", "scratch_root_problem", "scrub", "seat_text", "stamps",
-           "write_prompt"]
+__all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "CREDENTIAL",
+           "ENV_CLASS", "HEADER", "KEEP_WARM", "KEEP_WARM_LINE", "NOTES_DIR",
+           "PROVIDER_SWITCHES", "RECORDED", "RECORDED_PREFIXES", "RECYCLE_ON_EXPIRY",
+           "RELAUNCH", "RELAUNCHED", "REQUEST", "SCRUB_NAMES", "SCRUB_PREFIXES",
+           "TERMINAL_NAMES", "TURNS_COMMANDS", "USAGE_CROSSING_AT", "USAGE_WARN_AT",
+           "WINDOWS_BASE_NAMES", "WINDOWS_LINE", "WORD", "Additions", "Composition",
+           "Context", "NoBrief", "NotYet", "PromptFile", "TooLong", "TurnsAdditions",
+           "Unreadable", "agent_role", "base_env", "check_sizes", "commands", "encode",
+           "env_class", "environment", "first_turn", "identity_block", "locator",
+           "no_credentials", "option_stamps", "prompt_path", "replay_env", "scratch_dir",
+           "scratch_root", "scratch_root_problem", "scrub", "seat_text", "short_env",
+           "stamps", "write_prompt"]

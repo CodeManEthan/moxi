@@ -39,12 +39,20 @@ preset read, and its own request id (and, but for a resume, its own Claude sessi
 It keeps the row's directory, a scratch one too. It never sends the row's brief: a self
 relaunch's first turn is its handoff alone, under the header `Handoff from launcher,
 relaunched by <actor>: <path>`, and a director's relaunch or a resume sends none. **A
-replay's environment is built from the row and the settings only**: the row's base values
-(`base_env_json`; for a row made before they were kept, the same names from the
-replaying process, and `LaunchResult.base` says `job`), then the user's own location,
-configuration and sign-in variables from the replaying process (`common.own_names`; no
-row stores them), then each name `relaunch.pass_env` lists, from that process too, then
-the scrub and the stamps. No other variable of the replaying process reaches the child.
+replay's environment is built from the row and the settings only**: the row's recorded
+base (`base_env_json`: the short list slots' server keeps, the core's locators, the
+keep-lists' and provider names classed recorded, on Windows the names a process needs
+to start; `common.base_env`), then each name the user lists, read from the replaying
+process: `relaunch.pass_env`, or `relaunch.director_pass_env` in a director's relaunch,
+since there that process is the director's. A credential (a token, key, secret,
+password, or proxy, endpoint or base URL) is never recorded, so it reaches a replay only
+that way; when the base shows a provider switch on or a credential set at launch and
+nothing was passed, `LaunchResult.base` says `no-credentials`. A row made before the base
+was recorded takes the short list alone from the replaying process, and
+`LaunchResult.base` says `job`. A resume into the caller's own terminal adds the
+caller's terminal names (`TERM`, `COLORTERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERSION`).
+Then the scrub and the stamps. No other variable of the replaying process reaches the
+child.
 
 A launch in this terminal does not return on Linux and macOS: the process becomes the
 harness. On Windows it returns when the harness exits, with the harness's exit code; if
@@ -132,7 +140,8 @@ class ReplayRequest:
     (`common.RELAUNCHED` for a self relaunch, `with:<director>` for a director's); it goes
     in the new row's `posture` and never in its `values_json`. `handoff` is the handoff a
     self relaunch carries as its first turn, `run` the relaunch's run id, stamped as
-    `MOXI_LAUNCHER_RELAUNCH` when there is a handoff.
+    `MOXI_LAUNCHER_RELAUNCH` when there is a handoff. `director` marks a director's
+    relaunch, whose credentials come from `relaunch.director_pass_env`.
 
     For a slot launch: `slot` is the slot it goes to, else the row's own when `respawn`,
     else the one the row's values name; `hold` is the slot hold the caller has, which
@@ -155,6 +164,7 @@ class ReplayRequest:
     hold: str | None = None
     respawn: bool = False
     chain: str | None = None
+    director: bool = False
 
     #: Marks a request whose values are a stored row's, not resolved from presets.
     replay = True
@@ -250,6 +260,8 @@ def launch(request, *, environ: Mapping[str, str] | None = None,
 
         rid = ids.request_id
         warnings = _warnings(resolved, composition)
+        if base == "no-credentials":
+            warnings += (NO_CREDENTIALS,)
         try:
             _make_files(composition, environ, handoff_key)
         except OSError as error:
@@ -380,21 +392,36 @@ def _replayed(request: ReplayRequest) -> Replayed:
 def _child_base(request, caller: Mapping[str, str]) -> tuple[dict[str, str], str | None]:
     """The environment the child's is built from, and where its base came from: the
     caller's whole environment for a fresh launch (None); for a replay
-    (`common.replay_env`), the row's base values (`row`), or the caller's values of the
-    same names for a row that has none (`job`)."""
+    (`common.replay_env`), the row's recorded base (`row`, or `no-credentials` when it
+    shows a sign-in that nothing passed), or the caller's short list for a row that has
+    none (`job`)."""
     if not getattr(request, "replay", False):
         return caller, None
+    names = _pass_env(director=bool(getattr(request, "director", False)))
+    terminal = bool(request.resume_of) and request.row.target == "terminal"
     stored = request.row.base_env
-    base, where = ((stored, "row") if stored is not None
-                   else (common.base_env(caller), "job"))
-    return common.replay_env(base, caller, _pass_env()), where
+    if stored is None:
+        return common.replay_env(common.short_env(caller), caller, names,
+                                 terminal=terminal), "job"
+    passed = [name for name in names if name in caller]
+    where = "no-credentials" if common.no_credentials(stored, passed) else "row"
+    return common.replay_env(stored, caller, names, terminal=terminal), where
 
 
-def _pass_env() -> list[str]:
-    """The names `relaunch.pass_env` lists."""
+#: The warning of a replay that may start signed out.
+NO_CREDENTIALS = ("the launch signed in through its environment or another provider, and "
+                  "no sign-in variable was passed to this one: list the names in "
+                  "relaunch.pass_env (relaunch.director_pass_env for a director's "
+                  "relaunch) if it starts signed out")
+
+
+def _pass_env(*, director: bool = False) -> list[str]:
+    """The names `relaunch.pass_env` lists, or `relaunch.director_pass_env` for a
+    director's relaunch."""
     from . import settings
 
-    return [str(name) for name in settings.current()["relaunch.pass_env"]]
+    key = "relaunch.director_pass_env" if director else "relaunch.pass_env"
+    return [str(name) for name in settings.current()[key]]
 
 
 def _chain(conn, request, request_id: str) -> str:

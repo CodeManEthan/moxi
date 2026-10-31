@@ -330,6 +330,21 @@ def test_the_dialog_is_answered_after_two_full_reads(conn):
     assert slots_api.names().count("wait_ended") >= 2
 
 
+def test_only_a_director_run_replays_with_the_directors_pass_list(conn):
+    assert go(conn, arm(conn, mode="director")).requests[0].director is True
+    assert go(conn, arm(conn)).requests[0].director is False
+
+
+@pytest.mark.parametrize("base", ["no-credentials", "job"])
+def test_a_replay_with_no_credentials_or_the_jobs_base_says_so(conn, base):
+    result = launched_result()
+    result.base = base
+    got = go(conn, arm(conn, mode="director"), launch=lambda request: result)
+    assert got.outcome == "relaunched"
+    [event] = [e for e in store.run_events(conn, got.run.run_id) if e.kind == "base"]
+    assert event.detail == {"base": base}
+
+
 def test_a_dialog_with_a_new_turn_is_left_for_a_person(conn):
     session = FakeSession(facts_seq=[facts(number=5)])
     slots_api = FakeSlots(ended=False)
@@ -567,6 +582,13 @@ def test_a_repair_respawns_the_recorded_slot_under_the_original_holder(conn):
     assert request.respawn and request.slot == "3" and request.hold == original.run_id
     assert request.handoff == original.handoff_path
     assert ("hold", "3", original.run_id) in slots_api.calls
+
+
+def test_a_repair_of_a_directors_run_replays_with_the_plain_pass_list(conn):
+    original = failed_run(conn, mode="director")
+    slots_api = FakeSlots(shown=shown("ended", holder=original.run_id))
+    got = go(conn, repair_run(conn, original), slots_api=slots_api, cls=job.RepairJob)
+    assert got.outcome == "relaunched" and got.requests[0].director is False
 
 
 def test_a_repair_refuses_a_slot_running_the_chains_session(conn):

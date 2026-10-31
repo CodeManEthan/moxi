@@ -21,6 +21,7 @@ DEFAULTS = {
     "relaunch.follow_s": 300,
     "relaunch.fallback": "",
     "relaunch.pass_env": [],
+    "relaunch.director_pass_env": [],
     "relaunch.notice_retry_s": 30,
     "recycle.limit_wait_s": 1800,
     "keep_warm.subagent_cap": 3,

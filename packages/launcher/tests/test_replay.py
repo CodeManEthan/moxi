@@ -198,24 +198,75 @@ def test_the_first_turn_text_of_a_relaunch(tmp_path):
 # -- the environment ----------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", ["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN",
-                                  "MOXI_HOME", "MOXI_DEVICE", "MOXI_LAUNCHER_HOME",
+def test_every_keep_list_name_is_classed_recorded_or_credential():
+    # A name part 1's scrub keeps must be classed before it ships: unclassed, a replay
+    # would neither record it nor know it as a credential.
+    keep = common.CLAUDE_KEEP | common.CODEX_KEEP
+    unclassed = sorted(name for name in keep if common.env_class(name) is None)
+    assert unclassed == []
+    assert set(common.ENV_CLASS.values()) == {common.RECORDED, common.CREDENTIAL}
+
+
+#: Words that make a name a credential by the class rule: its value can grant access or
+#: route traffic. A name that ends in a file or a path holds where the secret is, not it.
+CREDENTIAL_WORDS = ("TOKEN", "API_KEY", "SECRET", "PASSWORD", "PASSPHRASE", "ACCESS_KEY",
+                    "BASE_URL", "PROXY", "ENDPOINT")
+
+
+@pytest.mark.parametrize("name", sorted(common.ENV_CLASS))
+def test_a_name_whose_value_can_grant_access_is_a_credential(name):
+    looks = (any(word in name for word in CREDENTIAL_WORDS)
+             and not name.endswith(("_FILE", "_TTL_MS", "_REFRESH_LOCK", "_CACHE",
+                                       "_RESOLVES_HOSTS")))
+    if looks:
+        assert common.env_class(name) == common.CREDENTIAL, name
+
+
+@pytest.mark.parametrize("name", ["CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
+                                  "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE", "CODEX_API_KEY",
+                                  "CODEX_ACCESS_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+                                  "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+                                  "AWS_SECRET_ACCESS_KEY", "AWS_BEARER_TOKEN_BEDROCK"])
+def test_the_credentials(name):
+    assert common.env_class(name) == common.CREDENTIAL
+
+
+@pytest.mark.parametrize("name", ["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_USE_BEDROCK",
+                                  "CODEX_HOME", "AWS_REGION", "AWS_PROFILE",
+                                  "ANTHROPIC_VERTEX_PROJECT_ID", "CLOUD_ML_REGION",
+                                  "VERTEX_REGION_CLAUDE_SONNET", "OPENAI_IDENTITY_TOKEN_FILE"])
+def test_recorded_names(name):
+    assert common.env_class(name) == common.RECORDED
+
+
+@pytest.mark.parametrize("name", ["MOXI_HOME", "MOXI_DEVICE", "MOXI_LAUNCHER_HOME",
                                   "MOXI_COMMS_STATE_HOME", "MOXI_SLOTS_RUNTIME_DIR",
-                                  "MOXI_TURNS_DEVICE", "CODEX_HOME", "CODEX_SQLITE_HOME",
-                                  "CODEX_API_KEY", "CODEX_ACCESS_TOKEN",
-                                  "CODEX_CA_CERTIFICATE", "OPENAI_API_KEY",
-                                  "OPENAI_FEDERATION_RULE_ID", "OPENAI_IDENTITY_TOKEN_FILE",
-                                  "OPENAI_WORKLOAD_IDENTITY_CONTEXT"])
-def test_the_users_own_names(name):
-    assert common.own_names(name)
+                                  "MOXI_TURNS_DEVICE", "MOXI_CACHE_CONFIG_HOME"])
+def test_the_cores_locators(name):
+    assert common.locator(name)
 
 
-@pytest.mark.parametrize("name", ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "MOXI_HOMEX",
-                                  "MOXI_LAUNCHER_REQUEST", "MOXI_COMMS_NAME", "AWS_SECRET",
-                                  "FOO_HOME", "CODEX_SANDBOX", "CODEX_THREAD_ID",
-                                  "CODEX_INSTALL_DIR", "OPENAI_OTHER"])
-def test_names_that_are_not_the_users_own(name):
-    assert not common.own_names(name)
+@pytest.mark.parametrize("name", ["MOXI_HOMEX", "MOXI_LAUNCHER_REQUEST", "MOXI_COMMS_NAME",
+                                  "FOO_HOME", "MOXI_TURNS_ENDPOINT"])
+def test_names_that_are_not_locators(name):
+    assert not common.locator(name)
+
+
+def test_the_recorded_base_holds_each_recorded_name_set_and_no_credential():
+    child = {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C", "XDG_STATE_HOME": "/s",
+             "MOXI_HOME": "/m", "MOXI_COMMS_STATE_HOME": "/cs", "CLAUDE_CONFIG_DIR": "/c",
+             "CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": "eu-west-1", "CODEX_HOME": "/x",
+             "CLAUDE_CODE_OAUTH_TOKEN": "tok", "AWS_SECRET_ACCESS_KEY": "sec",
+             "OPENAI_API_KEY": "key", "ARMED": "1", "TERM": "xterm", "TMPDIR": "/t"}
+    base = common.base_env(child, windows=False)
+    assert base == {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C", "XDG_STATE_HOME": "/s",
+                    "MOXI_HOME": "/m", "MOXI_COMMS_STATE_HOME": "/cs",
+                    "CLAUDE_CONFIG_DIR": "/c", "CLAUDE_CODE_USE_BEDROCK": "1",
+                    "AWS_REGION": "eu-west-1", "CODEX_HOME": "/x",
+                    # A credential set at launch is marked, never its value.
+                    "CLAUDE_CODE_OAUTH_TOKEN": None, "AWS_SECRET_ACCESS_KEY": None,
+                    "OPENAI_API_KEY": None}
+    assert not {"tok", "sec", "key"} & set(base.values())
 
 
 WINDOWS_CHILD = {
@@ -236,24 +287,32 @@ WINDOWS_CHILD = {
 
 def test_on_windows_the_base_keeps_the_system_names_a_process_needs_to_start():
     base = common.base_env(WINDOWS_CHILD, windows=True)
-    assert set(base) == set(WINDOWS_CHILD) - {"API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
-                                               "MOXI_LAUNCHER_REQUEST", "SESSIONNAME"}
+    assert {k for k, v in base.items() if v is not None} == set(WINDOWS_CHILD) - {
+        "API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "MOXI_LAUNCHER_REQUEST", "SESSIONNAME"}
+    assert base["CLAUDE_CODE_OAUTH_TOKEN"] is None and "API_KEY" not in base
     # Recorded as the child's own spelling, which Windows reads without case.
     assert base["SystemRoot"] == "C:\\Windows" and base["Path"] == "C:\\Windows\\system32"
 
 
 def test_elsewhere_the_base_leaves_the_windows_names_out():
     base = common.base_env({**WINDOWS_CHILD, "HOME": "/h", "PATH": "/bin"}, windows=False)
-    assert base == {"HOME": "/h", "PATH": "/bin"}
+    assert base == {"HOME": "/h", "PATH": "/bin", "CLAUDE_CODE_OAUTH_TOKEN": None}
 
 
-def test_a_replay_env_is_the_base_then_the_own_names_then_pass_env():
+def test_a_replay_env_is_the_base_then_the_pass_list_and_nothing_else():
     caller = {"PATH": "/now/bin", "HOME": "/home/now", "MOXI_HOME": "/m", "TOKEN": "t",
-              "ARMED": "1", "CLAUDE_CONFIG_DIR": "/c", "CLAUDECODE": "1"}
-    got = common.replay_env({"PATH": "/then/bin", "HOME": "/home/then"}, caller, ["TOKEN",
-                                                                                 "GONE"])
-    assert got == {"PATH": "/then/bin", "HOME": "/home/then", "MOXI_HOME": "/m",
-                   "CLAUDE_CONFIG_DIR": "/c", "TOKEN": "t"}
+              "ARMED": "1", "CLAUDE_CONFIG_DIR": "/c", "CLAUDECODE": "1", "TERM": "xterm"}
+    base = {"PATH": "/then/bin", "HOME": "/home/then", "CLAUDE_CODE_OAUTH_TOKEN": None}
+    got = common.replay_env(base, caller, ["TOKEN", "GONE"])
+    assert got == {"PATH": "/then/bin", "HOME": "/home/then", "TOKEN": "t"}
+
+
+def test_no_credentials_when_the_base_shows_a_sign_in_and_nothing_is_passed():
+    assert common.no_credentials({"CLAUDE_CODE_OAUTH_TOKEN": None}, [])
+    assert common.no_credentials({"CLAUDE_CODE_USE_VERTEX": "1"}, [])
+    assert not common.no_credentials({"CLAUDE_CODE_USE_VERTEX": "0"}, [])
+    assert not common.no_credentials({"CLAUDE_CODE_OAUTH_TOKEN": None}, ["TOKEN"])
+    assert not common.no_credentials({"HOME": "/h", "CLAUDE_CONFIG_DIR": "/c"}, [])
 
 
 # -- a replay through the launch ------------------------------------------------------------
@@ -281,44 +340,139 @@ def test_a_replay_env_holds_no_variable_of_the_replaying_shell(work, harness, no
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/config/then")
     api.launch(request(work))
     stored_path = row("r1").base_env["PATH"]
+    located = {k: v for k, v in os.environ.items() if common.locator(k)}
     # The arming shell: a variable no scrub names, a session stamp, a changed PATH, and
     # the user's own names as they are now.
     monkeypatch.setenv("ARMED_IN_SHELL", "1")
     monkeypatch.setenv("CLAUDECODE", "1")
     monkeypatch.setenv("MOXI_LAUNCHER_REQUEST", "old")
-    monkeypatch.setenv("API_TOKEN", "secret")
+    monkeypatch.setenv("API_TOKEN", "s3cr3t-value")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/config/now")
+    monkeypatch.setenv("CODEX_HOME", "/codex/now")
     monkeypatch.setenv("PATH", "/elsewhere/bin" + os.pathsep + stored_path)
     settings_file('[relaunch]\npass_env = ["API_TOKEN"]\n')
     got = api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2",
                                    actor="ann"))
     env = no_exec[-1]["env"]
     assert "ARMED_IN_SHELL" not in env and "CLAUDECODE" not in env
+    assert env.get("CODEX_HOME") != "/codex/now"
     assert env["MOXI_LAUNCHER_REQUEST"] == "r2"
-    assert env["API_TOKEN"] == "secret"
-    assert env["CLAUDE_CONFIG_DIR"] == "/config/now"
-    # The test fence's own home for the modules: the user's location names.
-    located = {k: v for k, v in os.environ.items() if k.startswith("MOXI_")
-               and common.own_names(k)}
+    assert env["API_TOKEN"] == "s3cr3t-value"
+    # The launch's own configuration, not the replaying process's.
+    assert env["CLAUDE_CONFIG_DIR"] == "/config/then"
+    # The test fence's own home for the modules, as the launch recorded it.
     assert located and all(env[k] == v for k, v in located.items())
     assert env["PATH"] == stored_path
     assert got.base == "row"
     # The new row records the base it used and no secret.
     new = row("r2")
     assert new.base_env["PATH"] == stored_path
-    assert "API_TOKEN" not in new.base_env_json and "API_TOKEN" not in new.env_json
+    assert "s3cr3t-value" not in new.base_env_json and "API_TOKEN" not in new.env_json
 
 
-def test_a_row_with_no_base_takes_the_base_names_from_the_replaying_process(
+def test_a_token_seat_records_that_it_had_a_token_and_never_the_token(work, harness,
+                                                                     no_exec, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-then")
+    api.launch(request(work))
+    assert no_exec[-1]["env"]["CLAUDE_CODE_OAUTH_TOKEN"] == "tok-then"
+    first_row = row("r1")
+    assert first_row.base_env["CLAUDE_CODE_OAUTH_TOKEN"] is None
+    assert "tok-then" not in first_row.base_env_json
+
+
+def test_a_director_relaunch_takes_only_the_directors_listed_names(work, harness,
+                                                                   no_exec, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/config/seat")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "seat-token")
+    api.launch(request(work))
+    # The director's own shell.
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/config/director")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "director-token")
+    monkeypatch.setenv("SELF_ONLY", "s")
+    monkeypatch.setenv("FOR_TARGET", "d")
+    settings_file('[relaunch]\npass_env = ["SELF_ONLY"]\n'
+                  'director_pass_env = ["FOR_TARGET"]\n')
+    got = api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2",
+                                   actor="boss", director=True))
+    env = no_exec[-1]["env"]
+    assert env["CLAUDE_CONFIG_DIR"] == "/config/seat"
+    assert env["FOR_TARGET"] == "d"
+    assert "SELF_ONLY" not in env and "CLAUDE_CODE_OAUTH_TOKEN" not in env
+    # A name was passed on purpose: the replay doesn't second-guess it.
+    assert got.base == "row"
+
+
+def test_a_token_seats_director_relaunch_with_none_passed_says_no_credentials(
+        work, harness, no_exec, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "seat-token")
+    api.launch(request(work))
+    got = api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2",
+                                   actor="boss", director=True))
+    assert got.base == "no-credentials"
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in no_exec[-1]["env"]
+    assert api.NO_CREDENTIALS in got.warnings
+    # Listed for the director, it comes back and nothing is said.
+    settings_file('[relaunch]\ndirector_pass_env = ["CLAUDE_CODE_OAUTH_TOKEN"]\n')
+    got = api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r3",
+                                   actor="boss", director=True))
+    assert got.base == "row"
+    assert no_exec[-1]["env"]["CLAUDE_CODE_OAUTH_TOKEN"] == "seat-token"
+
+
+def test_a_row_with_no_base_takes_only_the_short_list_from_the_replaying_process(
         work, harness, no_exec, monkeypatch):
     api.launch(request(work))
     old = row("r1")
     monkeypatch.setenv("ARMED_IN_SHELL", "1")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/config/job")
     got = api.launch(ReplayRequest(dataclasses.replace(old, base_env_json=None),
                                    relaunch_of="r1", request_id="r2", actor="ann"))
     env = no_exec[-1]["env"]
     assert got.base == "job" and "ARMED_IN_SHELL" not in env
-    assert env["PATH"] == os.environ["PATH"]
+    assert env["PATH"] == os.environ["PATH"] and env["HOME"] == os.environ["HOME"]
+    assert "CLAUDE_CONFIG_DIR" not in env
+    assert not [k for k in env if common.locator(k)]
+
+
+TERMINAL = {"TERM": "xterm-256color", "COLORTERM": "truecolor", "TERM_PROGRAM": "kitty",
+            "TERM_PROGRAM_VERSION": "0.40"}
+
+
+def test_a_resume_into_this_terminal_carries_the_callers_terminal_names(
+        work, harness, no_exec, monkeypatch):
+    for name in TERMINAL:
+        monkeypatch.delenv(name, raising=False)
+    api.launch(request(work))
+    assert not set(TERMINAL) & set(row("r1").base_env)
+    ended()
+    for name, value in TERMINAL.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("ARMED_IN_SHELL", "1")
+    monkeypatch.setenv("TERMINFO", "/caller/terminfo")
+    api.launch(ReplayRequest(row("r1"), resume_of="r1", request_id="r2", actor="ann"))
+    env = no_exec[-1]["env"]
+    assert {name: env.get(name) for name in TERMINAL} == TERMINAL
+    assert "ARMED_IN_SHELL" not in env and "TERMINFO" not in env
+
+
+def test_a_resume_from_a_caller_with_no_terminal_names_carries_none(
+        work, harness, no_exec, monkeypatch):
+    for name in TERMINAL:
+        monkeypatch.delenv(name, raising=False)
+    api.launch(request(work))
+    ended()
+    api.launch(ReplayRequest(row("r1"), resume_of="r1", request_id="r2", actor="ann"))
+    assert not set(TERMINAL) & set(no_exec[-1]["env"])
+
+
+def test_a_relaunch_carries_no_terminal_names(work, harness, no_exec, monkeypatch):
+    for name in TERMINAL:
+        monkeypatch.delenv(name, raising=False)
+    api.launch(request(work))
+    for name, value in TERMINAL.items():
+        monkeypatch.setenv(name, value)
+    api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2", actor="ann"))
+    assert not set(TERMINAL) & set(no_exec[-1]["env"])
 
 
 def test_a_fresh_launch_reports_no_base(work, harness, no_exec):
@@ -484,11 +638,17 @@ def test_the_chain_is_the_first_launch_of_the_relaunches(work, harness, rig):
     assert [c["meta"]["chain"] for c in rig.calls("respawn")] == ["r1", "r1"]
 
 
-def test_a_resume_into_a_slot_starts_a_chain_of_its_own(work, harness, rig):
+def test_a_resume_into_a_slot_starts_a_chain_of_its_own(work, harness, rig, monkeypatch):
+    for name in TERMINAL:
+        monkeypatch.delenv(name, raising=False)
     slot_launch(work, rig)
     rig.plan(slots={"5": {"state": "free", "launchable": True}})
+    for name, value in TERMINAL.items():
+        monkeypatch.setenv(name, value)
     api.launch(ReplayRequest(row("r1"), resume_of="r1", request_id="r2", slot=5))
     start = rig.calls("start")[-1]
+    # A slot gets its terminal names from slots, none of the caller's.
+    assert not set(TERMINAL) & set(start["env"])
     assert start["slot"] == 5 and start["meta"]["chain"] == "r2"
     assert start["argv"][1:3] == ["--resume", SID]
 

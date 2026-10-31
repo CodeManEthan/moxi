@@ -83,12 +83,14 @@ def test_a_resume_launch_learns_a_resumed_id_another_launch_holds(conn):
     assert store.learn_session(conn, "c", SID, "resume") is False
 
 
-def test_the_base_environment_is_recorded_and_holds_only_base_names(conn):
+def test_the_base_environment_is_recorded_and_holds_no_credential(conn):
     child = {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C", "XDG_RUNTIME_DIR": "/run/u",
-             "TZ": "UTC", "CLAUDE_CODE_OAUTH_TOKEN": "secret", "API_KEY": "k",
+             "TZ": "UTC", "CLAUDE_CODE_OAUTH_TOKEN": "s3cr3t", "API_KEY": "k",
              "MOXI_LAUNCHER_REQUEST": "r"}
-    base = common.base_env(child)
+    base = common.base_env(child, windows=False)
     assert base == {"HOME": "/h", "PATH": "/bin", "LC_ALL": "C",
-                    "XDG_RUNTIME_DIR": "/run/u", "TZ": "UTC"}
+                    "XDG_RUNTIME_DIR": "/run/u", "TZ": "UTC",
+                    "CLAUDE_CODE_OAUTH_TOKEN": None}
     put(conn, "a", at="2026-10-01T00:00:00.000000Z", base_env=base)
     assert store.get(conn, "a").base_env == base
+    assert "s3cr3t" not in store.get(conn, "a").base_env_json
