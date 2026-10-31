@@ -79,18 +79,44 @@ def test_sign_in_needs_only_a_ticket(shell):
     assert again.status == 403
 
 
-@pytest.mark.parametrize("path", ["/m/ui/api/health"])
+def _with_own_page(shell):
+    """`shell` with the shell's own page export mounted, as the shell mounts it, and a
+    recorder answering for the page."""
+    from moxi_loopback.api import export
+    from moxi_ui.page import PAGE
+    from moxi_ui.router import shell_profile, shell_table
+    from shell_kit import FIXTURE_EXPORT, Recorder
+
+    shell.router.page = Recorder("page")
+    table = shell_table(["fixture"], {"fixture": FIXTURE_EXPORT, "ui": export(PAGE)})
+    shell.profile = shell_profile(table, shell.sessions, ("127.0.0.1", "localhost"))
+    return shell
+
+
+_POSTED = {session.STOP_PATH, session.SIGNOUT_API}
+
+
+@pytest.mark.parametrize("path", sorted(session.TOKEN_PATHS))
 def test_token_routes(shell, path):
+    shell = _with_own_page(shell)
+    method, body = ("POST", b"{}") if path in _POSTED else ("GET", b"")
+    json_type = (b"content-type", b"application/json")
+
+    def send(*headers):
+        return shell.send(method, path, headers=[json_type, *headers], body=body).status
+
     token = (b"x-moxi-token", TOKEN.encode())
-    assert shell.send("GET", path, headers=[token]).status == 200
-    assert shell.send("GET", path).status == 403
-    assert shell.send("GET", path, headers=[(b"x-moxi-token", b"X" * 43)]).status == 403
+    assert send(token) in (200, 299)
+    assert send() == 403
+    assert send((b"x-moxi-token", b"X" * 43)) == 403
     cookie, key = shell.sign_in()
     for extra in ([cookie], [(b"sec-fetch-site", b"same-origin")], [(b"referer", b"http://x/")],
                   [(b"origin", b"http://" + HOST)]):
-        assert shell.send("GET", path, headers=[token, *extra]).status == 403
+        assert send(token, *extra) == 403
     # A browser's own session is not the token.
-    assert shell.send("GET", path, headers=[cookie, key, *FETCH]).status == 403
+    assert send(cookie, key, *FETCH) == 403
+    assert send(cookie, key, *ACT) == 403
+    assert shell.store.live() == 1
 
 
 def test_doors_need_the_cookie(shell):

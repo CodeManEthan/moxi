@@ -101,6 +101,17 @@ def test_a_long_url_under_a_full_cookie_jar_is_answered(shell):
     assert shell.sessions.store.live() == 0
 
 
+def test_a_shell_route_with_the_key_is_answered_under_a_full_cookie_jar(shell):
+    port = shell.listeners.port
+    session_id, key = shell.sessions.store.mint()
+    head = _head(port, "GET", "/m/ui/api/modules", [
+        _jar(session_id), b"X-Moxi-Key: " + key.encode(), b"Sec-Fetch-Site: same-origin",
+        b"Sec-Fetch-Mode: cors", b"Sec-Fetch-Dest: empty"])
+    assert len(head) > 700_000
+    status, body = _request(port, head)
+    assert status == 200 and "modules" in json.loads(body)
+
+
 def test_a_head_over_the_limit_is_refused_before_any_layer(shell):
     port = shell.listeners.port
     session_id, _ = shell.sessions.store.mint()
