@@ -9,10 +9,11 @@ host. Nothing here spawns codex and nothing here touches the network.
 from __future__ import annotations
 
 import itertools
+import time
 
 import pytest
 
-from conftest import clock_reads_warm, cursor_of, wait_until
+from conftest import clock_reads_warm, cursor_of, frame_kinds, wait_until
 from moxi_comms import codex_threads, owed, paths
 from moxi_comms.adapters.codex import CodexAdapter, layer_one_hash, scrub_own_environ
 from moxi_comms.adapters.codex_roster import CodexAgent
@@ -52,7 +53,7 @@ def launch(rig, tmp_path):
         exits: list = []
         adapter = CodexAdapter(agent, launch=fake_launch(session), window=window,
                                autoreconnect=autoreconnect, backoff=backoff,
-                               clock=rig.clock, started_wait=0.2,
+                               clock=rig.clock,
                                status_sink=lambda text: adapter.statuses.append(text),
                                exit_hook=lambda: exits.append(True))
         adapter.statuses = []
@@ -75,6 +76,12 @@ def send(rig, text, *, to=IDENTITY,  name="main", scope="proj-a"):
 
 def delivered(session, count=1):
     return wait_until(lambda: len(session.delivered) >= count and session.delivered)
+
+
+def turn_frames(frames, key):
+    """The message ids every `turn_ended` so far named under `key` (`handled_ids` or
+    `unhandled_ids`), in order."""
+    return [m for f in frame_kinds(frames, "turn") for m in f.get(key, ())]
 
 
 # --------------------------------------------------------------------------- the launch
@@ -177,7 +184,7 @@ def test_the_launch_no_longer_warns_that_roster_options_are_not_applied(rig, lau
     assert not any("NOT applied" in s for s in adapter.statuses), adapter.statuses
 
 
-def test_the_holder_is_taken_at_the_launch(rig, launch):
+def test_the_stop_handler_is_taken_at_the_launch(rig, launch):
     adapter = launch()
     assert adapter.fake.holder is not None
     adapter.stop()
@@ -195,28 +202,50 @@ def test_the_wrappers_environment_drops_a_stamp_the_identity_does_not_carry():
 
 # --------------------------------------------------------------------------- delivery
 
-def test_a_message_goes_in_steer_first_and_settles_handled_at_its_turns_end(rig, launch):
+def test_a_message_to_an_idle_thread_is_delivered_named_by_its_digest(rig, launch):
     adapter = launch()
     send(rig, "hello planner")
     first = delivered(adapter.fake)[0]
-    assert first.steer is True and "hello planner" in first.text
+    assert first.steer is False and "hello planner" in first.text
+    assert "[interrupt]" not in first.text
+    assert first.ref is not None and first.ref.isdigit(), "the ref is the digest's id"
     assert wait_until(lambda: adapter.held_ids)
     adapter.fake.end_turn("answer")
     assert wait_until(lambda: not adapter.held_ids)
     assert wait_until(lambda: cursor_of(IDENTITY) is not None)
+    assert not adapter.hands
     assert not paths.cursors_dir().exists(), "the adapter writes no cursor file"
 
 
-def test_a_digest_into_a_running_turn_is_steered_into_it(rig, launch):
+def test_plain_mail_waits_for_the_running_turns_end(rig, launch):
+    """A running turn no longer takes plain mail: it goes as the next turn's digest."""
     session = FakeSession(turn_open=True)
     adapter = launch(session=session)
     send(rig, "while you work")
-    rows = wait_until(lambda: len(session.turn_deliveries.get("turn-1", ())) >= 1
-                      and session.delivered)
-    assert all(row.steer for row in rows)
-    assert wait_until(lambda: adapter.held_ids)
+    send(rig, "and this too")
+    assert wait_until(lambda: len(adapter.queue) == 2)
+    time.sleep(0.3)
+    assert session.delivered == [], "nothing goes into the running turn"
+    session.end_turn("answer")
+    (row,) = delivered(session)
+    assert row.steer is False
+    assert "while you work" in row.text and "and this too" in row.text, "one digest"
+    assert wait_until(lambda: session.open_turn == "turn-2")
     session.end_turn("answer")
     assert wait_until(lambda: not adapter.held_ids)
+
+
+def test_one_plain_digest_at_a_time(rig, launch):
+    """A plain digest handed and not yet in its turn holds the next one back."""
+    session = FakeSession()
+    session.answer = "hang"
+    adapter = launch(session=session)
+    send(rig, "first")
+    delivered(session)
+    send(rig, "second")
+    assert wait_until(lambda: len(adapter.queue) == 1)
+    time.sleep(0.3)
+    assert len(session.delivered) == 1
 
 
 def test_an_aborted_turn_leaves_its_digest_unhandled_and_the_cursor_unmoved(rig, launch):
@@ -229,47 +258,69 @@ def test_an_aborted_turn_leaves_its_digest_unhandled_and_the_cursor_unmoved(rig,
     assert cursor_of(IDENTITY) is None
 
 
-def test_a_refused_delivery_is_put_back_and_handed_again(rig, launch, monkeypatch):
+def test_a_refused_delivery_is_unhandled_at_once_and_not_put_back(rig, launch, frames):
+    """A refusal says the text never went in: the digest is unhandled at once, and the
+    daemon hands it again at the next release point. The adapter does not requeue it."""
     adapter = launch()
-    monkeypatch.setattr(adapter, "retry_delay", lambda: 0.05)
     adapter.fake.answer = "refuse"
     send(rig, "try again")
     delivered(adapter.fake)
-    assert adapter.queue or adapter.held_ids
+    assert wait_until(lambda: turn_frames(frames, "unhandled_ids"))
+    assert not adapter.queue and not adapter.hands
+    time.sleep(0.2)
+    assert len(adapter.fake.delivered) == 1, "not handed again at once"
     adapter.fake.answer = "start"
+    adapter.fake.start_turn()
+    adapter.fake.end_turn("answer")              # the next release point
     rows = delivered(adapter.fake, 2)
-    assert rows[-1][2] is True
+    assert "try again" in rows[1].text and rows[1].steer is False
     adapter.fake.end_turn("answer")
     assert wait_until(lambda: not adapter.held_ids)
 
 
-def test_a_lost_delivery_is_unhandled_on_the_next_turn_frame(rig, launch):
+def test_a_lost_delivery_is_unhandled_at_once(rig, launch, frames):
     adapter = launch()
     adapter.fake.answer = "lose"
     send(rig, "into the void")
     delivered(adapter.fake)
-    assert wait_until(lambda: adapter.unhandled_owed)
-    adapter.fake.answer = "start"
-    adapter.fake.start_turn()
-    adapter.fake.end_turn("answer")
-    assert wait_until(lambda: not adapter.unhandled_owed and not adapter.held_ids)
+    assert wait_until(lambda: turn_frames(frames, "unhandled_ids"))
+    assert not adapter.hands and not adapter.held_ids
+    assert not turn_frames(frames, "handled_ids")
 
 
-def test_a_delivery_with_no_answer_in_time_is_unhandled_too(rig, launch):
+def test_a_delivery_with_no_answer_is_waited_on_not_handed_again(rig, launch, frames):
+    """An unanswered hand-in may be in a turn already: it stays open, is never
+    requeued, and settles only when its outcome comes or the session ends."""
     adapter = launch()
     adapter.fake.answer = "hang"
     send(rig, "no answer")
     delivered(adapter.fake)
-    assert wait_until(lambda: adapter.unhandled_owed)
+    time.sleep(0.5)
+    assert adapter.hands and adapter.held_ids, "the digest stays open"
+    assert not turn_frames(frames, "unhandled_ids")
+    assert len(adapter.fake.delivered) == 1 and not adapter.queue
+    adapter.fake.gone("the host failed")
+    assert wait_until(lambda: turn_frames(frames, "unhandled_ids"))
+    assert len(adapter.fake.delivered) == 1
 
 
-def test_a_turn_that_ends_before_its_delivery_is_recorded_still_settles(rig, launch):
-    adapter = launch()
-    adapter.started_wait = 0.2
-    adapter._turn_ended("turn-x", "answer", ["d1"])
+class _FastSession(FakeSession):
+    """A session whose turn starts and ends before the hand-in call returns."""
+
+    def deliver(self, text, **kw):
+        d = super().deliver(text, **kw)
+        self.end_turn("answer")
+        time.sleep(0.2)
+        return d
+
+
+def test_a_turn_that_ends_before_the_hand_in_returns_still_settles(rig, launch):
+    session = _FastSession()
+    adapter = launch(session=session)
     send(rig, "fast turn")
-    delivered(adapter.fake)
-    assert wait_until(lambda: not adapter.held_ids)
+    delivered(session)
+    assert wait_until(lambda: cursor_of(IDENTITY) is not None)
+    assert wait_until(lambda: not adapter.held_ids and not adapter.hands)
 
 
 def test_held_mail_waits_for_the_running_turns_end(rig, launch):

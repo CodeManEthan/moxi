@@ -177,10 +177,11 @@ The flush path, in order:
 
 Each port maps its own outcomes to `REQUEUE`:
 
-- **Codex** returns `REQUEUE` when the steer or start raised an app-server or JSON-RPC
-  error, so nothing was injected. Its receipt is the turn id. It returns `None` when the
-  text went into a turn that was already running and whose id couldn't be found, or when
-  it gave up steering; nothing tracks that digest, so it replays at the next bind.
+- **Codex** never returns `REQUEUE`. Its receipt is the digest's id, which is also the
+  `ref` it hands turns, and the digest settles from turns' own outcome: at the end of
+  the turn that names the ref, or at once as `unhandled` when turns refuses it or says it
+  is lost, so the daemon hands it again. A hand-in whose answer never came is waited
+  on, not put back: the text may already be in a turn.
 - **OpenCode** returns `REQUEUE` when nothing was admitted: the status read before the
   post doesn't say idle, the post can't connect, or the server answers it with a 5xx, a
   429 or any refusal. Its receipt is the message id comms chose, also when a post got no
@@ -249,6 +250,14 @@ of what each thread load reports. turns runs the app-server, wires Codex's hooks
 their per-launch trust, lays the settings on the start and on every resume, and refuses
 to deliver into a load whose settings did not take. `moxi doctor` shows why, in
 turns' rows.
+
+**How mail arrives.** Mail goes in at turn boundaries: while no turn runs, the wrapper
+hands turns one digest with `deliver`, which starts a turn. Mail that arrives while a
+turn runs, yours or the one a digest started, waits for that turn's end and goes in as
+one digest then. Mail sent with `--interrupt` goes into the running turn at once, by
+turns' `steer`, with `[interrupt]` on its frame line so the model knows why it came
+mid-turn; if the turn ended in between, it goes by `deliver` instead, once. Each digest
+is acked when the turn that took it ends with an answer, and handed again otherwise.
 
 **One thread.** The wrapper delivers into the thread this launch started. /clear, /new
 and /fork in the window start another thread, and /resume opens one; comms does not
