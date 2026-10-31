@@ -429,6 +429,15 @@ def test_an_owned_refusal_names_the_row_and_a_posture_one_names_its_option():
     assert "--sandbox" in posture.value.hint
 
 
+def test_refusing_the_git_check_skip_says_how_to_run_outside_a_git_repository():
+    with pytest.raises(Owned) as raised:
+        catalog.refuse_passthrough("codex", ["--skip-git-repo-check"], "exec")
+    assert raised.value.row == "skip_git_check"
+    assert "--scratch" in raised.value.hint and "git repository" in raised.value.hint
+    # Every row a hint is kept for is an owned row of its harness.
+    assert all(catalog.row(h, name).owned for h, name in catalog.OWNED_HINTS)
+
+
 @pytest.mark.parametrize("argv", [["--", "--permissions", "dev"], ["--permissions=dev"]])
 def test_a_flag_without_a_row_that_sets_a_posture_rows_value_is_refused(argv):
     with pytest.raises(catalog.PostureFlag) as raised:

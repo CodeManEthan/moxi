@@ -110,6 +110,15 @@ POSTURE_FLAGS = {
               "--approve-for-me": "approval",
               "--not-so-yolo": "approval"},
 }
+#: What to do instead, for an owned row whose plain "leave it out" would leave the user
+#: stuck: (harness, row) to the hint. `codex exec` runs outside a git repository only
+#: with its git check skipped, which the launcher does for a scratch launch alone (a
+#: trusted directory doesn't pass that check).
+OWNED_HINTS = {
+    ("codex", "skip_git_check"): "leave it out; a headless Codex launch runs outside a git "
+                                 "repository only with --scratch, so launch with --scratch "
+                                 "or in a git repository",
+}
 #: Config overrides that set what a posture row sets, per harness: the flags that carry a
 #: `key=value` override (in any mode), and each key with the posture row it stands in for.
 #: An override with one of these keys, passed on or as a `config` item, is refused like
@@ -197,7 +206,8 @@ class Owned(Refused):
         self.token = token
         if row.owned:
             problem = f"{token} sets {row.name}, which the launcher sets itself"
-            hint = f"leave {token} out of the flags passed on"
+            hint = OWNED_HINTS.get((row.harness, row.name),
+                                   f"leave {token} out of the flags passed on")
         else:
             problem = f"{token} sets {row.name}, a permission posture row"
             hint = _posture_hint(row.harness, row.name, token, mode)
