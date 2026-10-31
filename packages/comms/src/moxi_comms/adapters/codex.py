@@ -7,25 +7,50 @@ daemon stays a pure router with no child supervision.
 The Codex session itself is turns': the wrapper calls `turns.codex.launch`, and turns'
 host spawns and supervises `codex app-server`, holds the WebSocket link, starts and
 resumes the thread, wires Codex's own hooks (`moxi-turns-ping`) with their per-launch
-trust, delivers steer-first, opens the window and reaps every child when the launch ends.
-comms reaches the session only through turns' public API. What this process owns:
+trust, opens the window and reaps every child when the launch ends. comms reaches the
+session only through turns' public API. What this process owns:
 
   * one registration on the daemon socket for the roster identity, and the claim socket
     it stamps into that environment;
   * what comms adds to the launch: the identity stamp in the environment, layer one as
     the thread's developer instructions, and the roster's Codex thread options. turns
     passes them on and reads none of them;
-  * the queue, the digest, the cursor and the owed ledger. Each digest goes in with
-    `deliver(steer=True)`, comms' steer-first: a running turn takes it at once, an idle
-    thread gets a new turn. Its ids settle at that turn's end, from the session's own
-    turn events (`watch`): `handled` when the turn ended `answer`, `unhandled` on
-    `aborted`, `error` or `refusal`, and `unhandled` too for a delivery turns answered
-    `Lost`. The cursor advances there, never past an id still held, and the `turn`
-    frame follows the write;
-  * the holder: at each Stop turns asks `on_stop`, which runs the shim's reply check
-    (`HarnessAdapter.reply_check`) and answers the reminder text, which holds the turn
-    open, or None. turns gives the Stop's facts, the thread's running background
+  * the queue, the digests and the owed ledger. Each digest is handed to turns named by
+    its digest id as its `ref`;
+  * the stop handler: at each Stop turns asks `on_stop`, which runs the shim's reply
+    check (`HarnessAdapter.reply_check`) and answers the reminder text, which holds the
+    turn open, or None. turns gives the Stop's facts, the thread's running background
     terminals among them; Codex has no crons.
+
+**Delivery.** Plain mail goes one digest at a time, at turn boundaries only: while no
+turn runs, by `deliver(text, ref=<digest>)`, which starts a turn. Mail that arrives
+while a turn runs waits in the queue for that turn's end, and goes as one digest then.
+
+**Interrupt mail.** A queued message whose sender asked to interrupt, while a turn runs
+on a session that offers `steer`, goes at once: one digest of the interrupt mail alone,
+its frame lines marked `[interrupt]`, by `steer(text, ref=<digest>)`. A steer refused
+`idle` (the turn ended between the check and the call) or `loading` falls back to
+`deliver` with the same text and ref, once; turns runs the text once whichever way the
+race went.
+
+**Settling.** The ack is the end of the turn that took the digest. turns' `turn.ended`
+names every delivery the turn took, the opening one and each steered one, by ref:
+
+    turn ended answer                  handled: the daemon deletes its rows
+    turn ended otherwise               unhandled: the daemon hands it again later
+
+What a hand-in's own outcome does before a turn names it:
+
+    taken (Started)                    nothing yet: its turn's end settles it
+    Refused idle/loading, a steer      one `deliver` with the same text and ref
+    Refused (any other reason)         unhandled at once: the text never went in
+    unknown (no id, no value)          waited on: the library resolves it by ref; a
+                                       timeout keeps the digest open and waits again
+    Lost                               unhandled at once: no turn will name it
+
+An unanswered hand-in is never put back in the queue: the text may already be in a
+turn. The session's end (the window closed, or the host failed) settles every open digest
+`unhandled` and ends the launch.
 
 The digest itself is `claude_shim`'s `render_digest` / `frame_line` -- one attributed
 frame line per message, the routing line already stripped by the daemon -- so the model
@@ -35,7 +60,6 @@ sees the same thing on both harnesses, directive standing for the roster's decla
 
 from __future__ import annotations
 
-import collections
 import logging
 import os
 import subprocess
@@ -49,21 +73,22 @@ from ..client import DaemonClient, DaemonError, DaemonOffline
 from ..config import ConfigError
 from ..context import BARE_COMMS, MOXI_COMMS_PATH_LINE, own_comms
 from . import codex_roster
-from .harness import (REQUEUE, SOURCE_COMPACT, SOURCE_RESUME, SOURCE_STARTUP,
-                      HarnessAdapter, launch_stamp, plan_comms, plan_head)
+from .claude_shim import render_digest
+from .harness import (SOURCE_COMPACT, SOURCE_RESUME, SOURCE_STARTUP, HarnessAdapter,
+                      launch_stamp, plan_comms, plan_head)
 
 log = logging.getLogger("comms.codex")
 
 ADAPTER_KIND = "codex"
 BINARY = "codex"
 
-#: How long a digest waits for turns to say which turn took it. turns' host answers
-#: within a few seconds; one it has not answered by then is counted as not known to
-#: have gone in, and its ids are `unhandled` on the next `turn` frame.
-STARTED_WAIT = 30.0
 FLUSH_RETRY = 1.0
-#: How many delivery ids whose turn ended before the adapter recorded them it keeps.
-EARLY_KEPT = 1024
+#: How long a wait that timed out pauses before it asks again, in seconds. The digest
+#: stays open meanwhile.
+WAIT_RETRY = 0.5
+#: The steer refusals that fall back to `deliver`: no turn runs to take the text, or the
+#: host has no accepted load.
+STEER_FALLBACK = ("idle", "loading")
 #: A turn outcome that settles its digests `handled`.
 ANSWER = "answer"
 #: The reason turns gives when the person closes a Codex window (its prefix).
@@ -155,9 +180,57 @@ def scrub_own_environ(stamped: dict, environ=None) -> None:
             environ.pop(var, None)
 
 
+class HandInFailed:
+    """The value of a hand-in that raised, or of a wait that failed: read as lost."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+
+    def __repr__(self) -> str:
+        return f"HandInFailed({self.reason!r})"
+
+
+class _Unsent:
+    """A digest that could not be handed to the session (the call raised): its wait
+    answers `value` at once."""
+
+    id = None
+
+    def __init__(self, value, ref=None):
+        self._value = value
+        self.ref = ref
+
+    def wait_started(self, timeout):
+        return self._value
+
+
+class Hand:
+    """One digest handed to turns: its `ref` (the digest's id as a string), the
+    `digest`, its message `ids`, the `text`, whether it went by `steer`, and the
+    library's `delivery` (None while the hand-in call runs). A digest that went by
+    `deliver` is the boundary digest; a steered one is not, nor is its fallback."""
+
+    def __init__(self, ref: str, digest, ids, text: str, *, steer: bool):
+        self.ref = ref
+        self.digest = digest
+        self.ids = tuple(ids)
+        self.text = text
+        self.steer = steer
+        self.delivery = None
+        self.fell_back = False
+
+    @property
+    def boundary(self) -> bool:
+        return not self.steer
+
+    def __repr__(self) -> str:
+        how = "steer" if self.steer else "deliver"
+        return f"Hand({self.ref!r}, {how}, {self.delivery!r})"
+
+
 class CodexAdapter(HarnessAdapter):
-    """One identity: the daemon binding, the queue, the cursor and the holder, over the
-    turns session of the thread this launch started."""
+    """One identity: the daemon binding, the queue, the digests in flight and the stop
+    handler, over the turns session of the thread this launch started."""
 
     KIND = ADAPTER_KIND
     STATE_NOUN = "thread-id file"
@@ -169,14 +242,14 @@ class CodexAdapter(HarnessAdapter):
                  window: bool = False, autoreconnect: bool = True, backoff=None,
                  status_sink=None, clock=time.time, write_root=...,
                  comms_path: str | None = None, layer_one: bool = True, exit_hook=None,
-                 started_wait: float = STARTED_WAIT):
+                 wait_retry: float = WAIT_RETRY):
         super().__init__(agent, socket_path=socket_path, autoreconnect=autoreconnect,
                          backoff=backoff, status_sink=status_sink, clock=clock,
                          exit_hook=exit_hook)
         #: `turns.codex.launch`, or what a test hands in its place.
         self._launch = launch or _turns_launch
         self.window = window
-        self.started_wait = started_wait
+        self.wait_retry = wait_retry
         self._write_root = write_root
         self.write_root_reason = "given by the caller"
         self.comms_path = comms_path or BARE_COMMS
@@ -187,15 +260,14 @@ class CodexAdapter(HarnessAdapter):
         self.thread_id: str | None = None
         self.turn_open = False
         self.active_turn_id: str | None = None
-        self._hold = None
+        self._stops = None
+        self._watch_handle = None
         self._watcher: threading.Thread | None = None
         #: Why the session ended (`Gone`), once it has.
         self.gone_reason: str | None = None
         self.gone = threading.Event()
-        #: Each delivery's digest ids, by the delivery id turns minted, until its turn
-        #: ends; and the outcome of a delivery whose turn ended before it was recorded.
-        self._deliveries: dict[str, tuple] = {}
-        self._ended_early: collections.OrderedDict = collections.OrderedDict()
+        #: Every digest handed to turns and not settled, by ref.
+        self.hands: dict[str, Hand] = {}
         #: The turn the reply reminder holds open, while it does.
         self._blocked_turn: str | None = None
         #: Whether a turn of this launch's thread has ended (the cache clock's `turned`).
@@ -276,7 +348,7 @@ class CodexAdapter(HarnessAdapter):
         return {**self.agent.env(), **self.claim_env()}
 
     def start_port(self) -> None:
-        """Launch the thread through turns, become its holder and read its events. A
+        """Launch the thread through turns, become its stop handler and watch it. A
         failure here ends the launch: there is no session to deliver into."""
         instructions = self.developer_instructions()
         options = self.launch_options()
@@ -293,19 +365,16 @@ class CodexAdapter(HarnessAdapter):
             codex_threads.write(self.agent.qualified, thread_id,
                                 identity=self.agent.qualified, cwd=str(self.agent.cwd),
                                 launch=self.launch, **born_with)
-        try:
-            facts = session.facts()
-            turn_open = bool(facts.turn_open)
-        except Exception as e:                              # noqa: BLE001
-            self.log.info("the first facts of %s could not be read (%s); counted idle",
-                          self.agent.qualified, e)
-            turn_open = False
         with self._lock:
             self.session = session
             self.thread_id = thread_id
-            self.turn_open = turn_open
-        self._hold = session.hold(self.on_stop)
-        self._watcher = threading.Thread(target=self._watch, args=(session,),
+        self._stops = session.handle_stops(self.on_stop)
+        # The facts are read at the subscription: no turn event falls between them and
+        # the first event the watch gives.
+        watch = self._watch_handle = session.watch()
+        with self._lock:
+            self.turn_open = bool(watch.facts.turn_open)
+        self._watcher = threading.Thread(target=self._watch, args=(watch,),
                                          daemon=True, name="comms-codex-watch")
         self._watcher.start()
         self.log.info("launched codex thread %s for %s through turns", thread_id,
@@ -315,14 +384,19 @@ class CodexAdapter(HarnessAdapter):
         self._wake.set()
 
     def stop_before_unbind(self) -> None:
-        hold, self._hold = self._hold, None
-        if hold is not None:
-            hold.close()
+        stops, self._stops = self._stops, None
+        watch, self._watch_handle = self._watch_handle, None
+        for thing in (stops, watch):
+            if thing is not None:
+                try:
+                    thing.close()
+                except Exception:                           # noqa: BLE001
+                    self.log.debug("closing %r failed", thing, exc_info=True)
 
     # ------------------------------------------------------------------ the session's events
-    def _watch(self, session) -> None:
+    def _watch(self, watch) -> None:
         try:
-            for event in session.watch():
+            for event in watch:
                 if self._stop.is_set():
                     return
                 try:
@@ -339,10 +413,12 @@ class CodexAdapter(HarnessAdapter):
         self._adopt_thread(getattr(event, "session_id", None))
         kind = type(event).__name__
         if kind == "TurnStarted":
-            self._turn_started(event.turn_id)
+            self._turn_started(event.turn_id, [r.ref for r in event.deliveries])
+        elif kind == "TurnSteered":
+            self._turn_steered(event.turn_id, event.delivery.ref)
         elif kind == "TurnEnded":
             self._turn_ended(event.turn_id, event.outcome,
-                             [event.delivery_id, *(event.steered or ())])
+                             [r.ref for r in event.deliveries])
         elif kind == "Ready":
             self._ready(event.source, event.session_id)
         elif kind == "Gone":
@@ -367,35 +443,48 @@ class CodexAdapter(HarnessAdapter):
                       self.agent.qualified)
         self.report_refresh()
 
-    def _turn_started(self, turn_id) -> None:
+    def _turn_started(self, turn_id, refs=()) -> None:
         """A turn started, whoever started it. While the reply reminder holds a turn
-        open, a new turn resolves it, as a prompt does on the shim."""
+        open, a new turn resolves it, as a prompt does on the shim. The digests it opened
+        with are marked started (`activity` with their ids), which is not an ack."""
         with self._lock:
             self.turn_open = True
             self.active_turn_id = turn_id
             resolves = self.blocked and turn_id != self._blocked_turn
+            digests = [self.hands[r].digest for r in refs
+                       if r in self.hands and self.hands[r].digest is not None]
         if resolves:
             self.clear_block()
-        self.report_turn_start()
+        self._report_started(digests)
 
-    def _turn_ended(self, turn_id, outcome: str, delivery_ids) -> None:
-        """A turn ended: the digests delivered into it settle, `handled` on `answer`
-        and `unhandled` otherwise, in one `turn` frame."""
+    def _turn_steered(self, turn_id, ref) -> None:
+        """The running turn took a steered digest: it is marked started."""
+        with self._lock:
+            hand = self.hands.get(ref)
+        if hand is not None and hand.digest is not None:
+            self.log.info("turn %s of %s took the steered digest %s", turn_id,
+                          self.agent.qualified, hand.digest)
+            self._report_started([hand.digest])
+
+    def _report_started(self, digests) -> None:
+        """`activity` with no kind, naming the digests a turn took when there are any."""
+        with self._lock:
+            identity = self.identity
+        if identity and not self.offline:
+            self.notify_activity(identity, **({"ref": list(digests)} if digests else {}))
+
+    def _turn_ended(self, turn_id, outcome: str, refs) -> None:
+        """A turn ended: each digest it names settles, `handled` on `answer` and
+        `unhandled` otherwise, in one `turn` frame."""
         ids: list = []
         with self._lock:
             self.turn_open = False
             if self.active_turn_id == turn_id:
                 self.active_turn_id = None
-            for did in delivery_ids:
-                if not did:
-                    continue
-                kept = self._deliveries.pop(did, None)
-                if kept is None:
-                    self._ended_early[did] = outcome
-                    while len(self._ended_early) > EARLY_KEPT:
-                        self._ended_early.popitem(last=False)
-                else:
-                    ids.extend(kept)
+            for ref in refs:
+                hand = self.hands.pop(ref, None) if ref else None
+                if hand is not None:
+                    ids.extend(hand.ids)
             first = not self._own_turned
             self._own_turned = True
         completed = outcome == ANSWER
@@ -424,8 +513,8 @@ class CodexAdapter(HarnessAdapter):
                 return
             self.gone_reason = str(reason)
             self.gone.set()
-            ids = [mid for kept in self._deliveries.values() for mid in kept]
-            self._deliveries.clear()
+            ids = [mid for hand in self.hands.values() for mid in hand.ids]
+            self.hands.clear()
             self.turn_open = False
         if ids:
             self.report_turn_end(unhandled=ids)
@@ -466,49 +555,172 @@ class CodexAdapter(HarnessAdapter):
         with self._lock:
             return self.thread_id
 
-    def deliver(self, text: str, high: int, identity, count: int):
-        """Hand the digest to turns, steer-first. A refusal puts the batch back: nothing
-        went in. A turn id is the receipt. `Lost`, or no answer within `started_wait`,
-        is a receipt of None: the ids are `unhandled` on the next `turn` frame, so the
-        digest is handed again, a duplicate and never a loss."""
-        ids = self.digest_ids(high)
-        delivery = self.session.deliver(text, steer=True)
-        did = delivery.id
-        if did is not None:
-            with self._lock:
-                self._deliveries[did] = ids
+    def _can_steer(self) -> bool:
+        session = self.session
+        if session is None:
+            return False
         try:
-            result = delivery.wait_started(self.started_wait)
-        except TimeoutError:
-            result = None
-        kind = type(result).__name__
-        if kind == "Refused":
-            with self._lock:
-                self._deliveries.pop(did, None)
-            log.warning("turns refused the digest for %s (%s); %d message(s) requeued",
-                        identity, result.reason, count)
-            return REQUEUE
-        if kind != "Started":
-            with self._lock:
-                self._deliveries.pop(did, None)
-            self.owe_unhandled(ids)
-            log.warning("turns cannot say which turn took the digest for %s (%s); %d "
-                        "message(s) unhandled on the next turn frame", identity,
-                        getattr(result, "reason", "no answer in time"), count)
-            return None
+            return "steer" in session.capabilities
+        except Exception:                                   # noqa: BLE001
+            return False
+
+    def flush(self) -> str | None:
+        """Plain mail goes only at a boundary: no turn runs and no plain digest waits
+        for its turn. While a turn runs, interrupt mail goes into it by `steer` when the
+        session offers it (`flush_interrupt`); the rest waits for the turn's end."""
         with self._lock:
-            early = self._ended_early.pop(did, None) if did is not None else None
-            if early is not None:
-                self._deliveries.pop(did, None)
-        if early is not None:
-            done = early == ANSWER
-            self.report_turn_end(handled=ids if done else (), unhandled=() if done else ids)
-        return result.turn_id
+            if self.turn_open:
+                steer = (not self.replaying and self.can_inject() and self._can_steer()
+                         and any(self._steerable(p) for p in self.queue))
+                if not steer:
+                    return None
+            elif any(hand.boundary for hand in self.hands.values()):
+                return None
+            else:
+                steer = False
+        if steer:
+            return self.flush_interrupt()
+        return super().flush()
+
+    @staticmethod
+    def _steerable(payload) -> bool:
+        """Interrupt mail that may go into a running turn. Held mail never does."""
+        return bool(payload.get("interrupt")) and not payload.get("held")
+
+    def flush_interrupt(self) -> str | None:
+        """One digest of the queued interrupt mail, and only that, rendered with
+        `[interrupt]` on its frame lines and handed by `steer`. The rest of the queue
+        waits for the turn's end. Returns the digest text, or None when nothing went."""
+        with self._lock:
+            batch = sorted((p for p in self.queue if self._steerable(p)),
+                           key=lambda p: int(p["message_id"]))
+            if not batch:
+                return None
+            taken = {id(p) for p in batch}
+            self.queue = [p for p in self.queue if id(p) not in taken]
+            identity = self.identity
+        batch = self._open_batch(batch, None)
+        if not batch:
+            return None
+        ids = tuple(str(p["message_id"]) for p in batch)
+        high = max(int(mid) for mid in ids)
+        try:
+            text = render_digest(batch, None, self.agent.directors, clock=self.clock,
+                                 steered=True)
+            self.marks[str(high)] = self.claims.hold_mark()
+            receipt = self._hand_in(text, high, ids, steer=True)
+        except BaseException:
+            self.release_held(ids)
+            raise
+        with self._lock:
+            self.injected.append(text)
+            now = self.clock()
+            directors = tuple(getattr(self.agent, "directors", None) or ())
+            session_id = self.mirror_session()
+            for p in batch:
+                self.reply_ledger.open(p, directors, session_id, now)
+        self.delivered(text, high, identity, len(batch), receipt)
+        return text
+
+    def deliver(self, text: str, high: int, identity, count: int):
+        """Hand the boundary digest to turns by `deliver`, named by its digest id. The
+        receipt is the ref; the digest settles from its turn's end, or from its own
+        outcome when no turn will name it. Never `REQUEUE`: a hand-in whose answer did
+        not come may be in a turn already, so it is waited on, never handed again."""
+        return self._hand_in(text, high, self.digest_ids(high), steer=False)
+
+    def _hand_in(self, text: str, high: int, ids, *, steer: bool) -> str:
+        """One digest to the session, by `steer` or `deliver`, and a thread that waits
+        for its outcome. The hand is recorded before the call, so a turn that names it
+        before the call returns still finds it."""
+        with self._lock:
+            digest = self.digest_of.get(str(high))
+            ref = str(digest) if digest is not None else f"message-{high}"
+            hand = Hand(ref, digest, ids, text, steer=steer)
+            self.hands[ref] = hand
+            session = self.session
+        try:
+            if steer:
+                delivery = session.steer(text, ref=ref)
+            else:
+                delivery = session.deliver(text, ref=ref)
+        except Exception as e:                              # noqa: BLE001
+            self.log.warning("the hand-in of digest %s failed: %s", ref, e)
+            delivery = _Unsent(HandInFailed(f"the hand-in failed: {type(e).__name__}: "
+                                            f"{e}"), ref)
+        hand.delivery = delivery
+        self.log.info("handed digest %s to turns by %s as delivery %s", ref,
+                      "steer" if steer else "deliver", delivery.id)
+        threading.Thread(target=self._wait, args=(hand,), daemon=True,
+                         name="comms-codex-wait").start()
+        return ref
+
+    def _live(self, hand: Hand) -> bool:
+        return not self._stop.is_set() and self.hands.get(hand.ref) is hand
+
+    def _wait(self, hand: Hand) -> None:
+        """Wait for a hand-in's start on its own thread. Taken, the turn's end settles
+        it. A steer refused `idle` or `loading` falls back to `deliver`, once. An unknown
+        outcome is waited on, never replayed; a timeout keeps the digest open and waits
+        again."""
+        while True:
+            try:
+                value = hand.delivery.wait_started(None)
+            except TimeoutError:
+                if not self._live(hand):
+                    return
+                self._stop.wait(self.wait_retry)
+                continue
+            except Exception as e:                          # noqa: BLE001
+                self.log.exception("waiting on digest %s failed", hand.ref)
+                value = HandInFailed(f"the wait failed: {type(e).__name__}: {e}")
+            if (type(value).__name__ == "Refused" and hand.steer and not hand.fell_back
+                    and value.reason in STEER_FALLBACK):
+                if self._fall_back(hand, value.reason):
+                    continue
+                return
+            break
+        self._on_result(hand, value)
+
+    def _fall_back(self, hand: Hand, reason: str) -> bool:
+        """A steer refused `idle` or `loading`: `deliver` the same text with the same
+        ref, once. False when the hand settled or the session ended meanwhile."""
+        with self._lock:
+            if not self._live(hand) or self.gone.is_set():
+                return False
+            session = self.session
+            hand.fell_back = True
+        self.log.info("the steer of digest %s was refused %s; delivering it instead",
+                      hand.ref, reason)
+        try:
+            hand.delivery = session.deliver(hand.text, ref=hand.ref)
+        except Exception as e:                              # noqa: BLE001
+            hand.delivery = _Unsent(HandInFailed(f"the hand-in failed: "
+                                                 f"{type(e).__name__}: {e}"), hand.ref)
+        return True
+
+    def _on_result(self, hand: Hand, value) -> None:
+        """A hand-in's start, or why it has none. Taken (`Started`, or `Ended` for a
+        turn already over), the turn's end on the watch settles it. Anything else means
+        no turn will name it: it is unhandled at once."""
+        kind = type(value).__name__
+        if kind in ("Started", "Ended"):
+            return
+        with self._lock:
+            if self.hands.get(hand.ref) is not hand:
+                return                     # settled already, by its turn's end
+            del self.hands[hand.ref]
+        reason = getattr(value, "reason", "")
+        self.log.warning("digest %s for %s %s (%s): %d message(s) unhandled", hand.ref,
+                         self.agent.qualified,
+                         "was refused" if kind == "Refused" else "was lost", reason,
+                         len(hand.ids))
+        self.report_turn_end(unhandled=hand.ids)
 
     def delivered(self, text: str, high: int, identity, count: int, receipt) -> None:
         if self._daemon is not None:
             self.notify_injected(identity, high, text)
-        log.info("injected %d message(s) for %s through %s into turn %s",
+        log.info("injected %d message(s) for %s through %s as digest %s",
                  count, identity, high, receipt)
 
     def retry_delay(self) -> float:
@@ -566,7 +778,7 @@ def print_plan(agent, roster, args, *, version, comms_path, write_root,
             say(f"  writable   (nothing added: {write_root_reason})")
     say(f"  codex      {BINARY} on the session's PATH ({version})")
     plan_comms(comms_path, say)
-    say("  host       turns' Codex host (app-server, hooks, steer-first delivery, window)")
+    say("  host       turns' Codex host (app-server, hooks, delivery, window)")
     if args.window:
         say(f"  log        {window_log_path(agent.qualified)}")
 

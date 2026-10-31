@@ -222,8 +222,9 @@ has no row for, which comms has no clock for. [docs/adapters.md](docs/adapters.m
 the detail.
 
 - **Codex**: `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <name>` launches one identity's thread through Moxi
-  turns' Codex host, which runs the `codex app-server` and its hooks, and steers comms
-  mail into the thread; a digest settles when its turn ends. Mail goes to the thread this launch
+  turns' Codex host, which runs the `codex app-server` and its hooks. comms mail goes
+  into the thread at turn boundaries, and `--interrupt` mail into the running turn; a
+  digest settles when its turn ends. Mail goes to the thread this launch
   started: /clear, /new, /fork and /resume in the window start or open another thread,
   which comms does not follow. To start fresh, end the launch and launch again. Install
   the extra: `moxi install comms --with codex`. Identities are listed in the

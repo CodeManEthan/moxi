@@ -42,7 +42,7 @@ def codex(rig, tmp_path):
     row = CodexAgent(qualified=CODEX, name="planner", scope="proj-a",
                      cwd=str(tmp_path), thread_file=codex_threads.path(CODEX))
     adapter = CodexAdapter(row, launch=fake_launch(session), autoreconnect=False,
-                           clock=rig.clock, started_wait=0.2)
+                           clock=rig.clock)
     adapter.fake = session
     adapter.start()
     yield adapter
