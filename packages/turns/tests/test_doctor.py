@@ -204,7 +204,7 @@ def test_the_codex_host_times_a_ping_from_its_stamp(monkeypatch, tmp_path):
 
         def __init__(self):
             self.endpoint = types.SimpleNamespace(ready=lambda *a, **k: None,
-                                                  prompt=lambda: None,
+                                                  prompt=lambda *a, **k: None,
                                                   on_stop=lambda facts: None)
 
         def foreign_hook(self, event, session_id):

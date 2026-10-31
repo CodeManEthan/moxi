@@ -117,8 +117,8 @@ CAPABILITIES = {
     "compact": (True, True, True),
     "agents": (True, True, True),
     "stop-shells": (True, True, False),
-    "guards": (True, False, False),
-    "after-tool": (True, False, False),
+    "guards": (True, True, False),
+    "after-tool": (True, True, False),
     "usage": (True, False, False),
     "mcp-token": (False, False, False),
     "environ": (True, True, True),
@@ -231,6 +231,16 @@ def test_the_table_and_the_values_agree():
     assert (R.ERROR_GONE, R.ERROR_CAPABILITY, R.ERROR_STOP_HANDLER_TAKEN) == (1001, 1002, 1003)
     assert tuple(CAPABILITIES) == R.CAPABILITIES
     assert {need for need, _ in METHODS.values() if need} <= set(R.CAPABILITIES)
+
+
+def test_each_adapter_offers_its_column_of_the_capability_table():
+    from moxi_turns.claude_endpoint import ClaudeHarness
+    from moxi_turns.codex import CodexHarness
+    from moxi_turns.opencode import OpenCodeHarness
+
+    for column, adapter in enumerate((ClaudeHarness, CodexHarness, OpenCodeHarness)):
+        offered = {name for name, cells in CAPABILITIES.items() if cells[column]}
+        assert set(adapter.can) == offered, adapter.__name__
 
 
 def test_the_table_and_the_document_agree():

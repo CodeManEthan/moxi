@@ -97,8 +97,8 @@ The session's capabilities:
 | `compact` | yes | yes | yes | `command` `compact` |
 | `agents` | yes | yes | yes | `agents` |
 | `stop-shells` | yes | yes | no | `command` `clear` or `compact` with `stop_shells: true` |
-| `guards` | yes | no | no | the guard list runs at the session's tool calls |
-| `after-tool` | yes | no | no | an `after-tool` listener row's text reaches the model after the tool |
+| `guards` | yes | yes | no | the guard list runs at the session's tool calls |
+| `after-tool` | yes | yes | no | an `after-tool` listener row's text reaches the model after the tool |
 | `usage` | yes | no | no | the session reports its usage to `usage` listener rows |
 | `mcp-token` | no | no | no | `mcp.reload` |
 | `environ` | yes | yes | yes | `environ` |

@@ -633,18 +633,21 @@ class Endpoint:
 
     def after_tool(self, tool: str, *, tool_use_id: str | None = None,
                    agent_id: str | None = None, is_error: bool | None = None,
-                   point: str = "after", rows: list[str] | None = None) -> str | None:
+                   point: str = "after", rows: list[str] | None = None,
+                   record_path: str | None = None) -> str | None:
         """A tool call ran (`point` `after`), or is about to where the harness has no
         after-tool point (`pre`). Asks the after-tool rows `rows` names (every one when
         None), bounded together by `after_tool.wait_ms`; returns their texts joined, which
         the model reads after the tool. Floors are the harness's to apply: this asks
-        what it is given."""
+        what it is given. `record_path` is the file the call's agent writes its records
+        to, when the harness knows it per call; else the harness's `record_path`."""
         if self._gone is not None or not self._after_tool.rows:
             return None
+        if record_path is None:
+            record_path = getattr(self.harness, "record_path", None)
         event = self._event(turns_listeners.AFTER_TOOL, agent_id=agent_id or None,
                             tool=tool, tool_use_id=tool_use_id, is_error=is_error,
-                            point=point, record_path=getattr(self.harness, "record_path",
-                                                             None))
+                            point=point, record_path=record_path)
         return self._after_tool.ask(event, rows)
 
     def usage(self, reading: dict[str, Any]) -> None:
