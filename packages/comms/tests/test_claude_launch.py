@@ -478,6 +478,19 @@ def test_the_additions_env_goes_over_the_launchers(monkeypatch, launched):
     assert code == 0 and seen["env"]["MOXI_TURNS_COMMANDS"] == "clear"
 
 
+def test_turns_endpoint_command_reaches_the_environment_claude_starts_with(launched):
+    """turns' own additions, not a fake: the endpoint command turns' config names is in
+    `MOXI_TURNS_ENDPOINT` in the environment `claude` is started with."""
+    from pathlib import Path
+    config = Path(os.environ["MOXI_TURNS_CONFIG_HOME"]) / "turns"
+    config.mkdir(parents=True, exist_ok=True)
+    (config / "config.toml").write_text(
+        '[claude]\nendpoint = "/opt/elsewhere/moxi-turns-endpoint"\n')
+    code, seen = launched()
+    assert code == 0
+    assert seen["env"]["MOXI_TURNS_ENDPOINT"] == "/opt/elsewhere/moxi-turns-endpoint"
+
+
 @pytest.mark.parametrize("error", ["turns", "value"])
 def test_additions_turns_cannot_give_refuse_the_launch_before_anything_starts(
         capsys, monkeypatch, launched, error):
