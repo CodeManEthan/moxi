@@ -884,16 +884,22 @@ def _harness_rows() -> list[Row]:
 def _placement_rows(ctx: _Context) -> list[Row]:
     """Each owner's placements read against the disk (`moxi.place.status`): a `warn` row for
     each that is `stale`, `modified` or `missing`, and one `ok` row per owner whose
-    placements all read `ok`."""
+    placements all read `ok`. A ledger that can't be read is one `fail` row, since every
+    install and uninstall then fails to place or remove skills."""
     from .. import names, place
 
+    path = place._ledger_path()
     try:
         ledger = place._read_ledger()
     except ValueError as exc:
-        return [Row(names.HARNESS, "placements", "warn", str(exc))]
+        # The placer's text up to its advice, which the fix line gives in full.
+        return [Row(names.HARNESS, "placements", "fail", str(exc).partition("; ")[0],
+                    f"move {path} aside, then run moxi install <module> --replace for each "
+                    f"module whose skills are links: a link the placer made reads as "
+                    f"unmarked without its ledger entry (a copied folder is known by its "
+                    f"mark)")]
     except OSError as exc:
-        return [Row(names.HARNESS, "placements", "warn",
-                    f"{place._ledger_path()} cannot be read: {exc}")]
+        return [Row(names.HARNESS, "placements", "fail", f"{path} cannot be read: {exc}")]
     rows = []
     for owner in sorted(ledger):
         entries = ledger[owner].get("placed", {})
