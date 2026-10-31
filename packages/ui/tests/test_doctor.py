@@ -238,6 +238,29 @@ def test_a_held_lock_with_no_file_is_starting_never_idle_or_another_program(
     assert listener.connects() == 0
 
 
+def test_a_failed_proof_then_no_file_is_this_users_shell_stopping(monkeypatch):
+    """A 503 from this user's own shell at its connection cap fails the proof; when the
+    shell then removes its file, the last round read no file, so it is not another
+    program."""
+    from moxi_loopback.api import NotOurServer
+
+    info = SimpleNamespace(port=8460, server_id="a")
+    files_read = [info]
+    monkeypatch.setattr(health, "read_runtime",
+                        lambda module: files_read.pop(0) if files_read else None)
+
+    def refused(found, timeout):
+        raise NotOurServer("503")
+
+    monkeypatch.setattr(health, "_servers", refused)
+    monkeypatch.setattr(health, "POLL", 0.01)
+    found = health._held(0.1)
+    assert found.state == "starting"
+    # A proof that fails to the end is another program.
+    monkeypatch.setattr(health, "read_runtime", lambda module: info)
+    assert health._held(0.1).state == "held"
+
+
 def test_a_runtime_file_that_appears_within_the_wait_gives_the_running_row(monkeypatch, site):
     from moxi_ui.snapshot import ModuleSnapshot
     from test_snapshot import _serve

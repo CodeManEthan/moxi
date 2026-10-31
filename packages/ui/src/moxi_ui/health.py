@@ -134,10 +134,11 @@ def _servers(info: RuntimeInfo, timeout: float) -> Mapping[str, Any] | None:
 
 def _held(wait: float) -> Probe:
     deadline = _clock() + wait
-    foreign: RuntimeInfo | None = None
-    info: RuntimeInfo | None = None
     while True:
         info = read_runtime(MODULE)
+        # Only the last round's proof counts: a failed one followed by a round with no
+        # file is this user's shell gone on its way out, not another program.
+        foreign: RuntimeInfo | None = None
         if info is not None:
             left = max(deadline - _clock(), 0.5)
             try:
@@ -145,11 +146,10 @@ def _held(wait: float) -> Probe:
             except NotOurServer:
                 foreign = info
             except (OSError, TimeoutError, ValueError):
-                foreign = None
+                pass
             else:
                 if data is not None:
                     return Probe("running", info=info, servers=data, port=info.port)
-                foreign = None
         if _clock() >= deadline:
             break
         _sleep(POLL)
