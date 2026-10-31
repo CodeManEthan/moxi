@@ -142,7 +142,7 @@ def test_replay_stops_at_the_cursor(rig):
 
 
 #: A config file that no longer loads: an unclosed array, the slip an edit makes.
-BROKEN_CONFIG = "block = false\n[replay]\nmessages = [\n"
+BROKEN_CONFIG = "block = false\n[threads]\nreply_cap = [\n"
 
 
 def test_a_config_file_broken_mid_run_keeps_the_last_good_block(rig, caplog):
@@ -326,9 +326,8 @@ def test_the_record_carries_the_machine_line_at_position_zero(rig):
 # The rule: `waiting(q)` counts q's rows in the one queue. A row is written
 # for mail to q while q is not bound, and for every id q's binding was handed and did not
 # report handled when it unbinds; it is deleted only when a binding that was handed it
-# names it `handled`, never by the cursor, the unbind or its age. Replay
-# is bounded by REPLAY_N / REPLAY_T only when the cursor is absent, and only for mail with
-# no row.
+# names it `handled`, never by the cursor, the unbind or its age. Nothing is replayed
+# from the record, and no count or age bounds a name's rows.
 
 REVIEWER = dict(name="reviewer", scope="proj-a")
 REVIEWER_Q = "reviewer@proj-a"
@@ -415,10 +414,10 @@ def test_a_reader_racing_the_hand_over_writes_no_row_and_hands_nothing_twice(rig
     assert [p["message_id"] for p in shim.queue] == [msg.id], "not handed twice"
 
 
-def test_a_queued_row_past_REPLAY_T_is_still_released_at_a_first_bind(rig):
+def test_a_queued_row_a_day_old_is_still_released_at_a_first_bind(rig):
     """Mail handed to a session that unbinds with no cursor gets a row.
-    Queued mail has no age limit: a first bind long past the old replay bound's age
-    still gets it, by release."""
+    Queued mail has no age limit: a first bind more than a day later still gets it, by
+    release."""
     shim = rig.shim(**REVIEWER)
     old = rig.post_as("agent-6", [REVIEWER_Q], "handed, never handled")
     wait_for_queue(shim, 1)
@@ -430,7 +429,7 @@ def test_a_queued_row_past_REPLAY_T_is_still_released_at_a_first_bind(rig):
     _reboot(rig)
     assert _queue(rig, REVIEWER_Q) == {old.id}, "the boot load keeps it"
 
-    rig.clock.advance(constants.REPLAY_T + 3600)
+    rig.clock.advance(25 * 3600)
     assert _waiting(rig, REVIEWER_Q) == 1, "no age limit on waiting mail"
     code, out = rig.cli(["agents", "--seats"])
     assert "1 message(s)" in out, out
@@ -446,7 +445,6 @@ def test_a_queued_row_past_REPLAY_T_is_still_released_at_a_first_bind(rig):
 def test_a_first_bind_hands_every_queued_id_and_the_unbind_keeps_the_rows(rig, monkeypatch):
     """No count bounds the queue: a first bind releases all six rows, and an unbind
     with no cursor deletes none of them."""
-    write_config(None, "[replay]\nmessages = 3\n")   # the reader's own bound
     posted = [rig.post_as("agent-6", ["curator@proj-a"], f"msg-{i}") for i in range(6)]
     assert wait_until(lambda: len(_queue(rig, "curator@proj-a")) == 6)
     assert _waiting(rig, "curator@proj-a") == 6
@@ -467,7 +465,7 @@ def test_mail_posted_while_the_daemon_was_down_is_all_delivered_after_boot_once(
         rig, monkeypatch):
     """Every routed message holds a row until it is acked or dropped. Mail posted to
     the record while the daemon was down, more of it than the boot rescan's newest
-    window and the old replay's bounds hold, and older than the old age bound, gets its
+    window and more than fifty of them, the oldest more than a day old, gets its
     rows from the boot rescan. The next bind hands every one of them, once; once acked,
     a restart and a rebind hand none of them again."""
     curator = rig.shim(name="curator", scope="proj-a")
@@ -479,11 +477,11 @@ def test_mail_posted_while_the_daemon_was_down_is_all_delivered_after_boot_once(
     curator.stop()
     assert wait_until(lambda: "curator@proj-a" not in rig.daemon.bindings)
 
-    count = constants.REPLAY_N + 5
+    count = 55
     owed = posted_while_down(rig, monkeypatch, lambda: [
         rig.post_as("agent-6", ["curator@proj-a"], f"owed-{i}") for i in range(count)])
     rig.age_message(owed[0].id, "2001-01-01T00:00:00Z")
-    rig.clock.advance(constants.REPLAY_T + 3600)
+    rig.clock.advance(25 * 3600)
     assert _queue(rig, "curator@proj-a") == {m.id for m in owed}, "rows from the rescan"
 
     again = rig.shim(name="curator", scope="proj-a")

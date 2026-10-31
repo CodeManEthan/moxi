@@ -354,7 +354,6 @@ def test_the_declaration_never_reaches_the_record(rig):
 
 def test_constants_are_the_recorded_build_rulings():
     """Tunable numbers; the test pins them so a change is deliberate."""
-    assert (constants.REPLAY_N, constants.REPLAY_T) == (50, 86400)
     assert constants.RETRY_ATTEMPTS == 5
     assert (constants.BACKOFF_START, constants.BACKOFF_FACTOR, constants.BACKOFF_MAX) == (
         0.5, 2.0, 30.0)

@@ -25,10 +25,6 @@ line of doc and, for a few, the one variable that overrides it for one process:
     [provision]
     operator = "operator"                   # the human's identity name
 
-    [replay]
-    messages = 50                           # a reader's catch-up bound with no cursor
-    hours = 24
-
     [cache]
     required = false                        # true: the daemon refuses to start
                                             # without the cache module
@@ -146,18 +142,6 @@ class ProvisionConfig:
     operator: str = _default("provision.operator")
 
 
-@dataclass
-class ReplayConfig:
-    """`[replay]`: a reader's catch-up bound when it has no cursor."""
-
-    messages: int = _default("replay.messages")
-    hours: int = _default("replay.hours")
-
-    @property
-    def seconds(self) -> int:
-        return self.hours * 3600
-
-
 #: The units a duration takes, in seconds: `30m`, `6h`, `3d`.
 DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 #: The duration that means no expiry.
@@ -206,7 +190,6 @@ class CommsConfig:
     credentials: CredentialsConfig = field(default_factory=CredentialsConfig)
     policy: PolicyConfig = field(default_factory=PolicyConfig)
     provision: ProvisionConfig = field(default_factory=ProvisionConfig)
-    replay: ReplayConfig = field(default_factory=ReplayConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
     delivery: DeliveryConfig = field(default_factory=DeliveryConfig)
     block: bool = _default("block")
@@ -368,7 +351,7 @@ class Config(_moxi_config.Config):
             return self._good
 
     def use(self, key: str):
-        """One table or key of the settings now, by attribute name (`block`, `replay`)."""
+        """One table or key of the settings now, by attribute name (`block`, `delivery`)."""
         return getattr(self.current(), key)
 
 
@@ -404,11 +387,6 @@ def _typed(settings, path: Path | None) -> CommsConfig:
     if v["local.retain_days"] < 0:
         raise bad("local.retain_days", f"is {v['local.retain_days']}",
                   "set it to a whole number of days, or 0 to keep every message")
-    if v["replay.messages"] < 1:
-        raise bad("replay.messages", f"is {v['replay.messages']}",
-                  "set it to 1 or more")
-    if v["replay.hours"] < 0:
-        raise bad("replay.hours", f"is {v['replay.hours']}", "set it to 0 or more hours")
     try:
         parse_duration(v["delivery.expiry"])
     except ValueError:
@@ -431,7 +409,6 @@ def _typed(settings, path: Path | None) -> CommsConfig:
                                                  v["policy.cache_callers"]),
                             labels=_labels(bad, v["policy.labels"])),
         provision=ProvisionConfig(operator=operator),
-        replay=ReplayConfig(messages=v["replay.messages"], hours=v["replay.hours"]),
         cache=CacheConfig(required=v["cache.required"]),
         delivery=DeliveryConfig(expiry=str(v["delivery.expiry"]).strip().lower()),
         block=v["block"],
@@ -534,7 +511,7 @@ def refuse_secrets(path: Path | None, raw: dict) -> None:
 
 
 __all__ = ["Config", "ConfigError", "LocalConfig", "ThreadsConfig", "CredentialsConfig", "PolicyConfig",
-           "ProvisionConfig", "ReplayConfig", "CommsConfig",
+           "ProvisionConfig", "CommsConfig",
            "BUILTIN_ROLES", "check_text", "config_path", "load", "load_file",
            "refuse_secrets", "schema",
            "LOCAL_RETAIN_DAYS"]

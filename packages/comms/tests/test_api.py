@@ -57,7 +57,7 @@ def test_interface_2_holds_its_names():
         "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
         "session", "roster", "owner", "Roster", "Agent", "Standing", "Owner",
         "record_dir", "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
-        "replay", "DaemonError", "DaemonOffline", "delete", "DeleteResult",
+        "DaemonError", "DaemonOffline", "delete", "DeleteResult",
         "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "send_as",
         "session_of", "caller_identity"}
     for name in api.__all__:
@@ -113,7 +113,7 @@ def test_the_reads_and_names_are_pinned():
                          "session": ["identity", "deadline"],
                          "roster": ["deadline"], "owner": ["session_id", "deadline"],
                          "identity_state": ["name", "scope", "deadline"],
-                         "record_dir": [], "daemon_socket": [], "replay": []}.items():
+                         "record_dir": [], "daemon_socket": []}.items():
         assert list(inspect.signature(getattr(api, name)).parameters) == params, name
     assert list(api.Agent.__dataclass_fields__) == ["qualified", "name", "scope", "tier",
                                                     "adapter", "directors"]
@@ -504,16 +504,14 @@ def test_identity_state_refuses_what_no_launch_can_claim(env, name, scope):
         api.identity_state(name, scope=scope)
 
 
-def test_the_paths_and_the_replay_bound(env, tmp_path):
+def test_the_paths(env, tmp_path):
     from moxi_comms import paths
 
     assert api.daemon_socket() == paths.daemon_socket()
     assert api.record_dir() == paths.comms_db().parent
-    assert api.replay() == (50, 24 * 3600)
-    write_config(None, f'[local]\nrecord = "{tmp_path / "r" / "record.db"}"\n'
-                       "[replay]\nmessages = 7\nhours = 2\n")
+    write_config(None, f'[local]\nrecord = "{tmp_path / "r" / "record.db"}"\n')
     assert api.record_dir() == tmp_path / "r"
-    assert api.replay() == (7, 7200)
+    assert not hasattr(api, "replay")
 
 
 

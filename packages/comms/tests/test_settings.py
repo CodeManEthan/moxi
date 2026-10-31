@@ -24,7 +24,7 @@ def test_the_schema_parses_and_its_overrides_are_spelled_with_the_prefix():
 def test_the_retired_keys_are_declared():
     retired = {k.name for k in config.schema().keys.values() if k.retired}
     assert retired == {"claude.channel", "policy.never_held", "policy.next_turn_refused",
-                       "provision.slots"}
+                       "provision.slots", "replay.messages", "replay.hours"}
     assert not retired & {k.name for k in config.schema().live()}
 
 
@@ -45,8 +45,6 @@ def test_the_defaults_with_no_file():
     assert cfg.policy.cache_callers == ("operator",)
     assert cfg.policy.labels == {}
     assert cfg.provision.operator == "operator"
-    assert (cfg.replay.messages, cfg.replay.seconds) == \
-        (constants.REPLAY_N, constants.REPLAY_T)
     assert cfg.block is False
     assert cfg.codex == cfg.opencode == {"defaults": {}, "agents": {}}
     assert not hasattr(cfg, "claude")
@@ -80,10 +78,6 @@ labels = { "console@acme" = "the build console's send-only identity" }
 [provision]
 operator = "alice"
 
-[replay]
-messages = 10
-hours = 2
-
 [delivery]
 expiry = "6h"
 
@@ -113,7 +107,6 @@ def test_the_file_sets_every_table(monkeypatch):
     assert cfg.policy.cache_callers == ("operator", "herald")
     assert cfg.policy.labels == {"console@acme": "the build console's send-only identity"}
     assert cfg.provision.operator == "alice"
-    assert (cfg.replay.messages, cfg.replay.seconds) == (10, 7200)
     assert (cfg.delivery.expiry, cfg.delivery.expiry_seconds) == ("6h", 21600)
     assert cfg.codex["defaults"] == {"sandbox": "workspace-write"}
     assert cfg.codex["agents"]["planner@proj-a"] == {"model": "gpt-x",
@@ -145,10 +138,10 @@ def test_an_env_override_wins_over_the_file(monkeypatch, tmp_path):
 
 def test_a_given_environment_is_read_instead_of_the_process(tmp_path):
     env = {"MOXI_COMMS_CONFIG_HOME": str(tmp_path / "cfg"), "HOME": str(tmp_path)}
-    write_config(env, "[replay]\nmessages = 5\n")
+    write_config(env, "[threads]\nreply_cap = 5\n")
     assert config.config_path(env) == tmp_path / "cfg" / "comms" / "config.toml"
-    assert config.load(env=env).replay.messages == 5
-    assert config.load().replay.messages == 50
+    assert config.load(env=env).threads.reply_cap == 5
+    assert config.load().threads.reply_cap == constants.DEFAULT_REPLY_CAP
 
 
 #: Files comms' loader refuses, each with the key the refusal names.
@@ -164,7 +157,8 @@ BAD_FILES = [
     ('[policy]\ncache_callers = [""]\n', "policy.cache_callers"),
     ('[policy]\nlabels = { "x" = 1 }\n', "policy.labels"),
     ("[provision]\nslots = 0\n", "provision.slots"),
-    ("[replay]\nmessages = 0\n", "replay.messages"),
+    ("[replay]\nmessages = 50\n", "replay.messages"),
+    ("[replay]\nhours = 24\n", "replay.hours"),
     ('[codex.agents]\nplanner = 3\n', "codex.agents"),
     ('[claude]\nchannel = "server"\n', "claude.channel"),
     ('[policy]\nnever_held = []\n', "policy.never_held"),
@@ -279,16 +273,16 @@ def test_the_running_reader_refuses_a_bad_start_and_keeps_the_last_good_at_use()
     """`config.Config`, the daemon's reader: a bad file refuses `start()`; after a
     good start, `current()` keeps the last good settings while the file is in error,
     reports once per change of the file, and follows the file again once it loads."""
-    write_config(None, "[replay]\nmessages = [\n")
+    write_config(None, "[threads]\nreply_cap = [\n")
     with pytest.raises(config.ConfigError):
         config.Config(report=lambda exc: None).start()
 
     reports = []
-    write_config(None, "block = true\n[replay]\nmessages = 7\n")
+    write_config(None, "block = true\n[threads]\nreply_cap = 7\n")
     reader = config.Config(report=reports.append)
     assert reader.start().block is True
-    write_config(None, "block = false\n[replay]\nmessages = [\n")
-    assert reader.use("block") is True and reader.use("replay").messages == 7
+    write_config(None, "block = false\n[threads]\nreply_cap = [\n")
+    assert reader.use("block") is True and reader.use("threads").reply_cap == 7
     assert reader.current().block is True
     assert len(reports) == 1 and isinstance(reports[0], config.ConfigError)
     # A new bad edit is a change of the file: reported once more.
@@ -296,7 +290,7 @@ def test_the_running_reader_refuses_a_bad_start_and_keeps_the_last_good_at_use()
     assert reader.use("block") is True
     assert len(reports) == 2 and "looks like a secret" in str(reports[1])
     write_config(None, "block = false\n")
-    assert reader.use("block") is False and reader.use("replay").messages == 50
+    assert reader.use("block") is False and reader.use("threads").reply_cap == constants.DEFAULT_REPLY_CAP
     assert len(reports) == 2
 
 
@@ -314,9 +308,9 @@ def test_a_named_file_is_read_in_place(tmp_path, monkeypatch):
 
     monkeypatch.setattr(tempfile, "TemporaryDirectory", no_temp_root)
     named = tmp_path / "launch.toml"
-    named.write_text("block = true\n[replay]\nmessages = 9\n")
+    named.write_text("block = true\n[threads]\nreply_cap = 9\n")
     cfg = config.load_file(named)
-    assert cfg.block is True and cfg.replay.messages == 9
+    assert cfg.block is True and cfg.threads.reply_cap == 9
     assert cfg.source == str(named)
     assert config.load().block is False
 

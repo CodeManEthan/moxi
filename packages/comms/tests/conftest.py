@@ -317,8 +317,8 @@ class Rig:
     def age_message(self, message_id, timestamp: str) -> None:
         """Backdate one row of the record, whichever backend is holding it.
 
-        Aging mail in place is how the bounded-replay tests reach past `REPLAY_T`
-        without a day going by, and the two records keep it in different places: the
+        Aging mail in place is how the tests reach mail more than a day old without a
+        day going by, and the two records keep it in different places: the
         mock's is a list in memory, the local one is a table.
         """
         record = self.record

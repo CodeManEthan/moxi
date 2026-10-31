@@ -7,7 +7,8 @@ How comms puts mail in front of a model, written from the code in
 ## What an adapter is
 
 An adapter is a daemon-socket client that binds one name, puts that name's mail in front
-of a model at a turn boundary, and writes that name's cursor. One adapter process serves
+of a model at a turn boundary, and reports each turn's end to the daemon, which keeps the
+books. One adapter process serves
 one name. It registers with the daemon as one of the daemon's adapter **kinds**:
 
 | kind | wrapper | what it serves |
@@ -40,7 +41,7 @@ verdict itself (`moxi_comms/kinds.py` states the contract). comms declares its o
 the same way. The daemon reads the group when it starts and refuses a register of any other
 kind; a declaration that does not hold is left out and logged
 (`moxi_comms/kinds.py`). An adapter built outside comms uses `moxi_comms.adapter`: the
-daemon client, the backoff, cursors, the digest and frame line, the attribution tiers
+daemon client, the backoff, the digest and frame line, the attribution tiers
 and the machine line's parse.
 
 ## What a harness is
@@ -53,7 +54,7 @@ agents. Four things make it one:
 - **Mail arrives as model turns in that same live session**, idle or busy, by a way in
   of its own. Comms never types into the person's input box, so what they type and what
   another agent sends never interrupt each other.
-- **The cursor moves only on the CLI's own evidence** that the turn carrying the digest
+- **A digest is acked only on the CLI's own evidence** that the turn carrying it
   completed: an in-band completion event, never a guess from output or timing.
 - **The agent sends as its identity** from that session: its shell inherits the
   session's claim socket (`MOXI_COMMS_CLAIM_SOCKET`), and `moxi comms send` and `moxi comms reply` read
@@ -86,8 +87,8 @@ a harness.
    through the claim socket inside its session. A send needs that live binding, so a
    session whose adapter is not connected cannot send. A daemon restart invalidates
    the old token; the adapter rebinds with backoff, up to 30 seconds plus 20% jitter,
-   and sends wait for that rebind. An older adapter protocol is refused and the session
-   must be relaunched.
+   and sends wait for that rebind. An adapter whose comms wire version the daemon doesn't
+   speak is refused at its hello, and the session must be relaunched.
 5. **One renderer.** Every adapter renders the digest with `render_digest`, so every
    model reads the same frame lines. A frame line ends with the message's marks, each
    only when present: the thread mark (`[1 reply left]` or `[last reply]`) and the posture (`[no reply]`, `[reply-optional]`, `[reply-once]`, or `[open]` on the
@@ -111,14 +112,18 @@ a harness.
      anything newer and with its catch-up notice, only when the adapter's delivery
      reports that nothing reached a live turn, so that trying again at once can't put
      the same digest into a turn it already reached. Any other outcome is a delivery:
-     the digest is recorded, and whether the cursor moves for it is decided by the
-     completion evidence. An error the adapter didn't expect drops the batch, which
+     the digest is recorded, and whether it is acked is decided by the completion
+     evidence. An error the adapter didn't expect drops the batch, which
      replays when the name next binds.
    - **The wait before a retry.** Every batch that goes back waits before the next try,
      one second by default, so an adapter whose delivery keeps failing doesn't spin.
-7. **The adapter is the only cursor writer, and writes only on completion evidence.** A
-   digest whose turn can't be identified stays untracked and replays at the next bind.
-   Replay is the safe direction; a cursor that moved too far is not.
+7. **The adapter reports completion; the daemon keeps the books.** The adapter opens each
+   digest with the daemon (`open_digest`), hands it to turns with the digest's id as its
+   ref, and reports each turn's end (`turn_ended`) with the digests it handled and the
+   ones it didn't. The daemon advances the cursor and deletes the handled rows in one
+   transaction. A digest whose turn can't be identified is reported unhandled and
+   replays. Replay is the safe direction; a cursor that moved too far is not. No adapter
+   writes comms state of its own but its thread or session ids.
 8. **A recorded session is resumed, never replaced.** Where an adapter resumes a session
    (Codex and OpenCode), the session or thread id lives in STATE, written by
    the adapter. A resume that fails is said out loud and retried; the
@@ -137,17 +142,18 @@ a harness.
    with backoff rather than ending the process, since an adapter that exits leaves its
    name silent. An unexpected error is logged with its traceback, said once per
    exception type, and retried. A daemon refusal of the name at start is fatal.
-   `moxi-comms-codex --window` gives up and exits 3 if its thread is never ready to show, and
-   so does `moxi-comms-opencode` if its session never is.
+   `moxi-comms-opencode` gives up and exits 3 if its session is never ready to show.
 10. **The daemon hears about deliveries.** The adapter reports `injected`, with the
-   digest's text, and `activity`, so `moxi comms explain` works for every kind.
+   digest's text, and `activity`, with the digest's id when a turn takes it, so
+   `moxi comms explain` works for every kind.
 
 ## The base
 
 `codex` and `opencode` share one class, `HarnessAdapter` in
 `adapters/harness.py`. It owns
-the daemon binding, the queue and the catch-up hold, the flush path, the daemon side of
-supervision and the two notifications. An adapter for a CLI is a subclass, its **port**,
+the daemon binding, the queue and the catch-up hold, the flush path (which opens each
+digest with the daemon before it renders it), the turn-end report, the daemon side of
+supervision and the notifications. An adapter for a CLI is a subclass, its **port**,
 which fills in these hooks:
 
 | hook | what the port says | default |
@@ -155,6 +161,7 @@ which fills in these hooks:
 | `KIND` | the kind it registers as | |
 | `deliver(text, high, identity, count)` | puts the digest in front of the model; returns `REQUEUE` or a receipt | required |
 | `delivered(..., receipt)` | what to do after the base recorded a delivered digest | nothing |
+| `WAIT_WHEN_HELD` | wait for a name another binding holds, rather than exit refused | true |
 | `retry_delay()` | seconds to wait after a `REQUEUE`, read each time | the base module's `FLUSH_RETRY`, 1.0 |
 | `can_inject()` | whether a digest can go in now, such as "the CLI server is connected" | true |
 | `start_port()` | brings the CLI side up after the bind | nothing |
@@ -168,7 +175,8 @@ The flush path, in order:
 1. Under the lock, return if catch-up is still arriving, the queue is empty,
    `can_inject()` is false, or the port holds one delivery at a time and one is running.
    Otherwise take the queue sorted by message id, and the catch-up notice.
-2. Render the digest and call `deliver`.
+2. Open a digest with the daemon for those ids, keep the ids its answer keeps (a
+   withdrawn or expired one is dropped), render the digest and call `deliver`.
 3. On `REQUEUE`, put the batch back ahead of the queue with its notice, wait
    `retry_delay()`, and wake the flush loop.
 4. On any other value, record the digest and call `delivered` with the receipt. The base never
@@ -220,7 +228,7 @@ a loop while supervision brings it back.
 | harness | kind | how a person sits in the session | what ends a turn | status |
 |---|---|---|---|---|
 | Claude Code | `claude-shim` | `moxi comms claude --name <name>`: the session is the terminal it runs in; the wrapper forks the session's adapter process | the turn's end as Moxi turns reports it: a digest is handled when its turn ends with an answer, and handed again when it was interrupted (Esc), ended in an error or refusal, refused, or lost | supported through Moxi turns; the session must load turns' Claude plugin |
-| Codex | `codex` | `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <identity> --window` opens the Codex window on a new thread for each launch | the turn's end as Moxi turns' Codex host reports it: handled on an answer, handed again otherwise | experimental; through Moxi turns |
+| Codex | `codex` | `moxi comms codex --name <name>` runs Moxi turns' Codex host in the terminal, with its window, on a new thread for each launch | the turn's end as the host reports it: handled on an answer, handed again otherwise | experimental; through Moxi turns |
 | OpenCode | `opencode` | `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <identity>` opens `opencode attach` on a new session for each launch | the first idle after the model saw the digest, when the turn ended with `finish=stop` | experimental |
 
 comms reads a cache clock for both. A Codex thread's clock is the end of its last
@@ -242,23 +250,53 @@ pending, and a rollout or row comms does not recognise.
 
 ## Codex
 
-**Through turns.** `moxi-comms-codex` writes no hook and runs no app-server. It calls
-Moxi turns' `turns.codex.launch` with the roster row's thread settings (sandbox or
-permission profile, writable roots, network access, model, multi-agent off) and a check
-of what each thread load reports. turns runs the app-server, wires Codex's hooks with
-their per-launch trust, lays the settings on the start and on every resume, and refuses
-to deliver into a load whose settings did not take. `moxi doctor` shows why, in
-turns' rows.
+**Through turns' host.** `moxi comms codex` (also `moxi-comms-codex`) starts a Codex
+session through Moxi turns' Codex host, `moxi-turns-codex-host`, the turns command that
+runs `codex app-server` and its hooks and keeps the session's endpoint. Install it with
+`moxi install comms --with codex`.
 
-**How mail arrives.** Mail goes in at turn boundaries: while no turn runs, the wrapper
+```text
+moxi comms codex --name NAME [--scope SCOPE | --global] [--director NAME]...
+                 [--model M] [--sandbox MODE | --permissions PROFILE]
+                 [--option KEY=VALUE]... [--options-file F]
+                 [--no-window] [--dry-run]
+
+moxi-comms-codex IDENTITY [--config PATH] [--window] [--dry-run]
+```
+
+The settings flags are the host's own, so a launch reads the same with or without
+comms. The second form reads the row IDENTITY names in the config file's `[codex]` table
+(or in the file `--config` names, checked whole) and turns it into the same flags; it
+runs with no window unless it passes `--window`. The first form runs in the current
+directory, with the host's window unless it passes `--no-window`.
+
+The wrapper checks the whole host line with turns' own parser before anything starts,
+binds the name, forks the session's adapter, writes the comms instructions to a 0600
+file in the session's runtime directory, and execs the host with them, so the host is
+the session's process in the terminal. To every launch comms adds multi-agent off
+(`--option agents.enabled=false`); with no sandbox or permission profile named,
+`--sandbox workspace-write`; and on a sandbox, network access unless the launch sets it
+(the agent's shell needs it to reach the daemon socket) and comms' state directory in
+the writable roots. The host lays the settings on the thread's start and
+every resume, and refuses to deliver into a load whose sandbox did not take; `moxi
+doctor` shows why, in turns' rows. `--dry-run` prints the host line and starts nothing.
+
+A bad flag, row or config file exits 2, a name the daemon refuses (held, reserved,
+retired) exits 3 with the daemon's words, and a daemon that isn't running exits 75, all
+before Codex starts. A host that can't start exits 1. Once the host runs, its exit
+status is the launch's.
+
+**How mail arrives.** Mail goes in at turn boundaries: while no turn runs, the adapter
 hands turns one digest with `deliver`, which starts a turn. Mail that arrives while a
 turn runs, yours or the one a digest started, waits for that turn's end and goes in as
 one digest then. Mail sent with `--interrupt` goes into the running turn at once, by
 turns' `steer`, with `[interrupt]` on its frame line so the model knows why it came
 mid-turn; if the turn ended in between, it goes by `deliver` instead, once. Each digest
-is acked when the turn that took it ends with an answer, and handed again otherwise.
+is acked when the turn that took it ends with an answer, and handed again otherwise. A
+hand-in whose answer never came is waited on, not handed again: the text may already be
+in a turn.
 
-**One thread.** The wrapper delivers into the thread this launch started. /clear, /new
+**One thread.** The adapter delivers into the thread this launch started. /clear, /new
 and /fork in the window start another thread, and /resume opens one; comms does not
 follow any of them, and mail still goes to the launch's thread. To start fresh, end the
 launch and launch again.
@@ -314,9 +352,9 @@ written.
   the model answers you, and the digest's own reply may not be written. The digest still
   counts as delivered, since the model saw it.
 
-**When the cursor moves.** On the first idle after an assistant message answering the
+**When a digest is acked.** On the first idle after an assistant message answering the
 digest appears, when the turn ended with `finish=stop`. A turn that ends by an abort or
-an error moves nothing, and the digest comes again at the next launch.
+an error is reported unhandled, and the digest is handed again.
 
 **Failures.** A post that can't connect, a busy session, a 5xx or a 429 is tried again
 after a second, and a run of five or more is said once in the status line. Any other

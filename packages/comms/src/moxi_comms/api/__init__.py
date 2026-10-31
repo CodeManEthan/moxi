@@ -27,7 +27,6 @@ outside comms.
   `roster()`, `owner(session_id)`, `identity_state(name, scope=None)`,
   `caller_identity(env=None)`, `record_dir()`, `daemon_socket()`.
 * Names: `GLOBAL`, `qualify`, `split_tag`, `NAME_RE`.
-* `replay()`: the reader catch-up bound in force, `(messages, seconds)`.
 * `DaemonError`, `DaemonOffline`: what a read raises when the daemon refuses or is down.
 * `moxi_comms.api.tokens`: the token store the box's own consumers read.
 """
@@ -465,13 +464,6 @@ def daemon_socket() -> Path:
     return _paths.daemon_socket()
 
 
-def replay() -> tuple[int, int]:
-    """The reader catch-up bound in force: `(messages, seconds)`, from the config file's
-    `[replay] messages` and `hours`."""
-    bound = _config.load().replay
-    return bound.messages, bound.hours * 3600
-
-
 __all__ = [
     "INTERFACE", "send", "send_as", "check", "delete", "DeleteResult", "Sender", "SendResult",
     "Recipient", "Refusal",
@@ -479,6 +471,6 @@ __all__ = [
     "session", "session_of", "caller_identity", "roster", "owner", "Roster", "Agent",
     "Standing", "Owner",
     "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "record_dir",
-    "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE", "replay",
+    "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
     "DaemonError", "DaemonOffline",
 ]
