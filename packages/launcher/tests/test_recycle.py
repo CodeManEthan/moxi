@@ -628,6 +628,38 @@ def started(monkeypatch):
     return seen
 
 
+def test_a_run_that_ends_right_after_the_crossing_meets_it_takes_its_compact(
+        conn, monkeypatch, started):
+    limit(conn, "compact")
+    run = open_run(conn)
+    insert = store.insert_run
+
+    def then_the_run_ends(*args, **kwargs):
+        try:
+            return insert(*args, **kwargs)
+        except store.RunOpen:
+            store.end_run(conn, run.run_id, "not-exited", word="busy")
+            raise
+
+    monkeypatch.setattr(store, "insert_run", then_the_run_ends)
+    assert recycle.crossing_line(conn, crossing(), pid=os.getpid()) == recycle.COMPACT_LINE
+    assert store.pending_compact(conn, "r1") is None
+    [picked] = started
+    assert picked.crossing_key == store.crossing_key(SID, "1x", crossing().at)
+    assert picked.kind == "compact"
+
+
+def test_an_insert_that_pends_writes_the_pending_compact_and_no_run(conn):
+    run = open_run(conn)
+    with pytest.raises(store.RunOpen) as caught:
+        store.insert_run(conn, kind="compact", mode="limit", request_id="r1",
+                         session_id=SID, actor=store.LAUNCHER, crossing_key="k", pend=True)
+    assert caught.value.run.run_id == run.run_id
+    assert store.pending_compact(conn, "r1")[0] == "k"
+    assert [r.run_id for r in store.runs(conn, request_id="r1")] == [run.run_id]
+
+
+
 def test_a_run_s_end_takes_the_pending_compact_and_starts_it(conn, started):
     run = open_run(conn)
     store.pend_compact(conn, "r1", f"{SID}|1x|t")

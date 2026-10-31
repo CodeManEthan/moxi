@@ -405,9 +405,9 @@ def crossing_line(conn: sqlite3.Connection, crossing: Any, *, pid: int,
     try:
         run = store.insert_run(conn, kind="compact", mode="limit", request_id=row.request_id,
                                session_id=session_id, actor=store.LAUNCHER, state="armed",
-                               slot=row.slot, pane_id=row.pane_id, crossing_key=key)
+                               slot=row.slot, pane_id=row.pane_id, crossing_key=key,
+                               pend=True)
     except store.RunOpen:
-        store.pend_compact(conn, row.request_id, key)
         return COMPACT_LINE
     except sqlite3.IntegrityError:
         return None

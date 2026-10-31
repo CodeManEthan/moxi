@@ -1044,9 +1044,11 @@ def insert_run(conn: sqlite3.Connection, *, kind: str, mode: str, request_id: st
                pane_id: str | None = None, turn_number: int | None = None,
                repair_of: str | None = None, crossing_key: str | None = None,
                gone: Callable[[str], bool] | None = None, at: str | None = None,
-               run_id: str | None = None) -> Run:
+               run_id: str | None = None, pend: bool = False) -> Run:
     """Insert a run for a launch and return it, or raise `RunOpen` naming the launch's
-    open run.
+    open run. With `pend`, for a compact a crossing makes, an open run met here leaves
+    the compact pending on the launch (`pend_compact`, under `crossing_key`) in the same
+    transaction before `RunOpen` is raised, so the open run's end always finds it.
 
     With `gone`, an open run met here is tested first (`run_stale`): a stale one is ended
     `error`, word `job-gone`, and this run is inserted in the same transaction. The test
@@ -1064,25 +1066,45 @@ def insert_run(conn: sqlite3.Connection, *, kind: str, mode: str, request_id: st
     at = at or now()
     seen = open_run(conn, request_id)
     stale = seen is not None and gone is not None and run_stale(seen, gone, parse_time(at))
+    met = None
     with _writing(conn):
         current = open_run(conn, request_id)
         if current is not None:
             if not (stale and current == seen and _end_stale(conn, current, at)):
-                raise RunOpen(current)
-        if run_id is None:
+                if not pend or crossing_key is None:
+                    raise RunOpen(current)
+                _pend(conn, request_id, crossing_key, at)
+                met = current
+        if met is None:
+            row = _insert_run(conn, kind=kind, mode=mode, request_id=request_id,
+                              session_id=session_id, actor=actor, state=state, job=job,
+                              handoff_path=handoff_path, slot=slot, pane_id=pane_id,
+                              turn_number=turn_number, repair_of=repair_of,
+                              crossing_key=crossing_key, at=at, run_id=run_id)
+    if met is not None:
+        raise RunOpen(met)
+    return row
+
+
+def _insert_run(conn: sqlite3.Connection, *, kind: str, mode: str, request_id: str,
+                session_id: str, actor: str, state: str, job: str | None,
+                handoff_path: str | None, slot: str | None, pane_id: str | None,
+                turn_number: int | None, repair_of: str | None,
+                crossing_key: str | None, at: str, run_id: str | None) -> Run:
+    if run_id is None:
+        run_id = new_run_id()
+        while conn.execute("SELECT 1 FROM runs WHERE run_id = ?",
+                           (run_id,)).fetchone():
             run_id = new_run_id()
-            while conn.execute("SELECT 1 FROM runs WHERE run_id = ?",
-                               (run_id,)).fetchone():
-                run_id = new_run_id()
-        row = Run(run_id=run_id, kind=kind, mode=mode, request_id=request_id,
-                  session_id=session_id, actor=actor, handoff_path=handoff_path, slot=slot,
-                  pane_id=pane_id, turn_number=turn_number, new_request_id=None,
-                  repair_of=repair_of, crossing_key=crossing_key, job=job, state=state,
-                  outcome=None, word=None, detail=None, repeats=0, created_at=at,
-                  updated_at=at)
-        conn.execute(f"INSERT INTO runs ({', '.join(RUN_COLUMNS)}) "
-                     f"VALUES ({', '.join('?' * len(RUN_COLUMNS))})",
-                     [getattr(row, name) for name in RUN_COLUMNS])
+    row = Run(run_id=run_id, kind=kind, mode=mode, request_id=request_id,
+              session_id=session_id, actor=actor, handoff_path=handoff_path, slot=slot,
+              pane_id=pane_id, turn_number=turn_number, new_request_id=None,
+              repair_of=repair_of, crossing_key=crossing_key, job=job, state=state,
+              outcome=None, word=None, detail=None, repeats=0, created_at=at,
+              updated_at=at)
+    conn.execute(f"INSERT INTO runs ({', '.join(RUN_COLUMNS)}) "
+                 f"VALUES ({', '.join('?' * len(RUN_COLUMNS))})",
+                 [getattr(row, name) for name in RUN_COLUMNS])
     return row
 
 
@@ -1271,10 +1293,14 @@ def pend_compact(conn: sqlite3.Connection, request_id: str, key: str, *,
                  at: str | None = None) -> None:
     """Leave a compact pending on a launch for the crossing `key`; the newest wins."""
     with _writing(conn):
-        conn.execute(
-            "INSERT INTO pending_compacts (request_id, crossing_key, at) VALUES (?, ?, ?) "
-            "ON CONFLICT (request_id) DO UPDATE SET crossing_key = excluded.crossing_key, "
-            "at = excluded.at", (request_id, key, at or now()))
+        _pend(conn, request_id, key, at or now())
+
+
+def _pend(conn: sqlite3.Connection, request_id: str, key: str, at: str) -> None:
+    conn.execute(
+        "INSERT INTO pending_compacts (request_id, crossing_key, at) VALUES (?, ?, ?) "
+        "ON CONFLICT (request_id) DO UPDATE SET crossing_key = excluded.crossing_key, "
+        "at = excluded.at", (request_id, key, at))
 
 
 def pending_compact(conn: sqlite3.Connection, request_id: str) -> tuple[str, str] | None:
