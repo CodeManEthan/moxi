@@ -59,6 +59,7 @@ __all__ = [
     "View",
     "budget_of",
     "check_components",
+    "confirmed_paths",
     "modules_argv",
     "modules_value",
     "read_modules",
@@ -223,6 +224,17 @@ def budget_of(export: Mapping[str, Any] | None) -> dict[str, Any] | None:
     return {"rss": rss, "fds": fds}
 
 
+def confirmed_paths(export: Mapping[str, Any] | None) -> list[str]:
+    """The paths of a page export's confirmed acts, sorted. `client.js` reads them so that
+    `api()` refuses such a path and `confirm()` takes only such a path."""
+    routes = export.get("routes") if isinstance(export, Mapping) else None
+    if not isinstance(routes, Sequence):
+        return []
+    return sorted({route["path"] for route in routes
+                   if isinstance(route, Mapping) and route.get("kind") == "act"
+                   and route.get("confirmed") is True and isinstance(route.get("path"), str)})
+
+
 def modules_value(listing: Sequence[Mapping[str, Any]], mounts: Mapping[str, Mapping[str, Any]],
                   errors: Mapping[str, str], *, at: str | None = None,
                   error: str | None = None) -> dict[str, Any]:
@@ -247,6 +259,7 @@ def modules_value(listing: Sequence[Mapping[str, Any]], mounts: Mapping[str, Map
             "mounted": export is not None,
             "export_error": _text(errors[name]) if name in errors else None,
             "budget": budget_of(export),
+            "confirmed": confirmed_paths(export),
             "components": placed,
             "refused": refused,
         })

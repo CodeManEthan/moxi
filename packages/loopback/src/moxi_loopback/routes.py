@@ -289,6 +289,12 @@ class Route:
     to, and no `returns`, and `topics` is then a reserved query key. `gateway` says
     whether the gateway may reach the route. `body_cap` is an act's body cap in bytes, up
     to 1 MiB.
+
+    `confirmed=True` makes an act a confirmed act: one the user confirms a second time and
+    that runs at most once per `Idempotency-Key`. It names `status`, the path of a read of
+    the same page whose query declares a string `job` key, and its handler returns
+    `Accepted` with a path on that route. Only a confirmed act has a `status`, and every
+    confirmed act has one.
     """
 
     path: str
@@ -302,6 +308,8 @@ class Route:
     stream: bool = False
     topics: Mapping[str, Out] | None = None
     body_cap: int = BODY_CAP
+    confirmed: bool = False
+    status: str | None = None
     shape: Out | None = field(init=False, repr=False, compare=False, default=None)
 
     def __post_init__(self) -> None:
@@ -318,6 +326,17 @@ class Route:
             raise PageError(f"{where}: gateway and stream are True or False")
         if not _is_int(self.body_cap) or not 1 <= self.body_cap <= BODY_CAP_MAX:
             raise PageError(f"{where}: body_cap is 1 to {BODY_CAP_MAX} bytes")
+        if not isinstance(self.confirmed, bool):
+            raise PageError(f"{where}: confirmed is True or False")
+        if self.confirmed and self.kind != "act":
+            raise PageError(f"{where}: only an act is confirmed")
+        if self.status is not None:
+            if not self.confirmed:
+                raise PageError(f"{where}: only a confirmed act names a status route")
+            if not isinstance(self.status, str) or not _PATH.match(self.status):
+                raise PageError(f"{where}: status is a route path, not {self.status!r}")
+        elif self.confirmed:
+            raise PageError(f"{where}: a confirmed act names its status route")
 
         def query_field(key: str, item: object) -> None:
             if not isinstance(item, Field) or item.type not in _QUERY_TYPES:
@@ -432,6 +451,7 @@ class Page:
             streams += route.stream
         if streams > 1:
             raise PageError("a page has at most one stream route")
+        _check_status_routes(routes)
         if self.assets is not None and (
             not isinstance(self.assets, str) or not _ASSET_DIR.match(self.assets)
         ):
@@ -455,6 +475,30 @@ class Page:
     def stream_route(self) -> Route | None:
         """The page's one stream route, or None."""
         return next((route for route in self.routes if route.stream), None)
+
+
+def _check_status_routes(routes: tuple[Route, ...]) -> None:
+    """Each confirmed act's status route is a plain read of this page that takes a string
+    `job` query key, and the gateway reaches it whenever the gateway reaches the act, so a
+    phone that started an act can read how it went. A desk-only act may name a status
+    route of either reach."""
+    by_path = {route.path: route for route in routes}
+    for route in routes:
+        if not route.confirmed:
+            continue
+        where = f"route {route.path}"
+        target = by_path.get(route.status)
+        if target is None:
+            raise PageError(f"{where}: its status route {route.status} is not on this page")
+        if target.kind != "read" or target.stream:
+            raise PageError(f"{where}: its status route {route.status} is not a plain read")
+        job = target.query.get("job")
+        if job is None or job.type != "string":
+            raise PageError(f"{where}: its status route {route.status} takes a string job "
+                            "query key")
+        if route.gateway and not target.gateway:
+            raise PageError(f"{where}: the gateway reaches this act, so it must reach its "
+                            f"status route {route.status} too")
 
 
 # --- the table ----------------------------------------------------------------------
@@ -684,6 +728,8 @@ def _route_data(route: Route) -> dict[str, Any]:
         "topics": None if route.topics is None
         else {name: _out_data(item) for name, item in route.topics.items()},
         "body_cap": route.body_cap,
+        "confirmed": route.confirmed,
+        "status": route.status,
     }
 
 
@@ -691,7 +737,8 @@ def export(page: Page) -> dict[str, Any]:
     """The page's table as JSON-able data: `{"format": 1, "routes": [...], "assets":
     [...], "budget": {...}}`.
 
-    Each route carries its kind, its declared fields and shapes, and its topics. The
+    Each route carries its kind, its declared fields and shapes, its topics, and whether
+    it is a confirmed act with the path of its status route (`confirmed`, `status`). The
     asset names come from `build_table`, and the budget has its defaults filled in.
     Handler targets and the built-ins `/api/health` and `/api/prove` are left out, so no
     browser reaches a built-in through the shell. Raises `PageError` as `build_table`

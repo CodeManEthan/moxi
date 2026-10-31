@@ -5,6 +5,56 @@ which listens on `127.0.0.1` and `[::1]` on one port (8460 by default), signs th
 in with a one-use ticket from `moxi ui open`, and serves each module's page under
 `/m/<module>/`.
 
+## Confirmed acts in a page
+
+An act the user should confirm a second time, such as stopping a service or removing a
+project, is a confirmed act: it runs at most once, and only after the user says yes on a
+sheet the shell draws. The page declares it in its route table with `confirmed=True` and
+the status route it reports on; moxi-loopback's README, "Confirmed acts", has the route's
+whole shape. For example:
+
+```python
+Route("/api/status", "read", "moxi_usage.pagehandlers:status",
+      query={"job": Field("string")}, returns={"state": Out("string")}),
+Route("/api/stop", "act", "moxi_usage.pagehandlers:stop",
+      body={"name": Field("string")}, returns={},
+      confirmed=True, status="/api/status"),
+```
+
+A component calls it with `confirm` from `/m/ui/client.js`, never with `api`:
+
+```js
+import { api, confirm } from "/m/ui/client.js";
+
+const outcome = await confirm("usage", "api/stop", { name: "backup" },
+                              ["Stops the backup timer until you start it again."]);
+if (outcome.outcome === "accepted") {
+  const job = await api("usage", outcome.status.slice(1));  // "api/status?job=..."
+}
+```
+
+- `confirm(module, path, body, sheet)` shows `<moxi-ui-confirm>`: the module's page title,
+  the component's `sheet` lines and the body. On Confirm it makes a new `Idempotency-Key`
+  from 32 random bytes and posts the body once with it. A second click sends nothing more.
+  It never retries.
+- It resolves with one of:
+  - `{outcome: "accepted", status}`: the module took the act; `status` is its status
+    route's path and query on the module's page, such as `/api/status?job=7`;
+  - `{outcome: "refused", code, text}`: the act was not done. The module refused it (any
+    4xx, or its 503 when it was too busy), or the shell couldn't hand it over (a page
+    server that didn't start or couldn't be reached, or one that was stopping);
+  - `{outcome: "unknown", text}`: the act was sent and no answer says how it went (a 500,
+    a page server that ended before answering, no answer in 30 s, or no answer from the
+    shell at all). The module may have acted, so the component points the user at the
+    job, not at a retry;
+  - `{outcome: "cancelled"}`: the user closed the sheet and nothing was sent.
+- The component shows the outcome itself; the sheet closes once the answer is in.
+- `api()` on a confirmed act's path throws a `TypeError`, so a component can't skip the
+  sheet. `confirm()` on any other path throws one too. The shell reads which paths are
+  confirmed from the page's export.
+- The shell passes `Idempotency-Key` on to the page server with the other headers it
+  forwards, and nothing more.
+
 ## Testing a module's pages
 
 `moxi_ui.testing` is a pytest plugin, installed with moxi-ui and loaded in every pytest run

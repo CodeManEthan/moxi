@@ -37,6 +37,25 @@ export interface ApiResult {
     status: number;
     data: any;
 }
+/**
+ * What `confirm` resolves with. `accepted` carries the status path the module gave,
+ * relative to its own page (`/api/status?job=...`); `refused` the answer's status and a
+ * line of text; `unknown` a line of text. `cancelled` means the sheet was closed and
+ * nothing was sent.
+ */
+export type ConfirmOutcome = {
+    outcome: "accepted";
+    status: string;
+} | {
+    outcome: "refused";
+    code: number;
+    text: string;
+} | {
+    outcome: "unknown";
+    text: string;
+} | {
+    outcome: "cancelled";
+};
 /** The theme modes: `system` follows the browser's colour scheme. */
 export type ThemeMode = "system" | "light" | "dark";
 /** One entry of a switch table, as `moxi config show --json` lists it. */
@@ -165,9 +184,24 @@ export declare function components(module: string): ComponentInfo[];
  * With `body` it is a POST of that object as JSON; without, a GET. It sends the session
  * key, never retries, and never throws for an answer: a refusal is its status, and a
  * network failure is status 0. It throws a TypeError for a path that leaves
- * `/m/<module>/` or a body that is not an object.
+ * `/m/<module>/`, a body that is not an object, or a confirmed act's path, which only
+ * `confirm` sends, after the user confirms it.
  */
 export declare function api(module: string, path: string, body?: object): Promise<ApiResult>;
+/**
+ * Runs `module`'s confirmed act at `path` (relative to `/m/<module>/`) with `body`, once
+ * the user confirms it. It shows `<moxi-ui-confirm>`, a sheet with the module's title,
+ * the component's `sheet` lines and the body. On Confirm it mints a key from 32 random
+ * bytes, posts the body once with it as `Idempotency-Key`, and resolves with the
+ * outcome: `{outcome: "accepted", status}` with the module's status path (relative to
+ * its page), `{outcome: "refused", code, text}` when the act was not done, or
+ * `{outcome: "unknown", text}` when the module may have acted. Cancel resolves
+ * `{outcome: "cancelled"}` and sends nothing. It never retries and never throws for an
+ * answer. It throws a TypeError for a path that leaves `/m/<module>/` or is not one of
+ * the module's confirmed acts, a body that is not an object, or lines that are not
+ * strings.
+ */
+export declare function confirm(module: string, path: string, body: object, sheet?: readonly string[]): Promise<ConfirmOutcome>;
 /**
  * Calls `fn` with each value of `module`'s topic `topic`: first its current value, then
  * each value that replaces it. Returns the function that ends the subscription; call it

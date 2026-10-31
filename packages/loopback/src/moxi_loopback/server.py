@@ -8,6 +8,9 @@ stream route with its topics, and the `/api/health` built-in. It answers 403 to 
 `guard` did not pass. `prove(inner, ...)` answers `GET /api/prove` for a server that holds
 a runtime file's token.
 
+A confirmed act runs at most once per `Idempotency-Key`: the app keeps a map of the keys
+it has seen and answers a repeat itself (see `PageApp`).
+
 `Topics` holds the last value of each named topic and hands each publish to the open
 streams; `Snapshot` rebuilds one topic's value single-flight and publishes it only when it
 changed. `busy(name)` holds the idle exit while work runs. `Activity` holds the counts
@@ -21,6 +24,7 @@ window and deadline here is on `time.monotonic()`.
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import hashlib
 import importlib
@@ -35,7 +39,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from moxi_loopback.check import Profile, RequestView, check, proof, prove_nonce
+from moxi_loopback.check import TOKEN_PATTERN, Profile, RequestView, check, proof, prove_nonce
 from moxi_loopback.headers import NO_CACHE, NO_STORE, response_headers
 from moxi_loopback.routes import (
     CONTENT_TYPES,
@@ -83,6 +87,10 @@ STREAM_CAP = 8
 HEALTH_LIMIT = 2.0
 #: Seconds between two comment lines on an open stream.
 HEARTBEAT = 20.0
+#: The header that carries a confirmed act's key.
+IDEMPOTENCY_KEY = "Idempotency-Key"
+#: Finished keys the app keeps; past it the oldest is dropped and is a new key again.
+KEYS_KEPT = 1024
 
 _TOPIC = re.compile(r"\A[a-z0-9]+(-[a-z0-9]+)*\Z")
 _PROVE_RAW = PROVE_PATH.encode("ascii")
@@ -137,14 +145,17 @@ class Stream:
 
 class Call:
     """What a handler gets: the checked `query` and `body`, the `module` name, `busy`
-    and, on the stream route, `stream`."""
+    and, on the stream route, `stream`. On a confirmed act `key` is the request's
+    `Idempotency-Key`; elsewhere it is None."""
 
-    __slots__ = ("body", "module", "query")
+    __slots__ = ("body", "key", "module", "query")
 
-    def __init__(self, module: str, query: Mapping[str, Any], body: Mapping[str, Any]):
+    def __init__(self, module: str, query: Mapping[str, Any], body: Mapping[str, Any],
+                 key: str | None = None):
         self.module = module
         self.query = query
         self.body = body
+        self.key = key
 
     @staticmethod
     def busy(name: str) -> contextlib.AbstractContextManager[None]:
@@ -485,6 +496,70 @@ def read_topics(route: Route, query_string: bytes | str) -> tuple[str, ...]:
     return tuple(names)
 
 
+# --- the key map ---------------------------------------------------------------------
+
+
+def idempotency_key(scope: Mapping[str, Any]) -> str:
+    """The request's one `Idempotency-Key`: 43 characters of `[A-Za-z0-9_-]`, the shape
+    `secrets.token_urlsafe(32)` makes. Missing, sent more than once or of another shape
+    raises `BadRequest` naming the header, never its value."""
+    values = _header_values(scope, IDEMPOTENCY_KEY.lower().encode("ascii"))
+    if not values:
+        raise BadRequest(IDEMPOTENCY_KEY, "missing header")
+    if len(values) > 1:
+        raise BadRequest(IDEMPOTENCY_KEY, "repeated header")
+    value = values[0]
+    if not value.isascii() or not TOKEN_PATTERN.match(value.decode("ascii")):
+        raise BadRequest(IDEMPOTENCY_KEY, "malformed header")
+    return value.decode("ascii")
+
+
+#: A finished act's answer as sent: status, body and content type.
+_Answer = tuple[int, bytes, str | None]
+
+
+@dataclass
+class _Claim:
+    """One key: the route path and body hash it was claimed with, and once the handler
+    has finished, the answer it gave."""
+
+    path: str
+    digest: bytes
+    answer: _Answer | None = None
+
+
+class _Keys:
+    """The keys of confirmed acts this app has run: those still running, and up to `kept`
+    finished ones, the oldest dropped first. Only the event loop touches it."""
+
+    def __init__(self, kept: int = KEYS_KEPT):
+        self.kept = kept
+        self._running: dict[str, _Claim] = {}
+        self._finished: collections.OrderedDict[str, _Claim] = collections.OrderedDict()
+
+    def __len__(self) -> int:
+        return len(self._running) + len(self._finished)
+
+    def find(self, key: str) -> _Claim | None:
+        return self._running.get(key) or self._finished.get(key)
+
+    def claim(self, key: str, path: str, digest: bytes) -> _Claim:
+        claim = _Claim(path, digest)
+        self._running[key] = claim
+        return claim
+
+    def finish(self, key: str, answer: _Answer) -> None:
+        claim = self._running.pop(key)
+        claim.answer = answer
+        self._finished[key] = claim
+        while len(self._finished) > self.kept:
+            self._finished.popitem(last=False)
+
+
+_STILL_RUNNING = {"conflict": "this act is still running"}
+_KEY_REUSED = {"refused": "this Idempotency-Key was used for another request"}
+
+
 # --- responses -----------------------------------------------------------------------
 
 
@@ -672,6 +747,7 @@ class PageApp:
         self._prefix = prefix.encode("ascii") + b"/"
         self._started = time.monotonic()
         self._dropped_seen: set[tuple[str, str]] = set()
+        self._keys = _Keys()
 
         self.table, names = build_table(page)
         self.table.freeze()
@@ -762,6 +838,7 @@ class PageApp:
         if entry.raw_path == HEALTH_PATH:
             return await self._health_answer()
         route = self._routes[entry.raw_path]
+        key = None
         try:
             query = parse_query(route, scope.get("query_string") or b"")
             names = read_topics(route, scope.get("query_string") or b"") if route.stream else ()
@@ -773,8 +850,12 @@ class PageApp:
                 if raw is None:
                     return None  # The client went away mid-body.
                 body = parse_body(route, raw)
+                if route.confirmed:
+                    key = idempotency_key(scope)
         except BadRequest as err:
             return _bad_request(err)
+        if key is not None:
+            return await self._confirmed(route, Call(self.module, query, body, key), raw)
         call = Call(self.module, query, body)
         try:
             result = await self._run(self._handlers[route.path], call)
@@ -795,6 +876,54 @@ class PageApp:
             self.log.error("%s returned a value outside its shape: %s", route.path, err)
             return _response(500)
         return _json(200, value)
+
+    async def _confirmed(self, route: Route, call: Call, raw: bytes) -> Any:
+        """A confirmed act, through the key map.
+
+        Every check that can answer first has passed, so the key is judged here and,
+        when new, claimed in the same step, with no await between, before the handler
+        runs. A repeat while the first runs is a 409, a finished repeat gets the first
+        answer again, and a key seen with another path or body is a 422; none of those
+        reaches the handler.
+        """
+        key = call.key
+        digest = hashlib.sha256(raw).digest()
+        found = self._keys.find(key)
+        if found is not None:
+            if found.path != route.path or found.digest != digest:
+                return _json(422, _KEY_REUSED)
+            if found.answer is None:
+                return _json(409, _STILL_RUNNING)
+            status, body, content_type = found.answer
+            return _response(status, body, content_type=content_type)
+        self._keys.claim(key, route.path, digest)
+        # A handler cut short (the server stopping) may have acted, so its key stays
+        # claimed with a 500 rather than being freed for a second run.
+        answer: _Answer = (500, b"", None)
+        try:
+            answer = await self._confirmed_answer(route, call)
+        finally:
+            self._keys.finish(key, answer)
+        status, body, content_type = answer
+        return _response(status, body, content_type=content_type)
+
+    async def _confirmed_answer(self, route: Route, call: Call) -> _Answer:
+        try:
+            result = await self._run(self._handlers[route.path], call)
+        except Conflict as err:
+            return 409, _json_bytes({"conflict": err.text}), _JSON
+        except Refused as err:
+            return 422, _json_bytes({"refused": err.text}), _JSON
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.log.exception("%s failed", route.path)
+            return 500, b"", None
+        if not isinstance(result, Accepted):
+            self.log.error("%s is a confirmed act and returned %s, not Accepted",
+                           route.path, type(result).__name__)
+            return 500, b"", None
+        return 202, _json_bytes({"status": result.status_path}), _JSON
 
     async def _run(self, handler: Callable[..., Any], *args: Any) -> Any:
         if inspect.iscoroutinefunction(handler):
@@ -913,7 +1042,9 @@ def app(page: Page, *, module: str, server_id: str, prefix: str = "",
     It has no check of its own and refuses (403) any request whose scope lacks the
     `CHECKED` key, so serve it behind `guard`. It strips `prefix` from the raw path before
     it matches, and a raw path that does not start with `prefix + "/"` is a 404. It does
-    not answer `/api/prove`. Handler and health targets are resolved here, once; a
+    not answer `/api/prove`. A confirmed act needs an `Idempotency-Key` and runs at most
+    once per key while the app keeps it (see `PageApp._confirmed`). Handler and health
+    targets are resolved here, once; a
     target that cannot be loaded, or an asset that cannot be read, raises `PageError`, as
     `build_table` does for a refused asset table. `version` is reported by the health route. `strict` (the testing
     helper's) makes a value with an undeclared key a 500 rather than a dropped key.

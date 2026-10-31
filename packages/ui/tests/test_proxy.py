@@ -39,6 +39,7 @@ FAKE_EXPORT = {
     "routes": [
         {"path": "/api/read", "kind": "read"},
         {"path": "/api/act", "kind": "act"},
+        {"path": "/api/confirm", "kind": "act", "confirmed": True, "status": "/api/read"},
         {"path": "/api/events", "kind": "read", "stream": True},
     ],
     "assets": [],
@@ -311,6 +312,36 @@ def test_upstream_gets_only_the_allowlist_its_token_and_its_host():
             assert names.count(b"x-content-type-options") == 1
             assert got.header("x-kept") == "yes"
             assert got.header("content-security-policy") and got.header("cache-control")
+
+    run(body)
+
+
+def test_a_confirmed_act_upstream_gets_the_key_and_no_other_browser_header():
+    key = secrets.token_urlsafe(32).encode()
+
+    async def answer(seen, reply):
+        await reply(202, [(b"content-type", b"application/json")],
+                    b'{"status":"/api/read?job=1"}')
+
+    async def body():
+        async with Upstream(answer) as up:
+            px = fake_proxy(FakeStarters(up))
+            headers = [*BROWSER_HEADERS, (b"content-type", b"application/json"),
+                       (b"content-length", b"8"), (b"idempotency-key", key)]
+            got = await Browser(px, fake_scope("POST", "/m/pxfake/api/confirm", headers),
+                                b'{"by":1}').start().answer()
+            seen, = up.requests
+            assert seen.method == "POST" and seen.target == "/api/confirm"
+            assert seen.body == b'{"by":1}'
+            # Every header the page server got, as it got them: the shell's Host and
+            # token, the allowlist, and the key; no cookie, session key, origin,
+            # referer, fetch metadata, user agent or hop header of the browser's.
+            assert sorted(name for name, _ in seen.headers) == sorted([
+                b"host", b"x-moxi-token", b"accept", b"accept-language", b"if-none-match",
+                b"last-event-id", b"content-type", b"content-length", b"idempotency-key"])
+            assert dict(seen.headers)[b"idempotency-key"] == key
+            assert dict(seen.headers)[b"x-moxi-token"] == up.token.encode()
+            assert got.status == 202 and got.json() == {"status": "/api/read?job=1"}
 
     run(body)
 
