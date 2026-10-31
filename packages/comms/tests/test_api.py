@@ -58,7 +58,8 @@ def test_interface_2_holds_its_names():
         "session", "roster", "owner", "Roster", "Agent", "Standing", "Owner",
         "record_dir", "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
         "replay", "DaemonError", "DaemonOffline", "delete", "DeleteResult",
-        "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "send_as"}
+        "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "send_as",
+        "session_of", "caller_identity"}
     for name in api.__all__:
         assert hasattr(api, name), name
     assert api.ClaimServer is ClaimServer
