@@ -22,6 +22,7 @@ import errno
 import json
 import os
 import socket
+import stat
 import sys
 import threading
 from pathlib import Path
@@ -158,6 +159,9 @@ def sweep(directory: Path | str, address: str) -> str:
     directory's files go, then the directory, then the address's lock file; on `live`
     nothing is touched. The verdict is returned. Where `moxi.ipc.sweep` is not built (Windows,
     where a pipe goes with its server) this reports `live` and touches nothing.
+
+    An internal socket that `endpoint_socket` moved out of the directory goes too: its
+    path is worked out again from the directory's name, never read from a file.
     """
     from moxi import ipc
 
@@ -167,9 +171,25 @@ def sweep(directory: Path | str, address: str) -> str:
         return SWEPT_LIVE
     if verdict == SWEPT_LIVE:
         return verdict
+    remove_moved_sockets(directory)
     remove_directory(directory)
     remove_lock(address)
     return verdict
+
+
+def remove_moved_sockets(directory: Path | str) -> None:
+    """Remove a dead endpoint's internal sockets that sit outside its directory (the
+    short path). Only a path `endpoint_socket` gives for the directory, only outside it,
+    and only a socket; anything else, or a path that cannot be worked out, stays."""
+    directory = Path(directory)
+    for name in INTERNAL_SOCKS:
+        try:
+            path = Path(endpoint_socket(directory, name))
+            if path.parent == directory or not stat.S_ISSOCK(os.lstat(path).st_mode):
+                continue
+            os.unlink(path)
+        except (OSError, ValueError, NotImplementedError):
+            continue
 
 
 def remove_directory(directory: Path | str) -> None:
@@ -344,7 +364,7 @@ class LineConn:
 
 
 __all__ = ["VERSION", "VERSIONS", "V2_ROOT", "HELLO", "MOD_SOCK", "CODEX_APP_SOCK",
-           "CODEX_HOOKS_SOCK", "INTERNAL_SOCKS", "endpoint_socket", "HELLO_TMP",
+           "CODEX_HOOKS_SOCK", "INTERNAL_SOCKS", "endpoint_socket", "remove_moved_sockets", "HELLO_TMP",
            "INSTRUCTIONS", "ENDPOINT_FILES", "METHODS", "STOP_ASKED", "SOCK", "V1_HELLO",
            "MAX_LINE", "CONNECT_TIMEOUT", "LIVE", "STALE", "UNKNOWN", "SWEPT_LIVE",
            "SWEPT_REMOVED", "SWEPT_ABSENT", "endpoint_name", "address", "v2_root",
