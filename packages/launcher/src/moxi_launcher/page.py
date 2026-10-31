@@ -223,6 +223,9 @@ PREVIEW = {
 #: A refusal a page launch or resume meets before anything runs; null when it went ahead
 #: (202) or, for a terminal resume, with the command to copy.
 ACTED = {"refused": Out("table", items=REFUSAL.items, nullable=True)}
+#: A page launch's refusal; for a launch in a terminal, which the page never runs, the
+#: `moxi launcher run` command to copy too.
+LAUNCHED = {**ACTED, "command": _text(nullable=True, mark="redact")}
 
 _PAGED = {"limit": Field("int", required=False, max=LIMIT_MAX),
           "before": Field("string", required=False, max=QUERY_MAX)}
@@ -250,7 +253,7 @@ PAGE = lb.Page(
                  returns=RUNS),
         lb.Route("/api/preview", "act", _target("preview"), body=REQUEST, returns=PREVIEW),
         lb.Route("/api/launch", "act", _target("launch"),
-                 body={**REQUEST, "ticket": Field("string", max=1024)}, returns=ACTED),
+                 body={**REQUEST, "ticket": Field("string", max=1024)}, returns=LAUNCHED),
         lb.Route("/api/resume", "act", _target("resume"),
                  body={"session": Field("string", max=QUERY_MAX),
                        "slot": Field("string", required=False, max=QUERY_MAX)},
@@ -263,7 +266,7 @@ PAGE = lb.Page(
     ),
 )
 
-__all__ = ["CATALOG", "FIELD", "LAUNCH", "LAUNCHES", "LIMIT", "LIMIT_MAX", "PAGE", "PAST",
-           "PRESET", "PRESETS", "PREVIEW", "PROBLEM", "REFUSAL", "REQUEST", "RUN",
-           "RUN_EVENT", "RUN_LINE", "RUNS", "SESSIONS", "SESSION_STATE", "STANDING",
-           "STATE", "VALUES"]
+__all__ = ["ACTED", "CATALOG", "FIELD", "LAUNCH", "LAUNCHED", "LAUNCHES", "LIMIT", "LIMIT_MAX",
+           "PAGE", "PAST", "PRESET", "PRESETS", "PREVIEW", "PROBLEM", "REFUSAL", "REQUEST", "RUN",
+           "RUNS", "RUN_EVENT", "RUN_LINE", "SESSIONS", "SESSION_STATE", "STANDING", "STATE",
+           "VALUES"]

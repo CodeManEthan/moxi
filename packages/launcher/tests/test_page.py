@@ -175,8 +175,6 @@ def test_a_launch_request_takes_every_settable_catalog_key_and_no_other():
 
 
 @pytest.mark.parametrize("method,path,body", [
-    ("POST", "/api/preview", {"values": {"harness": "claude", "add_dir": ["/a"]}}),
-    ("POST", "/api/launch", {"ticket": "t", "seat": "planner"}),
     ("POST", "/api/resume", {"session": SID}),
 ])
 def test_a_route_not_answered_yet_is_refused_cleanly(method, path, body):

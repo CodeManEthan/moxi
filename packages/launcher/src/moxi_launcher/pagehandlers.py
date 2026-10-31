@@ -25,6 +25,28 @@ nothing to the log, nor does a spawning row turning stale. The poller is not a r
 stream or a busy hold, so it never delays the server's idle exit. It survives every
 exception: a failure is logged once per class and the next tick reads again.
 
+**A launch from the page** goes in two steps. `/api/preview` reads the form's values as
+typed, as the command line reads them: each becomes its row's option and goes through
+`catalog.parse` for the launch's harness, so a value the page sends overrides the preset
+and `[defaults]`, as one typed does. It answers `api.preview`'s composition beside every
+refusal `api.check` finds, and, for a launch not in a terminal, whether the command is on
+the PATH the launch job would start it with, which is this server's (a refusal
+`not-found` naming that PATH). A launch that names no directory, project or scratch is
+refused `no-cwd`: the server's own directory means nothing to the user. When nothing
+refuses it and its target isn't `terminal`, the preview issues a ticket: `<request
+id>.<expiry>.<hmac>`, an HMAC-SHA256 over the request as sent, its request id and its
+expiry, with a 32-byte key kept in `STATE/page.key` (0600, made at first use), living
+`page.launch_wait_s` seconds. A terminal launch gets the `moxi launcher run` command to
+copy instead: the page never runs one, since it would take the server's place.
+
+`/api/launch` takes the request and its ticket. A ticket not issued for exactly this
+request is refused `bad-ticket`, an old one `expired`. It writes the request file
+(`STATE/runs/<request id>.request.json`, 0600, made only if it is not there) and spawns
+`moxi-launcher-job launch <request id>` detached, then answers 202 with the status path
+`/api/launches?request=<request id>`, which shows the launch's row once it is written, or
+the refusal the job recorded before it. A ticket used a second time is a 409, whether its
+request file is still there or the launch log already knows its id.
+
 A handler cuts each answer to its route's declared keys, and turns any failure it did not
 expect into `state` `error` with a fixed `detail` naming only the exception's class, so no
 message text, which may hold a path, reaches the browser. The class and its traceback are
@@ -40,22 +62,30 @@ Like `page`, this module reaches loopback only through `moxi.modules.load`.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
+import os
+import secrets
 import sqlite3
 import threading
 import time
+import uuid
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import replace
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-from moxi import aio, modules, proc
+from moxi import aio, files, modules, paths, proc
 from moxi import store as core_store
 from moxi.config import ConfigError
+from moxi.paths import Layout
 
-from . import catalog, presets, slots, state, store, target
+from . import api, catalog, job, presets, settings, slots, state, store, target, targets
+from .compose import common
 from .page import LAUNCH, LIMIT, RUN
 from .resume import sessions as past_sessions
 
@@ -585,6 +615,330 @@ async def events(call: Any) -> Any:
     return call.stream(_feed().topics)
 
 
+# -- the ticket -----------------------------------------------------------------------------
+
+#: The ticket key's file under the launcher's state root, and its length in bytes.
+KEY_FILE = "page.key"
+KEY_BYTES = 32
+_key_lock = threading.Lock()
+
+
+def page_key(env: Mapping[str, str] | None = None) -> bytes:
+    """The key tickets are signed with: 32 random bytes in `STATE/page.key` (0600), made
+    at first use. A file of any other length is replaced, which voids the tickets out."""
+    path = Layout(store.MODULE).state_dir(env) / KEY_FILE
+    with _key_lock:
+        try:
+            key = path.read_bytes()
+        except FileNotFoundError:
+            key = b""
+        if len(key) != KEY_BYTES:
+            key = secrets.token_bytes(KEY_BYTES)
+            files.private_dir(path.parent)
+            files.atomic_write(path, key, mode=0o600)
+        return key
+
+
+def canonical(body: Mapping[str, Any], request_id: str, expires: int) -> bytes:
+    """The request a ticket is issued for, as the bytes it signs: the preset, the values
+    and `off_posture` as the page sent them, the request id and the expiry."""
+    asked = {"seat": body.get("seat"), "project_preset": body.get("project_preset"),
+             "values": body.get("values") or {},
+             "off_posture": bool(body.get("off_posture", False)),
+             "request_id": request_id, "expires": expires}
+    return json.dumps(asked, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False).encode()
+
+
+def _signed(body: Mapping[str, Any], request_id: str, expires: int) -> str:
+    return hmac.new(page_key(), canonical(body, request_id, expires),
+                    hashlib.sha256).hexdigest()
+
+
+def ticket(body: Mapping[str, Any], request_id: str,
+           now: float | None = None) -> tuple[str, str]:
+    """A ticket to launch `body` as `request_id`, and when it expires: it lives
+    `page.launch_wait_s` seconds. It is `<request id>.<expiry>.<hmac>`."""
+    wait = int(settings.current()["page.launch_wait_s"])
+    expires = int(time.time() if now is None else now) + wait
+    at = store.stamp(datetime.fromtimestamp(expires, timezone.utc))
+    return f"{request_id}.{expires}.{_signed(body, request_id, expires)}", at
+
+
+def verify(body: Mapping[str, Any],
+           now: float | None = None) -> tuple[str | None, dict[str, Any] | None]:
+    """`(request id, None)` when `body`'s ticket was issued for exactly this request and
+    has not expired, else `(None, refusal)`."""
+    parts = str(body.get("ticket", "")).rsplit(".", 2)
+    if len(parts) == 3 and common.plain_name(parts[0]) and parts[1].isdigit():
+        request_id, expires = parts[0], int(parts[1])
+        if hmac.compare_digest(parts[2], _signed(body, request_id, expires)):
+            if (time.time() if now is None else now) <= expires:
+                return request_id, None
+            return None, {"code": "expired", "row": None,
+                          "problem": "the ticket for this launch has expired",
+                          "hint": "preview the launch again"}
+    return None, {"code": "bad-ticket", "row": None,
+                  "problem": "the ticket was not issued for this launch as it is now",
+                  "hint": "preview the launch again, and launch what it shows"}
+
+
+# -- the form's values as a launch request ------------------------------------------------------
+
+
+def _refusal(error: BaseException) -> dict[str, Any]:
+    return job.refused_detail(error)
+
+
+def _is_path(row: catalog.Row) -> bool:
+    return row.type == "path" or (row.type == "list" and row.items == "path")
+
+
+def tokens(values: Mapping[str, Any], harness: str,
+           available: Callable[[str], bool]) -> tuple[list[str], dict[str, object]]:
+    """The form's values as the words a `harness` launch's command line would type,
+    each with its row's option, and the values the command line can't type (an optional
+    switch set off, a list emptied), already typed. A value spelled as the command line
+    spells it; a path must be absolute (or start with `~`), since the page server's own
+    directory means nothing to the user. Raises a refusal for a row the harness doesn't
+    have or this install doesn't offer, and for a bad spelling."""
+    words: list[str] = []
+    typed: dict[str, object] = {}
+    extra: list[str] = []
+    for name, value in values.items():
+        row = catalog.row(harness, name)
+        if row is None:
+            raise catalog.BadValue(name, f"{name} is not a {harness} row or a launcher row",
+                                   f"leave {name} out of a {harness} launch")
+        if name == catalog.EXTRA:
+            extra = [str(word) for word in value]
+            continue
+        items = value if isinstance(value, list) else [value]
+        if _is_path(row):
+            for item in items:
+                if item and not Path(item).expanduser().is_absolute():
+                    raise catalog.BadValue(name, f"{name} is the relative path {item!r}",
+                                           "give an absolute path, or one starting with ~")
+        option = row.option
+        if isinstance(value, list):
+            if value:
+                words += [f"{option}={item}" for item in value]
+                continue
+            direct: object = []
+        elif row.type == "bool":
+            if value not in ("true", "false"):
+                raise catalog.BadValue(name, f"{name} is {value!r}, not true or false",
+                                       f"set {name} to true or false")
+            words.append(option if value == "true" else f"--no-{option[2:]}")
+            continue
+        elif row.optional_value and value in ("true", "false"):
+            if value == "true":
+                words.append(option)
+                continue
+            direct = False
+        else:
+            words.append(f"{option}={value}")
+            continue
+        why = row.unoffered(available, harness)
+        if why is not None:
+            raise catalog.NeedsModule(row, *why)
+        typed[name] = row.check(direct)
+    return words + (["--", *extra] if extra else []), typed
+
+
+def launch_request(body: Mapping[str, Any], request_id: str):
+    """The `api.LaunchRequest` the page's `body` asks for, under `request_id`, and the
+    words of its `moxi launcher run` command. Each value is read as typed, as the command
+    line reads it: its words go through `catalog.parse` for `harness`'s rows (the value
+    set, else the preset's, else `[defaults]`'s), so a value the page sends overrides the
+    preset even when it is the shipped default. Raises a refusal."""
+    seat = body.get("seat") or None
+    project_preset = body.get("project_preset") or None
+    values = dict(body.get("values") or {})
+    available = _available()
+    harness = values.get("harness") or presets.harness_of(
+        presets.Request(seat=seat, project_preset=project_preset))
+    if harness not in catalog.HARNESSES:
+        raise catalog.BadValue("harness", f"harness cannot be {harness!r}",
+                               f"set it to one of {', '.join(catalog.HARNESSES)}")
+    words, direct = tokens(values, harness, available)
+    parsed = catalog.parse(words, harness, available=available)
+    off_posture = bool(body.get("off_posture", False))
+    request = api.LaunchRequest(seat=seat, project_preset=project_preset,
+                                typed={**parsed.values, **direct}, extra=parsed.extra,
+                                off_posture=off_posture, request_id=request_id)
+    command = ["moxi", "launcher", "run"]
+    if seat:
+        command += ["--seat", seat]
+    if project_preset:
+        command += ["--project-preset", project_preset]
+    if off_posture:
+        command.append("--off-posture")
+    return request, command + words
+
+
+def _command(words: list[str]) -> str:
+    from .cli import command_line
+
+    return command_line(words)
+
+
+# -- /api/preview ---------------------------------------------------------------------------
+
+#: The refusals a launch request meets in the launcher's own words.
+REFUSALS = (catalog.Refused, ConfigError, core_store.StoreError)
+#: What the page shows when the harness is not found where the launch would look.
+NOT_ON_PATH = "{command} is not found on the PATH the launcher's page server searched: {path}"
+NOT_ON_PATH_HINT = ("install it in a folder on that PATH, or give the UI shell a PATH that "
+                    "holds it")
+
+
+def _previewed(**answer: Any) -> dict[str, Any]:
+    empty = {"refused": [], "harness": None, "mode": None, "target": None, "argv": [],
+             "stamps": [], "first_turn": None, "not_applied": [], "warnings": [],
+             "command": None, "request_id": None, "ticket": None, "expires_at": None}
+    return {**empty, **answer}
+
+
+def on_path(composition: Any) -> dict[str, Any] | None:
+    """The refusal of a launch whose command is not found on the PATH the launch job
+    would start it with, the page server's, naming that PATH; None when it is found. The
+    check is the target's own, as `launch` makes it."""
+    env = common.environment(os.environ, composition, modules.session_env())
+    try:
+        targets.get(composition.target).prepare(composition, env)
+    except targets.NoCommand as error:
+        return {"code": error.code, "row": None,
+                "problem": NOT_ON_PATH.format(command=error.command,
+                                              path=env.get("PATH", os.defpath)),
+                "hint": NOT_ON_PATH_HINT}
+    return None
+
+
+def previewed(body: Mapping[str, Any]) -> dict[str, Any]:
+    """What `/api/preview` answers for the page's `body`: what the launch would start,
+    every refusal `check` finds, and, when there is none and the target isn't
+    `terminal`, a ticket to launch it. A terminal launch is answered with the command to
+    copy instead."""
+    request_id = str(uuid.uuid4())
+    try:
+        request, words = launch_request(body, request_id)
+        job.placed(request)
+        composition = api.preview(request)
+        checked = [_refusal(found) for found in api.check(request)]
+    except REFUSALS as error:
+        return _previewed(refused=[_refusal(error)])
+    terminal = composition.target == "terminal"
+    refused: list[dict[str, Any]] = []
+    for found in [*checked, None if terminal else on_path(composition)]:
+        if found is not None and found not in refused:
+            refused.append(found)
+    issued, expires_at = (None, None) if refused or terminal else ticket(body, request_id)
+    return _previewed(
+        refused=refused, harness=composition.harness, mode=composition.mode,
+        target=composition.target, argv=list(composition.argv),
+        stamps=[{"name": str(k), "value": str(v)} for k, v in composition.env.items()],
+        first_turn=composition.first, not_applied=list(composition.not_applied),
+        warnings=list(composition.warnings),
+        command=_command(words) if terminal else None,
+        request_id=None if issued is None else request_id, ticket=issued,
+        expires_at=expires_at)
+
+
+def _unexpected(err: BaseException, what: str) -> dict[str, Any]:
+    _log_once(err, what)
+    return {"code": "error", "row": None, "problem": UNEXPECTED.format(type(err).__name__),
+            "hint": "try again; if it fails the same way, read the page server's log"}
+
+
+def preview(call: Any) -> dict[str, Any]:
+    """`POST /api/preview`: what the launch the form describes would start, its
+    refusals, and a ticket to launch it."""
+    with call.busy("preview"):
+        try:
+            return previewed(call.body)
+        except Exception as err:
+            return _previewed(refused=[_unexpected(err, "previewing a launch failed")])
+
+
+# -- /api/launch ----------------------------------------------------------------------------
+
+#: The 409 of a ticket used a second time.
+USED = "the ticket for launch {} was used already; preview the launch again to launch it again"
+#: The status path a page launch's 202 points to.
+STATUS = "/api/launches?request={}"
+
+# The call the launch job is started through, named here so a test can stand in for it.
+_spawn = proc.spawn
+
+
+def _known(request_id: str) -> bool:
+    """Whether the launch log has `request_id`'s row, or its refusal."""
+    with _store() as conn:
+        if conn is None:
+            return False
+        rows, refused = _requested(conn, request_id)
+        return bool(rows) or refused is not None
+
+
+def _start_job(request_id: str) -> None:
+    env = common.scrub(os.environ, modules.session_env())
+    argv = [str(paths.script("moxi-launcher-job")), job.PAGE, request_id]
+    _spawn(argv, detached=True, env=env, cwd=str(Layout(store.MODULE).state_dir()),
+           output=targets.run_log(request_id))
+
+
+def launched(body: Mapping[str, Any]) -> Any:
+    """What `/api/launch` answers for the page's `body`: 202 with the status path once the
+    launch job is started, a refusal before that, or a 409 for a ticket used already."""
+    request_id, refused = verify(body)
+    if refused is not None:
+        return {"refused": refused, "command": None}
+    try:
+        request, words = launch_request(body, request_id)
+        resolved = job.placed(request)
+    except REFUSALS as error:
+        return {"refused": _refusal(error), "command": None}
+    if resolved.target == "terminal":
+        return {"refused": {"code": "terminal", "row": "target",
+                            "problem": "a launch in a terminal is not run by the page",
+                            "hint": "run its command in a terminal of your own"},
+                "command": _command(words)}
+    data = {"act": "launch", "request_id": request_id, "seat": request.seat,
+            "project_preset": request.project_preset, "typed": dict(request.typed),
+            "extra": list(request.extra), "off_posture": request.off_posture}
+    try:
+        path = job.write_request(request_id, data)
+    except FileExistsError:
+        raise lb.Conflict(USED.format(request_id)) from None
+    if _known(request_id):
+        path.unlink(missing_ok=True)
+        raise lb.Conflict(USED.format(request_id))
+    try:
+        _start_job(request_id)
+    except Exception as err:
+        path.unlink(missing_ok=True)
+        _log_once(err, "the launch job did not start")
+        return {"refused": {"code": targets.SPAWN_FAILED, "row": None,
+                            "problem": f"the launch job did not start ({type(err).__name__})",
+                            "hint": "try again; the page server's log has the details"},
+                "command": None}
+    return lb.Accepted(STATUS.format(request_id))
+
+
+def launch(call: Any) -> Any:
+    """`POST /api/launch`: the launch a ticket was issued for, written as a request file
+    and run by a detached launch job (202). Never run here, and never for a terminal."""
+    with call.busy("launch"):
+        try:
+            return launched(call.body)
+        except (lb.Conflict, lb.Refused):
+            raise
+        except Exception as err:
+            return {"refused": _unexpected(err, "a launch from the page failed"),
+                    "command": None}
+
+
 # -- the routes still to come ----------------------------------------------------------------
 
 
@@ -596,12 +950,12 @@ def _not_yet(route: str) -> Callable[[Any], Any]:
     return handler
 
 
-preview = _not_yet("/api/preview")
-launch = _not_yet("/api/launch")
 resume = _not_yet("/api/resume")
 
-__all__ = ["EVENT_TEXT", "REGATHER", "TICK", "TOPICS", "UNEXPECTED", "UNREADABLE", "WITHHELD",
-           "alive", "events", "field", "fields", "gather_launches", "gather_sessions", "launch",
-           "launch_row", "launches", "live", "live_states", "preview", "read_catalog",
-           "read_launches", "read_presets", "read_runs", "read_sessions", "read_state",
-           "refusal", "resume", "run_entry", "session_state", "spelled", "unreadable"]
+__all__ = ["EVENT_TEXT", "KEY_BYTES", "KEY_FILE", "NOT_ON_PATH", "REFUSALS", "REGATHER", "STATUS",
+           "TICK", "TOPICS", "UNEXPECTED", "UNREADABLE", "USED", "WITHHELD", "alive", "canonical",
+           "events", "field", "fields", "gather_launches", "gather_sessions", "launch",
+           "launch_request", "launch_row", "launched", "launches", "live", "live_states", "on_path",
+           "page_key", "preview", "previewed", "read_catalog", "read_launches", "read_presets",
+           "read_runs", "read_sessions", "read_state", "refusal", "resume", "run_entry",
+           "session_state", "spelled", "ticket", "tokens", "unreadable", "verify"]
