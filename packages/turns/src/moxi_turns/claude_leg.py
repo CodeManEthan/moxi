@@ -18,17 +18,28 @@ Lines (endpoint to runner)
 
 The first line, always first, before the runner sends anything:
 
-    {"op": "hello", "leg": 2, "mod_sock": "<absolute path>", "stop_wait_ms": n,
+    {"op": "hello", "leg": 3, "mod_sock": "<absolute path>", "stop_wait_ms": n,
      "listen_wait_ms": n, "endpoint_version": "…", "pid": <endpoint pid>,
-     "stop_after_clear": bool}
+     "stop_after_clear": bool, "guards": [<entry>, ...]}
 
 `stop_after_clear` says whether the runner stops a `clear`'s shells through `TaskStop`
 after the clear (`STOP_AFTER_CLEAR`); false, it stops none after a clear and reports
 every listed one left, why `not-stopped-after-clear`.
 
+`guards` is the guard table for Claude, which the runner matches every tool call against
+in its own process (`moxi_turns.guards.run` states the rule). Each entry:
+
+    {"id": "<module>.<name>", "calls": ["<pattern>", ...], "who": "any" | "main" | "agents",
+     "match": {"<input field>": "<regex>"} | null, "match_flags": "" | "i",
+     "judge": bool, "deny": "<text>", "wants": ["prompts"]?, "on_error": "allow" | "deny",
+     "deadline_ms": n}
+
+`deadline_ms` is already clamped to `guards.max_wait_ms`. A covering entry with no judge
+refuses with its `deny` and no trip; covering judge entries are asked on `/ask/guard`.
+
 or, when the endpoint cannot start (its config is broken), its only line:
 
-    {"op": "failed", "leg": 2, "error": "<words>"}
+    {"op": "failed", "leg": 3, "error": "<words>"}
 
 Then, in any order:
 
@@ -54,6 +65,9 @@ Then, in any order:
         Read `$.agent.list()` and `$.prompt.read()` and answer on `/live`.
     {"op": "agents", "ask": n}
         Read `$.agent.list()` and answer on `/agents`, each entry as the engine gives it.
+    {"op": "guards", "table": [<entry>, ...]}
+        The guard table again, read at a `ready` (start, resume, clear, compaction); it
+        replaces the one the runner holds. Sent before the `ready`'s `/ask/context` answer.
 
 Requests (runner and gate to endpoint, `POST` on `mod.sock`)
 ------------------------------------------------------------
@@ -123,6 +137,21 @@ calls `next`) or `{"ok": true, "verdict": "drop", "reason": r, "text": "<one lin
 person>"}`; the gate drops a `drop` with `text` and never calls `next`. A nonce that names
 no open window reads `late`, and the endpoint logs the late entry.
 
+`/ask/guard` — `{call: {tool, tool_use_id, input, agentId, prompts?}, guards: [id, ...]}`
+for a tool call that judge entries of the table cover: `input` is the call's envelope less
+`tool`, `tool_use_id` and `agentId` (absent or null on the main loop); `prompts`, the
+current main turn's prompts `[{origin, text}]`, when an asked entry `wants` them. The
+endpoint judges each named entry within its own `deadline_ms` from the ask's arrival, so
+the answer comes within the largest of them; the runner bounds the trip by that plus its
+margin. An id not on the endpoint's table (it changed at a `ready`) is skipped. Answer
+`{"ok": true, "deny"?: "<reason>", "lines": ["<text>", ...], "broken": ["<text>", ...]}`:
+`deny` refuses the call; else `lines` (the judges' allow lines) and `broken` (one line
+per guard that broke and let the call through) go after the tool's result, in that order.
+A trip that fails or overruns breaks every entry it asked: the runner refuses with
+"turns could not check this call with guard <id> (<why>)" when one declared `on_error`
+`deny`, else adds the line "[turns] guard <id> could not check this call (<why>); it ran
+unchecked." per entry.
+
 `/hook-times` — `{samples: [{event, ms}]}` from the runner or the gate, each at most
 once a minute: how long each of its hook handlers took, entry to return less the time in
 `next`. The gate's events carry the prefix `gate `. The leg keeps them for the doctor
@@ -149,7 +178,7 @@ from . import hooktimes
 log = logging.getLogger("moxi.turns.claude")
 
 #: This leg's version.
-LEG = 2
+LEG = 3
 
 #: Whether the runner stops a `clear`'s shells after the clear. Claude Code may no longer
 #: find a task through `TaskStop` once `/clear` has run; until a live session shows it
@@ -162,7 +191,7 @@ NOT_STOPPED_AFTER_CLEAR = "not-stopped-after-clear"
 #: The endpoint's line ops.
 LINE_HELLO, LINE_FAILED = "hello", "failed"
 LINE_SUBMIT, LINE_APPEND, LINE_COMMAND, LINE_LIVE = "submit", "append", "command", "live"
-LINE_AGENTS = "agents"
+LINE_AGENTS, LINE_GUARDS = "agents", "guards"
 
 #: The request paths on `mod.sock`.
 PATH_REPORT = "/report"
@@ -170,10 +199,11 @@ PATH_LIVE = "/live"
 PATH_AGENTS = "/agents"
 PATH_STOP = "/ask/stop"
 PATH_CONTEXT = "/ask/context"
+PATH_GUARD = "/ask/guard"
 PATH_GATE_ENTRY = "/gate/entry"
 PATH_GATE_COMMAND = "/gate/command"
 PATH_HOOK_TIMES = "/hook-times"
-PATHS = (PATH_REPORT, PATH_LIVE, PATH_AGENTS, PATH_STOP, PATH_CONTEXT,
+PATHS = (PATH_REPORT, PATH_LIVE, PATH_AGENTS, PATH_STOP, PATH_CONTEXT, PATH_GUARD,
          PATH_GATE_ENTRY, PATH_GATE_COMMAND, PATH_HOOK_TIMES)
 
 #: The report kinds.
@@ -344,8 +374,8 @@ def _handler_for(handle):
 
 
 __all__ = ["LEG", "STOP_AFTER_CLEAR", "NOT_STOPPED_AFTER_CLEAR", "LINE_HELLO", "LINE_FAILED", "LINE_SUBMIT", "LINE_APPEND", "LINE_COMMAND",
-           "LINE_LIVE", "LINE_AGENTS", "PATH_REPORT", "PATH_LIVE", "PATH_AGENTS",
-           "PATH_STOP", "PATH_CONTEXT",
+           "LINE_LIVE", "LINE_AGENTS", "LINE_GUARDS", "PATH_REPORT", "PATH_LIVE",
+           "PATH_AGENTS", "PATH_STOP", "PATH_CONTEXT", "PATH_GUARD",
            "PATH_GATE_ENTRY", "PATH_GATE_COMMAND", "PATH_HOOK_TIMES", "PATHS", "R_SESSION",
            "R_TURN_START", "R_TURN_COMPLETE", "R_SUBMIT_CLOSE", "R_SUBMIT_BOUND", "R_APPEND_DONE",
            "R_APPEND_FAILED",

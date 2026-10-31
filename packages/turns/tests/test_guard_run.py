@@ -1,5 +1,6 @@
 """The endpoint's guard runner: the shared matching cases, each harness's table, the judges'
-lanes, deadlines and breaks, and the doctor's records."""
+lanes, deadlines and breaks, the doctor's records, and `/ask/guard` and the `guards` line
+on the Claude leg."""
 
 from __future__ import annotations
 
@@ -13,11 +14,17 @@ from types import SimpleNamespace
 import pytest
 
 import moxi_turns
+from claude_runner import FakeRunner, pipe_pair, post
 from conftest import write_config
+from moxi_turns import claude_leg as leg
+from moxi_turns import protocol
+from moxi_turns.claude_endpoint import ClaudeHarness
+from moxi_turns.endpoint import Endpoint
 from moxi_turns.guards import (Allow, Deny, Found, Guard, Loaded, On, Problem, Prompt,
                                ToolCall, regex_problem)
 from moxi_turns.guards.run import (GUARD_WORKERS, STILL_JUDGING, Answer, GuardRunner,
                                    break_deny, break_line, decide, entry_for, load_line)
+from moxi_turns.listeners import Registry
 
 CASES_PATH = (Path(moxi_turns.__file__).parent / "claude" / "moxi-turns" / "tests"
               / "guard-cases.json")
@@ -501,3 +508,127 @@ def test_the_table_comes_from_turns_config_and_custom_files(turns_env, tmp_path)
         assert got.deny == "judged ls"
     finally:
         runner.close()
+
+
+# -- on the Claude leg -------------------------------------------------------------------
+
+@pytest.fixture
+def leg_rig(turns_env, rig):
+    made = []
+
+    def make(*founds, problems=(), env=None):
+        r = rig(*founds, problems=problems)
+        rd, w = pipe_pair()
+        harness = ClaudeHarness(w, pid=os.getpid(), cwd="/work", guards=r.runner)
+        ep = Endpoint(harness, registry=Registry(), env=env)
+        ep.prepare()
+        harness.serve(str(ep.dir / protocol.MOD_SOCK))
+        runner = FakeRunner(rd)
+        harness.first_line()
+        runner.wait_first()
+        runner.session("s-1")
+        ep.open()
+        made.append((ep, w))
+        return ep, runner, r
+
+    yield make
+    for ep, w in made:
+        ep.stop("the test ended")
+        w.close()
+
+
+def test_the_hello_carries_claudes_table_and_the_leg_is_3(leg_rig):
+    ep, runner, r = leg_rig(judged("a", lambda c: None, match={"command": "rm"}),
+                            data_only("b", "no", calls=("Agent",)))
+    assert leg.LEG == 3 and runner.first["leg"] == 3
+    assert leg.PATH_GUARD == "/ask/guard" and leg.PATH_GUARD in leg.PATHS
+    assert runner.first["guards"] == [
+        {"id": "t.a", "calls": ["Bash"], "who": "any", "match": {"command": "rm"},
+         "match_flags": "", "judge": True, "deny": "", "wants": [], "on_error": "allow",
+         "deadline_ms": 500},
+        {"id": "t.b", "calls": ["Agent"], "who": "any", "match": None, "match_flags": "",
+         "judge": False, "deny": "no", "wants": [], "on_error": "allow", "deadline_ms": 500}]
+
+
+def test_each_ready_sends_the_table_again_and_names_a_load_failure_once(leg_rig):
+    problem = Problem("t.bad", "load", "the file does not load: OSError: gone", on=True)
+    ep, runner, r = leg_rig(judged("a", lambda c: None), problems=(problem,))
+    # Read at the first line, and said at the first ready.
+    answer = runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "startup",
+                                            "session_id": "s-1"})
+    assert runner.tables.get(timeout=2) == r.runner.table()
+    assert answer["context"] == load_line("t.bad", problem.reason)
+    r.founds.append(data_only("new", "no"))
+    answer = runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "clear",
+                                            "session_id": "s-2"})
+    assert [e["id"] for e in runner.tables.get(timeout=2)] == ["t.a", "t.new"]
+    assert answer["context"] is None
+
+
+def test_ask_guard_builds_the_call_from_the_leg_and_the_endpoint(leg_rig):
+    seen = {}
+
+    def judge(call):
+        seen["call"] = call
+        return Allow("checked")
+
+    ep, runner, r = leg_rig(judged("a", judge, wants=("prompts",)),
+                            env={**os.environ, "MOXI_GUARD_TEST": "1"})
+    answer = runner.post(leg.PATH_GUARD, {
+        "call": {"tool": "Bash", "tool_use_id": "tu-9", "agentId": "a-4",
+                 "input": {"command": "rm -rf x"},
+                 "prompts": [{"origin": "composer", "text": "go"}, {"text": "bare"}, 5]},
+        "guards": ["t.a"]})
+    assert answer == {"ok": True, "lines": ["checked"], "broken": []}
+    c = seen["call"]
+    assert (c.harness, c.session_id, c.agent_id, c.tool, c.tool_use_id) == \
+        ("claude", "s-1", "a-4", "Bash", "tu-9")
+    assert c.input == {"command": "rm -rf x"} and c.cwd == "/work"
+    assert c.env["MOXI_GUARD_TEST"] == "1"
+    assert c.prompts == (Prompt("composer", "go"), Prompt(None, "bare"))
+    answer = runner.post(leg.PATH_GUARD, {"call": {"tool": "Bash", "input": {}},
+                                          "guards": ["t.a"]})
+    assert seen["call"].agent_id is None and seen["call"].tool_use_id is None
+
+
+@pytest.mark.parametrize("body", [
+    {"guards": ["t.a"]},
+    {"call": {"tool": ""}, "guards": ["t.a"]},
+    {"call": {"tool": "Bash", "input": "rm"}, "guards": ["t.a"]},
+    {"call": {"tool": "Bash"}},
+    {"call": {"tool": "Bash"}, "guards": ["t.a", 3]},
+], ids=["no-call", "no-tool", "input-not-object", "no-guards", "bad-id"])
+def test_a_malformed_ask_is_400(leg_rig, body):
+    ep, runner, r = leg_rig(judged("a", lambda c: None))
+    status, answer = post(runner.mod_sock, leg.PATH_GUARD, body)
+    assert status == 400 and answer["ok"] is False
+
+
+def test_an_ask_holds_its_request_thread_no_longer_than_its_deadline(leg_rig, rig):
+    gate = rig.gate()
+    ep, runner, r = leg_rig(judged("h", lambda c: gate.wait(10), deadline_ms=300))
+    body = {"call": {"tool": "Bash", "input": {"command": "x"}}, "guards": ["t.h"]}
+    took = []
+    answers = []
+
+    def one():
+        t0 = time.monotonic()
+        answers.append(runner.post(leg.PATH_GUARD, body))
+        took.append(time.monotonic() - t0)
+
+    threads = [threading.Thread(target=one) for _ in range(GUARD_WORKERS + 2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(5)
+    # Every ask, the four judged and the two that waited, answers inside the deadline
+    # plus the trip; each lets the call through with its line.
+    assert len(answers) == GUARD_WORKERS + 2
+    assert max(took) < 0.3 + 0.4
+    reasons = sorted(a["broken"][0] for a in answers)
+    assert reasons.count(break_line("t.h", "it took longer than 300 ms")) == GUARD_WORKERS
+    assert reasons.count(break_line("t.h", STILL_JUDGING)) == 2
+    t0 = time.monotonic()
+    again = runner.post(leg.PATH_GUARD, body)       # every thread hung: at once
+    assert time.monotonic() - t0 < 0.2
+    assert again["broken"] == [break_line("t.h", STILL_JUDGING)]

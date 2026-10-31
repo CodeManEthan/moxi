@@ -55,6 +55,13 @@ being written when its delivery settles `lost` (the core's expiry) may still rea
 runner once it reads again, and its prompt may run; that is the accepted cost of the
 bound, and the gate drops it unless its window is the open one.
 
+Guards: the endpoint loads the guards that are on at its first line and at each `ready`,
+and hands the runner Claude's table, in the first line and in a `guards` line before the
+`ready`'s context answer. The runner matches each tool call against it in its own
+process and asks `/ask/guard` only for calls judge guards cover; the endpoint runs those
+judges (`moxi_turns.guards.run`). A guard on the list that did not load is named once in
+a `ready`'s start context.
+
 A steer reads `Started`, and its turn names it, once the runner reports `append.done`
 (`$.session.append` resolved without a deny); `append.failed` refuses it `idle`.
 
@@ -85,6 +92,9 @@ from dataclasses import dataclass, field
 from typing import Any, BinaryIO
 
 from . import claude_leg as leg
+from . import listeners as turns_listeners
+from .guards import ToolCall
+from .guards.run import GuardRunner, prompts_of
 from .harness import CommandRequest, Delivery, Harness, Live
 from .results import (Agent, Agents, COMMAND_REFUSALS, LOST_UNTIED, OUTCOMES, SHELL_UNLISTED, Failed,
                       LeftShell, Passed, Ran, Refused, Shells, StopFacts)
@@ -131,9 +141,13 @@ class ClaudeHarness(Harness):
     live_wait_s = LIVE_WAIT_S
 
     def __init__(self, out: BinaryIO, *, pid: int | None = None, cwd: str | None = None,
-                 on_end=None):
+                 on_end=None, guards: GuardRunner | None = None):
         self.pid = os.getppid() if pid is None else pid
         self.cwd = os.getcwd() if cwd is None else cwd
+        #: The guard runner; made at `attach` with the endpoint's environment when None.
+        self.guards = guards
+        #: The file Claude writes the session's records to, once the runner names it.
+        self.record_path: str | None = None
         self.mod_version: str | None = None
         self._lines = leg.LineWriter(out, on_broken=on_end)
         self._lock = threading.RLock()
@@ -160,6 +174,11 @@ class ClaudeHarness(Harness):
     def broken(self) -> bool:
         return self._lines.broken
 
+    def attach(self, endpoint) -> None:
+        super().attach(endpoint)
+        if self.guards is None:
+            self.guards = GuardRunner(self.name, env=endpoint.env)
+
     def serve(self, path: str) -> None:
         """Listen on `mod.sock` at `path`."""
         self.server = leg.LegServer(path, self.handle).start()
@@ -172,7 +191,7 @@ class ClaudeHarness(Harness):
             "stop_wait_ms": int(ep.stop_wait_s * 1000),
             "listen_wait_ms": int(ep.listen_wait_s * 1000),
             "endpoint_version": ep.version, "pid": os.getpid(),
-            "stop_after_clear": leg.STOP_AFTER_CLEAR})
+            "stop_after_clear": leg.STOP_AFTER_CLEAR, "guards": self.guards.reload()})
 
     def handle(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         if path == leg.PATH_REPORT:
@@ -185,6 +204,8 @@ class ClaudeHarness(Harness):
             return {"reason": self.endpoint.on_stop(_stop_facts(body))}
         if path == leg.PATH_CONTEXT:
             return {"context": self._context(body)}
+        if path == leg.PATH_GUARD:
+            return self._guard(body)
         if path == leg.PATH_GATE_ENTRY:
             return self._gate_entry(body)
         if path == leg.PATH_GATE_COMMAND:
@@ -192,6 +213,8 @@ class ClaudeHarness(Harness):
         raise leg.BadRequest(f"no such path {path!r}")
 
     def close(self) -> None:
+        if self.guards is not None:
+            self.guards.close()
         if self.server is not None:
             try:
                 self.server.close()
@@ -423,12 +446,37 @@ class ClaudeHarness(Harness):
         if event == "ready":
             source = _opt_str(body, "source")
             self._learn(session_id)
+            # The new table reaches the runner before the session's first call can.
+            self._lines.write({"op": leg.LINE_GUARDS, "table": self.guards.reload()})
             if source == "clear":
                 self._clear_ran(session_id)
-            return self.endpoint.ready(source, session_id)
+            context = self.endpoint.ready(source, session_id)
+            notes = self.guards.take_notes()
+            if notes:
+                context = turns_listeners.JOIN.join([*([context] if context else []),
+                                                     "\n".join(notes)])
+            return context
         if event == "prompt":
             return self.endpoint.prompt()
         raise leg.BadRequest(f"unknown context event {event!r}")
+
+    def _guard(self, body: dict[str, Any]) -> dict[str, Any]:
+        """`/ask/guard`: judge one tool call by the guards the runner names. Holds this
+        request's thread until the largest named deadline at most."""
+        call, ids = body.get("call"), body.get("guards")
+        if not isinstance(call, dict) or not isinstance(call.get("tool"), str) \
+                or not call["tool"]:
+            raise leg.BadRequest('needs "call" with a "tool"')
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            raise leg.BadRequest('needs "guards", a list of guard ids')
+        given = call.get("input")
+        if given is not None and not isinstance(given, dict):
+            raise leg.BadRequest('"input" must be an object')
+        ep = self.endpoint
+        tc = ToolCall(self.name, ep.ledger.session_id, _opt_str(call, "agentId"),
+                      call["tool"], _opt_str(call, "tool_use_id"), dict(given or {}),
+                      self.cwd, self.record_path, ep.env, prompts_of(call.get("prompts")))
+        return self.guards.ask(tc, ids).to_leg()
 
     def _gate_entry(self, body: dict[str, Any]) -> dict[str, Any]:
         """The gate asks for a runner prompt as it enters. Under the lock
