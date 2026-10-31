@@ -1,0 +1,13 @@
+{
+  "name": "moxi-cache-web",
+  "private": true,
+  "description": "The cache module's web sources: its panel and its chip, one session's prompt cache.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "lit": "3.3.3"
+  }
+}

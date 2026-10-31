@@ -29,7 +29,6 @@ pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
                                 reason="cache runs on Linux only")
 
 ROOT = Path(__file__).resolve().parents[1]
-WEB = ROOT / "src" / "moxi_cache" / "web"
 TOKEN = "T" * 43
 SERVER_ID = "0123456789abcdef0123456789abcdef"
 PORT = 4321
@@ -190,8 +189,6 @@ def test_the_page_declares_two_reads_none_for_the_gateway():
     assert page.PAGE.idle_s == 300 and page.PAGE.health is None
 
 
-@pytest.mark.skipif(not (WEB / "build-stamp.txt").exists(),
-                    reason="the built web files come with the web build")
 def test_the_export_lists_the_built_assets():
     exported = loopback().export(page.PAGE)
     assert [route["path"] for route in exported["routes"]] == ["/api/clocks", "/api/events"]
