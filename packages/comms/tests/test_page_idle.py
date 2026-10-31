@@ -20,7 +20,7 @@ pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
 #: The idle time every page server of the test's shell gets, in seconds.
 IDLE_S = 0.5
 #: How long after its last request the server may take to exit: the idle time, plus the
-#: slack the design allows for its look and its exit.
+#: slack allowed for the server's idle look and its exit.
 EXIT_WITHIN = IDLE_S + 2
 
 

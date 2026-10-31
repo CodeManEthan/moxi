@@ -69,14 +69,35 @@ def _log_once(err: BaseException, what: str) -> None:
         log.error("%s (%s)", what, type(err).__name__, exc_info=err)
 
 
+def _fits(value: Any, shape: Any) -> bool:
+    # As the route's projection judges a value of `ROW`, so a row it would refuse is
+    # caught here and the read ends in `state` `error` rather than a 500.
+    if value is None:
+        return shape.nullable
+    if shape.type == "string":
+        return isinstance(value, str)
+    if shape.type == "bool":
+        return isinstance(value, bool)
+    if shape.type == "float":
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        try:
+            return math.isfinite(value)
+        except OverflowError:
+            return False
+    if shape.type == "list":
+        return (isinstance(value, (list, tuple))
+                and all(_fits(item, shape.items) for item in value))
+    return False
+
+
 def _row(row: api.RosterRow) -> dict:
     out = {key: getattr(row, key, None) for key in KEYS}
     for key in ("directors", "awaiting"):
         out[key] = list(out[key] or ())
-    if not (isinstance(out["qualified"], str) and isinstance(out["name"], str)):
-        raise ValueError("a roster row has no name")
-    if isinstance(out["bound_at"], float) and not math.isfinite(out["bound_at"]):
-        raise ValueError("a roster row's bound_at is not a finite number")
+    for key, value in out.items():
+        if not _fits(value, ROW.items[key]):
+            raise ValueError(f"a roster row's {key} is not of its declared type")
     return out
 
 

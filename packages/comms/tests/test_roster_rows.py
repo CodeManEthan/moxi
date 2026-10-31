@@ -160,7 +160,8 @@ def test_no_names_is_no_rows(monkeypatch):
 
 # --------------------------------------------------------------------------- failures
 
-@pytest.mark.parametrize("step", ["roster", ("session", LEAD), ("owner", SID_LEAD)])
+# PLAN is the first name read, so a call that followed the failure would show here.
+@pytest.mark.parametrize("step", ["roster", ("session", PLAN), ("owner", SID_PLAN)])
 def test_the_first_offline_ends_the_read_with_no_further_call(monkeypatch, step):
     daemon = two_live(fail={step: api.DaemonOffline("comms offline")}).install(monkeypatch)
     with pytest.raises(api.DaemonOffline):

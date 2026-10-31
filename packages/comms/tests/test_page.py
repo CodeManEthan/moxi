@@ -10,6 +10,7 @@ rig daemon, or from `api.roster_rows` stubbed.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import subprocess
@@ -230,6 +231,27 @@ def test_a_failed_read_is_a_200_with_state_error_and_a_fixed_detail(monkeypatch,
     assert "/x/y" not in json.dumps(body)
     logged = [r for r in caplog.records if r.exc_info and r.exc_info[0] is type(error)]
     assert len(logged) == 1 and "/x/y" in caplog.text
+
+
+LEAD_ROW = api.RosterRow(qualified="lead", name="lead", scope="global", live=True,
+                         kind=None, module=None, tier="chosen", adapter="claude-shim")
+
+
+@pytest.mark.parametrize("bad", [{"directors": (1,)}, {"directors": ({},)},
+                                 {"awaiting": (7,)}, {"tier": 3},
+                                 {"bound_at": float("inf")}, {"bound_at": 10 ** 400},
+                                 {"live": "yes"}, {"name": None}],
+                         ids=["int-director", "object-director", "int-awaiting", "int-tier",
+                              "infinite", "overflowing", "string-live", "no-name"])
+def test_a_value_its_declared_type_cannot_carry_is_state_error(monkeypatch, bad):
+    """A row built from a hand-edited claim file, with one value of the wrong type, ends
+    the read in `state` `error`, never a 500."""
+    rows = (dataclasses.replace(LEAD_ROW, **bad), dataclasses.replace(LEAD_ROW, name="ok"))
+    monkeypatch.setattr(api, "roster_rows", lambda **kw: rows)
+    status, body = run(get(served(), "/api/roster"))
+    assert status == 200
+    assert (body["state"], body["detail"], body["rows"]) == (
+        "error", pagehandlers.UNEXPECTED.format("ValueError"), [])
 
 
 def test_the_gather_asks_with_the_pages_deadline(monkeypatch):
