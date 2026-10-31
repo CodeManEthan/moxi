@@ -197,6 +197,23 @@ def test_delivered(turns, conn):
                                "delivery": "d-1", "turn_id": "t-1"}]
 
 
+def test_a_relaunch_s_handoff_goes_under_the_relaunch_header(turns, conn, tmp_path):
+    path = tmp_path / "handoff.md"
+    path.write_text("Done: the store.\n")
+    store.insert(conn, request_id="r-0", actor="ada", harness="claude", target="terminal",
+                 cwd="/work", values={"mode": "interactive"}, argv=["claude"], env={},
+                 posture="go", session_id="0b1c2d3e-4f50-4617-8899-aabbccddeeff")
+    store.insert(conn, request_id="r-1", actor="ada", harness="claude", target="terminal",
+                 cwd="/work", values={"mode": "interactive"}, argv=["claude"], env={},
+                 posture="relaunched", session_id=CLAUDE_ID, handoff_path=str(path),
+                 relaunch_of="r-0")
+    store.set_state(conn, "r-1", "started")
+    assert send(conn).outcome == "sent"
+    [given] = turns.calls("deliver")
+    assert given["text"] == (f"Handoff from launcher, relaunched by ada: {path}\n\n"
+                             "Done: the store.")
+
+
 def test_a_session_already_ready_is_sent_to(turns, conn):
     launch(conn, state="ready")
     assert send(conn).outcome == "sent"

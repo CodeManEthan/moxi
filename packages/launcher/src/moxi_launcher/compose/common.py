@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
-from moxi import files
+from moxi import files, paths
 
 from .. import catalog, store
 
@@ -174,6 +174,13 @@ class Context:
     when it is not installed. `comms_codex` and `comms_headless` say whether comms takes
     its Codex wrapper's per-launch settings and its headless flags. `windows` picks the
     command line limit.
+
+    A replay of a stored launch sets the rest. `posture` is the start posture the
+    identity block shows in place of the values' own (a relaunch's), which the values,
+    and so the new row's `values_json`, never carry; None keeps the values' posture.
+    `resume` says the session id is one the launch resumes, not one minted for it.
+    `relaunched` marks a relaunch, whose handoff header says so. `extra_stamps` are
+    stamps the replay adds to the option rows' own (`RELAUNCH`).
     """
 
     request_id: str
@@ -197,6 +204,20 @@ class Context:
     comms_codex: bool = False
     comms_headless: bool = False
     windows: bool = os.name == "nt"
+    posture: str | None = None
+    resume: bool = False
+    relaunched: bool = False
+    extra_stamps: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+
+    def posture_of(self, values: Mapping[str, object]) -> str:
+        """The start posture the launch shows: the replay's, else the values' own."""
+        if self.posture is not None:
+            return self.posture
+        return str(values.get("posture") or "")
+
+    def options(self, values: Mapping[str, object]) -> dict[str, str]:
+        """The stamps beyond the request's own: the option rows', then the replay's."""
+        return {**option_stamps(values), **self.extra_stamps}
 
 
 @dataclass(frozen=True)
@@ -313,15 +334,17 @@ def write_prompt(prompt_file: PromptFile) -> None:
 # -- the opening prompt -----------------------------------------------------------------
 
 def first_turn(actor: str, *, brief: str | None = None, handoff: str | None = None,
-               handoff_text: str | None = None, posture: str | None = None) -> str | None:
+               handoff_text: str | None = None, posture: str | None = None,
+               relaunched: bool = False) -> str | None:
     """The text of a launch's first turn, or None when it owes none: the first turn's own
     text (one header line, then the handoff's text and the brief), with the posture line
     second when `posture` is given. The header begins every first turn, so the text is
-    never read as a flag or a subcommand."""
+    never read as a flag or a subcommand; a relaunch's says it was relaunched."""
     from .. import first
 
     text = first.text(actor=actor, brief=brief, handoff=handoff or None,
-                      handoff_text=(handoff_text or "") if handoff else None)
+                      handoff_text=(handoff_text or "") if handoff else None,
+                      relaunched=relaunched)
     if text is None or not posture:
         return text
     header, _, rest = text.partition("\n")
@@ -485,6 +508,34 @@ def base_env(environ: Mapping[str, str]) -> dict[str, str]:
             if name in BASE_NAMES or name.startswith(BASE_PREFIXES)}
 
 
+#: The start posture of a self relaunch, which names its handoff.
+RELAUNCHED = "relaunched (handoff: {path})"
+
+_LOCATOR = re.compile(r"MOXI_[A-Z0-9_]+_(?:" + "|".join(paths.LOCATORS) + "|DEVICE)")
+
+
+def own_names(name: str) -> bool:
+    """Whether `name` is one of the user's own location, configuration and sign-in
+    variables, which a replay takes from the process running it and no launch row
+    stores: the Claude Code names the scrub keeps (`CLAUDE_KEEP`), the core's home and
+    device label (`MOXI_HOME`, `MOXI_DEVICE`), and each module's own (`MOXI_<M>_HOME`,
+    `MOXI_<M>_STATE_HOME` and the other root variables, `MOXI_<M>_DEVICE`)."""
+    return (name in CLAUDE_KEEP or name in (paths.HOME, paths.DEVICE)
+            or bool(_LOCATOR.fullmatch(name)))
+
+
+def replay_env(base: Mapping[str, str], environ: Mapping[str, str],
+               pass_env: Sequence[str] = ()) -> dict[str, str]:
+    """The environment a replay's child is built from, before the scrub and the stamps:
+    `base` (the stored row's base values), then the user's own names (`own_names`) that
+    `environ`, the replaying process's environment, holds, then each name `pass_env`
+    lists that it holds. Nothing else of `environ` comes in."""
+    env = dict(base)
+    env.update({name: value for name, value in environ.items() if own_names(name)})
+    env.update({name: environ[name] for name in pass_env if name in environ})
+    return env
+
+
 # -- sizes ------------------------------------------------------------------------------
 
 def encode(value: object) -> str:
@@ -520,11 +571,13 @@ def check_sizes(argv: Sequence[str], *, values: Mapping[str, object],
             raise TooLong(what, size, WORD, "bytes")
 
 
-__all__ = ["BASE_NAMES", "BASE_PREFIXES", "base_env", "COMMANDS", "HEADER", "KEEP_WARM", "KEEP_WARM_LINE", "RECYCLE_ON_EXPIRY",
-           "RELAUNCH", "USAGE_CROSSING_AT", "commands", "option_stamps", "NOTES_DIR", "REQUEST", "SCRUB_NAMES", "SCRUB_PREFIXES",
-           "TURNS_COMMANDS", "USAGE_WARN_AT", "WINDOWS_LINE", "WORD", "Additions",
+__all__ = ["BASE_NAMES", "BASE_PREFIXES", "COMMANDS", "HEADER", "KEEP_WARM",
+           "KEEP_WARM_LINE", "NOTES_DIR", "RECYCLE_ON_EXPIRY", "RELAUNCH", "RELAUNCHED",
+           "REQUEST", "SCRUB_NAMES", "SCRUB_PREFIXES", "TURNS_COMMANDS",
+           "USAGE_CROSSING_AT", "USAGE_WARN_AT", "WINDOWS_LINE", "WORD", "Additions",
            "Composition", "Context", "NoBrief", "NotYet", "PromptFile", "TooLong",
-           "TurnsAdditions", "Unreadable", "agent_role", "check_sizes", "encode",
-           "environment", "first_turn", "identity_block", "prompt_path",
-           "scratch_dir", "scratch_root", "scratch_root_problem", "scrub", "seat_text",
-           "stamps", "write_prompt"]
+           "TurnsAdditions", "Unreadable", "agent_role", "base_env", "check_sizes",
+           "commands", "encode", "environment", "first_turn", "identity_block",
+           "option_stamps", "own_names", "prompt_path", "replay_env", "scratch_dir",
+           "scratch_root", "scratch_root_problem", "scrub", "seat_text", "stamps",
+           "write_prompt"]
