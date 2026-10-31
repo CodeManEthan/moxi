@@ -50,6 +50,9 @@ FENCED = "fenced"
 #: Why `open_digest` left an id out.
 WITHDRAWN = "withdrawn"
 EXPIRED = "expired"
+#: Why a row that waited for a name before a module reserved it was dropped
+#: (`drop_reserved`).
+RESERVED = "reserved"
 
 TIMESTAMP_FMT = "%Y-%m-%dT%H:%M:%SZ"
 
@@ -370,6 +373,40 @@ class Books:
                              "VALUES (?, ?, ?, ?)", (mid, name, EXPIRED, at))
                 out.append((name, str(mid)))
         return out
+
+    def drop_reserved(self, name: str | None = None) -> list[tuple[str, str]]:
+        """Mail that waited for a name before a module reserved it: dropped, with a
+        `dropped` row whose reason is `reserved`. Nobody receives mail under a reserved
+        name, and a name freed later is a new holder's, so that mail is never delivered.
+
+        A row counts when it is `waiting` and its name has an unowned reserved row not
+        freed, or a `reserved` binding interval that began at or after the row was
+        queued (open or closed: a name reserved and freed since still drops it). Mail to
+        a reserved name is refused while it is reserved, so only a row queued before a
+        reservation matches. A conflict row isn't reserved, and keeps its mail.
+        `name` limits it to one name's rows. Nothing is written when nothing matches.
+        Returns (name, id) pairs."""
+        sql = ("SELECT q.name, q.message_id FROM queue q WHERE q.state = 'waiting' AND ("
+               "EXISTS (SELECT 1 FROM reserved r WHERE r.name = q.name AND "
+               "r.state = 'unowned' AND r.freed_at IS NULL) OR "
+               "EXISTS (SELECT 1 FROM bindings b WHERE b.qualified = q.name AND "
+               "b.kind = 'reserved' AND b.bound_at >= q.queued_at))")
+        args: tuple = ()
+        if name is not None:
+            sql += " AND q.name = ?"
+            args = (name,)
+        with self._lock:
+            found = self._conn.execute(sql, args).fetchall()
+            if not found:
+                return []
+            at = self._now()
+            with self._write() as conn:
+                for q, mid in found:
+                    conn.execute("DELETE FROM queue WHERE name = ? AND message_id = ? "
+                                 "AND state = 'waiting'", (q, mid))
+                    conn.execute("INSERT OR IGNORE INTO dropped(message_id, name, reason, "
+                                 "at) VALUES (?, ?, ?, ?)", (mid, q, RESERVED, at))
+        return [(q, str(mid)) for q, mid in found]
 
     def withdraw(self, message_id, *, unrouted=(), at: str | None = None) -> "Withdrawn":
         """The author's delete, in one transaction ordered against `open_digest` by

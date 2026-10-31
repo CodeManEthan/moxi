@@ -159,6 +159,9 @@ CASE_WAITING = books_mod.WAITING
 #: by its author. Read from the books' `dropped` rows, before every other case.
 CASE_EXPIRED = books_mod.EXPIRED
 CASE_WITHDRAWN = books_mod.WITHDRAWN
+#: And one more, read the same way: the message waited for a name that a module then
+#: reserved, so it was dropped.
+CASE_RESERVED = books_mod.RESERVED
 
 #: The `kind` of an `activity` notify for a turn that ran and ended. With `handled` on
 #: it, it is a release point and settles the ids it names.
@@ -219,6 +222,10 @@ CASE_REASONS = {
     CASE_WITHDRAWN: (
         "Its author withdrew the message (moxi comms delete) before it reached the "
         "model, so it was never handed over."),
+    CASE_RESERVED: (
+        "The message was waiting for this name when a module reserved it as a send-only "
+        "name. Nobody receives mail under a reserved name, so it was dropped undelivered, "
+        "and its sender was not told."),
 }
 
 
@@ -1329,6 +1336,7 @@ class Daemon:
 
     # ------------------------------------------------------------------ query
     def _agents_query(self, frame: dict) -> dict:
+        self._drop_reserved()
         with self._lock:
             bindings = [{"qualified": b.qualified, "name": b.name, "scope": b.scope,
                          "tier": b.tier, "adapter": b.adapter,
@@ -1341,8 +1349,38 @@ class Daemon:
         # queue holds offline, cold and flagged mail alike and no reason is stored.
         # `pending` stays in the answer, always empty and read by nothing here: an
         # adapter started before the queue checks for it before it renders a roster.
+        # `standing`: the standing names, bound or not, read from comms.db per call.
         return {"bindings": bindings, "waiting": waiting, "pending": {},
-                "unanswered": unanswered}
+                "unanswered": unanswered, "standing": self._standing_view()}
+
+    def _standing_view(self) -> list:
+        """The standing names, for `agents`: each directory row (kind `agent`), then
+        each reserved name not freed that is active or kept from an older comms (kind
+        `send-only`), as {qualified, name, scope, kind, module}. `module` is the module
+        a name is reserved for, or declared by when it is in conflict, and None when no
+        module owns it. A conflict row isn't reserved, so it is no send-only name. A
+        store that can't be read lists none."""
+        try:
+            with self._db() as db:
+                rows = directory.standing_rows(db)
+                held = {r["name"]: (r["module"], r["state"]) for r in db.execute(
+                    "SELECT name, module, state FROM reserved WHERE freed_at IS NULL")}
+        except sqlite3.Error:
+            log.exception("agents: the standing names couldn't be read")
+            return []
+        out = []
+        for r in rows:
+            q = qualify(r["name"], r["scope"])
+            out.append({"qualified": q, "name": r["name"], "scope": r["scope"],
+                        "kind": directory.KIND_AGENT, "module": held.get(q, (None,))[0]})
+        seen = {e["qualified"] for e in out}
+        for q, (module, state) in sorted(held.items()):
+            if q in seen or state not in (reserved_mod.ACTIVE, reserved_mod.UNOWNED):
+                continue
+            name, scope = split_tag(q)
+            out.append({"qualified": q, "name": name, "scope": scope or GLOBAL,
+                        "kind": reserved_mod.SEND_ONLY, "module": module})
+        return out
 
     def _last_digest_query(self, frame: dict) -> dict:
         """The LAST DIGEST a live identity was shown: what `moxi comms explain` reads to
@@ -1546,7 +1584,10 @@ class Daemon:
           cursor and the hand-over times `handed_at` still holds, and that is what makes
           the not-addressable case answerable at all.
         * **Not a ledger.** Nothing is recorded because this was asked. Asking costs two
-          cursor read (`moxi comms explain` is not on any hot path).
+          cursor read (`moxi comms explain` is not on any hot path). The one write it
+          can cause is the books catching up with a reservation another process made:
+          mail queued for the name before it was reserved is dropped first, as the next
+          release would drop it, so the answer says `reserved` rather than `waiting`.
 
         `identity` is a qualified name, taken literally, exactly as `kind="agents"`
         prints it. `message_id` names the message to explain; without one the daemon
@@ -1555,6 +1596,7 @@ class Daemon:
         """
         identity = str(frame.get("identity") or "")
         asked = frame.get("message_id")
+        self._drop_reserved(identity)
         now = self.clock()
         with self._lock:
             b = self.bindings.get(identity)
@@ -2438,6 +2480,34 @@ class Daemon:
                      ", ".join(f"{mid} for {q}" for q, mid in gone[:10]))
         return len(gone)
 
+    def _drop_reserved(self, name: str | None = None) -> int:
+        """Mail that waited for a name before a module reserved it: dropped, in the
+        books and in memory, with reason `reserved` (`Books.drop_reserved`). The daemon
+        does it, as the books' one writer, at boot, at each release and when `agents` or
+        `explain` asks, so a reserve made by another process (the doctor, an install)
+        takes effect at the next of those. `name` limits it to one name. Never raises;
+        returns how many rows went."""
+        if not self.books.is_open:
+            return 0
+        try:
+            gone = self.books.drop_reserved(name)
+        except Exception:                                          # noqa: BLE001
+            log.exception("dropping mail queued for a reserved name failed; the next "
+                          "check tries again")
+            return 0
+        if not gone:
+            return 0
+        with self._lock:
+            for q, mid in gone:
+                rows = self.queue.get(q)
+                if rows is not None:
+                    rows.pop(mid, None)
+                    if not rows:
+                        self.queue.pop(q, None)
+        log.info("dropped %d row(s) queued before their name was reserved: %s", len(gone),
+                 ", ".join(f"{mid} for {q}" for q, mid in gone[:10]))
+        return len(gone)
+
     def _expiry_loop(self) -> None:
         """One timer, set for the soonest expiry this daemon knows of, never a poll:
         it sleeps until then (or until a sooner one is noted) and sweeps."""
@@ -2820,6 +2890,7 @@ class Daemon:
         q = binding.qualified
         handed = 0
         self.sweep_expired()
+        self._drop_reserved(q)
         with self._name_lock(q):
             with self._lock:
                 if self.bindings.get(q) is not binding:
@@ -2992,6 +3063,8 @@ class Daemon:
         for q, ids in dropped.items():
             self._book("drop the rows of", q, lambda q=q, ids=ids: self.books.drop(q, ids))
         self._queue_flush()
+        # After the reconcile at start: mail that waited for a name now reserved.
+        self._drop_reserved()
         n = sum(len(v) for v in self.queue.values())
         if n:
             log.info("boot: %d queued message row(s) for %d name(s)", n, len(self.queue))
@@ -3446,4 +3519,5 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
 
 __all__ = ["Daemon", "Refusal", "Author", "Binding", "TRIM_INTERVAL", "TRIM_TICK",
            "CASE_HANDLED", "CASE_IGNORED", "CASE_NOT_ADDRESSABLE", "CASE_TURN_INCOMPLETE",
+           "CASE_EXPIRED", "CASE_WITHDRAWN", "CASE_RESERVED",
            "CASE_REASONS"]

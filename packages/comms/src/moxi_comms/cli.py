@@ -317,14 +317,19 @@ def _history_dropped(db, ids) -> dict:
 
 
 def _history_gone(m, dropped: dict) -> str:
-    """`[withdrawn]` for a message its author deleted (the record keeps it, marked), and
-    `[expired for <names>]` for the recipients it expired before reaching."""
+    """`[withdrawn]` for a message its author deleted (the record keeps it, marked),
+    `[expired for <names>]` for the recipients it expired before reaching, and
+    `[dropped for <names>: reserved]` for those it waited for until a module reserved
+    their name."""
     bits = []
     if getattr(m, "withdrawn_at", None) or books.WITHDRAWN in dropped.values():
         bits.append("[withdrawn]")
     expired = [name for name, why in dropped.items() if why == books.EXPIRED]
     if expired:
         bits.append(f"[expired for {', '.join(expired)}]")
+    reserved = [name for name, why in dropped.items() if why == books.RESERVED]
+    if reserved:
+        bits.append(f"[dropped for {', '.join(reserved)}: reserved]")
     return "".join(f" {bit}" for bit in bits)
 
 
@@ -400,7 +405,8 @@ def cmd_explain(args, ctx: Context) -> int:
     With the daemon down it still prints the cursor, which is the one durable fact,
     and says plainly that the rest is unknowable rather than showing a blank where a
     binding would be. Asked about one message, it also reads from the store whether
-    that message was dropped for this name, withdrawn or expired, which is durable too.
+    that message was dropped for this name, withdrawn, expired or reserved, which is
+    durable too.
     """
     identity = args.identity
     try:

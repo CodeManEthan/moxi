@@ -154,8 +154,8 @@ def test_the_adapter_surface():
     assert set(adapter.__all__) == {
         "DaemonClient", "DaemonError", "DaemonOffline", "DaemonNoAnswer",
         "backoff_delays", "render_digest", "frame_line", "TIER_EPHEMERAL",
-        "TIER_CHOSEN", "TIER_STANDING", "TIER_OPERATOR", "TIER_UNKNOWN", "VERIFIED",
-        "LABELED", "UNVERIFIED", "parse_machine_line", "MachineLine"}
+        "TIER_CHOSEN", "TIER_STANDING", "TIER_OPERATOR", "TIER_SEND_ONLY", "TIER_UNKNOWN",
+        "VERIFIED", "LABELED", "UNVERIFIED", "parse_machine_line", "MachineLine"}
     assert adapter.DaemonClient is client.DaemonClient
     assert adapter.DaemonNoAnswer is client.DaemonNoAnswer
     assert adapter.backoff_delays is client.backoff_delays
@@ -473,6 +473,21 @@ def test_a_standing_row_names_the_module_it_is_reserved_for(rig):
     assert herald.module == "launcher"
     (main,) = [s for s in api.roster().standing if s.qualified == "main@proj-a"]
     assert main.module is None
+
+
+def test_roster_lists_a_reserved_name_as_send_only_from_the_daemons_answer(rig):
+    """`roster().standing` comes from the daemon's `agents` answer: a reserved name is
+    there as kind `send-only` with its module, an unowned one with none, and a conflict
+    row isn't send-only."""
+    _store("INSERT INTO reserved(name, module, state, reserved_at) "
+           "VALUES ('console', 'launcher', 'active', '2026-01-01T00:00:00+00:00')")
+    _store("INSERT INTO reserved(name, state) VALUES ('relay', 'unowned')")
+    _store("INSERT INTO reserved(name, module, state) VALUES ('held', 'pager', 'conflict')")
+    got = {s.qualified: s for s in api.roster().standing}
+    assert got["console"] == api.Standing("console", "console", "global", api.SEND_ONLY,
+                                          "launcher")
+    assert (got["relay"].kind, got["relay"].module) == ("send-only", None)
+    assert "held" not in got
 
 
 def test_identity_state_is_offline_when_the_daemon_cannot_be_asked(env):

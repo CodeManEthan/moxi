@@ -191,11 +191,14 @@ The frame line prints only what the reader can't get elsewhere:
 [comms] from reviewer@proj-a · msg <id> · re: <id> · [1 reply left]
 [comms] from critic@proj-a · msg <id> · [no reply]
 [comms] from planner@proj-a (unverified) · msg <id>
+[comms] from console (send-only) · msg <id> · [no reply]
 [comms] directive from planner@proj-a · your director · msg <id>
 ```
 
 No mark means `chosen` and `verified`. Deviations print in one parenthetical, tier
-first: `(standing)`, `(ephemeral)`, `(unverified)`. `in <room>` prints
+first: `(standing)`, `(ephemeral)`, `(send-only)`, `(unverified)`. `(send-only)` is a
+message a module sent under a name it holds reserved, from the time the name was
+reserved until it was freed. `in <room>` prints
 only outside `#names`. Control and format characters are removed from bodies, and a
 body line can never start at column zero, so a frame line forged inside a body is
 visibly indented.

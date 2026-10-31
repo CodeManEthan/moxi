@@ -399,8 +399,22 @@ session, or one whose ancestry it can't read: module code sends from outside eve
 session. A send-only name an older comms kept is reserved for nobody until a module
 declares it; nothing sends under it meanwhile.
 
+`moxi comms agents` lists each reserved name after the bindings, as
+`console                  send-only, reserved for launcher` (or `send-only, no module
+holds it` for one an older comms kept), and a message sent under one is marked
+`(send-only)` on its frame line. A name declared but in conflict isn't reserved, so it
+isn't listed; `moxi doctor` reports it.
+
 Nothing is delivered to a reserved name. `moxi comms send` and `moxi comms reply` refuse
 it as a recipient before anything is posted, and the daemon refuses a `send` whose line
 zero names one (`not-mailable`); a record line that names it anyway is delivered to
 nobody, pending for nobody and held for nobody, and opens no ask for it. A scoped name
 (`console@acme`) is not the reserved one: it is an ordinary name.
+
+Mail that was already waiting for a name when a module reserved it is dropped
+undelivered, and stays dropped if the name is freed later: a later holder of a freed name
+is someone else. Its sender is not told. `moxi comms explain <name> <id>` says
+`reserved`, and `moxi comms history` marks it `[dropped for <name>: reserved]`. The
+daemon drops it at its start, at the name's next release point, and when `moxi comms
+agents` or `explain` asks, so a reservation another process made takes effect at the
+next of those. A name in conflict isn't reserved, and keeps its mail.
