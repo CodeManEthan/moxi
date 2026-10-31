@@ -14,7 +14,8 @@ hands its sign-in URL to the browser:
    wait for it. A runtime file whose server fails the proof may be stale; wait briefly for
    a new one, then refuse.
 3. A socket of this user that is listening holds the port; the first browser connection
-   starts the shell.
+   starts the shell. Its units must have been written with the port setting: a socket
+   that still listens on an older port is refused, naming it.
 4. Otherwise, if anything accepts a connection on the port, another program holds it.
    Else start the shell: through the logon task on Windows where it is installed and
    enabled, otherwise as a detached child, and wait for it to answer.
@@ -113,6 +114,36 @@ def _units_start() -> list[Any]:
     from moxi import units
 
     return list(units.start(MODULE, [DAEMON]))
+
+
+def _written_port(port: int) -> int | None:
+    """The port the shell's written units listen on, when it is not `port`; else None.
+
+    Read as the core's doctor reads it: the plan renders the units for `port`, and in a
+    unit it would change, the written line that matches a new line with the port's
+    digits in place gives the written port. None also when the plan can't be read."""
+    from moxi import units
+
+    try:
+        changes = units.plan(MODULE, only=[DAEMON])
+    except Exception:  # noqa: BLE001 - nothing known to differ
+        return None
+    digits = str(port)
+    for change in changes:
+        if change.action != "change" or not change.entry.get("socket"):
+            continue
+        for path, new in zip(change.paths, change.texts):
+            try:
+                old = path.read_bytes().decode("utf-8", errors="replace")
+            except OSError:
+                continue
+            for old_line, new_line in zip(old.splitlines(), new.splitlines()):
+                if old_line == new_line or digits not in new_line:
+                    continue
+                found = re.fullmatch(re.escape(new_line).replace(digits, r"(\d+)"), old_line)
+                if found and found.group(1) != digits:
+                    return int(found.group(1))
+    return None
 
 
 def _spawn(argv: list[str], *, cwd: Path, output: Path, env: Mapping[str, str]) -> Any:
@@ -368,6 +399,14 @@ def _wait_restart(first_last: Any, started: float, say: Callable[[str], Any]) ->
         _sleep(POLL)
 
 
+def _check_written_port(port: int) -> None:
+    """Refuse when this user's socket listens on another port than `port`, the setting:
+    the browser would be sent to a port nothing of this user holds."""
+    written = _written_port(port)
+    if written is not None:
+        raise Refused(f"the socket listens on {written}; run `moxi install ui`")
+
+
 def ensure_shell(port: int, *, environ: Mapping[str, str] | None = None,
                  say: Callable[[str], Any] = print) -> RuntimeInfo | None:
     """Make sure a shell of this user holds the port. Returns the shell's runtime info, or
@@ -402,9 +441,11 @@ def ensure_shell(port: int, *, environ: Mapping[str, str] | None = None,
 
     sock = socket_row(rows)
     if sock is not None and sock.state == "active":
+        _check_written_port(port)
         return None
     if socket_holds_v4(sock):
         # The socket holds 127.0.0.1, which `open` opens: a connect would only start it.
+        _check_written_port(port)
         say(f"the shell's socket holds 127.0.0.1 but not ::1 ({sock.detail}), so localhost "
             "is refused; `moxi install ui` writes and starts it again")
         return None

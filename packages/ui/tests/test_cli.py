@@ -50,6 +50,7 @@ class World:
         monkeypatch.setattr(cli, "probe", self.probe)
         monkeypatch.setattr(cli, "lock_held", lambda: False)
         monkeypatch.setattr(cli, "_port_taken", lambda port: False)
+        monkeypatch.setattr(cli, "_written_port", lambda port: None)
         monkeypatch.setattr(cli, "_stored_environment", lambda: {})
         monkeypatch.setattr(cli, "_open_browser", lambda url: self.opened.append(url) or True)
         monkeypatch.setattr(cli, "POLL", 0.001)
@@ -141,6 +142,38 @@ def test_a_socket_that_holds_only_127_0_0_1_needs_no_start_and_no_connect(monkey
     assert world.ensure() is None
     assert world.spawned == [] and dialled == []
     assert "localhost" in world.said[0] and "moxi install ui" in world.said[0]
+
+
+@pytest.mark.parametrize("row", [socket_unit("active"), socket_unit("failed", f"failed: {V6}")])
+def test_a_socket_written_with_another_port_is_refused_with_no_connect(monkeypatch, row):
+    world = World(monkeypatch, [row], probes=("down",))
+    dialled = []
+    monkeypatch.setattr(cli, "_port_taken", lambda port: dialled.append(port) or True)
+    monkeypatch.setattr(cli, "_written_port", lambda port: 8459 if port == 8460 else None)
+    with pytest.raises(Refused, match=r"^the socket listens on 8459; run `moxi install ui`$"):
+        world.ensure()
+    assert world.spawned == [] and dialled == []
+
+
+def test_the_written_port_is_read_from_the_units_the_plan_would_change(monkeypatch, tmp_path):
+    from moxi import units
+
+    written = tmp_path / V4
+    written.write_text("[Socket]\nListenStream=127.0.0.1:8460\n")
+    entry = {"socket": {"setting": "port", "addresses": ["127.0.0.1"]}}
+
+    def plan(port, action="change"):
+        text = f"[Socket]\nListenStream=127.0.0.1:{port}\n"
+        return [units.UnitChange("ui", "shell", "socket", action, None, (written,), text,
+                                 "", texts=(text,), entry=entry)]
+
+    monkeypatch.setattr(units, "plan", lambda module, only=None: plan(8461))
+    assert cli._written_port(8461) == 8460
+    monkeypatch.setattr(units, "plan", lambda module, only=None: plan(8460, "keep"))
+    assert cli._written_port(8460) is None
+    # A plan that can't be read refuses nothing.
+    monkeypatch.setattr(units, "plan", lambda module, only=None: 1 / 0)
+    assert cli._written_port(8461) is None
 
 
 @pytest.mark.parametrize(("row", "holds"), [
