@@ -163,6 +163,9 @@ COLLAB_STATES = {
     "notFound": ("unknown", False),
 }
 COLLAB_ITEM = "collabAgentToolCall"
+#: A spawn as Codex's ``multi_agent_v2`` reports it: an item turns cannot read a
+#: subagent's state from.
+SUBAGENT_ACTIVITY_ITEM = "subAgentActivity"
 
 
 def read_params(thread_id: str) -> dict:
@@ -232,6 +235,7 @@ __all__ = [
     "text_input", "initialize_params", "resume_params", "start_thread_params",
     "steer_params", "start_params", "method_missing", "compact_params",
     "terminals_params", "terminate_params", "terminal_ids", "COLLAB_STATES", "COLLAB_ITEM",
+    "SUBAGENT_ACTIVITY_ITEM",
     "read_params", "collab_state", "collab_notices", "thread_items", "thread_is_active",
     "active_turn_id",
 ]

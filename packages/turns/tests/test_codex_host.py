@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import itertools
+import os
+import sys
 import threading
 import time
 
@@ -12,6 +14,7 @@ from moxi_turns import codex_hooks
 from moxi_turns import codex_protocol as proto
 from moxi_turns import codex as codex_module
 from moxi_turns import doctor
+from moxi_turns import protocol
 from moxi_turns.client import Session
 from moxi_turns.codex import CodexHarness
 from moxi_turns.endpoint import Endpoint
@@ -1357,3 +1360,50 @@ def test_a_turn_a_load_reports_before_turn_start_answers_does_not_count_as_its_s
         assert not endpoint.facts().turn_open
     finally:
         endpoint.stop("the test ended")
+
+
+# -- the internal sockets' paths ------------------------------------------------------
+
+def test_the_codex_sockets_sit_in_the_endpoint_directory_when_their_paths_are_short(
+        turns_env):
+    endpoint, harness, app = _host(turns_env)
+    try:
+        assert harness.app_socket == endpoint.dir / protocol.CODEX_APP_SOCK
+        assert harness.hook_server.socket_path == endpoint.dir / protocol.CODEX_HOOKS_SOCK
+    finally:
+        endpoint.stop("the test ended")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="no Unix socket paths on Windows")
+def test_a_long_runtime_root_puts_the_codex_sockets_on_the_short_path(
+        turns_env, monkeypatch):
+    import stat
+
+    from moxi import paths
+
+    long_root = turns_env / ("r" * 60) / ("u" * 60)
+    monkeypatch.setenv("MOXI_TURNS_RUNTIME_DIR", str(long_root))
+    short_root = turns_env / "s"           # short, and the test's own, never /tmp itself
+    short_root.mkdir()
+    monkeypatch.setattr(paths, "_SHORT_ROOT", str(short_root))
+    endpoint, harness, app = _host(turns_env)
+    short = str(short_root / f"moxi-{os.getuid()}") + os.sep
+    sockets = (harness.app_socket, harness.hook_server.socket_path)
+    try:
+        for name in (protocol.CODEX_APP_SOCK, protocol.CODEX_HOOKS_SOCK):
+            assert len(os.fsencode(str(endpoint.dir / name))) >= paths.SOCKET_MAX
+        assert harness.app_server.socket_path == harness.app_socket
+        assert len(set(sockets)) == 2
+        for sock in sockets:
+            assert str(sock).startswith(short)
+            assert len(os.fsencode(str(sock))) < paths.SOCKET_MAX
+        # The hooks' server is listening there, and the session runs.
+        assert stat.S_ISSOCK(os.lstat(harness.hook_server.socket_path).st_mode)
+        session = Session(endpoint.address, endpoint.session(), directory=endpoint.dir)
+        delivery = session.deliver("hello", only_if_idle=True)
+        assert delivery.wait_started(2).turn_id == "turn-1"
+        app.complete()
+        assert delivery.wait_ended(2).outcome == "answer"
+    finally:
+        endpoint.stop("the test ended")
+    assert not os.path.lexists(harness.hook_server.socket_path)

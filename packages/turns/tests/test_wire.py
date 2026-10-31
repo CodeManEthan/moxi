@@ -247,6 +247,66 @@ def test_a_refused_connect_with_the_lock_held_removes_nothing(turns_env):
         holder.wait(10)
 
 
+@pytest.fixture
+def long_root(turns_env, monkeypatch):
+    """A runtime root too long for an endpoint's internal sockets, whose short path is
+    the test's own, never /tmp itself."""
+    from moxi import paths
+
+    monkeypatch.setenv("MOXI_TURNS_RUNTIME_DIR", str(turns_env / ("r" * 60) / ("u" * 60)))
+    short_root = turns_env / "s"
+    short_root.mkdir()
+    monkeypatch.setattr(paths, "_SHORT_ROOT", str(short_root))
+    return short_root
+
+
+def _plant_moved(directory: Path) -> list[str]:
+    """A socket file at each internal socket's short path, as a crashed endpoint leaves
+    them."""
+    planted = []
+    for name in protocol.INTERNAL_SOCKS:
+        path = protocol.endpoint_socket(directory, name)
+        assert Path(path).parent != directory
+        with socket.socket(socket.AF_UNIX) as s:
+            s.bind(path)
+        planted.append(path)
+    return planted
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="no Unix socket paths on Windows")
+def test_a_dead_endpoints_moved_sockets_go_with_its_directory(long_root):
+    dead, address = _dead_v2("fake-moved")
+    planted = _plant_moved(dead)
+    assert turns.sessions() == []                     # the list sweeps it
+    assert not dead.exists()
+    assert [p for p in planted if os.path.lexists(p)] == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="no Unix socket paths on Windows")
+def test_the_sweep_leaves_a_moved_path_that_is_not_a_socket(long_root):
+    dead, address = _dead_v2("fake-notsock")
+    path = protocol.endpoint_socket(dead, protocol.MOD_SOCK)
+    Path(path).write_text("not a socket")
+    assert protocol.sweep(dead, address) == "removed"
+    assert Path(path).read_text() == "not a socket"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="no Unix socket paths on Windows")
+def test_a_live_endpoints_moved_sockets_are_never_swept(long_root, make_endpoint):
+    ep, _ = make_endpoint()
+    planted = _plant_moved(ep.dir)
+    assert protocol.sweep(ep.dir, ep.address) == "live"
+    assert all(os.path.lexists(p) for p in planted)
+    for p in planted:
+        os.unlink(p)
+
+
+def test_a_short_root_keeps_every_internal_socket_in_the_directory(turns_env):
+    dead, address = _dead_v2("fake-short")
+    for name in protocol.INTERNAL_SOCKS:
+        assert protocol.endpoint_socket(dead, name) == str(dead / name)
+
+
 def test_a_starting_directory_has_no_hello_and_is_listed_as_such(turns_env):
     starting = runtime() / "v2" / "fake-starting"
     starting.mkdir(parents=True)

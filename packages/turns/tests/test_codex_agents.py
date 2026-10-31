@@ -5,6 +5,7 @@ rebuilt from the thread's history at a resumed load, and background terminals li
 from __future__ import annotations
 
 import sys
+import threading
 import time
 
 import pytest
@@ -156,6 +157,108 @@ def test_a_final_notice_inside_an_open_turn_reads_final_before_the_turn_ends(hos
     app.complete()
 
 
+def test_a_spawned_childs_own_turn_neither_opens_nor_closes_the_sessions_turn(host):
+    # The live sequence: the session's turn spawns a subagent, whose own thread raises
+    # turn/started, status changes and turn/completed on the same connection.
+    s, endpoint, harness, app = host()
+    events = []
+    threading.Thread(target=lambda: events.extend(s.watch()), daemon=True).start()
+    time.sleep(0.2)
+    d = s.deliver("spawn one and wait")
+    assert d.wait_started(3).turn_id == "turn-1"
+    item(app, "completed", collab(["sub-1"], {"sub-1": "pendingInit"}))
+    child = "sub-1"
+    app.on_notification("thread/status/changed",
+                        {"threadId": child, "status": {"type": "active"}}, None)
+    app.on_notification("turn/started", {"threadId": child, "turn": {"id": "child-t"}},
+                        None)
+    f = s.facts()
+    assert f.turn_open and f.turn.turn_id == "turn-1"
+    app.on_notification("thread/status/changed",
+                        {"threadId": child, "status": {"type": "idle"}}, None)
+    app.on_notification("turn/completed", {"threadId": child, "turn": {
+        "id": "child-t", "status": "completed"}}, None)
+    f = s.facts()
+    assert f.turn_open and f.turn.turn_id == "turn-1"
+    assert harness._grace is None           # the child's idle set no backstop
+    item(app, "completed", collab(["sub-1"], {"sub-1": "completed"}, tool="wait",
+                                  item_id="call-2"))
+    app.complete()
+    ended = d.wait_ended(3)
+    assert (ended.turn_id, ended.outcome) == ("turn-1", "answer")
+    assert wait_for(lambda: any(type(e).__name__ == "TurnEnded" for e in events))
+    turns = [(type(e).__name__, e.turn_number) for e in events
+             if type(e).__name__ in ("TurnStarted", "TurnEnded")]
+    assert len(turns) == 2 and turns[0][0] == "TurnStarted" and turns[1][0] == "TurnEnded"
+    assert turns[0][1] == turns[1][1]
+
+
+def test_turn_notifications_naming_the_sessions_thread_still_count(host):
+    s, endpoint, harness, app = host()
+    app.on_notification("turn/started", {"threadId": "thread-1",
+                                         "turn": {"id": "own-t"}}, None)
+    assert wait_for(lambda: s.facts().turn_open)
+    app.on_notification("turn/completed", {"threadId": "thread-1", "turn": {
+        "id": "own-t", "status": "completed"}}, None)
+    assert wait_for(lambda: not s.facts().turn_open)
+
+
+def activity(thread_id="sub-v2", kind="started", item_id="act-1"):
+    """A `subAgentActivity` item, a spawn as Codex's multi_agent_v2 reports it."""
+    return {"type": "subAgentActivity", "id": item_id, "agentThreadId": thread_id,
+            "agentPath": "/root/worker", "kind": kind}
+
+
+def test_a_live_subagent_activity_item_leaves_the_list_not_complete_for_good(host):
+    s, endpoint, harness, app = host()
+    item(app, "completed", collab(["sub-1"], {"sub-1": "running"}))
+    item(app, "started", activity())
+    a = s.agents()
+    assert a.complete is False and a.busy() is None
+    assert a.entries == (Agent("sub-1", "subagent", "running", False),)
+    assert s.facts().agents is None
+    # A final notice for every readable entry does not make it whole again.
+    item(app, "completed", activity(kind="completed"))
+    item(app, "completed", collab(["sub-1"], {"sub-1": "completed"}, tool="wait",
+                                  item_id="call-2"))
+    a = s.agents()
+    assert a.complete is False
+    assert a.entries == (Agent("sub-1", "subagent", "done", True),)
+    assert s.facts().agents is None
+    d = s.deliver("x", only_if_idle=True, refuse_agents=True)
+    assert d.wait_started(3) == Refused("busy-agents", d.id)
+
+
+def test_a_subagent_activity_item_of_a_foreign_thread_is_ignored(host):
+    s, endpoint, harness, app = host()
+    item(app, "started", activity(), thread="other")
+    assert s.agents().complete and s.facts().agents == 0
+
+
+def test_a_rebuild_that_finds_a_subagent_activity_item_stays_not_complete(host):
+    s, endpoint, harness, app = host()
+    harness.fake_history = [
+        collab(["sub-1"], {"sub-1": "completed"}),
+        activity(),
+    ]
+    _reconnect(harness, app)
+    a = s.agents()
+    assert a.complete is False
+    assert a.entries == (Agent("sub-1", "subagent", "done", True),)
+    assert s.facts().agents is None
+    # A later load whose history no longer shows it does not clear it.
+    harness.fake_history = [collab(["sub-1"], {"sub-1": "completed"})]
+    _reconnect(harness, harness.ws)
+    assert s.agents().complete is False and s.facts().agents is None
+
+
+def test_a_history_of_collab_items_only_stays_complete(host):
+    s, endpoint, harness, app = host()
+    harness.fake_history = [collab(["sub-1"], {"sub-1": "completed"})]
+    _reconnect(harness, app)
+    assert s.agents().complete is True and s.facts().agents == 0
+
+
 def _reconnect(harness, first):
     harness.app_server.alive = False
     first.connected = False
@@ -244,3 +347,14 @@ def test_a_live_subagent_holds_a_compact_that_stops_shells(compacting):
     s, harness, app = compacting()
     item(app, "completed", collab(["sub-1"], {"sub-1": "running"}))
     assert s.command("compact", stop_shells=True) == Refused("busy-agents")
+
+
+def test_a_subagent_activity_item_refuses_compact_with_no_subagent_running(compacting):
+    s, harness, app = compacting()
+    item(app, "started", activity())
+    item(app, "completed", activity(kind="completed"))
+    assert s.facts().agents is None
+    assert s.command("compact") == Refused("busy-agents")
+    assert s.command("compact", stop_shells=True) == Refused("busy-agents")
+    d = s.deliver("x", only_if_idle=True, refuse_agents=True)
+    assert d.wait_started(3) == Refused("busy-agents", d.id)

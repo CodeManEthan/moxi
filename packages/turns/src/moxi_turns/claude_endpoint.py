@@ -706,14 +706,9 @@ def mod_sock_path(ep) -> str:
     that path is too long for a socket address (a long `MOXI_HOME` or runtime directory),
     `moxi.paths.socket_path`'s path for the name `<endpoint name>-mod`, which falls back to
     a short hashed path as the endpoint's own address does."""
-    from moxi import paths
-
     from . import protocol
 
-    path = str(ep.dir / protocol.MOD_SOCK)
-    if len(os.fsencode(path)) < paths.SOCKET_MAX or sys.platform == "win32":
-        return path
-    return paths.socket_path("turns", f"{ep.name}-mod")
+    return protocol.endpoint_socket(ep.dir, protocol.MOD_SOCK)
 
 
 def main(argv: list[str] | None = None) -> int:

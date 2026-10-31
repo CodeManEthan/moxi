@@ -381,10 +381,33 @@ def test_compact_with_no_model_known_fails_and_posts_nothing(host):
 
 def test_compact_on_a_server_without_the_route_refuses_unsupported(host):
     s, h, world = _compacting(host, options={"model": "prov/m"})
-    world.fake.summarize_route = False
+    world.fake.summarize_route = False         # its answer: the web page, a 200
     assert s.command("compact", timeout=10) == Refused("unsupported")
     # The slot is free again; the rate still counts the accepted command.
     assert s.command("compact", timeout=10) == Refused("rate")
+    assert not h.endpoint.is_gone
+
+
+def test_compact_on_an_older_server_without_the_route_refuses_unsupported(host):
+    from fake_opencode import PLAIN_404
+
+    s, h, world = _compacting(host, options={"model": "prov/m"})
+    world.fake.summarize_route = False
+    world.fake.missing_route_answer = PLAIN_404
+    assert s.command("compact", timeout=10) == Refused("unsupported")
+    assert not h.endpoint.is_gone
+
+
+def test_compact_on_a_session_gone_from_the_server_fails_and_ends_the_endpoint(host):
+    s, h, world = _compacting(host, options={"model": "prov/m"})
+    # The session went between the checks and the post (OpenCode's own answer for it).
+    world.fake.summarize_answers.append((404, {"name": "NotFoundError", "data": {
+        "message": f"Session not found: {h.session_id}"}}))
+    result = s.command("compact", timeout=10)
+    assert isinstance(result, Failed)
+    assert "404" in result.reason and "session is gone" in result.reason
+    assert "NotFoundError" in result.reason
+    assert until(lambda: h.endpoint.is_gone)
 
 
 def test_compact_the_server_turns_down_fails_with_its_answer(host):

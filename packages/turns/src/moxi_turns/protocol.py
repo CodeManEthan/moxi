@@ -22,6 +22,7 @@ import errno
 import json
 import os
 import socket
+import stat
 import sys
 import threading
 from pathlib import Path
@@ -40,6 +41,11 @@ V2_ROOT = "v2"
 HELLO = "hello.json"
 #: A Claude endpoint's internal socket, its runner's leg; no caller uses it.
 MOD_SOCK = "mod.sock"
+#: A Codex endpoint's internal sockets: its app-server's, and its hooks'.
+CODEX_APP_SOCK = "codex-app.sock"
+CODEX_HOOKS_SOCK = "codex-hooks.sock"
+#: The internal sockets an endpoint may move to a short path (`endpoint_socket`).
+INTERNAL_SOCKS = (MOD_SOCK, CODEX_APP_SOCK, CODEX_HOOKS_SOCK)
 #: The temporary name `hello.json` is written under before it replaces the old one.
 HELLO_TMP = ".hello.json.tmp"
 #: The OpenCode host's `instructions` file.
@@ -129,6 +135,20 @@ def _is_dir(entry: os.DirEntry) -> bool:
         return False
 
 
+def endpoint_socket(directory: Path | str, filename: str) -> str:
+    """Where an endpoint's internal socket `filename` lives: in its directory, or, when
+    that path is too long for a socket address (a long `MOXI_HOME` or runtime directory),
+    `moxi.paths.socket_path`'s path for the name `<endpoint name>-<stem>`, which falls
+    back to a short hashed path as the endpoint's own address does."""
+    from moxi import paths
+
+    directory = Path(directory)
+    path = str(directory / filename)
+    if len(os.fsencode(path)) < paths.SOCKET_MAX or sys.platform == "win32":
+        return path
+    return paths.socket_path("turns", f"{directory.name}-{Path(filename).stem}")
+
+
 # -- sweeping a version 2 directory -------------------------------------------------------
 
 def sweep(directory: Path | str, address: str) -> str:
@@ -139,6 +159,9 @@ def sweep(directory: Path | str, address: str) -> str:
     directory's files go, then the directory, then the address's lock file; on `live`
     nothing is touched. The verdict is returned. Where `moxi.ipc.sweep` is not built (Windows,
     where a pipe goes with its server) this reports `live` and touches nothing.
+
+    An internal socket that `endpoint_socket` moved out of the directory goes too: its
+    path is worked out again from the directory's name, never read from a file.
     """
     from moxi import ipc
 
@@ -148,9 +171,25 @@ def sweep(directory: Path | str, address: str) -> str:
         return SWEPT_LIVE
     if verdict == SWEPT_LIVE:
         return verdict
+    remove_moved_sockets(directory)
     remove_directory(directory)
     remove_lock(address)
     return verdict
+
+
+def remove_moved_sockets(directory: Path | str) -> None:
+    """Remove a dead endpoint's internal sockets that sit outside its directory (the
+    short path). Only a path `endpoint_socket` gives for the directory, only outside it,
+    and only a socket; anything else, or a path that cannot be worked out, stays."""
+    directory = Path(directory)
+    for name in INTERNAL_SOCKS:
+        try:
+            path = Path(endpoint_socket(directory, name))
+            if path.parent == directory or not stat.S_ISSOCK(os.lstat(path).st_mode):
+                continue
+            os.unlink(path)
+        except (OSError, ValueError, NotImplementedError):
+            continue
 
 
 def remove_directory(directory: Path | str) -> None:
@@ -324,7 +363,8 @@ class LineConn:
         self.close()
 
 
-__all__ = ["VERSION", "VERSIONS", "V2_ROOT", "HELLO", "MOD_SOCK", "HELLO_TMP",
+__all__ = ["VERSION", "VERSIONS", "V2_ROOT", "HELLO", "MOD_SOCK", "CODEX_APP_SOCK",
+           "CODEX_HOOKS_SOCK", "INTERNAL_SOCKS", "endpoint_socket", "remove_moved_sockets", "HELLO_TMP",
            "INSTRUCTIONS", "ENDPOINT_FILES", "METHODS", "STOP_ASKED", "SOCK", "V1_HELLO",
            "MAX_LINE", "CONNECT_TIMEOUT", "LIVE", "STALE", "UNKNOWN", "SWEPT_LIVE",
            "SWEPT_REMOVED", "SWEPT_ABSENT", "endpoint_name", "address", "v2_root",
