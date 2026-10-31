@@ -203,6 +203,35 @@ def test_names_that_are_not_the_users_own(name):
     assert not common.own_names(name)
 
 
+WINDOWS_CHILD = {
+    "SystemRoot": "C:\\Windows", "windir": "C:\\Windows", "ComSpec": "C:\\Windows\\cmd.exe",
+    "PATHEXT": ".COM;.EXE;.BAT", "USERPROFILE": "C:\\Users\\ann",
+    "APPDATA": "C:\\Users\\ann\\AppData\\Roaming",
+    "LOCALAPPDATA": "C:\\Users\\ann\\AppData\\Local", "TEMP": "C:\\Temp", "TMP": "C:\\Temp",
+    "HOMEDRIVE": "C:", "HOMEPATH": "\\Users\\ann", "ProgramData": "C:\\ProgramData",
+    "Path": "C:\\Windows\\system32", "SYSTEMDRIVE": "C:",
+    "PROGRAMFILES": "C:\\Program Files", "ProgramFiles(x86)": "C:\\Program Files (x86)",
+    "CommonProgramFiles": "C:\\Program Files\\Common Files", "USERNAME": "ann",
+    "ALLUSERSPROFILE": "C:\\ProgramData", "PUBLIC": "C:\\Users\\Public",
+    "NUMBER_OF_PROCESSORS": "8", "PROCESSOR_ARCHITECTURE": "AMD64", "OS": "Windows_NT",
+    "COMPUTERNAME": "BOX", "API_KEY": "k", "CLAUDE_CODE_OAUTH_TOKEN": "secret",
+    "MOXI_LAUNCHER_REQUEST": "r", "SESSIONNAME": "Console",
+}
+
+
+def test_on_windows_the_base_keeps_the_system_names_a_process_needs_to_start():
+    base = common.base_env(WINDOWS_CHILD, windows=True)
+    assert set(base) == set(WINDOWS_CHILD) - {"API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
+                                               "MOXI_LAUNCHER_REQUEST", "SESSIONNAME"}
+    # Recorded as the child's own spelling, which Windows reads without case.
+    assert base["SystemRoot"] == "C:\\Windows" and base["Path"] == "C:\\Windows\\system32"
+
+
+def test_elsewhere_the_base_leaves_the_windows_names_out():
+    base = common.base_env({**WINDOWS_CHILD, "HOME": "/h", "PATH": "/bin"}, windows=False)
+    assert base == {"HOME": "/h", "PATH": "/bin"}
+
+
 def test_a_replay_env_is_the_base_then_the_own_names_then_pass_env():
     caller = {"PATH": "/now/bin", "HOME": "/home/now", "MOXI_HOME": "/m", "TOKEN": "t",
               "ARMED": "1", "CLAUDE_CONFIG_DIR": "/c", "CLAUDECODE": "1"}

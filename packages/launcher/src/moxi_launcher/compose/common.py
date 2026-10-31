@@ -500,12 +500,30 @@ def environment(environ: Mapping[str, str], composition: Composition,
 #: every name starting with one of `BASE_PREFIXES`.
 BASE_NAMES = ("HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "TZ")
 BASE_PREFIXES = ("LC_", "XDG_")
+#: The base names a launch on Windows records besides those: the system's own locations
+#: and names, which a process there needs to start (`SYSTEMROOT` above all), and the
+#: user's profile, data and temp folders. Paths and plain names, never a secret.
+WINDOWS_BASE_NAMES = (
+    "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "OS",
+    "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "COMPUTERNAME",
+    "USERPROFILE", "USERNAME", "USERDOMAIN", "HOMEDRIVE", "HOMEPATH",
+    "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "PUBLIC", "ALLUSERSPROFILE", "PROGRAMDATA",
+    "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432",
+    "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)", "COMMONPROGRAMW6432",
+)
 
 
-def base_env(environ: Mapping[str, str]) -> dict[str, str]:
-    """The values `environ` holds for the base names (`BASE_NAMES`, `BASE_PREFIXES`)."""
+def base_env(environ: Mapping[str, str], *,
+             windows: bool = os.name == "nt") -> dict[str, str]:
+    """The values `environ` holds for the base names (`BASE_NAMES`, `BASE_PREFIXES`, and
+    on Windows `WINDOWS_BASE_NAMES`), each under the name as `environ` spells it. Windows
+    reads names without case, so there they are matched so too."""
+    if not windows:
+        return {name: value for name, value in environ.items()
+                if name in BASE_NAMES or name.startswith(BASE_PREFIXES)}
+    names = frozenset((*BASE_NAMES, *WINDOWS_BASE_NAMES))
     return {name: value for name, value in environ.items()
-            if name in BASE_NAMES or name.startswith(BASE_PREFIXES)}
+            if name.upper() in names or name.upper().startswith(BASE_PREFIXES)}
 
 
 #: The start posture of a self relaunch, which names its handoff.
@@ -574,8 +592,8 @@ def check_sizes(argv: Sequence[str], *, values: Mapping[str, object],
 __all__ = ["BASE_NAMES", "BASE_PREFIXES", "COMMANDS", "HEADER", "KEEP_WARM",
            "KEEP_WARM_LINE", "NOTES_DIR", "RECYCLE_ON_EXPIRY", "RELAUNCH", "RELAUNCHED",
            "REQUEST", "SCRUB_NAMES", "SCRUB_PREFIXES", "TURNS_COMMANDS",
-           "USAGE_CROSSING_AT", "USAGE_WARN_AT", "WINDOWS_LINE", "WORD", "Additions",
-           "Composition", "Context", "NoBrief", "NotYet", "PromptFile", "TooLong",
+           "USAGE_CROSSING_AT", "USAGE_WARN_AT", "WINDOWS_BASE_NAMES", "WINDOWS_LINE", "WORD",
+           "Additions", "Composition", "Context", "NoBrief", "NotYet", "PromptFile", "TooLong",
            "TurnsAdditions", "Unreadable", "agent_role", "base_env", "check_sizes",
            "commands", "encode", "environment", "first_turn", "identity_block",
            "option_stamps", "own_names", "prompt_path", "replay_env", "scratch_dir",
