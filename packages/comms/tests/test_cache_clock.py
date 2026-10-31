@@ -1,10 +1,10 @@
-"""The cache clock for codex and opencode bindings, at comms' daemon, verb and launchers.
+"""The cache clock for codex and opencode bindings, at comms' daemon, verb and wrappers.
 
 The readers themselves (a Codex thread's rollout, an OpenCode session's rows, the lifetime
 table, the drift record) are the cache module's, and their pure reads are tested in its
 suite. What stays here is what drives comms: the daemon's gate and its
 `session` answer over each verdict, the hold and `moxi comms cache` lines, a lowering the
-daemon's learning store writes and the words comms logs about it, and the launchers'
+daemon's learning store writes and the words comms logs about it, and the wrappers'
 reports (the evidence cache's read takes). comms reaches cache only through its seam; a
 test reaches it only through `conftest.cache_api()`.
 
@@ -388,7 +388,7 @@ def test_cold_ones_are_queued_with_a_record_row(rig, adapters, tmp_path, kind):
     assert queued(rig, msg)
     time.sleep(0.1)
     assert coder.ids() == []
-    assert wait_until(lambda: msg.id in record_rows(rig.gateway, CODER_Q))
+    assert wait_until(lambda: msg.id in record_rows(rig.record, CODER_Q))
 
 
 def test_a_new_codex_identity_takes_its_deferred_mail(rig, adapters, tmp_path):
@@ -428,7 +428,7 @@ def test_a_resumed_identity_on_a_cold_or_unread_session_queues_its_backlog(
 
 
 @pytest.mark.parametrize("kind", ["codex", "opencode"])
-def test_a_launcher_that_reports_none_of_the_new_fields_is_queued(rig, adapters,
+def test_a_wrapper_that_reports_none_of_the_new_fields_is_queued(rig, adapters,
                                                                       kind):
     coder = adapters(name="coder", scope="proj-a", adapter=kind)
     msg = post(rig, [CODER_Q])
@@ -442,13 +442,12 @@ def test_the_fields_come_from_the_bindings_own_connection(rig, adapters, tmp_pat
     coder = codex_bind(adapters, None)               # no root: unknown
     forger = DaemonClient(daemon_socket()).connect()
     try:
-        forger.notify("activity", identity=CODER_Q, cache_source=str(root),
-                      session_id=TID, turned=True)
+        forger.notify("activity", {"identity": CODER_Q, "cache_source": str(root), "session_id": TID, "turned": True})
         time.sleep(0.2)
         assert rig.daemon.bindings[CODER_Q].cache_source is None
     finally:
         forger.close()
-    coder.client.notify("activity", identity=CODER_Q, kind="ready", cache_source=str(root))
+    coder.client.notify("ready", {"identity": CODER_Q, "cache_source": str(root)})
     wait_until(lambda: rig.daemon.bindings[CODER_Q].cache_source == str(root))
     msg = post(rig, [CODER_Q])
     assert delivered(coder, msg)
@@ -465,8 +464,8 @@ def test_the_session_answer_carries_the_lifetime_and_the_key(rig, adapters, tmp_
     codex_bind(adapters, root)
     c = DaemonClient(daemon_socket()).connect()
     try:
-        answer = c.query("session", identity=CODER_Q)
-        unbound = c.query("session", identity="nobody@proj-a")
+        answer = c.call("session", {"identity": CODER_Q})
+        unbound = c.call("session", {"identity": "nobody@proj-a"})
     finally:
         c.close()
     assert answer["cache_kind"] == "warm" and answer["cache_ttl"] == 1800
@@ -503,7 +502,7 @@ def test_an_opencode_model_with_no_row_is_sent_live(rig, adapters, tmp_path):
     assert code == 0, out
     assert out.splitlines()[0].startswith("sent ")
     assert not any(line.startswith("held:") for line in out.splitlines()), out
-    sent = rig.gateway.history(rig.names_channel)[-1]
+    sent = rig.record.history(rig.names_channel)[-1]
     assert delivered(oc, sent)
     code, out = rig.cli(["cache", CODER_Q], env={"MOXI_COMMS_OPERATOR": "900001"})
     assert out.strip() == (
@@ -567,7 +566,7 @@ def test_a_retry_with_a_recorded_id_queues_the_mail_handed_at_the_first_replay(
     wait_until(lambda: msg.id in held_of(rig, CODER_Q))
     first = codex_bind(adapters, root, tid=None, new_session=True)
     assert delivered(first, msg), "a new thread takes its deferred mail at replay"
-    first.client.close()                             # the launcher drops it and re-registers
+    first.client.close()                             # the wrapper drops it and re-registers
     wait_until(lambda: CODER_Q not in rig.daemon.bindings)
     real_rollout(root, 4000)                          # the record appeared: an old thread
     second = codex_bind(adapters, root, turned=True)
@@ -620,7 +619,7 @@ def test_a_lowering_is_written_logged_shown_and_survives_a_restart(
     codex_bind(adapters, root)
     c = DaemonClient(daemon_socket()).connect()
     try:
-        answer = c.query("session", identity=CODER_Q)
+        answer = c.call("session", {"identity": CODER_Q})
     finally:
         c.close()
     lowered = lower_to(gap)
@@ -640,7 +639,7 @@ def test_a_lowering_is_written_logged_shown_and_survives_a_restart(
     # A read that lowers nothing logs nothing more.
     c = DaemonClient(daemon_socket()).connect()
     try:
-        c.query("session", identity=CODER_Q)
+        c.call("session", {"identity": CODER_Q})
     finally:
         c.close()
     time.sleep(0.1)
@@ -650,7 +649,7 @@ def test_a_lowering_is_written_logged_shown_and_survives_a_restart(
     codex_bind(adapters, root)                        # bound again on the new daemon
     c = DaemonClient(daemon_socket()).connect()
     try:
-        assert c.query("session", identity=CODER_Q)["cache_ttl"] == lowered
+        assert c.call("session", {"identity": CODER_Q})["cache_ttl"] == lowered
     finally:
         c.close()
 
@@ -714,7 +713,7 @@ def test_a_rejected_or_unreadable_record_is_held_and_said_once(rig, adapters, tm
     assert coder.ids() == []
 
 
-# ======================================================================= the launchers
+# ======================================================================= the wrappers
 
 from types import SimpleNamespace  # noqa: E402
 
@@ -723,11 +722,11 @@ from moxi_comms.adapters import opencode_roster  # noqa: E402
 from moxi_comms.adapters.codex import CodexAdapter  # noqa: E402
 from moxi_comms.adapters.codex_roster import CodexAgent  # noqa: E402
 from fake_opencode import FakeOpenCode, install  # noqa: E402
-from fake_turns import FakeSession, launcher as fake_turns_launcher  # noqa: E402
+from fake_turns import FakeSession, fake_find  # noqa: E402
 
 
 def watch_reports(adapter):
-    """Every session report the launcher sends, with whether it rode a register."""
+    """Every session report the wrapper sends, with whether it rode a register."""
     sent = []
     real = adapter.session_report
 
@@ -741,7 +740,7 @@ def watch_reports(adapter):
 
 
 @pytest.fixture
-def codex_launcher(rig, tmp_path):
+def codex_wrapper(rig, tmp_path):
     made = []
     numbers = __import__("itertools").count(1)
 
@@ -750,7 +749,7 @@ def codex_launcher(rig, tmp_path):
         agent = CodexAgent(qualified=CODER_Q, name="coder", scope="proj-a",
                            cwd=str(tmp_path), thread_file=codex_threads.path(CODER_Q))
         adapter = CodexAdapter(
-            agent, launch=fake_turns_launcher(session), autoreconnect=autoreconnect,
+            agent, find=fake_find(session), autoreconnect=autoreconnect,
             backoff=__import__("itertools").repeat(0.05), clock=rig.clock,
             status_sink=lambda text: None)
         adapter.fake = session
@@ -770,17 +769,17 @@ def binding(rig):
 
 
 def test_cache_source_is_the_sessions_directory_under_codex_home(
-        rig, codex_launcher, tmp_path, monkeypatch):
+        rig, codex_wrapper, tmp_path, monkeypatch):
     home = tmp_path / "codex-home"
     monkeypatch.setenv("CODEX_HOME", str(home))
-    adapter = codex_launcher()
+    adapter = codex_wrapper()
     assert binding(rig).cache_source == str(home / "sessions")
     assert all(report.get("cache_source") == str(home / "sessions")
                for _register, report in adapter.reports)
 
 
-def test_a_new_thread_after_no_record(rig, codex_launcher):
-    adapter = codex_launcher()
+def test_a_new_thread_after_no_record(rig, codex_wrapper):
+    adapter = codex_wrapper()
     assert [report for register, report in adapter.reports if register][0] == {
         "new_session": True, "cache_source": adapter.cache_source()}
     assert [report for register, report in adapter.reports if not register][0] == {
@@ -791,15 +790,15 @@ def test_a_new_thread_after_no_record(rig, codex_launcher):
 
 
 def test_every_launch_registers_a_new_session_and_starts_unturned(
-        rig, codex_launcher):
-    first = codex_launcher()
+        rig, codex_wrapper):
+    first = codex_wrapper()
     first.fake.start_turn()
     first.fake.end_turn("answer")
     assert wait_until(lambda: binding(rig).turned)
     old = first.thread_id
     first.stop()
     assert wait_until(lambda: CODER_Q not in rig.daemon.bindings)
-    second = codex_launcher()
+    second = codex_wrapper()
     assert second.thread_id != old
     assert [report for register, report in second.reports if register][0][
         "new_session"] is True
@@ -807,11 +806,11 @@ def test_every_launch_registers_a_new_session_and_starts_unturned(
     assert binding(rig).turned is False
 
 
-def test_an_unreadable_record_is_not_read(rig, codex_launcher):
+def test_an_unreadable_record_is_not_read(rig, codex_wrapper):
     path = codex_threads.path(CODER_Q)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{not json")
-    adapter = codex_launcher()
+    adapter = codex_wrapper()
     assert [report for register, report in adapter.reports if register][0][
         "new_session"] is True
     assert codex_threads.read(CODER_Q) == adapter.thread_id
@@ -830,18 +829,18 @@ def never_read(monkeypatch, kind_cls, outcome_module, outcome_name):
 
 
 def test_a_codex_launch_never_reads_the_record_for_an_id(
-        rig, codex_launcher, monkeypatch):
+        rig, codex_wrapper, monkeypatch):
     never_read(monkeypatch, CodexAdapter, codex_threads, "read_outcome")
     monkeypatch.setattr(codex_threads, "read", lambda qualified: (_ for _ in ()).throw(
         AssertionError("a launch read the record's id")))
     codex_threads.write(CODER_Q, "old-launch")
-    adapter = codex_launcher()
+    adapter = codex_wrapper()
     assert adapter.thread_id != "old-launch"
 
 
 def test_a_reregister_inside_a_launch_reports_the_held_thread(
-        rig, codex_launcher):
-    adapter = codex_launcher()
+        rig, codex_wrapper):
+    adapter = codex_wrapper()
     adapter.reregister()
     reports = [report for register, report in adapter.reports if register]
     assert reports[-1]["new_session"] is False
@@ -876,7 +875,7 @@ def test_the_default_agent_is_named_only_by_opencodes_rule(config, expected):
 
 
 @pytest.fixture
-def oc_launcher(rig, tmp_path, monkeypatch):
+def oc_wrapper(rig, tmp_path, monkeypatch):
     fake = FakeOpenCode(password="pw", default_model="opencode/minimax-m3.1-flash-free",
                         heartbeat=0.5).start()
     stub = install(tmp_path / "bin")
@@ -922,49 +921,49 @@ def oc_launcher(rig, tmp_path, monkeypatch):
 
 
 def test_register_carries_the_db_and_the_agent_model_from_the_servers_env(
-        rig, oc_launcher, monkeypatch, tmp_path):
+        rig, oc_wrapper, monkeypatch, tmp_path):
     monkeypatch.setenv("FAKE_OPENCODE_DB", str(tmp_path / "data" / "opencode.db"))
     monkeypatch.setenv("FAKE_OPENCODE_CONFIG",
                        json.dumps({"agent": {"build": {"model": "anthropic/claude-x"}}}))
-    oc_launcher()
+    oc_wrapper()
     b = binding(rig)
     assert b.cache_source == str(tmp_path / "data" / "opencode.db")
     assert b.agent_model == {"agent": "build", "model": "anthropic/claude-x"}
-    runs = [e for e in oc_launcher.events() if e["event"] in ("db path", "debug config")]
-    assert runs and all(e["password"] and e["cwd"] == oc_launcher.cwd for e in runs), \
+    runs = [e for e in oc_wrapper.events() if e["event"] in ("db path", "debug config")]
+    assert runs and all(e["password"] and e["cwd"] == oc_wrapper.cwd for e in runs), \
         "both ran under the server's environment, in the agent's working directory"
 
 
-def test_commands_that_fail_report_nothing(rig, oc_launcher, monkeypatch):
+def test_commands_that_fail_report_nothing(rig, oc_wrapper, monkeypatch):
     monkeypatch.delenv("FAKE_OPENCODE_DB", raising=False)
     monkeypatch.setenv("FAKE_OPENCODE_CONFIG", "fail")
-    adapter = oc_launcher()
+    adapter = oc_wrapper()
     b = binding(rig)
     assert b.cache_source is None and b.agent_model is cache.MISSING
     assert [r for reg, r in adapter.reports if reg][0] == {"agent_model": None,
                                                             "new_session": True}
 
 
-def test_a_new_session_then_its_first_turn(rig, oc_launcher):
-    adapter = oc_launcher()
+def test_a_new_session_then_its_first_turn(rig, oc_wrapper):
+    adapter = oc_wrapper()
     sid = adapter.session_id
     ready = [r for reg, r in adapter.reports if not reg]
     assert ready[0]["session_id"] == sid and ready[0]["turned"] is False
     assert binding(rig).turned is False
-    oc_launcher.fake.prompt(sid, oc.mint_message_id(), text="typed", source="tui")
-    oc_launcher.fake.finish(sid)
+    oc_wrapper.fake.prompt(sid, oc.mint_message_id(), text="typed", source="tui")
+    oc_wrapper.fake.finish(sid)
     wait_until(lambda: binding(rig).turned)
     assert [r for reg, r in adapter.reports if not reg][-1]["turned"] is True
 
 
-def test_every_launch_registers_a_new_session(rig, oc_launcher):
+def test_every_launch_registers_a_new_session(rig, oc_wrapper):
     """A second launch, and one over an unreadable file, each register
     `new_session: true`, read no session file, and start their session unturned."""
-    first = oc_launcher()
+    first = oc_wrapper()
     sid = first.session_id
     first.stop()
     wait_until(lambda: CODER_Q not in rig.daemon.bindings)
-    second = oc_launcher()
+    second = oc_wrapper()
     reg = [r for reg, r in second.reports if reg][0]
     assert reg["new_session"] is True and "session_id" not in reg
     assert second.session_id != sid
@@ -972,27 +971,27 @@ def test_every_launch_registers_a_new_session(rig, oc_launcher):
     second.stop()
     wait_until(lambda: CODER_Q not in rig.daemon.bindings)
     opencode_roster.session_path(CODER_Q).write_text("[not, an, object")
-    third = oc_launcher()
+    third = oc_wrapper()
     assert [r for reg, r in third.reports if reg][0]["new_session"] is True
     assert [r for reg, r in third.reports if not reg][0]["turned"] is False
     assert third.session_id not in (sid, second.session_id)
 
 
-def test_a_re_register_inside_a_launch_reports_the_held_session(rig, oc_launcher):
-    adapter = oc_launcher()
+def test_a_re_register_inside_a_launch_reports_the_held_session(rig, oc_wrapper):
+    adapter = oc_wrapper()
     sid = adapter.session_id
     adapter.reregister()
     reg = [r for reg, r in adapter.reports if reg][-1]
     assert (reg["new_session"], reg["session_id"], reg["turned"]) == (False, sid, False)
-    oc_launcher.fake.prompt(sid, oc.mint_message_id(), text="typed", source="tui")
-    oc_launcher.fake.finish(sid)                      # the launch's first turn
+    oc_wrapper.fake.prompt(sid, oc.mint_message_id(), text="typed", source="tui")
+    oc_wrapper.fake.finish(sid)                      # the launch's first turn
     assert wait_until(lambda: binding(rig).turned)
     adapter.reregister()
     reg = [r for reg, r in adapter.reports if reg][-1]
     assert (reg["new_session"], reg["session_id"], reg["turned"]) == (False, sid, True)
 
 
-def restart_oc_server(adapter, oc_launcher, monkeypatch) -> None:
+def restart_oc_server(adapter, oc_wrapper, monkeypatch) -> None:
     """The launch's server dies and `supervise_port` starts it again on the same fake,
     which keeps its sessions as OpenCode's database would."""
 
@@ -1003,7 +1002,7 @@ def restart_oc_server(adapter, oc_launcher, monkeypatch) -> None:
             pass
 
         def wait_listening(self, timeout=None):
-            return oc_launcher.fake.url
+            return oc_wrapper.fake.url
 
         def stop(self):
             pass
@@ -1015,25 +1014,25 @@ def restart_oc_server(adapter, oc_launcher, monkeypatch) -> None:
 
 
 def test_a_server_restart_after_the_first_turn_keeps_the_session_turned(
-        rig, oc_launcher, monkeypatch):
+        rig, oc_wrapper, monkeypatch):
     """No restart inside a launch makes its session fresh again: after the first turn
     ends, the reports a server restart sends, and a `register` after it, still say
     `turned: true`."""
-    adapter = oc_launcher()
+    adapter = oc_wrapper()
     sid = adapter.session_id
     idles = []
     real_idle = adapter._on_idle
     adapter._on_idle = lambda: (real_idle(), idles.append(sid))
-    oc_launcher.fake.auto = False                     # the test ends the turn itself
-    oc_launcher.fake.prompt(sid, oc.mint_message_id(), text="typed", source="tui")
-    oc_launcher.fake.finish(sid)                      # the launch's first turn
+    oc_wrapper.fake.auto = False                     # the test ends the turn itself
+    oc_wrapper.fake.prompt(sid, oc.mint_message_id(), text="typed", source="tui")
+    oc_wrapper.fake.finish(sid)                      # the launch's first turn
     # The turn's end is two events (`session.status` idle, then `session.idle`); both
     # are handled before the restart, so no late idle raises `turned` after it.
     assert wait_until(lambda: len(idles) == 2)
     assert adapter._turned(sid) and wait_until(lambda: binding(rig).turned)
     first = adapter.generation
     mark = len(adapter.reports)
-    restart_oc_server(adapter, oc_launcher, monkeypatch)
+    restart_oc_server(adapter, oc_wrapper, monkeypatch)
     assert adapter.generation is not first and adapter.session_id == sid
     adapter.reregister()
     after = adapter.reports[mark:]
@@ -1041,11 +1040,11 @@ def test_a_server_restart_after_the_first_turn_keeps_the_session_turned(
     assert [(r["session_id"], r["turned"]) for _reg, r in after] == [(sid, True)] * len(
         after)
     assert after[-1][0] and after[-1][1]["new_session"] is False
-    assert [r[:2] for r in oc_launcher.fake.requests].count(("POST", "/session")) == 1
+    assert [r[:2] for r in oc_wrapper.fake.requests].count(("POST", "/session")) == 1
 
 
 def test_an_opencode_launch_never_reads_the_session_file_for_an_id(
-        rig, oc_launcher, monkeypatch):
+        rig, oc_wrapper, monkeypatch):
     """Start, a first turn, a server restart and a window reopen, with every record
     read patched to raise."""
     from moxi_comms.adapters.opencode_window import OpenCodeWindow
@@ -1053,33 +1052,32 @@ def test_an_opencode_launch_never_reads_the_session_file_for_an_id(
     never_read(monkeypatch, oc.OpenCodeAdapter, oc, "read_outcome")
     oc.update_record(opencode_roster.session_path(CODER_Q),
                      session_id="ses_ef0000000000000000000000000")
-    adapter = oc_launcher()
+    adapter = oc_wrapper()
     sid = adapter.session_id
     assert sid != "ses_ef0000000000000000000000000"
-    oc_launcher.fake.prompt(sid, oc.mint_message_id(), text="typed", source="tui")
-    oc_launcher.fake.finish(sid)                      # a first turn
+    oc_wrapper.fake.prompt(sid, oc.mint_message_id(), text="typed", source="tui")
+    oc_wrapper.fake.finish(sid)                      # a first turn
     wait_until(lambda: binding(rig).turned)
     first = adapter.generation
-    restart_oc_server(adapter, oc_launcher, monkeypatch)
+    restart_oc_server(adapter, oc_wrapper, monkeypatch)
     assert adapter.generation is not first and adapter.session_id == sid
     argv = OpenCodeWindow.argv(SimpleNamespace(binary="/b/oc"), adapter.generation)
     assert argv[-2:] == ["-s", sid], "the reopened window attaches the launch's session"
-    assert [r[:2] for r in oc_launcher.fake.requests].count(("POST", "/session")) == 1
+    assert [r[:2] for r in oc_wrapper.fake.requests].count(("POST", "/session")) == 1
 
 
 def test_new_session_comes_from_register_only_and_clears_with_an_id(rig, adapters,
                                                                       tmp_path):
     root = sessions_root(tmp_path)
     coder = codex_bind(adapters, root, tid=None, new_session=False)
-    coder.client.notify("activity", identity=CODER_Q, kind="ready", new_session=True)
+    coder.client.notify("ready", {"identity": CODER_Q, "new_session": True})
     time.sleep(0.2)
     assert rig.daemon.bindings[CODER_Q].new_session is False, "an activity cannot set it"
     coder.client.close()
     wait_until(lambda: CODER_Q not in rig.daemon.bindings)
     coder = codex_bind(adapters, root, tid=None, new_session=True)
     assert rig.daemon.bindings[CODER_Q].new_session is True
-    coder.client.notify("activity", identity=CODER_Q, kind="ready", session_id=TID,
-                        turned=False)
+    coder.client.notify("ready", {"identity": CODER_Q, "session_id": TID, "turned": False})
     wait_until(lambda: rig.daemon.bindings[CODER_Q].session_id == TID)
     assert rig.daemon.bindings[CODER_Q].new_session is False
     coder.client.close()
@@ -1092,11 +1090,11 @@ def test_a_null_agent_model_withdraws_the_report(rig, adapters, tmp_path):
     db = free_db(tmp_path)
     oc = oc_bind(adapters, db, agent_model=FREE_AGENT)
     assert rig.daemon.bindings[CODER_Q].agent_model == FREE_AGENT
-    oc.client.notify("activity", identity=CODER_Q, kind="ready")
+    oc.client.notify("ready", {"identity": CODER_Q})
     time.sleep(0.2)
     assert rig.daemon.bindings[CODER_Q].agent_model == FREE_AGENT, \
         "a frame without it keeps it"
-    oc.client.notify("activity", identity=CODER_Q, kind="ready", agent_model=None)
+    oc.client.notify("ready", {"identity": CODER_Q, "agent_model": None})
     wait_until(lambda: rig.daemon.bindings[CODER_Q].agent_model is cache.MISSING)
     msg = post(rig, [CODER_Q])
     assert queued(rig, msg), "with no agent model the next pair is unknown"

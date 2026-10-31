@@ -28,7 +28,9 @@ import pytest
 from conftest import (record_rows, send_ready, send_turn, wait_for_queue, wait_until,
                       write_transcript)
 
-from moxi_comms import cache, cli, constants, cursors, machine_line
+from moxi import exit as moxi_exit
+from moxi_comms import cache, cli, constants, machine_line
+from moxi_comms.store import books as books_mod
 from moxi_comms.client import DaemonClient, DaemonError
 from moxi_comms.daemon import TIER_EPHEMERAL
 from moxi_comms.paths import daemon_socket
@@ -71,7 +73,7 @@ def last_agent_n(q):
 # --------------------------------------------------------------------------- helpers
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def held_of(rig, q=REVIEWER_Q):
@@ -123,15 +125,14 @@ def stop_shim(rig, s, q=REVIEWER_Q):
 def agents_view():
     c = DaemonClient(daemon_socket()).connect()
     try:
-        return c.query("agents")
+        return c.call("agents")
     finally:
         c.close()
 
 
 def bare_turn(pushes, q, handled=()):
     """`activity kind=turn` with `handled` from a bare binding's own connection."""
-    pushes.client.notify("activity", identity=q, kind="turn", turned=True,
-                         handled=[str(i) for i in handled], unhandled=[])
+    pushes.client.notify("turn_ended", {"identity": q, "turned": True, "handled": [str(i) for i in handled], "unhandled": []})
 
 
 # ================================================================ the held send
@@ -154,7 +155,7 @@ def test_a_plain_send_to_a_cold_shim_is_posted_and_held(rig):
     (cold_at,) = ml.cold_at
     assert isinstance(cold_at, int) and cold_at <= t_send, "a cold read's cold-at is past"
     wait_until(lambda: msg.id in held_of(rig))
-    assert record_rows(rig.gateway, REVIEWER_Q) == {msg.id}
+    assert record_rows(rig.record, REVIEWER_Q) == {msg.id}
     time.sleep(0.1)
     assert s.queue == []
     view = agents_view()
@@ -162,7 +163,7 @@ def test_a_plain_send_to_a_cold_shim_is_posted_and_held(rig):
     code, roster = rig.cli(["agents", "--seats"], **PLANNER)
     assert f"  {REVIEWER_Q:<24} 1 message(s), oldest waiting " in roster
     code, why = rig.cli(["explain", REVIEWER_Q, msg.id], **PLANNER)
-    assert code == 0 and why.splitlines()[0].startswith(f"{REVIEWER_Q}   {cursors.WAITING}")
+    assert code == 0 and why.splitlines()[0].startswith(f"{REVIEWER_Q}   {books_mod.WAITING}")
     assert f"1 in the queue for its next release point: {msg.id}" in " ".join(why.split())
     assert "ACCOUNT-LIMITS-SECRET" not in out
 
@@ -182,7 +183,7 @@ def test_wake_the_operators_turn_releases_it(rig):
     assert held_of(rig) == {mid}
     send_turn(s, handled=[mid])
     wait_until(lambda: held_of(rig) == set())
-    assert record_rows(rig.gateway, REVIEWER_Q) == set()
+    assert record_rows(rig.record, REVIEWER_Q) == set()
 
 
 def test_the_shims_stop_on_a_warm_read_releases_the_row(rig, monkeypatch):
@@ -196,10 +197,10 @@ def test_the_shims_stop_on_a_warm_read_releases_the_row(rig, monkeypatch):
     # fall; so the payloads are read as they arrive, not from the queue.
     pushed, on_push = [], s._on_push
 
-    def record(frame):
-        if frame.get("op") == "deliver":
-            pushed.append(frame["payload"])
-        on_push(frame)
+    def record(method, params):
+        if method == "deliver":
+            pushed.append(params["payload"])
+        on_push(method, params)
 
     monkeypatch.setattr(s, "_on_push", record)
     s.start()
@@ -351,13 +352,13 @@ def test_the_verb_reads_cold_and_the_cache_warms_before_routing(rig, monkeypatch
     """A known read at the daemon decides alone. The sender was told held, its
     cold-at is past, and the gate, reading warm, delivers live."""
     s = cold_shim(rig)
-    real = DaemonClient.post
+    real = DaemonClient.send
 
     def warmed(*a, **kw):
         write_transcript(SESS_A, 5)               # its own turn lands in between
         return real(*a, **kw)
 
-    monkeypatch.setattr(DaemonClient, "post", warmed)
+    monkeypatch.setattr(DaemonClient, "send", warmed)
     code, out = send(rig, REVIEWER_Q, "just in time")
     assert code == 0 and out.splitlines()[-1] == LAST_CHOSEN
     (mid,) = sent_ids(out)
@@ -413,10 +414,10 @@ def test_an_ended_agent_n_drops_its_rows_from_memory_and_the_record(rig):
     s = agent_n(rig)
     q = s.identity
     _out, mid = cold_send(rig, q)
-    wait_until(lambda: record_rows(rig.gateway, q) == {mid})
+    wait_until(lambda: record_rows(rig.record, q) == {mid})
     stop_shim(rig, s, q)
     assert held_of(rig, q) == set()
-    wait_until(lambda: record_rows(rig.gateway, q) == set())
+    wait_until(lambda: record_rows(rig.record, q) == set())
 
 
 def test_boot_drops_an_agent_ns_rows_and_the_same_number_gets_nothing(rig, reboot):
@@ -431,11 +432,13 @@ def test_boot_drops_an_agent_ns_rows_and_the_same_number_gets_nothing(rig, reboo
     stop_shim(rig, s, q)
     stop_shim(rig, keeper)
     rig.daemon.stop()
-    rig.gateway.queue_add(q, [mid])              # as a daemon that died mid-unbind left it
-    assert record_rows(rig.gateway, q) == {mid}
+    rig.daemon.books.open()                     # as a daemon that died mid-unbind left it
+    rig.daemon.books.add(q, mid)
+    rig.daemon.books.close()
+    assert record_rows(rig.record, q) == {mid}
     reboot(rig)
     assert held_of(rig, q) == set()
-    assert record_rows(rig.gateway, q) == set()
+    assert record_rows(rig.record, q) == set()
     assert held_of(rig) == {kept}, "a chosen name's rows are untouched"
     later = rig.shim(session_id=SESS_B)          # unrelated, numbered the same
     assert later.identity == q
@@ -491,7 +494,7 @@ def test_a_held_send_to_an_agent_n_says_it_is_session_only(rig):
 
 def assert_refused(rig, code, out, reason):
     lines = out.splitlines()
-    assert code == cli.EXIT_COLD == 6, out
+    assert code == moxi_exit.TEMPFAIL, out
     assert lines[0].startswith("Nothing was sent: ") and reason in lines[0], lines[0]
     assert lines[-1] == "Nothing was sent.", out
     assert posted(rig) == []
@@ -573,14 +576,14 @@ def test_a_session_answer_with_no_verdict_refuses(rig, monkeypatch):
 
 def test_a_failed_session_query_refuses(rig, monkeypatch):
     cold_shim(rig)
-    real = DaemonClient.query
+    real = DaemonClient.call
 
-    def broken(self, kind, **kw):
+    def broken(self, kind, params=None, **kw):
         if kind == "session":
             raise DaemonError("the daemon fell over")
-        return real(self, kind, **kw)
+        return real(self, kind, params, **kw)
 
-    monkeypatch.setattr(DaemonClient, "query", broken)
+    monkeypatch.setattr(DaemonClient, "call", broken)
     code, out = send(rig, REVIEWER_Q)
     assert_refused(rig, code, out, f"comms could not ask the daemon about {REVIEWER_Q} "
                                    "(the session query failed (the daemon fell over))")

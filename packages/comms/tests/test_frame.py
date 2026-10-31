@@ -46,7 +46,8 @@ def payload(*, message_id="101", room="#names", text="body", backlog=False,
             "recipients": ["reviewer@proj-a"], "posture": "open",
             "open_mark": False, "backlog": backlog,
             "text": text, "reply_to": None, "audience": None, "audience_source": None,
-            "timestamp": timestamp if timestamp is not None else stamp(), **extra}
+            "timestamp": timestamp if timestamp is not None else stamp(),
+            "interrupt": False, "expires_at": None, **extra}
 
 
 def test_the_synthetic_payload_really_is_the_delivered_shape(rig):
@@ -113,7 +114,7 @@ def test_the_default_room_is_never_rendered_in_either_spelling(room):
 @pytest.mark.parametrize("room", ["#conference", "#notices", "1400000000001"])
 def test_any_other_room_still_says_where_it_came_from(room):
     """The room is rendered exactly when it is news -- including the bare channel id
-    the daemon falls back to when the gateway cannot name the channel."""
+    the daemon falls back to when the record cannot name the channel."""
     assert frame_line(payload(room=room)).endswith(f"· msg 101 · in {room}")
 
 
@@ -126,7 +127,7 @@ def test_a_missing_room_renders_no_room_bit_rather_than_a_dangling_one(room):
 
 def test_a_non_string_room_renders_instead_of_raising():
     """`room` is a courtesy field the daemon fills with the bare channel_id when the
-    gateway cannot name the channel -- and an int there used to raise out of `lstrip`.
+    record cannot name the channel -- and an int there used to raise out of `lstrip`.
     A rendering must never take the whole digest down over a field it only uses to
     be helpful."""
     assert frame_line(payload(room=1400000000001)).endswith(
@@ -196,6 +197,18 @@ def test_the_audience_sits_between_re_and_the_posture():
 def test_the_mark_reaches_the_digest():
     digest = render_digest([payload(audience="operator", audience_source="written")])
     assert "· audience: operator" in digest
+
+
+def test_interrupt_mail_says_so_only_when_it_was_steered_into_a_turn():
+    """`[interrupt]` tells the reader why mail came mid-turn: it is on a steered
+    digest's interrupt mail, and on nothing that came at a boundary."""
+    mail = payload(interrupt=True)
+    assert frame_line(mail, steered=True) == \
+        "[comms] from planner@proj-a · msg 101 · [interrupt]"
+    assert frame_line(mail) == "[comms] from planner@proj-a · msg 101"
+    assert frame_line(payload(), steered=True) == "[comms] from planner@proj-a · msg 101"
+    assert "· [interrupt]" in render_digest([mail], steered=True)
+    assert "[interrupt]" not in render_digest([mail])
 
 
 # --------------------------------------------- the rarer marks, in a REAL digest
@@ -352,7 +365,7 @@ def test_the_other_deviation_marks_still_render_inside_a_catch_up():
 
 def test_a_backlog_batch_of_MIXED_verification_gets_NO_note_and_keeps_its_marks():
     """The note is a blanket, and this batch is not uniform: one frame the daemon proved
-    (custody journal) beside two it could not. A note here would blame replay for the
+    (binding history) beside two it could not. A note here would blame replay for the
     proven frame, and the suppression under it would render proven and unproven
     identically -- the reader could no longer tell them apart at all, which is the whole
     job of the mark. So: nothing in the header, and every frame speaks for itself."""
@@ -703,17 +716,17 @@ def _launched_env():
     return s.env()
 
 
-def _ready(env):
+def _start(env):
     import moxi_turns
     from moxi_comms import listener
-    return listener.answer(moxi_turns.SessionEvent(event="ready", harness="claude",
+    return listener.answer(moxi_turns.SessionEvent(event="start", harness="claude",
                                                    session_id="s-1", env=env))
 
 
 def test_the_block_reaches_the_session_in_the_listeners_answer(rig):
     """Delivery, not text: the context comms' listener hands turns carries the block."""
     rig.shim(name="planner", scope="proj-a")
-    injected = _ready(_launched_env())
+    injected = _start(_launched_env())
     assert injected.startswith(CONTEXT_BLOCK)
     assert shim_roster.LABEL in injected
     assert "comms reply <message-id>" in injected, "the half no seat was ever told"
@@ -735,5 +748,5 @@ def test_the_block_still_reaches_the_session_offline(rig, capsys):
     """A launch is never blocked by comms: offline, the listener still answers the
     block, with the offline line."""
     rig.daemon.stop()
-    assert CONTEXT_BLOCK in _ready(_launched_env())
+    assert CONTEXT_BLOCK in _start(_launched_env())
     capsys.readouterr()

@@ -37,9 +37,8 @@ Anything else, or an exception, reads `unknown` (code `evidence-failed`). The fu
 runs in the daemon's process at each read, so it is quick and reads only its own record.
 
 comms' own kinds are declared the same way in its `pyproject.toml`: `claude-shim`,
-`codex` and `opencode` (harness kinds whose evidence is their own register report) and
-`send-only` (a name that receives nothing; comms' own treatment, which no module may
-declare). They are also compiled in here (`BUILT_IN`), so a daemon in an environment
+`codex` and `opencode`, harness kinds whose evidence is their own register report. They
+are also compiled in here (`BUILT_IN`), so a daemon in an environment
 whose metadata predates the group still knows them, and a test holds the two copies
 equal.
 
@@ -60,8 +59,8 @@ log = logging.getLogger("comms.kinds")
 #: The entry-point group.
 GROUP = "moxi.comms.kinds"
 
-#: The cache treatments. `send-only` is comms' own and is never declared by a module.
-CACHE_HARNESS, CACHE_PERSON, CACHE_SEND_ONLY = "harness", "person", "send-only"
+#: The cache treatments.
+CACHE_HARNESS, CACHE_PERSON = "harness", "person"
 #: The harnesses a harness kind may name: the ones cache has a clock for.
 HARNESSES = ("claude", "codex", "opencode")
 
@@ -73,11 +72,9 @@ _TARGET = re.compile(r"^[A-Za-z_]\w*(\.[A-Za-z_]\w*)*:[A-Za-z_]\w*$")
 CLAUDE_SHIM = {"cache": CACHE_HARNESS, "harness": "claude"}
 CODEX = {"cache": CACHE_HARNESS, "harness": "codex"}
 OPENCODE = {"cache": CACHE_HARNESS, "harness": "opencode"}
-SEND_ONLY = {"cache": CACHE_SEND_ONLY}
 
 #: The built-in kinds, by name, in the order the daemon has always listed them.
-BUILT_IN = {"claude-shim": CLAUDE_SHIM, "codex": CODEX, "opencode": OPENCODE,
-            "send-only": SEND_ONLY}
+BUILT_IN = {"claude-shim": CLAUDE_SHIM, "codex": CODEX, "opencode": OPENCODE}
 
 #: What an evidence function answers when its record exists but cannot be read.
 UNREADABLE = "unreadable"

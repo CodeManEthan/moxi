@@ -23,7 +23,7 @@ with a turn that runs `moxi comms send`). Neither sets the backend or the slots.
     exchange a message. Only a live session holding a name sends under it, so the test
     itself sends from the operator's lane, its own terminal outside every session: the
     operator asks alice to ping bob, alice's turn (run by her stub server, which her
-    launcher spawned inside her session) sends with `moxi comms send`, bob's turn answers the
+    wrapper spawned inside her session) sends with `moxi comms send`, bob's turn answers the
     same way, and alice's server gets the answer. A launch stamp alone is refused, and
     the test checks that too;
   * the daemon exits cleanly (status 0, socket gone) on SIGTERM;
@@ -119,7 +119,7 @@ if _path:
 #: The stub `opencode`'s turn. The stub server (`fake_opencode.py`, run by the test's own
 #: interpreter, so it is no part of the install) admits each posted prompt; this turn
 #: logs the prompt's text, runs `moxi comms send` when the text asks for it, and only then
-#: ends, as an agent's tool call runs inside its turn. The server is the launcher's child
+#: ends, as an agent's tool call runs inside its turn. The server is the wrapper's child
 #: with the session's claim socket in its environment, so the `moxi comms send` it runs is
 #: inside that session and sends as the session's identity.
 STUB_TURN = r'''
@@ -169,7 +169,7 @@ DEBUG_CONFIG = json.dumps({"agent": {"build": {"model": "opencode/minimax-m3.1-f
 
 class OnPty:
     """One `moxi-comms-opencode` on its own pty, as a terminal runs it: the window takes the
-    launcher's terminal, so it will not run without one."""
+    wrapper's terminal, so it will not run without one."""
 
     def __init__(self, argv, env, cwd):
         master, slave = os.openpty()
@@ -362,7 +362,7 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
             for pair in shlex.split(entry):
                 key, _, value = pair.partition("=")
                 unit_env[key] = value
-        sock = home / "run" / "moxi" / "comms" / "moxi-comms-daemon.sock"
+        sock = home / "run" / "moxi" / "comms" / "daemon.sock"
         daemon = start(*argv, environ=unit_env)
         wait_for(sock.exists, what="the daemon's socket")
 
@@ -381,7 +381,7 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
 
         # ---- Part two: the named fixtures the exchange needs ------------------------
         # The OpenCode roster for two identities, and the stub `opencode` on PATH,
-        # where the launcher looks for it. Neither names a backend.
+        # where the wrapper looks for it. Neither names a backend.
         config = home / ".config" / "moxi" / "comms"
         config.mkdir(parents=True, exist_ok=True)
         work = home / "work"
@@ -397,7 +397,7 @@ def test_a_stranger_installs_and_two_agents_talk(installed):
         assert "backend" not in (config / "config.toml").read_text()
 
         # 6. Two OpenCode identities exchange a message through their stub servers. Each
-        #    `moxi comms send` an agent makes runs inside its own session: its launcher spawned
+        #    `moxi comms send` an agent makes runs inside its own session: its wrapper spawned
         #    the server with the session's claim socket. The test is the operator at
         #    their own terminal, outside every session, with the id the daemon's first
         #    start provisioned, read from the directory.

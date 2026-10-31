@@ -1,6 +1,6 @@
 """`moxi-comms-opencode <identity>` -- an OpenCode session the person sits in, with comms mail.
 
-One launcher process per identity, an ordinary daemon-socket client whose connection is
+One wrapper process per identity, an ordinary daemon-socket client whose connection is
 its liveness, like `moxi-comms-codex`. What it owns:
 
   * one registration on the daemon socket for the roster identity;
@@ -9,8 +9,8 @@ its liveness, like `moxi-comms-codex`. What it owns:
   * a new OpenCode session at every launch, whose id it records in STATE; it never
     loads one an earlier launch recorded, as a Claude launch starts a new session;
   * the event stream of that server, read for the launch's session;
-  * the window: `opencode attach <url> -s <session>` in the launcher's own terminal,
-    where the person sits. Closing it stops the launcher and takes the identity offline.
+  * the window: `opencode attach <url> -s <session>` in the wrapper's own terminal,
+    where the person sits. Closing it stops the wrapper and takes the identity offline.
 
 **Delivery is a channel of its own.** A digest is posted to the server with
 `POST /session/:id/prompt_async`, under a message id comms chooses. The window is a
@@ -19,7 +19,7 @@ the window, so what the person has half-typed in its input box is never touched.
 
 **Only into an idle session.** The session has one loop: a prompt that arrives while a
 turn runs is taken at that turn's next step, and the running turn's own reply is never
-written. So the launcher posts only when the session is idle, read from
+written. So the wrapper posts only when the session is idle, read from
 `GET /session/status` immediately before each post (a 200 whose JSON has no entry for
 the session, or an entry that says idle; anything else is "not idle"), and holds the
 next post from its own post until that turn ends. A prompt the person submits between
@@ -35,12 +35,12 @@ the reply to them, and the digest completes on that idle. A turn that ends by an
 or an error moves no cursor, and its ids are `unhandled`, so the daemon hands them again.
 
 **Every turn is reported**, whoever prompted it: busy is an
-`activity` with no kind, and the idle after it one `turn` frame with the settled posts'
-ids `handled` or `unhandled`, sent after the clamped cursor write. An idle after an abort
+`activity` with no kind, and the idle after it one `turn_ended` with the settled posts'
+digests `handled` or `unhandled`; the daemon acks them and moves the cursor. An idle after an abort
 sends none: nothing reports the abort itself, as no hook reports Claude Code's Esc. Its
 ids go `unhandled` on the next frame, as the Claude shim names an interrupted digest
 `unhandled` once it reads the Esc in the session's transcript. `session.compacted` is `ready source=compact`. A window
-/new or /clear is followed: a top-level `session.created` this launcher did not make
+/new or /clear is followed: a top-level `session.created` this wrapper did not make
 rebinds the launch to that session, and the old session's pending posts go into it.
 
 **The reply reminder is a line of the adapter's own**, as Claude Code's is a held-open
@@ -54,10 +54,10 @@ ends that turn counts the debts it named, and any other turn end first voids the
 `small_model` to a free model the roster names (`opencode_roster.DEFAULT_MODELS` for a
 row that names none), or to another free model when none of those is offered. The
 choice is made on a model list fetched for this launch: before it starts the server, the
-launcher runs `opencode models --refresh`, within `MODELS_REFRESH_TIMEOUT`, so a model
+wrapper runs `opencode models --refresh`, within `MODELS_REFRESH_TIMEOUT`, so a model
 retired since OpenCode last fetched its list is not offered. A refresh that fails or
 overruns leaves the list as it stands, and the launch says so with the list's age. A
-server handed in to the launcher keeps the list it read at its own start. Comms never
+server handed in to the wrapper keeps the list it read at its own start. Comms never
 changes the model after the launch, and its posts name none. A request
 that runs on any other model is written to the log and the identity's status line, and
 nothing more is done about it.
@@ -96,7 +96,7 @@ FLUSH_RETRY = 1.0
 #: Consecutive failed posts of the kind a retry can fix (no connection, a 5xx, a 429)
 #: after which the status line says how many and which, once per run of failures.
 FAILURE_STREAK = 5
-#: How long the launcher keeps a launch notice on the screen before the window opens.
+#: How long the wrapper keeps a launch notice on the screen before the window opens.
 NOTICE_HOLD = 5.0
 #: How long a launch waits for its session to be ready before giving up.
 READY_WAIT = 120.0
@@ -137,10 +137,10 @@ UNSEEN_REQUEST = ("an assistant message in session {session} on {model} came wit
 #: A post the server refused in a way a retry can't fix.
 POST_REFUSED = (
     "the OpenCode server refused a post for {identity} with {status} ({meaning}): "
-    "{detail}. No more mail goes into this session until the launcher is started "
+    "{detail}. No more mail goes into this session until the wrapper is started "
     "again; the undelivered messages replay then.")
 POST_REFUSED_CONTENT = (" If the refusal is about the digest itself, the same messages "
-                        "will be refused again after a relaunch; the launcher's log has "
+                        "will be refused again after a relaunch; the wrapper's log has "
                         "the server's answer.")
 FAILING = ("{count} posts in a row for {identity} have failed ({last}); still retrying "
            "every {wait:g}s.")
@@ -162,7 +162,7 @@ def read_record(path: Path) -> dict:
 
 
 def write_record(path: Path, record: dict) -> None:
-    """Whole file, atomic replace, 0600 in a 0700 directory, as the cursors are."""
+    """Whole file, atomic replace, 0600 in a 0700 directory."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(path.parent, 0o700)
@@ -179,7 +179,7 @@ def write_record(path: Path, record: dict) -> None:
 
 #: What one read of the session file found: no session, a session id, or a file that
 #: exists but could not be read as one. Only `NONE` is evidence that a session the
-#: launcher then creates is new.
+#: wrapper then creates is new.
 NONE, RECORDED, UNREADABLE = "none", "recorded", "unreadable"
 
 
@@ -396,7 +396,7 @@ def fetch_roster(socket_path=None, timeout: float = 2.0):
     try:
         client = DaemonClient(socket_path, timeout=timeout).connect()
         try:
-            return client.query("agents")
+            return client.call("agents")
         finally:
             client.close()
     except Exception as e:                                  # noqa: BLE001
@@ -430,7 +430,7 @@ def idle_from_status(status: int, body, session_id: str) -> bool:
 
 # --------------------------------------------------------------------------- generations
 class Generation:
-    """One server process the launcher started, from listening until it is lost.
+    """One server process the wrapper started, from listening until it is lost.
 
     A window opens only on a ready generation (the launch's session and its event stream
     reconciled), and is closed when its generation ends."""
@@ -631,10 +631,10 @@ class OpenCodeAdapter(HarnessAdapter):
 
     # ------------------------------------------------------------------ the server
     def server_env(self, model: str | None) -> dict:
-        """The server's environment: the launcher's own, scrubbed of comms' variables
+        """The server's environment: the wrapper's own, scrubbed of comms' variables
         and stamped with this identity, the per-launch password, and the launch config.
         Nothing else of OpenCode's is set: the person's config, sign-in and switches
-        come from the environment the launcher was started in."""
+        come from the environment the wrapper was started in."""
         env = self.agent.env(self.base_env)
         env.update(self.claim_env())
         env["OPENCODE_SERVER_PASSWORD"] = self.password
@@ -995,8 +995,9 @@ class OpenCodeAdapter(HarnessAdapter):
         return isinstance(error, dict) and error.get("name") == ABORTED
 
     def _turn_ended(self, settled: list) -> None:
-        """One turn end: the settled posts' ids go `handled` or `unhandled` on one `turn`
-        frame, after the cursor write (the base's `report_turn_end`, with the clamp).
+        """One turn end: the settled posts' ids go `handled` or `unhandled` in one
+        `turn_ended` (the base's `report_turn_end`, which names their digests); the
+        daemon's ack moves the cursor.
 
         An idle after an abort sends no `turn`: no frame reports the abort itself, as
         none reports Claude Code's Esc, whose Stop hook does not run on a user interrupt
@@ -1073,7 +1074,7 @@ class OpenCodeAdapter(HarnessAdapter):
         return done
 
     def _on_session_created(self, info: dict) -> None:
-        """A top-level session this launcher did not make is the window's /new or
+        """A top-level session this wrapper did not make is the window's /new or
         /clear, and is followed: the posts still pending in the old
         session go back in the queue, in id order, their ids still held; `session_id`,
         the session file and the window's generation name the new session; then
@@ -1367,7 +1368,7 @@ class OpenCodeAdapter(HarnessAdapter):
         if self.trouble:
             return self.trouble
         if self.generation is None:
-            return "the launcher never connected to its opencode server"
+            return "the wrapper never connected to its opencode server"
         return "the opencode server connection never became ready"
 
     def stop_before_unbind(self) -> None:
@@ -1388,7 +1389,7 @@ def build_parser():
 
     ap = argparse.ArgumentParser(
         prog="moxi-comms-opencode",
-        description="an OpenCode session with comms mail, in this terminal: one launcher "
+        description="an OpenCode session with comms mail, in this terminal: one wrapper "
                     "per identity; closing the window takes the identity offline")
     ap.add_argument("identity", help="qualified roster identity, e.g. coder@proj-a")
     ap.add_argument("--opencode", help="the opencode binary (default: the roster's "
@@ -1411,7 +1412,7 @@ def build_parser():
     return ap
 
 
-def launcher_log_file(qualified: str) -> Path:
+def wrapper_log_file(qualified: str) -> Path:
     from ..paths import opencode_sessions_dir
 
     return opencode_sessions_dir() / f"{qualified}.log"
@@ -1442,7 +1443,7 @@ def print_plan(agent, roster, *, binary, version, comms_path, out=None) -> None:
     plan_comms(comms_path, say)
     say("  spawn      " + " ".join(serve_argv(binary or opencode_roster.BINARY)))
     say("  window     " + f"{binary or opencode_roster.BINARY} attach <url> -s <session>")
-    say(f"  log        {launcher_log_file(agent.qualified)}")
+    say(f"  log        {wrapper_log_file(agent.qualified)}")
 
 
 def main(argv=None) -> int:  # pragma: no cover - exercised end to end by the window tests
@@ -1479,7 +1480,7 @@ def main(argv=None) -> int:  # pragma: no cover - exercised end to end by the wi
         print("moxi-comms-opencode: run this in the foreground of a terminal: the OpenCode "
               "window takes that terminal.", file=sys.stderr)
         return 2
-    log_path = launcher_log_file(agent.qualified)
+    log_path = wrapper_log_file(agent.qualified)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(log_path.parent, 0o700)
     logging.basicConfig(level=args.log_level, filename=str(log_path),
@@ -1532,7 +1533,7 @@ def main(argv=None) -> int:  # pragma: no cover - exercised end to end by the wi
 
 
 def show_notice(adapter, hold: float, stopping=None, out=None) -> None:
-    """The launch notices, in the launcher's own terminal before the window opens, held
+    """The launch notices, in the wrapper's own terminal before the window opens, held
     on screen for `hold` seconds so it can be read before the window covers it. The
     window runs on its own screen, so the line is there again when the window closes."""
     if not adapter.launch_notices:

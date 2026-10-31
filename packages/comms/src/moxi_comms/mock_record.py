@@ -1,13 +1,13 @@
 """A mock record good enough to BE the record.
 
-The interface it implements lives in `gateway.py`, and `local_gateway.LocalGateway`
+The interface it implements lives in `record.py`, and `local_record.LocalRecord`
 implements the same one on the box's SQLite record. The daemon, the sender and the
 provisioner talk only to these methods and never learn which one they hold:
 
     channels        create_channel / channel_by_name
     permissions     deny_send / can_send
     the record      history(channel, after=, limit=) / get_message
-    the gateway     subscribe() -> Subscription, disconnect(), reconnect(resume=)
+    events          subscribe() -> Subscription, disconnect(), reconnect(resume=)
 
 Fidelity the tests depend on:
   * monotonic message ids (string, comparable as ints);
@@ -16,7 +16,7 @@ Fidelity the tests depend on:
     distinction (a non-RESUME reconnect loses the gap -- the daemon must rescan);
   * an optional JSON store so separate PROCESSES (the `comms` CLI, the daemon) share
     one record -- which is what makes a real end-to-end CLI smoke run possible;
-  * a DECLARED slow-gateway hold on `max_message_id`, because a mock that is
+  * a DECLARED slow-record hold on `max_message_id`, because a mock that is
     always instant hides every race the daemon runs against a real round trip.
 """
 
@@ -31,11 +31,14 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from .gateway import (
+from .record import (
+    AUTHOR_IDENTITY,
+    AUTHOR_OPERATOR,
+    AUTHOR_RESERVED,
     MAX_CONTENT_LENGTH,
     Fatal,
     Forbidden,
-    GatewayError,
+    RecordError,
     Message,
     RateLimited,
     Subscription,
@@ -45,7 +48,7 @@ from .gateway import (
 _EPOCH_BASE = 1_400_000_000_000  # only monotonicity matters
 
 
-class MockGateway:
+class MockRecord:
     """In-process record. Pass `store_path` to share the record across processes."""
 
     # Declared and enforced on every posting lane.
@@ -65,7 +68,7 @@ class MockGateway:
     # caller that reads outside its lock has to be safe against. It is also taken outside
     # `_txn()`, so a message CAN be posted during the round trip -- which is the whole
     # experiment. `subscribe()` and `reconnect()` read the high-water mark too, so a hold
-    # engaged before them slows the gateway's lifecycle as well as the daemon's registers.
+    # engaged before them slows the record's lifecycle as well as the daemon's registers.
     max_message_id_hold = 0.0
 
     def __init__(self, store_path: str | Path | None = None, poll_interval: float = 0.02,
@@ -196,7 +199,7 @@ class MockGateway:
             if self._rate_limits:
                 raise RateLimited(self._rate_limits.pop(0))
         if len(content) > self.max_content_length:
-            raise GatewayError(
+            raise RecordError(
                 f"content is {len(content)} characters, "
                 f"over the {self.max_content_length}-character cap on one message")
         with self._txn(write=True) as st:
@@ -204,7 +207,7 @@ class MockGateway:
                 raise Forbidden(f"Send denied in {channel_id}")
             msg = Message(
                 id=self._next_id(st), channel_id=channel_id, author_id=user_id,
-                author_kind="user", author_display=st.users.get(user_id, "operator"),
+                author_kind=AUTHOR_OPERATOR, author_display=st.users.get(user_id, "operator"),
                 content=content, timestamp=self._now(),
             )
             st.messages.append(msg.to_dict())
@@ -213,19 +216,43 @@ class MockGateway:
 
     def post_as_identity(self, qualified: str, channel_id: str, content: str) -> Message:
         """Write an agent post after the daemon has checked its live binding."""
+        return self._post(AUTHOR_IDENTITY, qualified, channel_id, content)
+
+    def post_as_reserved(self, name: str, channel_id: str, content: str) -> Message:
+        """Write a module's post under a name it reserved, after the daemon has checked
+        the name's token."""
+        return self._post(AUTHOR_RESERVED, name, channel_id, content)
+
+    def _post(self, kind: str, author: str, channel_id: str, content: str) -> Message:
         if len(content) > self.max_content_length:
-            raise GatewayError(
+            raise RecordError(
                 f"content is {len(content)} characters, "
                 f"over the {self.max_content_length}-character cap on one message")
         with self._txn(write=True) as st:
             msg = Message(
-                id=self._next_id(st), channel_id=channel_id, author_id=qualified,
-                author_kind="identity", author_display=qualified,
+                id=self._next_id(st), channel_id=channel_id, author_id=author,
+                author_kind=kind, author_display=author,
                 content=content, timestamp=self._now(),
             )
             st.messages.append(msg.to_dict())
         self._fanout()
         return msg
+
+    def withdraw(self, message_id: str, at: str) -> bool:
+        """Mark a message withdrawn at `at`; one already withdrawn keeps its first time."""
+        with self._txn(write=True) as st:
+            for m in st.messages:
+                if m["id"] == str(message_id):
+                    if m.get("withdrawn_at"):
+                        return False
+                    m["withdrawn_at"] = at
+                    return True
+        return False
+
+    def operator_token_ok(self, token: str | None) -> bool:
+        """The mock holds no operator credential (see `post_as_user`): every token
+        passes."""
+        return True
 
     # ------------------------------------------------------------------ the record
     def history(self, channel_id: str, *, after: str | None = None,
@@ -237,38 +264,6 @@ class MockGateway:
         if limit is not None:
             out = out[-limit:]
         return out
-
-    def marked(self, channel_id: str, token: str) -> list[Message]:
-        """Every message in `channel_id` containing `token` (lowercased compare), no
-        bound: the local record's boot read, on the in-memory double."""
-        token = token.lower()
-        return [m for m in self.history(channel_id) if token in m.content.lower()]
-
-    def queue_add(self, name: str, ids) -> None:
-        """The local record's queue rows, on the double: [message id, name] pairs."""
-        with self._txn(write=True) as st:
-            have = {tuple(p) for p in st.queue}
-            for i in ids:
-                pair = (str(i), str(name))
-                if pair not in have:
-                    st.queue.append(list(pair))
-                    have.add(pair)
-
-    def queue_remove(self, name: str, ids) -> None:
-        gone = {(str(i), str(name)) for i in ids}
-        with self._txn(write=True) as st:
-            st.queue = [p for p in st.queue if tuple(p) not in gone]
-
-    def queue_rows(self) -> list[tuple[str, str]]:
-        with self._txn() as st:
-            return sorted(((str(m), str(n)) for m, n in st.queue),
-                          key=lambda p: (int(p[0]), p[1]))
-
-    def drop_refusals(self) -> None:
-        """The queue's migration: the refusals an older store kept go."""
-        with self._txn(write=True) as st:
-            if hasattr(st, "cold_refusals"):
-                del st.cold_refusals
 
     def meta_get(self, key: str) -> str | None:
         with self._txn() as st:
@@ -299,7 +294,7 @@ class MockGateway:
             time.sleep(self.max_message_id_hold)   # the declared round trip, in flight
         return answer
 
-    # ------------------------------------------------------------------ the gateway
+    # ------------------------------------------------------------------ events
     def subscribe(self, *, from_id: str | None = None) -> Subscription:
         sub = Subscription(from_id if from_id is not None else (self.max_message_id() or "0"))
         with self._lock:
@@ -366,5 +361,5 @@ class MockGateway:
         return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.clock()))
 
 
-__all__ = ["MockGateway", "Message", "Subscription",
-           "GatewayError", "RateLimited", "Forbidden", "Fatal"]
+__all__ = ["MockRecord", "Message", "Subscription",
+           "RecordError", "RateLimited", "Forbidden", "Fatal"]

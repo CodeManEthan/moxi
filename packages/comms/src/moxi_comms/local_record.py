@@ -1,6 +1,6 @@
-"""The LOCAL backend: a SQLite file that IS the record, behind the gateway seam.
+"""The LOCAL backend: the record's tables in comms.db, behind the record seam.
 
-One of `gateway.py`'s two implementations, beside `MockGateway` (in-process, the test
+One of `record.py`'s two implementations, beside `MockRecord` (in-process, the test
 double).
 
 Why it exists: comms reads no platform. Every comms process on the box
@@ -10,9 +10,11 @@ needs no server and no account.
 
 What is fixed here, and must not drift:
 
-  * `STATE/comms/record.db` (`paths.record_db()`), one file per box. STATE and not
-    DATA because a live DB is never continuous-file-synced.
-  * `max_content_length` 16,000 (`gateway.MAX_CONTENT_LENGTH`), the one cap on one
+  * `STATE/comms/comms.db` (`paths.comms_db()`), one file per box, opened only
+    through `store.open_write`. STATE and not DATA because a live DB is never
+    continuous-file-synced. The record's tables are `rooms`, `messages`,
+    `principals`, `denied` and `meta`; `store/schema.py` makes them.
+  * `max_content_length` 16,000 (`record.MAX_CONTENT_LENGTH`), the one cap on one
     message.
   * `retain_days` 90 (config.toml's `[local] retain_days`, whose default this is),
     `0` disables.
@@ -41,25 +43,31 @@ from __future__ import annotations
 import contextlib
 import json
 import hashlib
+import logging
 import secrets
 import sqlite3
 import threading
 import time
 from pathlib import Path
 
+from moxi.store import transaction
+
 from .config import LOCAL_RETAIN_DAYS
-from .gateway import (
+from .machine_line import parse as parse_machine_line
+from .record import (
+    AUTHOR_IDENTITY,
+    AUTHOR_OPERATOR,
+    AUTHOR_RESERVED,
     MAX_CONTENT_LENGTH,
     Forbidden,
-    GatewayError,
+    RecordError,
     Message,
     Subscription,
 )
+from .store import open_write
+from .store.schema import ID_BASE, META_NEXT_ID
 
-#: The counter's floor. Larger than every id an older record issued (ids of that era
-#: stay below it until 2049), and well inside `INTEGER PRIMARY KEY`'s signed 64 bits, so
-#: no id issued here sorts before an older one.
-ID_BASE = 2 ** 62
+log = logging.getLogger("comms.record")
 
 #: Days of message bodies kept; `0` disables the trim. One owner: the schema's default
 #: for `[local] retain_days` (settings.toml), read through `config`.
@@ -67,23 +75,6 @@ RETAIN_DAYS = LOCAL_RETAIN_DAYS
 
 BUSY_TIMEOUT_MS = 5_000
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS channels  (channel_id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
-                        created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS principals(principal_id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE);
-CREATE TABLE IF NOT EXISTS denied    (principal_id TEXT NOT NULL, channel_id TEXT NOT NULL,
-                        PRIMARY KEY (principal_id, channel_id));
-CREATE TABLE IF NOT EXISTS messages  (id INTEGER PRIMARY KEY, channel_id TEXT NOT NULL,
-                        author_id TEXT NOT NULL, author_kind TEXT NOT NULL,
-                        author_display TEXT NOT NULL, content TEXT NOT NULL,
-                        timestamp TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS messages_channel ON messages(channel_id, id);
-CREATE TABLE IF NOT EXISTS meta      (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS queue     (message_id INTEGER NOT NULL, name TEXT NOT NULL,
-                        PRIMARY KEY (name, message_id));
-"""
-
-META_NEXT_ID = "next_id"
 META_OPERATOR_TOKEN_HASH = "operator_token_hash"
 
 
@@ -92,7 +83,7 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-class LocalGateway:
+class LocalRecord:
     """The box's own record. Every method here is one the seam's callers already use."""
 
     max_content_length = MAX_CONTENT_LENGTH
@@ -102,9 +93,9 @@ class LocalGateway:
     def __init__(self, record=None, *, retain_days: int = RETAIN_DAYS,
                  poll_interval: float = 0.5, clock=time.time,
                  busy_timeout: float | None = None):
-        from .paths import record_db
+        from .paths import comms_db
 
-        self.path = Path(record) if record else record_db()
+        self.path = Path(record) if record else comms_db()
         self.retain_days = retain_days
         self.poll_interval = poll_interval
         #: How long a statement waits on another writer's lock, in milliseconds: a
@@ -120,28 +111,28 @@ class LocalGateway:
         self._pump: threading.Thread | None = None
         self._wake = threading.Event()
         self._stop = threading.Event()
-        # `connect` makes a missing directory of the record's, private; one already
-        # there, such as a shared directory a configured record names, is left as it is.
-        self._init_schema()
+        # The first connection opens the store through its gate now, so a store that
+        # can't be opened refuses here and not at the first post.
+        self._conn()
 
     # ------------------------------------------------------------------ connections
     def _conn(self) -> sqlite3.Connection:
         """One connection per thread. WAL lets them all read while one writes.
 
-        Opened through `moxi.store.connect`: a record it creates is private to its owner
-        (0600) from its first byte and starts in WAL, in a directory left as it was when it
-        was there already (a missing one is made 0700); an existing record is opened as it
-        is, its mode and journal mode untouched. A thread that is done with the record
-        calls `release()`, or its connection stays open until `close()`.
+        Opened through `store.open_write`, which opens with the core's store connect: a
+        store it creates is private to its owner (0600) from its first byte and starts
+        in WAL, in a directory left as it was when it was there already (a missing one
+        is made 0700); an existing store is opened as it is, its mode and journal mode
+        untouched.
+        A thread that is done with the record calls `release()`, or its connection stays
+        open until `close()`.
         """
         conn = getattr(self._local, "conn", None)
         if conn is None:
-            from moxi.store import connect
-
             # check_same_thread=False so `close()` may be called from any thread; the
             # connection is still only ever USED by the thread it was opened for.
-            conn = connect(self.path, timeout=self.busy_timeout_ms / 1000.0,
-                           check_same_thread=False)
+            conn = open_write(self.path, timeout=self.busy_timeout_ms / 1000.0,
+                              check_same_thread=False)
             self._local.conn = conn
             with self._lock:
                 self._conns.append(conn)
@@ -150,9 +141,10 @@ class LocalGateway:
     def release(self) -> None:
         """Close the calling thread's connection, if it has one, and forget it.
 
-        For a thread that is about to end, such as the daemon's handler for one client:
-        without this each such thread leaves one connection open for the process's life.
-        The thread's next call opens a new one.
+        For a thread that is about to end while the record stays open: without this each
+        such thread leaves one connection open until `close()`. The daemon serves its
+        clients on a fixed pool whose threads live as long as its socket, so it needs no
+        release per client. The thread's next call opens a new one.
         """
         conn = getattr(self._local, "conn", None)
         if conn is None:
@@ -163,25 +155,13 @@ class LocalGateway:
         with contextlib.suppress(sqlite3.Error):
             conn.close()
 
-    def _init_schema(self) -> None:
-        conn = self._conn()
-        conn.executescript(SCHEMA)
-        conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES (?,?)",
-                     (META_NEXT_ID, str(ID_BASE)))
-
     @contextlib.contextmanager
     def _write(self):
-        """`BEGIN IMMEDIATE`, always. A DEFERRED transaction that reads the
-        counter before it upgrades computes a stale id and two writers collide."""
-        conn = self._conn()
-        conn.execute("BEGIN IMMEDIATE")
-        try:
+        """`BEGIN IMMEDIATE`, always (`moxi.store.transaction`). A DEFERRED transaction
+        that reads the counter before it upgrades computes a stale id and two writers
+        collide."""
+        with transaction(self._conn()) as conn:
             yield conn
-        except BaseException:
-            with contextlib.suppress(sqlite3.Error):
-                conn.execute("ROLLBACK")
-            raise
-        conn.execute("COMMIT")
 
     def _next_id(self, conn: sqlite3.Connection) -> int:
         conn.execute("UPDATE meta SET value = value + 1 WHERE key = ?", (META_NEXT_ID,))
@@ -205,22 +185,22 @@ class LocalGateway:
     # ------------------------------------------------------------------ channels
     def create_channel(self, name: str) -> str:
         with self._write() as conn:
-            row = conn.execute("SELECT channel_id FROM channels WHERE name = ?",
+            row = conn.execute("SELECT room_id FROM rooms WHERE name = ?",
                                (name,)).fetchone()
             if row:
                 return row[0]
             cid = f"ch-{self._next_id(conn)}"
-            conn.execute("INSERT INTO channels(channel_id, name, created_at) VALUES (?,?,?)",
+            conn.execute("INSERT INTO rooms(room_id, name, created_at) VALUES (?,?,?)",
                          (cid, name, self._now()))
             return cid
 
     def channel_by_name(self, name: str) -> str | None:
-        row = self._conn().execute("SELECT channel_id FROM channels WHERE name = ?",
+        row = self._conn().execute("SELECT room_id FROM rooms WHERE name = ?",
                                    (name,)).fetchone()
         return row[0] if row else None
 
     def channel_name(self, channel_id: str) -> str | None:
-        row = self._conn().execute("SELECT name FROM channels WHERE channel_id = ?",
+        row = self._conn().execute("SELECT name FROM rooms WHERE room_id = ?",
                                    (str(channel_id),)).fetchone()
         return row[0] if row else None
 
@@ -228,8 +208,8 @@ class LocalGateway:
     def delete_channel(self, channel_id: str) -> None:
         channel_id = str(channel_id)
         with self._write() as conn:
-            conn.execute("DELETE FROM messages WHERE channel_id = ?", (channel_id,))
-            conn.execute("DELETE FROM channels WHERE channel_id = ?", (channel_id,))
+            conn.execute("DELETE FROM messages WHERE room_id = ?", (channel_id,))
+            conn.execute("DELETE FROM rooms WHERE room_id = ?", (channel_id,))
 
     # ------------------------------------------------------------------ permissions
     def register_principal(self, name: str) -> str:
@@ -268,7 +248,7 @@ class LocalGateway:
         record that has not been provisioned for the operator yet.
         """
         if len(content) > self.max_content_length:
-            raise GatewayError(
+            raise RecordError(
                 f"content is {len(content)} characters, "
                 f"over the {self.max_content_length}-character cap on one message")
         stored = self.meta_get(META_OPERATOR_TOKEN_HASH)
@@ -284,25 +264,42 @@ class LocalGateway:
             row = conn.execute("SELECT name FROM principals WHERE principal_id = ?",
                                (str(user_id),)).fetchone()
             msg = self._insert(conn, channel_id=str(channel_id), author_id=str(user_id),
-                               author_kind="user", author_display=row[0] if row else "operator",
+                               author_kind=AUTHOR_OPERATOR,
+                               author_display=row[0] if row else "operator",
                                content=content)
-        self._fanout()
-        self.nudge()
+        self._announce()
         return msg
 
     def post_as_identity(self, qualified: str, channel_id: str, content: str) -> Message:
         """Write an agent post after the daemon has checked its live binding."""
+        return self._post(AUTHOR_IDENTITY, str(qualified), channel_id, content)
+
+    def post_as_reserved(self, name: str, channel_id: str, content: str) -> Message:
+        """Write a module's post under a name it reserved, after the daemon has checked
+        the name's token."""
+        return self._post(AUTHOR_RESERVED, str(name), channel_id, content)
+
+    def _post(self, kind: str, author: str, channel_id: str, content: str) -> Message:
         if len(content) > self.max_content_length:
-            raise GatewayError(
+            raise RecordError(
                 f"content is {len(content)} characters, "
                 f"over the {self.max_content_length}-character cap on one message")
         with self._write() as conn:
-            msg = self._insert(conn, channel_id=str(channel_id), author_id=str(qualified),
-                               author_kind="identity", author_display=str(qualified),
-                               content=content)
-        self._fanout()
-        self.nudge()
+            msg = self._insert(conn, channel_id=str(channel_id), author_id=author,
+                               author_kind=kind, author_display=author, content=content)
+        self._announce()
         return msg
+
+    def _announce(self) -> None:
+        """Push a committed post to the subscriptions, and wake the pump. The post is
+        written by now, so a push that fails is logged and left to the pump's next pass:
+        its caller still gets the message, and never reads the post as not done."""
+        try:
+            self._fanout()
+        except Exception:  # noqa: BLE001 - the post stands whatever the push does
+            log.warning("pushing a committed post failed; the pump pushes it next",
+                        exc_info=True)
+        self.nudge()
 
     def _insert(self, conn: sqlite3.Connection, *, channel_id: str, author_id: str,
                 author_kind: str, author_display: str, content: str) -> Message:
@@ -310,21 +307,43 @@ class LocalGateway:
                       author_id=author_id, author_kind=author_kind,
                       author_display=author_display, content=content,
                       timestamp=self._now())
+        # Line zero is parsed once, here, so the store can ask about the interrupt mark
+        # and the expiry without parsing: they are copies of what line zero says.
+        ml = parse_machine_line(content)
         conn.execute(
-            "INSERT INTO messages(id, channel_id, author_id, author_kind, author_display, "
-            "content, timestamp) VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO messages(id, room_id, author_id, author_kind, author_display, "
+            "content, timestamp, interrupt, expires_at) VALUES (?,?,?,?,?,?,?,?,?)",
             (int(msg.id), msg.channel_id, msg.author_id, msg.author_kind,
-             msg.author_display, msg.content, msg.timestamp))
+             msg.author_display, msg.content, msg.timestamp,
+             int(ml is not None and ml.interrupt),
+             None if ml is None else ml.expires_at))
         return msg
 
+    def withdraw(self, message_id: str, at: str) -> bool:
+        """Mark a message withdrawn at `at`; a message already withdrawn keeps its first
+        time. The daemon's delete writes the same mark in its own transaction; this is
+        the record's half of the seam, so either backend answers `withdrawn_at`."""
+        with self._write() as conn:
+            return conn.execute("UPDATE messages SET withdrawn_at = ? WHERE id = ? AND "
+                                "withdrawn_at IS NULL", (at, int(message_id))).rowcount > 0
+
+    def operator_token_ok(self, token: str | None) -> bool:
+        """The operator's credential check on its own, for a request that posts nothing
+        (a delete): the same compare `post_as_user` makes."""
+        stored = self.meta_get(META_OPERATOR_TOKEN_HASH)
+        if not stored:
+            return True
+        return token is not None and secrets.compare_digest(stored, token_hash(token))
+
     # ------------------------------------------------------------------ the record
-    _COLUMNS = ("id, channel_id, author_id, author_kind, author_display, content, timestamp")
+    _COLUMNS = ("id, room_id, author_id, author_kind, author_display, content, timestamp, "
+                "withdrawn_at")
 
     @staticmethod
     def _message(row) -> Message:
         return Message(id=str(row[0]), channel_id=row[1], author_id=row[2],
                        author_kind=row[3], author_display=row[4], content=row[5],
-                       timestamp=row[6])
+                       timestamp=row[6], withdrawn_at=row[7])
 
     def history(self, channel_id: str, *, after: str | None = None,
                 limit: int | None = None) -> list[Message]:
@@ -334,7 +353,7 @@ class LocalGateway:
         literal "first 500 then take the tail" would scan the whole channel every boot.
         `ORDER BY id DESC LIMIT ?` walks the index backwards and stops at 500.
         """
-        sql = f"SELECT {self._COLUMNS} FROM messages WHERE channel_id = ?"
+        sql = f"SELECT {self._COLUMNS} FROM messages WHERE room_id = ?"
         params: list = [str(channel_id)]
         if after is not None:
             sql += " AND id > ?"
@@ -362,7 +381,7 @@ class LocalGateway:
         if channel_id is None:
             row = self._conn().execute("SELECT MAX(id) FROM messages").fetchone()
         else:
-            row = self._conn().execute("SELECT MAX(id) FROM messages WHERE channel_id = ?",
+            row = self._conn().execute("SELECT MAX(id) FROM messages WHERE room_id = ?",
                                        (str(channel_id),)).fetchone()
         return str(row[0]) if row and row[0] is not None else None
 
@@ -372,52 +391,9 @@ class LocalGateway:
         its sent index. Timestamps are the record's one fixed format, so the comparison
         is a string one."""
         rows = self._conn().execute(
-            f"SELECT {self._COLUMNS} FROM messages WHERE channel_id = ? AND timestamp >= ? "
+            f"SELECT {self._COLUMNS} FROM messages WHERE room_id = ? AND timestamp >= ? "
             "ORDER BY id", (str(channel_id), str(timestamp))).fetchall()
         return [self._message(r) for r in rows]
-
-    # ------------------------------------------------------------------ retention
-    def marked(self, channel_id: str, token: str) -> list[Message]:
-        """Every message in `channel_id` whose content contains `token`, compared
-        lowercased, ascending by id, with no age or count bound. The queue migration's read
-        of `[held]` and `[next-turn]` mail: the same shape as
-        `history`, one scan of the channel."""
-        rows = self._conn().execute(
-            f"SELECT {self._COLUMNS} FROM messages WHERE channel_id = ? "
-            "AND instr(lower(content), ?) > 0 ORDER BY id",
-            (str(channel_id), token.lower())).fetchall()
-        return [self._message(r) for r in rows]
-
-    # ------------------------------------------------------------------ the queue
-    def queue_add(self, name: str, ids) -> None:
-        """Rows: each of `ids` waits for `name`. A row that exists stays as it is. Raises
-        on a failed write; the daemon keeps the change and retries it."""
-        rows = [(int(i), str(name)) for i in ids if str(i).isdigit()]
-        if not rows:
-            return
-        with self._write() as conn:
-            conn.executemany("INSERT OR IGNORE INTO queue(message_id, name) VALUES (?,?)",
-                             rows)
-
-    def queue_remove(self, name: str, ids) -> None:
-        """Delete the rows of `ids` for `name`. Raises on a failed write."""
-        rows = [(int(i), str(name)) for i in ids if str(i).isdigit()]
-        if not rows:
-            return
-        with self._write() as conn:
-            conn.executemany("DELETE FROM queue WHERE message_id = ? AND name = ?", rows)
-
-    def queue_rows(self) -> list[tuple[str, str]]:
-        """Every row, as (message id, name), oldest id first. The daemon reads them before
-        its socket listens; a read that raises stops the start."""
-        rows = self._conn().execute(
-            "SELECT message_id, name FROM queue ORDER BY message_id, name").fetchall()
-        return [(str(r[0]), r[1]) for r in rows]
-
-    def drop_refusals(self) -> None:
-        """The queue's migration: the cold-refusals table an older daemon kept goes."""
-        with self._write() as conn:
-            conn.execute("DROP TABLE IF EXISTS cold_refusals")
 
     def trim(self, retain_days: int | None = None, *, keep=()) -> int:
         """Delete messages older than `retain_days`; `0` disables.
@@ -445,7 +421,7 @@ class LocalGateway:
             self._conn().execute("PRAGMA wal_checkpoint(TRUNCATE)")
         return deleted or 0
 
-    # ------------------------------------------------------------------ the gateway
+    # ------------------------------------------------------------------ events
     def subscribe(self, *, from_id: str | None = None) -> Subscription:
         sub = Subscription(from_id if from_id is not None else (self.max_message_id() or "0"))
         with self._lock:
@@ -532,5 +508,5 @@ class LocalGateway:
         self._local = threading.local()
 
 
-__all__ = ["LocalGateway", "ID_BASE", "MAX_CONTENT_LENGTH", "RETAIN_DAYS", "SCHEMA",
+__all__ = ["LocalRecord", "ID_BASE", "MAX_CONTENT_LENGTH", "RETAIN_DAYS",
            "META_NEXT_ID", "META_OPERATOR_TOKEN_HASH", "token_hash"]

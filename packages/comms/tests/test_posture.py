@@ -24,14 +24,14 @@ import pytest
 from conftest import (no_cold_at, queued, send_turn, wait_for_payload, wait_for_queue,
                       wait_until, write_transcript)
 
-from moxi_comms import attribution, cli, constants, cursors, directory, glossary
+from moxi_comms import attribution, cli, constants, directory, glossary
 from moxi_comms import machine_line
 from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.attribution import Author
 from moxi_comms.client import DaemonClient, DaemonOffline, DaemonTimeout
 from moxi_comms.daemon import ASK_INDEX_SLACK, Daemon, Refusal, Resolution
-from moxi_comms.gateway import GatewayError, Message
-from moxi_comms.paths import directory_db
+from moxi_comms.record import RecordError, Message
+from moxi_comms.paths import comms_db
 from moxi_comms.sender import SenderIdentity
 
 from test_cold_sends import bind  # noqa: F401 -- a shared fixture
@@ -47,7 +47,7 @@ P, R, C = "planner", "reviewer", "critic"
 # --------------------------------------------------------------------------- helpers
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def line_zero(msg):
@@ -89,11 +89,11 @@ def force_nomination(monkeypatch, rig, *ids):
 
 
 def refused(code, out):
-    return code == 2 and "Nothing was sent" in out and "still open" in out
+    return code == 3 and "Nothing was sent" in out and "still open" in out
 
 
 class ReadFails:
-    """The real gateway, except that one record read raises."""
+    """The real record, except that one record read raises."""
 
     def __init__(self, inner, error, *, what="get_message"):
         self._inner, self._error, self._what = inner, error, what
@@ -112,7 +112,7 @@ def reboot():
 
     def _reboot(rig):
         rig.daemon.stop()
-        rig.daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+        rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
         started.append(rig.daemon)
         return rig.daemon
 
@@ -196,7 +196,7 @@ def test_keyword_calls_give_todays_bytes_and_a_positional_one_fails():
 def test_bodies_with_a_text_only_namespace_gives_one_plain_body():
     """A caller outside comms compares its own render with `cli._bodies(args, ...)`,
     with an `args` that carries the text: no posture on `args`."""
-    ctx = SimpleNamespace(gateway=SimpleNamespace(max_content_length=16_000),
+    ctx = SimpleNamespace(record=SimpleNamespace(max_content_length=16_000),
                           say=lambda _t="": None)
     fits = SimpleNamespace(text="hello")
     assert cli._bodies(fits, ctx, ["reviewer"], None) == ["::to reviewer\nhello"]
@@ -386,14 +386,14 @@ def test_a_daemon_that_does_not_answer_the_query_lets_the_send_through(rig, pair
     """A timeout, and a connection closed between the
     resolve and the query: both are a daemon that did not answer."""
     open_ask(rig)
-    real = DaemonClient.query
+    real = DaemonClient.call
 
-    def query(self, kind, **kwargs):
+    def query(self, kind, params=None, **kwargs):
         if kind == "asks":
             raise error
-        return real(self, kind, **kwargs)
+        return real(self, kind, params, **kwargs)
 
-    monkeypatch.setattr(DaemonClient, "query", query)
+    monkeypatch.setattr(DaemonClient, "call", query)
     code, out = rig.cli(["send", "--posture", "none", "planner", "hi"], **REVIEWER)
     assert code == 0, out
     assert cli.ASK_CHECK_NO_ANSWER in out
@@ -413,14 +413,14 @@ def test_any_other_daemon_error_lets_the_send_through_quoting_it(rig, pair, monk
 
 
 @pytest.mark.parametrize("what", ["get_message", "history"])
-@pytest.mark.parametrize("error", [GatewayError("500: the record is unreadable"),
+@pytest.mark.parametrize("error", [RecordError("500: the record is unreadable"),
                                    DaemonOffline("comms offline"),
                                    sqlite3.OperationalError("disk I/O error"),
                                    RuntimeError("an unforeseen defect")])
 def test_a_failed_record_read_lets_the_send_through_naming_the_ask(rig, pair, what, error):
     ask = open_ask(rig)
     code, out = rig.cli(["send", "--posture", "none", "planner", "hi"], **REVIEWER,
-                        gateway=ReadFails(rig.gateway, error, what=what))
+                        record=ReadFails(rig.record, error, what=what))
     assert code == 0, out
     assert f"NOTE: the single-reply check could not read msg {ask.id}" in out
     assert str(error) in out
@@ -431,7 +431,7 @@ def test_a_failed_record_read_lets_the_send_through_naming_the_ask(rig, pair, wh
 def test_a_failed_directory_read_lets_the_single_reply_check_through(rig, pair,
                                                                      monkeypatch, seam):
     ask = open_ask(rig)
-    ctx = cli.Context(gateway=rig.gateway, db_path=directory_db(), clock=rig.clock)
+    ctx = cli.Context(record=rig.record, db_path=comms_db(), clock=rig.clock)
     sender = SenderIdentity(qualified=R, scope="global", name="reviewer")
 
     if seam == "db":
@@ -725,13 +725,9 @@ def test_the_index_only_opens_what_it_has_not_held(rig):
 def test_a_send_during_the_boot_race_passes_and_is_refused_once_the_rescan_lands(
         rig, pair, monkeypatch):
     ask = open_ask(rig)
-    # Handled before the stop: the cursors pass the ask while both are bound, so the
-    # unbind at the stop leaves it no row (a cursor moved later deletes no row).
-    for name in (P, R):
-        cursors.advance(name, ask.id)
     rig.daemon.stop()
     gate = threading.Event()
-    daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     rescan = daemon.rescan
 
     def held_rescan():
@@ -743,7 +739,7 @@ def test_a_send_during_the_boot_race_passes_and_is_refused_once_the_rescan_lands
     booting = threading.Thread(target=daemon.start, daemon=True)
     booting.start()
     try:
-        assert wait_until(lambda: daemon._sub is not None and daemon.bound)
+        assert wait_until(lambda: daemon._sub is not None and daemon.host is not None)
         rig.shim(**PLANNER)
         rig.shim(**REVIEWER)
         code, out = rig.cli(["send", "--posture", "none", "planner", "before the rescan"], **REVIEWER)
@@ -836,21 +832,23 @@ def test_the_payload_carries_the_posture_on_release_at_bind(rig):
 
 
 def test_the_payload_carries_the_posture_on_rescan(rig, pair):
-    """The rescan routes through `_deliver` like live routing and replay. The shim drops
-    an id it already holds, so the frame is read off the daemon's side of the socket."""
+    """The rescan routes through `_deliver` like live routing. The shim drops an id it
+    already holds, so the push is read off the daemon's side of the socket; the rescan
+    reads no routed mark, as on a home that has none yet, so it routes the ask again."""
     _, reviewer = pair
     ask = open_ask(rig)
     wait_until(lambda: any(p["message_id"] == ask.id for p in reviewer.queue))
     binding = rig.daemon.bindings[R]
-    sent, real_send = [], binding.conn.send
+    sent, real_notify = [], binding.conn.notify_threadsafe
 
-    def record(frame):
-        sent.append(frame)
-        return real_send(frame)
+    def record(method, params=None):
+        sent.append({"op": method, **(params or {})})
+        return real_notify(method, params)
 
-    binding.conn.send = record
+    binding.conn.notify_threadsafe = record
     with rig.daemon._lock:
         binding.delivered.clear()
+    rig.daemon.books.routed_through = lambda: None     # no mark: route it again
     rig.daemon.rescan()
     (again,) = [f["payload"] for f in sent
                 if f.get("op") == "deliver" and f["payload"]["message_id"] == ask.id]

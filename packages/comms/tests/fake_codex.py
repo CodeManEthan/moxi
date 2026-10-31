@@ -1,11 +1,11 @@
 """A stub `codex` executable: the fake app-server, and a stub window, behind one binary.
 
-The launcher spawns `codex app-server --listen unix://SOCK` and, under `--window`,
+The wrapper spawns `codex app-server --listen unix://SOCK` and, under `--window`,
 `codex -c check_for_update_on_startup=false resume <thread> --remote unix://SOCK`. This
-stub answers both, so the real launcher can be run end to end with no model and no
+stub answers both, so the real wrapper can be run end to end with no model and no
 network. `--version` prints a version line.
 
-Everything it does is driven by the environment it inherits from the launcher:
+Everything it does is driven by the environment it inherits from the wrapper:
 
     FAKE_CODEX_DIR       a directory for its records:
                            events.jsonl   one line per process event (start, stop, exit)

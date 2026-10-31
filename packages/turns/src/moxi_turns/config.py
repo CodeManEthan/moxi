@@ -3,19 +3,27 @@
 The schema is `settings.toml` in this package (the announcement's `SETTINGS`). One more
 input sits outside the file: `MOXI_TURNS_COMMANDS`, a launcher's grant of session commands
 to one launch, read from the environment the endpoint inherits from its session.
+
+turns refuses nothing its schema passes, so it declares no `CONFIG_CHECK`: a name in
+`commands.allow` that is not a session command grants nothing (the doctor warns of it),
+and a start-list entry that names no installed module or readable file adds nothing (the
+doctor names it).
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 from moxi import config as moxi_config
 
 from .results import COMMANDS
 
 MODULE = "turns"
-#: A launcher stamps `clear,exit` (or one of them) into one launch's environment.
+#: A launcher stamps `clear,exit` (or any of the session commands) into one launch's
+#: environment.
 COMMANDS_ENV = "MOXI_TURNS_COMMANDS"
+#: The stop handler's wait.
+STOP_WAIT = "stop_handler.wait_ms"
 
 
 def schema() -> moxi_config.Schema:
@@ -25,6 +33,11 @@ def schema() -> moxi_config.Schema:
 def reader(env: Mapping[str, str] | None = None) -> moxi_config.Config:
     """A started-on-demand `moxi.config.Config` for turns."""
     return moxi_config.Config(MODULE, schema(), env=env)
+
+
+def load(env: Mapping[str, str] | None = None) -> moxi_config.Settings:
+    """turns' settings now. Raises `moxi.config.ConfigError`."""
+    return reader(env).start()
 
 
 def allowed(settings_allow: object, env: Mapping[str, str]) -> frozenset[str]:
@@ -38,4 +51,10 @@ def allowed(settings_allow: object, env: Mapping[str, str]) -> frozenset[str]:
     return frozenset(n for n in names if n in COMMANDS)
 
 
-__all__ = ["MODULE", "COMMANDS_ENV", "schema", "reader", "allowed"]
+def unknown_commands(settings_allow: Iterable[object]) -> list[str]:
+    """The names in `commands.allow` that are not session commands, which grant nothing."""
+    return [str(n) for n in settings_allow if n not in COMMANDS]
+
+
+__all__ = ["MODULE", "COMMANDS_ENV", "STOP_WAIT", "schema", "reader", "load", "allowed",
+           "unknown_commands"]

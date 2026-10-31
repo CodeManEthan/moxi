@@ -1,24 +1,31 @@
-"""`moxi comms claude` (and `moxi-comms-claude`) -- the launcher: one command starts a
+"""`moxi comms claude` (and `moxi-comms-claude`) -- the wrapper: one command starts a
 Claude Code session with a comms identity.
 
 It stamps the session's identity into the environment, makes the session's RUNTIME
 directory, forks the session's adapter, and execs `claude`:
 
-  * **The adapter** (`claude_adapter`) is a comms process, one per session. The launcher
+  * **The adapter** (`claude_adapter`) is a comms process, one per session. The wrapper
     takes a handle on its own process (a pidfd: the pid `claude` keeps once this process
     execs it), forks, and the child detaches (its own session, its standard streams to
     comms' log) with the environment `claude` gets. Before `claude` starts it binds the
     name with the daemon and listens on the claim socket, `MOXI_COMMS_CLAIM_SOCKET`, with
-    the `claude` process as the claim's root: the launcher waits for its ready byte, at
+    the `claude` process as the claim's root: the wrapper waits for its ready byte, at
     most `READY_WAIT` seconds, so an in-session `moxi comms send` is answered from the
     session's first command. It then finds the session's turns endpoint and delivers
     through it, and ends when `claude` exits.
-  * **No hooks, no settings file, no plugin.** turns is the one interface to the session:
-    its plugin is the one a session loads, and comms' context (layer one, the roster and
-    its deltas) reaches the session through comms' listener, which turns asks
-    (`moxi_comms.listener`). This launcher writes no `--settings` file, passes no
-    `--mcp-config`, and adds no plugin flag of its own. A session that is to load turns'
-    plugin for one launch passes `--plugin-dir` itself, after `--`.
+  * **No hooks, no settings file, no plugin of comms' own.** turns is the one interface
+    to the session: its plugins are the ones a session loads, and comms' context (layer
+    one, the roster and its deltas) reaches the session through comms' listener, which
+    turns asks (`moxi_comms.listener`). This wrapper writes no `--settings` file and
+    passes no `--mcp-config`.
+  * **turns' launch additions.** The wrapper is the one caller of
+    `moxi_turns.launch_additions("claude", ...)` on this launch path: a launcher that
+    goes through it adds none itself. Their words (turns' plugins as `--plugin-dir DIR`,
+    and any module's tool permissions) go after the wrapper's own `--session-id` and
+    before the passthrough, less any flag and value the passthrough already gives; their
+    variables go over the stamped environment. When turns cannot give them (its Claude
+    plugin cannot be set up), the launch is refused before anything starts, with
+    `moxi.exit.ERROR`.
 
 It also passes the session's NATIVE LABEL: `-n`, rendered here by `native_name()`
 (see there for the spelling). Two flags, two namespaces -- `--agent` carries a ROLE file
@@ -26,12 +33,15 @@ and is whoever launches the session's to pass, `-n` carries the label and is com
 render, because only this process knows both halves of the identity. See
 `Session.claude_argv`. Everything after `--` reaches `claude` exactly as given.
 
+`stamped_env` scrubs only comms' own variables, so whatever else the caller's environment
+carries reaches the session: a `MOXI_TURNS_COMMANDS` grant a launcher stamps, for one.
+
 The identity is stamped into the session's environment at launch (`MOXI_COMMS_NAME` /
 `MOXI_COMMS_SCOPE` / `MOXI_COMMS_GLOBAL`, and `MOXI_COMMS_PROJECT`),
 beside the adapter's claim socket (`MOXI_COMMS_CLAIM_SOCKET`). `moxi comms send` inside that
 session reads who it is speaking as from the claim socket; the stamp alone sends nothing.
 
-The launcher also stamps how its own comms is run, `MOXI_COMMS_COMMAND` (its `moxi`
+The wrapper also stamps how its own comms is run, `MOXI_COMMS_COMMAND` (its `moxi`
 script by absolute path, `context.own_comms`). comms' listener names it in the session's
 layer one, so the agent runs this install's comms and not whatever `moxi` its shell's
 PATH finds first.
@@ -48,27 +58,26 @@ from __future__ import annotations
 
 import argparse
 import os
-import select
 import shutil
 import sys
 from pathlib import Path
 
+from moxi import exit as moxi_exit
+
 from .. import directors as directors_mod
 from ..context import COMMAND_ENV, own_comms
-from ..paths import log_dir, runtime_root
-from ..scoping import GLOBAL, NAME_RE, project_key
+from ..paths import claim_socket, log_dir, runtime_root
+from ..scoping import GLOBAL, NAME_RE, project_key, qualify
+from .word import BOUND, FAILED, await_word, exit_of, teller
 
-#: The old launcher stamp, scrubbed from a child's environment so a nested session
+#: The old wrapper stamp, scrubbed from a child's environment so a nested session
 #: does not inherit its parent's (no comms code reads it).
 SOCKET_ENV = "MOXI_COMMS_SHIM_SOCKET"
 
-#: How long the launcher waits for the adapter's ready byte before it execs `claude`
+#: How long the wrapper waits for the adapter's ready byte before it execs `claude`
 #: anyway (the adapter's bind and listen take well under a second; a daemon that is not
 #: there does not hold it up, since the adapter then binds when the daemon returns).
 READY_WAIT = 5.0
-#: The claim socket's name in the session's RUNTIME directory.
-CLAIM_SOCKET_NAME = "claim.sock"
-
 #: The separator the native layer wears where the comms identity wears `@`.
 NATIVE_AT = "-at-"
 
@@ -100,7 +109,7 @@ def native_name(name: str, scope: str) -> str:
     collision costs a rename and no identity confusion. It is declared, not defended
     against; no machinery here guards it.
 
-    The renderer lives HERE, in the launcher, rather than beside `qualify()`, because
+    The renderer lives HERE, in the wrapper, rather than beside `qualify()`, because
     the native label is a harness artifact with exactly one writer -- this process, at
     launch. Keeping it out of `scoping` keeps the identity module free of a spelling no
     comms surface should ever be tempted to consume.
@@ -109,14 +118,16 @@ def native_name(name: str, scope: str) -> str:
 
 
 def sessions_dir(env=None) -> Path:
-    """RUNTIME/comms/comms-sessions: one directory per session this launcher starts,
-    holding its claim socket and its roster memory."""
+    """RUNTIME/comms/comms-sessions: one directory per session this wrapper starts,
+    holding its roster memory. Its claim socket is beside it in RUNTIME/comms
+    (`paths.claim_socket(<session id>)`), where the core's short path takes over when
+    the session directory would make a socket path too long."""
     return runtime_root(env) / "comms-sessions"
 
 
 # Every variable comms sets on a session. A child's comms identity is composed ONLY of
 # what its caller stamps, so all of these come off first -- see `stamped_env`.
-#: The claim socket: a session never inherits its launcher's.
+#: The claim socket: a session never inherits its wrapper's.
 CLAIM_SOCKET_ENV = "MOXI_COMMS_CLAIM_SOCKET"
 
 INHERITED_COMMS_ENV = ("MOXI_COMMS_NAME", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL",
@@ -138,7 +149,7 @@ def stamped_env(base=None, **claim) -> dict:
     session that launched it. The socket is the visible symptom; the one that
     matters is `MOXI_COMMS_DIRECTORS`, because authority is the recipient's own grant and
     nobody may be handed one by proximity. An agent that declared no directors would
-    have inherited its launcher's and rendered another agent's mail as `directive from`.
+    have inherited its wrapper's and rendered another agent's mail as `directive from`.
 
     Every stamp site goes through here -- `Session.env`, the codex roster and the
     opencode roster -- because the leak was in the pattern, not in any one of them.
@@ -198,13 +209,13 @@ class Session:
         # global identity.
         self.directors = directors_mod.declare(directors)
         self.dir = sessions_dir() / session_id
-        #: The adapter's claim socket, in the session's own directory.
-        self.claim_socket = self.dir / CLAIM_SOCKET_NAME
+        #: The adapter's claim socket, keyed by the session id as its claim file is.
+        self.claim_socket = claim_socket(session_id)
 
     # ------------------------------------------------------------------ pieces
     def env(self, base=None) -> dict:
         """The session's environment: the identity stamp, the claim socket and the
-        launcher's comms command, over a scrubbed `base`."""
+        wrapper's comms command, over a scrubbed `base`."""
         env = stamped_env(base, name=self.name, scope=self.scope,
                           global_=self.global_, project=self.project,
                           directors=self.directors)
@@ -215,7 +226,7 @@ class Session:
 
     def write(self) -> Path:
         """Make the session's RUNTIME directory (0700) and return it. It holds the
-        adapter's claim socket and the listener's roster memory, and nothing else: no
+        listener's roster memory, and nothing else: no
         settings file. Files a launch by an earlier comms left under this session id
         (`mcp.json`, `settings.json`) are removed rather than left to mislead."""
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -241,8 +252,8 @@ class Session:
         harness reserves `@` in its own address grammar and a `name@scope` label is
         unaddressable. Global still renders bare. See `native_name`.
 
-        Position is deliberate: the render goes AFTER `*extra`, the launcher
-        passthrough, so a stale launcher that still passes `-n` is overridden by
+        Position is deliberate: the render goes AFTER `*extra`, the wrapper
+        passthrough, so a stale wrapper that still passes `-n` is overridden by
         position. A repeated `-n` is LAST-WINS -- measured, not assumed
         (`claude --bg -n first -n second` -> session store `name`
         `second`, banner and `claude agents --json` agreeing; Claude Code
@@ -260,7 +271,7 @@ class Session:
         hand `os.execve` a `-n "None-at-proj"` or a literal `None`.
 
         **`--native-name` overrides the render.** A caller that names the session
-        (a launcher with its own session-name field) hands the name here as
+        (a wrapper with its own session-name field) hands the name here as
         `--native-name`. When one is given it is what `-n` carries, verbatim; the identity
         spelling (`native_name()`) remains the render when no label is given, so a bare
         `moxi-comms-claude --name x` still comes up as `x`. The position (last, after the
@@ -273,14 +284,14 @@ class Session:
         return argv
 
     def native_label(self) -> str:
-        """What `-n` carries: the launcher's label or the identity spelling."""
+        """What `-n` carries: the wrapper's label or the identity spelling."""
         return self.native or native_name(self.name, self.scope)
 
 
 # --------------------------------------------------------------------------- main
 
 def split_passthrough(argv) -> tuple[list[str], list[str]]:
-    """The launcher's own arguments, and everything after the first `--`, which goes to
+    """The wrapper's own arguments, and everything after the first `--`, which goes to
     `claude` exactly as given (a later `--` included)."""
     argv = list(sys.argv[1:] if argv is None else argv)
     if "--" in argv:
@@ -338,9 +349,9 @@ def launch_session_id(passthrough, own=None):
     An id the passthrough names is the id: `--session-id U`, or `--resume U` / `-r U`
     with `U` a UUID and no `--fork-session`. A launch that resumes without naming one
     (`--continue`, `-c`, `--resume` with no UUID, `--from-pr`, `--teleport`) and does not
-    fork passes through unchanged and names none: (None, []). Otherwise the launcher
+    fork passes through unchanged and names none: (None, []). Otherwise the wrapper
     names one, its own `--session-id` or a fresh UUID, and adds `--session-id U`.
-    Raises ValueError when the launcher's own `--session-id` or the passthrough's is not
+    Raises ValueError when the wrapper's own `--session-id` or the passthrough's is not
     a UUID, or the two differ.
 
     The id comes back in lowercase, the spelling `claude` and turns report it in and
@@ -373,6 +384,58 @@ def launch_session_id(passthrough, own=None):
         return None, []
     named = (own or str(uuid.uuid4())).lower()
     return named, ["--session-id", named]
+
+
+def additions_for(session: Session, env: dict, cwd=None):
+    """turns' launch additions for this Claude launch: `moxi_turns.launch_additions` with
+    the stamped environment, the launch's working directory and the id it names to
+    `claude` (None for an unnamed resume). It grants no session command: a launcher
+    that grants one stamps `MOXI_TURNS_COMMANDS` in the wrapper's environment, which
+    reaches the session. Raises what that call raises (`moxi_turns.TurnsError`,
+    `ValueError`)."""
+    import moxi_turns
+    return moxi_turns.launch_additions("claude", cwd=os.getcwd() if cwd is None else cwd,
+                                       env=env, session_id=session.stated_id)
+
+
+def not_given(additions, passthrough) -> list[str]:
+    """The additions' words less those the passthrough already gives.
+
+    The words are read as flags, each with its value when the next word is not a flag
+    (`--plugin-dir DIR`) or joined to it (`--allowedTools=RULE`). A flag and value are
+    already given when the passthrough, before any `--` of claude's own, carries the same
+    pair in either spelling; a bare flag, when it carries the flag."""
+    given = list(passthrough)
+    if "--" in given:
+        given = given[:given.index("--")]
+    pairs = set()
+    for i, tok in enumerate(given):
+        if tok.startswith("-") and "=" in tok:
+            pairs.add(tuple(tok.split("=", 1)))
+            pairs.add((tok.split("=", 1)[0], None))
+        elif tok.startswith("-"):
+            nxt = given[i + 1] if i + 1 < len(given) else None
+            pairs.add((tok, None))
+            if nxt is not None and not nxt.startswith("-"):
+                pairs.add((tok, nxt))
+    words = list(additions)
+    out: list[str] = []
+    i = 0
+    while i < len(words):
+        tok = words[i]
+        if tok.startswith("-") and "=" in tok:
+            unit, key = [tok], tuple(tok.split("=", 1))
+            i += 1
+        elif (tok.startswith("-") and i + 1 < len(words)
+              and not words[i + 1].startswith("-")):
+            unit, key = [tok, words[i + 1]], (tok, words[i + 1])
+            i += 2
+        else:
+            unit, key = [tok], (tok, None)
+            i += 1
+        if key not in pairs:
+            out += unit
+    return out
 
 
 def main(argv=None, prog: str = "moxi-comms-claude") -> int:
@@ -421,7 +484,7 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
         print(f"{prog}: pass --name <name>.\n"
               "  A claim is a name: it is what the record shows, what a recipient's frame\n"
               "  line says, and what `moxi comms send` speaks as. `agent-N` is minted by the\n"
-              "  daemon at register time — after this launcher has handed the session its\n"
+              "  daemon at register time — after this wrapper has handed the session its\n"
               "  environment — so there is no identity to stamp into it. Add --name.",
               file=sys.stderr)
         return 2
@@ -430,7 +493,7 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
         # accepted in full and rendered into the address as `-n 'bad name@x!@proj-a'`.
         # It then failed at REGISTER time, inside the session, where the shim's refusal
         # goes to a debug log nobody reads.
-        # NAME_RE is comms' own; this is the launcher consulting it, not a second copy.
+        # NAME_RE is comms' own; this is the wrapper consulting it, not a second copy.
         print(f"{prog}: --name {args.name!r} is not a name. A comms identity is "
               f"{NAME_RE.pattern} -- letters, digits, dot, underscore, hyphen. The scope "
               "half goes in --scope or --global, never in the name.", file=sys.stderr)
@@ -443,7 +506,7 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
         print(f"{prog}: {e}", file=sys.stderr)
         return 2
     # An unnamed resume states no id until the look; its runtime dir is still named, by
-    # the launcher's own --session-id when it has one, in lowercase as a stated id is.
+    # the wrapper's own --session-id when it has one, in lowercase as a stated id is.
     session_id = stated or (args.session_id or "").lower() or uuid.uuid4().hex[:8]
     try:
         session = Session(session_id, name=args.name,
@@ -462,10 +525,23 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
         print(f"{prog}: session {session.id} is already running under comms; "
               "its claim socket answers", file=sys.stderr)
         return 2
-    session.write()
     env = session.env()
-    # The named id goes first, ahead of any `--` in the passthrough.
-    cmd = session.claude_argv([*named_argv, *passthrough], claude=args.claude)
+    import moxi_turns
+    try:
+        additions = additions_for(session, env)
+    except (moxi_turns.TurnsError, ValueError) as e:
+        # Before the session directory, the adapter and `claude`: nothing has started.
+        print(f"{prog}: turns cannot give this launch its additions, so claude was not "
+              f"started: {e}", file=sys.stderr)
+        return moxi_exit.ERROR
+    for note in additions.notes:
+        print(f"{prog}: {note}", file=sys.stderr)
+    env.update(additions.env)
+    session.write()
+    # The named id goes first, ahead of any `--` in the passthrough; turns' additions
+    # follow the wrapper's own flags and come before the passthrough.
+    cmd = session.claude_argv([*named_argv, *not_given(additions.argv, passthrough),
+                               *passthrough], claude=args.claude)
 
     print(f"session {session.id}")
     print(f"  identity   {session.name} @ {session.scope}")
@@ -486,8 +562,7 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
         return 2
     sys.stdout.flush()
     sys.stderr.flush()
-    launch(session, binary, cmd, env, prog=prog)   # pragma: no cover - replaces this process
-    return 0
+    return launch(session, binary, cmd, env, prog=prog)
 
 
 # ----------------------------------------------------------------- the adapter fork
@@ -495,14 +570,18 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
 def launch(session: Session, binary: str, cmd: list[str], env: dict, *,
            prog: str = "moxi-comms-claude", ready_wait: float = READY_WAIT,
            exec_=os.execve):
-    """Fork the session's adapter, wait for it to be ready, and exec `claude`.
+    """Fork the session's adapter, wait for its word, and exec `claude`.
 
     This process takes a pidfd on itself first: it becomes `claude` at the exec, keeping
     its pid, so the handle is the adapter's watch on `claude`, and a reused pid cannot
     stand in for it. The adapter is forked twice over (its first parent leaves at once),
     so it is never `claude`'s child and is not left a zombie under it, and it runs in a
-    session of its own. The launcher waits for its ready byte, at most `ready_wait`
-    seconds, then execs whatever it heard; past the bound it says so on stderr."""
+    session of its own. The wrapper waits for its word (`adapters.word`), at most
+    `ready_wait` seconds. Any word but `BOUND` ends the launch here, before `claude`
+    starts, with its reason on stderr and its exit code: a refusal (the name held by
+    another session, or reserved) is `REFUSED`, a daemon that is not running is
+    `TEMPFAIL`. Past the bound `claude` starts anyway, and the wrapper says so on
+    stderr."""
     from .terminal import pidfd_open   # not at the top: it needs termios, and the listener
     #                                    imports this module
 
@@ -527,23 +606,19 @@ def launch(session: Session, binary: str, cmd: list[str], env: dict, *,
     os.close(w)
     os.waitpid(child, 0)
     os.close(handle)
-    ready = _await_ready(r, ready_wait)
+    word = await_word(r, ready_wait)
     os.close(r)
-    if not ready:
+    if word is None:
         print(f"{prog}: the session's comms adapter was not ready after {ready_wait:g}s; "
               f"starting claude anyway (its log: {session.log_path()})", file=sys.stderr)
+    elif word[0] != BOUND:
+        code, why = word
+        who = qualify(session.name, session.scope) if session.name else "the session"
+        print(f"{prog}: {who} was not launched: "
+              f"{why or 'the adapter ended before it bound'} (its log: "
+              f"{session.log_path()})", file=sys.stderr)
+        return exit_of(code)
     return exec_(binary, cmd, env)
-
-
-def _await_ready(fd: int, timeout: float) -> bool:
-    """True when the adapter wrote its ready byte within `timeout` seconds."""
-    ready, _, _ = select.select([fd], [], [], timeout)
-    if not ready:
-        return False
-    try:
-        return os.read(fd, 1) == b"1"
-    except OSError:
-        return False
 
 
 def _adapter_process(session: Session, env: dict, harness_pid: int, handle: int,
@@ -568,21 +643,19 @@ def _adapter_process(session: Session, env: dict, harness_pid: int, handle: int,
     logging.basicConfig(level="INFO", stream=sys.stderr, force=True,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
-    def ready() -> None:
-        try:
-            os.write(ready_fd, b"1")
-            os.close(ready_fd)
-        except OSError:
-            pass
-
     from . import claude_adapter
-    shim = adapter_shim(session, harness_pid)
+    say = teller(ready_fd)
     try:
-        return claude_adapter.serve(shim, harness_pid, handle, ready=ready)
+        shim = adapter_shim(session, harness_pid)
+        return claude_adapter.serve(shim, harness_pid, handle, say=say)
     finally:
-        # The session has ended: its directory (the claim socket's, the roster memory's)
-        # goes with it.
+        say(FAILED, "the adapter ended")
+        # The session has ended: its directory (the roster memory's) goes with it, and
+        # its claim socket if the adapter did not close it.
+        from ..claimhold import remove_socket
+
         shutil.rmtree(session.dir, ignore_errors=True)
+        remove_socket(session.claim_socket)
 
 
 def adapter_shim(session: Session, harness_pid: int, **extra):
@@ -590,8 +663,9 @@ def adapter_shim(session: Session, harness_pid: int, **extra):
     session id, its claim socket in the session's directory with the `claude` process as
     the claim's root, and its supervisor on. The session id is the one the launch named
     to `claude`, stated from the bind until the first look replaces it; an
-    unnamed resume states none. Never an inherited `CLAUDE_CODE_SESSION_ID` (a launcher
-    run inside another session carries that session's)."""
+    unnamed resume states none. Never an inherited `CLAUDE_CODE_SESSION_ID` (a wrapper
+    run inside another session carries that session's). A name another session holds is
+    refused, not waited for: the wrapper ends that launch before `claude` starts."""
     from ..membership import TREE, root_of
     from .claude_shim import ClaudeShim
 
@@ -603,6 +677,7 @@ def adapter_shim(session: Session, harness_pid: int, **extra):
                       claim_socket=session.claim_socket,
                       claim_roots=[root] if root else [], listen_claims=True, **extra)
     shim.session_id = session.stated_id
+    shim.WAIT_WHEN_HELD = False
     return shim
 
 

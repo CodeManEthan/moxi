@@ -400,8 +400,9 @@ class ReplyCheck:
         with self.lock:
             identity, client = self.identity(), self.connection()
         if identity and client is not None and client.connected:
-            client.notify("unanswered", identity=identity, message_id=debt.message_id,
-                          author=debt.author, at=debt.at)
+            client.notify("unanswered", {"identity": identity,
+                                         "message_id": debt.message_id,
+                                         "author": debt.author, "at": debt.at})
         self.log.info("comms: %s ended a turn without answering %s's msg %s", identity,
                       debt.author, debt.message_id)
 

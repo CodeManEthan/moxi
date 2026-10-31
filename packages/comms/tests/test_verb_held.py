@@ -13,21 +13,21 @@ import time
 import pytest
 from conftest import queued, wait_for_queue, wait_until
 
-from moxi_comms import cli, machine_line
+from moxi import exit as moxi_exit
+from moxi_comms import cli, machine_line, wire
 from moxi_comms.adapters.claude_shim import frame_line, held_mark, sent_at
-from moxi_comms.client import DaemonClient
-from moxi_comms.paths import daemon_socket
+from moxi_comms.daemon import Daemon
 
 PLANNER = dict(name="planner")
 T_ASK = 1_760_000_000.5
 
 
 def last(rig):
-    return rig.gateway.history(rig.names_channel)[-1]
+    return rig.record.history(rig.names_channel)[-1]
 
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def answers(rig, monkeypatch, table: dict):
@@ -143,7 +143,7 @@ def test_an_unknown_read_refuses_the_send_held_or_not(rig, monkeypatch):
     before = posted(rig)
     for flags in ([], ["--held"]):
         code, out = rig.cli(["send", "x,w", "hi", "--posture", "none", *flags], **PLANNER)
-        assert code == cli.EXIT_COLD, out
+        assert code == moxi_exit.TEMPFAIL, out
         assert out.splitlines() == [
             "Nothing was sent: comms could not read x's cache (no session id "
             "reported yet).",
@@ -231,60 +231,28 @@ def test_held_to_the_operator_and_another_flags_the_line_and_says_so(rig):
 
 # ------------------------------------------------------------------------ one version check
 
-@pytest.mark.parametrize("answer", [{}, {"cli_protocol": 0}, {"cli_protocol": 1},
-                                    {"cli_protocol": 4}])
-def test_a_daemon_on_another_verb_protocol_refuses_every_send(rig, monkeypatch, answer):
-    """Exit 4 with the protocol refusal's text, nothing posted."""
+@pytest.mark.parametrize("older", ["daemon", "verb"])
+def test_a_daemon_on_another_wire_version_refuses_every_send(rig, monkeypatch, older):
+    """A verb and a daemon with no comms wire version in common: the hello is refused,
+    every verb exits 1 with nothing sent (trying again won't change it), and the text
+    names the older side."""
     rig.shim(name="x")
-    real = DaemonClient.request
-
-    def request(self, op, **kw):
-        got = real(self, op, **kw)
-        if op == "ping":
-            got = {k: v for k, v in got.items() if k != "cli_protocol"} | answer
-        return got
-
-    monkeypatch.setattr(DaemonClient, "request", request)
+    if older == "daemon":
+        monkeypatch.setattr(wire, "VERSIONS", (2, 2))
+    else:
+        rig.daemon.stop()
+        monkeypatch.setattr(wire, "VERSIONS", (2, 2))
+        rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
+        monkeypatch.setattr(wire, "VERSIONS", (1, 1))
+    cure = ("the daemon is older. Restart it" if older == "daemon" else
+            "this program is older than the daemon")
     before = posted(rig)
     code, out = rig.cli(["send", "x", "hi", "--posture", "none"], **PLANNER)
-    spoken = answer.get("cli_protocol", 0)
-    assert (code, out.strip()) == (cli.EXIT_OFFLINE, (
-        f"the comms daemon speaks verb protocol {spoken} and this comms speaks 3; restart "
-        "the daemon (moxi comms service status names its unit), then run this again. Nothing "
-        "was sent."))
+    assert code == moxi_exit.ERROR
+    assert cure in out and out.count("Nothing was sent.") == 1, out
     assert posted(rig) == before
     code, out = rig.cli(["agents"], **PLANNER)
-    assert code == cli.EXIT_OFFLINE and "speaks verb protocol" in out
-
-
-@pytest.mark.parametrize("side", ["sending", "daemon"])
-def test_a_verb_and_a_daemon_from_either_side_of_cache_code_refuse_each_other(
-        rig, monkeypatch, side):
-    """An old verb on a new daemon, and a new verb on an old daemon, each exit 4
-    with nothing sent, so neither reads the other's session answer."""
-    rig.shim(name="x")
-    monkeypatch.setattr(f"moxi_comms.{side}.CLI_PROTOCOL", 2)
-    daemon, verb = (3, 2) if side == "sending" else (2, 3)
-    before = posted(rig)
-    code, out = rig.cli(["send", "x", "hi", "--posture", "none"], **PLANNER)
-    assert (code, out.strip()) == (cli.EXIT_OFFLINE, (
-        f"the comms daemon speaks verb protocol {daemon} and this comms speaks {verb}; "
-        "restart the daemon (moxi comms service status names its unit), then run this "
-        "again. Nothing was sent."))
-    assert posted(rig) == before
-    code, out = rig.cli(["agents"], **PLANNER)
-    assert code == cli.EXIT_OFFLINE and "speaks verb protocol" in out
-
-
-def test_ping_answers_the_verb_protocol_and_register_the_claims_one(rig):
-    from moxi_comms.protocol import CLI_PROTOCOL, PROTOCOL_VERSION
-
-    c = DaemonClient(daemon_socket()).connect()
-    try:
-        assert c.request("ping") == {"id": 1, "ok": True, "cli_protocol": CLI_PROTOCOL}
-    finally:
-        c.close()
-    assert (CLI_PROTOCOL, PROTOCOL_VERSION) == (3, 2)
+    assert code == moxi_exit.ERROR and cure in out
 
 
 # --------------------------------------------------------------------- the held frame mark

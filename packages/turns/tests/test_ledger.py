@@ -4,9 +4,9 @@ from moxi_turns.ledger import TurnLedger
 def test_the_ledger():
     led = TurnLedger("s-1")
     r0 = led.read()
-    assert (r0.epoch, r0.turn_open, r0.session_id) == (0, False, "s-1")
+    assert (r0.turn_number, r0.turn_open, r0.session_id) == (0, False, "s-1")
     prev, turn = led.started("t1", "d1")
-    assert prev is None and led.read().turn_open and led.read().epoch == 1
+    assert prev is None and led.read().turn_open and led.read().turn_number == 1
     assert led.steered_into("d2") is turn and turn.steered == ["d2"]
     assert led.ended("answer") is turn and turn.outcome == "answer"
     assert led.ended("answer") is None and led.steered_into("d3") is None
@@ -14,7 +14,7 @@ def test_the_ledger():
     assert not led.new_session("s-1") and led.read().version == v
     assert led.new_session("s-2")
     r = led.read()
-    assert (r.session_id, r.epoch, led.earlier) == ("s-2", 0, ["s-1"]) and r.version > v
+    assert (r.session_id, r.turn_number, led.earlier) == ("s-2", 0, ["s-1"]) and r.version > v
     led.started("t2", None)
     prev, _ = led.started("t3", None)
     assert prev.turn_id == "t2" and prev.outcome == "error"

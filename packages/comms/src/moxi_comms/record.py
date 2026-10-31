@@ -1,12 +1,12 @@
-"""The gateway INTERFACE -- the seam the daemon, the sender, the CLI and provision use.
+"""The record INTERFACE -- the seam the daemon, the sender, the CLI and provision use.
 
 There are two implementations, and nothing above this line knows which one it holds:
 
-  * `local_gateway.LocalGateway` -- the box's own SQLite record under STATE, written
-                                    directly by every comms process and subscribed to by
-                                    the daemon.
-  * `mock_gateway.MockGateway`   -- in-process (and optionally JSON-file-backed) record;
-                                    the tests' double.
+  * `local_record.LocalRecord` -- the box's own SQLite record under STATE, written
+                                  directly by every comms process and subscribed to by
+                                  the daemon.
+  * `mock_record.MockRecord`   -- in-process (and optionally JSON-file-backed) record;
+                                  the tests' double.
 
 The interface, in full:
 
@@ -20,6 +20,10 @@ The interface, in full:
                                                               backend checks the token
                  post_as_identity(qualified, channel_id, content)
                                                            -- daemon-stamped agent post
+                 post_as_reserved(name, channel_id, content)
+                                                           -- a module's post under a
+                                                              name it reserved, after
+                                                              the daemon checked its token
                  max_content_length -> int   (attribute, not a method)
                  history_bound -> int | None (attribute: the most messages an
                                               unbounded `history(after=)` returns, or
@@ -29,7 +33,7 @@ The interface, in full:
                  max_message_id(channel_id=None) -> str | None
                  since(channel_id, timestamp) -> [Message]  (the daemon's boot read of
                                                            its sent index)
-    the gateway  subscribe(from_id=) -> Subscription / unsubscribe(sub) / close()
+    events       subscribe(from_id=) -> Subscription / unsubscribe(sub) / close()
 
 Events on a Subscription are exactly two shapes, and the second one is load-bearing:
 
@@ -45,7 +49,7 @@ not split.
 unbounded forward read (`history(channel, after=id)`) can return before the backend
 stops on its own. None means the whole range comes back (the local record and the
 mock), and both declare None. The send verb reads it to know whether an open thread's members read
-may have been cut short; a gateway that declares nothing counts as bounded.
+may have been cut short; a record that declares nothing counts as bounded.
 
 `Message` carries NO reply field. Correlation rides the machine line's `re:<message_id>`
 token, and a reader gets it by parsing the record's own line zero. A transport-level reply
@@ -58,16 +62,26 @@ import threading
 import time
 from dataclasses import asdict, dataclass, field
 
+#: A message's `author_kind`, who posted it: an agent the daemon checked against its live
+#: binding, the operator through the operator's lane, or a module under a name it
+#: reserved, with that name's token.
+AUTHOR_IDENTITY, AUTHOR_OPERATOR, AUTHOR_RESERVED = "identity", "operator", "reserved"
+#: The operator's kind as older stores spell it: comms 0.2's record, and comms.db before
+#: its schema's second step. The 0.2 move and that step rewrite it to `operator`, and
+#: nothing writes it any more. Attribution still reads it, for a store a read-only open
+#: finds before any writer has stepped it.
+AUTHOR_OPERATOR_OLD = "user"
+
 # The one cap on one message, in characters. Declared here so the local record and the
 # mock name ONE number.
 MAX_CONTENT_LENGTH = 16_000
 
 
-class GatewayError(Exception):
+class RecordError(Exception):
     pass
 
 
-class RateLimited(GatewayError):
+class RateLimited(RecordError):
     """429. `retry_after` is seconds, surfaced, never swallowed here --
     the send verb owns the retry policy."""
 
@@ -78,11 +92,11 @@ class RateLimited(GatewayError):
         self.global_ = global_
 
 
-class Forbidden(GatewayError):
+class Forbidden(RecordError):
     """403 -- e.g. a principal whose Send was channel-denied."""
 
 
-class Fatal(GatewayError):
+class Fatal(RecordError):
     """A failure that retrying cannot fix (4004 auth failed, 4014 disallowed intents).
 
     Surfaced loudly and never retry-looped: a retry loop against a fatal close code
@@ -95,10 +109,14 @@ class Message:
     id: str
     channel_id: str
     author_id: str            # webhook id, operator user id, or qualified identity
-    author_kind: str          # 'webhook' | 'user' | 'identity'
+    author_kind: str          # 'identity' | 'operator' | 'reserved'; an older row may
+                              # say 'webhook'
     author_display: str       # webhook override, user display, or qualified identity
     content: str
     timestamp: str
+    #: When its author withdrew it (`moxi comms delete`), the record's own time
+    #: spelling; None while it stands. A withdrawn message stays in the record.
+    withdrawn_at: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -111,7 +129,7 @@ class Message:
 
 
 class Subscription:
-    """One gateway session's event queue, as seen by the daemon."""
+    """One record session's event queue, as seen by the daemon."""
 
     def __init__(self, last_id: str = "0"):
         self._q: list = []
@@ -149,9 +167,7 @@ class _State:
     denied: dict = field(default_factory=dict)
     users: dict = field(default_factory=dict)
     messages: list = field(default_factory=list)
-    #: [message id, name] queue rows: the message waits for the name.
-    queue: list = field(default_factory=list)
-    #: The record's meta keys the daemon reads (`queue_migrated`).
+    #: The record's meta keys (the operator's token hash among them).
     meta: dict = field(default_factory=dict)
 
     def replace_with(self, raw: dict) -> None:
@@ -183,9 +199,9 @@ class BackendChoice:
     def describe(self) -> str:
         """The source in words, for `moxi comms doctor`."""
         if self.source == SOURCE_FLAG:
-            return "the --gateway flag"
+            return "the --backend flag"
         if self.source == SOURCE_ENV:
-            return "MOXI_COMMS_GATEWAY"
+            return "MOXI_COMMS_BACKEND"
         if self.source == SOURCE_CONFIG:
             return "the config file"
         return "the default"
@@ -201,7 +217,7 @@ def default_backend() -> str:
 
 def backend_choice(explicit: str | None = None, env=None) -> BackendChoice:
     """Which backend a run uses, and why: the flag, then config.toml's `backend` with
-    its override `MOXI_COMMS_GATEWAY`, then the default (`local`).
+    its override `MOXI_COMMS_BACKEND`, then the default (`local`).
 
     `mock` is never a default: a test or a user picks it by name.
     """
@@ -216,25 +232,25 @@ def backend_choice(explicit: str | None = None, env=None) -> BackendChoice:
         try:
             cfg = config.load(env=env)
         except config.ConfigError as e:
-            raise GatewayError(str(e)) from None
+            raise RecordError(str(e)) from None
         chosen = cfg.backend
         source = {"env": SOURCE_ENV, "file": SOURCE_CONFIG}.get(
             cfg.sources.get("backend"), SOURCE_DEFAULT)
     if chosen not in BACKENDS:
-        raise GatewayError(f"unknown gateway backend {chosen!r}; expected one of "
+        raise RecordError(f"unknown record backend {chosen!r}; expected one of "
                            f"{', '.join(BACKENDS)}")
     return BackendChoice(chosen, source)
 
 
 def backend_name(explicit: str | None = None, env=None) -> str:
-    """The name half of `backend_choice`: the flag, `MOXI_COMMS_GATEWAY`, the config
+    """The name half of `backend_choice`: the flag, `MOXI_COMMS_BACKEND`, the config
     file, then `local`."""
     return backend_choice(explicit, env).name
 
 
-def open_gateway(explicit: str | None = None, *, role: str = "reader", env=None,
+def open_record(explicit: str | None = None, *, role: str = "reader", env=None,
                  busy_timeout: float | None = None):
-    """Open the gateway this run is configured for. `role` is accepted from every caller
+    """Open the record this run is configured for. `role` is accepted from every caller
     and means nothing to either backend. `busy_timeout` is the local record's wait for a
     writer's lock, in seconds (None: its own default); the mock has no lock."""
     import os
@@ -242,21 +258,22 @@ def open_gateway(explicit: str | None = None, *, role: str = "reader", env=None,
     env = env if env is not None else os.environ
     name = backend_name(explicit, env=env)
     if name == MOCK:
-        from .mock_gateway import MockGateway
-        store = env.get("MOXI_COMMS_MOCK_GATEWAY")
+        from .mock_record import MockRecord
+        store = env.get("MOXI_COMMS_MOCK_BACKEND")
         if not store:
-            raise GatewayError(
-                "the mock gateway needs a store: set MOXI_COMMS_MOCK_GATEWAY=<store.json>")
-        return MockGateway(store)
+            raise RecordError(
+                "the mock record needs a store: set MOXI_COMMS_MOCK_BACKEND=<store.json>")
+        return MockRecord(store)
     from . import config
     cfg = config.load(env=env)
-    from .local_gateway import LocalGateway
+    from .local_record import LocalRecord
     local = cfg.local
-    return LocalGateway(local.record or None, retain_days=local.retain_days,
+    return LocalRecord(local.record or None, retain_days=local.retain_days,
                         busy_timeout=busy_timeout)
 
 
-__all__ = ["MAX_CONTENT_LENGTH", "GatewayError", "RateLimited", "Forbidden", "Fatal",
+__all__ = ["AUTHOR_IDENTITY", "AUTHOR_OPERATOR", "AUTHOR_RESERVED", "AUTHOR_OPERATOR_OLD",
+           "MAX_CONTENT_LENGTH", "RecordError", "RateLimited", "Forbidden", "Fatal",
            "Message", "Subscription", "MOCK", "LOCAL", "BACKENDS",
            "BackendChoice", "SOURCE_FLAG", "SOURCE_ENV", "SOURCE_CONFIG", "SOURCE_DEFAULT",
-           "backend_choice", "backend_name", "default_backend", "open_gateway"]
+           "backend_choice", "backend_name", "default_backend", "open_record"]

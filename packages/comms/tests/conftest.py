@@ -1,12 +1,12 @@
 """Test rig: everything runs in tmp dirs via comms' root overrides.
 
 Nothing here touches a real HOME directory, and nothing touches a real record: the
-gateway is the in-process mock, which is also the record.
+record is the in-process mock, which is also the record.
 
 The rig runs on TWO backends. The
 `backend` fixture answers `mock` everywhere by default, and the suites named in
 `BOTH_BACKENDS` below run every rig-using test twice, once against the mock and once
-against a real `record.db` under the tmp STATE root. The mock stays the default and the
+against a real `comms.db` under the tmp STATE root. The mock stays the default and the
 in-memory double; `local` is there so the seam's second real implementation is
 exercised by the same tests, not by a parallel set of its own.
 
@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -34,15 +35,15 @@ from pathlib import Path
 
 import pytest
 
-from moxi_comms import cli, config, cursors, machine_line, tokens as tokens_mod
-from moxi_comms.adapters.claude_shim import ClaudeShim
+from moxi_comms import cli, config, machine_line, tokens as tokens_mod
+from moxi_comms.adapters.claude_shim import ACTIVITY_METHODS, ClaudeShim
 from moxi_comms.claimfile import HOLDS
 from moxi_comms.claimhold import CLAIM_SOCKET_ENV, ClaimServer
 from moxi_comms.daemon import Daemon
-from moxi_comms.local_gateway import LocalGateway
+from moxi_comms.local_record import LocalRecord
 from moxi_comms.membership import SELF, root_of
-from moxi_comms.mock_gateway import MockGateway
-from moxi_comms.paths import daemon_socket, directory_db, tokens_dir
+from moxi_comms.mock_record import MockRecord
+from moxi_comms.paths import daemon_socket, comms_db, tokens_dir
 from moxi_comms.provision import NAMES, provision
 from moxi_comms.scoping import is_auto_name, project_key
 from moxi_comms.sender import MalformedStamp, SenderIdentity, sender_from_env
@@ -105,14 +106,21 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setenv("MOXI_COMMS_HOME", str(home))
     monkeypatch.setenv("MOXI_COMMS_DEVICE", "testbox")
     monkeypatch.setenv("MOXI_COMMS_RUNTIME_DIR", str(runtime))
+    # A socket path too long for its directory falls back to the core's short path:
+    # this test's own, never the machine's shared one.
+    from moxi import paths as moxi_paths
+    monkeypatch.setattr(moxi_paths, "_SHORT_ROOT", str(runtime))
+    # Sends write no expiry unless a test asks for one, so line zero reads as the
+    # tests that pin it expect; the expiry tests set it back.
+    monkeypatch.setenv("MOXI_COMMS_DELIVERY_EXPIRY", "never")
     for root in ("DATA_HOME", "STATE_HOME", "CACHE_HOME", "CONFIG_HOME"):
         monkeypatch.delenv(f"MOXI_COMMS_{root}", raising=False)
     monkeypatch.delenv("MOXI_COMMS_PROJECT", raising=False)
     # RUNTIME/comms exists, as a login's runtime directory does: a rig's fake daemon
     # binds in it directly.
     (runtime / "comms").mkdir()
-    # turns' roots too: a Claude adapter looks for endpoints under RUNTIME/turns, and the
-    # doctor's turns rows sweep dead endpoints there, so neither may reach the box's own.
+    # turns' roots too: a Claude adapter looks for endpoints under RUNTIME/turns, and
+    # turns' library sweeps dead endpoints there, so neither may reach the box's own.
     monkeypatch.setenv("MOXI_TURNS_RUNTIME_DIR", str(runtime))
     monkeypatch.setenv("MOXI_TURNS_CONFIG_HOME", str(home / "config"))
     for var in ("MOXI_TURNS_HOME", "MOXI_TURNS_COMMANDS"):
@@ -124,20 +132,28 @@ def env(monkeypatch, tmp_path):
     # `MOXI_COMMS_TOKEN_STORE` and `MOXI_COMMS_OPERATOR` are on the list for the same
     # reason the sockets are: both name production. The first points the resolver chain
     # at the operator's REAL 0600 store, and the second turns any send in the suite into
-    # the operator's lane. `MOXI_COMMS_GATEWAY`, `MOXI_COMMS_LOCAL_RECORD` and
+    # the operator's lane. `MOXI_COMMS_BACKEND`, `MOXI_COMMS_LOCAL_RECORD` and
     # `MOXI_COMMS_LOCAL_RETAIN_DAYS` override config keys, so a shell that sets one would
     # change what a test reads.
     # `CLAUDE_CODE_SESSION_ID` is the session RUNNING the suite, which every rig shim
     # would otherwise report as its own.
     # `MOXI_COMMS_CLAIM_SOCKET` names the running session's real claim socket, and
-    # `MOXI_COMMS_COMMAND` the comms install its launcher ran.
+    # `MOXI_COMMS_COMMAND` the comms install its wrapper ran.
     for var in ("MOXI_COMMS_SHIM_SOCKET", "MOXI_COMMS_SOCKET", "MOXI_COMMS_NAME",
                 "MOXI_COMMS_SLOT", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL",
                 "MOXI_COMMS_DIRECTORS", "MOXI_COMMS_TOKEN_STORE", "MOXI_COMMS_OPERATOR",
-                "MOXI_COMMS_GATEWAY", "MOXI_COMMS_LOCAL_RECORD",
-                "MOXI_COMMS_LOCAL_RETAIN_DAYS", "MOXI_COMMS_MOCK_GATEWAY",
+                "MOXI_COMMS_BACKEND", "MOXI_COMMS_LOCAL_RECORD",
+                "MOXI_COMMS_LOCAL_RETAIN_DAYS", "MOXI_COMMS_MOCK_BACKEND",
                 "CLAUDE_CODE_SESSION_ID", "MOXI_COMMS_CLAIM_SOCKET", "MOXI_COMMS_COMMAND"):
         monkeypatch.delenv(var, raising=False)
+    # The credential chain's keychain step: never the user's own keychain. keyring's null
+    # backend is "no usable keychain", so every chain falls to the store under tmp; a
+    # test that wants a keychain hands the chain a fake backend of its own. The variable
+    # covers a child process, the setting this one.
+    import keyring
+    import keyring.backends.null
+    monkeypatch.setenv("PYTHON_KEYRING_BACKEND", "keyring.backends.null.Keyring")
+    monkeypatch.setattr(keyring.core, "_keyring_backend", keyring.backends.null.Keyring())
     # The cache clock (cold-sends). Every reader's root and every shim's reported root
     # are under tmp: `CLAUDE_CONFIG_DIR` is what a shim reports its session's transcripts
     # under and where the reader finds them (`projects/` in it). Outside `tmp_path`,
@@ -158,15 +174,45 @@ def env(monkeypatch, tmp_path):
     shutil.rmtree(claude_home, ignore_errors=True)
 
 
+@pytest.fixture(autouse=True)
+def turns_plugins(monkeypatch, tmp_path_factory) -> Path:
+    """turns' Claude plugins as a folder marketplace of the test's own. The Claude
+    wrapper asks turns for its launch additions, which write `endpoint.json` into the
+    plugins' folder; no test may rewrite the one in the package the suite runs from. A
+    test that runs the wrapper in a child process patches the child the same way
+    (`TURNS_PLUGINS_PATCH`)."""
+    from moxi_turns import claude_setup
+
+    root = tmp_path_factory.mktemp("turns-plugins")
+    (root / ".claude-plugin").mkdir()
+    (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps({
+        "name": "moxi-turns",
+        "plugins": [{"name": "moxi-turns", "source": "./moxi-turns"},
+                    {"name": "moxi-turns-gate", "source": "./moxi-turns-gate"}]}))
+    for name in ("moxi-turns", "moxi-turns-gate"):
+        (root / name / ".claude-plugin").mkdir(parents=True)
+        (root / name / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": name, "version": "0.0.0"}))
+    monkeypatch.setattr(claude_setup, "claude_root", lambda: root)
+    return root
+
+
+#: Python a child process runs first, with the folder `turns_plugins` gave, so the
+#: wrapper's launch additions in the child write their files there too.
+TURNS_PLUGINS_PATCH = ("import pathlib, moxi_turns.claude_setup as _cs; "
+                       "_cs.claude_root = lambda: pathlib.Path({root!r}); ")
+
+
 #: Suites that run on both backends. A module here has every one of its rig-using tests
 #: parametrised; a test in it that does not take `rig` (and so has no `backend` in its
 #: fixture closure) is left alone.
 BOTH_BACKENDS = (
     "test_cli.py",                  # the CLI verbs, and the sender through them
     "test_delivery.py",             # the daemon's routing, delivery and replay
+    "test_digests.py",              # the delivery books' methods on the daemon socket
     "test_claims.py",               # claim / release, through the daemon
     "test_directory_provision.py",  # provision against the seam
-    "test_local_gateway.py",        # its rig tests state the no-op half on the mock too
+    "test_local_record.py",        # its rig tests state the no-op half on the mock too
     "test_audience.py",             # the audience mark, verb to frame
     "test_cold_sends.py",           # the cold-cache hold, `moxi comms cache`, --next-turn
     "test_cold_every_sender.py",    # THE RULE: the clock, the hold, the daemon's gate
@@ -180,7 +226,7 @@ BOTH_BACKENDS = (
     "test_claim_server.py",         # a binding held by a module's own process
     "test_claim_send.py",           # sending as the claim; ordinary sends unchanged
     "test_claim_adapters.py",       # the shim and codex as claim holders
-    "test_console_identity.py",     # send-only identities: console@acme
+    "test_console_identity.py",     # reserved send-only names: console
     "test_owner.py",                # the owner read: a session's binding and awaiting
     "test_send_rule.py",            # no env path: every kind sends through its claim
     "test_attributed_read.py",      # the attributed_message read: author and recipients
@@ -199,21 +245,21 @@ def pytest_generate_tests(metafunc):
 
 @pytest.fixture
 def backend(request):
-    """Which gateway `rig` builds. `mock` unless a BOTH_BACKENDS suite parametrised it."""
+    """Which record `rig` builds. `mock` unless a BOTH_BACKENDS suite parametrised it."""
     return getattr(request, "param", "mock")
 
 
-def build_gateway(backend: str, clock):
-    """One gateway, chosen by name. The record and the daemon always share one clock.
+def build_record(backend: str, clock):
+    """One record, chosen by name. The record and the daemon always share one clock.
 
     The local one takes no `secret_reader`: provision is the writer of every minted
-    token, so the rig lays the files down the way `moxi-comms-provision` does and the gateway
+    token, so the rig lays the files down the way `moxi-comms-provision` does and the record
     reads them back through its own resolver chain. The stand-in that used to serve them
     out of memory is gone with it.
     """
     if backend == "local":
-        return LocalGateway(clock=clock, poll_interval=0.02)
-    return MockGateway(clock=clock)
+        return LocalRecord(clock=clock, poll_interval=0.02)
+    return MockRecord(clock=clock)
 
 
 def build_store(backend: str):
@@ -227,7 +273,7 @@ def build_store(backend: str):
 
 
 #: The verbs that post under the sender's identity.
-SEND_VERBS = ("send", "reply")
+SEND_VERBS = ("send", "reply", "delete")
 
 
 def _stamp_of(environ) -> SenderIdentity | None:
@@ -246,7 +292,7 @@ WARM_SESSION = object()
 @dataclass
 class Rig:
     backend: str
-    gateway: object
+    record: object
     daemon: Daemon
     clock: FakeClock
     prov: object
@@ -275,19 +321,19 @@ class Rig:
     def age_message(self, message_id, timestamp: str) -> None:
         """Backdate one row of the record, whichever backend is holding it.
 
-        Aging mail in place is how the bounded-replay tests reach past `REPLAY_T`
-        without a day going by, and the two records keep it in different places: the
+        Aging mail in place is how the tests reach mail more than a day old without a
+        day going by, and the two records keep it in different places: the
         mock's is a list in memory, the local one is a table.
         """
-        gateway = self.gateway
-        txn = getattr(gateway, "_txn", None)
+        record = self.record
+        txn = getattr(record, "_txn", None)
         if txn is not None:
             with txn(write=True) as st:
                 for m in st.messages:
                     if m["id"] == str(message_id):
                         m["timestamp"] = timestamp
             return
-        with gateway._write() as conn:
+        with record._write() as conn:
             conn.execute("UPDATE messages SET timestamp = ? WHERE id = ?",
                          (timestamp, int(message_id)))
 
@@ -298,7 +344,7 @@ class Rig:
         body = recipients if raw else machine_line.compose(
             recipients, text, reply_to=reply_to, audience=audience,
             next_turn=next_turn, cold_at=cold_at)
-        return self.gateway.post_as_identity(name, channel or self.names_channel, body)
+        return self.record.post_as_identity(name, channel or self.names_channel, body)
 
     def post_as_operator(self, recipients, text, *, reply_to=None, audience=None):
         """The operator's lane, holding the operator's own credential. On `local` a
@@ -306,7 +352,7 @@ class Rig:
         verb does; the mock takes the keyword and ignores it."""
         body = machine_line.compose(recipients, text, reply_to=reply_to,
                                     audience=audience)
-        return self.gateway.post_as_user(self.prov.operator_user_id, self.names_channel,
+        return self.record.post_as_user(self.prov.operator_user_id, self.names_channel,
                                          body, token=self.operator_token)
 
     # -- adapters -----------------------------------------------------------
@@ -338,10 +384,10 @@ class Rig:
 
     # -- the CLI ------------------------------------------------------------
     def cli(self, argv, *, name=None, scope=None, project="proj-a", env=None,
-            gateway=None, stamp_only=False, clock=None):
+            record=None, stamp_only=False, clock=None):
         """Run one CLI verb in this process.
 
-        `name` and `scope` stamp the environment as a launcher does. A send verb
+        `name` and `scope` stamp the environment as a wrapper does. A send verb
         (`send`, `reply`) with a stamp runs INSIDE a live session holding the stamped
         identity, because only such a session sends under it: the
         rig shim bound as that name, through its own claim socket, or, when no rig shim
@@ -362,8 +408,8 @@ class Rig:
             if stamped is not None:
                 with self.session_holding(stamped) as socket_path:
                     environ[CLAIM_SOCKET_ENV] = socket_path
-                    return self._run_cli(argv, environ, gateway, clock)
-        return self._run_cli(argv, environ, gateway, clock)
+                    return self._run_cli(argv, environ, record, clock)
+        return self._run_cli(argv, environ, record, clock)
 
     def send(self, to, text, *flags, sender=None, posture="none", **kw):
         """`moxi comms send` to `to` from `sender` (the `cli` stamp: `name`, `scope`),
@@ -389,7 +435,7 @@ class Rig:
             claim = holder.claim or {}
             if claim.get("qualified") != sender.qualified or holder.state not in HOLDS:
                 continue
-            if holder._server is None:
+            if holder._host is None:
                 holder.listen()       # serves claim ops for the rest of the test
             with holder.lock:
                 holder.roots.append(me)
@@ -424,13 +470,13 @@ class Rig:
                 if sender.qualified in self.daemon.bindings:
                     pytest.fail(f"stand-in session for {sender.qualified} stayed bound")
 
-    def _run_cli(self, argv, environ, gateway, clock=None):
+    def _run_cli(self, argv, environ, record, clock=None):
         # The verb's env is this process's (the env fixture's tmp roots) plus the stamps:
         # config reads the file under the roots ctx.env names, so stamps alone would
         # resolve the real home's config file.
         out = io.StringIO()
-        ctx = cli.Context(gateway=gateway if gateway is not None else self.gateway,
-                          db_path=directory_db(), socket_path=daemon_socket(),
+        ctx = cli.Context(record=record if record is not None else self.record,
+                          db_path=comms_db(), socket_path=daemon_socket(),
                           env=dict(os.environ, **environ), out=out, clock=clock)
         code = cli.main(argv, ctx=ctx)
         return code, out.getvalue()
@@ -439,17 +485,17 @@ class Rig:
 @pytest.fixture
 def rig(backend):
     clock = FakeClock()
-    gateway = build_gateway(backend, clock)
+    record = build_record(backend, clock)
     store = build_store(backend)
     # On `local`, provision writes the operator's token to its 0600 holder file. On the
     # mock, `store` is None and the mock's record holds it.
     prov = provision(
-        gateway, directory_db(),
+        record, comms_db(),
         standing=[("main", "proj-a"), ("main", "proj-b"), ("herald", "global")],
         operator=("900001", "operator"), store=store,
     )
-    daemon = Daemon(gateway, clock=clock, start_trim_thread=False).start()
-    rig = Rig(backend=backend, gateway=gateway, daemon=daemon, clock=clock, prov=prov,
+    daemon = Daemon(record, clock=clock, start_trim_thread=False).start()
+    rig = Rig(backend=backend, record=record, daemon=daemon, clock=clock, prov=prov,
               store=store)
     yield rig
     for s in rig.shims:
@@ -463,7 +509,7 @@ def rig(backend):
         # everything to feel -- the next CPU-bound test in the run measures the spin
         # instead of itself.
         rig.daemon.stop()
-    gateway.close()
+    record.close()
 
 
 # --------------------------------------------------------------------------- helpers
@@ -567,7 +613,7 @@ def write_transcript(session_id: str, age: float | None = 0, *, root: Path | Non
     return path
 
 
-#: How long a wait gives a daemon, shim or launcher thread to act. The suite runs with
+#: How long a wait gives a daemon, shim or wrapper thread to act. The suite runs with
 #: 16 workers, and often beside other 16-worker runs, so a thread can go seconds
 #: without the CPU; a wait returns as soon as its condition holds, so the deadline
 #: costs time only when a test is failing. A wait that expects nothing to happen passes
@@ -602,8 +648,47 @@ def wait_for_payload(shim, message_id: str, timeout: float = WAIT) -> dict:
     return payload
 
 
+@contextlib.contextmanager
+def raw_connection(path=None):
+    """A bare connection to the daemon socket, past the hello and holding no binding:
+    `moxi.ipc`'s own client, so a test sends methods and notifications as it likes."""
+    from moxi import ipc
+
+    from moxi_comms import wire
+    client = ipc.connect(str(path or daemon_socket()), timeout=5.0)
+    try:
+        client.hello(wire.VERSIONS)
+        yield client
+    finally:
+        client.close()
+
+
+def settle(client) -> None:
+    """A round trip on `client`: the daemon handles one connection's messages in order,
+    so its answer says every message sent before it has been handled."""
+    client.call("max_id", {}, timeout=5.0)
+
+
 def cursor_of(qualified: str):
-    return cursors.read(qualified)
+    """The name's cursor in comms.db's books, read from outside the daemon."""
+    from moxi_comms.store import books
+    row = books.read_cursor(qualified) if qualified else None
+    return None if row is None else row["cursor"]
+
+
+def put_cursor(qualified: str, message_id) -> None:
+    """Put a name's cursor in comms.db's books by hand, as an earlier ack would have."""
+    from moxi_comms.store import books
+    held = books.Books()
+    held.open()
+    try:
+        with held._lock, held._write() as conn:
+            conn.execute("INSERT INTO cursors(name, message_id, updated_at) VALUES "
+                         "(?, ?, ?) ON CONFLICT(name) DO UPDATE SET "
+                         "message_id = excluded.message_id", (qualified, int(message_id),
+                                                             "2026-01-01T00:00:00Z"))
+    finally:
+        held.close()
 
 
 @pytest.fixture
@@ -616,7 +701,7 @@ def bind_answered():
 
     def _bind(**kwargs):
         c = DaemonClient(daemon_socket()).connect()
-        answer = c.register(**kwargs)
+        answer = c.bind(**kwargs)
         made.append(c)
         return c, answer
 
@@ -635,21 +720,88 @@ def bind(bind_answered):
     return _bind
 
 
+def synced(client, timeout: float = 5.0) -> None:
+    """Wait until the daemon has handled everything `client` sent before now, and
+    `client`'s `on_push` has been handed everything the daemon pushed before that.
+
+    The first half is a read answered on the same connection: the daemon serves one
+    connection's messages in order. The second half has no public `moxi.ipc` call: the
+    answer proves the pushes before it were read off the socket, not that the reader
+    thread has handed them on. So this test kit puts a marker behind them on the
+    connection's own notification queue and waits for `on_push` to reach it. Test code
+    only; it reads `moxi.ipc.Client`'s private queue."""
+    client.call("max_id")
+    marker = f"test.synced-{uuid.uuid4()}"
+    reached = threading.Event()
+    handler = client.on_push
+
+    def on_push(method, params):
+        if method == marker:
+            reached.set()
+        elif handler is not None:
+            handler(method, params)
+
+    client.on_push = on_push
+    try:
+        client._client._notes.put((marker, {}))
+        assert reached.wait(timeout), "the client's reader never reached the marker"
+    finally:
+        client.on_push = handler
+
+
+def as_frames(frames: list):
+    """An `on_push` handler that keeps each push in `frames` as one dict: its method as
+    `op`, with its params."""
+    return lambda method, params: frames.append({"op": method, **params})
+
+
 @pytest.fixture
 def frames(monkeypatch):
-    """Every `activity` frame a harness adapter sends, with its identity's cursor as it
-    stood when the frame went out (`cursor_then`)."""
+    """Every `activity` frame a harness adapter sends. A kind sent as its own method
+    (`ready`, `look`) is recorded as an `activity` frame with that `kind`, and a
+    `turn_ended` as one of kind `turn`, with its digests (`handled`, `unhandled`), the
+    message ids they held (`handled_ids`, `unhandled_ids`, read from the books as the
+    request went out), and the daemon's answer (`answer`)."""
     from moxi_comms.client import DaemonClient
     seen: list = []
-    real = DaemonClient.notify
+    real, real_call = DaemonClient.notify, DaemonClient.call
+    kinds = {method: kind for kind, method in ACTIVITY_METHODS.items()}
 
-    def notify(self, op, **kw):
-        if op == "activity":
-            seen.append(dict(kw, cursor_then=cursor_of(kw.get("identity"))))
-        return real(self, op, **kw)
+    def notify(self, method, params=None):
+        if method == "activity" or method in kinds:
+            frame = dict(params or {})
+            if method in kinds:
+                frame["kind"] = kinds[method]
+            seen.append(frame)
+        return real(self, method, params)
+
+    def call(self, method, params=None, **kw):
+        if method != "turn_ended":
+            return real_call(self, method, params, **kw)
+        frame = dict(params or {}, kind="turn")
+        for key in ("handled", "unhandled"):
+            frame[f"{key}_ids"] = digest_ids(frame.get(key) or ())
+        seen.append(frame)
+        frame["answer"] = answer = real_call(self, method, params, **kw)
+        return answer
 
     monkeypatch.setattr(DaemonClient, "notify", notify)
+    monkeypatch.setattr(DaemonClient, "call", call)
     return seen
+
+
+def digest_ids(digests) -> list:
+    """The message ids the digests held, by id, read from comms.db's books."""
+    from moxi_comms.store import open_read
+    conn = open_read()
+    try:
+        out = []
+        for d in digests:
+            row = conn.execute("SELECT ids FROM digests WHERE id = ?", (int(d),)).fetchone()
+            out.extend(json.loads(row[0]) if row else [])
+    finally:
+        conn.close()
+    return sorted(out, key=int)
 
 
 def frame_kinds(frames, kind):
@@ -675,14 +827,28 @@ def own_activity(adapter, **fields) -> None:
             report["session_id"] = adapter.session_id
         if adapter.projects_root:
             report["projects_root"] = adapter.projects_root
-    client.notify("activity", identity=identity, **{**report, **fields})
+    kind = fields.pop("kind", None)
+    client.notify(ACTIVITY_METHODS.get(kind, "activity"),
+                  {"identity": identity, **{**report, **fields}})
 
 
-def send_turn(adapter, handled=(), unhandled=()) -> None:
-    """`activity kind=turn` with `handled` and `unhandled`, as the adapters
-    send it at every turn end."""
-    own_activity(adapter, kind="turn", turned=True, handled=[str(i) for i in handled],
-                 unhandled=[str(i) for i in unhandled])
+def send_turn(adapter, handled=(), unhandled=()) -> dict:
+    """A turn end on `adapter`'s own connection, named in message ids: one digest is
+    opened for the `handled` ids and one for the `unhandled` ones (as the adapter would
+    have opened them), then `turn_ended` names the two. Returns the daemon's answer."""
+    client = getattr(adapter, "_client", None) or getattr(adapter, "_daemon", None)
+    assert client is not None and client.connected, "the adapter is not connected"
+
+    def opened(ids) -> list:
+        ids = [str(i) for i in ids]
+        if not ids:
+            return []
+        return [client.call("open_digest", {"ids": ids}, timeout=5.0)["digest"]]
+
+    handled_d, unhandled_d = opened(handled), opened(unhandled)
+    return client.call("turn_ended", {"identity": adapter.identity, "turned": True,
+                                      "handled": handled_d, "unhandled": unhandled_d},
+                       timeout=5.0)
 
 
 def send_ready(adapter, source: str | None) -> None:
@@ -697,9 +863,22 @@ def queued(daemon, qualified: str) -> set:
         return set(daemon.queue.get(qualified, {}))
 
 
-def record_rows(gateway, qualified: str | None = None) -> set:
-    """The queue rows in the record: ids for `qualified`, or every (id, name)."""
-    rows = {(str(mid), str(q)) for mid, q in gateway.queue_rows()}
+def store_rows(qualified: str | None = None) -> list:
+    """The delivery books' rows in comms.db, read from outside the daemon."""
+    from moxi_comms.store import open_read
+    conn = open_read()
+    try:
+        sql = "SELECT message_id, name, state FROM queue"
+        got = conn.execute(sql).fetchall()
+    finally:
+        conn.close()
+    return [(str(m), n, st) for m, n, st in got if qualified is None or n == qualified]
+
+
+def record_rows(record, qualified: str | None = None) -> set:
+    """The queue rows in comms.db, any state: ids for `qualified`, or every (id, name).
+    `record` is not read: the rows are the daemon's, whatever the backend."""
+    rows = {(mid, q) for mid, q, _ in store_rows()}
     if qualified is None:
         return rows
     return {mid for mid, q in rows if q == qualified}
