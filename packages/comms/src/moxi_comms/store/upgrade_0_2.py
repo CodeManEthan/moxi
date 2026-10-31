@@ -20,7 +20,8 @@ markers, which means a store older than 0.2; or a cursor file doesn't parse or n
 identity comms can't read. The refusal names the file and the reason.
 
 What it writes, in one transaction into `comms.db.new`: every row carried, ids and
-`next_id` kept; queue rows as `waiting`; open binding intervals closed as fenced;
+`next_id` kept, the operator's messages with their kind renamed from `user` to
+`operator`; queue rows as `waiting`; open binding intervals closed as fenced;
 send-only identities as unowned reserved names, never as standing rows; and the marker,
 `migrated_from = "0.2"`, with the time, the fenced names and each moved file's fingerprint (size and
 modification time). Mail that 0.2 would have replayed from the record becomes queue
@@ -55,6 +56,7 @@ from pathlib import Path
 from moxi import store as _store
 
 from .. import machine_line, paths as _paths
+from ..record import AUTHOR_OPERATOR, AUTHOR_OPERATOR_OLD
 from ..scoping import GLOBAL, NAME_RE, identity_of, is_auto_name, qualify, split_tag
 from .open import StoreRefused, state_of, MARKED
 from .schema import (META_AUTHOR_STAMPS, META_MIGRATED_FROM, META_NEXT_ID,
@@ -309,6 +311,14 @@ def _open_0_2(role: str, p: Path) -> sqlite3.Connection:
     return conn
 
 
+def _author_kind(row: dict) -> dict:
+    """A 0.2 message row with the operator's kind renamed: 0.2 wrote `user`, comms.db
+    writes `operator`. Every other kind is carried as 0.2 wrote it."""
+    if row["author_kind"] == AUTHOR_OPERATOR_OLD:
+        row = dict(row, author_kind=AUTHOR_OPERATOR)
+    return row
+
+
 def _select(conn, role: str, table: str, order: str = "") -> list[dict]:
     have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
     parts = []
@@ -390,7 +400,7 @@ def _read_record(plan: Plan, conn, path) -> None:
     channels = []
     if conn is not None:
         channels = _select(conn, "record", "channels", "ORDER BY rowid")
-        plan.messages = [tuple(r.values()) for r in
+        plan.messages = [tuple(_author_kind(r).values()) for r in
                          _select(conn, "record", "messages", "ORDER BY id")]
         for r in _select(conn, "record", "meta"):
             record_meta[r["key"]] = r["value"]

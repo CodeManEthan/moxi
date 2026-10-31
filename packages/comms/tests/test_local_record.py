@@ -312,7 +312,7 @@ def test_the_operator_lane_compares_the_token_against_the_stored_hash(gw):
     """The lane needs a credential like every other lane. The SENDER side of the guard
     is the send verb's; the compare is this backend's."""
     channel = gw.create_channel("#names")
-    assert gw.post_as_user("900001", channel, "before provisioning").author_kind == "user"
+    assert gw.post_as_user("900001", channel, "before provisioning").author_kind == "operator"
     gw.meta_set(META_OPERATOR_TOKEN_HASH, token_hash("the-operator-token"))
     assert gw.post_as_user("900001", channel, "with the token",
                            token="the-operator-token").content == "with the token"

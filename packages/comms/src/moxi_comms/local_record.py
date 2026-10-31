@@ -54,6 +54,8 @@ from moxi.store import transaction
 from .config import LOCAL_RETAIN_DAYS
 from .machine_line import parse as parse_machine_line
 from .record import (
+    AUTHOR_IDENTITY,
+    AUTHOR_OPERATOR,
     MAX_CONTENT_LENGTH,
     Forbidden,
     RecordError,
@@ -258,7 +260,8 @@ class LocalRecord:
             row = conn.execute("SELECT name FROM principals WHERE principal_id = ?",
                                (str(user_id),)).fetchone()
             msg = self._insert(conn, channel_id=str(channel_id), author_id=str(user_id),
-                               author_kind="user", author_display=row[0] if row else "operator",
+                               author_kind=AUTHOR_OPERATOR,
+                               author_display=row[0] if row else "operator",
                                content=content)
         self._fanout()
         self.nudge()
@@ -272,7 +275,7 @@ class LocalRecord:
                 f"over the {self.max_content_length}-character cap on one message")
         with self._write() as conn:
             msg = self._insert(conn, channel_id=str(channel_id), author_id=str(qualified),
-                               author_kind="identity", author_display=str(qualified),
+                               author_kind=AUTHOR_IDENTITY, author_display=str(qualified),
                                content=content)
         self._fanout()
         self.nudge()

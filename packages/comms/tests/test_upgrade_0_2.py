@@ -97,6 +97,11 @@ def test_the_move_carries_every_row_and_makes_rows_for_row_less_mail(soon):
     store.open_write(report=said.extend).close()
     assert rows("SELECT COUNT(*) FROM messages") == [(7,)]
     assert rows("SELECT MIN(id), MAX(id) FROM messages") == [(IDS["m1"], IDS["m7"])]
+    # 0.2 wrote the operator's kind as `user`; the move renames it, and carries the rest.
+    assert rows("SELECT author_kind, COUNT(*) FROM messages GROUP BY author_kind "
+                "ORDER BY author_kind") == [("identity", 6), ("operator", 1)]
+    assert rows("SELECT author_kind, author_id FROM messages WHERE id = ?",
+                IDS["m7"]) == [("operator", MADE["operator_user_id"])]
     assert rows("SELECT value FROM meta WHERE key = 'next_id'") == [(str(IDS["m7"]),)]
     assert rows("SELECT room_id, name, kind FROM rooms") == [
         (MADE["names_room"], "#names", "names")]

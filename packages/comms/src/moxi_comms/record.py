@@ -58,6 +58,15 @@ import threading
 import time
 from dataclasses import asdict, dataclass, field
 
+#: A message's `author_kind`, who posted it: an agent the daemon checked against its live
+#: binding, or the operator through the operator's lane.
+AUTHOR_IDENTITY, AUTHOR_OPERATOR = "identity", "operator"
+#: The operator's kind as older stores spell it: comms 0.2's record, and comms.db before
+#: its schema's second step. The 0.2 move and that step rewrite it to `operator`, and
+#: nothing writes it any more. Attribution still reads it, for a store a read-only open
+#: finds before any writer has stepped it.
+AUTHOR_OPERATOR_OLD = "user"
+
 # The one cap on one message, in characters. Declared here so the local record and the
 # mock name ONE number.
 MAX_CONTENT_LENGTH = 16_000
@@ -95,7 +104,7 @@ class Message:
     id: str
     channel_id: str
     author_id: str            # webhook id, operator user id, or qualified identity
-    author_kind: str          # 'webhook' | 'user' | 'identity'
+    author_kind: str          # 'identity' | 'operator'; an older row may say 'webhook'
     author_display: str       # webhook override, user display, or qualified identity
     content: str
     timestamp: str
@@ -257,7 +266,8 @@ def open_record(explicit: str | None = None, *, role: str = "reader", env=None,
                         busy_timeout=busy_timeout)
 
 
-__all__ = ["MAX_CONTENT_LENGTH", "RecordError", "RateLimited", "Forbidden", "Fatal",
+__all__ = ["AUTHOR_IDENTITY", "AUTHOR_OPERATOR", "AUTHOR_OPERATOR_OLD",
+           "MAX_CONTENT_LENGTH", "RecordError", "RateLimited", "Forbidden", "Fatal",
            "Message", "Subscription", "MOCK", "LOCAL", "BACKENDS",
            "BackendChoice", "SOURCE_FLAG", "SOURCE_ENV", "SOURCE_CONFIG", "SOURCE_DEFAULT",
            "backend_choice", "backend_name", "default_backend", "open_record"]

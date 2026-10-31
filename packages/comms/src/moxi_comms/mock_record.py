@@ -32,6 +32,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .record import (
+    AUTHOR_IDENTITY,
+    AUTHOR_OPERATOR,
     MAX_CONTENT_LENGTH,
     Fatal,
     Forbidden,
@@ -204,7 +206,7 @@ class MockRecord:
                 raise Forbidden(f"Send denied in {channel_id}")
             msg = Message(
                 id=self._next_id(st), channel_id=channel_id, author_id=user_id,
-                author_kind="user", author_display=st.users.get(user_id, "operator"),
+                author_kind=AUTHOR_OPERATOR, author_display=st.users.get(user_id, "operator"),
                 content=content, timestamp=self._now(),
             )
             st.messages.append(msg.to_dict())
@@ -220,7 +222,7 @@ class MockRecord:
         with self._txn(write=True) as st:
             msg = Message(
                 id=self._next_id(st), channel_id=channel_id, author_id=qualified,
-                author_kind="identity", author_display=qualified,
+                author_kind=AUTHOR_IDENTITY, author_display=qualified,
                 content=content, timestamp=self._now(),
             )
             st.messages.append(msg.to_dict())

@@ -89,7 +89,7 @@ from .store import books as books_mod
 from .attribution import Author
 from .machine_line import (COLD_AT_LIVE, POSTURE_NONE,
                            POSTURE_ONCE, parse as parse_machine_line)
-from .record import Message
+from .record import AUTHOR_IDENTITY, AUTHOR_OPERATOR, Message
 from . import kinds as kinds_mod
 from . import reserved as reserved_mod
 from .paths import comms_db, daemon_socket
@@ -1158,7 +1158,7 @@ class Daemon:
                                                  else None):
                 raise Refusal("the operator's credential was refused",
                               code=wire.CREDENTIAL, credential=True)
-            author = ("user", user)
+            author = (AUTHOR_OPERATOR, user)
         else:
             with self._lock:
                 binding = self.bindings.get(who)
@@ -1167,7 +1167,7 @@ class Daemon:
                 if binding is None or not hmac.compare_digest(binding.token_hash, given):
                     raise Refusal("posting credential refused", code=wire.CREDENTIAL,
                                   credential=True)
-                author = ("identity", binding.qualified)
+                author = (AUTHOR_IDENTITY, binding.qualified)
         msg = self.record.get_message(mid)
         if msg is None:
             raise _unknown_message(mid)

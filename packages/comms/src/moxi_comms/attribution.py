@@ -17,6 +17,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from . import directory
+from .record import AUTHOR_IDENTITY, AUTHOR_OPERATOR, AUTHOR_OPERATOR_OLD
 from .scoping import GLOBAL, is_auto_name, qualify, split_tag
 
 TIER_EPHEMERAL, TIER_CHOSEN, TIER_STANDING = "ephemeral", "chosen", "standing"
@@ -68,7 +69,7 @@ def from_display(display: str) -> Author:
 
 def from_record(db, msg) -> Author:
     """Everything the record + directory can prove about who authored `msg`."""
-    if msg.author_kind == "identity":
+    if msg.author_kind == AUTHOR_IDENTITY:
         name, scope = split_tag(msg.author_id)
         scope = scope or GLOBAL
         if _reserved_at(db, qualify(name, scope), msg.timestamp):
@@ -80,7 +81,7 @@ def from_record(db, msg) -> Author:
         else:
             tier = TIER_CHOSEN
         return Author(name, scope, qualify(name, scope), tier, VERIFIED)
-    if msg.author_kind == "user":
+    if msg.author_kind in (AUTHOR_OPERATOR, AUTHOR_OPERATOR_OLD):
         row = directory.operator(db, msg.author_id)
         if row:
             return Author(row["name"], GLOBAL, row["name"], TIER_OPERATOR, VERIFIED)
