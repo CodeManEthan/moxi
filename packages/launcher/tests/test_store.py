@@ -127,6 +127,23 @@ def test_insert_leaves_the_connection_at_normal_sync(conn):
     assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1  # NORMAL
 
 
+def test_insert_commits_the_row_at_full_sync(conn):
+    # The row must be on disk before the spawn, so its commit runs at FULL; the
+    # connection goes back to NORMAL only after.
+    said: list[str] = []
+    conn.set_trace_callback(lambda statement: said.append(" ".join(statement.split())))
+    try:
+        claude(conn)
+    finally:
+        conn.set_trace_callback(None)
+    full = said.index("PRAGMA synchronous = FULL")
+    normal = said.index("PRAGMA synchronous = NORMAL")
+    insert = next(i for i, s in enumerate(said) if s.startswith("INSERT INTO launches"))
+    commit = next(i for i, s in enumerate(said) if s.upper().startswith("COMMIT"))
+    assert full < insert < commit < normal
+    assert not any("synchronous" in s for s in said[full + 1:normal])
+
+
 def test_a_codex_launch_has_no_session_id_yet(conn):
     codex(conn)
     assert store.get(conn, "c1").session_id is None
