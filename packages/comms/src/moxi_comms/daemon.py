@@ -90,6 +90,7 @@ from .machine_line import (COLD_AT_LIVE, POSTURE_NONE,
                            POSTURE_ONCE, parse as parse_machine_line)
 from .record import Message
 from . import kinds as kinds_mod
+from . import reserved as reserved_mod
 from .paths import comms_db, daemon_socket
 from .record import Forbidden
 from .provision import NAMES
@@ -1051,6 +1052,12 @@ class Daemon:
         with self._lock, self._db() as db:
             if self._stopping:
                 raise DaemonStopping()
+            row = reserved_mod.lookup(db, who)
+        if row is not None:
+            return self._send_reserved(conn, row, token, content)
+        with self._lock, self._db() as db:
+            if self._stopping:
+                raise DaemonStopping()
             binding = self.bindings.get(who)
             given = (hashlib.sha256(token.encode()).digest()
                      if isinstance(token, str) else b"")
@@ -1062,6 +1069,21 @@ class Daemon:
                               name=binding.qualified)
             qualified = binding.qualified
         message = self.record.post_as_identity(qualified, self._names_channel(), content)
+        return {"message_id": str(message.id)}
+
+    def _send_reserved(self, conn, row, token, content: str) -> dict:
+        """A `send` under a reserved name: only its owning module's token sends under it.
+        A name an older comms kept, or one in conflict, sends nothing."""
+        name = row["name"]
+        if row["state"] != reserved_mod.ACTIVE:
+            raise Refusal(f"{name} is a reserved name no module holds; nothing sends "
+                          "under it", code=wire.NAME_RESERVED, name=name)
+        given = reserved_mod.token_hash(token) if isinstance(token, str) else ""
+        if not row["token_hash"] or not hmac.compare_digest(row["token_hash"], given):
+            raise Refusal("posting credential refused", code=wire.CREDENTIAL,
+                          credential=True)
+        message = self.record.post_as_identity(name, self._names_channel(), content)
+        log.info("send %s under %s, reserved for %s", message.id, name, row["module"])
         return {"message_id": str(message.id)}
 
     def _delete(self, conn, params: dict) -> dict:

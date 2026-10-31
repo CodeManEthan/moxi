@@ -10,6 +10,8 @@ outside comms.
 * `send(sender, to, text, *, posture, ...)` sends one message and returns a
   `SendResult`. `check(...)`, with the same arguments, runs every check and posts
   nothing (`moxi comms send --check`).
+* `send_as(module, name, to, text, *, expires, interrupt)` sends under a send-only name
+  reserved for `module`, from that module's own code, outside every session.
 * `Sender`: who sends. `Sender.session()` (this process's stamps and its session's claim
   socket), `Sender.socket(path)`, `Sender.claim(server)` (a `ClaimServer` this process
   holds) or `Sender.operator(user_id)` (the operator's lane).
@@ -130,6 +132,28 @@ def _run(sender, to, text, *, posture, reply_to, new, audience, held, cap, no_ca
         args.reply_to = None if reply_to is None else str(reply_to)
     ctx = _sending.Context(env=sender.environ(os.environ), deadline=deadline)
     return _sending.run(ctx, args, tags=tags)
+
+
+def send_as(module: str, name: str, to, text: str, *, expires=None,
+            interrupt: bool = False, deadline: float = 30.0) -> SendResult:
+    """Send `text` to `to` under `name`, a send-only name reserved for `module`, as that
+    module's own code: its token is read through this process's credential chain and
+    presented to the daemon, which refuses a sender inside a live session. The posture is
+    always `[no reply]`, since nobody can mail a reserved name. A refusal is the result's
+    `outcome` and `refusal` (`credential` when the token can't be read: run `moxi
+    doctor`), as for `send`; it raises only for arguments `send` would refuse."""
+    if expires is not None:
+        _sending.expiry_seconds(expires)          # a bad duration raises ValueError
+    names = to.split(",") if isinstance(to, str) else [str(t) for t in to]
+    tags = [t.strip() for t in names if t.strip()]
+    if not tags:
+        raise ValueError("send_as needs `to` to name at least one recipient")
+    args = SimpleNamespace(text=str(text), posture=_machine_line.POSTURE_NONE, cap=None,
+                           no_cap=False, audience=None, new=False, held=False,
+                           standing=False, new_name=False, interrupt=bool(interrupt),
+                           expires=expires, check=False, reply_to=None, message_id=None)
+    ctx = _sending.Context(env=dict(os.environ), deadline=deadline)
+    return _sending.run_reserved(ctx, args, module=str(module), name=str(name), tags=tags)
 
 
 def delete(sender: Sender, message_id, *, deadline: float = 30.0) -> DeleteResult:
@@ -408,7 +432,7 @@ def replay() -> tuple[int, int]:
 
 
 __all__ = [
-    "INTERFACE", "send", "check", "delete", "DeleteResult", "Sender", "SendResult",
+    "INTERFACE", "send", "send_as", "check", "delete", "DeleteResult", "Sender", "SendResult",
     "Recipient", "Refusal",
     "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
     "session", "roster", "owner", "Roster", "Agent", "Standing", "Owner",

@@ -86,20 +86,23 @@ def test_the_verbs_that_act_stay_four():
     `migrate` is the STORE verb: it moves comms 0.2's files into comms.db through the
     store's one opener, as the daemon's start does, or with `--dry-run` says what that
     would do. It posts nothing and reaches no credential, so the acting four are still
-    four."""
+    four. `reserved renew` is the other store verb: it mints a reserved name's token
+    into this process's credential chain for the module that owns the name, and commits
+    the token's hash. It posts nothing and reaches no credential an agent holds."""
     from moxi_comms import cli
 
     sub = [a for a in cli.build_parser()._actions if hasattr(a, "choices") and a.dest
            == "verb"][0]
     assert set(sub.choices) == {"send", "reply", "agents", "history", "help", "whois",
                                 "explain", "cache", "doctor", "owner", "service",
-                                "whoami", "claude", "codex", "migrate", "delete"}
+                                "whoami", "claude", "codex", "migrate", "delete",
+                                "reserved"}
     acting = {"send", "reply", "agents", "history"}
     reading = {"help", "whois", "explain", "cache", "doctor", "owner"}
     machine = {"service"}
     claim = {"whoami"}
     wrapper = {"claude", "codex"}
-    store_verb = {"migrate"}
+    store_verb = {"migrate", "reserved"}
     # `delete` acts only on the sender's own message, taking back what it sent.
     withdraw = {"delete"}
     assert (acting | reading | machine | claim | wrapper | store_verb | withdraw

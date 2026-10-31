@@ -28,7 +28,8 @@ from .client import (DaemonClient, DaemonError, DaemonNoAnswer, DaemonOffline,
 from .record import RecordError
 from .paths import OutsideRuntime, comms_db
 from .provision import NAMES
-from .scoping import (GLOBAL, identity_of, project_key, qualify, tag_matches)
+from .scoping import (GLOBAL, NAME_RE, identity_of, is_auto_name, project_key, qualify,
+                      tag_matches)
 from .sender import (MalformedStamp, OperatorRefused, SendFailed, SenderIdentity,
                      operator_credential, operator_from_env, sender_from_env)
 
@@ -619,9 +620,36 @@ def _stamped_identity(env, project) -> str | None:
     return sender.qualified if sender is not None else None
 
 
+def _send_reserved(args, ctx: Context, *, module: str, name: str, tags) -> int:
+    """A module's send under the reserved name `name`: its token, read through this
+    process's credential chain for `module`, presented to the daemon's `send`. The daemon
+    checks it against the reserved row, and refuses a sender inside a live session."""
+    from . import reserved, secrets
+
+    if "@" in name or not NAME_RE.match(name) or is_auto_name(name):
+        _refuse(ctx, "not-reserved", f"{name!r} is not a reserved name: a reserved name "
+                "is bare and global. Nothing was sent.")
+        return _USAGE
+    try:
+        chain = secrets.from_config(env=ctx.env)
+        token = chain.get(reserved.secret_id(name), owner=reserved.owner(module))["value"]
+    except secrets.SecretNotFound:
+        _refuse(ctx, "credential",
+                f"comms holds no token for {name} for {module} in this process's "
+                "credential chain — nothing was sent. Run `moxi doctor`.")
+        return _REFUSED
+    except secrets.SecretError as e:
+        _refuse(ctx, "credential", f"{e} Nothing was sent. Run `moxi doctor`.")
+        return _FAILED
+    sender = SenderIdentity(qualified=name, scope=GLOBAL, name=name)
+    return _send_resolved(args, ctx, sender=sender, operator_id=None, tags=tags,
+                          reply_to=None, channel_room=NAMES,
+                          project=project_key(env=ctx.env), reserved_token=token)
+
+
 def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
                    channel_room, project, referent=None, claim_answer=None,
-                   claim_path=None, author=None) -> int:
+                   claim_path=None, author=None, reserved_token=None) -> int:
     """Everything a send does once it knows WHO is sending: the checks, the machine
     line, the length cap and the post.
 
@@ -685,7 +713,9 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
         return _OK
     (body,) = bodies
     if operator_id is None:
-        posted = _post_from_claim(ctx, claim_path, sender, claim_answer["token"], body)
+        posted = (_post_reserved(ctx, sender, reserved_token, body)
+                  if reserved_token is not None else
+                  _post_from_claim(ctx, claim_path, sender, claim_answer["token"], body))
     else:
         posted = _post_as_operator(ctx, operator_id, token, body)
     if isinstance(posted, int):
@@ -777,6 +807,40 @@ def _send_refused(ctx: Context, error: DaemonError) -> int:
 #: sent.
 NO_ANSWER = ("the daemon did not answer, so this message may have been sent; check "
              "`moxi comms history` before sending it again")
+
+
+def _post_reserved(ctx: Context, sender: SenderIdentity, token: str, content: str):
+    """A post under a reserved name, with its token. Returns the message id, or a step
+    code once the refusal is said."""
+    client = None
+    try:
+        client = ctx.daemon()
+        try:
+            answer = client.send(sender.qualified, token, content)
+        except DaemonError as error:
+            if error.data.get("credential"):
+                _refuse(ctx, "credential", f"comms refused the token for "
+                        f"{sender.qualified} — nothing was sent. Run `moxi doctor`.")
+                return _REFUSED
+            if error.code == wire.NAME_RESERVED:
+                _refuse(ctx, "name-reserved", f"{error} — nothing was sent.")
+                return _REFUSED
+            raise
+        return answer["message_id"]
+    except DaemonNoAnswer:
+        _refuse(ctx, "post-no-answer", NO_ANSWER)
+        return _UNKNOWN
+    except VersionMismatch as error:
+        _refuse(ctx, "protocol-mismatch", str(error))
+        return _FAILED
+    except DaemonOffline as error:
+        _refuse(ctx, "offline", f"{error} Nothing was sent.")
+        return _OFFLINE
+    except DaemonError as error:
+        return _send_refused(ctx, error)
+    finally:
+        if client is not None:
+            client.close()
 
 
 def _post_as_operator(ctx: Context, user_id: str, token: str, content: str):
@@ -1933,6 +1997,21 @@ def _refused_tag(tag: str, error) -> str:
 
 
 # --------------------------------------------------------------------------- the run
+
+def run_reserved(ctx: Context, args, *, module: str, name: str, tags) -> SendResult:
+    """`run` for a module's send under its reserved name `name` (`api.send_as`)."""
+    capture, outer = _Capture(), ctx.capture
+    ctx.capture = capture
+    try:
+        try:
+            code = _send_reserved(args, ctx, module=module, name=name, tags=list(tags))
+        except config.ConfigError as e:
+            ctx.refuse("config", str(e))
+            code = _REFUSED
+    finally:
+        ctx.capture = outer
+    return _result(code, capture, check=bool(getattr(args, "check", False)))
+
 
 def run(ctx: Context, args, *, tags=None) -> SendResult:
     """Run one send and hand back what it did. Nothing is printed: what the verb says is

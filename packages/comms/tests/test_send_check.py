@@ -658,7 +658,7 @@ def test_check_stop_is_immediately_before_the_post_loop():
             and isinstance(posting.test.left, ast.Name)
             and posting.test.left.id == "operator_id"
             and isinstance(posting.body[0], ast.Assign)
-            and posting.body[0].value.func.id == "_post_from_claim")
+            and "_post_from_claim" in ast.dump(posting.body[0].value))
 
 
 def test_the_site_reader_finds_send_checks_refusals():
