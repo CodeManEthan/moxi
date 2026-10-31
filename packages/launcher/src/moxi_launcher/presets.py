@@ -865,6 +865,12 @@ def resolve(request, *, presets: Presets | None = None,
 
     identity = values.get("identity") or None
     scope = values.get("scope") or None
+    if identity is None:
+        # Only comms' wrapper takes these, and it runs only for a launch with an identity.
+        for name in ("director", "scope"):
+            if name in chosen and catalog.is_set(values.get(name)):
+                warnings.append(f"{name} is ignored: the launch has no identity, and only "
+                                "comms' wrapper takes it")
     if identity and not avail("comms"):
         warnings.append(f"identity {identity} is ignored: comms is not installed")
         identity = scope = None
@@ -875,8 +881,7 @@ def resolve(request, *, presets: Presets | None = None,
     catalog.refuse_wrapper_flags(harness, identity, values.get(catalog.EXTRA) or ())
 
     links = {name for name, on in (
-        ("turns", turns), ("comms", identity is not None or posture.startswith(WITH)
-                           or bool(values.get("director"))),
+        ("turns", turns), ("comms", identity is not None or posture.startswith(WITH)),
         ("projects", project is not None), ("slots", target == "slot"),
         ("notes", catalog.is_set(values.get("notes_dir"))),
         ("usage", catalog.is_set(values.get("warn_at")))) if on}

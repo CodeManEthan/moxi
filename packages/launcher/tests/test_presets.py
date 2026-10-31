@@ -478,6 +478,27 @@ def test_identity_with_comms():
     assert (got.identity, got.scope) == ("planner", "moxi") and "comms" in got.links
 
 
+@pytest.mark.parametrize("given, warned", [
+    ({"typed": {"director": ["boss"]}}, ["director"]),
+    ({"typed": {"scope": "moxi"}}, ["scope"]),
+    ({"text": '[seat.s]\ndirector = ["boss"]\nscope = "moxi"\n', "seat": "s"},
+     ["director", "scope"]),
+])
+def test_a_director_or_scope_without_an_identity_is_ignored_with_a_warning(given,
+                                                                          warned):
+    got = resolve(available=only("comms"), **given)
+    assert got.identity is None and "comms" not in got.links
+    assert [w.split()[0] for w in got.warnings] == warned
+    assert all(w.endswith("the launch has no identity, and only comms' wrapper takes it")
+               for w in got.warnings)
+
+
+def test_a_default_scope_without_an_identity_says_nothing():
+    # Set for every launch, it is there for the seats with an identity.
+    got = resolve('[defaults]\nscope = "moxi"\n', available=only("comms"))
+    assert got.warnings == ()
+
+
 def test_the_with_posture_needs_comms():
     with pytest.raises(presets.BadPreset):
         resolve(typed={"posture": "with:lead"})
