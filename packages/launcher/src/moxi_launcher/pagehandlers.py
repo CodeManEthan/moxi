@@ -114,9 +114,10 @@ UNREADABLE = ("the launcher could not read this session's state ({}); the page s
 #: The catalog rows whose text a preset's values never send: a brief or standing
 #: instructions written inline.
 WITHHELD = ("brief", "instructions")
-#: The run event detail key never sent: a notice's whole text, which the run's other events
-#: already describe.
-EVENT_TEXT = "text"
+#: The run event detail keys never sent: a notice's whole text, which the run's other
+#: events already describe; a pane's id, which a run is never sent with; and the path of a
+#: saved screen, which the detail's text can't mark as a path.
+EVENT_CUT = ("text", "pane_id", "capture")
 #: The stream's topics.
 TOPICS = ("sessions", "launches")
 #: Seconds between the poller's reads of the launch log's data version, which moves at
@@ -385,7 +386,7 @@ def read_launches(call: Any) -> dict[str, Any]:
 
 
 def _event(event: store.RunEvent) -> dict[str, Any]:
-    detail = {k: v for k, v in event.detail.items() if k != EVENT_TEXT}
+    detail = {k: v for k, v in event.detail.items() if k not in EVENT_CUT}
     return {"at": event.at, "kind": event.kind,
             "detail": json.dumps(detail, sort_keys=True, ensure_ascii=False, default=str)}
 
@@ -1027,7 +1028,7 @@ def resume(call: Any) -> Any:
             return {"refused": _unexpected(err, "a resume from the page failed"),
                     "command": None}
 
-__all__ = ["EVENT_TEXT", "KEY_BYTES", "KEY_FILE", "NOT_ON_PATH", "REFUSALS", "REGATHER",
+__all__ = ["EVENT_CUT", "KEY_BYTES", "KEY_FILE", "NOT_ON_PATH", "REFUSALS", "REGATHER",
            "RESUME_USED", "STATUS", "TICK", "TOPICS", "UNEXPECTED", "UNREADABLE", "USED",
            "WITHHELD", "alive", "canonical", "events", "field", "fields", "gather_launches",
            "gather_sessions", "launch", "launch_request", "launch_row", "launched", "launches",

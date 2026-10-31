@@ -406,6 +406,9 @@ def ran(conn, request_id: str = "r1", outcome: str = "nudged"):
     store.add_run_event(conn, run.run_id, "note",
                         {"verdict": "taken", "why": "", "text": "the whole notice"})
     store.add_run_event(conn, run.run_id, "wait", {"word": "person", "detail": "typing"})
+    store.add_run_event(conn, run.run_id, "pane-ended", {"pane_id": "%7", "status": 0})
+    store.add_run_event(conn, run.run_id, "answer", {"outcome": "at-dialog", "why": "w",
+                                                     "capture": "/state/screens/r1.txt"})
     store.end_run(conn, run.run_id, outcome)
     return run.run_id
 
@@ -420,8 +423,11 @@ def test_runs_come_with_their_events_detail_as_text(conn):
                                                                    "/notes/handoff.md")
     assert [(e["kind"], json.loads(e["detail"])) for e in run["events"]] == [
         ("note", {"verdict": "taken", "why": ""}),
-        ("wait", {"word": "person", "detail": "typing"})]
+        ("wait", {"word": "person", "detail": "typing"}),
+        ("pane-ended", {"status": 0}),
+        ("answer", {"outcome": "at-dialog", "why": "w"})]
     assert b"the whole notice" not in raw and b"proc:" not in raw
+    assert b"%7" not in raw and b"screens" not in raw
 
 
 def test_runs_by_run_by_launch_and_paged(conn):
