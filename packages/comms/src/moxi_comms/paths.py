@@ -133,7 +133,7 @@ def tokens_dir(env=None) -> Path:
 
     STATE and deliberately not DATA: a stored credential is a DEVICE credential, and DATA
     is THE sync surface, so a token there would ride a future sync to boxes it was never
-    minted for. CONFIG holds no tokens at all. `[secrets] store` in config.toml (or
+    minted for. CONFIG holds no tokens at all. `[credentials] store` in config.toml (or
     `MOXI_COMMS_TOKEN_STORE`) overrides this path -- `MOXI_COMMS_HOME` collapses every
     root, so an alternate-home recipe needs a way to still name the real store.
     """

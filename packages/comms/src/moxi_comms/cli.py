@@ -676,8 +676,8 @@ def cmd_doctor(args, ctx: Context) -> int:
             else f"none ({config.config_path(ctx.env)} does not exist)")
         choice = gw.backend_choice(None, env=ctx.env)
         row("backend", f"{choice.name} ({choice.describe()})")
-        row("secrets", ", ".join(cfg.secrets.chain)
-            + ("" if tuple(cfg.secrets.chain) != tuple(secrets.default_chain())
+        row("credentials", ", ".join(cfg.credentials.chain)
+            + ("" if tuple(cfg.credentials.chain) != tuple(secrets.default_chain())
                else " (the default)"))
         required = cfg.cache.required
     except (config.ConfigError, RecordError) as e:
@@ -748,6 +748,32 @@ def cmd_migrate(args, ctx: Context) -> int:
     for line in lines:
         ctx.say(line)
     return moxi_exit.OK
+
+
+def cmd_reserved(args, ctx: Context) -> int:
+    """`moxi comms reserved renew NAME`: a fresh token for a reserved name, minted into
+    the first writable step of this process's credential chain, its hash committed. The
+    one repair for a token a context can't read; nothing else ever replaces one."""
+    from moxi.files import LockTimeout
+    from moxi.store import StoreError
+
+    from . import reserved, secrets
+
+    try:
+        result = reserved.renew(args.name, env=ctx.env)
+    except KeyError:
+        ctx.say(f"{args.name} isn't reserved for a module; nothing was changed")
+        return moxi_exit.REFUSED
+    except LockTimeout as e:
+        ctx.say(f"another comms process holds the reserved names' lock ({e}); nothing "
+                "was changed. Try again in a moment")
+        return moxi_exit.TEMPFAIL
+    except (StoreError, secrets.SecretError, config.ConfigError) as e:
+        ctx.say(f"refused: {e}")
+        return getattr(e, "exit_code", moxi_exit.ERROR)
+    for line in result.lines:
+        ctx.say(line)
+    return moxi_exit.OK if not result.failed else moxi_exit.ERROR
 
 
 def _store_rows(env) -> list[str]:
@@ -1075,6 +1101,13 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
     m.add_argument("--dry-run", dest="dry_run", action="store_true",
                    help="say what would move, and write nothing")
     m.set_defaults(func=cmd_migrate)
+
+    rs = sub.add_parser("reserved", help="the send-only names modules reserve")
+    rs_sub = rs.add_subparsers(dest="action", required=True)
+    rn = rs_sub.add_parser("renew", help="mint a fresh token for a reserved name into "
+                                         "this process's credential chain")
+    rn.add_argument("name")
+    rs.set_defaults(func=cmd_reserved)
 
     wh = sub.add_parser("whoami", help="what comms identity this session holds")
     wh.set_defaults(func=cmd_whoami)

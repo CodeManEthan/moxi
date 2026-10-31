@@ -222,3 +222,32 @@ def test_the_listener_is_declared_in_the_core_group():
     module = ep.load()
     assert module.on_install is reserved.on_install
     assert module.on_uninstall is reserved.on_uninstall
+
+
+def test_reserved_renew_on_the_cli_mints_into_this_process_chain(capsys):
+    from moxi import exit as moxi_exit
+    from moxi_comms import cli
+
+    store = TokenStore()                    # the configured store, under the tmp home
+    reserved.reconcile(declared=LAUNCHER, chain=secrets.from_config())
+    old = token_of(store, "launcher", "console")
+    write("UPDATE reserved SET token_hash = 'stale' WHERE name = 'console'")
+    assert cli.main(["reserved", "renew", "console"]) == moxi_exit.OK
+    new = token_of(store, "launcher", "console")
+    assert new != old and row("console")["token_hash"] == reserved.token_hash(new)
+    assert "a new token for launcher" in capsys.readouterr().out
+    assert cli.main(["reserved", "renew", "pager"]) == moxi_exit.REFUSED
+
+
+def test_the_token_rests_in_the_keychain_when_there_is_one(store):
+    from test_secrets import FakeKeychain
+
+    fake = FakeKeychain()
+    chain = secrets.build(["env", "keychain", "store"], store=store, keychain=fake)
+    reserved.reconcile(declared=LAUNCHER, chain=chain)
+    ((_service, user), token), = fake.kept.items()
+    assert user == "launcher:comms/reserved/console"
+    assert row("console")["token_hash"] == reserved.token_hash(token)
+    assert token_of(store, "launcher", "console") is None
+    reserved.reconcile(declared={}, chain=chain)
+    assert fake.kept == {}

@@ -142,6 +142,14 @@ def env(monkeypatch, tmp_path):
                 "MOXI_COMMS_LOCAL_RETAIN_DAYS", "MOXI_COMMS_MOCK_BACKEND",
                 "CLAUDE_CODE_SESSION_ID", "MOXI_COMMS_CLAIM_SOCKET", "MOXI_COMMS_COMMAND"):
         monkeypatch.delenv(var, raising=False)
+    # The credential chain's keychain step: never the user's own keychain. keyring's null
+    # backend is "no usable keychain", so every chain falls to the store under tmp; a
+    # test that wants a keychain hands the chain a fake backend of its own. The variable
+    # covers a child process, the setting this one.
+    import keyring
+    import keyring.backends.null
+    monkeypatch.setenv("PYTHON_KEYRING_BACKEND", "keyring.backends.null.Keyring")
+    monkeypatch.setattr(keyring.core, "_keyring_backend", keyring.backends.null.Keyring())
     # The cache clock (cold-sends). Every reader's root and every shim's reported root
     # are under tmp: `CLAUDE_CONFIG_DIR` is what a shim reports its session's transcripts
     # under and where the reader finds them (`projects/` in it). Outside `tmp_path`,

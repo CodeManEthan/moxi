@@ -13,8 +13,8 @@ line of doc and, for a few, the one variable that overrides it for one process:
     [threads]
     reply_cap = 8                           # an open thread's default reply cap
 
-    [secrets]
-    chain = ["env", "store"]                # the resolver chain, in order
+    [credentials]
+    chain = ["env", "keychain", "store"]    # the credential chain, in order
     store = "~/.../tokens"                  # empty: STATE/comms/tokens
     roles = ["calendar"]                    # role holders this box adds
 
@@ -69,7 +69,7 @@ _TOKENISH = ("token", "secret_value", "password", "webhook_url")
 #: The schema's resource, in this package (the announcement's `SETTINGS`).
 SETTINGS = "settings.toml"
 
-#: comms' own role holders, which `[secrets] roles` may not name again.
+#: comms' own role holders, which `[credentials] roles` may not name again.
 BUILTIN_ROLES = ("reader", "daemon", "provisioner", "operator")
 
 
@@ -121,11 +121,11 @@ class ThreadsConfig:
 
 
 @dataclass
-class SecretsConfig:
-    """`[secrets]`: WHICH resolvers this box has, in what order, where the token store
+class CredentialsConfig:
+    """`[credentials]`: WHICH steps the credential chain has, in what order, where the token store
     is (empty: `paths.tokens_dir()`), and the role holders this box adds."""
 
-    chain: tuple = tuple(_default("secrets.chain"))
+    chain: tuple = tuple(_default("credentials.chain"))
     store: str = ""
     roles: tuple = ()
 
@@ -203,7 +203,7 @@ class CommsConfig:
     backend: str = _default("backend")
     local: LocalConfig = field(default_factory=LocalConfig)
     threads: ThreadsConfig = field(default_factory=ThreadsConfig)
-    secrets: SecretsConfig = field(default_factory=SecretsConfig)
+    credentials: CredentialsConfig = field(default_factory=CredentialsConfig)
     policy: PolicyConfig = field(default_factory=PolicyConfig)
     provision: ProvisionConfig = field(default_factory=ProvisionConfig)
     replay: ReplayConfig = field(default_factory=ReplayConfig)
@@ -424,9 +424,9 @@ def _typed(settings, path: Path | None) -> CommsConfig:
         local=LocalConfig(record=str(record) if record is not None else "",
                           retain_days=v["local.retain_days"]),
         threads=ThreadsConfig(reply_cap=v["threads.reply_cap"]),
-        secrets=SecretsConfig(chain=_chain(bad, v["secrets.chain"]),
-                              store=str(v["secrets.store"] or ""),
-                              roles=_roles(bad, v["secrets.roles"])),
+        credentials=CredentialsConfig(chain=_chain(bad, v["credentials.chain"]),
+                              store=str(v["credentials.store"] or ""),
+                              roles=_roles(bad, v["credentials.roles"])),
         policy=PolicyConfig(cache_callers=_names(bad, "policy.cache_callers",
                                                  v["policy.cache_callers"]),
                             labels=_labels(bad, v["policy.labels"])),
@@ -443,7 +443,7 @@ def _typed(settings, path: Path | None) -> CommsConfig:
 
 
 def _chain(bad, chain) -> tuple:
-    """`[secrets] chain`, validated HERE: a name outside the steps is refused at config
+    """`[credentials] chain`, validated HERE: a name outside the steps is refused at config
     load, so a typo fails the box's first read of its own config and not the first send
     of the day."""
     from .secrets import STEPS
@@ -452,11 +452,11 @@ def _chain(bad, chain) -> tuple:
     for name in chain:
         text = str(name).strip()
         if text not in STEPS:
-            raise bad("secrets.chain", f"names {text!r}, which is not a resolver",
+            raise bad("credentials.chain", f"names {text!r}, which is not a resolver",
                       f"use the steps {', '.join(STEPS)}")
         names.append(text)
     if not names:
-        raise bad("secrets.chain", "is empty, so nothing on this box could resolve a "
+        raise bad("credentials.chain", "is empty, so nothing on this box could resolve a "
                   "credential", f"name at least one of {', '.join(STEPS)}, or remove "
                   "the key for the default")
     return tuple(names)
@@ -472,16 +472,16 @@ def _names(bad, key: str, value) -> tuple:
 
 
 def _roles(bad, value) -> tuple:
-    """`[secrets] roles`: each a token-store name of its own, and none of comms' own."""
+    """`[credentials] roles`: each a token-store name of its own, and none of comms' own."""
     from .tokens import COMPONENT_RE
 
     roles = []
-    for item in _names(bad, "secrets.roles", value):
+    for item in _names(bad, "credentials.roles", value):
         if item in (".", "..") or not COMPONENT_RE.match(item):
-            raise bad("secrets.roles", f"holds {item!r}, which is not a token-store "
+            raise bad("credentials.roles", f"holds {item!r}, which is not a token-store "
                       "name", "use letters, digits, dot, dash and underscore")
         if item in BUILTIN_ROLES:
-            raise bad("secrets.roles", f"holds {item!r}, one of comms' own roles",
+            raise bad("credentials.roles", f"holds {item!r}, one of comms' own roles",
                       "remove it; comms knows it already")
         roles.append(item)
     return tuple(roles)
@@ -510,8 +510,17 @@ def _roster(bad, table: str, v) -> dict:
     return out
 
 
+#: The table `[credentials]` was called before it was named for what it holds.
+OLD_CREDENTIALS_TABLE = "secrets"
+
+
 def refuse_secrets(path: Path | None, raw: dict) -> None:
-    """The refusal every comms config table shares: a token-shaped key is a hard stop."""
+    """The refusal every comms config table shares: a token-shaped key is a hard stop.
+    The table's old name, `[secrets]`, is refused too, naming the new one."""
+    if isinstance(raw.get(OLD_CREDENTIALS_TABLE), dict):
+        raise ConfigError(path, OLD_CREDENTIALS_TABLE, "is the old name of the "
+                          "credential chain's table", "rename the table [credentials]; "
+                          "its keys are the same")
     def walk(node, trail):
         if isinstance(node, dict):
             for k, v in node.items():
@@ -524,7 +533,7 @@ def refuse_secrets(path: Path | None, raw: dict) -> None:
     walk(raw, [])
 
 
-__all__ = ["Config", "ConfigError", "LocalConfig", "ThreadsConfig", "SecretsConfig", "PolicyConfig",
+__all__ = ["Config", "ConfigError", "LocalConfig", "ThreadsConfig", "CredentialsConfig", "PolicyConfig",
            "ProvisionConfig", "ReplayConfig", "CommsConfig",
            "BUILTIN_ROLES", "check_text", "config_path", "load", "load_file",
            "refuse_secrets", "schema",

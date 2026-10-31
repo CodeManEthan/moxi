@@ -59,10 +59,10 @@ def test_a_box_with_its_daemon_up(rig):
     assert r["CONFIG"] == str(home / "config" / "comms") == str(paths.config_dir())
     assert r["RUNTIME"] == str(paths.runtime_dir())
     assert r["backend"] == "local (the default)"
-    assert r["secrets"] == "env, store (the default)"
+    assert r["credentials"] == "env, keychain, store (the default)"
     assert r["daemon"].startswith("answers at ")
     assert set(r) == {"device", "DATA", "STATE", "CACHE", "CONFIG", "RUNTIME", "config",
-                      "backend", "secrets", "cache", "claude", "codex", "opencode",
+                      "backend", "credentials", "cache", "claude", "codex", "opencode",
                       "daemon", "waiting"}, out
 
 
@@ -108,7 +108,7 @@ def test_a_configured_box_whose_daemon_is_down_exits_offline(tmp_path):
 def test_a_bad_config_is_reported_not_raised(tmp_path):
     path = config.config_path()
     path.parent.mkdir(parents=True)
-    path.write_text("[secrets]\nchain = [\"vault\"]\n")
+    path.write_text("[credentials]\nchain = [\"vault\"]\n")
     code, out = doctor(env={"PATH": ""})
     assert rows(out)["config"].startswith("ERROR: ")
     assert code == 0                    # nothing configured it as far as doctor could read
