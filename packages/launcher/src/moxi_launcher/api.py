@@ -217,6 +217,9 @@ def preview(request, *, environ: Mapping[str, str] | None = None) -> Composition
     """The composition `request` would launch: argv, the stamped environment, target and
     mode. Starts nothing and writes nothing of the launcher's. Its `warnings` are the
     ones `launch` gives: the resolver's, then the composer's."""
+    bad_id = _request_id_refusal(getattr(request, "request_id", None))
+    if bad_id is not None:
+        raise bad_id
     resolved = _resolve(request, environ)
     composition = compose.build(request, resolved, environ=environ)
     return dataclasses.replace(composition,

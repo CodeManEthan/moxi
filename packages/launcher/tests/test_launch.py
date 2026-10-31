@@ -1070,3 +1070,9 @@ def test_the_scratch_folder_of_a_request_id_that_is_not_a_plain_name_is_refused(
         with pytest.raises(ValueError):
             common.scratch_dir(rid)
     assert common.scratch_dir("r-1.a_b").name == "r-1.a_b"
+
+
+def test_preview_refuses_a_request_id_that_is_not_a_plain_name_as_launch_does(tmp_path):
+    with pytest.raises(catalog.BadValue) as refused:
+        api.preview(scratch_request(tmp_path, "../x"))
+    assert refused.value.row == "request_id" and refused.value.exit_code == exits.USAGE
