@@ -23,7 +23,8 @@ Codex or OpenCode host). This module is its harness-free core; an adapter
 - asks the `after-tool` rows after a tool call (`after_tool`) and keeps each row's floor
   (`floors`), which it reads at each `ready` and after each call of the row's listener,
   and hands the harness each time one changes (`Harness.floors_changed`, when the
-  adapter has it). Every listener event carries the session's directory, `cwd`.
+  adapter has it). Every listener event carries the session's launch directory, `cwd`,
+  which a shell `cd` does not move (`SessionEvent`).
 
 turns decides nothing about content or timing: it delivers what it is handed, when it is
 handed it, under the preconditions the caller names.

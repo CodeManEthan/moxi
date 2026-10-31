@@ -136,9 +136,9 @@ describe('the ask', () => {
     const w = world(on)
     await attached($, w, [entry('t.one'), entry('t.two', { deadline_ms: 900 })])
     await $.tool.call({ tool: 'Bash', tool_use_id: 'u7', command: 'ls', description: 'list', agentId: 'a2' })
-    expect(asks(w)).toEqual([{ call: { tool: 'Bash', tool_use_id: 'u7', input: { command: 'ls', description: 'list' }, agentId: 'a2' }, guards: ['t.one', 't.two'] }])
+    expect(asks(w)).toEqual([{ call: { tool: 'Bash', tool_use_id: 'u7', input: { command: 'ls', description: 'list' }, agentId: 'a2', cwd: '/work' }, guards: ['t.one', 't.two'] }])
     await $.tool.call({ tool: 'Bash', tool_use_id: 'u8', command: 'ls' })
-    expect(asks(w)[1]!.call).toEqual({ tool: 'Bash', tool_use_id: 'u8', input: { command: 'ls' }, agentId: null })
+    expect(asks(w)[1]!.call).toEqual({ tool: 'Bash', tool_use_id: 'u8', input: { command: 'ls' }, agentId: null, cwd: '/work' })
   })
 
   test('a deny in the answer refuses, and the tool never runs', async ($: E, on) => {
@@ -180,6 +180,62 @@ describe('the ask', () => {
     const samples = w.got.filter(g => g.path === '/hook-times').flatMap(g => g.body.samples as { event: string; ms: number }[])
     expect(samples.find(x => x.event === 'guard')!.ms).toBeGreaterThanOrEqual(80)
     expect(samples.find(x => x.event === 'tool.call')!.ms).toBeLessThan(80)
+  })
+})
+
+describe('the call\'s directory', () => {
+  test('each ask carries the directory read in its own hook', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w, [entry('t.one')])
+    w.cwd = '/work/moved'
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'rm -rf build' })
+    w.cwd = '/work/.worktrees/agent-a1'
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'u2', command: 'rm -rf build', agentId: 'a1' })
+    expect(asks(w).map(b => [(b.call as Json).agentId, (b.call as Json).cwd])).toEqual([
+      [null, '/work/moved'],
+      ['a1', '/work/.worktrees/agent-a1'],
+    ])
+    expect(w.cwdReads).toBe(2)
+  })
+
+  test('no ask, no read: a call nothing covers, a data-only refusal, the runner\'s own', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w, [entry('t.one', { match: { command: '^rm' } }), entry('t.nested', { calls: ['Agent'], who: 'agents', judge: false, deny: 'no' })])
+    await $.tool.call({ tool: 'Bash', command: 'ls' })
+    await $.tool.call({ tool: 'Read', file_path: '/x' })
+    expect((await $.tool.call({ tool: 'Agent', prompt: 'go', agentId: 'a1' })).deny).toBe('no')
+    await $.classic.Stop({ stop_hook_active: false, background_tasks: [{ id: 's1', type: 'shell', status: 'running', description: '' }] })
+    await w.line({ op: 'command', request: 'r1', name: 'compact', stop_shells: true })
+    expect(w.stopCalls.map(c => c.taskId)).toEqual(['s1'])
+    expect(asks(w)).toEqual([])
+    expect(w.cwdReads).toBe(0)
+  })
+
+  for (const [name, given] of [['a read that rejects', 'fail'], ['a read that gives no string', 42], ['an empty read', '']] as const) {
+    test(`${name} sends the ask with no cwd, and the guard still judges`, async ($: E, on) => {
+      const w = world(on)
+      await attached($, w, [entry('t.one', { on_error: 'deny' })])
+      w.cwd = given
+      w.answers['/ask/guard'] = { ok: true, deny: 'judged', lines: [], broken: [] }
+      expect(await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'rm -rf build' })).toEqual({ deny: 'judged' })
+      expect(asks(w)).toHaveLength(1)
+      expect('cwd' in (asks(w)[0]!.call as Json)).toBe(false)
+      expect(ran(w)).toEqual([])
+    })
+  }
+
+  test('a read that never answers counts against the trip\'s bound', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w, [entry('t.one', { deadline_ms: 300 })])
+    w.cwd = 'hang'
+    let r: E
+    const call = $.tool.call({ tool: 'Bash', command: 'rm x' }).then((x: E) => { r = x })
+    await w.clock.advance(1299)
+    expect(r).toBeUndefined()
+    await w.clock.advance(1)
+    await call
+    expect(asks(w)).toEqual([])
+    expect(r.context).toEqual(['[turns] guard t.one could not check this call (no answer within 1300 ms); it ran unchecked.'])
   })
 })
 

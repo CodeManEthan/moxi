@@ -503,8 +503,15 @@ class ClaudeHarness(Harness):
         ep = self.endpoint
         tc = ToolCall(self.name, ep.ledger.session_id, _opt_str(call, "agentId"),
                       call["tool"], _opt_str(call, "tool_use_id"), dict(given or {}),
-                      self.cwd, self.record_path, ep.env, prompts_of(call.get("prompts")))
+                      self._call_cwd(call), self.record_path, ep.env,
+                      prompts_of(call.get("prompts")))
         return self.guards.ask(tc, ids).to_leg()
+
+    def _call_cwd(self, call: dict[str, Any]) -> str:
+        """The directory a call runs in: the ask's `cwd` when it is an absolute path, else
+        the launch directory. A shell `cd` moves the first and never the second."""
+        cwd = _opt_str(call, "cwd")
+        return cwd if cwd is not None and os.path.isabs(cwd) else self.cwd
 
     def _after_tool(self, body: dict[str, Any]) -> str | None:
         """`/ask/after-tool`: ask the rows the runner names about one call that ran.

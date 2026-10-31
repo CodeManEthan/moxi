@@ -79,12 +79,23 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     classicInSubmit: undefined as undefined | ((text: string) => Promise<unknown>),
     /** A hook beneath rewrites the prompt before its UserPromptSubmit, when set. */
     rewrite: undefined as undefined | ((text: string) => string),
+    /** What `$.session.cwd()` answers: a directory, a value that is no string, a throw
+     *  when `fail`, or never when `hang`. A test sets it per call, as each loop's hook reads its own. */
+    cwd: '/work' as unknown,
+    /** How many times the runner read `$.session.cwd()`. */
+    cwdReads: 0,
   }
   const endpointJson = options.endpointJson === undefined ? JSON.stringify({ argv: ROOT_ARGV }) : options.endpointJson
 
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
   on('session.surfaces', async () => ({ value: w.surfaces as never }))
   on('session.id', async () => ({ value: w.sessionId }))
+  on('session.cwd', async () => {
+    w.cwdReads += 1
+    if (w.cwd === 'fail') throw new Error('the directory cannot be read')
+    if (w.cwd === 'hang') await new Promise(() => {})
+    return { value: w.cwd as never }
+  })
   on('turn.start', async ($, e) => {
     // The work behind a hook (another plugin's, the engine's): real time, which a hook's
     // own timing leaves out.

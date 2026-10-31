@@ -599,6 +599,32 @@ def test_ask_guard_builds_the_call_from_the_leg_and_the_endpoint(leg_rig):
     assert seen["call"].agent_id is None and seen["call"].tool_use_id is None
 
 
+@pytest.mark.parametrize(("given", "want"), [
+    ("/work/moved", "/work/moved"),
+    ("/", "/"),
+    (None, "/work"),
+    ("", "/work"),
+    ("moved", "/work"),
+    ("./moved", "/work"),
+    (7, "/work"),
+    (["/x"], "/work"),
+], ids=["absolute", "root", "none", "empty", "relative", "dot-relative", "number", "list"])
+def test_ask_guard_takes_an_absolute_cwd_from_the_ask_else_the_launch_directory(
+        leg_rig, given, want):
+    seen = {}
+
+    def judge(call):
+        seen["cwd"] = call.cwd
+
+    ep, runner, r = leg_rig(judged("a", judge))
+    call = {"tool": "Bash", "input": {"command": "x"}}
+    if given is not None:
+        call["cwd"] = given
+    answer = runner.post(leg.PATH_GUARD, {"call": call, "guards": ["t.a"]})
+    assert answer == {"ok": True, "lines": [], "broken": []}
+    assert seen["cwd"] == want
+
+
 @pytest.mark.parametrize("body", [
     {"guards": ["t.a"]},
     {"call": {"tool": ""}, "guards": ["t.a"]},

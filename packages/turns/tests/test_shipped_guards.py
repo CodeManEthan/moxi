@@ -464,6 +464,28 @@ def test_end_to_end_the_switched_on_guards_reach_the_table_and_judge(endpoint, a
     assert reminded["context"] == qm.REMINDER
 
 
+@pytest.mark.parametrize(("cwd", "refused"), [
+    ("/home", True),             # a cd moved the shell: `user` is the home
+    ("/home/user", False),       # `user` is a directory under the home
+    ("/home/", True),            # absolute, and judged as its normal form
+    (None, False),               # no cwd: judged against the launch directory
+    ("home", False),             # a relative cwd counts as none
+], ids=["moved-to-home-parent", "moved-to-home", "trailing-slash", "none", "relative"])
+def test_end_to_end_a_relative_removal_is_judged_against_the_asks_cwd(endpoint, cwd,
+                                                                       refused):
+    fake = endpoint("[guards]\nremoval = true\n")
+    call = {"tool": "Bash", "input": {"command": "rm -rf user"}}
+    if cwd is not None:
+        call["cwd"] = cwd
+    answer = fake.post(leg.PATH_GUARD, {"call": call, "guards": ["turns.removal"]})
+    if refused:
+        assert answer["deny"] == removal.REASON_W
+    else:
+        assert "deny" not in answer and answer["broken"] == []
+    # Against the launch directory alone, the same word passes.
+    assert removal.rules("rm -rf user", "/home/user/proj", "/home/user") == ""
+
+
 def test_end_to_end_a_subagents_agent_call_is_refused_without_a_trip(endpoint):
     fake = endpoint('[guards]\non = ["turns.no-nested-agents"]\n')
     (entry,) = fake.first["guards"]

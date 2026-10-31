@@ -533,7 +533,9 @@ class SessionEvent:
     The fields after `reason` are optional and None where they don't apply, so a
     listener written for the first five events reads this unchanged:
 
-    - `cwd`, on every event: the session's working directory, as its harness reports it.
+    - `cwd`, on every event, `after-tool` included: the session's launch directory. A
+      shell `cd` does not move it, so after one an `after-tool` event's `cwd` is not the
+      directory the call ran in; only a guard's `ToolCall.cwd` is that.
     - On `after-tool`: `agent_id` (None on the main loop), `tool`, `tool_use_id`,
       `is_error`, `point` (`after`, or `pre` where the harness has only a pre-tool point)
       and `record_path`, the file the harness writes this session's records to (None

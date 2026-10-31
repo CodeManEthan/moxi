@@ -61,7 +61,7 @@
 //   /agents      {ask, entries}                            -> {}  each entry as the engine
 //                gives it, {id, type, description, status, parentId?, teammateId?}; the
 //                endpoint maps the states (entries null: unreadable)
-//   /ask/guard   {call: {tool, tool_use_id, input, agentId, prompts?}, guards: [id]}
+//   /ask/guard   {call: {tool, tool_use_id, input, agentId, cwd?, prompts?}, guards: [id]}
 //                -> {deny?, lines, broken}   a call judge entries cover (the guards, below)
 //   /ask/after-tool {call: {tool, tool_use_id, agentId, is_error}, rows: [id]}
 //                -> {context: string | null}   after a call ran (after-tool, below)
@@ -155,9 +155,13 @@
 //   2. a data-only entry (no judge) covers it: refused with its `deny`, and `next` is
 //      never called;
 //   3. else one POST /ask/guard naming the covering judge entries, bounded by the largest
-//      of their `deadline_ms` plus 1 s. A `deny` in the answer refuses; else the tool runs
-//      and `lines`, then `broken`, go into the result's `context`, which the model reads
-//      after the tool's result.
+//      of their `deadline_ms` plus 1 s. The call carries `cwd`, the directory it runs in:
+//      `$.session.cwd()` read inside this hook, so a subagent's call carries the
+//      subagent's own. It is read only here, inside the bound; a read that rejects or
+//      gives no string sends the ask with no `cwd`, and the endpoint judges against the
+//      launch directory. A `deny` in the answer refuses; else the tool runs and `lines`,
+//      then `broken`, go into the result's `context`, which the model reads after the
+//      tool's result.
 //   A trip that fails or misses its bound breaks each entry it named: the call is refused
 //   with "turns could not check this call with guard <id> (<why>)" when one of them
 //   declared `on_error` deny, else it runs with one line per entry, "[turns] guard <id>
@@ -1043,10 +1047,25 @@ export function catchRefuses(table: readonly Guard[], e: Json): boolean {
 
 type Trip = { answer: Json } | { why: string }
 
-/** One /ask/guard trip, bounded by `boundMs` on the plugin's own timer. */
-async function guardTrip($: Dollar, body: Json, boundMs: number): Promise<Trip> {
+/** The directory the hook's call runs in, or undefined when the read fails. */
+async function callCwd($: Dollar): Promise<string | undefined> {
+  try {
+    const cwd: unknown = await $.session.cwd()
+    return typeof cwd === 'string' && cwd !== '' ? cwd : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** One /ask/guard trip, bounded by `boundMs` on the plugin's own timer. The call's `cwd` is
+ *  read first, inside the bound; it is left out when the read fails. */
+async function guardTrip($: Dollar, body: { call: Json; guards: string[] }, boundMs: number): Promise<Trip> {
   if (hello === undefined || ended) return { why: "turns' endpoint is not running" }
-  const sent = post($, hello.sock, '/ask/guard', body).then(
+  const sock = hello.sock
+  const sent = callCwd($).then(cwd => {
+    if (cwd !== undefined) body.call.cwd = cwd
+    return post($, sock, '/ask/guard', body)
+  }).then(
     (answer): Trip => ({ answer }),
     (err): Trip => ({ why: `the trip failed: ${String(err)}` }),
   )

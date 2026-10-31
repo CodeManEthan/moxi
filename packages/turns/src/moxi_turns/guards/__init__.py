@@ -114,10 +114,13 @@ class Prompt:
 class ToolCall:
     """The call a judge decides.
 
-    `agent_id` is None on the main loop. `record_path` is the file the harness writes the
-    session's records to, None where it has none. `env` is the endpoint's environment,
-    which is the launch's. `prompts` holds the current main turn's prompts when the guard
-    `wants` them, else nothing.
+    `agent_id` is None on the main loop. `cwd` is the directory the call runs in, absolute:
+    on Claude what the runner read in the call's hook (a subagent's own in a subagent, and
+    meant to follow a shell `cd`); where the harness gives none, or a relative one, the
+    launch directory. A listener event's `cwd` is always the launch directory.
+    `record_path` is the file the harness writes the session's records to, None where it
+    has none. `env` is the endpoint's environment, which is the launch's. `prompts` holds
+    the current main turn's prompts when the guard `wants` them, else nothing.
     """
 
     harness: str

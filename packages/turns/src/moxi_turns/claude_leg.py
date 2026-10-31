@@ -167,11 +167,14 @@ calls `next`) or `{"ok": true, "verdict": "drop", "reason": r, "text": "<one lin
 person>"}`; the gate drops a `drop` with `text` and never calls `next`. A nonce that names
 no open window reads `late`, and the endpoint logs the late entry.
 
-`/ask/guard` — `{call: {tool, tool_use_id, input, agentId, prompts?}, guards: [id, ...]}`
-for a tool call that judge entries of the table cover: `input` is the call's envelope less
-`tool`, `tool_use_id` and `agentId` (absent or null on the main loop); `prompts`, the
-current main turn's prompts `[{origin, text}]`, when an asked entry `wants` them. The
-endpoint judges each named entry within its own `deadline_ms` from the ask's arrival, so
+`/ask/guard` — `{call: {tool, tool_use_id, input, agentId, cwd?, prompts?}, guards: [id,
+...]}` for a tool call that judge entries of the table cover: `input` is the call's envelope
+less `tool`, `tool_use_id` and `agentId` (absent or null on the main loop); `cwd`, the
+directory the call runs in, `$.session.cwd()` read in the call's hook (a subagent's own in
+a subagent, and meant to follow the Bash tool's `cd`s), absent when that read failed, and
+the endpoint judges against the launch directory when `cwd` is absent or not absolute;
+`prompts`, the current main turn's prompts `[{origin, text}]`, when an asked entry `wants`
+them. The endpoint judges each named entry within its own `deadline_ms` from the ask's arrival, so
 the answer comes within the largest of them; the runner bounds the trip by that plus its
 margin. An id not on the endpoint's table (it changed at a `ready`) is skipped. Answer
 `{"ok": true, "deny"?: "<reason>", "lines": ["<text>", ...], "broken": ["<text>", ...]}`:

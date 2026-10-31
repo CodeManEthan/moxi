@@ -836,3 +836,24 @@ def test_after_tool_floors_usage_and_the_prompt_through_the_leg(claude):
     assert [(c[0], c[2], c[3], c[4]) for c in seen] == [
         ("usage", None, None, reading), ("prompt", "hi there", "composer", None)]
     assert all(c[1] == ep.harness.cwd for c in seen)
+
+
+def test_an_after_tool_events_cwd_is_the_launch_directory_not_the_calls(claude):
+    import listener_targets
+
+    listener_targets.CALLS.clear()
+    registry = Registry((Listener("usage", frozenset({"after-tool"}),
+                                  "listener_targets:after"),))
+    ep, runner = claude(registry=registry)
+    assert os.path.isabs(ep.harness.cwd) and ep.harness.cwd != "/elsewhere"
+    # The guard's ask names the directory a shell cd moved to; the after-tool ask that
+    # follows, even one that names it too, still reaches its listener with the launch
+    # directory, which a cd does not move.
+    runner.post(leg.PATH_GUARD, {"call": {"tool": "Bash", "tool_use_id": "u1",
+                                          "input": {}, "cwd": "/elsewhere"},
+                                 "guards": []})
+    runner.post(leg.PATH_AFTER_TOOL, {
+        "call": {"tool": "Bash", "tool_use_id": "u1", "cwd": "/elsewhere"},
+        "rows": ["listener_targets:after"]})
+    (after,) = [c for c in listener_targets.CALLS if c[0] == "after"]
+    assert after[6] == ep.harness.cwd
