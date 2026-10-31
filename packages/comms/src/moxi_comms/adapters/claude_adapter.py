@@ -10,6 +10,7 @@ caller. It finds the session's endpoint, becomes its stop handler, watches its t
 events and hands each digest to it, named by the digest's id as its `ref`.
 
     the binding        ClaudeShim.start(): registered before `claude` starts
+    the tool token     its hash registered after every bind, the first before `claude`
     the claim socket   ClaudeShim's ClaimHolder, rooted at the `claude` process
     finding            turns.find(pid=<claude>), once a second until an endpoint answers
     the stop handler   Session.handle_stops(on_stop): the decision is ClaudeShim.on_stop
@@ -619,10 +620,17 @@ def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
     the daemon refused (the name held by another session, or reserved) or failed, or a
     daemon that is not there, is said with its reason, and the wrapper ends the launch
     before `claude` starts. Once bound, the supervisor binds again whenever the daemon
-    comes back from an outage."""
+    comes back from an outage.
+
+    A launch that carries comms' tools has the session's token in this process's
+    environment: the shim keeps its hash (the value leaves the environment) and registers
+    it after every bind, the first before `BOUND` is said, so `claude` starts after it."""
+    from .binding import ToolToken
     from .word import BOUND, exit_of, word_for
 
     say = say or (lambda code, reason="": None)
+    if shim.tool_token is None:
+        shim.tool_token = ToolToken.from_environ()
     adapter = ClaudeAdapter(shim, harness_pid, turns=turns)
     try:
         adapter.start()

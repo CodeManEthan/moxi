@@ -410,6 +410,7 @@ def fake_host(tmp_path):
         #!/bin/sh
         echo "token $MOXI_COMMS_MCP_TOKEN" >> {out}
         echo "url $MOXI_COMMS_MCP_URL" >> {out}
+        echo "reach $MOXI_COMMS_SHELL_REACH" >> {out}
         echo "args $*" >> {out}
         while [ "$1" != "--instructions-file" ]; do shift; done
         cp "$2" {tmp_path}/instructions.seen
@@ -440,7 +441,15 @@ def test_a_codex_launch_stamps_the_pair_for_the_host_and_names_the_tools(
         token = lines["token"]
         assert len(token) >= 43 and lines["url"] == serving.mcp_url
         assert token not in lines["args"], "never in the host's argv"
-        assert fake_host.instructions.read_text().endswith(f"\n\n{listener.TOOLS_LINE}")
+        # The launch carries the tools, so its network is off and its shell can't reach
+        # comms: the instructions say the tools are the way to send.
+        assert "sandbox_workspace_write.network_access=false" in lines["args"]
+        assert lines["reach"] == "off"
+        assert fake_host.instructions.read_text().endswith(
+            f"\n\n{listener.TOOLS_ONLY_LINE}")
+        # The adapter registered the token's hash for its binding before it said bound.
+        row = serving.mcp_tokens.verify(token)
+        assert row is not None and row.identity == "coder" and row.bound
     finally:
         fake_host.release.touch()
         out, err = proc.communicate(timeout=20)

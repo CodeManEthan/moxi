@@ -194,6 +194,9 @@ class HarnessAdapter:
     WAIT_WHEN_HELD: bool = True
     #: The port's own logger.
     log: logging.Logger = logging.getLogger("comms.harness")
+    #: The session's token for comms' tools (`binding.ToolToken`), registered after
+    #: every bind; None when the launch carries none.
+    tool_token: binding.ToolToken | None = None
 
     def __init__(self, agent, *, socket_path=None, autoreconnect: bool = True,
                  backoff=None, status_sink=None, clock=time.time, exit_hook=None):
@@ -356,7 +359,8 @@ class HarnessAdapter:
             return client.bind(name=self.agent.name, scope=self.agent.scope,
                                global_=self.agent.scope == "global",
                                project=self.agent.scope, adapter=self.KIND,
-                               report=self.session_report(register=True))
+                               report=self.session_report(register=True),
+                               claim=self.claims.key)
 
         def accept(resp):
             qualified = resp["identity"]["qualified"]
@@ -375,7 +379,7 @@ class HarnessAdapter:
         resp = binding.register_and_install(
             self, client_type=DaemonClient, on_close=self._on_daemon_close,
             register=register, accept=accept, install=install, ledger=self.reply_ledger,
-            disarm=False)
+            disarm=False, token=self.tool_token, registered=self.tool_token_registered)
         if resp == binding.STOPPED:
             raise DroppedAfterAnswer("comms offline: the adapter stopped while the "
                                      "daemon answered register")
@@ -540,6 +544,10 @@ class HarnessAdapter:
                 if "already bound" not in str(e) or time.monotonic() > deadline:
                     raise
                 time.sleep(0.05)
+
+    def tool_token_registered(self, served: bool) -> None:
+        """The daemon answered this bind's registration of the tool token: `served`
+        says whether it serves comms' tools now. A port that acts on it overrides this."""
 
     # ------------------------------------------------------------------ start attempts
     def record_read(self) -> tuple:

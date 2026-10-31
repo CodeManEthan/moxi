@@ -34,6 +34,8 @@ from typing import NamedTuple
 
 CODEX = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "compact",
                    "agents", "stop-shells"})
+#: A Codex host that offers `mcp.reload` (turns' capability `mcp-token`).
+CODEX_RELOAD = CODEX | {"mcp-token"}
 
 
 @dataclass(frozen=True)
@@ -233,6 +235,9 @@ class FakeSession:
         self.waiting: list = []            # delivery ids waiting for the turn's end
         self.unknown: dict = {}            # ref -> FakeDelivery of an unknown outcome
         self.closed = False
+        #: Each `mcp_reload` call's `timeout`, and what it answers (or raises).
+        self.reload_calls: list = []
+        self.reload_answer = {"reloaded": False, "servers": {"comms": "connected"}}
         self._events: queue.Queue = queue.Queue()
         self._ids = itertools.count(1)
         self._turns = itertools.count(1)
@@ -255,6 +260,17 @@ class FakeSession:
 
     def close(self):
         self.closed = True
+
+    def mcp_reload(self, *, timeout=22.0):
+        if "mcp-token" not in self.capabilities:
+            raise RuntimeError("the session does not offer mcp-token (the capability "
+                               "error)")
+        with self._lock:
+            self.reload_calls.append(timeout)
+            answer = self.reload_answer
+        if isinstance(answer, BaseException):
+            raise answer
+        return dict(answer)
 
     def deliver(self, text, *, ref=None, only_if_idle=False, if_turn_number=None,
                 refuse_draft=False, refuse_agents=False):

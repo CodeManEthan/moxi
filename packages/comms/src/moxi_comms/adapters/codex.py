@@ -34,6 +34,18 @@ its frame lines marked `[interrupt]`, by `steer(text, ref=<digest>)`. A steer re
 `deliver` with the same text and ref, once; turns runs the text once whichever way the
 race went.
 
+**comms' tools.** A launch the daemon serves comms' tools for carries the session's token
+(`MOXI_COMMS_MCP_TOKEN`), and this adapter registers its hash after every bind
+(`binding.ToolToken`), the first before it says bound, so the host's thread normally
+starts after it. A Codex thread whose MCP server failed at its start (a connect before
+the registration got a 401) keeps it failed until the server list is reloaded. So after
+each registration the daemon answers `served: true`, the adapter calls the host's
+`mcp.reload` (turns' `Session.mcp_reload`): after the first as soon as `find_session`
+hands it the session, and after each rebind. Only a host whose hello lists `mcp-token`
+offers it. The call can take twice the host's 10 s settle when it waits behind a settle
+already under way, so it gets `RELOAD_WAIT`, and it runs on a thread of its own: a slow
+reload holds up no delivery.
+
 **Settling.** The ack is the end of the turn that took the digest. turns' `turn.ended`
 names every delivery the turn took, the opening one and each steered one, by ref:
 
@@ -91,6 +103,14 @@ ANSWER = "answer"
 #: How long one look for the host's session waits before the adapter checks that the
 #: host still runs, in seconds.
 FIND_STEP = 2.0
+#: The capability of a host that offers `mcp.reload`.
+MCP_TOKEN_CAPABILITY = "mcp-token"
+#: The request bound of `mcp.reload`, in seconds: above the 20 s a call can take when it
+#: waits behind a settle already past its first read and then runs one of its own (10 s
+#: each), so a slow settle answers rather than timing out.
+RELOAD_WAIT = 25.0
+#: How long `stop` waits for a reload in flight to end, in seconds.
+RELOAD_JOIN = 2.0
 
 
 # --------------------------------------------------------------------------- layer one
@@ -263,6 +283,12 @@ class CodexAdapter(HarnessAdapter):
         self.launch = launch_stamp()
         #: What the thread record says the thread was born with (layer one's hash).
         self._born_with: dict = {}
+        #: A registration the daemon answered `served: true` whose `mcp.reload` has not
+        #: been sent yet, and the thread that sends it, while one runs.
+        self._reload_owed = False
+        self._reloader: threading.Thread | None = None
+        #: Each `mcp.reload` answer, in order (log and test visibility).
+        self.reloads: list = []
 
     # ------------------------------------------------------------------ the clock's evidence
     def cache_source(self) -> str | None:
@@ -354,6 +380,8 @@ class CodexAdapter(HarnessAdapter):
         with self._lock:
             self.session = session
             self.thread_id = thread_id
+        # The first registration's reload, now that there is a session to ask.
+        self._start_reload()
         self._stops = session.handle_stops(self.on_stop)
         # The facts are read at the subscription: no turn event falls between them and
         # the first event the watch gives.
@@ -378,6 +406,62 @@ class CodexAdapter(HarnessAdapter):
                     thing.close()
                 except Exception:                           # noqa: BLE001
                     self.log.debug("closing %r failed", thing, exc_info=True)
+        with self._lock:
+            reloader = self._reloader
+        if reloader is not None:
+            reloader.join(RELOAD_JOIN)
+
+    # ------------------------------------------------------------------ comms' tools
+    def tool_token_registered(self, served: bool) -> None:
+        """A registration the daemon answered: when it serves the tools, the host's
+        server list is reloaded, now or once the session is found."""
+        if not served:
+            return
+        with self._lock:
+            self._reload_owed = True
+        self._start_reload()
+
+    def _start_reload(self) -> None:
+        """Start the reload thread when a reload is owed, the session is known, and none
+        runs (the one that runs sends an owed one when it is done)."""
+        with self._lock:
+            if (not self._reload_owed or self.session is None or self._stop.is_set()
+                    or self._reloader is not None):
+                return
+            t = self._reloader = threading.Thread(target=self._reload_loop, daemon=True,
+                                                  name="comms-codex-reload")
+        t.start()
+
+    def _reload_loop(self) -> None:
+        try:
+            while True:
+                with self._lock:
+                    session = self.session
+                    if not self._reload_owed or session is None or self._stop.is_set():
+                        self._reloader = None
+                        return
+                    self._reload_owed = False
+                self._reload(session)
+        except BaseException:
+            with self._lock:
+                self._reloader = None
+            raise
+
+    def _reload(self, session) -> None:
+        """One `mcp.reload` of the host's servers, when the host offers it. A failure is
+        logged: the host settles its servers again at its next ready."""
+        try:
+            if MCP_TOKEN_CAPABILITY not in session.capabilities:
+                self.log.info("the codex host of %s offers no mcp.reload; its servers are "
+                              "not reloaded", self.agent.qualified)
+                return
+            answer = session.mcp_reload(timeout=RELOAD_WAIT)
+        except Exception as e:                              # noqa: BLE001
+            self.log.warning("mcp.reload for %s failed: %s", self.agent.qualified, e)
+            return
+        self.reloads.append(answer)
+        self.log.info("mcp.reload for %s: reloaded %s, servers %s", self.agent.qualified,
+                      answer.get("reloaded"), answer.get("servers"))
 
     # ------------------------------------------------------------------ the session's events
     def _watch(self, watch) -> None:
@@ -722,8 +806,8 @@ def main(argv=None) -> int:
     return wrapper_main(argv)
 
 
-__all__ = ["ADAPTER_KIND", "CodexAdapter", "FIND_STEP", "HostGone", "layer_one_hash",
-           "layer_one_text", "main"]
+__all__ = ["ADAPTER_KIND", "CodexAdapter", "FIND_STEP", "HostGone", "MCP_TOKEN_CAPABILITY",
+           "RELOAD_WAIT", "layer_one_hash", "layer_one_text", "main"]
 
 
 if __name__ == "__main__":  # pragma: no cover

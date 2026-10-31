@@ -464,6 +464,9 @@ class ClaudeShim:
     #: A first bind into a name another session holds waits for it. A wrapper that
     #: refuses such a launch before its harness starts turns this off.
     WAIT_WHEN_HELD: bool = True
+    #: The session's token for comms' tools (`binding.ToolToken`), registered after
+    #: every bind; None when the launch carries none.
+    tool_token: binding.ToolToken | None = None
 
     def __init__(self, *, name=None, scope=None, global_=False,
                  project=None, injector=None, socket_path=None, status_sink=None,
@@ -756,7 +759,8 @@ class ClaudeShim:
                                global_=self.global_, project=self.project,
                                adapter="claude-shim", session_id=session_id,
                                projects_root=projects_root,
-                               turned=turned, endpoint=endpoint)
+                               turned=turned, endpoint=endpoint,
+                               claim=self.claims.key)
 
         owed_ready = None
 
@@ -773,7 +777,7 @@ class ClaudeShim:
 
         resp = binding.register_and_install(
             self, client_type=DaemonClient, on_close=self._on_close, register=register,
-            install=install, bound=bound, ledger=self.ledger)
+            install=install, bound=bound, ledger=self.ledger, token=self.tool_token)
         if resp in (binding.STOPPED, binding.DROPPED):
             return False
         log.info("registered as %s (tier %s)", self.identity, self.tier)
