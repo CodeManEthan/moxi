@@ -53,7 +53,9 @@ SEGMENT = None
 # The announcement's version, and the optional names it declares.
 ANNOUNCES = 1
 #: The launch log, the per-launch run files (prompt files and headless logs) and the
-#: handoff folder used when notes is absent. Each is made at its first write.
+#: handoff folder used when notes is absent. Each is made at its first write. The run
+#: files' age is the shipped default of the `runs.keep_days` setting; the sweep that
+#: removes them reads the setting, so a user who changes it keeps them that long instead.
 STORES = {
     "launches": {"root": "state", "path": "launcher.db", "kind": "sqlite",
                  "private": True, "retention": "keep", "rebuildable": False,

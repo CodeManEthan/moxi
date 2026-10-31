@@ -79,3 +79,13 @@ def test_the_store_roots_sit_under_the_launchers_own_layout():
     roots = {"state": layout.state_dir(), "data": layout.data_dir()}
     for entry in module.STORES.values():
         assert roots[entry["root"]].name == "launcher"
+
+
+def test_the_run_files_declared_age_is_the_keep_days_default():
+    import tomllib
+    from importlib import resources
+
+    shipped = tomllib.loads(resources.files("moxi_launcher").joinpath(
+        "settings.toml").read_text())
+    days = shipped["runs"]["keep_days"]["default"]
+    assert module.STORES["runs"]["retention"] == f"{days}d"
