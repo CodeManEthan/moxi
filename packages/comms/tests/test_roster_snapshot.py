@@ -45,9 +45,10 @@ def test_the_snapshot_body_is_the_verb_output_verbatim(rig):
     (the default view is the names an agent can message)."""
     rig.shim(name="planner", scope="proj-a")
     rig.shim()
-    rig.cli(["send", "--posture", "none", "curator@proj-a", "waiting"],
-            name="planner", scope="proj-a")
-    wait_until(lambda: waiting_for("curator@proj-a"))
+    code, out = rig.cli(["send", "--posture", "none", "--new-name", "curator@proj-a",
+                         "waiting"], name="planner", scope="proj-a")
+    assert code == 0, out
+    assert wait_until(lambda: waiting_for("curator@proj-a")), "the mail waits for curator"
 
     code, out = rig.cli(["agents"])
     assert code == 0

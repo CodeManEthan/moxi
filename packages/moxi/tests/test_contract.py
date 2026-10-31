@@ -1,7 +1,7 @@
-"""The module contract check over the core's own repo: what the commit hook runs.
+"""The module contract check over the core's own package.
 
-The core passes its own check by order (it is built before any hook runs it), so its suite
-runs the check over the working tree and, staged, over git's index.
+It runs with the package's suite, so `moxi-dev check` and CI hold every change to it, over
+the working tree and, staged, over git's index.
 """
 
 import shutil
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from moxi.contract import check
+from moxi_dev.contract import check
 
 ROOT = Path(__file__).resolve().parents[1]
 

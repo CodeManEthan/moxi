@@ -27,7 +27,7 @@ from moxi.place import Item
 @pytest.fixture(autouse=True)
 def home(tmp_path, monkeypatch):
     """A home of its own, so `~/.claude`, `~/.agents` and `~/.codex` are under tmp."""
-    home = tmp_path / "home"
+    home = tmp_path / "user-home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))  # what `~` reads on Windows

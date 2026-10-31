@@ -22,6 +22,7 @@ from playwright.sync_api import expect
 
 import roster_kit
 import shim_drive
+from moxi_comms import claimfile
 from moxi_comms.daemon import Daemon
 from roster_kit import STANDING, holding, put_clock, wait_for
 from test_reply_enforcement import PLANNER, REVIEWER, P, R, indexed, send
@@ -66,12 +67,15 @@ def ui_shell_options():
 @pytest.fixture(autouse=True)
 def shell(ui_shell, monkeypatch):
     """The module's shell, the rig's daemon the one its comms page server asks, with no
-    clock record left by an earlier test."""
+    clock record or claim file left by an earlier test. A claim file names its holder's
+    claim socket, in that earlier test's tmp, and the daemon would try it."""
     roster_kit.point_at(ui_shell, monkeypatch)
     directory = roster_kit.clock_dir(ui_shell)
     if directory.is_dir():
         for path in directory.iterdir():
             path.unlink()
+    for path in claimfile.claim_dir().glob(f"{claimfile.PREFIX}*{claimfile.SUFFIX}"):
+        path.unlink()
     return ui_shell
 
 

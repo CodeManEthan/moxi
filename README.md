@@ -13,12 +13,12 @@ repository holds all of them.
 
 | directory | PyPI name | what it is |
 |---|---|---|
-| `packages/moxi` | `moxi` | The core: names, paths, config, module discovery, the module contract and the `moxi` command |
+| `packages/moxi` | `moxi` | The core: names, paths, config, module discovery and the `moxi` command |
 | `packages/sessions` | `moxi-sessions` | Reads a harness's own session records |
 | `packages/turns` | `moxi-turns` | One interface to a harness session's turns |
 | `packages/cache` | `moxi-cache` | The prompt cache clock, its watcher and timer |
 | `packages/comms` | `moxi-comms` | Messages between agent sessions, delivered into their turns |
-| `packages/moxi-dev` | `moxi-dev` | The contributor tools; not a module, and nothing depends on it at run time |
+| `packages/moxi-dev` | `moxi-dev` | The contributor tools and the module contract check; not a module, and nothing depends on it at run time |
 
 Each package's README says how to install and use it. `packages/moxi/README.md` is the
 place to start.

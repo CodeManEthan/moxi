@@ -188,13 +188,14 @@ def test_a_corrupt_state_file_is_an_unknown_baseline(rig, tmp_path):
 
 # ------------------------------------------------------------ no advance on failure
 
-def test_failed_query_does_not_advance_and_the_next_delta_catches_up(rig, tmp_path):
+def test_failed_query_does_not_advance_and_the_next_delta_catches_up(rig, tmp_path,
+                                                                     fence):
     """Silent skip, no advance -- at-least-once replayed against a
     roster. The accumulated change arrives on the next successful diff."""
     state = seed(tmp_path / "roster.json", {})
     rig.shim(name="reviewer", scope="proj-a")
 
-    envelope, online = shim_roster.delta("/nonexistent/daemon.sock", state, env={})
+    envelope, online = shim_roster.delta(str(fence.short / "absent.sock"), state, env={})
     assert not online and envelope is None
     assert json.loads(state.read_text()) == {}, "the file did not advance"
 
@@ -247,7 +248,9 @@ def test_state_writes_are_temp_plus_rename_in_the_same_directory(tmp_path,
 
 def test_a_failed_write_leaves_the_old_state_and_no_debris(tmp_path, monkeypatch,
                                                            capsys):
-    state = seed(tmp_path / "roster.json", {"a": "chosen"})
+    where = tmp_path / "state"          # a directory of its own: tmp_path holds HOME too
+    where.mkdir()
+    state = seed(where / "roster.json", {"a": "chosen"})
 
     def refuse(src, dst):
         raise OSError("disk says no")
@@ -255,7 +258,7 @@ def test_a_failed_write_leaves_the_old_state_and_no_debris(tmp_path, monkeypatch
     assert not shim_roster.write_state(state, {"b": "chosen"})
     assert "state write failed" in capsys.readouterr().err
     assert json.loads(state.read_text()) == {"a": "chosen"}, "no partial file"
-    assert os.listdir(tmp_path) == ["roster.json"], "the temp file was cleaned up"
+    assert os.listdir(where) == ["roster.json"], "the temp file was cleaned up"
 
 
 # ---------------------------------------------------------------------- the listener

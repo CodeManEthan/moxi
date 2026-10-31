@@ -18,7 +18,7 @@ Issues = "https://github.com/moxihq/sessions/issues"
 sessions = "moxi_sessions.module"
 
 [dependency-groups]
-dev = ["pytest"]
+dev = ["pytest", "moxi-dev"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -32,6 +32,10 @@ packages = ["src/moxi_sessions"]
 # pyproject.toml and .gitignore itself.
 only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_sessions", "tests"]
 
+# A plain `pytest` runs the units and contract seams: the tiers are deselected here.
+# `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a
+# changed path; `moxi-dev check --full` runs every tier but live. Run one by hand with
+# `pytest -m <tier>` (a live test also needs MOXI_TEST_LIVE=1).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m 'not browser and not slow and not build and not live'"

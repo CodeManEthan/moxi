@@ -52,10 +52,11 @@ def fake_claude(tmp_path):
 
 def test_the_launch_forks_a_bound_adapter_before_claude_and_it_ends_with_claude(
         rig, fake_claude, turns_plugins):
-    from conftest import TURNS_PLUGINS_PATCH
+    from conftest import files_under
+
     script, out, release = fake_claude
-    code = (TURNS_PLUGINS_PATCH.format(root=str(turns_plugins))
-            + "from moxi_comms.adapters import session; raise SystemExit(session.main("
+    before = files_under(turns_plugins)
+    code = ("from moxi_comms.adapters import session; raise SystemExit(session.main("
             f"['--name', {NAME!r}, '--session-id', {SID!r}, '--claude', {str(script)!r}, "
             "'--', '--model', 'haiku']))")
     proc = subprocess.Popen([sys.executable, "-c", code], env=dict(os.environ),
@@ -70,7 +71,7 @@ def test_the_launch_forks_a_bound_adapter_before_claude_and_it_ends_with_claude(
                    f"--plugin-dir {turns_plugins / 'moxi-turns-gate'}")
         assert lines[2] == f"args --session-id {SID} {plugins} --model haiku -n {NAME}", \
             "the launch names its id to claude, then turns' plugins, then the passthrough"
-        assert not (turns_plugins / "moxi-turns" / "endpoint.json").exists()
+        assert files_under(turns_plugins) == before, "the launch wrote nothing there"
         b = binding(rig)
         assert b is not None, "bound before claude started"
         assert b.endpoint is False, "the session has no turns endpoint"
@@ -113,23 +114,21 @@ def test_the_wrapper_waits_a_bounded_time_for_the_adapters_word():
     os.close(r)
 
 
-def run_wrapper(turns_plugins, script, name, sid, *extra):
+def run_wrapper(script, name, sid, *extra):
     """The wrapper's `main` in a child process, to its end."""
-    from conftest import TURNS_PLUGINS_PATCH
-    code = (TURNS_PLUGINS_PATCH.format(root=str(turns_plugins))
-            + "from moxi_comms.adapters import session; raise SystemExit(session.main("
+    code = ("from moxi_comms.adapters import session; raise SystemExit(session.main("
             f"['--name', {name!r}, *{list(extra)!r}, '--session-id', {sid!r}, "
             f"'--claude', {str(script)!r}]))")
     return subprocess.run([sys.executable, "-c", code], env=dict(os.environ),
                           capture_output=True, text=True, timeout=60)
 
 
-def test_a_reserved_name_is_refused_before_claude_starts(rig, fake_claude, turns_plugins):
+def test_a_reserved_name_is_refused_before_claude_starts(rig, fake_claude):
     script, out, release = fake_claude
     release.touch()                     # a claude that did start would end at once
     reserved.reconcile(declared={"launcher": ["console"]}, chain=secrets.from_config())
     sid = "5e55a1d0-0000-4000-8000-0000000000a1"
-    proc = run_wrapper(turns_plugins, script, "console", sid, "--global")
+    proc = run_wrapper(script, "console", sid, "--global")
     assert proc.returncode == moxi_exit.REFUSED, proc.stderr
     assert "console was not launched: console is reserved for launcher" in proc.stderr
     assert not out.exists(), "claude never started"
@@ -137,13 +136,13 @@ def test_a_reserved_name_is_refused_before_claude_starts(rig, fake_claude, turns
     assert wait_until(lambda: not (session.sessions_dir() / sid).exists(), timeout=5)
 
 
-def test_a_held_name_is_refused_before_claude_starts(rig, fake_claude, turns_plugins):
+def test_a_held_name_is_refused_before_claude_starts(rig, fake_claude):
     script, out, release = fake_claude
     release.touch()
     rig.shim(name="heldname", global_=True)
     holder = binding(rig, "heldname")
     assert holder is not None
-    proc = run_wrapper(turns_plugins, script, "heldname",
+    proc = run_wrapper(script, "heldname",
                        "5e55a1d0-0000-4000-8000-0000000000a2", "--global")
     assert proc.returncode == moxi_exit.REFUSED, proc.stderr
     assert "heldname was not launched: heldname is already bound" in proc.stderr
@@ -151,15 +150,14 @@ def test_a_held_name_is_refused_before_claude_starts(rig, fake_claude, turns_plu
     assert binding(rig, "heldname") is holder, "the holder keeps its name"
 
 
-def test_a_launch_with_no_daemon_is_tempfail_before_claude_starts(
-        rig, fake_claude, turns_plugins):
+def test_a_launch_with_no_daemon_is_tempfail_before_claude_starts(rig, fake_claude):
     """A launch that finds no daemon is "try again" and starts nothing: no `claude`
     without comms."""
     script, out, release = fake_claude
     release.touch()
     rig.daemon.stop()
     sid = "5e55a1d0-0000-4000-8000-0000000000a3"
-    proc = run_wrapper(turns_plugins, script, "nodaemon", sid, "--global")
+    proc = run_wrapper(script, "nodaemon", sid, "--global")
     assert proc.returncode == moxi_exit.TEMPFAIL, proc.stderr
     assert "nodaemon was not launched: comms offline" in proc.stderr
     assert not out.exists(), "claude never started"

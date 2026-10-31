@@ -28,7 +28,7 @@ moxi-turns-codex-host = "moxi_turns.codex_host:main"
 turns = "moxi_turns.module"
 
 [dependency-groups]
-dev = ["pytest", "websockets>=17.0.1"]
+dev = ["pytest", "moxi-dev", "websockets>=17.0.1"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -41,7 +41,13 @@ exclude = ["src/moxi_turns/claude/*/tests"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution built from any branch holds the published paths and nothing else.
-only-include = ["contracts/socket-protocol.md", "src/moxi_turns", "tests", "LICENSE", "README.md"]
+only-include = ["contracts/socket-protocol.md", "src/moxi_turns", "tests", "LICENSE", "README.md",
+                "conftest.py"]
 
+# A plain `pytest` runs the units and contract seams: the tiers are deselected here.
+# `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a
+# changed path; `moxi-dev check --full` runs every tier but live. Run one by hand with
+# `pytest -m <tier>` (a live test also needs MOXI_TEST_LIVE=1).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not browser and not slow and not build and not live'"

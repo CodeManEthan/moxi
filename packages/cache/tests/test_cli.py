@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from conftest import assistant_line, write_cache_config, write_transcript
+from conftest import assistant_line, claude_config, write_cache_config, write_transcript
 
 from moxi import cli as umbrella
 from moxi_cache import cli, drift
@@ -42,7 +42,7 @@ def test_read_json(tmp_path, capsys):
 
 
 def test_read_uses_sessions_root_by_default(tmp_path, capsys):
-    write_transcript(SID, 30, root=tmp_path / "claude-config" / "projects")
+    write_transcript(SID, 30, root=claude_config() / "projects")
     code, out, _ = run(capsys, "read", SID)
     assert code == 0 and ": warm," in out
 

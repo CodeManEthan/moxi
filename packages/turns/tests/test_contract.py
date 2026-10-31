@@ -1,5 +1,5 @@
-"""turns' two contracts: the module contract, as `moxi check` runs it, and the socket
-protocol, `contracts/socket-protocol.md`.
+"""turns' two contracts: the module contract, as `moxi-dev contract` runs it, and the
+socket protocol, `contracts/socket-protocol.md`.
 
 The socket protocol's table is the data below: each value's fields, each notification's
 params, each error code, each capability per harness, each method. The tests hold the
@@ -21,7 +21,7 @@ import pytest
 
 from fake_harness import FakeHarness
 from moxi import ipc
-from moxi.contract import check
+from moxi_dev.contract import check
 from moxi_turns import results as R
 
 ROOT = Path(__file__).resolve().parents[1]

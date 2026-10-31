@@ -1,5 +1,8 @@
 """Shared fixtures: a short runtime root (AF_UNIX paths stop at 108 bytes), a config home
-of the test's own, and an endpoint driven by the fake harness."""
+a test can write to, and an endpoint driven by the fake harness.
+
+Every test runs inside the kit's fence (the package's root `conftest.py`), which empties
+the environment (`MOXI_TURNS_COMMANDS` and the rest) and points every home into tmp."""
 
 from __future__ import annotations
 
@@ -30,8 +33,6 @@ def turns_env(monkeypatch, tmp_path_factory):
     (root / "cfg").mkdir()
     monkeypatch.setenv("MOXI_TURNS_RUNTIME_DIR", str(root / "rt"))
     monkeypatch.setenv("MOXI_TURNS_CONFIG_HOME", str(root / "cfg"))
-    monkeypatch.delenv("MOXI_TURNS_COMMANDS", raising=False)
-    monkeypatch.delenv("MOXI_TURNS_HOME", raising=False)
     yield root
 
 

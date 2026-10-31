@@ -426,7 +426,7 @@ WITHOUT_UI = textwrap.dedent("""
     import moxi_comms.module
     import moxi_comms.provision
     import moxi_comms.reserved
-    from moxi.contract import check
+    from moxi_dev.contract import check
 
     code = moxi_comms.cli.main(["help"], prog="moxi comms")
     loaded = sorted(name for name in sys.modules

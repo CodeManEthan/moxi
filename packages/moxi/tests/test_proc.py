@@ -695,11 +695,11 @@ def test_each_directory_a_detached_output_file_needs_is_made_0700(tmp_path):
     assert stat.S_IMODE(tmp_path.stat().st_mode) == before
 
 
-def test_a_detached_child_without_output_writes_nowhere(tmp_path):
-    pid = proc.spawn([PY, "-c", "print('lost')"], detached=True, cwd=tmp_path)
+def test_a_detached_child_without_output_writes_nowhere(work):
+    pid = proc.spawn([PY, "-c", "print('lost')"], detached=True, cwd=work)
     ident = proc.identity(pid)
     assert ident is None or gone(ident)
-    assert list(tmp_path.iterdir()) == []
+    assert list(work.iterdir()) == []
 
 
 @POSIX
