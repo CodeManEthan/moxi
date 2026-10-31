@@ -455,9 +455,26 @@ def outcome_result(run: store.Run) -> Result:
 # -- repair -----------------------------------------------------------------------------
 
 
+def _refuse_live(row: store.LaunchRow, session_id: str, turns: Any) -> None:
+    """Refuse a repair of a session that is live, or whose liveness can't be read."""
+    from . import resume
+
+    api = first.turns_api(quiet=True) if turns is LOOK else turns
+    live, unread = resume.liveness(row, session_id, api)
+    if live is None:
+        raise Refused("liveness-unread", f"whether session {session_id} is live can't be "
+                                         f"read: {unread}",
+                      "check `moxi doctor`, then try again; nothing was launched",
+                      exits.ERROR)
+    if live:
+        raise Refused("live", f"session {session_id} is live: the run did not take it "
+                              "down", "nothing was launched; relaunch it again if it still "
+                                      "needs one")
+
+
 def from_record(run_id: str, *, follow: bool = True,
                 environ: Mapping[str, str] | None = None, slots_api: Any | None = None,
-                settings: Mapping[str, Any] | None = None,
+                turns: Any = LOOK, settings: Mapping[str, Any] | None = None,
                 conn: sqlite3.Connection | None = None,
                 clock: Callable[[], float] = time.monotonic,
                 sleep: Callable[[float], None] = time.sleep) -> Result:
@@ -465,7 +482,10 @@ def from_record(run_id: str, *, follow: bool = True,
     the run's record, as the job `repair-<run>`. Raises a refusal with nothing written.
 
     A run still open whose job is gone is judged as ended `error`, word `job-gone`, the
-    end the repair's own insert writes for it."""
+    end the repair's own insert writes for it. A run's session that is live after all (a
+    refused exit, or a watch that broke while the session ran) is refused `live`, and one
+    whose liveness can't be read `liveness-unread`: a repair never starts a second copy
+    of the seat. `turns` stands in for turns' API (None: not installed)."""
     env = dict(os.environ if environ is None else environ)
     current = settings if settings is not None else _settings()
     with _store(conn) as c:
@@ -503,6 +523,7 @@ def from_record(run_id: str, *, follow: bool = True,
         if row is None:
             raise Refused("no-launch", f"the launch log holds no launch {run.request_id}",
                           "check the run id")
+        _refuse_live(row, run.session_id, turns)
         chain = job.chain_of(c, row.request_id)
         recorded = root.slot or row.slot
         try:

@@ -167,7 +167,8 @@ session and failed to start the new one tells the session's directors (or the co
 identity in `relaunch.fallback`) through comms, naming the command that repairs it:
 `--from-record` starts the session again from the run's record, in its slot, or the
 lowest free one when someone outside the session's own line of launches has taken it. It
-refuses when the slot already runs the relaunched session.
+refuses when the slot already runs the relaunched session, and when the session itself is
+still live.
 
 **Exit-session** exits one launched session, once it is quiet: `moxi launcher
 exit-session SESSION_ID`. Anyone with a shell may run it; the consent is the launch's own,

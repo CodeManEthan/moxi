@@ -798,6 +798,7 @@ def test_status_of_no_such_run_is_refused(conn):
 
 def repair(conn, run_id, *, slots_api=None, **kw):
     kw.setdefault("follow", False)
+    kw.setdefault("turns", None)
     return relaunch.from_record(run_id, conn=conn,
                                 slots_api=slots_api if slots_api is not None else FakeSlots(
                                     shown=slot_view()),
@@ -825,6 +826,37 @@ def test_a_repair_writes_its_own_run_and_starts_its_job(conn):
 def test_each_run_that_left_its_session_down_is_repairable(conn, outcome, events):
     failed = ended(conn, outcome, events=events)
     assert repair(conn, failed.run_id).exit_code == 0
+
+
+class FindingTurns:
+    def __init__(self, found=None, error=None):
+        self.found, self.error, self.asked = found, error, []
+
+    def find(self, *, session_id=None, pid=None):
+        self.asked.append(session_id)
+        if self.error is not None:
+            raise self.error
+        return self.found
+
+
+def test_a_repair_of_a_session_still_live_is_refused(conn):
+    # A refused exit sent the self run back to its wait, then its job died: the session
+    # still runs, and a repair would start a second copy of the seat.
+    failed = ended(conn, "relaunch-failed", events=("exit",))
+    slots_api = FakeSlots(shown=slot_view())
+    turns = FindingTurns(found=SimpleNamespace(close=lambda: None))
+    with pytest.raises(relaunch.Refused) as caught:
+        repair(conn, failed.run_id, slots_api=slots_api, turns=turns)
+    assert caught.value.code == "live" and turns.asked == [SID]
+    assert slots_api.started == [] and store.runs(conn, request_id="r1")[0].run_id == \
+        failed.run_id
+
+
+def test_a_repair_whose_liveness_cant_be_read_is_refused(conn):
+    failed = ended(conn, "relaunch-failed", events=("exit",))
+    with pytest.raises(relaunch.Refused) as caught:
+        repair(conn, failed.run_id, turns=FindingTurns(error=RuntimeError("no answer")))
+    assert caught.value.code == "liveness-unread" and caught.value.exit_code == 1
 
 
 def test_a_repair_of_a_repair_acts_as_the_original_run(conn):
