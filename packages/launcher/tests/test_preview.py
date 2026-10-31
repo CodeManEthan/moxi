@@ -218,13 +218,12 @@ def test_the_context_says_whether_the_agent_role_resolved(monkeypatch):
 
 
 def test_the_host_script_is_looked_for_in_this_environment():
-    import importlib.util
-
     try:
         expected = str(compose.paths.script(compose.HOST))
     except FileNotFoundError:
         expected = None
-    if importlib.util.find_spec(presets.CODEX_HOST_NEEDS) is None:
+    found = modules.load("turns", interface=compose.TURNS_INTERFACE)
+    if not found.ok or not found.api.codex_host_available():
         expected = None
     assert compose.host_script() == expected
 

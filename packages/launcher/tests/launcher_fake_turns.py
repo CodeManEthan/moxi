@@ -1,7 +1,7 @@
-"""A stand-in for turns' API, as the launcher calls it: `launch_additions` for the
-composer, and for the first-turn sender `wait_ready`, a `Session` with a plain
-`deliver(text, ref=)`, and the `Delivery` whose `wait_started` gives `Started`, `Refused`
-or `Lost`, or raises `TimeoutError`.
+"""A stand-in for turns' API, as the launcher calls it: `launch_additions` and
+`codex_host_available` for the composer, and for the first-turn sender `wait_ready`, a
+`Session` with a plain `deliver(text, ref=)`, and the `Delivery` whose `wait_started`
+gives `Started`, `Refused` or `Lost`, or raises `TimeoutError`.
 
 The launcher reaches it through its test seam, `MOXI_LAUNCHER_TURNS=launcher_fake_turns`.
 What it does is scripted by `script.json` in the directory `LAUNCHER_FAKE_TURNS` names, read
@@ -10,6 +10,7 @@ same record whether the sender ran in its own process or in a detached deliverer
 
 The script's keys, each with its default:
 
+- `codex_host`: true, or false when turns' Codex host can't start here.
 - `additions`: `ok`, `error` (raises `TurnsError`, as when turns can't write its own
   file) or `value` (raises `ValueError`, as for a command turns does not know).
 - `ready`: `ok`, `timeout` (raises `TimeoutError`) or `error` (raises `TurnsError`).
@@ -139,6 +140,11 @@ def launch_additions(harness, *, cwd, env, session_id=None, commands=()):
         raise ValueError("unknown command 'exit'")
     return LaunchAdditions(harness, ADDITIONS, {"MOXI_TURNS_COMMANDS": ",".join(commands)},
                            {}, ())
+
+
+def codex_host_available():
+    """turns' Codex host can start, unless the script's `codex_host` key is false."""
+    return bool(script().get("codex_host", True))
 
 
 def wait_ready(*, session_id=None, pid=None, timeout):

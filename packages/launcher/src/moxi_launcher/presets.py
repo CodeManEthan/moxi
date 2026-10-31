@@ -39,7 +39,6 @@ the project listing. Never from a listener.
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -71,8 +70,6 @@ PLACE = ("cwd", "project", "scratch", HOME)
 CODEX_START_CEILING = 4500
 #: turns' Codex host, which a Codex launch with turns runs under.
 CODEX_HOST = "moxi-turns-codex-host"
-#: The package turns' Codex host needs at its start, which turns' `codex` extra brings.
-CODEX_HOST_NEEDS = "websockets"
 #: The start postures every install takes; `with:<identity>` needs comms.
 POSTURES = ("operator", "go")
 WITH = "with:"
@@ -897,18 +894,21 @@ def mode_of(harness: str, target: str, *, identity: str | None = None,
 
 def codex_host() -> str | None:
     """turns' Codex host, when it can start here, else None: its script is installed in
-    this environment, and the package it needs at its start is importable. Without turns'
-    `codex` extra the script is installed all the same, and the host fails at its start,
-    so the script alone does not count."""
-    # turns will offer a call that says whether its Codex host can start; this check
-    # gives way to that call once it is there.
+    this environment, and turns says the host can start (`codex_host_available()`, true
+    once turns' `codex` extra is installed). The script is installed with or without the
+    extra, so the script alone does not count, and a turns that can't be reached at the
+    interface the launcher calls has no host to offer."""
     from moxi import paths
+
+    from . import first
 
     try:
         script = paths.script(CODEX_HOST)
     except FileNotFoundError:
         return None
-    if importlib.util.find_spec(CODEX_HOST_NEEDS) is None:
+    api = first.turns_api(quiet=True)
+    available = getattr(api, "codex_host_available", None) if api is not None else None
+    if available is None or not available():
         return None
     return str(script)
 

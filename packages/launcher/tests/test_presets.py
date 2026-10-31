@@ -501,13 +501,17 @@ def test_the_mode(monkeypatch, harness, target, links, mode, turns):
     assert presets.mode_of(harness, target, available=only(*links)) == (mode, turns, [])
 
 
-@pytest.mark.parametrize("script, needs, found", [
-    (True, True, True), (False, True, False), (True, False, False)])
+@pytest.mark.parametrize("script, can_start, found", [
+    (True, True, True), (False, True, False), (True, False, False), (True, None, False)])
 def test_the_codex_host_counts_only_when_it_can_start(monkeypatch, tmp_path, script,
-                                                      needs, found):
-    import importlib.util
+                                                      can_start, found):
+    """The script installed and turns saying its host can start; `can_start` None is a
+    turns that can't be reached at the interface the launcher calls."""
+    from types import SimpleNamespace
 
     from moxi import paths
+
+    from moxi_launcher import first
 
     host = tmp_path / presets.CODEX_HOST
 
@@ -516,11 +520,10 @@ def test_the_codex_host_counts_only_when_it_can_start(monkeypatch, tmp_path, scr
             return host
         raise FileNotFoundError(name)
 
-    real_find = importlib.util.find_spec
     monkeypatch.setattr(paths, "script", script_of)
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: (
-        (real_find("json") if needs else None) if name == presets.CODEX_HOST_NEEDS
-        else real_find(name, *a)))
+    api = None if can_start is None else SimpleNamespace(
+        codex_host_available=lambda: can_start)
+    monkeypatch.setattr(first, "turns_api", lambda quiet=False: api)
     assert presets.codex_host() == (str(host) if found else None)
     assert presets._host_installed() is found
     from moxi_launcher import compose
