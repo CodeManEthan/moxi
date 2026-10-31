@@ -16,7 +16,7 @@ moxi-ui-serve = "moxi_ui.serve:main"
 # The browser half of `moxi_ui.testing`, the pytest plugin a module's own tests use; the
 # plugin loads without it, and only its fixtures need it.
 [project.optional-dependencies]
-testing = ["pytest>=8", "playwright>=1.50,<2"]
+testing = ["pytest>=8", "playwright>=1.56,<2"]
 
 [project.urls]
 Homepage = "https://github.com/moxihq/moxi"

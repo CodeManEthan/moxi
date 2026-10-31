@@ -79,7 +79,7 @@ opencode = "moxi_comms.kinds:OPENCODE"
 # browser tests import Playwright themselves, so it is named too. moxi-dev brings
 # pytest-xdist.
 dev = ["pytest", "websockets>=17.0.1", "moxi-cache>=0.1,<0.2", "moxi-dev",
-       "moxi-ui[testing]", "playwright>=1.50,<2"]
+       "moxi-ui[testing]", "playwright>=1.56,<2"]
 
 [build-system]
 requires = ["hatchling>=1.27"]

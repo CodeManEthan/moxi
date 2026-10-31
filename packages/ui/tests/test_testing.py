@@ -158,7 +158,25 @@ def test_the_contract_check_counts_against_a_component_only_the_push_topics_it_a
         }
       }).observe(document.getElementById("moxi-panel"), {childList: true});
     }""")
-    with pytest.raises(AssertionError, match=r"outside /m/fixture/: .*elsewhere\.fresh"):
+    with pytest.raises(AssertionError, match=r"outside /m/fixture/: .*elsewhere\.fresh") as err:
+        ui_component_check(ui_page, "fixture", "block")
+    assert "could be read" not in str(err.value)
+
+
+@pytest.mark.browser
+def test_the_contract_check_says_when_it_could_not_read_the_held_topics(
+        ui_page, ui_component_check, monkeypatch):
+    # Without a page's recent requests (Playwright before 1.56), a topic the page held
+    # before the placement counts against the component, and the failure says why.
+    ui_page.evaluate("async () => (await import('/m/ui/client.js')).navigate('ui', 'settings')")
+    ui_page.evaluate("""async () => {
+      const {subscribe} = await import("/m/ui/client.js");
+      subscribe("elsewhere", "held", () => {});
+    }""")
+    _pushed(ui_page, ["elsewhere.held"], without=["fixture.count"])
+    monkeypatch.delattr(type(ui_page), "requests")
+    with pytest.raises(AssertionError, match=r"elsewhere\.held.*no earlier push request of "
+                                             r"the page could be read"):
         ui_component_check(ui_page, "fixture", "block")
 
 

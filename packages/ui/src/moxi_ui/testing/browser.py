@@ -176,20 +176,24 @@ def _topics(url: str) -> set[str]:
     return {topic for topic in joined.split(",") if topic}
 
 
-def _held(page: Any) -> set[str]:
-    """The topics `page`'s context already holds: those of the last push request each of
-    its pages made. Playwright keeps a page's recent requests from 1.56 on; with an older
-    one, or once the request has aged out of them, no topic counts as held."""
+def _held(page: Any) -> tuple[set[str], bool]:
+    """The topics `page`'s context already holds, those of the last push request each of
+    its pages made, and whether every page had one to read. Playwright keeps a page's
+    recent requests from 1.56 on; with an older one no topic counts as held, and a page
+    whose push request has aged out of them, or that made none, adds none."""
     held: set[str] = set()
+    read = True
     for each in page.context.pages:
         recent = getattr(each, "requests", None)
         if recent is None:
-            return set()
+            return set(), False
         pushes = [request.url for request in recent()
                   if urlsplit(request.url).path == PUSH_PATH]
         if pushes:
             held |= _topics(pushes[-1])
-    return held
+        else:
+            read = False
+    return held, read
 
 
 def _allowed(url: str, origin: str, modules: Sequence[str], held: set[str]) -> bool:
@@ -229,7 +233,7 @@ def check_component(page: Any, module: str, name: str,
     # Requests the page was already making (the shell placing its own blocks) are not
     # the component's.
     _settle(page)
-    held = _held(page)
+    held, held_read = _held(page)
     origin = page.evaluate("() => location.origin")
     mark = f"{module}.{name}.{time.monotonic_ns()}"
     requests: list[str] = []
@@ -276,8 +280,13 @@ def check_component(page: Any, module: str, name: str,
     if strays:
         if not keep:
             page.evaluate(_JS_REMOVE, mark)
+        unread = ""
+        if not held_read and any(urlsplit(url).path == PUSH_PATH for url in strays):
+            unread = ("; no earlier push request of the page could be read (it made none, "
+                      "it aged out of Playwright's recent requests, or Playwright is older "
+                      "than 1.56), so no topic the page held before counted as held")
         raise AssertionError(f"{placed['tag']} made requests outside /m/{module}/: "
-                             + ", ".join(strays))
+                             + ", ".join(strays) + unread)
     result = ComponentCheck(module, name, placed["tag"], requests, reached)
     if keep:
         result.locator = page.locator(f'[data-moxi-check="{mark}"] > {placed["tag"]}')

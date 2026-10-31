@@ -29,7 +29,7 @@ cache = "moxi_cache.module"
 [dependency-groups]
 # moxi-ui's pytest plugin runs cache's pages in a real shell; its testing extra brings
 # the browser. The browser tests import Playwright themselves, so it is named too.
-dev = ["pytest", "moxi-dev", "moxi-ui[testing]", "playwright>=1.50,<2"]
+dev = ["pytest", "moxi-dev", "moxi-ui[testing]", "playwright>=1.56,<2"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
