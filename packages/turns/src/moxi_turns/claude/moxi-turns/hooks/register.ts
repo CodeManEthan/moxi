@@ -105,13 +105,16 @@
 // already ended goes in neither list.
 //
 // The list rule: the runner vouches for its list only when nothing that could start a
-// shell has run since the harness gave it. A shell or Monitor starts only from a tool
-// call, so a `tool.call` hook keeps the calls in flight across every loop, by
-// `tool_use_id`, and marks the list at each call's start and end. A Stop or SubagentStop
-// carrying `background_tasks`, seen with no call in flight, replaces the list and clears
-// the mark. A reload starts with no list and the mark set. The mark is read as the stop
-// begins, after the command took effect, and the runner's own `TaskStop` calls set
-// nothing. With the mark set the report has `complete` false and the one unnamed entry
+// shell has run since the harness gave it. A shell or Monitor starts from a tool call, or
+// from a command the person runs with `!` and moves to the background. A `tool.call` hook
+// keeps the calls in flight across every loop, by `tool_use_id`, and marks the list at
+// each call's start and end. A `!` command raises no tool call, only its rows
+// (`session.append`, door `command`), so every such row marks the list too, but for the
+// rows of the runner's own command run, unless one is a `!` command's. A Stop or
+// SubagentStop carrying `background_tasks`, seen with no call in flight, replaces the list
+// and clears the mark. A reload starts with no list and the mark set. The mark is read as
+// the stop begins, after the command took effect, and the runner's own `TaskStop` calls
+// set nothing. With the mark set the report has `complete` false and the one unnamed entry
 // `{id: null, why: "unlisted"}`, so a list turns cannot vouch for never reads as empty.
 // A turn's abort drops the main loop's calls from the count (their tools are stopped);
 // a call whose hook never returns keeps the mark set, which errs to `complete` false.
@@ -141,6 +144,8 @@ const PLUGIN = 'moxi-turns'
 const SHELL_STOP_MS = 10_000
 const STOPPABLE = new Set(['shell', 'monitor'])
 const UNLISTED = 'unlisted'
+/** A row of a command the person ran with `!`: its input or its output. */
+const BASH_ROW = /<bash-(?:input|stdout|stderr)>/
 const NOT_STOPPED_AFTER_CLEAR = 'not-stopped-after-clear'
 /** What TaskStop says of a task that has already ended. */
 const ENDED = /not running|no longer running|already (?:stopped|completed|finished|exited|ended|killed)|has (?:already )?(?:completed|finished|exited|ended)/i
@@ -184,6 +189,8 @@ let tasksMarked = true
 const inflight = new Map<string, string | undefined>()
 /** The task ids the runner's own `TaskStop` calls are stopping now. */
 const stopping = new Set<string>()
+/** The runner's own commands now running, each until its stop has read the mark. */
+let ownCommands = 0
 
 const log = ($: Dollar, text: string): void => {
   try {
@@ -549,29 +556,48 @@ async function command($: Dollar, request: string, name: Name, stopShellsToo: bo
   }
   let text: string | null = null
   let error: string | null = null
+  ownCommands += 1
   try {
-    text = (await $.command.run({ command: name })).text ?? null
-  } catch (err) {
-    error = String(err)
-  }
-  // The gate's withdrawal is the command's own answer, one line naming the reason.
-  const withdrawn = text === null ? null : GATE_DROP.exec(text)
-  if (error !== null) {
-    done({ state: 'failed', reason: error })
-  } else if (withdrawn) {
-    done({ state: 'refused', reason: withdrawn[1] ?? 'gone' })
-  } else {
-    // The command took effect: only now are the shells stopped.
-    const shells = stopShellsToo ? await stopShells($, name) : undefined
-    let sessionId: string | null = null
     try {
-      sessionId = await $.session.id()
-    } catch {
-      sessionId = null
+      text = (await $.command.run({ command: name })).text ?? null
+    } catch (err) {
+      error = String(err)
     }
-    done({ state: 'ran', new_session_id: sessionId, ...(shells === undefined ? {} : { shells }) })
+    // The gate's withdrawal is the command's own answer, one line naming the reason.
+    const withdrawn = text === null ? null : GATE_DROP.exec(text)
+    if (error !== null) {
+      done({ state: 'failed', reason: error })
+    } else if (withdrawn) {
+      done({ state: 'refused', reason: withdrawn[1] ?? 'gone' })
+    } else {
+      // The command took effect: only now are the shells stopped.
+      const shells = stopShellsToo ? await stopShells($, name) : undefined
+      let sessionId: string | null = null
+      try {
+        sessionId = await $.session.id()
+      } catch {
+        sessionId = null
+      }
+      done({ state: 'ran', new_session_id: sessionId, ...(shells === undefined ? {} : { shells }) })
+    }
+  } finally {
+    ownCommands -= 1
   }
   void $.state.set(COMMAND, null).catch(() => {})
+}
+
+/** A row's text, its text blocks joined. */
+function rowText(message: unknown): string {
+  const content = (message as { content?: unknown } | null)?.content
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content.map(b => (b !== null && typeof b === 'object' && typeof (b as Json).text === 'string' ? (b as Json).text as string : '')).join('\n')
+}
+
+/** Does this `door: "command"` row mark the list? Every one does, but for the rows of the
+ *  runner's own command, which starts no shell; a `!` command's row always does. */
+function commandRowMarks(message: unknown): boolean {
+  return ownCommands === 0 || BASH_ROW.test(rowText(message))
 }
 
 async function onLine($: Dollar, line: string): Promise<void> {
@@ -845,6 +871,14 @@ export const register: Register = on => {
       }
       timeHook($, 'tool.call', hook)
     }
+  })
+
+  // A command the person runs with `!` raises no tool call, even moved to the background:
+  // only its rows (door `command`) show it. Each such row marks the list, as a call's
+  // start does.
+  on('session.append', async ($, e, next) => {
+    if (e.door === 'command' && commandRowMarks(e.message)) tasksMarked = true
+    return next(e)
   })
 
   // A turn's abort stops its running tools: the main loop's calls leave the count, so a

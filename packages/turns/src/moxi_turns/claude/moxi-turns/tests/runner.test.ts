@@ -3,7 +3,7 @@
 // ask, and the session commands.
 
 import { describe, expect, test } from 'claude-code/testing'
-import { ROOT_ARGV, SOCK, world } from './world.ts'
+import { ROOT_ARGV, SOCK, commandRow, world } from './world.ts'
 import type { World } from './world.ts'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -620,6 +620,53 @@ describe('compact and the shell stop', () => {
       await stop($, [shell('s3')])
       await command(w, 'compact', true, 'r2')
       expect(shellsOf(w)).toEqual({ stopped: ['s3'], left: [], complete: true })
+    })
+
+    test('a ! command moved to the background marks the list; a later Stop with no call in flight clears it', async ($: E, on) => {
+      const w = world(on)
+      await attached($, w)
+      await stop($, [shell('s1')])
+      // Ctrl+B on `! sleep 1600`: no tool call, only its three rows.
+      await commandRow($, '<local-command-caveat>The command below was run directly in Claude Code</local-command-caveat>')
+      await commandRow($, '<bash-input>sleep 1600</bash-input>')
+      await commandRow($, '<bash-stdout>Command was manually backgrounded by user with ID: b1</bash-stdout>')
+      await command(w, 'clear')
+      expect(shellsOf(w)).toEqual({ stopped: ['s1'], left: [UNLISTED], complete: false })
+      await stop($, [shell('b1')])
+      await command(w, 'compact', true, 'r2')
+      expect(shellsOf(w)).toEqual({ stopped: ['b1'], left: [], complete: true })
+    })
+
+    test('any command row marks the list, one of a slash command too', async ($: E, on) => {
+      const w = world(on)
+      await attached($, w)
+      await stop($, [shell('s1')])
+      await commandRow($, '<command-name>/context</command-name>')
+      await command(w, 'clear')
+      expect(shellsOf(w)?.complete).toBe(false)
+    })
+
+    test('the rows of the runner\'s own command mark nothing, but a ! command\'s row among them does', async ($: E, on) => {
+      const w = world(on)
+      await attached($, w)
+      await stop($, [shell('s1')])
+      // The engine appends a slash command's rows as it runs.
+      let rows: string[] = ['<command-name>/compact</command-name>', '<local-command-stdout>Compacted</local-command-stdout>']
+      w.commandAnswer = async name => {
+        for (const text of rows) await commandRow($, text)
+        return { text: `ran ${name}` }
+      }
+      await command(w, 'compact')
+      expect(shellsOf(w)).toEqual({ stopped: ['s1'], left: [], complete: true })
+      // Once the command is done, a row marks again.
+      rows = []
+      await commandRow($, '<command-name>/context</command-name>')
+      await command(w, 'compact', true, 'r2')
+      expect(shellsOf(w)?.complete).toBe(false)
+      await stop($, [shell('s1')])
+      rows = ['<bash-input>sleep 1600</bash-input>']
+      await command(w, 'compact', true, 'r3')
+      expect(shellsOf(w)).toEqual({ stopped: ['s1'], left: [UNLISTED], complete: false })
     })
 
     test('a turn with no tool call keeps the list vouched for', async ($: E, on) => {
