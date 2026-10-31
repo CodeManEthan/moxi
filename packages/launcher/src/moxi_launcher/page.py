@@ -138,18 +138,22 @@ RUN_LINE = _table(run_id=_text(), kind=_text(), mode=_text(), state=_text(),
                   detail=_text(nullable=True), created_at=_text(), updated_at=_text())
 _RUN_LINE_OR_NONE = Out("table", items=RUN_LINE.items, nullable=True)
 #: A launched session's state: its relaunch, recycle and keep-warm, and whether it is red.
+#: When one launch's state could not be read, its entry names the launch, says why in
+#: `unreadable`, and holds null for its relaunch, recycle and keep-warm; the others stand.
 SESSION_STATE = _table(
     session_id=_text(), request_id=_text(),
     relaunch=_table(state=_text(nullable=True), run=_RUN_LINE_OR_NONE,
                     made_by=_text(nullable=True), notices_refused=_texts(),
-                    note_not_taken=Out("bool")),
+                    note_not_taken=Out("bool"), nullable=True),
     recycle=_table(on_expiry=_text(), at_limit=_text(), limit_at=_text(nullable=True),
                    last=_RUN_LINE_OR_NONE, pending_compact=_text(nullable=True),
-                   told_at=_text(nullable=True), pending_dropped_at=_text(nullable=True)),
+                   told_at=_text(nullable=True), pending_dropped_at=_text(nullable=True),
+                   nullable=True),
     keep_warm=_table(on=Out("bool"), holds=_texts(), nudges=Out("int"),
-                     last=_RUN_LINE_OR_NONE, window=_text(nullable=True)),
+                     last=_RUN_LINE_OR_NONE, window=_text(nullable=True), nullable=True),
     red=Out("bool"), since=_text(nullable=True), why=_text(nullable=True),
     word=_text(nullable=True), run_id=_text(nullable=True),
+    unreadable=_text(nullable=True),
 )
 #: With `session`, `sessions` holds that session's state, or nothing and `refused` when no
 #: launch holds the id; without, the state of every live launch.

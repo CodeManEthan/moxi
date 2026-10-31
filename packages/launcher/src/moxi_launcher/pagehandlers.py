@@ -11,7 +11,9 @@ only.
 and start time its row recorded, or, with no pid, on the endpoint that claimed it. That
 costs one store read and one look at a process per row, and asks turns nothing, so the
 `sessions` topic can gather it every few seconds; the past-sessions list, which asks turns
-about each entry, is read only when the page asks for it.
+about each entry, is read only when the page asks for it. A live launch whose state can't
+be read (a keep-warm launch's cache read failing, say) is marked `unreadable` in its own
+entry, naming only the exception's class, and the other entries still stand.
 
 **The stream** carries two topics, `sessions` (every live launch's state) and `launches`
 (the newest page of the launch log), each built by a `Snapshot` of its own, which
@@ -64,6 +66,9 @@ lb = _loopback.api
 
 #: The detail of a read that failed in a way it did not expect.
 UNEXPECTED = "the launcher's page server hit an unexpected error ({}); its log has the details"
+#: What a live launch's entry says when its state could not be read.
+UNREADABLE = ("the launcher could not read this session's state ({}); the page server's log "
+              "has the details")
 #: The catalog rows whose text a preset's values never send: a brief or standing
 #: instructions written inline.
 WITHHELD = ("brief", "instructions")
@@ -400,10 +405,31 @@ def live(conn: sqlite3.Connection) -> list[store.LaunchRow]:
     return found
 
 
+def _readable(found: state.SessionState) -> dict[str, Any]:
+    return {**found.as_json(), "unreadable": None}
+
+
+def unreadable(row: store.LaunchRow, err: BaseException) -> dict[str, Any]:
+    """The entry of a live launch whose state could not be read: the launch, and why,
+    naming only the exception's class."""
+    _log_once(err, f"reading the state of launch {row.request_id} failed")
+    return {"session_id": row.newest_session_id or row.session_id or "",
+            "request_id": row.request_id, "relaunch": None, "recycle": None,
+            "keep_warm": None, "red": False, "since": None, "why": None, "word": None,
+            "run_id": None, "unreadable": UNREADABLE.format(type(err).__name__)}
+
+
 def live_states(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    """The state of every live launch, newest first."""
+    """The state of every live launch, newest first. A launch whose state can't be read
+    is marked `unreadable` in its own entry, and the others still stand."""
     api = slots.api()
-    return [state.of_launch(conn, row, slots_api=api).as_json() for row in live(conn)]
+    found = []
+    for row in live(conn):
+        try:
+            found.append(_readable(state.of_launch(conn, row, slots_api=api)))
+        except Exception as err:
+            found.append(unreadable(row, err))
+    return found
 
 
 def _refused(err: catalog.Refused) -> dict[str, Any]:
@@ -422,7 +448,7 @@ def session_state(session: str | None) -> dict[str, Any]:
             got = state.state(session, conn=conn, slots_api=slots.api())
         except target.NotLaunched as err:
             return _up(sessions=[], refused=_refused(err))
-        return _up(sessions=[got.as_json()], refused=None)
+        return _up(sessions=[_readable(got)], refused=None)
 
 
 def read_state(call: Any) -> dict[str, Any]:
@@ -574,8 +600,8 @@ preview = _not_yet("/api/preview")
 launch = _not_yet("/api/launch")
 resume = _not_yet("/api/resume")
 
-__all__ = ["EVENT_TEXT", "REGATHER", "TICK", "TOPICS", "UNEXPECTED", "WITHHELD", "alive",
-           "events", "field", "fields", "gather_launches", "gather_sessions", "launch",
+__all__ = ["EVENT_TEXT", "REGATHER", "TICK", "TOPICS", "UNEXPECTED", "UNREADABLE", "WITHHELD",
+           "alive", "events", "field", "fields", "gather_launches", "gather_sessions", "launch",
            "launch_row", "launches", "live", "live_states", "preview", "read_catalog",
            "read_launches", "read_presets", "read_runs", "read_sessions", "read_state",
-           "refusal", "resume", "run_entry", "session_state", "spelled"]
+           "refusal", "resume", "run_entry", "session_state", "spelled", "unreadable"]

@@ -186,12 +186,40 @@ def test_a_failed_state_read_says_only_the_class(conn, monkeypatch):
         raise RuntimeError("/home/someone/private/launcher.db is locked")
 
     monkeypatch.setattr(pagehandlers.state, "of_launch", broken)
-    for query in ("", f"session={SID}"):
-        status, said, raw = get("/api/state", query)
-        assert status == 200 and said["state"] == "error"
-        assert said["detail"] == UNEXPECTED.format("RuntimeError")
-        assert said["sessions"] == [] and said["refused"] is None
-        assert b"someone" not in raw
+    status, said, raw = get("/api/state", f"session={SID}")
+    assert status == 200 and said["state"] == "error"
+    assert said["detail"] == UNEXPECTED.format("RuntimeError")
+    assert said["sessions"] == [] and said["refused"] is None
+    assert b"someone" not in raw
+
+
+def broken_for(monkeypatch, request_id: str) -> None:
+    """`state.of_launch` raising, with a path in its words, for one launch only."""
+    real = pagehandlers.state.of_launch
+
+    def of_launch(conn, row, **kw):
+        if row.request_id == request_id:
+            raise RuntimeError("/home/someone/private/cache.db is locked")
+        return real(conn, row, **kw)
+
+    monkeypatch.setattr(pagehandlers.state, "of_launch", of_launch)
+
+
+def test_one_launchs_failed_state_read_marks_only_its_entry(conn, monkeypatch):
+    living(conn, "old", session_id=SID, at="2026-01-01T00:00:00.000000Z")
+    living(conn, "new", at="2026-01-02T00:00:00.000000Z")
+    ran(conn, "new", "blocked", kind="clear", mode="expiry", word="draft")
+    broken_for(monkeypatch, "old")
+    status, said, raw = get("/api/state")
+    assert status == 200 and said["state"] == "up" and said["detail"] is None
+    new, old = said["sessions"]
+    assert (new["request_id"], new["red"], new["unreadable"]) == ("new", True, None)
+    assert new["relaunch"] is not None and new["keep_warm"] is not None
+    assert (old["request_id"], old["session_id"]) == ("old", SID)
+    assert old["unreadable"] == pagehandlers.UNREADABLE.format("RuntimeError")
+    assert old["red"] is False
+    assert (old["relaunch"], old["recycle"], old["keep_warm"]) == (None, None, None)
+    assert b"someone" not in raw
 
 
 # --- /api/sessions --------------------------------------------------------------------------
@@ -427,6 +455,26 @@ def test_a_topic_publishes_its_error_and_then_up_once_its_read_recovers(conn, mo
             raising.clear()
             data = await stream.until("sessions", lambda d: d["state"] == "up", 3)
             assert requests(data, "sessions") == ["r1"]
+        finally:
+            await stream.close()
+
+    asyncio.run(go())
+
+
+def test_one_launchs_failed_state_read_leaves_the_rest_of_the_topic(conn, monkeypatch):
+    quick(monkeypatch)
+    living(conn, "old", session_id=SID, at="2026-01-01T00:00:00.000000Z")
+    living(conn, "new", at="2026-01-02T00:00:00.000000Z")
+    broken_for(monkeypatch, "old")
+
+    async def go():
+        stream = Stream(served(), b"topics=sessions")
+        try:
+            _, data = await stream.next(3)
+            assert data["state"] == "up" and data["detail"] is None
+            assert requests(data, "sessions") == ["new", "old"]
+            assert [s["unreadable"] for s in data["sessions"]] == [
+                None, pagehandlers.UNREADABLE.format("RuntimeError")]
         finally:
             await stream.close()
 
