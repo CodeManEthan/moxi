@@ -2010,7 +2010,12 @@ def run_reserved(ctx: Context, args, *, module: str, name: str, tags) -> SendRes
             code = _REFUSED
     finally:
         ctx.capture = outer
-    return _result(code, capture, check=bool(getattr(args, "check", False)))
+    result = _result(code, capture, check=bool(getattr(args, "check", False)))
+    from . import reserved
+    reserved.trace_send(module, name, sent=result.outcome == OUTCOME_SENT,
+                        credential=(result.refusal is not None
+                                    and result.refusal.code == "credential"))
+    return result
 
 
 def run(ctx: Context, args, *, tags=None) -> SendResult:

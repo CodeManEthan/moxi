@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import secrets as _secrets
 import sqlite3
 import threading
@@ -230,6 +231,8 @@ def renew(name: str, *, chain=None, env=None, target=None, clock=time.time) -> R
         if row is None or row["state"] != ACTIVE:
             raise KeyError(name)
         _mint(conn, chain, name, row["module"], clock, result, renew=True)
+    if not result.failed:
+        trace_send(row["module"], name, credential=False, sent=True)
     return result
 
 
@@ -446,6 +449,41 @@ def _free(conn, chain, name: str, module: str, clock, result: Result) -> None:
         log.warning("freed %s, but its token couldn't be removed: %s", name, e)
 
 
+# --------------------------------------------------------------------------- the trace
+
+def record_key(name: str) -> str:
+    """The key of the doctor record a send under `name` leaves when its process can't
+    use the token."""
+    return f"reserved-token-{name}"
+
+
+def trace_send(module: str, name: str, *, credential: bool, sent: bool) -> None:
+    """Leave or clear the doctor's record of a send under `name` for `module`.
+
+    The process that sends (a module's service, a timer) may read the credential chain
+    from a different context than the shell the doctor runs in, so the doctor can't see
+    the miss by reading the chain itself. A send refused for its credential records which
+    process found no usable token, and the record stays until a send under `name` works
+    again or `renew` mints a new one. Never raises: the send's own result is the
+    answer."""
+    import sys
+
+    from moxi import doctor
+
+    try:
+        if credential:
+            prog = os.path.basename(sys.argv[0]) if sys.argv and sys.argv[0] else "python"
+            doctor.record(MODULE, f"comms can't read the token for {name} from the "
+                          f"environment of {prog} (pid {os.getpid()}), where {module} "
+                          "sends under it; renew it from that environment if the shell "
+                          "you run this in reads it fine",
+                          key=record_key(name), fix=f"moxi comms reserved renew {name}")
+        elif sent:
+            doctor.clear(MODULE, record_key(name))
+    except Exception as e:                                       # noqa: BLE001
+        log.warning("the doctor's record for %s couldn't be written: %s", name, e)
+
+
 # --------------------------------------------------------------------------- the listener
 
 def on_install(module: str, found=None) -> None:
@@ -541,5 +579,5 @@ def token_rows(*, env=None, chain=None, context: str = "this process's") -> list
 
 __all__ = ["ACTIVE", "CONFLICT", "UNOWNED", "UNKNOWN", "SECRET_PREFIX", "Result",
            "declared_names", "doctor_rows", "lookup", "on_install", "on_uninstall",
-           "owner", "reconcile", "release_all", "renew", "rows", "secret_id", "token_hash",
-           "token_rows"]
+           "owner", "reconcile", "record_key", "release_all", "renew", "rows", "secret_id", "token_hash",
+           "token_rows", "trace_send"]

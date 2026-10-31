@@ -61,6 +61,13 @@ read. That keeps an honest agent off a module's name; a process of your user tha
 the token and leaves every session's process tree can still send under it, as it can
 forge the operator's lane.
 
+A module's service may read the credential chain differently from your shell (on Linux,
+the keychain may not be reachable from a service). When a send under a reserved name
+finds no token it can use, comms leaves a record that `moxi doctor` shows, naming the
+process, until a send under that name works again or `moxi comms reserved renew NAME`
+mints a new token. Renew from the environment that failed: a token minted in your shell's
+keychain may still be out of the service's reach.
+
 comms' config file, `config.toml`, holds non-secret values only. comms refuses to load
 it when a key looks like a token.
 
