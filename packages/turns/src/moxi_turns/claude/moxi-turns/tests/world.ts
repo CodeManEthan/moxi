@@ -21,8 +21,10 @@ export function commandRow($: any, text: string) {
   })
 }
 
-export function world(on: On, options: { surfaces?: string[]; endpointJson?: string | null; gate?: boolean; spinMs?: number } = {}) {
+export function world(on: On, options: { surfaces?: string[]; endpointJson?: string | null; env?: Record<string, string>; gate?: boolean; spinMs?: number } = {}) {
   const clock = mock.clock(on, { now: 1_000 })
+  // The session's environment: only what the test names, never the one the tests run in.
+  mock.env(on, options.env ?? {})
   const w = {
     clock,
     surfaces: options.surfaces ?? ['terminal'],
@@ -33,6 +35,8 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     box: '',
     gate: options.gate ?? true,
     spawned: [] as string[][],
+    /** Every path the runner read with `$.fs.read`, in order. */
+    reads: [] as string[],
     /** Every request the endpoint got, in order: path and body. */
     got: [] as { path: string; body: Record<string, unknown> }[],
     /** The endpoint's answer per path; a default `{}`. */
@@ -79,6 +83,7 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
   on('classic.UserPromptSubmit', async () => ({}))
   on('classic.Stop', async () => ({}))
   on('fs.read', async ($, e) => {
+    w.reads.push(e.path)
     if (e.path.endsWith('/endpoint.json') && endpointJson !== null) return { value: endpointJson }
     throw new Error(`ENOENT: ${e.path}`)
   })
