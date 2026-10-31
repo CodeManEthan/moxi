@@ -223,6 +223,28 @@ class PostureKey(Owned):
                          _posture_hint(harness, row, key, mode))
 
 
+class WrapperFlags(Refused):
+    """Flags passed on to a Codex launch with a comms identity. The launch runs comms'
+    Codex wrapper, whose grammar is its own and takes nothing past it."""
+
+    code = "not-taken"
+
+    def __init__(self, tokens: Sequence[str]):
+        self.tokens = tuple(tokens)
+        super().__init__(EXTRA, f"a Codex launch with an identity can't pass on "
+                                f"{' '.join(self.tokens)}",
+                         "leave the extra flags out: comms' Codex wrapper (moxi comms "
+                         "codex) takes no other flags. Set what they set with the rows "
+                         "(model, sandbox, add_dir, config), or launch without an identity")
+
+
+def refuse_wrapper_flags(harness: str, identity: object, tokens: Sequence[str]) -> None:
+    """Raise `WrapperFlags` when a Codex launch with a comms identity passes flags on."""
+    tokens = [str(token) for token in tokens or ()]
+    if harness == "codex" and identity and tokens:
+        raise WrapperFlags(tokens)
+
+
 def _option(row_name: str) -> str:
     """The launcher's option for a row: its name, dashed."""
     return "--" + row_name.replace("_", "-")

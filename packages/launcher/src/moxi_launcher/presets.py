@@ -70,6 +70,11 @@ PLACE = ("cwd", "project", "scratch", HOME)
 CODEX_START_CEILING = 4500
 #: turns' Codex host, which a Codex launch with turns runs under.
 CODEX_HOST = "moxi-turns-codex-host"
+#: The comms interface whose names the launcher calls: `identity_state`, and the Codex
+#: wrapper `moxi comms codex` that ships with it. An older comms offers neither.
+COMMS_INTERFACE = 2
+#: What to install for that comms.
+COMMS_NEEDED = "moxi-comms 0.2"
 #: The start postures every install takes; `with:<identity>` needs comms.
 POSTURES = ("operator", "go")
 WITH = "with:"
@@ -842,6 +847,7 @@ def resolve(request, *, presets: Presets | None = None,
     target = str(values.get("target") or "terminal")
     mode, turns, more = mode_of(harness, target, identity=identity, available=avail)
     warnings += more
+    catalog.refuse_wrapper_flags(harness, identity, values.get(catalog.EXTRA) or ())
 
     links = {name for name, on in (
         ("turns", turns), ("comms", identity is not None or posture.startswith(WITH)
@@ -867,8 +873,10 @@ def mode_of(harness: str, target: str, *, identity: str | None = None,
     Claude: `interactive` in a terminal or slot, `print` headless. Codex: `exec`
     headless; in a terminal or slot `host` with turns, `interactive` without. A Codex
     launch with turns but without turns' host installed runs as one without turns, with
-    a warning. Refused for now: a headless launch with an identity (comms' headless
-    wrapper flags), and a Codex launch with an identity (comms' Codex wrapper)."""
+    a warning. A Codex launch with an identity runs comms' Codex wrapper, which execs
+    turns' host, so it is `host` and refused where the host can't start or comms has no
+    such wrapper. Refused for now: a headless launch with an identity (comms' headless
+    wrapper flags)."""
     avail = _avail(available)
     turns = avail("turns")
     headless = target == "headless"
@@ -879,8 +887,16 @@ def mode_of(harness: str, target: str, *, identity: str | None = None,
     if harness == "claude":
         return ("print" if headless else "interactive"), turns, []
     if identity:
-        raise NotYet("identity", "a Codex launch with an identity is not taken yet",
-                     "it waits on comms' Codex wrapper; launch without an identity")
+        if not comms_codex():
+            raise NotYet("identity", "a Codex launch with an identity needs comms' Codex "
+                         "wrapper (moxi comms codex), which this comms does not offer",
+                         f"install {COMMS_NEEDED}, or launch without an identity")
+        if not turns or not _host_installed():
+            raise NotYet("identity", "a Codex launch with an identity runs under turns' "
+                         f"Codex host ({CODEX_HOST}), which can't start here",
+                         "install moxi-turns with its codex extra, or launch without an "
+                         "identity")
+        return "host", True, []
     if headless:
         return "exec", False, []
     if not turns:
@@ -890,6 +906,22 @@ def mode_of(harness: str, target: str, *, identity: str | None = None,
                                       "here, as it is not installed or turns lacks its "
                                       "codex extra: launching codex without turns"]
     return "host", True, []
+
+
+def comms_api() -> object | None:
+    """comms' API, or None when comms is not installed or does not speak the interface
+    the launcher calls (`COMMS_INTERFACE`): the identity check and the Codex wrapper come
+    with it."""
+    if not modules.available("comms"):
+        return None
+    found = modules.load("comms", interface=COMMS_INTERFACE)
+    return found.api if found.ok else None
+
+
+def comms_codex() -> bool:
+    """Whether comms offers its Codex wrapper, `moxi comms codex`: every comms that speaks
+    the launcher's interface does."""
+    return comms_api() is not None
 
 
 def codex_host() -> str | None:
@@ -1006,9 +1038,10 @@ def _show(value: object) -> str:
 
 
 __all__ = [
-    "Agent", "BadPreset", "CODEX_START_CEILING", "ERROR", "KINDS", "NeedsProjects",
-    "NotYet", "OffPosture", "Preset", "Presets", "Problem", "ProjectsBusy",
-    "ProjectsUnreadable", "Request", "Resolved", "UnknownPreset", "UnknownProject",
-    "WARNING", "check", "harness_of", "mode_of", "path", "project_agents", "projects_api",
-    "read", "resolve", "roles", "schema",
+    "Agent", "BadPreset", "CODEX_START_CEILING", "COMMS_INTERFACE", "ERROR", "KINDS",
+    "NeedsProjects", "NotYet", "OffPosture", "Preset", "Presets", "Problem",
+    "ProjectsBusy", "ProjectsUnreadable", "Request", "Resolved", "UnknownPreset",
+    "UnknownProject", "WARNING", "check", "comms_api", "comms_codex", "harness_of",
+    "mode_of", "path", "project_agents", "projects_api", "read", "resolve", "roles",
+    "schema",
 ]

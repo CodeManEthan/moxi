@@ -379,18 +379,29 @@ def test_a_permissions_profile_passed_on_is_refused_like_the_sandbox_row(tail, l
 
 def test_the_codex_host_with_comms_takes_the_hosts_flags_without_its_directory():
     values = codex_values(identity="coder", scope="moxi", director=["lead"],
-                          model="gpt-5", add_dir=["/a"], extra_flags=["--no-window"],
-                          sandbox="")
+                          model="gpt-5", add_dir=["/a"], sandbox="")
     got = codex.compose(values, ctx(session_id=None, modules=frozenset({"turns", "comms"}),
                                     host=HOST, comms_codex=True, brief="b"))
     assert list(got.argv) == [
         "moxi", "comms", "codex", "--name", "coder", "--scope", "moxi",
         "--director", "lead", "--model", "gpt-5", *UPDATE_OPTION,
-        "--option", 'sandbox_workspace_write.writable_roots=["/a"]', "--no-window"]
+        "--option", 'sandbox_workspace_write.writable_roots=["/a"]']
     assert got.mode == "host" and got.first is not None
 
 
-def test_a_codex_launch_with_an_identity_waits_on_comms():
+@pytest.mark.parametrize("tail", [["--no-window"], ["--option", "a.b=1"], ["-x"]])
+def test_a_codex_launch_with_an_identity_passes_no_extra_flags_on(tail):
+    # comms' Codex wrapper takes its own grammar and nothing past it.
+    with pytest.raises(catalog.WrapperFlags) as raised:
+        codex.compose(codex_values(identity="coder", extra_flags=tail),
+                      ctx(session_id=None, modules=frozenset({"turns", "comms"}),
+                          host=HOST, comms_codex=True, brief="b"))
+    assert raised.value.exit_code == 3 and raised.value.row == "extra_flags"
+    assert "comms' Codex wrapper (moxi comms codex) takes no other flags" in \
+        raised.value.hint
+
+
+def test_a_codex_launch_with_an_identity_runs_the_wrapper_comms_offers():
     links = frozenset({"turns", "comms"})
     with pytest.raises(common.NotYet, match="Codex wrapper"):
         codex.compose(codex_values(identity="coder"),

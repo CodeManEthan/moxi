@@ -126,7 +126,8 @@ def context(values: Mapping[str, object], *, request_id: str,
                    instructions=str(instructions) if instructions else None,
                    handoff_dir=handoff_dir, role_found=role_found, additions=additions,
                    runs_dir=str(Layout(MODULE).state_dir(environ) / "runs"),
-                   moxi=moxi_command(), host=host)
+                   moxi=moxi_command(), host=host,
+                   comms_codex=harness == "codex" and comms and presets.comms_codex())
 
 
 def launch_additions(*, cwd: str, env: Mapping[str, str],

@@ -540,14 +540,68 @@ def test_codex_with_turns_but_no_host_runs_without_turns(monkeypatch):
     assert any(presets.CODEX_HOST in w for w in got.warnings)
 
 
-@pytest.mark.parametrize("harness, target", [("claude", "headless"),
-                                             ("codex", "headless"),
-                                             ("codex", "terminal")])
-def test_identity_launches_comms_does_not_take_yet(harness, target):
-    with pytest.raises(presets.NotYet) as caught:
-        resolve(typed={"harness": harness, "target": target, "identity": "x"},
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_a_headless_launch_with_an_identity_waits_on_comms(harness):
+    with pytest.raises(presets.NotYet, match="headless") as caught:
+        resolve(typed={"harness": harness, "target": "headless", "identity": "x"},
                 available=only("comms"))
     assert caught.value.exit_code == codes.REFUSED
+
+
+@pytest.mark.parametrize("target", ["terminal", "slot"])
+def test_a_codex_launch_with_an_identity_runs_under_the_host(monkeypatch, target):
+    monkeypatch.setattr(presets, "_host_installed", lambda: True)
+    monkeypatch.setattr(presets, "comms_codex", lambda: True)
+    got = resolve(typed={"harness": "codex", "target": target, "identity": "x"},
+                  available=only("comms", "turns", "slots"))
+    assert got.mode == "host" and {"turns", "comms"} <= got.links
+
+
+def test_a_codex_launch_with_an_identity_needs_the_host(monkeypatch):
+    monkeypatch.setattr(presets, "comms_codex", lambda: True)
+    with pytest.raises(presets.NotYet, match="Codex host") as caught:
+        resolve(typed={"harness": "codex", "identity": "x"}, available=only("comms"))
+    assert caught.value.exit_code == codes.REFUSED
+    monkeypatch.setattr(presets, "_host_installed", lambda: False)
+    with pytest.raises(presets.NotYet, match="Codex host"):
+        resolve(typed={"harness": "codex", "identity": "x"},
+                available=only("comms", "turns"))
+
+
+def test_a_codex_launch_with_an_identity_needs_comms_codex_wrapper(monkeypatch):
+    monkeypatch.setattr(presets, "_host_installed", lambda: True)
+    monkeypatch.setattr(presets, "comms_codex", lambda: False)
+    with pytest.raises(presets.NotYet, match="moxi comms codex"):
+        resolve(typed={"harness": "codex", "identity": "x"},
+                available=only("comms", "turns"))
+
+
+def test_a_codex_launch_with_an_identity_and_extra_flags_is_refused(monkeypatch):
+    monkeypatch.setattr(presets, "_host_installed", lambda: True)
+    monkeypatch.setattr(presets, "comms_codex", lambda: True)
+    with pytest.raises(catalog.WrapperFlags) as caught:
+        resolve(typed={"harness": "codex", "identity": "x"}, extra=["--no-window"],
+                available=only("comms", "turns"))
+    assert caught.value.exit_code == codes.REFUSED
+    assert "takes no other flags" in caught.value.hint
+    # Without an identity, or for Claude, the flags go on.
+    assert resolve(typed={"harness": "codex"}, extra=["--no-window"],
+                   available=only("turns")).values["extra_flags"] == ["--no-window"]
+    assert resolve(typed={"harness": "claude", "identity": "x"}, extra=["--verbose"],
+                   available=only("comms")).identity == "x"
+
+
+def test_comms_codex_follows_comms_interface(monkeypatch):
+    monkeypatch.setattr(presets.modules, "available", lambda name: name == "comms")
+    monkeypatch.setattr(presets.modules, "load", lambda name, interface=None:
+                        SimpleNamespace(ok=interface == presets.COMMS_INTERFACE,
+                                        api="comms-api"))
+    assert presets.comms_api() == "comms-api" and presets.comms_codex()
+    monkeypatch.setattr(presets.modules, "load", lambda name, interface=None:
+                        SimpleNamespace(ok=False, api=None))
+    assert presets.comms_api() is None and not presets.comms_codex()
+    monkeypatch.setattr(presets.modules, "available", lambda name: False)
+    assert not presets.comms_codex()
 
 
 def test_links_follow_the_values(monkeypatch):

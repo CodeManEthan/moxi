@@ -10,8 +10,8 @@ The mode follows from the target and the links:
 Until turns' host can start (its entry installed, with turns' `codex` extra), a launch
 with turns runs as one without it (`interactive`, the brief as the opening prompt) and
 says so in one warning line. A launch with a comms identity runs comms' Codex wrapper,
-which takes the host's flags; until comms takes per-launch settings there, it is refused
-with that reason, and a headless one is refused until comms takes its headless flags.
+which takes the host's flags and execs the host, so it needs the host too; a headless one
+is refused until comms takes its headless flags.
 
     interactive  codex [<opening prompt>] -c check_for_update_on_startup=false -C <cwd>
                    [-m M] -s <S> -a <A> [other rows] [extra flags]
@@ -20,7 +20,7 @@ with that reason, and a headless one is refused until comms takes its headless f
     host         moxi-turns-codex-host --cwd <cwd> [--model M] --sandbox <S>
                    [--option ...] [extra flags]
     host, comms  moxi comms codex --name N [--scope S] [--director D ...] [--model M]
-                   --sandbox <S> [--option ...] [extra flags]
+                   --sandbox <S> [--option ...]
 
 The host runs with its window, and applies turns' launch additions itself; the launcher
 passes none. A Codex session under the host gets its identity block and instructions from
@@ -34,7 +34,12 @@ host reads the key as TOML does, so the quoted directory stays one part, dots an
 and its quotes come off. Plain `codex -c` splits a key at every dot and keeps the quotes,
 which is why the other modes trust the directory with an inline table instead.
 
-Extra flags go to the command line as given, in every mode, except a flag or config
+comms' wrapper takes its own grammar and nothing past it, so a launch with an identity
+passes no extra flags on: it is refused when it has any (`catalog.WrapperFlags`). The
+wrapper builds the host's `--cwd` from its own directory, so it gets none and is started
+in the launch's directory.
+
+Extra flags go to the command line as given, in every other mode, except a flag or config
 override that sets what a posture row sets, which is refused like that row so the posture
 check sees every posture: the host's `--permissions PROFILE` (until a permission profile
 has a row of its own), Codex's `--dangerously-bypass-approvals-and-sandbox` and
@@ -84,8 +89,8 @@ def mode(values: Mapping[str, object], ctx: Context) -> tuple[str, tuple[str, ..
     if identity:
         if not ctx.comms_codex:
             raise NotYet("identity", "a Codex launch with an identity needs comms' Codex "
-                         "wrapper to take per-launch settings, which this comms does not "
-                         "yet", "leave the identity out")
+                         "wrapper (moxi comms codex), which this comms does not offer",
+                         "install moxi-comms 0.2, or leave the identity out")
         if "turns" not in ctx.modules or not ctx.host:
             raise NotYet("identity", "a Codex launch with an identity runs under turns' "
                          "Codex host, which can't start here",
@@ -130,6 +135,7 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
     owned = {"cwd": cwd, "update_check": True,
              "skip_git_check": bool(values.get("scratch")) and mode_ == "exec"}
     extra = [str(token) for token in values.get(catalog.EXTRA) or ()]
+    catalog.refuse_wrapper_flags(HARNESS, identity, extra)
     catalog.refuse_passthrough(HARNESS, extra, mode_)
     fit = catalog.fit(HARNESS, mode_, {**values, **owned}, ctx.chosen)
     not_applied = fit.not_applied
@@ -147,7 +153,7 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
             argv += ["--scope", scope]
         for director in values.get("director") or ():
             argv += ["--director", str(director)]
-        argv += flags + extra
+        argv += flags
     elif host:
         argv = [str(ctx.host)] + flags + extra
     else:
