@@ -446,9 +446,14 @@ waits 30000 for `clear` and `exit` and 330000 for `compact`, plus 10000 with
 only; true needs `stop-shells`).
 
 Runs `/clear`, `/exit` or a compaction. Only with consent: the user's turns config
-`commands.allow`, or the launch's `MOXI_TURNS_COMMANDS` (a comma-separated list) in the
-session's environment. Only one in flight, one accepted per 60 s across all three, and
-only from an idle snapshot: no open turn, no live subagent, no draft. With
+`commands.allow`, or the launch's `MOXI_TURNS_COMMANDS` grant in the session's
+environment. The grant is bound, `<session id>:<commands>`, or bare, `<commands>`, where
+`<commands>` is a comma list. A bound grant counts only while the id it names is the
+session's current id or one of its earlier ids (`session`'s `earlier`), so it survives a
+`/clear`, and a harness started by hand inside the session, under an id of its own,
+gets nothing from it; one with an empty id or a second `:` counts as absent. A bare grant
+counts wherever it reaches. Only one in flight, one accepted per 60 s across all three,
+and only from an idle snapshot: no open turn, no live subagent, no draft. With
 `if_turn_number`, only if the turn number still equals it. The checks run again where the
 command takes effect.
 

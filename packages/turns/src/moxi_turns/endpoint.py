@@ -1174,11 +1174,20 @@ class Endpoint:
                               "ref", None, ref)
         return newest.id, self.wait(newest.id, until, timeout)
 
+    def session_ids(self) -> tuple[str, ...]:
+        """The ids this endpoint's session has had, the current one first, copied under
+        the lock: a command grant bound to any of them is this session's."""
+        with self._lock:
+            current = self.ledger.session_id
+            return ((current,) if current else ()) + tuple(self.ledger.earlier)
+
     def command(self, name: str, *, if_turn_number: int | None = None,
                 timeout: float | None = COMMAND_WAIT_S,
                 stop_shells: bool = False) -> Ran | Failed | Refused:
         """Run `/clear`, `/exit` or a compaction: consented, one in flight, one accepted
         per 60 s, from an idle snapshot with no open turn, no live subagent and no draft.
+        Consent is turns' `commands.allow` or the launch's grant, a bound grant only while
+        it names an id this session has had (`session_ids`).
         `stop_shells` (with `clear` or `compact`, on an adapter that offers `stop-shells`)
         stops the session's background shells once the command has taken effect, as one
         step with it: one consent, one slot, one count toward the rate, and the shells
@@ -1192,7 +1201,8 @@ class Endpoint:
         if reason is None and stop_shells:
             reason = "unsupported" if name == "exit" else self._unable("stop-shells")
         if reason is None:
-            allow = turns_config.allowed(self._config.use("commands.allow"), self.env)
+            allow = turns_config.allowed(self._config.use("commands.allow"), self.env,
+                                         self.session_ids())
             if name not in allow:
                 reason = "not-allowed"
         if reason is None:

@@ -24,7 +24,12 @@ What turns itself adds, per harness:
   reads it, not from `env`. A launch writes nothing into turns' package: launches in
   parallel share no write, and a read-only install launches.
 - every harness: `MOXI_TURNS_COMMANDS`, the session commands the launch grants, when
-  `commands` is not empty.
+  `commands` is not empty. With a `session_id` it is bound to that id,
+  `<session id>:<commands>`, and an endpoint honours it only while its session's id is
+  that one or was (a `/clear` keeps the launch's grant); a harness started by hand
+  inside the session inherits it and gets nothing from it. Without one it is the bare
+  comma list, honoured wherever it reaches. So a launcher passes as `session_id` only
+  the id it gives the harness itself (Claude's `--session-id`).
 
 **Contributions.** A module adds to a launch by declaring an entry point in the group
 `moxi.turns.additions`, named by the module, whose target is a function:
@@ -242,16 +247,17 @@ def launch_additions(harness: str, *, cwd, env: Mapping[str, str],
                      commands: Iterable[str] = ()) -> LaunchAdditions:
     """What a launch of `harness` adds: argv words, environment variables, harness
     options and notes. `cwd` and `env` are the launch's as composed so far; `session_id`
-    is the id the launcher minted, when it has one; `commands` the session commands this
-    launch grants. `env` goes to the contributors only; turns' own additions read no
-    variable from it.
+    is the id the launcher minted and gives the harness, when it has one; `commands` the
+    session commands this launch grants, bound to `session_id` when there is one. `env`
+    goes to the contributors only; turns' own additions read no variable from it.
 
     For Claude, `env` of the result always holds `MOXI_TURNS_ENDPOINT`, the endpoint
     command the runner spawns. Nothing is written for it. The contributions' MCP servers
     go last: one `--mcp-config=` word on Claude, `options` on Codex and OpenCode. Of
     `env`, the renderer asks only whether it holds each server's token variable.
 
-    Raises `ValueError` for a harness or a command turns does not know, and
+    Raises `ValueError` for a harness or a command turns does not know, or a session id
+    a grant cannot be bound to (empty, or holding `:`, `,` or white space), and
     `moxi_turns.TurnsError` when Claude's plugin folder is missing, turns' config cannot
     be read, or there is no endpoint command. A contribution that fails is skipped with a
     note; it never fails the launch.
@@ -280,9 +286,9 @@ def launch_additions(harness: str, *, cwd, env: Mapping[str, str],
         argv += ["--plugin-dir", str(runner), "--plugin-dir", str(gate)]
         out_env[ENDPOINT_ENV] = launch_endpoint()
     if granted:
-        from .config import COMMANDS_ENV
+        from .config import COMMANDS_ENV, grant
 
-        out_env[COMMANDS_ENV] = ",".join(c for c in COMMANDS if c in granted)
+        out_env[COMMANDS_ENV] = grant(granted, session_id or None)
 
     request = AdditionsRequest(harness, os.fspath(cwd),
                                MappingProxyType({str(k): str(v) for k, v in env.items()}),

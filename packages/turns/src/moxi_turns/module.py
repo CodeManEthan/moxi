@@ -14,14 +14,16 @@ OPTIONAL = {"codex": "launch Codex sessions through a supervised app-server host
 GATED = {"moxi-turns-ping": "codex", "moxi-turns-codex-host": "codex"}
 INTERNAL_ENV = {
     "MOXI_TURNS_COMMANDS": "a launcher's grant of session commands (clear, exit, compact) "
-                           "to the one launch it stamps",
+                           "to the one launch it stamps, bound to the launch's session id "
+                           "when it names one",
     "MOXI_TURNS_ENDPOINT": "the absolute endpoint command a Claude launch names for "
                            "turns' runner plugin to spawn",
 }
 #: Per-launch stamps turns' launch additions render, so a launcher scrubs them from what
 #: it inherits and stamps its own. turns also reads them, so they stay in INTERNAL_ENV.
 SESSION_ENV = {
-    "MOXI_TURNS_COMMANDS": "the session commands one launch grants, stamped per launch",
+    "MOXI_TURNS_COMMANDS": "the session commands one launch grants, stamped per launch "
+                           "and bound to its session id when it names one",
     "MOXI_TURNS_ENDPOINT": "the endpoint command one Claude launch names, stamped per "
                            "launch",
 }
