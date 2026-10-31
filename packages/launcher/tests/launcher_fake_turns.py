@@ -11,8 +11,8 @@ same record whether the sender ran in its own process or in a detached deliverer
 The script's keys, each with its default:
 
 - `codex_host`: true, or false when turns' Codex host can't start here.
-- `additions`: `ok`, `error` (raises `TurnsError`, as when turns can't write its own
-  file) or `value` (raises `ValueError`, as for a command turns does not know).
+- `additions`: `ok`, `error` (raises `TurnsError`, as when turns has no endpoint
+  command) or `value` (raises `ValueError`, as for a command turns does not know).
 - `ready`: `ok`, `timeout` (raises `TimeoutError`) or `error` (raises `TurnsError`).
 - `session_id`: the id the ready `Session` names (a Codex thread id), default the asked id.
 - `deliver`: `answered` (the endpoint answers with a delivery id), `unanswered` (the
