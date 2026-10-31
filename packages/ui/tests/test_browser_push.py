@@ -8,6 +8,7 @@ import re
 import threading
 
 import pytest
+from moxi import modules
 from moxi_dev.testing import wait_for
 from playwright.sync_api import expect
 
@@ -227,7 +228,11 @@ def test_the_servers_block_follows_a_running_server_a_crash_and_a_failed_start(
 
 
 def test_the_servers_block_says_when_no_page_server_has_run(ui_shells, fixture_site, ui_contexts):
-    shell = ui_shells(site=[fixture_site], leave_out=["fixture"])
+    # Every module with a page has a page server, which the home starts when it places
+    # one of its components, so the shell leaves out the fixture and every other one.
+    paged = [found.name for found in modules.scan()
+             if found.ok and found.page and found.name != "ui"]
+    shell = ui_shells(site=[fixture_site], leave_out=["fixture", *paged])
     page = ui_contexts(shell).pages[0]
     block = page.locator("#moxi-panel moxi-ui-servers")
     expect(block).to_contain_text("No page server has run since the shell started.")
