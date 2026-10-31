@@ -115,6 +115,8 @@ def test_with_the_shell_down_the_page_rows_come_from_servers_json(runtime):
     (SimpleNamespace(state="missing", enabled=None, last=None), "warn"),
     (SimpleNamespace(state="inactive", enabled=False, last=None), "warn"),
     (SimpleNamespace(state="failed", enabled=True, last={"exit": 1}), "warn"),
+    (SimpleNamespace(state="unknown", enabled=None, last=None, detail="schtasks timed out"),
+     "warn"),
     (SimpleNamespace(state="inactive", enabled=True, last=None), "off"),
 ])
 def test_on_windows_the_task_row_stands_beside_a_held_port(monkeypatch, task, state):
@@ -124,6 +126,8 @@ def test_on_windows_the_task_row_stands_beside_a_held_port(monkeypatch, task, st
     assert [(row.name, row.state) for row in held] == [("shell", "fail"), ("logon task", state)]
     if task is not None and task.state == "failed":
         assert "exited with 1" in held[1].detail and "within a minute" in held[1].detail
+    if task is not None and task.state == "unknown":
+        assert "could not be read: schtasks timed out" in held[1].detail
     # With the port free, the task's state is the shell row itself.
     down = doctor.shell_rows(health.Probe("down", task=task, port=8460))
     assert [(row.name, row.state) for row in down] == [("shell", state)]
@@ -213,10 +217,11 @@ def test_with_no_socket_the_doctor_connects_once_and_a_listener_is_another_progr
     assert next(doctor.rows()).state == "warn" and listener.connects() == 0
 
 
-def test_on_windows_every_task_state_goes_on_to_the_connect(monkeypatch, listener):
+@pytest.mark.parametrize("state", ["failed", "unknown"])
+def test_on_windows_every_task_state_goes_on_to_the_connect(monkeypatch, listener, state):
     monkeypatch.setattr(health, "_platform", lambda: "win32")
     task = SimpleNamespace(module="ui", name="shell", kind="daemon", backend="schtasks",
-                           state="failed", enabled=True, last={"exit": 1}, detail="")
+                           state=state, enabled=True, last={"exit": 1}, detail="")
     # The core gives the skipped socket as `off` beside the task: no socket holds the port.
     off = _socket_unit("off", "the socket is skipped on Windows; the daemon binds its own",
                        backend="schtasks")

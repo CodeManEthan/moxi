@@ -285,6 +285,10 @@ def _down_row(found: Probe) -> Row:
         return Row(MODULE, "shell", "warn",
                    "not running, and no logon task: the port is free whenever no shell runs",
                    "moxi install ui")
+    if task.state == "unknown":
+        detail = getattr(task, "detail", "") or "no detail"
+        return Row(MODULE, "shell", "warn",
+                   f"not running, and the logon task's state could not be read: {detail}")
     if task.enabled is False:
         return Row(MODULE, "shell", "warn",
                    "not running, and the logon task is disabled: the port is free whenever "
