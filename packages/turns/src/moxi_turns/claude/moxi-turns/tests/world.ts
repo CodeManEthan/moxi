@@ -8,7 +8,7 @@ import type { On } from 'claude-code'
 export const ROOT_ARGV = ['/opt/env/bin/moxi-turns-endpoint']
 export const SOCK = '/run/user/1000/moxi/turns/claude-n1/mod.sock'
 
-type Answer = Record<string, unknown> | 'hang' | 'fail'
+type Answer = Record<string, unknown> | 'hang' | 'fail' | ((body: Record<string, unknown>) => Promise<Record<string, unknown>>)
 
 /** A row the engine appends at the door `command`: a slash command's or a `!` command's. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -46,7 +46,7 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     reads: [] as string[],
     /** Every request the endpoint got, in order: path and body. */
     got: [] as { path: string; body: Record<string, unknown> }[],
-    /** The endpoint's answer per path; a default `{}`. */
+    /** The endpoint's answer per path, or a function of the request's body; a default `{}`. */
     answers: {} as Record<string, Answer>,
     submits: [] as string[],
     /** How the engine settles each prompt.submit: set before the line arrives. */
@@ -144,9 +144,10 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     const path = new URL(e.url).pathname
     const body = JSON.parse(String(e.init?.body ?? '{}')) as Record<string, unknown>
     w.got.push({ path, body })
-    const a = w.answers[path] ?? {}
-    if (a === 'fail') throw new Error('ECONNREFUSED')
-    if (a === 'hang') await new Promise(() => {})
+    const given = w.answers[path] ?? {}
+    if (given === 'fail') throw new Error('ECONNREFUSED')
+    if (given === 'hang') await new Promise(() => {})
+    const a = typeof given === 'function' ? await given(body) : given
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(a) } }
   })
   on('process.spawn', async function* ($, e) {
@@ -166,7 +167,7 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
       await clock.settle()
     },
     async hello(extra: Record<string, unknown> = {}) {
-      await this.line({ op: 'hello', leg: 2, mod_sock: SOCK, stop_wait_ms: 2000, listen_wait_ms: 2000, endpoint_version: '0.1.0', pid: 42, ...extra })
+      await this.line({ op: 'hello', leg: 3, mod_sock: SOCK, stop_wait_ms: 2000, listen_wait_ms: 2000, endpoint_version: '0.1.0', pid: 42, ...extra })
     },
     async end() {
       w.childDone = true

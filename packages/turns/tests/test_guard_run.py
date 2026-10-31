@@ -72,6 +72,14 @@ def test_the_case_table_is_plain_json_with_what_both_matchers_need():
     assert len(set(names)) == len(names)
 
 
+def test_the_typescript_copy_of_the_case_table_holds_the_same_value():
+    # The runner's tests can't read files, so they import a .ts copy of the table.
+    text = CASES_PATH.with_suffix(".ts").read_text()
+    head = "\nexport default "
+    assert head in text, "guard-cases.ts must hold a line `export default ` then the JSON"
+    assert json.loads(text[text.index(head) + len(head):]) == CASES
+
+
 def test_every_guard_of_the_case_table_is_sound_and_its_regexes_are_in_the_subset():
     for d in CASES["guards"]:
         f = case_found(d)
