@@ -946,15 +946,23 @@ def open_run(conn: sqlite3.Connection, request_id: str) -> Run | None:
 
 
 def runs(conn: sqlite3.Connection, *, request_id: str | None = None,
-         session_id: str | None = None, limit: int | None = None) -> list[Run]:
-    """Runs newest first, of one launch or one session id when either is given."""
-    sql, params = _SELECT_RUN, []
+         session_id: str | None = None, limit: int | None = None,
+         before: str | datetime | None = None) -> list[Run]:
+    """Runs newest first, of one launch or one session id when either is given, only
+    those made before `before` when it is given."""
+    sql, where, params = _SELECT_RUN, [], []
     if request_id is not None:
-        sql += " WHERE request_id = ?"
+        where.append("request_id = ?")
         params.append(request_id)
     elif session_id is not None:
-        sql += " WHERE session_id = ?"
+        where.append("session_id = ?")
         params.append(session_id)
+    if before is not None:
+        moment = before if isinstance(before, datetime) else parse_time(before)
+        where.append("created_at < ?")
+        params.append(stamp(moment))
+    if where:
+        sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY created_at DESC, rowid DESC"
     if limit is not None:
         sql += " LIMIT ?"
@@ -1335,6 +1343,22 @@ def release_hold(conn: sqlite3.Connection, request_id: str, name: str, *,
     return [Hold(h.request_id, h.name, h.opened_at, at) for h in found]
 
 
+def holds_log(conn: sqlite3.Connection, *, limit: int | None = None,
+              before: str | datetime | None = None) -> list[Hold]:
+    """Every hold, open or released, newest opened first, at most `limit`, only those
+    opened before `before` when it is given."""
+    sql, params = "SELECT request_id, name, opened_at, released_at FROM warm_holds", []
+    if before is not None:
+        moment = before if isinstance(before, datetime) else parse_time(before)
+        sql += " WHERE opened_at < ?"
+        params.append(stamp(moment))
+    sql += " ORDER BY opened_at DESC, rowid DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(int(limit))
+    return [Hold(*values) for values in conn.execute(sql, params)]
+
+
 def add_run_event(conn: sqlite3.Connection, run_id: str, kind: str,
                   detail: Mapping[str, Any] | None = None, *, at: str | None = None) -> int:
     """Add a `run_events` row and return its id."""
@@ -1488,16 +1512,58 @@ def log_lines(*, limit: int | None = None, before: str | datetime | None = None,
     return [_encode(row.as_json(stale_after=after, now=moment)) for row in rows]
 
 
+#: The tables `log --table` reads besides the launches.
+TABLES = ("runs", "exits", "holds")
+
+
+def table(conn: sqlite3.Connection, name: str, *, limit: int | None = None,
+          before: str | datetime | None = None) -> list[Run | ExitRow | Hold]:
+    """The rows of one of `TABLES`, newest first, at most `limit`, only those made before
+    `before` when it is given."""
+    if name == "runs":
+        return runs(conn, limit=limit, before=before)
+    if name == "exits":
+        return exits_log(conn, limit=limit, before=before)
+    if name == "holds":
+        return holds_log(conn, limit=limit, before=before)
+    raise ValueError(f"not a table log reads: {name!r}")
+
+
+def table_lines(name: str, *, limit: int | None = None, before: str | datetime | None = None,
+                db: str | Path | None = None,
+                env: Mapping[str, str] | None = None) -> list[str]:
+    """What `moxi launcher log --table NAME --json` prints: one JSON line per row, newest
+    first; a run carries its events, oldest first. A store not made yet has no rows;
+    nothing is created to say so."""
+    try:
+        conn = connect(db, env=env, create=False)
+    except store.StoreError as error:
+        if isinstance(error, store.StoreTooNew):
+            raise
+        return []
+    try:
+        lines = []
+        for row in table(conn, name, limit=limit, before=before):
+            data = row.as_json()
+            if isinstance(row, Run):
+                data["events"] = [{"at": e.at, "kind": e.kind, "detail": e.detail}
+                                  for e in run_events(conn, row.run_id)]
+            lines.append(_encode(data))
+        return lines
+    finally:
+        conn.close()
+
+
 __all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "EXIT_COLUMNS", "FACTS", "FRESH_CONTEXT", "HARNESSES",
            "HOWS", "JOB_GONE", "LAUNCHER", "LEAVES", "PRUNE_LIMIT", "RECLAIMED", "RUN_COLUMNS",
            "RUN_FIELDS", "RUN_GRACE_S", "RUN_KINDS", "RUN_LEAVES", "RUN_STATES", "SOURCES",
-           "STATES", "STEPS", "TARGETS", "VERDICTS", "Busy", "Event", "ExitRow", "Inserted", "Hold",
-           "LaunchRow", "Run", "RunEvent", "RunOpen", "SessionTaken", "TooLarge", "add_event",
-           "add_exit", "add_pick", "add_run_event", "advance_run", "chain", "claim", "connect",
-           "crossing_key", "crossing_known", "cut", "drop_run", "end_blocked", "end_run",
-           "endpoint_gone", "events", "exits_log", "get", "get_run", "holds", "insert",
-           "insert_run", "learn_session", "log", "log_lines", "made_by", "new_run_id", "now",
-           "open_hold", "open_holds", "open_run", "parse_endpoint", "parse_time", "path",
+           "STATES", "STEPS", "TABLES", "TARGETS", "VERDICTS", "Busy", "Event", "ExitRow",
+           "Inserted", "Hold", "LaunchRow", "Run", "RunEvent", "RunOpen", "SessionTaken",
+           "TooLarge", "add_event", "add_exit", "add_pick", "add_run_event", "advance_run", "chain",
+           "claim", "connect", "crossing_key", "crossing_known", "cut", "drop_run", "end_blocked",
+           "end_run", "endpoint_gone", "events", "exits_log", "get", "get_run", "holds", "insert",
+           "holds_log", "insert_run", "learn_session", "log", "log_lines", "made_by", "new_run_id",
+           "now", "open_hold", "open_holds", "open_run", "parse_endpoint", "parse_time", "path",
            "pend_compact", "pending_compact", "picked", "prune", "release_hold", "resolve",
            "run_events", "run_stale", "runs", "seen_at", "session_ids", "set_facts", "set_run_job",
-           "set_state", "stale_after_s", "stamp"]
+           "set_state", "stale_after_s", "stamp", "table", "table_lines"]
