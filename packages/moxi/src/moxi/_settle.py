@@ -878,6 +878,7 @@ def _skills(step: Settle) -> bool:
             return False
         # Every name, with a row or not: see above.
         harnesses = list(dict.fromkeys(place._core_settings()["skills.harnesses"]))
+        usable = place.chosen()[0] or harnesses  # the question names only working rows
         items = [place.Item(source / name, harness, name)
                  for name in skills for harness in harnesses]
         planned = place.plan(module, items)
@@ -894,7 +895,7 @@ def _skills(step: Settle) -> bool:
         s.action == "skip" or str(s.target) in held_now or str(s.target) in handed
         or (s.cause == "harness" and (s.item.harness, s.item.kind, s.item.name) in labels)
         for s in steps)
-    if not own and (not items or not skills_wanted(step, skills, harnesses)):
+    if not own and (not items or not skills_wanted(step, skills, usable)):
         return True
     with held():
         done = place.apply(steps, replace=step.replace,

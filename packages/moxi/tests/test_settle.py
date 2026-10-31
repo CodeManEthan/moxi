@@ -1693,6 +1693,18 @@ def test_a_broken_harness_row_keeps_its_placements_and_says_why(sk, capsys, monk
     assert [r.name for r in _run._harness_rows()] == ["skills.harnesses cluade"]
 
 
+def test_the_skills_question_names_only_harnesses_with_a_working_row(sk, capsys,
+                                                                       monkeypatch):
+    sk.skills("demo-send")
+    config.set("moxi", "skills.harnesses", ["claude", "cluade", "codex"], by="test")
+    asked = at_terminal(monkeypatch, "y")
+    code, out = place_settle(sk, capsys)
+    assert code == 0, out
+    assert asked == ["demo ships 1 skill (demo-send). Place them for claude and codex? "
+                     "[y/N] "]
+    assert "demo-send for cluade not placed: harness cluade has no row" in out
+
+
 def test_a_name_taken_out_of_skills_harnesses_removes_its_placements(sk, capsys,
                                                                      monkeypatch):
     sk.skills("demo-send")
