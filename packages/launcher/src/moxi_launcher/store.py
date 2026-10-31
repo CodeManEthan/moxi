@@ -881,6 +881,14 @@ def log(conn: sqlite3.Connection, *, limit: int | None = None,
     return [_row(cursor, values) for values in cursor.fetchall()]
 
 
+def running(conn: sqlite3.Connection) -> list[LaunchRow]:
+    """Launches that may still run, newest first: every row not `failed` that records a
+    process or an endpoint to look at. Whether that process runs is the caller's look."""
+    cursor = conn.execute(f"{_SELECT} WHERE state != 'failed' AND (pid IS NOT NULL OR "
+                          "endpoint IS NOT NULL) ORDER BY created_at DESC, rowid DESC")
+    return [_row(cursor, values) for values in cursor.fetchall()]
+
+
 def events(conn: sqlite3.Connection, request_id: str) -> list[Event]:
     """The events of one launch, oldest first."""
     return [Event(id, rid, sid, at, kind, json.loads(detail)) for id, rid, sid, at, kind,
@@ -1666,5 +1674,5 @@ __all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "EXIT_COLUMNS", "FACTS", "FRESH_CONTE
            "holds_log", "insert_run", "learn_session", "log", "log_lines", "made_by", "new_run_id",
            "now", "open_hold", "open_holds", "open_run", "parse_endpoint", "parse_time", "path",
            "pend_compact", "pending_compact", "picked", "prune", "release_hold", "resolve",
-           "run_events", "run_stale", "runs", "seen_at", "session_ids", "set_facts", "set_run_job",
-           "set_state", "stale_after_s", "stamp", "table", "table_lines"]
+           "running", "run_events", "run_stale", "runs", "seen_at", "session_ids", "set_facts",
+           "set_run_job", "set_state", "stale_after_s", "stamp", "table", "table_lines"]
