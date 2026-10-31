@@ -18,7 +18,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from moxi_dev.testing import wait_for
 from playwright.sync_api import expect
 
 from squatter import Squatter
@@ -34,9 +33,20 @@ JAR = "/cookies?k=180&s=4096"
 PLANT_MS = 30_000
 
 # The engine sends the update check a moment after the navigation the worker took, not
-# during it, so the test waits for the registration to go.
-GONE_S = 10
+# during it, so the test waits in the page for the registration to go.
+GONE_MS = 10_000
 WORKERS = "async () => (await navigator.serviceWorker.getRegistrations()).length"
+#: Waits in the page until no worker is registered, polling every 0.1 s; false after
+#: the given milliseconds.
+NO_WORKERS = """async (ms) => {
+  const until = Date.now() + ms;
+  while ((await navigator.serviceWorker.getRegistrations()).length) {
+    if (Date.now() > until) return false;
+    await new Promise((done) => setTimeout(done, 100));
+  }
+  return true;
+}"""
+KINDS = ("deep", "percent", "long")
 
 
 def _this_run(engine: str, ui_browser) -> None:
@@ -45,13 +55,20 @@ def _this_run(engine: str, ui_browser) -> None:
         pytest.skip(f"this run uses {running}; run with --ui-browser {engine} for {engine}")
 
 
-def _plant(contexts, squat, kind: str, n: int = 0):
-    page = contexts(SimpleNamespace(url=squat.url), sign_in=False).new_page()
-    page.goto(JAR)
-    expect(page).to_have_title("filled")
-    page.goto(f"/plant?kind={kind}&n={n}")
-    expect(page).to_have_title("planted", timeout=PLANT_MS)
-    return page
+def _plant(contexts, squat, plants: dict[str, int]) -> dict[str, object]:
+    """Fill a jar and plant a worker of each kind, each in a context of its own, all in
+    one pass: every plant is begun before any is waited for."""
+    pages = {}
+    for kind in plants:
+        page = contexts(SimpleNamespace(url=squat.url), sign_in=False).new_page()
+        page.goto(JAR)
+        expect(page).to_have_title("filled")
+        pages[kind] = page
+    for kind, n in plants.items():
+        pages[kind].goto(f"/plant?kind={kind}&n={n}")
+    for page in pages.values():
+        expect(page).to_have_title("planted", timeout=PLANT_MS)
+    return pages
 
 
 @pytest.mark.parametrize("engine", ENGINES)
@@ -60,8 +77,7 @@ def test_a_planted_worker_takes_one_navigation_and_is_gone_by_the_second(
     _this_run(engine, ui_browser)
     squat = Squatter().start()
     try:
-        planted = {kind: _plant(ui_contexts, squat, kind, LONGEST[engine])
-                   for kind in ("deep", "percent", "long")}
+        planted = _plant(ui_contexts, squat, {kind: LONGEST[engine] for kind in KINDS})
     finally:
         squat.stop()
     shell = ui_shells(site=[fixture_site], port=squat.port)
@@ -69,8 +85,10 @@ def test_a_planted_worker_takes_one_navigation_and_is_gone_by_the_second(
         assert page.evaluate(WORKERS) == 1, kind
         page.goto("/m/ui/")
         expect(page, f"the {kind} worker's navigation").to_have_title("squatter")
-        wait_for(lambda: page.evaluate(WORKERS) == 0, GONE_S, interval=0.1,
-                 what=f"the {kind} worker to unregister")
+    # The three update checks run side by side; each page waits for its own.
+    for kind, page in planted.items():
+        assert page.evaluate(NO_WORKERS, GONE_MS), f"the {kind} worker did not unregister"
+    for kind, page in planted.items():
         page.goto("/m/ui/")
         expect(page, f"after the {kind} worker").to_have_title("Moxi: signed out")
         assert page.evaluate(WORKERS) == 0, kind
@@ -123,7 +141,7 @@ def test_a_worker_webkit_registered_from_a_5_000_000_byte_path_stays(
     _this_run(engine, ui_browser)
     squat = Squatter().start()
     try:
-        page = _plant(ui_contexts, squat, "long", 5_000_000)
+        page = _plant(ui_contexts, squat, {"long": 5_000_000})["long"]
     finally:
         squat.stop()
     ui_shells(site=[fixture_site], port=squat.port)
