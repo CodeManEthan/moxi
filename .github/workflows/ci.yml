@@ -117,7 +117,14 @@ jobs:
         run: uv run --locked --package moxi-ui playwright install --with-deps ${{ matrix.engine }}
       - name: the browser tests
         working-directory: packages/ui
-        run: uv run --locked --package moxi-ui pytest -m browser --ui-browser ${{ matrix.engine }} -n auto
+        run: uv run --locked --package moxi-ui pytest -m browser --ui-browser ${{ matrix.engine }} -n auto --ui-traces ui-traces
+      - name: a failed test's Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: ui-traces-${{ matrix.engine }}
+          path: packages/ui/ui-traces
+          if-no-files-found: ignore
 
   browser-other:
     # The same tests in Chromium on Windows and macOS, and in WebKit on macOS. Like the
@@ -148,7 +155,14 @@ jobs:
         run: uv run --locked --package moxi-ui playwright install --with-deps ${{ matrix.engine }}
       - name: the browser tests
         working-directory: packages/ui
-        run: uv run --locked --package moxi-ui pytest -m browser --ui-browser ${{ matrix.engine }} -n auto
+        run: uv run --locked --package moxi-ui pytest -m browser --ui-browser ${{ matrix.engine }} -n auto --ui-traces ui-traces
+      - name: a failed test's Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: ui-traces-${{ matrix.os }}-${{ matrix.engine }}
+          path: packages/ui/ui-traces
+          if-no-files-found: ignore
 
   secrets-windows:
     # The secrets rule files are compared byte for byte (the pin's sha256, the
