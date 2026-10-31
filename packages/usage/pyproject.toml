@@ -10,6 +10,7 @@ dependencies = ["moxi>=0.1,<0.2", "moxi-sessions>=0.2,<0.3"]
 
 [project.optional-dependencies]
 turns = ["moxi-turns>=0.1,<0.2"]
+projects = ["moxi-projects>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/moxihq/moxi"

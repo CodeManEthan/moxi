@@ -770,6 +770,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+projects = [
+    { name = "moxi-projects" },
+]
 turns = [
     { name = "moxi-turns" },
 ]
@@ -782,10 +785,11 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
     { name = "moxi-sessions", editable = "packages/sessions" },
     { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
 ]
-provides-extras = ["turns"]
+provides-extras = ["turns", "projects"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest" }]
