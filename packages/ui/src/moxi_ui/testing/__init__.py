@@ -220,9 +220,7 @@ def ui_contexts(ui_browser: Any, request: pytest.FixtureRequest,
         context.tracing.start(screenshots=True, snapshots=True)
         opened.append(context)
         if sign_in:
-            page = context.new_page()
-            page.goto("/m/ui/")
-            page.locator("#moxi-panel > moxi-ui-page").wait_for(state="attached")
+            _open_settled(context.new_page(), "/m/ui/")
         return context
 
     try:
@@ -242,6 +240,39 @@ def ui_contexts(ui_browser: Any, request: pytest.FixtureRequest,
                     context.tracing.stop()
             finally:
                 context.close()
+
+
+def _open_settled(page: Any, path: str) -> None:
+    """Open the shell's document at `path`, and wait until its modules view is placed and
+    every request it began has finished, the push stream aside. A test that navigates
+    at once would otherwise abort the home blocks' scripts mid-load, and the document
+    would log that they could not load."""
+    pending: set[Any] = set()
+
+    def begun(request: Any) -> None:
+        if "/m/ui/api/push" not in request.url:
+            pending.add(request)
+
+    def ended(request: Any) -> None:
+        pending.discard(request)
+
+    page.on("request", begun)
+    page.on("requestfinished", ended)
+    page.on("requestfailed", ended)
+    try:
+        page.goto(path)
+        page.locator("#moxi-panel > moxi-ui-page").wait_for(state="attached")
+        quiet = 0
+        for _ in range(WAIT_MS // 25):
+            # The sync API hands over request events only inside a call to it.
+            page.wait_for_timeout(25)
+            quiet = quiet + 1 if not pending else 0
+            if quiet >= 2:
+                break
+    finally:
+        page.remove_listener("request", begun)
+        page.remove_listener("requestfinished", ended)
+        page.remove_listener("requestfailed", ended)
 
 
 def _stored_sign_in(browser: Any, shell: Any) -> dict[str, Any]:
