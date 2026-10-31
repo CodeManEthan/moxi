@@ -684,7 +684,9 @@ def verify(body: Mapping[str, Any],
     parts = str(body.get("ticket", "")).rsplit(".", 2)
     if len(parts) == 3 and common.plain_name(parts[0]) and parts[1].isdigit():
         request_id, expires = parts[0], int(parts[1])
-        if hmac.compare_digest(parts[2], _signed(body, request_id, expires)):
+        # Bytes, since a text comparison raises on a character outside ASCII.
+        signed = _signed(body, request_id, expires).encode()
+        if hmac.compare_digest(parts[2].encode("utf-8", "replace"), signed):
             if (time.time() if now is None else now) <= expires:
                 return request_id, None
             return None, {"code": "expired", "row": None,

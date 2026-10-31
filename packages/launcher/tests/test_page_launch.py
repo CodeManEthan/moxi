@@ -281,6 +281,15 @@ def test_a_ticket_holds_only_for_its_request_until_it_expires(work):
         assert rid is None and refused["code"] == "bad-ticket"
 
 
+
+def test_a_ticket_whose_signature_is_not_hex_is_a_bad_ticket(work):
+    body = headless(work)
+    issued, _ = pagehandlers.ticket(body, "r1", now=1000.0)
+    head = issued.rsplit(".", 1)[0]
+    for sig in ("é" * 64, "\u00ff", ""):
+        rid, refused = pagehandlers.verify({**body, "ticket": f"{head}.{sig}"}, now=1000.0)
+        assert rid is None and refused["code"] == "bad-ticket"
+
 # --- /api/launch -----------------------------------------------------------------------------
 
 def ticketed(body: dict, request_id: str = "r1") -> dict:
