@@ -77,7 +77,8 @@ def test_explain_compares_against_the_message_it_is_asked_about(rig):
 
 def test_the_four_cases_each_have_a_sentence():
     assert set(CASE_REASONS) == {CASE_HANDLED, CASE_NOT_ADDRESSABLE, CASE_IGNORED,
-                                 CASE_TURN_INCOMPLETE, "expired", "withdrawn"}
+                                 CASE_TURN_INCOMPLETE, "expired", "withdrawn",
+                                 "reserved"}
 
 
 def test_explain_classifies_with_classify_over_handed_at(rig):

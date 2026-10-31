@@ -35,7 +35,7 @@ BINDING_KINDS = ("session", "reserved")
 IDENTITY_KINDS = ("agent",)
 IDENTITY_STATUSES = ("active", "retired")
 RESERVED_STATES = ("active", "conflict", "unowned")
-DROP_REASONS = ("expired", "withdrawn")
+DROP_REASONS = ("expired", "withdrawn", "reserved")
 ROOM_KINDS = ("names",)
 
 
