@@ -30,7 +30,9 @@ file, so `preview` is not free of side effects outside the launcher; and for a C
 under turns' host it shows the host's command, not the `codex` command the host builds.
 
 A launch in this terminal does not return on Linux and macOS: the process becomes the
-harness. On Windows it returns when the harness exits, with the harness's exit code.
+harness. On Windows it returns when the harness exits, with the harness's exit code; if
+the first turn's deliverer could not start, the row ended `failed` while the harness ran,
+and the result says that failure, with its exit code.
 """
 
 from __future__ import annotations

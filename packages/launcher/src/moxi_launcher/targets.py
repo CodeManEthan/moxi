@@ -53,7 +53,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -298,8 +298,7 @@ class Terminal(Target):
             return fail(launch.conn, rid, SPAWN_FAILED,
                            f"{launch.argv[0]} could not be started: {error}")
         _started(launch.conn, rid, child.pid)
-        if launch.first_owed:
-            _start_deliverer(launch, child.pid)
+        failed = _start_deliverer(launch, child.pid) if launch.first_owed else None
         while True:
             try:
                 code = child.wait()
@@ -307,6 +306,10 @@ class Terminal(Target):
             except KeyboardInterrupt:
                 # The harness has the terminal and takes its own Ctrl-C.
                 continue
+        if failed is not None:
+            # The harness ran, but its first turn had no deliverer: the row says failed,
+            # and so does the launch, with the code a retry of it would give.
+            return replace(failed, pid=child.pid)
         return Started("started", code, pid=child.pid)
 
 

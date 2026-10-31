@@ -281,6 +281,38 @@ def test_on_windows_the_terminal_waits_for_its_child(work, harness, monkeypatch,
     assert result.exit_code == 5 and row().pid == Child.pid
 
 
+def test_on_windows_a_deliverer_that_fails_to_start_fails_the_launch_as_its_row(
+        work, harness, monkeypatch, turns):
+    class Child:
+        pid = os.getpid() + 7919
+        waited = False
+
+        def __init__(self, argv, env, cwd):
+            pass
+
+        def wait(self):
+            Child.waited = True
+            return 5
+
+    def broken(rid, *, pid=None, env=None):
+        raise OSError("no such file")
+
+    monkeypatch.setattr(targets, "WINDOWS", True)
+    monkeypatch.setattr(targets, "_popen", Child)
+    monkeypatch.setattr(first, "start_deliverer", broken)
+    result = api.launch(request(work, brief=BRIEF))
+    # The harness still runs to its end in the terminal; the launch then says what its
+    # row says, as a retry of it would.
+    assert Child.waited
+    assert (result.state, result.reason, result.pid) == ("failed", targets.NO_DELIVERER,
+                                                         Child.pid)
+    assert (row().state, row().reason) == ("failed", targets.NO_DELIVERER)
+    assert result.exit_code == targets.exit_of(row()) == exits.ERROR
+    again = api.launch(request(work, brief=BRIEF))
+    assert again.duplicate and (again.state, again.exit_code) == (result.state,
+                                                                  result.exit_code)
+
+
 # -- headless, end to end ------------------------------------------------------------------
 
 
