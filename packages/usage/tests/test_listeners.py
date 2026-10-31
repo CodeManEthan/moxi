@@ -101,10 +101,10 @@ def test_a_codex_limits_event_sessions_cannot_read_fails_open(caplog):
     assert "not stored" in caplog.text
 
 
-def test_importing_the_listeners_loads_neither_sessions_nor_sqlite(fence):
+def test_importing_the_listeners_loads_neither_sessions_nor_sqlite_nor_logging(fence):
     code = ("import sys, moxi_usage.listeners; "
             "print(sorted(m for m in ('sqlite3', 'moxi_sessions', 'moxi_usage.readings', "
-            "'json') if m in sys.modules))")
+            "'json', 'logging') if m in sys.modules))")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                          env=dict(fence.env), check=True).stdout
     assert json.loads(out.replace("'", '"')) == []

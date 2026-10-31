@@ -13,16 +13,24 @@ the event goes on.
   (`event.received_at`). sessions maps it to limits records, which are stored as
   app-server readings.
 
-Importing this module imports nothing beyond the standard library's `logging`; the
-readings store and sessions load on the first event.
+Importing this module imports nothing beyond `typing`, so a process that loads it to
+call a listener pays next to nothing: the readings store and sessions load on the first
+event, and `logging` (about 13 ms to import on its own) only when a listener has a
+problem to log.
 """
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-log = logging.getLogger("moxi.usage")
+#: The logger a listener's problem goes to.
+LOGGER = "moxi.usage"
+
+
+def _warn(message: str) -> None:
+    import logging
+
+    logging.getLogger(LOGGER).warning(message, exc_info=True)
 
 
 def usage(event: Any) -> None:
@@ -42,7 +50,7 @@ def usage(event: Any) -> None:
         readings.add_claude(rate_limits, observed_at=received,
                             session_id=getattr(event, "session_id", None), now=received)
     except Exception:  # noqa: BLE001 - a listener fails open
-        log.warning("usage: the Claude limits reading was not stored", exc_info=True)
+        _warn("usage: the Claude limits reading was not stored")
     return None
 
 
@@ -60,8 +68,7 @@ def codex_limits(event: Any) -> None:
         records = codex.limits_from_app_server(payload, received)
         readings.add_codex(records, now=received)
     except Exception:  # noqa: BLE001 - a listener fails open
-        log.warning("usage: the Codex app-server limits reading was not stored",
-                    exc_info=True)
+        _warn("usage: the Codex app-server limits reading was not stored")
     return None
 
 
