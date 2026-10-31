@@ -317,6 +317,16 @@ def test_an_active_set_reads_active_with_its_epoch_and_gives_the_daemon_its_enab
         w.sup.invocations[f"{STEM}-1.socket"] != ids[1]
 
 
+def test_a_failed_set_also_names_the_units_that_are_not_active(w):
+    w.module(shell("127.0.0.1", "::1", "127.0.0.2"))
+    w.apply(units.plan("demo"))
+    w.sup.props[f"{STEM}-1.socket"] = {"ActiveState": "failed"}
+    w.sup(["systemctl", "--user", "stop", f"{STEM}-2.socket"])
+    sock = states()[("shell", "socket")]
+    assert (sock.state, sock.epoch) == ("failed", None)
+    assert sock.detail == f"failed: {STEM}-1.socket; not active: {STEM}-2.socket"
+
+
 def test_a_failed_or_stopped_unit_gives_no_epoch(w):
     w.module(shell("127.0.0.1", "::1"))
     w.apply(units.plan("demo"))

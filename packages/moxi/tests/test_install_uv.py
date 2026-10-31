@@ -124,6 +124,35 @@ def test_install_in_a_uv_tool_environment(tool):
     assert "the shortcut" not in tool.moxi("modules")
 
 
+def test_uninstall_in_a_uv_tool_environment_keeps_what_the_module_pulled_in(
+        tool, tmp_path, uv_env, wheels):
+    # A home of its own, so no harness folder of this account's is read or written.
+    uv_env["HOME"] = str(tmp_path / "home")
+    # relay needs turns, which the find-links index holds, so uv pulls turns in as a
+    # dependency and the receipt names only relay. Neither ships a command of its own.
+    # (The fixture's comms ships a `moxi` script, and uv takes that file away with comms,
+    # the core's command with it.)
+    wheels.module(tmp_path / "index", "turns", requires=("moxi>=0.1,<0.2",))
+    relay = wheels.module(tmp_path / "relay", "relay",
+                          requires=("moxi>=0.1,<0.2", "moxi-turns>=0.1,<0.2"))
+    tool.moxi("install", "relay", "--none", "--from", f"moxi-relay @ {relay.as_uri()}")
+    assert sorted(tool.modules()) == ["relay", "turns"]
+    assert [r["name"] for r in tool.receipt()["requirements"]] == ["moxi", "moxi-relay"]
+
+    out = tool.moxi("uninstall", "relay")
+    assert "uninstalled relay (moxi-relay 0.1.0)" in out
+    assert ("turns was installed for relay, and nothing else requires it now; uninstall "
+            "it with: moxi uninstall turns") in out
+    assert sorted(tool.modules()) == ["turns"]
+    # The re-run wrote turns into the receipt, or uv would have taken it away.
+    assert [r["name"] for r in tool.receipt()["requirements"]] == ["moxi", "moxi-turns"]
+    assert tool.receipt()["options"]["find-links"]
+    # turns' own uninstall line works, and leaves the core alone.
+    tool.moxi("uninstall", "turns")
+    assert tool.modules() == {}
+    assert [r["name"] for r in tool.receipt()["requirements"]] == ["moxi"]
+
+
 def test_install_names_the_closure_when_a_member_is_left_out(tool):
     out = tool.moxi("install", "comms", "--none", "--from", tool.frm("comms"), code=1)
     assert "the install failed" in out
