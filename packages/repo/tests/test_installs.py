@@ -522,6 +522,111 @@ def test_teardown_drops_a_git_dir_left_with_nothing_of_repos_in_it(demo, capsys)
                    f"lists no other work tree of its git dir {bare}\n")
 
 
+def _bare_with_worktree(demo, hooks: Path) -> tuple[Path, Path, str]:
+    """A bare repo `proj.git` whose `core.hooksPath` is `hooks`, holding the user's own
+    pre-commit hook, and a worktree `wt` of it. Returns them and that hook's text."""
+    src = demo.repo("src")
+    bare, wt = demo.tmp / "proj.git", demo.tmp / "wt"
+    git(demo.tmp, "clone", "-q", "--bare", str(src), str(bare))
+    hooks.mkdir()
+    mine = "#!/bin/sh\necho the existing hook of proj\n"
+    (hooks / "pre-commit").write_text(mine, encoding="utf-8")
+    (hooks / "pre-commit").chmod(0o755)
+    git(bare, "config", "core.hooksPath", str(hooks))
+    git(bare, "worktree", "add", "-q", str(wt), "-b", "side")
+    return bare, wt, mine
+
+
+def _dropped(wt: Path, bare: Path) -> str:
+    return (f"dropped {wt} from the index: {wt} is no longer a git work tree, and git lists "
+            f"no other work tree of its git dir {bare}")
+
+
+def test_teardown_of_a_git_dir_left_with_no_work_tree_follows_its_hooks_path_inside_it(
+        demo, capsys):
+    """Shim mode with `core.hooksPath` inside the git dir: the shim goes, the user's hook
+    moves back, and a worktree added later commits with nothing of repo's run."""
+    bare, wt, mine = _bare_with_worktree(demo, demo.tmp / "proj.git" / "custom")
+    hooks = bare / "custom"
+    api.add(wt, ["demo/gate"], mode="shim")
+    assert shim.shim_event(hooks / "pre-commit") == "pre-commit"
+    assert (hooks / "pre-commit.local").read_text() == mine
+    git(bare, "worktree", "remove", str(wt))
+    capsys.readouterr()
+    assert repo_install.teardown() == 0
+    out, err = capsys.readouterr()
+    assert err == ""
+    assert (_dropped(wt, bare) + f"; removed repo's config keys and git hooks from {bare} "
+            "too\n") in out
+    assert "outside" not in out
+    assert (hooks / "pre-commit").read_text() == mine
+    assert not (hooks / "pre-commit.local").exists()
+    assert ours_in_config(bare) == ""
+    later = demo.tmp / "later"
+    git(bare, "worktree", "add", "-q", str(later), "-b", "later")
+    demo.act(gate="refuse")
+    change(later)
+    done = commit(later)
+    assert done.returncode == 0, done.stderr
+    assert "the existing hook of proj" in done.stdout + done.stderr
+    assert demo.ids() == []
+
+
+def test_teardown_of_a_git_dir_left_with_no_work_tree_names_the_chain_line_outside_it(
+        demo, capsys):
+    """Shim mode with `core.hooksPath` outside the git dir goes through the launcher: the
+    teardown removes the config keys and the launcher, removes nothing in that hooks dir,
+    says so, and names the git hook the user added the chain line to."""
+    shared = demo.tmp / "sharedhooks"
+    bare, wt, mine = _bare_with_worktree(demo, shared)
+    report = api.add(wt, ["demo/gate"], mode="shim")
+    [(_, _, _, line, _)] = [c for c in report.chain if c[1] == "pre-commit"]
+    managed = shared / "pre-commit"
+    text = f"{mine}{line}\n"
+    managed.write_text(text, encoding="utf-8")
+    assert (bare / "moxi-repo" / "hook").exists()
+    git(bare, "worktree", "remove", str(wt))
+    capsys.readouterr()
+    assert repo_install.teardown() == 0
+    out, err = capsys.readouterr()
+    assert err == ""
+    assert out == (_dropped(wt, bare) + f"; removed repo's config keys and launcher from "
+                   f"{bare} too; its hooks dir {shared} is outside that git dir, so repo "
+                   "removed nothing there\n"
+                   f"{managed} still holds repo's chain line for pre-commit, which does "
+                   "nothing now; delete that line\n")
+    assert managed.read_text() == text
+    assert sorted(p.name for p in shared.iterdir()) == ["pre-commit"]
+    assert not (bare / "moxi-repo").exists()
+    assert ours_in_config(bare) == ""
+
+
+def test_teardown_of_a_git_dir_left_with_no_work_tree_names_a_moved_hook_outside_it(
+        demo, capsys):
+    """The user moved a hooks dir that held repo's shim out of the git dir and pointed
+    `core.hooksPath` at its new place: the shim goes, and the hook repo moved aside there
+    is named and left as it is, since repo moves nothing outside the git dir."""
+    bare, wt, mine = _bare_with_worktree(demo, demo.tmp / "proj.git" / "custom")
+    api.add(wt, ["demo/gate"], mode="shim")
+    shared = demo.tmp / "sharedhooks"
+    (bare / "custom").rename(shared)
+    git(bare, "config", "core.hooksPath", str(shared))
+    git(bare, "worktree", "remove", str(wt))
+    capsys.readouterr()
+    assert repo_install.teardown() == 0
+    out = capsys.readouterr().out
+    hook, local = shared / "pre-commit", shared / "pre-commit.local"
+    assert out == (_dropped(wt, bare) + f"; removed repo's config keys from {bare} too; its "
+                   f"hooks dir {shared} is outside that git dir, so repo removed only its "
+                   "shims there\n"
+                   f"{local} may be the git hook repo moved aside for pre-commit, left as it "
+                   f"is outside {bare}; repo no longer records it, so move it back to {hook} "
+                   "or delete it\n")
+    assert sorted(p.name for p in shared.iterdir()) == ["pre-commit.local"]
+    assert local.read_text() == mine
+    assert ours_in_config(bare) == ""
+
+
 def test_teardown_leaves_a_moved_hook_whose_slot_was_taken_and_no_longer_records_it(
         demo, capsys):
     repo = demo.repo()

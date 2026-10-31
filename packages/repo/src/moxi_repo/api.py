@@ -731,11 +731,51 @@ def chain_holders(repo: Repo) -> list[tuple[str, Path]]:
             if gitconf.holds_chain_line(hook, event)]
 
 
+def _shims_to_remove(repo: Repo) -> bool:
+    """True when `remove_all` has shims of repo's to take out of the git dir: in the hooks
+    dir when it is inside it, or in `<common git dir>/hooks` when git reads another."""
+    return bool((repo.hooks_inside and shim.our_shims(repo.hooks_dir))
+                or (repo.stray_dir is not None and shim.our_shims(repo.stray_dir)))
+
+
 def _wrote_in(repo: Repo, state: gitconf.State) -> bool:
-    """True when anything of repo's is in the repo: a config key, a shim, a git hook it
-    moved aside, or `<common git dir>/moxi-repo/`."""
+    """True when `remove_all` has something of repo's to remove there: a config key, a
+    shim, a git hook it moved aside, or `<common git dir>/moxi-repo/`."""
     return bool(state.sections or state.entries or state.moved or repo.own_dir.exists()
-                or shim.our_shims(repo.hooks_dir))
+                or _shims_to_remove(repo) or shim.our_shims(repo.hooks_dir))
+
+
+def _removing(repo: Repo, state: gitconf.State) -> str:
+    """What `remove_all` is about to remove from the repo's git dir, in words, for its
+    line."""
+    parts = []
+    if state.sections or state.entries:
+        parts.append("config keys")
+    if state.entries or _shims_to_remove(repo):
+        parts.append("git hooks")
+    if repo.launcher.exists():
+        parts.append("launcher")
+    elif not parts and repo.own_dir.exists():
+        parts.append(f"{repo.own_dir.name}/ dir")
+    if len(parts) > 1:
+        return ", ".join(parts[:-1]) + " and " + parts[-1]
+    return parts[0] if parts else "nothing"
+
+
+def _left_outside(repo: Repo, moved: set[str]) -> list[str]:
+    """A line for each git hook repo moved aside (an event in `moved`) that is in a hooks
+    dir outside the git dir, which `remove_all` doesn't move back: it takes only its own
+    shims out of such a dir."""
+    if repo.hooks_inside:
+        return []
+    out = []
+    for event in sorted(moved):
+        local, hook = repo.hooks_dir / (event + shim.LOCAL), repo.hooks_dir / event
+        if local.exists() or local.is_symlink():
+            out.append(f"{local} may be the git hook repo moved aside for {event}, left as "
+                       f"it is outside {repo.common_dir}; repo no longer records it, so "
+                       f"move it back to {hook} or delete it")
+    return out
 
 
 class Teardown(Report):
@@ -756,8 +796,10 @@ def teardown() -> Teardown:
     `<common git dir>/moxi-repo/`), naming each git hook file that still holds a chain line
     for the user to delete; an indexed path that is no longer a repo is dropped from the
     index with one line. When that repo's common git dir is still there with no work tree,
-    what repo wrote in it goes too, through `git --git-dir`, and the line says so. Then
-    every doctor record repo has open is cleared.
+    what repo wrote in it goes too, through `git --git-dir`, and the line says what went;
+    where git reads that git dir's hooks from a dir outside it, only repo's shims there
+    are removed, and the report says so and names each chain line and moved git hook left
+    there. Then every doctor record repo has open is cleared.
 
     It first opens and reads every indexed repo, and when one can't be read (a config git
     can't read, say) it removes nothing and the report names that repo. A step that still
@@ -766,7 +808,7 @@ def teardown() -> Teardown:
     `IndexUnreadable` when the index can't be read."""
     report = Teardown()
     plan: list[tuple[str, dict, Repo | None, str | None, gitconf.State | None,
-                     list[tuple[str, Path]]]] = []
+                     list[tuple[str, Path]], Repo | None]] = []
     for key, entry, repo, why in indexed_repos():
         left = None
         if repo is None:
@@ -780,30 +822,42 @@ def teardown() -> Teardown:
         target = repo or left
         try:
             state = gitconf.read(target) if target is not None else None
-            found = chain_holders(repo) if repo is not None else []
+            found = chain_holders(target) if target is not None else []
         except (gitconf.GitError, OSError) as exc:
             report.problems.append(f"{repo.root if repo is not None else left.common_dir}: "
                                    f"{exc}, so repo can't clean it")
             continue
         if left is not None and not _wrote_in(left, state):
             target = None
-        plan.append((key, entry, target, why, state, found))
+        plan.append((key, entry, target, why, state, found, left))
     if not report.ok:
         return report
     held: list[tuple[str, Path]] = []
-    for key, entry, repo, why, state, found in plan:
+    # Read once every removal is done, so a moved git hook in a hooks dir another indexed
+    # repo shares, which that repo's cleaning has just moved back, isn't named.
+    outside: list[tuple[Repo, set[str]]] = []
+    for key, entry, repo, why, state, found, left in plan:
         gone = why is not None
         root = (entry.get("root") or key) if gone else str(repo.root)
         try:
             if gone:
                 line = f"dropped {root} from the index: {why}"
+                moved = set(state.moved) if state is not None else set()
                 if repo is not None:
+                    what = _removing(repo, state)
+                    shims = not repo.hooks_inside and shim.our_shims(repo.hooks_dir)
                     report.lines += gitconf.remove_all(repo, state, final=True)
-                    line += (f"; removed repo's config keys and git hooks from "
-                             f"{repo.common_dir} too")
+                    line += f"; removed repo's {what} from {repo.common_dir} too"
+                    if not repo.hooks_inside:
+                        line += (f"; its hooks dir {repo.hooks_dir} is outside that git dir, "
+                                 "so repo removed "
+                                 + ("only its shims there" if shims else "nothing there"))
                 _records.close_repo(entry.get("common_dir") or key)
                 _index_drop(key)
                 report.lines.append(line)
+                held += found
+                if left is not None:
+                    outside.append((left, moved))
                 continue
             report.lines += gitconf.remove_all(repo, state, final=True)
             _records.close_repo(repo.common_dir)
@@ -818,6 +872,8 @@ def teardown() -> Teardown:
     for event, hook in held:
         report.lines.append(f"{hook} still holds repo's chain line for {event}, which does "
                             "nothing now; delete that line")
+    for left, moved in outside:
+        report.lines += _left_outside(left, moved)
     if report.ok:
         _records.close_all()
     return report

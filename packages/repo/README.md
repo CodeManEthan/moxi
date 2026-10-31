@@ -435,8 +435,10 @@ does nothing once the launcher is gone, for you to delete. A git hook it moved a
 place another tool's hook has taken stays where it is, named, for you to merge or delete.
 An indexed path that is no longer a repo is dropped from the index with one line; when
 its git dir is still there with no work tree (a bare repo whose last worktree was
-removed), what repo wrote in that git dir goes too, and the line says so. Then every
-doctor record repo left is cleared.
+removed), what repo wrote in that git dir goes too, and the line says what went. When
+that git dir's `core.hooksPath` points outside it, repo removes only its own shims there,
+says so, and names each chain line and each git hook it moved aside that it leaves there.
+Then every doctor record repo left is cleared.
 
 It reads every indexed repo before it removes anything. If one can't be read (a broken
 git config, say), it removes nothing and the uninstall stops with the reason, before

@@ -119,7 +119,8 @@ class Repo:
 class GitDirOnly(Repo):
     """A common git dir that no work tree uses any more (a bare repo whose last worktree
     was removed, say), seen only to remove what repo left there: its config calls go
-    through `git --git-dir=<it>`, and its hooks dir is `<it>/hooks`."""
+    through `git --git-dir=<it>`, and its hooks dir is the one git reads there, by its
+    `core.hooksPath` when it has one."""
 
     __slots__ = ()
 
@@ -132,14 +133,18 @@ class GitDirOnly(Repo):
 
 
 def git_dir_only(common_dir: str | os.PathLike) -> GitDirOnly | None:
-    """`common_dir` as a `GitDirOnly`, or None when it is no longer a git dir."""
+    """`common_dir` as a `GitDirOnly`, or None when it is no longer a git dir. Its hooks
+    dir is git's `--git-path hooks` from inside it, as `resolve` reads a repo's, so a
+    relative `core.hooksPath` is read from the git dir."""
     cgd = Path(common_dir)
     if not cgd.is_dir():
         return None
-    done = git(cgd, f"--git-dir={cgd}", "rev-parse", "--git-dir")
-    if done.returncode != 0:
+    done = git(cgd, f"--git-dir={cgd}", "rev-parse", "--path-format=absolute", "--git-dir",
+               "--git-path", "hooks")
+    lines = done.stdout.splitlines()
+    if done.returncode != 0 or len(lines) < 2:
         return None
-    return GitDirOnly(cgd, cgd, cgd, cgd / "hooks")
+    return GitDirOnly(cgd, cgd, cgd, Path(lines[1]))
 
 
 def key_of(common_dir: str | os.PathLike) -> str:
