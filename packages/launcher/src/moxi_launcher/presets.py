@@ -61,6 +61,8 @@ FILE = "presets.toml"
 KINDS = ("seat", "project")
 #: The seat key that is not a catalog row: where the seat starts, a path or a project key.
 HOME = "home"
+#: The row of config overrides, `key=value` each; one keyed as a posture row is refused.
+CONFIG = "config"
 #: The rows (and the seat's `home`) that name where a session starts; a layer names one.
 PLACE = ("cwd", "project", "scratch", HOME)
 #: The launcher's share of Codex's start context, in characters. A Codex seat whose
@@ -343,11 +345,33 @@ def _check_defaults(table: Mapping[str, object], avail) -> tuple[dict, list[Prob
             if problem is not None:
                 break
             values[key] = _checked(row, value)
+        if problem is None and key in values:
+            # A default reaches every launch of each harness that takes the row.
+            problem = _passed_on_problem(where, key, values[key],
+                                         catalog.HARNESSES if key == catalog.EXTRA
+                                         else [h for h in catalog.HARNESSES
+                                               if key in catalog.load(h)])
         if problem is not None:
             values.pop(key, None)
             problems.append(problem)
     problems += _check_place(where, values, allow_home=False)
     return values, problems
+
+
+def _passed_on_problem(where: str, key: str, value: object,
+                       harnesses: Sequence[str]) -> Problem | None:
+    """The refusal every launch of one of `harnesses` would meet at compose for `value`
+    of `key`: flags passed on (`extra_flags`) that spell an owned or a posture row, or
+    stand in for one, and config overrides (`config`) keyed as a posture row."""
+    for harness in harnesses:
+        try:
+            if key == catalog.EXTRA:
+                catalog.refuse_passthrough(harness, value)
+            elif key == CONFIG:
+                catalog.refuse_posture_keys(harness, value)
+        except Owned as exc:
+            return Problem.of(where, key, exc)
+    return None
 
 
 def _check_preset(preset: Preset, base_harness: str, avail,
@@ -388,11 +412,9 @@ def _check_preset(preset: Preset, base_harness: str, avail,
             problems.append(problem)
             continue
         values[key] = _checked(row, value)
-        if key == catalog.EXTRA:
-            try:
-                catalog.refuse_passthrough(harness, values[key])
-            except Owned as exc:
-                problems.append(Problem.of(where, key, exc))
+        problem = _passed_on_problem(where, key, values[key], (harness,))
+        if problem is not None:
+            problems.append(problem)
     if values.get("instructions") and values.get("instructions_file"):
         problems.append(Problem(where, "instructions", "both instructions and "
                                 "instructions_file are set", "keep one of them",
