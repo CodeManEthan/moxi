@@ -33,7 +33,8 @@ out of the harness. This package is turns' whole public API, the announcement's
     adds = turns.launch_additions(harness, *, cwd, env, session_id=None, commands=())
                               # LaunchAdditions(harness, argv, env, options, notes): what a
                               # launch about to start adds; modules contribute through the
-                              # group moxi.turns.additions (a Contribution each)
+                              # group moxi.turns.additions (a Contribution each;
+                              # its mcp_servers McpServer(url, token_env) values)
     s = turns.codex.launch(cwd, *, instructions=None, env=None, window=True, options=None,
                            verify=None, additions=None, resume=None)   # a Codex host
     kw = turns.codex.launch_args(argv)   # moxi-turns-codex-host's flags as launch()'s
@@ -68,7 +69,7 @@ _WHERE = {
     **dict.fromkeys(("find", "sessions", "wait_ready", "Session", "Delivery", "Watch",
                      "StopHandler", "TurnsError", "VersionError"), "client"),
     **dict.fromkeys(("launch_additions", "LaunchAdditions", "Contribution",
-                     "AdditionsRequest"), "additions"),
+                     "AdditionsRequest", "McpServer"), "additions"),
     "codex_host_available": "codex_host",
     "opencode": "opencode",     # a host's namespace (`turns.opencode.launch`): the module
     **dict.fromkeys(("Facts", "Agents", "Agent", "OpenTurn", "Started", "Refused", "Lost",
@@ -83,7 +84,7 @@ _WHERE = {
 __all__ = [
     "find", "sessions", "wait_ready", "codex", "codex_host_available", "opencode",
     "launch_additions", "LaunchAdditions", "Contribution", "AdditionsRequest",
-    "Session", "Delivery", "Watch", "StopHandler", "TurnsError", "VersionError",
+    "McpServer", "Session", "Delivery", "Watch", "StopHandler", "TurnsError", "VersionError",
     "Facts", "Agents", "Agent", "OpenTurn", "Started", "Refused", "Lost", "Ended", "Ran",
     "Shells", "LeftShell", "Failed", "Ready", "TurnStarted", "TurnSteered", "TurnEnded",
     "DeliveryRef", "Gone", "StopFacts", "SessionEvent",

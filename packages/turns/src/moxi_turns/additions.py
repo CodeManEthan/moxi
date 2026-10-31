@@ -39,8 +39,10 @@ What turns itself adds, per harness:
 It returns a `Contribution` (or a mapping with its fields), or None to add nothing. The
 doctor also calls it, with no session id, to show what each module would add; so it has
 no side effects and answers quickly. A contribution is applied whole or skipped whole,
-with a note and a doctor row; it is never half applied. Hooks are not a contribution: a
-module that wants session events registers a listener.
+with a note and a doctor row; it is never half applied. The one exception is an MCP
+server that cannot go into this launch (below): that server alone is left out, with a
+note and a doctor row, and the rest of the contribution goes in. Hooks are not a
+contribution: a module that wants session events registers a listener.
 
 - `tool_permissions` maps a harness to rules in that harness's own permission syntax,
   which turns passes as given. Module tool permissions go in per launch and are never
@@ -55,14 +57,36 @@ module that wants session events registers a listener.
     rules is skipped for a Codex launch, with a note.
   A rule that is not a non-empty string, or a harness turns does not know, refuses the
   contribution.
-- `mcp_servers` (`{name: spec}`) waits for a later turns: a contribution naming any
-  server is skipped with a note.
+  OpenCode names an MCP server's tool `<server>_<tool>`, hyphens kept, and Claude
+  `mcp__<server>__<tool>`; a rule for one keys on that name.
+- `mcp_servers` maps a server name to `McpServer(url, token_env)` (or a mapping with
+  those keys): an HTTP MCP server at `url`, sent `Authorization: Bearer <token>` with the
+  token taken from the variable `token_env`, or no header when `token_env` is None. A
+  name is lowercase letters, digits and hyphens; a URL is http or https. Per harness:
+  - Claude: one `--mcp-config=<json>` word holding every contribution's servers,
+    `{"mcpServers": {name: {"type": "http", "url": ..., "headers": {"Authorization":
+    "Bearer ${VAR}"}}}}`. Claude expands `${VAR}` from its own environment. The joined
+    form, because `--mcp-config <json>` takes a positional prompt right after it as a
+    second config. No `--strict-mcp-config`: the user's own servers stay beside these.
+  - Codex: `options["config"]["mcp_servers"][name] = {"url": ..., "bearer_token_env_var":
+    VAR, "default_tools_approval_mode": "approve"}`, the thread config the host sends.
+    The host answers no approval request, so a tool held for one would hang.
+  - OpenCode: `options["mcp"][name] = {"type": "remote", "url": ..., "enabled": True,
+    "headers": {"Authorization": "Bearer {env:VAR}"}}`, which OpenCode substitutes in the
+    config it reads at start (`OPENCODE_CONFIG_CONTENT`).
+  **turns never reads a token's value and never writes one into argv, a file or another
+  variable.** It checks only that `token_env` is a key of the launch's `env` and renders
+  a reference to it. A server whose variable is absent is left out, never rendered with
+  an empty token: Claude would send the reference itself and get a 401. So is a server
+  with a bad name or URL, and one whose name an earlier module's server already has.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -75,6 +99,18 @@ GROUP = "moxi.turns.additions"
 HARNESSES = ("claude", "codex", "opencode")
 #: The fields a contribution may carry.
 FIELDS = ("mcp_servers", "tool_permissions")
+#: What an MCP server's name may be.
+SERVER_NAME = re.compile(r"[a-z0-9-]+")
+#: What a token variable's name may be: one Claude's `${...}` and OpenCode's `{env:...}`
+#: both take whole.
+VARIABLE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+#: Characters a server's URL may not hold: whitespace, and what Claude (`${VAR}`) or
+#: OpenCode (`{env:VAR}`) would read as a reference to a variable.
+_URL_REFUSED = re.compile(r"[\s${}]")
+#: Whether the installed OpenCode substitutes `{env:VAR}` in the config it reads at start.
+#: 1.18.34 does. Were it found not to, the OpenCode form is left out with a note: turns
+#: never reads the value to write it in instead.
+OPENCODE_SUBSTITUTES_ENV = True
 
 
 @dataclass(frozen=True)
@@ -88,10 +124,20 @@ class AdditionsRequest:
 
 
 @dataclass(frozen=True)
+class McpServer:
+    """An HTTP MCP server a contribution adds: its URL, and the name of the variable in
+    the launch's environment that holds its bearer token (None: no token). turns renders
+    a reference to the variable and never reads it."""
+
+    url: str
+    token_env: str | None = None
+
+
+@dataclass(frozen=True)
 class Contribution:
     """What one module adds to a launch."""
 
-    mcp_servers: Mapping[str, object] = field(default_factory=dict)
+    mcp_servers: Mapping[str, McpServer] = field(default_factory=dict)
     tool_permissions: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
 
@@ -131,12 +177,22 @@ class Group:
 @dataclass(frozen=True)
 class _Rendered:
     """One contribution for one harness: what it adds, or why it is skipped. `serious`
-    is a skip that is the module's fault (a doctor `fail`), not one that waits on turns."""
+    is a skip that is the module's fault (a doctor `fail`), not one that waits on turns.
+
+    `servers` holds its MCP servers by name, each in the harness's own form, which the
+    launch places once every contribution is in (`_place`): Claude's in one word, the
+    others' in `options`. `left_out` says why each server that could not go in did not."""
 
     argv: tuple[str, ...] = ()
     permission: Mapping[str, object] | None = None
+    servers: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
+    left_out: tuple[str, ...] = ()
     skipped: str | None = None
     serious: bool = False
+
+    @property
+    def adds(self) -> bool:
+        return bool(self.argv or self.permission or self.servers)
 
 
 # -- the group -----------------------------------------------------------------------------
@@ -191,7 +247,9 @@ def launch_additions(harness: str, *, cwd, env: Mapping[str, str],
     variable from it.
 
     For Claude, `env` of the result always holds `MOXI_TURNS_ENDPOINT`, the endpoint
-    command the runner spawns. Nothing is written for it.
+    command the runner spawns. Nothing is written for it. The contributions' MCP servers
+    go last: one `--mcp-config=` word on Claude, `options` on Codex and OpenCode. Of
+    `env`, the renderer asks only whether it holds each server's token variable.
 
     Raises `ValueError` for a harness or a command turns does not know, and
     `moxi_turns.TurnsError` when Claude's plugin folder is missing, turns' config cannot
@@ -233,16 +291,27 @@ def launch_additions(harness: str, *, cwd, env: Mapping[str, str],
     for b in group.broken:
         notes.append(f"additions of {b.module} are off: {b.reason}")
     permission: dict[str, object] = {}
+    servers: dict[str, Mapping[str, object]] = {}
+    owner: dict[str, str] = {}
     for contributor in group.contributors:
         rendered = _ask(contributor, request)
         if rendered.skipped:
             notes.append(f"additions of {contributor.module} skipped: {rendered.skipped}")
             continue
+        notes += [f"additions of {contributor.module}: {why}"
+                  for why in _left_out(rendered, harness, owner)]
         argv += rendered.argv
         if rendered.permission:
             _add_permission(permission, rendered.permission)
+        for name, entry in rendered.servers.items():
+            if name not in owner:
+                owner[name] = contributor.module
+                servers[name] = entry
     if permission:
         options["permission"] = permission
+    server_argv, server_options = _place(harness, servers)
+    argv += server_argv
+    options = merge_options(options, server_options)
     return LaunchAdditions(harness, tuple(argv), out_env, options, tuple(notes))
 
 
@@ -253,11 +322,14 @@ def _ask(contributor: Contributor, request: AdditionsRequest) -> _Rendered:
         return _Rendered(skipped=f"it raised {_describe(exc)}", serious=True)
     if answer is None:
         return _Rendered()
-    return render(answer, request.harness)
+    return render(answer, request.harness, request.env)
 
 
-def render(answer: object, harness: str) -> _Rendered:
-    """One contribution, rendered for `harness`, or the reason it is skipped whole."""
+def render(answer: object, harness: str, env: Mapping[str, str] | None = None
+           ) -> _Rendered:
+    """One contribution, rendered for `harness`, or the reason it is skipped whole. `env`
+    is the launch's environment; of it, only which names it holds is asked (an MCP
+    server's token variable), never a value. Without it no token variable is there."""
     if isinstance(answer, Contribution):
         servers, permissions = answer.mcp_servers, answer.tool_permissions
     elif isinstance(answer, Mapping):
@@ -276,22 +348,130 @@ def render(answer: object, harness: str) -> _Rendered:
     problem = _check_permissions(permissions)
     if problem:
         return _Rendered(skipped=problem, serious=True)
-    if servers:
-        named = ", ".join(sorted(map(str, servers)))
-        return _Rendered(skipped=f"it names MCP servers ({named}), which this turns does "
-                                 "not add yet")
+    specs = _server_specs(servers)
+    if isinstance(specs, str):
+        return _Rendered(skipped=specs, serious=True)
+    rendered, left_out = _render_servers(specs, harness, env if env is not None else {})
     rules = tuple(permissions.get(harness) or ())
     if not rules:
-        return _Rendered()
+        return _Rendered(servers=rendered, left_out=left_out)
     if harness == "claude":
-        return _Rendered(argv=tuple(f"--allowedTools={rule}" for rule in rules))
+        return _Rendered(argv=tuple(f"--allowedTools={rule}" for rule in rules),
+                         servers=rendered, left_out=left_out)
     if harness == "opencode":
         fragment: dict[str, object] = {}
         for rule in rules:
             _add_permission(fragment, _opencode_rule(rule))
-        return _Rendered(permission=fragment)
+        return _Rendered(permission=fragment, servers=rendered, left_out=left_out)
     return _Rendered(skipped=f"it names {len(rules)} Codex tool rule(s), and turns knows "
                              "no way to give Codex a tool rule for one launch")
+
+
+# -- MCP servers ---------------------------------------------------------------------------
+
+
+def _server_specs(servers: Mapping) -> dict[str, McpServer] | str:
+    """Each server as an `McpServer`, or what is wrong with the contribution's shape."""
+    out: dict[str, McpServer] = {}
+    for name, spec in servers.items():
+        if isinstance(spec, Mapping):
+            unknown = sorted(str(k) for k in spec if k not in ("url", "token_env"))
+            if unknown or "url" not in spec:
+                return (f"its MCP server {name!r} is given as a mapping with "
+                        f"{', '.join(map(str, spec)) or 'no keys'}; use url and token_env")
+            spec = McpServer(spec["url"], spec.get("token_env"))
+        elif not isinstance(spec, McpServer):
+            return (f"its MCP server {name!r} is a {type(spec).__name__}, not an "
+                    "McpServer")
+        if not isinstance(spec.url, str):
+            return f"its MCP server {name!r} has a url that is not a string"
+        if spec.token_env is not None and not isinstance(spec.token_env, str):
+            return f"its MCP server {name!r} has a token_env that is not a string or None"
+        out[str(name)] = spec
+    return out
+
+
+def _render_servers(specs: Mapping[str, McpServer], harness: str, env
+                    ) -> tuple[dict[str, dict[str, object]], tuple[str, ...]]:
+    """The servers that can go into this launch, each in `harness`'s form, and why each
+    other one is left out. Of `env`, asks only whether it holds a token variable."""
+    rendered: dict[str, dict[str, object]] = {}
+    left_out: list[str] = []
+    for name in sorted(specs):
+        spec = specs[name]
+        why = _server_problem(name, spec, harness)
+        if why is None and spec.token_env is not None and spec.token_env not in env:
+            why = f"{spec.token_env} is not in the launch's environment"
+        if why is not None:
+            left_out.append(f"MCP server {name!r} left out: {why}")
+            continue
+        rendered[name] = _entry(harness, spec)
+    return rendered, tuple(left_out)
+
+
+def _server_problem(name: str, spec: McpServer, harness: str) -> str | None:
+    if not SERVER_NAME.fullmatch(name):
+        return "a server's name is lowercase letters, digits and hyphens"
+    if _URL_REFUSED.search(spec.url):
+        return "its URL holds whitespace, '$', '{' or '}'"
+    from urllib.parse import urlsplit
+
+    try:
+        url = urlsplit(spec.url)
+        host = url.hostname
+    except ValueError as exc:
+        return f"its URL does not parse: {exc}"
+    if url.scheme not in ("http", "https") or not host:
+        return "its URL is not an http or https URL with a host"
+    if spec.token_env is not None and not VARIABLE_NAME.fullmatch(spec.token_env):
+        return f"its token_env {spec.token_env!r} is not a variable name"
+    if (harness == "opencode" and spec.token_env is not None
+            and not OPENCODE_SUBSTITUTES_ENV):
+        return ("this OpenCode does not substitute {env:...} in its config, and turns "
+                "never writes a token's value")
+    return None
+
+
+def _entry(harness: str, spec: McpServer) -> dict[str, object]:
+    """One server in `harness`'s form. A token is a reference to its variable only."""
+    var = spec.token_env
+    if harness == "claude":
+        entry: dict[str, object] = {"type": "http", "url": spec.url}
+        if var is not None:
+            entry["headers"] = {"Authorization": f"Bearer ${{{var}}}"}
+        return entry
+    if harness == "codex":
+        entry = {"url": spec.url}
+        if var is not None:
+            entry["bearer_token_env_var"] = var
+        entry["default_tools_approval_mode"] = "approve"
+        return entry
+    entry = {"type": "remote", "url": spec.url, "enabled": True}
+    if var is not None:
+        entry["headers"] = {"Authorization": f"Bearer {{env:{var}}}"}
+    return entry
+
+
+def _left_out(rendered: _Rendered, harness: str, owner: Mapping[str, str]) -> list[str]:
+    """Why each of a contribution's servers stays out of this launch: its own reasons, and
+    a name an earlier module's server (`owner`) already has."""
+    return list(rendered.left_out) + [
+        f"MCP server {name!r} left out: {owner[name]} already adds a server of that name"
+        for name in rendered.servers if name in owner]
+
+
+def _place(harness: str, servers: Mapping[str, Mapping[str, object]]
+           ) -> tuple[tuple[str, ...], dict[str, object]]:
+    """Every contribution's servers, where `harness` takes them: argv for Claude (one
+    word), options for Codex and OpenCode."""
+    if not servers:
+        return (), {}
+    if harness == "claude":
+        config = json.dumps({"mcpServers": dict(servers)}, separators=(",", ":"))
+        return (f"--mcp-config={config}",), {}
+    if harness == "codex":
+        return (), {"config": {"mcp_servers": dict(servers)}}
+    return (), {"mcp": dict(servers)}
 
 
 def _check_permissions(permissions: Mapping) -> str | None:
@@ -380,8 +560,12 @@ def merge_options(under: Mapping, over: Mapping) -> dict:
 def rows() -> list:
     """The doctor's `additions <module>` rows: an entry that does not load, or a
     contribution that raises or is malformed, is `fail`; one skipped on a harness for a
-    reason that waits on turns (MCP servers, Codex rules) is `warn`; else `ok`, naming
-    the harnesses it adds to."""
+    reason that waits on turns (Codex rules) is `warn`; else `ok`, naming the harnesses
+    it adds to. A module with an MCP server left out on a harness (its token variable is
+    not in this environment, a bad name or URL, a name an earlier module's server has,
+    or a form this harness cannot take) also gets an `additions <module>: mcp_servers`
+    `warn` row. The doctor asks each contributor about a launch with its own directory
+    and environment."""
     from moxi import doctor as moxi_doctor
 
     from .doctor import MODULE
@@ -393,14 +577,22 @@ def rows() -> list:
                                    "reinstall or fix that module"))
     cwd = os.getcwd()
     env = MappingProxyType(dict(os.environ))
+    owners: dict[str, dict[str, str]] = {harness: {} for harness in HARNESSES}
     for contributor in group.contributors:
         adds, skips, serious = [], [], False
+        left_out: dict[str, list[str]] = {}
         for harness in HARNESSES:
             rendered = _ask(contributor, AdditionsRequest(harness, cwd, env))
             if rendered.skipped:
                 skips.append(f"{harness}: {rendered.skipped}")
                 serious = serious or rendered.serious
-            elif rendered.argv or rendered.permission:
+                continue
+            owner = owners[harness]
+            for why in _left_out(rendered, harness, owner):
+                left_out.setdefault(why, []).append(harness)
+            for name in rendered.servers:
+                owner.setdefault(name, contributor.module)
+            if rendered.adds:
                 adds.append(harness)
         if skips:
             out.append(moxi_doctor.Row(
@@ -410,6 +602,13 @@ def rows() -> list:
             out.append(moxi_doctor.Row(
                 MODULE, f"additions {contributor.module}", "ok",
                 f"adds to {', '.join(adds)}" if adds else "adds nothing here"))
+        if left_out:
+            out.append(moxi_doctor.Row(
+                MODULE, f"additions {contributor.module}: mcp_servers", "warn",
+                "; ".join(f"{', '.join(harnesses)}: {why}"
+                          for why, harnesses in left_out.items()),
+                f"a launch through {contributor.module} stamps a server's token variable; "
+                f"a bad name or URL is {contributor.module}'s to fix"))
     return out
 
 
@@ -417,5 +616,6 @@ def _describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
 
 
-__all__ = ["GROUP", "HARNESSES", "AdditionsRequest", "Contribution", "LaunchAdditions",
-           "launch_additions", "load", "render", "for_host", "merge_options", "rows"]
+__all__ = ["GROUP", "HARNESSES", "AdditionsRequest", "Contribution", "McpServer",
+           "LaunchAdditions", "launch_additions", "load", "render", "for_host",
+           "merge_options", "rows"]
