@@ -11,9 +11,10 @@ to a port only a socket holds, so a doctor run never starts the shell:
   keeps failing its bind shows beside the held port.
 - `page:<module>`: with the shell answering, from its `/servers` data, each sampled now;
   otherwise from `servers.json`, which the shell rewrites at each child exit. The last
-  three starts failed is a fail, with the log's path; a crash in the last hour, a start
-  that failed since the last good one, or a sample over the page's budget is a warn; a
-  running server within its budget is ok; one not running is off.
+  three starts failed is a fail, with the log's path; a crash in the last hour or a
+  sample over the page's budget is a warn; a running server within its budget is ok; one
+  not running is off, with its counts. One or two failed starts in a row are no warn of
+  their own: the next start tries again, and a third makes the fail.
 
 The UI module declares no `BUDGETS`: the core would count every page server as the
 shell's, so the shell's own budget is compared here, on its own pid only.
@@ -107,8 +108,6 @@ def page_row(data: Mapping[str, Any], *, now: float | None = None,
     if crashed is not None and now - crashed <= CRASH_WINDOW:
         warns.append(f"crashed at {data['last_crash_at']}"
                      + (f" ({reason})" if reason and not in_row else ""))
-    if in_row:
-        warns.append("the last start failed" + (f": {reason}" if reason else ""))
     sample = data.get("sample") if isinstance(data.get("sample"), Mapping) else None
     warns += health.over_budget(sample, data.get("budget"))
     state = data.get("state")

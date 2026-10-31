@@ -85,6 +85,16 @@ def test_the_rows_with_the_shell_up_come_from_its_servers_data():
     assert "1 streams" in by["page:fine"].detail
 
 
+@pytest.mark.parametrize("in_row", [1, 2])
+def test_one_or_two_failed_starts_are_no_warn(in_row):
+    idle = doctor.page_row(_server("flaky", state="idle", failed_in_row=in_row,
+                                   failed_starts=in_row, reason="exited 3 at start"), now=NOW)
+    assert idle.state == "off" and idle.detail.startswith("not running (idle); 1 starts")
+    running = doctor.page_row(_server("flaky", failed_in_row=in_row, reason="exited 3"),
+                              now=NOW)
+    assert running.state == "ok" and "exited 3" not in running.detail
+
+
 def test_a_shell_listening_off_its_port_setting_is_a_warn(runtime):
     _set_port(8471)
     row = doctor.shell_rows(_running([], port=8460))[0]
