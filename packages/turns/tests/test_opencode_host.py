@@ -520,9 +520,14 @@ def test_a_4xx_post_refuses_and_ends_the_endpoint(host):
     s, h, world = host()
     world.fake.post_answers.append((400, {"name": "BadRequest"}))
     # The server turned the text down, so it never ran: `unsupported`, settled before the
-    # endpoint ends. A wait that connects only after the end finds nothing serving.
+    # endpoint ends. The end runs on a thread of its own, so the wait can land after it:
+    # while the ending endpoint still listens it answers every method with the `gone`
+    # error, which a wait reads as `lost` (the socket protocol, "Refused"), and once it
+    # has closed a wait finds nothing serving.
     got = bare(s.deliver("x", only_if_idle=True).wait_started(5))
-    assert got in (Refused("unsupported"), Lost("unanswered"))
+    ending = (isinstance(got, Lost) and got.reason.startswith("gone: the endpoint is ending")
+              and "400" in got.reason)
+    assert got in (Refused("unsupported"), Lost("unanswered")) or ending, got
     assert until(lambda: h.endpoint.is_gone)
     assert "400" in h.endpoint._gone
 
