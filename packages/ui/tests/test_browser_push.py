@@ -215,8 +215,11 @@ def test_the_servers_block_follows_a_running_server_a_crash_and_a_failed_start(
     # The next start fails: the push upstream's reconnect meets a page server that exits 3.
     fixture_kit.fail_start(shell)
     shell.kill("fixture")
-    expect(row.locator(".state")).to_have_text("failed to start", timeout=10_000)
-    expect(row).to_have_class("fail")
+    # One failed start is no warning of its own: the row says not running, why, and when
+    # it tries again. Its tone is the warning of the crash a moment before.
+    expect(row).to_contain_text("The last start failed", timeout=10_000)
+    expect(row.locator(".state")).to_have_text("not running")
+    expect(row).to_have_class("warn")
     expect(row).to_contain_text("The next request after 10 s tries again.")
     expect(row).to_contain_text("last exited with code 3")
     expect(row).to_contain_text("log: ")

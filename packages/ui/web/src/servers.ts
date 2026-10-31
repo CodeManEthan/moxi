@@ -1,7 +1,8 @@
 // <moxi-ui-servers>: the modules view's home block. Each module's page server and its
-// state, kept current by the shell's topic `ui.servers`: running, idle, restarting for a
-// new version, failed to start, with its starts, crashes and last exit, and the doctor's
-// warn and fail cases (a crash in the last hour, three failed starts in a row).
+// state, kept current by the shell's topic `ui.servers`: running, starting, restarting for
+// a new version, or not running (idle, or its last start failed and the next request tries
+// again), with its starts, crashes and last exit, and the doctor's warn and fail cases (a
+// crash in the last hour, three failed starts in a row).
 
 import { css, html, LitElement } from "lit";
 import { subscribe } from "/m/ui/client.js";
