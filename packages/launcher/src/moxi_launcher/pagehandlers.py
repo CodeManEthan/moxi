@@ -51,12 +51,13 @@ request file is still there or the launch log already knows its id.
 refusals a resume meets before anything runs, as `moxi launcher resume` words them: no
 launch holds the id, the launch ran headless (nothing to resume it into), it has no session
 id, its harness is no longer launched, its session is live now (liveness read at the call),
-or its liveness can't be read. A launch that ran in a terminal is not resumed here: the
+its liveness can't be read, or a relaunch, exit or recycle under way owns it (an open run
+whose job still runs). A launch that ran in a terminal is not resumed here: the
 answer is the `moxi launcher resume <id>` command to copy, since run here it would take the
 server's place. A slot launch is resumed by the same detached job as a launch: a request
 file whose act is `resume`, under a new request id that becomes the new launch's, and a 202
-with the status path holding that id. What the resume meets later (an open run, a slot
-slots won't give, another resume of the session starting first) the job records as it
+with the status path holding that id. What the resume meets later (a run opened since, a
+slot slots won't give, another resume of the session starting first) the job records as it
 records a launch's refusal.
 
 A handler cuts each answer to its route's declared keys, and turns any failure it did not
@@ -93,7 +94,8 @@ from moxi import store as core_store
 from moxi.config import ConfigError
 from moxi.paths import Layout
 
-from . import api, catalog, first, job, presets, settings, slots, state, store, target, targets
+from . import (api, catalog, first, job, presets, relaunch, settings, slots, state, store, target,
+               targets)
 from . import resume as resuming
 from .compose import common
 from .page import LAUNCH, LIMIT, RUN
@@ -968,19 +970,22 @@ def launch(call: Any) -> Any:
 
 def resumable(session: str) -> store.LaunchRow:
     """The launch the session id `session` belongs to, when a resume of it may go ahead.
-    Raises the refusal it meets before anything runs: `not-launched`, or `resume`'s own,
-    whatever the session's state (`headless` among them) and then its liveness, read now."""
+    Raises the refusal it meets before anything runs, in the order the command line's
+    resume meets them: `not-launched`, or `resume`'s own, whatever the session's state
+    (`headless` among them) and then its liveness, read now; then `run-open` while a
+    relaunch, exit or recycle under way owns the session and its job still runs."""
     with _store() as conn:
         row = None if conn is None else store.resolve(conn, session)
-    if row is None:
-        raise target.NotLaunched()
-    newest = row.newest_session_id or row.session_id
-    refused = resuming.static_refusal(row, newest)
-    if refused is None:
-        live, unread = resuming.liveness(row, newest, first.turns_api(quiet=True))
-        refused = resuming.live_refusal(row, newest, live, unread)
-    if refused is not None:
-        raise refused
+        if row is None:
+            raise target.NotLaunched()
+        newest = row.newest_session_id or row.session_id
+        refused = resuming.static_refusal(row, newest)
+        if refused is None:
+            live, unread = resuming.liveness(row, newest, first.turns_api(quiet=True))
+            refused = resuming.live_refusal(row, newest, live, unread)
+        if refused is not None:
+            raise refused
+        relaunch._no_open_run(conn, row, slots.api())
     return row
 
 

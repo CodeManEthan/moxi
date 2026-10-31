@@ -153,6 +153,37 @@ def test_a_liveness_that_cant_be_read_is_refused(monkeypatch):
     assert "the endpoint did not answer" in said["refused"]["problem"]
 
 
+def open_run(request_id="r1") -> None:
+    """A relaunch run open on `request_id`'s launch, its job this test's own process."""
+    mine = proc.identity(os.getpid())
+    with_store(lambda c: store.insert_run(c, kind="relaunch", mode="self",
+                                          request_id=request_id, session_id=SID, actor="ann",
+                                          job=f"proc:{mine.pid}@{mine.started:.6f}"))
+
+
+@pytest.mark.parametrize("target_name", ["slot", "terminal"])
+def test_a_run_under_way_is_refused_run_open_in_the_route(target_name):
+    # A relaunch, exit or recycle under way owns the session: the route says so before
+    # anything is written or spawned, as the command line's resume does.
+    seed(target_name=target_name)
+    open_run()
+    said = resumed({"session": SID})
+    assert said["command"] is None and said["refused"]["code"] == "run-open"
+    assert said["refused"]["hint"] == "that run must end first"
+    assert no_request_files()
+
+
+def test_a_run_whose_job_is_gone_does_not_hold_the_resume(monkeypatch):
+    monkeypatch.setattr(pagehandlers, "_spawn", Spawned())
+    seed()
+    with_store(lambda c: store.insert_run(c, kind="relaunch", mode="self", request_id="r1",
+                                          session_id=SID, actor="ann",
+                                          job=f"proc:{os.getpid()}@{ENDED:.6f}",
+                                          at="2020-01-01T00:00:00.000000Z"))
+    status, _ = post("/api/resume", {"session": SID})
+    assert status == 202
+
+
 def test_an_unexpected_failure_names_only_its_class(monkeypatch):
     def broken(conn, session_id):
         raise RuntimeError("/home/someone/private")
@@ -288,10 +319,7 @@ def test_a_session_live_by_the_time_the_job_runs_is_recorded(monkeypatch):
 
 def test_a_run_under_way_is_recorded_run_open():
     seed()
-    mine = proc.identity(os.getpid())
-    with_store(lambda c: store.insert_run(c, kind="relaunch", mode="self", request_id="r1",
-                                          session_id=SID, actor="ann",
-                                          job=f"proc:{mine.pid}@{mine.started:.6f}"))
+    open_run()
     resume_file()
     assert job.run_request("r9", launch=Launch()) == "refused"
     assert requested("r9")["refused"]["code"] == "run-open"
