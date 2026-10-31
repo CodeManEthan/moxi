@@ -19,6 +19,14 @@ from moxi_loopback.check import upstream
 from moxi_loopback.routes import Field, Out, Page, PageError, Route, Table, build_table, export
 from moxi_loopback.server import app, guard, prove
 
+
+async def until(condition, seconds: float = 5.0) -> None:
+    """Wait for `condition()` to hold, failing the test after `seconds` rather than hanging."""
+    async with asyncio.timeout(seconds):
+        while not condition():
+            await asyncio.sleep(0.005)
+
+
 PACKAGE = "lbconfirmed"
 
 HANDLERS = '''
@@ -287,8 +295,7 @@ def test_two_requests_with_one_key_sent_together_run_the_handler_once(h):
         h.STATE["mode"] = "wait"
         h.STATE["release"] = asyncio.Event()
         first = asyncio.create_task(drive(chain, post(key_=value), b"{}"))
-        while not h.CALLS:
-            await asyncio.sleep(0.005)
+        await until(lambda: h.CALLS)
         second = await drive(chain, post(key_=value), b"{}")
         h.STATE["release"].set()
         return await first, second
@@ -361,8 +368,7 @@ def test_another_body_while_the_first_still_runs_is_a_422(h):
         h.STATE["mode"] = "wait"
         h.STATE["release"] = asyncio.Event()
         first = asyncio.create_task(drive(chain, post(key_=value), b'{"n":1}'))
-        while not h.CALLS:
-            await asyncio.sleep(0.005)
+        await until(lambda: h.CALLS)
         other = await drive(chain, post(key_=value), b'{"n":2}')
         h.STATE["release"].set()
         await first
@@ -402,8 +408,7 @@ def test_a_key_answered_503_past_the_in_flight_cap_is_not_claimed(h):
         h.STATE["release"] = asyncio.Event()
         tasks = [asyncio.create_task(drive(chain, scope(path="/api/wait")))
                  for _ in range(server.INFLIGHT_CAP)]
-        while inner.activity.requests < server.INFLIGHT_CAP:
-            await asyncio.sleep(0.005)
+        await until(lambda: inner.activity.requests >= server.INFLIGHT_CAP)
         over = await drive(chain, post(key_=value), b"{}")
         h.STATE["release"].set()
         await asyncio.gather(*tasks)
@@ -439,8 +444,7 @@ def test_a_handler_cut_short_keeps_its_key_claimed_with_a_500(h):
         h.STATE["mode"] = "wait"
         h.STATE["release"] = asyncio.Event()
         first = asyncio.create_task(drive(chain, post(key_=value), b"{}"))
-        while not h.CALLS:
-            await asyncio.sleep(0.005)
+        await until(lambda: h.CALLS)
         first.cancel()
         with pytest.raises(asyncio.CancelledError):
             await first
