@@ -35,7 +35,7 @@ from pathlib import Path
 
 import pytest
 
-from moxi_comms import cli, config, machine_line, tokens as tokens_mod
+from moxi_comms import cli, config, machine_line, reserved, tokens as tokens_mod
 from moxi_comms.adapters.claude_shim import ACTIVITY_METHODS, ClaudeShim
 from moxi_comms.claimfile import HOLDS
 from moxi_comms.claimhold import CLAIM_SOCKET_ENV, ClaimServer
@@ -201,6 +201,44 @@ def turns_plugins(monkeypatch, tmp_path_factory) -> Path:
 #: wrapper's launch additions in the child write their files there too.
 TURNS_PLUGINS_PATCH = ("import pathlib, moxi_turns.claude_setup as _cs; "
                        "_cs.claude_root = lambda: pathlib.Path({root!r}); ")
+
+
+#: The reserve step's own read of the modules installed, before `installs` scopes it.
+_DECLARED_NAMES = reserved.declared_names
+
+
+@pytest.fixture(autouse=True)
+def installs(monkeypatch) -> set:
+    """The modules whose declared names comms' reserve step sees in this test: none,
+    unless the test adds one.
+
+    The workspace installs every module together, so the reserve step would otherwise
+    find each one's `RESERVED_NAMES` (the launcher's `console`, say) in every test, and a
+    test that inserts its own row for such a name, or counts the standing names, would
+    meet it. A test that installs a module says so by adding its name to the set; a test
+    that fakes the core's scan adds the fakes' names. The `whole_workspace` fixture lets
+    the reserve step see every module installed. A daemon run in a child process takes
+    the same view from `RESERVED_NONE_PATCH`."""
+    seen: set = set()
+
+    def scoped(gone=None):
+        return {m: n for m, n in _DECLARED_NAMES(gone).items() if m in seen}
+
+    monkeypatch.setattr(reserved, "declared_names", scoped)
+    return seen
+
+
+@pytest.fixture
+def whole_workspace(installs, monkeypatch) -> None:
+    """The reserve step sees every module this environment installs, as a real install
+    has it."""
+    monkeypatch.setattr(reserved, "declared_names", _DECLARED_NAMES)
+
+
+#: Python a child process runs first, so the reserve step in it sees no module's names,
+#: as `installs` gives a test that adds none.
+RESERVED_NONE_PATCH = ("import moxi_comms.reserved as _rs; "
+                       "_rs.declared_names = lambda gone=None: {}; ")
 
 
 #: Suites that run on both backends. A module here has every one of its rig-using tests
