@@ -497,6 +497,16 @@ def test_the_components_reach_data_only_through_their_routes_and_topics():
     assert '"api/state"' in sessions and '"api/launches"' in sessions
     assert '"launcher","launches"' in sessions
     assert "api/state?session=" in state
+    # The panel reads and acts only through its own routes, follows both topics, draws the
+    # launch form with the shell's one form renderer and places a state per live row.
+    panel = (WEB / "page.js").read_text(encoding="utf-8")
+    assert "fetch(" not in panel and "WebSocket" not in panel and "EventSource" not in panel
+    for route in ("api/catalog", "api/presets", "api/launches", "api/state", "api/sessions",
+                  "api/preview", "api/launch", "api/resume"):
+        assert f'"{route}"' in panel, route
+    assert '"launcher","launches"' in panel and '"launcher","sessions"' in panel
+    assert "moxi-ui-form" in panel and 'mode="submit"' in panel
+    assert '"launcher","state"' in panel
     # Red is drawn with the theme's error colour; the rest with its accent.
     for text in (sessions, state):
         assert "var(--moxi-error)" in text and "var(--moxi-accent)" in text
