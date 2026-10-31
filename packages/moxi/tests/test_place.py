@@ -590,6 +590,30 @@ def test_after_a_hand_back_and_the_givers_removal_the_taker_may_place_or_adopt(
     one(place.plan("comms", [item]), "skip")
 
 
+def test_a_hand_over_handed_on_stands_until_no_owner_places_the_target(home, skill):
+    """comms hands its skill to loadout, which hands it on to tidy: comms skips it while
+    tidy holds it, and places it again once nobody does."""
+    item = Item(skill(), "claude", "comms-send")
+    place.apply(place.plan("comms", [item]))
+    target = home / ".claude" / "skills" / "comms-send"
+    place.adopt("comms", "loadout", place.status("comms"))
+    place.adopt("loadout", "tidy", place.status("loadout"))
+    step = one(place.plan("comms", [item]), "skip")
+    assert step.reason == "comms-send was handed to loadout; skipped"
+    said, say = lines()
+    assert place.apply(place.plan("comms", [item]), say=say) == []
+    assert said == ["comms-send was handed to loadout; skipped"]
+    assert list(ledger()["tidy"]["placed"]) == [str(target)]
+    place.remove("tidy", say=lambda line: None)
+    one(place.plan("comms", [item]), "add")
+    place.apply(place.plan("comms", [item]))
+    led = ledger()
+    assert list(led["comms"]["placed"]) == [str(target)] and not led["comms"]["handed"]
+    # loadout's entry stands while comms holds the target.
+    assert led["loadout"]["handed"][str(target)]["to"] == "tidy"
+    one(place.plan("loadout", [item]), "skip")
+
+
 def test_apply_skips_a_lapsed_hand_over_the_taker_holds_again(home, skill):
     """A plan made while the hand-over had lapsed, applied after the taker placed the
     target again, is skipped at apply and keeps the entry."""

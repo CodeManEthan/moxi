@@ -857,8 +857,8 @@ def _skills(step: Settle) -> bool:
     placed, none handed over), `skills_wanted` asks first, and a no places nothing. When
     it has some, there is no question: the plan updates, adds and removes them as the
     package's `SKILLS` say now, so a module that drops a skill, or `SKILLS` altogether,
-    has it removed. One handed to another owner is skipped while that owner places it;
-    once it doesn't, the skill is placed again with no question. A name in
+    has it removed. One handed to another owner is skipped while any other owner places
+    it; once none does, the skill is placed again with no question. A name in
     `skills.harnesses` whose harness row is skipped or missing still makes its items:
     the placer refuses each (cause `harness`) with a line and keeps what was placed
     there, so a broken row never removes skills and never fails the step (the doctor
