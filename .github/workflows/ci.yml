@@ -5,6 +5,9 @@
 # to main, gating nothing, with only secrets and what it needs installed.
 # The web job runs on all three systems on every push: the web pages' built files must be
 # what the pinned Node toolchain makes from their sources, byte for byte.
+# The browser jobs run ui's browser tests: Chromium and Firefox on Linux on every push,
+# gating; Chromium on Windows and macOS and WebKit on macOS on pushes to main, gating
+# nothing.
 # Actions are pinned to a release commit, with its version beside it.
 
 name: check
@@ -87,6 +90,61 @@ jobs:
         env:
           PYTHONPATH: packages/moxi-dev/src
         run: uv run --no-project --python 3.12 python -m moxi_dev.stamp
+
+  browser:
+    # ui's browser tests, in a real browser through Playwright: Chromium and Firefox on
+    # Linux, on every push, gating. moxi-dev check runs them only where Chromium is
+    # installed, which the linux job's runner is not.
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, firefox]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      - run: uv sync --locked --package moxi-ui
+      - name: install the browser and the system libraries it needs
+        working-directory: packages/ui
+        run: uv run --locked --package moxi-ui playwright install --with-deps ${{ matrix.engine }}
+      - name: the browser tests
+        working-directory: packages/ui
+        run: uv run --locked --package moxi-ui pytest -m browser --ui-browser ${{ matrix.engine }} -n auto
+
+  browser-other:
+    # The same tests in Chromium on Windows and macOS, and in WebKit on macOS. Like the
+    # other non-Linux runs, on pushes to main, gating nothing.
+    if: github.ref == 'refs/heads/main'
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            engine: chromium
+          - os: macos-latest
+            engine: chromium
+          - os: macos-latest
+            engine: webkit
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+      - run: uv sync --locked --package moxi-ui
+      - name: install the browser and the system libraries it needs
+        working-directory: packages/ui
+        run: uv run --locked --package moxi-ui playwright install --with-deps ${{ matrix.engine }}
+      - name: the browser tests
+        working-directory: packages/ui
+        run: uv run --locked --package moxi-ui pytest -m browser --ui-browser ${{ matrix.engine }} -n auto
 
   secrets-windows:
     # The secrets rule files are compared byte for byte (the pin's sha256, the
