@@ -403,10 +403,34 @@ of `git_hooks.mode`.
 
 ### Other modules' upgrades, and uninstall
 
-> **Not written yet.** This part will cover how another module's upgrade or uninstall
-> reaches the pieces it registered, and what `moxi uninstall repo` removes. Until then,
-> `moxi repo git-hooks refresh` re-reads every declaration, and `moxi repo git-hooks remove
-> PATH` takes everything repo wrote out of one repo.
+repo listens to every module's install and uninstall (through the core's `moxi.installs`
+group), so a module's pieces in your repos follow the module:
+
+- **A module installed or upgraded.** Last in each `moxi install <module>`, repo reads that
+  module's declarations again and, in every indexed repo, rewrites each of its pieces whose
+  event, function, fail policy or order changed, with one line per piece. Only those four
+  keys are rewritten: whether the piece is enabled, its `--set` settings and an open doctor
+  record stay as they were. A piece the module no longer declares is removed, as `remove
+  PATH PIECE` removes it, with a line naming it and the repo. So an upgrade that moves a
+  piece's function doesn't leave a closed piece refusing every commit.
+- **A module uninstalled.** `moxi uninstall <module>` removes that module's pieces from
+  every indexed repo, and forgets its committer specs there, saved or not, with their
+  state and doctor records, as `moxi repo specs remove` does.
+
+A repo that can't be read (a broken git config, say) is named with the reason and left as
+it is; the other repos go on. A piece whose new declaration is refused is left as it was,
+with a line.
+
+**`moxi uninstall repo`** first takes out of every indexed repo everything repo wrote
+there, as `moxi repo git-hooks remove PATH` does: its git config sections, hook entries
+and shims, each existing git hook it moved to `<event>.local` moved back, the launcher, and
+`<git dir>/moxi-repo/`. It names each git hook file that still holds a chain line, which
+does nothing once the launcher is gone, for you to delete. An indexed path that is no
+longer a repo is dropped from the index with one line. Then every doctor record repo left
+is cleared. If one repo can't be cleaned, it stays indexed with its records and the
+uninstall stops with the reason, before repo's package is removed; fix it and run the
+uninstall again. With `--purge` the uninstall also asks whether to remove repo's index
+and its ledger of records.
 
 ## Install
 
