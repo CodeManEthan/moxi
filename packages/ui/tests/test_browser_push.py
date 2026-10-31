@@ -127,9 +127,14 @@ def test_seven_tabs_share_one_stream_and_closing_the_leader_hands_it_on(ui_shell
     held = [lock for lock in rest[0].evaluate("navigator.locks.query()")["held"]
             if lock["name"] == "moxi-ui-push"]
     assert len(held) == 1, held
-    # The value is kept across the hand-over, and the next act reaches every tab left.
-    for page in rest:
-        expect(_panel(page).get_by_test_id("count")).to_have_text(f"Count: {n + 1}")
+    # The value is kept across the hand-over: a tab opened now, before any other act, has
+    # only the new leader's stream to show it from.
+    fresh = ui_context.new_page()
+    fresh.goto("/m/fixture/")
+    expect(_panel(fresh).get_by_test_id("count")).to_have_text(f"Count: {n + 1}")
+    assert _streams(ui_shell) == 1
+    rest.append(fresh)
+    # The next act reaches every tab left.
     ui_shell.session().post("/m/fixture/api/add", {"by": 1})
     for page in rest:
         expect(_panel(page).get_by_test_id("count")).to_have_text(f"Count: {n + 2}")
