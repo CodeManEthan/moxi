@@ -47,18 +47,18 @@ def test_standing_bind_is_open_first_bind_wins_and_the_second_is_refused(rig):
     with pytest.raises(DaemonError) as e:
         rig.shim(name="herald", global_=True)
     assert "herald" in str(e.value)
-    assert e.value.response["holder"] == {
+    assert e.value.data["holder"] == {
         "qualified": "herald", "adapter": "claude-shim"}
 
 
 def test_standing_rows_are_read_per_claim_not_from_a_boot_cache(rig):
     from moxi_comms import directory
-    from moxi_comms.paths import directory_db
+    from moxi_comms.paths import comms_db
     from moxi_comms.provision import add_standing
 
-    conn = directory.connect(directory_db())
+    conn = directory.connect(comms_db())
     try:
-        add_standing(rig.gateway, conn, "curator", "proj-a")
+        add_standing(rig.record, conn, "curator", "proj-a")
     finally:
         conn.close()
     s = rig.shim(name="curator", scope="proj-a")
@@ -81,15 +81,15 @@ def test_a_tag_names_one_identity_whatever_the_scope_asking(rig):
         for asking in ("proj-a", "proj-b", "global", None):
             frame = {} if asking is None else {"scope": asking}
             # a scoped identity is named in full, and is the same from everywhere
-            assert c.query("resolve", name="main@proj-a", **frame)["qualified"] == "main@proj-a"
-            assert c.query("resolve", name="main@proj-b", **frame)["qualified"] == "main@proj-b"
+            assert c.call("resolve", {"name": "main@proj-a", **frame})["qualified"] == "main@proj-a"
+            assert c.call("resolve", {"name": "main@proj-b", **frame})["qualified"] == "main@proj-b"
             # a bare name is the global identity, even while main@<asking> is bound
-            r = c.query("resolve", name="main", **frame)
+            r = c.call("resolve", {"name": "main", **frame})
             assert r["qualified"] == "main" and r["bound"] is False and r["deferred"] is True
-            r = c.query("resolve", name="herald", **frame)
+            r = c.call("resolve", {"name": "herald", **frame})
             assert r["qualified"] == "herald" and r["bound"] is True
             # nothing bound: defer as the global identity, never as <asking>'s
-            r = c.query("resolve", name="ghost", **frame)
+            r = c.call("resolve", {"name": "ghost", **frame})
             assert (r["qualified"], r["tier"], r["deferred"]) == ("ghost", "chosen", True)
     finally:
         c.close()
@@ -98,9 +98,9 @@ def test_a_tag_names_one_identity_whatever_the_scope_asking(rig):
 def test_unbound_standing_name_resolves_to_deferral_not_an_error(rig):
     c = client()
     try:
-        r = c.query("resolve", name="main@proj-a")
+        r = c.call("resolve", {"name": "main@proj-a"})
         assert r["tier"] == "standing" and r["deferred"] is True and r["bound"] is False
-        r = c.query("resolve", name="herald", scope="proj-a")
+        r = c.call("resolve", {"name": "herald", "scope": "proj-a"})
         assert r["tier"] == "standing" and r["deferred"] is True and r["bound"] is False
     finally:
         c.close()
@@ -110,7 +110,7 @@ def test_unresolvable_ephemeral_is_an_honest_error(rig):
     c = client()
     try:
         with pytest.raises(DaemonError, match="no such ephemeral identity"):
-            c.query("resolve", name="agent-77", scope="proj-a")
+            c.call("resolve", {"name": "agent-77", "scope": "proj-a"})
     finally:
         c.close()
 
@@ -120,8 +120,8 @@ def test_resolution_is_not_a_liveness_check(rig):
     rig.shim(name="planner", scope="proj-a")
     c = client()
     try:
-        live = c.query("resolve", name="planner@proj-a")
-        deferred = c.query("resolve", name="typo@proj-a")
+        live = c.call("resolve", {"name": "planner@proj-a"})
+        deferred = c.call("resolve", {"name": "typo@proj-a"})
         assert live["route"] == deferred["route"] == "#names"
         assert live["bound"] is True and deferred["bound"] is False
     finally:
@@ -140,7 +140,7 @@ def test_unknown_adapter_kind_is_refused(rig):
     c = client()
     try:
         with pytest.raises(DaemonError, match="unknown adapter kind"):
-            c.register(name="x", scope="proj-a", adapter="telepathy")
+            c.bind(name="x", scope="proj-a", adapter="telepathy")
     finally:
         c.close()
 
@@ -151,10 +151,10 @@ def test_register_still_refuses_an_unknown_adapter_kind(rig):
     c = client()
     try:
         with pytest.raises(DaemonError, match="unknown adapter kind") as e:
-            c.register(name="x", scope="proj-a", adapter="megaphone")
+            c.bind(name="x", scope="proj-a", adapter="megaphone")
     finally:
         c.close()
     said = str(e.value)
-    for kind in ("claude-shim", "codex", "opencode", "send-only"):
+    for kind in ("claude-shim", "codex", "opencode"):
         assert kind in said
     assert "x@proj-a" not in rig.daemon.bindings   # refused at the frame: nothing bound

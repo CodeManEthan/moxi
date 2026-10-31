@@ -4,12 +4,13 @@ Everything the seam shares with the other backend is covered by the parametrised
 suites (conftest's `BOTH_BACKENDS`). What is here is local-only: the id counter surviving a
 trim, two PROCESSES writing without collision, N subscriptions each seeing each id once,
 retention, the two reads the daemon does in bursts staying cheap on a full record, and the
-daemon refusing a `--gateway` flag that disagrees with the box.
+daemon refusing a `--backend` flag that disagrees with the box.
 """
 
 from __future__ import annotations
 
 import os
+import sqlite3
 import subprocess
 import sys
 import time
@@ -17,35 +18,36 @@ import time
 import pytest
 from conftest import wait_until, write_config
 
-from moxi_comms import config, daemon as daemon_mod, gateway as gateway_mod, paths
-from moxi_comms.gateway import Forbidden, GatewayError
-from moxi_comms.local_gateway import (
+from moxi import exit as moxi_exit
+from moxi_comms import config, daemon as daemon_mod, record as record_mod, paths
+from moxi_comms.record import Forbidden, RecordError
+from moxi_comms.local_record import (
     ID_BASE,
     META_OPERATOR_TOKEN_HASH,
-    LocalGateway,
+    LocalRecord,
     token_hash)
-from moxi_comms.mock_gateway import MockGateway
+from moxi_comms.mock_record import MockRecord
 
 
 @pytest.fixture
 def gw(tmp_path):
     """A record of its own, with the pump fast enough for a test to wait on it."""
-    gateway = LocalGateway(tmp_path / "record.db", poll_interval=0.02)
+    record = LocalRecord(tmp_path / "record.db", poll_interval=0.02)
     try:
-        yield gateway
+        yield record
     finally:
-        gateway.close()
+        record.close()
 
 
-def post(gateway, channel_id, text, username="planner"):
-    return gateway.post_as_identity(username, channel_id, text)
+def post(record, channel_id, text, username="planner"):
+    return record.post_as_identity(username, channel_id, text)
 
 
 def test_both_backends_expose_the_remaining_posting_contract():
     active = {"post_as_user", "post_as_identity", "history", "get_message",
               "subscribe", "create_channel", "delete_channel", "register_principal"}
     retired = {"create_webhook", "resolve_secret", "execute_webhook", "webhook_channel"}
-    for backend in (LocalGateway, MockGateway):
+    for backend in (LocalRecord, MockRecord):
         assert all(callable(getattr(backend, name, None)) for name in active)
         assert all(not hasattr(backend, name) for name in retired)
 
@@ -54,8 +56,8 @@ def test_both_backends_expose_the_remaining_posting_contract():
 
 def test_the_record_lives_in_state_beside_the_cursors_and_tokens():
     """STATE, per box, and not DATA."""
-    assert paths.record_db() == paths.cursors_dir().parent / "record.db"
-    assert paths.record_db().parent == paths.tokens_dir().parent
+    assert paths.comms_db() == paths.cursors_dir().parent / "comms.db"
+    assert paths.comms_db().parent == paths.tokens_dir().parent
 
 
 def test_the_file_is_wal_with_its_pragmas(gw):
@@ -70,11 +72,11 @@ POSIX = pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
 
 @POSIX
 def test_a_new_record_is_created_private(tmp_path):
-    gateway = LocalGateway(tmp_path / "state" / "record.db")
+    record = LocalRecord(tmp_path / "state" / "record.db")
     try:
         assert (tmp_path / "state" / "record.db").stat().st_mode & 0o777 == 0o600
     finally:
-        gateway.close()
+        record.close()
 
 
 @POSIX
@@ -82,12 +84,12 @@ def test_a_record_in_a_shared_directory_opens_there_and_leaves_it_shared(tmp_pat
     shared = tmp_path / "shared"
     shared.mkdir()
     shared.chmod(0o775)
-    gateway = LocalGateway(shared / "record.db")
+    record = LocalRecord(shared / "record.db")
     try:
         assert shared.stat().st_mode & 0o777 == 0o775
         assert (shared / "record.db").stat().st_mode & 0o777 == 0o600
     finally:
-        gateway.close()
+        record.close()
 
 
 @POSIX
@@ -97,23 +99,23 @@ def test_a_record_through_a_linked_directory_opens_and_leaves_the_link(tmp_path)
     real.chmod(0o755)
     link = tmp_path / "link"
     link.symlink_to(real)
-    gateway = LocalGateway(link / "record.db")
+    record = LocalRecord(link / "record.db")
     try:
         assert link.is_symlink()
         assert real.stat().st_mode & 0o777 == 0o755
         assert (real / "record.db").stat().st_mode & 0o777 == 0o600
     finally:
-        gateway.close()
+        record.close()
 
 
 @POSIX
 def test_a_missing_record_directory_is_made_private(tmp_path):
-    gateway = LocalGateway(tmp_path / "state" / "comms" / "record.db")
+    record = LocalRecord(tmp_path / "state" / "comms" / "record.db")
     try:
         assert (tmp_path / "state").stat().st_mode & 0o777 == 0o700
         assert (tmp_path / "state" / "comms").stat().st_mode & 0o777 == 0o700
     finally:
-        gateway.close()
+        record.close()
 
 
 @POSIX
@@ -122,11 +124,11 @@ def test_an_existing_record_keeps_its_mode_and_is_not_rewritten(tmp_path):
     import sqlite3
 
     path = tmp_path / "record.db"
-    first = LocalGateway(path)
+    first = LocalRecord(path)
     first.close()
     path.chmod(0o644)
     before = path.read_bytes()
-    second = LocalGateway(path)
+    second = LocalRecord(path)
     try:
         second._conn().execute("SELECT 1")
         assert path.stat().st_mode & 0o777 == 0o644
@@ -170,43 +172,32 @@ def test_release_closes_the_calling_threads_connection_and_only_that(gw):
     assert gw.channel_by_name("nothing") is None
 
 
-def test_each_client_the_daemon_serves_closes_its_connection_when_it_leaves(rig):
-    """One connection per client used to stay open for the daemon's life: each thread
-    serving a client now releases its own when the client goes."""
-    import sqlite3
+def test_the_daemon_holds_a_bounded_set_of_record_connections_however_many_clients(rig):
+    """One connection per client once stayed open for the daemon's life. The daemon now
+    runs every client's methods on its fixed pool, whose threads keep one connection each,
+    so the record's connections are bounded by the pool, not by the clients served."""
+    from moxi_comms import wire
 
-    local = rig.backend == "local"
-    released = []
-    real = rig.gateway.release
-
-    def watching():
-        conn = getattr(rig.gateway._local, "conn", None) if local else None
-        real()
-        # Counted only once the real release has closed it, so the checks below never
-        # run a statement on a connection still being closed.
-        released.append(conn)
-
-    rig.gateway.release = watching
-    for n in range(3):
+    if rig.backend != "local":
+        pytest.skip("only the local record holds connections")
+    clients = wire.WORKERS + 8
+    for n in range(clients):
         rig.shim(name=f"leaver{n}", scope="proj-a").stop()
-    assert wait_until(lambda: len(released) >= 3)
-    if local:
-        assert all(conn is not None for conn in released)   # each served on the record
-        assert not any(conn in rig.gateway._conns for conn in released)
-        for conn in released:
-            with pytest.raises(sqlite3.ProgrammingError):
-                conn.execute("SELECT 1")
+    assert wait_until(lambda: not any(b.startswith("leaver") for b in rig.daemon.bindings))
+    # The pool, plus the daemon's own loops and the test's thread.
+    assert len(rig.record._conns) <= wire.WORKERS + 6 < clients
 
 
 def test_the_schema_has_no_retired_credential_table_or_reply_column(gw):
     conn = gw._conn()
     tables = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert {"channels", "principals", "denied", "messages", "meta", "queue"} == tables
+    assert {"rooms", "principals", "denied", "messages", "meta", "queue"} <= tables
+    assert not {"webhooks", "slots", "channels"} & tables
     columns = [r[1] for r in conn.execute("PRAGMA table_info(messages)")]
-    # `Message`'s seven fields and nothing else
-    assert columns == ["id", "channel_id", "author_id", "author_kind", "author_display",
-                       "content", "timestamp"]
+    # `Message`'s seven fields, then what the store keeps about delivery
+    assert columns == ["id", "room_id", "author_id", "author_kind", "author_display",
+                       "content", "timestamp", "interrupt", "expires_at", "withdrawn_at"]
     assert "reply_to" not in columns
 
 
@@ -263,10 +254,10 @@ def test_two_processes_writing_never_collide_and_never_go_backwards(gw, tmp_path
 
 CHILD_WRITER = """
 import sys
-from moxi_comms.local_gateway import LocalGateway
+from moxi_comms.local_record import LocalRecord
 
 record, channel, count = sys.argv[1:4]
-gw = LocalGateway(record, poll_interval=60)
+gw = LocalRecord(record, poll_interval=60)
 for i in range(int(count)):
     print(gw.post_as_identity("helper", channel, "child %d" % i).id)
 gw.close()
@@ -285,27 +276,39 @@ def test_the_cap_is_sixteen_thousand(gw):
     channel = gw.create_channel("#names")
     assert gw.max_content_length == 16_000
     assert post(gw, channel, "x" * 16_000).content == "x" * 16_000
-    with pytest.raises(GatewayError, match="cap on one message"):
+    with pytest.raises(RecordError, match="cap on one message"):
         post(gw, channel, "x" * 16_001)
     assert len(gw.history(channel)) == 1
 
 
 def test_an_identity_post_writes_one_stamped_row_on_both_backends(rig):
-    message = rig.gateway.post_as_identity(
+    message = rig.record.post_as_identity(
         "planner@proj-a", rig.names_channel, "bound sender")
 
     assert (message.author_kind, message.author_id, message.author_display) == \
         ("identity", "planner@proj-a", "planner@proj-a")
-    assert rig.gateway.history(rig.names_channel) == [message]
+    assert rig.record.history(rig.names_channel) == [message]
 
 
 def test_an_overlong_identity_post_writes_nothing_on_both_backends(rig):
-    with pytest.raises(GatewayError, match="cap on one message"):
-        rig.gateway.post_as_identity(
+    with pytest.raises(RecordError, match="cap on one message"):
+        rig.record.post_as_identity(
             "planner@proj-a", rig.names_channel,
-            "x" * (rig.gateway.max_content_length + 1))
+            "x" * (rig.record.max_content_length + 1))
 
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
+
+
+def test_a_reserved_name_post_writes_one_reserved_row_on_both_backends(rig):
+    message = rig.record.post_as_reserved("console", rig.names_channel, "a module's post")
+
+    assert (message.author_kind, message.author_id, message.author_display) == \
+        ("reserved", "console", "console")
+    assert rig.record.history(rig.names_channel) == [message]
+    with pytest.raises(RecordError, match="cap on one message"):
+        rig.record.post_as_reserved("console", rig.names_channel,
+                                    "x" * (rig.record.max_content_length + 1))
+    assert rig.record.history(rig.names_channel) == [message]
 
 
 def test_the_reader_denial_is_a_real_check(gw):
@@ -323,7 +326,7 @@ def test_the_operator_lane_compares_the_token_against_the_stored_hash(gw):
     """The lane needs a credential like every other lane. The SENDER side of the guard
     is the send verb's; the compare is this backend's."""
     channel = gw.create_channel("#names")
-    assert gw.post_as_user("900001", channel, "before provisioning").author_kind == "user"
+    assert gw.post_as_user("900001", channel, "before provisioning").author_kind == "operator"
     gw.meta_set(META_OPERATOR_TOKEN_HASH, token_hash("the-operator-token"))
     assert gw.post_as_user("900001", channel, "with the token",
                            token="the-operator-token").content == "with the token"
@@ -394,14 +397,14 @@ def test_the_daemon_trims_at_boot_and_only_where_there_is_a_record(rig):
     """
     assert rig.daemon._last_trim > 0, "the boot trim ran, or was asked and declined"
     rig.daemon.trim_record()
-    assert hasattr(rig.gateway, "trim") is (rig.backend == "local")
+    assert hasattr(rig.record, "trim") is (rig.backend == "local")
 
 
 # --------------------------------------------------------------------------- fanout
 
 def test_two_subscriptions_each_see_every_id_exactly_once(gw):
     """The pump iterates `_subs` per pass and each subscription's `last_id` moves
-    under the gateway's own lock."""
+    under the record's own lock."""
     channel = gw.create_channel("#names")
     first = gw.subscribe(from_id="0")
     second = gw.subscribe(from_id="0")
@@ -420,6 +423,46 @@ def test_two_subscriptions_each_see_every_id_exactly_once(gw):
         assert sub.next_event(timeout=0.1) is None, "and nothing twice"
     gw.unsubscribe(first)
     gw.unsubscribe(second)
+
+
+def _busy_once(record, monkeypatch):
+    """The record's next push to its subscriptions finds the store busy, once."""
+    real, calls = record._fanout, []
+
+    def push():
+        calls.append(1)
+        if len(calls) == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real()
+
+    monkeypatch.setattr(record, "_fanout", push)
+
+
+def test_a_push_that_fails_after_the_commit_still_answers_the_post(gw, monkeypatch):
+    """The post is committed before the push, so the caller gets its message, and the
+    pump pushes it on its next pass."""
+    channel = gw.create_channel("#names")
+    sub = gw.subscribe(from_id="0")
+    assert sub.next_event(timeout=1.0)["t"] == "READY"
+    _busy_once(gw, monkeypatch)
+    message = post(gw, channel, "once")
+    assert gw.history(channel) == [message]
+    event = sub.next_event(timeout=2.0)
+    assert event["t"] == "MESSAGE_CREATE" and event["d"]["id"] == message.id
+    gw.unsubscribe(sub)
+
+
+def test_a_send_whose_push_fails_after_the_commit_is_sent_once(rig, monkeypatch):
+    """The send verb's try-again exit means nothing was sent; a post that committed
+    before its push failed was sent, and a retry would post it twice."""
+    if rig.backend != "local":
+        pytest.skip("only the local record pushes after its own commit")
+    before = len(rig.record.history(rig.names_channel))
+    _busy_once(rig.record, monkeypatch)
+    code, _ = rig.cli(["send", "--posture", "none", "main@proj-a", "hello once"],
+                      name="captain", scope="proj-a")
+    assert code == moxi_exit.OK
+    assert len(rig.record.history(rig.names_channel)) == before + 1
 
 
 def test_a_subscription_says_ready_first_so_the_daemon_sees_the_shapes_it_knows(gw):
@@ -444,23 +487,23 @@ def test_the_pump_finds_what_another_process_wrote(gw, tmp_path):
 
 
 def test_nudge_wakes_the_pump_without_waiting_out_the_interval(tmp_path):
-    gateway = LocalGateway(tmp_path / "record.db", poll_interval=30)
+    record = LocalRecord(tmp_path / "record.db", poll_interval=30)
     try:
-        channel = gateway.create_channel("#names")
-        sub = gateway.subscribe(from_id="0")
+        channel = record.create_channel("#names")
+        sub = record.subscribe(from_id="0")
         assert sub.next_event(timeout=1.0)["t"] == "READY"
-        # a row written behind the gateway's back: only the pump can find it, and only
+        # a row written behind the record's back: only the pump can find it, and only
         # the nudge can make it look before the 30-second interval is up
-        with gateway._write() as conn:
-            gateway._insert(conn, channel_id=channel, author_id="planner",
+        with record._write() as conn:
+            record._insert(conn, channel_id=channel, author_id="planner",
                             author_kind="identity", author_display="planner",
                             content="nudged")
         assert sub.next_event(timeout=0.3) is None
-        gateway.nudge()
+        record.nudge()
         event = sub.next_event(timeout=2.0)
         assert event is not None and event["d"]["content"] == "nudged"
     finally:
-        gateway.close()
+        record.close()
 
 
 def test_a_reconnect_without_resume_makes_the_daemon_rescan(gw):
@@ -504,10 +547,10 @@ def test_the_daemons_two_hot_reads_stay_cheap_on_a_full_record(gw):
 
     for sql, params in (
             ("SELECT MAX(id) FROM messages", ()),
-            ("SELECT MAX(id) FROM messages WHERE channel_id = ?", (channel,)),
-            ("SELECT id FROM messages WHERE channel_id = ? ORDER BY id DESC LIMIT ?",
+            ("SELECT MAX(id) FROM messages WHERE room_id = ?", (channel,)),
+            ("SELECT id FROM messages WHERE room_id = ? ORDER BY id DESC LIMIT ?",
              (channel, 500)),
-            ("SELECT id FROM messages WHERE channel_id = ? AND id > ? "
+            ("SELECT id FROM messages WHERE room_id = ? AND id > ? "
              "ORDER BY id DESC LIMIT ?", (channel, 0, 500))):
         plan = " ".join(row[3] for row in
                         gw._conn().execute("EXPLAIN QUERY PLAN " + sql, params))
@@ -537,7 +580,7 @@ def _timed(call) -> float:
     return time.thread_time() - started
 
 
-def fill(gateway, channel_id, count):
+def fill(record, channel_id, count):
     """`count` rows straight into the table: this is a fixture, not a posting path.
 
     One statement, generated inside SQLite by a recursive CTE, rather than 100,000 tuples
@@ -545,12 +588,12 @@ def fill(gateway, channel_id, count):
     and minutes inside the full suite, because every row wants the GIL back and the rig's
     daemon threads are competing for it: a fixture that slow is a test that looks hung.
     """
-    with gateway._write() as conn:
-        start = gateway._next_id(conn)
+    with record._write() as conn:
+        start = record._next_id(conn)
         conn.execute(
             "WITH RECURSIVE seq(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM seq "
             "                          WHERE n + 1 < ?) "
-            "INSERT INTO messages(id, channel_id, author_id, author_kind, author_display, "
+            "INSERT INTO messages(id, room_id, author_id, author_kind, author_display, "
             "                     content, timestamp) "
             "SELECT ? + n, ?, 'wh-filler', 'webhook', 'filler', 'line ' || n, ? FROM seq",
             (count, start, channel_id, "2026-09-12T00:00:00Z"))
@@ -560,14 +603,14 @@ def fill(gateway, channel_id, count):
 
 # --------------------------------------------------------------------------- selection
 
-def test_local_is_one_of_two_backends_and_open_gateway_returns_it(monkeypatch, tmp_path):
-    assert gateway_mod.BACKENDS == ("local", "mock")
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "local")
+def test_local_is_one_of_two_backends_and_open_record_returns_it(monkeypatch, tmp_path):
+    assert record_mod.BACKENDS == ("local", "mock")
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "local")
     monkeypatch.setenv("MOXI_COMMS_LOCAL_RECORD", str(tmp_path / "elsewhere.db"))
-    assert gateway_mod.backend_name() == "local"
-    opened = gateway_mod.open_gateway(role="reader")
+    assert record_mod.backend_name() == "local"
+    opened = record_mod.open_record(role="reader")
     try:
-        assert isinstance(opened, LocalGateway)
+        assert isinstance(opened, LocalRecord)
         assert opened.path == tmp_path / "elsewhere.db"
         assert not hasattr(opened, "role")        # selection accepts it; record does not use it
         assert opened.retain_days == 90
@@ -598,11 +641,11 @@ def test_a_retain_days_that_is_not_a_count_of_days_is_a_refusal(value):
 
 
 def test_the_retention_has_one_owner():
-    """`[local] retain_days` is declared once, in the schema; the gateway's default is
+    """`[local] retain_days` is declared once, in the schema; the record's default is
     that declaration, not a second number."""
-    from moxi_comms import local_gateway
+    from moxi_comms import local_record
 
-    assert local_gateway.RETAIN_DAYS == config.LOCAL_RETAIN_DAYS == \
+    assert local_record.RETAIN_DAYS == config.LOCAL_RETAIN_DAYS == \
         config.schema().keys["local.retain_days"].default == 90
 
 
@@ -612,24 +655,24 @@ def test_the_cli_opens_the_local_record_in_process(monkeypatch, tmp_path):
     from moxi_comms import cli
 
     monkeypatch.setenv("MOXI_COMMS_LOCAL_RECORD", str(tmp_path / "record.db"))
-    ctx = cli.Context(env={"MOXI_COMMS_GATEWAY": "local",
+    ctx = cli.Context(env={"MOXI_COMMS_BACKEND": "local",
                            "MOXI_COMMS_LOCAL_RECORD": str(tmp_path / "record.db")})
     try:
-        assert isinstance(ctx.gateway, LocalGateway)
+        assert isinstance(ctx.record, LocalRecord)
     finally:
-        ctx.gateway.close()
+        ctx.record.close()
 
 
 # ---------------------------------------------------------------------------
 
-def test_the_daemon_refuses_a_gateway_flag_that_disagrees_with_the_box(monkeypatch):
+def test_the_daemon_refuses_a_record_flag_that_disagrees_with_the_box(monkeypatch):
     """Every adapter and the CLI resolve the backend with no flag, so a
     daemon holding a different record is a box that looks connected and delivers
     nothing."""
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "local")
-    monkeypatch.setenv("MOXI_COMMS_MOCK_GATEWAY", "")
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "local")
+    monkeypatch.setenv("MOXI_COMMS_MOCK_BACKEND", "")
     with pytest.raises(SystemExit) as excinfo:
-        daemon_mod.main(["--gateway", "mock"])
+        daemon_mod.main(["--backend", "mock"])
     assert "disagrees" in str(excinfo.value) and "local" in str(excinfo.value)
 
 
@@ -641,15 +684,15 @@ def test_the_daemon_takes_a_flag_that_agrees_and_mock_with_a_scratch_store(monke
 
     def sentinel(*args, **kwargs):
         reached.append((args, kwargs))
-        raise RuntimeError("open_gateway reached")
+        raise RuntimeError("open_record reached")
 
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "local")
-    monkeypatch.setenv("MOXI_COMMS_MOCK_GATEWAY", "")
-    monkeypatch.setattr(gateway_mod, "open_gateway", sentinel)
-    for argv in (["--gateway", "local"], ["--gateway", "mock", "--gateway-store",
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "local")
+    monkeypatch.setenv("MOXI_COMMS_MOCK_BACKEND", "")
+    monkeypatch.setattr(record_mod, "open_record", sentinel)
+    for argv in (["--backend", "local"], ["--backend", "mock", "--backend-store",
                                           str(tmp_path / "store.json")], []):
         reached.clear()
-        with pytest.raises(RuntimeError, match="open_gateway reached"):
+        with pytest.raises(RuntimeError, match="open_record reached"):
             daemon_mod.main(argv)
         assert reached, f"{argv} should have got past the flag check"
 
@@ -669,10 +712,10 @@ def test_the_daemon_stops_on_sigterm_and_on_sighup_where_there_is_one(monkeypatc
         def start(self):
             raise RuntimeError("stop here")
 
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "mock")
-    monkeypatch.setenv("MOXI_COMMS_MOCK_GATEWAY", str(tmp_path / "store.json"))
-    monkeypatch.setattr(gateway_mod, "open_gateway",
-                        lambda *a, **k: MockGateway(tmp_path / "store.json"))
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "mock")
+    monkeypatch.setenv("MOXI_COMMS_MOCK_BACKEND", str(tmp_path / "store.json"))
+    monkeypatch.setattr(record_mod, "open_record",
+                        lambda *a, **k: MockRecord(tmp_path / "store.json"))
     monkeypatch.setattr(daemon_mod, "Daemon", Refusing)
     monkeypatch.setattr(signal, "signal", lambda sig, handler: installed.append(sig))
     if not has_sighup:
@@ -683,11 +726,11 @@ def test_the_daemon_stops_on_sigterm_and_on_sighup_where_there_is_one(monkeypatc
     assert installed == expected
 
 
-def test_a_local_gateway_the_daemon_opens_delivers_through_the_seam(rig):
+def test_a_local_record_the_daemon_opens_delivers_through_the_seam(rig):
     """The whole point, said once on both backends: a post through the seam reaches the
     daemon's subscription and comes back out of the record."""
     reviewer = rig.shim(name="reviewer", scope="proj-a")
     rig.post_as("agent-6", ["reviewer@proj-a"], "hello from the record")
     wait_until(lambda: len(reviewer.queue) >= 1)
     assert reviewer.queue[0]["message_id"] in [
-        m.id for m in rig.gateway.history(rig.names_channel)]
+        m.id for m in rig.record.history(rig.names_channel)]

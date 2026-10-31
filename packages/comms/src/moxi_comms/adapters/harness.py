@@ -1,7 +1,8 @@
 """The skeleton every daemon-socket adapter shares, and the hooks its port fills in.
 
 An adapter binds one name on the daemon socket, puts that name's mail in front of a
-model at a turn boundary, and writes the name's cursor. Most of that is the same in
+model at a turn boundary, and reports each turn's end to the daemon, which keeps the
+books: the rows, the digests and the cursor. Most of that is the same in
 every adapter: the daemon binding and its liveness, the queue and the replay hold, the
 one flush path, supervision and the daemon notifications. That is this class. What is a
 harness's own -- how a digest gets into its session, which outcomes put a batch back,
@@ -16,8 +17,14 @@ port's `deliver` returns `REQUEUE`, and a port returns it only for an outcome af
 an immediate retry cannot put the same digest into a live turn it already reached. Any
 other value is a receipt, and a receipt is a delivery: the digest is recorded and the
 receipt is handed to `delivered`. The base tests `receipt is REQUEUE` and never the
-receipt's truth, so a receipt of None is a delivery. Whether the cursor ever moves for
-that digest is the port's call, on its harness's own evidence that the turn completed.
+receipt's truth, so a receipt of None is a delivery. Whether that digest is ever acked
+is the port's call, on its harness's own evidence that the turn completed.
+
+**The books.** Before it renders a batch, the flush opens a digest with the daemon
+(`open_digest`), and renders only the ids the answer keeps. The port reports a turn's end
+in message ids (`report_turn_end`); the base sends `turn_ended` with the digests that hold
+them. The adapter writes no comms state of its own: a digest whose turn can't be
+identified is reported unhandled and replays.
 """
 
 from __future__ import annotations
@@ -30,15 +37,17 @@ import sys
 import threading
 import time
 
-from .. import claimfile, cursors
+from .. import claimfile
 from .. import owed as owed_mod
 from ..claimhold import CLAIM_SOCKET_ENV, ClaimHolder
-from ..client import DaemonClient, DaemonError, DaemonOffline, backoff_delays
+from ..client import (DaemonClient, DaemonError, DaemonOffline, DaemonTimeout,
+                      backoff_delays)
 from ..config import ConfigError
 from ..context import BARE_COMMS
 from ..membership import DEFAULT_PROC, TREE, Root
 from . import binding
-from .claude_shim import OFFLINE_MESSAGE, render_digest, survive_supervisor_error
+from .claude_shim import (ACTIVITY_METHODS, OFFLINE_MESSAGE, render_digest,
+                          survive_supervisor_error)
 
 #: The one value of `deliver` that puts a batch back on the queue.
 REQUEUE = object()
@@ -54,20 +63,20 @@ class DroppedAfterAnswer(DaemonOffline):
     the binding: nothing is bound, and the supervisor registers again."""
 
 
-#: The one turn status that moves a cursor, in what a port hands `TurnLedger.completed`.
+#: The one turn status that acks a digest, in what a port hands `TurnLedger.completed`.
 TURN_COMPLETED = "completed"
 
 #: The `kind` of an `activity` frame: `ready` at a session start, clear,
-#: compaction or resume, always with its `source`; `turn` at every turn end of the
-#: agent, with `handled` and `unhandled`. A report refresh is `activity` with no kind.
+#: compaction or resume, always with its `source`. A turn end of the agent is the
+#: `turn_ended` request. A report refresh is `activity` with no kind.
 ACTIVITY_READY, ACTIVITY_TURN = "ready", "turn"
 SOURCE_STARTUP, SOURCE_RESUME, SOURCE_CLEAR, SOURCE_COMPACT = (
     "startup", "resume", "clear", "compact")
 
 
 def launch_stamp() -> str:
-    """`<pid>@<UTC start>`: which launcher process wrote a thread record or session
-    file. A launch is one launcher process, so this names the launch."""
+    """`<pid>@<UTC start>`: which wrapper process wrote a thread record or session
+    file. A launch is one wrapper process, so this names the launch."""
     from datetime import datetime, timezone
 
     started = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
@@ -75,7 +84,7 @@ def launch_stamp() -> str:
 
 
 def plan_head(agent, roster, say, *, record: str) -> None:
-    """The head of a launcher's plan: the identity, roster, cwd, `record` (the
+    """The head of a wrapper's plan: the identity, roster, cwd, `record` (the
     harness's own line for the thread or session it keeps), and the agent's directors
     when it declares any."""
     say(f"identity   {agent.qualified}")
@@ -115,7 +124,7 @@ class TurnLedger:
         it carried (`ids`)."""
         if not turn_id:
             # An injection whose turn id could not be established is deliberately not
-            # tracked: an untracked digest never advances a cursor, so it replays.
+            # tracked: an untracked digest is never acked, so it replays.
             return
         kept = self._pending.setdefault(turn_id, [])
         for mid in (*ids, message_id):
@@ -159,7 +168,7 @@ class TurnLedger:
 
 
 #: Which harness adapter this is in its process: the first is keyed by its pid and
-#: start time alone, as a launcher always is; a test that builds several gets suffixes.
+#: start time alone, as a wrapper always is; a test that builds several gets suffixes.
 _HOLDERS = itertools.count()
 
 
@@ -169,7 +178,7 @@ class HarnessAdapter:
     # ---------------------------------------------------------------- set by the port
     #: The daemon kind this adapter registers as.
     KIND: str = ""
-    #: What the port keys by the qualified name besides the cursor, for the bind error.
+    #: What the port keys by the qualified name, for the bind error.
     STATE_NOUN: str = "state file"
     #: One delivery in flight per identity: mail that arrives during one queues, and the
     #: next flush coalesces it.
@@ -180,6 +189,9 @@ class HarnessAdapter:
     #: `TurnLedger` kept), so a delivered digest's ids stay held until then. A port that
     #: reports none has finished the digest's turn when `deliver` returns.
     HOLDS_UNTIL_TURN_ENDS: bool = False
+    #: A launch into a name another session holds waits for it. A wrapper that refuses
+    #: such a launch before its harness starts turns this off.
+    WAIT_WHEN_HELD: bool = True
     #: The port's own logger.
     log: logging.Logger = logging.getLogger("comms.harness")
 
@@ -200,11 +212,16 @@ class HarnessAdapter:
         self.replaying = False
         self.replay_notice: str | None = None
         self.queue: list = []
-        #: Ids queued or injected whose digest's turn has not ended. A daemon restart
-        #: replays from the cursor, which has moved past neither, so without this the
-        #: same message arrives twice. Listed as `holding` at every register; it loses
-        #: exactly an ended digest's ids, never by comparing ids with the cursor.
+        #: Ids queued or injected under this binding whose digest's turn has not ended:
+        #: a second hand-over of one is dropped. A new binding starts it empty, since
+        #: the daemon hands the name's rows again at every bind.
         self.held_ids: set[str] = set()
+        #: The digest the daemon opened for each message id injected under this
+        #: binding, until its turn's end is reported (`open_digest`, `turn_ended`).
+        self.digest_of: dict[str, int] = {}
+        #: The digest of each batch by its high id, from its open until `injected`
+        #: names it (a port may report the turn's end before it reports the injection).
+        self._opened: dict[str, int] = {}
         #: The ids of each digest the flush is handing the port, by its high id
         #: (`digest_ids`), while `deliver` runs.
         self._digests: dict[str, tuple] = {}
@@ -213,13 +230,9 @@ class HarnessAdapter:
         #: later (OpenCode's follow of a window /new) keeps them.
         self._batches: dict[str, list] = {}
         #: Ids whose digest's turn ended without completing, or went into a turn the
-        #: port could not identify, and that the next `turn` frame names `unhandled`.
-        #: They stay held until that frame is sent (the clamp).
+        #: port could not identify, and whose digests the next `turn_ended` names
+        #: `unhandled`.
         self.unhandled_owed: list[str] = []
-        #: The highest `through` of every completed digest: the cursor's high-water
-        #: mark. The cursor advances to the lower of this and one below the lowest id
-        #: still held.
-        self.high_water: int | None = None
         #: A `ready` whose moment came while the adapter was not bound: its `source`,
         #: sent once right after the next register's answer.
         self._owed_ready: str | None = None
@@ -238,8 +251,8 @@ class HarnessAdapter:
         self._attempt: tuple | None = None        # (attempt number, read)
         self._registered: tuple | None = None     # the read the last register reported
         self._pinned_read: tuple | None = None    # what a re-register must report
-        #: (identity, hold) of each injection, by the high message id it carried: a
-        #: cursor moves only in the hold its digest was injected under.
+        #: The hold each injection was made under, by the high message id it carried: a
+        #: batch put back after the name was released is dropped, not requeued.
         self.marks: dict = {}
         #: Reply enforcement, as the Claude shim keeps it: the ledger of owed replies,
         #: opened when `deliver` returns a receipt (the model has the digest); this
@@ -262,15 +275,15 @@ class HarnessAdapter:
         """This adapter is its session's top process and its claim holder. Its claim
         file is keyed by its pid and that pid's start time, so a reused pid never meets
         a dead adapter's file as its own; its claim socket is
-        RUNTIME/comms-adapter-<pid>.sock, stamped into everything it spawns."""
-        from ..paths import runtime_root
+        `paths.claim_socket("<pid>-<start>")`, stamped into everything it spawns."""
+        from ..paths import claim_socket
         me = os.getpid()
         start = DEFAULT_PROC.start_time(me) or "0"
         n = next(_HOLDERS)
         suffix = "" if n == 0 else f"-{n}"
         self.claims = ClaimHolder(
             kind=self.KIND, key=f"{me}-{start}{suffix}",
-            socket_path=runtime_root() / f"comms-adapter-{me}{suffix}.sock",
+            socket_path=claim_socket(f"{me}-{start}{suffix}"),
             lock=self._lock, roots=[Root(me, start, TREE)], keying="pid")
         agent = self.agent
         name, scope = getattr(agent, "name", None), getattr(agent, "scope", None)
@@ -302,10 +315,9 @@ class HarnessAdapter:
             with self.claims.register_lock:
                 self.connect_daemon()
         except DaemonError as e:
-            response = getattr(e, "response", None) or {}
-            holder = (response.get("holder") or {}).get("qualified")
-            if not (self.autoreconnect and response.get("refused")
-                    and not response.get("transient") and holder == self.agent.qualified):
+            holder = (e.data.get("holder") or {}).get("qualified")
+            if not (self.autoreconnect and self.WAIT_WHEN_HELD and e.refused
+                    and holder == self.agent.qualified):
                 raise
             self.claims.name_refused(holder)
             self.status_sink(f"comms unbound: {self.agent.qualified} is held by another "
@@ -332,16 +344,19 @@ class HarnessAdapter:
         """Register the roster identity. The connection is the liveness anchor."""
         def register(client):
             with self._lock:
-                # `holding`: the ids this adapter already has queued or injected and
-                # whose turn has not ended. The daemon claims them for the new binding at
-                # once, so a reconnect's replay from the unmoved cursor never hands them
-                # again.
-                holding = sorted(self.held_ids, key=int)
-            return client.register(name=self.agent.name, scope=self.agent.scope,
-                                   global_=self.agent.scope == "global",
-                                   project=self.agent.scope, adapter=self.KIND,
-                                   holding=holding,
-                                   report=self.session_report(register=True))
+                # A new binding, before its first hand-over can land: the last one's
+                # rows went back to waiting when it ended, and its digests with it. The
+                # daemon hands the rows again, so what this adapter held or queued
+                # under it goes.
+                self.queue = []
+                self.held_ids = set()
+                self.digest_of = {}
+                self._opened = {}
+                self.unhandled_owed = []
+            return client.bind(name=self.agent.name, scope=self.agent.scope,
+                               global_=self.agent.scope == "global",
+                               project=self.agent.scope, adapter=self.KIND,
+                               report=self.session_report(register=True))
 
         def accept(resp):
             qualified = resp["identity"]["qualified"]
@@ -349,8 +364,8 @@ class HarnessAdapter:
                 raise ConfigError(
                     f"the daemon bound this registration as {qualified!r} but the roster "
                     f"calls it {self.agent.qualified!r}. The {self.STATE_NOUN} and the "
-                    "cursor are both keyed by the qualified name, so a mismatch would "
-                    "split the agent in two -- fix the roster key or its scope.")
+                    "daemon's books are both keyed by the qualified name, so a mismatch "
+                    "would split the agent in two -- fix the roster key or its scope.")
 
         def install(client, resp):
             self._daemon = client
@@ -388,10 +403,9 @@ class HarnessAdapter:
         self.claims.close()
 
     # ------------------------------------------------------------------ daemon side
-    def _on_push(self, frame: dict) -> None:
-        op = frame.get("op")
-        if op == "deliver":
-            payload = frame["payload"]
+    def _on_push(self, method: str, params: dict) -> None:
+        if method == "deliver":
+            payload = params["payload"]
             with self._lock:
                 if not self.claims.holds:
                     return     # nothing is injected addressed to a claim not held
@@ -401,13 +415,13 @@ class HarnessAdapter:
                 self.held_ids.add(mid)
                 self.queue.append(payload)
             self._wake.set()
-        elif op == "replay_complete":
+        elif method == "replay_complete":
             with self._lock:
                 self.replaying = False
-                if frame.get("truncated"):
-                    self.replay_notice = frame.get("notice")
-            self.log.info("replay complete for %s at cursor %s", frame.get("identity"),
-                          frame.get("cursor"))
+                if params.get("truncated"):
+                    self.replay_notice = params.get("notice")
+            self.log.info("replay complete for %s at cursor %s", params.get("identity"),
+                          params.get("cursor"))
             self._wake.set()
 
     def _on_daemon_close(self) -> None:
@@ -446,10 +460,8 @@ class HarnessAdapter:
                         self.status_sink("comms online: reconnected to the delivery "
                                          "daemon.")
                     except DaemonError as e:
-                        response = getattr(e, "response", None) or {}
-                        holder = (response.get("holder") or {}).get("qualified")
-                        if (response.get("refused") and not response.get("transient")
-                                and holder == self.agent.qualified):
+                        holder = (e.data.get("holder") or {}).get("qualified")
+                        if e.refused and holder == self.agent.qualified:
                             # A name held by another connection: a claim this adapter
                             # has held is gone for good (standby); a launch waits.
                             self.claims.name_refused(holder)
@@ -470,33 +482,45 @@ class HarnessAdapter:
             except Exception as e:                          # noqa: BLE001 -- see docstring
                 delays = survive_supervisor_error(self, e, delays, self.log)
 
-    def notify_injected(self, identity, through, digest) -> None:
-        """Tell the daemon a digest went in, with its text."""
+    def open_digest(self, ids) -> dict:
+        """`open_digest` for the ids the flush is about to render: the daemon's answer
+        (`digest`, the `ids` still deliverable, the `dropped` ones). Raises what the
+        client raises."""
         daemon = self._daemon
-        if daemon is not None:
-            daemon.notify("injected", identity=identity, through=str(through),
-                          digest=digest)
+        if daemon is None or not daemon.connected:
+            raise DaemonOffline("comms offline: not connected to the daemon")
+        return daemon.call("open_digest", {"ids": [str(mid) for mid in ids]})
+
+    def notify_injected(self, identity, through, digest) -> None:
+        """Tell the daemon a digest went in, with its text. `through` is the digest's
+        high message id, which names the daemon's digest."""
+        daemon = self._daemon
+        with self._lock:
+            opened = self._opened.pop(str(through), None)
+            if opened is None:
+                opened = self.digest_of.get(str(through))
+        if daemon is not None and opened is not None:
+            daemon.notify("injected", {"identity": identity, "digest": opened,
+                                       "text": digest})
 
     def notify_activity(self, identity, kind: str | None = None, **fields) -> bool:
         """Tell the daemon the agent did something, with the port's session report.
         With no `kind` it is a report refresh or a turn start and releases nothing;
-        `kind` and its fields say what happened (`ready` with `source`, `turn` with
-        `handled` and `unhandled`). True when the frame went out on a connection."""
+        `kind` and its fields say what happened (`ready` with `source`). True when the
+        frame went out on a connection."""
         daemon = self._daemon
         if daemon is None or not daemon.connected:
             return False
-        extra = {"kind": kind} if kind else {}
-        daemon.notify("activity", identity=identity, **extra, **fields,
-                      **self.session_report(register=False))
+        daemon.notify(ACTIVITY_METHODS.get(kind, "activity"),
+                      {"identity": identity, **fields,
+                       **self.session_report(register=False)})
         return True
 
     def reregister(self) -> None:
         """Replace this registration, because what `register` reported is stale: close
-        the connection, drop the queue (a dropped batch replays at the next
-        registration, and the cursor has not moved past it), and register again, so the
-        daemon gates the backlog on what is true now. The ids injected and not yet ended
-        stay held, and the register lists them as `holding`, so the replay does not hand
-        them in again. Raises what `connect_daemon` raises once the daemon has had
+        the connection, drop the queue (its rows wait again when the binding ends, and
+        the next bind hands them), and register again, so the daemon gates the backlog
+        on what is true now. Raises what `connect_daemon` raises once the daemon has had
         `REREGISTER_WAIT` seconds to drop the old one."""
         with self._lock:
             old, self._daemon = self._daemon, None
@@ -523,7 +547,7 @@ class HarnessAdapter:
         unreadable, the id or None).
 
         Kept for a port whose launch reads its record. Neither the codex nor the
-        opencode launcher calls this, `read_for_register` or `read_for_attempt`: each
+        opencode wrapper calls this, `read_for_register` or `read_for_attempt`: each
         launch creates its own thread or session and reads no id from the record, as a
         Claude launch starts a new session."""
         raise NotImplementedError
@@ -592,23 +616,24 @@ class HarnessAdapter:
 
     # ------------------------------------------------------------------ turn ends
     def owe_unhandled(self, ids) -> None:
-        """Ids the next `turn` frame names `unhandled`: a digest whose turn ended
-        without completing and was not reported at once, or one that went into a turn
-        the port could not identify. They stay held until that frame is sent."""
+        """Ids whose digests the next `turn_ended` names `unhandled`: a digest whose
+        turn ended without completing and was not reported at once, or one that went
+        into a turn the port could not identify."""
         with self._lock:
             for mid in ids:
                 if str(mid) not in self.unhandled_owed:
                     self.unhandled_owed.append(str(mid))
 
     def report_turn_end(self, handled=(), unhandled=()) -> None:
-        """A turn of the agent ended: the ids of the digests it
-        completed (`handled`) and of those it ended without completing (`unhandled`).
+        """A turn of the agent ended: the ids of the digests it completed (`handled`)
+        and of those it ended without completing (`unhandled`), the owed ones included.
 
-        In this order: the handled ids stop being held; the cursor advances, never
-        past an id still held; `turn` goes out with both lists, the owed `unhandled` ids included;
-        only then do the unhandled ids stop being held, since until the frame is sent
-        they have no row and the cursor must not pass them. A frame that cannot be sent
-        (no daemon) leaves the unhandled ids owed and held for the next one."""
+        `turn_ended` goes out with the digests that hold them, and the daemon acks the
+        handled ones and puts the others' rows back to waiting. The ids stop being held
+        first, so the daemon may hand an unhandled one again at once. A digest named in
+        both lists is unhandled: replay is the safe direction. An id no digest of this
+        binding holds is left out. A `turn_ended` that can't be sent is dropped: the
+        binding's end puts every row it held back to waiting."""
         handled = [str(m) for m in handled]
         with self._lock:
             unhandled = list(dict.fromkeys(
@@ -616,39 +641,31 @@ class HarnessAdapter:
             self.unhandled_owed = []
             identity = self.identity
             self.held_ids.difference_update(handled)
-        if handled:
-            through = max(handled, key=int)
-            for mid in handled:
-                if mid != through:
-                    self.marks.pop(mid, None)
-            if self.may_advance(through):
-                with self._lock:
-                    if self.high_water is None or int(through) > self.high_water:
-                        self.high_water = int(through)
-        self.advance_cursor()
-        sent = bool(identity) and self.notify_activity(
-            identity, kind=ACTIVITY_TURN, handled=handled, unhandled=unhandled)
-        if sent:
-            self.release_held(unhandled)
-        else:
-            self.owe_unhandled(unhandled)
+            self.held_ids.difference_update(unhandled)
+            back = {self.digest_of[m] for m in unhandled if m in self.digest_of}
+            acked = {self.digest_of[m] for m in handled if m in self.digest_of} - back
+            for mid in (*handled, *unhandled):
+                self.digest_of.pop(mid, None)
+        for mid in handled:
+            self.marks.pop(mid, None)
+        if identity:
+            self.send_turn_ended(identity, sorted(acked), sorted(back))
         self._wake.set()
 
-    def advance_cursor(self) -> str | None:
-        """Move the cursor to the lower of the high-water mark and one below the lowest
-        id still held: it never passes an id this adapter holds and has not seen
-        in a completed turn. Monotonic; returns the cursor after the write, or None."""
-        with self._lock:
-            target = self.high_water
-            identity = self.identity
-            if target is not None and self.held_ids:
-                target = min(target, min(int(m) for m in self.held_ids) - 1)
-        if target is None or target <= 0 or not identity:
+    def send_turn_ended(self, identity, handled, unhandled) -> dict | None:
+        """`turn_ended` with digest ids, and the session report: the daemon's answer
+        (`cursor`), or None when it could not be sent or was refused."""
+        daemon = self._daemon
+        if daemon is None or not daemon.connected:
             return None
-        cursor = cursors.advance(identity, str(target))
-        if cursor is not None:
-            self.log.info("cursor for %s advanced to %s", identity, cursor)
-        return cursor
+        try:
+            return daemon.call("turn_ended", {"identity": identity, "handled": list(handled),
+                                              "unhandled": list(unhandled),
+                                              **self.session_report(register=False)})
+        except (DaemonOffline, DaemonError) as e:
+            self.log.warning("turn end for %s not reported: %s; the binding's end puts "
+                             "its rows back", identity, e)
+            return None
 
     # ------------------------------------------------------------------ reply enforcement
     @property
@@ -728,6 +745,10 @@ class HarnessAdapter:
         arriving, while the port says it can't take a digest, or, for a port that holds
         one delivery at a time, while a delivery is running.
 
+        The batch's digest is opened with the daemon first, and only the ids its answer
+        keeps are rendered. With the daemon gone the batch is dropped (its rows wait
+        again with the binding's end); a refused or unanswered open puts it back.
+
         An exception out of `deliver` that the port did not turn into `REQUEUE` leaves
         here: the taken batch is dropped and replays at the next registration. A
         `REQUEUE` after this adapter stopped holding the name the batch was injected
@@ -749,6 +770,12 @@ class HarnessAdapter:
             identity = self.identity
             if self.ONE_AT_A_TIME:
                 self._running = True
+        batch = self._open_batch(batch, notice)
+        if not batch:
+            if self.ONE_AT_A_TIME:
+                with self._lock:
+                    self._running = False
+            return None
         ids = tuple(str(p["message_id"]) for p in batch)
         high = max(int(mid) for mid in ids)
         try:
@@ -796,6 +823,46 @@ class HarnessAdapter:
             self.release_held(ids)         # the digest's turn ended inside `deliver`
         return text
 
+    def _open_batch(self, batch: list, notice) -> list:
+        """`open_digest` for a taken batch: the payloads the answer keeps, each id
+        mapped to the digest. Empty when nothing is left to render: the daemon dropped
+        every id, the daemon is gone (the batch is dropped), or the open was refused or
+        unanswered (the batch is put back, after the retry wait)."""
+        ids = [str(p["message_id"]) for p in batch]
+        try:
+            opened = self.open_digest(ids)
+        except DaemonOffline as e:
+            self.log.info("digest for %s not opened (%s); its rows wait again for the "
+                          "next binding", self.identity, e)
+            self.release_held(ids)
+            return []
+        except (DaemonError, DaemonTimeout) as e:
+            self.log.warning("digest for %s not opened: %s; the batch is put back",
+                             self.identity, e)
+            with self._lock:
+                self.queue = batch + self.queue
+                self.replay_notice = notice or self.replay_notice
+            delay = self.retry_delay()
+            if delay:
+                time.sleep(delay)
+            self._wake.set()
+            return []
+        kept = {str(mid) for mid in opened.get("ids") or ()}
+        digest = opened.get("digest")
+        dropped = [mid for mid in ids if mid not in kept]
+        if dropped:
+            self.log.info("digest for %s leaves out %s: withdrawn, expired or already "
+                          "acked", self.identity, ", ".join(dropped))
+            self.release_held(dropped)
+        with self._lock:
+            for mid in kept:
+                self.digest_of[mid] = digest
+            if kept:
+                self._opened[max(kept, key=int)] = digest
+                while len(self._opened) > 64:
+                    self._opened.pop(next(iter(self._opened)))
+        return [p for p in batch if str(p["message_id"]) in kept]
+
     # ------------------------------------------------------------------ the held ids
     def digest_ids(self, high) -> tuple:
         """Every message id of the digest whose high id is `high`, while the base's
@@ -808,22 +875,11 @@ class HarnessAdapter:
 
     def release_held(self, ids) -> None:
         """A digest's turn ended, completed or not, or its batch was dropped: exactly
-        its ids stop being held, so a later registration's replay may hand any that the
-        cursor has not passed. Never by comparing ids with the cursor: a lower id can
-        still be queued when a higher digest's turn ends."""
+        its ids stop being held, so the daemon may hand any of them again."""
         with self._lock:
             self.held_ids.difference_update(str(mid) for mid in ids)
 
     # ------------------------------------------------------------------ the port's hooks
-    def may_advance(self, through) -> bool:
-        """A cursor moves only for the name its digest was injected under, in the same
-        hold, while this adapter still holds it."""
-        mark = self.marks.pop(str(through), None)
-        if self.claims.may_advance(mark):
-            return True
-        self.log.info("a turn completed after its name was released; no cursor advance")
-        return False
-
     def mirror_session(self) -> str | None:
         """The session the port runs now ("" for a blank anchor), or None when the
         port cannot say. A delivered digest's owed replies are opened against it."""

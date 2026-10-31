@@ -19,6 +19,7 @@ Every rig test runs on the mock and on the local backend (`BOTH_BACKENDS`).
 from __future__ import annotations
 
 import ast
+import re
 import hashlib
 import inspect
 import os
@@ -31,10 +32,10 @@ from pathlib import Path
 import pytest
 from conftest import wait_until, write_config, write_transcript
 
-from moxi_comms import cli, provision, sending
+from moxi_comms import cli, provision, reserved, secrets, sending
 from moxi_comms.client import DaemonClient, DaemonOffline
 from moxi_comms.daemon import Refusal
-from moxi_comms.gateway import GatewayError
+from moxi_comms.record import RecordError
 
 # The cold-cache fixtures (the autouse tmp-path guard among them), so a held send can be
 # shown.
@@ -82,9 +83,10 @@ def _is_bodies_refusal(node) -> bool:
 
 
 def _is_claim_refusal(node) -> bool:
-    """An exit-code return in `_claim_token`, not its token return."""
+    """An outcome-marker return in `_claim_token` (`_REFUSED`, `_OFFLINE`), not its
+    token return."""
     return (isinstance(node.value, ast.Name)
-            and node.value.id.startswith("EXIT_"))
+            and re.fullmatch(r"_[A-Z]+", node.value.id) is not None)
 
 
 #: The functions whose refusals the table must cover: name -> (the function, which of its
@@ -192,7 +194,7 @@ def _home_files() -> dict:
 def snapshot(rig) -> dict:
     """Everything a send writes or moves: the record, every room; the daemon's queued
     and delivered ids; each shim's queue; every file under the homes."""
-    rooms = {name: [(m.id, m.content) for m in rig.gateway.history(cid)]
+    rooms = {name: [(m.id, m.content) for m in rig.record.history(cid)]
              for name, cid in rig.prov.rooms.items()}
     with rig.daemon._lock:
         daemon = dict(queue={k: sorted(v) for k, v in rig.daemon.queue.items() if v},
@@ -203,31 +205,20 @@ def snapshot(rig) -> dict:
 
 @pytest.fixture
 def doors(monkeypatch):
-    """Every post through either lane, every call of the nudge (`_nudge_daemon`), and
-    every frame handed to `notify` (where the local backend's nudge goes)."""
+    """Every post through the daemon's `send` (an agent's and the operator's alike), and
+    every method handed to `notify`. `nudges` stays empty: no lane nudges any more."""
     seen = dict(posts=[], notify=[], nudges=[])
-    real_post, real_op = DaemonClient.post, sending.post_as_operator
-    real_notify, real_nudge = DaemonClient.notify, sending._nudge_daemon
+    real_send, real_notify = DaemonClient.send, DaemonClient.notify
 
-    def post(self, identity, token, content):
+    def send(self, as_, token, content, **kw):
         seen["posts"].append(content)
-        return real_post(self, identity, token, content)
+        return real_send(self, as_, token, content, **kw)
 
-    def post_as_operator(*a, **kw):
-        seen["posts"].append(a[3] if len(a) > 3 else kw.get("content"))
-        return real_op(*a, **kw)
+    def notify(self, method, params=None):
+        seen["notify"].append(method)
+        return real_notify(self, method, params)
 
-    def notify(self, op, **kw):
-        seen["notify"].append(op)
-        return real_notify(self, op, **kw)
-
-    def nudge(ctx):
-        seen["nudges"].append(ctx)
-        return real_nudge(ctx)
-
-    monkeypatch.setattr(DaemonClient, "post", post)
-    monkeypatch.setattr(sending, "_nudge_daemon", nudge)
-    monkeypatch.setattr(sending, "post_as_operator", post_as_operator)
+    monkeypatch.setattr(DaemonClient, "send", send)
     monkeypatch.setattr(DaemonClient, "notify", notify)
     return seen
 
@@ -314,6 +305,18 @@ def s_cap_shape(rig, mp):
     return Case(["send", "reviewer", "x", "--posture", "open", "--cap", "0"], PLANNER, 2)
 
 
+def s_interrupt_with_held(rig, mp):
+    pair(rig)
+    return Case(["send", "reviewer", "x", "--posture", "none", "--interrupt", "--held"],
+                PLANNER, 2)
+
+
+def s_expires_shape(rig, mp):
+    pair(rig)
+    return Case(["send", "reviewer", "x", "--posture", "none", "--expires", "5y"],
+                PLANNER, 2)
+
+
 def s_block(rig, mp):
     pair(rig)
     write_config(None, "block = true\n")
@@ -330,36 +333,35 @@ def s_daemon_offline(rig, mp):
         raise DaemonOffline("comms daemon is not running")
 
     mp.setattr(cli.Context, "daemon", offline)
-    return Case(["send", "reviewer", "x", "--posture", "none"], PLANNER, 4)
+    return Case(["send", "reviewer", "x", "--posture", "none"], PLANNER, 75)
 
 
 def s_verb_protocol(rig, mp):
-    """A daemon speaking another verb protocol is offline, exit 4."""
+    """A daemon sharing no comms wire version with the verb fails, exit 1: trying again
+    won't change it."""
     pair(rig)
-    mp.setattr("moxi_comms.daemon.CLI_PROTOCOL", 0)
-    return Case(["send", "reviewer", "x", "--posture", "none"], PLANNER, 4)
+    mp.setattr("moxi_comms.wire.VERSIONS", (2, 2))
+    return Case(["send", "reviewer", "x", "--posture", "none"], PLANNER, 1)
 
 
 def s_resolve_refused(rig, mp):
     pair(rig)
-    return Case(["send", "agent-99", "x", "--posture", "none"], PLANNER, 2)
+    return Case(["send", "agent-99", "x", "--posture", "none"], PLANNER, 3)
 
 
 def s_send_only(rig, mp):
     pair(rig)
-    lines = []
-    assert provision.send_only_main(["console@acme"], gateway=rig.gateway,
-                                    store=rig.store, out=lines.append) == 0, lines
-    return Case(["send", "console@acme", "x", "--posture", "none"], PLANNER, 2)
+    reserved.reconcile(declared={"launcher": ["console"]}, chain=secrets.from_config())
+    return Case(["send", "console", "x", "--posture", "none"], PLANNER, 3)
 
 
 def s_standing(rig, mp):
     pair(rig)
-    return Case(["send", "reviewer", "x", "--posture", "none", "--standing"], PLANNER, 2)
+    return Case(["send", "reviewer", "x", "--posture", "none", "--standing"], PLANNER, 3)
 
 
 def s_never_bound(rig, mp):
-    """The daemon says the journal has never seen the name bound (`ever_bound` false;
+    """The daemon says the binding history has never seen the name bound (`ever_bound` false;
     the daemon's half is tested with the names), and no `--new-name`."""
     pair(rig)
     real = rig.daemon._resolve_query
@@ -370,7 +372,7 @@ def s_never_bound(rig, mp):
         return answer
 
     mp.setattr(rig.daemon, "_resolve_query", resolve)
-    return Case(["send", "newbie", "x", "--posture", "none"], PLANNER, 2)
+    return Case(["send", "newbie", "x", "--posture", "none"], PLANNER, 3)
 
 
 def s_bound_elsewhere(rig, mp):
@@ -378,13 +380,13 @@ def s_bound_elsewhere(rig, mp):
     planner, _reviewer = pair(rig)
     planner.claims.state = cli.claimfile.WAITING
     planner.claims.token = None
-    return Case(["send", "reviewer", "x", "--posture", "none"], PLANNER, 2)
+    return Case(["send", "reviewer", "x", "--posture", "none"], PLANNER, 3)
 
 
 def s_claim_offline(rig, mp):
     planner, _reviewer = pair(rig)
     planner.claims.went_offline()
-    return Case(["send", "reviewer", "x", "--posture", "none"], PLANNER, 4)
+    return Case(["send", "reviewer", "x", "--posture", "none"], PLANNER, 75)
 
 
 def _changed_claim(**changes):
@@ -436,7 +438,7 @@ def _unreadable(exc):
         def broken(message_id):
             raise exc
 
-        mp.setattr(rig.gateway, "get_message", broken)
+        mp.setattr(rig.record, "get_message", broken)
         return Case(["send", "planner", "a", "--reply-to", ask], REVIEWER, 0)
     return setup
 
@@ -444,14 +446,14 @@ def _unreadable(exc):
 def s_no_reply(rig, mp):
     pair(rig)
     note = ok(rig, PLANNER, ["send", "reviewer", "fyi", "--posture", "none"])
-    return Case(["send", "planner", "thanks", "--reply-to", note], REVIEWER, 2)
+    return Case(["send", "planner", "thanks", "--reply-to", note], REVIEWER, 3)
 
 
 def s_once_not_open(rig, mp):
     pair(rig)
     ask = ok(rig, PLANNER, ["send", "reviewer", "q?", "--posture", "once"])
     return Case(["send", "planner", "a", "--reply-to", ask, "--posture", "open"],
-                REVIEWER, 2)
+                REVIEWER, 3)
 
 
 def s_closed_by_cap(rig, mp):
@@ -459,14 +461,14 @@ def s_closed_by_cap(rig, mp):
     root = ok(rig, PLANNER, ["send", "reviewer", "shall we?", "--posture", "open",
                              "--cap", "1"])
     last = ok(rig, REVIEWER, ["reply", root, "yes"])
-    return Case(["send", "reviewer", "more", "--reply-to", last], PLANNER, 2)
+    return Case(["send", "reviewer", "more", "--reply-to", last], PLANNER, 3)
 
 
 def s_closed_by_none(rig, mp):
     pair(rig)
     root = ok(rig, PLANNER, ["send", "reviewer", "shall we?", "--posture", "open"])
     ok(rig, REVIEWER, ["reply", root, "done here", "--posture", "none"])
-    return Case(["send", "reviewer", "more", "--reply-to", root], PLANNER, 2)
+    return Case(["send", "reviewer", "more", "--reply-to", root], PLANNER, 3)
 
 
 def s_cap_no_thread_reply(rig, mp):
@@ -483,20 +485,20 @@ def s_cap_closed(rig, mp):
     ask = ok(rig, REVIEWER, ["reply", root, "which one?", "--posture", "once"])
     ok(rig, PLANNER, ["reply", root, "stop here", "--posture", "none"])
     return Case(["send", "reviewer", "this one", "--reply-to", ask, "--cap", "3"],
-                PLANNER, 2)
+                PLANNER, 3)
 
 
 def s_cap_not_opener(rig, mp):
     pair(rig)
     root = ok(rig, PLANNER, ["send", "reviewer", "shall we?", "--posture", "open"])
-    return Case(["send", "planner", "yes", "--reply-to", root, "--cap", "3"], REVIEWER, 2)
+    return Case(["send", "planner", "yes", "--reply-to", root, "--cap", "3"], REVIEWER, 3)
 
 
 def s_cap_below(rig, mp):
     pair(rig)
     root = ok(rig, PLANNER, ["send", "reviewer", "shall we?", "--posture", "open"])
     first = ok(rig, REVIEWER, ["reply", root, "yes"])
-    return Case(["send", "reviewer", "ok", "--reply-to", first, "--cap", "1"], PLANNER, 2)
+    return Case(["send", "reviewer", "ok", "--reply-to", first, "--cap", "1"], PLANNER, 3)
 
 
 # ---- 5. the cache reads
@@ -513,7 +515,7 @@ def s_cold_refused(rig, mp):
         return answer
 
     mp.setattr(rig.daemon, "_session_query", old)
-    return Case(["send", "reviewer", "x", "--posture", "none"], PLANNER, 6)
+    return Case(["send", "reviewer", "x", "--posture", "none"], PLANNER, 75)
 
 
 # ---- 6. the audience table
@@ -523,15 +525,15 @@ def s_audience_changed(rig, mp):
     ask = ok(rig, PLANNER, ["send", "reviewer", "q?", "--posture", "once",
                             "--audience", "operator"])
     return Case(["send", "planner", "a", "--reply-to", ask, "--audience", "critic"],
-                REVIEWER, 2)
+                REVIEWER, 3)
 
 
 # ---- after the checks: the bodies and the credential
 
 def s_over_the_cap(rig, mp):
     pair(rig)
-    text = "x" * rig.gateway.max_content_length
-    return Case(["send", "reviewer", text, "--posture", "none"], PLANNER, 2)
+    text = "x" * rig.record.max_content_length
+    return Case(["send", "reviewer", text, "--posture", "none"], PLANNER, 3)
 
 
 # ---- before the checks: who is sending (`_send`)
@@ -539,7 +541,7 @@ def s_over_the_cap(rig, mp):
 def s_stamp_only(rig, mp):
     rig.shim(**REVIEWER)
     return Case(["send", "reviewer", "x", "--posture", "none"],
-                dict(name="planner", stamp_only=True), 2)
+                dict(name="planner", stamp_only=True), 3)
 
 
 GOT = ("_send_checks", "return got, None")
@@ -557,60 +559,61 @@ ROWS = [
         (("_send_checks", "--new says this message"),)),
     Row("cap-and-no-cap", s_cap_both, 2, (("_send_checks", "CAP_BOTH"),)),
     Row("cap-shape", s_cap_shape, 2, (("_send_checks", "CAP_SHAPE"),)),
+    Row("interrupt-with-held", s_interrupt_with_held, 2,
+        (("_send_checks", "INTERRUPT_WITH_HELD"),)),
+    Row("expires-shape", s_expires_shape, 2, (("_send_checks", "--expires:"),)),
     Row("block", s_block, 3, (("_send_checks", "block is on in comms' config"),)),
     # 2. the daemon block
-    Row("daemon-offline", s_daemon_offline, 4,
+    Row("daemon-offline", s_daemon_offline, 75,
         (("_send_checks", "The daemon performs tier/route"),)),
-    Row("verb-protocol-mismatch", s_verb_protocol, 4,
-        (("_send_checks", "except VerbProtocolMismatch"),)),
-    Row("resolve-refused", s_resolve_refused, 2, (("_send_checks", "_refused_tag"),)),
-    Row("send-only", s_send_only, 2, (("_send_checks", "send_only_refusal"),)),
-    Row("standing-without-row", s_standing, 2,
+    Row("verb-protocol-mismatch", s_verb_protocol, 1,
+        (("_send_checks", "except VersionMismatch as e"),)),
+    Row("resolve-refused", s_resolve_refused, 3, (("_send_checks", "_refused_tag"),)),
+    Row("send-only", s_send_only, 3, (("_send_checks", "send_only_refusal"),)),
+    Row("standing-without-row", s_standing, 3,
         (("_send_checks", "declared standing"),)),
-    Row("never-bound", s_never_bound, 2, (("_send_checks", "_never_bound_refusal"),)),
-    Row("bound-by-another-session", s_bound_elsewhere, 2,
+    Row("never-bound", s_never_bound, 3, (("_send_checks", "_never_bound_refusal"),)),
+    Row("bound-by-another-session", s_bound_elsewhere, 3,
         (("_claim_token", "state != claimfile.BOUND"), CLAIM_GOT)),
-    Row("claim-offline", s_claim_offline, 4,
+    Row("claim-offline", s_claim_offline, 75,
         (("_claim_token", "state == claimfile.OFFLINE"), CLAIM_GOT)),
-    Row("older-claim-protocol", _changed_claim(protocol=_DROP, _code=2), 2,
-        (("_claim_token", "answer.get(\"protocol\")"), CLAIM_GOT)),
-    Row("bound-without-token", _changed_claim(token=_DROP, _code=2), 2,
+    Row("bound-without-token", _changed_claim(token=_DROP, _code=3), 3,
         (("_claim_token", "not isinstance(token, str)"), CLAIM_GOT)),
-    Row("dead-adapter", _changed_claim(dead_adapter=True, _code=4), 4,
+    Row("dead-adapter", _changed_claim(dead_adapter=True, _code=75), 75,
         (("_claim_token", "answer.get(\"dead_adapter\")"), CLAIM_GOT)),
     # 3. the single-reply refusal
-    Row("single-reply", s_single_reply, 2, (("_send_checks", "_ask_refusal"),)),
+    Row("single-reply", s_single_reply, 3, (("_send_checks", "_ask_refusal"),)),
     # 4. the reply checks
     Row("cap-on-a-new-send-opening-no-thread", s_cap_no_thread_new, 2,
         (("_send_checks", "CAP_NO_THREAD"),)),
-    Row("referent-unreadable-gateway", _unreadable(GatewayError("record read failed")), 5,
+    Row("referent-unreadable-record", _unreadable(RecordError("record read failed")), 1,
         (("_send_checks", "could not be read"),)),
-    Row("referent-unreadable-offline", _unreadable(DaemonOffline("daemon down")), 4,
+    Row("referent-unreadable-offline", _unreadable(DaemonOffline("daemon down")), 75,
         (("_send_checks", "could not be read"),)),
-    Row("reply-to-no-reply", s_no_reply, 2,
+    Row("reply-to-no-reply", s_no_reply, 3,
         (("_reply_checks", "NO_REPLY_REFUSED"), GOT)),
-    Row("open-on-a-once-ask", s_once_not_open, 2,
+    Row("open-on-a-once-ask", s_once_not_open, 3,
         (("_reply_checks", "ONCE_NOT_OPEN"), GOT)),
-    Row("thread-closed-by-cap", s_closed_by_cap, 2,
+    Row("thread-closed-by-cap", s_closed_by_cap, 3,
         (("_reply_checks", "CLOSED_BY_CAP"), GOT)),
-    Row("thread-closed-by-none", s_closed_by_none, 2,
+    Row("thread-closed-by-none", s_closed_by_none, 3,
         (("_reply_checks", "CLOSED_BY_NONE"), GOT)),
     Row("cap-on-a-reply-in-no-thread", s_cap_no_thread_reply, 2,
         (("_reply_checks", "CAP_NO_THREAD"), GOT)),
-    Row("cap-in-a-closed-thread", s_cap_closed, 2, (("_reply_checks", "CAP_CLOSED"), GOT)),
-    Row("cap-not-the-opener", s_cap_not_opener, 2,
+    Row("cap-in-a-closed-thread", s_cap_closed, 3, (("_reply_checks", "CAP_CLOSED"), GOT)),
+    Row("cap-not-the-opener", s_cap_not_opener, 3,
         (("_reply_checks", "CAP_NOT_OPENER"), GOT)),
-    Row("cap-below-the-count", s_cap_below, 2, (("_reply_checks", "CAP_BELOW"), GOT)),
+    Row("cap-below-the-count", s_cap_below, 3, (("_reply_checks", "CAP_BELOW"), GOT)),
     # 5. the cache reads
-    Row("cold-not-held", s_cold_refused, 6, (("_send_checks", "EXIT_COLD"),)),
+    Row("cold-not-held", s_cold_refused, 75, (("_send_checks", "return _COLD, None"),)),
     # 6. the audience table
-    Row("reply-changes-the-audience", s_audience_changed, 2,
+    Row("reply-changes-the-audience", s_audience_changed, 3,
         (("_send_checks", "_reply_audience"),)),
     # after the checks: the bodies
-    Row("over-the-cap", s_over_the_cap, 2,
+    Row("over-the-cap", s_over_the_cap, 3,
         (("_bodies", "cap on one message"),)),
     # before the checks: who is sending (`_send`, not guarded)
-    Row("stamp-without-a-session", s_stamp_only, 2),
+    Row("stamp-without-a-session", s_stamp_only, 3),
 ]
 
 
@@ -653,7 +656,7 @@ def test_check_stop_is_immediately_before_the_post_loop():
             and isinstance(posting.test.left, ast.Name)
             and posting.test.left.id == "operator_id"
             and isinstance(posting.body[0], ast.Assign)
-            and posting.body[0].value.func.id == "_post_from_claim")
+            and "_post_from_claim" in ast.dump(posting.body[0].value))
 
 
 def test_the_site_reader_finds_send_checks_refusals():
@@ -664,7 +667,7 @@ def test_the_site_reader_finds_send_checks_refusals():
     for func, _line in sites:
         by_func[func] = by_func.get(func, 0) + 1
     assert by_func["_send_checks"] >= 20
-    assert by_func["_claim_token"] == 5
+    assert by_func["_claim_token"] == 4
     assert by_func["_reply_checks"] >= 7
     assert by_func["_bodies"] == 1
 
@@ -701,15 +704,15 @@ CODES = {
     "reply-to-not-digits": "reply-to-shape", "audience-shape": "audience-shape",
     "posture-required": "posture-required", "new-with-reply-to": "new-with-reply-to",
     "cap-and-no-cap": "cap-both", "cap-shape": "cap-shape", "block": "blocked",
+    "interrupt-with-held": "interrupt-with-held", "expires-shape": "expires-shape",
     "daemon-offline": "offline", "verb-protocol-mismatch": "protocol-mismatch",
     "resolve-refused": "resolve-refused", "send-only": "send-only",
     "standing-without-row": "not-standing", "never-bound": "never-bound",
     "bound-by-another-session": "claim-refused", "claim-offline": "offline",
-    "older-claim-protocol": "claim-protocol",
     "bound-without-token": "claim-credential", "dead-adapter": "offline",
     "single-reply": "single-reply",
     "cap-on-a-new-send-opening-no-thread": "cap-no-thread",
-    "referent-unreadable-gateway": "referent-unreadable",
+    "referent-unreadable-record": "referent-unreadable",
     "referent-unreadable-offline": "referent-unreadable",
     "reply-to-no-reply": "no-reply", "open-on-a-once-ask": "once-not-open",
     "thread-closed-by-cap": "thread-closed", "thread-closed-by-none": "thread-closed",

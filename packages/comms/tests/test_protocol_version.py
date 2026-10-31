@@ -1,20 +1,24 @@
-"""The claims-protocol version on the `register` answer.
+"""The wire version is agreed at the hello, never on the `bind` answer.
 
-The daemon answers `register` with `protocol`, at 2. Nothing in comms reads it: the Claude
-shim no longer compares it with its own and says nothing about a mismatch, in its log or
-in a session.
+Every connection to the daemon opens with `rpc.hello`, which agrees one comms wire version.
+The `bind` answer names none, and the Claude shim keeps no version notice of its own: a
+daemon that can't speak this comms' wire refuses the hello, and the client says which
+side is older.
 """
 
 from __future__ import annotations
 
+from moxi_comms import wire
 from moxi_comms.adapters import claude_shim
-from moxi_comms.protocol import PROTOCOL_VERSION
 
 
-def test_the_daemon_answers_register_with_its_protocol_version(rig):
+def test_the_bind_answer_names_no_version_and_the_hello_agreed_one(rig):
     shim = rig.shim(name="planner", scope="proj-a")
-    assert shim._last_resp["protocol"] == PROTOCOL_VERSION == 2
+    assert "protocol" not in shim._last_resp
     assert "slot" not in shim._last_resp
+    agreed = shim._client._client.agreed
+    assert agreed.version == wire.VERSIONS[1]
+    assert set(agreed.capabilities) == set(wire.CAPABILITIES)
 
 
 def test_the_shim_has_no_version_notice():

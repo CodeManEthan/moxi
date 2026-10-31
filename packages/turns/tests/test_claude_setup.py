@@ -1,4 +1,5 @@
-"""turns' SETUP in its two steps, `claude_plugin_dirs()`, and the Claude doctor rows.
+"""turns' SETUP in its two steps, the plugin folders for one launch, and the Claude doctor
+rows.
 `claude` is a stand-in on PATH; no test runs the real one, and none writes the
 package's own `endpoint.json` (conftest's `claude_root`)."""
 
@@ -74,7 +75,7 @@ def test_the_config_key_wins_and_must_be_absolute(turns_env, claude_root):
 
 
 def test_claude_plugin_dirs_writes_endpoint_json_first(turns_env, claude_root):
-    runner, gate = turns.claude_plugin_dirs()
+    runner, gate = claude_setup.claude_plugin_dirs()
     assert (runner, gate) == ((claude_root / "moxi-turns").resolve(),
                               (claude_root / "moxi-turns-gate").resolve())
     assert (runner / "endpoint.json").is_file()
@@ -85,7 +86,7 @@ def test_claude_plugin_dirs_raises_when_it_cannot_set_up(turns_env, claude_root)
 
     shutil.rmtree(claude_root / "moxi-turns")
     with pytest.raises(turns.TurnsError):
-        turns.claude_plugin_dirs()
+        claude_setup.claude_plugin_dirs()
 
 
 def test_setup_adds_the_marketplace_and_both_plugins_then_skips(turns_env, claude_root,
@@ -132,18 +133,27 @@ def _rows():
 def test_rows_name_the_plugins_endpoint_json_and_the_version(turns_env, claude_root,
                                                              fake_claude):
     rows = _rows()
-    assert rows["claude plugin moxi-turns"].ok and rows["claude plugin moxi-turns-gate"].ok
-    assert not rows["claude endpoint.json"].ok and "missing" in rows["claude endpoint.json"].detail
-    assert rows["claude code"].ok
+    assert rows["claude plugin moxi-turns"].state == "ok"
+    assert rows["claude plugin moxi-turns-gate"].state == "ok"
+    assert rows["claude endpoint.json"].state == "fail" and "missing" in rows["claude endpoint.json"].detail
+    assert rows["claude code"].state == "ok"
     claude_setup.write_endpoint_file()
-    assert _rows()["claude endpoint.json"].ok
+    assert _rows()["claude endpoint.json"].state == "ok"
     write_config(turns_env, '[claude]\nendpoint = "/opt/moved/moxi-turns-endpoint"\n')
-    assert not _rows()["claude endpoint.json"].ok      # names a command no longer given
+    assert _rows()["claude endpoint.json"].state == "fail"      # names a command no longer given
     os.environ["FAKE_CLAUDE_VERSION"] = "9.9.9"
     row = _rows()["claude code"]
-    assert not row.ok and "9.9.9" in row.detail
+    assert row.state == "warn" and "9.9.9" in row.detail
+
+
+def test_no_claude_on_path_is_an_off_row(turns_env, monkeypatch):
+    monkeypatch.setattr(claude_setup, "_claude", lambda: None)
+    assert _rows()["claude code"].state == "off"
+    assert all(row.module == "turns" for row in claude_setup.rows())
 
 
 def test_check_carries_the_claude_rows(turns_env, fake_claude):
-    names = [row.name for row in turns.check()]
+    from moxi_turns import doctor
+
+    names = [row.name for row in doctor.check()]
     assert "claude endpoint.json" in names and "claude code" in names

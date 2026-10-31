@@ -6,21 +6,46 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 import threading
 import time
 
 import pytest
 
 import moxi_turns as turns
-from conftest import write_config
+from conftest import bare, write_config
 from fake_harness import FakeHarness
+from moxi_turns import procs, protocol
+from moxi_turns.endpoint import Endpoint
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32",
+                                reason="moxi.ipc's named pipe server comes later")
+
+
+def idle_start(s, **checks):
+    """How a delivery given only if the session is idle starts."""
+    return bare(s.deliver("x", only_if_idle=True, **checks).wait_started(1))
+
+
+def test_the_start_list_comes_from_the_sessions_env(turns_env, tmp_path, monkeypatch):
+    # The caller's config names one start list, the session's env points at another.
+    write_config(turns_env, '[start]\norder = ["callers-entry"]\n')
+    session = tmp_path / "session"
+    write_config(session, '[start]\norder = ["sessions-entry"]\n')
+    env = dict(os.environ, MOXI_TURNS_CONFIG_HOME=str(session / "cfg"))
+    ep = Endpoint(FakeHarness(), env=env)
+    assert ep.registry.order == ("sessions-entry",)
+    assert Endpoint(FakeHarness()).registry.order == ("callers-entry",)
 
 
 def test_find_by_session_id_and_by_pid(make_endpoint):
     ep, fake = make_endpoint()
     s = turns.find(session_id="s-1")
     assert s is not None and s.harness == "fake" and s.pid == os.getpid()
-    assert s.can == frozenset({"start", "steer", "hold", "clear", "exit"})
+    assert s.capabilities == frozenset({"deliver", "only-if-idle", "steer", "stop-handler",
+                                        "clear", "exit", "compact", "agents",
+                                            "stop-shells"})
+    assert s.endpoint_pid == os.getpid() and s.address == ep.address
     assert turns.find(pid=os.getpid()).dir == ep.dir
     assert turns.find(session_id="nobody") is None
     assert [x.dir for x in turns.sessions()] == [ep.dir]
@@ -35,14 +60,27 @@ def test_find_by_pid_walks_up_from_a_process_under_the_harness(make_endpoint):
     assert turns.find(pid=999999, proc=Tree()).dir == ep.dir
 
 
+def test_find_by_pid_walks_up_from_a_real_child_through_the_cores_parent(make_endpoint):
+    import subprocess
+
+    ep, _ = make_endpoint()
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        assert list(procs.DEFAULT.ancestry(child.pid))[:2] == [child.pid, os.getpid()]
+        assert turns.find(pid=child.pid).dir == ep.dir
+    finally:
+        child.kill()
+        child.wait()
+
+
 def test_directory_and_hello(make_endpoint):
     ep, _ = make_endpoint()
     assert stat.S_IMODE(ep.dir.stat().st_mode) == 0o700
-    assert stat.S_IMODE(ep.sock_path.stat().st_mode) == 0o600
-    assert ep.dir.name == f"fake-{ep.nonce}"
+    assert ep.dir.name == f"fake-{ep.nonce}" and ep.dir.parent.name == "v2"
     hello = json.loads(ep.hello_path.read_text())
-    assert hello["session_id"] == "s-1" and hello["protocol"] == [1]
-    assert {"harness", "pid", "earlier", "cwd", "can", "endpoint_version",
+    assert hello["session_id"] == "s-1" and hello["protocol"] == 2
+    assert hello["address"] == ep.address
+    assert {"harness", "pid", "endpoint_pid", "earlier", "cwd", "endpoint_version",
             "mod_version"} <= set(hello)
 
 
@@ -58,8 +96,9 @@ def test_a_dead_directory_is_swept_and_a_starting_one_is_not(make_endpoint, turn
     ep, _ = make_endpoint()
     dead = ep.dir.parent / "fake-dead"
     dead.mkdir()
-    (dead / "hello.json").write_text(json.dumps({"harness": "fake", "pid": os.getpid(),
-                                                 "session_id": "s-1", "started": 9e12}))
+    (dead / "hello.json").write_text(json.dumps({
+        "address": protocol.address("fake-dead"), "protocol": 2, "harness": "fake",
+        "pid": os.getpid(), "session_id": "s-1", "started": 9e12}))
     starting = ep.dir.parent / "fake-starting"
     starting.mkdir()
     assert turns.find(session_id="s-1").dir == ep.dir
@@ -69,41 +108,42 @@ def test_a_dead_directory_is_swept_and_a_starting_one_is_not(make_endpoint, turn
 def test_start_runs_and_ends_with_the_outcome(make_endpoint):
     ep, fake = make_endpoint()
     s = turns.find(session_id="s-1")
-    d = s.start("hello")
-    assert d.wait_started(2) == turns.Started("t1")
+    d = s.deliver("hello", only_if_idle=True)
+    assert bare(d.wait_started(2)) == turns.Started("t1")
     assert fake.submitted[0].text == "hello"
     with pytest.raises(TimeoutError):
         d.wait_ended(0.05)
     fake.end_turn("answer")
-    assert d.wait_ended(2) == turns.Ended("t1", "answer")
+    assert bare(d.wait_ended(2)) == turns.Ended("t1", "answer")
     f = s.facts()
-    assert (f.session_id, f.epoch, f.turn_open, f.stale) == ("s-1", 1, False, False)
+    assert (f.session_id, f.turn_number, f.turn_open, f.stale) == ("s-1", 1, False, False)
 
 
 @pytest.mark.parametrize("outcome", ["aborted", "error", "refusal"])
 def test_esc_and_errors_are_outcomes(make_endpoint, outcome):
     ep, fake = make_endpoint()
-    d = turns.find(session_id="s-1").start("x")
+    d = turns.find(session_id="s-1").deliver("x", only_if_idle=True)
+    d.wait_started(1)                       # the worker hands it over after the answer
     fake.end_turn(outcome)
-    assert d.wait_ended(2) == turns.Ended("t1", outcome)
+    assert bare(d.wait_ended(2)) == turns.Ended("t1", outcome)
 
 
 def test_start_refusals(make_endpoint):
     ep, fake = make_endpoint()
     s = turns.find(session_id="s-1")
     fake.start_turn()
-    assert s.start("x").wait_started(1) == turns.Refused("busy-turn")
+    assert idle_start(s) == turns.Refused("busy-turn")
     fake.end_turn()
-    assert s.start("x", if_epoch=0).wait_started(1) == turns.Refused("stale-turn")
+    assert idle_start(s, if_turn_number=0) == turns.Refused("stale-turn")
     fake.draft = True
-    assert s.start("x", refuse_draft=True).wait_started(1) == turns.Refused("draft")
-    fake.draft, fake.agents = False, 1
-    assert s.start("x", refuse_agents=True).wait_started(1) == turns.Refused("busy-agents")
+    assert idle_start(s, refuse_draft=True) == turns.Refused("draft")
+    fake.draft, fake.live_agents = False, 1
+    assert idle_start(s, refuse_agents=True) == turns.Refused("busy-agents")
     fake.live_fails = True
-    assert s.start("x", refuse_draft=True).wait_started(1) == turns.Refused("draft")
-    fake.live_fails, fake.agents = False, 0
-    d = s.start("x", if_epoch=1, refuse_draft=True, refuse_agents=True)
-    assert d.wait_started(1) == turns.Started("t2")
+    assert idle_start(s, refuse_draft=True) == turns.Refused("draft")
+    fake.live_fails, fake.live_agents = False, 0
+    d = s.deliver("x", only_if_idle=True, if_turn_number=1, refuse_draft=True, refuse_agents=True)
+    assert bare(d.wait_started(1)) == turns.Started("t2")
 
 
 def test_an_unreadable_subagent_list_is_unknown_and_counts_as_busy(make_endpoint):
@@ -111,9 +151,9 @@ def test_an_unreadable_subagent_list_is_unknown_and_counts_as_busy(make_endpoint
     env = dict(os.environ, MOXI_TURNS_COMMANDS="clear")
     ep, fake = make_endpoint(env=env)
     s = turns.find(session_id="s-1")
-    fake.agents = None
+    fake.live_agents = None
     assert s.facts().agents is None
-    assert s.start("x", refuse_agents=True).wait_started(1) == turns.Refused("busy-agents")
+    assert idle_start(s, refuse_agents=True) == turns.Refused("busy-agents")
     assert s.command("clear") == turns.Refused("busy-agents")
     fake.live_fails = True
     f = s.facts()
@@ -123,20 +163,20 @@ def test_an_unreadable_subagent_list_is_unknown_and_counts_as_busy(make_endpoint
 def test_a_turn_typed_between_the_submit_and_the_entry_refuses_the_start(make_endpoint):
     ep, fake = make_endpoint(FakeHarness(auto=False))
     s = turns.find(session_id="s-1")
-    d = s.start("x", if_epoch=0)
+    d = s.deliver("x", only_if_idle=True, if_turn_number=0)
     fake.start_turn()                       # the person types first
     fake.end_turn()
-    assert fake.enter(fake.submitted[0]) == "stale-turn"
-    assert d.wait_started(1) == turns.Refused("stale-turn")
-    assert d.wait_ended(1) == turns.Refused("stale-turn")
+    assert fake.enter(fake.handed(1)[0]) == "stale-turn"
+    assert bare(d.wait_started(1)) == turns.Refused("stale-turn")
+    assert bare(d.wait_ended(1)) == turns.Refused("stale-turn")
 
 
 def test_a_start_whose_checks_fail_where_it_takes_effect_is_refused(make_endpoint):
     ep, fake = make_endpoint(FakeHarness(auto=False))
-    d = turns.find(session_id="s-1").start("x", refuse_draft=True)
+    d = turns.find(session_id="s-1").deliver("x", only_if_idle=True, refuse_draft=True)
     fake.draft = True
-    assert fake.enter(fake.submitted[0]) == "draft"
-    assert d.wait_started(1) == turns.Refused("draft")
+    assert fake.enter(fake.handed(1)[0]) == "draft"
+    assert bare(d.wait_started(1)) == turns.Refused("draft")
 
 
 def test_deliver_waits_for_the_running_turn_and_two_are_two_turns(make_endpoint):
@@ -148,101 +188,68 @@ def test_deliver_waits_for_the_running_turn_and_two_are_two_turns(make_endpoint)
         a.wait_started(0.05)
     assert fake.submitted == []
     fake.end_turn()
-    assert a.wait_started(1) == turns.Started("t2")
+    assert bare(a.wait_started(1)) == turns.Started("t2")
     assert [x.text for x in fake.submitted] == ["a"]
     fake.end_turn()
-    assert a.wait_ended(1) == turns.Ended("t2", "answer")
-    assert b.wait_started(1) == turns.Started("t3")
+    assert bare(a.wait_ended(1)) == turns.Ended("t2", "answer")
+    assert bare(b.wait_started(1)) == turns.Started("t3")
     fake.end_turn("aborted")
-    assert b.wait_ended(1) == turns.Ended("t3", "aborted")
+    assert bare(b.wait_ended(1)) == turns.Ended("t3", "aborted")
     # A start is refused while a delivery is held.
     fake.start_turn()
     s.deliver("c")
-    assert s.start("x").wait_started(1) == turns.Refused("busy-turn")
+    assert idle_start(s) == turns.Refused("busy-turn")
 
 
 def test_steer(make_endpoint):
     ep, fake = make_endpoint()
     s = turns.find(session_id="s-1")
-    assert s.steer("x").wait_started(1) == turns.Refused("idle")
+    assert bare(s.steer("x").wait_started(1)) == turns.Refused("idle")
     turn = fake.start_turn()
     d = s.steer("now")
-    assert d.wait_started(1) == turns.Started(turn)
+    assert bare(d.wait_started(1)) == turns.Started(turn)
     assert [x.text for x in fake.appended] == ["now"]
-    e = s.deliver("also", steer=True)
-    assert e.wait_started(1) == turns.Started(turn)
     fake.end_turn()
-    assert d.wait_ended(1) == e.wait_ended(1) == turns.Ended(turn, "answer")
-    idle = s.deliver("new", steer=True)                # idle: a new turn
-    assert idle.wait_started(1) == turns.Started("t2")
+    assert bare(d.wait_ended(1)) == turns.Ended(turn, "answer")
 
 
-def test_a_steering_deliver_racing_a_turn_end_gets_a_new_turn(make_endpoint):
-    """The turn ends between the caller's deliver(steer=True) and the steer
-    taking hold. The text is mail for a new turn, never `idle`."""
-    ep, fake = make_endpoint()
+def test_what_the_session_lacks_is_an_error_and_gone_is_refused(make_endpoint):
+    ep, fake = make_endpoint(FakeHarness(can=("deliver", "only-if-idle")))
     s = turns.find(session_id="s-1")
     fake.start_turn()
-    made = ep._new
-
-    def racing_new(kind, text, **checks):
-        if kind == "steer" and fake.open_turn:
-            fake.end_turn()                      # the turn ends in the window
-        return made(kind, text, **checks)
-
-    ep._new = racing_new
-    d = s.deliver("mail", steer=True)
-    assert d.wait_started(1) == turns.Started("t2")
-    assert [x.text for x in fake.submitted] == ["mail"]
-    assert [x.kind for x in fake.submitted] == ["deliver"]
-    assert fake.appended == []
-    # Racing a turn end with another delivery in flight, it queues behind that one.
-    slow = FakeHarness(auto=False)
-    ep2, fake2 = make_endpoint(slow, session_id="s-2")
-    s2 = turns.find(session_id="s-2")
-    fake2.start_turn()
-    first = s2.deliver("first")                  # held for the running turn
-    made2 = ep2._new
-
-    def racing_new2(kind, text, **checks):
-        if kind == "steer" and fake2.open_turn:
-            fake2.end_turn()                     # "first" goes in flight, untied
-        return made2(kind, text, **checks)
-
-    ep2._new = racing_new2
-    second = s2.deliver("second", steer=True)
-    assert [x.text for x in fake2.submitted] == ["first"]
-    fake2.enter(fake2.submitted[0])
-    assert first.wait_started(1) == turns.Started("t2")
-    fake2.end_turn()
-    fake2.enter(fake2.submitted[1])
-    assert second.wait_started(1) == turns.Started("t3")
-
-
-def test_unsupported_and_gone(make_endpoint):
-    ep, fake = make_endpoint(FakeHarness(can=("start",)))
-    s = turns.find(session_id="s-1")
-    fake.start_turn()
-    assert s.steer("x").wait_started(1) == turns.Refused("unsupported")
-    assert s.command("clear") == turns.Refused("unsupported")
-    d = s.deliver("held", steer=True)            # no steer here: held to the turn's end
+    for call in (lambda: s.steer("x"), lambda: s.command("clear")):
+        with pytest.raises(turns.TurnsError) as caught:
+            call()
+        assert caught.value.code == 1002
+    assert caught.value.data == {"capability": "clear"}
+    with pytest.raises(ValueError):
+        s.command("reboot")
+    d = s.deliver("held")                        # held to the turn's end
     ep.stop("the session ended")
     assert isinstance(d.wait_ended(1), turns.Lost)      # the endpoint is gone with it
-    assert s.start("x").wait_started(1) == turns.Refused("gone")
+    assert idle_start(s) == turns.Refused("gone")
+    assert s.steer("x").wait_started(1) == turns.Refused("gone")
+    assert s.command("clear") == turns.Refused("gone")
+    for read in (s.facts, s.agents, s.refresh):
+        with pytest.raises(turns.TurnsError):
+            read()
     assert turns.find(session_id="s-1") is None
 
 
 def test_an_open_delivery_answers_lost_when_the_endpoint_goes(make_endpoint):
     ep, fake = make_endpoint()
-    d = turns.find(session_id="s-1").start("x")
-    assert d.wait_started(1) == turns.Started("t1")
+    d = turns.find(session_id="s-1").deliver("x", only_if_idle=True)
+    assert bare(d.wait_started(1)) == turns.Started("t1")
     waiter = []
     t = threading.Thread(target=lambda: waiter.append(d.wait_ended(None)))
     t.start()
     time.sleep(0.1)
     ep.gone("a reload")
     t.join(3)
-    assert waiter == [turns.Lost("a reload")]
+    # The endpoint's reason when its answer is out before the server closes; else the
+    # wait's reconnect finds nothing serving, which reads the same `lost`.
+    assert len(waiter) == 1 and isinstance(waiter[0], turns.Lost)
+    assert waiter[0].reason in ("a reload", "unanswered")
 
 
 def test_watch_yields_every_turn_event_then_gone(make_endpoint):
@@ -251,72 +258,79 @@ def test_watch_yields_every_turn_event_then_gone(make_endpoint):
     events = []
     started = threading.Event()
 
+    w = s.watch()
+    assert w.facts.session_id == "s-1" and w.facts.turn is None
+
     def read():
-        for ev in s.watch():
+        for ev in w:
             events.append(ev)
             started.set()
 
     t = threading.Thread(target=read)
     t.start()
-    time.sleep(0.2)
     ep.ready("startup", "s-1")
     fake.start_turn()
     fake.end_turn()
-    d = s.start("x")
+    d = s.deliver("x", only_if_idle=True)
     d.wait_started(1)
     fake.end_turn("error")
     ep.gone("bye")
     t.join(3)
+    opened = (turns.DeliveryRef(d.id, None, "opened"),)
     assert events == [
         turns.Ready("startup", "s-1"),
-        turns.TurnStarted("t1", "s-1", None),
-        turns.TurnEnded("t1", "answer", "s-1", None, ()),
-        turns.TurnStarted("t2", "s-1", d.id),
-        turns.TurnEnded("t2", "error", "s-1", d.id, ()),
+        turns.TurnStarted("t1", "s-1", 1),
+        turns.TurnEnded("t1", "s-1", 1, "answer"),
+        turns.TurnStarted("t2", "s-1", 2, opened),
+        turns.TurnEnded("t2", "s-1", 2, "error", opened),
         turns.Gone("bye"),
     ]
 
 
-def test_epoch_counts_the_current_session_and_a_missed_end_closes_as_error(make_endpoint):
+def test_the_turn_number_counts_this_session_and_a_missed_end_closes_as_error(
+        make_endpoint):
     ep, fake = make_endpoint()
     s = turns.find(session_id="s-1")
-    d = s.start("x")
+    d = s.deliver("x", only_if_idle=True)
     d.wait_started(1)
     fake.start_turn()                    # a turn start with the last one still open
-    assert d.wait_ended(1) == turns.Ended("t1", "error")
+    assert bare(d.wait_ended(1)) == turns.Ended("t1", "error")
     fake.end_turn()
-    assert s.facts().epoch == 2
+    assert s.facts().turn_number == 2
     ep.ready("clear", "s-2")
-    assert (s.facts().session_id, s.facts().epoch) == ("s-2", 0)
+    assert (s.facts().session_id, s.facts().turn_number) == ("s-2", 0)
 
 
-# -- holding -------------------------------------------------------------------------
+# -- the stop handler ------------------------------------------------------------------
 
 
-def test_the_holder_holds_a_stop_open_or_lets_it_end(make_endpoint):
+def test_the_stop_handler_holds_a_stop_open_or_lets_it_end(make_endpoint):
     ep, fake = make_endpoint()
     s = turns.find(session_id="s-1")
-    assert ep.on_stop(turns.StopFacts(turn_id="t1")) is None     # no holder
+    assert ep.on_stop(turns.StopFacts(turn_id="t1")) is None     # no handler
     seen = []
-    h = s.hold(lambda facts: seen.append(facts) or ("reply first" if len(seen) == 1 else None))
+    h = s.handle_stops(
+        lambda facts: seen.append(facts) or ("reply first" if len(seen) == 1 else None))
     facts = turns.StopFacts(turn_id="t1", session_id="s-1", stop_hook_active=False,
                             task_types=("shell",), crons=0)
     assert ep.on_stop(facts) == "reply first"
     assert ep.on_stop(facts) is None
     assert seen == [facts, facts]
-    with pytest.raises(turns.TurnsError, match="held"):
-        s.hold(lambda f: None)
+    with pytest.raises(turns.TurnsError) as caught:
+        s.handle_stops(lambda f: None)
+    assert caught.value.code == 1003
     h.close()
+    assert h.closed
     time.sleep(0.1)
     assert ep.on_stop(facts) is None
-    s.hold(lambda f: "again").close()
+    s.handle_stops(lambda f: "again").close()
 
 
-def test_a_late_or_broken_holder_lets_the_turn_end(make_endpoint, turns_env):
-    write_config(turns_env, "[hold]\nwait_ms = 100\n")
+def test_a_late_or_broken_stop_handler_lets_the_turn_end(make_endpoint, turns_env):
+    write_config(turns_env, "[stop_handler]\nwait_ms = 100\n")
     ep, fake = make_endpoint()
     s = turns.find(session_id="s-1")
-    h = s.hold(lambda f: time.sleep(0.5) or "too late")
+    h = s.handle_stops(lambda f: time.sleep(0.5) or "too late")
     t0 = time.monotonic()
     assert ep.on_stop(turns.StopFacts()) is None
     assert time.monotonic() - t0 < 0.4
@@ -326,7 +340,7 @@ def test_a_late_or_broken_holder_lets_the_turn_end(make_endpoint, turns_env):
     def broken(facts):
         raise RuntimeError("bug")
 
-    h = s.hold(broken)
+    h = s.handle_stops(broken)
     assert ep.on_stop(turns.StopFacts()) is None
     h.close()
 
@@ -338,7 +352,6 @@ def test_a_command_needs_consent(make_endpoint, turns_env):
     ep, fake = make_endpoint()
     s = turns.find(session_id="s-1")
     assert s.command("clear") == turns.Refused("not-allowed")
-    assert s.command("reboot") == turns.Refused("unsupported")
     write_config(turns_env, '[commands]\nallow = ["exit"]\n')
     assert s.command("clear") == turns.Refused("not-allowed")
     assert s.command("exit") == turns.Ran(None)
@@ -348,7 +361,7 @@ def test_a_launch_stamp_grants_commands(make_endpoint):
     env = dict(os.environ, MOXI_TURNS_COMMANDS="clear,exit")
     ep, fake = make_endpoint(env=env)
     s = turns.find(session_id="s-1")
-    r = s.command("clear", if_epoch=0)
+    r = s.command("clear", if_turn_number=0)
     assert r == turns.Ran("s-2")
     assert s.refresh()["session_id"] == "s-2"
     assert s.command("exit") == turns.Refused("rate")        # one accepted per 60 s
@@ -361,10 +374,10 @@ def test_a_command_runs_only_from_an_idle_snapshot(make_endpoint):
     fake.start_turn()
     assert s.command("clear") == turns.Refused("busy-turn")
     fake.end_turn()
-    assert s.command("clear", if_epoch=0) == turns.Refused("stale-turn")
-    fake.agents = 1
+    assert s.command("clear", if_turn_number=0) == turns.Refused("stale-turn")
+    fake.live_agents = 1
     assert s.command("clear") == turns.Refused("busy-agents")
-    fake.agents, fake.draft = 0, True
+    fake.live_agents, fake.draft = 0, True
     assert s.command("clear") == turns.Refused("draft")
     fake.draft = False
     fake.auto_commands = False
@@ -390,25 +403,25 @@ def test_a_delivery_the_harness_never_settles_expires_and_frees_the_slot(
     s = turns.find(session_id="s-1")
     a = s.deliver("a")                               # in flight, never entered
     b = s.deliver("b")                               # held behind it
-    assert s.start("x").wait_started(1) == turns.Refused("busy-turn")
-    assert [x.text for x in fake.submitted] == ["a"]
+    assert idle_start(s) == turns.Refused("busy-turn")
+    assert [x.text for x in fake.handed(1)] == ["a"]
     lost = a.wait_started(2)
     assert isinstance(lost, turns.Lost) and lost.reason.startswith("expired")
     assert a.wait_ended(1) == lost
-    assert [x.text for x in fake.submitted] == ["a", "b"]   # the held one went in
+    assert [x.text for x in fake.handed(2)] == ["a", "b"]   # the held one went in
     # The adapter's late word about the expired one is refused and changes nothing.
     assert fake.enter(fake.submitted[0]) == "expired"
     assert a.wait_started(1) == lost
     assert fake.enter(fake.submitted[1]) is None
-    assert b.wait_started(1) == turns.Started("t1")
+    assert bare(b.wait_started(1)) == turns.Started("t1")
     fake.end_turn()
-    assert b.wait_ended(1) == turns.Ended("t1", "answer")
+    assert bare(b.wait_ended(1)) == turns.Ended("t1", "answer")
     # An untied start expires the same way, and a start after it goes in.
-    c = s.start("c")
+    c = s.deliver("c", only_if_idle=True)
     assert isinstance(c.wait_started(2), turns.Lost)
-    d = s.start("d")
-    fake.enter(fake.submitted[-1])
-    assert d.wait_started(1) == turns.Started("t2")
+    d = s.deliver("d", only_if_idle=True)
+    assert fake.enter(fake.handed(4)[3]) is None
+    assert bare(d.wait_started(1)) == turns.Started("t2")
 
 
 def test_a_command_the_harness_never_settles_expires_and_frees_the_slot(

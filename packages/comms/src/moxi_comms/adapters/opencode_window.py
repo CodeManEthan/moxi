@@ -1,12 +1,12 @@
 """The OpenCode window: `opencode attach <url> -s <session>`, the session the person sits in.
 
-The launcher runs it as its child in its own terminal, with the lifecycle the Codex
+The wrapper runs it as its child in its own terminal, with the lifecycle the Codex
 window had in comms (`window.WindowSession`): it opens only on a ready generation (one
-server process with the launch's session and its event stream reconciled), the launcher
+server process with the launch's session and its event stream reconciled), the wrapper
 records why it ends a window before it ends it, a window that exits by itself while its
-server still answers was closed by the person, and the launcher then stops, so the
+server still answers was closed by the person, and the wrapper then stops, so the
 identity goes offline. A window whose server was lost closes and reopens on the server
-the launcher starts in its place.
+the wrapper starts in its place.
 
 `attach` reads the server password from `OPENCODE_SERVER_PASSWORD`, which the window's
 environment carries.

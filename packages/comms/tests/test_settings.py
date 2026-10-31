@@ -9,15 +9,15 @@ import pytest
 from conftest import write_config
 from moxi import config as moxi_config
 
-from moxi_comms import config, constants, gateway, local_gateway, module, secrets, tokens
+from moxi_comms import config, constants, record, local_record, module, secrets, tokens
 
 
 def test_the_schema_parses_and_its_overrides_are_spelled_with_the_prefix():
     schema = config.schema()
     schema.check_env("comms")
     assert {k.env for k in schema.live() if k.env} == {
-        "MOXI_COMMS_GATEWAY", "MOXI_COMMS_LOCAL_RECORD", "MOXI_COMMS_LOCAL_RETAIN_DAYS",
-        "MOXI_COMMS_TOKEN_STORE"}
+        "MOXI_COMMS_BACKEND", "MOXI_COMMS_LOCAL_RECORD", "MOXI_COMMS_LOCAL_RETAIN_DAYS",
+        "MOXI_COMMS_TOKEN_STORE", "MOXI_COMMS_DELIVERY_EXPIRY"}
     assert not set(module.INTERNAL_ENV) & {k.env for k in schema.live()}
 
 
@@ -40,20 +40,18 @@ def test_the_defaults_with_no_file():
     assert cfg.backend == "local"
     assert (cfg.local.record, cfg.local.retain_days) == ("", 90)
     assert cfg.threads.reply_cap == constants.DEFAULT_REPLY_CAP
-    assert cfg.secrets.chain == ("env", "store") == secrets.DEFAULT_CHAIN
-    assert (cfg.secrets.store, cfg.secrets.roles) == ("", ())
+    assert cfg.credentials.chain == ("env", "keychain", "store") == secrets.DEFAULT_CHAIN
+    assert (cfg.credentials.store, cfg.credentials.roles) == ("", ())
     assert cfg.policy.cache_callers == ("operator",)
     assert cfg.policy.labels == {}
     assert cfg.provision.operator == "operator"
-    assert (cfg.replay.messages, cfg.replay.seconds) == \
-        (constants.REPLAY_N, constants.REPLAY_T)
     assert cfg.block is False
     assert cfg.codex == cfg.opencode == {"defaults": {}, "agents": {}}
     assert not hasattr(cfg, "claude")
 
 
 def test_one_owner_of_the_retention():
-    assert config.LOCAL_RETAIN_DAYS == local_gateway.RETAIN_DAYS == \
+    assert config.LOCAL_RETAIN_DAYS == local_record.RETAIN_DAYS == \
         config.schema().keys["local.retain_days"].default
 
 
@@ -69,7 +67,7 @@ retain_days = 7
 [threads]
 reply_cap = 3
 
-[secrets]
+[credentials]
 chain = ["store"]
 roles = ["calendar", "pager"]
 
@@ -80,9 +78,8 @@ labels = { "console@acme" = "the build console's send-only identity" }
 [provision]
 operator = "alice"
 
-[replay]
-messages = 10
-hours = 2
+[delivery]
+expiry = "6h"
 
 [codex.defaults]
 sandbox = "workspace-write"
@@ -97,19 +94,20 @@ cwd = "/src/x"
 """
 
 
-def test_the_file_sets_every_table():
+def test_the_file_sets_every_table(monkeypatch):
+    monkeypatch.delenv("MOXI_COMMS_DELIVERY_EXPIRY")
     path = write_config(None, EVERY_TABLE)
     cfg = config.load()
     assert cfg.source == str(path) == str(config.config_path())
     assert cfg.backend == "mock" and cfg.block is True
     assert cfg.local.record == os.path.expanduser("~/rec.db")
     assert cfg.local.retain_days == 7 and cfg.threads.reply_cap == 3
-    assert cfg.secrets.chain == ("store",)
-    assert cfg.secrets.roles == ("calendar", "pager")
+    assert cfg.credentials.chain == ("store",)
+    assert cfg.credentials.roles == ("calendar", "pager")
     assert cfg.policy.cache_callers == ("operator", "herald")
     assert cfg.policy.labels == {"console@acme": "the build console's send-only identity"}
     assert cfg.provision.operator == "alice"
-    assert (cfg.replay.messages, cfg.replay.seconds) == (10, 7200)
+    assert (cfg.delivery.expiry, cfg.delivery.expiry_seconds) == ("6h", 21600)
     assert cfg.codex["defaults"] == {"sandbox": "workspace-write"}
     assert cfg.codex["agents"]["planner@proj-a"] == {"model": "gpt-x",
                                                      "cwd": "/src/proj-a"}
@@ -127,7 +125,7 @@ def test_block_is_read_at_each_use():
 
 def test_an_env_override_wins_over_the_file(monkeypatch, tmp_path):
     write_config(None, 'backend = "mock"\n[local]\nretain_days = 7\n')
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "local")
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "local")
     monkeypatch.setenv("MOXI_COMMS_LOCAL_RETAIN_DAYS", "0")
     monkeypatch.setenv("MOXI_COMMS_LOCAL_RECORD", str(tmp_path / "r.db"))
     monkeypatch.setenv("MOXI_COMMS_TOKEN_STORE", str(tmp_path / "store"))
@@ -135,15 +133,15 @@ def test_an_env_override_wins_over_the_file(monkeypatch, tmp_path):
     assert cfg.backend == "local" and cfg.sources["backend"] == "env"
     assert cfg.local.retain_days == 0
     assert cfg.local.record == str(tmp_path / "r.db")
-    assert cfg.secrets.store == str(tmp_path / "store")
+    assert cfg.credentials.store == str(tmp_path / "store")
 
 
 def test_a_given_environment_is_read_instead_of_the_process(tmp_path):
     env = {"MOXI_COMMS_CONFIG_HOME": str(tmp_path / "cfg"), "HOME": str(tmp_path)}
-    write_config(env, "[replay]\nmessages = 5\n")
+    write_config(env, "[threads]\nreply_cap = 5\n")
     assert config.config_path(env) == tmp_path / "cfg" / "comms" / "config.toml"
-    assert config.load(env=env).replay.messages == 5
-    assert config.load().replay.messages == 50
+    assert config.load(env=env).threads.reply_cap == 5
+    assert config.load().threads.reply_cap == constants.DEFAULT_REPLY_CAP
 
 
 #: Files comms' loader refuses, each with the key the refusal names.
@@ -152,14 +150,15 @@ BAD_FILES = [
     ("[threads]\nreply_cap = 0\n", "threads.reply_cap"),
     ("[threads]\nreply_cap = true\n", "threads.reply_cap"),
     ("[local]\nretain_days = -1\n", "local.retain_days"),
-    ('[secrets]\nchain = ["env", "vault"]\n', "secrets.chain"),
-    ("[secrets]\nchain = []\n", "secrets.chain"),
-    ('[secrets]\nroles = ["operator"]\n', "secrets.roles"),
-    ('[secrets]\nroles = ["../up"]\n', "secrets.roles"),
+    ('[credentials]\nchain = ["env", "vault"]\n', "credentials.chain"),
+    ("[credentials]\nchain = []\n", "credentials.chain"),
+    ('[credentials]\nroles = ["operator"]\n', "credentials.roles"),
+    ('[credentials]\nroles = ["../up"]\n', "credentials.roles"),
     ('[policy]\ncache_callers = [""]\n', "policy.cache_callers"),
     ('[policy]\nlabels = { "x" = 1 }\n', "policy.labels"),
     ("[provision]\nslots = 0\n", "provision.slots"),
     ("[replay]\nmessages = 0\n", "replay.messages"),
+    ("[replay]\nhours = -1\n", "replay.hours"),
     ('[codex.agents]\nplanner = 3\n', "codex.agents"),
     ('[claude]\nchannel = "server"\n', "claude.channel"),
     ('[policy]\nnever_held = []\n', "policy.never_held"),
@@ -177,6 +176,12 @@ def test_a_bad_file_is_refused_naming_the_key(text, key):
     assert caught.value.key == key
     assert isinstance(caught.value, moxi_config.ConfigError)
     assert caught.value.fix
+
+
+def test_the_replay_keys_are_read_and_default_to_comms_0_2s():
+    assert (config.load().replay.messages, config.load().replay.hours) == (50, 24)
+    write_config(None, "[replay]\nmessages = 7\nhours = 2\n")
+    assert (config.load().replay.messages, config.load().replay.hours) == (7, 2)
 
 
 def test_a_retired_key_says_what_to_do():
@@ -215,29 +220,29 @@ def test_the_roster_parsers_can_raise_the_same_error_with_one_message():
 # ------------------------------------------------------------------ the readers
 
 def test_the_backend_choice_names_its_source(monkeypatch):
-    assert gateway.backend_choice() == gateway.BackendChoice("local", gateway.SOURCE_DEFAULT)
-    assert gateway.backend_choice().describe() == "the default"
+    assert record.backend_choice() == record.BackendChoice("local", record.SOURCE_DEFAULT)
+    assert record.backend_choice().describe() == "the default"
     write_config(None, 'backend = "mock"\n')
-    assert gateway.backend_choice() == gateway.BackendChoice("mock", gateway.SOURCE_CONFIG)
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "local")
-    assert gateway.backend_choice().source == gateway.SOURCE_ENV
-    assert gateway.backend_choice("mock").source == gateway.SOURCE_FLAG
-    assert gateway.default_backend() == gateway.LOCAL
+    assert record.backend_choice() == record.BackendChoice("mock", record.SOURCE_CONFIG)
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "local")
+    assert record.backend_choice().source == record.SOURCE_ENV
+    assert record.backend_choice("mock").source == record.SOURCE_FLAG
+    assert record.default_backend() == record.LOCAL
 
 
-def test_an_unknown_backend_is_a_gateway_error(monkeypatch):
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "discord")
-    with pytest.raises(gateway.GatewayError):
-        gateway.backend_choice()
-    with pytest.raises(gateway.GatewayError):
-        gateway.backend_choice("discord")
+def test_an_unknown_backend_is_a_record_error(monkeypatch):
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "discord")
+    with pytest.raises(record.RecordError):
+        record.backend_choice()
+    with pytest.raises(record.RecordError):
+        record.backend_choice("discord")
 
 
 def test_the_token_store_location_comes_from_the_config(monkeypatch, tmp_path):
     from moxi_comms import paths
 
     assert tokens.TokenStore().root == paths.tokens_dir()
-    write_config(None, f'[secrets]\nstore = "{tmp_path / "a"}"\n')
+    write_config(None, f'[credentials]\nstore = "{tmp_path / "a"}"\n')
     assert tokens.TokenStore().root == tmp_path / "a"
     monkeypatch.setenv(tokens.STORE_ENV_VAR, str(tmp_path / "b"))
     assert tokens.TokenStore().root == tmp_path / "b"
@@ -252,7 +257,7 @@ def test_the_token_store_location_comes_from_the_config(monkeypatch, tmp_path):
 def test_a_role_the_box_lists_keys_under_itself_and_an_unlisted_one_is_unknown():
     assert tokens.owner_for_role("calendar").parts == ()
     assert tokens.owner_of_holder("comms/calendar") is None
-    write_config(None, '[secrets]\nroles = ["calendar"]\n')
+    write_config(None, '[credentials]\nroles = ["calendar"]\n')
     owner = tokens.owner_for_role("calendar")
     assert owner.parts == ("calendar",) and owner.role == "calendar"
     assert tokens.owner_of_holder("comms/calendar") == owner
@@ -262,7 +267,7 @@ def test_a_role_the_box_lists_keys_under_itself_and_an_unlisted_one_is_unknown()
 
 def test_the_chain_reads_the_configured_store(tmp_path):
     store = tmp_path / "store"
-    write_config(None, f'[secrets]\nchain = ["store"]\nstore = "{store}"\n')
+    write_config(None, f'[credentials]\nchain = ["store"]\nstore = "{store}"\n')
     owner = tokens.owner_for_role(tokens.ROLE_OPERATOR)
     tokens.TokenStore(store).write_secret(owner, tokens.OPERATOR_SECRET_ID, "tok")
     chain = secrets.from_config()
@@ -274,16 +279,16 @@ def test_the_running_reader_refuses_a_bad_start_and_keeps_the_last_good_at_use()
     """`config.Config`, the daemon's reader: a bad file refuses `start()`; after a
     good start, `current()` keeps the last good settings while the file is in error,
     reports once per change of the file, and follows the file again once it loads."""
-    write_config(None, "[replay]\nmessages = [\n")
+    write_config(None, "[threads]\nreply_cap = [\n")
     with pytest.raises(config.ConfigError):
         config.Config(report=lambda exc: None).start()
 
     reports = []
-    write_config(None, "block = true\n[replay]\nmessages = 7\n")
+    write_config(None, "block = true\n[threads]\nreply_cap = 7\n")
     reader = config.Config(report=reports.append)
     assert reader.start().block is True
-    write_config(None, "block = false\n[replay]\nmessages = [\n")
-    assert reader.use("block") is True and reader.use("replay").messages == 7
+    write_config(None, "block = false\n[threads]\nreply_cap = [\n")
+    assert reader.use("block") is True and reader.use("threads").reply_cap == 7
     assert reader.current().block is True
     assert len(reports) == 1 and isinstance(reports[0], config.ConfigError)
     # A new bad edit is a change of the file: reported once more.
@@ -291,7 +296,7 @@ def test_the_running_reader_refuses_a_bad_start_and_keeps_the_last_good_at_use()
     assert reader.use("block") is True
     assert len(reports) == 2 and "looks like a secret" in str(reports[1])
     write_config(None, "block = false\n")
-    assert reader.use("block") is False and reader.use("replay").messages == 50
+    assert reader.use("block") is False and reader.use("threads").reply_cap == constants.DEFAULT_REPLY_CAP
     assert len(reports) == 2
 
 
@@ -309,9 +314,9 @@ def test_a_named_file_is_read_in_place(tmp_path, monkeypatch):
 
     monkeypatch.setattr(tempfile, "TemporaryDirectory", no_temp_root)
     named = tmp_path / "launch.toml"
-    named.write_text("block = true\n[replay]\nmessages = 9\n")
+    named.write_text("block = true\n[threads]\nreply_cap = 9\n")
     cfg = config.load_file(named)
-    assert cfg.block is True and cfg.replay.messages == 9
+    assert cfg.block is True and cfg.threads.reply_cap == 9
     assert cfg.source == str(named)
     assert config.load().block is False
 
@@ -403,11 +408,11 @@ def test_the_text_entry_refuses_every_row_its_roster_refuses(text, words):
 
 def test_the_text_entry_reads_no_environment(monkeypatch):
     write_config(None, 'backend = "local"\n')
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "bogus")
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "bogus")
     with pytest.raises(config.ConfigError):
         config.load()
     assert config.check_text('backend = "local"\n') is None
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "mock")
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "mock")
     with pytest.raises(config.ConfigError):
         config.check_text('backend = "remote"\n')
 
@@ -460,6 +465,8 @@ def test_the_text_entry_types_the_values_as_the_loader_does(monkeypatch):
         return typed(settings, path)
 
     monkeypatch.setattr(config, "_typed", spy)
+    # The test environment sets the expiry's override; the text entry reads no environment.
+    monkeypatch.delenv("MOXI_COMMS_DELIVERY_EXPIRY")
     write_config(None, EVERY_TABLE)
     config.load()
     config.check_text(EVERY_TABLE)
@@ -470,7 +477,7 @@ def test_the_text_entry_leaves_no_cache_entry():
     checked, cached = dict(config._checked), dict(moxi_config._cache)
     config.check_text(EVERY_TABLE)
     with pytest.raises(config.ConfigError):
-        config.check_text('[secrets]\nchain = []\n')
+        config.check_text('[credentials]\nchain = []\n')
     assert (config._checked, moxi_config._cache) == (checked, cached)
 
 
@@ -484,10 +491,10 @@ def core_state(monkeypatch, tmp_path):
     (("codex.agents", '{"p@x" = {api_token = "sk-secret"}}'),
      {"p@x": {"api_token": "sk-secret"}}, "codex.agents.p@x.api_token",
      "looks like a secret"),
-    (("secrets.chain", '["env", "vault"]'), ["env", "vault"], "secrets.chain",
+    (("credentials.chain", '["env", "vault"]'), ["env", "vault"], "credentials.chain",
      "not a resolver"),
-    (("secrets.chain", "[]"), [], "secrets.chain", "is empty"),
-    (("secrets.roles", "--add", "reader"), None, "secrets.roles",
+    (("credentials.chain", "[]"), [], "credentials.chain", "is empty"),
+    (("credentials.roles", "--add", "reader"), None, "credentials.roles",
      "one of comms' own roles"),
 ])
 def test_config_set_refuses_what_comms_refuses(core_state, capsys, argv, value, key,
@@ -537,8 +544,8 @@ def test_config_set_and_check_pass_a_good_file_under_a_bad_variable(core_state, 
     from moxi import cli
 
     path = write_config(None, "block = true\n")
-    monkeypatch.setenv("MOXI_COMMS_GATEWAY", "bogus")
-    assert cli.main(["config", "set", "comms", "secrets.roles", "--add", "pager"]) == 0
+    monkeypatch.setenv("MOXI_COMMS_BACKEND", "bogus")
+    assert cli.main(["config", "set", "comms", "credentials.roles", "--add", "pager"]) == 0
     assert cli.main(["config", "unset", "comms", "block"]) == 0
     assert cli.main(["config", "comms", "check"]) == 0
     assert capsys.readouterr().err == ""

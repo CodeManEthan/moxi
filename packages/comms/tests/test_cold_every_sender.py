@@ -32,7 +32,6 @@ from __future__ import annotations
 import io
 import os
 import shutil
-import socket
 import tempfile
 import threading
 import time
@@ -40,15 +39,18 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from conftest import (assistant_line, cache_absent, cache_api, projects_root, record_rows,
-                      send_turn, wait_for_queue, wait_until, write_transcript)
+from conftest import (assistant_line, cache_absent, cache_api, projects_root, put_cursor,
+                      raw_connection,
+                      record_rows, send_turn, settle, store_rows, synced, wait_for_queue,
+                      wait_until, write_transcript)
 
-from moxi_comms import cache, cli, cursors, machine_line, paths
-from moxi_comms.adapters.claude_shim import ClaudeShim
+from moxi import exit as moxi_exit
+from moxi_comms.store import books as books_mod
+from moxi_comms import cache, cli, machine_line, paths
+from moxi_comms.adapters.claude_shim import ACTIVITY_METHODS, ClaudeShim
 from moxi_comms.client import DaemonClient
 from moxi_comms.daemon import Daemon
 from moxi_comms.paths import daemon_socket
-from moxi_comms.protocol import CLI_PROTOCOL, LineConn
 from moxi_comms.provision import NAMES
 from moxi_comms.sender import SenderIdentity
 
@@ -92,11 +94,9 @@ HELD_LAST = held_last()
 def _live_paths():
     return {
         "socket": paths.daemon_socket(),
-        "record": paths.record_db(),
-        "directory": paths.directory_db(),
+        "store": paths.comms_db(),
         "tokens": paths.tokens_dir(),
         "cursors": paths.cursors_dir(),
-        "cold gate": paths.cold_gate(),
         "claude projects": Path(cache_api().projects_root(None)),
         "shim root": Path(cache_api().projects_root(os.environ)),
     }
@@ -151,7 +151,7 @@ def test_the_guard_fails_a_path_outside_both_roots_and_names_both(tmp_path_facto
 # --------------------------------------------------------------------------- helpers
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def held_of(rig, q=REVIEWER_Q):
@@ -167,8 +167,8 @@ def queued_ids(shim_or_queue):
 
 
 def nudge(rig):
-    if hasattr(rig.gateway, "nudge"):
-        rig.gateway.nudge()
+    if hasattr(rig.record, "nudge"):
+        rig.record.nudge()
 
 
 def post(rig, recipients, text="past the verb", *, next_turn=False,
@@ -186,14 +186,24 @@ def raw_activity(pushes, q, **fields):
     """An `activity` frame on a bare binding's own connection (a bare claude-shim, a codex or an
     opencode agent bound by `adapters`): the release points ride
     these frames, whichever adapter code sends them."""
-    pushes.client.notify("activity", identity=q, **fields)
+    kind = fields.pop("kind", None)
+    pushes.client.notify(ACTIVITY_METHODS.get(kind, "activity"), {"identity": q, **fields})
 
 
 def raw_turn(pushes, q, handled=(), unhandled=()):
-    """`activity kind=turn` with `handled` and `unhandled`, as the adapters send
-    it at every turn end."""
-    raw_activity(pushes, q, kind="turn", turned=True, handled=[str(i) for i in handled],
-                 unhandled=[str(i) for i in unhandled])
+    """A turn end on a bare binding's own connection, as the adapters send it: one
+    digest opened for the `handled` message ids and one for the `unhandled` ones, then
+    `turn_ended` naming them."""
+    def opened(ids) -> list:
+        ids = [str(i) for i in ids]
+        if not ids:
+            return []
+        return [pushes.client.call("open_digest", {"ids": ids}, timeout=5.0)["digest"]]
+
+    handled_d, unhandled_d = opened(handled), opened(unhandled)
+    return pushes.client.call("turn_ended", {"identity": q, "turned": True,
+                                             "handled": handled_d,
+                                             "unhandled": unhandled_d}, timeout=5.0)
 
 
 def raw_ready(pushes, q, source):
@@ -210,8 +220,8 @@ class Pushes:
     def __init__(self):
         self.frames = []
 
-    def __call__(self, frame):
-        self.frames.append(frame)
+    def __call__(self, method, params):
+        self.frames.append({"op": method, **params})
 
     def delivered(self):
         return [f["payload"] for f in self.frames if f.get("op") == "deliver"]
@@ -229,15 +239,14 @@ def adapters():
     def _bind(**kw):
         pushes = Pushes()
         c = DaemonClient(daemon_socket(), on_push=pushes).connect()
-        c.register(**kw)
-        # The daemon answers a register before it runs the bind's replay and release
-        # point, and it serves one connection's frames in order: a ping answered on
-        # this connection means both have run. Without it, a release point that runs
-        # late reads whatever the test has set up since (a transcript warmed after a
-        # post was held) and hands a row the test means to keep. If the daemon ever
-        # serves a connection's frames out of order, the ping still answers but proves
-        # nothing, and this race comes back.
-        c.request("ping")
+        c.bind(**kw)
+        # The daemon answers a bind before it runs the bind's replay and release
+        # point, and it serves one connection's messages in order: a read answered on
+        # this connection means both have run, and `synced` then waits for what they
+        # pushed to reach the handler. Without it, a release point that runs late reads
+        # whatever the test has set up since (a transcript warmed after a post was
+        # held) and hands a row the test means to keep.
+        synced(c)
         made.append(c)
         pushes.client = c
         return pushes
@@ -275,8 +284,7 @@ def shim(rig, sid=SESS_A, *, age="none", **kw):
 # its suite. What stays is comms' seam: what reads without the module, and
 # that a read never raises.
 
-@pytest.mark.parametrize("adapter", ["something-new", None, "harness-kind", "person-kind",
-                                     "send-only"])
+@pytest.mark.parametrize("adapter", ["something-new", None, "harness-kind", "person-kind"])
 def test_an_adapter_with_no_clock_reads_no_cache(adapter):
     """No clock, live: an adapter comms has no clock for reads
     `no-cache`, a passing read, with the reason naming the adapter; never `unknown`, so
@@ -357,8 +365,8 @@ REFUSED_STATES = ["no session id", "unreadable", "no evidence", "codex", "openco
 
 
 def _bind_lane(bind, who):
-    """The console's lane holds a binding of its own, as a send-only console does, so a
-    post that goes has a credential to go with."""
+    """The console's lane holds a binding of its own, as a module's own process does, so
+    a post that goes has a credential to go with."""
     if who is AS_CONSOLE:
         bind(name="console", scope="acme")
 
@@ -390,7 +398,7 @@ def test_every_sender_is_held_or_refused_in_every_state_that_does_not_pass(
         time.sleep(0.1)
         assert msg.id not in rig.daemon.bindings[to].delivered, "held, not delivered"
     else:
-        assert code == cli.EXIT_COLD == 6, out
+        assert code == moxi_exit.TEMPFAIL, out
         assert lines[0].startswith(f"Nothing was sent: comms could not read {to}'s cache ("), out
         assert lines[1:] == ["Send it again in a moment; a read that succeeds holds or "
                              "delivers it.", "Nothing was sent."], out
@@ -424,17 +432,17 @@ def test_a_small_cold_context_is_held(rig):
 def test_a_failed_session_query_refuses_the_post(rig, monkeypatch):
     """A `session` query that fails refuses the post, exit 6."""
     shim(rig, SESS_A, age=60)
-    real = DaemonClient.query
+    real = DaemonClient.call
 
-    def broken(self, kind, **kw):
+    def broken(self, kind, params=None, **kw):
         if kind == "session":
             from moxi_comms.client import DaemonError
             raise DaemonError("the daemon fell over")
-        return real(self, kind, **kw)
+        return real(self, kind, params, **kw)
 
-    monkeypatch.setattr(DaemonClient, "query", broken)
+    monkeypatch.setattr(DaemonClient, "call", broken)
     code, out = send(rig, REVIEWER_Q)
-    assert code == cli.EXIT_COLD and posted(rig) == []
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == []
     assert out.splitlines()[0] == ("Nothing was sent: comms could not ask the daemon about "
                                    "reviewer@proj-a (the session query failed (the daemon "
                                    "fell over)).")
@@ -460,7 +468,7 @@ def test_a_session_answer_with_no_verdict_refuses_the_post(rig, monkeypatch, old
 
     monkeypatch.setattr(rig.daemon, "_session_query", old)
     code, out = send(rig, REVIEWER_Q)
-    assert code == cli.EXIT_COLD and posted(rig) == []
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == []
     assert out.splitlines()[0] == {
         "no session query": ("Nothing was sent: comms could not ask the daemon about "
                              "reviewer@proj-a (the session query failed (unknown query "
@@ -502,7 +510,7 @@ def test_held_to_a_recipient_comms_cannot_read_is_refused(rig):
     """An unknown read refuses a flagged send too; it is not held."""
     rig.shim(**REVIEWER, session_id=None)
     code, out = send(rig, REVIEWER_Q, "later", "--held")
-    assert code == cli.EXIT_COLD and posted(rig) == [], out
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == [], out
     assert out.splitlines()[0] == ("Nothing was sent: comms could not read "
                                    "reviewer@proj-a's cache (no session id reported yet).")
     assert held_of(rig) == set()
@@ -539,7 +547,7 @@ def test_the_refusal_text_for_an_unreadable_codex_recipient(rig, adapters):
     shim(rig, SESS_A, age=2 * HOUR)
     adapters(name="coder", scope="proj-a", adapter="codex")
     code, out = send(rig, "reviewer@proj-a,coder@proj-a")
-    assert code == cli.EXIT_COLD and posted(rig) == []
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == []
     assert out.splitlines() == [
         "Nothing was sent: comms could not read coder@proj-a's cache (no thread id "
         "reported yet).",
@@ -561,7 +569,7 @@ def test_a_caller_past_the_verb_is_still_held(rig):
     out = io.StringIO()
     planner = SenderIdentity(qualified="planner@proj-a", scope="proj-a", name="planner")
     with rig.session_holding(planner) as claim_socket:
-        ctx = cli.Context(gateway=rig.gateway, db_path=paths.directory_db(),
+        ctx = cli.Context(record=rig.record, db_path=paths.comms_db(),
                           socket_path=paths.daemon_socket(),
                           env={"MOXI_COMMS_PROJECT": "proj-a",
                                "MOXI_COMMS_CLAIM_SOCKET": claim_socket}, out=out)
@@ -640,7 +648,7 @@ def test_a_cold_shim_recipient_is_held_then_released_by_its_own_warm_turn(rig):
     assert held_of(rig) == {msg.id}, "the row stays until the adapter names it handled"
     send_turn(s, handled=[msg.id])
     assert wait_until(lambda: held_of(rig) == set())
-    assert wait_until(lambda: record_rows(rig.gateway, REVIEWER_Q) == set())
+    assert wait_until(lambda: record_rows(rig.record, REVIEWER_Q) == set())
 
 
 def test_cold_held_mail_waits_while_newer_mail_goes_once_warm(rig):
@@ -782,20 +790,20 @@ def test_held_mail_at_a_bare_binding_bind(rig, adapters, anchor, released):
         assert helper.ids() == [] and held_of(rig, HELPER_Q) == {held.id}
 
 
-def test_replays_cursor_never_passes_a_cold_held_id(rig):
-    cursors.advance(REVIEWER_Q, "1")
+def test_the_binds_cursor_never_passes_a_cold_held_id(rig):
+    put_cursor(REVIEWER_Q, "1")
     before = post(rig, [REVIEWER_Q], "while unbound")
     assert wait_until(lambda: before.id in held_of(rig))
     write_transcript(SESS_A, 3 * HOUR)
     pushes = Pushes()
     c = DaemonClient(daemon_socket(), on_push=pushes).connect()
     try:
-        c.register(name="reviewer", scope="proj-a", adapter="claude-shim",
+        c.bind(name="reviewer", scope="proj-a", adapter="claude-shim",
                    session_id=SESS_A, projects_root=str(projects_root()), turned=True)
         wait_until(lambda: any(f.get("op") == "replay_complete" for f in pushes.frames))
         (done,) = [f for f in pushes.frames if f.get("op") == "replay_complete"]
         assert pushes.delivered() == []
-        assert done["cursor"] in (None, "1") and int(done["cursor"]) < int(before.id)
+        assert done["cursor"] == "1" and int(done["cursor"]) < int(before.id)
         assert held_of(rig) == {before.id}
     finally:
         c.close()
@@ -808,8 +816,7 @@ def test_a_cold_row_survives_a_restart_and_a_shim_that_registers_at_once(rig, re
              backoff=iter(lambda: 0.02, None))
     msg = post(rig, [REVIEWER_Q])
     assert wait_until(lambda: msg.id in held_of(rig))
-    assert wait_until(lambda: record_rows(rig.gateway, REVIEWER_Q) == {msg.id})
-    assert not paths.cold_gate().exists()
+    assert wait_until(lambda: record_rows(rig.record, REVIEWER_Q) == {msg.id})
     daemon = reboot(rig)
     assert held_of(rig) == {msg.id}, "loaded before the socket listened"
     wait_until(lambda: REVIEWER_Q in daemon.bindings and not s.offline)
@@ -855,14 +862,14 @@ def test_the_daemon_refuses_to_start_when_the_queue_load_raises(rig, monkeypatch
     over an empty memory: a queue read that raises stops the start."""
     rig.daemon.stop()
 
-    def broken():
+    def broken(*args, **kwargs):
         raise RuntimeError("the record's queue could not be read")
 
-    monkeypatch.setattr(rig.gateway, "queue_rows", broken)
-    daemon = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    monkeypatch.setattr(books_mod.Books, "rows", broken)
+    daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     with pytest.raises(RuntimeError, match="queue could not be read"):
         daemon.start()
-    assert not daemon.bound and not daemon_socket().exists()
+    assert daemon.host is None and not daemon_socket().exists()
 
 
 def test_the_trim_keeps_a_cold_bare_bindings_row_and_takes_the_message_once_handled(
@@ -873,18 +880,18 @@ def test_the_trim_keeps_a_cold_bare_bindings_row_and_takes_the_message_once_hand
         pytest.skip("only the local record trims")
     helper = bare_shim(adapters, sid=SESS_D, age=3 * HOUR)
     msg = post(rig, [HELPER_Q])
-    assert wait_until(lambda: record_rows(rig.gateway, HELPER_Q) == {msg.id})
+    assert wait_until(lambda: record_rows(rig.record, HELPER_Q) == {msg.id})
     rig.age_message(msg.id, time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                           time.gmtime(rig.clock() - 200 * 86400)))
     rig.daemon.trim_record()
-    assert rig.gateway.get_message(msg.id) is not None
+    assert rig.record.get_message(msg.id) is not None
     write_transcript(SESS_D, 5)
     raw_turn(helper, HELPER_Q)
     assert wait_until(lambda: helper.ids() == [msg.id])
     raw_turn(helper, HELPER_Q, handled=[msg.id])
-    assert wait_until(lambda: record_rows(rig.gateway, HELPER_Q) == set())
+    assert wait_until(lambda: record_rows(rig.record, HELPER_Q) == set())
     rig.daemon.trim_record()
-    assert rig.gateway.get_message(msg.id) is None
+    assert rig.record.get_message(msg.id) is None
 
 
 def test_a_cursor_past_a_cold_held_id_leaves_its_row(rig):
@@ -893,10 +900,10 @@ def test_a_cursor_past_a_cold_held_id_leaves_its_row(rig):
     shim(rig, SESS_A, age=2 * HOUR)
     msg = post(rig, [REVIEWER_Q])
     wait_until(lambda: msg.id in held_of(rig))
-    cursors.advance(REVIEWER_Q, msg.id)
+    put_cursor(REVIEWER_Q, msg.id)
     rig.daemon.rescan()
     assert held_of(rig) == {msg.id}
-    assert wait_until(lambda: record_rows(rig.gateway, REVIEWER_Q) == {msg.id})
+    assert wait_until(lambda: record_rows(rig.record, REVIEWER_Q) == {msg.id})
 
 
 def test_a_delivered_message_re_read_after_the_recipient_went_cold_writes_no_row(
@@ -910,7 +917,7 @@ def test_a_delivered_message_re_read_after_the_recipient_went_cold_writes_no_row
     rig.daemon.rescan()
     time.sleep(0.1)
     assert held_of(rig, HELPER_Q) == set()
-    assert record_rows(rig.gateway, HELPER_Q) == set()
+    assert store_rows(HELPER_Q) == [(msg.id, HELPER_Q, "handed")], "its row stays handed"
     assert helper.ids() == [msg.id]
 
 
@@ -953,7 +960,7 @@ def test_the_trim_keeps_cold_held_ids(rig):
     rig.age_message(msg.id, time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                           time.gmtime(rig.clock() - 200 * 86400)))
     rig.daemon.trim_record()
-    assert rig.gateway.get_message(msg.id) is not None
+    assert rig.record.get_message(msg.id) is not None
 
 
 def test_comms_explain_names_a_cold_shims_and_a_cold_bare_bindings_mail_waiting(rig, adapters):
@@ -965,8 +972,8 @@ def test_comms_explain_names_a_cold_shims_and_a_cold_bare_bindings_mail_waiting(
     wait_until(lambda: held.id in held_of(rig) and other.id in held_of(rig, HELPER_Q))
     for name, q, mid in ((REVIEWER_Q, REVIEWER_Q, held.id), (HELPER_Q, HELPER_Q, other.id)):
         code, out = rig.cli(["explain", name, mid], **PLANNER)
-        assert code == 0 and out.splitlines()[0].startswith(f"{q}   {cursors.WAITING}"), out
-        assert ("This message waits in the queue for the name's next release point"
+        assert code == 0 and out.splitlines()[0].startswith(f"{q}   {books_mod.WAITING}"), out
+        assert ("This message waits in the name's rows for its next release point"
                 in out.replace("\n  ", " "))
 
 
@@ -979,7 +986,7 @@ def test_comms_agents_counts_cold_held_mail(rig):
     wait_until(lambda: len(held_of(rig)) == 2)
     c = DaemonClient(daemon_socket()).connect()
     try:
-        view = c.query("agents")
+        view = c.call("agents")
     finally:
         c.close()
     assert view["waiting"][REVIEWER_Q]["count"] == 2
@@ -994,13 +1001,13 @@ def test_checked_warm_and_cold_at_delivery_is_held(rig, monkeypatch):
     """The verb reads warm; the clock crosses the hour before the daemon routes the
     post. The daemon's gate holds it, after the sender was told `sent`."""
     s = shim(rig, SESS_A, age=60)
-    real = DaemonClient.post
+    real = DaemonClient.send
 
     def late(*a, **kw):
         write_transcript(SESS_A, HOUR + 5)          # the hour passes in between
         return real(*a, **kw)
 
-    monkeypatch.setattr(DaemonClient, "post", late)
+    monkeypatch.setattr(DaemonClient, "send", late)
     code, out = send(rig, REVIEWER_Q, "just in time?")
     assert code == 0 and out.startswith("sent ")
     mid = out.split()[1]
@@ -1050,7 +1057,7 @@ def test_a_second_binding_reporting_a_held_session_id_is_refused(rig, caplog):
     time.sleep(0.1)
     assert rig.daemon.bindings["main@proj-a"].session_id is None
     code, out = send(rig, "main@proj-a")
-    assert code == cli.EXIT_COLD and posted(rig) == [], "no id: unknown, and refused"
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == [], "no id: unknown, and refused"
     assert out.splitlines()[0] == ("Nothing was sent: comms could not read main@proj-a's "
                                    "cache (no session id reported yet).")
     assert first.identity == REVIEWER_Q
@@ -1102,7 +1109,7 @@ def _old_shim_register(session_id, **extra):
     """A register as an older shim sends it: a session id, no root."""
     pushes = Pushes()
     c = DaemonClient(daemon_socket(), on_push=pushes).connect()
-    c.register(name="reviewer", scope="proj-a", adapter="claude-shim",
+    c.bind(name="reviewer", scope="proj-a", adapter="claude-shim",
                session_id=session_id, **extra)
     pushes.client = c
     return pushes
@@ -1152,7 +1159,8 @@ def test_a_prompt_alone_tells_the_daemon_and_releases_nothing(rig, monkeypatch):
     frames = []
     real_notify = s._client.notify
     monkeypatch.setattr(s._client, "notify",
-                        lambda op, **kw: frames.append((op, kw)) or real_notify(op, **kw))
+                        lambda op, params=None: frames.append((op, params or {}))
+                        or real_notify(op, params))
     shim_drive.turn_started(s)
     wait_until(lambda: rig.daemon.bindings[REVIEWER_Q].turned)
     assert rig.daemon._read(rig.daemon.bindings[REVIEWER_Q]).kind == "unknown"
@@ -1253,25 +1261,18 @@ def test_both_fields_ride_register_and_every_activity(rig):
 
 def test_the_daemon_takes_them_only_from_the_bindings_own_connection(rig):
     shim(rig, SESS_A, age=60)
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.connect(str(daemon_socket()))
-    conn = LineConn(s)
-    try:
-        conn.send({"op": "activity", "identity": REVIEWER_Q, "session_id": SESS_A,
-                   "projects_root": "/tmp/forged", "turned": True, "kind": "turn",
-                   "seq": 1})
-        conn.send({"id": 1, "op": "ping"})
-        assert conn.recv() == {"id": 1, "ok": True, "cli_protocol": CLI_PROTOCOL}
-    finally:
-        conn.close()
+    with raw_connection() as conn:
+        conn.notify("turn_ended", {"identity": REVIEWER_Q, "session_id": SESS_A,
+                                   "projects_root": "/tmp/forged", "turned": True,
+                                   "seq": 1})
+        settle(conn)
     b = rig.daemon.bindings[REVIEWER_Q]
     assert b.projects_root == str(projects_root()) and b.turned is False
 
 
 def test_a_kind_turn_sets_turned_whatever_the_frame_says(rig):
     s = shim(rig, SESS_A, age=60)
-    s._client.notify("activity", identity=REVIEWER_Q, session_id=SESS_A, turned=False,
-                     kind="turn")
+    s._client.notify("turn_ended", {"identity": REVIEWER_Q, "session_id": SESS_A, "turned": False})
     wait_until(lambda: rig.daemon.bindings[REVIEWER_Q].turned)
 
 
@@ -1279,7 +1280,7 @@ def test_a_frame_with_neither_field_leaves_projects_root_unset(rig):
     old = _old_shim_register(SESS_A)
     wait_until(lambda: REVIEWER_Q in rig.daemon.bindings)
     assert rig.daemon.bindings[REVIEWER_Q].projects_root is None
-    old.client.notify("activity", identity=REVIEWER_Q, session_id=SESS_A)
+    old.client.notify("activity", {"identity": REVIEWER_Q, "session_id": SESS_A})
     time.sleep(0.1)
     assert rig.daemon.bindings[REVIEWER_Q].projects_root is None
     old.client.close()

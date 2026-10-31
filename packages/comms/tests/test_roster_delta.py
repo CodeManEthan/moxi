@@ -151,7 +151,7 @@ def test_a_delta_carries_no_seat_context(rig, tmp_path):
 def test_the_snapshot_seeds_the_state_file_on_success(rig):
     rig.shim(name="planner", scope="proj-a")
     env, state = launched()
-    assert ask("ready", env).startswith(shim_roster.BLOCK)
+    assert ask("start", env).startswith(shim_roster.BLOCK)
     assert json.loads(state.read_text()) == {"planner@proj-a": CHOSEN_SHIM}
 
 
@@ -160,7 +160,7 @@ def test_offline_snapshot_seeds_nothing(rig, capsys):
     an offline envelope leaves NO baseline, so the first delta seeds quietly."""
     rig.daemon.stop()
     env, state = launched()
-    assert ask("ready", env) == shim_roster.with_block(
+    assert ask("start", env) == shim_roster.with_block(
         shim_roster.OFFLINE, comms=shim_roster.comms_command(env))
     capsys.readouterr()
     assert not state.exists()

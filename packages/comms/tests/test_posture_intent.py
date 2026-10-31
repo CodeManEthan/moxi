@@ -27,7 +27,7 @@ from moxi_comms import cli, config, constants, context, glossary, machine_line, 
 from moxi_comms.adapters import claude_shim, codex, opencode, shim_roster
 from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.daemon import Daemon
-from moxi_comms.gateway import GatewayError
+from moxi_comms.record import RecordError
 
 # The cold-cache fixtures, so a held send can be shown (the autouse tmp guard among them).
 from test_cold_every_sender import (adapters, cold_harness_report,  # noqa: F401
@@ -46,7 +46,7 @@ HOUR = 3600
 # --------------------------------------------------------------------------- helpers
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def last(rig):
@@ -84,7 +84,7 @@ def posts(rig, who, argv, clock=None):
     code, out = rig.cli(argv, clock=clock, **who)
     assert code == 0, out
     mid = sent_id(out)
-    return rig.gateway.get_message(mid), out
+    return rig.record.get_message(mid), out
 
 
 @pytest.fixture
@@ -203,7 +203,7 @@ def test_keyword_calls_write_todays_bytes_and_positional_ones_fail():
 
 def test_bodies_with_a_bare_namespace_gives_the_plain_bytes(rig):
     args = SimpleNamespace(text="hello")
-    ctx = cli.Context(gateway=rig.gateway, env={})
+    ctx = cli.Context(record=rig.record, env={})
     assert cli._bodies(args, ctx, [P], None) == [f"::to {P}\nhello"]
     assert cli._bodies(args, ctx, [P], "9", posture="once") == \
         [f"::to {P} re:9 [reply-once]\nhello"]
@@ -305,7 +305,7 @@ def test_every_cell_of_the_reply_table(rig, pair, kind, typed):
         assert (zero(msg).reply_to, zero(msg).posture) == (ref.id, want)
         assert not zero(msg).open_mark, "only a new send writes [open]"
     else:
-        assert code == 2, out
+        assert code == 3, out
         assert want in tail(out) and tail(out).endswith("Nothing was sent.")
         assert len(posted(rig)) == before
 
@@ -329,7 +329,7 @@ def test_the_single_reply_cure_does_not_carry_open_and_posts(rig, pair):
     ask = make_ref(rig, "once")
     wait_until(lambda: ask.id in rig.daemon.asks)
     code, out = send(rig, REVIEWER, "planner", "about that", "--posture", "open")
-    assert code == 2 and "still open" in out
+    assert code == 3 and "still open" in out
     cure = next(line.strip() for line in out.splitlines() if line.startswith("  moxi comms "))
     assert cure == f'moxi comms reply {ask.id} "text"'
     code, out = reply(rig, REVIEWER, ask.id, "about that")
@@ -356,7 +356,7 @@ def test_a_reply_to_a_verified_no_reply_is_refused_on_both_verbs(rig, pair, verb
             ["send", "planner", "but", "--reply-to", ref.id])
     code, out = rig.cli(argv, **REVIEWER)
     names = P if verb == "reply" else "planner"
-    assert code == 2
+    assert code == 3
     assert tail(out) == (f"msg {ref.id} from {P} is marked [no reply], so it takes no "
                          "reply. If you have something new, send it as a new message: "
                          f'moxi comms send {names} --posture none|optional|once|open "text". Nothing was '
@@ -370,7 +370,7 @@ def test_the_no_reply_cure_adds_new_when_the_sender_holds_an_open_ask(rig, pair)
     wait_until(lambda: ask.id in rig.daemon.asks)
     ref = make_ref(rig, "no-reply")
     code, out = reply(rig, REVIEWER, ref.id, "but")
-    assert code == 2
+    assert code == 3
     assert f'moxi comms send {P} --new --posture none|optional|once|open "text"' in tail(out)
     code, out = send(rig, REVIEWER, P, "something new", "--new", "--posture", "none")
     assert code == 0, out
@@ -382,7 +382,7 @@ def test_open_on_a_reply_to_a_once_ask_is_refused_and_both_cures_post(rig, pair)
     ask = make_ref(rig, "once")
     wait_until(lambda: ask.id in rig.daemon.asks)
     code, out = reply(rig, REVIEWER, ask.id, "let's talk", "--posture", "open")
-    assert code == 2
+    assert code == 3
     assert tail(out) == ("A reply to a [reply-once] ask closes it: leave out --posture, or "
                          "add --posture once to ask something back. A back-and-forth "
                          f'starts with a new send: moxi comms send {P} --new --posture open '
@@ -410,7 +410,7 @@ def test_the_walk_finds_the_root_from_deep_in_a_chain(rig, pair):
     last_one, out = posts(rig, PLANNER, ["reply", msgs[-1].id, "four"])
     assert zero(last_one).thread_mark == "last"
     code, out = reply(rig, REVIEWER, last_one.id)
-    assert code == 2 and f"msg {root.id} opened an open thread" in tail(out)
+    assert code == 3 and f"msg {root.id} opened an open thread" in tail(out)
 
 
 @pytest.mark.parametrize("root_kind", ["unmarked", "speaker", "exempt"])
@@ -435,7 +435,7 @@ def test_a_root_without_open_binds_no_limit(rig, pair, whole_clock, root_kind):
 def test_a_members_read_at_the_mocks_declared_bound_posts_with_the_longer_note(rig, pair):
     if rig.backend != "mock":
         pytest.skip("the mock stands in for a bounded backend here")
-    rig.gateway.history_bound = 2
+    rig.record.history_bound = 2
     root = open_root(rig, "--cap", "2")
     msgs = ping_pong(rig, root, 2)
     msg, out = posts(rig, PLANNER, ["reply", msgs[-1].id, "past the cap"])
@@ -447,13 +447,13 @@ def test_a_members_read_at_the_mocks_declared_bound_posts_with_the_longer_note(r
 def test_a_busy_local_channel_keeps_the_cap(rig, pair):
     if rig.backend != "local":
         pytest.skip("the local record reads the whole range back")
-    assert rig.gateway.history_bound is None
+    assert rig.record.history_bound is None
     root = open_root(rig, "--cap", "2")
     for n in range(600):
         rig.post_as("ghost", ["nobody-here"], f"noise {n}")
     msgs = ping_pong(rig, root, 2)
     code, out = reply(rig, REVIEWER, msgs[-1].id)
-    assert code == 2 and "has had its 2 replies, so it is closed." in tail(out)
+    assert code == 3 and "has had its 2 replies, so it is closed." in tail(out)
     assert "NOTE" not in out
 
 
@@ -462,7 +462,7 @@ def test_the_default_cap_is_eight(rig, pair):
     msgs = ping_pong(rig, root, 8)
     assert [zero(m).thread_mark for m in msgs] == [None] * 6 + ["one-left", "last"]
     code, out = reply(rig, REVIEWER, msgs[-1].id)
-    assert code == 2
+    assert code == 3
     assert tail(out) == (f"msg {root.id} opened an open thread that has had its 8 replies, "
                          "so it is closed. To go on, start a new send: moxi comms send "
                          f'{P} --posture none|optional|once|open "text". Nothing was sent.')
@@ -477,7 +477,7 @@ def test_a_none_reply_at_one_from_the_cap_closes_without_a_one_left_mark(rig, pa
     assert (zero(closing).posture, zero(closing).thread_mark) == ("none", None)
     assert cli.ONE_LEFT_SENT not in out.splitlines()
     code, out = reply(rig, REVIEWER, first.id, "three")
-    assert code == 2 and f"closed with msg {closing.id}" in tail(out)
+    assert code == 3 and f"closed with msg {closing.id}" in tail(out)
 
 
 def test_the_default_cap_comes_from_threads_reply_cap(rig, pair):
@@ -490,7 +490,7 @@ def test_the_default_cap_comes_from_threads_reply_cap(rig, pair):
         ref, _ = posts(rig, who, ["reply", ref.id, f"r{i}"])
     assert zero(ref).thread_mark == "last"
     code, out = rig.cli(["reply", ref.id, "x"], **PLANNER)
-    assert code == 2 and "has had its 3 replies" in tail(out)
+    assert code == 3 and "has had its 3 replies" in tail(out)
 
 
 @pytest.mark.parametrize("value,why", [
@@ -522,7 +522,7 @@ def test_the_opener_lowers_and_raises_the_cap(rig, pair):
     assert zero(third).thread_mark == "last"
     assert "Sent. That was this thread's last reply; it is now closed." in out.splitlines()
     code, out = reply(rig, PLANNER, third.id)
-    assert code == 2 and "has had its 3 replies" in tail(out)
+    assert code == 3 and "has had its 3 replies" in tail(out)
 
     root = open_root(rig, "--cap", "2")
     first, _ = posts(rig, REVIEWER, ["reply", root.id, "one"])
@@ -555,11 +555,11 @@ def test_the_openers_no_cap_after_the_last_reply_is_refused(rig, pair):
     first, _ = posts(rig, REVIEWER, ["reply", root.id, "one"])
     assert zero(first).thread_mark == "last"
     code, out = reply(rig, PLANNER, first.id, "reopen", "--no-cap")
-    assert code == 2 and "has had its 1 replies, so it is closed." in tail(out)
+    assert code == 3 and "has had its 1 replies, so it is closed." in tail(out)
 
 
 class StaleHistory:
-    """The real gateway, except that `history` leaves out messages above `upto`: a
+    """The real record, except that `history` leaves out messages above `upto`: a
     reply whose check read the record before another reply landed."""
 
     def __init__(self, inner, upto):
@@ -578,11 +578,11 @@ def test_two_replies_racing_past_cap_minus_one_both_close_and_a_third_is_refused
     first, _ = posts(rig, REVIEWER, ["reply", root.id, "one"])
     racer, _ = posts(rig, PLANNER, ["reply", first.id, "two"])
     code, out = rig.cli(["reply", first.id, "two, too"],
-                        gateway=StaleHistory(rig.gateway, first.id), **CRITIC)
+                        record=StaleHistory(rig.record, first.id), **CRITIC)
     assert code == 0, out
     assert zero(racer).thread_mark == zero(last(rig)).thread_mark == "last"
     code, out = reply(rig, REVIEWER, racer.id)
-    assert code == 2 and "has had its 2 replies" in tail(out)
+    assert code == 3 and "has had its 2 replies" in tail(out)
 
 
 @pytest.mark.parametrize("age, posts_it", [(HOUR - 1, True), (HOUR, False)])
@@ -594,7 +594,7 @@ def test_idle_at_the_hour(rig, pair, whole_clock, age, posts_it):
     if posts_it:
         assert code == 0, out
     else:
-        assert code == 2
+        assert code == 3
         assert tail(out) == (f"msg {root.id} opened an open thread that has had no message "
                              "for over an hour, so it is closed. To go on, start a new "
                              f'send: moxi comms send {P} --posture none|optional|once|open "text". '
@@ -654,16 +654,16 @@ def test_the_senders_own_follow_up_an_hour_on_is_refused(rig, whole_clock):
     root = open_root(rig)
     whole_clock.advance(HOUR)
     code, out = reply(rig, PLANNER, root.id, "anyone?", clock=whole_clock)
-    assert code == 2 and "has had no message for over an hour" in tail(out)
+    assert code == 3 and "has had no message for over an hour" in tail(out)
 
 
 def test_after_a_restart_the_idle_clock_counts_from_since(rig, trio, whole_clock):
     root = open_root(rig)
     whole_clock.advance(2 * HOUR)
     code, out = reply(rig, CRITIC, root.id, "chiming in", clock=whole_clock)
-    assert code == 2 and "no message for over an hour" in tail(out)
+    assert code == 3 and "no message for over an hour" in tail(out)
     rig.daemon.stop()
-    rig.daemon = Daemon(rig.gateway, clock=whole_clock, start_trim_thread=False).start()
+    rig.daemon = Daemon(rig.record, clock=whole_clock, start_trim_thread=False).start()
     rig.shim(**PLANNER)
     rig.shim(**REVIEWER)
     rig.shim(**CRITIC)
@@ -686,7 +686,7 @@ def test_a_failed_readable_query_says_so_and_the_cap_still_refuses(rig, pair, mo
     assert zero(first).thread_mark == "one-left"
     second, _ = posts(rig, PLANNER, ["reply", first.id, "two"])
     code, out = reply(rig, REVIEWER, second.id)
-    assert code == 2 and "has had its 2 replies" in tail(out)
+    assert code == 3 and "has had its 2 replies" in tail(out)
 
 
 def test_a_none_reply_closes_the_thread_for_everyone(rig, trio):
@@ -694,9 +694,9 @@ def test_a_none_reply_closes_the_thread_for_everyone(rig, trio):
     closer, _ = posts(rig, REVIEWER, ["reply", root.id, "done here", "--posture", "none"])
     assert zero(closer).posture == "none"
     code, out = reply(rig, PLANNER, closer.id)
-    assert code == 2 and "is marked [no reply]" in tail(out)
+    assert code == 3 and "is marked [no reply]" in tail(out)
     code, out = rig.cli(["send", "planner", "me too", "--reply-to", root.id], **CRITIC)
-    assert code == 2
+    assert code == 3
     assert tail(out) == (f"msg {root.id} opened an open thread that {R} closed with msg "
                          f"{closer.id}. To go on, start a new send: moxi comms send planner "
                          '--posture none|optional|once|open "text". Nothing was sent.')
@@ -733,7 +733,7 @@ def idle_closed_with_ask(rig, clock):
     delivered(rig, R, ask.id)
     clock.advance(HOUR + 60)
     code, out = reply(rig, REVIEWER, root.id, "idle?", clock=clock)
-    assert code == 2 and "no message for over an hour" in tail(out)
+    assert code == 3 and "no message for over an hour" in tail(out)
     return root, ask
 
 
@@ -747,7 +747,7 @@ def test_a_once_ask_in_a_closed_thread_stays_answerable(rig, pair, whole_clock, 
     assert R in awaiting(rig, P)
     code, out = reply(rig, REVIEWER, ask.id, "on main", "--posture", "open",
                       clock=whole_clock)
-    assert code == 2 and "A reply to a [reply-once] ask closes it" in tail(out)
+    assert code == 3 and "A reply to a [reply-once] ask closes it" in tail(out)
     answer, _ = posts(rig, REVIEWER, ["reply", ask.id, "on main"], clock=whole_clock)
     assert (zero(answer).posture, zero(answer).reply_to, zero(answer).thread_mark) == \
         ("none", ask.id, None)
@@ -765,7 +765,7 @@ def test_what_stays_closed_after_a_plain_answer(rig, pair, whole_clock, how):
                  idle_closed_with_ask(rig, whole_clock))
     posts(rig, REVIEWER, ["reply", ask.id, "on main"], clock=whole_clock)
     code, out = reply(rig, REVIEWER, root.id, "and another thing", clock=whole_clock)
-    assert code == 2 and "Nothing was sent." in tail(out)
+    assert code == 3 and "Nothing was sent." in tail(out)
 
 
 def test_an_ask_back_ends_an_idle_close(rig, pair, whole_clock):
@@ -796,7 +796,7 @@ def test_closed_cures_add_new_when_the_sender_holds_an_open_ask_and_then_post(ri
     first, _ = posts(rig, REVIEWER, ["reply", root.id, "one"])
     code, out = reply(rig, REVIEWER, root.id, "two")
     cure = (f'moxi comms send {P} --new --posture none|optional|once|open "text"')
-    assert code == 2 and cure in tail(out)
+    assert code == 3 and cure in tail(out)
     code, out = send(rig, REVIEWER, P, "a new subject", "--new", "--posture", "open")
     assert code == 0, out
 
@@ -913,7 +913,7 @@ def test_a_read_that_raises_posts_with_its_note(rig, pair):
     root = open_root(rig, "--cap", "1")
     first, _ = posts(rig, REVIEWER, ["reply", root.id, "one"])
     code, out = rig.cli(["reply", first.id, "past it"],
-                        gateway=HistoryFails(rig.gateway, GatewayError("the record is away")), **PLANNER)
+                        record=HistoryFails(rig.record, RecordError("the record is away")), **PLANNER)
     assert code == 0, out
     assert ("NOTE: the open-thread check did not run (the record is away), so it did not "
             "hold this reply.") in out.splitlines()
@@ -945,14 +945,14 @@ def test_an_agents_reply_to_the_operator_in_a_closed_thread_is_refused(rig, op, 
         posts(rig, REVIEWER, ["reply", root.id, "done", "--posture", "none"])
         his = root
     code, out = reply(rig, REVIEWER, his.id, "but")
-    assert code == 2 and "Nothing was sent." in tail(out)
+    assert code == 3 and "Nothing was sent." in tail(out)
     assert f"msg {root.id} opened an open thread" in tail(out)
 
 
 def test_a_reply_to_the_operators_no_reply_is_refused(rig, op):
     his, _ = posts(rig, OPERATOR, ["send", R, "fyi", "--posture", "none"])
     code, out = reply(rig, REVIEWER, his.id, "ok")
-    assert code == 2 and "from operator is marked [no reply]" in tail(out)
+    assert code == 3 and "from operator is marked [no reply]" in tail(out)
 
 
 def his_once_in_a_closed_thread(rig, how, *, gateway=False):
@@ -965,14 +965,14 @@ def his_once_in_a_closed_thread(rig, how, *, gateway=False):
         code, out = rig.cli(gateway_argv(root.id, P, "[gateway] which one?"),
                             env=operator_env(rig))
         assert code == 0, out
-        his = rig.gateway.get_message(sent_id(out))
+        his = rig.record.get_message(sent_id(out))
     else:
         his, _ = posts(rig, OPERATOR, ["reply", root.id, "which one?", "--posture",
                                        "once"])
     assert zero(his).posture == "once"
     posts(rig, REVIEWER, ["reply", root.id, "closing", *(["--posture", "none"] if how == "none" else [])])
     code, out = reply(rig, PLANNER, root.id, "one more")
-    assert code == 2, out
+    assert code == 3, out
     return his
 
 
@@ -1110,15 +1110,16 @@ def test_the_payload_on_rescan_and_the_hand_over_time(rig, pair, whole_clock):
     root = open_root(rig)
     first_at = delivered(rig, R, root.id)
     binding = rig.daemon.bindings[R]
-    sent, real_send = [], binding.conn.send
+    sent, real_notify = [], binding.conn.notify_threadsafe
 
-    def record(frame):
-        sent.append(frame)
-        return real_send(frame)
+    def record(method, params=None):
+        sent.append({"op": method, **(params or {})})
+        return real_notify(method, params)
 
-    binding.conn.send = record
+    binding.conn.notify_threadsafe = record
     with rig.daemon._lock:
         binding.delivered.clear()
+    rig.daemon.books.routed_through = lambda: None     # no mark: route it again
     whole_clock.advance(60)
     rig.daemon.rescan()
     (again,) = [f["payload"] for f in sent
@@ -1306,7 +1307,7 @@ def test_a_cold_recipients_reply_to_a_no_reply_is_refused_not_held(rig):
     rig.shim(**REVIEWER)
     ref, _ = posts(rig, PLANNER, ["send", "reviewer", "done", "--posture", "none"])
     code, out = reply(rig, REVIEWER, ref.id, "but")
-    assert code == 2 and "held:" not in out and "is marked [no reply]" in tail(out)
+    assert code == 3 and "held:" not in out and "is marked [no reply]" in tail(out)
     assert last(rig).id == ref.id
 
 
@@ -1319,7 +1320,7 @@ def test_a_posture_refusal_precedes_a_failed_cache_read(rig, pair, monkeypatch):
 
     monkeypatch.setattr(rig.daemon, "_session_query", old)
     code, out = reply(rig, REVIEWER, ref.id, "but", "--held")
-    assert code == 2 and "is marked [no reply]" in tail(out)
+    assert code == 3 and "is marked [no reply]" in tail(out)
     assert "Nothing was sent: comms could not ask the daemon" not in out
 
 
@@ -1332,7 +1333,7 @@ def test_a_held_once_send_to_a_cold_shim_posts_and_is_indexed_as_an_ask(rig):
     code, out = send(rig, PLANNER, "reviewer", "which branch?", "--posture", "once")
     assert code == 0, out
     assert any(line.startswith("held: reviewer") for line in out.splitlines())
-    ask = rig.gateway.get_message(sent_id(out))
+    ask = rig.record.get_message(sent_id(out))
     assert zero(ask).posture == "once"
     assert wait_until(lambda: ask.id in rig.daemon.asks)
     assert rig.daemon.asks[ask.id]["open"] == {R}
@@ -1398,7 +1399,7 @@ def test_an_outcome_notices_argv(rig, pair):
     assert line_of(msg) == f"::to {P} [no reply]"
 
 
-def test_a_launchers_brief_argv(rig, pair):
+def test_a_wrappers_brief_argv(rig, pair):
     msg, _ = posts(rig, PLANNER, ["send", R, "your brief", "--posture", "none"])
     assert line_of(msg) == f"::to {R} [no reply]"
 
@@ -1417,7 +1418,7 @@ def test_a_gateways_argv_posts_reply_once(rig, op, kind):
     code, out = rig.cli(gateway_argv(ref.id, P, "[gateway · answer button] A"),
                         env=operator_env(rig))
     assert code == 0, out
-    msg = rig.gateway.get_message(sent_id(out))
+    msg = rig.record.get_message(sent_id(out))
     assert line_of(msg) == f"::to {P} re:{ref.id} [reply-once]"
 
 
@@ -1433,14 +1434,14 @@ def test_the_gateway_lane_in_an_open_thread_counts_and_takes_its_mark(rig, op):
     root = open_root(rig, "--cap", "2", to="operator")
     code, out = rig.cli(gateway_argv(root.id, P, "[gateway] yes"), env=operator_env(rig))
     assert code == 0, out
-    his = rig.gateway.get_message(sent_id(out))
+    his = rig.record.get_message(sent_id(out))
     assert (zero(his).posture, zero(his).thread_mark) == ("once", "one-left")
     assert "Sent. One reply left in this thread." in out.splitlines()
     closing, _ = posts(rig, PLANNER, ["reply", his.id, "noted"])
     assert zero(closing).thread_mark == "last"
     code, out = rig.cli(gateway_argv(closing.id, P, "[gateway] one more"), env=operator_env(rig))
     assert code == 0, out
-    assert zero(rig.gateway.get_message(sent_id(out))).posture == "once"
+    assert zero(rig.record.get_message(sent_id(out))).posture == "once"
 
 
 def test_the_terminal_lane_writes_the_same_flags_as_passed(rig, op):
@@ -1449,7 +1450,7 @@ def test_the_terminal_lane_writes_the_same_flags_as_passed(rig, op):
                         (["--posture", "open", "--cap", "3"], f"::to {P} [cap:3] [open]")):
         code, out = rig.cli(["send", P, "typed", *flags], env=operator_env(rig))
         assert code == 0, out
-        assert line_of(rig.gateway.get_message(sent_id(out))) == line
+        assert line_of(rig.record.get_message(sent_id(out))) == line
 
 
 def test_the_gateway_lanes_once_opens_an_ask_the_recipient_answers(rig, op):
@@ -1458,10 +1459,10 @@ def test_the_gateway_lanes_once_opens_an_ask_the_recipient_answers(rig, op):
     code, out = rig.cli(gateway_argv(notice.id, P, "[gateway · answer button] A"),
                         env=operator_env(rig))
     assert code == 0, out
-    his = rig.gateway.get_message(sent_id(out))
+    his = rig.record.get_message(sent_id(out))
     assert wait_until(lambda: his.id in rig.daemon.asks)
     code, out = send(rig, PLANNER, "operator", "unrelated", "--posture", "none")
-    assert code == 2 and "still open" in out
+    assert code == 3 and "still open" in out
     answer, _ = posts(rig, PLANNER, ["reply", his.id, "on it"])
     assert zero(answer).posture == "none"
     assert wait_until(lambda: P not in rig.daemon.asks[his.id]["open"])
@@ -1477,7 +1478,7 @@ def test_the_gateway_lanes_answer_to_an_ask_ends_the_wait_and_asks_back(rig, op)
     code, out = rig.cli(gateway_argv(ask.id, P, "[gateway · answer button] B"),
                         env=operator_env(rig))
     assert code == 0, out
-    his = rig.gateway.get_message(sent_id(out))
+    his = rig.record.get_message(sent_id(out))
     assert wait_until(lambda: his.id in rig.daemon.sent_by_id)
     assert "operator" not in awaiting(rig, P)
     assert zero(his).posture == "once"

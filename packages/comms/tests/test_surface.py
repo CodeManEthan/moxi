@@ -3,7 +3,7 @@ message, the start text, `--new-name`, `--check`'s NOTEs and `moxi comms reply -
 and the `held` help entry.
 
 The never-bound check reads `ever_bound` (and `seen_as`) off the daemon's resolve
-answer. The daemon's half (`Journal.ever_bound`, the resolve answer's field) is tested
+answer. The daemon's half (`BindingHistory.ever_bound`, the resolve answer's field) is tested
 with the names; here the daemon is made to give the answer chosen for each test.
 """
 
@@ -22,7 +22,7 @@ from moxi_comms import cli, context, directory, glossary, machine_line, owed
 from moxi_comms.adapters import claude_shim, harness
 from moxi_comms.adapters.claude_shim import frame_line
 from moxi_comms.attribution import Author
-from moxi_comms.paths import directory_db
+from moxi_comms.paths import comms_db
 from moxi_comms.provision import add_standing
 
 from test_posture_intent import make_ref, open_root, posts  # noqa: F401
@@ -36,7 +36,7 @@ P, R, C = "planner", "reviewer", "critic"
 
 
 def posted(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def last(rig):
@@ -121,7 +121,7 @@ def test_a_reply_to_an_optional_message_takes_the_once_row(rig, pair, typed):
         assert code == 0, out
         assert (zero(last(rig)).reply_to, zero(last(rig)).posture) == (ref.id, want)
     else:
-        assert code == 2 and tail(out) == (
+        assert code == 3 and tail(out) == (
             "A reply to a [reply-optional] message closes it: leave out --posture, or add "
             "--posture once to ask something back. A back-and-forth starts with a new "
             f'send: moxi comms send {P} --posture open "text". Nothing was sent.')
@@ -139,7 +139,7 @@ def test_the_optional_column(rig, pair, kind):
     ref = make_ref(rig, kind)
     code, out = rig.cli(["reply", ref.id, "answer", "--posture", "optional"], **REVIEWER)
     if OPTIONAL_COLUMN[kind] == "refused":
-        assert code == 2 and tail(out).endswith("Nothing was sent."), out
+        assert code == 3 and tail(out).endswith("Nothing was sent."), out
         assert "--posture none|optional|once|open" in tail(out)
     else:
         assert code == 0, out
@@ -156,7 +156,7 @@ def test_an_optional_message_in_a_closed_thread_by_someone_else_stays_answerable
     msg, _ = posts(rig, REVIEWER, ["reply", late.id, "answer"])
     assert zero(msg).posture == "none"
     code, out = rig.cli(["reply", late.id, "more", "--posture", "open"], **REVIEWER)
-    assert code == 2 and "[reply-optional] message" in tail(out)
+    assert code == 3 and "[reply-optional] message" in tail(out)
 
 
 def test_an_optional_message_inside_an_open_thread_follows_the_thread(rig, pair):
@@ -357,7 +357,7 @@ def test_your_own_no_reply_is_refused_naming_its_recipients(rig, trio):
     mine, _ = posts(rig, PLANNER, ["send", "reviewer,critic", "done", "--posture", "none"])
     before = len(posted(rig))
     code, out = rig.cli(["reply", mine.id, "p.s."], **PLANNER)
-    assert code == 2
+    assert code == 3
     assert tail(out) == (f"msg {mine.id} from {P} is marked [no reply], so it takes no "
                          "reply. If you have something new, send it as a new message: "
                          f'moxi comms send {R},{C} --posture none|optional|once|open "text". '
@@ -369,7 +369,7 @@ def test_your_own_prose_message_is_refused(rig, pair):
     prose = rig.post_as(P, "no routing line here", raw=True)
     before = len(posted(rig))
     code, out = rig.cli(["reply", prose.id, "x"], **PLANNER)
-    assert (code, out.strip()) == (2, (
+    assert (code, out.strip()) == (3, (
         f"msg {prose.id} is your own, and comms cannot read whom it was sent to, so a reply "
         "has no one to go to. Send it as a new message with moxi comms send. Nothing was sent."))
     assert len(posted(rig)) == before
@@ -379,7 +379,7 @@ def test_your_own_message_to_yourself_alone_is_refused(rig, pair):
     alone = rig.post_as(P, f"::to {P}\nnote to self", raw=True)
     before = len(posted(rig))
     code, out = rig.cli(["reply", alone.id, "x"], **PLANNER)
-    assert (code, out.strip()) == (2, (
+    assert (code, out.strip()) == (3, (
         f"msg {alone.id} is your own and went to no one but you, so a reply has no one to "
         "go to. Send it as a new message with moxi comms send. Nothing was sent."))
     assert len(posted(rig)) == before
@@ -398,7 +398,7 @@ def test_others_replies_are_unchanged(rig, pair):
 def test_a_sender_refusal_prints_no_replying_to_line(rig, pair):
     theirs, _ = posts(rig, PLANNER, ["send", "reviewer", "q?", "--posture", "once"])
     code, out = rig.cli(["reply", theirs.id, "a"], **REVIEWER, stamp_only=True)
-    assert code == 2 and "replying to" not in out, out
+    assert code == 3 and "replying to" not in out, out
 
 
 def test_the_targets_are_the_tags_as_written_read_by_the_rule():
@@ -429,11 +429,11 @@ def test_the_reply_standing_help_names_its_recipients():
 
 # ===================================================================== --new-name
 
-def journal(rig, monkeypatch, *, seen=(), seen_as=None, present=True):
+def binding_history(rig, monkeypatch, *, seen=(), seen_as=None, present=True):
     """The daemon's resolve answer carries `ever_bound`: True for a
-    bound identity, else whether `seen` holds it. `present=False` is a journal that
+    bound identity, else whether `seen` holds it. `present=False` is a binding history that
     could not be read (no field). `seen_as` adds that field to every never-bound
-    answer. It replaces the daemon's own journal answer."""
+    answer. It replaces the daemon's own binding history answer."""
     real = rig.daemon._resolve_query
 
     def resolve(frame):
@@ -456,30 +456,30 @@ NEVER = ("newbie: comms has never seen newbie bound, so no agent of that name ha
 
 
 def test_a_send_to_a_never_bound_name_is_refused(rig, pair, monkeypatch):
-    journal(rig, monkeypatch)
+    binding_history(rig, monkeypatch)
     before = len(posted(rig))
     code, out = rig.cli(["send", "newbie", "brief", "--posture", "none"], **PLANNER)
-    assert (code, out.strip()) == (2, NEVER)
+    assert (code, out.strip()) == (3, NEVER)
     assert len(posted(rig)) == before
 
 
 def test_one_never_bound_name_refuses_the_whole_post(rig, pair, monkeypatch):
-    journal(rig, monkeypatch)
+    binding_history(rig, monkeypatch)
     before = len(posted(rig))
     code, out = rig.cli(["send", "reviewer,newbie", "brief", "--posture", "none"], **PLANNER)
-    assert (code, out.strip()) == (2, NEVER)
+    assert (code, out.strip()) == (3, NEVER)
     assert len(posted(rig)) == before
 
 
 def test_send_reply_to_is_checked_too(rig, pair, monkeypatch):
-    journal(rig, monkeypatch)
+    binding_history(rig, monkeypatch)
     ref, _ = posts(rig, REVIEWER, ["send", "planner", "q?", "--posture", "open"])
     code, out = rig.cli(["send", "planner,newbie", "a", "--reply-to", ref.id], **PLANNER)
-    assert code == 2 and "comms has never seen newbie bound" in out
+    assert code == 3 and "comms has never seen newbie bound" in out
 
 
 def test_new_name_defers_the_message(rig, pair, monkeypatch):
-    journal(rig, monkeypatch)
+    binding_history(rig, monkeypatch)
     code, out = rig.cli(["send", "newbie", "brief", "--posture", "none", "--new-name"], **PLANNER)
     assert code == 0, out
     assert out.splitlines()[-1] == cli.NOT_BOUND_NOTE.format(name="newbie")
@@ -487,7 +487,7 @@ def test_new_name_defers_the_message(rig, pair, monkeypatch):
 
 
 def test_a_name_bound_before_defers_with_no_refusal(rig, pair, monkeypatch):
-    journal(rig, monkeypatch, seen={"oldie"})
+    binding_history(rig, monkeypatch, seen={"oldie"})
     code, out = rig.cli(["send", "oldie", "x", "--posture", "none"], **PLANNER)
     assert code == 0, out
     assert out.splitlines()[-1] == cli.NOT_BOUND_NOTE.format(name="oldie")
@@ -496,7 +496,7 @@ def test_a_name_bound_before_defers_with_no_refusal(rig, pair, monkeypatch):
 @pytest.mark.parametrize("target", ["reviewer", "oldie"])
 def test_new_name_on_a_name_bound_now_or_before_changes_nothing(rig, pair, monkeypatch,
                                                                  target):
-    journal(rig, monkeypatch, seen={"oldie"})
+    binding_history(rig, monkeypatch, seen={"oldie"})
     code, plain = rig.cli(["send", "--check", target, "x", "--posture", "none"], **PLANNER)
     code2, flagged = rig.cli(["send", "--check", target, "x", "--posture", "none",
                               "--new-name"], **PLANNER)
@@ -504,12 +504,12 @@ def test_new_name_on_a_name_bound_now_or_before_changes_nothing(rig, pair, monke
 
 
 def test_a_standing_identity_never_bound_passes(rig, pair, monkeypatch):
-    conn = directory.connect(directory_db())
+    conn = directory.connect(comms_db())
     try:
-        add_standing(rig.gateway, conn, "curator")
+        add_standing(rig.record, conn, "curator")
     finally:
         conn.close()
-    journal(rig, monkeypatch)
+    binding_history(rig, monkeypatch)
     code, out = rig.cli(["send", "curator", "x", "--posture", "none"], **PLANNER)
     assert code == 0, out
 
@@ -517,7 +517,7 @@ def test_a_standing_identity_never_bound_passes(rig, pair, monkeypatch):
 def test_the_operator_is_known_on_a_box_provisioned_by_default(rig):
     """`moxi comms send operator` works on a box where the operator never bound. A box
     provisioned by default writes no `operator` agents row and nothing has bound
-    `operator`, so the real journal has never seen it: the send still goes."""
+    `operator`, so the real binding history has never seen it: the send still goes."""
     rig.shim(**PLANNER)
     assert "operator" not in rig.daemon.bindings
     code, out = rig.cli(["send", "operator", "x", "--posture", "none"], **PLANNER)
@@ -528,9 +528,9 @@ def test_the_operator_is_known_on_a_box_provisioned_by_default(rig):
     assert cli.HELD_IGNORED_OPERATOR in out
 
 
-def test_an_unreadable_journal_lets_the_send_defer_with_no_added_text(rig, pair,
+def test_an_unreadable_binding_history_lets_the_send_defer_with_no_added_text(rig, pair,
                                                                     monkeypatch):
-    journal(rig, monkeypatch, present=False)
+    binding_history(rig, monkeypatch, present=False)
     code, out = rig.cli(["send", "newbie", "x", "--posture", "none"], **PLANNER)
     assert code == 0, out
     assert out.splitlines()[1:] == [cli.NOT_BOUND_NOTE.format(name="newbie")]
@@ -538,28 +538,28 @@ def test_an_unreadable_journal_lets_the_send_defer_with_no_added_text(rig, pair,
 
 def test_comms_reply_is_not_checked(rig, pair, monkeypatch):
     """A reply's names come from the record: your own message to a name since gone from
-    the journal's knowledge is answered without `--new-name`."""
+    the binding history's knowledge is answered without `--new-name`."""
     mine, _ = posts(rig, PLANNER, ["send", "newbie", "brief", "--posture", "once",
                                    "--new-name"])
-    journal(rig, monkeypatch)
+    binding_history(rig, monkeypatch)
     code, out = rig.cli(["reply", mine.id, "and"], **PLANNER)
     assert code == 0, out
     assert line_of(last(rig)) == f"::to newbie re:{mine.id} [no reply]"
 
 
 def test_the_refusal_names_the_identities_of_that_name_that_exist(rig, pair, monkeypatch):
-    """A never-bound identity whose name the journal knows in other
+    """A never-bound identity whose name the binding history knows in other
     scopes says which, so `--new-name` is not the only cure on offer."""
-    journal(rig, monkeypatch, seen_as=["newbie@proj-b"])
+    binding_history(rig, monkeypatch, seen_as=["newbie@proj-b"])
     code, out = rig.cli(["send", "newbie@global", "x", "--posture", "none"], **PLANNER)
-    assert code == 2
+    assert code == 3
     assert out.strip() == (
         "newbie@global: comms has never seen newbie bound, so no agent of that name has "
         "started. If it has not started yet, send it again with --new-name and the message "
         "waits for its first session; if it has, check the name (moxi comms agents lists who "
         "you can message). newbie was seen bound only as newbie@proj-b; address that "
         "identity as newbie@proj-b if it is who you mean. Nothing was sent.")
-    journal(rig, monkeypatch, seen_as=["newbie@proj-b", "newbie@proj-c"])
+    binding_history(rig, monkeypatch, seen_as=["newbie@proj-b", "newbie@proj-c"])
     code, out = rig.cli(["send", "newbie@global", "x", "--posture", "none"], **PLANNER)
     assert ("newbie was seen bound only as newbie@proj-b and newbie@proj-c; address that "
             "identity by its full name if it is who you mean. Nothing was sent.") in out
@@ -609,7 +609,7 @@ def test_reply_check_prints_the_replying_to_line_first_and_posts_nothing(rig, pa
         f"replying to {P} (chosen, verified) in #names", f"would send 1 message(s) to {P}"])
     assert len(posted(rig)) == before
     code, out = rig.cli(["reply", theirs.id, "a", "--check", "--posture", "open"], **REVIEWER)
-    assert code == 2 and out.splitlines()[0].startswith("replying to")
+    assert code == 3 and out.splitlines()[0].startswith("replying to")
     assert len(posted(rig)) == before
 
 

@@ -19,9 +19,9 @@ for a session with at least one declared director (`layer_one_block`).
 **Which comms to run.** Every session comms launches is told once in its layer one, after
 the block, which comms to run, by absolute path: `MOXI_COMMS_PATH_LINE`, filled with the
 launching install's own command (`own_comms`). The agent's shell builds its PATH from the
-login shell, not from the launcher, so a bare `moxi` there can be another install's. The
-Codex and OpenCode launchers write the line into the layer one they hand their harness;
-the Claude launcher stamps the command into the session's environment
+login shell, not from the wrapper, so a bare `moxi` there can be another install's. The
+Codex and OpenCode wrappers write the line into the layer one they hand their harness;
+the Claude wrapper stamps the command into the session's environment
 (`MOXI_COMMS_COMMAND`) and comms' listener renders the line from it
 (`adapters/shim_roster.render_snapshot`). Every other text names the bare verb, because
 layer one says how to run it.
@@ -67,7 +67,7 @@ MOXI_COMMS_PATH_LINE = (
     "Run every comms verb with {comms} (this agent's own comms install). A bare "
     "`moxi comms` on your shell's PATH may be a different install.")
 
-#: Where the Claude launcher stamps its own comms command for the listener to name.
+#: Where the Claude wrapper stamps its own comms command for the listener to name.
 COMMAND_ENV = "MOXI_COMMS_COMMAND"
 
 

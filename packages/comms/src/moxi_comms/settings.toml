@@ -11,12 +11,12 @@ values = ["local", "mock"]
 default = "local"
 doc = "Which record backend: local (this box's SQLite record) or mock (a JSON test double)."
 read = "start"
-env = "MOXI_COMMS_GATEWAY"
+env = "MOXI_COMMS_BACKEND"
 
 [local.record]
 type = "path"
 default = ""
-doc = "The local record's file; empty means record.db in comms' state directory."
+doc = "The local record's file; empty means comms.db in comms' state directory."
 read = "start"
 env = "MOXI_COMMS_LOCAL_RECORD"
 
@@ -33,20 +33,20 @@ default = 8
 doc = "An open thread's reply cap when its opener set none; 1 or more."
 read = "start"
 
-[secrets.chain]
+[credentials.chain]
 type = "list"
-default = ["env", "store"]
-doc = "Where a credential is looked for, in order: env (MOXI_COMMS_SECRET_*), store."
+default = ["env", "keychain", "store"]
+doc = "The credential chain, in order: env (MOXI_COMMS_SECRET_*), keychain, store."
 read = "start"
 
-[secrets.store]
+[credentials.store]
 type = "path"
 default = ""
 doc = "The token store's directory; empty means tokens/ in comms' state directory."
 read = "start"
 env = "MOXI_COMMS_TOKEN_STORE"
 
-[secrets.roles]
+[credentials.roles]
 type = "list"
 default = []
 doc = "Role holders this box adds to comms' own; each keys the token store by its name."
@@ -70,23 +70,18 @@ default = "operator"
 doc = "The human's identity name, provisioned at first start."
 read = "start"
 
-[replay.messages]
-type = "int"
-default = 50
-doc = "A reader's catch-up bound with no cursor: at most this many messages; 1 or more."
-read = "use"
-
-[replay.hours]
-type = "int"
-default = 24
-doc = "A reader's catch-up bound with no cursor: nothing older than this many hours."
-read = "use"
-
 [cache.required]
 type = "bool"
 default = false
 doc = "Refuse to start the daemon when the cache module is absent or broken, so the cold-send hold cannot switch off without a word."
 read = "start"
+
+[delivery.expiry]
+type = "string"
+default = "24h"
+doc = "How long a sent message may wait before it is dropped undelivered, when the send names no --expires: a whole number with s, m, h or d (30m, 6h, 3d), or never."
+read = "use"
+env = "MOXI_COMMS_DELIVERY_EXPIRY"
 
 [block]
 type = "bool"
@@ -116,6 +111,21 @@ read = "start"
 type = "table"
 default = {}
 doc = "The OpenCode roster: one table per identity, [opencode.agents.\"name@scope\"]."
+read = "start"
+
+# comms 0.2's catch-up bound. Read only when comms 0.2's files move into comms.db, to
+# bound the mail a name with no cursor gets; nothing else reads them.
+
+[replay.messages]
+type = "int"
+default = 50
+doc = "Read only when comms 0.2's files move: a name with no cursor gets at most this many messages; 1 or more. Otherwise unused."
+read = "start"
+
+[replay.hours]
+type = "int"
+default = 24
+doc = "Read only when comms 0.2's files move: a name with no cursor gets nothing older than this many hours. Otherwise unused."
 read = "start"
 
 # Keys an earlier comms read, kept declared so a file that still sets one is told what

@@ -20,7 +20,7 @@ exist and nothing else does.
 carry already-qualified names and are never re-qualified: a global identity renders bare
 (`herald`, not `herald@global`), so a second pass cannot tell it from a bare name and
 would quietly turn it into something else. One spelling per identity, decided at the
-launcher and the roster: a bare director is the global identity, `name@scope` is that
+wrapper and the roster: a bare director is the global identity, `name@scope` is that
 scope's.
 
 Directive standing requires VERIFIED attribution. A

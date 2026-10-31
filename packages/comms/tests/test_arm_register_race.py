@@ -2,7 +2,7 @@
 on is open, and a drop at any point after the answer sends it back to register.
 
 Every arm that registers through shared code is driven: the `ClaimServer`'s own arm
-(the send-only console) and the harness
+(a module's own process holding a name) and the harness
 adapters' `connect_daemon` (codex and OpenCode). The drop is forced at each
 point, not waited for:
 
@@ -35,9 +35,8 @@ from moxi_comms.adapters.codex_roster import CodexAgent
 from moxi_comms.adapters.opencode import OpenCodeAdapter
 from moxi_comms.adapters.opencode_roster import OpenCodeAgent
 from moxi_comms.claimhold import ClaimServer
-from fake_turns import FakeSession, launcher
+from fake_turns import FakeSession, fake_find
 from fake_opencode import FakeOpenCode
-from test_console_identity import CONSOLE, provision_console
 
 FAST = 0.05
 PASSWORD = "test-password"
@@ -107,7 +106,7 @@ def codex_arm(rig, tmp_path, request):
                        cwd=str(tmp_path), thread_file=codex_threads.path("planner@proj-a"),
                        directors=[])
     return HarnessArm(rig, CodexAdapter(
-        agent, launch=launcher(FakeSession()), autoreconnect=True,
+        agent, find=fake_find(FakeSession()), autoreconnect=True,
         backoff=itertools.repeat(FAST), clock=rig.clock))
 
 
@@ -139,13 +138,11 @@ def opencode_arm(rig, tmp_path, request):
     return HarnessArm(rig, adapter)
 
 
-def send_only_arm(rig, tmp_path, request):
-    provision_console(rig)
-    name, scope = CONSOLE.split("@", 1)
-    return ServerArm(rig, name, scope, "send-only")
+def server_arm(rig, tmp_path, request):
+    return ServerArm(rig, "relay", "proj-a", "claude-shim")
 
 
-ARMS = {"send-only": send_only_arm, "codex": codex_arm, "opencode": opencode_arm}
+ARMS = {"server": server_arm, "codex": codex_arm, "opencode": opencode_arm}
 
 
 @pytest.fixture(params=list(ARMS))
