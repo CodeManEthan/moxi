@@ -744,3 +744,47 @@ def test_a_stop_the_runner_turned_down_reads_unsupported(claude, monkeypatch):
     runner.report(leg.R_COMMAND_DONE, request=line["request"], state="refused",
                   reason="unsupported", new_session_id=None)
     assert out.get(timeout=3) == turns.Refused("unsupported")
+
+
+# -- mod.sock's path ------------------------------------------------------------------
+
+def test_mod_sock_sits_in_the_endpoint_directory_when_its_path_is_short(turns_env):
+    from moxi_turns.claude_endpoint import mod_sock_path
+
+    ep = Endpoint(ClaudeHarness(open(os.devnull, "wb"), pid=os.getpid()), registry=Registry())
+    assert mod_sock_path(ep) == str(ep.dir / protocol.MOD_SOCK)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="no Unix socket paths on Windows")
+def test_a_long_runtime_root_puts_mod_sock_on_the_short_path_and_the_endpoint_starts(
+        turns_env, monkeypatch):
+    from moxi import paths
+
+    from moxi_turns.claude_endpoint import mod_sock_path
+
+    long_root = turns_env / ("r" * 60) / ("u" * 60)
+    monkeypatch.setenv("MOXI_TURNS_RUNTIME_DIR", str(long_root))
+    short_root = turns_env / "s"           # short, and the test's own, never /tmp itself
+    short_root.mkdir()
+    monkeypatch.setattr(paths, "_SHORT_ROOT", str(short_root))
+    r, w = pipe_pair()
+    harness = ClaudeHarness(w, pid=os.getpid())
+    ep = Endpoint(harness, registry=Registry())
+    assert len(os.fsencode(str(ep.dir / protocol.MOD_SOCK))) >= paths.SOCKET_MAX
+    ep.prepare()
+    sock = mod_sock_path(ep)
+    assert sock.startswith(str(short_root / f"moxi-{os.getuid()}") + os.sep)
+    assert len(os.fsencode(sock)) < paths.SOCKET_MAX
+    harness.serve(sock)
+    try:
+        runner = FakeRunner(r)
+        harness.first_line()
+        assert runner.wait_first()["mod_sock"] == sock
+        runner.session("s-long")
+        ep.open()
+        assert [s.session_id for s in turns.sessions()] == ["s-long"]
+    finally:
+        ep.stop("the test ended")
+        w.close()
+    assert not os.path.lexists(sock)
+    assert not ep.dir.exists()

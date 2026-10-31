@@ -10,6 +10,17 @@ export const SOCK = '/run/user/1000/moxi/turns/claude-n1/mod.sock'
 
 type Answer = Record<string, unknown> | 'hang' | 'fail'
 
+/** A row the engine appends at the door `command`: a slash command's or a `!` command's. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function commandRow($: any, text: string) {
+  return $.session.append({
+    message: { type: 'user', role: 'user', content: [{ type: 'text', text }] },
+    door: 'command',
+    origin: { kind: 'unclassified' },
+    uuid: `row-${text.length}`,
+  })
+}
+
 export function world(on: On, options: { surfaces?: string[]; endpointJson?: string | null; gate?: boolean; spinMs?: number } = {}) {
   const clock = mock.clock(on, { now: 1_000 })
   const w = {

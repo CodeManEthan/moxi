@@ -3,7 +3,7 @@
 // ask, and the session commands.
 
 import { describe, expect, test } from 'claude-code/testing'
-import { ROOT_ARGV, SOCK, world } from './world.ts'
+import { ROOT_ARGV, SOCK, commandRow, world } from './world.ts'
 import type { World } from './world.ts'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -95,6 +95,35 @@ describe('the report queue', () => {
     w.answers['/report'] = {}
     await turnEnd($, 't1')
     expect(w.kinds().at(-1)).toBe('turn.complete')
+  })
+})
+
+describe('main-loop turns only', () => {
+  test('a subagent starting during an open main turn leaves it open and opens none; the main turn ends normally', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    await turnStart($, 't1')
+    await $.turn.start({ text: 'look around', turnId: 'a-t1', agentId: 'a1' })
+    // The main turn is still the open one when its Stop asks.
+    await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [] })
+    expect(w.got.find(g => g.path === '/ask/stop')?.body.turn_id).toBe('t1')
+    await turnEnd($, 't1')
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'a-t1', reason: 'answer', agentId: 'a1' })
+    expect(w.kinds()).toEqual(['session', 'turn.start', 'turn.complete'])
+    expect(w.reports().slice(1)).toEqual([
+      { seq: 2, kind: 'turn.start', turn_id: 't1' },
+      { seq: 3, kind: 'turn.complete', turn_id: 't1', reason: 'answer', is_aborted: false },
+    ])
+  })
+
+  test('a subagent starting while idle opens no turn and does not stop a pending submit\'s bound', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    w.settle = () => new Promise(() => {})
+    await w.line(submitLine('d1', 'hello'))
+    await $.turn.start({ text: '', turnId: 'a-t1', agentId: 'a1' })
+    await w.clock.advance(5_000)
+    expect(w.kinds()).toEqual(['session', 'submit.bound'])
   })
 })
 
@@ -591,6 +620,53 @@ describe('compact and the shell stop', () => {
       await stop($, [shell('s3')])
       await command(w, 'compact', true, 'r2')
       expect(shellsOf(w)).toEqual({ stopped: ['s3'], left: [], complete: true })
+    })
+
+    test('a ! command moved to the background marks the list; a later Stop with no call in flight clears it', async ($: E, on) => {
+      const w = world(on)
+      await attached($, w)
+      await stop($, [shell('s1')])
+      // Ctrl+B on `! sleep 1600`: no tool call, only its three rows.
+      await commandRow($, '<local-command-caveat>The command below was run directly in Claude Code</local-command-caveat>')
+      await commandRow($, '<bash-input>sleep 1600</bash-input>')
+      await commandRow($, '<bash-stdout>Command was manually backgrounded by user with ID: b1</bash-stdout>')
+      await command(w, 'clear')
+      expect(shellsOf(w)).toEqual({ stopped: ['s1'], left: [UNLISTED], complete: false })
+      await stop($, [shell('b1')])
+      await command(w, 'compact', true, 'r2')
+      expect(shellsOf(w)).toEqual({ stopped: ['b1'], left: [], complete: true })
+    })
+
+    test('any command row marks the list, one of a slash command too', async ($: E, on) => {
+      const w = world(on)
+      await attached($, w)
+      await stop($, [shell('s1')])
+      await commandRow($, '<command-name>/context</command-name>')
+      await command(w, 'clear')
+      expect(shellsOf(w)?.complete).toBe(false)
+    })
+
+    test('the rows of the runner\'s own command mark nothing, but a ! command\'s row among them does', async ($: E, on) => {
+      const w = world(on)
+      await attached($, w)
+      await stop($, [shell('s1')])
+      // The engine appends a slash command's rows as it runs.
+      let rows: string[] = ['<command-name>/compact</command-name>', '<local-command-stdout>Compacted</local-command-stdout>']
+      w.commandAnswer = async name => {
+        for (const text of rows) await commandRow($, text)
+        return { text: `ran ${name}` }
+      }
+      await command(w, 'compact')
+      expect(shellsOf(w)).toEqual({ stopped: ['s1'], left: [], complete: true })
+      // Once the command is done, a row marks again.
+      rows = []
+      await commandRow($, '<command-name>/context</command-name>')
+      await command(w, 'compact', true, 'r2')
+      expect(shellsOf(w)?.complete).toBe(false)
+      await stop($, [shell('s1')])
+      rows = ['<bash-input>sleep 1600</bash-input>']
+      await command(w, 'compact', true, 'r3')
+      expect(shellsOf(w)).toEqual({ stopped: ['s1'], left: [UNLISTED], complete: false })
     })
 
     test('a turn with no tool call keeps the list vouched for', async ($: E, on) => {

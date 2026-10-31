@@ -69,6 +69,7 @@ moment of effect, and settles nothing.
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 import logging
 import os
@@ -195,6 +196,10 @@ class ClaudeHarness(Harness):
                 self.server.close()
             except OSError:
                 pass
+            # A socket outside the endpoint's directory goes with the server; one inside
+            # goes with the directory.
+            with contextlib.suppress(OSError):
+                os.unlink(self.server.path)
 
     # -- the core calls these -----------------------------------------------------------
 
@@ -696,6 +701,21 @@ class Life:
                 os.close(fd)
 
 
+def mod_sock_path(ep) -> str:
+    """Where endpoint `ep` listens for its runner: `mod.sock` in its directory, or, when
+    that path is too long for a socket address (a long `MOXI_HOME` or runtime directory),
+    `moxi.paths.socket_path`'s path for the name `<endpoint name>-mod`, which falls back to
+    a short hashed path as the endpoint's own address does."""
+    from moxi import paths
+
+    from . import protocol
+
+    path = str(ep.dir / protocol.MOD_SOCK)
+    if len(os.fsencode(path)) < paths.SOCKET_MAX or sys.platform == "win32":
+        return path
+    return paths.socket_path("turns", f"{ep.name}-mod")
+
+
 def main(argv: list[str] | None = None) -> int:
     """`moxi-turns-endpoint`: spawned by the runner, never typed by a person."""
     # The leg owns the real stdout. Anything else that prints (a listener, a library)
@@ -727,10 +747,12 @@ def main(argv: list[str] | None = None) -> int:
                                        "error": str(exc)})
         return 2
     ep.prepare()
+    sock: str | None = None
     try:
-        harness.serve(str(ep.dir / protocol.MOD_SOCK))
+        sock = mod_sock_path(ep)
+        harness.serve(sock)
     except OSError as exc:
-        log.error("cannot listen on %s: %s", ep.dir / protocol.MOD_SOCK, exc)
+        log.error("cannot listen on %s: %s", sock or "mod.sock", exc)
         leg.LineWriter(leg_out).write({"op": leg.LINE_FAILED, "leg": leg.LEG,
                                        "error": f"mod.sock: {exc}"})
         ep.stop(f"mod.sock: {exc}")
