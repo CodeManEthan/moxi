@@ -278,6 +278,23 @@ def test_an_export_command_that_fails_gives_every_module_its_reason(shell_dirs):
     assert found.errors["a"].startswith("its export is refused")
 
 
+
+def test_an_export_command_past_its_time_is_run_again_for_each_module_alone(shell_dirs):
+    calls = []
+
+    def one_slow(argv, **kwargs):
+        modules = argv[4:]
+        calls.append(modules)
+        if "stslow" in modules:
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return proc.run(argv, **kwargs)
+
+    found = export_tables(["stpage", "stslow", "stnopage"], cwd=shell_dirs[0], run=one_slow)
+    assert calls == [["stpage", "stslow", "stnopage"], ["stpage"], ["stslow"], ["stnopage"]]
+    assert list(found.mounts) == ["stpage"]
+    assert found.errors["stslow"] == "the export command ran past 10 s"
+    assert "declares no PAGE" in found.errors["stnopage"]
+
 # --- real page servers ------------------------------------------------------------------
 
 

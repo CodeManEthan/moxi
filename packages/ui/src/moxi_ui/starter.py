@@ -1045,7 +1045,9 @@ def export_tables(modules: Sequence[str], *, cwd: str | os.PathLike,
 
     Each export the command gave and a route table takes goes in `mounts`, ready for
     `router.shell_table(modules, mounts)`; every other module is in `errors` with its
-    reason. Blocking: the shell runs it on a worker thread.
+    reason. A command that runs past `timeout` for several modules is run again for each
+    alone, so one module's slow import costs only its own mount. Blocking: the shell runs
+    it on a worker thread.
     """
     found = Exports()
     if not modules:
@@ -1054,6 +1056,12 @@ def export_tables(modules: Sequence[str], *, cwd: str | os.PathLike,
     try:
         done = run(argv, timeout=timeout, cwd=str(cwd))
     except subprocess.TimeoutExpired:
+        if len(modules) > 1:
+            for module in modules:
+                one = export_tables([module], cwd=cwd, timeout=timeout, run=run)
+                found.mounts.update(one.mounts)
+                found.errors.update(one.errors)
+            return found
         return Exports(errors={m: f"the export command ran past {timeout:g} s" for m in modules})
     except OSError as err:
         return Exports(errors={m: f"the export command could not run: {err}" for m in modules})
