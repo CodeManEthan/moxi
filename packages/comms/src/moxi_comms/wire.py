@@ -42,9 +42,10 @@ log = logging.getLogger("comms.wire")
 #: socket and the claim socket, which ship in one package and change together.
 VERSIONS = (1, 1)
 
-#: The daemon's capabilities at version 1. They are all present in version 1; they are
-#: listed so a later client tests a name, not a version.
-CAPABILITIES = frozenset({"delete", "expiry", "interrupt", "reserved-names"})
+#: The daemon's capabilities at version 1, listed so a client tests a name, not a
+#: version. `mcp` is the adapter method `mcp_token`, which registers the hash of the
+#: session's token for comms' tools; an adapter calls it only when the hello lists it.
+CAPABILITIES = frozenset({"delete", "expiry", "interrupt", "reserved-names", "mcp"})
 
 # -- error codes -------------------------------------------------------------------------
 NAME_HELD = 1101
@@ -59,6 +60,8 @@ ALREADY_DELIVERED = 1109
 UNKNOWN_MESSAGE = 1110
 UNKNOWN_ADAPTER = 1111
 NOT_BOUND = 1112
+MCP_TOKEN_TAKEN = 1113
+MCP_TOKEN_REVOKED = 1114
 STOPPING = 1150
 FAILED = 1151
 BUSY = 1152
@@ -70,8 +73,9 @@ CODE_NAMES = {
     NAME_UNKNOWN: "name-unknown", NOT_MAILABLE: "not-mailable", CREDENTIAL: "credential",
     TOO_LONG: "too-long", NOT_SENDER: "not-sender", ALREADY_DELIVERED: "already-delivered",
     UNKNOWN_MESSAGE: "unknown-message", UNKNOWN_ADAPTER: "unknown-adapter",
-    NOT_BOUND: "not-bound", STOPPING: "stopping", FAILED: "failed", BUSY: "busy",
-    STORE_BUSY: "store-busy",
+    NOT_BOUND: "not-bound", MCP_TOKEN_TAKEN: "mcp-token-taken",
+    MCP_TOKEN_REVOKED: "mcp-token-revoked", STOPPING: "stopping", FAILED: "failed",
+    BUSY: "busy", STORE_BUSY: "store-busy",
 }
 
 #: JSON-RPC's own codes that comms answers with, and the core's hello refusal.

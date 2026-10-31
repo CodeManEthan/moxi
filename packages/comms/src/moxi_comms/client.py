@@ -127,6 +127,10 @@ class DaemonClient:
         #: method can be answered `busy`.
         self._asked = False
         self._retried = False
+        #: The daemon's capabilities, as its answer to this connection's hello named
+        #: them; empty until connected. An adapter tests a name here (`mcp`) before it
+        #: calls the method that needs it.
+        self.capabilities: frozenset = frozenset()
 
     # ------------------------------------------------------------------ lifecycle
     def connect(self) -> "DaemonClient":
@@ -137,7 +141,7 @@ class DaemonClient:
         except (ipc.IpcError, OSError) as e:
             raise DaemonOffline(f"comms offline: {self.socket_path}: {e}") from e
         try:
-            client.hello(wire.VERSIONS)
+            agreed = client.hello(wire.VERSIONS)
         except ipc.RpcError as e:
             client.close()
             if e.code == wire.VERSION_REFUSED:
@@ -151,6 +155,7 @@ class DaemonClient:
             client.close()
             raise DaemonOffline(f"comms offline: {self.socket_path}: {e}") from e
         self._client = client
+        self.capabilities = frozenset(agreed.capabilities or ())
         self._closed = False
         self._asked = False
         self._reader = threading.Thread(target=self._read_loop, args=(client,),
@@ -242,7 +247,7 @@ class DaemonClient:
     # ------------------------------------------------------------------ the methods
     def bind(self, *, name=None, scope=None, global_=False, project=None,
              adapter="claude-shim", session_id=None, projects_root=None,
-             turned=None, report=None, endpoint=None) -> dict:
+             turned=None, report=None, endpoint=None, claim=None) -> dict:
         """`bind`: the result's `identity`, `token` and `high`.
 
         `session_id`, `projects_root` and `turned` are the claude-shim's: which live
@@ -251,7 +256,8 @@ class DaemonClient:
         evidence for its cache clock, sent as it stands (`REPORT_FIELDS`;
         `HarnessAdapter.session_report`). They are left off when there is nothing to
         say. `endpoint` is a Claude adapter's word on whether its session has a turns
-        endpoint yet; None sends nothing."""
+        endpoint yet; None sends nothing. `claim` is the adapter's claim key, which the
+        session's tool token maps to (`mcp_token`); None sends nothing."""
         params = {key: value for key, value in dict(report or {}).items()
                   if key in REPORT_FIELDS}
         if session_id:
@@ -262,9 +268,17 @@ class DaemonClient:
             params["turned"] = bool(turned)
         if endpoint is not None:
             params["endpoint"] = bool(endpoint)
+        if claim is not None:
+            params["claim"] = claim
         params.update(name=name, scope=scope, project=project, adapter=adapter)
         params["global"] = global_
         return self.call("bind", params)
+
+    def mcp_token(self, token_hash: str) -> dict:
+        """`mcp_token`: register the hash of the session's tool token for the binding
+        this connection holds. The result's `served` says whether the daemon serves
+        comms' tools now. Call it only when the hello listed the `mcp` capability."""
+        return self.call("mcp_token", {"hash": token_hash})
 
     def send(self, as_: str, token: str | None, content: str, *, user=None) -> dict:
         """`send` as `as_` with its `token`: the result's `message_id`. A request that

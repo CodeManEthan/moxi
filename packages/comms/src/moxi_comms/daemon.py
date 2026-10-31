@@ -86,6 +86,7 @@ from moxi import ipc
 from . import (attribution, bindings, cache, claimfile, config, constants, directory,
                membership, wire)
 from .store import books as books_mod
+from .mcp import tokens as mcp_tokens_mod
 from .attribution import Author
 from .machine_line import (COLD_AT_LIVE, POSTURE_NONE,
                            POSTURE_ONCE, parse as parse_machine_line)
@@ -340,6 +341,10 @@ class Binding:
     #: The ids a turn of this binding left unhandled, back to `waiting` until the next
     #: release point. A live send above one waits with them (`_behind_returned`).
     returned: set = field(default_factory=set)
+    #: The claim key of the adapter that holds this binding (its claim file's key), as
+    #: its `bind` named it. A tool token's row maps to it. None when the bind named none;
+    #: such a binding registers no tool token.
+    claim_key: str | None = None
 
 
 @dataclass
@@ -403,6 +408,14 @@ class Daemon:
         self.proc_view: membership.ProcView = membership.DEFAULT_PROC
         # custody, recorded: the daemon is the only writer, and the only witness
         self.binding_history = bindings.BindingHistory(history_path, clock=clock)
+        #: The tool tokens' registry (`mcp.tokens`): comms.db's `mcp_tokens` through the
+        #: binding history's connection, and its active rows in memory. Loaded at boot
+        #: after the fence. Its evidence reads processes through `proc_view`.
+        self.mcp_tokens = mcp_tokens_mod.Registry(self.binding_history, clock=clock,
+                                                  proc=lambda: self.proc_view)
+        #: Whether this daemon serves comms' tools over MCP now: what `mcp_token`
+        #: answers as `served`. The endpoint sets it once it settles; until then False.
+        self.mcp_served = False
 
         self._lock = threading.RLock()
         self.bindings: dict[str, Binding] = {}
@@ -545,6 +558,7 @@ class Daemon:
             "look": self._look,
             "activity": self._activity,
             "unanswered": self._note_unanswered,
+            "mcp_token": self._mcp_token,
         }
 
     # ------------------------------------------------------------------ directory
@@ -614,6 +628,10 @@ class Daemon:
             if fenced:
                 log.warning("boot fence: closed %d custody interval(s) left open by a "
                             "daemon that did not shut down cleanly", fenced)
+            # The tool tokens, after the fence cleared their bindings: those whose
+            # session has positively ended are revoked here, the rest wait for their
+            # adapter's next registration.
+            self.mcp_tokens.load()
         # boot: the reserved names, brought in line with what the installed modules
         # declare, which catches a module installed before comms and a store restored
         # from a backup. A failure is logged; the names stay as they were.
@@ -918,6 +936,11 @@ class Daemon:
         if adapter not in self.kinds:
             raise Refusal(f"unknown adapter kind {adapter!r}; expected one of "
                           f"{', '.join(self.kinds.names())}", code=wire.UNKNOWN_ADAPTER)
+        # The adapter's claim key, which a tool token's row maps to. Optional: an adapter
+        # that registers no tool token need not name it.
+        claim_key = frame.get("claim")
+        if claim_key is not None and not mcp_tokens_mod.valid_claim_key(claim_key):
+            raise Refusal("claim: not a claim key", code=wire.INVALID_PARAMS)
         # The catch-up boundary is READ BEFORE THE LOCK. It is a record round trip -- a
         # file read, local or mock -- and taking it under the daemon's ONE lock made every register
         # wait out every other register's network call, and every router, resolver and
@@ -989,7 +1012,7 @@ class Daemon:
             hwm = max(hwm, self._seen_max, key=int)
             binding = Binding(conn=conn, qualified=q, name=name, scope=scope, tier=tier,
                               adapter=adapter, bound_at=self.clock(),
-                              replay_hwm=hwm)
+                              replay_hwm=hwm, claim_key=claim_key)
             # The session behind the name, from the register itself: this frame is the
             # binding's own connection by construction. With it, the shim's evidence for
             # `fresh`; an id another live binding holds is refused.
@@ -1005,6 +1028,9 @@ class Daemon:
             binding.history_id = self.binding_history.bind(
                 qualified=q, name=name, scope=scope, tier=tier,
                 adapter=adapter, at=binding.bound_at)
+            # The name went to this claim: another claim's tool tokens for it are
+            # revoked, so a session that lost its name loses its tools with it.
+            self.mcp_tokens.name_bound(q, claim_key)
             log.info("bind %s tier=%s adapter=%s", q, tier, adapter)
         # `high`, the catch-up boundary: the shim's registration high-water id. A `re:`
         # below it was sent before that shim could see payments.
@@ -1322,14 +1348,60 @@ class Daemon:
                 for key in [k for k in self.unanswered if k[0] == b.qualified]:
                     del self.unanswered[key]
                 # the close of the custody interval: the connection IS the liveness
-                # signal, so the connection's end is the release, here and nowhere else
+                # signal, so the connection's end is the release, here and nowhere else.
+                # Its tool tokens lose the binding in the same transaction.
                 self.binding_history.release(b.history_id)
+                self.mcp_tokens.released(b.history_id)
                 log.info("unbind %s: its connection from pid %s ended (a peer that stops "
                          "reading is dropped after %.0f s)", b.qualified,
                          getattr(getattr(conn, "peer", None), "pid", None),
                          wire.WRITE_DEADLINE)
         if gone:
             self._queue_flush()
+            # Each released claim's session may have ended with it: its tool tokens are
+            # revoked only on positive evidence.
+            claims = {b.claim_key for b in gone if b.claim_key}
+            if claims:
+                self.mcp_tokens.check_ended(claims)
+
+    # ------------------------------------------------------------------ the tool token
+    def _mcp_token(self, conn, params: dict) -> dict:
+        """`mcp_token`: register the hash of the session's tool token for the binding
+        this connection holds, after its bind. Answers `served`, whether this daemon
+        serves comms' tools now. Refused `mcp-token-taken` when another claim's row has
+        the hash (or this claim's row for another identity), `mcp-token-revoked` for a
+        revoked one, and `name-reserved` for a reserved identity."""
+        token_hash = params.get("hash")
+        if not mcp_tokens_mod.is_digest(token_hash):
+            raise Refusal("hash: the token's SHA-256 as 64 lowercase hex digits",
+                          code=wire.INVALID_PARAMS)
+        b = self._own_binding(conn, params)
+        self._not_bound(b)
+        with self._lock:
+            # Under the lock a release takes too, so the row never names a binding that
+            # was released while this ran.
+            if self.bindings.get(b.qualified) is not b:
+                self._not_bound(None)
+            with self._db() as db:
+                if reserved_mod.lookup(db, b.qualified) is not None:
+                    raise Refusal(f"{b.qualified} is a reserved name, and a reserved name "
+                                  "has no tools", code=wire.NAME_RESERVED,
+                                  name=b.qualified)
+            if not b.claim_key:
+                raise Refusal("this binding's bind named no claim, so it registers no "
+                              "token", code=wire.INVALID_PARAMS)
+            if b.history_id is None:
+                raise wire.error(wire.FAILED, "this binding isn't recorded in comms' "
+                                 "store; bind again and register then")
+            try:
+                self.mcp_tokens.register(token_hash, claim=b.claim_key,
+                                         identity=b.qualified, adapter=b.adapter,
+                                         binding_id=b.history_id)
+            except mcp_tokens_mod.Refused as e:
+                raise Refusal(e.reason, code=e.code) from None
+            except RuntimeError as e:
+                raise wire.error(wire.FAILED, str(e)) from None
+        return {"served": bool(self.mcp_served)}
 
     # ------------------------------------------------------------------ query
     def _agents_query(self, frame: dict) -> dict:

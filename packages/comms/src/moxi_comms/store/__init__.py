@@ -2,12 +2,13 @@
 
 It holds the record (rooms, messages), the delivery books (queue, digests, cursors,
 dropped), the binding history (bindings), the directory (identities, operators), the
-reserved send-only names, and `meta`. `schema.py` has the tables.
+reserved send-only names, the hashes of comms' per-session tool tokens (mcp_tokens), and
+`meta`. `schema.py` has the tables.
 
 Who writes what:
 
   * the daemon is the only message writer: `messages`, `queue`, `digests`, `cursors`,
-    `bindings`, `dropped` and `meta.next_id`;
+    `bindings`, `dropped`, `mcp_tokens` and `meta.next_id`;
   * provisioning writes `identities`, `operators` and `rooms`;
   * the reserved-names listener writes `reserved`, with the `bindings` row of kind
     `reserved` that goes with each reservation;
