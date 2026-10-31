@@ -699,7 +699,8 @@ class Delivery:
     def _wait_id(self, until: str, deadline: float | None):
         """Wait by id on a connection of its own. A connection that closes while the
         endpoint lives is replaced once. `Lost` `unanswered` only when nothing listens at
-        the address; any other connect that fails raises `TimeoutError`."""
+        the address; any other connect that fails is tried again until the deadline, then
+        raises `TimeoutError` (at once with no deadline), as `_resolve` does."""
         reconnected = False
         while True:
             try:
@@ -708,8 +709,12 @@ class Delivery:
                 if exc.not_serving:
                     return Lost(LOST_UNANSWERED, delivery=self.id, ref=self.ref)
                 # The endpoint listens but did not get through the hello or `session`:
-                # that says nothing of a delivery an earlier call recorded.
-                raise self._timed_out(until, deadline) from None
+                # that says nothing of a delivery an earlier call recorded. An endpoint
+                # that is ending stops listening soon, and the next connect says so.
+                if deadline is None or time.monotonic() >= deadline:
+                    raise self._timed_out(until, deadline) from None
+                time.sleep(0.05)
+                continue
             left = self._left(deadline)
             try:
                 answer = _call(client, "wait", {"delivery": self.id, "until": until,

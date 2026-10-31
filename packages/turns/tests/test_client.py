@@ -158,7 +158,7 @@ def test_a_wait_whose_connect_stalls_raises_timeout_never_lost(scripted, monkeyp
         else:
             server.session_gate = release
         with pytest.raises(TimeoutError):
-            d.wait_started(5)
+            d.wait_started(1)
         with pytest.raises(TimeoutError):
             d.wait_ended(None)
     finally:
@@ -169,6 +169,22 @@ def test_a_wait_whose_connect_stalls_raises_timeout_never_lost(scripted, monkeyp
     server.stop()
     # Nothing listens any more: that, and only that, reads lost.
     assert d.wait_started(1) == Lost("unanswered", delivery="d-1", ref="r")
+
+
+def test_a_wait_that_stalls_while_the_endpoint_ends_reads_lost_within_its_time(scripted):
+    # An ending endpoint can accept a connect and fail its hello before it stops
+    # listening. The wait asks again inside the time it was given, and the endpoint's
+    # going is what it then reads.
+    server, s = scripted()
+    d = client.Delivery(s, "d-1", "r")
+    server.refuse_session = True
+    stopper = threading.Timer(0.3, server.stop)
+    stopper.start()
+    try:
+        assert d.wait_started(5) == Lost("unanswered", delivery="d-1", ref="r")
+    finally:
+        stopper.cancel()
+    assert server.methods() == []
 
 
 def test_a_look_up_by_ref_with_no_deadline_raises_timeout_when_it_cannot_connect(scripted):
