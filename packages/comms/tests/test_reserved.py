@@ -169,6 +169,16 @@ def test_a_scoped_or_malformed_declaration_is_refused(chain, name):
     assert result.reserved == []
 
 
+@pytest.mark.parametrize("name", ["operator", "auto"])
+def test_a_name_the_daemon_keeps_is_never_reserved_and_gets_no_row(chain, store, name):
+    result = reserved.reconcile(declared={"pager": [name]}, chain=chain)
+    assert [c[:2] for c in result.conflicts] == [(name, "pager")]
+    assert result.lines == [f"pager: {name} isn't reserved: {result.conflicts[0][2]}"]
+    assert result.reserved == []
+    assert row(name) is None
+    assert token_of(store, "pager", name) is None
+
+
 def test_an_unowned_row_is_adopted_by_the_first_module_that_declares_it(chain, store):
     write("INSERT INTO reserved(name, state, note) VALUES ('console', 'unowned', 'old')")
     assert reserved.reconcile(declared={}, chain=chain).lines == []

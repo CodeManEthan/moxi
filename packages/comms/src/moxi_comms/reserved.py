@@ -42,7 +42,7 @@ from dataclasses import dataclass, field
 from . import paths as _paths
 from .bindings import stamp
 from .release import MODULE
-from .scoping import GLOBAL, NAME_RE, is_auto_name
+from .scoping import AUTO_WORD, GLOBAL, NAME_RE, OPERATOR_NAME, is_auto_name
 
 log = logging.getLogger("comms.reserved")
 
@@ -142,6 +142,12 @@ def bind_refusal(row) -> str:
             "is settled")
 
 
+#: Names the daemon keeps for itself and the operator. A module that declares one gets a
+#: conflict line and no row: a `conflict` row refuses binds, and the operator's own
+#: session binds his name.
+_KEPT = (OPERATOR_NAME, AUTO_WORD)
+
+
 def _bad_name(name: str) -> str | None:
     """Why `name` can't be reserved, or None when it can."""
     if "@" in name:
@@ -150,6 +156,10 @@ def _bad_name(name: str) -> str | None:
         return "it isn't a comms name"
     if is_auto_name(name):
         return "agent-N names are the daemon's"
+    if name == OPERATOR_NAME:
+        return "it is the operator's name, and the daemon keeps it for him"
+    if name == AUTO_WORD:
+        return "a bind of auto asks the daemon for an agent-N name, so the daemon keeps it"
     return None
 
 
@@ -286,8 +296,8 @@ def _reconcile(conn, declared: dict, chain, clock) -> Result:
     for name, module, why in bad:
         row = table.get(name)
         _conflict(conn, result, name, module, why,
-                  keep=row is not None and row["freed_at"] is None
-                  and row["state"] == UNOWNED, clock=clock)
+                  keep=name in _KEPT or (row is not None and row["freed_at"] is None
+                                         and row["state"] == UNOWNED), clock=clock)
 
     for name in sorted(wanted):
         modules_ = wanted[name]
@@ -326,8 +336,9 @@ def _write(conn, sql: str, params=()) -> None:
 
 def _conflict(conn, result: Result, name: str, module, why: str, *, keep: bool = False,
               clock=time.time) -> None:
-    """Record that `name` couldn't be reserved for `module`, and say so. An unowned row
-    (`keep`) stays unowned: it still refuses binds and mail."""
+    """Record that `name` couldn't be reserved for `module`, and say so. With `keep`, the
+    table isn't written: an unowned row stays unowned (it still refuses binds and mail),
+    and a name the daemon keeps gets no row."""
     result.conflicts.append((name, module, why))
     who = module or "a module"
     result.lines.append(f"{who}: {name} isn't reserved: {why}")
