@@ -534,6 +534,25 @@ def test_a_run_ended_between_steps_stops_before_its_next_act(conn):
     assert ("release", "3", run.run_id) in slots_api.calls
 
 
+def test_a_run_ended_after_the_exit_does_not_respawn(conn):
+    # Ended under the job once the pane has ended: the respawn, the act that matters most,
+    # waits on its own check that the run is still open.
+    run = arm(conn, mode="director")
+    slots_api = FakeSlots(ended=True)
+    original = slots_api.wait_ended
+
+    def wait_ended(slot, **kw):
+        store.end_run(conn, run.run_id, "error", word="job-gone")
+        return original(slot, **kw)
+
+    slots_api.wait_ended = wait_ended
+    session = FakeSession()
+    got = go(conn, run, session=session, slots_api=slots_api)
+    assert session.commands == [("exit", 4)] and got.requests == []
+    assert got.run.word == "job-gone" and "respawn" not in got.events
+    assert ("release", "3", run.run_id) in slots_api.calls
+
+
 # -- notices -----------------------------------------------------------------------------
 
 
