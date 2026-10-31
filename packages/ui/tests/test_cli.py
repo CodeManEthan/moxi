@@ -19,8 +19,12 @@ def task(state="inactive", enabled=True, last=None):
     return UnitState("ui", "shell", "daemon", "schtasks", state, last=last, enabled=enabled)
 
 
-def socket_unit(state="active"):
-    return UnitState("ui", "shell", "socket", "systemd", state)
+V4, V6 = "moxi-ui-shell.socket", "moxi-ui-shell-1.socket"
+
+
+def socket_unit(state="active", detail="", backend="systemd"):
+    """The socket state as the core reads it: `detail` names the units not active."""
+    return UnitState("ui", "shell", "socket", backend, state, detail=detail)
 
 
 #: What a probe that found the shell up returns.
@@ -125,9 +129,43 @@ def test_a_listening_socket_needs_no_start(monkeypatch):
 
 
 def test_a_failed_socket_is_said_and_a_shell_started(monkeypatch):
-    world = World(monkeypatch, [socket_unit("failed")], probes=("down", "up"))
+    world = World(monkeypatch, [socket_unit("failed", f"failed: {V4}")], probes=("down", "up"))
     world.ensure()
     assert "moxi install ui" in world.said[0] and world.spawned == [True]
+
+
+def test_a_socket_that_holds_only_127_0_0_1_needs_no_start_and_no_connect(monkeypatch):
+    world = World(monkeypatch, [socket_unit("failed", f"failed: {V6}")], probes=("down",))
+    dialled = []
+    monkeypatch.setattr(cli, "_port_taken", lambda port: dialled.append(port) or True)
+    assert world.ensure() is None
+    assert world.spawned == [] and dialled == []
+    assert "localhost" in world.said[0] and "moxi install ui" in world.said[0]
+
+
+@pytest.mark.parametrize(("row", "holds"), [
+    (socket_unit("active", "listening"), True),
+    (socket_unit("failed", f"failed: {V6}"), True),
+    (socket_unit("inactive", f"not active: {V6}"), True),
+    (socket_unit("failed", f"failed: {V4}"), False),
+    (socket_unit("failed", f"failed: {V4}, {V6}"), False),
+    (socket_unit("inactive", f"not active: {V4}"), False),
+    (socket_unit("failed", ""), False),
+    (socket_unit("inactive", "not loaded", backend="launchd"), False),
+    (None, False),
+])
+def test_whether_the_socket_holds_127_0_0_1(row, holds):
+    assert cli.socket_holds_v4(row) is holds
+
+
+def test_on_windows_the_skipped_socket_is_no_socket(monkeypatch):
+    off = socket_unit("off", "the socket is skipped on Windows; the daemon binds its own",
+                      backend="schtasks")
+    assert cli.socket_row([off]) is None
+    world = World(monkeypatch, [task("inactive"), off], platform="win32",
+                  probes=("down", "up"))
+    world.ensure()
+    assert world.started == [True] and not any("socket" in line for line in world.said)
 
 
 def test_a_port_held_by_another_program_is_refused(monkeypatch):

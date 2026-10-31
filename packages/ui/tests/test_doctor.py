@@ -164,15 +164,40 @@ def listener(runtime):
     held.close()
 
 
-def _socket_unit(state="active"):
-    return SimpleNamespace(module="ui", name="shell", kind="socket", state=state, detail="",
-                           backend="systemd")
+V4, V6 = "moxi-ui-shell.socket", "moxi-ui-shell-1.socket"
+
+
+def _socket_unit(state="active", detail="listening", backend="systemd"):
+    """The socket state as the core's `units.status` gives it."""
+    from moxi.units import UnitState
+
+    epoch = f"{V4}=a1,{V6}=b2" if state == "active" and backend == "systemd" else None
+    return UnitState("ui", "shell", "socket", backend, state, detail=detail, epoch=epoch)
 
 
 def test_idle_under_an_active_socket_the_doctor_makes_no_connect(monkeypatch, listener):
     monkeypatch.setattr(health, "_units_status", lambda: [_socket_unit()])
     rows = list(doctor.rows())
     assert rows[0].name == "shell" and rows[0].state == "off" and "socket" in rows[0].detail
+    assert listener.connects() == 0
+
+
+@pytest.mark.parametrize(("state", "detail", "row"), [
+    ("failed", f"failed: {V6}", "warn"),
+    ("inactive", f"not active: {V6}", "warn"),
+    ("failed", f"failed: {V4}", "fail"),
+    ("inactive", f"not active: {V4}, {V6}", "fail"),
+])
+def test_a_socket_not_all_listening_makes_no_connect(monkeypatch, listener, state, detail,
+                                                      row):
+    """[::1] alone not held: the shell still starts on 127.0.0.1 and refuses localhost, a
+    warn; 127.0.0.1 not held is the fail row, naming the unit."""
+    monkeypatch.setattr(health, "_units_status", lambda: [_socket_unit(state, detail)])
+    found = next(doctor.rows())
+    assert found.name == "shell" and found.state == row
+    assert detail in found.detail and found.fix == "moxi install ui"
+    if row == "warn":
+        assert "localhost is refused" in found.detail
     assert listener.connects() == 0
 
 
@@ -192,7 +217,10 @@ def test_on_windows_every_task_state_goes_on_to_the_connect(monkeypatch, listene
     monkeypatch.setattr(health, "_platform", lambda: "win32")
     task = SimpleNamespace(module="ui", name="shell", kind="daemon", backend="schtasks",
                            state="failed", enabled=True, last={"exit": 1}, detail="")
-    monkeypatch.setattr(health, "_units_status", lambda: [task])
+    # The core gives the skipped socket as `off` beside the task: no socket holds the port.
+    off = _socket_unit("off", "the socket is skipped on Windows; the daemon binds its own",
+                       backend="schtasks")
+    monkeypatch.setattr(health, "_units_status", lambda: [task, off])
     rows = list(doctor.rows())
     assert [(r.name, r.state) for r in rows[:2]] == [("shell", "fail"), ("logon task", "warn")]
     assert listener.connects() == 1
