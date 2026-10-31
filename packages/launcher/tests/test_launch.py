@@ -770,6 +770,85 @@ def test_a_scratch_launch_makes_its_folder_and_never_removes_it(harness, tmp_pat
     assert where.is_dir()
 
 
+@POSIX
+def test_scratch_launches_go_under_a_parent_of_this_users_own(harness, tmp_path):
+    import tempfile
+
+    root = common.scratch_root()
+    assert root == Path(tempfile.gettempdir()) / f"moxi-scratch-{os.getuid()}"
+    assert not root.exists()
+    req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
+                               "brief": BRIEF}, cwd=str(tmp_path), request_id="r9")
+    assert api.check(req) == []
+    api.launch(req)
+    # A missing parent is made private, and the launch's folder in it.
+    assert stat.S_IMODE(root.stat().st_mode) == 0o700 and root.stat().st_uid == os.getuid()
+    assert common.scratch_dir("r9").parent == root
+
+
+def scratch_request(tmp_path, rid: str = "r9") -> LaunchRequest:
+    return LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
+                                "brief": BRIEF}, cwd=str(tmp_path), request_id=rid)
+
+
+def refused_before_the_row(tmp_path, words: str) -> None:
+    [refused] = api.check(scratch_request(tmp_path))
+    assert isinstance(refused, api.ScratchRoot) and refused.code == "scratch-root"
+    assert refused.exit_code == exits.REFUSED and words in refused.problem
+    with pytest.raises(api.ScratchRoot):
+        api.launch(scratch_request(tmp_path))
+    assert row("r9") is None and not common.scratch_dir("r9").exists()
+
+
+@POSIX
+def test_a_scratch_parent_open_to_other_users_refuses_the_launch_before_the_row(
+        harness, tmp_path):
+    root = common.scratch_root()
+    root.mkdir(mode=0o700)
+    root.chmod(0o755)
+    refused_before_the_row(tmp_path, "lets other users in (mode 755)")
+    # Left as it was: the launcher never takes over a folder it didn't make.
+    assert stat.S_IMODE(root.stat().st_mode) == 0o755
+
+
+@POSIX
+def test_a_scratch_parent_that_is_a_link_refuses_the_launch(harness, tmp_path):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir(mode=0o700)
+    common.scratch_root().symlink_to(elsewhere)
+    refused_before_the_row(tmp_path, "is a symbolic link")
+    assert list(elsewhere.iterdir()) == []
+
+
+@POSIX
+def test_a_scratch_parent_another_user_owns_refuses_the_launch(harness, tmp_path,
+                                                              monkeypatch):
+    # The folder is the real user's; the launcher is told it runs as another uid.
+    other = os.getuid() + 1
+    monkeypatch.setattr(os, "getuid", lambda: other)
+    common.scratch_root().mkdir(mode=0o700)
+    refused_before_the_row(tmp_path, f"is owned by another user (uid {other - 1})")
+
+
+@POSIX
+def test_a_scratch_parent_taken_after_the_check_fails_the_row_and_makes_nothing(
+        harness, tmp_path, monkeypatch):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir(mode=0o700)
+    real_check = api._check
+
+    def check_then_swap(*args, **kwargs):
+        found = real_check(*args, **kwargs)
+        common.scratch_root().symlink_to(elsewhere)
+        return found
+
+    monkeypatch.setattr(api, "_check", check_then_swap)
+    result = api.launch(scratch_request(tmp_path))
+    assert result.state == "failed" and result.reason == targets.SPAWN_FAILED
+    assert "symbolic link" in result.line and list(elsewhere.iterdir()) == []
+    assert harness.runs() == []
+
+
 # -- the run-log sweep ---------------------------------------------------------------------
 
 

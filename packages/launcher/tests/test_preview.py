@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -354,8 +355,10 @@ def test_preview_argv_is_the_argv_launch_hands_the_target(tmp_path, monkeypatch,
 def test_a_scratch_launch_works_in_a_folder_named_by_its_request_id(tmp_path):
     import tempfile
 
+    # One parent per user, so no other user owns it.
     assert common.scratch_dir("r1") == (
-        Path(tempfile.gettempdir()) / "moxi-scratch" / "r1")
+        Path(tempfile.gettempdir()) / f"moxi-scratch-{os.getuid()}" / "r1"
+        if hasattr(os, "getuid") else common.scratch_root() / "r1")
     resolved = Resolved({"harness": "codex", "cwd": "", "scratch": True,
                          "target": "headless", "brief": "b"})
     got = compose.build(Request(), resolved, modules=frozenset())

@@ -20,8 +20,11 @@ log's cap, is refused naming what is too long.
 
 from __future__ import annotations
 
+import getpass
 import json
 import os
+import re
+import stat
 import subprocess
 import tempfile
 from collections.abc import Mapping, Sequence
@@ -312,11 +315,54 @@ def first_turn(actor: str, *, brief: str | None = None, handoff: str | None = No
     return f"{header}\nstart posture: {posture}" + (f"\n{rest}" if rest else "")
 
 
+def scratch_root() -> Path:
+    """The folder this user's scratch launches go under: `moxi-scratch-<uid>` in the
+    system's temporary folder (the user's name where there is no uid), always absolute.
+    One per user, so no other user owns it, and none can move a launch's folder out of it
+    and put their own in its place."""
+    if hasattr(os, "getuid"):
+        who = str(os.getuid())
+    else:
+        try:
+            who = getpass.getuser()
+        except Exception:  # noqa: BLE001  (no name to be had: one folder for all)
+            who = "user"
+        who = re.sub(r"[^A-Za-z0-9._-]", "_", who) or "user"
+    return Path(os.path.abspath(tempfile.gettempdir())) / f"moxi-scratch-{who}"
+
+
 def scratch_dir(request_id: str) -> Path:
-    """Where a scratch launch works: a folder named by its request id under the system's
-    temporary folder, always as an absolute path (a slot launch is refused a relative
+    """Where a scratch launch works: a folder named by its request id under
+    `scratch_root()`, always as an absolute path (a slot launch is refused a relative
     one). Only the path: the launch makes the folder."""
-    return Path(os.path.abspath(tempfile.gettempdir())) / "moxi-scratch" / request_id
+    return scratch_root() / request_id
+
+
+def scratch_root_problem(root: Path | None = None) -> str | None:
+    """Why this user's scratch launches can't go under `root` (`scratch_root()` when
+    None), or None when they can. A missing folder is fine: the launch makes it, 0700.
+    One that is a link, not a folder, owned by another user, or open to other users is
+    not. On Windows the temporary folder is the user's own, and making the folder checks
+    its access list, so nothing is read here."""
+    root = scratch_root() if root is None else root
+    if os.name == "nt":
+        return None
+    try:
+        st = os.lstat(root)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        return f"{root} can't be read: {error}"
+    if stat.S_ISLNK(st.st_mode):
+        return f"{root} is a symbolic link"
+    if not stat.S_ISDIR(st.st_mode):
+        return f"{root} is not a directory"
+    if st.st_uid != os.getuid():
+        return f"{root} is owned by another user (uid {st.st_uid})"
+    if st.st_mode & 0o077:
+        return (f"{root} lets other users in (mode {stat.S_IMODE(st.st_mode):o}); only "
+                "its owner may use it")
+    return None
 
 
 # -- the child's environment ------------------------------------------------------------
@@ -405,4 +451,5 @@ __all__ = ["COMMANDS", "HEADER", "NOTES_DIR", "REQUEST", "SCRUB_NAMES", "SCRUB_P
            "Composition", "Context", "NoBrief", "NotYet", "PromptFile", "TooLong",
            "TurnsAdditions", "Unreadable", "agent_role", "check_sizes", "encode",
            "environment", "first_turn", "identity_block", "prompt_path",
-           "scratch_dir", "scrub", "seat_text", "stamps", "write_prompt"]
+           "scratch_dir", "scratch_root", "scratch_root_problem", "scrub", "seat_text",
+           "stamps", "write_prompt"]

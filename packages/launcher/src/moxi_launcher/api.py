@@ -67,6 +67,13 @@ class NoDirectory(Refusal):
     code = "no-cwd"
 
 
+class ScratchRoot(Refusal):
+    """The folder this user's scratch launches go under is one they can't trust: a link,
+    not a folder, another user's, or open to other users."""
+
+    code = "scratch-root"
+
+
 @dataclass(frozen=True)
 class LaunchRequest:
     """One launch asked for: at most one preset (`seat` or `project_preset`), the flags
@@ -177,10 +184,11 @@ def launch(request, *, environ: Mapping[str, str] | None = None,
 def check(request, *, environ: Mapping[str, str] | None = None) -> list[Refusal]:
     """The refusals `launch` would meet in the live state, without composing or writing
     anything: the resolver's own (an unknown preset or project, projects unreadable or
-    busy, a posture off its default), a directory that does not exist, a comms name that
-    is held, reserved or retired (or that comms refuses, or can't answer on), and the
-    target's (for a slot launch: slots not installed or not
-    supported here, or a named slot that is held, occupied or missing)."""
+    busy, a posture off its default), a directory that does not exist, a scratch folder's
+    parent this user can't trust (a link, another user's, or open to others), a comms
+    name that is held, reserved or retired (or that comms refuses, or can't answer on),
+    and the target's (for a slot launch: slots not installed or not supported here, or a
+    named slot that is held, occupied or missing)."""
     caller = dict(os.environ if environ is None else environ)
     try:
         resolved = _resolve(request, environ)
@@ -217,6 +225,12 @@ def _check(resolved, caller: Mapping[str, str]) -> list[Refusal]:
     if not resolved.scratch and resolved.cwd and not os.path.isdir(resolved.cwd):
         found.append(NoDirectory("cwd", f"the directory {resolved.cwd} does not exist",
                                  "make it, or launch from another directory"))
+    if resolved.scratch:
+        problem = common.scratch_root_problem()
+        if problem is not None:
+            found.append(ScratchRoot(
+                "scratch", f"a scratch launch can't use its folder: {problem}",
+                "move that folder away, or launch in a directory of your own"))
     if resolved.identity:
         taken = _identity_taken(resolved.identity, resolved.scope)
         if taken is not None:
@@ -264,9 +278,13 @@ def _actor(request, caller: Mapping[str, str]) -> str:
 
 def _make_files(composition: Composition) -> None:
     """What a launch makes before its start: Claude's system prompt file, and a scratch
-    launch's directory (0700, never removed by the launcher)."""
+    launch's directory (0700, never removed by the launcher). The scratch folder's parent
+    is made private first, which refuses one that is a link or another user's, in case one
+    turned up since the check."""
     if composition.values.get("scratch"):
-        files.private_dir(Path(str(composition.values["cwd"])))
+        where = Path(str(composition.values["cwd"]))
+        files.private_dir(where.parent)
+        files.private_dir(where)
     if composition.prompt_file is not None:
         common.write_prompt(composition.prompt_file)
 
@@ -294,5 +312,5 @@ def _stored(row: store.LaunchRow) -> LaunchResult:
 
 
 __all__ = ["TAKEN", "CommsOffline", "CommsUnanswered", "IdentityRefused", "IdentityTaken",
-           "LaunchRequest", "LaunchResult", "NoDirectory", "Refusal", "check", "exit_code",
-           "launch", "preview"]
+           "LaunchRequest", "LaunchResult", "NoDirectory", "Refusal", "ScratchRoot", "check",
+           "exit_code", "launch", "preview"]
