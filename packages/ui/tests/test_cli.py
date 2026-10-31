@@ -193,19 +193,41 @@ def test_the_written_port_is_read_from_the_units_the_plan_would_change(monkeypat
     assert cli._written_port(8461) is None
 
 
+#: The core's detail when the first unit is inactive or missing and the second has
+#: failed: "not active" covers both, so the two cases read the same.
+V4_DOWN_V6_FAILED = f"failed: {V6}; not active: {V4}"
+
+
 @pytest.mark.parametrize(("row", "holds"), [
-    (socket_unit("active", "listening"), True),
-    (socket_unit("failed", f"failed: {V6}"), True),
-    (socket_unit("inactive", f"not active: {V6}"), True),
-    (socket_unit("failed", f"failed: {V4}"), False),
-    (socket_unit("failed", f"failed: {V4}, {V6}"), False),
-    (socket_unit("inactive", f"not active: {V4}"), False),
-    (socket_unit("failed", ""), False),
-    (socket_unit("inactive", "not loaded", backend="launchd"), False),
-    (None, False),
+    pytest.param(socket_unit("active", "listening"), True, id="both active"),
+    pytest.param(socket_unit("failed", f"failed: {V6}"), True, id="v6 failed"),
+    pytest.param(socket_unit("inactive", f"not active: {V6}"), True, id="v6 inactive"),
+    pytest.param(socket_unit("failed", f"failed: {V4}"), False, id="v4 failed"),
+    pytest.param(socket_unit("failed", f"failed: {V4}, {V6}"), False, id="both failed"),
+    pytest.param(socket_unit("failed", f"failed: {V4}; not active: {V6}"), False,
+                 id="v4 failed, v6 inactive"),
+    pytest.param(socket_unit("failed", V4_DOWN_V6_FAILED), False, id="v4 inactive, v6 failed"),
+    pytest.param(socket_unit("failed", V4_DOWN_V6_FAILED), False, id="v4 missing, v6 failed"),
+    pytest.param(socket_unit("inactive", f"not active: {V4}"), False, id="v4 inactive"),
+    pytest.param(socket_unit("inactive", f"not active: {V4}, {V6}"), False, id="both inactive"),
+    # A detail not in the core's form for the state is never read as the first unit active.
+    pytest.param(socket_unit("failed", ""), False, id="no detail"),
+    pytest.param(socket_unit("inactive", f"failed: {V6}"), False, id="detail of another state"),
+    pytest.param(socket_unit("failed", f"failed: {V6} (start limit)"), False, id="other words"),
+    pytest.param(socket_unit("inactive", "not loaded", backend="launchd"), False, id="launchd"),
+    pytest.param(None, False, id="no socket"),
 ])
 def test_whether_the_socket_holds_127_0_0_1(row, holds):
     assert cli.socket_holds_v4(row) is holds
+
+
+def test_a_socket_whose_first_unit_is_down_beside_a_failed_one_makes_no_url_for_it(monkeypatch):
+    """127.0.0.1's unit stopped or missing and ::1's failed: nothing holds 127.0.0.1, so
+    `open` says so and starts a shell of its own in place of resting on the socket."""
+    world = World(monkeypatch, [socket_unit("failed", V4_DOWN_V6_FAILED)], probes=("down", "up"))
+    # The shell it started gives the URL, not the socket (which would return None).
+    assert world.ensure() is UP and world.spawned == [True]
+    assert V4_DOWN_V6_FAILED in world.said[0] and "localhost" not in world.said[0]
 
 
 def test_on_windows_the_skipped_socket_is_no_socket(monkeypatch):

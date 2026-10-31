@@ -197,16 +197,24 @@ def test_idle_under_an_active_socket_the_doctor_makes_no_connect(monkeypatch, li
 
 
 @pytest.mark.parametrize(("state", "detail", "row"), [
-    ("failed", f"failed: {V6}", "warn"),
-    ("inactive", f"not active: {V6}", "warn"),
-    ("failed", f"failed: {V4}", "fail"),
-    ("inactive", f"not active: {V4}, {V6}", "fail"),
+    pytest.param("failed", f"failed: {V6}", "warn", id="v6 failed"),
+    pytest.param("inactive", f"not active: {V6}", "warn", id="v6 inactive"),
+    pytest.param("failed", f"failed: {V4}", "fail", id="v4 failed"),
+    pytest.param("inactive", f"not active: {V4}, {V6}", "fail", id="both inactive"),
+    # The core names an inactive and a missing unit alike, after the failed one.
+    pytest.param("failed", f"failed: {V6}; not active: {V4}", "fail",
+                 id="v4 inactive, v6 failed"),
+    pytest.param("failed", f"failed: {V6}; not active: {V4}", "fail",
+                 id="v4 missing, v6 failed"),
 ])
 def test_a_socket_not_all_listening_makes_no_connect(monkeypatch, listener, state, detail,
                                                       row):
     """[::1] alone not held: the shell still starts on 127.0.0.1 and refuses localhost, a
     warn; 127.0.0.1 not held is the fail row, naming the unit."""
     monkeypatch.setattr(health, "_units_status", lambda: [_socket_unit(state, detail)])
+    found = health.probe(wait=0)
+    assert found.state == ("partial" if row == "warn" else "socket")
+    assert health.shell_row(found).state == row
     found = next(doctor.rows())
     assert found.name == "shell" and found.state == row
     assert detail in found.detail and found.fix == "moxi install ui"
