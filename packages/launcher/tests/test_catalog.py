@@ -450,6 +450,10 @@ def test_a_flag_without_a_row_that_sets_a_posture_rows_value_is_refused(argv):
     ("claude", ["--allow-dangerously-skip-permissions"], "permission_mode"),
     ("codex", ["--", "--dangerously-bypass-approvals-and-sandbox"], "sandbox"),
     ("codex", ["--approve-for-me"], "approval"),
+    # Hidden aliases: Codex's --help never shows them.
+    ("codex", ["--yolo"], "sandbox"),
+    ("codex", ["--", "--yolo"], "sandbox"),
+    ("codex", ["--not-so-yolo"], "approval"),
 ])
 def test_a_flag_that_skips_or_hands_off_the_permission_checks_is_refused(harness, argv,
                                                                          row):

@@ -329,6 +329,8 @@ CODEX_MODES = {
     ({"extra_flags": ["--config=approval_policy=never"]}, "approval"),
     ({"extra_flags": ["--dangerously-bypass-approvals-and-sandbox"]}, "sandbox"),
     ({"extra_flags": ["--approve-for-me"]}, "approval"),
+    ({"extra_flags": ["--yolo"]}, "sandbox"),
+    ({"extra_flags": ["--not-so-yolo"]}, "approval"),
 ])
 def test_a_config_key_or_flag_that_sets_a_posture_row_is_refused_in_every_mode(
         mode, values, row):

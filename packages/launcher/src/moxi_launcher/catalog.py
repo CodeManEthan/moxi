@@ -98,13 +98,17 @@ EXTRA = "extra_flags"
 #: the posture check, so each is refused like that row, in every mode. Claude's two skip
 #: or offer to skip every permission check; Codex's bypass drops the sandbox and the
 #: approvals, its approve-for-me hands approvals to an automatic reviewer, and its host
-#: takes a permissions profile in place of a sandbox mode.
+#: takes a permissions profile in place of a sandbox mode. Codex also takes hidden
+#: aliases that its `--help` never shows, so the help check can't find them: `--yolo`
+#: for the bypass and `--not-so-yolo` for approve-for-me.
 POSTURE_FLAGS = {
     "claude": {"--dangerously-skip-permissions": "permission_mode",
                "--allow-dangerously-skip-permissions": "permission_mode"},
     "codex": {"--permissions": "sandbox",
               "--dangerously-bypass-approvals-and-sandbox": "sandbox",
-              "--approve-for-me": "approval"},
+              "--yolo": "sandbox",
+              "--approve-for-me": "approval",
+              "--not-so-yolo": "approval"},
 }
 #: Config overrides that set what a posture row sets, per harness: the flags that carry a
 #: `key=value` override (in any mode), and each key with the posture row it stands in for.

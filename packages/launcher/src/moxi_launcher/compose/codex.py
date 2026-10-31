@@ -43,7 +43,7 @@ Extra flags go to the command line as given, in every other mode, except a flag 
 override that sets what a posture row sets, which is refused like that row so the posture
 check sees every posture: the host's `--permissions PROFILE` (until a permission profile
 has a row of its own), Codex's `--dangerously-bypass-approvals-and-sandbox` and
-`--approve-for-me`, and a config override keyed `sandbox_mode` or `approval_policy`,
+`--approve-for-me` with their hidden aliases `--yolo` and `--not-so-yolo`, and a config override keyed `sandbox_mode` or `approval_policy`,
 passed on (`-c`, `--config`, `--option`) or as a `config` item (`catalog.POSTURE_FLAGS`,
 `catalog.POSTURE_KEYS`).
 """
