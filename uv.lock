@@ -12,6 +12,7 @@ members = [
     "moxi-loopback",
     "moxi-projects",
     "moxi-secrets",
+    "moxi-services",
     "moxi-sessions",
     "moxi-slots",
     "moxi-turns",
@@ -377,6 +378,40 @@ dev = [
     { name = "moxi-dev", editable = "packages/moxi-dev" },
     { name = "pytest" },
     { name = "python-stdnum", specifier = ">=2.2" },
+]
+
+[[package]]
+name = "moxi-services"
+version = "0.1.0"
+source = { editable = "packages/services" }
+dependencies = [
+    { name = "moxi" },
+    { name = "psutil" },
+]
+
+[package.optional-dependencies]
+projects = [
+    { name = "moxi-projects" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "moxi-dev" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
+    { name = "psutil", specifier = ">=5.9" },
+]
+provides-extras = ["projects"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "pytest" },
 ]
 
 [[package]]

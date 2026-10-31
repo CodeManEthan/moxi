@@ -1,0 +1,9 @@
+# The services module's config schema. The file it governs is CONFIG/services/config.toml;
+# `moxi config services` shows every key.
+
+[adopted]
+type = "table"
+items = "bool"
+default = {}
+doc = "On or off for each adopted Linux timer, by its row's name: the timer's runs go on only while its entry is true (a missing entry is off). `moxi services enable` and `disable` set it."
+read = "use"
