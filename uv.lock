@@ -236,6 +236,7 @@ ui = [
 [package.dev-dependencies]
 dev = [
     { name = "moxi-ui", extra = ["testing"] },
+    { name = "playwright" },
     { name = "pytest" },
 ]
 
@@ -250,6 +251,7 @@ provides-extras = ["ui"]
 [package.metadata.requires-dev]
 dev = [
     { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
+    { name = "playwright", specifier = ">=1.50,<2" },
     { name = "pytest" },
 ]
 

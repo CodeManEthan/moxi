@@ -28,8 +28,8 @@ cache = "moxi_cache.module"
 
 [dependency-groups]
 # moxi-ui's pytest plugin runs cache's pages in a real shell; its testing extra brings
-# the browser.
-dev = ["pytest", "moxi-ui[testing]"]
+# the browser. The browser tests import Playwright themselves, so it is named too.
+dev = ["pytest", "moxi-ui[testing]", "playwright>=1.50,<2"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -43,5 +43,9 @@ packages = ["src/moxi_cache"]
 # pyproject.toml and .gitignore hatchling adds itself.
 only-include = ["LICENSE", "README.md", "src/moxi_cache", "tests", "web"]
 
+# A plain `pytest` leaves out the browser tests, and so does `moxi-dev check` when
+# Playwright's Chromium can't start; `pytest -m browser` runs them.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not browser'"
+markers = ["browser: drives a browser; deselected by a plain pytest run"]
