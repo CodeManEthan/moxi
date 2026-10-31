@@ -685,17 +685,16 @@ def test_a_row_already_handed_is_not_handed_again(rig):
 
 
 def test_queued_mail_is_never_bounded_and_the_flagged_row_waits(rig):
-    """Bounded replay is for mail with no row: offline rows past REPLAY_N and
-    older than REPLAY_T all go at the bind's release; the flagged one waits for a real
-    boundary."""
+    """No count or age bounds a name's rows: sixty offline rows, the oldest two days
+    old, all go at the bind's release; the flagged one waits for a real boundary."""
     mid = next_turn(rig)
     rig.age_message(mid, time.strftime("%Y-%m-%dT%H:%M:%SZ",
                                        time.gmtime(rig.clock() - 2 * 86400)))
-    offline = post_many(rig, [REVIEWER_Q], constants.REPLAY_N + 10)
-    assert wait_until(lambda: len(held_of(rig)) == constants.REPLAY_N + 11)
+    offline = post_many(rig, [REVIEWER_Q], 60)
+    assert wait_until(lambda: len(held_of(rig)) == 61)
     reviewer = rig.shim(**REVIEWER)
     wait_until(lambda: not reviewer.replaying)
-    wait_for_queue(reviewer, constants.REPLAY_N + 10)
+    wait_for_queue(reviewer, 60)
     assert queued_ids(reviewer) == [m.id for m in offline]
     assert reviewer.replay_notice is None, "nothing was bounded"
     assert mid not in queued_ids(reviewer)

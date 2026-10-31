@@ -26,9 +26,10 @@ send-only identities as unowned reserved names, never as standing rows; and the 
 `migrated_from = "0.2"`, with the time, the fenced names and each moved file's fingerprint (size and
 modification time). Mail that 0.2 would have replayed from the record becomes queue
 rows: for a name with a cursor, the messages above it that name it on line zero; for a
-name without one, 0.2's bounded set (`[replay]`). After this nothing is replayed from the
-record. The new file is committed, checkpointed and closed, then renamed to comms.db, so
-a run that dies midway leaves no comms.db and the next open starts again.
+name without one, 0.2's bounded set at its defaults (the newest 50 within a day). After
+this nothing is replayed from the record. The new file is committed, checkpointed and
+closed, then renamed to comms.db, so a run that dies midway leaves no comms.db and the
+next open starts again.
 
 What it leaves: each 0.2 file renamed in place to `<name>.0.2-moved` (the cursor folder
 to `cursors.0.2-moved`). Nothing is deleted. A run stopped between the commit and the
@@ -111,6 +112,12 @@ REQUIRED = {
 OPTIONAL = {("directory", "agents", "kind"): "agent"}
 #: The `user_version` every comms 0.2 database has: 0.2 never set one.
 KNOWN_VERSIONS = (0,)
+
+#: comms 0.2's catch-up bound for a name with no cursor, at its defaults: at most this
+#: many messages, none older than this many seconds. The move gives such a name these
+#: as rows, and nothing is bounded after it.
+REPLAY_MESSAGES = 50
+REPLAY_SECONDS = 24 * 3600
 
 #: The line the report gives each fenced binding, and the doctor while its mail waits.
 FENCED_LINE = ("{name}: its session was launched before the upgrade; relaunch it to get "
@@ -529,8 +536,6 @@ def _recipient(plan: Plan, tag: str) -> str | None:
 
 def _make_rows(plan: Plan, now: float, env) -> None:
     """The queue: 0.2's rows, then a row for each message 0.2 would have replayed."""
-    from .. import config
-
     names_room = next((r[0] for r in plan.rooms if r[1] == NAMES), None)
     by_id = {int(m[0]): m for m in plan.messages}
     lines = {}
@@ -571,15 +576,14 @@ def _make_rows(plan: Plan, now: float, env) -> None:
             q = _recipient(plan, tag)
             if q is not None and mid not in mine.setdefault(q, []):
                 mine[q].append(mid)
-    replay = config.load(env=env).replay
     for q in sorted(mine):
         ids = mine[q]
         cursor = plan.cursor_of.get(q)
         if cursor is not None:
             ids = [i for i in ids if i > cursor]
         else:
-            ids = [i for i in ids[-replay.messages:]
-                   if now - _epoch(by_id[i][6]) <= replay.seconds]
+            ids = [i for i in ids[-REPLAY_MESSAGES:]
+                   if now - _epoch(by_id[i][6]) <= REPLAY_SECONDS]
         for mid in ids:
             if (q, mid) in rows:
                 continue

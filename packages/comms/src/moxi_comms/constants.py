@@ -5,24 +5,6 @@ They are collected in one module so each number lives in exactly one place.
 
 from __future__ import annotations
 
-# --- bounded replay ------------------------------------------------------------------
-# A reader with no cursor catches up on at most REPLAY_N messages, none older than
-# REPLAY_T seconds. These are the defaults of config.toml's `[replay] messages` and
-# `hours` (settings.toml; `tests/test_settings.py` holds the two together); the daemon
-# reads the keys at use, through its `config.Config`.
-REPLAY_N = 50          # max messages replayed on an absent/stale cursor
-REPLAY_T = 24 * 3600   # ...and no older than this many seconds
-
-
-def replay_notice(messages: int = REPLAY_N, seconds: int = REPLAY_T) -> str:
-    """The catch-up's truncation notice, for the bound in force."""
-    return ("Older mail was omitted from this catch-up (bounded replay: last "
-            f"{messages} messages / {seconds // 3600}h). Use "
-            "`moxi comms history <your-name>` for anything older.")
-
-
-REPLAY_TRUNCATED_NOTICE = replay_notice()
-
 # --- send retry: retried, then loud ----------------------------------------------------
 RETRY_ATTEMPTS = 5     # total attempts, then a loud failure at the verb
 RETRY_MAX_SLEEP = 30.0  # cap on an honored Retry-After, per attempt

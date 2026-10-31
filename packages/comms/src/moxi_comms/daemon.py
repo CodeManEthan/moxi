@@ -375,7 +375,7 @@ class Daemon:
         #: `moxi.comms.kinds` group declares (`kinds.load`), read once at construction.
         self.kinds = kinds if kinds is not None else kinds_mod.load()
         #: comms' settings, read at use with the last good kept (`config.Config`): a
-        #: bad edit to the config file mid-run leaves `block` and `[replay]` as they
+        #: bad edit to the config file mid-run leaves `block` and the rest as they
         #: were, and the error is logged once per change of the file. `main` starts it
         #: before anything else, so a file that is bad at start refuses the start.
         if settings is None:

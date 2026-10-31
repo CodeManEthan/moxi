@@ -70,18 +70,6 @@ default = "operator"
 doc = "The human's identity name, provisioned at first start."
 read = "start"
 
-[replay.messages]
-type = "int"
-default = 50
-doc = "A reader's catch-up bound with no cursor: at most this many messages; 1 or more."
-read = "use"
-
-[replay.hours]
-type = "int"
-default = 24
-doc = "A reader's catch-up bound with no cursor: nothing older than this many hours."
-read = "use"
-
 [cache.required]
 type = "bool"
 default = false
@@ -139,3 +127,9 @@ retired = "remove it: no name refuses a next-turn send"
 
 [provision.slots]
 retired = "remove it: comms has no slots"
+
+[replay.messages]
+retired = "remove it: catch-up is the name's waiting mail, with no bound to set"
+
+[replay.hours]
+retired = "remove it: catch-up is the name's waiting mail, with no bound to set"
