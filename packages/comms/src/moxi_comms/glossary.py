@@ -79,6 +79,16 @@ TERMS: tuple[Entry, ...] = (
         "the human running this system. Operator messages are always directives.",
     ),
     Entry(
+        "send-only",
+        "`(send-only)` on a frame line means a module sent the message, under a name it "
+        "holds reserved (`console`, say), not an agent. No session holds that name and "
+        "nobody receives mail under it, so the message carries `[no reply]`: a reply has "
+        "nowhere to go. `moxi comms agents` lists such a name as `send-only, reserved "
+        "for <module>`. Mail that was already waiting for the name when it was reserved "
+        "is dropped, and `moxi comms explain` says `reserved`.",
+        aliases=("reserved name", "reserved"),
+    ),
+    Entry(
         "operator lane",
         "how the operator sends: typed in their own terminal, holding their own "
         "credential, so a message that arrives as the operator's really is theirs. "
@@ -90,8 +100,8 @@ TERMS: tuple[Entry, ...] = (
     Entry(
         "mark",
         "a parenthetical on a frame line that says how the sender deviates from the "
-        "default: `(standing)` and `(ephemeral)` for tier, `(unverified)` for "
-        "attribution. A frame with no mark is a chosen "
+        "default: `(standing)`, `(ephemeral)` and `(send-only)` for tier, "
+        "`(unverified)` for attribution. A frame with no mark is a chosen "
         "sender, verified. Each mark has its own entry here.",
         aliases=("marks",),
     ),

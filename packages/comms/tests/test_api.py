@@ -154,8 +154,8 @@ def test_the_adapter_surface():
     assert set(adapter.__all__) == {
         "DaemonClient", "DaemonError", "DaemonOffline", "DaemonNoAnswer",
         "backoff_delays", "render_digest", "frame_line", "TIER_EPHEMERAL",
-        "TIER_CHOSEN", "TIER_STANDING", "TIER_OPERATOR", "TIER_UNKNOWN", "VERIFIED",
-        "LABELED", "UNVERIFIED", "parse_machine_line", "MachineLine"}
+        "TIER_CHOSEN", "TIER_STANDING", "TIER_OPERATOR", "TIER_SEND_ONLY", "TIER_UNKNOWN",
+        "VERIFIED", "LABELED", "UNVERIFIED", "parse_machine_line", "MachineLine"}
     assert adapter.DaemonClient is client.DaemonClient
     assert adapter.DaemonNoAnswer is client.DaemonNoAnswer
     assert adapter.backoff_delays is client.backoff_delays
