@@ -7,6 +7,7 @@ this terminal becomes the harness, so a test runs it here and reads what it left
 writes what it saw), and optionally `moxi` (the command comms' wrapper runs under, in
 place of this environment's `moxi`). The deliverer runs the `deliver` function directly,
 from this environment's Python, since a test has no `moxi launcher deliver` to run.
+When the test hid the installed turns (`launcher_fake_turns.hide`), it is hidden here too.
 
 Before the launch it writes `preview(request).argv` to `out`; after a launch that
 returns (one that refused, failed, or did not exec) it adds the result and exits with
@@ -17,9 +18,11 @@ process's.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
+import launcher_fake_turns as fake_turns
 from moxi_launcher import api, compose, first
 
 DELIVER = ("import sys; from moxi_launcher import first; "
@@ -29,6 +32,8 @@ DELIVER = ("import sys; from moxi_launcher import first; "
 def main(spec_path: str) -> int:
     spec = json.loads(Path(spec_path).read_text(encoding="utf-8"))
     out = Path(spec["out"])
+    if os.environ.get(fake_turns.HIDDEN):
+        fake_turns.hide_here()
     if spec.get("moxi"):
         compose.moxi_command = lambda: spec["moxi"]
     first.deliverer_argv = lambda rid, pid: [sys.executable, "-c", DELIVER, rid, "--pid",

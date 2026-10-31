@@ -29,6 +29,13 @@ SID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
 BRIEF = "Read the design and start the build."
 
 
+@pytest.fixture(autouse=True)
+def no_turns(monkeypatch):
+    """The installed turns hidden in every test here: a test that wants turns fakes it on
+    the launcher's seam."""
+    fake_turns.hide(monkeypatch)
+
+
 @pytest.fixture
 def harness(tmp_path, monkeypatch) -> Harness:
     return Harness.on_path(tmp_path, monkeypatch)

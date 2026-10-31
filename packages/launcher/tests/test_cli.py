@@ -18,6 +18,7 @@ from moxi import modules
 from moxi import store as core_store
 from moxi.config import ConfigError
 
+import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
 from moxi_launcher import api, catalog, cli, first, handoffs, presets, slots, store, targets
 from moxi_launcher.compose import common
@@ -34,6 +35,13 @@ def work(tmp_path, monkeypatch) -> Path:
     path.mkdir()
     monkeypatch.chdir(path)
     return path
+
+
+@pytest.fixture(autouse=True)
+def no_turns(monkeypatch):
+    """The installed turns hidden in every test here: a test that wants turns fakes it on
+    the launcher's seam."""
+    fake_turns.hide(monkeypatch)
 
 
 @pytest.fixture
@@ -296,8 +304,6 @@ def test_run_refuses_before_the_row_and_writes_nothing(work, harness, no_project
 @pytest.mark.parametrize("verb", ["preview", "run"])
 def test_turns_failing_to_give_its_additions_prints_a_refusal_not_a_traceback(
         work, harness, tmp_path, monkeypatch, capsys, verb):
-    import launcher_fake_turns as fake_turns
-
     fake = tmp_path / "fake-turns"
     fake.mkdir()
     (fake / "script.json").write_text(json.dumps({"additions": "error"}))

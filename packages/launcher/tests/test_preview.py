@@ -14,6 +14,7 @@ from moxi import modules
 from moxi.paths import Layout
 from moxi_dev.testing import wait_for
 
+import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness, run_child
 from moxi_launcher import api, compose, first, handoffs, presets
 from moxi_launcher.compose import Additions, common
@@ -50,6 +51,12 @@ class FakeTurns:
                                argv=["--plugin-dir", "/p/runner", "--plugin-dir", "/p/gate"],
                                env={"MOXI_TURNS_COMMANDS": ",".join(commands)},
                                options={}, notes=["mcp: skipped, no renderer"])
+
+
+@pytest.fixture
+def no_turns(monkeypatch):
+    """The installed turns hidden: a launch that wants turns fakes it on the seam."""
+    fake_turns.hide(monkeypatch)
 
 
 @pytest.fixture
@@ -305,8 +312,8 @@ LAUNCHES = [
 @pytest.mark.skipif(sys.platform == "win32",
                     reason="the fake harness is a script run by its #! line")
 @pytest.mark.parametrize("name, typed, with_turns", LAUNCHES, ids=[c[0] for c in LAUNCHES])
-def test_preview_argv_is_the_argv_launch_hands_the_target(tmp_path, monkeypatch, name,
-                                                          typed, with_turns):
+def test_preview_argv_is_the_argv_launch_hands_the_target(tmp_path, monkeypatch, no_turns,
+                                                          name, typed, with_turns):
     """For each target, with a fake harness on PATH, turns and slots faked on their seams
     (`MOXI_LAUNCHER_TURNS`, `MOXI_LAUNCHER_SLOTS`; the fake slots runs the command it is
     handed) and comms' wrapper stood in for, the argv the launch hands
@@ -413,7 +420,8 @@ def test_preview_of_a_scratch_codex_launch_names_the_scratch_folder():
     assert not common.scratch_dir("r9").exists()
 
 
-def test_preview_gives_the_resolvers_warnings_as_launch_does(tmp_path, monkeypatch):
+def test_preview_gives_the_resolvers_warnings_as_launch_does(tmp_path, monkeypatch,
+                                                            no_turns):
     """An identity without comms is dropped with a warning from the resolver; `preview`
     carries it, as `launch` does, so the CLI shows it before anything runs."""
     real = modules.available

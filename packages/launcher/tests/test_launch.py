@@ -31,6 +31,13 @@ BRIEF = "Read the design and start the build."
 POSIX = pytest.mark.skipif(sys.platform == "win32",
                            reason="the fake harness is a script run by its #! line")
 
+@pytest.fixture(autouse=True)
+def no_turns(monkeypatch):
+    """The installed turns hidden in every test here: a test that wants turns fakes it on
+    the launcher's seam."""
+    fake_turns.hide(monkeypatch)
+
+
 @pytest.fixture
 def harness(tmp_path, monkeypatch) -> Harness:
     return Harness.on_path(tmp_path, monkeypatch)

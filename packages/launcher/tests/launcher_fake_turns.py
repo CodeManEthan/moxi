@@ -77,6 +77,38 @@ def record(call: str, **detail) -> None:
         out.write(json.dumps({"call": call, "pid": os.getpid(), **detail}) + "\n")
 
 
+#: Set by `hide`, so a launch a test runs in a process of its own (`launcher_child`) finds
+#: no turns either.
+HIDDEN = "LAUNCHER_NO_TURNS"
+#: The launcher's seam (`moxi_launcher.first.TURNS_SEAM`), named here so this module
+#: imports nothing of the launcher's.
+SEAM = "MOXI_LAUNCHER_TURNS"
+
+
+def hide(monkeypatch) -> None:
+    """turns not installed, whatever this environment holds, unless a test fakes it on the
+    seam. A launch that reached the installed turns would have it write its Claude plugin's
+    endpoint file inside its own package, outside the test's tmp, and would wait on a
+    session that never comes."""
+    monkeypatch.setenv(HIDDEN, "1")
+    hide_here(monkeypatch.setattr)
+
+
+def hide_here(setattr_=setattr) -> None:
+    """Hide the installed turns in this process (`moxi.modules.available` answers False
+    for it) while the seam names no fake."""
+    from moxi import modules
+
+    real = modules.available
+
+    def available(name: str) -> bool:
+        if name == "turns" and not os.environ.get(SEAM):
+            return False
+        return real(name)
+
+    setattr_(modules, "available", available)
+
+
 def calls(directory: Path) -> list[dict]:
     path = Path(directory) / "calls.jsonl"
     if not path.exists():
