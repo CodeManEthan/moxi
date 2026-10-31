@@ -1121,6 +1121,11 @@ def test_a_ledger_that_is_not_json_is_one_fail_row_and_the_rest_run(pl):
     path.write_text("[]")
     row = pl.rows()[("moxi", "placements")]
     assert (row.state, row.detail) == ("fail", f"{path} is not a JSON object")
+    # a ledger that can't be opened at all fails the same way
+    path.unlink()
+    path.mkdir()
+    row = pl.rows()[("moxi", "placements")]
+    assert row.state == "fail" and str(path) in row.detail
 
 
 def test_a_harness_name_with_no_row_and_a_skipped_row_warn_on_moxi(pl, capsys):
