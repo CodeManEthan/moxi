@@ -242,6 +242,25 @@ def make_env(root: Path, *, site: Path | None, with_workspace: bool = True) -> P
     return python
 
 
+@pytest.fixture(autouse=True)
+def installs(monkeypatch) -> set:
+    """The modules the core's full scan finds in this test: repo, and each module the
+    test's site installs.
+
+    A test that runs every `moxi.installs` listener runs those of the other modules
+    installed too, and comms' reads every module's declared send-only names through the
+    scan. The workspace installs every module together, so it would find each one's
+    `RESERVED_NAMES` (the launcher's `console`, say) and say so in the test's output.
+    Scoped here, the scan finds only what the test installed."""
+    import moxi.modules
+
+    seen = {"repo"}
+    scan = moxi.modules.scan
+    monkeypatch.setattr(moxi.modules, "scan",
+                        lambda: [found for found in scan() if found.name in seen])
+    return seen
+
+
 @pytest.fixture(scope="session")
 def hook_env(tmp_path_factory) -> dict[str, Path]:
     """The demo site and the environments the git hooks run in."""
@@ -352,8 +371,9 @@ class Site:
     the fake one, nor hide that it is absent.
     """
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, installs: set):
         self.root = root
+        self.installs = installs
         self.packages: set[str] = set()
 
     def write(self, relpath: str, text: str) -> Path:
@@ -382,6 +402,7 @@ class Site:
         self.write(f"{info}/METADATA",
                    f"Metadata-Version: 2.1\nName: moxi-{name}\nVersion: {version}\n")
         self.write(f"{info}/entry_points.txt", f"[moxi.modules]\n{name} = {package}.module\n")
+        self.installs.add(name)
         return package
 
 
@@ -413,7 +434,7 @@ def see_only(root: Path, keep: tuple[Path, ...], monkeypatch) -> None:
 
 
 @pytest.fixture
-def site(demo, tmp_path, monkeypatch):
+def site(demo, installs, tmp_path, monkeypatch):
     """A fresh site on `sys.path` for the test's fake distributions, beside the demo."""
     import moxi.modules
 
@@ -422,7 +443,7 @@ def site(demo, tmp_path, monkeypatch):
     see_only(root, (demo.hook_env["site"],), monkeypatch)
     monkeypatch.syspath_prepend(str(root))
     moxi.modules.reset()
-    s = Site(root)
+    s = Site(root, installs)
     yield s
     moxi.modules.reset()
     for mod in list(sys.modules):

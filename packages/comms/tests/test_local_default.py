@@ -301,9 +301,11 @@ def _clean_env(tmp_path, **extra) -> dict:
 
 
 def _run_daemon(env, sock: Path, *, expect_socket=True):
+    from conftest import RESERVED_NONE_PATCH
+
     proc = subprocess.Popen(
-        [sys.executable, "-c", "import sys; from moxi_comms.daemon import main; "
-                               "sys.exit(main([]))"],
+        [sys.executable, "-c", RESERVED_NONE_PATCH + "import sys; "
+                               "from moxi_comms.daemon import main; sys.exit(main([]))"],
         env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
         deadline = time.monotonic() + 20

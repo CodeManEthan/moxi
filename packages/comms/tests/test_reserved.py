@@ -192,16 +192,18 @@ class Found:
         self.name, self.state, self.reserved_names = name, state, names
 
 
-def scanning(monkeypatch, *found):
+def scanning(monkeypatch, installs, *found):
+    """The core's scan finds `found` and nothing else; the test installed them."""
     monkeypatch.setattr(modules, "scan", lambda: list(found))
+    installs.update(f.name for f in found)
 
 
-def test_a_broken_module_keeps_its_names_and_tokens(chain, store, monkeypatch):
-    scanning(monkeypatch, Found("launcher", modules.PRESENT, ("console",)))
+def test_a_broken_module_keeps_its_names_and_tokens(chain, store, monkeypatch, installs):
+    scanning(monkeypatch, installs, Found("launcher", modules.PRESENT, ("console",)))
     reserved.reconcile(chain=chain)
     before = (row("console")["token_hash"], token_of(store, "launcher", "console"))
     # The launcher is still installed, but its announcement no longer imports.
-    scanning(monkeypatch, Found("launcher", modules.BROKEN))
+    scanning(monkeypatch, installs, Found("launcher", modules.BROKEN))
     result = reserved.reconcile(chain=chain)
     assert (result.freed, result.lines) == ([], [])
     r = row("console")
@@ -210,26 +212,26 @@ def test_a_broken_module_keeps_its_names_and_tokens(chain, store, monkeypatch):
     assert intervals("console")[-1]["released_at"] is None
 
 
-def test_a_broken_module_keeps_its_names_from_a_second_declarer(chain, monkeypatch):
-    scanning(monkeypatch, Found("launcher", modules.PRESENT, ("console",)))
+def test_a_broken_module_keeps_its_names_from_a_second_declarer(chain, monkeypatch, installs):
+    scanning(monkeypatch, installs, Found("launcher", modules.PRESENT, ("console",)))
     reserved.reconcile(chain=chain)
-    scanning(monkeypatch, Found("launcher", modules.BROKEN),
+    scanning(monkeypatch, installs, Found("launcher", modules.BROKEN),
              Found("pager", modules.PRESENT, ("console",)))
     result = reserved.reconcile(chain=chain)
     assert result.conflicts == [("console", "pager", "launcher has it")]
     assert (row("console")["state"], row("console")["module"]) == ("active", "launcher")
 
 
-def test_an_absent_or_uninstalled_module_loses_its_names(chain, store, monkeypatch):
-    scanning(monkeypatch, Found("launcher", modules.PRESENT, ("console",)))
+def test_an_absent_or_uninstalled_module_loses_its_names(chain, store, monkeypatch, installs):
+    scanning(monkeypatch, installs, Found("launcher", modules.PRESENT, ("console",)))
     reserved.reconcile(chain=chain)
-    scanning(monkeypatch, Found("launcher", modules.BROKEN))
+    scanning(monkeypatch, installs, Found("launcher", modules.BROKEN))
     assert reserved.reconcile(gone="launcher", chain=chain).freed == [
         ("console", "launcher")]
     assert token_of(store, "launcher", "console") is None
-    scanning(monkeypatch, Found("launcher", modules.PRESENT, ("console",)))
+    scanning(monkeypatch, installs, Found("launcher", modules.PRESENT, ("console",)))
     reserved.reconcile(chain=chain)
-    scanning(monkeypatch, Found("launcher", modules.ABSENT))
+    scanning(monkeypatch, installs, Found("launcher", modules.ABSENT))
     assert reserved.reconcile(chain=chain).freed == [("console", "launcher")]
     assert row("console")["freed_at"] is not None
 
@@ -297,6 +299,28 @@ def test_the_listener_is_declared_in_the_core_group():
     module = ep.load()
     assert module.on_install is reserved.on_install
     assert module.on_uninstall is reserved.on_uninstall
+
+
+def test_a_real_install_reserves_every_installed_modules_names(whole_workspace, chain,
+                                                               monkeypatch, capsys):
+    """The listener as a real install runs it, against every module this environment
+    installs: each name a module declares is reserved for it, the launcher's `console`
+    among them wherever the launcher is installed."""
+    wanted = {(name, found.name) for found in modules.scan()
+              if found.state == modules.PRESENT for name in found.reserved_names or ()}
+    if modules.available("launcher"):
+        assert ("console", "launcher") in wanted
+    monkeypatch.setattr(reserved, "_chain", lambda c, env: chain)
+    reserved.on_install("comms")
+    conn = sqlite3.connect(comms_db())
+    try:
+        active = set(conn.execute("SELECT name, module FROM reserved "
+                                  "WHERE state = 'active' AND freed_at IS NULL"))
+    finally:
+        conn.close()
+    assert active == wanted
+    assert sorted(capsys.readouterr().out.splitlines()) == sorted(
+        f"{module}: {name} reserved" for name, module in wanted)
 
 
 def test_reserved_renew_on_the_cli_mints_into_this_process_chain(capsys):

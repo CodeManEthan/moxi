@@ -1,0 +1,42 @@
+# The launcher's config schema: every key a user may set in CONFIG/launcher/config.toml.
+# `moxi config launcher` shows every key; `moxi config set launcher KEY VALUE` sets one.
+# Seats and project presets are not here: they live in CONFIG/launcher/presets.toml.
+
+[ready.wait_s]
+type = "int"
+default = 60
+doc = "How long a launch waits for the started session to be ready before its first turn, in seconds."
+read = "use"
+
+[first.wait_s]
+type = "int"
+default = 120
+doc = "How long a launch waits for its first turn to start once delivered, in seconds."
+read = "use"
+
+[startup.wait_s]
+type = "int"
+default = 20
+doc = "How long a slot launch watches for startup screens to answer, in seconds."
+read = "use"
+needs = "slots"
+
+[startup.trust_dialog]
+type = "bool"
+default = false
+doc = "Answer Claude Code's folder-trust screen in a slot launch, when it shows."
+read = "use"
+needs = "slots"
+
+[startup.dev_channels_dialog]
+type = "bool"
+default = false
+doc = "Answer Claude Code's development-channels screen in a slot launch, when it shows."
+read = "use"
+needs = "slots"
+
+[runs.keep_days]
+type = "int"
+default = 30
+doc = "How many days a launch's run files (its prompt file and headless log) are kept."
+read = "use"

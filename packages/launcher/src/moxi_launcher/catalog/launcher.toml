@@ -1,0 +1,100 @@
+# The launcher's own rows: what a launch sets that no harness spells. One table per row,
+# keyed by the launcher's name for it; moxi_launcher.catalog documents the fields.
+
+[harness]
+type = "enum"
+default = "claude"
+values = ["claude", "codex"]
+doc = "The harness the launch starts."
+
+[cwd]
+type = "path"
+default = ""
+doc = "The directory the session starts in; the caller's own when unset."
+
+[project]
+type = "string"
+default = ""
+doc = "A project key, whose directory the session starts in."
+
+[scratch]
+type = "bool"
+default = false
+doc = "Start in a new scratch directory."
+
+[identity]
+type = "string"
+default = ""
+doc = "The comms name the session holds; ignored, with a warning, without comms."
+
+[scope]
+type = "string"
+default = ""
+doc = "The comms scope of the identity."
+
+[director]
+type = "list"
+default = []
+repeatable = true
+requires = "comms"
+doc = "A comms identity that directs the session; may be given more than once."
+
+[instructions]
+type = "string"
+default = ""
+doc = "The seat's standing instructions, inline."
+
+[instructions_file]
+type = "path"
+default = ""
+doc = "A file holding the seat's standing instructions, read at launch."
+
+[brief]
+type = "string"
+default = ""
+doc = "The brief, sent as the session's first turn."
+
+[brief_file]
+type = "path"
+default = ""
+doc = "A file holding the brief, sent as the session's first turn."
+
+[handoff]
+type = "path"
+default = ""
+doc = "A handoff file, sent as the session's first turn."
+
+[posture]
+type = "string"
+default = ""
+values = ["operator", "go"]
+doc = "The start posture: operator, go, or with:<identity> (with comms)."
+
+[target]
+type = "enum"
+default = "terminal"
+values = ["terminal", "headless", "slot"]
+doc = "Where the session runs: this terminal, headless, or a tmux slot."
+
+[slot]
+type = "string"
+default = ""
+requires = "slots"
+doc = "The tmux slot a slot launch goes into; the lowest free one when unset."
+
+[extra_flags]
+type = "list"
+default = []
+doc = "Flags passed on to the harness as given, last on its argv."
+
+[notes_dir]
+type = "path"
+default = ""
+requires = "notes"
+doc = "The notes directory the session works in."
+
+[warn_at]
+type = "string"
+default = ""
+requires = "usage"
+doc = "The context mark at which usage warns the session, such as 1x or 1.5x."
