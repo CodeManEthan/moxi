@@ -20,6 +20,11 @@ repo = "moxi_repo.module"
 [project.entry-points."moxi.repo.git_hooks"]
 "repo.commit-rules" = "moxi_repo.commit_rules:COMMIT_RULES"
 
+# The listener the core calls after every module's install and uninstall: it keeps the
+# pieces and specs a module registered in line with what that module now declares.
+[project.entry-points."moxi.installs"]
+repo = "moxi_repo.install"
+
 [dependency-groups]
 dev = ["pytest", "moxi-dev"]
 

@@ -443,6 +443,17 @@ def test_everywhere_leaves_a_disabled_piece_and_a_repos_own_settings_alone(demo,
                  ("add", str(beta))):
         code, out, _ = run(capsys, "git-hooks", *argv)
         assert code == 0 and "commit_rules.everywhere" not in out, (argv, out)
+    # repo's own install, as the core calls its listener: a registration written by an
+    # older version is rewritten, and keeps the repo's own settings.
+    import moxi.modules
+
+    git(alpha, "config", f"moxi-repo.piece.{PIECE}.order", "7")
+    found = moxi.modules.load("repo")
+    for ext in moxi.modules.extensions("moxi.installs"):
+        getattr(ext.load(), "on_install")("repo", found)
+    out = capsys.readouterr().out
+    assert out == f"rewrote {PIECE} (commit-msg, closed) in {alpha}\n"
+    assert piece_config(alpha)["order"] != ["7"]
     assert piece_config(alpha)["refused-trailer"] == ["Co-Authored-By", "Round"]
     assert "tag-pattern" not in piece_config(alpha)
     assert piece_config(beta)["enabled"] == ["false"]

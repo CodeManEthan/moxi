@@ -600,6 +600,179 @@ def refresh(path: str | os.PathLike | None = None) -> Report:
     return report
 
 
+# -- other modules' installs and uninstalls, and repo's own -------------------------------
+
+def module_of(name: str) -> str:
+    """The module a piece id or a spec name belongs to: the part before its `/`."""
+    return name.split("/", 1)[0]
+
+
+def _declares_otherwise(section: dict[str, list], piece: pieces.Piece) -> bool:
+    """True when the registration's declared keys differ from the declaration's."""
+    return any(section.get(var) != [value] for var, value in piece.registration().items())
+
+
+def _unreadable_repo(key: str, entry: dict) -> str | None:
+    """Why an indexed repo that `open_indexed` couldn't open is still there: its root
+    exists, so it isn't gone, but git can't read it (a broken config, say). None when the
+    repo is gone: its root no longer exists, or is now another repo's or no repo's."""
+    root = entry.get("root") or key
+    if not os.path.isdir(root) or not os.path.isdir(entry.get("common_dir") or key):
+        return None
+    try:
+        gitconf.resolve(root)
+    except gitconf.NotARepo as exc:
+        return str(exc)
+    return None
+
+
+def install_module(module: str) -> Report:
+    """What `on_install` does after module `module`'s install or upgrade: in every indexed
+    repo, rewrite each registered piece of that module that its declaration now gives
+    otherwise, by the rewrite rule, and remove each one it no longer declares as `remove`
+    does, with a line naming the piece and the repo. A piece whose declaration is refused
+    is left as it is, with a problem. Raises `IndexUnreadable` when the index can't be
+    read; one repo's problem is a problem of the report."""
+    report = Report()
+    index = indexed()
+    if not index:
+        return report
+    good, bad = pieces.declared()
+    for key, entry, repo, why in indexed_repos(index):
+        if repo is None:
+            # A repo that is gone is the doctor's row and `refresh`'s problem.
+            problem = _unreadable_repo(key, entry)
+            if problem:
+                report.problems.append(f"{problem}, so it is left as it is")
+            continue
+        try:
+            state = gitconf.read(repo)
+            mine = sorted(pid for pid in state.pieces if module_of(pid) == module)
+            changed = False
+            for pid in mine:
+                if pid in good:
+                    if _declares_otherwise(state.pieces[pid], good[pid]):
+                        gitconf.register(repo, good[pid], state)
+                        report.lines.append(f"rewrote {pid} ({good[pid].event}, "
+                                            f"{good[pid].fail}) in {repo.root}")
+                        changed = True
+                elif pid in bad:
+                    report.problems.append(f"{repo.root}: {pid}'s declaration is refused "
+                                           f"({bad[pid]}); its registration is left as it is")
+                else:
+                    gitconf.remove_piece(repo, pid, state)
+                    _records.close_piece(repo.common_dir, pid)
+                    report.lines.append(f"removed {pid} from {repo.root}: {module} no "
+                                        "longer declares it")
+                    changed = True
+            if changed:
+                report.take(repo.root, gitconf.sync(repo, state))
+        except (gitconf.GitError, OSError) as exc:
+            report.problems.append(f"{repo.root}: {exc}")
+            continue
+        if mine:
+            _sweep(repo)
+    return report
+
+
+def uninstall_module(module: str) -> Report:
+    """What `on_uninstall` does when module `module` is uninstalled: in every indexed repo,
+    remove each of its registered pieces as `remove` does, and forget each of its specs,
+    saved or only in the repo's state file, as `remove_spec` does. Raises
+    `IndexUnreadable` when the index can't be read; one repo's problem is a problem of the
+    report."""
+    from moxi import files
+
+    from moxi_repo import committer
+
+    report = Report()
+    index = indexed()
+    for key, entry, repo, why in indexed_repos(index):
+        if repo is None:
+            # The sweep clears a gone repo's records once its git dir is gone.
+            problem = _unreadable_repo(key, entry)
+            if problem:
+                report.problems.append(f"{problem}, so {module}'s pieces and specs are "
+                                       "left there")
+            continue
+        try:
+            state = gitconf.read(repo)
+            mine = sorted(pid for pid in state.pieces if module_of(pid) == module)
+            for pid in mine:
+                gitconf.remove_piece(repo, pid, state)
+                _records.close_piece(repo.common_dir, pid)
+                report.lines.append(f"removed {pid} from {repo.root}: {module} is "
+                                    "uninstalled")
+            if mine:
+                report.take(repo.root, gitconf.sync(repo, state))
+            names = (set(committer.saved_names(repo.common_dir))
+                     | set(committer.read_state(repo.common_dir)["specs"]))
+            for name in sorted(n for n in names if module_of(n) == module):
+                report.lines += committer.remove_spec(repo.root, name)
+        except files.LockTimeout as exc:
+            report.problems.append(f"{repo.root}: a committer pass holds {exc.path}, so "
+                                   f"{module}'s specs are left; forget each with: "
+                                   f"moxi repo specs remove {_arg(repo.root)} NAME")
+            continue
+        except (gitconf.GitError, committer.SpecError, OSError) as exc:
+            report.problems.append(f"{repo.root}: {exc}")
+            continue
+        _sweep(repo)
+    return report
+
+
+def chain_holders(repo: Repo) -> list[tuple[str, Path]]:
+    """Each (event, git hook file) in a hooks dir outside the repo's git dir that holds
+    repo's chain line."""
+    if repo.hooks_inside:
+        return []
+    out = []
+    for event in sorted(EVENTS):
+        hook, _, present = gitconf.chain_state(repo, event)
+        if present:
+            out.append((event, hook))
+    return out
+
+
+def teardown() -> Report:
+    """What repo's own uninstall does: for every indexed repo, what `remove PATH` does (its
+    sections, entries, shims with each `.local` moved back, the launcher and
+    `<common git dir>/moxi-repo/`), naming each git hook file that still holds a chain line
+    for the user to delete; an indexed path that is no longer a repo is dropped from the
+    index with one line. Then every doctor record repo has open is cleared, unless a repo
+    couldn't be cleaned: then that repo stays indexed with its records, and the report
+    names it. Raises `IndexUnreadable` when the index can't be read."""
+    report = Report()
+    held: list[tuple[str, Path]] = []
+    for key, entry, repo, why in indexed_repos():
+        if repo is None:
+            problem = _unreadable_repo(key, entry)
+            if problem:
+                report.problems.append(f"{problem}, so repo can't clean it")
+                continue
+            _records.close_repo(entry.get("common_dir") or key)
+            _index_drop(key)
+            report.lines.append(f"dropped {entry.get('root') or key} from the index: {why}")
+            continue
+        try:
+            state = gitconf.read(repo)
+            found = chain_holders(repo)
+            report.lines += gitconf.remove_all(repo, state)
+        except (gitconf.GitError, OSError) as exc:
+            report.problems.append(f"{repo.root}: {exc}")
+            continue
+        _records.close_repo(repo.common_dir)
+        _index_drop(key)
+        report.lines.append(f"removed repo's git hooks from {repo.root}")
+        held += found
+    for event, hook in held:
+        report.lines.append(f"{hook} still holds repo's chain line for {event}, which does "
+                            "nothing now; delete that line")
+    if report.ok:
+        _records.close_all()
+    return report
+
+
 # -- committer specs ----------------------------------------------------------------------
 
 def specs(path: str | os.PathLike | None = None) -> list[dict]:
@@ -826,4 +999,5 @@ def _guard_problems(event: str, text: str, python: str, runner: str,
 __all__ = ["Failure", "Usage", "Refused", "Busy", "IndexUnreadable", "Report", "Problem", "SEEDS", "SETTING_CHECKS",
            "available", "add", "remove", "enable", "disable", "refresh", "status",
            "indexed", "indexed_repos", "open_indexed", "default_mode", "everywhere", "specs",
-           "forget_spec"]
+           "forget_spec", "module_of", "install_module", "uninstall_module",
+           "chain_holders", "teardown"]

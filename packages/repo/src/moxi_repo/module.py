@@ -20,6 +20,9 @@ CONFIG_CHECK = "moxi_repo.settings:check_text"
 # On every `moxi install repo`: refresh every indexed repo, so an install that moved the
 # environment rewrites every entry, shim and launcher.
 SETUP = "moxi_repo.install:setup"
+# On `moxi uninstall repo`, before anything is removed: take out of every indexed repo what
+# repo wrote there, and clear repo's doctor records.
+TEARDOWN = "moxi_repo.install:teardown"
 DOCTOR = "moxi_repo.checks:rows"
 SEGMENT = None
 STORES = {
