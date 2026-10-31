@@ -334,6 +334,18 @@ def test_a_headless_launch_spawns_from_spawning_and_records_its_process(work, ha
     assert got.pid_started == pytest.approx(proc.identity(os.getpid()).started)
 
 
+def test_a_headless_run_log_goes_where_the_callers_environment_puts_the_store(
+        work, harness, tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(targets, "_spawn", lambda argv, **kw: seen.append(kw) or 99)
+    environ = {**os.environ, "MOXI_LAUNCHER_STATE_HOME": str(tmp_path / "other-state")}
+    api.launch(request(work, target="headless", brief=BRIEF), environ=environ)
+    [handed] = seen
+    assert handed["output"] == targets.run_log("r1", environ)
+    assert handed["output"] != targets.run_log("r1")
+    assert store.path(environ).exists() and not store.path().exists()
+
+
 def test_a_headless_spawn_that_fails_ends_the_row_failed(work, harness, monkeypatch):
     def spawn(argv, **kw):
         raise FileNotFoundError(2, "No such file or directory")

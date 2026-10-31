@@ -197,8 +197,9 @@ class Launch:
 
     `argv` is the composition's, as `preview` shows it; `command` the executable found for
     its first word, which the target runs it as. `env` is the child's whole environment,
-    `cwd` its directory. `deliverer_env` is the environment the detached deliverer runs
-    in, the launcher's own."""
+    `cwd` its directory. `deliverer_env` is the launcher's own environment, the one the
+    detached deliverer runs in and the one the launch's files are placed by (the launch
+    log, the run files), None for this process's."""
 
     conn: sqlite3.Connection
     request_id: str
@@ -319,7 +320,7 @@ class Headless(Target):
 
     def start(self, launch: Launch) -> Started:
         rid = launch.request_id
-        output = run_log(rid)
+        output = run_log(rid, launch.deliverer_env)
         argv = [launch.command, *launch.argv[1:]] if WINDOWS else list(launch.argv)
         try:
             pid = _spawn(argv, detached=True, output=output, env=dict(launch.env),
