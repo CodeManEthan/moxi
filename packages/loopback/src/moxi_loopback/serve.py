@@ -133,6 +133,8 @@ async def _serve(app: Callable[..., Any], sockets: Iterable[Any], *,
     if head_limit is not None and (isinstance(head_limit, bool) or not isinstance(head_limit, int)
                                    or head_limit < 1):
         raise ValueError(f"head_limit is a number of bytes above 0, not {head_limit!r}")
+    if isinstance(http, str) and http != "h11":
+        raise ValueError(f"http is \"h11\" or a protocol class, not {http!r}")
     import uvicorn
 
     if http == "h11":

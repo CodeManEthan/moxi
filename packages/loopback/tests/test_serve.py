@@ -394,6 +394,34 @@ def test_the_runners_protocol_turns_nodelay_on_too(pages):
     assert_nodelay(inherited(proto=0), http=serve_mod._protocol_class(stop))
 
 
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="no Unix sockets")
+def test_a_unix_connection_is_left_as_it_is():
+    seen = []
+
+    class Base:
+        def connection_made(self, transport):
+            seen.append("made")
+
+    class Sock:
+        family = socket.AF_UNIX
+
+        def setsockopt(self, *args):
+            seen.append(args)
+
+    class Transport:
+        def get_extra_info(self, name):
+            return Sock() if name == "socket" else None
+
+    serve_mod._no_delay(Base)().connection_made(Transport())
+    assert seen == ["made"]
+
+
+def test_an_http_name_other_than_h11_is_refused():
+    with pytest.raises(ValueError, match="httptools"):
+        asyncio.run(serve_mod._serve(reaching_app([]), [], should_exit=asyncio.Event(),
+                                     http="httptools"))
+
+
 # --- the one decision -----------------------------------------------------------------
 
 
