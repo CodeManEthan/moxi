@@ -27,8 +27,10 @@ background shell never refuses: the exit dialog stops it). Then it prints the ar
 and the agent ends its turn; the job waits for the session to be quiet.
 
 **A director's call** needs comms: the caller's identity, proven by its session's claim
-(never a variable it sets); the target by session id, or by a bound comms name; the
-caller's name, without its scope, among the launch's directors (`values_json`); with
+(never a variable it sets); the target by session id (anything shaped like a UUID,
+looked up in the launch log only), or else by a bound comms name; the caller among the
+launch's directors (`values_json`: a director named with a scope admits that qualified
+name only, a plain one the name in any scope); with
 cache installed, a session whose cache is warm or fresh is refused `warm` (it can be
 mailed); and the quiet read must pass now, or the call ends `held` (exit 75) with nothing
 written. The call then follows the run for `relaunch.follow_s` and prints its outcome;
@@ -288,22 +290,23 @@ def _caller_identity(comms: Any, env: Mapping[str, str]) -> str | None:
 
 
 def _session_of(conn: sqlite3.Connection, which: str, comms: Any) -> str:
-    """`which` as a session id: itself when a launch holds it, else the live session
-    behind it as a bound comms name."""
-    if store.resolve(conn, which) is not None:
+    """`which` as a session id. Shaped like one (a UUID), it is looked up in the launch log
+    only: one no launch holds is refused `not-launched`, and comms is never asked. Anything
+    else is a comms identity: the live session behind it as a bound name."""
+    if target.session_id_shaped(which):
+        if store.resolve(conn, which) is None:
+            raise target.NotLaunched(f"session {which} was not launched by the launcher")
         return which
     try:
         sid = comms.session_of(which)
     except Exception as error:  # noqa: BLE001  (comms can't answer: a refusal, not a trace)
         offline = type(error).__name__ == "DaemonOffline"
         raise Refused("comms-offline" if offline else "comms-failed",
-                      f"{which} is no session the launcher launched, and comms could not "
-                      f"say whose name it is: {error}",
+                      f"comms could not say which session {which} is bound to: {error}",
                       "start comms' daemon" if offline else "check moxi doctor",
                       exits.TEMPFAIL if offline else exits.ERROR) from None
     if not sid:
-        raise Refused("not-bound", f"{which} is no session the launcher launched, and no "
-                                   "comms name bound to a live session",
+        raise Refused("not-bound", f"{which} is no comms name bound to a live session",
                       "give a session id, or the comms name of a live session")
     return sid
 

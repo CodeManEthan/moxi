@@ -581,6 +581,40 @@ def test_a_name_comms_cannot_turn_into_a_session_is_refused(conn, comms, code, e
     nothing_written(conn, slots_api)
 
 
+@pytest.mark.parametrize("which", ["0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+                                   "0A1B2C3D-4E5F-4A6B-8C7D-9E0F1A2B3C4D"])
+def test_an_unknown_session_id_is_not_launched_and_comms_is_never_asked(conn, which):
+    class Unasked(FakeComms):
+        def session_of(self, identity):
+            raise AssertionError("comms was asked about a session id")
+
+    slots_api = FakeSlots()
+    with pytest.raises(target.NotLaunched):
+        call(conn, which, comms=Unasked(), slots_api=slots_api)
+    nothing_written(conn, slots_api)
+
+
+def test_a_name_that_is_not_a_session_id_goes_to_comms_even_when_a_launch_holds_it(tmp_path):
+    connection = store.connect(tmp_path / "launcher.db")
+    launched(connection, request_id="r1", session_id="planner")
+    launched(connection, request_id="r2", session_id=SID)
+    try:
+        result = call(connection, "planner", comms=FakeComms(bound={"planner": SID}),
+                      follow=False)
+    finally:
+        connection.close()
+    assert result.run.request_id == "r2" and result.run.session_id == SID
+
+
+@pytest.mark.parametrize("text, shaped", [
+    (SID, True), (SID.upper(), True), ("planner", False), ("planner@work", False),
+    (SID.replace("-", ""), False), ("{" + SID + "}", False), (SID + "x", False),
+    ("urn:uuid:" + SID, False), ("", False),
+])
+def test_what_reads_as_a_session_id(text, shaped):
+    assert target.session_id_shaped(text) is shaped
+
+
 def test_without_comms_there_is_no_directors_call(conn):
     with pytest.raises(relaunch.Refused) as caught:
         relaunch.call_director(SID, conn=conn, comms=None, settings=SETTINGS)

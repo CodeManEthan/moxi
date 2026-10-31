@@ -36,6 +36,7 @@ turns and slots are optional links, reached as part 1 reaches them (`first.turns
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from dataclasses import dataclass
 from typing import Any
@@ -45,6 +46,17 @@ from moxi import proc
 from moxi import store as core_store
 
 from . import catalog, first, slots, store, targets
+
+#: The shape of a session id: Claude session ids and Codex thread ids are UUIDs, written
+#: as five groups of hex digits joined by hyphens.
+SESSION_ID_SHAPE = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+
+def session_id_shaped(text: str) -> bool:
+    """Whether `text` is shaped like a session id (a UUID), so it names a session and
+    never a comms identity."""
+    return SESSION_ID_SHAPE.fullmatch(text) is not None
 
 
 class NotLaunched(catalog.Refused):
@@ -272,5 +284,5 @@ def _turns() -> Any:
     return api
 
 
-__all__ = ["Changed", "NoTurns", "NotLaunched", "Target", "TurnsFailed", "Unclaimed",
-           "caller", "check_claim", "claims", "find"]
+__all__ = ["SESSION_ID_SHAPE", "Changed", "NoTurns", "NotLaunched", "Target", "TurnsFailed",
+           "Unclaimed", "caller", "check_claim", "claims", "find", "session_id_shaped"]
