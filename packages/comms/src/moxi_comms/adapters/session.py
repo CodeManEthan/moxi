@@ -577,10 +577,11 @@ def launch(session: Session, binary: str, cmd: list[str], env: dict, *,
     stand in for it. The adapter is forked twice over (its first parent leaves at once),
     so it is never `claude`'s child and is not left a zombie under it, and it runs in a
     session of its own. The wrapper waits for its word (`adapters.word`), at most
-    `ready_wait` seconds. A refusal the adapter reports (the name held by another session,
-    or reserved) ends the launch here, before `claude` starts: the daemon's words on
-    stderr, and its exit code. Past the bound `claude` starts anyway, and the wrapper says
-    so on stderr."""
+    `ready_wait` seconds. Any word but `BOUND` ends the launch here, before `claude`
+    starts, with its reason on stderr and its exit code: a refusal (the name held by
+    another session, or reserved) is `REFUSED`, a daemon that is not running is
+    `TEMPFAIL`. Past the bound `claude` starts anyway, and the wrapper says so on
+    stderr."""
     from .terminal import pidfd_open   # not at the top: it needs termios, and the listener
     #                                    imports this module
 
