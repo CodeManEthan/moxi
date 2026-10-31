@@ -58,6 +58,13 @@ skipped. A subagent's call always reaches every row. ``record_path`` is the thre
 rollout (``thread.path`` in the load answer, else the hook's ``transcript_path``) on the
 main loop, and the subagent's own ``transcript_path`` in a subagent.
 
+Limits and MCP servers. After each accepted load the host reads the account's rate limits
+(``account/rateLimits/read``) once, and Codex pushes ``account/rateLimits/updated`` with
+token counts; each reading goes to the ``codex_limits`` rows unparsed, and
+``usage.codex_limits`` reads one on request. At each ``ready`` (the load's, and a
+compaction's two) and on ``mcp.reload`` the host settles the MCP servers its thread
+config names, reloading them once when one reads ``failed`` (``codex_mcp``).
+
 The ending form: once a Stop is answered unblocked, Codex may complete the turn
 at any moment, and a steer it takes in that gap can be written into the turn and never
 answered. So the turn is marked ending: it stays open, but no ``turn/steer`` for it goes
@@ -85,6 +92,7 @@ from moxi.paths import script
 from . import client as turns_client
 from . import codex_hooks
 from .codex_appserver import LIMITS_READ, LIMITS_READ_S, LIMITS_UPDATED
+from .codex_mcp import STARTUP_STATUS, McpSettle, rendered
 from . import codex_protocol as proto
 from . import protocol
 from .doctor import MODULE
@@ -201,7 +209,7 @@ class CodexHarness(Harness):
     name = "codex"
     can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "compact",
                      "agents", "stop-shells", "guards", "after-tool", "usage",
-                     "environ"})
+                     "mcp-token", "environ"})
     mod_version = None
 
     @staticmethod
@@ -255,6 +263,10 @@ class CodexHarness(Harness):
         self._prompts: tuple[str | None, tuple[Prompt, ...]] = (None, ())
         #: The last rate-limits reading the host saw, `(payload, received_at, kind)`.
         self._limits: tuple[dict, float, str] | None = None
+        #: The settle of the MCP servers the thread config names, at each ready and on
+        #: `mcp.reload`.
+        self.mcp = McpSettle(rendered(self.options), self._app_call,
+                             lambda: self.session_id)
 
         self.pid = os.getpid()
         #: The thread: None until a fresh thread is started; a resume names it from
@@ -1250,6 +1262,10 @@ class CodexHarness(Harness):
         elif method == LIMITS_UPDATED:
             if isinstance(params, dict):
                 self._limits_seen(params, "updated")
+        elif method == STARTUP_STATUS:
+            if isinstance(params, dict) and params.get("threadId") in (None,
+                                                                      self.session_id):
+                self.mcp.notified(params)
         elif method == "thread/status/changed":
             active = (params.get("status") or {}).get("type") == "active"
             with self._lock:
@@ -1272,10 +1288,29 @@ class CodexHarness(Harness):
             log.warning("unanswered app-server request %s; approvals are disabled", method)
 
     def _loaded(self, ws) -> None:
-        """An accepted load: read the account's rate limits once, on a thread of its own,
-        so the load does not wait for the answer."""
+        """An accepted load, which raised its `ready`: read the account's rate limits
+        once, and settle the MCP servers, each on a thread of its own, so the load waits
+        for neither."""
         threading.Thread(target=self._read_limits_at_load, args=(ws,), daemon=True,
                          name="turns-codex-limits").start()
+        self.mcp.ready()
+
+    def mcp_ready(self) -> None:
+        """A `ready` a hook raised (a compaction's `PostCompact`, and its `SessionStart`
+        at the next turn): settle the MCP servers, or join the settle that runs."""
+        self.mcp.ready()
+
+    def mcp_reload(self) -> dict:
+        """`mcp.reload`: settle the MCP servers and answer `{reloaded, servers}`."""
+        return self.mcp.reload()
+
+    def _app_call(self, method: str, params, timeout: float):
+        """One request on the current app-server connection."""
+        with self._lock:
+            ws = self.ws
+        if ws is None:
+            raise proto.AppServerOffline("the Codex app-server is not connected")
+        return ws.call(method, params, timeout=timeout)
 
     def _read_limits_at_load(self, ws) -> None:
         try:
@@ -1487,6 +1522,7 @@ class CodexHarness(Harness):
         self._stop.set()
         with self._lock:
             self._cancel_grace()
+        self.mcp.close()
         with self._connect_lock:
             generation = self.generation
             if generation is not None:

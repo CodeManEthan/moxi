@@ -120,7 +120,7 @@ CAPABILITIES = {
     "guards": (True, True, False),
     "after-tool": (True, True, False),
     "usage": (True, True, False),
-    "mcp-token": (False, False, False),
+    "mcp-token": (False, True, False),
     "environ": (True, True, True),
 }
 
@@ -140,6 +140,7 @@ METHODS = {
     "stops.answer": (None, {"taken"}),
     "environ": ("environ", {"values"}),
     "usage.codex_limits": ("usage", {"payload", "received_at"}),
+    "mcp.reload": ("mcp-token", {"reloaded", "servers"}),
 }
 
 #: The fields of the `session` answer that may be absent.
@@ -450,6 +451,7 @@ CAPABILITY_ROWS = [
     ("command", {"name": "compact", "stop_shells": True}, "stop-shells"),
     ("environ", {"names": ["HOME"]}, "environ"),
     ("usage.codex_limits", {}, "usage"),
+    ("mcp.reload", {}, "mcp-token"),
 ]
 
 

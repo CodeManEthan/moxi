@@ -379,6 +379,12 @@ class HookServer:
             guards_ready = getattr(self.harness, "guards_ready", None)
             notes = guards_ready() if guards_ready is not None else []
             context = endpoint.ready(source, self.harness.session_id, announce=not loaded)
+            if not loaded:
+                # The load settled the MCP servers at its own ready; this one settles them
+                # again (a compaction's two readys each do, or join a settle running).
+                mcp_ready = getattr(self.harness, "mcp_ready", None)
+                if mcp_ready is not None:
+                    mcp_ready()
             if notes:
                 from .listeners import JOIN
 

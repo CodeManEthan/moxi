@@ -100,7 +100,7 @@ The session's capabilities:
 | `guards` | yes | yes | no | the guard list runs at the session's tool calls |
 | `after-tool` | yes | yes | no | an `after-tool` listener row's text reaches the model after the tool |
 | `usage` | yes | yes | no | Claude Code reports its usage to `usage` listener rows; the Codex host hands each rate-limits reading to `codex_limits` rows and answers `usage.codex_limits` |
-| `mcp-token` | no | no | no | `mcp.reload` |
+| `mcp-token` | no | yes | no | `mcp.reload` |
 | `environ` | yes | yes | yes | `environ` |
 
 `session`, `facts`, `watch` and `wait` are always there and carry no capability. A method or
@@ -325,6 +325,7 @@ Params are an object; a missing optional param takes its default. In short:
 | `stops.answer` | `{ask, reason}` | `{taken}` |
 | `environ` | `{names}` | `{values}` |
 | `usage.codex_limits` | `{cached?}` | `{payload, received_at}` |
+| `mcp.reload` | `{}` | `{reloaded, servers}` |
 
 `text` is a non-empty string. `ref` is a string of at most 256 bytes as UTF-8, or absent
 or null.
@@ -332,8 +333,9 @@ or null.
 **No answer waits on the harness.** `session`, `deliver`, `steer`, `environ` and a `wait`
 with `timeout_ms` 0 answer from the endpoint's own record, at once. `facts` and `agents` answer
 within the harness's live bound (above) whatever the harness is doing. Only `wait` with a
-bound, `command`, `usage.codex_limits` (one app-server request, unless `cached`) and the
-long-lived `watch` and `stops.handle` wait, each for its own reason.
+bound, `command`, `usage.codex_limits` (one app-server request, unless `cached`),
+`mcp.reload` (the host's settle, bounded by its deadline) and the long-lived `watch` and
+`stops.handle` wait, each for its own reason.
 
 ### `session`
 
@@ -544,6 +546,30 @@ after each accepted load, a push from Codex, or an earlier `usage.codex_limits`)
 `{payload, received_at, kind}`, `kind` being `read` or `updated`, each null before the
 first. Needs `usage`; a session of another harness that offers `usage` answers the
 `capability` error too. The library's pull, `moxi_turns.codex_rate_limits`, calls it.
+
+### `mcp.reload`
+
+`mcp.reload {}` asks a Codex host to settle the MCP servers its launch's thread config
+names, and answers `{reloaded, servers}`: whether it sent Codex's
+`config/mcpServer/reload`, and each such server's status as it last read it from
+`mcpServerStatus/list` (`connected`, `failed`, `cancelled`, `authenticationRequired`,
+`disabled`, `starting`, `notStarted`, or null: unavailable, or never read). Needs
+`mcp-token`. A session whose launch named no MCP server answers
+`{reloaded: false, servers: {}}` at once.
+
+Codex keeps a server that failed at thread start `failed` for the thread's life; a
+reload brings it back. The host reads the list, waits out each server still starting on
+Codex's own startup notifications (it does not poll the list, since each read opens a
+fresh MCP session to every configured server), and reloads once when one reads `failed`,
+then waits for those again. One deadline of 10 s bounds the whole settle; past it the host
+answers with what it has. A server that ends `failed`, or unsettled at the deadline, is a
+doctor record until a later settle reads it `connected`. The host settles the same way at
+each `session.ready`.
+
+One settle runs at a time. A call that comes before the running settle's first list read
+joins it; one that comes later waits for it and then for one more settle, which every call
+until then joins. So a call answers within 10 s, or within 20 s when it waited; a caller's
+request timeout is above 20 s (the library's `Session.mcp_reload` uses 22 s).
 
 ## Notifications
 
