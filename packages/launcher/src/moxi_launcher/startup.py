@@ -25,13 +25,14 @@ covers the whole call, keys and settling included, and records the outcome as a
   before the screen held still. It is recorded as `not-settled`, and one interval later
   the loop answers the screen again if it still shows, while the bound has time left. If
   the bound runs out this way, the watch ends at its bound and the ready wait decides.
-- any other `mismatch`: the screen showing is not the one declared. The launch fails
-  `screen-mismatch` at once, with slots' capture of the screen, and nothing more is sent
-  to the session.
+- any other `mismatch`: slots could not answer the screen. The loop reads the pane once
+  more. If that read still shows the same screen, the launch fails `screen-mismatch`, with
+  slots' capture of the screen, and nothing more is sent to the session. If the screen has
+  left (a person attached and answered it, or it went on its own), the loop goes on.
 - `ended`, `ended-without-screen` or `no-pane`: the pane died or is gone, and the launch
-  fails `exited`. So does a dead pane at any read, and a `mismatch` whose last read
-  (`Answer.seen`) found the pane dead: a session that died after Enter on the screen
-  exited, it did not show another screen.
+  fails `exited`. So does a dead pane at any read, the read after a `mismatch` included,
+  and a `mismatch` whose last read (`Answer.seen`) found the pane dead: a session that died
+  after Enter on the screen exited, it did not show another screen.
 
 No answer is started with less than `MIN_ANSWER_S` left. An answer may run up to 5 s past
 the wait it is given (slots waits that long for a screen to leave after Enter), so the time
@@ -207,11 +208,20 @@ def watch(conn: sqlite3.Connection, request_id: str, slot: Any,
                 return _stopped(conn, request_id,
                                 f"slots answered the {name} screen {outcome!r}", done)
             if not unsettled:
-                return done("failed", reason=SCREEN_MISMATCH,
-                            why=f"the {name} screen showed and slots could not answer it"
-                                + (f": {why}" if why else ""),
-                            capture=capture)
-            # Not settled yet: asked again after one interval, while the bound has time.
+                # A failure only if the screen is still showing: read once more.
+                try:
+                    again = api.read_screen(slot, screens=shown)
+                except failures as error:
+                    return _stopped(conn, request_id, error, done)
+                if again.dead:
+                    return done("failed", reason=EXITED, why=_exited(api, slot))
+                if _named(again.screen, enabled)[0] == name:
+                    return done("failed", reason=SCREEN_MISMATCH,
+                                why=f"the {name} screen showed and slots could not answer "
+                                    "it" + (f": {why}" if why else ""),
+                                capture=capture)
+            # Not settled yet, or the screen left after a mismatch: the loop reads again
+            # after one interval, and answers a screen that shows while the bound has time.
         step = min(interval, max(deadline - clock(), 0))
         began = clock()
         if ready is not None:

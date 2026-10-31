@@ -605,7 +605,7 @@ def test_both_screens_are_watched_when_both_settings_are_on(work, harness, rig):
                                                       "CLAUDE_DEV_CHANNELS"]
 
 
-def test_a_screen_that_is_not_the_one_declared_fails_screen_mismatch_at_once(
+def test_a_screen_slots_cant_answer_that_still_shows_fails_screen_mismatch(
         work, harness, rig, turns):
     screens_on(3)
     turns.plan(ready="timeout")
@@ -619,12 +619,30 @@ def test_a_screen_that_is_not_the_one_declared_fails_screen_mismatch_at_once(
     assert "the option row is missing" in got.line
     [failed] = events(kind="start-failed")
     assert failed.detail["capture"] == "/state/slots/mismatches/1.txt"
-    # Asked once and not again: nothing more is sent, no further read, no first turn.
-    assert len(rig.calls("answer_screen")) == 1 and len(rig.calls("read_screen")) == 1
+    # Asked once, read once more to see it still showing, and nothing more: no further
+    # answer or read, no first turn.
+    assert len(rig.calls("answer_screen")) == 1 and len(rig.calls("read_screen")) == 2
     [seen] = events(kind=startup.EVENT)
     assert seen.detail["outcome"] == "mismatch"
     assert turns.calls("deliver") == []
     assert targets.exit_of(row()) == exits.ERROR
+
+
+def test_a_screen_slots_cant_answer_that_left_lets_the_launch_go_on(work, harness, rig,
+                                                                   turns):
+    """slots says `mismatch` when the screen left between the loop's read and its answer:
+    a person attached and answered it. The launch goes on and sends its first turn."""
+    screens_on(3)
+    rig.plan(frames=[{"screen": "CLAUDE_TRUST_FOLDER"}, {"screen": None}],
+             answers=[{"outcome": "mismatch",
+                       "why": "the screen did not settle within 2 s"}])
+    got = api.launch(request(work, brief=BRIEF))
+    assert (got.state, got.reason) != ("failed", startup.SCREEN_MISMATCH)
+    assert got.state == "first-sent" and got.exit_code == exits.OK
+    assert events(kind="start-failed") == []
+    assert len(rig.calls("answer_screen")) == 1
+    assert [e.detail["outcome"] for e in events(kind=startup.EVENT)] == ["mismatch"]
+    assert len(turns.calls("deliver")) == 1
 
 
 def test_a_screen_not_settled_until_the_bound_runs_out_lets_the_launch_go_on(
@@ -922,19 +940,69 @@ def test_a_screen_not_settled_then_an_ended_pane_fails_exited_with_its_status(co
     "not-settledness",             # and be the whole word
     "Not-settled: two rows",
 ])
-def test_any_other_mismatch_fails_screen_mismatch_at_once(conn, why):
+def test_any_other_mismatch_whose_screen_still_shows_fails_screen_mismatch(conn, why):
     clock = Clock()
     seen = loop_api(clock, [SHOWING], [{"outcome": "mismatch", "why": why,
                                         "capture": "/c"}], answer_takes=1.0)
     got = watch(conn, clock, seen, wait_s=20)
-    # One read, one answer, then nothing more: no pause, no read, no second answer.
-    assert seen.answers == [5.0] and len(seen.reads) == 1
+    # One read, one answer, one read straight after that still shows the screen, then
+    # nothing more: no pause, no further read, no second answer.
+    assert seen.answers == [5.0] and seen.reads == [0.0, 1.0]
     assert (got.ended, got.reason, got.capture) == ("failed", startup.SCREEN_MISMATCH,
                                                      "/c")
     assert "CLAUDE_TRUST_FOLDER" in got.why and why in got.why
     assert got.answered == (("CLAUDE_TRUST_FOLDER", "mismatch"),)
     [event] = store.events(conn, "r1")
     assert event.detail["outcome"] == "mismatch" and "answer" not in event.detail
+
+
+def test_a_mismatch_whose_screen_left_goes_on_watching(conn):
+    clock = Clock()
+    seen = loop_api(clock, [SHOWING, NONE], [{"outcome": "mismatch",
+                                              "why": "the screen did not settle within 2 s",
+                                              "capture": "/c"}])
+    got = watch(conn, clock, seen, wait_s=2)
+    assert got.ended == "bound" and not got.failed and seen.answers == [2.0]
+    assert got.answered == (("CLAUDE_TRUST_FOLDER", "mismatch"),)
+    assert len(seen.reads) > 2
+
+
+def test_a_mismatch_whose_screen_left_then_came_back_is_answered_again(conn):
+    clock = Clock()
+    seen = loop_api(clock, [SHOWING, NONE, SHOWING, NONE],
+                    [{"outcome": "mismatch", "why": "the screen did not settle"},
+                     {"outcome": "gone"}])
+    got = watch(conn, clock, seen, wait_s=2)
+    assert not got.failed
+    assert got.answered == (("CLAUDE_TRUST_FOLDER", "mismatch"),
+                            ("CLAUDE_TRUST_FOLDER", "gone"))
+
+
+def test_a_mismatch_whose_pane_died_by_the_read_after_fails_exited(conn):
+    clock = Clock()
+    seen = loop_api(clock, [SHOWING, {"screen": None, "dead": True}],
+                    [{"outcome": "mismatch", "why": "the option row is missing"}],
+                    status=1)
+    got = watch(conn, clock, seen, wait_s=20)
+    assert (got.ended, got.reason) == ("failed", startup.EXITED)
+    assert "pane status 1" in got.why
+
+
+def test_a_mismatch_whose_read_after_fails_stops_the_watch(conn):
+    clock = Clock()
+    seen = loop_api(clock, [SHOWING], [{"outcome": "mismatch", "why": "x"}])
+    reads = []
+    real = seen.api.read_screen
+
+    def read_screen(slot, screens):
+        reads.append(slot)
+        if len(reads) > 1:
+            raise fake.TmuxError("tmux capture-pane failed")
+        return real(slot, screens)
+
+    seen.api.read_screen = read_screen
+    got = watch(conn, clock, seen, wait_s=20)
+    assert got.ended == "stopped" and not got.failed and "capture-pane" in got.why
 
 
 @pytest.mark.parametrize("why", ["not-settled", "not-settled: two rows marked",
