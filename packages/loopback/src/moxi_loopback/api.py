@@ -39,7 +39,9 @@ read a page as data without importing handler code.
 * The base: `app(page, ...)`, `guard(inner, profile)`, `prove(inner, ...)` and
   `serve(app, sockets, ...)`. Handlers get a `Call` and may return `Accepted(...)` or
   raise `Conflict(...)` or `Refused(...)`; `busy(name)` holds the idle exit; `Topics` and
-  `Snapshot` feed the page's one stream route.
+  `Snapshot` feed the page's one stream route. A confirmed act (`Route(...,
+  confirmed=True, status=...)`) needs an `Idempotency-Key`, runs at most once per key,
+  gets the key as `call.key` and returns `Accepted(...)`.
 * The fixed header set: `response_headers(...)` for a response of the caller's own, and
   `complete(headers)` to add whatever is missing from it.
 * Tests: `gate_matrix(page)`.

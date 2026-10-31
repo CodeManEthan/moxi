@@ -97,6 +97,48 @@ PAGE = Page(
   (default `{"rss": "120M", "fds": 64}`) is carried in the export for whoever watches the
   process.
 
+### Confirmed acts
+
+An act that changes something the user should confirm twice, such as stopping a service
+or removing a project, is declared as a confirmed act. It runs at most once for each key
+its caller sends:
+
+```python
+Route("/api/status", "read", "moxi_usage.pagehandlers:status",
+      query={"job": Field("string")}, returns={"state": Out("string")}),
+Route("/api/stop", "act", "moxi_usage.pagehandlers:stop",
+      body={"name": Field("string")}, returns={},
+      confirmed=True, status="/api/status"),
+```
+
+- `confirmed=True` is allowed only on an act, and a confirmed act names `status`: a read
+  route of the same page, not a stream, whose query declares a string `job` key. If the
+  gateway reaches the act (`gateway=True`), it must reach the status route too, so a phone
+  that started an act can see how it went. A desk-only act may name a status route of
+  either reach. `Page` refuses a page that breaks any of this.
+- Each request to a confirmed act carries one `Idempotency-Key` header: exactly 43
+  characters of letters, digits, `-` and `_`, the shape `secrets.token_urlsafe(32)` makes.
+  A missing key, a key sent twice or a key of another shape is a 400 that names the
+  header, `{"error": "missing header: Idempotency-Key"}` (or `repeated header`, `malformed
+  header`), and never repeats the value.
+- The handler gets the key as `call.key` and returns `Accepted(f"/api/status?job={id}")`,
+  which is sent as 202 `{"status": "/api/status?job=..."}`. A confirmed act that returns
+  anything else, a plain dict included, is a 500 and is logged.
+- The base keeps a map of the keys it has run, for the server's life. A key reaches its
+  handler at most once while the map holds it. The same key sent again while the first
+  request still runs is a 409, `{"conflict": "this act is still running"}`. Sent again
+  after it finished, with the same path and body, it gets the first answer again, a 202,
+  4xx or 500, and no handler runs. Sent with another path or another body, it is a 422,
+  `{"refused": "this Idempotency-Key was used for another request"}`. The map keeps the
+  1,024 most recently finished keys; an older one is a new key again, and the module's own
+  job records say what a second run does.
+- A request answered before its handler would run (a 503 when 32 requests are already
+  in, a 413 or 400 for its body, a 400 for its key) claims nothing, so the same key sent
+  again is judged as new. A handler cut short by a stop keeps its key, with a 500, since it
+  may have acted.
+- The export carries `confirmed` and `status` for every route, so the shell reads them as
+  data. A route without `confirmed` works exactly as before, and ignores the header.
+
 A page module whose distribution doesn't require `moxi-loopback` reaches the same module
 as `moxi.modules.load("loopback", interface=1).api`, and imports nothing else outside the
 standard library and the core.
@@ -181,7 +223,8 @@ python -P -m moxi_loopback.export <module>...
 ```
 
 prints one JSON object, keyed by module: `{"ok": true, "export": {...}}` with the module's
-routes, their fields and shapes, its topics, its asset names and its budget, or `{"ok":
+routes, their fields and shapes, whether each is a confirmed act and its status route, its
+topics, its asset names and its budget, or `{"ok":
 false, "error": "..."}` for a module with no `PAGE`, a broken target, a refused
 declaration or a refused asset table. It exits 0 when every module was read, 3 when any
 was refused, and 2 with no module named. The shell runs it in a fresh process to learn
