@@ -198,19 +198,6 @@ def _config_entries() -> tuple[object, str | None]:
         return [], str(e)
 
 
-def _live_records() -> list[dict]:
-    found = []
-    try:
-        for path in sorted(records.record_dir().iterdir()):
-            if path.suffix == ".json":
-                record = records.load(path)
-                if record is not None:
-                    found.append(record)
-    except OSError:
-        pass
-    return found
-
-
 def _clock_time(t: float | None, now: float) -> str:
     if t is None:
         return "never"
@@ -229,7 +216,7 @@ def timers_view(now: float | None = None) -> dict:
     loaded = _timer.load(entries)
     logged = _timer.read_log(_timer.log_path())
     sessions = []
-    for record in _live_records():
+    for record in api.clock_records():
         environ = None
         if any(s.requires_env for s in loaded.subscriptions):
             environ = _timer.proc_environ(record["pid"])
