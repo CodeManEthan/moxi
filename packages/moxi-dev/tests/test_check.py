@@ -466,10 +466,10 @@ def test_the_probe_says_why_chromium_cant_start(tmp_path):
     assert "could not run" in check.chromium_probe(tmp_path / "missing", {})
 
 
-def test_the_real_workspace_runs_browser_tests_for_ui_only():
+def test_the_real_workspace_runs_browser_tests_for_its_page_packages():
     if not (REPO / "packages" / "ui" / "pyproject.toml").is_file():
         pytest.skip("not run from the repository (an sdist has no workspace)")
-    assert [p.dir for p in check.load_workspace(REPO) if p.browser] == ["ui"]
+    assert [p.dir for p in check.load_workspace(REPO) if p.browser] == ["cache", "ui"]
 
 
 # --- the built web files ---------------------------------------------------------------
