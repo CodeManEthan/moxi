@@ -97,10 +97,18 @@ The session's capabilities:
 | `compact` | yes | yes | yes | `command` `compact` |
 | `agents` | yes | yes | yes | `agents` |
 | `stop-shells` | yes | yes | no | `command` `clear` or `compact` with `stop_shells: true` |
+| `guards` | yes | no | no | the guard list runs at the session's tool calls |
+| `after-tool` | yes | no | no | an `after-tool` listener row's text reaches the model after the tool |
+| `usage` | yes | no | no | the session reports its usage to `usage` listener rows |
+| `mcp-token` | no | no | no | `mcp.reload` |
+| `environ` | yes | yes | yes | `environ` |
 
 `session`, `facts`, `watch` and `wait` are always there and carry no capability. A method or
 option the session lacks is answered with the `capability` error, never a refusal. OpenCode
-support is experimental.
+support is experimental. An endpoint of an older turns lacks the later capabilities
+(`guards` to `environ`), and a caller reads their absence as "not offered". On OpenCode an
+`after-tool` row is still told of a finished call, observe only: its text reaches no
+model, so OpenCode does not offer `after-tool`.
 
 ## Errors
 
@@ -117,7 +125,7 @@ conditional question: "no, a turn is open" is its answer, not a failure of the r
 | -32700 | parse error | a line that is not JSON |
 | -32600 | invalid request | not a JSON-RPC request, a batch, or a line over the cap |
 | -32601 | method not found | a method turns does not have |
-| -32602 | invalid params | params that break this contract: an empty or missing `text`; a `ref` that is not a string, or longer than 256 bytes as UTF-8; `if_turn_number`, `refuse_draft` or `refuse_agents` without `only_if_idle: true`, or of the wrong type; a bad `until` or `timeout_ms`; a `wait` with both or neither of `delivery` and `ref`; an unknown command name; `stop_shells` not a boolean, or given with `exit` |
+| -32602 | invalid params | params that break this contract: an empty or missing `text`; a `ref` that is not a string, or longer than 256 bytes as UTF-8; `if_turn_number`, `refuse_draft` or `refuse_agents` without `only_if_idle: true`, or of the wrong type; a bad `until` or `timeout_ms`; a `wait` with both or neither of `delivery` and `ref`; an unknown command name; `stop_shells` not a boolean, or given with `exit`; `environ`'s `names` not a list, longer than 64, or holding something that is not a variable name |
 | -32001 | hello refused | no version in both ranges; `data` names both |
 | -32002 | hello required | a first request other than `rpc.hello`; the connection closes |
 | 1001 | `gone` | the endpoint is ending or has ended |
@@ -315,12 +323,13 @@ Params are an object; a missing optional param takes its default. In short:
 | `watch` | `{}` | `{facts}`, then notifications |
 | `stops.handle` | `{}` | `{}`, then `stop.asked` notifications |
 | `stops.answer` | `{ask, reason}` | `{taken}` |
+| `environ` | `{names}` | `{values}` |
 
 `text` is a non-empty string. `ref` is a string of at most 256 bytes as UTF-8, or absent
 or null.
 
-**No answer waits on the harness.** `session`, `deliver`, `steer` and a `wait` with
-`timeout_ms` 0 answer from the endpoint's own record, at once. `facts` and `agents` answer
+**No answer waits on the harness.** `session`, `deliver`, `steer`, `environ` and a `wait`
+with `timeout_ms` 0 answer from the endpoint's own record, at once. `facts` and `agents` answer
 within the harness's live bound (above) whatever the harness is doing. Only `wait` with a
 bound, `command` and the long-lived `watch` and `stops.handle` wait, each for its own
 reason.
@@ -508,6 +517,20 @@ open with that text, null lets it end. Result `{taken: bool}`. `taken` is false 
 answer, past `stop_handler.wait_ms` (turns config, default 2000), which let the turn end,
 or for an unknown `ask`. Closing the connection gives the handler up.
 
+### `environ`
+
+`environ {names: [string, ...]}` answers `{values: {name: string | null}}`: the value of each
+named variable in the endpoint process's own copy of the session's environment, null for
+one that is unset. Needs `environ`. At most 64 names a call, each an environment variable's
+name (`[A-Za-z_][A-Za-z0-9_]*`); anything else is invalid params. It reads no other
+process, and answers only the names asked.
+
+Whose environment it is: on Claude Code the endpoint is the harness's child, started at
+the session's start, so the values are those the session started with, not a change made
+later inside a shell. The Codex and OpenCode hosts are the launch's own process, so theirs
+is the launch's environment. The endpoint's address is the user's alone, and any process
+of the same user can already read a session's environment, so this adds no reader.
+
 ## Notifications
 
 On a `watch` connection, in the order the endpoint's ledger saw them:
@@ -587,10 +610,9 @@ needs that connection.
 These are reserved for later additions, each one a hello can carry without a version bump.
 An endpoint of this version offers none of them:
 
-- session capabilities `guards`, `after-tool`, `usage` and `mcp-token`, and the client
-  capability `guards`;
-- the method spaces `guard.*`, `tool.*`, `usage.*` and `mcp.*`, and the notifications
-  `tool.*`.
+- the client capability `guards`;
+- the method spaces `guard.*`, `tool.*`, `usage.*` and `mcp.*` beyond the methods this
+  document names, and the notifications `tool.*`.
 
 ## Versions
 

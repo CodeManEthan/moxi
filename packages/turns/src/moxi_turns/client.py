@@ -11,7 +11,8 @@ two shared connections, each opened on first use and closed with the `Session` (
 `close()`, or its collection):
 
 - the first carries the calls whose answer never waits on the harness: `session`,
-  `deliver`, `steer`, and the look-up by `ref` of a hand-in whose answer never came;
+  `deliver`, `steer`, `environ`, and the look-up by `ref` of a hand-in whose answer never
+  came;
 - the second carries `facts` and `agents`, which wait on the harness's live read for up
   to its live bound, so a `deliver` never queues behind one.
 
@@ -20,7 +21,8 @@ its own and closes it when done. Before a call writes on a shared connection it 
 the connection is still open, and opens a new one first if not, so a request is never
 lost to a connection that had already closed.
 
-Read bounds. A short call (`session`, `deliver`, `steer`, the look-up, `stops.answer`)
+Read bounds. A short call (`session`, `deliver`, `steer`, `environ`, the look-up,
+`stops.answer`)
 waits `READ_S` for its answer. `facts`, `agents` and `watch`'s first answer wait
 `LIVE_READ_S`, which is longer than any harness's live bound (1 s on Claude, 2 s on Codex
 and OpenCode), so a slow live read answers with its live part unreadable instead of
@@ -52,7 +54,7 @@ import logging
 import threading
 import time
 import weakref
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -358,9 +360,9 @@ class Session:
 
     # -- reads --------------------------------------------------------------------------
 
-    def _read(self, link: _Link, method: str, timeout: float) -> Any:
+    def _read(self, link: _Link, method: str, timeout: float, params: Any = None) -> Any:
         try:
-            return _call(link.get(), method, None, timeout)
+            return _call(link.get(), method, params, timeout)
         except _NotWritten as exc:
             raise exc.error from None
         except _Unanswered as exc:
@@ -398,6 +400,25 @@ class Session:
         """The session's subagents as the harness records them. Raises `TurnsError`."""
         return self._value(self._read(self._reads, "agents", LIVE_READ_S), "agents",
                            Agents)
+
+    def environ(self, names: Iterable[str]) -> dict[str, str | None]:
+        """The values of the named variables in the session's own environment, None for
+        one that is unset, read from the session's endpoint: on Claude Code the
+        environment the session started with, on the Codex and OpenCode hosts the
+        launch's. At most `ENVIRON_MAX_NAMES` names, each `[A-Za-z_][A-Za-z0-9_]*`.
+        Raises `TurnsError`: code -32602 for names the endpoint refuses, the
+        `capability` error on a session without `environ`."""
+        if isinstance(names, str):
+            raise TypeError("names is an iterable of variable names, not one string")
+        asked = list(names)
+        raw = self._read(self._short, "environ", READ_S, {"names": asked})
+        values = raw.get("values") if isinstance(raw, dict) else None
+        if not isinstance(values, dict) or set(values) != set(asked) or not all(
+                v is None or isinstance(v, str) for v in values.values()):
+            # The answer is not echoed: it may hold a secret's value.
+            raise TurnsError(f"the endpoint at {self.address} answered environ with "
+                             "something turns cannot read")
+        return dict(values)
 
     # -- deliveries ---------------------------------------------------------------------
 

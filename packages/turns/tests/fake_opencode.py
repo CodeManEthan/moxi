@@ -7,8 +7,9 @@ session is a 404; `GET /session/status` is `{}` when idle and names a running se
 busy; `GET /session/:id/children` lists child sessions; the event stream (`GET /event`)
 carries `server.connected`, `server.heartbeat`, `message.updated` (the user message, then
 the assistant message parented to it, its final update sent twice), `session.status`,
-`session.idle`, `session.error` and `session.compacted`. `POST /session/:id/summarize`
-runs the loop busy, sends `session.compacted`, goes idle and answers `true`; with
+`session.idle`, `session.error`, `session.compacted`, `session.created`, and
+`message.part.updated` for a tool part when a test sends one (`tool_part`).
+`POST /session/:id/summarize` runs the loop busy, sends `session.compacted`, goes idle and answers `true`; with
 `summarize_route = False` it is an unknown route. An unknown route gets
 `missing_route_answer`: by default 1.18.34's, a 200 `text/html` web page, never a 404.
 Every id here is synthetic.
@@ -258,6 +259,28 @@ class FakeOpenCode:
             handler.close_connection = True
 
     # ------------------------------------------------------------- the session side
+    def tool_part(self, sid, call_id, tool, status, *, part_id=None, output="ok") -> str:
+        """One `message.part.updated` for a tool part, in 1.18.34's shape: `pending`
+        (empty input), `running`, then `completed` or `error`; the part's id holds across
+        its updates and `callID` ties them. Returns the part's id."""
+        part_id = part_id or mint("prt")
+        now = int(time.time() * 1000)
+        state = {"status": status, "input": {} if status == "pending" else {"text": "x"}}
+        if status == "pending":
+            state["raw"] = ""
+        if status in ("running", "completed", "error"):
+            state["time"] = {"start": now}
+        if status == "completed":
+            state.update(output=output, metadata={"truncated": False}, title="")
+            state["time"]["end"] = now
+        if status == "error":
+            state["error"] = "the tool failed"
+            state["time"]["end"] = now
+        self.emit("message.part.updated", {"sessionID": sid, "time": now, "part": {
+            "id": part_id, "messageID": mint("msg"), "sessionID": sid, "type": "tool",
+            "tool": tool, "callID": call_id, "state": state}})
+        return part_id
+
     def create_session(self, title=None, parent=None) -> dict:
         sid = mint("ses")
         with self.lock:

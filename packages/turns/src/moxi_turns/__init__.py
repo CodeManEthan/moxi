@@ -16,6 +16,8 @@ out of the harness. This package is turns' whole public API, the announcement's
     f = s.facts()    # Facts(session_id, turn_number, turn_open, turn, agents, draft, at,
                      #       stale, ready); turn: OpenTurn | None
     a = s.agents()   # Agents(entries, complete, at)
+    e = s.environ(names)   # {name: value | None}: the session's own environment, read
+                           # from its endpoint (capability environ; at most 64 names)
 
     d = s.deliver(text, *, only_if_idle=False, if_turn_number=None, refuse_draft=False,
                   refuse_agents=False, ref=None)

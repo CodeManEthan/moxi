@@ -402,3 +402,59 @@ def test_the_endpoint_asks_after_tool_rows_reads_floors_and_carries_cwd(make_end
     (u,) = [c for c in listener_targets.CALLS if c[0] == "usage"]
     assert u[4] == {"rateLimits": [], "context": {"tokens": 3}} and u[5] >= before
     assert fake.cwd
+
+
+def test_each_adapter_states_its_tool_points():
+    from moxi_turns.claude_endpoint import ClaudeHarness
+    from moxi_turns.codex import CodexHarness
+    from moxi_turns.harness import Harness
+    from moxi_turns.opencode import OpenCodeHarness
+
+    assert Harness.tool_points() == {"pre": False, "after": False}
+    assert Harness().after_tool_point() is None
+    for cls in (ClaudeHarness, CodexHarness):
+        assert cls.tool_points() == {"pre": True, "after": True}
+    assert OpenCodeHarness.tool_points() == {"pre": False, "after": False}
+
+
+def test_a_harness_with_a_pre_tool_point_and_no_after_tool_point_fires_at_pre(
+        make_endpoint):
+    """The pre-tool fallback: the same event fires before the call, `point` `pre`, and
+    its text goes where the pre-tool point puts context."""
+    listener_targets.CALLS.clear()
+    reg = _after_reg(Entry("usage", [("after-tool", "listener_targets:after")]))
+
+    class PreOnly(FakeHarness):
+        @staticmethod
+        def tool_points():
+            return {"pre": True, "after": False}
+
+        def pre_tool(self, tool):
+            """The adapter's pre-tool hook: its context for the call."""
+            point = self.after_tool_point()
+            if point == "pre":
+                return self.endpoint.after_tool(tool, tool_use_id="u1", point=point)
+            return None
+
+        def post_tool(self, tool):
+            if self.after_tool_point() == "after":
+                return self.endpoint.after_tool(tool, tool_use_id="u1")
+            return None
+
+    ep, fake = make_endpoint(PreOnly(), registry=reg)
+    assert fake.after_tool_point() == "pre"
+    assert fake.post_tool("Bash") is None
+    assert fake.pre_tool("Bash") == "after Bash"
+    assert [c[:5] for c in listener_targets.CALLS] == [("after", "Bash", None, None, "pre")]
+
+    class Both(PreOnly):
+        @staticmethod
+        def tool_points():
+            return {"pre": True, "after": True}
+
+    listener_targets.CALLS.clear()
+    ep, fake = make_endpoint(Both(), registry=reg)
+    assert fake.after_tool_point() == "after"
+    assert fake.pre_tool("Bash") is None
+    assert fake.post_tool("Bash") == "after Bash"
+    assert [c[:5] for c in listener_targets.CALLS] == [("after", "Bash", None, None, "after")]

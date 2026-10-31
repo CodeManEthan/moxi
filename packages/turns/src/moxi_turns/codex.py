@@ -182,8 +182,13 @@ class _Compaction:
 class CodexHarness(Harness):
     name = "codex"
     can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "compact",
-                     "agents", "stop-shells"})
+                     "agents", "stop-shells", "environ"})
     mod_version = None
+
+    @staticmethod
+    def tool_points() -> dict[str, bool]:
+        """Codex's `PreToolUse` and `PostToolUse` command hooks."""
+        return {"pre": True, "after": True}
 
     def __init__(self, cwd, *, instructions: str | None = None, env=None,
                  window: bool = True, options=None, verify=None,

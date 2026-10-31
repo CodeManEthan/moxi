@@ -117,6 +117,11 @@ CAPABILITIES = {
     "compact": (True, True, True),
     "agents": (True, True, True),
     "stop-shells": (True, True, False),
+    "guards": (True, False, False),
+    "after-tool": (True, False, False),
+    "usage": (True, False, False),
+    "mcp-token": (False, False, False),
+    "environ": (True, True, True),
 }
 
 #: Each method, the capability it needs (None: always there), and its result's keys
@@ -133,6 +138,7 @@ METHODS = {
     "watch": (None, {"facts"}),
     "stops.handle": ("stop-handler", set()),
     "stops.answer": (None, {"taken"}),
+    "environ": ("environ", {"values"}),
 }
 
 #: The fields of the `session` answer that may be absent.
@@ -407,6 +413,13 @@ INVALID_PARAMS = [
     ("command", {"name": "exit", "stop_shells": False}),
     ("command", {"name": "clear", "if_turn_number": "0"}),
     ("command", {"name": "clear", "timeout_ms": -1}),
+    ("environ", {}),
+    ("environ", {"names": "HOME"}),
+    ("environ", {"names": ["HOME", 5]}),
+    ("environ", {"names": ["1HOME"]}),
+    ("environ", {"names": ["A-B"]}),
+    ("environ", {"names": [""]}),
+    ("environ", {"names": [f"V{n}" for n in range(65)]}),
 ]
 
 #: Methods turns does not have, among them version 1's old ops.
@@ -423,6 +436,7 @@ CAPABILITY_ROWS = [
     ("command", {"name": "compact"}, "compact"),
     ("command", {"name": "clear", "stop_shells": True}, "stop-shells"),
     ("command", {"name": "compact", "stop_shells": True}, "stop-shells"),
+    ("environ", {"names": ["HOME"]}, "environ"),
 ]
 
 
@@ -485,6 +499,23 @@ def test_the_result_shapes_of_the_reads(connect):
     first = watch.call("watch", {}, timeout=5)
     assert set(first) == METHODS["watch"][1]
     assert isinstance(R.from_wire(first["facts"]), R.Facts)
+
+
+@_POSIX
+def test_environ_answers_the_names_asked_from_the_endpoints_environment(
+        connect, make_endpoint):
+    ep, _ = make_endpoint(FakeHarness(can=R.CAPABILITIES),
+                          env={"MOXI_T_SET": "one", "MOXI_T_EMPTY": "", "PATH": "/bin"})
+    client, _ = connect(ep=ep)
+    answer = client.call("environ", {"names": ["MOXI_T_SET", "MOXI_T_EMPTY", "MOXI_T_NO"]},
+                         timeout=5)
+    assert set(answer) == METHODS["environ"][1]
+    assert answer["values"] == {"MOXI_T_SET": "one", "MOXI_T_EMPTY": "", "MOXI_T_NO": None}
+    assert client.call("environ", {"names": []}, timeout=5) == {"values": {}}
+    names = [f"MOXI_T_{n}" for n in range(R.ENVIRON_MAX_NAMES)]
+    assert client.call("environ", {"names": names}, timeout=5)["values"] == \
+        dict.fromkeys(names)
+    assert R.ENVIRON_MAX_NAMES == 64
 
 
 @_POSIX

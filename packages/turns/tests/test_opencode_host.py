@@ -175,7 +175,8 @@ def test_no_instructions_lays_the_options_alone(host):
 def test_the_host_is_an_endpoint_that_can_start_and_compact(host):
     s, h, world = host()
     assert s.harness == "opencode"
-    assert s.capabilities == frozenset({"deliver", "only-if-idle", "compact", "agents"})
+    assert s.capabilities == frozenset({"deliver", "only-if-idle", "compact", "agents",
+                                        "environ"})
     assert s.session_id == h.session_id and h.session_id.startswith("ses_")
     for call, lacking in ((lambda: s.steer("x"), "steer"),
                           (lambda: s.command("clear"), "clear"),
@@ -667,3 +668,87 @@ def test_the_doctor_names_the_opencode_binary(monkeypatch, tmp_path):
     monkeypatch.setattr(opencode, "INSTALL_DIR", tmp_path / "none")
     [row] = opencode.rows()
     assert row.state == "off" and "experimental" in row.name
+
+
+# -- after a tool: observe only ------------------------------------------------------------
+
+@pytest.fixture
+def after_rows(monkeypatch):
+    """An installed `after-tool` row (`listener_targets:after`), as the endpoint loads."""
+    import listener_targets
+    from moxi_turns import listeners
+
+    class Row:
+        name = "usage"
+
+        def load(self):
+            import types
+            return types.SimpleNamespace(LISTENERS=[("after-tool", "listener_targets:after")])
+
+    registry = listeners.load([Row()], order=(), limit=0)
+    monkeypatch.setattr(listeners, "load", lambda *a, **kw: registry)
+    listener_targets.CALLS.clear()
+    return listener_targets.CALLS
+
+
+def _after_calls(calls, tool):
+    return [c for c in calls if c[0] == "after" and c[1] == tool]
+
+
+def test_the_host_has_no_tool_points():
+    h = opencode.OpenCodeHarness
+    assert h.tool_points() == {"pre": False, "after": False}
+    assert opencode.OpenCodeHarness("/").after_tool_point() is None
+
+
+def test_a_finished_tool_part_tells_the_after_tool_rows_once_and_drops_the_text(
+        host, after_rows, caplog):
+    caplog.set_level("INFO", logger="moxi.turns.opencode")
+    s, h, world = host()
+    sid = h.session_id
+    part = world.fake.tool_part(sid, "call_1", "oc_echo", "pending")
+    world.fake.tool_part(sid, "call_1", "oc_echo", "running", part_id=part)
+    time.sleep(0.2)
+    assert _after_calls(after_rows, "oc_echo") == []        # not finished yet
+    world.fake.tool_part(sid, "call_1", "oc_echo", "completed", part_id=part)
+    world.fake.tool_part(sid, "call_1", "oc_echo", "completed", part_id=part)  # sent again
+    world.fake.tool_part(sid, "call_2", "oc_fail", "error")
+    assert until(lambda: _after_calls(after_rows, "oc_fail"))
+    time.sleep(0.2)
+    # (tool, agent_id, is_error, point, record_path, cwd): the session's own calls.
+    assert _after_calls(after_rows, "oc_echo") == [
+        ("after", "oc_echo", None, False, "after", None, h.cwd)]
+    assert _after_calls(after_rows, "oc_fail") == [
+        ("after", "oc_fail", None, True, "after", None, h.cwd)]
+    dropped = [r.getMessage() for r in caplog.records
+               if "after-tool rows' text" in r.getMessage()]
+    assert len(dropped) == 1 and "after oc_" not in dropped[0]
+
+
+def test_a_subagents_tool_part_carries_its_session_and_a_strangers_is_not_told(
+        host, after_rows):
+    s, h, world = host()
+    child = world.fake.create_session("look", parent=h.session_id)["id"]
+    grandchild = world.fake.create_session("deeper", parent=child)["id"]
+    stranger = world.fake.create_session("someone else's")["id"]
+    time.sleep(0.2)
+    world.fake.tool_part(stranger, "call_s", "oc_stranger", "completed")
+    world.fake.tool_part(child, "call_c", "oc_child", "completed")
+    world.fake.tool_part(grandchild, "call_g", "oc_grand", "completed")
+    assert until(lambda: _after_calls(after_rows, "oc_grand"))
+    assert until(lambda: _after_calls(after_rows, "oc_child"))
+    time.sleep(0.2)
+    assert _after_calls(after_rows, "oc_child")[0][2] == child
+    assert _after_calls(after_rows, "oc_grand")[0][2] == grandchild
+    assert _after_calls(after_rows, "oc_stranger") == []
+
+
+def test_with_no_after_tool_row_a_finished_part_asks_nothing(host, monkeypatch):
+    from moxi_turns.endpoint import Endpoint
+
+    asked = []
+    monkeypatch.setattr(Endpoint, "after_tool", lambda self, *a, **kw: asked.append(a))
+    s, h, world = host()
+    world.fake.tool_part(h.session_id, "call_1", "oc_echo", "completed")
+    time.sleep(0.3)
+    assert asked == []

@@ -146,8 +146,14 @@ class ClaudeHarness(Harness):
 
     name = "claude"
     can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "clear", "exit",
-                     "compact", "agents", "stop-shells"})
+                     "compact", "agents", "stop-shells", "guards", "after-tool", "usage",
+                     "environ"})
     live_wait_s = LIVE_WAIT_S
+
+    @staticmethod
+    def tool_points() -> dict[str, bool]:
+        """The runner's `tool.call` hook: guards before `next`, after-tool after it."""
+        return {"pre": True, "after": True}
 
     def __init__(self, out: BinaryIO, *, pid: int | None = None, cwd: str | None = None,
                  on_end=None, guards: GuardRunner | None = None):

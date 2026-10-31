@@ -19,6 +19,8 @@ The core calls the adapter:
                           harness or the endpoint (the base does nothing)
     submit(delivery)      put the text in as a new turn
     append(delivery)      put the text into the running turn (a steer)
+    tool_points()         where the harness lets turns act at a tool call:
+                          `{"pre": bool, "after": bool}` (the base has neither)
     command(request)      run `/clear`, `/exit` or a compaction, and with
                           `request.stop_shells` stop the session's background shells once
                           it has taken effect
@@ -82,6 +84,10 @@ through the endpoint's adapter-side calls:
                                           the command ran, with the stop's report when
                                           `stop_shells` was set; a compaction settles at
                                           the later of this and its Ready
+    endpoint.after_tool(tool, …, point=)  a tool call ran (`after`), or is about to
+                                          where the harness has no after-tool point
+                                          (`pre`, the fallback): the after-tool rows'
+                                          text, which the model reads at that point
     endpoint.gone(reason)                 the session ended
 
 The adapter's duty to settle: every delivery handed to `submit` ends in exactly one
@@ -238,6 +244,26 @@ class Harness:
         """The session's subagents as the harness records them, read on every call. The
         base cannot list any: its list is not complete, which counts as busy."""
         return Agents((), False, time.time())
+
+    @staticmethod
+    def tool_points() -> dict[str, bool]:
+        """Where this harness lets turns act at a tool call and put text the model reads:
+        `pre`, before the call runs (where guards run), and `after`, once it ran. The
+        base has neither. A static method, so the doctor can read it off the class."""
+        return {"pre": False, "after": False}
+
+    def after_tool_point(self) -> str | None:
+        """Where this harness asks the `after-tool` rows: `after` where it has an
+        after-tool point; else `pre`, the fallback, where it has a pre-tool point, so the
+        same event fires before the call and its text goes where the pre-tool point puts
+        context; else None, and no text reaches the model (a host may still tell the rows
+        a call ran, observe only, with `point` `after`)."""
+        points = self.tool_points()
+        if points.get("after"):
+            return "after"
+        if points.get("pre"):
+            return "pre"
+        return None
 
     def loading(self) -> bool:
         """Whether this adapter has no accepted load to receive input."""

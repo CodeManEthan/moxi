@@ -84,7 +84,8 @@ def test_the_first_line_and_no_hello_before_the_session_id(claude):
     assert s is not None and s.harness == "claude"
     assert s.capabilities == frozenset({"deliver", "only-if-idle", "steer", "stop-handler",
                                         "clear", "exit", "compact", "agents",
-                                        "stop-shells"})
+                                        "stop-shells", "guards", "after-tool", "usage",
+                                        "environ"})
     assert s.info["mod_version"] == "0.1.0"
 
 
