@@ -429,9 +429,15 @@ def deliver(request_id: str, *, pid: int | None = None, out: TextIO | None = Non
     """`moxi launcher deliver REQUEST_ID --pid PID`: send the launch's first turn, write
     the outcome to its row, print one line and return the exit code.
 
+    A launch with a comms identity first waits for comms' wrapper to bind its name
+    (`targets.settle_bind`), and one whose wrapper ended before that ends `failed` with
+    the cause and sends nothing; so this process is started for such a launch even when
+    no first turn is owed.
+
     0 when the first turn was sent, is unconfirmed, or was not this deliverer's to send;
-    1 when the session was not ready or nothing could be sent; 3 when turns refused it or
-    there is no such launch; 75 when the launch log stayed busy.
+    1 when the session was not ready or nothing could be sent, or comms' wrapper failed;
+    3 when turns refused it, comms refused the name, or there is no such launch; 75 when
+    the launch log stayed busy or comms' daemon was not running.
     """
     out = sys.stdout if out is None else out
     try:
@@ -442,7 +448,13 @@ def deliver(request_id: str, *, pid: int | None = None, out: TextIO | None = Non
         outcome = Outcome(request_id, "unknown-launch")
         print(outcome.line(), file=out, flush=True)
         return outcome.exit_code
+    from . import targets  # not at the top: targets imports this module
+
     try:
+        ended = targets.settle_bind(conn, request_id, pid=pid)
+        if ended is not None:
+            print(ended.line, file=out, flush=True)
+            return ended.exit_code
         outcome = send(conn, request_id, pid=pid, turns=turns)
     except store.Busy as error:
         print(f"the launch log is busy: {error}", file=out, flush=True)

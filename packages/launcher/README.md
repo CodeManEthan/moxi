@@ -123,7 +123,8 @@ by hand never hides a seat's handoff. The launcher ships a `handoff` skill, whic
 
 Exit codes: 0 done; 1 a start that failed; 2 bad arguments or a bad value; 3 refused (with
 nothing written when it was refused before the launch's row, else the row says why); 75 a
-lock held past its wait (the launch log's, slots' or projects'), when trying again may work.
+lock held past its wait (the launch log's, slots' or projects'), or comms' daemon not
+answering, when trying again may work.
 A refusal prints one line ending in a short code, such as `[off-posture]`, and a hint.
 
 ## Optional links
@@ -142,6 +143,15 @@ and the project's.
 
 With comms installed, comms keeps the name `console` for the launcher's own notices, so
 no session can take it.
+
+A launch with an identity runs under comms' wrapper, `moxi comms claude` or `moxi comms
+codex` (which needs turns' Codex host), in this terminal or a slot; a headless one is
+refused for now. Before anything is written the launcher asks comms about the name: one
+held by another session, reserved for a module or retired is refused (3), naming who or
+why, and an answer comms can't read is a try-again (75). A Codex launch with an identity
+takes no extra flags, since comms' Codex wrapper takes only its own. When the wrapper
+ends before the harness starts, its words show where it ran and the row ends `failed`
+with `comms-offline` (75), `identity-taken` (3) or `comms-failed` (1).
 
 ## Settings
 
