@@ -113,6 +113,21 @@ default = {}
 doc = "The OpenCode roster: one table per identity, [opencode.agents.\"name@scope\"]."
 read = "start"
 
+# comms 0.2's catch-up bound. Read only when comms 0.2's files move into comms.db, to
+# bound the mail a name with no cursor gets; nothing else reads them.
+
+[replay.messages]
+type = "int"
+default = 50
+doc = "Read only when comms 0.2's files move: a name with no cursor gets at most this many messages; 1 or more. Otherwise unused."
+read = "start"
+
+[replay.hours]
+type = "int"
+default = 24
+doc = "Read only when comms 0.2's files move: a name with no cursor gets nothing older than this many hours. Otherwise unused."
+read = "start"
+
 # Keys an earlier comms read, kept declared so a file that still sets one is told what
 # to do rather than refused as unknown.
 
@@ -127,9 +142,3 @@ retired = "remove it: no name refuses a next-turn send"
 
 [provision.slots]
 retired = "remove it: comms has no slots"
-
-[replay.messages]
-retired = "remove it: catch-up is the name's waiting mail, with no bound to set"
-
-[replay.hours]
-retired = "remove it: catch-up is the name's waiting mail, with no bound to set"

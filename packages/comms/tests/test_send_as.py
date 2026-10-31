@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from conftest import wait_until
@@ -33,6 +35,36 @@ def test_send_as_without_the_token_is_refused_credential(console):
     result = api.send_as("launcher", "console", ["main@proj-a"], "x")
     assert (result.outcome, result.refusal.code) == ("refused", "credential")
     assert "moxi doctor" in result.refusal.text
+
+
+def doctor_records():
+    """The records `moxi doctor` shows as comms' rows, by key."""
+    import json
+
+    from moxi import doctor, paths
+    path = paths._layout("comms").state_dir() / doctor.RECORDS_FILE
+    return json.loads(path.read_text()) if path.exists() else {}
+
+
+def test_a_token_this_process_cant_read_leaves_a_record_for_the_doctor(console):
+    """The process that sends (a module's unit, a timer) may read the credential chain
+    differently from the shell the doctor runs in, so its failure is recorded where any
+    later doctor run finds it, and a send that works again, or a renew, clears it."""
+    key = "reserved-token-console"
+    TokenStore().delete_secret(reserved.owner("launcher"), reserved.secret_id("console"))
+    result = api.send_as("launcher", "console", ["main@proj-a"], "x")
+    assert result.refusal.code == "credential"
+    record = doctor_records()[key]
+    assert "comms can't read the token for console from the environment of" in \
+        record["text"]
+    assert f"pid {os.getpid()}" in record["text"]
+    assert record["fix"] == "moxi comms reserved renew console"
+    reserved.renew("console", chain=secrets.from_config())
+    assert key not in doctor_records()
+    api.send_as("pager", "console", ["main@proj-a"], "x")
+    assert key in doctor_records()
+    assert api.send_as("launcher", "console", ["main@proj-a"], "x").outcome == "sent"
+    assert key not in doctor_records()
 
 
 def test_send_as_with_a_wrong_token_is_refused_by_the_daemon(console):

@@ -11,6 +11,7 @@ import sys
 import pytest
 
 from claim_kit import wait_for
+from moxi import exit as moxi_exit
 from moxi_comms import claimfile
 from moxi_comms.claimhold import (CLAIM_SOCKET_ENV, NOT_INSIDE, ClaimServer, ClaimUnreachable,
                                    call)
@@ -248,7 +249,7 @@ def test_a_claim_socket_outside_comms_runtime_directory_is_never_asked(
         assert str(paths.runtime_dir()) in str(caught.value)
 
         said: list[str] = []
-        assert claimhold.whoami(env, say=said.append) == 2
+        assert claimhold.whoami(env, say=said.append) == moxi_exit.REFUSED
         assert said and "outside comms' runtime directory" in said[0]
         assert "scout" not in " ".join(said)
 

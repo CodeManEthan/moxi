@@ -24,7 +24,7 @@ def test_the_schema_parses_and_its_overrides_are_spelled_with_the_prefix():
 def test_the_retired_keys_are_declared():
     retired = {k.name for k in config.schema().keys.values() if k.retired}
     assert retired == {"claude.channel", "policy.never_held", "policy.next_turn_refused",
-                       "provision.slots", "replay.messages", "replay.hours"}
+                       "provision.slots"}
     assert not retired & {k.name for k in config.schema().live()}
 
 
@@ -157,8 +157,8 @@ BAD_FILES = [
     ('[policy]\ncache_callers = [""]\n', "policy.cache_callers"),
     ('[policy]\nlabels = { "x" = 1 }\n', "policy.labels"),
     ("[provision]\nslots = 0\n", "provision.slots"),
-    ("[replay]\nmessages = 50\n", "replay.messages"),
-    ("[replay]\nhours = 24\n", "replay.hours"),
+    ("[replay]\nmessages = 0\n", "replay.messages"),
+    ("[replay]\nhours = -1\n", "replay.hours"),
     ('[codex.agents]\nplanner = 3\n', "codex.agents"),
     ('[claude]\nchannel = "server"\n', "claude.channel"),
     ('[policy]\nnever_held = []\n', "policy.never_held"),
@@ -176,6 +176,12 @@ def test_a_bad_file_is_refused_naming_the_key(text, key):
     assert caught.value.key == key
     assert isinstance(caught.value, moxi_config.ConfigError)
     assert caught.value.fix
+
+
+def test_the_replay_keys_are_read_and_default_to_comms_0_2s():
+    assert (config.load().replay.messages, config.load().replay.hours) == (50, 24)
+    write_config(None, "[replay]\nmessages = 7\nhours = 2\n")
+    assert (config.load().replay.messages, config.load().replay.hours) == (7, 2)
 
 
 def test_a_retired_key_says_what_to_do():

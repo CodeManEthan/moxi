@@ -648,9 +648,9 @@ class ClaudeShim:
 
         With `tolerate_offline=True` an unreachable daemon at the FIRST bind is not an
         exit: the shim says one line, stays unbound, and lets the supervisor bind when
-        the daemon returns (a session whose comms are late is still a session).
-        `_serve_inject_file` does NOT pass it -- the hand-run seam keeps its
-        `EXIT_OFFLINE`.
+        the daemon returns. Neither launch path passes it: the wrapper's adapter ends
+        the launch with "try again" before `claude` starts, and `_serve_inject_file`
+        (the hand-run seam) keeps its `EXIT_OFFLINE`.
 
         A REFUSAL is still a refusal: only an unreachable daemon and a register that
         never answered are tolerated here. The claim gate is untouched.

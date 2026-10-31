@@ -151,6 +151,21 @@ def test_a_held_name_is_refused_before_claude_starts(rig, fake_claude, turns_plu
     assert binding(rig, "heldname") is holder, "the holder keeps its name"
 
 
+def test_a_launch_with_no_daemon_is_tempfail_before_claude_starts(
+        rig, fake_claude, turns_plugins):
+    """A launch that finds no daemon is "try again" and starts nothing: no `claude`
+    without comms."""
+    script, out, release = fake_claude
+    release.touch()
+    rig.daemon.stop()
+    sid = "5e55a1d0-0000-4000-8000-0000000000a3"
+    proc = run_wrapper(turns_plugins, script, "nodaemon", sid, "--global")
+    assert proc.returncode == moxi_exit.TEMPFAIL, proc.stderr
+    assert "nodaemon was not launched: comms offline" in proc.stderr
+    assert not out.exists(), "claude never started"
+    assert wait_until(lambda: not (session.sessions_dir() / sid).exists(), timeout=5)
+
+
 # ------------------------------------------------------------- the wrapper's pidfd
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pidfds are Linux's")

@@ -108,6 +108,12 @@ def test_a_send_through_a_0_2_claim_holder_exits_error_and_sends_nothing(
     assert rig.record.max_message_id(rig.names_channel) == before
 
 
+def test_whoami_through_a_0_2_claim_holder_exits_error(rig, zero_two_holder, capsys):
+    path, _seen = zero_two_holder
+    assert claimhold.whoami({CLAIM_SOCKET_ENV: str(path)}) == moxi_exit.ERROR
+    assert "relaunch the session" in capsys.readouterr().out
+
+
 # ------------------------------------------------------------- a 0.2 frame, new socket
 
 @pytest.mark.parametrize("frame", [

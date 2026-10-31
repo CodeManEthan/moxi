@@ -9,7 +9,10 @@ On Windows the script is `Scripts\<script>.exe` in the same tool directory; in P
 `& "$(uv tool dir)\moxi\Scripts\<script>.exe"`.
 
 Most installs set nothing at all. With no config file and no variables, comms runs on
-the `local` backend, and the daemon provisions itself on its first start.
+the `local` backend. `moxi install comms` provisions it (the operator identity) before
+it starts the daemon, and moves comms 0.2's files when it finds them; a move it refuses
+fails the install with the reason. While comms 0.2's daemon still runs, the new daemon's
+first start does both instead.
 `moxi comms doctor` prints what this box resolved and where each answer came from, and
 `moxi config comms` prints every key with its value and source.
 
@@ -35,7 +38,10 @@ cursor, the binding history, the identities and the reserved names. An install t
 still has comms 0.2's files (`record.db`, `cursors/`, and `directory.db` and
 `bindings.db` under DATA) moves them into it at the first open, and renames each to
 `<name>.0.2-moved` in place; `moxi comms migrate --dry-run` says what it would move, and
-`moxi doctor` lists the leftovers until you remove them.
+`moxi doctor` lists the leftovers until you remove them. The move bounds what a name
+with no cursor gets by comms 0.2's `[replay] messages` and `hours` when your config sets
+them; nothing else reads those keys, and once the files have moved `moxi doctor` shows a
+row asking you to remove them.
 
 | variable | what it does |
 |---|---|
@@ -113,6 +119,8 @@ expiry = "24h"                        # how long a send waits before it is dropp
 | `[provision] operator` | `operator` | | the human's identity name, provisioned at first start |
 | `[delivery] expiry` | `24h` | `MOXI_COMMS_DELIVERY_EXPIRY` | how long a sent message may wait undelivered before it is dropped, when the send names no `--expires`: a whole number with `s`, `m`, `h` or `d` (`30m`, `6h`, `3d`), or `never`. The send verb writes the expiry on the message's first line, so a change touches only later sends. Nothing goes back to the sender when a message expires; `moxi comms explain` says `expired`. Read at each send. |
 | `[cache] required` | `false` | | makes the daemon refuse to start when the cache module is absent or broken (`moxi install comms --with cache` installs it), so the cold-send hold cannot switch off without a word. With this off, an absent or broken cache makes every agent read as having no cache and get its mail live. Read at the daemon's start. |
+| `[replay] messages` | `50` | | read only when comms 0.2's files move: a name with no cursor gets at most this many of its messages as waiting mail; 1 or more |
+| `[replay] hours` | `24` | | read only when comms 0.2's files move: a name with no cursor gets none of its messages older than this; 0 or more |
 | `block` | `false` | | stops all routing: while it is true the daemon neither delivers to nor routes from any identity, and `moxi comms send` says so and sends nothing. Read at every use, so a change needs no restart. |
 | `[codex] defaults`, `[codex] agents` | `{}` | | the Codex roster (experimental, below) |
 | `[opencode] defaults`, `[opencode] agents` | `{}` | | the OpenCode roster (experimental, below) |
@@ -120,8 +128,7 @@ expiry = "24h"                        # how long a send waits before it is dropp
 Retired keys, still declared so a file that sets one is told what to do: `[claude]
 channel` (comms passes Claude Code no channel),
 `[policy] never_held` (no sender is exempt from the cold-cache hold) and
-`[policy] next_turn_refused` (`--held` is accepted for every recipient) and `[replay]
-messages` and `hours` (catch-up is a name's waiting mail, which no count or age bounds).
+`[policy] next_turn_refused` (`--held` is accepted for every recipient).
 The old `[provision] slots` key and roster `slot` key are also retired; remove them.
 Remove all retired keys.
 

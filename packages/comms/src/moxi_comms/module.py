@@ -35,7 +35,9 @@ INTERNAL_ENV = {
     "MOXI_COMMS_MOCK_BACKEND": "test seam: the mock record's JSON store",
 }
 SETTINGS = "settings.toml"
-SETUP = None
+#: Provisioning at install, through the store's one opener: a comms 0.2 home whose files
+#: the move refuses fails the install with the reason.
+SETUP = "moxi_comms.provision:setup"
 #: comms' own doctor rows: the move of comms 0.2's files into comms.db and what it left,
 #: and the reserved send-only names.
 DOCTOR = "moxi_comms.checks:doctor_rows"

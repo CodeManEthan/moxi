@@ -460,7 +460,11 @@ def remove_socket(path) -> None:
 def whoami(env=None, say=print, proc=None) -> int:
     """`moxi comms whoami`: what this session holds, `<qualified> (<state>)`,
     or the line a send would refuse with; then `session <id>` when the claim records
-    its launch session. 0 when it holds an identity, 2 when it holds none."""
+    its launch session. `OK` when it holds an identity; `REFUSED` when it holds none, the
+    code a send from the same process exits with; `ERROR` for an adapter that speaks
+    another comms wire, as for a send."""
+    from moxi import exit as moxi_exit
+
     from .paths import OutsideRuntime
 
     env = env if env is not None else os.environ
@@ -468,24 +472,24 @@ def whoami(env=None, say=print, proc=None) -> int:
         path = socket_from_env(env)
     except OutsideRuntime as e:
         say(f"{e} Nothing was asked.")
-        return 2
+        return moxi_exit.REFUSED
     if not path:
         say("this process has no claim socket: it is inside no comms session and holds "
             "no comms identity")
-        return 2
+        return moxi_exit.REFUSED
     try:
         answer = call(path, "claim")
     except AdapterMismatch as e:
         say(str(e).replace(" Nothing was sent.", ""))
-        return 2
+        return moxi_exit.ERROR
     except ClaimUnreachable:
         answer = dead_adapter_answer(path, proc=proc)
         if answer is None:
             say("this session's comms adapter is gone and it holds no comms identity")
-            return 2
+            return moxi_exit.REFUSED
     if not answer.get("ok"):
         say(answer.get("error"))
-        return 2
+        return moxi_exit.REFUSED
     claim = answer.get("claim") or {}
     line = answer.get("line")
     if line is None:
@@ -494,7 +498,7 @@ def whoami(env=None, say=print, proc=None) -> int:
         say(line)
     if answer.get("launch_session"):
         say(f"session {answer['launch_session']}")
-    return 0 if line is None else 2
+    return moxi_exit.OK if line is None else moxi_exit.REFUSED
 
 
 def dead_adapter_answer(path, proc=None, pid=None) -> dict | None:

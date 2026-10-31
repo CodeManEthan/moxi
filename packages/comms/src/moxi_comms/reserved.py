@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import secrets as _secrets
 import sqlite3
 import threading
@@ -209,14 +210,57 @@ def reconcile(gone: str | None = None, *, declared=None, chain=None, env=None,
 def release_all(*, chain=None, env=None, target=None, clock=time.time) -> Result:
     """comms' own uninstall: free every `active` row and remove every token comms
     minted, so no token outlives the code that checks it. Conflict and unowned rows stay
-    as they are; the rows stay in comms.db until a purge takes it."""
+    as they are; the rows stay in comms.db until a purge takes it.
+
+    A token can outlive its row's hash: a freed name whose token couldn't be removed, a
+    mint whose commit failed. So after the frees, the token of every name any row or
+    installed module names goes too, and every reserved-name token in the file store
+    whatever names it."""
+    from .secrets import SecretError
+
     chain = _chain(chain, env)
     result = Result()
     with _held(target, env) as conn:
-        for name, row in rows(conn).items():
+        found = rows(conn)
+        for name, row in found.items():
             if row["state"] == ACTIVE and row["freed_at"] is None:
                 _free(conn, chain, name, row["module"], clock, result)
+    done = set(result.freed)
+    for name, module in sorted(_minted(chain, found) - done):
+        try:
+            if chain.delete(secret_id(name), owner=owner(module)):
+                result.lines.append(f"{module}: {name}'s leftover token removed")
+        except SecretError as e:
+            result.lines.append(f"{module}: {name}'s token couldn't be removed: {e}")
+            log.warning("%s's token for %s couldn't be removed: %s", name, module, e)
     return result
+
+
+def _minted(chain, found: dict) -> set:
+    """(name, module) for every reserved-name token comms may have minted: each row's,
+    each installed module's declared names, and each one the file store holds."""
+    pairs = {(name, row["module"]) for name, row in found.items() if row["module"]}
+    try:
+        declared = declared_names()
+    except Exception as e:                                       # noqa: BLE001
+        log.warning("the installed modules couldn't be read: %s", e)
+        declared = {}
+    pairs |= {(name, module) for module, names in declared.items() if names
+              for name in names}
+    from .tokens import TokenOwner
+
+    for step in getattr(chain, "steps", ()):
+        store = getattr(step, "store", None)
+        if store is None:
+            continue
+        try:
+            for holder in store.owners_present():
+                for key in store.secret_ids(TokenOwner(tuple(holder.split("/")))):
+                    if key.startswith(SECRET_PREFIX) and "/" not in holder:
+                        pairs.add((key[len(SECRET_PREFIX):], holder))
+        except Exception as e:                                   # noqa: BLE001
+            log.warning("the token store couldn't be listed: %s", e)
+    return pairs
 
 
 def renew(name: str, *, chain=None, env=None, target=None, clock=time.time) -> Result:
@@ -230,6 +274,8 @@ def renew(name: str, *, chain=None, env=None, target=None, clock=time.time) -> R
         if row is None or row["state"] != ACTIVE:
             raise KeyError(name)
         _mint(conn, chain, name, row["module"], clock, result, renew=True)
+    if not result.failed:
+        trace_send(row["module"], name, credential=False, sent=True)
     return result
 
 
@@ -446,6 +492,41 @@ def _free(conn, chain, name: str, module: str, clock, result: Result) -> None:
         log.warning("freed %s, but its token couldn't be removed: %s", name, e)
 
 
+# --------------------------------------------------------------------------- the trace
+
+def record_key(name: str) -> str:
+    """The key of the doctor record a send under `name` leaves when its process can't
+    use the token."""
+    return f"reserved-token-{name}"
+
+
+def trace_send(module: str, name: str, *, credential: bool, sent: bool) -> None:
+    """Leave or clear the doctor's record of a send under `name` for `module`.
+
+    The process that sends (a module's service, a timer) may read the credential chain
+    from a different context than the shell the doctor runs in, so the doctor can't see
+    the miss by reading the chain itself. A send refused for its credential records which
+    process found no usable token, and the record stays until a send under `name` works
+    again or `renew` mints a new one. Never raises: the send's own result is the
+    answer."""
+    import sys
+
+    from moxi import doctor
+
+    try:
+        if credential:
+            prog = os.path.basename(sys.argv[0]) if sys.argv and sys.argv[0] else "python"
+            doctor.record(MODULE, f"comms can't read the token for {name} from the "
+                          f"environment of {prog} (pid {os.getpid()}), where {module} "
+                          "sends under it; renew it from that environment if the shell "
+                          "you run this in reads it fine",
+                          key=record_key(name), fix=f"moxi comms reserved renew {name}")
+        elif sent:
+            doctor.clear(MODULE, record_key(name))
+    except Exception as e:                                       # noqa: BLE001
+        log.warning("the doctor's record for %s couldn't be written: %s", name, e)
+
+
 # --------------------------------------------------------------------------- the listener
 
 def on_install(module: str, found=None) -> None:
@@ -541,5 +622,5 @@ def token_rows(*, env=None, chain=None, context: str = "this process's") -> list
 
 __all__ = ["ACTIVE", "CONFLICT", "UNOWNED", "UNKNOWN", "SECRET_PREFIX", "Result",
            "declared_names", "doctor_rows", "lookup", "on_install", "on_uninstall",
-           "owner", "reconcile", "release_all", "renew", "rows", "secret_id", "token_hash",
-           "token_rows"]
+           "owner", "reconcile", "record_key", "release_all", "renew", "rows", "secret_id", "token_hash",
+           "token_rows", "trace_send"]

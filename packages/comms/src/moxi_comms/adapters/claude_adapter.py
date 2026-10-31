@@ -196,8 +196,10 @@ class ClaudeAdapter:
         return next((h for h in self.hands.values() if h.boundary), None)
 
     # ------------------------------------------------------------------ lifecycle
-    def start(self, *, tolerate_offline: bool = True) -> ClaudeAdapter:
-        """Bind (the shim's register, which needs no endpoint), then look and tick."""
+    def start(self, *, tolerate_offline: bool = False) -> ClaudeAdapter:
+        """Bind (the shim's register, which needs no endpoint), then look and tick. A
+        daemon that is not there raises, as any failed bind does, unless
+        `tolerate_offline` asks the shim to serve unbound until it returns."""
         self.shim.start(tolerate_offline=tolerate_offline)
         for target, name in ((self._look_loop, "look"), (self._idle_loop, "idle")):
             t = threading.Thread(target=target, daemon=True, name=f"comms-claude-{name}")
@@ -613,17 +615,17 @@ def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
     `claude` ends, close.
 
     `say(code, reason)` gives the wrapper its word (`adapters.word`): `BOUND` once the
-    bind has been tried (bound, or the daemon not there and the supervisor left to bind
-    when it returns) and the claim socket listens, so the wrapper can exec `claude`. A
-    bind the daemon refused (the name held by another session, or reserved) or failed is
-    said with the daemon's words, and the wrapper ends the launch before `claude`
-    starts."""
+    name is bound and the claim socket listens, so the wrapper can exec `claude`. A bind
+    the daemon refused (the name held by another session, or reserved) or failed, or a
+    daemon that is not there, is said with its reason, and the wrapper ends the launch
+    before `claude` starts. Once bound, the supervisor binds again whenever the daemon
+    comes back from an outage."""
     from .word import BOUND, exit_of, word_for
 
     say = say or (lambda code, reason="": None)
     adapter = ClaudeAdapter(shim, harness_pid, turns=turns)
     try:
-        adapter.start(tolerate_offline=True)
+        adapter.start()
     except Exception as e:                                  # noqa: BLE001
         log.warning("the launch of this session failed: %s", e)
         word = word_for(e)

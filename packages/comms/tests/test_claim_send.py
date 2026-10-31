@@ -218,7 +218,7 @@ def test_whoami_prints_the_claim_and_its_session(rig, world):
 
 def test_whoami_outside_any_session(rig):
     code, out = rig.cli(["whoami"])
-    assert code == 2 and "no claim socket" in out
+    assert code == 3 and "no claim socket" in out
 
 
 def test_whois_and_the_cache_caller_read_the_claim(rig, world, monkeypatch):
