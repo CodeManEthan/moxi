@@ -10,6 +10,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from moxi_dev.testing import wait_for
 from playwright.sync_api import expect
 
 import fixture_kit
@@ -119,6 +120,46 @@ def test_the_fixture_components_keep_the_contract_and_fit_a_phone(ui_page, ui_co
     ui_width_check(ui_page)
     ui_width_check(ui_page, module="fixture")
     ui_width_check(ui_page, module="ui", route="settings")
+
+
+def _pushed(page, held, without=()):
+    """Wait until the last push stream `page` asked for holds `held` and none of
+    `without`: the stream reopens a moment after a panel's components subscribe."""
+    def last():
+        urls = [r.url for r in page.requests() if "/m/ui/api/push?" in r.url]
+        return urls[-1] if urls else ""
+    wait_for(lambda: all(t in last() for t in held) and not any(t in last() for t in without),
+             10, interval=0.05, what=lambda: f"a push stream for {held}, not {without}: {last()}")
+
+
+@pytest.mark.browser
+def test_the_contract_check_counts_against_a_component_only_the_push_topics_it_adds(
+        ui_page, ui_component_check):
+    # The push channel is one stream for the page, reopened with every topic the page
+    # holds whenever a component subscribes. `elsewhere` stands for another module with a
+    # component on the page: its topics are no topic of the fixture's. The settings panel
+    # holds no fixture topic, so placing the fixture's block reopens the stream.
+    ui_page.evaluate("async () => (await import('/m/ui/client.js')).navigate('ui', 'settings')")
+    ui_page.evaluate("""async () => {
+      const {subscribe} = await import("/m/ui/client.js");
+      subscribe("elsewhere", "held", () => {});
+    }""")
+    _pushed(ui_page, ["elsewhere.held"], without=["fixture.count"])
+    check = ui_component_check(ui_page, "fixture", "block")
+    assert any("elsewhere.held" in url and "fixture.count" in url for url in check.requests)
+    # A foreign topic that comes with the placement is still the component's, and refused.
+    _pushed(ui_page, ["elsewhere.held"], without=["fixture.count"])
+    ui_page.evaluate("""async () => {
+      const {subscribe} = await import("/m/ui/client.js");
+      new MutationObserver((changes, observer) => {
+        if (changes.some((c) => [...c.addedNodes].some((n) => n.dataset?.moxiCheck))) {
+          observer.disconnect();
+          subscribe("elsewhere", "fresh", () => {});
+        }
+      }).observe(document.getElementById("moxi-panel"), {childList: true});
+    }""")
+    with pytest.raises(AssertionError, match=r"outside /m/fixture/: .*elsewhere\.fresh"):
+        ui_component_check(ui_page, "fixture", "block")
 
 
 @pytest.mark.browser

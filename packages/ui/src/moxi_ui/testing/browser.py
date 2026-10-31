@@ -170,15 +170,37 @@ def _settle(page: Any) -> None:
         page.context.remove_listener("request", seen)
 
 
-def _allowed(url: str, origin: str, modules: Sequence[str]) -> bool:
+def _topics(url: str) -> set[str]:
+    """The topics a push request asks for."""
+    joined = ",".join(parse_qs(urlsplit(url).query).get("topics", []))
+    return {topic for topic in joined.split(",") if topic}
+
+
+def _held(page: Any) -> set[str]:
+    """The topics `page`'s context already holds: those of the last push request each of
+    its pages made. Playwright keeps a page's recent requests from 1.56 on; with an older
+    one, or once the request has aged out of them, no topic counts as held."""
+    held: set[str] = set()
+    for each in page.context.pages:
+        recent = getattr(each, "requests", None)
+        if recent is None:
+            return set()
+        pushes = [request.url for request in recent()
+                  if urlsplit(request.url).path == PUSH_PATH]
+        if pushes:
+            held |= _topics(pushes[-1])
+    return held
+
+
+def _allowed(url: str, origin: str, modules: Sequence[str], held: set[str]) -> bool:
     parts = urlsplit(url)
     if f"{parts.scheme}://{parts.netloc}" != origin:
         return False
     if any(parts.path.startswith(f"/m/{module}/") for module in modules):
         return True
     if parts.path == PUSH_PATH:
-        topics = ",".join(parse_qs(parts.query).get("topics", [])).split(",")
-        return all(topic.split(".", 1)[0] in (*modules, "ui") for topic in topics if topic)
+        return all(topic in held or topic.split(".", 1)[0] in (*modules, "ui")
+                   for topic in _topics(url))
     return False
 
 
@@ -196,7 +218,9 @@ def check_component(page: Any, module: str, name: str,
     browser context made from the placement until it settled went to the shell's own
     origin, under `/m/<module>/` (or `/m/<m>/` for each `m` of `allow`, the modules whose
     components it places in turn), or to the push channel for `<module>`'s, `allow`'s
-    and the shell's own topics.
+    and the shell's own topics. The push channel is one stream for the whole page, which
+    reopens with every topic the page holds when a component subscribes, so a topic the
+    page held before the placement is not counted against the component.
 
     The component is removed after the check, unless `keep`, when `locator` is the
     element still in the page.
@@ -205,6 +229,7 @@ def check_component(page: Any, module: str, name: str,
     # Requests the page was already making (the shell placing its own blocks) are not
     # the component's.
     _settle(page)
+    held = _held(page)
     origin = page.evaluate("() => location.origin")
     mark = f"{module}.{name}.{time.monotonic_ns()}"
     requests: list[str] = []
@@ -247,7 +272,7 @@ def check_component(page: Any, module: str, name: str,
     finally:
         context.remove_listener("request", seen)
     modules = (module, *allow)
-    strays = [url for url in requests if not _allowed(url, origin, modules)]
+    strays = [url for url in requests if not _allowed(url, origin, modules, held)]
     if strays:
         if not keep:
             page.evaluate(_JS_REMOVE, mark)
