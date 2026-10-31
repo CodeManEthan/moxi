@@ -397,8 +397,7 @@ def test_teardown_with_nothing_indexed_clears_the_ledger(demo, capsys):
     assert _records.ledger() == {} and doctor_records() == {}
 
 
-def test_a_repo_teardown_cannot_clean_stops_the_uninstall_and_keeps_its_records(
-        demo, capsys):
+def _two_with_records(demo):
     alpha, beta = demo.repo("alpha-notes"), demo.repo("beta-code")
     for r in (alpha, beta):
         api.add(r, ["demo/lint"])
@@ -406,16 +405,53 @@ def test_a_repo_teardown_cannot_clean_stops_the_uninstall_and_keeps_its_records(
     for r in (alpha, beta):
         change(r)
         commit(r)
+    return alpha, beta
+
+
+def test_a_repo_teardown_cannot_read_stops_the_uninstall_before_anything_is_removed(
+        demo, capsys):
+    alpha, beta = _two_with_records(demo)
+    before = ours_in_config(beta)
     config = alpha / ".git" / "config"
     config.write_text(config.read_text(encoding="utf-8") + "[broken\n", encoding="utf-8")
     capsys.readouterr()
     assert repo_install.teardown() == 1
     out, err = capsys.readouterr()
-    assert f"removed repo's git hooks from {beta}" in out
+    assert out == ""
     assert err.startswith(f"repo: {alpha}: ") and "bad config line" in err
-    assert "run moxi uninstall repo again" in err
-    assert set(api.indexed()) == {gitconf.key_of(alpha / ".git")}
-    assert set(_records.ledger()) == {_records.piece_key(alpha / ".git", "demo/lint")}
+    assert "so repo can't clean it" in err
+    assert err.splitlines()[-1] == ("repo: fix the problem above and run moxi uninstall "
+                                    "repo again")
+    # beta, which git can read, was left as it was too.
+    assert ours_in_config(beta) == before and before
+    assert set(api.indexed()) == {gitconf.key_of(r / ".git") for r in (alpha, beta)}
+    assert set(_records.ledger()) == {_records.piece_key(r / ".git", "demo/lint")
+                                      for r in (alpha, beta)}
+
+
+def test_a_step_that_fails_once_removing_began_stops_there_and_names_the_repos_cleaned(
+        demo, capsys):
+    alpha, beta = _two_with_records(demo)
+    real = gitconf.remove_all
+
+    def remove_all(repo, state=None):
+        if repo.root == beta:
+            raise gitconf.GitError("git config could not remove section moxi-repo: locked")
+        return real(repo, state)
+
+    demo.mp.setattr(gitconf, "remove_all", remove_all)
+    capsys.readouterr()
+    assert repo_install.teardown() == 1
+    out, err = capsys.readouterr()
+    assert out == f"removed repo's git hooks from {alpha}\n"
+    assert err.startswith(f"repo: {beta}: git config could not remove section")
+    assert "repo stopped there" in err
+    last = err.splitlines()[-1]
+    assert last.startswith("repo: already cleaned and dropped from the index")
+    assert last.endswith(f": {alpha}")
+    assert ours_in_config(alpha) == ""
+    assert set(api.indexed()) == {gitconf.key_of(beta / ".git")}
+    assert set(_records.ledger()) == {_records.piece_key(beta / ".git", "demo/lint")}
 
 
 def test_an_unreadable_index_fails_the_teardown(demo, capsys):

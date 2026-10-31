@@ -48,7 +48,9 @@ def setup() -> int:
 def teardown() -> int:
     """Take out of every indexed repo what repo wrote there, and clear repo's doctor
     records; prints what it did. 0 when every repo was cleaned; 1, with the reason, when
-    the index can't be read or a repo couldn't be cleaned, which stops the uninstall."""
+    the index can't be read or a repo couldn't be cleaned, which stops the uninstall. When
+    a repo couldn't be read, nothing was removed; when a step failed after removing began,
+    the last line names the repos already cleaned."""
     from moxi_repo import api
     from moxi_repo.cli import print_report
 
@@ -58,6 +60,10 @@ def teardown() -> int:
         return _failed(exc)
     if print_report(report):
         print("repo: fix the problem above and run moxi uninstall repo again", file=sys.stderr)
+        if report.cleaned:
+            print("repo: already cleaned and dropped from the index, so their pieces no "
+                  "longer run (add them again with moxi repo git-hooks add PATH PIECE to "
+                  "keep them): " + ", ".join(report.cleaned), file=sys.stderr)
         return 1
     return 0
 

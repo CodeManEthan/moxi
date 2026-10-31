@@ -734,36 +734,65 @@ def chain_holders(repo: Repo) -> list[tuple[str, Path]]:
     return out
 
 
-def teardown() -> Report:
+class Teardown(Report):
+    """`teardown`'s report, which also names each repo it cleaned."""
+
+    __slots__ = ("cleaned",)
+
+    def __init__(self) -> None:
+        super().__init__()
+        #: The root of each repo whose git hooks it removed and that it dropped from the
+        #: index.
+        self.cleaned: list[str] = []
+
+
+def teardown() -> Teardown:
     """What repo's own uninstall does: for every indexed repo, what `remove PATH` does (its
     sections, entries, shims with each `.local` moved back, the launcher and
     `<common git dir>/moxi-repo/`), naming each git hook file that still holds a chain line
     for the user to delete; an indexed path that is no longer a repo is dropped from the
-    index with one line. Then every doctor record repo has open is cleared, unless a repo
-    couldn't be cleaned: then that repo stays indexed with its records, and the report
-    names it. Raises `IndexUnreadable` when the index can't be read."""
-    report = Report()
-    held: list[tuple[str, Path]] = []
+    index with one line. Then every doctor record repo has open is cleared.
+
+    It first opens and reads every indexed repo, and when one can't be read (a config git
+    can't read, say) it removes nothing and the report names that repo. A step that still
+    fails once removing began stops it there: that repo and the rest stay indexed with
+    their records, and the report's `cleaned` names the repos already cleaned. Raises
+    `IndexUnreadable` when the index can't be read."""
+    report = Teardown()
+    plan: list[tuple[str, dict, Repo | None, str | None, gitconf.State | None,
+                     list[tuple[str, Path]]]] = []
     for key, entry, repo, why in indexed_repos():
         if repo is None:
             problem = _unreadable_repo(key, entry)
             if problem:
                 report.problems.append(f"{problem}, so repo can't clean it")
-                continue
-            _records.close_repo(entry.get("common_dir") or key)
-            _index_drop(key)
-            report.lines.append(f"dropped {entry.get('root') or key} from the index: {why}")
+            else:
+                plan.append((key, entry, None, why, None, []))
             continue
         try:
-            state = gitconf.read(repo)
-            found = chain_holders(repo)
-            report.lines += gitconf.remove_all(repo, state)
+            plan.append((key, entry, repo, None, gitconf.read(repo), chain_holders(repo)))
         except (gitconf.GitError, OSError) as exc:
-            report.problems.append(f"{repo.root}: {exc}")
-            continue
-        _records.close_repo(repo.common_dir)
-        _index_drop(key)
-        report.lines.append(f"removed repo's git hooks from {repo.root}")
+            report.problems.append(f"{repo.root}: {exc}, so repo can't clean it")
+    if not report.ok:
+        return report
+    held: list[tuple[str, Path]] = []
+    for key, entry, repo, why, state, found in plan:
+        root = str(repo.root) if repo is not None else entry.get("root") or key
+        try:
+            if repo is None:
+                _records.close_repo(entry.get("common_dir") or key)
+                _index_drop(key)
+                report.lines.append(f"dropped {root} from the index: {why}")
+                continue
+            report.lines += gitconf.remove_all(repo, state)
+            _records.close_repo(repo.common_dir)
+            _index_drop(key)
+        except (gitconf.GitError, OSError, IndexUnreadable) as exc:
+            report.problems.append(f"{root}: {exc}; repo stopped there, so it and the "
+                                   "repos after it are left as they are")
+            break
+        report.lines.append(f"removed repo's git hooks from {root}")
+        report.cleaned.append(root)
         held += found
     for event, hook in held:
         report.lines.append(f"{hook} still holds repo's chain line for {event}, which does "
@@ -1000,4 +1029,4 @@ __all__ = ["Failure", "Usage", "Refused", "Busy", "IndexUnreadable", "Report", "
            "available", "add", "remove", "enable", "disable", "refresh", "status",
            "indexed", "indexed_repos", "open_indexed", "default_mode", "everywhere", "specs",
            "forget_spec", "module_of", "install_module", "uninstall_module",
-           "chain_holders", "teardown"]
+           "chain_holders", "teardown", "Teardown"]
