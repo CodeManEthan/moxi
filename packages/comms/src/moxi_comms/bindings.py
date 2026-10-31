@@ -114,7 +114,8 @@ class BindingHistory:
         fence records that the interval ENDED without witnessing the release (`fenced=1`)
         rather than pretending the binding ran to now.
 
-        A fenced row records only that the daemon did not witness a clean release.
+        A fenced row records only that the daemon did not witness a clean release. A
+        reserved name's interval is no binding a daemon held, and stays open.
         """
         with self._lock:
             if self._conn is None:
@@ -124,7 +125,7 @@ class BindingHistory:
                 with transaction(self._conn) as conn:
                     cur = conn.execute(
                         "UPDATE bindings SET released_at = ?, fenced = 1 "
-                        "WHERE released_at IS NULL", (marker,))
+                        "WHERE released_at IS NULL AND kind = 'session'", (marker,))
             except sqlite3.Error:
                 log.exception("boot fence failed; dangling custody intervals remain open")
                 return 0

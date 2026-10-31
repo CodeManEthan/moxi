@@ -49,6 +49,11 @@ moxi-comms-provision = "moxi_comms.provision:main"
 [project.entry-points."moxi.modules"]
 comms = "moxi_comms.module"
 
+# comms reserves the send-only names each module declares when it installs, and frees
+# them when it is uninstalled.
+[project.entry-points."moxi.installs"]
+comms = "moxi_comms.reserved"
+
 # comms' listener: turns asks it at a session's start and at each prompt for the context
 # comms adds (layer one, the roster and its deltas).
 [project.entry-points."moxi.turns.listeners"]

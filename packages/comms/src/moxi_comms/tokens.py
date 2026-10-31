@@ -376,6 +376,25 @@ class TokenStore:
         log.info("token store: wrote %s [%s]", path, key)   # the PATH and the KEY; never
         return path                                         # the value
 
+    def delete_secret(self, owner: TokenOwner, secret_id: str) -> bool:
+        """Remove one key from one holder's file, leaving its other keys: True when the
+        holder had it. The file goes when it holds nothing else."""
+        key = _secret_id(secret_id)
+        path = self.path_for(owner)
+        entries = self._entries_for(owner, writing=True)
+        if not entries or key not in entries:
+            return False
+        entries = dict(entries)
+        del entries[key]
+        if not entries:
+            path.unlink(missing_ok=True)
+        else:
+            from moxi import files
+
+            files.atomic_write(path, _emit(entries), mode=FILE_MODE)
+        log.info("token store: removed [%s] from %s", key, path)
+        return True
+
     def _mkdirs(self, directory: Path) -> None:
         root = self.root
         root.mkdir(mode=DIR_MODE, parents=True, exist_ok=True)

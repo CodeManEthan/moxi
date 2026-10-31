@@ -110,6 +110,17 @@ class Resolver:
     def get(self, secret_id: str, *, owner=None) -> dict | None:
         raise NotImplementedError
 
+    def put(self, secret_id: str, value: str, *, owner) -> bool:
+        """Write `value` under `secret_id` for `owner`: True when this step took it,
+        False when this step can't be written (the chain then tries the next one).
+        Raises `SecretStepFailed` when the write broke."""
+        return False
+
+    def delete(self, secret_id: str, *, owner) -> bool:
+        """Remove `secret_id` for `owner` from this step: True when it held it. Raises
+        `SecretStepFailed` when the step broke."""
+        return False
+
 
 class EnvResolver(Resolver):
     """Step 1: `MOXI_COMMS_SECRET_<KEY>` out of the injected environment. No note."""
@@ -168,6 +179,28 @@ class StoreResolver(Resolver):
         log.info("secret %s: resolved from the token store", secret_id)   # never which
         return {"value": value, "note": ""}
 
+    def put(self, secret_id: str, value: str, *, owner) -> bool:
+        from .tokens import TokenStoreError
+
+        try:
+            self.store.write_secret(owner, secret_id, value)
+        except TokenStoreError as e:
+            raise SecretStepFailed(f"cannot write {secret_id}: the token store step "
+                                   f"failed. {e}") from None
+        except OSError as e:
+            raise SecretStepFailed(f"cannot write {secret_id}: the token store step "
+                                   f"failed ({e.strerror or e}).") from None
+        return True
+
+    def delete(self, secret_id: str, *, owner) -> bool:
+        from .tokens import TokenStoreError
+
+        try:
+            return self.store.delete_secret(owner, secret_id)
+        except (TokenStoreError, OSError) as e:
+            raise SecretStepFailed(f"cannot remove {secret_id}: the token store step "
+                                   f"failed. {e}") from None
+
 
 class Chain(Resolver):
     """The steps in declared order. The only thing the backends hold."""
@@ -193,6 +226,31 @@ class Chain(Resolver):
                 return found
         raise SecretNotFound(_not_found(secret_id, owner, tried,
                                         STEP_STORE in self.names))
+
+    def put(self, secret_id: str, value: str, *, owner) -> str:
+        """Write `value` into the first step that takes it, and answer that step's name.
+        Raises `SecretStepFailed` when that step broke, and `SecretError` when no step
+        can be written."""
+        for step in self.steps:
+            if step.put(secret_id, value, owner=owner):
+                log.info("secret %s: written to the %s step", secret_id, step.name)
+                return step.name
+        raise SecretError(f"cannot write {secret_id}: no step of the credential chain "
+                          f"({', '.join(self.names) or 'none'}) can be written.")
+
+    def delete(self, secret_id: str, *, owner) -> list[str]:
+        """Remove `secret_id` for `owner` from every step that holds it; the names of
+        those steps. A step that breaks raises `SecretStepFailed` after the others ran."""
+        removed, failed = [], None
+        for step in self.steps:
+            try:
+                if step.delete(secret_id, owner=owner):
+                    removed.append(step.name)
+            except SecretStepFailed as e:
+                failed = failed or e
+        if failed is not None:
+            raise failed
+        return removed
 
 
 def _not_found(secret_id, owner, tried, has_store) -> str:

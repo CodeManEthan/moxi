@@ -610,6 +610,10 @@ class Daemon:
             if fenced:
                 log.warning("boot fence: closed %d custody interval(s) left open by a "
                             "daemon that did not shut down cleanly", fenced)
+        # boot: the reserved names, brought in line with what the installed modules
+        # declare, which catches a module installed before comms and a store restored
+        # from a backup. A failure is logged; the names stay as they were.
+        self._reconcile_reserved()
         # boot: the delivery books, fenced BEFORE any method is answered: every row a
         # binding of the last daemon held (handed, or in a digest whose turn never
         # reported) waits again, and every digest it left open ends `fenced`. Then the
@@ -649,6 +653,17 @@ class Daemon:
             self._hold_routed()
         if self._start_trim_thread:
             self._spawn(self._trim_loop)
+
+    def _reconcile_reserved(self) -> None:
+        from . import reserved
+
+        try:
+            result = reserved.reconcile(target=Path(self.db_path))
+        except Exception:                                        # noqa: BLE001
+            log.exception("reserved names: the reconcile at start failed")
+            return
+        for line in result.lines:
+            log.info("reserved names: %s", line)
 
     def _spawn(self, target) -> None:
         t = threading.Thread(target=target, daemon=True)
