@@ -174,18 +174,6 @@ def test_a_launch_request_takes_every_settable_catalog_key_and_no_other():
     assert (status, said) == (400, {"error": "unknown key: values.nope"})
 
 
-@pytest.mark.parametrize("method,path,body", [
-    ("POST", "/api/resume", {"session": SID}),
-])
-def test_a_route_not_answered_yet_is_refused_cleanly(method, path, body):
-    if method == "GET":
-        status, said, _ = get(path)
-    else:
-        status, said = post(path, body)
-    assert status == 422
-    assert said == {"refused": f"this version of the launcher's page does not answer {path} yet"}
-
-
 # --- /api/catalog -------------------------------------------------------------------------
 
 def catalog_answer() -> dict[str, list[dict]]:

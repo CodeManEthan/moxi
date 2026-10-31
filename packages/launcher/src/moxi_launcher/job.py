@@ -82,9 +82,13 @@ no directory, project or scratch is refused `no-cwd` (it would start in the job'
 directory), and one whose target is `terminal` is refused, since there is no terminal to
 run it in. A refusal before the launch row is written is recorded as a `launch-refused`
 event under the request id, with its `code`, `row`, `problem` and `hint`, which the page
-reads back; after the row is written, the row says what happened. This version refuses the
-`resume` act. The job deletes the request file when it ends, whatever the end; the run-file
-sweep takes one a job left behind.
+reads back; after the row is written, the row says what happened. For `resume` the job
+runs `resume.resume` for the session the file names, with the request id as the new
+launch's, so a retry never launches twice, bounded the same way; it runs only a resume into
+a slot, and refuses one whose launch turns out to be in a terminal, since that would take
+the job's place. Its refusals before the row are recorded as a launch's are. The job
+deletes the request file when it ends, whatever the end; the run-file sweep takes one a
+job left behind.
 """
 
 from __future__ import annotations
@@ -991,6 +995,34 @@ def launch_request(request_id: str, data: Mapping[str, Any]):
                              request_id=request_id)
 
 
+def resume_request(request_id: str, data: Mapping[str, Any], *,
+                   launch: Callable[..., Any] | None = None):
+    """Resume the session a request file names, into a slot, as the launch `request_id`
+    (`resume.resume`), and return its `Result`. Raises `resume`'s refusals, and `not-run`
+    when the launch it resumes ran in a terminal or the file names no session. `launch`
+    stands in for `api.launch`."""
+    from . import api, resume
+
+    session = data.get("session")
+    if not isinstance(session, str) or not session.strip():
+        raise NotHere(None, f"the page's request for launch {request_id} names no session "
+                            "to resume", "resume the session from the page again")
+    slot = data.get("slot")
+    slot = slot.strip() if isinstance(slot, str) and slot.strip() else None
+    go = launch or api.launch
+
+    def in_slot(request, **kw: Any) -> Any:
+        # The launch replayed is the one checked: a terminal resume would become the job.
+        if request.row.target != "slot":
+            raise NotHere("target", f"launch {request.row.request_id} ran in its "
+                                    f"{request.row.target}, and the page resumes only a "
+                                    "slot launch",
+                          f"run moxi launcher resume {session} in a terminal of your own")
+        return go(request, **kw)
+
+    return resume.resume(session.strip(), slot=slot, request_id=request_id, launch=in_slot)
+
+
 def placed(request, env: Mapping[str, str] | None = None):
     """`request`'s values resolved (`presets.resolve`), refused `no-cwd` when no layer of
     them names where the session starts: a page launch has no caller's directory to fall
@@ -1050,9 +1082,10 @@ def record_refused(request_id: str, detail: Mapping[str, Any]) -> bool:
 
 def run_request(request_id: str, *, wait_s: float | None = None,
                 launch: Callable[..., Any] | None = None) -> str:
-    """Run the page's request file for `request_id` to its end, and return its outcome:
-    the launch row's state, `refused` (recorded before the row), or `timed-out` (the
-    launch passed `page.launch_wait_s`). The request file is deleted at the end."""
+    """Run the page's request file for `request_id` to its end, a launch or a resume, and
+    return its outcome: the launch row's state, `refused` (recorded before the row), or
+    `timed-out` (it passed `page.launch_wait_s`). The request file is deleted at the end.
+    `launch` stands in for `api.launch`."""
     from . import api, settings
 
     path = targets.request_file(request_id)
@@ -1067,12 +1100,10 @@ def run_request(request_id: str, *, wait_s: float | None = None,
                 None, f"the page's request for launch {request_id} could not be read",
                 "preview the launch again and launch it")))
             return "refused"
-        if act != "launch":
-            words = ("resuming from the page is not run by this version of the launcher"
-                     if act == "resume" else f"the page's request names no act it runs "
-                                             f"({act!r})")
+        if act not in ACTS:
             record_refused(request_id, refused_detail(NotHere(
-                None, words, "resume it with moxi launcher resume")))
+                None, f"the page's request names no act it runs ({act!r})",
+                "preview the launch again and launch it")))
             return "refused"
         if wait_s is None:
             wait_s = float(settings.current()["page.launch_wait_s"])
@@ -1081,33 +1112,37 @@ def run_request(request_id: str, *, wait_s: float | None = None,
 
         def start() -> None:
             try:
+                if act == "resume":
+                    done["state"] = resume_request(request_id, data,
+                                                   launch=launch).data["state"]
+                    return
                 request = launch_request(request_id, data)
                 resolved = placed(request)
                 if resolved.target == "terminal":
                     raise NotHere("target", "a launch in a terminal is not run from the page",
                                   "run its command in a terminal of your own")
-                done["result"] = go(request)
+                done["state"] = go(request).state
             except BaseException as error:  # noqa: BLE001  (each end is recorded)
                 done["error"] = error
 
-        worker = threading.Thread(target=start, name=f"launch {request_id}", daemon=True)
+        worker = threading.Thread(target=start, name=f"{act} {request_id}", daemon=True)
         worker.start()
         worker.join(wait_s)
         if worker.is_alive():
-            log.warning("launch %s passed page.launch_wait_s (%s s)", request_id, wait_s)
+            log.warning("%s %s passed page.launch_wait_s (%s s)", act, request_id, wait_s)
             record_refused(request_id, {
                 "code": "timed-out", "row": None,
-                "problem": f"the launch did not finish within page.launch_wait_s "
+                "problem": f"the {act} did not finish within page.launch_wait_s "
                            f"({wait_s:g} s)",
                 "hint": "look at moxi launcher log, then try again"})
             return "timed-out"
         if "error" in done:
             detail = refused_detail(done["error"])
             if detail["code"] == "error":
-                log.error("launch %s failed", request_id, exc_info=done["error"])
+                log.error("%s %s failed", act, request_id, exc_info=done["error"])
             record_refused(request_id, detail)
             return "refused"
-        return str(done["result"].state)
+        return str(done["state"])
     finally:
         with suppress(OSError):
             path.unlink()
@@ -1167,7 +1202,7 @@ __all__ = ["ACTED", "ACTS", "ASKS", "DONE", "GONE", "JOBS", "KINDS", "LAUNCHED",
            "TRANSIENT", "UNEXPECTED_JOB", "Choice", "CompactJob", "Ended", "NoPlace",
            "NotHere", "RelaunchJob", "RepairJob", "chain_of", "choose_slot", "gone",
            "job_name", "launch_request", "main", "placed", "record_refused", "refused_detail",
-           "repairable", "root_run", "run", "run_request", "write_request"]
+           "repairable", "resume_request", "root_run", "run", "run_request", "write_request"]
 
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())

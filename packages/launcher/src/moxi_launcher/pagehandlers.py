@@ -47,14 +47,23 @@ request is refused `bad-ticket`, an old one `expired`. It writes the request fil
 the refusal the job recorded before it. A ticket used a second time is a 409, whether its
 request file is still there or the launch log already knows its id.
 
+`/api/resume` takes a session id, and a slot in place of the launch's own. It answers the
+refusals a resume meets before anything runs, as `moxi launcher resume` words them: no
+launch holds the id, the launch ran headless (nothing to resume it into), it has no session
+id, its harness is no longer launched, its session is live now (liveness read at the call),
+or its liveness can't be read. A launch that ran in a terminal is not resumed here: the
+answer is the `moxi launcher resume <id>` command to copy, since run here it would take the
+server's place. A slot launch is resumed by the same detached job as a launch: a request
+file whose act is `resume`, under a new request id that becomes the new launch's, and a 202
+with the status path holding that id. What the resume meets later (an open run, a slot
+slots won't give, another resume of the session starting first) the job records as it
+records a launch's refusal.
+
 A handler cuts each answer to its route's declared keys, and turns any failure it did not
 expect into `state` `error` with a fixed `detail` naming only the exception's class, so no
 message text, which may hold a path, reaches the browser. The class and its traceback are
 logged once. A query the read can't take (a `before` that is not a time, a `limit` under
 1, `request` with paging) is refused (422) with what to send instead.
-
-A route the page declares whose handler this version does not have yet answers 422, saying
-so, and runs nothing.
 
 Like `page`, this module reaches loopback only through `moxi.modules.load`.
 """
@@ -84,7 +93,8 @@ from moxi import store as core_store
 from moxi.config import ConfigError
 from moxi.paths import Layout
 
-from . import api, catalog, job, presets, settings, slots, state, store, target, targets
+from . import api, catalog, first, job, presets, settings, slots, state, store, target, targets
+from . import resume as resuming
 from .compose import common
 from .page import LAUNCH, LIMIT, RUN
 from .resume import sessions as past_sessions
@@ -865,11 +875,18 @@ def preview(call: Any) -> dict[str, Any]:
 
 #: The 409 of a ticket used a second time.
 USED = "the ticket for launch {} was used already; preview the launch again to launch it again"
+#: The 409 of a resume's request id used a second time.
+RESUME_USED = ("the request for launch {} was used already; resume the session from the page "
+               "again")
 #: The status path a page launch's 202 points to.
 STATUS = "/api/launches?request={}"
 
 # The call the launch job is started through, named here so a test can stand in for it.
 _spawn = proc.spawn
+
+
+def _new_request_id() -> str:
+    return str(uuid.uuid4())
 
 
 def _known(request_id: str) -> bool:
@@ -904,16 +921,23 @@ def launched(body: Mapping[str, Any]) -> Any:
                             "problem": "a launch in a terminal is not run by the page",
                             "hint": "run its command in a terminal of your own"},
                 "command": _command(words)}
-    data = {"act": "launch", "request_id": request_id, "seat": request.seat,
-            "project_preset": request.project_preset, "typed": dict(request.typed),
-            "extra": list(request.extra), "off_posture": request.off_posture}
+    return _run_job(request_id, {
+        "act": "launch", "request_id": request_id, "seat": request.seat,
+        "project_preset": request.project_preset, "typed": dict(request.typed),
+        "extra": list(request.extra), "off_posture": request.off_posture})
+
+
+def _run_job(request_id: str, data: Mapping[str, Any], used: str = USED) -> Any:
+    """Write `data` as `request_id`'s request file and start the launch job on it: 202
+    with the status path, a refusal when the job did not start, or a 409 when the request
+    id was used already (its file is there, or the launch log knows it)."""
     try:
         path = job.write_request(request_id, data)
     except FileExistsError:
-        raise lb.Conflict(USED.format(request_id)) from None
+        raise lb.Conflict(used.format(request_id)) from None
     if _known(request_id):
         path.unlink(missing_ok=True)
-        raise lb.Conflict(USED.format(request_id))
+        raise lb.Conflict(used.format(request_id))
     try:
         _start_job(request_id)
     except Exception as err:
@@ -939,23 +963,68 @@ def launch(call: Any) -> Any:
                     "command": None}
 
 
-# -- the routes still to come ----------------------------------------------------------------
+# -- /api/resume ----------------------------------------------------------------------------
 
 
-def _not_yet(route: str) -> Callable[[Any], Any]:
-    def handler(call: Any) -> Any:
-        raise lb.Refused(f"this version of the launcher's page does not answer {route} yet")
+def resumable(session: str) -> store.LaunchRow:
+    """The launch the session id `session` belongs to, when a resume of it may go ahead.
+    Raises the refusal it meets before anything runs: `not-launched`, or `resume`'s own,
+    whatever the session's state (`headless` among them) and then its liveness, read now."""
+    with _store() as conn:
+        row = None if conn is None else store.resolve(conn, session)
+    if row is None:
+        raise target.NotLaunched()
+    newest = row.newest_session_id or row.session_id
+    refused = resuming.static_refusal(row, newest)
+    if refused is None:
+        live, unread = resuming.liveness(row, newest, first.turns_api(quiet=True))
+        refused = resuming.live_refusal(row, newest, live, unread)
+    if refused is not None:
+        raise refused
+    return row
 
-    handler.__name__ = handler.__qualname__ = route.rsplit("/", 1)[-1]
-    return handler
+
+def resumed(body: Mapping[str, Any]) -> Any:
+    """What `/api/resume` answers for the page's `body`: a refusal, the command to copy
+    for a launch that ran in a terminal, or, for a slot launch, 202 with the status path
+    once the job that resumes it is started."""
+    session = str(body.get("session") or "").strip()
+    slot = str(body.get("slot") or "").strip() or None
+    try:
+        row = resumable(session)
+    except REFUSALS as error:
+        return {"refused": _refusal(error), "command": None}
+    if row.target != "slot":
+        if slot is not None:
+            return {"refused": {"code": "bad-value", "row": "slot",
+                                "problem": f"launch {row.request_id} ran in its {row.target}, "
+                                           "and only a slot launch resumes in a slot",
+                                "hint": "resume it without a slot"},
+                    "command": None}
+        return {"refused": None,
+                "command": _command(["moxi", "launcher", "resume", session])}
+    request_id = _new_request_id()
+    return _run_job(request_id, {"act": "resume", "request_id": request_id,
+                                 "session": session, "slot": slot}, used=RESUME_USED)
 
 
-resume = _not_yet("/api/resume")
+def resume(call: Any) -> Any:
+    """`POST /api/resume`: a past session resumed. A slot launch's resume runs in a
+    detached launch job (202); a terminal launch's is answered with the command to copy."""
+    with call.busy("resume"):
+        try:
+            return resumed(call.body)
+        except (lb.Conflict, lb.Refused):
+            raise
+        except Exception as err:
+            return {"refused": _unexpected(err, "a resume from the page failed"),
+                    "command": None}
 
-__all__ = ["EVENT_TEXT", "KEY_BYTES", "KEY_FILE", "NOT_ON_PATH", "REFUSALS", "REGATHER", "STATUS",
-           "TICK", "TOPICS", "UNEXPECTED", "UNREADABLE", "USED", "WITHHELD", "alive", "canonical",
-           "events", "field", "fields", "gather_launches", "gather_sessions", "launch",
-           "launch_request", "launch_row", "launched", "launches", "live", "live_states", "on_path",
-           "page_key", "preview", "previewed", "read_catalog", "read_launches", "read_presets",
-           "read_runs", "read_sessions", "read_state", "refusal", "resume", "run_entry",
+__all__ = ["EVENT_TEXT", "KEY_BYTES", "KEY_FILE", "NOT_ON_PATH", "REFUSALS", "REGATHER",
+           "RESUME_USED", "STATUS", "TICK", "TOPICS", "UNEXPECTED", "UNREADABLE", "USED",
+           "WITHHELD", "alive", "canonical", "events", "field", "fields", "gather_launches",
+           "gather_sessions", "launch", "launch_request", "launch_row", "launched", "launches",
+           "live", "live_states", "on_path", "page_key", "preview", "previewed",
+           "read_catalog", "read_launches", "read_presets", "read_runs", "read_sessions",
+           "read_state", "refusal", "resumable", "resume", "resumed", "run_entry",
            "session_state", "spelled", "ticket", "tokens", "unreadable", "verify"]

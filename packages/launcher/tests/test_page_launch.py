@@ -445,14 +445,6 @@ def test_a_launch_past_its_wait_is_recorded_timed_out(work):
     assert not path.exists()
 
 
-def test_the_resume_act_is_refused_by_this_version():
-    path = request_file(act="resume")
-    assert job.run_request("r1") == "refused"
-    refused = requested("r1")["refused"]
-    assert refused["code"] == "not-run" and "resum" in refused["problem"]
-    assert not path.exists()
-
-
 def test_a_request_file_that_cant_be_read_is_recorded(monkeypatch):
     path = targets.request_file("r1")
     path.parent.mkdir(parents=True)
