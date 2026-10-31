@@ -22,7 +22,7 @@ from moxi_loopback.check import proof, upstream
 from moxi_loopback.runtime import RuntimeInfo
 from moxi_loopback.serve import serve
 from moxi_loopback.server import app, guard, prove
-from moxi_loopback.transport import bind_tcp, bind_unix, call
+from moxi_loopback.transport import bind_browser, bind_tcp, bind_unix, call
 
 posix = pytest.mark.skipif(sys.platform == "win32", reason="Unix sockets")
 
@@ -301,13 +301,97 @@ def test_the_config_passes_the_head_limit_only_when_it_is_set(monkeypatch):
     asyncio.run(once(head_limit=4 * MiB))
     assert "h11_max_incomplete_event_size" not in configs[0]
     assert configs[1]["h11_max_incomplete_event_size"] == 4 * MiB
+    from uvicorn.protocols.http.h11_impl import H11Protocol
+
     for config in configs:
-        assert config["http"] == "h11" and config["ws"] == "none"
+        assert issubclass(config["http"], H11Protocol) and config["ws"] == "none"
         assert config["lifespan"] == "off" and config["proxy_headers"] is False
         assert config["server_header"] is False and config["date_header"] is False
         assert config["log_config"] is None and config["access_log"] is False
         assert config["limit_concurrency"] == 128
         assert config["timeout_graceful_shutdown"] == 2
+
+
+# --- TCP_NODELAY on every accepted TCP connection --------------------------------------
+
+
+def _has_ipv6_loopback():
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as probe:
+            probe.bind(("::1", 0))
+    except OSError:
+        return False
+    return True
+
+
+ipv6 = pytest.mark.skipif(not _has_ipv6_loopback(), reason="this system has no IPv6 loopback")
+
+
+def bound_v4():
+    return bind_tcp(0)
+
+
+def bound_v6():
+    v4, v6 = bind_browser(0).sockets
+    v4.close()
+    return v6
+
+
+def inherited(proto=None):
+    """A listener bound outside loopback and passed in by descriptor, wrapped as the ui
+    shell wraps systemd's and launchd's: `socket.socket(fileno=fd)`. Linux reads the
+    protocol back from the descriptor; `proto=0` gives the socket a system that can't,
+    as macOS may, hands back."""
+    outside = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    outside.bind(("127.0.0.1", 0))
+    outside.listen()
+    fd = outside.detach()
+    if proto is None:
+        return socket.socket(fileno=fd)
+    return socket.socket(socket.AF_INET, socket.SOCK_STREAM, proto, fileno=fd)
+
+
+def accepted_nodelay(served, server):
+    """`TCP_NODELAY` on each connection the server holds, read on its own loop."""
+    async def read():
+        return [connection.transport.get_extra_info("socket").getsockopt(
+                    socket.IPPROTO_TCP, socket.TCP_NODELAY)
+                for connection in server.server_state.connections]
+    return asyncio.run_coroutine_threadsafe(read(), served.loop).result(5)
+
+
+def assert_nodelay(sock, **kwargs):
+    address = sock.getsockname()[:2]
+    servers = []
+    served = Served(reaching_app([]), [sock], inner=True, on_server=servers.append, **kwargs)
+    try:
+        conn = raw_connect(address)
+        try:
+            conn.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            assert read_head(conn)[0] == 200
+            flags = accepted_nodelay(served, servers[0])
+            assert len(flags) == 1 and flags[0], "the accepted connection keeps Nagle on"
+        finally:
+            conn.close()
+    finally:
+        served.stop()
+
+
+@pytest.mark.parametrize("listener", [
+    pytest.param(bound_v4, id="bound-127.0.0.1"),
+    pytest.param(bound_v6, id="bound-::1", marks=ipv6),
+    pytest.param(inherited, id="inherited"),
+    pytest.param(lambda: inherited(proto=0), id="inherited-protocol-0"),
+])
+def test_every_accepted_tcp_connection_has_nodelay_on(listener):
+    assert_nodelay(listener())
+
+
+def test_the_runners_protocol_turns_nodelay_on_too(pages):
+    stop = serve_mod._Stop(logging.getLogger("test.stop"), end=lambda code: None,
+                           exit_deadline=60)
+    stop.activity = app(asgi_kit.make_page(), module="lbtest", server_id=SERVER_ID).activity
+    assert_nodelay(inherited(proto=0), http=serve_mod._protocol_class(stop))
 
 
 # --- the one decision -----------------------------------------------------------------
