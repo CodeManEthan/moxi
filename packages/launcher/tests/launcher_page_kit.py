@@ -110,6 +110,15 @@ def seed(shell: Any, request_id: str, *, target: str = "slot", live: bool = Fals
     return sid
 
 
+def learned(shell: Any, request_id: str, source: str = "clear") -> str:
+    """A new session id `request_id`'s launch learns, as a clear or a compact gives one;
+    returns it."""
+    sid = str(uuid.uuid4())
+    with launch_log(shell) as conn:
+        assert store.learn_session(conn, request_id, sid, source)
+    return sid
+
+
 def failed_run(shell: Any, request_id: str, *, word: str = "relaunch-failed",
                detail: str = "the new session did not start") -> str:
     """A relaunch run on `request_id`'s launch that ended failed; returns its id."""

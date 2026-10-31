@@ -1,8 +1,8 @@
 """The launcher's page and components in a browser, through a real shell that starts the
 launcher's real page server: the contract check on the panel and both components, a red
-session in the error colour, the 360 px width check, a headless launch whose row arrives
-by push, a refusal met before a launch's row, and a past terminal session's command to
-resume.
+session in the error colour, a session's state followed through a clear, the 360 px width
+check, a headless launch whose row arrives by push, a refusal met before a launch's row, and
+a past terminal session's command to resume.
 
 The shell runs with a fake `claude` first on its `PATH`, which prints a line and exits, so
 a launch from the panel runs that and nothing else. Every test seeds rows of its own in
@@ -115,6 +115,23 @@ def test_a_live_session_whose_relaunch_fails_goes_red_in_the_launches_list(ui_sh
     expect(chip).to_have_attribute("data-word", "failed")
     expect(chip).to_have_text("failed")
     kit.assert_colour(chip, "error")
+
+
+def test_a_live_session_given_a_new_id_by_a_clear_keeps_its_state(ui_shell, ui_page):
+    sid = kit.seed(ui_shell, "cleared", live=True)
+    kit.published(ui_shell, "sessions", kit.holding_session(sid, red=False))
+    panel = kit.open_panel(ui_page)
+    row = panel.locator('section.launches li[data-request="cleared"]')
+    chip = row.locator(f'[data-session="{sid}"] moxi-launcher-state span.state')
+    expect(chip).to_have_attribute("data-state", "up")
+    # A clear gives the session a new id; the launch row keeps the first, which the chip
+    # was placed with, and the state comes under the new one.
+    newer = kit.learned(ui_shell, "cleared")
+    kit.published(ui_shell, "sessions", kit.holding_session(newer, red=False))
+    kit.failed_run(ui_shell, "cleared")
+    expect(chip).to_have_attribute("data-red", "true", timeout=10_000)
+    expect(chip).to_have_attribute("data-state", "up")
+    expect(chip).to_have_text("failed")
 
 
 # --- 360 px ---------------------------------------------------------------------------------

@@ -173,15 +173,46 @@ export function parseLaunches(data: unknown): Launches | null {
 }
 
 /**
- * The topic `sessions` as one session's state component reads it: the topic cut to the
- * newest entry for `session`. Null when the topic holds no entry for it (a session that
- * isn't live is in no topic), so the component reads its route instead.
+ * The entry for one session among `sessions`: its launch's (`request`), once the route has
+ * said which launch holds the session, else the first under the session id.
  */
-export function pickSession(session: string): (data: unknown) => States | null {
-  return (data) => {
+export function entryOf(sessions: SessionState[], session: string,
+                        request: string | null): SessionState | undefined {
+  return sessions.find((entry) => (request !== null ? entry.request_id === request
+                                                    : entry.session_id === session));
+}
+
+/**
+ * Which launch one session's state component follows. A clear or a compact gives a
+ * session a new id. The route resolves any id the launch has had and answers under the
+ * newest, so the id the component was placed with may be one no entry carries. Once the
+ * route has answered, the component follows the launch by its request id, which never
+ * changes.
+ */
+export class SessionPick {
+  readonly session: string;
+  /** The launch the route resolved the session to; null until it has, or when no launch
+   * holds the session. */
+  request: string | null = null;
+
+  constructor(session: string) {
+    this.session = session;
+  }
+
+  /** The route's answer, read as `parseStates` reads it; it holds at most the one launch
+   * that holds the session, which the pick follows from then on. */
+  route = (data: unknown): States | null => {
+    const value = parseStates(data);
+    if (value !== null && value.state === "up") this.request = value.sessions[0]?.request_id ?? null;
+    return value;
+  };
+
+  /** A topic event cut to the followed launch's entry. Null when the topic holds none
+   * (a session that isn't live is in no topic), so the component reads its route instead. */
+  topic = (data: unknown): States | null => {
     const value = parseStates(data);
     if (value === null || value.state === "error") return value;
-    const found = value.sessions.find((entry) => entry.session_id === session);
+    const found = entryOf(value.sessions, this.session, this.request);
     return found === undefined ? null : { ...value, sessions: [found] };
   };
 }

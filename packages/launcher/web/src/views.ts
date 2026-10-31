@@ -5,6 +5,7 @@
 // relaunch, its recycle and its keep-warm. Red is the server's: a component never judges a
 // run itself, it shows `red` and `word` as the state sent them.
 
+import { entryOf } from "./feed.ts";
 import type { Failure, LaunchRow, Launches, RunLine, SessionState, States } from "./feed.ts";
 
 /** A component's data as its `Feed` holds it. */
@@ -107,8 +108,10 @@ export interface StateView {
   title: string | null;
 }
 
-/** The `state` component for `session`. */
-export function stateView(data: FeedState<States>, session: string): StateView {
+/** The `state` component for `session`, whose launch is `request` once the route has
+ * resolved it: the entry may carry a newer id than the one the component was placed with. */
+export function stateView(data: FeedState<States>, session: string,
+                          request: string | null = null): StateView {
   const base = { red: false, word: null };
   if (data.gone) return { ...base, state: "gone", tone: "none", text: "", title: null };
   if (data.failure !== null) {
@@ -121,7 +124,7 @@ export function stateView(data: FeedState<States>, session: string): StateView {
   if (value.state === "error") {
     return { ...base, state: "error", tone: "muted", text: UNREADABLE, title: value.detail ?? SERVER_ERROR };
   }
-  const entry = value.sessions.find((item) => item.session_id === session);
+  const entry = entryOf(value.sessions, session, request);
   if (entry === undefined) {
     return { ...base, state: "unknown", tone: "muted", text: NOT_LAUNCHED,
              title: value.refused?.problem ?? `no launch holds the session ${session}` };

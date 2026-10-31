@@ -3,15 +3,17 @@
 // state as its title.
 //
 // It reads `/api/state?session=<id>`, then follows the topic `sessions`, which holds every
-// live launch's state: an event that holds its session replaces the state at once, and
-// one that doesn't (the session isn't live) reads the route again. It reads `session` once,
-// when it connects: a host that needs another session's state places a new one. It reads
-// the route again when its tab is shown.
+// live launch's state: an event that holds its launch replaces the state at once, and one
+// that doesn't (the session isn't live) reads the route again. `session` may be any id the
+// session has had: a clear or a compact gives it a new one, and the route answers under the
+// newest, so once the route has answered the component follows the launch that holds the
+// session, by its request id. It reads `session` once, when it connects: a host that needs
+// another session's state places a new one. It reads the route again when its tab is shown.
 
 import { css, html, LitElement, nothing } from "lit";
 import { api, subscribe } from "/m/ui/client.js";
 
-import { Feed, parseStates, pickSession } from "./feed.ts";
+import { Feed, SessionPick } from "./feed.ts";
 import type { States } from "./feed.ts";
 import { stateView } from "./views.ts";
 
@@ -37,7 +39,7 @@ const STYLES = css`
 export class LauncherState extends LitElement {
   static styles = STYLES;
 
-  #session = "";
+  #pick = new SessionPick("");
   #feed: Feed<States> | null = null;
   #stop: (() => void) | null = null;
   #shown = (): void => {
@@ -46,10 +48,11 @@ export class LauncherState extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.#session = this.getAttribute("session") ?? "";
-    const path = `api/state?session=${encodeURIComponent(this.#session)}`;
-    const feed = new Feed<States>(() => api("launcher", path), parseStates,
-                                  () => this.requestUpdate(), { topic: pickSession(this.#session) });
+    const pick = new SessionPick(this.getAttribute("session") ?? "");
+    this.#pick = pick;
+    const path = `api/state?session=${encodeURIComponent(pick.session)}`;
+    const feed = new Feed<States>(() => api("launcher", path), pick.route,
+                                  () => this.requestUpdate(), { topic: pick.topic });
     this.#feed = feed;
     void feed.refresh().then(() => {
       if (this.#feed === feed) this.#stop = subscribe("launcher", "sessions", (data) => feed.topic(data));
@@ -69,7 +72,7 @@ export class LauncherState extends LitElement {
   render() {
     const feed = this.#feed;
     if (feed === null) return nothing;
-    const view = stateView(feed, this.#session);
+    const view = stateView(feed, this.#pick.session, this.#pick.request);
     if (view.state === "gone") return nothing;
     return html`<span class="state ${view.tone}" tabindex="0" title=${view.title ?? nothing}
       data-state=${view.state} data-red=${String(view.red)} data-word=${view.word ?? nothing}

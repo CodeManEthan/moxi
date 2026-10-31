@@ -111,6 +111,16 @@ test("the state component, up and red", () => {
   assert.match(red.title, /^blocked since 2026-10-31 10:01 UTC: person: someone is typing\n/);
 });
 
+test("the state component finds its launch's entry under a newer id", () => {
+  // The route answers under the id a clear or a compact gave the session since.
+  const cleared = up([entry({ session_id: "s2" })]);
+  const view = stateView(cleared, "s1", "q1");
+  assert.deepEqual([view.state, view.tone, view.text], ["up", "ok", "ok"]);
+  // Before the route has named the launch, only the id it was placed with matches.
+  assert.equal(stateView(cleared, "s1").state, "unknown");
+  assert.equal(stateView(up([entry({ request_id: "q2" })]), "s1", "q1").state, "unknown");
+});
+
 test("the state component's other states", () => {
   assert.equal(stateView({ loading: true, gone: false, failure: null, value: null }, "s1").state, "loading");
   assert.equal(stateView({ loading: false, gone: true, failure: null, value: null }, "s1").state, "gone");

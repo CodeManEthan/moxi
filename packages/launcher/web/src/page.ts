@@ -669,8 +669,9 @@ export class LauncherPage extends LitElement {
   }
 
   /** After each draw: the form's first values once it has fields, and a `state` component
-   * placed in each new live row's cell. A cell's session never changes, since the row's
-   * key is its launch, so a cell is placed once. */
+   * placed in each new live row's cell. A cell holds the id its launch row was first known
+   * by, which a clear or a compact doesn't change; the component follows the launch through
+   * the session's later ids, so a cell is placed once. */
   protected updated(changed: Map<PropertyKey, unknown>): void {
     super.updated(changed);
     const form = this.#form();
