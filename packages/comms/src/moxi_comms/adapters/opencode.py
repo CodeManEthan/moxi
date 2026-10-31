@@ -61,6 +61,18 @@ server handed in to the wrapper keeps the list it read at its own start. Comms n
 changes the model after the launch, and its posts name none. A request
 that runs on any other model is written to the log and the identity's status line, and
 nothing more is done about it.
+
+**turns' additions, comms' tools among them.** Before it starts, the wrapper asks turns
+once what an OpenCode launch adds (`prepare_launch`, `moxi_turns.launch_additions`), with
+the server's environment. When the daemon serves comms' tools, that environment carries
+the session's token, minted here, and the daemon's URL, so comms' contribution adds its
+server and turns renders it naming the token's variable (`{env:MOXI_COMMS_MCP_TOKEN}`),
+never its value. The additions' `options` are merged into the launch config (`mcp` and
+`permission` one level deep) and their `env` into the server's, at every server start,
+whole or not at all: additions that set what the wrapper sets, or a call that fails, are
+skipped with a note, and the session then has no tools. The token's value stays in this
+process and the server's environment; the daemon keeps its hash, registered after every
+bind.
 """
 
 from __future__ import annotations
@@ -379,6 +391,84 @@ def launch_config(model: str | None, instructions: str | None) -> dict:
     return config
 
 
+# --------------------------------------------------------------------------- turns' additions
+#: The top-level config keys `launch_config` sets.
+OWN_KEYS = ("instructions", "model", "small_model")
+#: The `permission` keys `launch_config` sets.
+OWN_PERMISSIONS = tuple(launch_config(None, None)["permission"])
+#: The config keys turns' additions are merged into one level deep; any other key of
+#: theirs is laid in as it is.
+MERGED_KEYS = ("mcp", "permission")
+#: The server variables the wrapper sets itself. The identity's stamps and comms' own
+#: variables (`session.INHERITED_COMMS_ENV`) are the wrapper's too.
+OWN_ENV = ("OPENCODE_SERVER_PASSWORD", "OPENCODE_CONFIG_CONTENT")
+#: How turns says it left a server out because this OpenCode does not substitute
+#: `{env:...}` in its config (`moxi_turns.launch_additions`' notes).
+NOT_SUBSTITUTED = "does not substitute {env:"
+
+
+def additions_clash(additions) -> str | None:
+    """Why turns' additions for an OpenCode launch cannot go into this wrapper's server
+    whole, or None when they can. They are applied whole or skipped whole, never half:
+    words for a command line (an OpenCode launch takes none), a config key the launch
+    config sets itself (`OWN_KEYS`, or a key inside its `permission`), a `mcp` or
+    `permission` that is not a mapping, or a variable the wrapper sets itself."""
+    from collections.abc import Mapping
+
+    from .session import INHERITED_COMMS_ENV
+
+    if additions.argv:
+        return "they carry command-line words, and an OpenCode server takes none"
+    options = additions.options
+    try:
+        json.dumps(options)
+    except (TypeError, ValueError) as e:
+        return f"their options cannot be written as JSON ({e})"
+    for key in OWN_KEYS:
+        if key in options:
+            return f"they set `{key}`, which comms' launch config sets"
+    for key in MERGED_KEYS:
+        if key in options and not isinstance(options[key], Mapping):
+            return f"their `{key}` is not a mapping"
+    for key in OWN_PERMISSIONS:
+        if key in (options.get("permission") or {}):
+            return f"they set `permission.{key}`, which comms' launch config sets"
+    for name in additions.env:
+        if name in OWN_ENV or name in INHERITED_COMMS_ENV:
+            return f"they set {name}, which comms' wrapper sets"
+    return None
+
+
+def merge_additions(config: dict, options) -> dict:
+    """`config` (a launch config) with turns' `options` merged in: `mcp` and `permission`
+    one level deep, any other key as it is. `additions_clash` has already refused a
+    key the launch config sets. Neither argument is changed."""
+    merged = dict(config)
+    for key, value in options.items():
+        if key in MERGED_KEYS and isinstance(merged.get(key), dict):
+            merged[key] = {**merged[key], **value}
+        else:
+            merged[key] = json.loads(json.dumps(value))
+    return merged
+
+
+def left_out_unsubstituted(notes, server: str) -> bool:
+    """Whether turns left comms' server `server` out of an OpenCode launch because the
+    installed OpenCode does not substitute `{env:...}`, the one case the wrapper writes
+    the entry itself."""
+    said = f"additions of comms: MCP server {server!r} left out:"
+    return any(note.startswith(said) and NOT_SUBSTITUTED in note for note in notes)
+
+
+def written_entry(url: str, token: str) -> dict:
+    """comms' server as the wrapper writes it when OpenCode does not substitute
+    `{env:...}`: turns' form, with the token's value in the header. It goes only into
+    the `OPENCODE_CONFIG_CONTENT` of a server whose environment holds
+    `MOXI_COMMS_MCP_TOKEN` itself, never into argv or a file."""
+    return {"type": "remote", "url": url, "enabled": True,
+            "headers": {"Authorization": f"Bearer {token}"}}
+
+
 def layer_one_text(roster_info, comms: str = BARE_COMMS, *, directors=()) -> str:
     """Layer one for an OpenCode session: the context block, the line naming the
     `comms` to use, then the labeled roster snapshot (or the offline line), the same
@@ -495,6 +585,18 @@ class OpenCodeAdapter(HarnessAdapter):
         self.server = server
         self.http: Http | None = None
         self.stream: EventStream | None = None
+        #: turns' additions as this launch applies them (`prepare_launch`): the
+        #: variables (comms' stamped pair among them, when its tools go in) and the
+        #: config merged into the launch config at every server start.
+        self.added_env: dict = {}
+        self.added_options: dict = {}
+        #: Whether comms' tools are in this launch's config, and why not when they
+        #: aren't (None until `prepare_launch` says).
+        self.tools = False
+        self.tools_why: str | None = None
+        #: The lines a launch says about its additions: turns' notes, and why comms'
+        #: tools are off.
+        self.additions_notes: list = []
 
         self.session_id: str | None = None
         self.default_model: str | None = None
@@ -637,10 +739,83 @@ class OpenCodeAdapter(HarnessAdapter):
         come from the environment the wrapper was started in."""
         env = self.agent.env(self.base_env)
         env.update(self.claim_env())
+        env.update(self.added_env)
         env["OPENCODE_SERVER_PASSWORD"] = self.password
+        config = launch_config(model, self.layer_one_path() if self.layer_one else None)
         env["OPENCODE_CONFIG_CONTENT"] = json.dumps(
-            launch_config(model, self.layer_one_path() if self.layer_one else None))
+            merge_additions(config, self.added_options))
         return env
+
+    def prepare_launch(self, tools_url: str | None, tools_why: str = "", *,
+                       token: str | None = None) -> bool:
+        """Ask turns what this launch adds (`moxi_turns.launch_additions("opencode")`),
+        once, before `start`, and keep what is applied for every server start. True
+        when comms' tools are in.
+
+        When the daemon answered `tools_url`, the session's token is minted (or `token`,
+        a test's) and stamped with the URL into the environment turns is given, so comms'
+        contribution adds its server, which turns renders naming the variable. The
+        additions' `options` are merged into the launch config (`merge_additions`) and
+        their `env` added to the server's, whole; additions that clash with what the
+        wrapper sets (`additions_clash`), or a call that fails, are skipped whole, with
+        a note, and the session has no tools. When turns left comms' server out because
+        this OpenCode does not substitute `{env:...}`, the wrapper writes the entry with
+        the value into the config itself: the server's environment holds the token's
+        variable already, and no file or argv word gets it.
+
+        The value stays in this process for every restart's environment; only its hash
+        goes to the daemon, registered after every bind (`tool_token`)."""
+        from ..mcp import tokens
+        from ..mcp.additions import SERVER, TOKEN_ENV, URL_ENV
+        from .binding import ToolToken
+        from .session import stamp_tools, tools_off
+
+        pair: dict = {}
+        stamp_tools(pair, tools_url, token=token)
+        env = {**self.server_env(self._probe_model()), **pair}
+        notes: list = []
+        skipped = None
+        try:
+            import moxi_turns
+
+            additions = moxi_turns.launch_additions("opencode", cwd=self.agent.cwd, env=env)
+        except Exception as e:                                  # noqa: BLE001
+            skipped = f"turns could not give this launch its additions: {e}"
+        else:
+            notes += additions.notes
+            why = additions_clash(additions)
+            if why is not None:
+                skipped = f"turns' additions are skipped whole: {why}"
+        if skipped is not None:
+            notes.append(skipped)
+            added_env, options = {}, {}
+        else:
+            added_env, options = dict(additions.env), merge_additions({}, additions.options)
+        servers = options.get("mcp") or {}
+        if (pair and skipped is None and SERVER not in servers
+                and left_out_unsubstituted(notes, SERVER)):
+            options["mcp"] = {**servers, SERVER: written_entry(pair[URL_ENV], pair[TOKEN_ENV])}
+            notes.append("comms' server is written with its token into this server's "
+                         "OPENCODE_CONFIG_CONTENT, since OpenCode does not substitute "
+                         "{env:...} there")
+        self.tools = bool(pair) and SERVER in (options.get("mcp") or {})
+        if self.tools:
+            self.tool_token = ToolToken(tokens.digest(pair[TOKEN_ENV]))
+            self.tools_why = None
+            added_env.update(pair)
+        else:
+            # Without its server the pair is no use to the session: it goes, value and all.
+            self.tool_token = None
+            self.tools_why = (tools_why or "comms' daemon doesn't serve them" if not pair
+                              else "turns' additions are skipped" if skipped is not None
+                              else "turns left comms' server out of this launch")
+            notes.append(tools_off(self.tools_why))
+        pair.clear()
+        self.added_env, self.added_options = added_env, options
+        self.additions_notes = notes
+        for note in notes:
+            log.warning("%s: %s", self.agent.qualified, note)
+        return self.tools
 
     def window_env(self) -> dict:
         """The window's environment: the server's, so `attach` holds the password."""
@@ -652,11 +827,15 @@ class OpenCodeAdapter(HarnessAdapter):
         return opencode_runtime_dir() / f"{self.agent.qualified}.md"
 
     def write_layer_one(self) -> None:
+        """Layer one, with the line naming comms' tools when this launch has them."""
+        from ..listener import with_tools
+
         path = self.layer_one_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(path.parent, 0o700)
-        path.write_text(layer_one_text(fetch_roster(self.socket_path), self.comms_path,
-                                       directors=getattr(self.agent, "directors", ())))
+        text = layer_one_text(fetch_roster(self.socket_path), self.comms_path,
+                              directors=getattr(self.agent, "directors", ()))
+        path.write_text(with_tools(text, getattr(self, "added_env", {})))
 
     def _new_server(self, model: str | None) -> Server:
         return Server(self.binary, env=self.server_env(model), cwd=self.agent.cwd,
@@ -1424,7 +1603,9 @@ def server_log_file(qualified: str) -> Path:
     return opencode_sessions_dir() / f"{qualified}.server.log"
 
 
-def print_plan(agent, roster, *, binary, version, comms_path, out=None) -> None:
+def print_plan(agent, roster, *, binary, version, comms_path, tools_url=None,
+               out=None) -> None:
+    from ..mcp.additions import TOKEN_ENV
     from .opencode_server import serve_argv
 
     out = out or sys.stdout
@@ -1441,6 +1622,8 @@ def print_plan(agent, roster, *, binary, version, comms_path, out=None) -> None:
         "chosen from the refreshed list")
     say(f"  opencode   {binary or 'opencode (does not resolve)'} ({version})")
     plan_comms(comms_path, say)
+    if tools_url is not None:
+        say(f"  tools      {tools_url} (token in {TOKEN_ENV}, minted at launch)")
     say("  spawn      " + " ".join(serve_argv(binary or opencode_roster.BINARY)))
     say("  window     " + f"{binary or opencode_roster.BINARY} attach <url> -s <session>")
     say(f"  log        {wrapper_log_file(agent.qualified)}")
@@ -1450,6 +1633,7 @@ def main(argv=None) -> int:  # pragma: no cover - exercised end to end by the wi
     import signal
 
     from .opencode_window import EXIT_GAVE_UP, GaveUp, OpenCodeWindow
+    from .session import tools_endpoint, tools_off
     from .terminal import JOB_CONTROL_SIGNALS, Terminal, in_terminal_foreground, terminal_fd
 
     args = build_parser().parse_args(argv)
@@ -1462,7 +1646,11 @@ def main(argv=None) -> int:  # pragma: no cover - exercised end to end by the wi
     binary = opencode_roster.resolve_binary(args.opencode or agent.binary)
     comms_path = own_comms()
     version = binary_version(binary, env=agent.env()) if binary else "not found"
-    print_plan(agent, roster, binary=binary, version=version, comms_path=comms_path)
+    # comms' tools: the daemon is asked here; the token is minted only at the launch
+    # (`prepare_launch`), never on a dry run.
+    tools_url, tools_why = tools_endpoint()
+    print_plan(agent, roster, binary=binary, version=version, comms_path=comms_path,
+               tools_url=tools_url)
     sys.stdout.flush()
     if binary is None:
         print("moxi-comms-opencode: no opencode binary resolves (the roster's `binary`, "
@@ -1474,6 +1662,8 @@ def main(argv=None) -> int:  # pragma: no cover - exercised end to end by the wi
               "could not be told which comms to run.", file=sys.stderr)
         return 2
     if args.dry_run:
+        if tools_url is None:
+            print(f"moxi-comms-opencode: {tools_off(tools_why)}", file=sys.stderr)
         return 0
     tty = terminal_fd()
     if not in_terminal_foreground(tty):
@@ -1489,6 +1679,9 @@ def main(argv=None) -> int:  # pragma: no cover - exercised end to end by the wi
 
     adapter = OpenCodeAdapter(agent, binary=binary, comms_path=comms_path,
                               log_path=server_log_file(agent.qualified))
+    adapter.prepare_launch(tools_url, tools_why)
+    for note in adapter.additions_notes:
+        print(f"moxi-comms-opencode: {note}", file=sys.stderr, flush=True)
     stopping = threading.Event()
     hangup = threading.Event()
 
@@ -1561,8 +1754,9 @@ def say_after(adapter, out=None) -> None:
 
 __all__ = ["ADAPTER_KIND", "FALLBACK_MODEL", "MODELS_STALE", "NO_FREE_MODEL",
            "SHIPPED_DEFAULT", "OpenCodeAdapter",
-           "OpenCodeOffline", "build_parser", "choose_default",
-           "free_models", "idle_from_status", "launch_config", "main", "mint_message_id",
+           "OpenCodeOffline", "additions_clash", "build_parser", "choose_default",
+           "free_models", "idle_from_status", "launch_config", "main", "merge_additions",
+           "mint_message_id",
            "read_record", "show_notice", "status_lines"]
 
 
