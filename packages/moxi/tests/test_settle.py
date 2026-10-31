@@ -1627,7 +1627,8 @@ def test_a_skill_handed_to_an_owner_since_removed_is_placed_again(sk, capsys, mo
 
 def test_a_broken_harness_row_keeps_its_placements_and_says_why(sk, capsys, monkeypatch):
     """A name in `skills.harnesses` whose row is skipped, or that has no row at all,
-    still reaches the placer, which refuses it and leaves what it placed there."""
+    still reaches the placer, which refuses it and leaves what it placed there. The
+    install says the line and goes on: the doctor warns about the row."""
     from moxi.doctor import _run
 
     sk.skills("demo-send")
@@ -1639,7 +1640,7 @@ def test_a_broken_harness_row_keeps_its_placements_and_says_why(sk, capsys, monk
     config.set("moxi", "harnesses", [{"name": "claude", "skills": "relative/skills"},
                                      {"name": "codex"}], by="test")
     code, out = place_settle(sk, capsys)
-    assert code == 1
+    assert code == 0, out
     assert ("demo: demo-send for claude not placed: harness claude has no row in "
             "harnesses (some rows are skipped: moxi config moxi shows the table)") in out
     assert "removed skill" not in out
@@ -1650,7 +1651,7 @@ def test_a_broken_harness_row_keeps_its_placements_and_says_why(sk, capsys, monk
     config.unset("moxi", "harnesses", by="test")
     config.set("moxi", "skills.harnesses", ["claude", "codex", "cluade"], by="test")
     code, out = place_settle(sk, capsys)
-    assert code == 1
+    assert code == 0, out
     assert ("demo: demo-send for cluade not placed: harness cluade has no row in "
             "harnesses") in out
     assert "removed skill" not in out and owned(sk)["placed"] == before
@@ -1672,7 +1673,7 @@ def test_a_name_taken_out_of_skills_harnesses_removes_its_placements(sk, capsys,
     # Its only placements on a broken row still count as its own: no question.
     config.set("moxi", "harnesses", [{"name": "codex", "skills": "relative"}], by="test")
     code, out = place_settle(sk, capsys)
-    assert code == 1 and "skills not placed; place them with" not in out
+    assert code == 0 and "skills not placed; place them with" not in out
     assert [p.harness for p in sk.place.status("demo")] == ["codex"]
 
 

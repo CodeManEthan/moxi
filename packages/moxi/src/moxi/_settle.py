@@ -860,10 +860,11 @@ def _skills(step: Settle) -> bool:
     has it removed. One handed to another owner is skipped while that owner places it;
     once it doesn't, the skill is placed again with no question. A name in
     `skills.harnesses` whose harness row is skipped or missing still makes its items:
-    the placer refuses each (cause `harness`) and keeps what was placed there, so a
-    broken row never removes skills; a name taken out of the setting removes them.
-    `apply` runs in a held span. Returns False when the skills can't be read or a
-    placement was refused or failed."""
+    the placer refuses each (cause `harness`) with a line and keeps what was placed
+    there, so a broken row never removes skills and never fails the step (the doctor
+    warns about it); a name taken out of the setting removes them. `apply` runs in a
+    held span. Returns False when the skills can't be read or a placement was refused
+    for another cause or failed."""
     from . import place
 
     module, found = step.module, step.found
@@ -930,8 +931,9 @@ def _skill_folders(found) -> tuple[list[str] | None, object]:
 
 def _skills_report(module: str, steps, done, replace: bool) -> bool:
     """One line per placement the plan added, updated or removed; True when every step
-    went through (a skip counts), False on a refusal `replace` didn't place over or a
-    step `apply` couldn't carry out (it said why)."""
+    went through (a skip counts, and so does a refusal for a broken harness row, which
+    `apply` said), False on another refusal `replace` didn't place over or a step
+    `apply` couldn't carry out (it said why)."""
     from . import place
 
     left = {str(p.path) for p in done}
@@ -951,7 +953,7 @@ def _skills_report(module: str, steps, done, replace: bool) -> bool:
                 say(f"{module}: {verb} skill {item.name} for {item.harness} ({target})")
             else:
                 ok = False
-        elif s.action == "refuse":
+        elif s.action == "refuse" and s.cause != "harness":
             ok = False
         elif s.action == "keep" and target not in left:
             ok = False
