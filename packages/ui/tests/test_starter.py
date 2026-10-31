@@ -690,3 +690,38 @@ def test_a_hung_child_of_its_own_that_holds_the_lock_is_stopped(shell_dirs, monk
         assert not child.alive and starters.get("stpage").record.starts == 3
 
     drive(starters, body)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="process groups")
+def test_a_kill_ends_the_child_and_what_it_started_and_never_signals_the_group(
+        tmp_path, monkeypatch):
+    signalled = []
+    monkeypatch.setattr(os, "killpg", lambda *args: signalled.append(args))
+    script = ("import pathlib, subprocess, sys, time\n"
+              "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+              "pathlib.Path('below').write_text(str(child.pid))\n"
+              "time.sleep(60)\n")
+
+    async def body():
+        popen = proc.spawn([str(python()), "-c", script], lifeline="stdin",
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=str(tmp_path))
+        assert os.getpgid(popen.pid) == os.getpgid(0), "the child runs in the shell's group"
+        child = starter_mod.Child("stpage", popen, asyncio.get_running_loop(),
+                                  lambda child, code: None)
+        await until(lambda: (tmp_path / "below").exists(), what="the grandchild")
+        below = int((tmp_path / "below").read_text())
+        child.kill()
+        assert await asyncio.wait_for(child.exited, 5) == -9
+        await until(lambda: _gone(below), what="the grandchild's end")
+
+    asyncio.run(asyncio.wait_for(body(), 20))
+    assert signalled == []
+
+
+def _gone(pid: int) -> bool:
+    import psutil
+
+    try:
+        return psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return True

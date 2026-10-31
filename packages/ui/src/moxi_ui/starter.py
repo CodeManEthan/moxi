@@ -383,8 +383,9 @@ class Child:
                 pass
 
     def kill(self) -> None:
-        """Kill the child and every process below it. (The child shares the shell's
-        process group, so the group itself is never signalled.)"""
+        """Kill the child and every process below it, each by its pid. The child runs in
+        the shell's own process group (its stdin lifeline needs no group of its own), so
+        signalling that group would kill the shell too; it is never signalled."""
         self.stopping = True
         try:
             import psutil
