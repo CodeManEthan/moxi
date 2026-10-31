@@ -84,7 +84,7 @@ def test_the_check_syncs_its_own_env_and_runs_the_picked_suites(workspace, capsy
     (workspace / "packages/low/tests/test_more.py").write_text(UNDER_WORKERS)
     assert check.main([]) == 0
     line = last_line(capsys)
-    assert "packages: low, high | lock pass | sync pass | low pass" in line, line
+    assert "packages: low, high | lock pass | stamps none | web none | sync pass | low pass" in line, line
     assert ", high pass " in line and line.endswith("exit 0")
     assert (workspace / ".moxi-dev/env-3.12/bin/python").exists()
     assert not (workspace / ".venv").exists()
@@ -98,7 +98,7 @@ def test_the_check_syncs_its_own_env_and_runs_the_picked_suites(workspace, capsy
     git(workspace, "commit", "-q", "-m", "break high")
     assert check.main(["--base", "mark"]) == 1
     line = last_line(capsys)
-    assert "packages: high | lock pass | sync pass | high fail " in line, line
+    assert "packages: high | lock pass | stamps none | web none | sync pass | high fail " in line, line
     assert line.endswith("exit 1")
 
 
@@ -107,4 +107,4 @@ def test_a_stale_lock_fails_the_check(workspace, capsys):
         (workspace / "packages/low/pyproject.toml").read_text()
         .replace("dependencies = []", 'dependencies = ["iniconfig"]'))
     assert check.main(["--full"]) == 1
-    assert "lock fail | sync not run" in last_line(capsys)
+    assert "lock fail | stamps not run | web not run | sync not run" in last_line(capsys)
