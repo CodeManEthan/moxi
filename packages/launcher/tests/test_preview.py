@@ -339,7 +339,7 @@ def test_preview_argv_is_the_argv_launch_hands_the_target(tmp_path, monkeypatch,
     sid = None if typed.get("harness") == "codex" else SID
     req = {"typed": typed, "cwd": str(work), "request_id": "r1", "session_id": sid,
            "actor": "ann"}
-    code, seen = run_child(tmp_path, req, moxi="moxi-comms-fake")
+    code, seen = run_child(tmp_path, req, moxi="moxi-comms-fake", free_identity=True)
     assert code == 0, seen["stderr"]
     run = rig.one()
     handed = [Path(run["argv"][0]).name, *run["argv"][1:]]

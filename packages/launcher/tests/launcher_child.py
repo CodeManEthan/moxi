@@ -5,7 +5,8 @@ this terminal becomes the harness, so a test runs it here and reads what it left
 
 `SPEC` is a JSON file: `request` (the `LaunchRequest`'s fields), `out` (where this
 writes what it saw), and optionally `moxi` (the command comms' wrapper runs under, in
-place of this environment's `moxi`). The deliverer runs the `deliver` function directly,
+place of this environment's `moxi`), and `free_identity` (when true, comms' identity check
+finds every name free: the test's comms has no daemon to ask). The deliverer runs the `deliver` function directly,
 from this environment's Python, since a test has no `moxi launcher deliver` to run.
 When the test hid the installed turns (`launcher_fake_turns.hide`), it is hidden here too.
 
@@ -36,6 +37,8 @@ def main(spec_path: str) -> int:
         fake_turns.hide_here()
     if spec.get("moxi"):
         compose.moxi_command = lambda: spec["moxi"]
+    if spec.get("free_identity"):
+        api._identity_taken = lambda name, scope: None
     first.deliverer_argv = lambda rid, pid: [sys.executable, "-c", DELIVER, rid, "--pid",
                                              str(pid)]
     request = api.LaunchRequest(**spec["request"])

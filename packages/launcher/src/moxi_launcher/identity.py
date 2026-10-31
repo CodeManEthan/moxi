@@ -8,7 +8,7 @@ one of these of a name:
 |---|---|---|
 | `free` | no one holds it | goes on |
 | `standing` | a standing identity's own name, not bound now | goes on: its session binds it |
-| `offline` | comms' daemon can't be asked | goes on: the wrapper's bind decides |
+| `offline` | comms' daemon can't be asked | refused as a try-again: the wrapper would stop |
 | `held` | a live session holds it | refused, naming the holder |
 | `reserved` | a module's send-only name | refused, naming the module |
 | `retired` | a scoped name comms no longer binds | refused, with comms' words |
@@ -77,6 +77,21 @@ class CommsUnanswered(Refused):
                          "comms")
 
 
+class CommsOffline(Refused):
+    """comms can't reach its daemon to ask about the name, so its wrapper could not bind
+    it either."""
+
+    code = "try-again"
+    exit_code = exits.TEMPFAIL
+
+    def __init__(self, name: str, said: str | None):
+        self.name = name
+        super().__init__("identity", f"the comms daemon can't be asked about identity "
+                                     f"{name}" + (f": {said}" if said else ""),
+                         "try again once the comms daemon runs; moxi doctor shows what is "
+                         "wrong with comms")
+
+
 def words(name: str, state: str, holder: str | None = None, *,
           module: str | None = None, reason: str | None = None) -> str:
     """One state of a name, in a few words."""
@@ -117,6 +132,9 @@ def check(name: str, scope: str | None, comms: Any) -> Refused | None:
         return IdentityRefused(named, str(error))
     except daemon_errors(comms) as error:
         return CommsUnanswered(named, str(error))
+    if state.state == "offline":
+        return CommsOffline(getattr(state, "qualified", None) or named,
+                            getattr(state, "reason", None))
     if state.state not in TAKEN:
         return None
     holder = getattr(state, "holder", None)
@@ -132,5 +150,5 @@ def daemon_errors(comms: Any) -> tuple[type[BaseException], ...]:
     return (error,) if isinstance(error, type) and issubclass(error, BaseException) else ()
 
 
-__all__ = ["TAKEN", "CommsUnanswered", "IdentityRefused", "IdentityTaken", "ask", "check",
-           "daemon_errors", "shown", "words"]
+__all__ = ["TAKEN", "CommsOffline", "CommsUnanswered", "IdentityRefused", "IdentityTaken",
+           "ask", "check", "daemon_errors", "shown", "words"]

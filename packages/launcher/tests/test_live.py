@@ -9,8 +9,8 @@ settings and hooks do not run in it; turns' hooks come in its own plugin folders
 the launch names. A Codex launch without turns passes `--disable hooks`, so the user's
 Codex hooks do not run in it; one under turns' host keeps hooks on, since turns' hooks
 are how the session reports itself ready, and so the user's Codex hooks run there too.
-No launch here takes a comms identity, and comms' daemon socket follows the test's own
-`MOXI_HOME`, so the machine's comms daemon is never reached.
+comms' daemon socket follows the test's own `MOXI_HOME`, so the machine's comms daemon is
+never reached, and the few launches with a comms identity find no daemon and bind no name.
 
 What each needs, and is skipped without: the harness on PATH; for the launches with
 turns, a turns that offers the interface the launcher calls; for a Codex launch with turns
@@ -34,6 +34,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -275,9 +276,28 @@ def moxi_command() -> str:
     return found
 
 
+#: Claude's folder-trust screen, as its text reads with the spaces taken out (the
+#: terminal draws them as cursor moves): its question, its option and its last line.
+TRUST_SCREEN = ("Accessingworkspace:", "Yes,Itrustthisfolder", "Entertoconfirm")
+#: The arrow key down, as a terminal sends it.
+DOWN = b"\x1b[B"
+
+
+#: How long Claude takes, once the screen is drawn, to read keys: a key pressed sooner is
+#: lost, and the Enter after it then picks "No, exit".
+TRUST_SETTLE_S = 1.0
+
+
 def answer_trust_once(term: Terminal, answered: list[bool]) -> None:
-    """Claude's folder-trust screen, pressed only once it shows."""
-    if not answered and "trust" in term.text().lower():
+    """Answer Claude's folder-trust screen once it is drawn whole. Its marker starts on
+    "No, exit", so the answer is one Down, then Enter, pressed once Claude reads keys."""
+    if answered:
+        return
+    text = "".join(term.text().split())
+    if all(phrase in text for phrase in TRUST_SCREEN):
+        time.sleep(TRUST_SETTLE_S)
+        term.press(DOWN)
+        time.sleep(0.5)
         term.press(b"\r")
         answered.append(True)
 
@@ -424,7 +444,8 @@ def test_a_terminal_launch_with_turns_gets_its_brief_as_the_first_turn(
         wait_for(sent, timeout=ANSWER_S, interval=0.25,
                  what=lambda: f"the first turn; saw {term.text()[-2000:]}")
         current = launch_row(row.request_id)
-        assert (current.state, current.reason) == ("first-sent", None), current.reason
+        assert (current.state, current.reason) == ("first-sent", None), (
+            f"{current.reason}; saw {term.text()[-3000:]}")
         [event] = first_turn_events(row.request_id)
         assert event.detail["outcome"] == "started"
         wait_for(lambda: answer in term.text(), timeout=ANSWER_S, interval=0.25,
@@ -609,14 +630,23 @@ def comms_isolated(env: dict[str, str]) -> None:
 
 
 def test_a_slot_launch_whose_comms_daemon_is_down_fails_comms_offline(live_env, work,
-                                                                      own_slots):
+                                                                      own_slots,
+                                                                      monkeypatch):
+    """The check refuses an identity launch while comms' daemon is down, as a try-again.
+    When the daemon stops after the check, the wrapper exits before the harness starts and
+    the row ends `comms-offline`: the check is stood in for here to reach that."""
     needs("claude")
     comms_isolated(live_env)
     request = api.LaunchRequest(typed={**flags("claude"), "target": "slot",
                                        "identity": "probe", "scope": "launcherlive",
                                        "cwd": str(work)},
                                 extra=CLAUDE_OWN, cwd=str(work))
-    assert api.check(request, environ=live_env) == [], "an offline daemon goes on"
+    [refused] = api.check(request, environ=live_env)
+    assert type(refused) is api.CommsOffline and refused.exit_code == 75, refused
+    with pytest.raises(api.CommsOffline):
+        api.launch(request, environ=live_env)
+    assert launch_row() is None
+    monkeypatch.setattr(api, "_identity_taken", lambda name, scope: None)
     result = api.launch(request, environ=live_env)
     row = launch_row(result.request_id)
     try:
@@ -635,8 +665,10 @@ def test_a_slot_launch_whose_comms_daemon_is_down_fails_comms_offline(live_env, 
 
 
 @pytest.mark.parametrize("harness", ["claude", "codex"])
-def test_a_terminal_launch_whose_comms_daemon_is_down_fails_comms_offline(
-        harness, live_env, work):
+def test_a_terminal_launch_whose_comms_daemon_is_down_is_a_try_again(harness, live_env,
+                                                                     work):
+    """In this terminal the check refuses the launch before it writes a row or runs the
+    wrapper, and the shell gets 75."""
     needs(harness)
     comms_isolated(live_env)
     if harness == "codex":
@@ -646,16 +678,9 @@ def test_a_terminal_launch_whose_comms_daemon_is_down_fails_comms_offline(
             "--identity", "probe", "--scope", "launcherlive"]
     if harness == "claude":
         argv += ["--model", CLAUDE_MODEL, "--", *CLAUDE_OWN]
-    term = Terminal(argv, live_env, work)
-    try:
-        row = wait_for(launch_row, timeout=60, what=lambda: f"the row; saw {term.text()}")
-        failed = wait_for(lambda: (r := launch_row(row.request_id)) is not None
-                          and r.state == "failed" and r, timeout=60, interval=0.25,
-                          what=lambda: f"the row failed; saw {term.text()[-2000:]}")
-        assert failed.reason == targets.COMMS_OFFLINE
-        # comms' own words are in the terminal, and the deliverer's line in the run log.
-        wait_for(lambda: "was not launched: comms offline" in " ".join(term.text().split()),
-                 timeout=10, what=lambda: f"comms' words; saw {term.text()[-2000:]}")
-        assert run_log_holds(row.request_id, "the comms daemon is not running")
-    finally:
-        term.close()
+    done = subprocess.run(argv, env=live_env, cwd=work, capture_output=True, text=True,
+                          timeout=120, stdin=subprocess.DEVNULL)
+    said = " ".join((done.stdout + done.stderr).split())
+    assert done.returncode == 75, said
+    assert "the comms daemon can't be asked about identity probe@launcherlive" in said
+    assert launch_row() is None

@@ -148,10 +148,12 @@ A launch with an identity runs under comms' wrapper, `moxi comms claude` or `mox
 codex` (which needs turns' Codex host), in this terminal or a slot; a headless one is
 refused for now. Before anything is written the launcher asks comms about the name: one
 held by another session, reserved for a module or retired is refused (3), naming who or
-why, and an answer comms can't read is a try-again (75). A Codex launch with an identity
-takes no extra flags, since comms' Codex wrapper takes only its own. When the wrapper
-ends before the harness starts, its words show where it ran and the row ends `failed`
-with `comms-offline` (75), `identity-taken` (3) or `comms-failed` (1).
+why. When comms can't reach its daemon, or gets an answer from it that it can't read, the
+launch is a try-again (75), since the wrapper would stop before the harness starts. A
+Codex launch with an identity takes no extra flags, since comms' Codex wrapper takes only
+its own. When the wrapper ends before the harness starts (comms' daemon stopped after the
+check, say), its words show where it ran and the row ends `failed` with `comms-offline`
+(75), `identity-taken` (3) or `comms-failed` (1).
 
 ## Settings
 

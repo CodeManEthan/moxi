@@ -72,12 +72,13 @@ class Harness:
 
 
 def run_child(tmp_path: Path, req: dict, *, env: dict | None = None,
-              moxi: str | None = None) -> tuple[int, dict]:
+              moxi: str | None = None, free_identity: bool = False) -> tuple[int, dict]:
     """Run one launch through `launcher_child`, in a process of its own: its exit code
     and what it saw (the preview's argv, and the result or refusal when it returned)."""
     spec = tmp_path / f"spec-{req.get('request_id')}.json"
     out = tmp_path / f"seen-{req.get('request_id')}.json"
-    spec.write_text(json.dumps({"request": req, "out": str(out), "moxi": moxi}))
+    spec.write_text(json.dumps({"request": req, "out": str(out), "moxi": moxi,
+                                "free_identity": free_identity}))
     child_env = {**os.environ, "PYTHONPATH": str(TESTS), **(env or {})}
     done = subprocess.run([sys.executable, "-m", "launcher_child", str(spec)],
                           env=child_env, cwd=str(tmp_path), timeout=120,

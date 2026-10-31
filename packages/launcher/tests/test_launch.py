@@ -146,7 +146,7 @@ def test_a_terminal_launch_with_an_identity_runs_comms_wrapper(tmp_path, work, h
         pytest.skip("comms is not installed")
     req = {"typed": {"identity": "planner", "brief": BRIEF}, "cwd": str(work),
            "request_id": "r3", "session_id": SID, "actor": "ann"}
-    code, seen = run_child(tmp_path, req, moxi="moxi-comms-fake")
+    code, seen = run_child(tmp_path, req, moxi="moxi-comms-fake", free_identity=True)
     run = harness.one()
     assert code == 0, seen["stderr"]
     assert seen["preview"][:5] == ["moxi-comms-fake", "comms", "claude", "--name",
@@ -700,10 +700,9 @@ def test_check_refuses_an_identity_that_is_held_reserved_or_retired(work, monkey
     assert nothing_written()
 
 
-@pytest.mark.parametrize("name", ["free", "standing", "offline"])
-def test_a_free_standing_or_offline_identity_goes_on(work, monkeypatch, name):
-    # A standing name is its standing identity's to bind, and an offline daemon is the
-    # wrapper's bind to decide.
+@pytest.mark.parametrize("name", ["free", "standing"])
+def test_a_free_or_standing_identity_goes_on(work, monkeypatch, name):
+    # A standing name is its standing identity's to bind.
     fake_comms(monkeypatch, state(name))
     assert api.check(request(work, identity="planner", scope="moxi")) == []
 
@@ -727,6 +726,22 @@ def test_an_answer_comms_cant_read_is_a_try_again_naming_the_daemon(work, monkey
     assert refused.exit_code == exits.TEMPFAIL and refused.code == "try-again"
     assert "the comms daemon" in refused.problem and "a garbled answer" in refused.problem
     assert refused.hint.startswith("try again")
+    assert nothing_written()
+
+
+@pytest.mark.parametrize("reason", ["comms offline: no daemon socket", None])
+def test_an_offline_comms_daemon_is_a_try_again_naming_the_daemon(work, monkeypatch,
+                                                                    reason):
+    # comms' wrapper exits before the harness starts when it can't reach its daemon.
+    fake_comms(monkeypatch, state("offline", reason=reason))
+    [refused] = api.check(request(work, identity="planner", scope="moxi"))
+    assert isinstance(refused, api.CommsOffline)
+    assert refused.exit_code == exits.TEMPFAIL and refused.code == "try-again"
+    assert refused.problem == ("the comms daemon can't be asked about identity planner@moxi"
+                               + (f": {reason}" if reason else ""))
+    assert refused.hint.startswith("try again")
+    with pytest.raises(api.CommsOffline):
+        api.launch(request(work, identity="planner", scope="moxi"))
     assert nothing_written()
 
 

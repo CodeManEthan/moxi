@@ -58,6 +58,7 @@ TAKEN = identity.TAKEN
 IdentityTaken = identity.IdentityTaken
 IdentityRefused = identity.IdentityRefused
 CommsUnanswered = identity.CommsUnanswered
+CommsOffline = identity.CommsOffline
 
 
 class NoDirectory(Refusal):
@@ -292,6 +293,6 @@ def _stored(row: store.LaunchRow) -> LaunchResult:
              "nothing was started again")
 
 
-__all__ = ["TAKEN", "CommsUnanswered", "IdentityRefused", "IdentityTaken", "LaunchRequest",
-           "LaunchResult", "NoDirectory", "Refusal", "check", "exit_code", "launch",
-           "preview"]
+__all__ = ["TAKEN", "CommsOffline", "CommsUnanswered", "IdentityRefused", "IdentityTaken",
+           "LaunchRequest", "LaunchResult", "NoDirectory", "Refusal", "check", "exit_code",
+           "launch", "preview"]
