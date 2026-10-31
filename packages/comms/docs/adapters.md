@@ -337,7 +337,9 @@ of the same server and shows the turn as it runs. Nothing is typed into the wind
 what you have half-typed in its input box stays as it is. The wrapper posts only into
 an idle session: it reads the session's status immediately before each post, and after
 its own post it waits for that turn to end before the next. Mail that arrives meanwhile
-goes as the next digest.
+goes as the next digest. Mail sent with `--interrupt` waits for idle too, and
+`moxi comms agents --seats` says so on an OpenCode name's row: `interrupt delivers at
+idle`.
 
 **What it can't prevent.** OpenCode's session has one loop. A prompt that arrives while
 a turn runs is taken at that turn's next step, and the running turn's own reply is never

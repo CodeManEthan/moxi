@@ -37,8 +37,8 @@ STATES = (BOUND, OFFLINE, WAITING, STANDBY)
 HOLDS = (BOUND, OFFLINE)
 
 
-def claim_dir() -> Path:
-    return runtime_root()
+def claim_dir(env=None) -> Path:
+    return runtime_root(env)
 
 
 def file_for(key: str) -> Path:
@@ -95,11 +95,12 @@ def remove(key: str) -> None:
         pass
 
 
-def all_records() -> list:
-    """Every claim file readable in the runtime dir, as (key, record)."""
+def all_records(env=None) -> list:
+    """Every claim file readable in the runtime dir (`env`'s, else this process's), as
+    (key, record)."""
     out = []
     try:
-        entries = sorted(claim_dir().glob(f"{PREFIX}*{SUFFIX}"))
+        entries = sorted(claim_dir(env).glob(f"{PREFIX}*{SUFFIX}"))
     except OSError:
         return out
     for p in entries:

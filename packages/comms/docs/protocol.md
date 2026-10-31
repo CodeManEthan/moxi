@@ -270,7 +270,8 @@ is in [adapters.md](adapters.md).
    row was acked or dropped.
 4. **Waiting mail is listed by name.** `moxi comms agents --seats` lists, for each name, the
    mail waiting for it in the queue: how many messages, and how long the oldest has
-   waited.
+   waited. Its row for an OpenCode name says `interrupt delivers at idle`, since that
+   adapter posts only into an idle session.
 5. **A stalled turn is looked up, not announced.** The adapter watches its own
    injection, and says so on its status line if no turn starts within
    `INJECT_STALL_WINDOW` (15 s). `moxi comms explain <identity>` prints which of four cases
@@ -528,8 +529,9 @@ with no owner. An empty `session_id` is refused. The read changes nothing. `moxi
 owner <session-id> --json` prints it with `"ok": true` and exits 0, owner or none. A read
 that fails exits non-zero and, with `--json`, prints `{"ok": false, "session_id": ...,
 "error": ..., "detail": ...}`: `refused` (exit 2) for an empty id, which never reaches
-the daemon; `offline` (exit 75) when the daemon is down or drops the connection;
-`timeout` or `failed` (exit 1) when it doesn't answer or answers an error.
+the daemon; `offline` (exit 75) when the daemon is down or drops the connection, or
+(exit 1) when it speaks a comms wire version this comms doesn't; `timeout` or `failed`
+(exit 1) when it doesn't answer or answers an error.
 
 `readable` tells the send verb when a replier could first read each message
 of an open thread, for the idle close:
@@ -617,7 +619,8 @@ seconds>}}`, read from the queue, and `pending: {}`, always empty.
 | `STATE/comms/tokens/` | provisioning, the reserved-names listener | the credential chain's token store (0600) |
 | `STATE/comms/codex/`, `STATE/comms/opencode/` | the Codex and OpenCode adapters | thread and session ids per identity |
 | `RUNTIME/comms/daemon.sock` | the daemon | the daemon socket |
-| `RUNTIME/comms/comms-sessions/` | the wrappers | each session's directory: its claim socket, and Codex's comms instructions |
+| `RUNTIME/comms/claim-<key>.sock` | each adapter | its session's claim socket (Moxi's short socket path when this one is too long) |
+| `RUNTIME/comms/comms-sessions/` | the wrappers | each session's directory: the listener's roster memory, and Codex's comms instructions |
 | `CONFIG/comms/config.toml` | you | comms' settings, `block` among them |
 
 comms 0.2's `STATE/comms/record.db`, `STATE/comms/cursors/`, `DATA/comms/directory.db`

@@ -126,6 +126,24 @@ def test_now_defaults_to_the_wall_clock(monkeypatch):
     assert "  curator                  1 message(s), oldest waiting 1h 42m" in out
 
 
+CODER = {"qualified": "coder@proj-a", "name": "coder", "scope": "proj-a",
+         "tier": "chosen", "adapter": "opencode"}
+
+
+def test_seats_says_an_opencode_name_takes_interrupt_mail_at_idle():
+    """OpenCode's adapter posts only when the session reads idle, so `--seats` says the
+    interrupt flag waits for idle there; the default view, which the snapshot renders,
+    says nothing of it."""
+    info = answer(bindings=(REVIEWER, CODER), waiting={}, unanswered=[])
+    assert roster_view.render_agents(info, seats=True, now=NOW) == (
+        "reviewer@proj-b          chosen     adapter codex\n"
+        "coder@proj-a             chosen     adapter opencode, interrupt delivers at idle")
+    assert roster_view.render_agents(info, now=NOW) == (
+        "reviewer@proj-b          chosen     adapter codex\n"
+        "coder@proj-a             chosen     adapter opencode")
+    assert roster_view.OPENCODE == opencode.ADAPTER_KIND
+
+
 def test_seats_reads_waiting_and_not_pending():
     """`pending` is always empty in the answer and nothing renders it."""
     out = roster_view.render_agents(answer(pending={"ghost": 7}), seats=True, now=NOW)

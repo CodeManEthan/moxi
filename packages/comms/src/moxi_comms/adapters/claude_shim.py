@@ -588,10 +588,10 @@ class ClaudeShim:
         the same session reads it and comes up in the recorded state. A file for the key
         whose recorded session roots have all ended is a dead session's, not this one's:
         this is a fresh launch, and its own file replaces it."""
-        from ..paths import runtime_root
+        from ..paths import claim_socket
         known = key is not None
         key = key or f"shim-{os.getpid()}-{id(self):x}"
-        path = path or runtime_root() / f"comms-claim-{key}.sock"
+        path = path or claim_socket(key)
         self.claims = ClaimHolder(kind="claude-shim", key=key, socket_path=path,
                                   lock=self._lock, roots=list(roots or ()),
                                   keying="session",

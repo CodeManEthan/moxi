@@ -332,9 +332,6 @@ class Binding:
     #: (`_route_recipients`), so a read made in the record's lag never queues a row
     #: behind the release that read past it.
     releases_begun: int = 0
-    #: Whether the binding's turns session can take a steer, as its adapter last
-    #: reported it. None until reported.
-    can_steer: bool | None = None
     #: The ids pushed to the adapter that it hasn't yet taken into a digest (at most
     #: `WINDOW`), and the claimed ids waiting for room, oldest first, with what their
     #: `deliver` frame needs.

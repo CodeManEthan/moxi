@@ -275,15 +275,15 @@ class HarnessAdapter:
         """This adapter is its session's top process and its claim holder. Its claim
         file is keyed by its pid and that pid's start time, so a reused pid never meets
         a dead adapter's file as its own; its claim socket is
-        RUNTIME/comms/claim-<pid>-<start>.sock, stamped into everything it spawns."""
-        from ..paths import runtime_root
+        `paths.claim_socket("<pid>-<start>")`, stamped into everything it spawns."""
+        from ..paths import claim_socket
         me = os.getpid()
         start = DEFAULT_PROC.start_time(me) or "0"
         n = next(_HOLDERS)
         suffix = "" if n == 0 else f"-{n}"
         self.claims = ClaimHolder(
             kind=self.KIND, key=f"{me}-{start}{suffix}",
-            socket_path=runtime_root() / f"claim-{me}-{start}{suffix}.sock",
+            socket_path=claim_socket(f"{me}-{start}{suffix}"),
             lock=self._lock, roots=[Root(me, start, TREE)], keying="pid")
         agent = self.agent
         name, scope = getattr(agent, "name", None), getattr(agent, "scope", None)

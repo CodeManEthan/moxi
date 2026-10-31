@@ -21,7 +21,7 @@ import textwrap
 import pytest
 from conftest import wait_until
 
-from moxi_comms import claimfile
+from moxi_comms import claimfile, paths
 from moxi_comms.adapters import session
 
 NAME = "launched"
@@ -76,8 +76,8 @@ def test_the_launch_forks_a_bound_adapter_before_claude_and_it_ends_with_claude(
         assert b.session_id == SID, "the adapter states the named id from its bind"
         record = claimfile.read(SID)
         assert [r["pid"] for r in record["roots"]] == [pid], "claude is the claim's root"
-        sock = session.sessions_dir() / SID / "claim.sock"
-        assert sock.is_socket()
+        sock = paths.claim_socket(SID)
+        assert sock.is_socket() and record["socket"] == str(sock)
     finally:
         release.touch()
     proc.wait(timeout=15)

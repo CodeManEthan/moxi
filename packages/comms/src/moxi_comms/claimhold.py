@@ -397,15 +397,62 @@ def _version_text(data) -> str:
 def socket_from_env(env=None) -> Path | None:
     """The claim socket `env` (else this process) names, or None when it names none.
 
-    A path outside comms' runtime directory raises `paths.OutsideRuntime`, naming the
-    variable and the directory: a socket stamped by another copy of comms, or by hand,
-    is never asked who this process is. The directory is this process's own; a stamp
-    cannot move it.
+    A path that is not one of this comms' claim sockets raises `paths.OutsideRuntime`
+    (`checked_socket`), naming the variable and the directory: a socket stamped by
+    another copy of comms, or by hand, is never asked who this process is. The
+    directory is this process's own; a stamp cannot move it.
     """
-    from .paths import refuse_outside_runtime
-
     value = (env if env is not None else os.environ).get(CLAIM_SOCKET_ENV)
-    return refuse_outside_runtime(value, CLAIM_SOCKET_ENV) if value else None
+    return checked_socket(value) if value else None
+
+
+def checked_socket(path, env=None) -> Path:
+    """`path` when it is one of this comms' claim sockets, else raise
+    `paths.OutsideRuntime` naming `MOXI_COMMS_CLAIM_SOCKET` and the directory.
+
+    One of comms' own is a path inside RUNTIME/comms (`env`'s, else this process's), or
+    a short path the core gave a holder whose path there was too long
+    (`paths.claim_socket`): in the core's short socket directory, and recorded as its
+    socket by the holder's claim file in RUNTIME/comms. A short path no claim file of
+    this comms records is another program's, and is refused.
+    """
+    from .paths import OutsideRuntime, refuse_outside_runtime, runtime_dir, short_socket_dir
+
+    try:
+        return refuse_outside_runtime(path, CLAIM_SOCKET_ENV, env)
+    except OutsideRuntime:
+        short = short_socket_dir()
+        if (short is not None
+                and os.path.realpath(Path(path).parent) == os.path.realpath(short)
+                and record_at(path, env) is not None):
+            return Path(path)
+        root = runtime_dir(env)
+        raise OutsideRuntime(
+            f"{CLAIM_SOCKET_ENV} names {path}, which is outside comms' runtime directory "
+            f"{root} and is no claim socket of this comms; comms uses only its own "
+            f"sockets. Start the session from `moxi comms` or unset "
+            f"{CLAIM_SOCKET_ENV}.") from None
+
+
+def record_at(path, env=None) -> tuple | None:
+    """(key, record) of the claim file in RUNTIME/comms that records `path` as its
+    socket, or None when none does."""
+    want = str(path)
+    for key, record in claimfile.all_records(env):
+        if record.get("socket") == want:
+            return key, record
+    return None
+
+
+def remove_socket(path) -> None:
+    """Remove the claim socket at `path` and its lock file once no holder serves it:
+    what a holder that ended without closing left behind. A live holder's are left."""
+    try:
+        verdict = ipc.sweep(str(path))
+    except NotImplementedError:
+        return
+    if verdict != "live":
+        Path(ipc_lock_path(str(path))).unlink(missing_ok=True)
 
 
 # --------------------------------------------------------------------------- whoami
@@ -500,7 +547,7 @@ class ClaimServer:
     def __init__(self, name: str, scope: str, *, kind: str,
                  directors=(), socket_path=None, arm: bool = False, daemon_socket=None,
                  proc=None, global_: bool = False, backoff=None):
-        from .paths import runtime_root
+        from .paths import claim_socket
         from .scoping import GLOBAL, qualify
 
         self.proc = proc or DEFAULT_PROC
@@ -514,8 +561,7 @@ class ClaimServer:
         key = f"srv-{me}-{start}-{self.claim['qualified']}"
         # Numbered per server: two servers for one name in one process (one waiting on
         # the other) each serve a socket of their own.
-        path = socket_path or runtime_root() / (
-            f"claim-srv-{me}-{abs(hash(key)) % 10**8}-{next(_SERVER_SOCKETS)}.sock")
+        path = socket_path or claim_socket(f"{key}-{next(_SERVER_SOCKETS)}")
         self.holder = ClaimHolder(kind=kind, key=key, socket_path=path, proc=self.proc,
                                   keying="server", roots=[Root(me, start, SELF)])
         self.holder.claim = dict(self.claim)
@@ -701,7 +747,8 @@ class ClaimServer:
 
 __all__ = ["AdapterMismatch", "CLAIM_OPS", "CLAIM_SOCKET_ENV", "ClaimUnreachable",
            "STAMP_VARS", "claim_overlay", "ClaimHolder", "ClaimServer", "NOT_INSIDE",
-           "OLD_ADAPTER", "OPS", "STATE_OPS", "call", "dead_adapter_answer", "send_line",
+           "OLD_ADAPTER", "OPS", "STATE_OPS", "call", "checked_socket",
+           "dead_adapter_answer", "record_at", "remove_socket", "send_line",
            "socket_from_env", "whoami"]
 
 

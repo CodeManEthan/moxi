@@ -16,10 +16,10 @@ the listener answers None there. It answers only for Claude Code sessions: a Cod
 gets layer one as developer instructions at its launch.
 
 **The roster memory.** The deltas diff against what this session last saw, kept in
-`roster.json` in the session's runtime directory, the directory that holds the claim
-socket the wrapper stamped (`MOXI_COMMS_CLAIM_SOCKET`). `start` seeds it on a roster it
-could read; a session with no such directory gets no deltas, since deltas without memory
-would announce the world every prompt.
+`roster.json` in the session's runtime directory, the one named for the key of the claim
+socket the wrapper stamped (`MOXI_COMMS_CLAIM_SOCKET`): `claim-<session id>`. `start`
+seeds it on a roster it could read; a session with no such directory gets no deltas,
+since deltas without memory would announce the world every prompt.
 
 **Time.** turns bounds every listener of an event together by `listen.wait_ms` (2000 ms
 by default) and gives the event no context from a listener that is late. The daemon query
@@ -44,20 +44,34 @@ MEMORY = "roster.json"
 
 def memory_path(env) -> Path | None:
     """The session's roster memory file, or None when the session has no runtime
-    directory of comms' own (a claim socket in a session directory the wrapper made)."""
+    directory of comms' own (a session directory the wrapper made, named for its claim
+    socket's key).
+
+    The key is read from the socket's name, `claim-<key>.sock` in RUNTIME/comms, or,
+    for a short path the core gave a socket whose path there was too long, from the
+    claim file that records it (the Claude adapter's is keyed by the session id)."""
     from .adapters.session import sessions_dir
-    from .claimhold import CLAIM_SOCKET_ENV
-    from .paths import OutsideRuntime, refuse_outside_runtime
+    from .claimhold import CLAIM_SOCKET_ENV, checked_socket, record_at
+    from .paths import OutsideRuntime, runtime_dir
 
     value = env.get(CLAIM_SOCKET_ENV)
     if not value:
         return None
     try:
-        sock = refuse_outside_runtime(value, CLAIM_SOCKET_ENV, env)
+        sock = checked_socket(value, env)
     except OutsideRuntime:
         return None
-    directory = Path(sock).parent
-    if directory.parent != sessions_dir(env):
+    name = sock.name
+    if os.path.realpath(sock.parent) == os.path.realpath(runtime_dir(env)):
+        key = (name[len("claim-"):-len(".sock")]
+               if name.startswith("claim-") and name.endswith(".sock") else None)
+    else:
+        found = record_at(sock, env)
+        key = found[0] if found is not None else None
+    if not key or key in (".", "..") or "/" in key:
+        return None
+    directory = sessions_dir(env) / key
+    if not directory.is_dir():
         return None
     return directory / MEMORY
 

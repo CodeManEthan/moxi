@@ -67,7 +67,7 @@ from moxi import exit as moxi_exit
 
 from .. import directors as directors_mod
 from ..context import COMMAND_ENV, own_comms
-from ..paths import log_dir, runtime_root
+from ..paths import claim_socket, log_dir, runtime_root
 from ..scoping import GLOBAL, NAME_RE, project_key
 
 #: The old wrapper stamp, scrubbed from a child's environment so a nested session
@@ -78,9 +78,6 @@ SOCKET_ENV = "MOXI_COMMS_SHIM_SOCKET"
 #: anyway (the adapter's bind and listen take well under a second; a daemon that is not
 #: there does not hold it up, since the adapter then binds when the daemon returns).
 READY_WAIT = 5.0
-#: The claim socket's name in the session's RUNTIME directory.
-CLAIM_SOCKET_NAME = "claim.sock"
-
 #: The separator the native layer wears where the comms identity wears `@`.
 NATIVE_AT = "-at-"
 
@@ -122,7 +119,9 @@ def native_name(name: str, scope: str) -> str:
 
 def sessions_dir(env=None) -> Path:
     """RUNTIME/comms/comms-sessions: one directory per session this wrapper starts,
-    holding its claim socket and its roster memory."""
+    holding its roster memory. Its claim socket is beside it in RUNTIME/comms
+    (`paths.claim_socket(<session id>)`), where the core's short path takes over when
+    the session directory would make a socket path too long."""
     return runtime_root(env) / "comms-sessions"
 
 
@@ -210,8 +209,8 @@ class Session:
         # global identity.
         self.directors = directors_mod.declare(directors)
         self.dir = sessions_dir() / session_id
-        #: The adapter's claim socket, in the session's own directory.
-        self.claim_socket = self.dir / CLAIM_SOCKET_NAME
+        #: The adapter's claim socket, keyed by the session id as its claim file is.
+        self.claim_socket = claim_socket(session_id)
 
     # ------------------------------------------------------------------ pieces
     def env(self, base=None) -> dict:
@@ -227,7 +226,7 @@ class Session:
 
     def write(self) -> Path:
         """Make the session's RUNTIME directory (0700) and return it. It holds the
-        adapter's claim socket and the listener's roster memory, and nothing else: no
+        listener's roster memory, and nothing else: no
         settings file. Files a launch by an earlier comms left under this session id
         (`mcp.json`, `settings.json`) are removed rather than left to mislead."""
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -657,9 +656,12 @@ def _adapter_process(session: Session, env: dict, harness_pid: int, handle: int,
     try:
         return claude_adapter.serve(shim, harness_pid, handle, ready=ready)
     finally:
-        # The session has ended: its directory (the claim socket's, the roster memory's)
-        # goes with it.
+        # The session has ended: its directory (the roster memory's) goes with it, and
+        # its claim socket if the adapter did not close it.
+        from ..claimhold import remove_socket
+
         shutil.rmtree(session.dir, ignore_errors=True)
+        remove_socket(session.claim_socket)
 
 
 def adapter_shim(session: Session, harness_pid: int, **extra):

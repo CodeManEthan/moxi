@@ -2,9 +2,10 @@
 """Smoke the Codex delivery path through turns' Codex host.
 
 Every root (comms', turns' and the rest of Moxi's) goes under one temporary directory,
-and the comms daemon runs on the mock backend there. Keep TMPDIR short (``/tmp``): a
-session's claim socket sits under that root at its full path, and a Unix socket path
-has a length limit.
+and the comms daemon runs on the mock backend there. Keep TMPDIR short (``/tmp``) for
+``--dry-run``: comms' and turns' sockets take Moxi's short socket path under a long one,
+but the fake ``codex``'s control socket sits under that root at its full path, and a
+Unix socket path has a length limit.
 
 ``--dry-run`` uses the repository's fake ``codex`` executable. It starts a real comms
 daemon and the roster form of ``moxi-comms-codex``, which binds the name and execs
