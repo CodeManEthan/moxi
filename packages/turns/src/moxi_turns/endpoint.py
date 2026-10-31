@@ -294,7 +294,8 @@ class Endpoint:
         self.listen_wait_s = max(0, int(settings["listen.wait_ms"])) / 1000
         #: The bound on an unsettled delivery or command (`PENDING_TTL_S`).
         self.pending_ttl_s = PENDING_TTL_S
-        self.registry = registry if registry is not None else turns_listeners.load()
+        self.registry = registry if registry is not None \
+            else turns_listeners.load(env=self.env)
         self.nonce = secrets.token_hex(6)
         self.version = package_version()
         self.started_at = time.time()

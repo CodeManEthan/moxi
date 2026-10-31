@@ -16,6 +16,7 @@ import moxi_turns as turns
 from conftest import bare, write_config
 from fake_harness import FakeHarness
 from moxi_turns import procs, protocol
+from moxi_turns.endpoint import Endpoint
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32",
                                 reason="moxi.ipc's named pipe server comes later")
@@ -24,6 +25,17 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32",
 def idle_start(s, **checks):
     """How a delivery given only if the session is idle starts."""
     return bare(s.deliver("x", only_if_idle=True, **checks).wait_started(1))
+
+
+def test_the_start_list_comes_from_the_sessions_env(turns_env, tmp_path, monkeypatch):
+    # The caller's config names one start list, the session's env points at another.
+    write_config(turns_env, '[start]\norder = ["callers-entry"]\n')
+    session = tmp_path / "session"
+    write_config(session, '[start]\norder = ["sessions-entry"]\n')
+    env = dict(os.environ, MOXI_TURNS_CONFIG_HOME=str(session / "cfg"))
+    ep = Endpoint(FakeHarness(), env=env)
+    assert ep.registry.order == ("sessions-entry",)
+    assert Endpoint(FakeHarness()).registry.order == ("callers-entry",)
 
 
 def test_find_by_session_id_and_by_pid(make_endpoint):
