@@ -480,6 +480,10 @@ def test_a_slot_launch_with_turns_gets_its_brief_as_the_first_turn(harness, live
     needs_turns()
     if harness == "codex":
         needs_host()
+    # The work dir is new, so Claude asks whether to trust it: the launcher answers that
+    # screen through slots, as in the slot launch without turns.
+    config.set("launcher", "startup.trust_dialog", True, by="launcher live test")
+    config.set("launcher", "startup.wait_s", 15, by="launcher live test")
     brief, answer = words()
     typed = {**flags(harness), "target": "slot", "brief": brief, "cwd": str(work)}
     if harness == "codex":
