@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -466,10 +467,17 @@ def test_the_probe_says_why_chromium_cant_start(tmp_path):
     assert "could not run" in check.chromium_probe(tmp_path / "missing", {})
 
 
-def test_the_real_workspace_runs_browser_tests_for_ui_only():
+def test_the_real_workspace_runs_browser_tests_for_its_page_packages():
     if not (REPO / "packages" / "ui" / "pyproject.toml").is_file():
         pytest.skip("not run from the repository (an sdist has no workspace)")
-    assert [p.dir for p in check.load_workspace(REPO) if p.browser] == ["ui"]
+    found = [p for p in check.load_workspace(REPO) if p.browser]
+    # The page packages known here, not all of them: the next one joins without a change.
+    assert {"cache", "comms", "ui"} <= {p.dir for p in found}
+    for package in found:
+        data = tomllib.loads((package.path / "pyproject.toml").read_text())
+        assert any(check.requirement_name(r) == "moxi-ui"
+                   and "testing" in check.requirement_extras(r)
+                   for r in check._requirement_strings(data)), package.dir
 
 
 # --- the built web files ---------------------------------------------------------------

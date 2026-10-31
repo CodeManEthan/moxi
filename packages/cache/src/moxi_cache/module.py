@@ -4,7 +4,7 @@ INTERFACES = frozenset({1})
 API = "moxi_cache.api"
 CLI = "moxi_cache.cli:main"
 SUMMARY = "Know when a session's prompt cache goes cold, and act before it does."
-OPTIONAL = {}
+OPTIONAL = {"ui": "The cache panel and its chip in the browser UI shell."}
 GATED = {}
 INTERNAL_ENV = {}
 SETTINGS = "settings.toml"
@@ -19,3 +19,14 @@ DOCTOR = "moxi_cache.doctor:rows"
 DAEMONS = {"watch": {"command": "moxi-cache-watch",
                      "doc": "the watcher that keeps clock records of live Claude sessions",
                      "stop": "process"}}
+#: cache's page server, which the browser UI shell starts. Nothing here imports it.
+PAGE = "moxi_cache.page:PAGE"
+#: What cache offers the browser UI shell: its panel, and a chip any host may place.
+COMPONENTS = {
+    "page": {"script": "page.js", "title": "Cache", "contract": 1, "place": "page",
+             "doc": "Each live session's prompt cache, warm or cold"},
+    "chip": {"script": "chip.js", "title": "Cache chip", "contract": 1, "place": "inline",
+             "doc": "One session's cache: warm, near or cold, and the time left",
+             "attributes": {"session": {"type": "string", "required": True,
+                                        "doc": "the harness's session id"}}},
+}

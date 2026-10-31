@@ -82,7 +82,11 @@ def test_the_home_holds_the_servers_block_and_the_fixture_block(ui_page):
 def test_the_menu_opens_the_fixture_panel_in_the_same_document_and_back_returns(ui_shell, ui_page):
     ui_page.evaluate("window.__sameDocument = true")
     links = ui_page.locator("#moxi-menu a")
-    expect(links).to_have_text(["Modules", "Fixture", "Settings"])
+    # Every installed module with a page has an entry between these two, so only the
+    # fixture's is named.
+    expect(links.first).to_have_text("Modules")
+    expect(links.last).to_have_text("Settings")
+    expect(ui_page.locator("#moxi-menu a[data-module=fixture]")).to_have_text("Fixture")
     ui_page.locator("#moxi-menu a[data-module=fixture]").click()
     panel = ui_page.locator("#moxi-panel > moxi-fixture-page")
     expect(panel.get_by_test_id("route")).to_have_text("Route: ")

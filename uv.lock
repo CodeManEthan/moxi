@@ -407,8 +407,16 @@ dependencies = [
     { name = "moxi-sessions" },
 ]
 
+[package.optional-dependencies]
+ui = [
+    { name = "moxi-ui" },
+]
+
 [package.dev-dependencies]
 dev = [
+    { name = "moxi-dev" },
+    { name = "moxi-ui", extra = ["testing"] },
+    { name = "playwright" },
     { name = "pytest" },
 ]
 
@@ -416,10 +424,17 @@ dev = [
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-sessions", editable = "packages/sessions" },
+    { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
 ]
+provides-extras = ["ui"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest" }]
+dev = [
+    { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
+    { name = "playwright", specifier = ">=1.56,<2" },
+    { name = "pytest" },
+]
 
 [[package]]
 name = "moxi-comms"
@@ -439,10 +454,16 @@ cache = [
 codex = [
     { name = "moxi-turns", extra = ["codex"] },
 ]
+ui = [
+    { name = "moxi-ui" },
+]
 
 [package.dev-dependencies]
 dev = [
     { name = "moxi-cache" },
+    { name = "moxi-dev" },
+    { name = "moxi-ui", extra = ["testing"] },
+    { name = "playwright" },
     { name = "pytest" },
     { name = "websockets" },
 ]
@@ -454,13 +475,17 @@ requires-dist = [
     { name = "moxi-cache", marker = "extra == 'cache'", editable = "packages/cache" },
     { name = "moxi-turns", editable = "packages/turns" },
     { name = "moxi-turns", extras = ["codex"], marker = "extra == 'codex'", editable = "packages/turns" },
+    { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
     { name = "psutil", specifier = ">=5.9" },
 ]
-provides-extras = ["codex", "cache"]
+provides-extras = ["codex", "cache", "ui"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "moxi-cache", editable = "packages/cache" },
+    { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
+    { name = "playwright", specifier = ">=1.56,<2" },
     { name = "pytest" },
     { name = "websockets", specifier = ">=17.0.1" },
 ]
@@ -746,7 +771,7 @@ requires-dist = [
     { name = "h11", specifier = ">=0.16,<1" },
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-loopback", editable = "packages/loopback" },
-    { name = "playwright", marker = "extra == 'testing'", specifier = ">=1.50,<2" },
+    { name = "playwright", marker = "extra == 'testing'", specifier = ">=1.56,<2" },
     { name = "psutil", specifier = ">=5.9" },
     { name = "pytest", marker = "extra == 'testing'", specifier = ">=8" },
 ]
