@@ -11,7 +11,19 @@ moved forward with `moxi.store.migrate`, and every write runs in one
 - `events`, things that happened to a launch or a session, each a `kind` and a JSON detail;
 - `picks`, the handoffs a launch was given or shown at startup.
 
-Later versions add tables through `migrate`; the columns here are read unchanged.
+Schema version 2 adds the acts on a launched session and changes two things of version 1:
+
+- `runs`, one row per act (a relaunch, an exit, a clear, a compact, a keep-warm ask), and
+  `run_events`, what happened during one;
+- `pending_compacts`, a compact a crossing asked for while another run was open;
+- `warm_holds`, the named holds that keep a launch warm;
+- `exits`, one row per exit-session run, whatever its verdict;
+- `session_ids` is keyed by the pair `(session_id, request_id)`, so a resumed session's id
+  can belong to the launch that resumed it beside the one that started it; its rows are
+  copied as they were, in the same order;
+- `launches` gains `base_env_json`, null on every row made before version 2.
+
+Each later version adds through `migrate`; no row of an earlier one is lost.
 
 **A later step never moves a row's state back.** The states go forward in one order,
 `spawning`, `started`, `ready`, `sending`, `first-sent`, and `failed` ends any of the first
@@ -29,11 +41,12 @@ The caller owns a connection's lifetime: open one with `connect`, use it, close 
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, fields
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -71,6 +84,31 @@ SOURCES = ("minted", "sender", "startup", "resume", "clear", "compact")
 HOWS = ("given", "shown")
 #: The facts a write may set whatever the state.
 FACTS = ("pid", "pid_started", "pane_id", "slot")
+
+#: What a run does.
+RUN_KINDS = ("relaunch", "exit", "clear", "compact", "keep-warm")
+#: A run's states, in the one order it moves through them.
+RUN_STATES = ("armed", "waiting", "acting", "ended")
+#: The states each run state may be written from; a run is inserted `armed` or `acting`.
+#: A state may be written again from itself, which a job does right before it acts, to
+#: learn that its run is still open. Nothing leaves `ended`.
+RUN_LEAVES = {
+    "waiting": ("armed", "waiting"),
+    "acting": ("armed", "waiting", "acting"),
+    "ended": ("armed", "waiting", "acting"),
+}
+#: The fields a run's state write may set beside the state.
+RUN_FIELDS = ("job", "slot", "pane_id", "turn_number", "new_request_id", "outcome", "word",
+              "detail", "repeats")
+#: How long after its insert a run is never read as stale, in seconds: the time its
+#: spawner has to start the job and record it.
+RUN_GRACE_S = 60.0
+#: The outcome and word of a run ended because its job is gone.
+JOB_GONE = ("error", "job-gone")
+#: The longest detail text a run keeps, in bytes; a longer one loses its front.
+DETAIL_CAP = 4 * 1024
+#: The most rows of one table `prune` deletes in one call.
+PRUNE_LIMIT = 1000
 
 SCHEMA_1 = """
 CREATE TABLE launches (
@@ -132,8 +170,85 @@ CREATE INDEX events_session_at ON events(session_id, at);
 CREATE INDEX picks_key_at ON picks(key, at);
 """
 
+SCHEMA_2 = """
+ALTER TABLE launches ADD COLUMN base_env_json TEXT;
+CREATE TABLE session_ids_new (
+  session_id TEXT NOT NULL,
+  request_id TEXT NOT NULL REFERENCES launches,
+  source TEXT NOT NULL,
+  seen_at TEXT NOT NULL,
+  PRIMARY KEY (session_id, request_id)
+);
+INSERT INTO session_ids_new (rowid, session_id, request_id, source, seen_at)
+  SELECT rowid, session_id, request_id, source, seen_at FROM session_ids ORDER BY rowid;
+DROP TABLE session_ids;
+ALTER TABLE session_ids_new RENAME TO session_ids;
+CREATE INDEX session_ids_session_id ON session_ids(session_id);
+CREATE TABLE runs (
+  run_id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('relaunch','exit','clear','compact','keep-warm')),
+  mode TEXT NOT NULL,
+  request_id TEXT NOT NULL REFERENCES launches,
+  session_id TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  handoff_path TEXT,
+  slot TEXT,
+  pane_id TEXT,
+  turn_number INTEGER,
+  new_request_id TEXT,
+  repair_of TEXT,
+  crossing_key TEXT UNIQUE,
+  job TEXT,
+  state TEXT NOT NULL CHECK (state IN ('armed','waiting','acting','ended')),
+  outcome TEXT,
+  word TEXT,
+  detail TEXT,
+  repeats INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX runs_open ON runs(request_id) WHERE state <> 'ended';
+CREATE TABLE run_events (
+  id INTEGER PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES runs,
+  at TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  detail_json TEXT NOT NULL
+);
+CREATE TABLE pending_compacts (
+  request_id TEXT PRIMARY KEY REFERENCES launches,
+  crossing_key TEXT NOT NULL,
+  at TEXT NOT NULL
+);
+CREATE TABLE warm_holds (
+  request_id TEXT NOT NULL REFERENCES launches,
+  name TEXT NOT NULL,
+  opened_at TEXT NOT NULL,
+  released_at TEXT
+);
+CREATE UNIQUE INDEX warm_open ON warm_holds(request_id, name) WHERE released_at IS NULL;
+CREATE TABLE exits (
+  id INTEGER PRIMARY KEY,
+  at TEXT NOT NULL,
+  run_id TEXT REFERENCES runs,
+  request_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  verdict TEXT NOT NULL,
+  word TEXT,
+  detail TEXT,
+  slot TEXT,
+  pane_id TEXT
+);
+CREATE INDEX runs_session_at ON runs(session_id, created_at);
+CREATE INDEX runs_request_at ON runs(request_id, created_at);
+CREATE INDEX run_events_run_at ON run_events(run_id, at);
+CREATE INDEX exits_at ON exits(at);
+CREATE INDEX launches_relaunch_of ON launches(relaunch_of);
+CREATE INDEX launches_resume_of ON launches(resume_of);
+"""
+
 #: The schema's steps, one per version; `PRAGMA user_version` counts those run.
-STEPS: tuple[str, ...] = (SCHEMA_1,)
+STEPS: tuple[str, ...] = (SCHEMA_1, SCHEMA_2)
 
 
 class TooLarge(store.StoreError):
@@ -157,6 +272,18 @@ class Busy(store.StoreError):
     exit_code = exits.TEMPFAIL
 
 
+class RunOpen(store.StoreError):
+    """The launch already has an open run; a second act loses at insert. `run` is the
+    open one."""
+
+    exit_code = exits.REFUSED
+
+    def __init__(self, run: Run):
+        self.run = run
+        super().__init__(f"launch {run.request_id} has an open {run.kind} run, {run.run_id} "
+                         f"({run.state})")
+
+
 class SessionTaken(store.StoreError):
     """The session id given for a launch already belongs to another launch."""
 
@@ -174,6 +301,7 @@ class LaunchRow:
 
     `newest_session_id` is set only by `resolve`: the session id this launch was last
     known by, which after a clear or a compaction is not the one it started with.
+    `base_env_json` is null on a row made before schema version 2.
     """
 
     request_id: str
@@ -204,6 +332,7 @@ class LaunchRow:
     state: str
     reason: str | None
     updated_at: str
+    base_env_json: str | None = None
     newest_session_id: str | None = None
 
     @property
@@ -218,6 +347,11 @@ class LaunchRow:
     def env(self) -> dict[str, str]:
         return json.loads(self.env_json)
 
+    @property
+    def base_env(self) -> dict[str, str] | None:
+        """The base environment recorded for the launch, or None when none was."""
+        return None if self.base_env_json is None else json.loads(self.base_env_json)
+
     def stale(self, after_s: float, now: datetime | None = None) -> bool:
         """Whether the row is still `spawning` or `sending` more than `after_s` seconds
         after it was made. The row is never rewritten; it only reads as stale."""
@@ -228,13 +362,14 @@ class LaunchRow:
 
     def as_json(self, *, stale_after: float | None = None,
                 now: datetime | None = None) -> dict[str, Any]:
-        """The row as a JSON object: every column, the three JSON columns expanded, and
-        `stale` when `stale_after` is given."""
+        """The row as a JSON object: every column, the JSON columns expanded, and `stale`
+        when `stale_after` is given."""
         out = {f.name: getattr(self, f.name) for f in fields(self)
                if f.name != "newest_session_id"}
         out["values_json"] = self.values
         out["argv_json"] = self.argv
         out["env_json"] = self.env
+        out["base_env_json"] = self.base_env
         if stale_after is not None:
             out["stale"] = self.stale(stale_after, now)
         return out
@@ -386,7 +521,7 @@ def insert(conn: sqlite3.Connection, *, request_id: str, actor: str, harness: st
         "posture": posture, "brief": brief, "handoff_path": handoff_path,
         "relaunch_of": relaunch_of, "resume_of": resume_of, "pid": None,
         "pid_started": None, "endpoint": None, "state": "spawning", "reason": None,
-        "updated_at": at,
+        "updated_at": at, "base_env_json": None,
     }
     conn.execute("PRAGMA synchronous = FULL")
     try:
@@ -473,7 +608,8 @@ def learn_session(conn: sqlite3.Connection, request_id: str, session_id: str,
     The id joins `session_ids` unless it is there already, and becomes the row's
     `session_id` when the row has none. An id another launch is known by stays that
     launch's: it joins nothing and the row's column is left as it is, so `resolve` and
-    the claim read the same owner. The state is not touched.
+    the claim read the same owner. The table is keyed by the pair, which would hold the id
+    for both; this write keeps it with the launch that has it. The state is not touched.
     """
     if source not in SOURCES:
         raise ValueError(f"unknown session id source {source!r}")
@@ -483,7 +619,9 @@ def learn_session(conn: sqlite3.Connection, request_id: str, session_id: str,
             return False
         cursor = conn.execute(
             "INSERT OR IGNORE INTO session_ids (session_id, request_id, source, seen_at) "
-            "VALUES (?, ?, ?, ?)", (session_id, request_id, source, at))
+            "SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM session_ids "
+            "WHERE session_id = ? AND request_id <> ?)",
+            (session_id, request_id, source, at, session_id, request_id))
         added = cursor.rowcount == 1
         conn.execute("UPDATE launches SET session_id = ?, updated_at = ? "
                      "WHERE request_id = ? AND session_id IS NULL AND EXISTS ("
@@ -551,19 +689,28 @@ def _known_by(conn: sqlite3.Connection, row: LaunchRow, session_id: str) -> bool
                         (session_id, row.request_id)).fetchone() is not None
 
 
-def endpoint_gone(endpoint: str) -> bool:
-    """Whether the endpoint process a claim names has ended. A claim names it
-    `<pid>@<start time>` (`listeners.endpoint_id`), and the process is gone when no
-    process with that pid and start time runs; one named by its pid alone, its start time
-    unread, is gone when no process has that pid. A name that is neither is never gone."""
-    from moxi import proc
-
+def parse_endpoint(endpoint: str) -> tuple[int, float | None] | None:
+    """The pid and start time a claim names, from its text `<pid>@<start time>`
+    (`listeners.endpoint_id`); the start time is None for a claim named by its pid alone,
+    its start time unread. None for text that is neither."""
     pid_text, sep, started_text = endpoint.partition("@")
     try:
-        pid = int(pid_text)
-        started = float(started_text) if sep else None
+        return int(pid_text), (float(started_text) if sep else None)
     except ValueError:
+        return None
+
+
+def endpoint_gone(endpoint: str) -> bool:
+    """Whether the endpoint process a claim names has ended: no process with that pid and
+    start time runs (start times within `moxi.proc.alive`'s tolerance), or, for a claim
+    named by its pid alone, no process has that pid. A name `parse_endpoint` can't read is
+    never gone."""
+    from moxi import proc
+
+    parsed = parse_endpoint(endpoint)
+    if parsed is None:
         return False
+    pid, started = parsed
     if started is None:
         return proc.identity(pid) is None
     return not proc.alive(proc.ProcId(pid, started))
@@ -675,6 +822,277 @@ def picked(conn: sqlite3.Connection, key: str) -> list[str]:
         "ORDER BY p.at DESC, p.rowid DESC", (key,))]
 
 
+# -- runs ------------------------------------------------------------------------------
+#
+# **One open run per launch.** A unique index over the runs not `ended` makes a second
+# insert for the same launch fail, and `insert_run` reports the open run; nothing is locked
+# across a wait.
+#
+# **A run's state goes forward only**, `armed`, `waiting`, `acting`, `ended`, by one
+# conditional update naming the states it may leave (`RUN_LEAVES`). A job writes its state
+# right before each act on the session; a write that matches nothing means the run was
+# ended under it, and the job exits without acting.
+#
+# **A run is stale exactly when its job is gone.** The job is recorded on the run (a slots
+# job by name, a spawned job by its process); the caller says how to test it. No clock
+# decides it, except that a run is never stale within `RUN_GRACE_S` of its insert, and one
+# with no job recorded after that is stale (its spawner died before recording it).
+
+
+@dataclass(frozen=True)
+class Run:
+    """One `runs` row, its columns by name."""
+
+    run_id: str
+    kind: str
+    mode: str
+    request_id: str
+    session_id: str
+    actor: str
+    handoff_path: str | None
+    slot: str | None
+    pane_id: str | None
+    turn_number: int | None
+    new_request_id: str | None
+    repair_of: str | None
+    crossing_key: str | None
+    job: str | None
+    state: str
+    outcome: str | None
+    word: str | None
+    detail: str | None
+    repeats: int
+    created_at: str
+    updated_at: str
+
+    @property
+    def open(self) -> bool:
+        return self.state != "ended"
+
+    def as_json(self) -> dict[str, Any]:
+        return {f.name: getattr(self, f.name) for f in fields(self)}
+
+
+@dataclass(frozen=True)
+class RunEvent:
+    id: int
+    run_id: str
+    at: str
+    kind: str
+    detail: dict[str, Any]
+
+
+RUN_COLUMNS = tuple(f.name for f in fields(Run))
+_SELECT_RUN = "SELECT " + ", ".join(RUN_COLUMNS) + " FROM runs"
+
+
+def _run(values: Sequence[Any] | None) -> Run | None:
+    return None if values is None else Run(*values)
+
+
+def cut(text: str | None) -> str | None:
+    """`text` cut from the front to `DETAIL_CAP` bytes, so its end, where an error's last
+    words are, is kept; shorter text is kept whole."""
+    if text is None:
+        return None
+    data = text.encode("utf-8")
+    if len(data) <= DETAIL_CAP:
+        return text
+    return "..." + data[-(DETAIL_CAP - 3):].decode("utf-8", "ignore")
+
+
+def new_run_id() -> str:
+    """A run id: 16 hex digits from `secrets`."""
+    return secrets.token_hex(8)
+
+
+def get_run(conn: sqlite3.Connection, run_id: str) -> Run | None:
+    """One run, or None."""
+    return _run(conn.execute(f"{_SELECT_RUN} WHERE run_id = ?", (run_id,)).fetchone())
+
+
+def open_run(conn: sqlite3.Connection, request_id: str) -> Run | None:
+    """The launch's open run, or None."""
+    return _run(conn.execute(f"{_SELECT_RUN} WHERE request_id = ? AND state <> 'ended'",
+                             (request_id,)).fetchone())
+
+
+def runs(conn: sqlite3.Connection, *, request_id: str | None = None,
+         session_id: str | None = None, limit: int | None = None) -> list[Run]:
+    """Runs newest first, of one launch or one session id when either is given."""
+    sql, params = _SELECT_RUN, []
+    if request_id is not None:
+        sql += " WHERE request_id = ?"
+        params.append(request_id)
+    elif session_id is not None:
+        sql += " WHERE session_id = ?"
+        params.append(session_id)
+    sql += " ORDER BY created_at DESC, rowid DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(int(limit))
+    return [Run(*values) for values in conn.execute(sql, params)]
+
+
+def run_stale(run: Run, gone: Callable[[str], bool], now: datetime | None = None) -> bool:
+    """Whether an open run is stale: past `RUN_GRACE_S` from its insert, with no job
+    recorded or with `gone(job)` true. `gone` is given the run's `job` text (`slots:<name>`
+    or `proc:<pid>@<start>`); an ended run is never stale."""
+    if not run.open:
+        return False
+    now = now or datetime.now(timezone.utc)
+    if (now - parse_time(run.created_at)).total_seconds() <= RUN_GRACE_S:
+        return False
+    return run.job is None or bool(gone(run.job))
+
+
+def insert_run(conn: sqlite3.Connection, *, kind: str, mode: str, request_id: str,
+               session_id: str, actor: str, state: str = "armed", job: str | None = None,
+               handoff_path: str | None = None, slot: str | None = None,
+               pane_id: str | None = None, turn_number: int | None = None,
+               repair_of: str | None = None, crossing_key: str | None = None,
+               gone: Callable[[str], bool] | None = None, at: str | None = None) -> Run:
+    """Insert a run for a launch and return it, or raise `RunOpen` naming the launch's
+    open run.
+
+    With `gone`, an open run met here is tested first (`run_stale`): a stale one is ended
+    `error`, word `job-gone`, and this run is inserted in the same transaction. The test
+    runs before the write lock is taken, and the end is conditional on the run being as
+    it was read, so a job that wrote its run in between is alive and keeps it. `state`
+    is where the run starts (`armed`, or `acting` for an act that starts at once).
+    """
+    if kind not in RUN_KINDS:
+        raise ValueError(f"unknown run kind {kind!r}")
+    if state not in RUN_STATES or state == "ended":
+        raise ValueError(f"a run does not start {state!r}")
+    at = at or now()
+    seen = open_run(conn, request_id)
+    stale = seen is not None and gone is not None and run_stale(seen, gone, parse_time(at))
+    with _writing(conn):
+        current = open_run(conn, request_id)
+        if current is not None:
+            if not (stale and current == seen and _end_stale(conn, current, at)):
+                raise RunOpen(current)
+        run_id = new_run_id()
+        while conn.execute("SELECT 1 FROM runs WHERE run_id = ?", (run_id,)).fetchone():
+            run_id = new_run_id()
+        row = Run(run_id=run_id, kind=kind, mode=mode, request_id=request_id,
+                  session_id=session_id, actor=actor, handoff_path=handoff_path, slot=slot,
+                  pane_id=pane_id, turn_number=turn_number, new_request_id=None,
+                  repair_of=repair_of, crossing_key=crossing_key, job=job, state=state,
+                  outcome=None, word=None, detail=None, repeats=0, created_at=at,
+                  updated_at=at)
+        conn.execute(f"INSERT INTO runs ({', '.join(RUN_COLUMNS)}) "
+                     f"VALUES ({', '.join('?' * len(RUN_COLUMNS))})",
+                     [getattr(row, name) for name in RUN_COLUMNS])
+    return row
+
+
+def _end_stale(conn: sqlite3.Connection, run: Run, at: str) -> bool:
+    outcome, word = JOB_GONE
+    ended = conn.execute(
+        "UPDATE runs SET state = 'ended', outcome = ?, word = ?, updated_at = ? "
+        "WHERE run_id = ? AND state = ? AND updated_at = ?",
+        (outcome, word, at, run.run_id, run.state, run.updated_at)).rowcount == 1
+    if ended:
+        conn.execute("INSERT INTO run_events (run_id, at, kind, detail_json) "
+                     "VALUES (?, ?, 'ended', ?)",
+                     (run.run_id, at, _encode({"outcome": outcome, "word": word,
+                                               "job": run.job})))
+    return ended
+
+
+def advance_run(conn: sqlite3.Connection, run_id: str, state: str, *,
+                leaving: Iterable[str] | None = None, at: str | None = None,
+                **values: Any) -> bool:
+    """Move a run to `state`, with `values` (any of `RUN_FIELDS`), and say whether it
+    moved.
+
+    The run moves only from a state `state` may be written from (`RUN_LEAVES`), narrowed
+    to `leaving` when given; otherwise nothing is written, so a write that comes after a
+    later one, or one for a run ended under its job, changes nothing. `detail` is cut to
+    `DETAIL_CAP` from the front.
+    """
+    if state not in RUN_LEAVES:
+        raise ValueError(f"no run is moved to {state!r}")
+    allowed = RUN_LEAVES[state]
+    if leaving is not None:
+        leaving = tuple(leaving)
+        if bad := [s for s in leaving if s not in allowed]:
+            raise ValueError(f"a run's {state} is never written from {', '.join(bad)}")
+        allowed = leaving
+    if bad := [name for name in values if name not in RUN_FIELDS]:
+        raise ValueError(f"not a field of a run: {', '.join(bad)}")
+    if "detail" in values:
+        values["detail"] = cut(values["detail"])
+    names = list(values)
+    sets = "".join(f", {name} = ?" for name in names)
+    with _writing(conn):
+        cursor = conn.execute(
+            f"UPDATE runs SET state = ?, updated_at = ?{sets} "
+            f"WHERE run_id = ? AND state IN ({', '.join('?' * len(allowed))})",
+            (state, at or now(), *(values[n] for n in names), run_id, *allowed))
+        return cursor.rowcount == 1
+
+
+def end_run(conn: sqlite3.Connection, run_id: str, outcome: str, *, word: str | None = None,
+            detail: str | None = None, at: str | None = None, **values: Any) -> bool:
+    """End an open run with its `outcome`, and say whether this call ended it; a run
+    already ended is left as it was."""
+    return advance_run(conn, run_id, "ended", outcome=outcome, word=word, detail=detail,
+                       at=at, **values)
+
+
+def add_run_event(conn: sqlite3.Connection, run_id: str, kind: str,
+                  detail: Mapping[str, Any] | None = None, *, at: str | None = None) -> int:
+    """Add a `run_events` row and return its id."""
+    with _writing(conn):
+        cursor = conn.execute(
+            "INSERT INTO run_events (run_id, at, kind, detail_json) VALUES (?, ?, ?, ?)",
+            (run_id, at or now(), kind, _encode(dict(detail or {}))))
+        return int(cursor.lastrowid)
+
+
+def run_events(conn: sqlite3.Connection, run_id: str) -> list[RunEvent]:
+    """The events of one run, oldest first."""
+    return [RunEvent(id, rid, at, kind, json.loads(detail)) for id, rid, at, kind, detail
+            in conn.execute("SELECT id, run_id, at, kind, detail_json FROM run_events "
+                            "WHERE run_id = ? ORDER BY at, id", (run_id,))]
+
+
+def prune(conn: sqlite3.Connection, keep_days: float, *, at: str | None = None,
+          limit: int = PRUNE_LIMIT) -> dict[str, int]:
+    """Delete what is older than `keep_days` and say how many rows of each table went:
+    ended runs, with their events and `exits` rows, and released holds. At most `limit`
+    rows of each table go in one call; a run whose events or exits are not all gone yet
+    is kept for the next. Open runs and open holds are never deleted by age."""
+    moment = parse_time(at) if at else datetime.now(timezone.utc)
+    cutoff = stamp(moment - timedelta(days=keep_days))
+    with _writing(conn):
+        old = [run_id for (run_id,) in conn.execute(
+            "SELECT run_id FROM runs WHERE state = 'ended' AND updated_at < ? "
+            "ORDER BY updated_at LIMIT ?", (cutoff, limit))]
+        marks = ", ".join("?" * len(old))
+        gone = {"run_events": 0, "exits": 0, "runs": 0, "warm_holds": 0}
+        if old:
+            gone["run_events"] = conn.execute(
+                f"DELETE FROM run_events WHERE id IN (SELECT id FROM run_events "
+                f"WHERE run_id IN ({marks}) LIMIT ?)", (*old, limit)).rowcount
+            gone["exits"] = conn.execute(
+                f"DELETE FROM exits WHERE id IN (SELECT id FROM exits "
+                f"WHERE run_id IN ({marks}) LIMIT ?)", (*old, limit)).rowcount
+            gone["runs"] = conn.execute(
+                f"DELETE FROM runs WHERE run_id IN ({marks}) "
+                "AND NOT EXISTS (SELECT 1 FROM run_events e WHERE e.run_id = runs.run_id) "
+                "AND NOT EXISTS (SELECT 1 FROM exits x WHERE x.run_id = runs.run_id)",
+                old).rowcount
+        gone["warm_holds"] = conn.execute(
+            "DELETE FROM warm_holds WHERE rowid IN (SELECT rowid FROM warm_holds "
+            "WHERE released_at IS NOT NULL AND released_at < ? LIMIT ?)",
+            (cutoff, limit)).rowcount
+    return gone
+
+
 # -- the log verb ----------------------------------------------------------------------
 
 
@@ -710,8 +1128,13 @@ def log_lines(*, limit: int | None = None, before: str | datetime | None = None,
     return [_encode(row.as_json(stale_after=after, now=moment)) for row in rows]
 
 
-__all__ = ["CAP", "COLUMNS", "FACTS", "HARNESSES", "HOWS", "LEAVES", "RECLAIMED", "SOURCES",
-           "STATES", "STEPS", "TARGETS", "Busy", "Event", "Inserted", "LaunchRow",
-           "SessionTaken", "TooLarge", "add_event", "add_pick", "claim", "connect",
-           "endpoint_gone", "events", "get", "insert", "learn_session", "log", "log_lines", "now", "parse_time", "path", "picked",
-           "resolve", "session_ids", "set_facts", "set_state", "stale_after_s", "stamp"]
+__all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "FACTS", "HARNESSES", "HOWS", "JOB_GONE", "LEAVES",
+           "PRUNE_LIMIT", "RECLAIMED", "RUN_COLUMNS", "RUN_FIELDS", "RUN_GRACE_S",
+           "RUN_KINDS", "RUN_LEAVES", "RUN_STATES", "SOURCES", "STATES", "STEPS", "TARGETS",
+           "Busy", "Event", "Inserted", "LaunchRow", "Run", "RunEvent", "RunOpen",
+           "SessionTaken", "TooLarge", "add_event", "add_pick", "add_run_event",
+           "advance_run", "claim", "connect", "cut", "end_run", "endpoint_gone", "events",
+           "get", "get_run", "insert", "insert_run", "learn_session", "log", "log_lines",
+           "new_run_id", "now", "open_run", "parse_endpoint", "parse_time", "path", "picked",
+           "prune", "resolve", "run_events", "run_stale", "runs", "session_ids", "set_facts",
+           "set_state", "stale_after_s", "stamp"]
