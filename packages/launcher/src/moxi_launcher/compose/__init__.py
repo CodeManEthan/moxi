@@ -115,10 +115,11 @@ def context(values: Mapping[str, object], *, request_id: str,
     host = host_script() if harness == "codex" else None
     additions = None
     if harness == "claude" and "turns" in links and not comms:
+        granted = common.commands(values)
         base = {**scrub(environ, moxi_modules.session_env()),
-                **stamps(request_id, turns=True)}
+                **stamps(request_id, turns=True, granted=granted)}
         additions = launch_additions(cwd=str(values.get("cwd") or ""), env=base,
-                                     session_id=session_id)
+                                     session_id=session_id, granted=granted)
 
     return Context(request_id=request_id, session_id=session_id, mode=mode, actor=who,
                    modules=links, chosen=frozenset(chosen), project_key=project_key,
@@ -132,9 +133,11 @@ def context(values: Mapping[str, object], *, request_id: str,
                    comms_codex=harness == "codex" and comms and presets.comms_codex())
 
 
-def launch_additions(*, cwd: str, env: Mapping[str, str],
-                     session_id: str | None) -> Additions:
-    """turns' launch additions for a Claude launch without comms, asked once. turns'
+def launch_additions(*, cwd: str, env: Mapping[str, str], session_id: str | None,
+                     granted: Iterable[str] = common.COMMANDS) -> Additions:
+    """turns' launch additions for a Claude launch without comms, asked once, with the
+    commands the launch grants (`common.commands`), which turns renders into its own
+    `MOXI_TURNS_COMMANDS`. turns'
     own error, or its `ValueError` for a harness or command it does not know, is a
     `TurnsAdditions` refusal, so `preview` and the launch say it in one line."""
     api = first.turns_api(quiet=True)
@@ -148,7 +151,7 @@ def launch_additions(*, cwd: str, env: Mapping[str, str],
                               and issubclass(turns_error, BaseException) else ())
     try:
         got = call("claude", cwd=cwd, env=dict(env), session_id=session_id,
-                   commands=common.COMMANDS)
+                   commands=tuple(granted))
     except caught as error:
         raise TurnsAdditions(None, f"turns could not give this launch its additions: "
                                    f"{error}", "moxi doctor shows what is wrong with turns"

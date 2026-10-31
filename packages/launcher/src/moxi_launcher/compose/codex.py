@@ -163,7 +163,9 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
 
     env = common.stamps(ctx.request_id, turns="turns" in ctx.modules,
                         warn_at=str(values.get("warn_at") or "") or None,
-                        notes_dir=str(values.get("notes_dir") or "") or None)
+                        notes_dir=str(values.get("notes_dir") or "") or None,
+                        granted=common.commands(values),
+                        options=common.option_stamps(values))
     recorded = common.recorded(HARNESS, values, mode_, not_applied)
     common.check_sizes(argv, values=recorded, brief=ctx.brief, env=env, prompt=prompt,
                        windows=ctx.windows)

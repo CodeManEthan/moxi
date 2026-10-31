@@ -44,10 +44,22 @@ _WIDTH = len("start posture: ")
 REQUEST = "MOXI_LAUNCHER_REQUEST"
 #: turns' grant of session commands to the one launch it is stamped into.
 TURNS_COMMANDS = "MOXI_TURNS_COMMANDS"
-#: The commands part 1 grants.
+#: The commands every launch with turns grants; `commands(values)` adds those its
+#: recycle rows need.
 COMMANDS = ("exit",)
 #: usage's context mark, set from the `warn_at` row.
 USAGE_WARN_AT = "MOXI_USAGE_WARN_AT"
+#: usage's crossing mark for recycle at limit, set from `limit_at` when
+#: `recycle_at_limit` is not off.
+USAGE_CROSSING_AT = "MOXI_USAGE_CROSSING_AT"
+#: The launch's keep-warm and recycle-on-expiry options, read by cache's timer.
+KEEP_WARM = "MOXI_LAUNCHER_KEEP_WARM"
+RECYCLE_ON_EXPIRY = "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY"
+#: The run id of a relaunch whose first turn carries its handoff.
+RELAUNCH = "MOXI_LAUNCHER_RELAUNCH"
+#: The identity block's line on a keep-warm launch.
+KEEP_WARM_LINE = ('on; open a hold with "moxi launcher keep-warm hold <name>" for each '
+                  "piece of work you hand out, and release it when the work is done")
 #: notes' directory, set from the `notes_dir` row.
 NOTES_DIR = "MOXI_NOTES_DIR"
 #: What every scrub removes besides the modules' own session stamps: every `CLAUDE*`
@@ -258,15 +270,16 @@ def cwd_of(values: Mapping[str, object]) -> str:
 def identity_block(*, session_id: str | None, cwd: str, posture: str,
                    project_key: str | None = None, identity: str | None = None,
                    scope: str | None = None, handoff_dir: str | Path | None = None,
-                   agent_role: str | None = None) -> str:
+                   agent_role: str | None = None, keep_warm: bool = False) -> str:
     """The identity block a launched session starts with. A line appears only when it
-    carries a value."""
+    carries a value; `keep warm:` only on a keep-warm launch."""
     lines = [("session id:", session_id), ("project cwd:", cwd),
              ("project key:", project_key),
              ("identity:", f"{identity}@{scope}"
               if identity and scope and "@" not in identity else identity),
              ("handoff dir:", handoff_dir), ("start posture:", posture),
-             ("agent role:", agent_role)]
+             ("agent role:", agent_role),
+             ("keep warm:", KEEP_WARM_LINE if keep_warm else None)]
     return "\n".join([HEADER, *(f"{label:<{_WIDTH}}{value}" for label, value in lines
                                 if value)])
 
@@ -402,18 +415,49 @@ def scrub(environ: Mapping[str, str], session_env: frozenset[str] | set[str] = f
     return {name: value for name, value in environ.items() if not scrubbed(name)}
 
 
+def commands(values: Mapping[str, object]) -> tuple[str, ...]:
+    """The session commands a launch grants through turns: `exit`, then `clear` or
+    `compact` for `recycle_on_expiry`, and `compact` for `recycle_at_limit`."""
+    granted = list(COMMANDS)
+    expiry = values.get("recycle_on_expiry")
+    if expiry in ("clear", "compact"):
+        granted.append(str(expiry))
+    if values.get("recycle_at_limit") in ("relaunch", "compact") and "compact" not in granted:
+        granted.append("compact")
+    return tuple(granted)
+
+
+def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
+    """The stamps a launch's option rows set: keep-warm on, recycle on expiry's value,
+    and the crossing mark when it recycles at its limit. A row at `off` stamps nothing."""
+    env: dict[str, str] = {}
+    if values.get("keep_warm") == "on":
+        env[KEEP_WARM] = "on"
+    if values.get("recycle_on_expiry") in ("clear", "compact"):
+        env[RECYCLE_ON_EXPIRY] = str(values["recycle_on_expiry"])
+    if values.get("recycle_at_limit") in ("relaunch", "compact") and values.get("limit_at"):
+        env[USAGE_CROSSING_AT] = str(values["limit_at"])
+    return env
+
+
 def stamps(request_id: str, *, turns: bool = False, additions: Additions | None = None,
-           warn_at: str | None = None, notes_dir: str | None = None) -> dict[str, str]:
-    """The variables a launch stamps into its session's environment."""
+           warn_at: str | None = None, notes_dir: str | None = None,
+           granted: Sequence[str] = COMMANDS,
+           options: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The variables a launch stamps into its session's environment. `granted` is the
+    commands turns grants (`commands(values)`), and must be the ones turns' launch
+    additions were asked with, whose own render of the grant lands over this one;
+    `options` the option rows' stamps and any a replay adds."""
     env: dict[str, str] = {}
     if turns:
-        env[TURNS_COMMANDS] = ",".join(COMMANDS)
+        env[TURNS_COMMANDS] = ",".join(granted)
     if additions is not None:
         env.update(additions.env)
     if warn_at:
         env[USAGE_WARN_AT] = str(warn_at)
     if notes_dir:
         env[NOTES_DIR] = str(notes_dir)
+    env.update(options or {})
     env[REQUEST] = request_id
     return env
 
@@ -463,7 +507,8 @@ def check_sizes(argv: Sequence[str], *, values: Mapping[str, object],
             raise TooLong(what, size, WORD, "bytes")
 
 
-__all__ = ["COMMANDS", "HEADER", "NOTES_DIR", "REQUEST", "SCRUB_NAMES", "SCRUB_PREFIXES",
+__all__ = ["COMMANDS", "HEADER", "KEEP_WARM", "KEEP_WARM_LINE", "RECYCLE_ON_EXPIRY",
+           "RELAUNCH", "USAGE_CROSSING_AT", "commands", "option_stamps", "NOTES_DIR", "REQUEST", "SCRUB_NAMES", "SCRUB_PREFIXES",
            "TURNS_COMMANDS", "USAGE_WARN_AT", "WINDOWS_LINE", "WORD", "Additions",
            "Composition", "Context", "NoBrief", "NotYet", "PromptFile", "TooLong",
            "TurnsAdditions", "Unreadable", "agent_role", "check_sizes", "encode",

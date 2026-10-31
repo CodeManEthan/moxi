@@ -98,7 +98,8 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
         session_id=ctx.session_id, cwd=cwd, posture=str(values.get("posture") or ""),
         project_key=ctx.project_key, identity=identity, scope=scope,
         handoff_dir=ctx.handoff_dir,
-        agent_role=common.agent_role(str(values.get("agent") or ""), ctx.role_found))
+        agent_role=common.agent_role(str(values.get("agent") or ""), ctx.role_found),
+        keep_warm=values.get("keep_warm") == "on")
     prompt_file = PromptFile(common.prompt_path(ctx.runs_dir, ctx.request_id),
                              common.seat_text(block, ctx.instructions))
 
@@ -135,7 +136,9 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
         warnings += list(additions.notes)
     env = common.stamps(ctx.request_id, turns=turns, additions=additions,
                         warn_at=str(values.get("warn_at") or "") or None,
-                        notes_dir=str(values.get("notes_dir") or "") or None)
+                        notes_dir=str(values.get("notes_dir") or "") or None,
+                        granted=common.commands(values),
+                        options=common.option_stamps(values))
     recorded = common.recorded(HARNESS, values, mode_, fit.not_applied)
     common.check_sizes(argv, values=recorded, brief=ctx.brief, env=env, prompt=prompt,
                        windows=ctx.windows)

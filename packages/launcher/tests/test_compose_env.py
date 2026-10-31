@@ -44,7 +44,10 @@ def test_the_scrub_takes_claude_names_the_agent_marker_and_each_session_stamp():
 
 def test_the_launchers_own_stamps_are_named_exactly_so_its_configuration_stays():
     found = modules.load("launcher")
-    assert set(found.session_env) == {"MOXI_LAUNCHER_REQUEST", "MOXI_LAUNCHER_RELAUNCH"}
+    assert set(found.session_env) == {"MOXI_LAUNCHER_REQUEST", "MOXI_LAUNCHER_RELAUNCH",
+                                     "MOXI_LAUNCHER_KEEP_WARM",
+                                     "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY",
+                                     "MOXI_USAGE_CROSSING_AT", "MOXI_USAGE_WARN_AT"}
     assert not any(name.endswith("_") for name in found.session_env)
     kept = common.scrub(CALLER, modules.session_env(), windows=False)
     assert "MOXI_LAUNCHER_REQUEST" not in kept and "MOXI_LAUNCHER_RELAUNCH" not in kept

@@ -119,3 +119,61 @@ def test_the_catalog_refuses_malformed_new_fields(spec):
     text = ('[x]\ntype = "enum"\ndefault = "a"\nvalues = ["a", "b"]\ndoc = "d"\n' + spec)
     with pytest.raises(CatalogError):
         catalog.parse_text(text, harness=catalog.LAUNCHER)
+
+
+# -- the stamps and the grant -------------------------------------------------------------
+
+from moxi_launcher.compose import common  # noqa: E402
+
+
+@pytest.mark.parametrize(("values", "granted"), [
+    ({}, ("exit",)),
+    ({"recycle_on_expiry": "clear"}, ("exit", "clear")),
+    ({"recycle_on_expiry": "compact"}, ("exit", "compact")),
+    ({"recycle_at_limit": "compact"}, ("exit", "compact")),
+    ({"recycle_at_limit": "relaunch", "recycle_on_expiry": "clear"},
+     ("exit", "clear", "compact")),
+    ({"recycle_at_limit": "off", "recycle_on_expiry": "off"}, ("exit",)),
+])
+def test_the_grant_widens_with_the_recycle_rows(values, granted):
+    assert common.commands(values) == granted
+
+
+def test_the_option_stamps():
+    assert common.option_stamps({"keep_warm": "off", "recycle_on_expiry": "off",
+                                 "recycle_at_limit": "off", "limit_at": "1x"}) == {}
+    assert common.option_stamps({"keep_warm": "on", "recycle_on_expiry": "compact",
+                                 "recycle_at_limit": "relaunch", "limit_at": "1.5x"}) == {
+        "MOXI_LAUNCHER_KEEP_WARM": "on", "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY": "compact",
+        "MOXI_USAGE_CROSSING_AT": "1.5x"}
+
+
+def test_the_grant_reaches_the_stamp_and_the_additions_alike(monkeypatch):
+    """turns renders its own grant into its additions, which land over the stamp, so the
+    additions must be asked with the same commands."""
+    from moxi_launcher import compose
+
+    asked = {}
+
+    class Turns:
+        TurnsError = RuntimeError
+
+        @staticmethod
+        def launch_additions(harness, *, cwd, env, session_id, commands):
+            asked["commands"] = commands
+            return type("A", (), {"argv": (), "env": {"MOXI_TURNS_COMMANDS":
+                                                      ",".join(commands)}, "notes": ()})
+
+    monkeypatch.setattr(compose.first, "turns_api", lambda quiet=False: Turns)
+    got = compose.launch_additions(cwd="/w", env={}, session_id="s",
+                                   granted=common.commands({"recycle_on_expiry": "clear"}))
+    assert asked["commands"] == ("exit", "clear")
+    env = common.stamps("r1", turns=True, additions=got, granted=("exit", "clear"))
+    assert env["MOXI_TURNS_COMMANDS"] == "exit,clear"
+
+
+def test_a_keep_warm_launch_has_its_identity_line():
+    block = common.identity_block(session_id="s", cwd="/w", posture="go", keep_warm=True)
+    assert block.splitlines()[-1].startswith('keep warm:     on; open a hold with "moxi '
+                                             'launcher keep-warm hold <name>"')
+    assert "keep warm" not in common.identity_block(session_id="s", cwd="/w", posture="go")
