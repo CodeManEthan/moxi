@@ -4,9 +4,10 @@ system prompt file, the opening prompt, the child's environment, and the size li
 Everything here but `write_prompt` is pure: values in, text, argv and environment out.
 
 **The child's environment is scrubbed, then stamped.** From a copy of the caller's
-environment every `CLAUDE*` name, `AI_AGENT`, and every name and prefix the installed
-modules declare in `SESSION_ENV` (`moxi.modules.session_env()`) is removed, so a launch
-made from inside a session carries none of that session's stamps. Then the launch's own
+environment every `CLAUDE*` name but the user's own Claude configuration and sign-in
+(`CLAUDE_KEEP`), `AI_AGENT`, and every name and prefix the installed modules declare in
+`SESSION_ENV` (`moxi.modules.session_env()`) is removed, so a launch made from inside a
+session carries none of that session's stamps. Then the launch's own
 stamps go in: `MOXI_LAUNCHER_REQUEST` always, `MOXI_TURNS_COMMANDS=exit` when turns is
 installed, the launch additions' environment, usage's warning mark and notes' directory
 when those rows are set. The stamps alone are what a launch records and `preview` shows;
@@ -46,10 +47,42 @@ COMMANDS = ("exit",)
 USAGE_WARN_AT = "MOXI_USAGE_WARN_AT"
 #: notes' directory, set from the `notes_dir` row.
 NOTES_DIR = "MOXI_NOTES_DIR"
-#: What every scrub removes besides the modules' own session stamps: the names a Claude
-#: Code session sets in what it starts, and the agent marker.
+#: What every scrub removes besides the modules' own session stamps: every `CLAUDE*`
+#: name but those in `CLAUDE_KEEP`, and the agent marker. A Claude Code session sets
+#: `CLAUDE*` names in what it starts, and new ones come with new versions, so the scrub
+#: drops the prefix and keeps only a named list.
 SCRUB_PREFIXES = ("CLAUDE",)
 SCRUB_NAMES = ("AI_AGENT",)
+#: The `CLAUDE*` names the scrub keeps: the user's own Claude Code configuration and
+#: sign-in, as Claude Code's environment variable reference documents them. A session
+#: never sets these in what it starts; without them the launched Claude would read
+#: another configuration folder, sign in another way or not at all, or lose a security
+#: choice the user made.
+CLAUDE_KEEP = frozenset({
+    # Where the configuration lives.
+    "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR", "CLAUDE_CODE_PLUGIN_SEED_DIR",
+    "CLAUDE_CODE_TMPDIR",
+    # Sign-in and the model provider.
+    "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
+    "CLAUDE_CODE_OAUTH_SCOPES", "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
+    "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
+    "CLAUDE_CODE_USE_MANTLE", "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+    "CLAUDE_CODE_SKIP_BEDROCK_AUTH", "CLAUDE_CODE_SKIP_VERTEX_AUTH",
+    "CLAUDE_CODE_SKIP_FOUNDRY_AUTH", "CLAUDE_CODE_SKIP_MANTLE_AUTH",
+    "CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH", "CLAUDE_CODE_SKIP_AWS_CRED_CACHE",
+    "CLAUDE_CODE_AWS_CHAIN_RESOLVE_TIMEOUT_MS", "CLAUDE_CODE_DISABLE_AUTH_REFRESH_LOCK",
+    "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+    # How it connects: client certificates, trusted CAs, the proxy.
+    "CLAUDE_CODE_CLIENT_CERT", "CLAUDE_CODE_CLIENT_KEY",
+    "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE", "CLAUDE_CODE_CERT_STORE",
+    "CLAUDE_CODE_PROXY_RESOLVES_HOSTS",
+    # Security and traffic choices, and the wrappers its commands run under.
+    "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", "CLAUDE_CODE_SCRIPT_CAPS",
+    "CLAUDE_CODE_MCP_ALLOWLIST_ENV", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+    "CLAUDE_CODE_SHELL_PREFIX", "CLAUDE_CODE_PROCESS_WRAPPER",
+    # The shell it runs.
+    "CLAUDE_CODE_SHELL", "CLAUDE_CODE_GIT_BASH_PATH",
+})
 
 #: The longest command line Windows takes, whole, in characters, its terminator included.
 WINDOWS_LINE = 32_767
@@ -292,16 +325,23 @@ def scrub(environ: Mapping[str, str], session_env: frozenset[str] | set[str] = f
           *, windows: bool = os.name == "nt") -> dict[str, str]:
     """A copy of `environ` without any session's stamps.
 
-    Removes every `CLAUDE*` name, `AI_AGENT`, and each name in `session_env`, the
-    modules' `SESSION_ENV` keys, where a key ending in `_` is a prefix.
+    Removes every `CLAUDE*` name but the user's configuration and sign-in
+    (`CLAUDE_KEEP`), `AI_AGENT`, and each name in `session_env`, the modules'
+    `SESSION_ENV` keys, where a key ending in `_` is a prefix.
     """
     norm = str.upper if windows else (lambda name: name)
-    prefixes = tuple(norm(p) for p in (*SCRUB_PREFIXES,
-                                       *(n for n in session_env if n.endswith("_"))))
+    claude = tuple(norm(p) for p in SCRUB_PREFIXES)
+    keep = {norm(n) for n in CLAUDE_KEEP}
+    prefixes = tuple(norm(n) for n in session_env if n.endswith("_"))
     names = {norm(n) for n in (*SCRUB_NAMES, *(n for n in session_env
                                                 if not n.endswith("_")))}
-    return {name: value for name, value in environ.items()
-            if norm(name) not in names and not norm(name).startswith(prefixes)}
+
+    def scrubbed(name: str) -> bool:
+        name = norm(name)
+        return (name in names or name.startswith(prefixes)
+                or (name.startswith(claude) and name not in keep))
+
+    return {name: value for name, value in environ.items() if not scrubbed(name)}
 
 
 def stamps(request_id: str, *, turns: bool = False, additions: Additions | None = None,

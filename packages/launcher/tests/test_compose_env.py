@@ -59,11 +59,46 @@ def test_the_scrub_scrubs_the_whole_installed_set(monkeypatch):
     assert "MOXI_COMMS_NAME" not in got and "MOXI_COMMS_SCOPE" not in got
 
 
+def test_the_scrub_keeps_the_users_claude_configuration_and_sign_in():
+    # Where the configuration lives, the sign-in and the provider: without them the
+    # launched Claude reads another folder or can't sign in.
+    caller = {**CALLER, "CLAUDE_CONFIG_DIR": "/home/u/.claude-work",
+              "CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_VERTEX": "1",
+              "CLAUDE_CODE_OAUTH_TOKEN": "t", "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1",
+              # A session's own stamps, and a name no list knows yet, still go.
+              "CLAUDE_CODE_SESSION_ID": "s", "CLAUDE_CODE_CHILD_SESSION": "1",
+              "CLAUDE_PID": "4242", "CLAUDE_CODE_SOMETHING_NEW": "x",
+              # A posture with no row of its own is never carried in.
+              "CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS": "1"}
+    got = common.scrub(caller, frozenset(), windows=False)
+    assert {name for name in got if name.startswith("CLAUDE")} == {
+        "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"}
+    assert got["CLAUDE_CONFIG_DIR"] == "/home/u/.claude-work"
+    # Every kept name is a Claude name, and none is one a session stamps.
+    assert all(name.startswith("CLAUDE") for name in common.CLAUDE_KEEP)
+    assert not common.CLAUDE_KEEP & {"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
+                                     "CLAUDE_CODE_SSE_PORT", "CLAUDE_CODE_SESSION_ID",
+                                     "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_PID",
+                                     "CLAUDE_EFFORT", "CLAUDE_ENV_FILE"}
+
+
+def test_a_composed_claude_launch_runs_on_the_users_configuration_folder():
+    caller = {**CALLER, "CLAUDE_CONFIG_DIR": "/home/u/.claude-work",
+              "CLAUDE_CODE_OAUTH_TOKEN": "t"}
+    composition = compose.compose({"harness": "claude", "cwd": "/work"}, ctx())
+    env = common.environment(caller, composition, modules.session_env(), windows=False)
+    assert env["CLAUDE_CONFIG_DIR"] == "/home/u/.claude-work"
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "t"
+    # The sign-in reaches the child only: the launch records its stamps alone.
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in composition.env
+
+
 def test_on_windows_names_compare_without_case():
     got = common.scrub({"Claude_X": "1", "ai_agent": "x", "Path": "p",
-                        "moxi_launcher_request": "r"},
+                        "moxi_launcher_request": "r", "Claude_Config_Dir": "c"},
                        frozenset({"MOXI_LAUNCHER_REQUEST"}), windows=True)
-    assert got == {"Path": "p"}
+    assert got == {"Path": "p", "Claude_Config_Dir": "c"}
 
 
 def test_the_scrub_leaves_the_callers_environment_alone():
