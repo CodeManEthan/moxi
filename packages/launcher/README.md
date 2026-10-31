@@ -36,9 +36,10 @@ given. A passed-on flag that would set a row the launcher owns (the session id, 
 or a permission row is refused, so the permission check always sees it. So is one that
 sets what a permission row sets another way: Claude's `--dangerously-skip-permissions`
 and a `--settings` JSON string with a `permissions` mode, allow or deny list; Codex's
-`--dangerously-bypass-approvals-and-sandbox`, `--approve-for-me`, and a config override
-(passed on, or a `--config` item) keyed `sandbox_mode` or `approval_policy`. A settings
-file, or a Codex profile, is not read: what it sets is up to you.
+`--dangerously-bypass-approvals-and-sandbox` and `--approve-for-me` (and their hidden
+aliases `--yolo` and `--not-so-yolo`), and a config override (passed on, or a `--config`
+item) keyed `sandbox_mode` or `approval_policy`. A settings file, or a Codex profile, is
+not read: what it sets is up to you.
 
 **Permission rows.** A row that sets how much the session may do without asking (Claude's
 permission mode and tool lists, Codex's sandbox and approval) is a posture row. A launch
@@ -96,6 +97,12 @@ far it got (`spawning`, `started`, `ready`, `sending`, `first-sent`, or `failed`
 reason). A launch refused before its row is written writes nothing. Each session the
 launcher starts carries `MOXI_LAUNCHER_REQUEST`, its launch's request id, and a Claude
 launch's session id is set at launch, so the session can always be found from its row.
+A launch made from inside a session drops that session's stamps from the environment it
+passes on: every `CLAUDE*` variable except your own Claude Code configuration and
+sign-in (`CLAUDE_CONFIG_DIR`, the provider switches such as `CLAUDE_CODE_USE_BEDROCK`,
+`CLAUDE_CODE_OAUTH_TOKEN` and the others in the launcher's keep-list), and each
+module's own session stamps. A scratch launch works in a folder of its own under
+`moxi-scratch-<uid>` in the system's temporary folder, which only you may use.
 
 ## Handoffs
 
