@@ -29,7 +29,7 @@ from .record import RecordError
 from .paths import OutsideRuntime, comms_db
 from .provision import NAMES
 from .scoping import (GLOBAL, NAME_RE, identity_of, is_auto_name, project_key, qualify,
-                      tag_matches)
+                      split_tag, tag_matches)
 from .sender import (MalformedStamp, OperatorRefused, SendFailed, SenderIdentity,
                      operator_credential, operator_from_env, sender_from_env)
 
@@ -215,11 +215,23 @@ class Sender:
         directory), asked from inside its session;
       * `Sender.claim(server)`: a `ClaimServer` this process holds, through its socket;
       * `Sender.operator(user_id)`: the operator's lane, refused inside a session.
+
+    One more kind is comms' own and not part of its interface: `Sender.bound(identity,
+    token)`, a session's live binding that comms' tools send as from inside the daemon,
+    through its in-process client. It is handed to `run` and `delete` as `sender=`,
+    never read from an environment.
     """
 
     kind: str
     path: str | None = None
     user_id: str | None = None
+    #: A bound sender's identity and its live binding's credential, as the daemon's
+    #: in-process client presents it (`Daemon.live_credential`).
+    identity: str | None = None
+    token: str | None = field(default=None, repr=False)
+    #: A bound sender's second look at its binding: `(identity, token)` as the daemon
+    #: holds it now, or None when the session holds no live binding.
+    reread: object = field(default=None, repr=False, compare=False)
 
     @classmethod
     def session(cls) -> "Sender":
@@ -237,11 +249,25 @@ class Sender:
     def operator(cls, user_id: str) -> "Sender":
         return cls("operator", user_id=str(user_id))
 
+    @classmethod
+    def bound(cls, identity: str, token: str, *, reread=None) -> "Sender":
+        """A session's live binding, as comms' tools send from inside the daemon: the
+        identity a tool token's row maps to and the credential of that identity's live
+        binding (`Daemon.live_credential`). No claim socket is read. The daemon still
+        checks the credential against the binding on every post. `reread()` answers the
+        binding as it is now, `(identity, token)` or None, and is asked once when the
+        daemon refuses the credential."""
+        return cls("bound", identity=str(identity), token=str(token), reread=reread)
+
     def environ(self, base) -> dict:
         """`base` as the verb would see this sender's process: the claim socket named,
-        or the operator's stamp set with no claim socket."""
+        or the operator's stamp set with no claim socket. A bound sender has no
+        environment: it is handed to `run` itself."""
         from .sender import OPERATOR_VAR
 
+        if self.kind == "bound":
+            raise TypeError("a bound sender sends only from inside comms' daemon, handed "
+                            "to the send itself")
         env = dict(base)
         if self.kind in ("socket", "claim"):
             env[claimhold.CLAIM_SOCKET_ENV] = self.path
@@ -249,6 +275,12 @@ class Sender:
             env.pop(claimhold.CLAIM_SOCKET_ENV, None)
             env[OPERATOR_VAR] = self.user_id
         return env
+
+    def sender_identity(self) -> SenderIdentity:
+        """A bound sender's identity as the verb posts as it: its qualified name, as the
+        binding holds it, with the name and scope it spells."""
+        name, scope = split_tag(self.identity or "")
+        return SenderIdentity(qualified=self.identity, scope=scope or GLOBAL, name=name)
 
 
 class Context:
@@ -263,12 +295,17 @@ class Context:
 
     A send runs with a capture open (`run`): what it says is kept for its `SendResult`
     instead of printed, with the refusal and the NOTEs as data beside it.
+
+    `daemon` is the client every daemon call goes through, in place of a new socket
+    connection per call: comms' tools pass the daemon's in-process client
+    (`mcp.inprocess`). None connects to the daemon socket, as the verbs do.
     """
 
     def __init__(self, record=None, db_path=None, socket_path=None, env=None, out=None,
-                 backend=None, clock=None, deadline: float | None = None):
+                 backend=None, clock=None, deadline: float | None = None, daemon=None):
         self.env = env if env is not None else os.environ
         self.deadline = deadline
+        self._client = daemon
         self.capture: _Capture | None = None
         #: The verb's clock: the single-reply check reads an ask's age against it.
         #: Injectable, so a rig can age an ask.
@@ -326,7 +363,11 @@ class Context:
         """A connection to the daemon, once its hello has agreed a comms wire version.
         A version it refuses raises `VersionMismatch`, and a daemon that doesn't answer
         `DaemonOffline`, which every verb answers with exit 75, so no verb writes a token
-        or reads an answer its daemon does not speak."""
+        or reads an answer its daemon does not speak. With a client given at
+        construction, that client, once its `connect` has said the daemon is there; its
+        `close` leaves it ready for the next call."""
+        if self._client is not None:
+            return self._client.connect()
         return (DaemonClient(self.socket_path) if self.deadline is None else
                 DaemonClient(self.socket_path, timeout=self.deadline)).connect()
 
@@ -370,7 +411,7 @@ def _refuse(ctx, code: str, text: str) -> None:
 
 
 
-def _reply(args, ctx: Context) -> int:
+def _reply(args, ctx: Context, *, bound=None) -> int:
     """`moxi comms reply <id>`: read the message it answers, then send to the name its
     author (or, for your own message, its recipients) holds."""
     try:
@@ -397,7 +438,7 @@ def _reply(args, ctx: Context) -> int:
     # message's recipients, not back to you (`_reply_targets`). One room: the reply goes
     # to #names whatever room the referent sits in.
     return _send(args, ctx, tags=None, reply_to=original.id, channel_room=NAMES,
-                 referent=original, author=author)
+                 referent=original, author=author, bound=bound)
 
 
 
@@ -520,8 +561,15 @@ def _claim_token(ctx: Context, sender: SenderIdentity, answer: dict):
 
 
 def _send(args, ctx: Context, *, tags, reply_to, channel_room, referent=None,
-          author=None) -> int:
+          author=None, bound=None) -> int:
     project = project_key(env=ctx.env)
+    if bound is not None:
+        # comms' tools, inside the daemon: the session's live binding is handed in, so no
+        # claim socket and no stamp is read.
+        return _send_resolved(args, ctx, sender=bound.sender_identity(), operator_id=None,
+                              tags=tags, reply_to=reply_to, channel_room=channel_room,
+                              project=project, referent=referent, author=author,
+                              bound=bound)
     try:
         # A claim socket outside comms' runtime directory is asked nothing.
         claim_path = claimhold.socket_from_env(ctx.env)
@@ -649,7 +697,7 @@ def _send_reserved(args, ctx: Context, *, module: str, name: str, tags) -> int:
 
 def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
                    channel_room, project, referent=None, claim_answer=None,
-                   claim_path=None, author=None, reserved_token=None) -> int:
+                   claim_path=None, author=None, reserved_token=None, bound=None) -> int:
     """Everything a send does once it knows WHO is sending: the checks, the machine
     line, the length cap and the post.
 
@@ -669,6 +717,9 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
     `author` is `moxi comms reply`'s: the referent's author, from which `_reply_targets` takes
     the recipients now that the sender is known, and says the "replying to" line. A reply
     is never held to the never-bound check: its names come from the record.
+
+    `bound` is a `Sender.bound`: its token is presented as the claim's would be, and a
+    refused one is checked against the binding once more (`_post_bound`).
     """
     typed_names = author is None
     if not typed_names:
@@ -713,7 +764,8 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
         return _OK
     (body,) = bodies
     if operator_id is None:
-        posted = (_post_reserved(ctx, sender, reserved_token, body)
+        posted = (_post_bound(ctx, sender, bound, body) if bound is not None else
+                  _post_reserved(ctx, sender, reserved_token, body)
                   if reserved_token is not None else
                   _post_from_claim(ctx, claim_path, sender, claim_answer["token"], body))
     else:
@@ -766,6 +818,62 @@ def _post_from_claim(ctx: Context, path, sender: SenderIdentity, token: str,
                 return _FAILED
             try:
                 answer = client.send(current_sender.qualified, current, content)
+            except DaemonError as retry_error:
+                if retry_error.data.get("credential"):
+                    _refuse(ctx, "credential",
+                            "comms refused this session's posting credential — nothing "
+                            "was sent")
+                    return _FAILED
+                raise
+        return answer["message_id"]
+    except DaemonNoAnswer:
+        _refuse(ctx, "post-no-answer", NO_ANSWER)
+        return _UNKNOWN
+    except VersionMismatch as error:
+        _refuse(ctx, "protocol-mismatch", str(error))
+        return _FAILED
+    except DaemonOffline as error:
+        _refuse(ctx, "offline", f"{error} Nothing was sent.")
+        return _OFFLINE
+    except DaemonError as error:
+        return _send_refused(ctx, error)
+    finally:
+        if client is not None:
+            client.close()
+
+
+#: A bound sender whose session holds no live binding when its token is checked again.
+BOUND_OFFLINE = ("{name} is offline: this session's comms adapter is not connected to the "
+                 "daemon, so it holds no posting credential — nothing was sent. The "
+                 "adapter reconnects on its own; try again in a few seconds.")
+
+
+def _post_bound(ctx: Context, sender: SenderIdentity, bound: Sender, content: str):
+    """Post as a bound sender, with its binding's token. A refused token is not retried
+    through a claim socket: the binding is read again once (`bound.reread`), and the post
+    is tried once more only when it now holds another token. Returns the message id, or
+    a step code once the refusal is said."""
+    client = None
+    try:
+        client = ctx.daemon()
+        try:
+            answer = client.send(sender.qualified, bound.token, content)
+        except DaemonError as error:
+            if not error.data.get("credential"):
+                raise
+            current = bound.reread() if callable(bound.reread) else (bound.identity,
+                                                                    bound.token)
+            if current is None:
+                _refuse(ctx, "offline", BOUND_OFFLINE.format(name=sender.qualified))
+                return _OFFLINE
+            identity, token = current
+            if (identity, token) == (bound.identity, bound.token):
+                _refuse(ctx, "credential",
+                        "comms refused this session's posting credential — nothing was "
+                        "sent")
+                return _FAILED
+            try:
+                answer = client.send(identity, token, content)
             except DaemonError as retry_error:
                 if retry_error.data.get("credential"):
                     _refuse(ctx, "credential",
@@ -2018,7 +2126,7 @@ def run_reserved(ctx: Context, args, *, module: str, name: str, tags) -> SendRes
     return result
 
 
-def run(ctx: Context, args, *, tags=None) -> SendResult:
+def run(ctx: Context, args, *, tags=None, sender=None) -> SendResult:
     """Run one send and hand back what it did. Nothing is printed: what the verb says is
     in the result's `lines()`.
 
@@ -2026,16 +2134,19 @@ def run(ctx: Context, args, *, tags=None) -> SendResult:
     `no_cap`, `audience`, `new`, `held`, `interrupt`, `expires`, `standing`,
     `new_name`, `check`, and either
     `reply_to` (with `tags`, the names) or `message_id` (the reply verb: the names come
-    from the message it answers). The sender is the one `ctx.env` describes."""
+    from the message it answers). The sender is the one `ctx.env` describes, or
+    `sender`, a `Sender.bound` (comms' tools, inside the daemon)."""
+    bound = _bound(sender)
     capture, outer = _Capture(), ctx.capture
     ctx.capture = capture
     try:
         try:
             if getattr(args, "message_id", None) is not None:
-                code = _reply(args, ctx)
+                code = _reply(args, ctx, bound=bound)
             else:
                 code = _send(args, ctx, tags=list(tags or ()),
-                             reply_to=getattr(args, "reply_to", None), channel_room=NAMES)
+                             reply_to=getattr(args, "reply_to", None), channel_room=NAMES,
+                             bound=bound)
         except config.ConfigError as e:
             # A config file that does not load refuses the send, naming the key and the
             # fix.
@@ -2044,6 +2155,17 @@ def run(ctx: Context, args, *, tags=None) -> SendResult:
     finally:
         ctx.capture = outer
     return _result(code, capture, check=bool(getattr(args, "check", False)))
+
+
+def _bound(sender) -> Sender | None:
+    """`sender` as `run` and `delete` take it: None, or a `Sender.bound`. Every other
+    kind is described by the context's environment, never handed in."""
+    if sender is None:
+        return None
+    if not isinstance(sender, Sender) or sender.kind != "bound":
+        raise TypeError("sender= takes only a bound sender; every other sender is read "
+                        "from the context's environment")
+    return sender
 
 
 def _result(code: int, capture: _Capture, *, check: bool) -> SendResult:
@@ -2146,11 +2268,12 @@ class DeleteResult:
                 {"code": self.refusal.code, "text": self.refusal.text}}
 
 
-def delete(ctx: Context, message_id) -> DeleteResult:
+def delete(ctx: Context, message_id, *, sender=None) -> DeleteResult:
     """Withdraw `message_id`, sent by the identity `ctx.env` describes, from every
     recipient that hasn't had it in a digest. The sender is found as a send finds it:
-    this session's claim, or the operator's lane. Nothing is printed: what the verb says
-    is in the result's `lines()`."""
+    this session's claim, or the operator's lane, or it is `sender`, a `Sender.bound`.
+    Nothing is printed: what the verb says is in the result's `lines()`."""
+    bound = _bound(sender)
     mid = str(message_id).strip()
     capture, outer = _Capture(), ctx.capture
     ctx.capture = capture
@@ -2162,7 +2285,7 @@ def delete(ctx: Context, message_id) -> DeleteResult:
                     "Nothing was withdrawn.")
             code = _USAGE
         else:
-            code, answer = _delete(ctx, mid)
+            code, answer = _delete(ctx, mid, bound=bound)
     finally:
         ctx.capture = outer
     said = list(capture.said)
@@ -2186,16 +2309,18 @@ def delete(ctx: Context, message_id) -> DeleteResult:
                         said=tuple(lines + said))
 
 
-def _delete(ctx: Context, mid: str):
+def _delete(ctx: Context, mid: str, *, bound=None):
     """The delete's sender and its one request: (step code, the daemon's answer, or the
     names a refusal carries)."""
     try:
-        claim_path = claimhold.socket_from_env(ctx.env)
+        claim_path = None if bound is not None else claimhold.socket_from_env(ctx.env)
     except OutsideRuntime as e:
         _refuse(ctx, "outside-runtime", f"{e} Nothing was withdrawn.")
         return _REFUSED, None
     user = None
-    if claim_path and not (ctx.env.get("MOXI_COMMS_OPERATOR") or "").strip():
+    if bound is not None:
+        who, token = bound.identity, bound.token
+    elif claim_path and not (ctx.env.get("MOXI_COMMS_OPERATOR") or "").strip():
         got = _claim_sender(ctx, claim_path)
         if isinstance(got, int):
             return got, None

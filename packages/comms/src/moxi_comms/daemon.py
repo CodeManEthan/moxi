@@ -432,6 +432,8 @@ class Daemon:
         #: What adds the tools to the endpoint's server, given the SDK's server; None
         #: serves the endpoint with no tools.
         self.mcp_tools = None
+        #: Where the tools' calls run (`mcp.inprocess.Calls`), made with the endpoint.
+        self.tool_calls = None
         #: Called once, from the endpoint's loop, when something this daemon can't run
         #: without has failed (the endpoint, after it started); `main` stops the daemon
         #: and exits nonzero. `fatal` says what failed.
@@ -567,10 +569,7 @@ class Daemon:
             "send": self._send,
             "bind": self._bind,
             # The reads take no connection.
-            **{name: _read(self, f"_{name}_query") for name in (
-                "resolve", "agents", "session", "owner", "asks", "owed", "readable",
-                "explain", "binding_window", "attributed_message", "rooms", "message",
-                "history", "max_id", "last_digest")},
+            **{name: _read(self, f"_{name}_query") for name in READS},
             "delete": self._delete,
             "open_digest": self._open_digest,
             "turn_ended": self._turn_ended,
@@ -733,6 +732,11 @@ class Daemon:
             return
         verifier = mcp_server.Verifier(self.mcp_tokens.verify, self.host.pool,
                                        self.host.opened)
+        from .mcp import inprocess
+
+        # Where tool calls run: on the host's pool, a few at a time, so adapters' and
+        # the verbs' methods always find threads free. Made before the tools are added.
+        self.tool_calls = inprocess.Calls(self.host)
         endpoint = mcp_server.Endpoint(sock, verifier, tools=self.mcp_tools,
                                        on_failure=self._endpoint_failed)
         # Set before the start, so a start that runs late is still stopped with the host.
@@ -759,6 +763,29 @@ class Daemon:
                   self.fatal)
         if self._on_fatal is not None:
             self._on_fatal(self.fatal)
+
+    def live_credential(self, claim_key: str, identity: str | None = None):
+        """The live binding behind `claim_key`'s active tool token: `(identity,
+        credential)`, the identity the token's row maps to and the credential of that
+        identity's binding now, its token's hash as hex. The daemon keeps no binding's
+        token, only its hash, and accepts the hash in place of the token only from a
+        connection in its own process (`_presented`). None when the claim has no active row (or its row maps to another identity
+        than `identity`), and when the row's binding isn't live: the daemon restarted and
+        the adapter hasn't bound again, or its connection dropped. comms' tools send as
+        this pair, in this process, and the post checks it against the binding as it
+        checks an adapter's token."""
+        rows = [row for row in self.mcp_tokens.active() if row.claim_key == claim_key]
+        with self._lock:
+            for row in rows:
+                if identity is not None and row.identity != identity:
+                    continue
+                if row.binding_id is None:
+                    continue
+                b = self.bindings.get(row.identity)
+                if (b is not None and b.history_id == row.binding_id
+                        and b.claim_key == claim_key and b.token_hash):
+                    return b.qualified, b.token_hash.hex()
+        return None
 
     def _mcp_endpoint_query(self, frame: dict) -> dict:
         """`mcp_endpoint`: whether this daemon serves comms' tools, at which URL, and
@@ -1167,8 +1194,7 @@ class Daemon:
             if self._stopping:
                 raise DaemonStopping()
             binding = self.bindings.get(who)
-            given = (hashlib.sha256(token.encode()).digest()
-                     if isinstance(token, str) else b"")
+            given = _presented(conn, token)
             if binding is None or not hmac.compare_digest(binding.token_hash, given):
                 raise Refusal("posting credential refused", code=wire.CREDENTIAL,
                               credential=True)
@@ -1279,8 +1305,7 @@ class Daemon:
         else:
             with self._lock:
                 binding = self.bindings.get(who)
-                given = (hashlib.sha256(token.encode()).digest()
-                         if isinstance(token, str) else b"")
+                given = _presented(conn, token)
                 if binding is None or not hmac.compare_digest(binding.token_hash, given):
                     raise Refusal("posting credential refused", code=wire.CREDENTIAL,
                                   credential=True)
@@ -3498,6 +3523,12 @@ class DaemonStopping(Exception):
     retries."""
 
 
+#: The read methods: any client may call them, and they take no connection.
+READS = ("resolve", "agents", "session", "owner", "asks", "owed", "readable", "explain",
+         "binding_window", "attributed_message", "rooms", "message", "history", "max_id",
+         "last_digest")
+
+
 class Refusal(Exception):
     """The daemon's own no, with its comms error `code` (`wire`), and in `extra` what
     it names (the holder of a name, say), which goes in the error's `data`. A refusal
@@ -3507,6 +3538,21 @@ class Refusal(Exception):
         super().__init__(message)
         self.code = code
         self.extra = extra
+
+
+def _presented(conn, token) -> bytes:
+    """The hash the `token` of a `send` or `delete` stands for: the token's SHA-256, or,
+    from a connection in comms' own process (its tools, `mcp.inprocess`), the hash
+    itself as hex, since the daemon keeps only the hash of a binding's token. No socket
+    connection is in process, so over the socket only the token itself is accepted."""
+    if not isinstance(token, str):
+        return b""
+    if getattr(conn, "in_process", False) is True:
+        try:
+            return bytes.fromhex(token)
+        except ValueError:
+            return b""
+    return hashlib.sha256(token.encode()).digest()
 
 
 def _unknown_message(mid: str) -> Refusal:
