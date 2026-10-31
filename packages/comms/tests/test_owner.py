@@ -1,6 +1,6 @@
 """The `owner` read: which live binding owns one session id now, and whom it awaits.
 
-One read a launcher can call, given a session id: the binding that owns it now (its
+One read a wrapper can call, given a session id: the binding that owns it now (its
 identity as comms renders it), and that identity's `awaiting` list. No acting verb is
 added. The daemon answers it as `query kind="owner"`; a caller asks it as
 `moxi comms owner <session-id> --json`.
@@ -15,9 +15,9 @@ import json
 import pytest
 from conftest import wait_until
 
-from moxi_comms import cli, provision
+from moxi import exit as moxi_exit
+from moxi_comms import api, claimfile, cli
 from moxi_comms.client import DaemonClient, DaemonError, DaemonTimeout
-from moxi_comms.daemon import Refusal
 from moxi_comms.paths import daemon_socket
 
 from test_reply_enforcement import (PLANNER, REVIEWER, P, R, indexed, query_owed,
@@ -27,12 +27,9 @@ from test_reply_enforcement import (PLANNER, REVIEWER, P, R, indexed, query_owed
 def owner(session_id):
     client = DaemonClient(daemon_socket()).connect()
     try:
-        answer = client.query("owner", session_id=session_id)
+        return client.call("owner", {"session_id": session_id})
     finally:
         client.close()
-    answer.pop("id", None)
-    assert answer.pop("ok") is True
-    return answer
 
 
 def owner_cli(rig, *argv):
@@ -146,24 +143,6 @@ def test_the_read_changes_nothing(rig):
     assert state() == before
 
 
-def test_a_send_only_binding_owns_a_session_only_if_its_register_named_one(rig):
-    """No shipped send-only holder reports a session id (`ClaimServer._register`), so it
-    owns none; a register that does carry one is answered as any owner, by its kind."""
-    code = provision.send_only_main(["relay@proj-a"], gateway=rig.gateway,
-                                    store=rig.store, out=lambda _l: None)
-    assert code == 0
-    c = DaemonClient(daemon_socket()).connect()
-    try:
-        c.register(name="relay", scope="proj-a",
-                   project="proj-a", adapter="send-only",
-                   session_id="5e5e5e5e-0000-4000-8000-000000000000")
-        answer = owner("5e5e5e5e-0000-4000-8000-000000000000")
-        assert (answer["owner"], answer["adapter"], answer["awaiting"]) == \
-            ("relay@proj-a", "send-only", [])
-    finally:
-        c.close()
-
-
 # --------------------------------------------------------------------------- the verb
 
 def test_the_verb_prints_the_answer_as_json(rig):
@@ -172,14 +151,14 @@ def test_the_verb_prints_the_answer_as_json(rig):
     ask = send(rig, P, "do it", "--posture", "once", who=REVIEWER)
     indexed(rig, ask.id)
     code, out = owner_json(rig, reviewer.session_id)
-    assert code == cli.EXIT_OK
+    assert code == moxi_exit.OK
     assert out == {"ok": True, "session_id": reviewer.session_id, "owner": R,
                    "adapter": "claude-shim", "awaiting": [P]}
 
 
 def test_the_verb_answers_no_owner_with_exit_0(rig):
     code, out = owner_json(rig, "0b9f6a1e-0000-4000-8000-000000000000")
-    assert code == cli.EXIT_OK
+    assert code == moxi_exit.OK
     assert out == {"ok": True, "session_id": "0b9f6a1e-0000-4000-8000-000000000000",
                    "owner": None, "adapter": None, "awaiting": []}
 
@@ -195,10 +174,10 @@ def test_the_verbs_text_form(rig):
                                          "session.")
 
 
-def test_the_verb_with_the_daemon_down_is_offline_exit_4(rig):
+def test_the_verb_with_the_daemon_down_is_offline_exit_75(rig):
     rig.daemon.stop()
     code, out = owner_json(rig, "0b9f6a1e-0000-4000-8000-000000000000")
-    assert code == cli.EXIT_OFFLINE == 4
+    assert code == moxi_exit.TEMPFAIL
     assert out["ok"] is False and out["error"] == "offline"
     assert "comms offline" in out["detail"]
 
@@ -207,24 +186,87 @@ def test_the_verb_refuses_an_empty_session_id_exit_2_without_asking(rig, monkeyp
     monkeypatch.setattr(cli.Context, "daemon",
                         lambda self: pytest.fail("asked the daemon"))
     code, out = owner_json(rig, "  ")
-    assert code == cli.EXIT_REFUSED == 2
+    assert code == moxi_exit.USAGE
     assert out["ok"] is False and out["error"] == "refused"
 
 
-def test_a_daemon_without_the_query_is_a_failed_read_exit_5(rig, monkeypatch):
-    def old(frame):
-        raise Refusal("unknown query kind 'owner'")
-    monkeypatch.setattr(rig.daemon, "_owner_query", old)
+def test_a_daemon_without_the_query_is_a_failed_read_exit_1(rig, monkeypatch):
+    monkeypatch.delitem(rig.daemon._methods, "owner")
     code, out = owner_json(rig, "0b9f6a1e-0000-4000-8000-000000000000")
-    assert code == cli.EXIT_FAILED == 5
+    assert code == moxi_exit.ERROR
     assert (out["ok"], out["error"]) == (False, "failed")
-    assert "unknown query kind 'owner'" in out["detail"]
+    assert "method not found: owner" in out["detail"]
 
 
-def test_a_daemon_that_never_answers_is_a_failed_read_exit_5(rig, monkeypatch):
-    def silent(self, kind, **kw):
-        raise DaemonTimeout("timeout waiting for query")
-    monkeypatch.setattr(DaemonClient, "query", silent)
+def test_a_daemon_that_never_answers_is_a_failed_read_exit_1(rig, monkeypatch):
+    def silent(self, method, params=None, **kw):
+        raise DaemonTimeout(f"timeout waiting for {method}")
+    monkeypatch.setattr(DaemonClient, "call", silent)
     code, out = owner_json(rig, "0b9f6a1e-0000-4000-8000-000000000000")
-    assert code == cli.EXIT_FAILED
+    assert code == moxi_exit.ERROR
     assert (out["ok"], out["error"]) == (False, "timeout")
+
+
+# --------------------------------------------------------------------------- through the API
+
+def test_the_verb_prints_what_api_owner_answers(rig, monkeypatch):
+    """The verb is `api.owner()` rendered: the same fields as before, the directors the
+    read carries left out."""
+    asked = []
+
+    def answer(session_id, *, deadline):
+        asked.append((session_id, deadline))
+        return api.Owner(session_id=session_id, identity=R, adapter="codex",
+                         directors=("lead",), awaiting=(P, "critic"))
+
+    monkeypatch.setattr(api, "owner", answer)
+    code, out = owner_json(rig, " s-1 ")
+    assert code == moxi_exit.OK
+    assert out == {"ok": True, "session_id": "s-1", "owner": R, "adapter": "codex",
+                   "awaiting": [P, "critic"]}
+    code, text = owner_cli(rig, "s-1")
+    assert (code, text.strip()) == (0, f"s-1: owned by {R} (codex); awaiting {P}, critic.")
+    assert asked == [("s-1", api.READ_DEADLINE)] * 2
+
+
+def _holding(rig, name):
+    from conftest import _stamp_of
+
+    return rig.session_holding(_stamp_of({"MOXI_COMMS_PROJECT": "proj-a",
+                                          "MOXI_COMMS_NAME": name}))
+
+
+def test_an_unreadable_claim_directory_leaves_only_the_directors_empty(rig):
+    reviewer = rig.shim(**REVIEWER, directors=(P,))
+    bound(rig, R)
+    claims = claimfile.claim_dir()
+    with _holding(rig, R):
+        assert api.owner(reviewer.session_id).directors == (P,)
+        mode = claims.stat().st_mode
+        claims.chmod(0o300)        # the daemon's socket answers; the files can't be listed
+        try:
+            got = api.owner(reviewer.session_id)
+            code, out = owner_json(rig, reviewer.session_id)
+            text_code, text = owner_cli(rig, reviewer.session_id)
+        finally:
+            claims.chmod(mode)
+    assert (got.identity, got.adapter, got.directors) == (R, "claude-shim", ())
+    assert code == moxi_exit.OK
+    assert out == {"ok": True, "session_id": reviewer.session_id, "owner": R,
+                   "adapter": "claude-shim", "awaiting": []}
+    assert (text_code, text.strip()) == (
+        0, f"{reviewer.session_id}: owned by {R} (claude-shim); awaiting nobody.")
+
+
+def test_a_claim_read_that_raises_leaves_only_the_directors_empty(rig, monkeypatch):
+    reviewer = rig.shim(**REVIEWER, directors=(P,))
+    bound(rig, R)
+
+    def unreadable(*a, **kw):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(claimfile, "live_records", unreadable)
+    got = api.owner(reviewer.session_id)
+    assert (got.identity, got.directors) == (R, ())
+    code, out = owner_json(rig, reviewer.session_id)
+    assert code == moxi_exit.OK and out["owner"] == R

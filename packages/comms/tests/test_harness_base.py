@@ -31,6 +31,18 @@ class RecordingPort(HarnessAdapter):
     def __init__(self):
         super().__init__(SimpleNamespace(directors=()), autoreconnect=False)
         self.delivered_batches: list = []
+        #: The daemon's side of `open_digest`: each open's ids, and the ids it drops.
+        self.opens: list = []
+        self.drops: set = set()
+        self._digest_numbers = itertools.count(100)
+
+    def open_digest(self, ids):
+        ids = [str(i) for i in ids]
+        self.opens.append(ids)
+        return {"digest": next(self._digest_numbers),
+                "ids": [i for i in ids if i not in self.drops],
+                "dropped": [{"id": i, "reason": "withdrawn"} for i in ids
+                            if i in self.drops]}
 
     def deliver(self, text, high, identity, count):
         self.delivered_batches.append((high, count))
@@ -44,14 +56,14 @@ def test_nothing_is_delivered_while_catch_up_is_still_arriving():
     port = RecordingPort()
     port.identity = IDENTITY
     port.replaying = True
-    port._on_push({"op": "deliver", "payload": payload(7)})
-    port._on_push({"op": "deliver", "payload": payload(5)})
+    port._on_push("deliver", {"payload": payload(7)})
+    port._on_push("deliver", {"payload": payload(5)})
 
     assert port.flush() is None
     assert port.delivered_batches == []
     assert [p["message_id"] for p in port.queue] == ["7", "5"]
 
-    port._on_push({"op": "replay_complete", "identity": IDENTITY, "cursor": "4"})
+    port._on_push("replay_complete", {"identity": IDENTITY, "cursor": "4"})
     assert port.replaying is False
     assert port.flush() is not None
     assert port.delivered_batches == [(7, 2)]
@@ -92,7 +104,7 @@ class TurnPort(RecordingPort):
 
 def push(port, *mids):
     for mid in mids:
-        port._on_push({"op": "deliver", "payload": payload(mid)})
+        port._on_push("deliver", {"payload": payload(mid)})
 
 
 def queued(port):
@@ -106,7 +118,7 @@ def held(port):
 def online_port(cls=TurnPort):
     port = cls()
     port.identity = IDENTITY
-    port._on_push({"op": "replay_complete", "identity": IDENTITY, "cursor": None})
+    port._on_push("replay_complete", {"identity": IDENTITY, "cursor": None})
     return port
 
 
@@ -122,9 +134,10 @@ def test_a_pushed_id_already_held_is_dropped():
     assert port.delivered_batches == [(5, 1)]
 
 
-def test_the_register_lists_the_held_ids_as_holding(monkeypatch):
-    """`holding` on register: the ids queued or injected and not ended, so the daemon
-    claims them for the new binding and its replay does not hand them in again."""
+def test_a_register_starts_the_binding_with_nothing_held(monkeypatch):
+    """A new binding: the last one's rows went back to waiting with its end and the
+    daemon hands them again, so the register sends no `holding` and the queue, the held
+    ids and the digests of the last binding go before the bind's round trip."""
     registered: list = []
 
     class Refused(Exception):
@@ -137,7 +150,7 @@ def test_the_register_lists_the_held_ids_as_holding(monkeypatch):
         def connect(self):
             pass
 
-        def register(self, **fields):
+        def bind(self, **fields):
             registered.append(fields)
             raise Refused
 
@@ -152,7 +165,26 @@ def test_the_register_lists_the_held_ids_as_holding(monkeypatch):
     push(port, 15)                        # queued
     with pytest.raises(Refused):
         port.connect_daemon()
-    assert registered[-1]["holding"] == ["9", "12", "15"]
+    assert "holding" not in registered[-1]
+    assert (port.queue, port.held_ids, port.digest_of) == ([], set(), {})
+
+
+def test_the_flush_renders_only_the_ids_the_digest_keeps():
+    """The flush opens the digest before it renders: an id the daemon drops (withdrawn
+    or expired) is not rendered and stops being held; the others map to the digest."""
+    port = online_port()
+    port.drops = {"6"}
+    push(port, 5, 6)
+    text = port.flush()
+    assert port.opens == [["5", "6"]]
+    assert "body 5" in text and "body 6" not in text
+    assert port.delivered_batches == [(5, 1)]
+    assert held(port) == ["5"] and port.digest_of == {"5": 100}
+
+    port.drops = {"7"}
+    push(port, 7)
+    assert port.flush() is None and port.delivered_batches == [(5, 1)]
+    assert held(port) == ["5"]
 
 
 def test_a_digests_turn_end_releases_exactly_its_ids():
@@ -187,18 +219,22 @@ def test_the_ledger_keeps_each_turns_ids():
     assert ledger.turns == ()
 
 
-def test_reregister_drops_the_queue_and_keeps_the_injected_ids(monkeypatch):
-    """`reregister` drops the queue, whose ids replay, and keeps the ids injected into a
-    turn that has not ended, which its register lists as `holding`."""
+def test_reregister_drops_the_queue(monkeypatch):
+    """`reregister` drops the queue, whose rows wait again and are handed to the new
+    binding; the register itself lets go of the rest (see the test above)."""
     port = online_port()
     push(port, 5)
     port.flush()                          # 5 in turn-1, still running
     push(port, 8)                         # queued
     seen: list = []
-    port.connect_daemon = lambda: seen.append((held(port), queued(port)))
+
+    def connect():
+        seen.append((held(port), queued(port)))
+
+    port.connect_daemon = connect
     port.reregister()
     assert seen == [(["5"], [])]
-    push(port, 5, 8)                      # the new registration's replay
+    push(port, 8)                         # the new binding's catch-up
     assert queued(port) == ["8"]
 
 
@@ -222,18 +258,27 @@ def test_a_dropped_batch_and_a_returned_delivery_hold_nothing():
     assert plain.held_ids == set()
 
 
-# ------------------------------------------------------- the turn frame and the clamp
+# ------------------------------------------------------------------ the turn end
 
 class FakeDaemon:
-    """The binding's connection, as far as `notify_activity` needs it."""
+    """The binding's connection, as far as the turn end and `notify_activity` need it."""
 
     def __init__(self, connected=True):
         self.connected = connected
         self.frames: list = []
 
-    def notify(self, op, **kw):
-        from moxi_comms import cursors
-        self.frames.append(dict(kw, op=op, cursor_then=cursors.read(IDENTITY)))
+    def notify(self, method, params=None):
+        """Kept as an `activity` frame, a kind sent as its own method named as `kind`."""
+        from moxi_comms.adapters.claude_shim import ACTIVITY_METHODS
+        kinds = {m: k for k, m in ACTIVITY_METHODS.items()}
+        frame = dict(params or {}, op=method)
+        if method in kinds:
+            frame.update(op="activity", kind=kinds[method])
+        self.frames.append(frame)
+
+    def call(self, method, params=None, **kw):
+        self.frames.append(dict(params or {}, op=method))
+        return {"cursor": None}
 
 
 def bound_port(connected=True):
@@ -243,56 +288,49 @@ def bound_port(connected=True):
     return port
 
 
-def test_a_lower_held_id_keeps_the_cursor_below_it_until_it_completes():
-    """The clamp: a digest completes while a lower id is still held (queued out of
-    order). The cursor goes to one below that id, not to the digest's; once the lower
-    id completes, the next completion reaches the high-water mark."""
-    from moxi_comms import cursors
+def test_a_turn_end_names_the_digests_that_held_its_ids():
+    """`report_turn_end` takes message ids from the port and sends `turn_ended` with
+    the digests that hold them; the ids stop being held and leave the digest map."""
     port = bound_port()
     push(port, 7)
-    port.flush()                                   # 7 in turn-1
-    push(port, 3)                                  # held, queued
+    port.flush()                                   # 7 in turn-1, digest 100
+    push(port, 3)
+    port.flush()                                   # 3 in turn-2, digest 101
     _, ids = port.ledger.end({"id": "turn-1", "status": TURN_COMPLETED})
     port.report_turn_end(handled=ids)
-    assert cursors.read(IDENTITY) == "2", "never past a held id"
-    assert port.high_water == 7
     frame = port._daemon.frames[-1]
-    assert (frame["kind"], frame["handled"], frame["unhandled"]) == ("turn", ["7"], [])
-    assert frame["cursor_then"] == "2", "the cursor is written before the frame"
+    assert (frame["op"], frame["handled"], frame["unhandled"]) == ("turn_ended", [100], [])
+    assert held(port) == ["3"] and port.digest_of == {"3": 101}
 
-    port.flush()                                   # 3 in turn-2
-    _, ids = port.ledger.end({"id": "turn-2", "status": TURN_COMPLETED})
-    port.report_turn_end(handled=ids)
-    assert cursors.read(IDENTITY) == "7"
-    assert held(port) == []
+    _, ids = port.ledger.end({"id": "turn-2", "status": "interrupted"})
+    port.report_turn_end(unhandled=ids)
+    frame = port._daemon.frames[-1]
+    assert (frame["handled"], frame["unhandled"]) == ([], [101])
+    assert held(port) == [] and port.digest_of == {}
 
 
-def test_an_unhandled_id_is_held_until_the_frame_naming_it_is_sent():
-    """Owed `unhandled` ids have no row until the frame names them, so they stay held
-    (the clamp counts them) while no frame can go out, and are let go once one does."""
-    from moxi_comms import cursors
+def test_a_turn_end_that_cannot_be_sent_is_dropped():
+    """With no connection the turn end goes nowhere and nothing is owed: the binding's
+    end puts its rows back to waiting, and the next binding is handed them again."""
     port = bound_port(connected=False)
     push(port, 5)
     port.flush()                                   # 5 in turn-1
     _, ids = port.ledger.end({"id": "turn-1", "status": "interrupted"})
     port.report_turn_end(unhandled=ids)
     assert port._daemon.frames == []
-    assert port.unhandled_owed == ["5"] and held(port) == ["5"]
-    assert cursors.read(IDENTITY) is None
-
-    port._daemon.connected = True
-    port.report_turn_end()                         # the next turn end of the agent
-    frame = port._daemon.frames[-1]
-    assert (frame["handled"], frame["unhandled"]) == ([], ["5"])
     assert port.unhandled_owed == [] and held(port) == []
 
 
-def test_owe_unhandled_names_each_id_once():
+def test_owe_unhandled_names_each_digest_once():
     port = bound_port()
+    push(port, 4)
+    port.flush()                                   # digest 100
+    push(port, 6)
+    port.flush()                                   # digest 101
     port.owe_unhandled(["4", "4", 6])
     port.owe_unhandled(["6"])
     port.report_turn_end(unhandled=["4"])
-    assert port._daemon.frames[-1]["unhandled"] == ["4", "6"]
+    assert port._daemon.frames[-1]["unhandled"] == [100, 101]
 
 
 def test_a_ready_that_cannot_be_sent_is_owed_to_the_next_register():

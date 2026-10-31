@@ -1,56 +1,40 @@
-"""bindings.db -- the binding custody journal.
+"""The binding history: comms.db's `bindings` table.
 
-The daemon's routing table is memory only and dies with the socket.  This journal keeps
-the binding history used by the never-bound check and its scope hint.  Existing rows
-from older releases also supply evidence to the one-time record conversion; new rows
-have no allocation number.
+The daemon's routing table is memory only and dies with the socket. This table keeps
+the binding history used by the never-bound check and its scope hint, and the intervals
+attribution reads to verify an author.
 
-What this file is NOT: it is never consulted for routing or addressability. A journal
-row is history, not a live binding, and nothing here can make a dead agent addressable.
+What it is NOT: it is never consulted for routing or addressability. A binding
+history row is history, not a live binding, and nothing here can make a dead agent
+addressable.
 
-Posture, mirroring directory.db: DATA (device-agnostic -- the journal interprets the
-record, and the record is not a device's), mode 0600, written by the daemon alone,
-every other consumer opens read-only. Journal mode is WAL, which is the whole reason
-a read-only consumer can read the file while the daemon holds it open: a rollback
-journal would hand a concurrent reader a lock error at exactly the moment a bind is
-being written, and an attribution read that fails is an attribution read that lies by
-omission.
+The daemon writes it, through `store.open_write`; every other consumer opens it
+read-only (`store.open_read`). The store is in WAL, which is why a reader can read while
+the daemon holds it open: an attribution read that fails is an attribution read that lies
+by omission.
 
-Best-effort by construction after the old record has been converted: every live
-operation here swallows its own failures and says so in the log.  The one-time
-conversion is stricter because it must preserve what an older reader showed.
+Best-effort by construction: every live operation here swallows its own failures and
+says so in the log.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 import sqlite3
 import threading
 import time
 from pathlib import Path
 
-from .paths import bindings_db
+from moxi.store import transaction
+
+from .paths import comms_db
+from .store import open_read, open_write
 
 log = logging.getLogger("comms.bindings")
 
-#: The record's timestamp format, the one the gateway normalizes timestamps into.
+#: The record's timestamp format, the one the record normalizes timestamps into.
 #: Containment is a string comparison because this format sorts chronologically.
 TIMESTAMP_FMT = "%Y-%m-%dT%H:%M:%SZ"
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS bindings (
-    id           INTEGER PRIMARY KEY,
-    qualified    TEXT NOT NULL,     -- the match-gate compares THIS to the display
-    name         TEXT NOT NULL,
-    scope        TEXT NOT NULL,
-    tier         TEXT NOT NULL,     -- the tier a verified match reports
-    adapter      TEXT NOT NULL,
-    bound_at     TEXT NOT NULL,     -- %Y-%m-%dT%H:%M:%SZ, UTC
-    released_at  TEXT,              -- NULL while the binding is LIVE
-    fenced       INTEGER NOT NULL DEFAULT 0   -- closed by a boot fence, not by a release
-);
-"""
 
 
 def stamp(t: float) -> str:
@@ -58,34 +42,24 @@ def stamp(t: float) -> str:
     return time.strftime(TIMESTAMP_FMT, time.gmtime(t))
 
 
-def connect(path: str | Path, *, read_only: bool = False) -> sqlite3.Connection:
-    path = Path(path)
-    if read_only:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, check_same_thread=False)
-    else:
-        conn = sqlite3.connect(str(path), check_same_thread=False)
+def connect(path: str | Path | None = None, *, read_only: bool = False,
+            env=None) -> sqlite3.Connection:
+    """Open the store that holds the binding history (`path`, else comms.db), rows as
+    `sqlite3.Row`, usable from any thread."""
+    opener = open_read if read_only else open_write
+    conn = opener(path, env=env, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def init(path: str | Path) -> sqlite3.Connection:
-    """Create the journal, 0600, in WAL. The daemon's connection, and only its."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = connect(path)
-    # chmod BEFORE WAL: SQLite gives the -wal/-shm sidecars the main file's mode, so
-    # getting the order right is what keeps the sidecars 0600 too.
-    if (path.stat().st_mode & 0o777) != 0o600:
-        os.chmod(path, 0o600)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.executescript(SCHEMA)
-    conn.commit()
-    return conn
+def init(path: str | Path | None = None, *, env=None) -> sqlite3.Connection:
+    """The daemon's connection, through the store's gate. Only the daemon's."""
+    return connect(path, env=env)
 
 
 # ------------------------------------------------------------------------- the writer
 
-class Journal:
+class BindingHistory:
     """The daemon's custody writer: bind, release, and the boot fence. Nothing else.
 
     Every method is failure-swallowing on purpose (see the module docstring): a write
@@ -101,19 +75,21 @@ class Journal:
         self._lock = threading.Lock()
 
     def _resolved(self) -> Path:
-        return self.path if self.path is not None else bindings_db()
+        return self.path if self.path is not None else comms_db()
 
     # -- lifecycle ----------------------------------------------------------
     def open(self) -> bool:
-        """Open (creating) the journal. False means custody goes unrecorded this run."""
+        """Open (creating) the binding history. False means custody goes unrecorded this run.
+        A store its gate refuses (`store.StoreRefused`) raises: the daemon doesn't start
+        on it."""
         with self._lock:
             if self._conn is not None:
                 return True
             try:
                 self._conn = init(self._resolved())
             except (sqlite3.Error, OSError) as e:
-                log.warning("custody journal unavailable (%s: %s); bindings will not be "
-                            "journalled and replay attribution stays unverified",
+                log.warning("binding history unavailable (%s: %s); bindings will not be "
+                            "recorded and replay attribution stays unverified",
                             type(e).__name__, e)
                 self._conn = None
                 return False
@@ -138,17 +114,18 @@ class Journal:
         fence records that the interval ENDED without witnessing the release (`fenced=1`)
         rather than pretending the binding ran to now.
 
-        A fenced row records only that the daemon did not witness a clean release.
+        A fenced row records only that the daemon did not witness a clean release. A
+        reserved name's interval is no binding a daemon held, and stays open.
         """
         with self._lock:
             if self._conn is None:
                 return 0
             marker = stamp(self.clock() if at is None else at)
             try:
-                cur = self._conn.execute(
-                    "UPDATE bindings SET released_at = ?, fenced = 1 "
-                    "WHERE released_at IS NULL", (marker,))
-                self._conn.commit()
+                with transaction(self._conn) as conn:
+                    cur = conn.execute(
+                        "UPDATE bindings SET released_at = ?, fenced = 1 "
+                        "WHERE released_at IS NULL AND kind = 'session'", (marker,))
             except sqlite3.Error:
                 log.exception("boot fence failed; dangling custody intervals remain open")
                 return 0
@@ -162,15 +139,15 @@ class Journal:
             if self._conn is None:
                 return None
             try:
-                cur = self._conn.execute(
-                    "INSERT INTO bindings(qualified, name, scope, tier, adapter, bound_at) "
-                    "VALUES (?,?,?,?,?,?)",
-                    (qualified, name, scope, tier, adapter,
-                     stamp(self.clock() if at is None else at)))
-                self._conn.commit()
+                with transaction(self._conn) as conn:
+                    cur = conn.execute(
+                        "INSERT INTO bindings(qualified, name, scope, tier, adapter, "
+                        "bound_at) VALUES (?,?,?,?,?,?)",
+                        (qualified, name, scope, tier, adapter,
+                         stamp(self.clock() if at is None else at)))
             except sqlite3.Error:
                 # logged, never fatal: the binding is real whether or not it is recorded
-                log.exception("custody journal: failed to record the bind of %s", qualified)
+                log.exception("binding history: failed to record the bind of %s", qualified)
                 return None
             return cur.lastrowid
 
@@ -182,19 +159,19 @@ class Journal:
             if self._conn is None:
                 return
             try:
-                self._conn.execute(
-                    "UPDATE bindings SET released_at = ? WHERE id = ? "
-                    "AND released_at IS NULL",
-                    (stamp(self.clock() if at is None else at), int(row_id)))
-                self._conn.commit()
+                with transaction(self._conn) as conn:
+                    conn.execute(
+                        "UPDATE bindings SET released_at = ? WHERE id = ? "
+                        "AND released_at IS NULL",
+                        (stamp(self.clock() if at is None else at), int(row_id)))
             except sqlite3.Error:
-                log.exception("custody journal: failed to record the release of row %s",
+                log.exception("binding history: failed to record the release of row %s",
                               row_id)
 
     # -- read-back for the daemon's never-bound checks -----------------------
     def ever_bound(self, name: str, scope: str) -> bool | None:
         """Has the identity (name, scope) ever been bound on this box? None when the
-        journal is not open or the read fails: the caller then does not know, and the
+        binding history is not open or the read fails: the caller then does not know, and the
         send's never-bound check does not run."""
         with self._lock:
             if self._conn is None:
@@ -233,4 +210,4 @@ class Journal:
                 return []
 
 
-__all__ = ["Journal", "SCHEMA", "TIMESTAMP_FMT", "connect", "init", "stamp"]
+__all__ = ["BindingHistory", "TIMESTAMP_FMT", "connect", "init", "stamp"]

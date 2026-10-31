@@ -11,8 +11,10 @@ import sys
 import pytest
 
 from claim_kit import wait_for
+from moxi import exit as moxi_exit
 from moxi_comms import claimfile
-from moxi_comms.claimhold import CLAIM_SOCKET_ENV, NOT_INSIDE, ClaimServer, call
+from moxi_comms.claimhold import (CLAIM_SOCKET_ENV, NOT_INSIDE, ClaimServer, ClaimUnreachable,
+                                   call)
 
 ASK = ("import json,os,sys\nfrom moxi_comms import claimhold\n"
        "out={}\n"
@@ -38,7 +40,7 @@ def test_the_holder_sends_as_each_binding_it_holds(servers):
     operator, archivist = servers
     answer = call(operator.socket_path, "claim")
     assert answer["claim"]["qualified"] == "operator"
-    assert answer["protocol"] == 2 and answer["token"] == "operator-token"
+    assert "protocol" not in answer and answer["token"] == "operator-token"
     assert call(archivist.socket_path, "claim")["token"] == "archivist-token"
 
 
@@ -90,8 +92,8 @@ def test_state_answers_and_every_old_act_is_an_unknown_op(servers):
     assert call(operator.socket_path, "state")["claim"] == "operator"
     for op in ("lock", "release", "take", "confirm", "reclaim", "abandon", "contingent",
                "uncontingent"):
-        answer = call(operator.socket_path, op, verb="v", receiver="x", token="operator")
-        assert not answer["ok"] and f"unknown claim op {op!r}" in answer["error"], op
+        with pytest.raises(ClaimUnreachable, match=f"refused {op}: method not found"):
+            call(operator.socket_path, op)
 
 
 def test_the_file_records_the_holder_as_a_self_root(servers):
@@ -181,7 +183,7 @@ def test_a_binding_never_bound_says_so(rig, tmp_path):
         code, out = rig.cli(["send", "--posture", "none", "--new-name",
                              "nobody", "hello"],
                             env={CLAIM_SOCKET_ENV: str(srv.socket_path)})
-        assert code == 2
+        assert code == 3
         assert "newbie@proj-a is not bound to comms yet — nothing was sent." in out, out
         assert down.holder.state == "waiting"
         assert line_of(down) == "nobody@proj-a is not bound to comms yet"
@@ -220,7 +222,7 @@ def test_a_held_name_still_says_another_session_holds_it(rig):
         code, out = rig.cli(["send", "--posture", "none", "--new-name",
                              "nobody", "hello"],
                             env={CLAIM_SOCKET_ENV: str(srv.socket_path)})
-        assert code == 2
+        assert code == 3
         assert "planner@proj-a is held by another session — nothing was sent." in out, out
     finally:
         srv.stop()
@@ -247,7 +249,7 @@ def test_a_claim_socket_outside_comms_runtime_directory_is_never_asked(
         assert str(paths.runtime_dir()) in str(caught.value)
 
         said: list[str] = []
-        assert claimhold.whoami(env, say=said.append) == 2
+        assert claimhold.whoami(env, say=said.append) == moxi_exit.REFUSED
         assert said and "outside comms' runtime directory" in said[0]
         assert "scout" not in " ".join(said)
 
@@ -257,7 +259,7 @@ def test_a_claim_socket_outside_comms_runtime_directory_is_never_asked(
 
         # A send is refused the same way, naming the variable, and nothing is sent.
         code, out = rig.cli(["send", "main", "hello"], env=env)
-        assert code == 2, out
+        assert code == 3, out
         assert "outside comms' runtime directory" in out and CLAIM_SOCKET_ENV in out, out
         assert "Nothing was sent." in out and "scout" not in out, out
 

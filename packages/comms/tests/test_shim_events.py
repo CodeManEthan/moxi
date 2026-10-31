@@ -1,21 +1,24 @@
 """The Claude shim's frames to the daemon.
 
 `ready` carries the SessionStart's `source`; a SessionStart before the bind is owed and
-goes once after the register answer; the idle tick sends no `kind`; every turn end sends
-`kind=turn` with `handled` and `unhandled`, after the cursor write; a StopFailure's ids
-are `unhandled`; the cursor is clamped with its high-water mark; a digest's ids leave the
-held set exactly, never by comparison.
+goes once after the register answer; the idle tick sends no `kind`; each flush opens a
+digest first; every turn end sends `turn_ended` with the `handled` and `unhandled`
+digests; a StopFailure's digest is `unhandled`; a digest's ids leave the held set
+exactly, never by comparison; a new binding starts with nothing held.
 
 The daemon side of these frames is tested elsewhere, so the shim talks to a fake daemon
-socket here: it answers `register`, records every frame with the cursor as it stood when
-the frame arrived, and pushes `deliver` frames as the daemon's release would.
+socket here: it answers `bind`, `open_digest` and `turn_ended`, records every message,
+and pushes `deliver` notifications as the daemon's release would. A `turn_ended` is
+recorded with its digests' message ids in `handled` and `unhandled`, and the digests
+themselves in `handled_digests` and `unhandled_digests`.
 """
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import itertools
 import os
-import socket
 import threading
 import time
 from pathlib import Path
@@ -23,13 +26,13 @@ from pathlib import Path
 import pytest
 from conftest import FakeClock, wait_until
 
-from moxi_comms import cursors
+from moxi import ipc
+from moxi_comms import wire
 from moxi_comms import daemon as daemon_mod
 from moxi_comms.adapters import claude_shim
 from moxi_comms.adapters.claude_shim import ClaudeShim
 from moxi_comms.client import DaemonError, DaemonOffline
 from moxi_comms.paths import runtime_root
-from moxi_comms.protocol import LineConn
 
 import shim_drive
 
@@ -39,63 +42,79 @@ SESSION = "11111111-2222-3333-4444-555555555555"
 T0 = 1_790_000_000.0
 
 
+#: The daemon methods that replaced the old frames: each as the old frame's op and kind,
+#: so a test reads every frame the shim sends in one shape.
+_AS_FRAME = {"bind": ("register", None), "activity": ("activity", None),
+             "turn_ended": ("activity", "turn"), "ready": ("activity", "ready"),
+             "look": ("activity", "look")}
+
+
 class FakeDaemon:
-    """A unix socket that speaks enough of the claims protocol for one shim."""
+    """A `moxi.ipc` server that speaks enough of the daemon's wire for one shim."""
 
     def __init__(self, path: Path):
         self.path = path
-        self.frames: list[dict] = []          # every frame, with the cursor at receipt
-        self.conns: list[LineConn] = []
+        self.frames: list[dict] = []          # every frame, with its connection's index
+        self.conns: list = []
         self.registers: list[dict] = []
+        #: Each digest `open_digest` opened: its message ids, by digest id.
+        self.digests: dict[int, list] = {}
+        self._digest_numbers = itertools.count(500)
         self._lock = threading.Lock()
-        self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._server.bind(str(path))
-        self._server.listen(8)
-        self._stop = threading.Event()
-        threading.Thread(target=self._accept, daemon=True).start()
+        self._loop = asyncio.new_event_loop()
+        self._server = self._loop.run_until_complete(ipc.serve(
+            str(path), self._handle, hello=ipc.Hello(wire.VERSIONS, wire.CAPABILITIES)))
+        threading.Thread(target=self._loop.run_forever, daemon=True).start()
 
-    def _accept(self):
-        while not self._stop.is_set():
-            try:
-                sock, _ = self._server.accept()
-            except OSError:
-                return
-            conn = LineConn(sock)
-            with self._lock:
+    async def _handle(self, conn, method, params):
+        params = params if isinstance(params, dict) else {}
+        with self._lock:
+            if conn not in self.conns:
                 self.conns.append(conn)
-            threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
+            op, kind = _AS_FRAME.get(method, (method, None))
+            frame = {"op": op, **params}
+            if kind is not None:
+                frame["kind"] = kind
+            if method == "turn_ended":
+                for key in ("handled", "unhandled"):
+                    frame[f"{key}_digests"] = list(params.get(key) or ())
+                    frame[key] = sorted((mid for d in params.get(key) or ()
+                                         for mid in self.digests.get(d, ())), key=int)
+            self.frames.append(dict(frame, _conn=self.conns.index(conn)))
+            if op == "register":
+                self.registers.append(frame)
+            if method == "open_digest":
+                digest = next(self._digest_numbers)
+                self.digests[digest] = [str(i) for i in params.get("ids") or ()]
+                return {"digest": digest, "ids": self.digests[digest], "dropped": []}
+        if op == "register":
+            return {"identity": {"qualified": IDENT, "name": NAME, "scope": SCOPE,
+                                 "tier": "chosen"}}
+        if method == "turn_ended":
+            return {"cursor": None}
+        return None
 
-    def _serve(self, conn):
-        while True:
+    def _on_loop(self, fn):
+        done = concurrent.futures.Future()
+
+        def run():
             try:
-                frame = conn.recv()
-            except Exception:                                     # noqa: BLE001
-                return
-            if frame is None:
-                return
-            seen = dict(frame, _cursor=cursors.read(IDENT), _conn=self.conns.index(conn))
-            with self._lock:
-                self.frames.append(seen)
-            if frame.get("op") == "register":
-                with self._lock:
-                    self.registers.append(frame)
-                try:
-                    conn.send({"id": frame["id"], "ok": True,
-                               "identity": {"qualified": IDENT, "name": NAME,
-                                            "scope": SCOPE, "tier": "chosen"}})
-                except OSError:
-                    return
+                done.set_result(fn())
+            except BaseException as exc:                          # noqa: BLE001
+                done.set_exception(exc)
+
+        self._loop.call_soon_threadsafe(run)
+        return done.result(5.0)
 
     def push(self, *mids):
-        """`deliver` frames on the newest connection, as a release hands them."""
+        """`deliver` notifications on the newest connection, as a release hands them."""
         conn = self.conns[-1]
-        for mid in mids:
-            conn.send({"op": "deliver", "payload": payload(mid)})
+        self._on_loop(lambda: [conn.notify("deliver", {"payload": payload(mid)})
+                               for mid in mids])
 
     def drop(self):
         """Close every connection, as a daemon restart does."""
-        for conn in list(self.conns):
-            conn.close()
+        self._on_loop(lambda: [conn.close() for conn in list(self.conns)])
 
     def activity(self, kind="any"):
         with self._lock:
@@ -105,9 +124,8 @@ class FakeDaemon:
         return [f for f in out if f.get("kind") == kind]
 
     def close(self):
-        self._stop.set()
-        self._server.close()
-        self.drop()
+        self._on_loop(self._server.close)
+        self._loop.call_soon_threadsafe(self._loop.stop)
 
 
 def payload(mid):
@@ -241,12 +259,25 @@ def test_the_idle_tick_sends_no_kind_even_after_a_prompt(daemon, make_shim):
     activity = [f for f in daemon.activity() if "handled" not in f]
     assert activity and all("kind" not in f for f in activity)
     assert daemon.activity("turn") == []
-    assert cursors.read(IDENT) is None
 
 
-# ---------------------------------------------------------------- `turn` frames
+# ---------------------------------------------------------------- `turn_ended`
 
-def test_a_stop_reports_the_digest_handled_after_the_cursor_write(daemon, make_shim):
+def test_a_flush_opens_the_digest_and_names_it_injected(daemon, make_shim):
+    """The flush opens a digest for the batch before it renders, and `injected` names
+    the digest the daemon answered."""
+    s = make_shim()
+    deliver(daemon, s, 101, 102)
+    shim_drive.turn_ended(s)                            # flushes 101-102
+    opens = [f for f in daemon.frames if f["op"] == "open_digest"]
+    assert [f["ids"] for f in opens] == [["101", "102"]]
+    assert s.awaiting_digest == 500
+    assert wait_until(lambda: [f for f in daemon.frames if f["op"] == "injected"])
+    (injected,) = [f for f in daemon.frames if f["op"] == "injected"]
+    assert injected["digest"] == 500 and "through" not in injected
+
+
+def test_a_stop_reports_the_digest_handled(daemon, make_shim):
     s = make_shim()
     deliver(daemon, s, 101, 102)
     shim_drive.turn_ended(s)                            # flushes 101-102
@@ -255,11 +286,11 @@ def test_a_stop_reports_the_digest_handled_after_the_cursor_write(daemon, make_s
     shim_drive.turn_ended(s)                            # 101-102 complete
     second = turns(daemon, 2)[1]
     assert second["handled"] == ["101", "102"] and second["unhandled"] == []
-    assert second["_cursor"] == "102", "the cursor was written before the frame"
+    assert second["handled_digests"] == [500]
     assert s.held_ids == set()
 
 
-def test_a_stop_failure_reports_the_digest_unhandled_and_the_cursor_stays(
+def test_a_stop_failure_reports_the_digest_unhandled(
         daemon, make_shim):
     """A failed turn's ids are `unhandled`, StopFailure included."""
     s = make_shim()
@@ -268,57 +299,14 @@ def test_a_stop_failure_reports_the_digest_unhandled_and_the_cursor_stays(
     shim_drive.turn_ended(s, failed=True)               # the API error ends it
     failed = turns(daemon, 2)[1]
     assert failed["unhandled"] == ["101"] and failed["handled"] == []
-    assert failed["_cursor"] is None and cursors.read(IDENT) is None
-    assert s.held_ids == set(), "it has a row now: the frame went out"
+    assert s.held_ids == set(), "its row waits again: the daemon may hand it at once"
     # The daemon hands it again at a later release; the shim takes it.
     deliver(daemon, s, 101)
     assert [p["message_id"] for p in s.queue] == ["101"]
     shim_drive.turn_ended(s)                            # flushes 101 again
     shim_drive.turn_ended(s)                            # and it completes
     last = turns(daemon, 4)[3]
-    assert last["handled"] == ["101"] and last["_cursor"] == "101"
-
-
-def test_the_failed_ids_are_held_for_the_cursor_write_and_not_after_the_frame(
-        daemon, make_shim):
-    s = make_shim()
-    deliver(daemon, s, 105)
-    s.on_turn_boundary()                                # flushes 105
-    deliver(daemon, s, 110)
-    s.on_turn_boundary()                                # 105 completes, flushes 110
-    assert cursors.read(IDENT) == "105"
-    s.on_turn_failed()                                  # 110 fails
-    turn = turns(daemon, 3)[2]
-    assert turn["unhandled"] == ["110"] and cursors.read(IDENT) == "105"
-
-
-# ---------------------------------------------------------------------- the clamp
-
-def test_the_cursor_never_passes_a_held_id_and_catches_up_to_the_high_water_mark(
-        daemon, make_shim):
-    """A replay hands an old live id (105) while a digest through 110 is in flight. 110
-    completes: the cursor stops at 104. 105 completes: it goes to the mark, 110."""
-    s = make_shim()
-    deliver(daemon, s, 110)
-    s.on_turn_boundary()                                # flushes 110
-    deliver(daemon, s, 105)                             # queued below it
-    s.on_turn_boundary()                                # 110 completes; flushes 105
-    assert cursors.read(IDENT) == "104"
-    assert s.completed_through == "110"
-    s.on_turn_boundary()                                # 105 completes
-    assert cursors.read(IDENT) == "110"
-    handled = [t["handled"] for t in turns(daemon, 3)]
-    assert handled == [[], ["110"], ["105"]]
-
-
-def test_the_clamp_writes_nothing_while_the_lowest_held_id_is_the_first(daemon,
-                                                                        make_shim):
-    s = make_shim()
-    deliver(daemon, s, 7)
-    s.on_turn_boundary()                                # flushes 7
-    deliver(daemon, s, 1)
-    s.on_turn_boundary()                                # 7 completes, 1 held
-    assert cursors.read(IDENT) is None
+    assert last["handled"] == ["101"] and last["handled_digests"] == [501]
 
 
 # ---------------------------------------------------------------- the held-id prune
@@ -337,39 +325,27 @@ def test_a_completing_digest_prunes_exactly_its_own_ids(daemon, make_shim):
     assert [p["message_id"] for p in s.queue] == ["105", "106"], "105 deduped"
 
 
-def test_holding_lists_held_and_unreported_ids_on_register(daemon, make_shim):
+def test_a_new_binding_starts_with_nothing_held(daemon, make_shim):
+    """A reconnect: the last binding's rows wait again and the daemon hands them to the
+    new one, so the register sends no `holding`, the shim lets go of what it held and
+    queued, and a turn end it could not send goes (its digest has ended)."""
     s = make_shim()
     deliver(daemon, s, 101)
     s.on_turn_boundary()                                # flushes 101
     deliver(daemon, s, 102)
     daemon.drop()
     wait_until(lambda: s.offline)
-    s.on_turn_boundary()                                # 101 completes, frame cannot
-    assert s.unreported_handled == ["101"]              # go; 102 is flushed
+    s._complete_turn()                                  # 101 completes; can't go
+    assert s.unreported_handled == [500]
     s.connect()
     assert wait_until(lambda: len(daemon.registers) == 2)
-    assert daemon.registers[1]["holding"] == ["101", "102"]
-    s.on_turn_boundary()                                # 102 completes
+    assert "holding" not in daemon.registers[1]
+    assert s.unreported_handled == [] and s.queue == [] and s.held_ids == set()
+    deliver(daemon, s, 101, 102)                        # the new binding's catch-up
+    s.on_turn_boundary()                                # flushes both
+    s.on_turn_boundary()                                # and they complete
     turn = turns(daemon, 2)[-1]
     assert turn["handled"] == ["101", "102"] and turn["_conn"] == 1
-    assert s.unreported_handled == []
-
-
-def test_an_unhandled_frame_that_cannot_go_keeps_the_ids_held_until_one_does(
-        daemon, make_shim):
-    s = make_shim()
-    deliver(daemon, s, 101)
-    s.on_turn_boundary()                                # flushes 101
-    daemon.drop()
-    wait_until(lambda: s.offline)
-    s.on_turn_failed()
-    assert s.held_ids == {"101"} and s.unreported_unhandled == ["101"]
-    s.connect()
-    assert wait_until(lambda: len(daemon.registers) == 2)
-    assert daemon.registers[1]["holding"] == ["101"], "the new binding counts it handed"
-    s.on_turn_boundary()
-    turn = turns(daemon, 2)[-1]
-    assert turn["unhandled"] == ["101"] and s.held_ids == set()
 
 
 # ---------------------------------------------------------------- a turn's start
@@ -407,7 +383,6 @@ def test_a_turn_start_with_a_digest_awaiting_ends_nothing(daemon, make_shim):
     shim_drive.turn_ended(s)
     frame = turns(daemon, 2)[1]
     assert frame["handled"] == ["101"] and frame["unhandled"] == []
-    assert frame["_cursor"] == "101"
 
 
 def test_a_turn_start_with_nothing_awaiting_sends_no_turn(daemon, make_shim):
@@ -418,23 +393,22 @@ def test_a_turn_start_with_nothing_awaiting_sends_no_turn(daemon, make_shim):
     assert daemon.activity("turn") == []
 
 
-def test_an_unhandled_digest_keeps_the_clamp(daemon, make_shim):
-    """105 completes, 110 is named unhandled. The cursor stays at 105 until 110 is
-    handed again and completes."""
+def test_an_unhandled_digest_is_opened_again_when_it_is_handed_again(daemon, make_shim):
+    """105 completes, 110 is named unhandled; handed again, 110 goes in a new digest,
+    and that one is acked."""
     s = make_shim()
     deliver(daemon, s, 105)
     shim_drive.turn_ended(s)                            # flushes 105
     deliver(daemon, s, 110)
     shim_drive.turn_ended(s)                            # 105 completes, flushes 110
-    assert cursors.read(IDENT) == "105"
     shim_drive.turn_ended(s, failed=True)               # 110's turn did not answer
     frame = turns(daemon, 3)[2]
-    assert frame["unhandled"] == ["110"] and frame["_cursor"] == "105"
+    assert frame["unhandled"] == ["110"] and frame["unhandled_digests"] == [501]
     deliver(daemon, s, 110)
     shim_drive.turn_ended(s)                            # flushes 110 again
     shim_drive.turn_ended(s)
-    assert turns(daemon, 5)[4]["handled"] == ["110"]
-    assert cursors.read(IDENT) == "110"
+    last = turns(daemon, 5)[4]
+    assert last["handled"] == ["110"] and last["handled_digests"] == [502]
 
 
 class Gate:
@@ -482,7 +456,7 @@ def restart(rig):
     made: list = []
 
     def again():
-        fresh = daemon_mod.Daemon(rig.gateway, clock=rig.clock,
+        fresh = daemon_mod.Daemon(rig.record, clock=rig.clock,
                                   start_trim_thread=False).start()
         rig.daemon = fresh
         made.append(fresh)
@@ -580,7 +554,7 @@ def test_a_stop_that_lands_mid_register_never_says_comms_online(rig, monkeypatch
     assert wait_until(lambda: seeds and seeds[0].waits >= 1), "parked, unbound"
 
     restart()
-    rig.gateway.max_message_id_hold = 0.4      # register stays in flight this long
+    rig.record.max_message_id_hold = 0.4      # register stays in flight this long
     seeds[0].step()
     time.sleep(0.15)                           # the supervisor is inside `register`
     shim.stop()                                # ...and the session ends under it
@@ -611,8 +585,8 @@ def test_a_connection_that_dies_during_register_is_not_a_binding(rig, monkeypatc
     closed = threading.Event()
 
     class DropsAfterRegister(real):
-        def register(self, **kwargs):
-            resp = super().register(**kwargs)
+        def bind(self, **kwargs):
+            resp = super().bind(**kwargs)
             if not dropped:
                 dropped.append(True)
                 self.close()
@@ -643,7 +617,7 @@ def test_the_inject_file_seam_reports_a_timeout_as_offline_not_refused(
     """On the hand-run seam: `DaemonTimeout` is a `DaemonError`, so with `except
     DaemonError` first a slow-but-live daemon would print a refusal naming no holder on
     the one seam a human reads directly. The seam's `EXIT_OFFLINE` is what it reaches."""
-    rig.gateway.max_message_id_hold = 0.3      # the mock's declared round trip
+    rig.record.max_message_id_hold = 0.3      # the mock's declared round trip
     real = claude_shim.DaemonClient
     monkeypatch.setattr(claude_shim, "DaemonClient",
                         lambda *a, **kw: real(*a, **{**kw, "timeout": 0.05}))
@@ -654,7 +628,7 @@ def test_the_inject_file_seam_reports_a_timeout_as_offline_not_refused(
     assert claude_shim._serve_inject_file(args, common) == claude_shim.EXIT_OFFLINE
     err = capsys.readouterr().err
     assert claude_shim.REFUSED_PREFIX not in err, "nothing refused anything"
-    assert "timeout waiting for register" in err and "Traceback" not in err
+    assert "timeout waiting for bind" in err and "Traceback" not in err
 
 
 def test_a_round_trip_that_never_landed_leaves_no_replay_flag_armed(rig):
@@ -767,13 +741,13 @@ def test_a_send_waits_for_the_new_token_after_a_restart(rig, monkeypatch, restar
 
     code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "before"],
         env={CLAIM_SOCKET_ENV: str(path)})
-    assert code == 4 and "holds no posting credential" in out
-    assert rig.gateway.history(rig.names_channel) == []
+    assert code == 75 and "holds no posting credential" in out
+    assert rig.record.history(rig.names_channel) == []
 
     seeds[0].step()
     assert wait_until(lambda: not planner.offline)
     code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "after"],
         env={CLAIM_SOCKET_ENV: str(path)})
     assert code == 0, out
-    posted = rig.gateway.history(rig.names_channel)[-1]
+    posted = rig.record.history(rig.names_channel)[-1]
     assert (posted.author_kind, posted.author_id) == ("identity", "planner@proj-a")

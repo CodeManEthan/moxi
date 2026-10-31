@@ -22,7 +22,8 @@ def test_the_announcement_offers_interface_1():
     assert module.API == "moxi_cache.api"
     assert module.CLI == "moxi_cache.cli:main"
     assert module.SETTINGS == "settings.toml"
-    assert module.OPTIONAL == {} and module.GATED == {} and module.INTERNAL_ENV == {}
+    assert module.GATED == {} and module.INTERNAL_ENV == {}
+    assert set(module.OPTIONAL) == {"ui"}
 
 
 def test_load_finds_the_module_and_its_api():
@@ -35,7 +36,8 @@ def test_load_finds_the_module_and_its_api():
 
 
 def test_interface_1_holds_its_names():
-    assert {"read", "KINDS", "CODES", "MISSING", "open_store", "projects_root"} <= set(
+    assert {"read", "KINDS", "CODES", "MISSING", "open_store", "projects_root",
+            "clock_records"} <= set(
         api.__all__)
     assert api.KINDS == ("warm", "cold", "fresh", "no-cache", "unknown")
     assert repr(api.MISSING) == "MISSING"

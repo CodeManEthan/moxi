@@ -17,6 +17,10 @@ from pathlib import Path
 GLOBAL = "global"
 AUTO_NAME_RE = re.compile(r"^agent-\d+$")
 NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+#: The operator's identity, a name the daemon keeps for him.
+OPERATOR_NAME = "operator"
+#: The word a bind gives to ask the daemon for an `agent-N` name; it names no one.
+AUTO_WORD = "auto"
 
 
 def project_key(cwd: str | Path | None = None, env=None) -> str:

@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import threading
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -219,8 +220,9 @@ def test_the_real_workspace_picks_by_the_same_rule():
         return [p.dir for p in check.pick(packages, [path])]
 
     assert {"moxi", "sessions", "turns", "cache", "comms", "moxi-dev"} <= set(dirs)
+    # cache depends on sessions, comms on cache through an extra, the launcher on comms.
     assert set(of("packages/sessions/src/moxi_sessions/__init__.py")) == {
-        "sessions", "cache", "comms"}
+        "sessions", "cache", "comms", "launcher"}
     assert of("packages/moxi/src/moxi/__init__.py") == dirs
     assert of("uv.lock") == dirs
 
@@ -339,7 +341,8 @@ def test_a_stale_lock_stops_before_the_sync(repo):
     runs = Runs({lambda cmd, cwd: cmd[:2] == ["uv", "lock"]: 1})
     result = run_check(repo, runs)
     assert result.code == 1 and len(runs.calls) == 1
-    assert "lock fail | tags not run | sync not run | lint not run" in result.line()
+    assert ("lock fail | tags not run | stamps not run | web not run | sync not run | "
+            "lint not run") in result.line()
 
 
 def test_a_failed_sync_runs_no_suite(repo):
@@ -353,8 +356,8 @@ def test_nothing_picked_checks_the_lock_and_passes(repo):
     result = run_check(repo, runs)
     assert result.code == 0
     assert [cmd for cmd, _, _ in runs.calls] == [["uv", "lock", "--check"]]
-    assert ("packages: none | lock pass | tags pass | sync skipped | lint not run | "
-            "no suites run") in result.line()
+    assert ("packages: none | lock pass | tags pass | stamps skipped | web skipped | "
+            "sync skipped | lint not run | no suites run") in result.line()
 
 
 # --- the tag check and the lint -------------------------------------------------------
@@ -435,12 +438,208 @@ def test_the_real_plan_runs_over_the_real_layout(repo):
     assert (repo / ".moxi-dev" / "lint" / "sessions" / "importlinter.toml").is_file()
 
 
+# --- browser tests ---------------------------------------------------------------------
+
+# A page-shell package whose testing extra brings Playwright, a module whose dev group
+# asks for that extra, and a package with neither.
+BROWSER_LAYOUT = {
+    "ui": ("moxi-ui", [], {"testing": ["pytest>=8", "playwright>=1.50,<2"]},
+           {"dev": ["pytest", "moxi-ui[testing]"]}),
+    "mod": ("moxi-mod", [], {}, {"dev": ["pytest", "Moxi_UI[ Testing ]>=0.1"]}),
+    "plain": ("moxi-plain", [], {}, {"dev": ["pytest", "moxi-ui>=0.1"]}),
+}
+
+
+@pytest.fixture
+def browser_repo(tmp_path):
+    root = tmp_path / "b"
+    root.mkdir()
+    git(root, "init", "-q", "-b", "main")
+    write_workspace(root, BROWSER_LAYOUT)
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "start")
+    return root
+
+
+class Probe:
+    """The Chromium probe's stand-in: answers `why` (None: it starts), counting calls."""
+
+    def __init__(self, why=None):
+        self.why = why
+        self.calls = []
+
+    def __call__(self, python, env):
+        self.calls.append((Path(python), dict(env)))
+        return self.why
+
+
+def test_a_package_drives_a_browser_when_it_asks_for_playwright_or_ui_testing(browser_repo):
+    browser = {p.dir: p.browser for p in check.load_workspace(browser_repo)}
+    assert browser == {"ui": True, "mod": True, "plain": False}
+    assert check.requirement_extras("moxi-ui[testing, Other_X]>=1") == {"testing", "other-x"}
+    assert check.requirement_extras("moxi-ui>=1") == frozenset()
+
+
+def test_the_browser_tiers_are_the_plain_runs_less_the_browser():
+    from moxi_dev.testing import TIERS
+
+    assert check.WITH_BROWSER == " and ".join(f"not {t}" for t in TIERS if t != "browser")
+
+
+def test_with_chromium_a_browser_package_runs_its_browser_tests_in_its_suite(browser_repo,
+                                                                            monkeypatch):
+    monkeypatch.setattr(check, "cpu_count", lambda: 4)
+    runs, probe = Runs(), Probe()
+    result = run_check(browser_repo, runs, full=True, probe=probe)
+    assert result.code == 0
+    suites = dict(runs.suites())
+    assert suites["ui"][3:] == ["-n", "4", "-m", check.WITH_BROWSER]
+    assert suites["mod"][3:] == ["-n", "4", "-m", check.WITH_BROWSER]
+    assert suites["plain"][3:] == ["-n", "4"]
+    # One probe, with the check's own python and the suites' environment.
+    env_dir = browser_repo / ".moxi-dev" / "env-3.12"
+    assert [python for python, _ in probe.calls] == [env_dir / "bin" / "python"]
+    assert probe.calls[0][1]["VIRTUAL_ENV"] == str(env_dir)
+    assert "without its browser tests" not in result.line()
+
+
+def test_without_chromium_the_browser_tests_are_left_out_with_a_line_saying_why(
+        browser_repo, capsys):
+    runs, probe = Runs(), Probe("Executable doesn't exist at /x/chrome")
+    result = run_check(browser_repo, runs, full=True, probe=probe)
+    assert result.code == 0
+    for cmd, cwd, env in runs.calls:
+        if "pytest" in cmd:
+            assert "-m" not in cmd[3:]
+            # Not even --full puts them back.
+            want = None if cwd.name == "plain" else "browser"
+            assert env.get(testing.LEAVE_OUT_ENV) == want, cwd.name
+    err = capsys.readouterr().err
+    for name in ("ui", "mod"):
+        assert (f"moxi-dev check: {name}'s browser tests are left out: Playwright's "
+                f"Chromium can't start here (Executable doesn't exist at /x/chrome)") in err
+    assert "plain's browser" not in err
+    match = LINE.match(result.line())
+    assert match, result.line()
+    assert re.fullmatch(r"ui pass \d+\.\d+s without its browser tests, "
+                        r"mod pass \d+\.\d+s without its browser tests, "
+                        r"plain pass \d+\.\d+s", match["suites"])
+
+
+def test_no_browser_package_picked_means_no_probe(browser_repo):
+    git(browser_repo, "switch", "-q", "-c", "work")
+    commit_file(browser_repo, "packages/plain/x.py")
+    runs, probe = Runs(), Probe("not reached")
+    result = run_check(browser_repo, runs, probe=probe)
+    assert result.code == 0 and probe.calls == []
+    assert [name for name, _ in runs.suites()] == ["plain"]
+
+
+def test_a_failed_sync_runs_no_probe(browser_repo):
+    runs, probe = Runs({lambda cmd, cwd: cmd[:2] == ["uv", "sync"]: 1}), Probe()
+    run_check(browser_repo, runs, full=True, probe=probe)
+    assert probe.calls == []
+
+
+def test_the_probe_says_why_chromium_cant_start(tmp_path):
+    fake = tmp_path / "python"
+    fake.write_text("#!/bin/sh\necho 'Traceback (most recent call last):' >&2\n"
+                    "echo \"No module named 'playwright'\" >&2\nexit 1\n")
+    fake.chmod(0o755)
+    assert check.chromium_probe(fake, {"PATH": "/usr/bin:/bin"}) == "No module named 'playwright'"
+    good = tmp_path / "good"
+    good.write_text("#!/bin/sh\nexit 0\n")
+    good.chmod(0o755)
+    assert check.chromium_probe(good, {"PATH": "/usr/bin:/bin"}) is None
+    assert "could not run" in check.chromium_probe(tmp_path / "missing", {})
+
+
+def test_the_real_workspace_runs_browser_tests_for_its_page_packages():
+    if not (REPO / "packages" / "ui" / "pyproject.toml").is_file():
+        pytest.skip("not run from the repository (an sdist has no workspace)")
+    found = [p for p in check.load_workspace(REPO) if p.browser]
+    # The page packages known here, not all of them: the next one joins without a change.
+    assert {"cache", "comms", "ui"} <= {p.dir for p in found}
+    for package in found:
+        data = tomllib.loads((package.path / "pyproject.toml").read_text())
+        assert any(check.requirement_name(r) == "moxi-ui"
+                   and "testing" in check.requirement_extras(r)
+                   for r in check._requirement_strings(data)), package.dir
+
+
+# --- the built web files ---------------------------------------------------------------
+
+def _with_page(repo, monkeypatch, stamps="pass"):
+    """Make the stamps step report `stamps` for the picked packages."""
+    def fake(root, chosen, result):
+        result.stamps = stamps
+        return stamps != "fail"
+    monkeypatch.setattr(check, "_stamps", fake)
+
+
+def _tools(tmp_path, *names):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    for name in names:
+        tool = bin_dir / name
+        tool.write_text("#!/bin/sh\nexit 0\n")
+        tool.chmod(0o755)
+    return str(bin_dir)
+
+
+def test_with_node_and_node_modules_the_built_files_are_compared(repo, monkeypatch, tmp_path):
+    _with_page(repo, monkeypatch)
+    (repo / "node_modules").mkdir()
+    runs = Runs()
+    result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, "node", "npm")})
+    assert result.code == 0 and "| web pass |" in result.line()
+    lock, web, sync, *_ = runs.calls
+    assert web[0] == ["npm", "run", "check"] and web[1] == repo
+
+
+def test_a_built_file_that_differs_fails_before_the_sync(repo, monkeypatch, tmp_path):
+    _with_page(repo, monkeypatch)
+    (repo / "node_modules").mkdir()
+    runs = Runs({lambda cmd, cwd: cmd[:2] == ["npm", "run"]: 1})
+    result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, "node", "npm")})
+    assert result.code == 1 and runs.suites() == []
+    assert "| web fail | sync not run |" in result.line()
+
+
+@pytest.mark.parametrize("tools, modules, why", [
+    (("npm",), True, "no node on PATH"),
+    (("node", "npm"), False, "no node_modules at the root (run `npm ci`)")])
+def test_without_node_the_compare_is_left_out_with_a_line(repo, monkeypatch, tmp_path, capsys,
+                                                        tools, modules, why):
+    _with_page(repo, monkeypatch)
+    if modules:
+        (repo / "node_modules").mkdir()
+    runs = Runs()
+    result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, *tools)})
+    assert result.code == 0 and "| web skipped |" in result.line()
+    assert not any(cmd[0] == "npm" for cmd, _, _ in runs.calls)
+    assert ("moxi-dev check: the built web files were not compared with their sources: "
+            + why) in capsys.readouterr().err
+
+
+def test_no_page_picked_runs_no_compare(repo, monkeypatch, tmp_path):
+    _with_page(repo, monkeypatch, stamps="none")
+    (repo / "node_modules").mkdir()
+    runs = Runs()
+    result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, "node", "npm")})
+    assert "| web none |" in result.line()
+    assert not any(cmd[0] == "npm" for cmd, _, _ in runs.calls)
+
+
 # --- the summary line -------------------------------------------------------------------
 
 LINE = re.compile(
     r"moxi-dev check: commit (?P<commit>[0-9a-f]{12}(\+dirty)?) \| "
     r"packages: (?P<packages>[^|]+) \| lock (pass|fail|not run) \| "
-    r"tags (pass|fail|not run) \| sync (pass|fail|skipped|not run) \| "
+    r"tags (pass|fail|not run) \| "
+    r"stamps (pass|fail|none|skipped|not run) \| "
+    r"web (pass|fail|none|skipped|not run) \| "
+    r"sync (pass|fail|skipped|not run) \| "
     r"lint (?P<lint>pass|none|not run|fail \([^)]+\)) \| (?P<suites>[^|]+) \| "
     r"timed (?P<timed>[^|]+) \| "
     r"(?P<durations>durations none|durations \d+\.\d+s, slowest 5% \d+%, delta "
@@ -966,3 +1165,30 @@ def test_the_suites_drop_a_caller_s_timed_setting(repo):
     run_check(repo, runs, full=True,
               environ={"PATH": "/usr/bin", testing.TIMED_ENV: "only"})
     assert {env[testing.TIMED_ENV] for _, _, _, env in pytest_calls(runs)} == {"hold"}
+
+
+def test_the_suites_drop_a_caller_s_left_out_tiers(repo):
+    runs = Runs()
+    run_check(repo, runs, full=True,
+              environ={"PATH": "/usr/bin", testing.LEAVE_OUT_ENV: "slow"})
+    assert all(testing.LEAVE_OUT_ENV not in env for _, _, _, env in pytest_calls(runs))
+
+
+@pytest.mark.parametrize("why", [None, "Executable doesn't exist at /x/chrome"])
+def test_a_browser_package_s_serial_pass_runs_with_its_parallel_pass_s_browser_choice(
+        browser_repo, monkeypatch, why):
+    (browser_repo / ".git" / "info" / "exclude").write_text(".moxi-dev/\n")
+    monkeypatch.setattr(check, "cpu_count", lambda: 4)
+    runs = Timed({name: [1.0] for name in BROWSER_LAYOUT},
+                 held={"ui": [0.5], "plain": [0.5]})
+    result = run_check(browser_repo, runs, full=True, probe=Probe(why))
+    assert result.code == 0
+    marks = [] if why else ["-m", check.WITH_BROWSER]
+    left_out = "browser" if why else None
+    calls = [(name, args, mode, env.get(testing.LEAVE_OUT_ENV))
+             for name, args, mode, env in pytest_calls(runs)]
+    assert calls == [("ui", ["-n", "4", *marks], "hold", left_out),
+                     ("mod", ["-n", "4", *marks], "hold", left_out),
+                     ("plain", ["-n", "4"], "hold", None),
+                     ("ui", ["-n", "0", *marks], "only", left_out),
+                     ("plain", ["-n", "0"], "only", None)]

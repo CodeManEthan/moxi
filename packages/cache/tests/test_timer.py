@@ -239,6 +239,28 @@ def test_discovery_reads_the_entry_point_group_from_installed_metadata(tmp_path,
     assert "moxi-sample-timers-run is not installed in this environment" in unresolved.reason
 
 
+def test_a_real_install_finds_every_installed_modules_timer_entry(installed_modules):
+    """The rest of the suite hides installed modules' timer entries from cache; this test
+    reads the real scan, the one the watcher's timer runs at each tick, so that hiding
+    can't hide a module's entry from cache itself. Every entry point in the group is
+    found, each under its module's name, and the launcher's, installed beside cache,
+    loads and gives its subscriptions, none refused."""
+    from importlib import metadata
+
+    names = {ep.name for ep in metadata.entry_points(group=timer.GROUP)}
+    loaded = timer.load([])
+    found = {item.source for item in (*loaded.subscriptions, *loaded.refused)}
+    assert {f"module {name}" for name in names} <= found, (names, loaded)
+    try:
+        metadata.distribution("moxi-launcher")
+    except metadata.PackageNotFoundError:
+        pytest.skip("moxi-launcher is not installed beside cache")
+    assert "launcher" in names
+    launcher = [s.name for s in loaded.subscriptions if s.source == "module launcher"]
+    assert launcher and all(name.startswith("launcher.") for name in launcher), loaded
+    assert not [r for r in loaded.refused if r.source == "module launcher"], loaded
+
+
 # --- when it asks -------------------------------------------------------------------------------
 
 class Proc:

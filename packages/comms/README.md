@@ -20,20 +20,19 @@ moxi comms send reviewer --posture once "The parser change is on branch fix-pars
 moxi comms reply 4611686018427387905 "Looks good; one nit on line 40."
 ```
 
-No server, no account and no network: the record is a SQLite file in your home
-directory, and everything talks over Unix sockets.
+No server, no account and no network: comms keeps everything in one SQLite file in
+your home directory, and everything talks over Unix sockets.
 
 ```
- agent A ── moxi comms send ──▶ record.db ◀── subscribe ── moxi-comms-daemon ── socket ──▶ adapter ──▶ agent B
- (any shell)              (SQLite, WAL)              (routes by name)          (shim, at a turn boundary)
+ agent A ── moxi comms send ──▶ moxi-comms-daemon ──▶ comms.db ── socket ──▶ adapter ──▶ agent B
+ (any shell)                 (writes, routes by name)  (SQLite)              (at a turn boundary)
 ```
 
 Claude Code, Codex and OpenCode sessions take part through adapters. A Claude Code
 session `moxi comms claude` launches gets an adapter process of its own, which binds the
 session's name and delivers mail into the session through Moxi turns, the one way into a
-harness session: the session must load turns' Claude plugin (installed by `moxi install
-turns`, or passed for one launch with `--plugin-dir`). Codex and OpenCode work through
-experimental adapters.
+harness session: `moxi comms claude` loads turns' Claude plugins into the session it
+starts. Codex and OpenCode work through experimental adapters.
 
 ## Install
 
@@ -98,9 +97,9 @@ stay under `~/.local/state/moxi/` and `~/.local/share/moxi/` until you delete th
 
 ## Quick start with Claude Code
 
-Each session needs turns' Claude plugin: `moxi install turns` installs it for every
-session, or pass `-- --plugin-dir DIR` for each folder `moxi_turns.claude_plugin_dirs()`
-returns to load it for one launch.
+Each session needs turns' Claude plugins. `moxi comms claude` asks turns for them and
+passes each as `--plugin-dir` on the launch it starts (`--dry-run` shows the line), so
+there is nothing to add by hand.
 
 Open two terminals in your project and launch a named session in each:
 
@@ -111,9 +110,12 @@ moxi comms claude --name reviewer
 
 `moxi comms claude` stamps the session's identity, starts the session's comms adapter
 (it binds the name before `claude` starts, and its log is under comms' state directory)
-and starts `claude`; everything after `--` goes to `claude` unchanged. The launch names
+and starts `claude`; everything after `--` goes to `claude` unchanged. A name another
+session holds, or one a module reserved, is refused before `claude` starts: the wrapper
+prints why and exits 3. With the daemon not running it starts nothing and exits 75, so
+try again once the daemon is up. The launch names
 its session id to `claude`: the one after `--` (`--session-id <uuid>`, or `--resume <uuid>`
-without `--fork-session`), else the launcher's own `--session-id <uuid>`, else a new one,
+without `--fork-session`), else the wrapper's own `--session-id <uuid>`, else a new one,
 added as `--session-id`. A resume that names no id (`--continue`, `--resume` with no id,
 `--from-pr`, `--teleport`) goes through with nothing added, and a send to that session is
 refused (`cache-unread`) until its adapter finds the session's turns endpoint. A name with no `@scope` is the global identity,
@@ -129,8 +131,8 @@ moxi comms agents                  # who you can message
 moxi comms history reviewer        # the record, with who sent each message
 ```
 
-Mail to a name that isn't running waits in the record and is delivered when a session
-with that name starts. A name that has never had a session needs `--new-name` on the
+Mail to a name that isn't running waits for it and is delivered when a session with that
+name starts. A name that has never had a session needs `--new-name` on the
 send; without it the send is refused. `moxi comms help <term>` explains any word a session
 meets.
 
@@ -142,7 +144,7 @@ meets.
 | Claude Code sessions through `moxi comms claude` | supported, through Moxi turns: the session must load turns' Claude plugin; until its adapter finds the session's turns endpoint, mail to it waits and a send says `waiting` |
 | Systemd user service (`moxi comms service`) | supported |
 | Held mail, catch-up on start, delivery at turn boundaries | supported |
-| Attribution and the identity journal | supported |
+| Attribution and the binding history | supported |
 | Reply enforcement for the operator's and directors' messages | supported |
 | Codex adapter (`moxi-comms-codex`) | experimental |
 | OpenCode adapter (`moxi-comms-opencode`) | experimental |
@@ -155,7 +157,8 @@ meets.
 |---|---|
 | `moxi comms send <name> --posture none\|optional\|once\|open "text"` | message one or more names (comma-separated) |
 | `moxi comms reply <message-id> "text"` | answer a message |
-| `moxi comms agents` | who you can message (`--seats`: bindings, send-only identities and waiting mail) |
+| `moxi comms delete <message-id>` | take back a message you sent from whoever hasn't had it yet |
+| `moxi comms agents` | who you can message (`--seats`: bindings and waiting mail; `--json`: one row per address, as comms' browser panel lists them) |
 | `moxi comms history <name>` | an identity's record |
 | `moxi comms help [term]` | explain a comms word |
 | `moxi comms whois <name>` | the card an identity wrote about itself |
@@ -163,6 +166,7 @@ meets.
 | `moxi comms doctor` | what this machine resolved, and whether the daemon answers |
 | `moxi comms service install\|uninstall\|status` | the daemon as a user service |
 | `moxi comms claude` | launch a named Claude Code session (also `"$(uv tool dir)/moxi/bin/moxi-comms-claude"`) |
+| `moxi comms codex` | launch a named Codex session through Moxi turns' Codex host (experimental) |
 | `"$(uv tool dir)/moxi/bin/moxi-comms-opencode"` | launch an OpenCode session for a roster identity (experimental) |
 | `"$(uv tool dir)/moxi/bin/moxi-comms-daemon"` | the daemon, in the foreground |
 | `"$(uv tool dir)/moxi/bin/moxi-comms-provision"` | provision standing identities |
@@ -189,7 +193,10 @@ thread closes after 8 replies (`[threads] reply_cap`, or `--cap N` / `--no-cap` 
 whoever opened it), after an hour with no message, or on a `--posture none` reply; after
 that, start a new send. The operator's own lane needs no `--posture`. Other useful flags:
 `--held` (hold the message until the recipient's next turn, or until its session starts,
-is cleared or is compacted), `--new-name` (the recipient has not started yet), and
+is cleared or is compacted), `--interrupt` (go into the recipient's running turn where
+its harness can take it there), `--expires 30m|6h|3d|never` (drop the message if it
+hasn't reached the recipient by then; the default is `[delivery] expiry`, 24 hours),
+`--new-name` (the recipient has not started yet), and
 `--check`, on `moxi comms send` and `moxi comms reply` (run every check the send makes before
 posting and then stop: it prints `would send <N> message(s) to <names>`, any `held:`
 lines and every NOTE the post would print, or the send's own refusal with its exit code,
@@ -201,7 +208,7 @@ price. A send to an agent whose cache has expired,
 on any adapter, is posted and held: it exits 0, prints a `held:` line for that
 recipient, and the agent reads the message at its next session start, `/clear`,
 compaction or turn (when you type into it, say). Nothing wakes it for that message
-alone. A send to an agent whose cache comms cannot read is refused with exit 6, and the
+alone. A send to an agent whose cache comms cannot read is refused with exit 75, and the
 output says "Nothing was sent." first and last; send it again in a moment. An agent comms
 has no cache clock for, one on a model with no lifetime row included, gets its mail live.
 This holds for every sender, the operator's own lane included, and there is no
@@ -221,18 +228,20 @@ on one of Zen's free models is reached at any age, and so is one on a model the 
 has no row for, which comms has no clock for. [docs/adapters.md](docs/adapters.md) has
 the detail.
 
-- **Codex**: `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <name>` launches one identity's thread through Moxi
-  turns' Codex host, which runs the `codex app-server` and its hooks, and steers comms
-  mail into the thread; a digest settles when its turn ends. Mail goes to the thread this launch
+- **Codex**: `moxi comms codex --name <name>` launches one identity's thread through Moxi
+  turns' Codex host, which runs the `codex app-server` and its hooks. comms mail goes
+  into the thread at turn boundaries, and `--interrupt` mail into the running turn; a
+  digest settles when its turn ends. Mail goes to the thread this launch
   started: /clear, /new, /fork and /resume in the window start or open another thread,
   which comms does not follow. To start fresh, end the launch and launch again. Install
-  the extra: `moxi install comms --with codex`. Identities are listed in the
-  config file's `[codex]` table, `~/.config/moxi/comms/config.toml`.
+  the extra: `moxi install comms --with codex`. The settings flags are the host's own
+  (`--model`, `--sandbox`, `--option KEY=VALUE`); an identity listed in the config file's
+  `[codex]` table launches with `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <name>`.
 - **OpenCode**: `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <name>` runs an OpenCode server for one identity and
   opens its session in your terminal; mail goes to the server as its own prompts, never
   through your input box. It defaults the session to a free OpenCode Zen model and
   never changes it after launch. Each launch opens a new OpenCode session, as a new
-  Claude Code session starts fresh, and keeps that session while the launcher runs,
+  Claude Code session starts fresh, and keeps that session while the wrapper runs,
   across a restart of its server. /new and /clear in the window are followed. Another
   session opened with /sessions is not, and mail stays with the session the launch
   started. Identities are listed in the config file's `[opencode]` table:
@@ -246,7 +255,7 @@ cwd  = "/home/me/src/my-project"
 
 A name is a claim made by a process running as your user. comms keeps agents from
 confusing each other and shows who said what, but any process running as you can speak
-as any name, read the token store, or write the record. It is not access control. Read
+as any name, read the token store, or write comms' store. It is not access control. Read
 [docs/security.md](docs/security.md) before running agents you don't trust, and before
 using comms on a machine other people log in to.
 
@@ -258,7 +267,7 @@ environment variable and every key of the one config file, is in
 its value. By default:
 
 - data: `~/.local/share/moxi/comms/`
-- state, including the record and tokens: `~/.local/state/moxi/<host>/comms/`
+- state, including comms' store (`comms.db`) and tokens: `~/.local/state/moxi/comms/`
 - config: `~/.config/moxi/comms/config.toml`
 - sockets: `$XDG_RUNTIME_DIR/moxi/comms/`
 
@@ -273,7 +282,7 @@ How messages are routed, delivered and attributed is in
   `journalctl --user -u moxi-comms-daemon`. Or run the daemon in a terminal:
   `"$(uv tool dir)/moxi/bin/moxi-comms-daemon"`.
 - **The daemon refuses to start because a token is missing.** The token store lost
-  credentials the record expects; see [docs/security.md](docs/security.md).
+  credentials the store expects; see [docs/security.md](docs/security.md).
 
 ## Contributing
 

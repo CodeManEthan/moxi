@@ -50,7 +50,7 @@ def test_a_role_that_is_still_unknown_has_no_store_path_at_all(tmp_path):
     """The role set is closed by construction, not by a list somewhere: an unknown role
     gets an owner with no PARTS, and the refusal happens where the path is computed. The
     message is the generic no-owner one -- there is no role-specific error to extend, and
-    a box adding a role names it in `[secrets] roles` (test_roles.py)."""
+    a box adding a role names it in `[credentials] roles` (test_roles.py)."""
     store = TokenStore(tmp_path)
     unknown = owner_for_role("stenographer")
     assert unknown.parts == () and unknown.role == "stenographer"

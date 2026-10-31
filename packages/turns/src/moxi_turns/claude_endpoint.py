@@ -1,9 +1,10 @@
 """The Claude Code endpoint: the endpoint core with the Claude half (`ClaudeHarness`).
 
 `moxi-turns-endpoint` runs this. The runner plugin spawns it at `session.start` with the
-absolute path `endpoint.json` names; it lives for the session and inherits the
-session's environment. It speaks to its runner over the leg in `claude_leg` and to every
-caller over the endpoint socket (`contracts/socket-protocol.md`).
+absolute path `MOXI_TURNS_ENDPOINT` names in the session's environment, else the one
+`endpoint.json` names; it lives for the session and inherits the session's environment.
+It speaks to its runner over the leg in `claude_leg` and to every caller over the
+endpoint socket (`contracts/socket-protocol.md`).
 
 The tie rule: each plugin submit has one window, opened when the endpoint hands
 the runner its `submit` line and closed exactly once, at the first end it accepts: the
@@ -43,10 +44,33 @@ a caller that will not wait that long frees itself with its own `wait_*` timeout
 The endpoint's life, a rule: it ends on its own SIGTERM, an EPIPE on its stdout, or
 a change of parent, and never on a `session.end` hook. It takes its session id from the
 runner on every load, and opens its caller socket (answers `hello`) once it has the id.
+
+Lines and the adapter's lock: `submit`, `append` and `command` come from the endpoint's
+ordered worker, and each writes a line through `LineWriter.write`, which blocks while the
+runner's pipe is full. No line is written while the adapter's lock is held, so a write
+the runner does not read holds the worker and nothing else: the reports, the gate's asks
+and the core's expiry still take the lock and settle what they must. A submit line the
+window's close (on a leg thread) hands over is written the same way. A line already
+being written when its delivery settles `lost` (the core's expiry) may still reach the
+runner once it reads again, and its prompt may run; that is the accepted cost of the
+bound, and the gate drops it unless its window is the open one.
+
+A steer reads `Started`, and its turn names it, once the runner reports `append.done`
+(`$.session.append` resolved without a deny); `append.failed` refuses it `idle`.
+
+Session commands: the runner runs `/clear`, `/exit` and `/compact` through
+`$.command.run`, and the gate re-checks each (`/gate/command`). `exit` settles `passed` at
+the gate's pass. A plain `clear` settles `ran` at the new session's SessionStart. A
+`compact` settles `ran` at its SessionStart with source `compact` (the core's rule for
+every harness). With `stop_shells` the runner stops the session's background shells and
+Monitors after the command has taken effect, and both settle only at its `command.done`,
+which carries the stop's report: a `clear`'s SessionStart records the new id and marks the
+moment of effect, and settles nothing.
 """
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 import logging
 import os
@@ -62,8 +86,8 @@ from typing import Any, BinaryIO
 
 from . import claude_leg as leg
 from .harness import CommandRequest, Delivery, Harness, Live
-from .results import (CAPABILITIES, COMMAND_REFUSALS, LOST_UNTIED, OUTCOMES, Failed,
-                      Passed, Ran, Refused, StopFacts)
+from .results import (Agent, Agents, COMMAND_REFUSALS, LOST_UNTIED, OUTCOMES, SHELL_UNLISTED, Failed,
+                      LeftShell, Passed, Ran, Refused, Shells, StopFacts)
 
 log = logging.getLogger("moxi.turns.claude")
 
@@ -82,6 +106,8 @@ class _Window:
     """One plugin submit's window."""
 
     delivery: str
+    #: The leg's word for the submit: `start` for an only-if-idle delivery, else
+    #: `deliver`.
     kind: str
     #: The window nonce: random, 128 bits, minted at the hand-over.
     nonce: str = field(default_factory=lambda: secrets.token_hex(16))
@@ -92,13 +118,17 @@ class _Window:
     #: The turn held in the window: the last main-loop `turn.start` reported in it.
     held: str | None = None
     held_set: bool = False
+    #: The delivery, for the window's submit line.
+    spec: Delivery | None = None
 
 
 class ClaudeHarness(Harness):
     """The Claude half of an endpoint: the runner's leg under the endpoint core."""
 
     name = "claude"
-    can = frozenset(CAPABILITIES)
+    can = frozenset({"deliver", "only-if-idle", "steer", "stop-handler", "clear", "exit",
+                     "compact", "agents", "stop-shells"})
+    live_wait_s = LIVE_WAIT_S
 
     def __init__(self, out: BinaryIO, *, pid: int | None = None, cwd: str | None = None,
                  on_end=None):
@@ -114,6 +144,9 @@ class ClaudeHarness(Harness):
         self._live: dict[int, list] = {}
         self._commands: dict[str, CommandRequest] = {}
         self._clear_passed: str | None = None
+        #: A `clear` with `stop_shells` past its SessionStart: its request id and the new
+        #: session's id, which its `command.done` settles with.
+        self._clear_effect: tuple[str, str | None] | None = None
         #: Delivery ids the gate refused, for a `drop` close.
         self._gate_refused: set[str] = set()
         #: Closed windows by nonce: (delivery, how it closed), to name a late entry.
@@ -136,15 +169,16 @@ class ClaudeHarness(Harness):
         ep = self.endpoint
         return self._lines.write({
             "op": leg.LINE_HELLO, "leg": leg.LEG, "mod_sock": str(self.server.path),
-            "hold_wait_ms": int(ep.hold_wait_s * 1000),
+            "stop_wait_ms": int(ep.stop_wait_s * 1000),
             "listen_wait_ms": int(ep.listen_wait_s * 1000),
-            "endpoint_version": ep.version, "pid": os.getpid()})
+            "endpoint_version": ep.version, "pid": os.getpid(),
+            "stop_after_clear": leg.STOP_AFTER_CLEAR})
 
     def handle(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         if path == leg.PATH_REPORT:
             self.report(body)
             return {}
-        if path == leg.PATH_LIVE:
+        if path in (leg.PATH_LIVE, leg.PATH_AGENTS):
             self._live_answer(body)
             return {}
         if path == leg.PATH_STOP:
@@ -163,25 +197,15 @@ class ClaudeHarness(Harness):
                 self.server.close()
             except OSError:
                 pass
+            # A socket outside the endpoint's directory goes with the server; one inside
+            # goes with the directory.
+            with contextlib.suppress(OSError):
+                os.unlink(self.server.path)
 
     # -- the core calls these -----------------------------------------------------------
 
     def live(self) -> Live:
-        ask = next(self._asks)
-        slot: list = [threading.Event(), None]
-        with self._lock:
-            self._live[ask] = slot
-        try:
-            if not self._lines.write({"op": leg.LINE_LIVE, "ask": ask}):
-                raise OSError("the runner's line is closed")
-            if not slot[0].wait(LIVE_WAIT_S):
-                raise TimeoutError(f"the runner did not answer live within {LIVE_WAIT_S} s")
-        finally:
-            with self._lock:
-                self._live.pop(ask, None)
-        answer = slot[1] or {}
-        if answer.get("error") is not None:
-            raise OSError(f"the runner could not read the live facts: {answer['error']}")
+        answer = self._ask_runner(leg.LINE_LIVE, "the live facts")
         agents, draft = answer.get("agents"), answer.get("draft")
         # `agents` null: the runner could not list the subagents. Unknown, which counts
         # as busy and never reads as 0.
@@ -190,10 +214,36 @@ class ClaudeHarness(Harness):
             raise OSError(f"the runner's live answer is malformed: {answer!r}")
         return Live(agents=agents, draft=draft)
 
+    def agents(self) -> Agents:
+        """The runner's `$.agent.list()`, read on this call; the states are mapped here. A
+        list the runner could not read, or that came back malformed, is not complete."""
+        answer = self._ask_runner(leg.LINE_AGENTS, "agents")
+        return agents_from_runner(answer.get("entries"), time.time())
+
+    def _ask_runner(self, op: str, what: str) -> dict:
+        """Send the runner a line that asks for a live read and wait `LIVE_WAIT_S` for its
+        answer. Raises when the line is closed, the answer is late or it names an error."""
+        ask = next(self._asks)
+        slot: list = [threading.Event(), None]
+        with self._lock:
+            self._live[ask] = slot
+        try:
+            if not self._lines.write({"op": op, "ask": ask}):
+                raise OSError("the runner's line is closed")
+            if not slot[0].wait(LIVE_WAIT_S):
+                raise TimeoutError(f"the runner did not answer {what} within {LIVE_WAIT_S} s")
+        finally:
+            with self._lock:
+                self._live.pop(ask, None)
+        answer = slot[1] or {}
+        if answer.get("error") is not None:
+            raise OSError(f"the runner could not read {what}: {answer['error']}")
+        return answer
+
     def submit(self, delivery: Delivery) -> None:
         with self._lock:
             self._pending.append(delivery)
-            self._next_window()
+        self._hand_next()
 
     def expired(self, delivery_id: str) -> None:
         """The core expired the delivery (`PENDING_TTL_S`): its window closes now, admitted
@@ -204,6 +254,7 @@ class ClaudeHarness(Harness):
                 log.warning("window of %s (%s) expired; it closes", delivery_id,
                             "admitted" if w.admitted else "not admitted")
                 self._close(leg.END_FAIL, "expired: the submit never settled")
+        self._hand_next()
 
     def append(self, delivery: Delivery) -> None:
         if not self._lines.write({"op": leg.LINE_APPEND, "delivery": delivery.id,
@@ -214,23 +265,42 @@ class ClaudeHarness(Harness):
         with self._lock:
             self._commands[request.id] = request
         if not self._lines.write({"op": leg.LINE_COMMAND, "request": request.id,
-                                  "name": request.name}):
+                                  "name": request.name,
+                                  "stop_shells": request.stop_shells}):
             raise OSError("the runner's line is closed")
 
     # -- the window ---------------------------------------------------------------------
 
-    def _next_window(self) -> None:
-        """Under the lock: hand the runner the next pending submit, once no window is
-        open. A delivery the core settled meanwhile (refused, expired) is skipped."""
+    def _hand_next(self) -> None:
+        """Hand the runner the next pending submit, once no window is open. A delivery
+        the core settled meanwhile (refused, expired) is skipped. The window opens under
+        the lock; its line is written after the lock is let go."""
+        while True:
+            with self._lock:
+                w = self._open_next()
+                if w is None:
+                    return
+                d = w.spec
+            if self._lines.write({"op": leg.LINE_SUBMIT, "delivery": d.id,
+                                  "kind": w.kind, "text": d.text, "nonce": w.nonce}):
+                return
+            with self._lock:
+                if self._window is not w:
+                    return
+                self._close(leg.END_FAIL, "the runner's line is closed")
+
+    def _open_next(self) -> _Window | None:
+        """Under the lock: open the window of the next pending submit still waiting, or
+        None (a window is open, or nothing waits)."""
         while self._window is None and self._pending:
             d = self._pending.pop(0)
             if not self.endpoint.is_waiting(d.id):
                 continue
             # The window counts as open from here, a few ms before the runner's call.
-            w = self._window = _Window(d.id, d.kind)
-            if not self._lines.write({"op": leg.LINE_SUBMIT, "delivery": d.id,
-                                      "kind": d.kind, "text": d.text, "nonce": w.nonce}):
-                self._close(leg.END_FAIL, "the runner's line is closed")
+            w = self._window = _Window(d.id, "start" if d.only_if_idle else "deliver")
+            w.spec = d
+            return w
+        return None
 
     def _close(self, end: str, reason: str | None) -> None:
         """Under the lock: the open window closes by `end`."""
@@ -264,7 +334,6 @@ class ClaudeHarness(Harness):
                 ep.lost(w.delivery, f"{LOST_UNTIED}: the submit failed"
                                     + (f": {reason}" if reason else ""))
         self._gate_refused.discard(w.delivery)
-        self._next_window()
 
     # -- reports ------------------------------------------------------------------------
 
@@ -283,6 +352,7 @@ class ClaudeHarness(Harness):
                     self._close(leg.END_FAIL, "a report from the runner was lost")
                 self._last_seq = seq
             self._apply(kind, body)
+        self._hand_next()                       # a report may have closed the window
 
     def _apply(self, kind: str, body: dict[str, Any]) -> None:
         ep = self.endpoint
@@ -322,6 +392,10 @@ class ClaudeHarness(Harness):
                          "window waits for the settle", delivery)
             else:
                 self._close(leg.END_FAIL, _opt_str(body, "reason") or "the runner's bound")
+        elif kind == leg.R_APPEND_DONE:
+            delivery = body.get("delivery")
+            if isinstance(delivery, str):
+                ep.steered(delivery)
         elif kind == leg.R_APPEND_FAILED:
             delivery = body.get("delivery")
             if isinstance(delivery, str):
@@ -379,8 +453,8 @@ class ClaudeHarness(Harness):
             reason = ep.entering(w.delivery)
             if reason is None and not ep.is_waiting(w.delivery):
                 reason = "gone"           # the core settled it meanwhile
-            if reason is None and w.kind == "start":
-                spec = ep._deliveries[w.delivery].spec
+            spec = w.spec
+            if reason is None and spec is not None and spec.only_if_idle:
                 if spec.refuse_draft and body.get("draft") is not False:
                     reason = "draft"      # a draft, or a box the gate could not read
                 elif spec.refuse_agents and _busy_agents(body.get("agents")):
@@ -416,17 +490,27 @@ class ClaudeHarness(Harness):
                     "text": f"moxi-turns-gate: /{request.name if request else '?'} was "
                             f"refused ({reason})"}
         # The decision is recorded before the gate passes it.
+        # A compaction settles at its Ready, the core's rule.
         if request.name == "exit":
             ep.command_settled(request.id, Passed())
-        else:
+        elif request.name == "clear":
             with self._lock:
                 self._clear_passed = request.id
         return {"verdict": "pass"}
 
     def _clear_ran(self, new_session_id: str | None) -> None:
+        """The SessionStart of a `clear` the gate passed: a plain one settles `ran` here;
+        one with `stop_shells` has taken effect, and settles at its `command.done`."""
         with self._lock:
             request_id, self._clear_passed = self._clear_passed, None
-        if request_id is not None:
+            request = self._commands.get(request_id) if request_id is not None else None
+            if request is not None and request.stop_shells:
+                self._clear_effect = (request.id, new_session_id)
+        if request_id is None:
+            return
+        if request is not None and request.stop_shells:
+            self.endpoint.command_took_effect(request_id)
+        else:
             self.endpoint.command_settled(request_id, Ran(new_session_id))
 
     def _command_done(self, body: dict[str, Any]) -> None:
@@ -438,23 +522,33 @@ class ClaudeHarness(Harness):
             return
         reason = _opt_str(body, "reason") or state or "unknown"
         ep = self.endpoint
+        with self._lock:
+            effect, self._clear_effect = self._clear_effect, None
+            if effect is not None and effect[0] != request.id:
+                self._clear_effect, effect = effect, None
+            if self._clear_passed == request.id:
+                self._clear_passed = None
         if state == "ran":
+            shells = _shells(body.get("shells")) if request.stop_shells else None
             if request.name == "clear":
-                new_id = _opt_str(body, "new_session_id")
+                new_id = _opt_str(body, "new_session_id") or (effect[1] if effect else None)
                 self._learn(new_id)
-                with self._lock:
-                    if self._clear_passed == request.id:
-                        self._clear_passed = None
-                ep.command_settled(request.id, Ran(new_id or ep.ledger.session_id))
+                new_id = new_id or ep.ledger.session_id
+                if request.stop_shells:
+                    ep.command_ran(request.id, new_session_id=new_id, shells=shells)
+                else:
+                    ep.command_settled(request.id, Ran(new_id))
+            elif request.name == "compact":
+                ep.command_ran(request.id, shells=shells)
             else:
                 ep.command_settled(request.id, Passed())
+        elif state == "refused" and reason in COMMAND_REFUSALS:
+            ep.command_settled(request.id, Refused(reason))
         elif state == "refused":
-            ep.command_settled(request.id, Refused(reason if reason in COMMAND_REFUSALS
-                                                   else "gone"))
+            # The plugins' own word (the gate's `gone`: it could not reach this endpoint
+            # in time) is no refusal the contract names: the command did not run.
+            ep.command_settled(request.id, Failed(f"the gate withdrew it: {reason}"))
         else:
-            with self._lock:
-                if self._clear_passed == request.id:
-                    self._clear_passed = None
             ep.command_settled(request.id, Failed(reason))
 
 
@@ -464,6 +558,64 @@ def _drop(reason: str, kind: str | None) -> dict[str, Any]:
     what = {"start": "the start was refused", "deliver": "the delivery was refused"}.get(
         kind or "", "a late prompt was dropped")
     return {"verdict": "drop", "reason": reason, "text": f"moxi-turns-gate: {what} ({reason})"}
+
+
+def _shells(value: Any) -> Shells:
+    """The runner's report of a shell stop. One turns cannot read is a list it cannot
+    vouch for: nothing named, the unnamed entry left."""
+    unnamed = LeftShell(None, SHELL_UNLISTED)
+    try:
+        if not isinstance(value, dict):
+            raise ValueError("not an object")
+        stopped, left, complete = value.get("stopped"), value.get("left"), value.get("complete")
+        if not isinstance(complete, bool):
+            raise ValueError("complete is not a bool")
+        if not isinstance(stopped, list) or not all(isinstance(i, str) for i in stopped):
+            raise ValueError("stopped is not a list of ids")
+        if not isinstance(left, list):
+            raise ValueError("left is not a list")
+        entries = []
+        for e in left:
+            if (not isinstance(e, dict) or not isinstance(e.get("why"), str)
+                    or not (e.get("id") is None or isinstance(e.get("id"), str))):
+                raise ValueError(f"a left entry is malformed: {e!r}")
+            entries.append(LeftShell(e.get("id"), e["why"]))
+    except ValueError as exc:
+        log.warning("the runner's shell report cannot be read (%s): %r", exc, value)
+        return Shells((), (unnamed,), False)
+    if not complete and unnamed not in entries:
+        entries.append(unnamed)
+    return Shells(tuple(stopped), tuple(entries), complete)
+
+
+#: Claude Code's agent statuses (`AgentStatus`) as turns' states.
+CLAUDE_STATES = {"pending": "pending", "running": "running", "waiting": "waiting",
+                 "idle": "idle", "completed": "done", "failed": "failed",
+                 "killed": "stopped"}
+#: The statuses that are a final notice.
+CLAUDE_FINAL = frozenset({"completed", "failed", "killed"})
+
+
+def agents_from_runner(entries: Any, at: float) -> Agents:
+    """The runner's unmapped `$.agent.list()` entries as `Agents`. Null is a list the runner
+    could not read; an entry with no id makes the list not complete, never shorter. A
+    status turns does not know reads `unknown`, with no notice to call final."""
+    if not isinstance(entries, list):
+        return Agents((), False, at)
+    out: list[Agent] = []
+    complete = True
+    for raw in entries:
+        if not isinstance(raw, dict) or not isinstance(raw.get("id"), str) \
+                or not raw["id"]:
+            complete = False
+            continue
+        status = raw.get("status")
+        state = CLAUDE_STATES.get(status, "unknown") if isinstance(status, str) else "unknown"
+        final = (status in CLAUDE_FINAL) if state != "unknown" else None
+        teammate = isinstance(raw.get("teammateId"), str) or raw.get("type") == "teammate"
+        out.append(Agent(raw["id"], "teammate" if teammate else "subagent", state, final,
+                         _opt_str(raw, "description"), _opt_str(raw, "parentId")))
+    return Agents(tuple(out), complete, at)
 
 
 def _opt_str(body: dict[str, Any], key: str) -> str | None:
@@ -550,6 +702,16 @@ class Life:
                 os.close(fd)
 
 
+def mod_sock_path(ep) -> str:
+    """Where endpoint `ep` listens for its runner: `mod.sock` in its directory, or, when
+    that path is too long for a socket address (a long `MOXI_HOME` or runtime directory),
+    `moxi.paths.socket_path`'s path for the name `<endpoint name>-mod`, which falls back to
+    a short hashed path as the endpoint's own address does."""
+    from . import protocol
+
+    return protocol.endpoint_socket(ep.dir, protocol.MOD_SOCK)
+
+
 def main(argv: list[str] | None = None) -> int:
     """`moxi-turns-endpoint`: spawned by the runner, never typed by a person."""
     # The leg owns the real stdout. Anything else that prints (a listener, a library)
@@ -581,10 +743,12 @@ def main(argv: list[str] | None = None) -> int:
                                        "error": str(exc)})
         return 2
     ep.prepare()
+    sock: str | None = None
     try:
-        harness.serve(str(ep.dir / protocol.MOD_SOCK))
+        sock = mod_sock_path(ep)
+        harness.serve(sock)
     except OSError as exc:
-        log.error("cannot listen on %s: %s", ep.dir / protocol.MOD_SOCK, exc)
+        log.error("cannot listen on %s: %s", sock or "mod.sock", exc)
         leg.LineWriter(leg_out).write({"op": leg.LINE_FAILED, "leg": leg.LEG,
                                        "error": f"mod.sock: {exc}"})
         ep.stop(f"mod.sock: {exc}")

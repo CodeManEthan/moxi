@@ -17,13 +17,14 @@ from pathlib import Path
 
 import pytest
 
+from moxi import exit as moxi_exit
 from moxi_comms import cli, config, paths
 
 
 def doctor(env=None, socket_path=None):
     """One doctor run with this test's environment (the rig's tmp roots) under `env`."""
     out = io.StringIO()
-    ctx = cli.Context(gateway=object(), env=dict(os.environ, **(env or {})),
+    ctx = cli.Context(record=object(), env=dict(os.environ, **(env or {})),
                       socket_path=socket_path, out=out, db_path=Path("/nonexistent/db"))
     code = cli.main(["doctor"], ctx=ctx)
     return code, out.getvalue()
@@ -58,11 +59,11 @@ def test_a_box_with_its_daemon_up(rig):
     assert r["CONFIG"] == str(home / "config" / "comms") == str(paths.config_dir())
     assert r["RUNTIME"] == str(paths.runtime_dir())
     assert r["backend"] == "local (the default)"
-    assert r["secrets"] == "env, store (the default)"
+    assert r["credentials"] == "env, keychain, store (the default)"
     assert r["daemon"].startswith("answers at ")
     assert set(r) == {"device", "DATA", "STATE", "CACHE", "CONFIG", "RUNTIME", "config",
-                      "backend", "secrets", "cache", "claude", "codex", "opencode",
-                      "daemon", "waiting", "turns"}, out
+                      "backend", "credentials", "cache", "claude", "codex", "opencode",
+                      "daemon", "waiting"}, out
 
 
 def test_adapter_binaries_and_their_versions(tmp_path):
@@ -94,20 +95,20 @@ def test_a_configured_box_whose_daemon_is_down_exits_offline(tmp_path):
     path.parent.mkdir(parents=True)
     path.write_text('backend = "local"\n')
     code, out = doctor(env={"PATH": ""})
-    assert code == cli.EXIT_OFFLINE
+    assert code == moxi_exit.TEMPFAIL
     assert rows(out)["config"] == str(path)
     assert rows(out)["backend"] == "local (the config file)"
-    code, _ = doctor(env={"PATH": "", "MOXI_COMMS_GATEWAY": "local"})
-    assert code == cli.EXIT_OFFLINE
+    code, _ = doctor(env={"PATH": "", "MOXI_COMMS_BACKEND": "local"})
+    assert code == moxi_exit.TEMPFAIL
     path.unlink()
-    code, _ = doctor(env={"PATH": "", "MOXI_COMMS_GATEWAY": "mock"})
-    assert code == cli.EXIT_OFFLINE                         # the env var configures it too
+    code, _ = doctor(env={"PATH": "", "MOXI_COMMS_BACKEND": "mock"})
+    assert code == moxi_exit.TEMPFAIL                         # the env var configures it too
 
 
 def test_a_bad_config_is_reported_not_raised(tmp_path):
     path = config.config_path()
     path.parent.mkdir(parents=True)
-    path.write_text("[secrets]\nchain = [\"vault\"]\n")
+    path.write_text("[credentials]\nchain = [\"vault\"]\n")
     code, out = doctor(env={"PATH": ""})
     assert rows(out)["config"].startswith("ERROR: ")
     assert code == 0                    # nothing configured it as far as doctor could read

@@ -1,0 +1,21 @@
+# The ui module's config schema. The file it governs is CONFIG/ui/config.toml;
+# `moxi config ui` shows every key and `moxi config ui init` writes the file.
+
+[port]
+type = "int"
+default = 8460
+doc = "The TCP port the shell listens on, on 127.0.0.1 and [::1]. The shell reads it when it starts; under a socket unit, a change takes effect once `moxi install ui` rewrites the unit."
+read = "start"
+
+[idle_s]
+type = "int"
+default = 900
+doc = "Seconds a shell that a socket unit started stays up with no open request, stream or page server. A shell that bound its own listener never exits idle, since nothing would hold the port after it."
+read = "start"
+
+[theme.mode]
+type = "enum"
+values = ["system", "light", "dark"]
+default = "system"
+doc = "The pages' colours: system follows the browser's light or dark scheme; light and dark fix one. Each page the shell opens reads it."
+read = "use"

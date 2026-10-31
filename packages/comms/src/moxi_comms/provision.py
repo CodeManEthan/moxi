@@ -2,7 +2,7 @@
 
 The shape:
   * one shared room agents post in, `#names`. No inbox rooms.
-  * standing and send-only identities are directory rows with no stored credential.
+  * standing identities are directory rows with no stored credential.
   * the daemon holds no writing credential.
 
 On the local backend provision writes only the operator's posting token. The record
@@ -13,8 +13,8 @@ decision because only the caller knows which backend it opened: the mock keeps t
 token in its own record, and there is no token here to keep. `main()` builds the store
 when the selected backend is `local`; a caller that passes none is a caller whose
 backend stores its own. Asking the SELECTION seam instead was the other candidate
-and it is wrong here: a gateway handed in directly (the rig, the smokes) is not the
-backend the box's config names, and provision must write for the gateway it was given.
+and it is wrong here: a record handed in directly (the rig, the smokes) is not the
+backend the box's config names, and provision must write for the record it was given.
 
 An operator store file lost after a run is not recovered by re-running: the record keeps
 only the hash. Re-provisioning converges and does not rotate it.
@@ -28,6 +28,8 @@ from __future__ import annotations
 import secrets as _secrets
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from moxi.store import transaction
 
 from . import directory
 from .config import ProvisionConfig
@@ -50,7 +52,7 @@ class ProvisionResult:
     operator_token_written: bool = False   # local backend only; False means "already had one"
 
 
-def _operator_token(gateway, store) -> bool:
+def _operator_token(record, store) -> bool:
     """The operator's lane gets a credential like every other lane.
 
     The token rests in the `operator` holder's store file and the record keeps only its
@@ -63,24 +65,23 @@ def _operator_token(gateway, store) -> bool:
     lane nobody can use and there is nothing to lose by replacing it.
     """
     from . import tokens
-    from .local_gateway import META_OPERATOR_TOKEN_HASH, token_hash
+    from .local_record import META_OPERATOR_TOKEN_HASH, token_hash
 
     owner = tokens.owner_for_role(tokens.ROLE_OPERATOR)
     held = store.read_secret(owner, tokens.OPERATOR_SECRET_ID)
-    stored = gateway.meta_get(META_OPERATOR_TOKEN_HASH)
+    stored = record.meta_get(META_OPERATOR_TOKEN_HASH)
     if held and stored and _secrets.compare_digest(stored, token_hash(held)):
         return False
     token = _secrets.token_urlsafe(32)
     store.write_secret(owner, tokens.OPERATOR_SECRET_ID, token)
-    gateway.meta_set(META_OPERATOR_TOKEN_HASH, token_hash(token))
+    record.meta_set(META_OPERATOR_TOKEN_HASH, token_hash(token))
     return True
 
 
-def provision(gateway, db_path, *, standing=(), operator=("operator", "operator"),
-              writer: str = "provisioner", daemon_client=None, store=None,
-              send_only=()) -> ProvisionResult:
-    """Idempotent. `standing` and `send_only` are iterables of (name, scope); a
-    `send_only` pair is a standing row whose kind is `send-only`.
+def provision(record, db_path, *, standing=(), operator=("operator", "operator"),
+              writer: str = "provisioner", daemon_client=None,
+              store=None) -> ProvisionResult:
+    """Idempotent. `standing` is an iterable of (name, scope).
 
     `store` is the local backend's operator-token writer. None on the mock, which keeps
     its own credential.
@@ -88,39 +89,37 @@ def provision(gateway, db_path, *, standing=(), operator=("operator", "operator"
     conn = directory.init(db_path)
     result = ProvisionResult()
     try:
-        # --- rooms -------------------------------------------------------------
-        for room, kind in ROOM_KINDS.items():
-            channel_id = gateway.create_channel(room)
-            conn.execute(
-                "INSERT OR IGNORE INTO rooms(channel_id, name, kind, created_at) VALUES (?,?,?,?)",
-                (channel_id, room, kind, directory.now()),
-            )
-            result.rooms[room] = channel_id
-
-        # --- operator + writer declaration --------------------------------------
+        # The record's own writes come first: on the local backend the record is the
+        # same store, and its transactions must not wait on one held here.
+        for room in ROOM_KINDS:
+            result.rooms[room] = record.create_channel(room)
         op_id, op_name = operator
-        user_id = gateway.register_principal(op_name) if not op_id.isdigit() else op_id
-        conn.execute("INSERT OR IGNORE INTO operators(user_id, name, created_at) VALUES (?,?,?)",
-                     (user_id, op_name, directory.now()))
+        user_id = record.register_principal(op_name) if not op_id.isdigit() else op_id
         result.operator_user_id = user_id
-        directory.meta_set(conn, directory.META_WRITER, writer)
-        conn.commit()
+
+        # --- rooms, operator and writer declaration, in one transaction ------------
+        with transaction(conn):
+            for room, kind in ROOM_KINDS.items():
+                channel_id = result.rooms[room]
+                # On the local backend the record already made the row, with no kind.
+                conn.execute(
+                    "INSERT INTO rooms(room_id, name, kind, created_at) VALUES (?,?,?,?) "
+                    "ON CONFLICT DO NOTHING", (channel_id, room, kind, directory.now()))
+                conn.execute("UPDATE rooms SET kind = ? WHERE room_id = ? AND kind IS NULL",
+                             (kind, channel_id))
+            conn.execute("INSERT OR IGNORE INTO operators(user_id, name, created_at) "
+                         "VALUES (?,?,?)", (user_id, op_name, directory.now()))
+            directory.meta_set(conn, directory.META_WRITER, writer)
 
         # --- the operator's own posting credential ---
         if store is not None:
-            result.operator_token_written = _operator_token(gateway, store)
+            result.operator_token_written = _operator_token(record, store)
 
         # --- standing identities -------------------------------------------------
         for name, scope in standing:
-            add_standing(gateway, conn, name, scope, rooms=result.rooms,
+            add_standing(record, conn, name, scope, rooms=result.rooms,
                          daemon_client=daemon_client, store=store)
             result.standing.append((name, scope))
-        for name, scope in send_only:
-            add_standing(gateway, conn, name, scope, rooms=result.rooms,
-                         daemon_client=daemon_client, store=store,
-                         kind=directory.KIND_SEND_ONLY)
-            result.standing.append((name, scope))
-        conn.commit()
     finally:
         conn.close()
     return result
@@ -160,7 +159,7 @@ class Readiness:
 def readiness(db_path, *, operator_hash, store) -> Readiness:
     """Is this directory provisioned? The one definition, read-only.
 
-    Provisioned means `directory.db` holds the declared writer and, when `store` is
+    Provisioned means the directory holds the declared writer and, when `store` is
     given, the operator's stored token hashes to `operator_hash`. With `store` None the
     directory alone answers.
 
@@ -170,7 +169,7 @@ def readiness(db_path, *, operator_hash, store) -> Readiness:
     operator hash but has no matching stored token is LOST.
     """
     from . import tokens
-    from .local_gateway import token_hash
+    from .local_record import token_hash
 
     path = Path(db_path)
     if not path.exists():
@@ -198,12 +197,14 @@ def operator_hash_in(record_path) -> str | None:
     None when there is no record or no hash in it."""
     import sqlite3
 
-    from .local_gateway import META_OPERATOR_TOKEN_HASH
+    from .store import open_read
+
+    from .local_record import META_OPERATOR_TOKEN_HASH
 
     path = Path(record_path)
     if not path.exists():
         return None
-    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn = open_read(path)
     try:
         row = conn.execute("SELECT value FROM meta WHERE key = ?",
                            (META_OPERATOR_TOKEN_HASH,)).fetchone()
@@ -234,16 +235,16 @@ def first_start(store, *, operator=None):
     """
     import logging
 
-    from .local_gateway import META_OPERATOR_TOKEN_HASH
+    from .local_record import META_OPERATOR_TOKEN_HASH
 
     log = logging.getLogger("comms.daemon")
 
-    def run(gateway, db_path) -> None:
+    def run(record, db_path) -> None:
         from .tokens import TokenStoreError
 
         try:
             found = readiness(db_path,
-                              operator_hash=gateway.meta_get(META_OPERATOR_TOKEN_HASH),
+                              operator_hash=record.meta_get(META_OPERATOR_TOKEN_HASH),
                               store=store)
         except TokenStoreError as e:
             raise RuntimeError(f"moxi-comms-daemon: {e}") from None
@@ -252,9 +253,9 @@ def first_start(store, *, operator=None):
         if found.state == LOST:
             raise RuntimeError(LOST_REFUSAL.format(
                 db=db_path, detail=found.detail, store=store.root,
-                record=getattr(gateway, "path", "the record")))
+                record=getattr(record, "path", "the record")))
         want_operator = configured()
-        result = provision(gateway, db_path,
+        result = provision(record, db_path,
                            operator=operator if operator is not None else want_operator,
                            store=store)
         log.info("first start: provisioned the operator credential on the local backend "
@@ -271,153 +272,48 @@ def _names_only(rooms: dict) -> dict:
     return {NAMES: rooms[NAMES]} if NAMES in rooms else {}
 
 
-def add_standing(gateway, conn, name: str, scope: str = GLOBAL, *, rooms=None,
-                 daemon_client=None, store=None, kind: str = directory.KIND_AGENT) -> None:
+def add_standing(record, conn, name: str, scope: str = GLOBAL, *, rooms=None,
+                 daemon_client=None, store=None) -> None:
     """Create a standing row without a stored credential.
 
     Refuses `^agent-\\d+$` in every scope, and refuses a name currently live as a
     chosen binding in the same scope (release the binding first) when a daemon client is
     available to ask.
 
-    `kind` is the row's directory kind, `agent` or `send-only`. A row that already
-    exists with the other kind is refused, not converted: turning a name that receives
-    mail into one that refuses it (or back) is a decision about that identity, and a
-    re-run of the provisioner is not the place to make it by accident.
-
     The retired `rooms` and `store` arguments remain accepted until the old webhook
     helpers are removed. They are ignored.
     """
-    if kind not in directory.ROW_KINDS:
-        raise ProvisionError(f"{kind!r} is not a standing row kind; expected one of "
-                             f"{', '.join(directory.ROW_KINDS)}")
     if is_auto_name(name):
         raise ProvisionError(
             f"{name!r}: the agent-N namespace is reserved for the auto-namer, so a standing identity can't take one")
-    found = conn.execute("SELECT * FROM agents WHERE name = ? AND scope = ?",
-                         (name, scope)).fetchone()
-    if found is not None and directory.kind_of(found) != kind:
-        raise ProvisionError(
-            f"{name}@{scope} is already provisioned as a standing row of kind "
-            f"{directory.kind_of(found)!r}, not {kind!r}; nothing was changed")
     if daemon_client is not None:
-        for b in daemon_client.query("agents")["bindings"]:
+        for b in daemon_client.call("agents")["bindings"]:
             if b["name"] == name and b["scope"] == scope and b["tier"] == "chosen":
                 raise ProvisionError(
                     f"{name}@{scope} is currently live as a chosen binding "
                     f"(adapter {b['adapter']}); release it first")
-    conn.execute("INSERT OR IGNORE INTO agents(name, scope, status, created_at, kind) "
-                 "VALUES (?,?, 'active', ?, ?)", (name, scope, directory.now(), kind))
-    conn.commit()
-
-
-# --------------------------------------------------------------------------- send-only
-
-def send_only_main(argv=None, *, gateway=None, store=None, env=None, out=None,
-                   daemon_client=None) -> int:
-    """`moxi-comms-provision send-only NAME@SCOPE` -- one send-only standing identity, alone.
-
-    A send-only identity is a standing row whose directory kind is `send-only`. It posts
-    with its live binding token when its holder is bound, and nothing is ever delivered
-    to it. This verb adds the row to a directory that is already provisioned and does
-    nothing else, so it can be run
-    against a live box without touching anything it was not asked about. It migrates
-    the directory's `agents` table to carry the `kind` column first, if it has none.
-
-    Re-running converges: a row that is already send-only changes nothing.
-    A row of the same name and scope whose kind is `agent` is refused, not converted.
-    """
-    import argparse
-    import os
-
-    from . import tokens
-    from .client import DaemonClient, DaemonOffline
-    from .gateway import BACKENDS, LOCAL, GatewayError, backend_name, open_gateway
-    from .paths import daemon_socket, directory_db
-    from .scoping import NAME_RE
-
-    ap = argparse.ArgumentParser(
-        prog="moxi-comms-provision send-only",
-        description="add a send-only standing identity to an already provisioned "
-                    "directory")
-    ap.add_argument("identity", metavar="NAME@SCOPE",
-                    help="the identity, e.g. console@acme (no @SCOPE means global)")
-    ap.add_argument("--gateway", choices=BACKENDS,
-                    help="local or mock; default: MOXI_COMMS_GATEWAY, then the "
-                         "config file, then local")
-    ap.add_argument("--gateway-store", help="JSON store, mock backend only")
-    ap.add_argument("--db", help="directory.db path (default: DATA/comms/directory.db)")
-    ap.add_argument("--store", help=f"token store directory, local backend only (default: "
-                                    f"${tokens.STORE_ENV_VAR} or the STATE path)")
-    args = ap.parse_args(argv)
-
-    env = env if env is not None else os.environ
-    say = out or print
-    name, sep, scope = args.identity.partition("@")
-    scope = scope if sep else GLOBAL
-    if not NAME_RE.match(name) or not NAME_RE.match(scope):
-        raise SystemExit(f"moxi-comms-provision send-only: {args.identity!r} is not NAME@SCOPE. "
-                         "Nothing was written.")
-    db_path = Path(args.db or directory_db())
-    if not db_path.exists():
-        raise SystemExit(f"moxi-comms-provision send-only: {db_path} does not exist. Provision "
-                         "the directory first (moxi-comms-provision); this verb adds one "
-                         "identity to it. Nothing was written.")
-    if args.gateway_store:
-        env = dict(env, MOXI_COMMS_MOCK_GATEWAY=args.gateway_store)
-    backend = backend_name(args.gateway, env=env)
-    opened = None
-    if gateway is None:
-        try:
-            opened = gateway = open_gateway(args.gateway, role="provisioner", env=env)
-        except GatewayError as e:
-            raise SystemExit(f"moxi-comms-provision send-only: {e}") from None
-        # The local backend mints its tokens and they have no other home; the other two
-        # keep their own (see `main`).
-        if store is None and backend == LOCAL:
-            store = tokens.TokenStore(args.store, env=env)
-    asked = None
-    if daemon_client is None:
-        # The daemon, when it is up, says whether the name is live as a chosen binding;
-        # a daemon that is down has no binding to collide with.
-        try:
-            asked = daemon_client = DaemonClient(daemon_socket()).connect()
-        except DaemonOffline:
-            daemon_client = None
-    conn = directory.init(db_path)
-    try:
-        rooms = _names_only({r["name"]: r["channel_id"]
-                             for r in conn.execute("SELECT * FROM rooms")})
-        if not rooms:
-            raise SystemExit(f"moxi-comms-provision send-only: the directory has no "
-                             f"{NAMES} room. Provision the directory first "
-                             "(moxi-comms-provision). Nothing was written.")
-        found = conn.execute("SELECT status FROM agents WHERE name = ? AND scope = ?",
-                             (name, scope)).fetchone()
-        if found is not None and found["status"] != "active":
-            # Reactivating would bring back an identity someone retired; that is a
-            # decision about it, not something a provisioning re-run should make.
-            raise SystemExit(f"moxi-comms-provision send-only: {name}@{scope} is provisioned "
-                             f"but {found['status']}; nothing was changed. Reactivating "
-                             "a retired identity is not this verb's to do.")
-        add_standing(gateway, conn, name, scope, rooms=rooms, daemon_client=daemon_client,
-                     store=store, kind=directory.KIND_SEND_ONLY)
-    except (GatewayError, ProvisionError) as e:
-        raise SystemExit(f"moxi-comms-provision send-only: {e}") from None
-    finally:
-        conn.close()
-        if asked is not None:
-            asked.close()
-        if opened is not None:
-            close = getattr(opened, "close", None)
-            if close:
-                close()
-    qualified = name if scope == GLOBAL else f"{name}@{scope}"
-    say(f"backend: {backend}")
-    say(f"send-only {qualified}: standing row, kind send-only")
-    return 0
+    conn.execute("INSERT OR IGNORE INTO identities(name, scope, status, created_at, kind) "
+                 "VALUES (?,?, 'active', ?, ?)",
+                 (name, scope, directory.now(), directory.KIND_AGENT))
 
 
 # --------------------------------------------------------------------------- operator CLI
+
+#: What provisioning says when comms 0.2's daemon still runs, and writes nothing.
+SETUP_WAITS = "comms' 0.2 data moves at the daemon's next start"
+
+
+def setup():
+    """comms' `SETUP`, which `moxi install` runs before it starts the daemon: provisioning
+    as `moxi-comms-provision` makes it with no flags, through the store's one opener.
+    While comms 0.2's daemon still answers it writes nothing and says so, and the new
+    daemon's start moves the files and provisions. Any other refusal of the move is
+    returned as its line, so the install fails with it. Returns 0 when done."""
+    try:
+        return main([])
+    except SystemExit as e:
+        return e.code
+
 
 def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
     """`moxi-comms-provision` -- OPERATOR machinery, deliberately not a `moxi comms` verb.
@@ -430,10 +326,6 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
     Re-running against an already-provisioned directory converges: rooms and directory
     rows are found by name, and only what is missing is created.
 
-    One SUBCOMMAND, dispatched before argparse sees anything: `moxi-comms-provision
-    send-only NAME@SCOPE` (one send-only standing identity, added to a provisioned
-    directory). A subparser would have moved the existing top-level invocation.
-
     With no flags it makes `[provision]`'s operator (`configured()`).
     """
     import argparse
@@ -442,23 +334,17 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
     import sys
 
     from . import tokens
-    from .gateway import BACKENDS, LOCAL, GatewayError, backend_name, open_gateway
-    from .paths import directory_db
+    from .record import BACKENDS, LOCAL, RecordError, backend_name, open_record
+    from .paths import comms_db
     from .scoping import GLOBAL
 
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] == "send-only":
-        return send_only_main(argv[1:])
-
     ap = argparse.ArgumentParser(
-        prog="moxi-comms-provision",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="subcommand (it has its own --help):\n"
-               "  moxi-comms-provision send-only NAME@SCOPE add one send-only standing identity")
-    ap.add_argument("--gateway", choices=BACKENDS,
-                    help="local or mock; default: MOXI_COMMS_GATEWAY, then the "
+        prog="moxi-comms-provision")
+    ap.add_argument("--backend", choices=BACKENDS,
+                    help="local or mock; default: MOXI_COMMS_BACKEND, then the "
                          "config file, then local")
-    ap.add_argument("--gateway-store", help="JSON store, mock backend only")
+    ap.add_argument("--backend-store", help="JSON store, mock backend only")
     ap.add_argument("--slots", dest="retired_slots", help=argparse.SUPPRESS)
     ap.add_argument("--standing", action="append", default=[], metavar="NAME[@SCOPE]",
                     help="declare a standing identity (repeatable)")
@@ -466,7 +352,7 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
     ap.add_argument("--operator-name", default=None,
                     help="the operator's identity name (default: [provision] operator)")
     ap.add_argument("--writer", default="provisioner", help="the declared directory writer")
-    ap.add_argument("--db", help="directory.db path (default: DATA/comms/directory.db)")
+    ap.add_argument("--db", help="comms.db path (default: STATE/comms/comms.db)")
     ap.add_argument("--store", help=f"token store directory, local backend only (default: "
                                     f"${tokens.STORE_ENV_VAR} or the STATE path)")
     ap.add_argument("--log-level", default="INFO")
@@ -476,34 +362,44 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
             "moxi-comms-provision: --slots is retired; remove it: comms has no slots.")
     logging.basicConfig(level=args.log_level,
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    if args.gateway_store:
-        os.environ["MOXI_COMMS_MOCK_GATEWAY"] = args.gateway_store
+    if args.backend_store:
+        os.environ["MOXI_COMMS_MOCK_BACKEND"] = args.backend_store
 
-    backend = backend_name(args.gateway)
+    backend = backend_name(args.backend)
     _, want_operator = configured()
     standing = []
     for entry in args.standing:
         name, sep, scope = entry.partition("@")
         standing.append((name, scope if sep else GLOBAL))
+    from .store import StoreRefused, upgrade_0_2
+
     try:
-        gateway = open_gateway(args.gateway, role="provisioner")
-    except GatewayError as e:
+        record = open_record(args.backend, role="provisioner")
+    except RecordError as e:
         raise SystemExit(str(e)) from None
+    except upgrade_0_2.DaemonLive:
+        # The upgrade's usual order: the 0.2 daemon still runs until the unit step, so
+        # its files can't move yet. Nothing is written; the daemon's start moves them and
+        # then provisions what is missing.
+        print(SETUP_WAITS)
+        return 0
+    except StoreRefused as e:
+        raise SystemExit(f"moxi-comms-provision: {e}") from None
     # The local backend mints its own tokens and they have no other home, so provision
     # is their writer. Built HERE because this is the caller that knows which backend it
     # opened, and skipped on the mock, which keeps its tokens in its own record.
     store = tokens.TokenStore(args.store, env=os.environ) if backend == LOCAL else None
     try:
-        result = provision(gateway, args.db or directory_db(),
+        result = provision(record, args.db or comms_db(),
                            standing=standing, writer=args.writer,
                            operator=(args.operator_id or "operator",
                                      args.operator_name or want_operator),
                            store=store)
-    except (GatewayError, ProvisionError) as e:
+    except (RecordError, ProvisionError) as e:
         # A refusal mid-converge is one line, not a traceback; what converged before it stands, the run stopped AT the refusal.
         raise SystemExit(f"moxi-comms-provision: {e}") from None
     finally:
-        close = getattr(gateway, "close", None)
+        close = getattr(record, "close", None)
         if close:
             close()
     print(f"backend: {backend}")

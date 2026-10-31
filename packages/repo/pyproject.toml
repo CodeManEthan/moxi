@@ -1,0 +1,48 @@
+[project]
+name = "moxi-repo"
+version = "0.1.0"
+description = "Git hooks run as declared pieces, and the one shared committer."
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
+dependencies = ["moxi>=0.1,<0.2"]
+
+[project.urls]
+Homepage = "https://github.com/moxihq/moxi"
+Repository = "https://github.com/moxihq/moxi"
+Issues = "https://github.com/moxihq/moxi/issues"
+
+# The module's one announcement, read by moxi.modules.
+[project.entry-points."moxi.modules"]
+repo = "moxi_repo.module"
+
+# repo's own git hook piece, declared the way any module declares one.
+[project.entry-points."moxi.repo.git_hooks"]
+"repo.commit-rules" = "moxi_repo.commit_rules:COMMIT_RULES"
+
+# The listener the core calls after every module's install and uninstall: it keeps the
+# pieces and specs a module registered in line with what that module now declares.
+[project.entry-points."moxi.installs"]
+repo = "moxi_repo.install"
+
+[dependency-groups]
+dev = ["pytest", "moxi-dev"]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/moxi_repo"]
+
+[tool.hatch.build.targets.sdist]
+# A source distribution holds these paths and nothing else.
+only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_repo", "tests"]
+
+# A plain `pytest` runs the units and contract seams: the tiers are deselected here.
+# `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a
+# changed path; `moxi-dev check --full` runs every tier but live. Run one by hand with
+# `pytest -m <tier>` (a live test also needs MOXI_TEST_LIVE=1).
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not browser and not slow and not build and not live'"

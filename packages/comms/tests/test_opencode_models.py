@@ -5,7 +5,7 @@ A row that names no model gets `DEFAULT_MODELS`. Before a launch starts its serv
 OpenCode refresh its model list, within `MODELS_REFRESH_TIMEOUT`, so a model retired since
 OpenCode last fetched the list is not offered and the next default is chosen. A refresh
 that fails or overruns leaves the list as it stands, and the launch says so with the
-list's age. A server handed in to the launcher gets no refresh.
+list's age. A server handed in to the wrapper gets no refresh.
 
 The servers here are the stub `opencode` (`tests/fake_opencode.py`), spawned for real, or
 the in-process fake. No model, no network.

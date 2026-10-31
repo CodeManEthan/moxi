@@ -1,0 +1,13 @@
+{
+  "name": "moxi-comms-web",
+  "private": true,
+  "description": "The comms module's web sources: its panel and its roster of agents.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "lit": "3.3.3"
+  }
+}

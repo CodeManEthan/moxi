@@ -7,7 +7,11 @@ session is a 404; `GET /session/status` is `{}` when idle and names a running se
 busy; `GET /session/:id/children` lists child sessions; the event stream (`GET /event`)
 carries `server.connected`, `server.heartbeat`, `message.updated` (the user message, then
 the assistant message parented to it, its final update sent twice), `session.status`,
-`session.idle`, `session.error` and `session.compacted`. Every id here is synthetic.
+`session.idle`, `session.error` and `session.compacted`. `POST /session/:id/summarize`
+runs the loop busy, sends `session.compacted`, goes idle and answers `true`; with
+`summarize_route = False` it is an unknown route. An unknown route gets
+`missing_route_answer`: by default 1.18.34's, a 200 `text/html` web page, never a 404.
+Every id here is synthetic.
 
 As an executable (`install`), it answers `opencode serve ...` and `opencode --version`,
 driven by `FAKE_OPENCODE_DIR` (records: `events.jsonl`, and `sessions.json`, kept across
@@ -30,6 +34,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 VERSION = "1.18.34 (fake)"
+#: The model an assistant message names.
+PROVIDER, MODEL = "fakeprovider", "fake-model"
 #: A `post_answers` entry that admits the prompt and closes the connection unanswered.
 DROP_ADMITTED = ("drop", True)
 #: One that closes the connection unanswered and admits nothing.
@@ -40,6 +46,13 @@ def mint(prefix: str) -> str:
     ms = int(time.time() * 1000)
     tail = "".join(random.choice(string.ascii_letters + string.digits) for _ in range(14))
     return f"{prefix}_{(ms * 0x1000 + random.randint(1, 4000)) & 0xFFFFFFFFFFFF:012x}{tail}"
+
+
+#: What OpenCode 1.18.34 answers for a route it does not have: its web app's page.
+WEB_PAGE = (200, "text/html",
+            "<!doctype html><html><head><title>OpenCode</title></head><body></body></html>")
+#: What an older server answers for one: a plain-text 404.
+PLAIN_404 = (404, "text/plain", "404 Not Found")
 
 
 class FakeOpenCode:
@@ -64,6 +77,12 @@ class FakeOpenCode:
         self.url = None
         #: False: a prompt is admitted and runs, but no reply is ever written.
         self.reply_to_prompts = True
+        #: False: the server has no summarize route.
+        self.summarize_route = True
+        #: (status, content type, raw body) for a route the server does not have.
+        self.missing_route_answer = WEB_PAGE
+        #: (status, body) to answer the next summarize posts with, in place of running.
+        self.summarize_answers: list = []
         if self.store and self.store.exists():
             # A session's status lives in the server's memory: a new server finds every
             # stored session idle.
@@ -132,11 +151,12 @@ class FakeOpenCode:
         want = base64.b64encode(f"opencode:{self.password}".encode()).decode()
         return handler.headers.get("authorization") == f"Basic {want}"
 
-    def reply(self, handler, status: int, body=None, raw: str | None = None):
+    def reply(self, handler, status: int, body=None, raw: str | None = None,
+              content_type: str = "application/json"):
         data = (raw if raw is not None else
                 ("" if body is None else json.dumps(body))).encode()
         handler.send_response(status)
-        handler.send_header("content-type", "application/json")
+        handler.send_header("content-type", content_type)
         handler.send_header("content-length", str(len(data)))
         handler.end_headers()
         handler.wfile.write(data)
@@ -179,8 +199,8 @@ class FakeOpenCode:
                     return self.reply(handler, 200, list(session["messages"]))
             if method == "GET" and parts[2:] == ["children"]:
                 with self.lock:
-                    kids = [{"id": k, "parentID": sid} for k, s in self.sessions.items()
-                            if s.get("parent") == sid]
+                    kids = [{"id": k, "parentID": sid, "title": s["title"]}
+                            for k, s in self.sessions.items() if s.get("parent") == sid]
                 return self.reply(handler, 200, kids)
             if method == "POST" and parts[2:] == ["prompt_async"]:
                 with self.lock:
@@ -199,8 +219,16 @@ class FakeOpenCode:
                         "message": "Expected a string starting with \"msg\""}})
                 self.prompt(sid, mid, body)
                 return self.reply(handler, 204)
-        return self.reply(handler, 404, {"name": "NotFoundError", "data": {
-            "message": f"no route {method} {path}"}})
+            if method == "POST" and parts[2:] == ["summarize"] and self.summarize_route:
+                with self.lock:
+                    answer = (self.summarize_answers.pop(0) if self.summarize_answers
+                              else None)
+                if answer is not None:
+                    return self.reply(handler, answer[0], answer[1])
+                self.summarize(sid)
+                return self.reply(handler, 200, True)
+        status, content_type, text = self.missing_route_answer
+        return self.reply(handler, status, raw=text, content_type=content_type)
 
     def serve_events(self, handler):
         q = queue.Queue()
@@ -278,7 +306,8 @@ class FakeOpenCode:
         if not self.reply_to_prompts:
             return
         assistant = {"id": mint("msg"), "role": "assistant", "sessionID": sid,
-                     "parentID": mid, "time": {"created": int(time.time() * 1000)}}
+                     "parentID": mid, "providerID": PROVIDER, "modelID": MODEL,
+                     "time": {"created": int(time.time() * 1000)}}
         with self.lock:
             self.sessions[sid]["running"] = assistant
         self._message(sid, assistant)
@@ -317,6 +346,12 @@ class FakeOpenCode:
 
     def compacted(self, sid):
         self.emit("session.compacted", {"sessionID": sid})
+
+    def summarize(self, sid):
+        """A compaction: the loop runs, the session is compacted, then idle."""
+        self.set_status(sid, "busy")
+        self.compacted(sid)
+        self.go_idle(sid)
 
     def type(self, sid, text="typed"):
         """A prompt of the person's own (a window's)."""

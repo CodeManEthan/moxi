@@ -51,6 +51,7 @@ import logging  # noqa: E402
 import math  # noqa: E402
 import os  # noqa: E402
 import signal  # noqa: E402
+import socket  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
 from collections.abc import Awaitable, Callable, Iterable  # noqa: E402
@@ -106,6 +107,8 @@ async def serve(app: Callable[..., Any], sockets: Iterable[Any], *,
     returns; no signal is raised again, so a signal never ends the process before the
     caller's own stop. Signals are left alone when `serve` runs off the main thread.
 
+    Every TCP connection it takes has `TCP_NODELAY` on, whatever made its listener.
+
     Once `should_exit` is set, `serve` awaits `drain()` if given, then tells uvicorn to
     stop, and returns when it has. uvicorn's own shutdown waits up to 2 s for open
     requests and then cancels them.
@@ -130,10 +133,16 @@ async def _serve(app: Callable[..., Any], sockets: Iterable[Any], *,
     if head_limit is not None and (isinstance(head_limit, bool) or not isinstance(head_limit, int)
                                    or head_limit < 1):
         raise ValueError(f"head_limit is a number of bytes above 0, not {head_limit!r}")
+    if isinstance(http, str) and http != "h11":
+        raise ValueError(f"http is \"h11\" or a protocol class, not {http!r}")
     import uvicorn
 
+    if http == "h11":
+        from uvicorn.protocols.http.h11_impl import H11Protocol
+
+        http = H11Protocol
     options: dict[str, Any] = dict(
-        http=http, ws="none", lifespan="off", loop="asyncio", interface="asgi3",
+        http=_no_delay(http), ws="none", lifespan="off", loop="asyncio", interface="asgi3",
         proxy_headers=False, server_header=False, date_header=False, log_config=None,
         access_log=False, timeout_graceful_shutdown=_GRACEFUL,
         limit_concurrency=CONNECTION_CAP,
@@ -167,6 +176,27 @@ async def _serve(app: Callable[..., Any], sockets: Iterable[Any], *,
         await serving
     finally:
         _restore_signals(saved)
+
+
+def _no_delay(protocol: type) -> type:
+    """`protocol`, turning `TCP_NODELAY` on for each TCP connection it takes.
+
+    asyncio turns it on only when the listener was made with `IPPROTO_TCP`: a socket
+    made with protocol 0, as an inherited socket may be on macOS, and every connection
+    the Windows proactor accepts, keep Nagle's algorithm on. A response written in two
+    pieces then waits on the client's delayed ACK, about 40 ms a request.
+    """
+
+    class NoDelay(protocol):  # type: ignore[misc, valid-type]
+        def connection_made(self, transport: Any) -> None:
+            sock = transport.get_extra_info("socket")
+            if sock is not None and sock.family in (socket.AF_INET, socket.AF_INET6):
+                # A connection already reset refuses the option; it fails its own way.
+                with contextlib.suppress(OSError):
+                    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            super().connection_made(transport)
+
+    return NoDelay
 
 
 def _server_class() -> type:

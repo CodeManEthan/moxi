@@ -18,12 +18,17 @@ Lines (endpoint to runner)
 
 The first line, always first, before the runner sends anything:
 
-    {"op": "hello", "leg": 1, "mod_sock": "<absolute path>", "hold_wait_ms": n,
-     "listen_wait_ms": n, "endpoint_version": "…", "pid": <endpoint pid>}
+    {"op": "hello", "leg": 2, "mod_sock": "<absolute path>", "stop_wait_ms": n,
+     "listen_wait_ms": n, "endpoint_version": "…", "pid": <endpoint pid>,
+     "stop_after_clear": bool}
+
+`stop_after_clear` says whether the runner stops a `clear`'s shells through `TaskStop`
+after the clear (`STOP_AFTER_CLEAR`); false, it stops none after a clear and reports
+every listed one left, why `not-stopped-after-clear`.
 
 or, when the endpoint cannot start (its config is broken), its only line:
 
-    {"op": "failed", "leg": 1, "error": "<words>"}
+    {"op": "failed", "leg": 2, "error": "<words>"}
 
 Then, in any order:
 
@@ -34,11 +39,21 @@ Then, in any order:
         minted per window, so no other window of this endpoint or any earlier one names
         it. The endpoint sends the next `submit` only once this one's window has closed.
     {"op": "append", "delivery": id, "text": "…"}
-        `$.session.append` a user-role row into the running turn (a steer).
-    {"op": "command", "request": id, "name": "clear" | "exit"}
-        `$.command.run` the command; the gate re-checks it (`/gate/command`).
+        `$.session.append` a user-role row into the running turn (a steer). The runner
+        reports `append.done` when the call resolves without a deny, else
+        `append.failed`.
+    {"op": "command", "request": id, "name": "clear" | "exit" | "compact",
+     "stop_shells": bool}
+        `$.command.run` the command; the gate re-checks it (`/gate/command`). With
+        `stop_shells` (never with `exit`), before the run the runner asks
+        `$.tool.check` for a `TaskStop` of each background shell and Monitor it lists,
+        and any answer but `allow` reports `refused` `unsupported` with nothing run.
+        Once the run returns without the gate's withdrawal, it stops each listed one
+        with `$.tool.call` `TaskStop` within `SHELL_STOP_S` and reports `shells`.
     {"op": "live", "ask": n}
         Read `$.agent.list()` and `$.prompt.read()` and answer on `/live`.
+    {"op": "agents", "ask": n}
+        Read `$.agent.list()` and answer on `/agents`, each entry as the engine gives it.
 
 Requests (runner and gate to endpoint, `POST` on `mod.sock`)
 ------------------------------------------------------------
@@ -57,10 +72,16 @@ own count from 1 for this load, and `kind`:
                                                     report too
     submit.bound   {delivery, reason}               the runner's bound: still unsettled
                                                     after 5 s with no main-loop turn open
+    append.done    {delivery}                       a steer appended: `$.session.append`
+                                                    resolved without a deny
     append.failed  {delivery, reason}               a steer the runner could not append
-    command.done   {request, state, reason, new_session_id}
+    command.done   {request, state, reason, new_session_id, shells?}
                                                     `$.command.run` settled: `state` is
-                                                    `ran`, `refused` or `failed`
+                                                    `ran`, `refused` or `failed`. With
+                                                    `stop_shells` a `ran` carries
+                                                    `shells: {stopped: [id], left: [{id,
+                                                    why}], complete}`, sent once the
+                                                    stop is done
 
 Reports are keyed by their window's delivery: an end for a window that is not the open
 one is logged and changes nothing. The bound is a report, not a close: the endpoint fails
@@ -77,9 +98,14 @@ was lost: the endpoint fails the open submit window (its delivery reads `Lost`, 
 `agents` is null when `$.agent.list()` could not be read: unknown, which counts as busy
 and never as 0. An unreadable box is sent as `draft: true`. Answer `{"ok": true}`.
 
+`/agents` — `{ask, entries}` (or `{ask, error}`), the answer to an `agents` line. `entries`
+is `$.agent.list()` unmapped, each `{id, type, description, status, parentId?,
+teammateId?}`; the endpoint maps the states. `entries` is null when the list could not be
+read: the list is then not complete, which counts as busy. Answer `{"ok": true}`.
+
 `/ask/stop` — `{turn_id, session_id, stop_hook_active, task_types, crons}` at a main-loop
 `classic.Stop`. Answer `{"ok": true, "reason": "<text>" | null}`: a reason holds the turn
-open (`block`), null lets it end. The endpoint answers within `hold.wait_ms`.
+open (`block`), null lets it end. The endpoint answers within `stop_handler.wait_ms`.
 
 `/ask/context` — `{event: "ready" | "prompt", source, session_id}` at
 `classic.SessionStart` (`ready`) and `classic.UserPromptSubmit` (`prompt`). Answer
@@ -97,6 +123,12 @@ calls `next`) or `{"ok": true, "verdict": "drop", "reason": r, "text": "<one lin
 person>"}`; the gate drops a `drop` with `text` and never calls `next`. A nonce that names
 no open window reads `late`, and the endpoint logs the late entry.
 
+`/hook-times` — `{samples: [{event, ms}]}` from the runner or the gate, each at most
+once a minute: how long each of its hook handlers took, entry to return less the time in
+`next`. The gate's events carry the prefix `gate `. The leg keeps them for the doctor
+(`hooktimes`), apart from the report queue, so a lost batch costs only its samples.
+Answer `{"ok": true}`.
+
 `/gate/command` — `{request, agents, draft}` from the gate, for a command its runner
 queued, as it comes off the queue. The endpoint re-checks it and records its decision
 before it answers, as `/gate/entry` does.
@@ -112,31 +144,45 @@ import threading
 from collections.abc import Callable
 from typing import Any, BinaryIO
 
+from . import hooktimes
+
 log = logging.getLogger("moxi.turns.claude")
 
 #: This leg's version.
-LEG = 1
+LEG = 2
+
+#: Whether the runner stops a `clear`'s shells after the clear. Claude Code may no longer
+#: find a task through `TaskStop` once `/clear` has run; until a live session shows it
+#: does, this stays as the design has it, and turning it off keeps the order (the stop
+#: after the command) and stops nothing after a clear.
+STOP_AFTER_CLEAR = True
+#: The `why` of a listed shell left running because the runner stops none after a clear.
+NOT_STOPPED_AFTER_CLEAR = "not-stopped-after-clear"
 
 #: The endpoint's line ops.
 LINE_HELLO, LINE_FAILED = "hello", "failed"
 LINE_SUBMIT, LINE_APPEND, LINE_COMMAND, LINE_LIVE = "submit", "append", "command", "live"
+LINE_AGENTS = "agents"
 
 #: The request paths on `mod.sock`.
 PATH_REPORT = "/report"
 PATH_LIVE = "/live"
+PATH_AGENTS = "/agents"
 PATH_STOP = "/ask/stop"
 PATH_CONTEXT = "/ask/context"
 PATH_GATE_ENTRY = "/gate/entry"
 PATH_GATE_COMMAND = "/gate/command"
-PATHS = (PATH_REPORT, PATH_LIVE, PATH_STOP, PATH_CONTEXT, PATH_GATE_ENTRY,
-         PATH_GATE_COMMAND)
+PATH_HOOK_TIMES = "/hook-times"
+PATHS = (PATH_REPORT, PATH_LIVE, PATH_AGENTS, PATH_STOP, PATH_CONTEXT,
+         PATH_GATE_ENTRY, PATH_GATE_COMMAND, PATH_HOOK_TIMES)
 
 #: The report kinds.
 R_SESSION, R_TURN_START, R_TURN_COMPLETE = "session", "turn.start", "turn.complete"
 R_SUBMIT_CLOSE, R_SUBMIT_BOUND = "submit.close", "submit.bound"
-R_APPEND_FAILED, R_COMMAND_DONE = "append.failed", "command.done"
+R_APPEND_DONE, R_APPEND_FAILED = "append.done", "append.failed"
+R_COMMAND_DONE = "command.done"
 REPORTS = (R_SESSION, R_TURN_START, R_TURN_COMPLETE, R_SUBMIT_CLOSE, R_SUBMIT_BOUND,
-           R_APPEND_FAILED, R_COMMAND_DONE)
+           R_APPEND_DONE, R_APPEND_FAILED, R_COMMAND_DONE)
 
 #: A submit window's three ends.
 END_RESOLVE, END_DROP, END_FAIL = "resolve", "drop", "fail"
@@ -206,11 +252,14 @@ class _Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 
 class LegServer:
     """The HTTP server on `mod.sock`. `handle(path, body)` answers each request with a
-    dict (sent as `200`), or raises `BadRequest` (`400`)."""
+    dict (sent as `200`), or raises `BadRequest` (`400`). The server answers
+    `/hook-times` itself, into `times`."""
 
-    def __init__(self, path: str, handle: Callable[[str, dict[str, Any]], dict[str, Any]]):
+    def __init__(self, path: str, handle: Callable[[str, dict[str, Any]], dict[str, Any]],
+                 *, times: hooktimes.Recorder | None = None):
         self.path = path
-        handler = _handler_for(handle)
+        self.times = hooktimes.Recorder("claude") if times is None else times
+        handler = _handler_for(_with_hook_times(handle, self.times))
         self._server = _Server(path, handler)
         self._thread = threading.Thread(target=self._server.serve_forever,
                                         kwargs={"poll_interval": 0.2}, daemon=True,
@@ -218,6 +267,7 @@ class LegServer:
 
     def start(self) -> "LegServer":
         self._thread.start()
+        self.times.start()
         return self
 
     def close(self) -> None:
@@ -225,6 +275,22 @@ class LegServer:
             self._server.shutdown()
         finally:
             self._server.server_close()
+            self.times.close()
+
+
+def _with_hook_times(handle, times: hooktimes.Recorder):
+    def answer(path: str, body: dict[str, Any]) -> dict[str, Any]:
+        if path != PATH_HOOK_TIMES:
+            return handle(path, body)
+        samples = body.get("samples")
+        if not isinstance(samples, list):
+            raise BadRequest("hook times without a samples list")
+        for sample in samples:
+            if isinstance(sample, dict):
+                times.add(sample.get("event"), sample.get("ms"))
+        return {}
+
+    return answer
 
 
 def _handler_for(handle):
@@ -277,10 +343,12 @@ def _handler_for(handle):
     return Handler
 
 
-__all__ = ["LEG", "LINE_HELLO", "LINE_FAILED", "LINE_SUBMIT", "LINE_APPEND", "LINE_COMMAND",
-           "LINE_LIVE", "PATH_REPORT", "PATH_LIVE", "PATH_STOP", "PATH_CONTEXT",
-           "PATH_GATE_ENTRY", "PATH_GATE_COMMAND", "PATHS", "R_SESSION", "R_TURN_START",
-           "R_TURN_COMPLETE", "R_SUBMIT_CLOSE", "R_SUBMIT_BOUND", "R_APPEND_FAILED",
+__all__ = ["LEG", "STOP_AFTER_CLEAR", "NOT_STOPPED_AFTER_CLEAR", "LINE_HELLO", "LINE_FAILED", "LINE_SUBMIT", "LINE_APPEND", "LINE_COMMAND",
+           "LINE_LIVE", "LINE_AGENTS", "PATH_REPORT", "PATH_LIVE", "PATH_AGENTS",
+           "PATH_STOP", "PATH_CONTEXT",
+           "PATH_GATE_ENTRY", "PATH_GATE_COMMAND", "PATH_HOOK_TIMES", "PATHS", "R_SESSION",
+           "R_TURN_START", "R_TURN_COMPLETE", "R_SUBMIT_CLOSE", "R_SUBMIT_BOUND", "R_APPEND_DONE",
+           "R_APPEND_FAILED",
            "R_COMMAND_DONE", "REPORTS", "END_RESOLVE", "END_DROP", "END_FAIL", "ENDS",
            "GATE_CODES", "NONCE_LINE", "LATE", "MAX_BODY",
            "BadRequest", "LineWriter", "LegServer"]

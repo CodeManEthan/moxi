@@ -3,6 +3,9 @@
 # that no longer matches one, so this list only shrinks as the module moves onto the
 # helpers. One line per site: <path> <enclosing scope> <call>.
 src/moxi_comms/adapters/claude_shim.py _serve_inject_file.injector .open
+src/moxi_comms/adapters/codex_wrapper.py _adapter_process os.fdopen
+src/moxi_comms/adapters/codex_wrapper.py _adapter_process os.fdopen
+src/moxi_comms/adapters/codex_wrapper.py _adapter_process os.open
 src/moxi_comms/adapters/opencode.py OpenCodeAdapter.write_layer_one .write_text
 src/moxi_comms/adapters/opencode.py write_record os.fdopen
 src/moxi_comms/adapters/opencode.py write_record os.replace
@@ -13,21 +16,15 @@ src/moxi_comms/adapters/session.py _adapter_process os.open
 src/moxi_comms/adapters/shim_roster.py write_state os.fdopen
 src/moxi_comms/adapters/shim_roster.py write_state os.replace
 src/moxi_comms/adapters/terminal.py terminal_fd os.open
-src/moxi_comms/bindings.py connect sqlite3.connect
-src/moxi_comms/bindings.py connect sqlite3.connect
 src/moxi_comms/claimfile.py write os.fdopen
 src/moxi_comms/claimfile.py write os.open
 src/moxi_comms/claimfile.py write os.replace
 src/moxi_comms/codex_threads.py write os.fdopen
 src/moxi_comms/codex_threads.py write os.replace
-src/moxi_comms/cursors.py advance os.fdopen
-src/moxi_comms/cursors.py advance os.replace
-src/moxi_comms/directory.py connect sqlite3.connect
-src/moxi_comms/directory.py connect sqlite3.connect
-src/moxi_comms/migration.py _open_journal sqlite3.connect
-src/moxi_comms/migration.py stamp_record sqlite3.connect
-src/moxi_comms/mock_gateway.py MockGateway._save os.fdopen
-src/moxi_comms/mock_gateway.py MockGateway._save os.replace
-src/moxi_comms/provision.py operator_hash_in sqlite3.connect
+src/moxi_comms/mock_record.py MockRecord._save os.fdopen
+src/moxi_comms/mock_record.py MockRecord._save os.replace
 src/moxi_comms/service.py Service.install .write_text
+src/moxi_comms/store/upgrade_0_2.py _rename os.replace
+src/moxi_comms/store/upgrade_0_2.py _rename os.replace
+src/moxi_comms/store/upgrade_0_2.py move os.replace
 src/moxi_comms/tokens.py TokenStore.write_secret os.open

@@ -1,0 +1,1080 @@
+"""The launch: `launch` and `check` end to end against a fake harness on PATH, in this
+terminal and headless, the write order, a duplicate request, every refusal's exit code,
+the scratch directory and the run-log sweep."""
+
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+import stat
+import sys
+import time
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from moxi import exit as exits
+from moxi import modules, proc
+from moxi.config import ConfigError
+from moxi_dev.testing import wait_for
+
+import launcher_fake_turns as fake_turns
+from launcher_fake_harness import Harness, run_child
+from moxi_launcher import api, catalog, first, presets, store, targets
+from moxi_launcher.api import LaunchRequest
+from moxi_launcher.compose import Context, codex, common
+
+TESTS = Path(__file__).resolve().parent
+SID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
+BRIEF = "Read the design and start the build."
+POSIX = pytest.mark.skipif(sys.platform == "win32",
+                           reason="the fake harness is a script run by its #! line")
+
+@pytest.fixture(autouse=True)
+def no_turns(monkeypatch):
+    """The installed turns hidden in every test here: a test that wants turns fakes it on
+    the launcher's seam."""
+    fake_turns.hide(monkeypatch)
+
+
+@pytest.fixture
+def harness(tmp_path, monkeypatch) -> Harness:
+    return Harness.on_path(tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def work(tmp_path) -> Path:
+    path = tmp_path / "work"
+    path.mkdir()
+    return path
+
+
+@pytest.fixture
+def turns(tmp_path, monkeypatch):
+    """The fake turns behind the launcher's seam."""
+    directory = tmp_path / "fake-turns"
+    directory.mkdir()
+    monkeypatch.setenv(first.TURNS_SEAM, "launcher_fake_turns")
+    monkeypatch.setenv(fake_turns.DIR, str(directory))
+    monkeypatch.syspath_prepend(str(TESTS))
+    return SimpleNamespace(dir=directory,
+                           calls=lambda name=None: [c for c in fake_turns.calls(directory)
+                                                    if name is None or c["call"] == name])
+
+
+def request(work: Path, *, rid: str = "r1", sid: str | None = SID,
+            **typed) -> LaunchRequest:
+    return LaunchRequest(typed=typed, cwd=str(work), request_id=rid, session_id=sid,
+                         actor="ann")
+
+
+def row(rid: str = "r1") -> store.LaunchRow | None:
+    if not store.path().exists():
+        return None
+    conn = store.connect(create=False)
+    try:
+        return store.get(conn, rid)
+    finally:
+        conn.close()
+
+
+def nothing_written(rid: str = "r1") -> bool:
+    return row(rid) is None and not targets.runs_dir().exists()
+
+
+# -- this terminal, end to end, in a process of its own ------------------------------------
+
+
+@POSIX
+def test_a_terminal_launch_becomes_the_harness(tmp_path, work, harness, monkeypatch):
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("LAUNCHER_FAKE_EXIT", "7")
+    req = {"typed": {"brief": BRIEF, "model": "opus"}, "cwd": str(work),
+           "request_id": "r1", "session_id": SID, "actor": "ann"}
+    code, seen = run_child(tmp_path, req)
+    run = harness.one()
+    # exec: the harness has the launcher's pid, its exit code is the launch's, and it
+    # runs in the launch's directory with the composed argv.
+    assert code == 7, seen["stderr"]
+    assert Path(run["argv"][0]) == harness.bin / "claude"
+    assert run["argv"][1:] == seen["preview"][1:] and seen["preview"][0] == "claude"
+    assert run["cwd"] == str(work)
+    assert run["argv"][1].startswith("Brief from launcher, launched by ann")
+    # The environment: scrubbed, then stamped.
+    assert run["env"]["MOXI_LAUNCHER_REQUEST"] == "r1" and "CLAUDECODE" not in run["env"]
+    # The launch log is not left open in the harness.
+    assert not [p for p in run["fds"].values() if p.endswith("launcher.db")]
+    got = row()
+    assert (got.state, got.pid, got.target) == ("started", run["pid"], "terminal")
+    assert got.pid_started is not None and got.session_id == SID
+    assert got.argv == seen["preview"]
+    assert got.env == {"MOXI_LAUNCHER_REQUEST": "r1"}
+    prompt = common.prompt_path(targets.runs_dir(), "r1")
+    assert Path(prompt).exists() and "--append-system-prompt-file" in run["argv"]
+    assert stat.S_IMODE(Path(prompt).stat().st_mode) == 0o600
+
+
+@POSIX
+def test_a_terminal_launch_with_turns_starts_the_deliverer_before_it_execs(
+        tmp_path, work, harness, turns):
+    req = {"typed": {"brief": BRIEF}, "cwd": str(work), "request_id": "r2",
+           "session_id": SID, "actor": "ann"}
+    code, seen = run_child(tmp_path, req)
+    run = harness.one()
+    assert code == 0, seen["stderr"]
+    # With turns the brief is the first turn, not on the argv, and the additions are.
+    assert run["argv"][1:] == seen["preview"][1:]
+    assert not any(word.startswith("Brief from launcher") for word in run["argv"])
+    assert list(fake_turns.ADDITIONS) == run["argv"][5:7]
+    assert run["env"]["MOXI_TURNS_COMMANDS"] == "exit"
+    assert run["env"]["MOXI_TURNS_ENDPOINT"] == fake_turns.ENDPOINT, \
+        "turns' endpoint command reaches the environment claude starts with"
+    # The deliverer waited on the session by its minted id, given the harness's pid,
+    # which is the launcher's own, and sent the brief once.
+    wait_for(lambda: (row("r2").state == "first-sent"), timeout=60)
+    [ready] = turns.calls("wait_ready")
+    assert ready["session_id"] == SID
+    [given] = turns.calls("deliver")
+    assert given["ref"] == "launcher:r2" and BRIEF in given["text"]
+    assert row("r2").pid == run["pid"]
+    log = targets.run_log("r2")
+    wait_for(lambda: log.exists() and "delivered" in log.read_text(), timeout=30)
+
+
+@POSIX
+def test_a_terminal_launch_with_an_identity_runs_comms_wrapper(tmp_path, work, harness):
+    if not modules.available("comms"):
+        pytest.skip("comms is not installed")
+    req = {"typed": {"identity": "planner", "brief": BRIEF}, "cwd": str(work),
+           "request_id": "r3", "session_id": SID, "actor": "ann"}
+    code, seen = run_child(tmp_path, req, moxi="moxi-comms-fake", free_identity=True)
+    run = harness.one()
+    assert code == 0, seen["stderr"]
+    assert seen["preview"][:5] == ["moxi-comms-fake", "comms", "claude", "--name",
+                                   "planner"]
+    assert run["argv"][1:] == seen["preview"][1:]
+    assert row("r3").identity == "planner"
+
+
+@POSIX
+def test_a_terminal_launch_whose_harness_is_missing_writes_nothing(tmp_path, work):
+    req = {"typed": {"brief": BRIEF}, "cwd": str(work), "request_id": "r4",
+           "session_id": SID, "actor": "ann"}
+    code, seen = run_child(tmp_path, req, env={"PATH": str(tmp_path / "empty")})
+    assert code == exits.ERROR, seen["stderr"]
+    assert seen["refused"]["type"] == "NoCommand"
+    assert nothing_written("r4")
+
+
+# -- this terminal, in process, with exec stood in for -------------------------------------
+
+
+@pytest.fixture
+def no_exec(monkeypatch):
+    """exec stood in for: records what it was handed, and the row as it was then."""
+    seen = []
+
+    def execve(command, argv, env):
+        seen.append({"command": command, "argv": argv, "env": env, "cwd": os.getcwd(),
+                     "row": row(env["MOXI_LAUNCHER_REQUEST"]), "order": "exec"})
+
+    monkeypatch.setattr(targets, "_execve", execve)
+    here = os.getcwd()
+    yield seen
+    os.chdir(here)
+
+
+@pytest.fixture
+def deliverers(monkeypatch):
+    started = []
+
+    def start(rid, *, pid=None, env=None):
+        started.append({"rid": rid, "pid": pid, "row": row(rid)})
+        return 4321
+
+    monkeypatch.setattr(first, "start_deliverer", start)
+    return started
+
+
+def test_the_terminal_writes_its_pid_and_started_before_it_execs(work, harness, no_exec,
+                                                                 deliverers):
+    result = api.launch(request(work, brief=BRIEF))
+    [handed] = no_exec
+    assert handed["command"] == str(harness.bin / "claude")
+    assert tuple(handed["argv"]) == result.argv and handed["cwd"] == str(work)
+    assert handed["row"].state == "started" and handed["row"].pid == os.getpid()
+    assert handed["row"].pid_started == pytest.approx(proc.identity(os.getpid()).started)
+    # Without turns the brief is on the argv: no deliverer.
+    assert deliverers == []
+    assert result.state == "started" and result.exit_code == exits.OK
+
+
+def test_the_warnings_are_given_before_the_session_starts(work, harness, no_exec,
+                                                          monkeypatch):
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "comms" and real(name))
+    said = []
+    result = api.launch(request(work, brief=BRIEF, identity="planner"),
+                        warn=lambda line: said.append((line, len(no_exec))))
+    assert said == [("identity planner is ignored: comms is not installed", 0)]
+    assert result.warnings == ("identity planner is ignored: comms is not installed",)
+
+
+def test_the_deliverer_starts_after_started_and_before_exec(work, harness, no_exec,
+                                                            deliverers, turns):
+    api.launch(request(work, brief=BRIEF))
+    [deliverer] = deliverers
+    assert deliverer["pid"] == os.getpid() and deliverer["row"].state == "started"
+    [handed] = no_exec
+    assert handed["row"].state == "started"
+
+
+def test_a_deliverer_that_fails_to_start_fails_the_launch_and_execs_nothing(
+        work, harness, no_exec, turns, monkeypatch):
+    def broken(rid, *, pid=None, env=None):
+        raise OSError("no such file")
+
+    monkeypatch.setattr(first, "start_deliverer", broken)
+    result = api.launch(request(work, brief=BRIEF))
+    assert no_exec == []
+    assert (result.state, result.reason, result.exit_code) == (
+        "failed", targets.NO_DELIVERER, exits.ERROR)
+    assert row().state == "failed" and row().reason == targets.NO_DELIVERER
+
+
+def test_an_exec_that_fails_ends_the_row_failed(work, harness, monkeypatch):
+    def execve(command, argv, env):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(targets, "_execve", execve)
+    here = os.getcwd()
+    result = api.launch(request(work, brief=BRIEF))
+    assert os.getcwd() == here
+    assert (result.state, result.reason, result.exit_code) == (
+        "failed", targets.SPAWN_FAILED, exits.ERROR)
+    got = row()
+    assert got.state == "failed" and got.reason == targets.SPAWN_FAILED
+    [event] = [e for e in store.events(store.connect(), "r1") if e.kind == "start-failed"]
+    assert "Permission denied" in event.detail["why"]
+
+
+def test_on_windows_the_terminal_waits_for_its_child(work, harness, monkeypatch,
+                                                     deliverers, turns):
+    class Child:
+        # Not the launcher's own pid, so a deliverer given that pid in place of the
+        # child's is told apart.
+        pid = os.getpid() + 7919
+
+        def __init__(self, argv, env, cwd):
+            Child.seen = {"argv": argv, "env": env, "cwd": cwd, "row": row()}
+
+        def wait(self):
+            return 5
+
+    monkeypatch.setattr(targets, "WINDOWS", True)
+    monkeypatch.setattr(targets, "_popen", Child)
+    result = api.launch(request(work, brief=BRIEF))
+    assert Child.seen["argv"][0] == str(harness.bin / "claude")
+    assert Child.seen["argv"][1:] == list(result.argv[1:])
+    assert Child.seen["cwd"] == str(work) and Child.seen["row"].state == "spawning"
+    # Its pid recorded, then the deliverer given that pid, then the child's exit code.
+    assert deliverers[0]["pid"] == Child.pid and deliverers[0]["row"].state == "started"
+    assert result.exit_code == 5 and row().pid == Child.pid
+
+
+def test_on_windows_a_deliverer_that_fails_to_start_fails_the_launch_as_its_row(
+        work, harness, monkeypatch, turns):
+    class Child:
+        pid = os.getpid() + 7919
+        waited = False
+
+        def __init__(self, argv, env, cwd):
+            pass
+
+        def wait(self):
+            Child.waited = True
+            return 5
+
+    def broken(rid, *, pid=None, env=None):
+        raise OSError("no such file")
+
+    monkeypatch.setattr(targets, "WINDOWS", True)
+    monkeypatch.setattr(targets, "_popen", Child)
+    monkeypatch.setattr(first, "start_deliverer", broken)
+    result = api.launch(request(work, brief=BRIEF))
+    # The harness still runs to its end in the terminal; the launch then says what its
+    # row says, as a retry of it would.
+    assert Child.waited
+    assert (result.state, result.reason, result.pid) == ("failed", targets.NO_DELIVERER,
+                                                         Child.pid)
+    assert (row().state, row().reason) == ("failed", targets.NO_DELIVERER)
+    assert result.exit_code == targets.exit_of(row()) == exits.ERROR
+    again = api.launch(request(work, brief=BRIEF))
+    assert again.duplicate and (again.state, again.exit_code) == (result.state,
+                                                                  result.exit_code)
+
+
+# -- headless, end to end ------------------------------------------------------------------
+
+
+@POSIX
+@pytest.mark.parametrize("harness_name, head", [("claude", ["claude", "-p"]),
+                                                ("codex", ["codex", "exec"])])
+def test_a_headless_launch_starts_detached_and_returns(work, harness, harness_name, head,
+                                                       monkeypatch):
+    monkeypatch.setenv("CLAUDECODE", "1")
+    req = request(work, sid=None if harness_name == "codex" else SID,
+                  harness=harness_name, target="headless", brief=BRIEF)
+    shown = api.preview(req)
+    result = api.launch(req)
+    assert list(result.argv[:2]) == head and result.argv == shown.argv
+    assert result.state == "started" and result.exit_code == exits.OK
+    run = harness.one()
+    assert run["pid"] == result.pid and run["cwd"] == str(work)
+    assert Path(run["argv"][0]).name == harness_name and run["argv"][1:] == list(
+        shown.argv[1:])
+    assert run["env"]["MOXI_LAUNCHER_REQUEST"] == "r1" and "CLAUDECODE" not in run["env"]
+    got = row()
+    assert (got.state, got.pid, got.target, got.brief) == ("started", run["pid"],
+                                                          "headless", BRIEF)
+    assert got.pid_started is not None
+    assert got.session_id == (SID if harness_name == "claude" else None)
+    # Its output is appended to the run log, readable by its owner only.
+    log = targets.run_log("r1")
+    wait_for(lambda: log.exists() and "the fake harness ran" in log.read_text(), timeout=30)
+    assert stat.S_IMODE(log.stat().st_mode) == 0o600
+    assert str(log) in result.line
+
+
+def test_a_headless_launch_spawns_from_spawning_and_records_its_process(work, harness,
+                                                                        monkeypatch):
+    seen = []
+
+    def spawn(argv, **kw):
+        seen.append({"argv": argv, **kw, "row": row()})
+        return os.getpid()
+
+    monkeypatch.setattr(targets, "_spawn", spawn)
+    result = api.launch(request(work, target="headless", brief=BRIEF))
+    [handed] = seen
+    assert handed["detached"] is True and handed["cwd"] == str(work)
+    assert handed["output"] == targets.run_log("r1")
+    assert tuple(handed["argv"]) == result.argv
+    assert handed["env"]["MOXI_LAUNCHER_REQUEST"] == "r1"
+    assert handed["row"].state == "spawning" and handed["row"].pid is None
+    got = row()
+    assert got.state == "started" and got.pid == os.getpid()
+    assert got.pid_started == pytest.approx(proc.identity(os.getpid()).started)
+
+
+def test_a_headless_run_log_goes_where_the_callers_environment_puts_the_store(
+        work, harness, tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(targets, "_spawn", lambda argv, **kw: seen.append(kw) or 99)
+    environ = {**os.environ, "MOXI_LAUNCHER_STATE_HOME": str(tmp_path / "other-state")}
+    api.launch(request(work, target="headless", brief=BRIEF), environ=environ)
+    [handed] = seen
+    assert handed["output"] == targets.run_log("r1", environ)
+    assert handed["output"] != targets.run_log("r1")
+    assert store.path(environ).exists() and not store.path().exists()
+
+
+def test_a_headless_spawn_that_fails_ends_the_row_failed(work, harness, monkeypatch):
+    def spawn(argv, **kw):
+        raise FileNotFoundError(2, "No such file or directory")
+
+    monkeypatch.setattr(targets, "_spawn", spawn)
+    result = api.launch(request(work, target="headless", brief=BRIEF))
+    assert (result.state, result.reason, result.exit_code) == (
+        "failed", targets.SPAWN_FAILED, exits.ERROR)
+    assert row().state == "failed"
+
+
+# -- the write order and the duplicate request ---------------------------------------------
+
+
+def test_the_row_is_inserted_with_full_sync_before_the_start(work, harness, monkeypatch):
+    """The insert is written with `synchronous = FULL`, and every later write is back at
+    NORMAL; nothing starts before the insert."""
+    real = store._writing
+    writes = []
+
+    def writing(conn):
+        sync = conn.execute("PRAGMA synchronous").fetchone()[0]
+        writes.append(("write", sync))
+        return real(conn)
+
+    def spawn(argv, **kw):
+        writes.append(("spawn", None))
+        return os.getpid()
+
+    monkeypatch.setattr(store, "_writing", writing)
+    monkeypatch.setattr(targets, "_spawn", spawn)
+    api.launch(request(work, target="headless", brief=BRIEF))
+    full, normal = 2, 1
+    assert writes[0] == ("write", full)
+    assert writes[1] == ("spawn", None)
+    assert writes[2:] and all(w == ("write", normal) for w in writes[2:])
+
+
+def test_a_duplicate_request_starts_nothing_and_gives_the_stored_outcome(work, harness,
+                                                                         monkeypatch):
+    spawned = []
+    monkeypatch.setattr(targets, "_spawn", lambda argv, **kw: spawned.append(argv) or 99)
+    first_ = api.launch(request(work, target="headless", brief=BRIEF))
+    again = api.launch(request(work, target="headless", brief="another brief"))
+    assert len(spawned) == 1
+    assert not first_.duplicate and again.duplicate
+    assert (again.state, again.exit_code, again.pid) == ("started", exits.OK, 99)
+    assert again.argv == first_.argv and "nothing was started again" in again.line
+    assert row().brief == BRIEF
+
+
+def test_a_duplicate_of_a_failed_launch_exits_as_it_failed(work, harness, monkeypatch):
+    def spawn(argv, **kw):
+        raise OSError("boom")
+
+    monkeypatch.setattr(targets, "_spawn", spawn)
+    api.launch(request(work, target="headless", brief=BRIEF))
+    again = api.launch(request(work, target="headless", brief=BRIEF))
+    assert again.duplicate and again.exit_code == exits.ERROR
+    assert again.reason == targets.SPAWN_FAILED
+
+
+@pytest.mark.parametrize("reason, code", [
+    (targets.SPAWN_FAILED, exits.ERROR), (first.NO_READY, exits.ERROR),
+    ("exited", exits.ERROR), (targets.TRY_AGAIN, exits.TEMPFAIL),
+    ("dropped", exits.REFUSED), ("occupied", exits.REFUSED)])
+def test_a_stored_failed_row_exits_by_its_reason(reason, code):
+    got = SimpleNamespace(state="failed", reason=reason)
+    assert targets.exit_of(got) == code
+    assert targets.exit_of(SimpleNamespace(state="first-sent", reason="unconfirmed")) == 0
+
+
+# -- refusals and their exit codes ---------------------------------------------------------
+
+
+def write_presets(text: str) -> None:
+    file = presets.path()
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(text)
+
+
+@pytest.mark.parametrize("make, code, kind", [
+    (lambda w: LaunchRequest(seat="nobody", cwd=str(w)), 3, presets.UnknownPreset),
+    (lambda w: request(w, nothing=1), 2, catalog.BadValue),
+    (lambda w: request(w, permission_mode="bypassPermissions"), 3, presets.OffPosture),
+    (lambda w: request(w / "missing"), 3, api.NoDirectory),
+    (lambda w: request(w, target="headless"), 3, common.NoBrief),
+    (lambda w: request(w, brief="x" * (store.CAP + 1)), 3, store.TooLarge),
+    (lambda w: request(w, brief_file=str(w / "no-brief.md")), 3, common.Unreadable),
+    (lambda w: request(w, harness="codex", sid=None, target="headless", brief="b",
+                       approval="on-request"), 3, catalog.NotTaken),
+    (lambda w: request(w, harness="codex", sid=None, extra_flags=["--permissions", "p"]),
+     3, catalog.PostureFlag),
+    (lambda w: LaunchRequest(typed={"extra_flags": ["--session-id", "x"]}, cwd=str(w)), 3,
+     catalog.Owned),
+    (lambda w: request(w, project="moxi"), 3, presets.NeedsProjects),
+])
+def test_a_refusal_before_the_row_writes_nothing_and_exits_with_its_code(
+        work, harness, no_projects, make, code, kind):
+    with pytest.raises(kind) as raised:
+        api.launch(make(work))
+    assert api.exit_code(raised.value) == code
+    assert nothing_written()
+    assert harness.runs() == []
+
+
+def test_a_harness_not_on_path_is_refused_before_the_row(work, monkeypatch):
+    monkeypatch.setenv("PATH", str(work))
+    with pytest.raises(targets.NoCommand) as raised:
+        api.launch(request(work, brief=BRIEF))
+    assert api.exit_code(raised.value) == exits.ERROR and raised.value.code == "not-found"
+    assert nothing_written()
+
+
+def test_a_presets_file_that_cant_be_read_exits_2(work, harness):
+    write_presets("[seat.a\n")
+    with pytest.raises(ConfigError) as raised:
+        api.launch(request(work, brief=BRIEF))
+    assert api.exit_code(raised.value) == exits.USAGE and nothing_written()
+
+
+def test_a_session_id_another_launch_holds_is_refused(work, harness, monkeypatch):
+    monkeypatch.setattr(targets, "_spawn", lambda argv, **kw: 99)
+    api.launch(request(work, target="headless", brief=BRIEF))
+    with pytest.raises(store.SessionTaken) as raised:
+        api.launch(request(work, rid="r2", target="headless", brief=BRIEF))
+    assert api.exit_code(raised.value) == exits.REFUSED and row("r2") is None
+
+
+def test_a_busy_launch_log_exits_75_and_writes_nothing(work, harness, monkeypatch):
+    holder = store.connect()
+    holder.execute("BEGIN IMMEDIATE")
+    real = store.connect
+    monkeypatch.setattr(store, "connect",
+                        lambda *a, **kw: real(*a, **{**kw, "timeout": 0.1}))
+    try:
+        with pytest.raises(store.Busy) as raised:
+            api.launch(request(work, target="headless", brief=BRIEF))
+    finally:
+        holder.rollback()
+        holder.close()
+    assert api.exit_code(raised.value) == exits.TEMPFAIL
+    assert row() is None and harness.runs() == []
+
+
+@pytest.mark.parametrize("failure", ["error", "value"])
+def test_turns_failing_to_give_its_additions_is_a_refusal_before_the_row(
+        work, harness, turns, failure):
+    (turns.dir / "script.json").write_text(json.dumps({"additions": failure}))
+    for call in (api.preview, api.launch):
+        with pytest.raises(common.TurnsAdditions) as raised:
+            call(request(work, brief=BRIEF))
+        assert raised.value.code == "turns-additions"
+        assert api.exit_code(raised.value) == exits.REFUSED
+        assert "turns could not give this launch its additions" in raised.value.problem
+    assert nothing_written() and harness.runs() == []
+
+
+def test_a_passed_on_permissions_profile_is_refused_from_a_preset_too(work, harness):
+    write_presets('[seat.coder]\nharness = "codex"\nextra_flags = ["--permissions", "p"]\n')
+    with pytest.raises(catalog.Refused) as raised:
+        api.launch(LaunchRequest(seat="coder", cwd=str(work), request_id="r1"))
+    assert api.exit_code(raised.value) == exits.REFUSED and nothing_written()
+
+
+def test_a_launch_with_a_handoff_key_makes_its_handoff_folder_after_the_row(
+        work, harness, monkeypatch):
+    from moxi_launcher import handoffs
+
+    folder = handoffs.own_folder(create=False)
+    seen = []
+    monkeypatch.setattr(targets, "_spawn", lambda argv, **kw: seen.append(
+        (row(), folder.is_dir())) or 99)
+    real = handoffs.own_folder
+
+    def own_folder(env=None, *, create=True):
+        if create:
+            seen.append(("made", row() is not None))
+        return real(env, create=create)
+
+    monkeypatch.setattr(handoffs, "own_folder", own_folder)
+    write_presets('[seat.lead]\ntarget = "headless"\n')
+    api.launch(LaunchRequest(seat="lead", typed={"brief": BRIEF}, cwd=str(work),
+                             request_id="r1"))
+    # Made once the row is written, and there before the session starts.
+    assert seen[0] == ("made", True)
+    [(started_row, there)] = seen[1:]
+    assert started_row.state == "spawning" and there
+
+
+def test_a_refusal_from_the_composer_leaves_the_handoff_folder_unmade(work, harness):
+    from moxi_launcher import handoffs
+
+    write_presets('[seat.lead]\ntarget = "headless"\n')
+    with pytest.raises(catalog.Refused):
+        api.launch(LaunchRequest(seat="lead", cwd=str(work), request_id="r1"))
+    assert nothing_written() and not handoffs.own_folder(create=False).exists()
+
+
+# -- projects ------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def no_projects(monkeypatch):
+    """projects not installed, whatever this environment holds."""
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "projects" and real(name))
+
+
+class ProjectsError(Exception):
+    def __init__(self, reason, fix=None):
+        self.reason, self.fix = reason, fix
+        super().__init__(reason)
+
+
+class NotFound(ProjectsError):
+    def __init__(self, key):
+        self.key = key
+        super().__init__(f"no project is named {key!r}", f"moxi projects add {key}")
+
+
+class Unreadable(ProjectsError):
+    pass
+
+
+class TooNew(Unreadable):
+    pass
+
+
+class Busy(Unreadable):
+    pass
+
+
+@pytest.fixture
+def projects(monkeypatch, work):
+    """A fake projects installed, holding `moxi` at `work`; `fake.fail` makes calls raise.
+    Only projects is faked: every other module loads as it is installed."""
+    fake = SimpleNamespace(fail=None)
+
+    def get(key):
+        if fake.fail:
+            raise fake.fail
+        if key == "moxi":
+            return SimpleNamespace(key="moxi", root=str(work), agents=("planner",))
+        raise NotFound(key)
+
+    def for_path(path):
+        if fake.fail:
+            raise fake.fail
+        return get("moxi") if path == str(work) else None
+
+    found = modules.Found(name="projects", state=modules.PRESENT,
+                          interfaces=frozenset({1}), api=SimpleNamespace(
+                              get=get, for_path=for_path, ProjectsError=ProjectsError,
+                              NotFound=NotFound, Unreadable=Unreadable, TooNew=TooNew,
+                              Busy=Busy))
+    real_available, real_load = modules.available, modules.load
+    monkeypatch.setattr(modules, "available",
+                        lambda name: name == "projects" or real_available(name))
+    monkeypatch.setattr(modules, "load", lambda name, interface=None: found
+                        if name == "projects" else real_load(name, interface=interface))
+    return fake
+
+
+@pytest.mark.parametrize("fail, kind, code", [
+    (None, presets.UnknownProject, exits.REFUSED),
+    (Unreadable("the store is damaged", "moxi doctor"), presets.ProjectsUnreadable,
+     exits.REFUSED),
+    (TooNew("the store is at a newer schema", "upgrade it"), presets.ProjectsUnreadable,
+     exits.REFUSED),
+    (Busy("the store stayed locked", "try again"), presets.ProjectsBusy, exits.TEMPFAIL),
+])
+def test_a_project_lookup_that_fails_refuses_the_launch(work, harness, projects, fail,
+                                                        kind, code):
+    projects.fail = fail
+    with pytest.raises(kind) as raised:
+        api.launch(request(work, project="nope", brief=BRIEF))
+    assert api.exit_code(raised.value) == code
+    assert raised.value.hint and nothing_written()
+    # check lists the same refusal, and writes nothing either.
+    [listed] = api.check(request(work, project="nope", brief=BRIEF))
+    assert type(listed) is kind and nothing_written()
+
+
+def test_a_project_launch_records_its_key(work, harness, projects, monkeypatch):
+    monkeypatch.setattr(targets, "_spawn", lambda argv, **kw: 99)
+    api.launch(request(work, project="moxi", target="headless", brief=BRIEF))
+    assert row().project_key == "moxi" and row().cwd == str(work)
+
+
+@pytest.fixture
+def real_projects(work, tmp_path):
+    """The installed projects module, its registry in this test's own home, holding
+    `Moxi` at `work` with lead `planner` and agent `builder`, made by its own verbs."""
+    projects_cli = pytest.importorskip("moxi_projects.cli", reason="projects is not "
+                                       "installed")
+    for argv in (["add", "Moxi", "--root", str(work), "--lead", "planner"],
+                 ["agents", "add", "Moxi", "builder"]):
+        assert projects_cli.main(argv, prog="moxi projects") == 0
+    nested = work / "src" / "pkg"
+    nested.mkdir(parents=True)
+    return SimpleNamespace(key="Moxi", nested=nested, api=modules.load(
+        "projects", interface=1).api)
+
+
+def test_a_launch_through_the_installed_projects_takes_its_key_root_and_agents(
+        work, harness, real_projects, monkeypatch):
+    monkeypatch.setattr(targets, "_spawn", lambda argv, **kw: 99)
+    # A project key, typed in another case: projects' own spelling is recorded.
+    resolved = presets.resolve(request(work, project="moxi", target="headless",
+                                       brief=BRIEF))
+    assert resolved.project_key == "Moxi" and resolved.cwd == str(work)
+    assert resolved.agents == ("planner", "builder") and "projects" in resolved.links
+    api.launch(request(work, project="moxi", target="headless", brief=BRIEF))
+    assert row().project_key == "Moxi" and row().cwd == str(work)
+    # A directory inside the project gets the project's key.
+    api.launch(request(real_projects.nested, rid="r2", sid="9a8b7c6d-1111-4222-8333-"
+                       "444455556666", target="headless", brief=BRIEF))
+    assert row("r2").project_key == "Moxi" and row("r2").cwd == str(real_projects.nested)
+
+
+def test_an_unknown_key_in_the_installed_projects_is_refused_with_its_hint(
+        work, harness, real_projects):
+    with pytest.raises(presets.UnknownProject) as raised:
+        api.launch(request(work, project="nope", brief=BRIEF))
+    assert api.exit_code(raised.value) == exits.REFUSED
+    assert "moxi projects add nope" in raised.value.hint and nothing_written()
+
+
+def test_a_projects_store_newer_than_the_installed_projects_is_refused_as_unreadable(
+        work, harness, real_projects):
+    conn = sqlite3.connect(real_projects.api._store_path())
+    conn.execute("PRAGMA user_version = 99")
+    conn.close()
+    with pytest.raises(presets.ProjectsUnreadable) as raised:
+        api.launch(request(work, target="headless", brief=BRIEF))
+    assert api.exit_code(raised.value) == exits.REFUSED
+    assert "newer" in raised.value.problem and "moxi install projects" in raised.value.hint
+    assert nothing_written()
+
+
+# -- check ---------------------------------------------------------------------------------
+
+
+def test_check_lists_nothing_for_a_launch_that_can_go(work, harness):
+    assert api.check(request(work, brief=BRIEF)) == []
+    assert nothing_written()
+
+
+def test_check_lists_the_live_refusals_and_writes_nothing(work):
+    [missing] = api.check(request(work / "gone"))
+    assert isinstance(missing, api.NoDirectory) and missing.exit_code == exits.REFUSED
+    assert nothing_written()
+
+
+class DaemonError(Exception):
+    """Stands in for comms' DaemonError."""
+
+
+def fake_comms(monkeypatch, answer):
+    """A comms whose `identity_state` answers `answer` (a state, or an error it raises),
+    and the asks it was given."""
+    if not modules.available("comms"):
+        pytest.skip("comms is not installed")
+    asked = []
+
+    def identity_state(name, scope=None):
+        asked.append((name, scope))
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(api, "_comms_api", lambda: SimpleNamespace(
+        identity_state=identity_state, DaemonError=DaemonError))
+    return asked
+
+
+def state(name, **fields):
+    return SimpleNamespace(**{"qualified": "planner@moxi", "state": name, "holder": None,
+                              "module": None, "reason": None, **fields})
+
+
+@pytest.mark.parametrize("answer, words", [
+    (state("held", holder="claude session 1234"),
+     "identity planner@moxi is held by claude session 1234"),
+    (state("held"), "identity planner@moxi is held by a live session"),
+    (state("reserved", module="launcher"), "identity planner@moxi is reserved for launcher"),
+    (state("reserved"), "identity planner@moxi is reserved, and no module owns it"),
+    (state("retired", reason="planner@moxi is retired: use planner"),
+     "identity planner@moxi is retired; comms says: planner@moxi is retired: use planner")])
+def test_check_refuses_an_identity_that_is_held_reserved_or_retired(work, monkeypatch,
+                                                                    answer, words):
+    asked = fake_comms(monkeypatch, answer)
+    [taken] = api.check(request(work, identity="planner", scope="moxi"))
+    assert asked == [("planner", "moxi")]
+    assert isinstance(taken, api.IdentityTaken) and taken.exit_code == exits.REFUSED
+    assert taken.problem == words and taken.state == answer.state
+    with pytest.raises(api.IdentityTaken):
+        api.launch(request(work, identity="planner", scope="moxi"))
+    assert nothing_written()
+
+
+@pytest.mark.parametrize("name", ["free", "standing"])
+def test_a_free_or_standing_identity_goes_on(work, monkeypatch, name):
+    # A standing name is its standing identity's to bind.
+    fake_comms(monkeypatch, state(name))
+    assert api.check(request(work, identity="planner", scope="moxi")) == []
+
+
+def test_a_name_comms_refuses_is_refused_with_comms_words(work, monkeypatch):
+    fake_comms(monkeypatch, ValueError("'agent-3' is an agent-N name, which the daemon "
+                                       "mints and no launch claims"))
+    [refused] = api.check(request(work, identity="agent-3"))
+    assert isinstance(refused, api.IdentityRefused) and refused.exit_code == exits.REFUSED
+    assert refused.problem == ("comms refuses identity agent-3: 'agent-3' is an agent-N "
+                               "name, which the daemon mints and no launch claims")
+    with pytest.raises(api.IdentityRefused):
+        api.launch(request(work, identity="agent-3"))
+    assert nothing_written()
+
+
+def test_an_answer_comms_cant_read_is_a_try_again_naming_the_daemon(work, monkeypatch):
+    fake_comms(monkeypatch, DaemonError("a garbled answer"))
+    [refused] = api.check(request(work, identity="planner", scope="moxi"))
+    assert isinstance(refused, api.CommsUnanswered)
+    assert refused.exit_code == exits.TEMPFAIL and refused.code == "try-again"
+    assert "the comms daemon" in refused.problem and "a garbled answer" in refused.problem
+    assert refused.hint.startswith("try again")
+    assert nothing_written()
+
+
+@pytest.mark.parametrize("reason", ["comms offline: no daemon socket", None])
+def test_an_offline_comms_daemon_is_a_try_again_naming_the_daemon(work, monkeypatch,
+                                                                    reason):
+    # comms' wrapper exits before the harness starts when it can't reach its daemon.
+    fake_comms(monkeypatch, state("offline", reason=reason))
+    [refused] = api.check(request(work, identity="planner", scope="moxi"))
+    assert isinstance(refused, api.CommsOffline)
+    assert refused.exit_code == exits.TEMPFAIL and refused.code == "try-again"
+    assert refused.problem == ("the comms daemon can't be asked about identity planner@moxi"
+                               + (f": {reason}" if reason else ""))
+    assert refused.hint.startswith("try again")
+    with pytest.raises(api.CommsOffline):
+        api.launch(request(work, identity="planner", scope="moxi"))
+    assert nothing_written()
+
+
+def test_a_retried_launch_whose_first_run_holds_the_name_gets_the_stored_outcome(
+        work, harness, no_exec, deliverers, monkeypatch):
+    first_asks = fake_comms(monkeypatch, state("free"))
+    req = request(work, identity="planner", scope="moxi", brief=BRIEF)
+    first_ = api.launch(req)
+    # The first run's session now holds the name the retry asks for.
+    again_asks = fake_comms(monkeypatch, state("held", holder=f"claude session {SID}"))
+    again = api.launch(req)
+    assert not first_.duplicate and again.duplicate
+    assert (again.state, again.exit_code) == (first_.state, first_.exit_code) == (
+        "started", exits.OK)
+    # Nothing is asked or started again.
+    assert first_asks == [("planner", "moxi")] and again_asks == []
+    assert len(no_exec) == 1 and len(deliverers) == 1
+
+
+def test_a_comms_without_the_identity_check_lets_the_wrapper_decide(work, monkeypatch):
+    monkeypatch.setattr(api, "_comms_api", lambda: SimpleNamespace())
+    assert api._identity_taken("planner", None) is None
+
+
+# -- scratch -------------------------------------------------------------------------------
+
+
+@POSIX
+def test_a_scratch_launch_makes_its_folder_and_never_removes_it(harness, tmp_path):
+    req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
+                               "brief": BRIEF}, cwd=str(tmp_path), request_id="r9")
+    assert not common.scratch_dir("r9").exists()
+    api.preview(req)
+    assert not common.scratch_dir("r9").exists()
+    result = api.launch(req)
+    where = common.scratch_dir("r9")
+    assert where.is_dir() and stat.S_IMODE(where.stat().st_mode) == 0o700
+    run = harness.one()
+    assert run["cwd"] == str(where) and "--skip-git-repo-check" in run["argv"]
+    assert row("r9").cwd == str(where) and result.exit_code == exits.OK
+    targets.sweep(store.connect(), keep_days=0, now=time.time() + 10)
+    assert where.is_dir()
+
+
+@POSIX
+def test_scratch_launches_go_under_a_parent_of_this_users_own(harness, tmp_path):
+    import tempfile
+
+    root = common.scratch_root()
+    assert root == Path(tempfile.gettempdir()) / f"moxi-scratch-{os.getuid()}"
+    assert not root.exists()
+    req = LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
+                               "brief": BRIEF}, cwd=str(tmp_path), request_id="r9")
+    assert api.check(req) == []
+    api.launch(req)
+    # A missing parent is made private, and the launch's folder in it.
+    assert stat.S_IMODE(root.stat().st_mode) == 0o700 and root.stat().st_uid == os.getuid()
+    assert common.scratch_dir("r9").parent == root
+
+
+def scratch_request(tmp_path, rid: str = "r9") -> LaunchRequest:
+    return LaunchRequest(typed={"harness": "codex", "scratch": True, "target": "headless",
+                                "brief": BRIEF}, cwd=str(tmp_path), request_id=rid)
+
+
+def refused_before_the_row(tmp_path, words: str) -> None:
+    [refused] = api.check(scratch_request(tmp_path))
+    assert isinstance(refused, api.ScratchRoot) and refused.code == "scratch-root"
+    assert refused.exit_code == exits.REFUSED and words in refused.problem
+    with pytest.raises(api.ScratchRoot):
+        api.launch(scratch_request(tmp_path))
+    assert row("r9") is None and not common.scratch_dir("r9").exists()
+
+
+@POSIX
+def test_a_scratch_parent_open_to_other_users_refuses_the_launch_before_the_row(
+        harness, tmp_path):
+    root = common.scratch_root()
+    root.mkdir(mode=0o700)
+    root.chmod(0o755)
+    refused_before_the_row(tmp_path, "lets other users in (mode 755)")
+    # Left as it was: the launcher never takes over a folder it didn't make.
+    assert stat.S_IMODE(root.stat().st_mode) == 0o755
+
+
+@POSIX
+def test_a_scratch_parent_that_is_a_link_refuses_the_launch(harness, tmp_path):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir(mode=0o700)
+    common.scratch_root().symlink_to(elsewhere)
+    refused_before_the_row(tmp_path, "is a symbolic link")
+    assert list(elsewhere.iterdir()) == []
+
+
+@POSIX
+def test_a_scratch_parent_another_user_owns_refuses_the_launch(harness, tmp_path,
+                                                              monkeypatch):
+    # The folder is the real user's; the launcher is told it runs as another uid.
+    other = os.getuid() + 1
+    monkeypatch.setattr(os, "getuid", lambda: other)
+    common.scratch_root().mkdir(mode=0o700)
+    refused_before_the_row(tmp_path, f"is owned by another user (uid {other - 1})")
+
+
+@POSIX
+def test_a_scratch_parent_taken_after_the_check_fails_the_row_and_makes_nothing(
+        harness, tmp_path, monkeypatch):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir(mode=0o700)
+    real_check = api._check
+
+    def check_then_swap(*args, **kwargs):
+        found = real_check(*args, **kwargs)
+        common.scratch_root().symlink_to(elsewhere)
+        return found
+
+    monkeypatch.setattr(api, "_check", check_then_swap)
+    result = api.launch(scratch_request(tmp_path))
+    assert result.state == "failed" and result.reason == targets.SPAWN_FAILED
+    assert "symbolic link" in result.line and list(elsewhere.iterdir()) == []
+    assert harness.runs() == []
+
+
+# -- the run-log sweep ---------------------------------------------------------------------
+
+
+def runs_file(name: str, data: bytes | str = "x\n", *, age_days: float = 0) -> Path:
+    folder = targets.runs_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / name
+    path.write_bytes(data.encode() if isinstance(data, str) else data)
+    if age_days:
+        then = time.time() - age_days * 86400
+        os.utime(path, (then, then))
+    return path
+
+
+def running_row(conn, rid: str) -> None:
+    store.insert(conn, request_id=rid, actor="ann", harness="codex", target="headless",
+                 cwd="/work", values={}, argv=["codex"], env={}, posture="")
+    me = proc.identity(os.getpid())
+    store.set_state(conn, rid, "started", pid=me.pid, pid_started=me.started)
+
+
+def test_the_sweep_removes_old_run_files_and_keeps_the_rest():
+    old_log = runs_file("old.log", age_days=31)
+    old_prompt = runs_file("old.prompt.md", age_days=31)
+    new_log = runs_file("new.log", age_days=29)
+    other = runs_file("notes.txt", age_days=90)
+    conn = store.connect()
+    running_row(conn, "live")
+    live = runs_file("live.log", age_days=31)
+    swept = targets.sweep(conn, keep_days=30)
+    assert sorted(swept.removed) == ["old.log", "old.prompt.md"]
+    assert not old_log.exists() and not old_prompt.exists()
+    assert new_log.exists() and other.exists() and live.exists()
+
+
+def test_the_sweep_reads_how_long_to_keep_from_the_settings():
+    runs_file("a.log", age_days=31)
+    assert targets.sweep().removed == ("a.log",)
+
+
+def test_the_sweep_cuts_a_long_run_log_from_the_front():
+    lines = b"".join(b"line %06d\n" % i for i in range(300))
+    path = runs_file("big.log", lines)
+    swept = targets.sweep(cap=1000, keep_days=30)
+    assert swept.cut == ("big.log",)
+    kept = path.read_bytes()
+    assert len(kept) <= 1000
+    head, _, rest = kept.partition(b"\n")
+    assert head.startswith(b"[the launcher cut ")
+    assert head.endswith(b" bytes from the front of this log]")
+    assert rest.endswith(b"line 000299\n") and rest.startswith(b"line ")
+    assert lines.endswith(rest)
+    assert int(head.split()[3]) == len(lines) - len(rest)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    # A log at or under the cap, and a prompt file of any size, are left as they are.
+    small = runs_file("small.log", b"y" * 1000)
+    prompt = runs_file("p.prompt.md", b"z" * 5000)
+    assert targets.sweep(cap=1000, keep_days=30).cut == ()
+    assert small.stat().st_size == 1000 and prompt.stat().st_size == 5000
+
+
+def test_the_sweep_leaves_the_log_of_a_launch_still_running():
+    conn = store.connect()
+    running_row(conn, "live")
+    path = runs_file("live.log", b"x" * 5000)
+    assert targets.sweep(conn, cap=1000, keep_days=30).cut == ()
+    assert path.stat().st_size == 5000
+    # Once its process is gone, the next sweep cuts it.
+    store.set_facts(conn, "live", pid_started=1.0)
+    assert targets.sweep(conn, cap=1000, keep_days=30).cut == ("live.log",)
+
+
+def test_the_sweep_with_no_runs_folder_does_nothing():
+    assert targets.sweep() == targets.Swept()
+    assert not targets.runs_dir().exists()
+
+
+def test_a_launch_runs_the_sweep_and_caps_a_run_log_at_8_mib(work, harness, monkeypatch):
+    monkeypatch.setattr(targets, "_spawn", lambda argv, **kw: 99)
+    big = runs_file("earlier.log", b"o" * 100 + b"\n" + b"x" * (9 * 1024 * 1024))
+    stale = runs_file("earlier.prompt.md", age_days=40)
+    api.launch(request(work, target="headless", brief=BRIEF))
+    assert big.stat().st_size <= targets.LOG_CAP == 8 * 1024 * 1024
+    assert not stale.exists()
+
+
+def test_a_refused_launch_runs_no_sweep(work):
+    stale = runs_file("earlier.log", age_days=40)
+    with pytest.raises(common.NoBrief):
+        api.launch(request(work, target="headless"))
+    assert stale.exists()
+
+
+# -- the announcement ----------------------------------------------------------------------
+
+
+def test_the_api_module_is_the_announced_one():
+    found = modules.load("launcher")
+    assert found.state == modules.PRESENT, found.reason
+    assert found.api is api
+    for name in ("launch", "check", "preview", "LaunchRequest", "LaunchResult"):
+        assert hasattr(found.api, name)
+
+
+@pytest.mark.parametrize("rid", ["../x", "a/b", "..", ".", "r 1"])
+def test_a_request_id_that_is_not_a_plain_name_is_refused_before_anything(
+        harness, tmp_path, rid):
+    temp = Path(common.scratch_root()).parent
+    before = stat.S_IMODE(temp.stat().st_mode)
+    [refused] = api.check(scratch_request(tmp_path, rid))
+    assert isinstance(refused, catalog.BadValue) and refused.row == "request_id"
+    assert refused.exit_code == exits.USAGE
+    with pytest.raises(catalog.BadValue):
+        api.launch(scratch_request(tmp_path, rid))
+    assert not store.path().exists() and harness.runs() == []
+    # Nothing outside the launcher's own folders is touched.
+    assert stat.S_IMODE(temp.stat().st_mode) == before
+    assert not common.scratch_root().exists()
+
+
+def test_the_scratch_folder_of_a_request_id_that_is_not_a_plain_name_is_refused():
+    for rid in ("../x", "a/b", "..", "."):
+        with pytest.raises(ValueError):
+            common.scratch_dir(rid)
+    assert common.scratch_dir("r-1.a_b").name == "r-1.a_b"
+
+
+def test_preview_refuses_a_request_id_that_is_not_a_plain_name_as_launch_does(tmp_path):
+    with pytest.raises(catalog.BadValue) as refused:
+        api.preview(scratch_request(tmp_path, "../x"))
+    assert refused.value.row == "request_id" and refused.value.exit_code == exits.USAGE

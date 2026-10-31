@@ -146,6 +146,33 @@ def test_a_lifted_test_still_answers_to_k(package, monkeypatch):
     assert "test_slow" in ran(result) and "test_slow_touches" not in ran(result)
 
 
+def test_a_tier_left_out_never_comes_back(package, monkeypatch):
+    monkeypatch.setenv(testing.TIERS_ENV, "all")
+    monkeypatch.setenv(testing.LEAVE_OUT_ENV, "browser")
+    result = package.runpytest("-p", "no:cacheprovider")
+    assert ran(result) == PLAIN | {"test_slow", "test_build", "test_slow_touches",
+                                   "test_slow_holds_l7"}
+    monkeypatch.delenv(testing.TIERS_ENV)
+    monkeypatch.setenv(testing.LEAVE_OUT_ENV, " slow ,build")
+    monkeypatch.setenv(testing.CHANGED_ENV, changed(package, "packages/p/src/p/claude/x.py"))
+    monkeypatch.setenv(testing.FINDING_ENV, "L7")
+    result = package.runpytest("-p", "no:cacheprovider")
+    assert ran(result) == {"test_holds_l7"}
+
+
+def test_the_check_s_browser_expression_keeps_what_the_tiers_put_back(package, monkeypatch):
+    """`moxi-dev check` runs a browser package with its own `-m` when Chromium starts; the
+    tiers a selection puts back still come back beside the browser tests."""
+    from moxi_dev.check import WITH_BROWSER
+
+    result = package.runpytest("-p", "no:cacheprovider", "-m", WITH_BROWSER)
+    assert ran(result) == PLAIN | {"test_browser"}
+    monkeypatch.setenv(testing.TIERS_ENV, "all")
+    result = package.runpytest("-p", "no:cacheprovider", "-m", WITH_BROWSER)
+    assert ran(result) == PLAIN | {"test_slow", "test_build", "test_browser",
+                                   "test_slow_touches", "test_slow_holds_l7"}
+
+
 def test_a_finding_runs_only_its_tests_whatever_their_tier(package, monkeypatch):
     monkeypatch.setenv(testing.FINDING_ENV, "L7")
     result = package.runpytest("-p", "no:cacheprovider")
@@ -167,7 +194,8 @@ def test_a_finding_no_test_carries_runs_nothing(package, monkeypatch):
     (testing.FINDING_ENV, "50", "names findings as L<n>"),
     (testing.TIERS_ENV, "slow", "is 'all' or unset"),
     (testing.CHANGED_ENV, "/no/such/file", "can't read"),
-    (testing.TIMED_ENV, "serial", "is 'hold' or 'only' or unset")])
+    (testing.TIMED_ENV, "serial", "is 'hold' or 'only' or unset"),
+    (testing.LEAVE_OUT_ENV, "browser,live", "names tiers of browser, slow, build")])
 def test_a_bad_selection_is_a_usage_error(package, monkeypatch, var, value, says):
     monkeypatch.setenv(var, value)
     result = package.runpytest("-p", "no:cacheprovider")

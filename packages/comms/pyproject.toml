@@ -19,15 +19,20 @@ classifiers = [
 ]
 # turns is required: it is the one way into a harness session (a Claude session's
 # delivery, its Stop hold and its context all go through it).
-dependencies = ["moxi>=0.1,<0.2", "moxi-turns>=0.1,<0.2"]
+# keyring is the credential chain's keychain step (the macOS Keychain, Windows Credential
+# Manager, the Secret Service): required, since Windows is a target and has no other.
+dependencies = ["moxi>=0.1,<0.2", "moxi-turns>=0.2,<0.3", "keyring>=25", "psutil>=5.9"]
 
 [project.optional-dependencies]
 # `moxi-comms-codex` launches each Codex session through turns' Codex host, whose
 # app-server link needs `websockets`: turns' own `codex` extra, which this one installs.
-codex = ["moxi-turns[codex]>=0.1,<0.2"]
+codex = ["moxi-turns[codex]>=0.2,<0.3"]
 # The cold-send hold reads each agent's prompt cache through the cache module, an
 # optional Moxi module comms reaches only through moxi.modules.load("cache").
 cache = ["moxi-cache>=0.1,<0.2"]
+# The browser UI shell: with it, comms' panel and its roster of agents show there.
+# Loopback, which comms' page server runs on, comes with it.
+ui = ["moxi-ui>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/moxihq/moxi"
@@ -49,6 +54,11 @@ moxi-comms-provision = "moxi_comms.provision:main"
 [project.entry-points."moxi.modules"]
 comms = "moxi_comms.module"
 
+# comms reserves the send-only names each module declares when it installs, and frees
+# them when it is uninstalled.
+[project.entry-points."moxi.installs"]
+comms = "moxi_comms.reserved"
+
 # comms' listener: turns asks it at a session's start and at each prompt for the context
 # comms adds (layer one, the roster and its deltas).
 [project.entry-points."moxi.turns.listeners"]
@@ -60,14 +70,16 @@ comms = "moxi_comms.listeners"
 claude-shim = "moxi_comms.kinds:CLAUDE_SHIM"
 codex = "moxi_comms.kinds:CODEX"
 opencode = "moxi_comms.kinds:OPENCODE"
-send-only = "moxi_comms.kinds:SEND_ONLY"
 
 [dependency-groups]
 # The suite runs the Codex adapter over turns' real Codex host against a stub app-server,
 # and exercises the cache seam, so the dev environment carries `websockets` (the one
-# dependency of turns' `codex` extra) and `moxi-cache` beside pytest, and moxi-dev, whose
-# contract check the suite runs.
-dev = ["pytest", "moxi-dev", "websockets>=17.0.1", "moxi-cache>=0.1,<0.2"]
+# dependency of turns' `codex` extra) and `moxi-cache` beside pytest. moxi-ui's pytest
+# plugin runs comms' pages in a real shell, and its testing extra brings the browser; the
+# browser tests import Playwright themselves, so it is named too. moxi-dev brings
+# pytest-xdist.
+dev = ["pytest", "websockets>=17.0.1", "moxi-cache>=0.1,<0.2", "moxi-dev",
+       "moxi-ui[testing]", "playwright>=1.56,<2"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -81,11 +93,12 @@ packages = ["src/moxi_comms"]
 # Only the published paths go into a source distribution, whatever branch it is built
 # from (hatchling adds pyproject.toml and .gitignore itself).
 only-include = ["CHANGELOG.md", "CONTRIBUTING.md", "LICENSE", "README.md", "conftest.py",
-                "docs", "scripts", "src/moxi_comms", "tests"]
+                "docs", "scripts", "src/moxi_comms", "tests", "web"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
-# `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a
-# changed path; `moxi-dev check --full` runs every tier but live. Run one by hand with
+# `moxi-dev check` runs the same, plus the browser tests when Playwright's Chromium
+# starts there, plus a tier test whose `touches` glob matches a changed path;
+# `moxi-dev check --full` runs every tier but live. Run one by hand with
 # `pytest -m <tier>` (a live test also needs MOXI_TEST_LIVE=1).
 [tool.pytest.ini_options]
 testpaths = ["tests"]

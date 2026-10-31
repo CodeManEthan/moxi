@@ -85,7 +85,7 @@ deadline or timeout that fired from one that never did (a 0.3 s timeout that mus
 in under 0.9 s) is not timed. A plain `pytest`, with neither of the values below, runs a
 timed test where it falls, like any other.
 
-Selection. Four variables, read from the environment pytest starts with, change what
+Selection. Five variables, read from the environment pytest starts with, change what
 runs; `moxi-dev check` sets them for each suite, and a contributor may set them by hand:
 
 - `MOXI_TEST_TIERS=all` puts back every test of the `browser`, `slow` and `build` tiers
@@ -104,6 +104,10 @@ runs; `moxi-dev check` sets them for each suite, and a contributor may set them 
   test that is not `timed`. Both apply after the rest of the selection and the run's own
   `-m` and `-k`, so with the same other variables an `only` run runs exactly the tests a
   `hold` run held.
+- `MOXI_TEST_LEAVE_OUT=<tier>[,<tier>...]` names tiers (of `browser`, `slow` and
+  `build`) whose tests are never put back, whatever the variables above ask; the
+  package's `-m` still deselects them. `moxi-dev check` sets `browser` for a package
+  whose browser tests can't run because Playwright's Chromium can't start.
 
 A test put back gets the marker `lifted`, and the run's `-m` expression becomes
 `(<expression>) or lifted`, so pytest's own deselection keeps it and `-k` still applies.
@@ -181,6 +185,8 @@ DURATIONS_ENV = "MOXI_TEST_DURATIONS"
 #: `hold` or `only`: what a run does with the `timed` tests (module doc, Selection).
 TIMED_ENV = "MOXI_TEST_TIMED"
 TIMED_MODES = ("hold", "only")
+#: Tiers this run never puts back, comma-separated (module doc, Selection).
+LEAVE_OUT_ENV = "MOXI_TEST_LEAVE_OUT"
 
 #: The marker of a test that asserts a wall-clock budget (module doc, Timed tests).
 TIMED = "timed"
@@ -557,11 +563,13 @@ class Selection:
     changed: tuple[str, ...] = ()
     findings: frozenset[str] = frozenset()
     timed: str = ""                     # "", "hold" or "only"
+    left_out: frozenset[str] = frozenset()   # tiers never put back
 
     def lifts(self, item: pytest.Item) -> bool:
         """Whether this run puts `item` back: a `browser`, `slow` or `build` test, never
-        a `live` one, that every tier, a changed path or a finding asks for."""
-        if item.get_closest_marker("live"):
+        a `live` one or one of a tier left out, that every tier, a changed path or a
+        finding asks for."""
+        if any(item.get_closest_marker(tier) for tier in ("live", *self.left_out)):
             return False
         if not any(item.get_closest_marker(tier) for tier in LIFTABLE):
             return False
@@ -598,8 +606,14 @@ def selection(environ: Mapping[str, str]) -> Selection:
     if timed not in ("", *TIMED_MODES):
         raise pytest.UsageError(f"{TIMED_ENV} is {' or '.join(map(repr, TIMED_MODES))} or "
                                 f"unset; it is {timed!r}")
+    left_out = [tier.strip() for tier in environ.get(LEAVE_OUT_ENV, "").split(",")]
+    left_out = [tier for tier in left_out if tier]
+    bad = [tier for tier in left_out if tier not in LIFTABLE]
+    if bad:
+        raise pytest.UsageError(f"{LEAVE_OUT_ENV} names tiers of {', '.join(LIFTABLE)}, "
+                                f"comma-separated; {', '.join(map(repr, bad))} is not one")
     return Selection(all_tiers=tiers == "all", changed=changed, findings=frozenset(names),
-                     timed=timed)
+                     timed=timed, left_out=frozenset(left_out))
 
 
 def findings_of(item: pytest.Item) -> set[str]:
@@ -1032,7 +1046,7 @@ def _statements(script: str) -> Iterator[str]:
 
 
 __all__ = ["CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence", "FenceError",
-           "HARNESS_HOMES", "KEPT_ENV", "LIFTED", "LIVE_ENV", "MARKERS", "SHUTDOWN_POLL",
+           "HARNESS_HOMES", "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS", "SHUTDOWN_POLL",
            "Seam", "Selection", "TIERS", "TIERS_ENV", "TIMED", "TIMED_ENV", "fence",
            "findings_of", "param_id", "selection", "served", "short_dir", "touches_match",
            "uv_env", "wait_for", "write_sqlite"]

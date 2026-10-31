@@ -27,3 +27,4 @@ packages/moxi-dev/tests/test_tags.py	L12	data: the tag check's own tests feed th
 packages/moxi-dev/tests/test_tags.py	[L12]	data: the tag check's own tests feed this to the pattern they test
 packages/moxi-dev/tests/test_tags.py	L13	data: the tag check's own tests feed this to the pattern they test
 packages/moxi-dev/tests/test_tags.py	L50	data: the tag check's own tests feed this to the pattern they test
+packages/launcher/src/moxi_launcher/compose/common.py	(X86)	data: Windows environment variable names, PROGRAMFILES(X86) and COMMONPROGRAMFILES(X86)

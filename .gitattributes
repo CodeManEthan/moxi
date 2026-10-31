@@ -1,0 +1,45 @@
+# The web build's files keep the same bytes on every system: the text types are
+# checked out with LF line endings and the binary ones are never rewritten. The build
+# stamp hashes these files as committed, and CI compares built files byte for byte,
+# so a checkout that rewrote one would fail both. Each build input must match a line here.
+
+packages/*/web/**/*.ts text eol=lf
+packages/*/web/**/*.js text eol=lf
+packages/*/web/**/*.mjs text eol=lf
+packages/*/web/**/*.css text eol=lf
+packages/*/web/**/*.html text eol=lf
+packages/*/web/**/*.json text eol=lf
+packages/*/web/**/*.svg text eol=lf
+packages/*/web/**/*.txt text eol=lf
+packages/*/web/**/*.map text eol=lf
+packages/*/web/**/*.png binary
+packages/*/web/**/*.ico binary
+packages/*/web/**/*.woff2 binary
+
+packages/*/src/*/web/**/*.ts text eol=lf
+packages/*/src/*/web/**/*.js text eol=lf
+packages/*/src/*/web/**/*.mjs text eol=lf
+packages/*/src/*/web/**/*.css text eol=lf
+packages/*/src/*/web/**/*.html text eol=lf
+packages/*/src/*/web/**/*.json text eol=lf
+packages/*/src/*/web/**/*.svg text eol=lf
+packages/*/src/*/web/**/*.txt text eol=lf
+packages/*/src/*/web/**/*.map text eol=lf
+packages/*/src/*/web/**/*.png binary
+packages/*/src/*/web/**/*.ico binary
+packages/*/src/*/web/**/*.woff2 binary
+
+tools/web/**/*.ts text eol=lf
+tools/web/**/*.js text eol=lf
+tools/web/**/*.mjs text eol=lf
+tools/web/**/*.css text eol=lf
+tools/web/**/*.html text eol=lf
+tools/web/**/*.json text eol=lf
+tools/web/**/*.svg text eol=lf
+tools/web/**/*.txt text eol=lf
+tools/web/**/*.map text eol=lf
+tools/web/**/*.png binary
+tools/web/**/*.ico binary
+tools/web/**/*.woff2 binary
+
+package-lock.json text eol=lf

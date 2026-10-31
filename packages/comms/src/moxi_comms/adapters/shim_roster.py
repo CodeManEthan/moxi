@@ -1,7 +1,7 @@
 """The launch context comms gives a session: the roster snapshot and the roster deltas.
 
 comms' listener (`moxi_comms.listener`) answers turns with what this module renders, at
-a session's start and at each prompt; the Codex launcher puts the same layer one into a
+a session's start and at each prompt; the Codex wrapper puts the same layer one into a
 thread's developer instructions (`codex.layer_one_text`). comms writes no hook of its own:
 turns carries the text into the session.
 
@@ -28,8 +28,8 @@ The snapshot IS the verb's output: both call `roster_view.render_agents`, so "ve
 holds by construction rather than by a second rendering kept in sync. The delta diffs by
 qualified name alone -- the name is the identity, so adapter churn under an
 unchanged name is not news -- and shows a join's tier the way the verb shows it.
-Both show the names an agent can message: a send-only binding is in neither, on either
-side of the diff. Waiting mail does not ride deltas: joins and leaves are the signal.
+Both show the names an agent can message: every live binding. Waiting mail does not ride
+deltas: joins and leaves are the signal.
 
 The state file is the qualified-name->{tier, adapter} map as this session last saw it
 (a memory written before reply-enforcement holds the bare tier): advisory
@@ -53,12 +53,12 @@ memory any more than in rendering.
 The daemon being unreachable degrades honestly and never raises: a listener that fails
 costs its own context, and comms being down must never stop an agent from working.
 
-Which comms to run: the line names the command the session's launcher stamped,
-`MOXI_COMMS_COMMAND`. A session an older launcher started has no stamp, and the line
+Which comms to run: the line names the command the session's wrapper stamped,
+`MOXI_COMMS_COMMAND`. A session an older wrapper started has no stamp, and the line
 names this process's own install instead (`context.own_comms`); the listener runs in
 turns' endpoint process, whose install is the launching one where one Moxi environment
 serves every session. With neither, the line names the bare `moxi comms`, as the Codex and
-OpenCode launchers' do.
+OpenCode wrappers' do.
 
 The own-binding race: the session's adapter binds before `claude` starts, so the snapshot
 normally lists the session's own binding. When the session carries an identity stamp and
@@ -77,7 +77,7 @@ from pathlib import Path
 from .. import directors as directors_mod
 from ..context import (BARE_COMMS, COMMAND_ENV, CONTEXT_BLOCK, MOXI_COMMS_PATH_LINE,
                        layer_one_block, own_comms)
-from ..roster_view import SEND_ONLY_ADAPTER, messageable, render_agents
+from ..roster_view import render_agents
 from ..client import DaemonClient
 from ..scoping import GLOBAL, qualify
 
@@ -105,7 +105,7 @@ def fetch(socket_path=None, *, timeout: float = 2.0) -> dict | None:
     try:
         client = DaemonClient(socket_path, timeout=timeout).connect()
         try:
-            return client.query("agents")
+            return client.call("agents")
         finally:
             client.close()
     except Exception as e:                                       # noqa: BLE001
@@ -133,15 +133,13 @@ def usable(info) -> bool:
 
 def roster_of(info: dict) -> dict[str, dict]:
     """The session's roster memory: qualified name -> its tier and its adapter, for
-    the names an agent can message (send-only bindings dropped, as the roster drops
-    them).
+    every live binding.
 
     The diff is keyed by qualified name alone, so adapter churn under an unchanged name
-    is still not news; the adapter is kept so a remembered send-only row can be told
-    apart. Waiting mail earns no place in memory.
+    is still not news. Waiting mail earns no place in memory.
     """
     return {b["qualified"]: {"tier": b["tier"], "adapter": b.get("adapter")}
-            for b in messageable(info["bindings"])}
+            for b in info["bindings"]}
 
 
 def entry_of(value) -> dict:
@@ -185,22 +183,21 @@ def render_snapshot(info: dict | None, *, env=None) -> tuple[str, bool]:
         return with_block(OFFLINE, directors=directors, comms=comms), False
     lines = [LABEL, render_agents(info)]
     name = env.get("MOXI_COMMS_NAME")
-    # The list the roster shows: one of only send-only rows is empty to the session too.
-    if name and not messageable(info["bindings"]):
+    if name and not info["bindings"]:
         lines.append(OWN_BINDING_RACE.format(name=name))
     return with_block("\n".join(lines), directors=directors, comms=comms), True
 
 
 def comms_command(env) -> str:
-    """The comms the session is told to run: its launcher's stamp, else this process's
-    own install, else the bare `moxi comms`, as the Codex and OpenCode launchers say."""
+    """The comms the session is told to run: its wrapper's stamp, else this process's
+    own install, else the bare `moxi comms`, as the Codex and OpenCode wrappers say."""
     return env.get(COMMAND_ENV) or own_comms() or BARE_COMMS
 
 
 def with_block(body: str, *, directors=(), comms=None) -> str:
     """Layer one, in order: the block, one blank line, the line naming `comms` (when
     there is one) and one blank line, then the roster (or the offline line), as the
-    Codex and OpenCode launchers lay it out. The block is first because it is what the
+    Codex and OpenCode wrappers lay it out. The block is first because it is what the
     roster under it is FOR. A session with a declared director gets the director
     sentence at the block's end."""
     if comms:
@@ -316,11 +313,7 @@ def delta(socket_path=None, state_path: Path | str = "", *, env=None,
         return None, False                     # silent skip: the file stays put
     now = roster_of(info)
     raw = read_state(state_path)
-    # A memory written before this build may hold send-only rows; filtered like the
-    # roster, or the first delta would announce one leaving.
-    before = None if raw is None else {
-        q: v for q, v in raw.items()
-        if q != SHOWN_KEY and entry_of(v)["adapter"] != SEND_ONLY_ADAPTER}
+    before = None if raw is None else {q: v for q, v in raw.items() if q != SHOWN_KEY}
     shown_before = list((raw or {}).get(SHOWN_KEY) or [])
     self_q = self_identity(env)
     owed_lines, shown = unanswered_for(info, self_q, shown_before)

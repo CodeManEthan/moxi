@@ -1,25 +1,24 @@
-"""`moxi-comms-codex` over turns: real daemon, real sockets, a stand-in turns session.
+"""comms' Codex adapter over turns: real daemon, real sockets, a stand-in turns session.
 
 The daemon and its socket are the ordinary rig; the session is `fake_turns.FakeSession`,
 shaped as turns' public `Session`, whose turns the test starts and ends as turns' Codex
-host would report them. `test_codex_turns_host.py` runs the launcher over turns' real
-host. Nothing here spawns codex and nothing here touches the network.
+host would report them. `test_codex_turns_host.py` runs the wrapper over turns' real
+host, and `test_codex_wrapper.py` the wrapper's own steps. Nothing here spawns codex and nothing here touches the network.
 """
 
 from __future__ import annotations
 
 import itertools
+import time
 
 import pytest
 
-from conftest import clock_reads_warm, cursor_of, wait_until
-from moxi_comms import codex_threads, owed
-from moxi_comms.adapters.codex import CodexAdapter, layer_one_hash, scrub_own_environ
+from conftest import clock_reads_warm, cursor_of, frame_kinds, wait_until
+from moxi_comms import codex_threads, owed, paths
+from moxi_comms.adapters.codex import CodexAdapter, HostGone, layer_one_hash
 from moxi_comms.adapters.codex_roster import CodexAgent
-from moxi_comms.adapters.session import INHERITED_COMMS_ENV
-from moxi_comms.claimhold import CLAIM_SOCKET_ENV
 
-from fake_turns import FakeSession, launcher as fake_launcher
+from fake_turns import FakeSession, fake_find
 
 
 @pytest.fixture(autouse=True)
@@ -34,27 +33,22 @@ IDENTITY = "planner@proj-a"
 
 @pytest.fixture
 def launch(rig, tmp_path):
-    """One launcher for `planner@proj-a` over a fresh `FakeSession`."""
+    """One wrapper for `planner@proj-a` over a fresh `FakeSession`."""
     made: list = []
 
     def build(*, name="planner", scope="proj-a", directors=(), start=True,
-              session=None, autoreconnect=False, backoff=None, window=False,
-              sandbox="workspace-write", permissions=None, profile=None,
-              writable_roots=(), network_access=True, model=None):
+              session=None, autoreconnect=False, backoff=None, **kwargs):
         qualified = f"{name}@{scope}" if scope != "global" else name
         agent = CodexAgent(qualified=qualified, name=name, scope=scope,
                            cwd=str(tmp_path), thread_file=codex_threads.path(qualified),
-                           sandbox=sandbox, permissions=permissions,
-                           profile=dict(profile or {}), writable_roots=list(writable_roots),
-                           network_access=network_access, model=model,
                            directors=list(directors))
         session = session or FakeSession()
         exits: list = []
-        adapter = CodexAdapter(agent, launch=fake_launcher(session), window=window,
+        adapter = CodexAdapter(agent, find=fake_find(session), harness_pid=4242,
                                autoreconnect=autoreconnect, backoff=backoff,
-                               clock=rig.clock, started_wait=0.2,
+                               clock=rig.clock,
                                status_sink=lambda text: adapter.statuses.append(text),
-                               exit_hook=lambda: exits.append(True))
+                               exit_hook=lambda: exits.append(True), **kwargs)
         adapter.statuses = []
         adapter.exits = exits
         adapter.fake = session
@@ -77,6 +71,12 @@ def delivered(session, count=1):
     return wait_until(lambda: len(session.delivered) >= count and session.delivered)
 
 
+def turn_frames(frames, key):
+    """The message ids every `turn_ended` so far named under `key` (`handled_ids` or
+    `unhandled_ids`), in order."""
+    return [m for f in frame_kinds(frames, "turn") for m in f.get(key, ())]
+
+
 # --------------------------------------------------------------------------- the launch
 
 def test_it_registers_with_the_codex_kind(rig, launch):
@@ -86,50 +86,43 @@ def test_it_registers_with_the_codex_kind(rig, launch):
     assert adapter.identity == IDENTITY
 
 
-def test_the_launchers_death_is_its_deregistration(rig, launch):
+def test_the_wrappers_death_is_its_deregistration(rig, launch):
     adapter = launch()
     adapter.stop()
     assert wait_until(lambda: IDENTITY not in rig.daemon.bindings)
 
 
-def test_the_session_is_launched_through_turns_with_stamp_layer_one_and_options(
-        rig, launch, tmp_path):
-    """comms hands turns the identity, layer one and roster-owned thread settings."""
-    extra = tmp_path / "extra"
-    adapter = launch(window=True, writable_roots=[extra], network_access=False,
-                     model="sample-model")
-    (call,) = adapter._launch.calls
-    assert call["cwd"] == str(tmp_path) and call["window"] is True
-    env = call["env"]
-    assert (env["MOXI_COMMS_NAME"], env["MOXI_COMMS_SCOPE"]) == ("planner", "proj-a")
-    assert "MOXI_COMMS_SLOT" not in env
-    assert env[CLAIM_SOCKET_ENV] == str(adapter.claims.socket_path)
-    assert "MOXI_COMMS_DIRECTORS" not in env
-    assert "moxi comms" in call["instructions"]
-    assert call["options"] == {
-        "sandbox": "workspace-write",
-        "config": {
-            "agents": {"enabled": False},
-            "sandbox_workspace_write": {
-                "writable_roots": [str(extra), str(adapter.write_root)],
-                "network_access": False,
-            },
-        },
-        "model": "sample-model",
-    }
-    assert not {"cwd", "developerInstructions", "approvalPolicy"} & call["options"].keys()
+def test_the_session_is_found_by_the_hosts_pid_once_bound(rig, launch):
+    """The adapter binds, says so, then finds the host's session by the host's pid."""
+    order = []
+    adapter = launch(start=False, on_bound=lambda: order.append(
+        ("bound", IDENTITY in rig.daemon.bindings)))
+    adapter._find = lambda pid, timeout: order.append(("find", pid)) or adapter.fake
+    adapter.start()
+    assert order == [("bound", True), ("find", 4242)]
+    assert adapter.session is adapter.fake
 
 
-def test_the_launch_verifier_checks_each_load_answer(rig, launch, tmp_path):
-    adapter = launch(writable_roots=[tmp_path / "extra"], network_access=True)
-    verify = adapter._launch.calls[0]["verify"]
-    accepted = {"cwd": str(tmp_path), "sandbox": {
-        "type": "workspaceWrite", "networkAccess": True,
-        "writableRoots": [str(tmp_path / "extra"), str(adapter.write_root)],
-    }}
-    assert verify(accepted) is None
-    rejected = {**accepted, "sandbox": {**accepted["sandbox"], "networkAccess": False}}
-    assert verify(rejected) == "network access is off, not on"
+def test_the_look_for_the_session_waits_while_the_host_runs(rig, launch):
+    looks = []
+
+    def find(pid, timeout):
+        looks.append(timeout)
+        if len(looks) < 3:
+            raise TimeoutError("not yet")
+        return adapter.fake
+
+    adapter = launch(start=False, find_step=0.01)
+    adapter._find = find
+    adapter.start()
+    assert looks == [0.01, 0.01, 0.01] and adapter.thread_id == "thread-1"
+
+
+def test_a_host_that_ends_before_its_session_is_ready_ends_the_look(rig, launch):
+    adapter = launch(start=False, alive=lambda: False)
+    adapter._find = lambda pid, timeout: pytest.fail("no look once the host has ended")
+    with pytest.raises(HostGone):
+        adapter.start()
 
 
 def test_the_thread_record_names_the_launch_and_its_layer_one(rig, launch):
@@ -177,45 +170,59 @@ def test_the_launch_no_longer_warns_that_roster_options_are_not_applied(rig, lau
     assert not any("NOT applied" in s for s in adapter.statuses), adapter.statuses
 
 
-def test_the_holder_is_taken_at_the_launch(rig, launch):
+def test_the_stop_handler_is_taken_at_the_launch(rig, launch):
     adapter = launch()
     assert adapter.fake.holder is not None
     adapter.stop()
     assert adapter.fake.holder.closed
 
 
-def test_the_launchers_environment_drops_a_stamp_the_identity_does_not_carry():
-    environ = {var: "inherited" for var in INHERITED_COMMS_ENV}
-    environ["PATH"] = "/bin"
-    scrub_own_environ({"MOXI_COMMS_NAME": "planner"}, environ)
-    assert "MOXI_COMMS_DIRECTORS" not in environ
-    assert environ["MOXI_COMMS_NAME"] == "inherited", "the stamp itself overrides it"
-    assert environ["PATH"] == "/bin"
-
-
 # --------------------------------------------------------------------------- delivery
 
-def test_a_message_goes_in_steer_first_and_settles_handled_at_its_turns_end(rig, launch):
+def test_a_message_to_an_idle_thread_is_delivered_named_by_its_digest(rig, launch):
     adapter = launch()
     send(rig, "hello planner")
-    (did, text, steer) = delivered(adapter.fake)[0]
-    assert steer is True and "hello planner" in text
+    first = delivered(adapter.fake)[0]
+    assert first.steer is False and "hello planner" in first.text
+    assert "[interrupt]" not in first.text
+    assert first.ref is not None and first.ref.isdigit(), "the ref is the digest's id"
     assert wait_until(lambda: adapter.held_ids)
     adapter.fake.end_turn("answer")
     assert wait_until(lambda: not adapter.held_ids)
     assert wait_until(lambda: cursor_of(IDENTITY) is not None)
+    assert not adapter.hands
+    assert not paths.cursors_dir().exists(), "the adapter writes no cursor file"
 
 
-def test_a_digest_into_a_running_turn_is_steered_into_it(rig, launch):
+def test_plain_mail_waits_for_the_running_turns_end(rig, launch):
+    """A running turn no longer takes plain mail: it goes as the next turn's digest."""
     session = FakeSession(turn_open=True)
     adapter = launch(session=session)
     send(rig, "while you work")
-    rows = wait_until(lambda: len(session.turn_deliveries.get("turn-1", ())) >= 1
-                      and session.delivered)
-    assert all(steer for _, _, steer in rows)
-    assert wait_until(lambda: adapter.held_ids)
+    send(rig, "and this too")
+    assert wait_until(lambda: len(adapter.queue) == 2)
+    time.sleep(0.3)
+    assert session.delivered == [], "nothing goes into the running turn"
+    session.end_turn("answer")
+    (row,) = delivered(session)
+    assert row.steer is False
+    assert "while you work" in row.text and "and this too" in row.text, "one digest"
+    assert wait_until(lambda: session.open_turn == "turn-2")
     session.end_turn("answer")
     assert wait_until(lambda: not adapter.held_ids)
+
+
+def test_one_plain_digest_at_a_time(rig, launch):
+    """A plain digest handed and not yet in its turn holds the next one back."""
+    session = FakeSession()
+    session.answer = "hang"
+    adapter = launch(session=session)
+    send(rig, "first")
+    delivered(session)
+    send(rig, "second")
+    assert wait_until(lambda: len(adapter.queue) == 1)
+    time.sleep(0.3)
+    assert len(session.delivered) == 1
 
 
 def test_an_aborted_turn_leaves_its_digest_unhandled_and_the_cursor_unmoved(rig, launch):
@@ -228,47 +235,69 @@ def test_an_aborted_turn_leaves_its_digest_unhandled_and_the_cursor_unmoved(rig,
     assert cursor_of(IDENTITY) is None
 
 
-def test_a_refused_delivery_is_put_back_and_handed_again(rig, launch, monkeypatch):
+def test_a_refused_delivery_is_unhandled_at_once_and_not_put_back(rig, launch, frames):
+    """A refusal says the text never went in: the digest is unhandled at once, and the
+    daemon hands it again at the next release point. The adapter does not requeue it."""
     adapter = launch()
-    monkeypatch.setattr(adapter, "retry_delay", lambda: 0.05)
     adapter.fake.answer = "refuse"
     send(rig, "try again")
     delivered(adapter.fake)
-    assert adapter.queue or adapter.held_ids
+    assert wait_until(lambda: turn_frames(frames, "unhandled_ids"))
+    assert not adapter.queue and not adapter.hands
+    time.sleep(0.2)
+    assert len(adapter.fake.delivered) == 1, "not handed again at once"
     adapter.fake.answer = "start"
+    adapter.fake.start_turn()
+    adapter.fake.end_turn("answer")              # the next release point
     rows = delivered(adapter.fake, 2)
-    assert rows[-1][2] is True
+    assert "try again" in rows[1].text and rows[1].steer is False
     adapter.fake.end_turn("answer")
     assert wait_until(lambda: not adapter.held_ids)
 
 
-def test_a_lost_delivery_is_unhandled_on_the_next_turn_frame(rig, launch):
+def test_a_lost_delivery_is_unhandled_at_once(rig, launch, frames):
     adapter = launch()
     adapter.fake.answer = "lose"
     send(rig, "into the void")
     delivered(adapter.fake)
-    assert wait_until(lambda: adapter.unhandled_owed)
-    adapter.fake.answer = "start"
-    adapter.fake.start_turn()
-    adapter.fake.end_turn("answer")
-    assert wait_until(lambda: not adapter.unhandled_owed and not adapter.held_ids)
+    assert wait_until(lambda: turn_frames(frames, "unhandled_ids"))
+    assert not adapter.hands and not adapter.held_ids
+    assert not turn_frames(frames, "handled_ids")
 
 
-def test_a_delivery_with_no_answer_in_time_is_unhandled_too(rig, launch):
+def test_a_delivery_with_no_answer_is_waited_on_not_handed_again(rig, launch, frames):
+    """An unanswered hand-in may be in a turn already: it stays open, is never
+    requeued, and settles only when its outcome comes or the session ends."""
     adapter = launch()
     adapter.fake.answer = "hang"
     send(rig, "no answer")
     delivered(adapter.fake)
-    assert wait_until(lambda: adapter.unhandled_owed)
+    time.sleep(0.5)
+    assert adapter.hands and adapter.held_ids, "the digest stays open"
+    assert not turn_frames(frames, "unhandled_ids")
+    assert len(adapter.fake.delivered) == 1 and not adapter.queue
+    adapter.fake.gone("the host failed")
+    assert wait_until(lambda: turn_frames(frames, "unhandled_ids"))
+    assert len(adapter.fake.delivered) == 1
 
 
-def test_a_turn_that_ends_before_its_delivery_is_recorded_still_settles(rig, launch):
-    adapter = launch()
-    adapter.started_wait = 0.2
-    adapter._turn_ended("turn-x", "answer", ["d1"])
+class _FastSession(FakeSession):
+    """A session whose turn starts and ends before the hand-in call returns."""
+
+    def deliver(self, text, **kw):
+        d = super().deliver(text, **kw)
+        self.end_turn("answer")
+        time.sleep(0.2)
+        return d
+
+
+def test_a_turn_that_ends_before_the_hand_in_returns_still_settles(rig, launch):
+    session = _FastSession()
+    adapter = launch(session=session)
     send(rig, "fast turn")
-    delivered(adapter.fake)
-    assert wait_until(lambda: not adapter.held_ids)
+    delivered(session)
+    assert wait_until(lambda: cursor_of(IDENTITY) is not None)
+    assert wait_until(lambda: not adapter.held_ids and not adapter.hands)
 
 
 def test_held_mail_waits_for_the_running_turns_end(rig, launch):
@@ -363,52 +392,17 @@ def test_a_launch_into_a_held_name_waits_for_it(rig, launch):
     assert first.identity == IDENTITY
 
 
-# --------------------------------------------------------------------------- the launcher's exit
-
-@pytest.fixture
-def launcher_main(monkeypatch, tmp_path):
-    """`codex.main` up to the launch, with a launch that raises what the test says: no
-    terminal, signal handler, environment scrub or logging setup of this process is
-    touched."""
-    import logging
-    import signal
-
-    from moxi_comms.adapters import codex, terminal
-
-    config = tmp_path / "roster.toml"
-    config.write_text(f'[codex.agents."{IDENTITY}"]\ncwd = "{tmp_path}"\n')
-    monkeypatch.setattr(terminal, "in_terminal_foreground", lambda fd: True)
-    monkeypatch.setattr(terminal, "terminal_fd", lambda: 0)
-    monkeypatch.setattr(codex, "own_comms", lambda: "/env/bin/moxi comms")
-    monkeypatch.setattr(codex, "scrub_own_environ", lambda *a, **k: None)
-    monkeypatch.setattr(signal, "signal", lambda *a, **k: None)
-    monkeypatch.setattr(logging, "basicConfig", lambda **k: None)
-
-    def run(error, *flags):
-        def start(self, *a, **k):
-            raise error
-        monkeypatch.setattr(codex.CodexAdapter, "start", start)
-        return codex.main([IDENTITY, "--config", str(config), *flags])
-
-    return run
 
 
-def test_a_window_launch_that_turns_gives_up_on_exits_3_naming_the_log(
-        launcher_main, capsys):
-    code = launcher_main(RuntimeError("the Codex window did not load within 180 s."),
-                         "--window")
-    err = capsys.readouterr().err
-    assert code == 3, err
-    assert (f"moxi-comms-codex: gave up on {IDENTITY}: the Codex window did not load "
-            f"within 180 s. The log is ") in err
-    assert err.rstrip().endswith(".log."), err
+def test_a_wrappers_launch_into_a_held_name_is_refused_before_the_look(rig, launch):
+    """The wrapper's adapter does not wait for a held name: the bind's refusal ends the
+    launch before the host starts."""
+    from moxi_comms.client import DaemonError
 
-
-def test_untrusted_hooks_and_a_launch_with_no_window_still_exit_2(launcher_main, capsys):
-    class HooksUntrusted(RuntimeError):
-        pass
-
-    assert launcher_main(HooksUntrusted("Codex does not trust the hooks"), "--window") == 2
-    assert "was not launched: Codex does not trust the hooks" in capsys.readouterr().err
-    assert launcher_main(RuntimeError("no codex on PATH")) == 2
-    assert "was not launched: no codex on PATH" in capsys.readouterr().err
+    launch()
+    second = launch(start=False, autoreconnect=True, backoff=itertools.repeat(0.05),
+                    wait_when_held=False)
+    second._find = lambda pid, timeout: pytest.fail("no look after a refused bind")
+    with pytest.raises(DaemonError) as refused:
+        second.start()
+    assert refused.value.refused

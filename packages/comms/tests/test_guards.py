@@ -1,6 +1,5 @@
 """The guards: the `block` setting, 429-then-loud, the rescan."""
 
-import errno
 import itertools
 import shutil
 import socket
@@ -8,14 +7,14 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from conftest import queued, wait_for_queue, wait_until, write_config
+from conftest import (cursor_of, put_cursor, queued, raw_connection, send_turn, settle,
+                      wait_for_queue, wait_until, write_config)
 
-from moxi_comms import constants, cursors, daemon as daemon_mod
+from moxi_comms import constants, daemon as daemon_mod
 from moxi_comms.daemon import Daemon
-from moxi_comms.gateway import RateLimited
-from moxi_comms.mock_gateway import MockGateway
+from moxi_comms.record import RateLimited
+from moxi_comms.mock_record import MockRecord
 from moxi_comms.paths import cursors_dir, daemon_socket
-from moxi_comms.protocol import CLI_PROTOCOL, LineConn
 from moxi_comms.sender import SendFailed, _bounded
 
 
@@ -44,7 +43,7 @@ def test_send_verb_block_check_is_advisory_and_says_so(rig):
     code, out = rig.cli(["send", "--posture", "none", "reviewer", "hi"],  name="planner", scope="proj-a")
     assert code == 3
     assert "Advisory" in out and "enforcement is at daemon routing" in out
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 # --------------------------------------------------------------------------- 429
@@ -71,7 +70,7 @@ def test_429_exhaustion_is_loud_and_the_message_is_not_in_the_record(rig):
     with pytest.raises(SendFailed, match="SEND FAILED"):
         _bounded(send, as_="planner", attempts=constants.RETRY_ATTEMPTS,
                  sleep=lambda _seconds: None)
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 def test_the_verb_reports_the_loud_failure(rig, monkeypatch):
@@ -80,24 +79,24 @@ def test_the_verb_reports_the_loud_failure(rig, monkeypatch):
     def fail(*_args, **_kwargs):
         raise SendFailed("SEND FAILED: the message was NOT posted")
 
-    monkeypatch.setattr(rig.gateway, "post_as_identity", fail)
+    monkeypatch.setattr(rig.record, "post_as_identity", fail)
     code, out = rig.cli(["send", "--posture", "none", "reviewer@proj-a", "hi"],  name="planner", scope="proj-a")
-    assert code == 5
+    assert code == 75, "nothing was posted, so it may be tried again"
     assert "SEND FAILED" in out and "was NOT posted" in out
-    assert rig.gateway.history(rig.names_channel) == []
+    assert rig.record.history(rig.names_channel) == []
 
 
 # --------------------------------------------------------------------------- rescan
 
-def test_gateway_reconnect_without_resume_triggers_a_rescan(rig):
+def test_record_reconnect_without_resume_triggers_a_rescan(rig):
     b = rig.shim(name="reviewer", scope="proj-a")
     before = rig.daemon.rescans
-    rig.gateway.disconnect()
+    rig.record.disconnect()
     rig.post_as("agent-6", ["reviewer@proj-a"], "posted during the gap")
     wait_until(lambda: False, timeout=0.2)
     assert b.queue == [], "the event never reached the socket"
 
-    rig.gateway.reconnect(resume=False)             # fresh IDENTIFY: the gap is gone
+    rig.record.reconnect(resume=False)             # fresh IDENTIFY: the gap is gone
     assert wait_until(lambda: rig.daemon.rescans > before)
     wait_for_queue(b, 1)
     assert b.queue[0]["text"] == "posted during the gap"
@@ -106,9 +105,9 @@ def test_gateway_reconnect_without_resume_triggers_a_rescan(rig):
 def test_resume_replays_the_gap_without_a_rescan(rig):
     b = rig.shim(name="reviewer", scope="proj-a")
     before = rig.daemon.rescans
-    rig.gateway.disconnect()
+    rig.record.disconnect()
     rig.post_as("agent-6", ["reviewer@proj-a"], "gap message")
-    rig.gateway.reconnect(resume=True)
+    rig.record.reconnect(resume=True)
     wait_for_queue(b, 1)
     assert b.queue[0]["text"] == "gap message"
     assert rig.daemon.rescans == before
@@ -117,7 +116,7 @@ def test_resume_replays_the_gap_without_a_rescan(rig):
 def test_boot_rescan_rebuilds_the_pending_view(rig):
     rig.post_as("agent-6", ["curator@proj-a"], "waiting")
     wait_until(lambda: queued(rig.daemon, "curator@proj-a"))
-    fresh = daemon_mod.Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    fresh = daemon_mod.Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     rig.daemon.stop()
     fresh.start()
     try:
@@ -130,11 +129,11 @@ def test_boot_rescan_rebuilds_the_pending_view(rig):
 def test_rescan_does_not_re_pend_what_an_unbound_name_already_handled(rig):
     """The contract is "rescan #names PAST CURSORS". A chosen name that handled a message
     and then unbound gets no row for it: no reader writes a row for an id at or below
-    the name's cursor. The message is posted while the gateway is down, so only
+    the name's cursor. The message is posted while the record is down, so only
     the rescan reads it."""
-    rig.gateway.disconnect()
+    rig.record.disconnect()
     msg = rig.post_as("agent-6", ["curator@proj-a"], "handled before unbinding")
-    cursors.advance("curator@proj-a", msg.id)
+    put_cursor("curator@proj-a", msg.id)
 
     rig.daemon.rescan()
     assert queued(rig.daemon, "curator@proj-a") == set()
@@ -143,7 +142,7 @@ def test_rescan_does_not_re_pend_what_an_unbound_name_already_handled(rig):
 def test_rescan_still_pends_for_a_name_that_never_bound(rig):
     """No cursor at all means nothing was ever handled: the message stays pending."""
     rig.post_as("agent-6", ["curator@proj-a"], "nobody has ever held this name")
-    assert cursors.read("curator@proj-a") is None
+    assert cursor_of("curator@proj-a") is None
 
     rig.daemon.rescan()
     assert len(queued(rig.daemon, "curator@proj-a")) == 1
@@ -151,97 +150,37 @@ def test_rescan_still_pends_for_a_name_that_never_bound(rig):
 
 def test_rescan_still_pends_for_a_message_past_the_cursor(rig):
     """A cursor BEHIND the message proves only the earlier mail was handled. Both are
-    posted while the gateway is down, so only the rescan reads them."""
-    rig.gateway.disconnect()
+    posted while the record is down, so only the rescan reads them."""
+    rig.record.disconnect()
     first = rig.post_as("agent-6", ["curator@proj-a"], "handled")
     second = rig.post_as("agent-6", ["curator@proj-a"], "arrived after the cursor")
-    cursors.advance("curator@proj-a", first.id)
+    put_cursor("curator@proj-a", first.id)
 
     rig.daemon.rescan()
     assert queued(rig.daemon, "curator@proj-a") == {second.id}
 
 
-def test_a_corrupt_cursor_file_does_not_stop_the_daemon_from_BOOTING(rig, tmp_path):
-    """New blast radius since the boot rescan moved into `start()`: an `int(cursor)` on a
-    file holding junk used to raise out of `rescan()` and take BOOT with it -- no socket,
-    no routing, over one unreadable advisory file. An unreadable cursor is treated as no
-    cursor, which degrades toward replay and pending; never toward loss."""
-    rig.post_as("agent-6", ["curator@proj-a"], "waiting behind a corrupt cursor")
+def test_a_cursor_folder_an_earlier_build_left_beside_the_store_is_not_read(rig):
+    """A build that still wrote cursor files left `cursors/` beside a store it made. The
+    folder isn't comms 0.2's (no move fingerprinted it), so the gate leaves it where it
+    is, the daemon boots past it, and nothing in it moves a cursor."""
+    rig.post_as("agent-6", ["curator@proj-a"], "waiting beside a leftover cursor file")
     wait_until(lambda: queued(rig.daemon, "curator@proj-a"))
+    high = max(int(m.id) for m in rig.record.history(rig.names_channel))
     cursors_dir().mkdir(parents=True, exist_ok=True)
-    (cursors_dir() / "curator@proj-a.json").write_text('{"cursor": "not-a-number"}')
+    left = cursors_dir() / "curator@proj-a.json"
+    left.write_text('{"cursor": "%d"}' % high)
 
-    fresh = daemon_mod.Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    fresh = daemon_mod.Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     rig.daemon.stop()
     fresh.start()
     try:
-        assert len(queued(fresh, "curator@proj-a")) == 1, \
-            "the name still pends: an unreadable cursor proves nothing was handled"
+        assert len(queued(fresh, "curator@proj-a")) == 1, "the file proves nothing"
+        assert cursor_of("curator@proj-a") is None
+        assert left.exists(), "left where it is, not renamed"
     finally:
         fresh.stop()
     rig.daemon = fresh
-
-
-@pytest.mark.parametrize("body", ['["1400000000001"]', '{"cursor": {"id": "1"}}',
-                                  'not json at all', '{"no_cursor_key": 1}'])
-def test_an_unreadable_cursor_file_reads_as_no_cursor(rig, body):
-    """Every way of being unusable answers the same way. The JSON LIST is the one that
-    used to escape: valid JSON, so no decode error, and `["cursor"]` raises TypeError
-    rather than KeyError -- straight out of `read` and into the caller."""
-    cursors_dir().mkdir(parents=True, exist_ok=True)
-    (cursors_dir() / "curator@proj-a.json").write_text(body)
-    assert cursors.read("curator@proj-a") is None
-
-
-@pytest.mark.parametrize("body", ['["1400000000001"]', '{"cursor": {"id": "1"}}',
-                                  'not json at all', '{"no_cursor_key": 1}',
-                                  '{"cursor": "not-a-number"}'])
-def test_a_corrupt_cursor_file_does_not_raise_out_of_the_STOP_HOOK(rig, body):
-    """The adapter side of the same rule. `advance` runs inside the Stop
-    hook, and a raise there does not just lose a cursor -- `dispatch` never returns, so
-    the turn boundary itself is lost and the shim stays 'busy' forever. Unusable cursor
-    state is NO cursor: the advance proceeds, which is also the only reading that can
-    heal the file."""
-    cursors_dir().mkdir(parents=True, exist_ok=True)
-    (cursors_dir() / "curator@proj-a.json").write_text(body)
-
-    curator = rig.shim(name="curator", scope="proj-a")
-    rig.post_as("agent-6", ["curator@proj-a"], "arrives over a corrupt cursor")
-    wait_for_queue(curator, 1)
-    delivered = curator.queue[0]["message_id"]
-
-    curator.on_turn_boundary()                   # inject
-    curator.on_turn_boundary()                   # complete: this is where it used to die
-    assert cursors.read("curator@proj-a") == delivered
-
-
-def test_advance_never_writes_a_cursor_that_is_not_a_message_id():
-    """The other direction: a caller bug must not be written down. A cursor holding junk
-    would claim mail was handled that never was -- the one thing a cursor must never do --
-    so
-    nothing is written, nothing is raised, and the batch replays."""
-    assert cursors.advance("curator@proj-a", "1400000000009") == "1400000000009"
-    assert cursors.advance("curator@proj-a", "not-an-id") is None
-    assert cursors.advance("curator@proj-a", None) is None
-    assert cursors.read("curator@proj-a") == "1400000000009", "the good one is untouched"
-
-
-def test_a_cursor_that_cannot_be_written_degrades_to_replay_not_to_a_raise(monkeypatch):
-    """A read-only STATE dir, a full disk: the turn still completed and the record still
-    holds the mail. Seeing it twice is the cost; the hook surviving is the point."""
-    def no_writes(*a, **kw):
-        raise OSError("read-only file system")
-    monkeypatch.setattr(cursors.tempfile, "mkstemp", no_writes)
-    assert cursors.advance("curator@proj-a", "1400000000001") is None
-    assert cursors.read("curator@proj-a") is None
-
-
-def test_a_cursor_record_of_the_wrong_shape_reads_as_no_record(rig):
-    """`read_meta` is the diagnostic read, and it answers like the real one: valid JSON
-    of the wrong shape is not a record."""
-    cursors_dir().mkdir(parents=True, exist_ok=True)
-    (cursors_dir() / "curator@proj-a.json").write_text('["1400000000001"]')
-    assert cursors.read_meta("curator@proj-a") is None
 
 
 def test_bind_deliver_unbind_rescan_leaves_the_pending_view_empty(rig):
@@ -254,13 +193,13 @@ def test_bind_deliver_unbind_rescan_leaves_the_pending_view_empty(rig):
     delivered = curator.queue[0]["message_id"]
     curator.on_turn_boundary()
     curator.on_turn_boundary()
-    assert cursors.read("curator@proj-a") == delivered
+    assert cursor_of("curator@proj-a") == delivered
 
     curator.stop()
     wait_until(lambda: "curator@proj-a" not in rig.daemon.bindings)
 
     before = rig.daemon.rescans
-    rig.gateway.reconnect(resume=False)
+    rig.record.reconnect(resume=False)
     assert wait_until(lambda: rig.daemon.rescans > before)
     wait_until(lambda: False, timeout=0.2)          # let a bad row show up
     assert queued(rig.daemon, "curator@proj-a") == set()
@@ -276,7 +215,7 @@ def test_shim_surfaces_comms_offline_and_reconnects(rig):
     assert wait_until(lambda: b.offline)
     assert any(OFFLINE_MESSAGE in s for s in b.statuses)
 
-    fresh = daemon_mod.Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False).start()
+    fresh = daemon_mod.Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
     rig.daemon = fresh
     assert wait_until(lambda: b.offline is False, timeout=5.0)
     assert wait_until(lambda: any("comms online" in s for s in b.statuses))
@@ -324,16 +263,11 @@ def stale_socket(path: Path) -> Path:
 
 
 def says_ping(path: Path) -> bool:
-    """Does something at `path` answer the claims protocol? A round trip, not a knock."""
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.settimeout(2.0)
-    s.connect(str(path))
-    conn = LineConn(s)
-    try:
-        conn.send({"id": 7, "op": "ping"})
-        return conn.recv() == {"id": 7, "ok": True, "cli_protocol": CLI_PROTOCOL}
-    finally:
-        conn.close()
+    """Does something at `path` answer comms' wire? A hello and a round trip, not a
+    knock."""
+    with raw_connection(path) as conn:
+        settle(conn)
+    return True
 
 
 def test_stop_without_a_start_removes_nothing(shortdir):
@@ -341,8 +275,8 @@ def test_stop_without_a_start_removes_nothing(shortdir):
     never bound has nothing of its own there, so it takes nothing away."""
     path = shortdir / "d.sock"
     path.write_text("someone else's")
-    d = Daemon(MockGateway(), socket_path=path, start_trim_thread=False)
-    assert d.bound is False
+    d = Daemon(MockRecord(), socket_path=path, start_trim_thread=False)
+    assert d.host is None
     d.stop()
     assert path.exists(), "a daemon removes only the socket it bound"
 
@@ -352,7 +286,7 @@ def test_a_start_against_a_live_daemon_refuses_and_leaves_it_serving(rig):
     refuse, and neither the refusal nor its `stop()` may touch what is already there."""
     path = daemon_socket()
     inode = path.stat().st_ino
-    intruder = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False)
+    intruder = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
 
     with pytest.raises(RuntimeError, match="live comms daemon"):
         intruder.start()
@@ -368,10 +302,10 @@ def test_a_stale_socket_file_is_cleared_and_the_daemon_serves(rig, shortdir):
     """Unattended recovery still works: the file a dead daemon left behind answers
     ECONNREFUSED, which is the allowlist saying `nothing is here`."""
     path = stale_socket(shortdir / "d.sock")
-    d = Daemon(rig.gateway, clock=rig.clock, socket_path=path, start_trim_thread=False,
-               journal_path=shortdir / "j.db").start()
+    d = Daemon(rig.record, clock=rig.clock, socket_path=path, start_trim_thread=False,
+               history_path=shortdir / "j.db").start()
     try:
-        assert d.bound is True
+        assert d.host is not None
         assert says_ping(path)
     finally:
         d.stop()
@@ -382,57 +316,31 @@ def test_a_clean_stop_removes_the_socket_and_a_second_stop_does_not(rig, shortdi
     """The regression, and the flag's reset: once the file is gone the daemon no
     longer claims it, so a second `stop()` cannot take a successor's socket with it."""
     path = shortdir / "d.sock"
-    d = Daemon(rig.gateway, clock=rig.clock, socket_path=path, start_trim_thread=False,
-               journal_path=shortdir / "j.db").start()
+    d = Daemon(rig.record, clock=rig.clock, socket_path=path, start_trim_thread=False,
+               history_path=shortdir / "j.db").start()
     assert path.exists()
     d.stop()
-    assert not path.exists() and d.bound is False
+    assert not path.exists() and d.host is None
 
     path.write_text("a successor's")
     d.stop()
     assert path.exists(), "the second stop removes nothing"
 
 
-@pytest.mark.parametrize("error", [
-    BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable"),
-    PermissionError(errno.EACCES, "Permission denied"),
-])
-def test_a_probe_that_cannot_conclude_refuses_and_says_which_errno(monkeypatch, rig,
-                                                                   shortdir, error):
-    """The blocker the allowlist exists for. A live listener with a full backlog
-    answers EAGAIN and a foreign-owned socket answers EACCES -- and a bare
-    `except OSError: proceed` would read both as `dead`, re-introducing the steal
-    exactly under load. Neither refusal may claim to know a live daemon is there."""
-    path = stale_socket(shortdir / "d.sock")
-
-    def refuse(self, address):
-        raise error
-
-    monkeypatch.setattr(socket.socket, "connect", refuse)
-    d = Daemon(rig.gateway, clock=rig.clock, socket_path=path, start_trim_thread=False,
-               journal_path=shortdir / "j.db")
-    with pytest.raises(RuntimeError) as caught:
-        d.start()
-    assert f"errno {error.errno}" in str(caught.value)
-    assert type(error).__name__ in str(caught.value)
-    assert "live comms daemon" not in str(caught.value), "it does not claim to know"
-    assert path.exists() and d.bound is False
-
-
 def test_a_refused_start_has_no_side_effects_at_all(rig, shortdir):
-    """Refusing is not half-starting: no server socket, no gateway subscription,
-    and no journal -- `Journal.open()` would have created the file and its parent."""
-    journal = shortdir / "fresh" / "bindings.db"
-    subscribers = len(rig.gateway._subs)
-    intruder = Daemon(rig.gateway, clock=rig.clock, start_trim_thread=False,
-                      journal_path=journal)
+    """Refusing is not half-starting: no server socket, no record subscription,
+    and no binding history -- `BindingHistory.open()` would have created the file and its parent."""
+    history = shortdir / "fresh" / "bindings.db"
+    subscribers = len(rig.record._subs)
+    intruder = Daemon(rig.record, clock=rig.clock, start_trim_thread=False,
+                      history_path=history)
 
     with pytest.raises(RuntimeError):
         intruder.start()
 
-    assert intruder._server is None and intruder.bound is False
-    assert len(rig.gateway._subs) == subscribers, "it never subscribed"
-    assert not journal.exists() and not journal.parent.exists()
+    assert intruder.host is None
+    assert len(rig.record._subs) == subscribers, "it never subscribed"
+    assert not history.exists() and not history.parent.exists()
 
 
 # --------------------------------------------------------------------------- handing is
@@ -451,7 +359,7 @@ def test_mail_handed_to_a_session_that_unbinds_before_its_cursor_moves_is_pendin
 
     b.stop()                                          # no turn boundary: cursor unmoved
     assert wait_until(lambda: "reviewer@proj-a" not in rig.daemon.bindings)
-    assert cursors.read("reviewer@proj-a") is None
+    assert cursor_of("reviewer@proj-a") is None
     assert queued(rig.daemon, "reviewer@proj-a") == {msg.id}
 
     code, out = rig.cli(["agents", "--seats"])
@@ -471,24 +379,60 @@ def test_mail_handed_to_a_session_that_unbinds_before_its_cursor_moves_is_pendin
 
 
 def test_mail_a_session_handled_before_unbinding_stays_handled(rig):
-    """The other half: the cursor passed it, so it is not pending after the unbind."""
+    """The other half: its turn acked it, so it is not pending after the unbind."""
     b = rig.shim(name="reviewer", scope="proj-a")
     msg = rig.post_as("agent-6", ["reviewer@proj-a"], "handled")
-    assert wait_until(lambda: msg.id in rig.daemon.bindings["reviewer@proj-a"].delivered)
-    cursors.advance("reviewer@proj-a", msg.id)         # the turn boundary's act
+    wait_for_queue(b, 1)
+    b.on_turn_boundary()                               # inject
+    b.on_turn_boundary()                               # complete: the ack
+    assert cursor_of("reviewer@proj-a") == msg.id
 
     b.stop()
     assert wait_until(lambda: "reviewer@proj-a" not in rig.daemon.bindings)
     assert queued(rig.daemon, "reviewer@proj-a") == set()
 
 
-def test_a_partial_cursor_re_pends_only_what_it_has_not_passed(rig):
+def test_a_partial_ack_re_pends_only_what_it_did_not_handle(rig):
     b = rig.shim(name="reviewer", scope="proj-a")
     first = rig.post_as("agent-6", ["reviewer@proj-a"], "handled")
     second = rig.post_as("agent-6", ["reviewer@proj-a"], "handed only")
     assert wait_until(lambda: second.id in rig.daemon.bindings["reviewer@proj-a"].delivered)
-    cursors.advance("reviewer@proj-a", first.id)
+    send_turn(b, handled=[first.id])
 
     b.stop()
     assert wait_until(lambda: "reviewer@proj-a" not in rig.daemon.bindings)
     assert queued(rig.daemon, "reviewer@proj-a") == {second.id}
+
+
+# ------------------------------------------------------- no cursor files are written
+
+def test_a_full_delivery_writes_nothing_under_the_cursor_folder(rig):
+    """Delivery, ack, rescan, rebind and restart: the daemon keeps the cursor in its
+    books, and nothing makes `STATE/comms/cursors/`."""
+    curator = rig.shim(name="curator", scope="proj-a", autoreconnect=True,
+                       backoff=itertools.repeat(0.1))
+    msg = rig.post_as("agent-6", ["curator@proj-a"], "delivered and acked")
+    wait_for_queue(curator, 1)
+    curator.on_turn_boundary()
+    curator.on_turn_boundary()
+    assert wait_until(lambda: cursor_of("curator@proj-a") == msg.id)
+    rig.daemon.rescan()
+    rig.daemon.stop()
+    rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()
+    assert wait_until(lambda: "curator@proj-a" in rig.daemon.bindings and not curator.offline)
+    assert not cursors_dir().exists()
+
+
+def test_no_comms_source_names_the_cursor_folder_but_the_move():
+    """Only the gate and the move of comms 0.2's files name the cursor folder, which
+    they look for, read and rename. No adapter or daemon code writes there."""
+    import re
+
+    import moxi_comms
+    src = Path(moxi_comms.__file__).parent
+    naming = set()
+    for f in src.rglob("*.py"):
+        text = f.read_text()
+        if "cursors_dir" in text or re.search(r"""/\s*["']cursors["']""", text):
+            naming.add(f.relative_to(src).as_posix())
+    assert naming == {"paths.py", "store/open.py", "store/upgrade_0_2.py"}

@@ -14,7 +14,7 @@ from conftest import queued, record_rows, wait_for_queue, wait_until
 from moxi_comms import bindings, cards, directors, directory, scoping
 from moxi_comms.adapters.session import Session
 from moxi_comms.client import DaemonClient, DaemonError
-from moxi_comms.paths import daemon_socket, directory_db
+from moxi_comms.paths import daemon_socket, comms_db
 
 RETIRED_SEND = ("{q} is retired: comms keeps a project suffix only to tell apart two "
                 "agents of one name in different projects, and {q} had no such twin. "
@@ -26,10 +26,10 @@ RETIRED_BIND = ("{q} is retired: comms keeps a project suffix only to tell apart
 
 def retire(name: str, scope: str) -> None:
     """The retire op's own insert."""
-    conn = directory.connect(directory_db())
+    conn = directory.connect(comms_db())
     try:
         with conn:
-            conn.execute("INSERT OR IGNORE INTO agents(name, scope, status, created_at, "
+            conn.execute("INSERT OR IGNORE INTO identities(name, scope, status, created_at, "
                          "kind) VALUES (?, ?, 'retired', ?, 'agent')",
                          (name, scope, directory.now()))
     finally:
@@ -37,13 +37,13 @@ def retire(name: str, scope: str) -> None:
 
 
 def history(rig):
-    return rig.gateway.history(rig.names_channel)
+    return rig.record.history(rig.names_channel)
 
 
 def query(kind, **kw):
     c = DaemonClient(daemon_socket()).connect()
     try:
-        return c.query(kind, **kw)
+        return c.call(kind, kw)
     finally:
         c.close()
 
@@ -109,7 +109,7 @@ def test_a_bare_line_zero_tag_from_an_author_in_s_waits_for_the_global_x(rig):
 
 
 def test_at_a_rescan_and_a_replay_a_bare_tag_is_the_global_x(rig):
-    """The journal knows reviewer@proj-a, the global reviewer was never bound: a rescan
+    """The binding history knows reviewer@proj-a, the global reviewer was never bound: a rescan
     still files the bare tag for the global one, and its first bind's replay delivers it,
     while a rebind of reviewer@proj-a is never handed it."""
     scoped = rig.shim(name="reviewer", scope="proj-a")
@@ -171,7 +171,7 @@ def test_a_shim_with_no_scope_binds_global(rig):
 def test_a_register_with_only_project_binds_global(rig):
     c = DaemonClient(daemon_socket()).connect()
     try:
-        got = c.register(name="loner", project="proj-a", adapter="claude-shim")
+        got = c.bind(name="loner", project="proj-a", adapter="claude-shim")
         assert got["identity"]["qualified"] == "loner"
     finally:
         c.close()
@@ -219,9 +219,9 @@ def test_a_bare_whois_reads_the_global_card_only(monkeypatch, tmp_path):
 
 # --------------------------------------------------------------------------- ever bound
 
-def test_journal_ever_bound_reads_the_exact_identity(tmp_path):
-    j = bindings.Journal(tmp_path / "b.db")
-    assert j.ever_bound("x", "global") is None, "a journal that is not open cannot say"
+def test_binding_history_ever_bound_reads_the_exact_identity(tmp_path):
+    j = bindings.BindingHistory(tmp_path / "b.db")
+    assert j.ever_bound("x", "global") is None, "a binding history that is not open cannot say"
     assert j.open()
     j.bind(qualified="x@proj-a", name="x", scope="proj-a", tier="chosen",
            adapter="claude-shim")
@@ -245,8 +245,8 @@ def test_resolve_answers_ever_bound_and_the_identities_seen(rig):
     assert query("resolve", name="reviewer")["seen_as"] == [], "never a retired one"
 
 
-def test_resolve_answers_ever_bound_none_when_the_journal_is_closed(rig):
-    rig.daemon.journal.close()
+def test_resolve_answers_ever_bound_none_when_the_binding_history_is_closed(rig):
+    rig.daemon.binding_history.close()
     got = query("resolve", name="nobody")
     assert got["ever_bound"] is None
 
@@ -255,7 +255,7 @@ def test_resolve_answers_ever_bound_none_when_the_journal_is_closed(rig):
 
 def test_directory_retired_and_standing_row_ignores_a_retired_row(rig):
     retire("captain", "proj-old")
-    conn = directory.connect(directory_db(), read_only=True)
+    conn = directory.connect(comms_db(), read_only=True)
     try:
         assert directory.retired(conn, "captain", "proj-old")
         assert not directory.retired(conn, "captain", "global")
@@ -270,7 +270,7 @@ def test_a_retired_identity_cannot_bind(rig):
     c = DaemonClient(daemon_socket()).connect()
     try:
         with pytest.raises(DaemonError) as e:
-            c.register(name="captain", scope="proj-old", adapter="claude-shim")
+            c.bind(name="captain", scope="proj-old", adapter="claude-shim")
         assert str(e.value) == RETIRED_BIND.format(q="captain@proj-old",
                                                    name="captain")
     finally:
@@ -287,7 +287,7 @@ def test_a_send_or_check_to_a_retired_identity_is_refused(rig, argv):
     retire("mate", "proj-old")
     before = len(history(rig))
     code, out = rig.cli(argv,  name="planner")
-    assert code == 2
+    assert code == 3
     assert out.strip() == RETIRED_SEND.format(q="mate@proj-old",
                                               name="mate")
     assert len(history(rig)) == before, "nothing posted"
@@ -302,7 +302,7 @@ def test_a_reply_to_a_retired_author_is_refused(rig):
     before = len(history(rig))
     code, out = rig.cli(["reply", "--posture", "none", str(m.id), "answer"],
                         name="planner")
-    assert code == 2
+    assert code == 3
     assert RETIRED_SEND.format(q="mate@proj-old",
                                name="mate") in out
     assert len(history(rig)) == before
@@ -312,10 +312,10 @@ def test_explain_and_cache_refuse_a_retired_identity(rig):
     retire("captain", "proj-old")
     text = RETIRED_SEND.format(q="captain@proj-old", name="captain")
     code, out = rig.cli(["explain", "captain@proj-old"])
-    assert code == 2 and out.strip() == text
+    assert code == 3 and out.strip() == text
     code, out = rig.cli(["cache", "captain@proj-old"],
                         env={"MOXI_COMMS_OPERATOR": "900001"})
-    assert code == 2 and text in out
+    assert code == 3 and text in out
 
 
 def test_a_recorded_tag_naming_a_retired_identity_is_held_for_nobody(rig):
@@ -327,18 +327,19 @@ def test_a_recorded_tag_naming_a_retired_identity_is_held_for_nobody(rig):
     assert wait_until(lambda: m.id in queued(rig.daemon, "captain"))
     rig.daemon.rescan()
     assert not queued(rig.daemon, "captain@proj-old")
-    assert not record_rows(rig.gateway, "captain@proj-old")
+    assert not record_rows(rig.record, "captain@proj-old")
     assert m.id in queued(rig.daemon, "captain")
 
 
 def test_the_provisioner_does_not_reactivate_a_retired_row(rig):
     from moxi_comms import provision
     retire("console2", "acme")
-    with pytest.raises(SystemExit) as e:
-        provision.send_only_main(["console2@acme", "--db", str(directory_db())],
-                                 gateway=rig.gateway, store=rig.store)
-    assert "retired" in str(e.value)
-    conn = directory.connect(directory_db(), read_only=True)
+    conn = directory.init(comms_db())
+    try:
+        provision.add_standing(rig.record, conn, "console2", "acme")
+    finally:
+        conn.close()
+    conn = directory.connect(comms_db(), read_only=True)
     try:
         assert directory.retired(conn, "console2", "acme")
         assert directory.standing_row(conn, "console2", "acme") is None

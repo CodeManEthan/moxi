@@ -37,6 +37,18 @@ directory, plus the contributor tools. `moxi-dev check` runs the checks a change
 pass before it merges. A package's own tests also run from its directory with
 `uv run pytest`.
 
+A module's web page is TypeScript under `packages/<name>/web/`, built with Node 22 and
+committed as built files, so installing or testing Moxi never needs Node. To change a
+page, build it from the root and commit what the build writes:
+
+```sh
+npm ci
+npm run build
+```
+
+`npm run check` type-checks every page and compares a fresh build with the committed
+files, as CI does on Linux, macOS and Windows.
+
 ## License
 
 MIT; see `LICENSE`. Each package carries the same license.

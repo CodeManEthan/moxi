@@ -6,7 +6,10 @@ the environment (`MOXI_TURNS_COMMANDS` and the rest) and points every home into 
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import shutil
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -16,6 +19,14 @@ from moxi_turns import listeners
 from moxi_turns.endpoint import Endpoint
 
 
+@pytest.fixture(autouse=True)
+def state_home(monkeypatch, tmp_path_factory):
+    """Every test keeps turns' state (the hook times among it) in a folder of its own."""
+    root = tmp_path_factory.mktemp("state")
+    monkeypatch.setenv("MOXI_TURNS_STATE_HOME", str(root))
+    return root
+
+
 @pytest.fixture
 def turns_env(monkeypatch, tmp_path_factory):
     root = tmp_path_factory.mktemp("mt")
@@ -23,6 +34,31 @@ def turns_env(monkeypatch, tmp_path_factory):
     monkeypatch.setenv("MOXI_TURNS_RUNTIME_DIR", str(root / "rt"))
     monkeypatch.setenv("MOXI_TURNS_CONFIG_HOME", str(root / "cfg"))
     yield root
+
+
+@pytest.fixture
+def short_runtime(turns_env, monkeypatch):
+    """A runtime root short enough that every internal socket fits in its endpoint's
+    directory. pytest's own root can be long enough under many workers to push the
+    longest of them past the core's limit, so a test that needs them in place uses this."""
+    root = Path(tempfile.mkdtemp(prefix="mt"))
+    monkeypatch.setenv("MOXI_TURNS_RUNTIME_DIR", str(root / "rt"))
+    yield root / "rt"
+    shutil.rmtree(root, ignore_errors=True)
+
+
+def bare(value):
+    """A delivery's value without the delivery id and the ref it echoes."""
+    return dataclasses.replace(value, delivery=None, ref=None)
+
+
+def opener(event):
+    """The id of the delivery that opened a `TurnStarted` or `TurnEnded`'s turn, or None
+    for the person's own turn (and for any other event)."""
+    for entry in getattr(event, "deliveries", ()):
+        if entry.how == "opened":
+            return entry.id
+    return None
 
 
 def write_config(root: Path, text: str) -> None:

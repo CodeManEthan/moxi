@@ -12,6 +12,8 @@ import re
 
 JSONRPC = "2.0"
 INVALID_REQUEST = -32600
+#: JSON-RPC's code for a method the server does not have (an older Codex).
+METHOD_NOT_FOUND = -32601
 NO_ACTIVE_TURN_MESSAGE = "no active turn to steer"
 _MISMATCH_RE = re.compile(r"expected active turn id `([^`]*)` but found `([^`]*)`")
 ZERO_TURN_ID = "00000000-0000-0000-0000-000000000000"
@@ -119,6 +121,100 @@ def start_params(thread_id: str, text: str) -> dict:
     return {"threadId": str(thread_id), "input": text_input(text)}
 
 
+def method_missing(exc: BaseException) -> bool:
+    """Whether `exc` is the app-server's answer that it has no such method."""
+    return isinstance(exc, CodexError) and exc.code == METHOD_NOT_FOUND
+
+
+def compact_params(thread_id: str) -> dict:
+    return {"threadId": str(thread_id)}
+
+
+def terminals_params(thread_id: str) -> dict:
+    return {"threadId": str(thread_id)}
+
+
+def terminate_params(thread_id: str, process_id: str) -> dict:
+    return {"threadId": str(thread_id), "processId": process_id}
+
+
+def terminal_ids(result) -> list[str]:
+    """The process ids of a `thread/backgroundTerminals/list` answer, in its order. An
+    answer of any other shape raises `ValueError`: a list turns cannot read is not an
+    empty one."""
+    data = result.get("data") if isinstance(result, dict) else None
+    if not isinstance(data, list):
+        raise ValueError("the background terminal list has no data list")
+    ids = []
+    for entry in data:
+        process_id = entry.get("processId") if isinstance(entry, dict) else None
+        if not isinstance(process_id, (str, int)) or isinstance(process_id, bool):
+            raise ValueError("a background terminal has no process id")
+        ids.append(str(process_id))
+    return ids
+
+
+#: A collab agent's status (`CollabAgentStatus`) as turns' state, and whether it is a
+#: final notice.
+COLLAB_STATES = {
+    "pendingInit": ("pending", False), "running": ("running", False),
+    "completed": ("done", True), "errored": ("failed", True),
+    "interrupted": ("stopped", True), "shutdown": ("stopped", True),
+    "notFound": ("unknown", False),
+}
+COLLAB_ITEM = "collabAgentToolCall"
+#: A spawn as Codex's ``multi_agent_v2`` reports it: an item turns cannot read a
+#: subagent's state from.
+SUBAGENT_ACTIVITY_ITEM = "subAgentActivity"
+
+
+def read_params(thread_id: str) -> dict:
+    """`thread/read` with the thread's turns and their items."""
+    return {"threadId": thread_id, "includeTurns": True}
+
+
+def collab_state(status) -> tuple[str, bool | None]:
+    """A collab agent status as `(state, final)`; one turns does not know reads
+    `unknown`, with no notice to call final."""
+    return COLLAB_STATES.get(status, ("unknown", None)) if isinstance(status, str) \
+        else ("unknown", None)
+
+
+def collab_notices(item) -> list[tuple[str, str | None, str | None]]:
+    """A `collabAgentToolCall` item's notices, in order: `(agent thread id, status or
+    None, sender thread id)` for each receiver and each agent its `agentsStates` names.
+    Any other item gives none."""
+    if not isinstance(item, dict) or item.get("type") != COLLAB_ITEM:
+        return []
+    sender = item.get("senderThreadId") if isinstance(item.get("senderThreadId"), str) \
+        else None
+    states = item.get("agentsStates") if isinstance(item.get("agentsStates"), dict) else {}
+    ids = [r for r in item.get("receiverThreadIds") or () if isinstance(r, str) and r]
+    ids += [k for k in states if isinstance(k, str) and k and k not in ids]
+    out = []
+    for agent_id in ids:
+        state = states.get(agent_id)
+        status = state.get("status") if isinstance(state, dict) else None
+        out.append((agent_id, status if isinstance(status, str) else None, sender))
+    return out
+
+
+def thread_items(result) -> list:
+    """The items of a `thread/read` answer, turn by turn in its order. Raises
+    `ValueError` on any other shape: a history turns cannot read is not an empty one."""
+    thread = result.get("thread") if isinstance(result, dict) else None
+    turns = thread.get("turns") if isinstance(thread, dict) else None
+    if not isinstance(turns, list):
+        raise ValueError("the thread read has no turns list")
+    items = []
+    for turn in turns:
+        turn_items = turn.get("items") if isinstance(turn, dict) else None
+        if not isinstance(turn_items, list):
+            raise ValueError("a turn of the thread read has no items list")
+        items.extend(turn_items)
+    return items
+
+
 def thread_is_active(thread: dict | None) -> bool:
     return bool(thread and (thread.get("status") or {}).get("type") == "active")
 
@@ -131,10 +227,15 @@ def active_turn_id(turns_result: dict | None) -> str | None:
 
 
 __all__ = [
-    "JSONRPC", "INVALID_REQUEST", "NO_ACTIVE_TURN_MESSAGE", "ZERO_TURN_ID",
+    "JSONRPC", "INVALID_REQUEST", "METHOD_NOT_FOUND", "NO_ACTIVE_TURN_MESSAGE",
+    "ZERO_TURN_ID",
     "STATUS_COMPLETED", "STATUS_IN_PROGRESS", "TERMINAL_STATUSES", "AppServerOffline",
     "NoReply", "CodexError", "NoActiveTurn", "ActiveTurnMismatch", "classify_error",
     "request", "notification",
     "text_input", "initialize_params", "resume_params", "start_thread_params",
-    "steer_params", "start_params", "thread_is_active", "active_turn_id",
+    "steer_params", "start_params", "method_missing", "compact_params",
+    "terminals_params", "terminate_params", "terminal_ids", "COLLAB_STATES", "COLLAB_ITEM",
+    "SUBAGENT_ACTIVITY_ITEM",
+    "read_params", "collab_state", "collab_notices", "thread_items", "thread_is_active",
+    "active_turn_id",
 ]

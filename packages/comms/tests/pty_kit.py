@@ -1,4 +1,4 @@
-"""A launcher run on a pseudo-terminal, for the window suites."""
+"""A wrapper run on a pseudo-terminal, for the window suites."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ SHOW = b"\x1b[?25h"
 RESTORE = ENTER + LEAVE + SHOW
 
 
-class PtyLauncher:
+class PtyWrapper:
     """One `moxi-comms-codex --window` process on its own pty, as a terminal would run it."""
 
     def __init__(self, argv, env):

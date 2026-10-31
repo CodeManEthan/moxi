@@ -57,7 +57,7 @@ def box(tmp_path, monkeypatch):
 
 def comms(box, *argv):
     out = io.StringIO()
-    ctx = cli.Context(gateway=object(), env=box.env, out=out,
+    ctx = cli.Context(record=object(), env=box.env, out=out,
                       db_path=Path("/nonexistent/db"))
     code = cli.main(["service", *argv], ctx=ctx)
     return code, out.getvalue()

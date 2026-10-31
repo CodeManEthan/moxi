@@ -79,6 +79,16 @@ TERMS: tuple[Entry, ...] = (
         "the human running this system. Operator messages are always directives.",
     ),
     Entry(
+        "send-only",
+        "`(send-only)` on a frame line means a module sent the message, under a name it "
+        "holds reserved (`console`, say), not an agent. No session holds that name and "
+        "nobody receives mail under it, so the message carries `[no reply]`: a reply has "
+        "nowhere to go. `moxi comms agents` lists such a name as `send-only, reserved "
+        "for <module>`. Mail that was already waiting for the name when it was reserved "
+        "is dropped, and `moxi comms explain` says `reserved`.",
+        aliases=("reserved name", "reserved"),
+    ),
+    Entry(
         "operator lane",
         "how the operator sends: typed in their own terminal, holding their own "
         "credential, so a message that arrives as the operator's really is theirs. "
@@ -90,8 +100,8 @@ TERMS: tuple[Entry, ...] = (
     Entry(
         "mark",
         "a parenthetical on a frame line that says how the sender deviates from the "
-        "default: `(standing)` and `(ephemeral)` for tier, `(unverified)` for "
-        "attribution. A frame with no mark is a chosen "
+        "default: `(standing)`, `(ephemeral)` and `(send-only)` for tier, "
+        "`(unverified)` for attribution. A frame with no mark is a chosen "
         "sender, verified. Each mark has its own entry here.",
         aliases=("marks",),
     ),
@@ -99,7 +109,7 @@ TERMS: tuple[Entry, ...] = (
         "verified",
         "attribution the machinery PROVED: the credential that posted the message and "
         "the name it displayed agree (live: checked against the live session; "
-        "catch-up: checked against the custody record of who held what, when). "
+        "catch-up: checked against the binding history of who held what, when). "
         "Unmarked frames are verified — silence is the guarantee, not the absence of "
         "one.",
     ),
@@ -130,6 +140,33 @@ TERMS: tuple[Entry, ...] = (
         "is warm goes out after its next turn. A message that waited arrives marked "
         "`[held]`, with when it was sent and how long it waited.",
         aliases=("--held", "pending", "cold"),
+    ),
+    Entry(
+        "interrupt",
+        "`[interrupt]` on a frame line means the sender asked for the message to reach "
+        "you while you work, between the steps of a running turn, instead of after the "
+        "turn ends. Send one with `moxi comms send --interrupt`. It skips no hold: mail to "
+        "a session that is not running, or whose cache is cold, waits like any other. "
+        "Where the harness cannot take mail mid-turn, it arrives when the turn ends.",
+    ),
+    Entry(
+        "expiry",
+        "how long a message may wait before it is dropped undelivered. Every send "
+        "carries one: `--expires 30m`, `6h`, `3d` or `never`, and without the flag the "
+        "box's default, 24 hours unless its config says otherwise. A message still "
+        "waiting when its time passes is dropped, not delivered late, and its sender is "
+        "not told; `moxi comms explain <name> <id>` says `expired`. A message that has "
+        "already reached you is not taken back.",
+        aliases=("expires", "--expires", "expired"),
+    ),
+    Entry(
+        "withdrawn",
+        "a message its author took back with `moxi comms delete <id>` before it reached "
+        "the recipient. It never arrives, `moxi comms explain` says `withdrawn`, and "
+        "`moxi comms history` still shows it, marked `[withdrawn]`, so its id and replies "
+        "to it still hold. Only the author can delete a message, and only from those who "
+        "have not had it yet: a recipient who has read it keeps it.",
+        aliases=("delete", "withdraw"),
     ),
     Entry(
         "posture",
