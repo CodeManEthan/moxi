@@ -14,7 +14,8 @@ scanned or unscanned, within its deadline plus the kill time (also at three time
 never clean for a set where RE2 finds a hit.
 
 Run with `pytest -m slow tests/test_cost.py`. Each run prints its numbers (`-s` shows
-them).
+them). The timed tests are marked `timed`, so `moxi-dev check` runs them alone, after its
+parallel pass.
 """
 
 from __future__ import annotations
@@ -267,6 +268,7 @@ def re2_hits():
 
 @pytest.mark.parametrize("set_name", ["credentials", "broad"])
 @pytest.mark.parametrize("name", list(SHAPES))
+@pytest.mark.timed
 def test_re2_holds_the_budget(name, set_name, re2_hits, monkeypatch):
     monkeypatch.setattr(engine, "_active", None)
     eng = re2_engine()
@@ -288,6 +290,7 @@ def test_re2_holds_the_budget(name, set_name, re2_hits, monkeypatch):
 
 
 @pytest.mark.parametrize("name", list(SHAPES))
+@pytest.mark.timed
 def test_the_fallback_returns_by_its_deadline_and_never_clean(name, re2_hits,
                                                               fallback_engine):
     text = shape(name)
@@ -339,6 +342,7 @@ def names_shapes(entries):
 
 
 @pytest.mark.parametrize("eng_name", ["re2", "re"])
+@pytest.mark.timed
 def test_private_names_hold_the_budget(eng_name, names_config):
     entries = made_up_entries(corpus.rng(49))
     names_config(words=entries[:150], anywhere=entries[150:180], emails=[
@@ -401,6 +405,7 @@ def personal_candidates(text, eng, monkeypatch) -> int:
 
 
 @pytest.mark.parametrize("eng_name", ["re2", "re"])
+@pytest.mark.timed
 def test_personal_data_holds_the_budget(eng_name, monkeypatch):
     eng = re2_engine() if eng_name == "re2" else engine.python()
     for label, text in personal_shapes():
@@ -454,6 +459,7 @@ def child_times(text, hide_re2=False):
     return json.loads(out.stdout)
 
 
+@pytest.mark.timed
 def test_the_import_and_the_first_scan_hold_their_budgets():
     text = prose(corpus.rng(80), 4_000)
     runs = [child_times(text) for _ in range(5)]
@@ -471,6 +477,7 @@ def test_the_import_and_the_first_scan_hold_their_budgets():
 
 @pytest.mark.parametrize("set_name", ["credentials", "broad", "private-names",
                                       "personal-data"])
+@pytest.mark.timed
 def test_a_warm_short_text_holds_its_budget(set_name, names_config, monkeypatch):
     monkeypatch.setattr(engine, "_active", None)
     names_config(words=made_up_entries(corpus.rng(90), 40))

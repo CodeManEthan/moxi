@@ -23,9 +23,11 @@ ORG = "moxihq"
 #: shared by every module, each under its own subdirectory.
 NAMESPACE = "moxi"
 
-#: The umbrella's own verbs (`moxi install`, `moxi check`, ...), with the ones this
+#: The umbrella's own verbs (`moxi install`, `moxi config`, ...), with the ones this
 #: version keeps for commands still to come. A module named by one could never be
-#: reached as `moxi <module>`, so no module may take one.
+#: reached as `moxi <module>`, so no module may take one. `check` only says where the
+#: contract check went, and stays reserved so no module takes the name a contributor
+#: still types.
 VERBS = frozenset({"modules", "install", "shortcut", "config", "check", "help", "version",
                    "doctor", "uninstall", "run", "paths"})
 

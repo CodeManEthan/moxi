@@ -35,7 +35,20 @@ the catalog's own:
     since    the harness version that added the flag; an older harness is not expected
              to list it
     hidden   the harness's `--help` does not list the flag
-    requires a Moxi module that must be installed for the row to be offered
+    requires a Moxi module that must be installed for the row to be offered, or a list
+             of them, all needed
+    condition
+             a condition on this system or the launch's harness that must hold for the
+             row to be offered, by name (`CONDITIONS`): `cache-timer`, cache's timer
+             asks about the harness's sessions and can read a session's environment here;
+             `slots-here`, tmux slots run here
+    when     on an `enum` row: per value, what that value needs besides the row's own:
+             `requires` (modules), `condition`, `target` (the launch's target), and
+             `refused` and `hint`, the words a launch or preset that breaks it is refused
+             with
+    offered_with
+             another launcher row: this row is offered only when that one is set off its
+             default
 
 The modes are Claude's `interactive` (`claude`) and `print` (`claude -p`), and Codex's
 `interactive` (`codex`), `exec` (`codex exec`) and `host` (turns' Codex host, and comms'
@@ -47,7 +60,9 @@ lists that no row spells (`others`).
 What this module gives the rest of the launcher:
 
 - `load(harness)` and `launcher()`: the parsed catalogs, checked when read; `offered(...)`
-  the rows a user may set on this install.
+  the rows a user may set on this install, for a harness when one is named.
+- `refuse_values(harness, values, chosen=...)`: the rules between a launch's values that
+  `when` and `offered_with` state, each refused with its own words.
 - `Row.check(value)` and `Row.tokens(mode, value, cwd=...)`: a value checked against its
   row, and the tokens one mode spells it as.
 - `fit(harness, mode, values, chosen)`: the modes rule. A composed command carries only
@@ -153,8 +168,14 @@ POSTURE_SETTINGS = {"claude": {"defaultMode": "permission_mode", "allow": "allow
 TYPES = ("bool", "int", "float", "string", "enum", "path", "list")
 KEY_FIELDS = ("type", "default", "doc", "values", "env", "retired")
 OWN_FIELDS = ("flag", "aliases", "repeatable", "optional_value", "variadic", "modes",
-              "items", "owned", "posture", "since", "hidden", "requires")
+              "items", "owned", "posture", "since", "hidden", "requires", "condition",
+              "when", "offered_with")
 FIELDS = KEY_FIELDS + OWN_FIELDS
+#: The fields of one value's table under `when`.
+WHEN_FIELDS = ("requires", "condition", "target", "refused", "hint")
+#: The harnesses whose sessions cache's timer asks about: it keeps clock records for
+#: Claude sessions only, so a row that rides its asks is offered for Claude alone.
+CACHE_TIMED = ("claude",)
 SPELLING_FIELDS = ("flag", "value", "join")
 PLACEHOLDERS = ("{value}", "{toml}", "{cwd_toml}")
 #: How long one `--help` (or `--version`) may run, in seconds.
@@ -310,14 +331,18 @@ def _posture_hint(harness: str | None, row_name: str, token: str,
 
 
 class NeedsModule(Refused):
-    """A row whose `requires` module is not installed."""
+    """A row this install does not offer: a module it `requires` is not installed, or its
+    `condition` does not hold here; or a value whose `when` needs are not met, or a row
+    set without the row it is `offered_with`. `problem` and `hint` are the words, when
+    the caller has them (`Row.unoffered`); else the row's first module is named."""
 
     code = "needs-module"
 
-    def __init__(self, row: "Row"):
-        super().__init__(row.name, f"{row.name} needs {row.requires}",
-                         f"install {names.distribution(row.requires)}, or leave "
-                         f"{row.name} out")
+    def __init__(self, row: "Row", problem: str | None = None, hint: str | None = None):
+        module = row.required[0] if row.required else MODULE
+        super().__init__(row.name, problem or f"{row.name} needs {module}",
+                         hint or f"install {names.distribution(module)}, or leave "
+                                 f"{row.name} out")
 
 
 # -- rows -----------------------------------------------------------------------------
@@ -371,8 +396,22 @@ class Spelling:
 
 
 @dataclass(frozen=True)
+class When:
+    """What one value of an `enum` row needs besides the row's own needs: modules, a
+    condition, the launch's target, and the words a launch that breaks it is refused
+    with."""
+
+    requires: tuple[str, ...] = ()
+    condition: str | None = None
+    target: str | None = None
+    refused: str = ""
+    hint: str = ""
+
+
+@dataclass(frozen=True)
 class Row:
-    """One catalog row. `harness` is None for a launcher row."""
+    """One catalog row. `harness` is None for a launcher row. `requires` is one module's
+    name, or a tuple of several, all needed (`required` is always the tuple)."""
 
     name: str
     harness: str | None
@@ -393,16 +432,27 @@ class Row:
     posture: bool = False
     since: str | None = None
     hidden: bool = False
-    requires: str | None = None
+    requires: str | tuple[str, ...] | None = None
+    condition: str | None = None
+    when: Mapping[str, When] = field(default_factory=lambda: MappingProxyType({}))
+    offered_with: str | None = None
+
+    @property
+    def required(self) -> tuple[str, ...]:
+        """Every module the row needs, in the order the catalog names them."""
+        if self.requires is None:
+            return ()
+        return (self.requires,) if isinstance(self.requires, str) else tuple(self.requires)
 
     @property
     def key(self) -> Key:
-        """The row as a `moxi.config.Key`, read at use, for code that reads keys."""
+        """The row as a `moxi.config.Key`, read at use, for code that reads keys. A key
+        names one module it needs: the row's first."""
         values = self.values if self.type == "enum" else None
         items = "str" if self.type == "list" else None
         return Key(name=self.name, type=self.type, default=self.default, doc=self.doc,
                    read="use", values=values, env=self.env, retired=self.retired,
-                   needs=self.requires, items=items)
+                   needs=self.required[0] if self.required else None, items=items)
 
     @property
     def option(self) -> str:
@@ -415,11 +465,29 @@ class Row:
         does not own it."""
         return self.retired is None and not self.owned
 
-    def offered(self, available: Callable[[str], bool] | None = None) -> bool:
-        """The row is offered on this install: it is live and its module is present."""
+    def offered(self, available: Callable[[str], bool] | None = None,
+                harness: str | None = None) -> bool:
+        """The row is offered on this install: it is live, every module it needs is
+        present, and its condition holds here, for `harness` when one is named."""
         if self.retired is not None:
             return False
-        return self.requires is None or _available(available)(self.requires)
+        return self.unoffered(available, harness) is None
+
+    def unoffered(self, available: Callable[[str], bool] | None = None,
+                  harness: str | None = None) -> tuple[str, str] | None:
+        """Why a live row is not offered on this install, as a refusal's problem and
+        hint, or None when it is: the first module it needs that is absent, else its
+        condition's words. A retired row reads None here; `check` refuses it."""
+        avail = _available(available)
+        for module in self.required:
+            if not avail(module):
+                return (f"{self.name} needs {module}",
+                        f"install {names.distribution(module)}, or leave {self.name} out")
+        if self.condition is not None:
+            why = CONDITIONS[self.condition](harness)
+            if why is not None:
+                return f"{self.name} {why}", f"leave {self.name} out"
+        return None
 
     def spellings(self) -> frozenset[str]:
         """Every flag that sets the row in some mode, its aliases included."""
@@ -527,10 +595,13 @@ class Catalog:
     def __iter__(self):
         return iter(self.rows.values())
 
-    def offered(self, available: Callable[[str], bool] | None = None) -> dict[str, Row]:
-        """The rows a user may set on this install, by name."""
+    def offered(self, available: Callable[[str], bool] | None = None,
+                harness: str | None = None) -> dict[str, Row]:
+        """The rows a user may set on this install, for a `harness` launch when one is
+        named, by name."""
         avail = _available(available)
-        return {row.name: row for row in self if row.settable and row.offered(avail)}
+        return {row.name: row for row in self
+                if row.settable and row.offered(avail, harness)}
 
 
 # -- loading --------------------------------------------------------------------------
@@ -561,7 +632,7 @@ def offered(harness: str, available: Callable[[str], bool] | None = None
     """Every row a user may set for a `harness` launch on this install: the launcher's
     rows, then the harness's, by name."""
     avail = _available(available)
-    return {**launcher().offered(avail), **load(harness).offered(avail)}
+    return {**launcher().offered(avail, harness), **load(harness).offered(avail, harness)}
 
 
 def row(harness: str, name: str) -> Row | None:
@@ -599,6 +670,10 @@ def parse_text(text: str, *, harness: str, source: str = "catalog") -> Catalog:
     if harness == LAUNCHER:
         if meta is not None:
             raise CatalogError(source, None, "the launcher's rows take no [catalog] table")
+        for row_ in rows.values():
+            if row_.offered_with is not None and row_.offered_with not in rows:
+                raise CatalogError(source, row_.name, f"is offered_with "
+                                   f"{row_.offered_with!r}, which is not a launcher row")
         return Catalog(LAUNCHER, MappingProxyType(rows), source)
     checked, helps = _meta(meta, harness, source)
     catalog = Catalog(harness, MappingProxyType(rows), source, checked, helps)
@@ -720,16 +795,25 @@ def _row(name, spec, harness, source) -> Row:
     since = spec.get("since")
     if since is not None and not (isinstance(since, str) and _VERSION.fullmatch(since)):
         raise bad(f"has since {since!r}, which is not a version")
-    requires = spec.get("requires")
-    if requires is not None and not names.is_module_name(requires):
-        raise bad(f"has requires {requires!r}, which is not a module name")
+    requires = _requires(spec.get("requires"), bad)
+    condition = _condition(spec.get("condition"), bad)
+    when = _when(spec.get("when"), kind, values, bad)
+    offered_with = spec.get("offered_with")
+    if offered_with is not None:
+        if harness != LAUNCHER or not (isinstance(offered_with, str)
+                                       and _NAME.fullmatch(offered_with)):
+            raise bad("has offered_with, which only a launcher row takes, naming another "
+                      "launcher row")
+        if offered_with == name:
+            raise bad("is offered_with itself")
     if flags["owned"] and flags["posture"]:
         raise bad("is both owned and a posture row")
 
     built = Row(name=name, harness=None if harness == LAUNCHER else harness, type=kind,
                 default=default, doc=doc, values=values, env=env, retired=retired,
                 flag=flag, aliases=tuple(aliases), modes=modes, items=items,
-                since=since, requires=requires, **flags)
+                since=since, requires=requires, condition=condition,
+                when=MappingProxyType(when), offered_with=offered_with, **flags)
     if retired is None:
         try:
             checked = (built.check(default) if not (kind == "path" and default == "")
@@ -739,6 +823,55 @@ def _row(name, spec, harness, source) -> Row:
         if kind == "enum" and default != "" and checked not in values:
             raise bad("has a default outside its values")
     return built
+
+
+def _requires(raw, bad) -> str | tuple[str, ...] | None:
+    """A row's (or a value's) `requires`: one module's name, or a list of distinct ones."""
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        if not names.is_module_name(raw):
+            raise bad(f"has requires {raw!r}, which is not a module name")
+        return raw
+    if (not _str_list(raw) or not raw or len(set(raw)) != len(raw)
+            or not all(names.is_module_name(m) for m in raw)):
+        raise bad(f"has requires {raw!r}, which is not a module name or a list of distinct "
+                  "module names")
+    return raw[0] if len(raw) == 1 else tuple(raw)
+
+
+def _condition(raw, bad) -> str | None:
+    if raw is not None and raw not in CONDITIONS:
+        raise bad(f"has condition {raw!r}; the conditions are {', '.join(CONDITIONS)}")
+    return raw
+
+
+def _when(raw, kind, values, bad) -> dict[str, When]:
+    """An `enum` row's `when`: per value it names, that value's needs and words."""
+    if raw is None:
+        return {}
+    if kind != "enum" or not isinstance(raw, dict) or not raw:
+        raise bad("has when, which only an enum row takes, as a table of its values")
+    out = {}
+    for value, spec in raw.items():
+        if value not in values:
+            raise bad(f"has when for {value!r}, which is not one of its values")
+        if not isinstance(spec, dict) or set(spec) - set(WHEN_FIELDS):
+            raise bad(f"has when.{value}, which takes only {', '.join(WHEN_FIELDS)}")
+        refused, hint = spec.get("refused"), spec.get("hint")
+        if not (isinstance(refused, str) and refused.strip()
+                and isinstance(hint, str) and hint.strip()):
+            raise bad(f"has when.{value} without the words it is refused with (refused "
+                      "and hint)")
+        target = spec.get("target")
+        if target is not None and not isinstance(target, str):
+            raise bad(f"has when.{value} target {target!r}, which is not a target's name")
+        needs = _requires(spec.get("requires"), bad)
+        out[value] = When(requires=() if needs is None else
+                          ((needs,) if isinstance(needs, str) else needs),
+                          condition=_condition(spec.get("condition"), bad),
+                          target=target, refused=refused, hint=hint)
+    return out
 
 
 def _modes(raw, flag, harness, bad) -> Mapping[str, Spelling]:
@@ -816,6 +949,114 @@ def fit(harness: str, mode: str, values: Mapping[str, object],
     return Fit(mode, MappingProxyType(applied), tuple(not_applied))
 
 
+def refuse_values(harness: str, values: Mapping[str, object], *,
+                  chosen: Iterable[str] = (),
+                  available: Callable[[str], bool] | None = None) -> None:
+    """Refuse a launch's resolved `values` where one breaks a rule between rows, with
+    the rule's own words (`NeedsModule`):
+
+    - a value whose `when` needs are not met: a module absent, its condition not
+      holding here, or the launch's `target` another;
+    - a row chosen for this launch (`chosen`: typed or from the preset) whose
+      `offered_with` row is at its default, which leaves it nothing to do.
+
+    A row not in `values` is not offered here and is not looked at."""
+    avail = _available(available)
+    chosen = frozenset(chosen)
+    for name, value in values.items():
+        row_ = row(harness, name)
+        if row_ is None:
+            continue
+        need = row_.when.get(value) if isinstance(value, str) else None
+        if need is not None and not _met(need, values, avail, harness):
+            raise NeedsModule(row_, need.refused, need.hint)
+        if row_.offered_with is not None and name in chosen:
+            other = row(harness, row_.offered_with)
+            if other is None or values.get(other.name, other.default) in (None, "",
+                                                                            other.default):
+                raise NeedsModule(row_, f"{name} needs {row_.offered_with}",
+                                  f"set {row_.offered_with} too, or leave {name} out")
+
+
+def _met(need: When, values: Mapping[str, object], avail: Callable[[str], bool],
+         harness: str | None) -> bool:
+    if not all(avail(module) for module in need.requires):
+        return False
+    if need.target is not None and values.get("target") != need.target:
+        return False
+    return need.condition is None or CONDITIONS[need.condition](harness) is None
+
+
+# -- conditions -----------------------------------------------------------------------
+
+def native_windows() -> bool:
+    """Whether this is native Windows, by the test slots' own `supported()` makes: WSL2
+    reads as Linux here."""
+    import sys
+
+    return sys.platform in ("win32", "cygwin")
+
+
+def session_env_readable() -> bool:
+    """Whether cache can read a session's environment on this system, so that its timer
+    can check what a subscription's `requires_env` asks: cache's own `env_checkable()`
+    when its API offers it, else true everywhere but native Windows. Asked of cache once
+    per process; cache answers from the platform alone."""
+    return _session_env_readable()
+
+
+@cache
+def _session_env_readable() -> bool:
+    from moxi import modules
+
+    if modules.available("cache"):
+        found = modules.load("cache")
+        ask = getattr(found.api, "env_checkable", None) if found.ok else None
+        if callable(ask):
+            try:
+                return bool(ask())
+            except Exception:  # noqa: BLE001  (an answer cache can't give is a no)
+                return False
+    return not native_windows()
+
+
+def slots_here() -> bool:
+    """Whether tmux slots run here: slots is installed and its `supported()` says so."""
+    from . import slots
+
+    api = slots.api()
+    if api is None:
+        return False
+    try:
+        return bool(api.supported().ok)
+    except Exception:  # noqa: BLE001  (slots that can't say runs nothing here)
+        return False
+
+
+def _cache_timer(harness: str | None) -> str | None:
+    """Words for why cache's timer can't ask about a launch's session, or None when it
+    can: it times only `CACHE_TIMED` harnesses' sessions, and checks a subscription's
+    `requires_env` only where it can read a session's environment."""
+    if harness is not None and harness not in CACHE_TIMED:
+        return (f"needs cache to time {harness} sessions, and cache times only "
+                f"{', '.join(CACHE_TIMED)} sessions")
+    if not session_env_readable():
+        return "needs cache to read session environments on this system"
+    return None
+
+
+def _slots_here(harness: str | None) -> str | None:
+    return None if slots_here() else "needs tmux slots, which can't run here"
+
+
+#: The conditions a row or a value may name, each giving the words for why it does not
+#: hold (after the row's name), or None when it holds.
+CONDITIONS: Mapping[str, Callable[[str | None], str | None]] = MappingProxyType({
+    "cache-timer": lambda harness: _cache_timer(harness),
+    "slots-here": lambda harness: _slots_here(harness),
+})
+
+
 # -- the parser -----------------------------------------------------------------------
 
 class _Parser(argparse.ArgumentParser):
@@ -852,7 +1093,7 @@ def build_parser(harness: str, *, available: Callable[[str], bool] | None = None
                                 retired=row_.retired, help=argparse.SUPPRESS)
             taken.add(row_.option)
             continue
-        if not row_.offered(avail):
+        if not row_.offered(avail, harness):
             continue
         taken.add(row_.option)
         _add_option(parser, row_)
@@ -1031,11 +1272,11 @@ def _spells(row_: Row, flag: str, value: str | None) -> bool:
 
 def _refuse_unoffered(harness, unknown, avail) -> None:
     hidden = {r.option: r for r in [*launcher(), *load(harness)]
-              if r.retired is None and not r.owned and not r.offered(avail)}
+              if r.retired is None and not r.owned and not r.offered(avail, harness)}
     for token in unknown:
         found = hidden.get(token.split("=", 1)[0])
         if found is not None:
-            raise NeedsModule(found)
+            raise NeedsModule(found, *(found.unoffered(avail, harness) or ()))
 
 
 # -- the --help diff ------------------------------------------------------------------
@@ -1185,7 +1426,9 @@ def describe(row_: Row, available: Callable[[str], bool] | None = None) -> dict:
     """One row as plain data, for `moxi launcher catalog --json`. `option` is the
     launcher's option for the row, None for an owned row and for `extra_flags`, which
     takes the words after `--`; `offered` is false for an owned row and for one whose
-    module is absent."""
+    module is absent or whose condition does not hold here, and `unoffered` says why.
+    `requires` is a module's name, or a list of several."""
+    why = None if row_.owned else row_.unoffered(available)
     return {
         "name": row_.name,
         "harness": row_.harness or LAUNCHER,
@@ -1201,8 +1444,9 @@ def describe(row_: Row, available: Callable[[str], bool] | None = None) -> dict:
         "optional_value": row_.optional_value,
         "owned": row_.owned,
         "posture": row_.posture,
-        "requires": row_.requires,
+        "requires": (list(row_.required) if len(row_.required) > 1 else row_.requires),
         "offered": not row_.owned and row_.offered(available),
+        "unoffered": why[0] if why is not None and row_.retired is None else None,
     }
 
 

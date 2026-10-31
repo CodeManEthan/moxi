@@ -2,22 +2,24 @@
 Claude Code, Codex and OpenCode write; none is cut from a real record. Claude transcripts
 and Codex rollouts are written through sessions' builders (`moxi_sessions.api.testing`).
 
-Every test runs with cache's and sessions' roots under a directory of its own
-(`MOXI_CACHE_HOME`, `MOXI_SESSIONS_CONFIG_HOME`), with Claude Code's config directory
-pointed into the test's tmp path, `XDG_CONFIG_HOME` (where systemd user units live)
-there too, and with the lifetime table read from a copy of the
-shipped one, so no test reads or writes the files of the user running it.
+Every test runs inside the kit's fence (the package's root `conftest.py`): HOME, the XDG
+homes (`XDG_CONFIG_HOME` is where systemd user units live), Claude Code's config
+directory and every module's home are the test's own, so no test reads or writes the
+files of the user running it. On top of that, cache's home and sessions' config root are
+directories a test can name (`own_roots`), and the lifetime table is read from a copy of
+the shipped one.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
 import pytest
 
-from moxi_cache import table
+from moxi_cache import table, timer
 from moxi_sessions.api import testing
 
 HOUR = 3600
@@ -25,21 +27,44 @@ HOUR = 3600
 
 @pytest.fixture(autouse=True)
 def own_roots(tmp_path, monkeypatch) -> Path:
-    """cache's five roots under one directory, sessions' config root empty, and Claude
-    Code's config directory in tmp. Returns cache's home."""
+    """cache's five roots under one directory and sessions' config root empty, both in
+    tmp where a test can write a config file (`write_cache_config`,
+    `write_sessions_config`). Returns cache's home."""
     home = tmp_path / "cache-home"
     home.mkdir()
     monkeypatch.setenv("MOXI_CACHE_HOME", str(home))
-    for name in ("MOXI_CACHE_STATE_HOME", "MOXI_CACHE_CONFIG_HOME", "MOXI_CACHE_RUNTIME_DIR",
-                 "MOXI_CACHE_DATA_HOME", "MOXI_CACHE_CACHE_HOME"):
-        monkeypatch.delenv(name, raising=False)
     sessions_config = tmp_path / "sessions-config"
     sessions_config.mkdir()
     monkeypatch.setenv("MOXI_SESSIONS_CONFIG_HOME", str(sessions_config))
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
-    # The systemd user unit folder lives under XDG_CONFIG_HOME: never the user's own.
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
     return home
+
+
+def claude_config() -> Path:
+    """Claude Code's config directory, as the fence set it for this test."""
+    return Path(os.environ["CLAUDE_CONFIG_DIR"])
+
+
+@pytest.fixture
+def installed_modules() -> None:
+    """The installed modules' timer subscriptions, as a real install finds them: a test
+    that asks for this fixture reads the real scan, which `no_module_subscriptions` then
+    leaves alone."""
+
+
+@pytest.fixture(autouse=True)
+def no_module_subscriptions(request, monkeypatch) -> None:
+    """No module installed beside cache declares a timer subscription here, so what the
+    watcher, `timers` and `doctor` find is the test's own config. A test that reads
+    modules' subscriptions hands `from_modules` its entry points, or asks for
+    `installed_modules` to read the real scan."""
+    if "installed_modules" in request.fixturenames:
+        return
+    real = timer.from_modules
+
+    def from_modules(entry_points=None, find=None):
+        return real([] if entry_points is None else entry_points, find)
+
+    monkeypatch.setattr(timer, "from_modules", from_modules)
 
 
 @pytest.fixture(autouse=True)

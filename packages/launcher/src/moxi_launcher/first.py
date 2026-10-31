@@ -74,7 +74,10 @@ COMMS_NAME = "MOXI_COMMS_NAME"
 BRIEF_HEADER = "Brief from launcher, launched by {actor}"
 #: The first line of a first turn that carries a handoff, with or without a brief.
 HANDOFF_HEADER = "Handoff from launcher, launched by {actor}: {path}"
-_HEADER_STARTS = ("Brief from launcher, launched by ", "Handoff from launcher, launched by ")
+#: The first line of a self relaunch's first turn, which carries its handoff alone.
+RELAUNCH_HEADER = "Handoff from launcher, relaunched by {actor}: {path}"
+_HEADER_STARTS = ("Brief from launcher, launched by ", "Handoff from launcher, launched by ",
+                  "Handoff from launcher, relaunched by ")
 
 #: The reason written with `first-sent` when turns could not say whether the text went in.
 UNCONFIRMED = "unconfirmed"
@@ -119,14 +122,15 @@ def actor(env: Mapping[str, str] | None = None) -> str:
 
 
 def text(*, actor: str, brief: str | None = None, handoff: str | os.PathLike | None = None,
-         handoff_text: str | None = None) -> str | None:
+         handoff_text: str | None = None, relaunched: bool = False) -> str | None:
     """The first turn a launch sends, or None when it has neither brief nor handoff.
 
     It starts with one header line naming the launcher and `actor`. With a handoff the
     header names its path and the handoff's text follows; a brief comes after the handoff
-    when there are both. `handoff_text` is the handoff's text when the caller has read it
-    already; otherwise the file is read here, any readable file, and one that can't be
-    read raises `HandoffUnreadable`.
+    when there are both. `relaunched` marks a relaunch's handoff, whose header says the
+    session was relaunched by `actor`. `handoff_text` is the handoff's text when the
+    caller has read it already; otherwise the file is read here, any readable file, and
+    one that can't be read raises `HandoffUnreadable`.
     """
     brief = brief if brief and brief.strip() else None
     if handoff is None and brief is None:
@@ -136,7 +140,8 @@ def text(*, actor: str, brief: str | None = None, handoff: str | os.PathLike | N
     path = os.fspath(handoff)
     if handoff_text is None:
         handoff_text = read_handoff(path)
-    parts = [HANDOFF_HEADER.format(actor=actor, path=path), handoff_text.strip("\n")]
+    header = RELAUNCH_HEADER if relaunched else HANDOFF_HEADER
+    parts = [header.format(actor=actor, path=path), handoff_text.strip("\n")]
     if brief is not None:
         parts.append(brief)
     return "\n\n".join(parts)
@@ -279,7 +284,8 @@ def send(conn: sqlite3.Connection, request_id: str, *, pid: int | None = None,
     if row.state not in _CLAIMABLE:
         return Outcome(request_id, "not-claimed", detail=f"the launch is {row.state}")
     try:
-        body = text(actor=row.actor, brief=row.brief, handoff=row.handoff_path)
+        body = text(actor=row.actor, brief=row.brief, handoff=row.handoff_path,
+                    relaunched=bool(row.relaunch_of))
     except HandoffUnreadable as error:
         return _fail(conn, row, HANDOFF_UNREADABLE, error.why, leaving=_CLAIMABLE)
     turns = turns_api() if turns is None else turns
@@ -478,6 +484,6 @@ def deliver(request_id: str, *, pid: int | None = None, out: TextIO | None = Non
 
 
 __all__ = ["BRIEF_HEADER", "EVENT", "HANDOFF_HEADER", "HANDOFF_UNREADABLE", "NO_READY",
-           "NO_TURNS", "TURNS_INTERFACE", "TURNS_SEAM", "UNCONFIRMED", "HandoffUnreadable",
+           "NO_TURNS", "RELAUNCH_HEADER", "TURNS_INTERFACE", "TURNS_SEAM", "UNCONFIRMED", "HandoffUnreadable",
            "Outcome", "actor", "deliver", "deliverer_argv", "on_argv", "read_handoff", "ref",
            "run_log", "send", "start_deliverer", "text", "turns_api"]

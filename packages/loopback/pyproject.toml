@@ -53,9 +53,10 @@ packages = ["src/moxi_loopback"]
 # A source distribution holds these paths and nothing else.
 only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_loopback", "tests"]
 
-# A plain `pytest` runs the units and contract seams, and so does `moxi-dev check`: the
-# tiers are deselected here. Run one by hand with `pytest -m <tier>` (a live test also
-# needs MOXI_TEST_LIVE=1).
+# A plain `pytest` runs the units and contract seams: the tiers are deselected here.
+# `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a
+# changed path; `moxi-dev check --full` runs every tier but live. Run one by hand with
+# `pytest -m <tier>` (a live test also needs MOXI_TEST_LIVE=1).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m 'not browser and not slow and not build and not live'"

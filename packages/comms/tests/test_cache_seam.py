@@ -100,7 +100,7 @@ def module_not_asked(monkeypatch):
 # ============================================================== the seam's own rules
 
 def test_no_import_in_comms_names_cache_s_package():
-    """Only `load` reaches cache; `moxi check` refuses an import of an
+    """Only `load` reaches cache; the contract's lint refuses an import of an
     optional module, and this holds it for every file of the package too."""
     for path in SRC.rglob("*.py"):
         for node in ast.walk(ast.parse(path.read_text())):
@@ -379,10 +379,10 @@ def test_a_store_handed_in_is_kept_open_at_stop(rig):
         store.close()
 
 
-def test_cache_writes_under_its_own_roots_in_the_rig(rig, tmp_path):
-    """The rig points cache's roots into tmp: the learning lock is there, not in the home
-    of whoever runs the suite."""
+def test_cache_writes_under_its_own_roots_in_the_rig(rig, fence):
+    """The test fence points cache's home into tmp: the learning lock is there, not in the
+    home of whoever runs the suite."""
     cache_api()
     lock = Path(rig.daemon.cache_store.lock_path)
-    assert str(lock).startswith(str(tmp_path)), lock
+    assert lock.is_relative_to(fence.module_home("cache")), lock
     assert json.dumps(str(lock))

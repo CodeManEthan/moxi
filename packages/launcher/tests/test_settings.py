@@ -14,7 +14,23 @@ DEFAULTS = {
     "startup.trust_dialog": False,
     "startup.dev_channels_dialog": False,
     "runs.keep_days": 30,
+    "relaunch.wait_s": 900,
+    "relaunch.person_s": 120,
+    "relaunch.dialog_s": 60,
+    "relaunch.name_wait_s": 15,
+    "relaunch.follow_s": 300,
+    "relaunch.fallback": "",
+    "relaunch.pass_env": [],
+    "relaunch.director_pass_env": [],
+    "relaunch.notice_retry_s": 30,
+    "recycle.limit_wait_s": 1800,
+    "keep_warm.subagent_cap": 3,
+    "keep_warm.director_cap": 10,
+    "page.launch_wait_s": 600,
+    "records.keep_days": 90,
 }
+#: The list settings whose defaults are texts: checked for their count only.
+TEXTS = {"keep_warm.subagent_texts": 3, "keep_warm.director_texts": 2}
 
 
 def test_with_no_file_every_key_has_its_default():
@@ -25,7 +41,10 @@ def test_with_no_file_every_key_has_its_default():
 
 
 def test_the_schema_declares_exactly_these_keys():
-    assert set(settings.schema().keys) == set(DEFAULTS)
+    assert set(settings.schema().keys) == set(DEFAULTS) | set(TEXTS)
+    current = settings.current()
+    for key, count in TEXTS.items():
+        assert len(current[key]) == count and all(isinstance(t, str) for t in current[key])
 
 
 def test_the_startup_keys_need_slots():

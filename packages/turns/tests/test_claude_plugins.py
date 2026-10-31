@@ -1,6 +1,8 @@
 """The Claude plugins inside the package: their layout as a
 folder marketplace, `claude plugin validate` on each, and their own tests under
-`claude plugin test`. The last two need Claude Code on PATH and are skipped without it."""
+`claude plugin test`. The last two need Claude Code on PATH and are skipped without it;
+the plugin tests take most of a minute, so they are `slow` and come back into
+`moxi-dev check` when a plugin's files change."""
 
 from __future__ import annotations
 
@@ -56,6 +58,9 @@ def test_claude_plugin_validate_passes(folder):
 
 
 @needs_claude
+@pytest.mark.slow
+@pytest.mark.touches("packages/turns/src/moxi_turns/claude/**",
+                     "packages/turns/tests/test_claude_plugins.py")
 @pytest.mark.parametrize("name", PLUGINS)
 def test_claude_plugin_test_passes(name):
     out = _claude("test", str(CLAUDE_DIR / name), timeout=420)

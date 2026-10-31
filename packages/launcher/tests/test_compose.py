@@ -113,12 +113,12 @@ def test_every_claude_row_composed_at_once_in_its_order():
     assert got.env == {"MOXI_TURNS_COMMANDS": "exit", "MOXI_LAUNCHER_REQUEST": "r1"}
 
 
-def test_the_claude_order_covers_every_row_but_resume():
+def test_the_claude_order_covers_every_row():
     names = {row.name for row in catalog.load("claude")}
-    assert set(claude.ORDER) - {claude.ADDITIONS} == names - {"resume"}
+    assert set(claude.ORDER) - {claude.ADDITIONS} == names
 
 
-def test_resume_is_refused():
+def test_resume_as_a_value_is_refused():
     with pytest.raises(catalog.Refused, match="resume"):
         claude.compose(claude_values(resume=SID), ctx())
 

@@ -228,7 +228,7 @@ def unchanged(root) -> bool:
 
 
 @pytest.mark.parametrize("module, says", [
-    ("check", "one of the core's own verbs"),
+    ("config", "one of the core's own verbs"),
     ("installs", "a name the core keeps for itself"),
     ("Bad-Name", "not a Moxi module name"),
     ("other", "the workspace already has moxi-other"),

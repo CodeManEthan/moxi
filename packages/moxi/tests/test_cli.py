@@ -1,4 +1,4 @@
-"""The umbrella: the verbs, dispatch to a module, `modules`, `shortcut`, `config`, `check`."""
+"""The umbrella: the verbs, dispatch to a module, `modules`, `shortcut`, `config`."""
 
 from __future__ import annotations
 
@@ -74,6 +74,16 @@ def test_help_prints_usage(capsys):
 def test_help_on_a_verb_prints_that_verb_s_help(capsys):
     code, out, _ = run(capsys, "help", "modules")
     assert code == 0 and "usage: moxi modules" in out
+
+
+def test_check_says_the_contract_check_moved_to_moxi_dev(capsys):
+    code, out, err = run(capsys, "check", "--staged", "some/path")
+    assert code == 2 and out == ""
+    assert err.startswith("moxi check: the module contract check moved out of moxi")
+    assert "moxi-dev check " in err and "moxi-dev contract [--staged] [PATH]" in err
+    assert "install" not in err
+    code, out, _ = run(capsys, "help", "check")
+    assert code == 0 and "moxi-dev contract" in out
 
 
 def test_help_on_a_module_runs_its_help(alpha, capsys):
@@ -585,18 +595,6 @@ def test_paths_of_an_absent_module_or_a_bad_name(site, capsys):
     assert code == 2 and "not a module name" in err
 
 
-# -- moxi check --------------------------------------------------------------------------
-
-def test_check_runs_moxi_contract_main_with_its_arguments(monkeypatch, capsys):
-    seen = []
-    stub = types.ModuleType("moxi.contract")
-    stub.main = lambda argv: seen.append(argv) or 5
-    monkeypatch.setitem(sys.modules, "moxi.contract", stub)
-    monkeypatch.setattr(moxi, "contract", stub, raising=False)
-    assert cli.main(["check", "--staged", "some/path"]) == 5
-    assert seen == [["--staged", "some/path"]]
-
-
 # -- the console script ------------------------------------------------------------------
 
 def test_pyproject_declares_the_moxi_script_and_no_other():
@@ -611,7 +609,7 @@ def test_pyproject_declares_the_moxi_script_and_no_other():
 def test_importing_the_cli_loads_no_verb_module():
     code = ("import sys, moxi.cli\n"
             "bad = [m for m in ('moxi.install', 'moxi.config', 'moxi.modules', "
-            "'moxi.contract', 'importlib.metadata', 'tomllib', 'argparse') "
+            "'importlib.metadata', 'tomllib', 'argparse') "
             "if m in sys.modules]\n"
             "print(bad)\n")
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,

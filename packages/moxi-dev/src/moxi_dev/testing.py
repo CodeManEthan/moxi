@@ -71,16 +71,66 @@ The fsync seam: `os.fsync` (and `os.fdatasync`) is a no-op in every test that is
 marked `honest_fsync`; the no-op still refuses a closed descriptor. Code must call
 `os.fsync(...)` through the module for the seam to reach it.
 
-Markers registered here: `browser`, `live`, `slow`, `build`, `touches`, `finding` and
-`honest_fsync`. A package's `addopts` deselects the four tiers in `TIERS`; a `live` test
-also needs `MOXI_TEST_LIVE=1` in the environment pytest starts with, else it is skipped.
+Markers registered here: `browser`, `live`, `slow`, `build`, `touches`, `finding`,
+`timed` and `honest_fsync`. A package's `addopts` deselects the four tiers in `TIERS`; a
+`live` test also needs `MOXI_TEST_LIVE=1` in the environment pytest starts with, else it
+is skipped.
+
+Timed tests. A test that asserts a wall-clock budget (a median under so many
+milliseconds, an import under its share of a hook's ceiling) is marked `timed`, whatever
+its tier. Beside other tests on a loaded machine such a test measures the machine, so
+`moxi-dev check` never runs one beside another: its parallel pass holds the timed tests
+back and a serial pass afterwards runs them alone. A test whose bound only tells a
+deadline or timeout that fired from one that never did (a 0.3 s timeout that must return
+in under 0.9 s) is not timed. A plain `pytest`, with neither of the values below, runs a
+timed test where it falls, like any other.
+
+Selection. Five variables, read from the environment pytest starts with, change what
+runs; `moxi-dev check` sets them for each suite, and a contributor may set them by hand:
+
+- `MOXI_TEST_TIERS=all` puts back every test of the `browser`, `slow` and `build` tiers
+  that the package's `-m` deselected. A `live` test is never put back.
+- `MOXI_TEST_CHANGED=<file>` names a file of repository paths that changed, separated by
+  NUL bytes. A `browser`, `slow` or `build` test (never a `live` one) marked
+  `@pytest.mark.touches("packages/<p>/<glob>")` is put back when one of its globs
+  matches one of the paths (`touches_match`). A glob that does not start with
+  `packages/` is refused when the tests are collected, since it could never match.
+- `MOXI_TEST_FINDING=L<n>[,L<n>...]` runs only the tests marked `finding` with one of
+  those arguments, a tier test among them put back as above; every other test is
+  deselected.
+- `MOXI_TEST_TIMED=hold` deselects every `timed` test the run would otherwise run, and
+  the run's `durations.json` names them under `held` (under xdist the workers collect,
+  and each hands its list to the controller). `MOXI_TEST_TIMED=only` deselects every
+  test that is not `timed`. Both apply after the rest of the selection and the run's own
+  `-m` and `-k`, so with the same other variables an `only` run runs exactly the tests a
+  `hold` run held.
+- `MOXI_TEST_LEAVE_OUT=<tier>[,<tier>...]` names tiers (of `browser`, `slow` and
+  `build`) whose tests are never put back, whatever the variables above ask; the
+  package's `-m` still deselects them. `moxi-dev check` sets `browser` for a package
+  whose browser tests can't run because Playwright's Chromium can't start.
+
+A test put back gets the marker `lifted`, and the run's `-m` expression becomes
+`(<expression>) or lifted`, so pytest's own deselection keeps it and `-k` still applies.
+
+Durations. Each run writes `durations.json`: every test's seconds by phase (`setup`,
+`call`, `teardown`), its outcome and, for a test this run put back, `lifted` with its
+tiers, from the reports the main process sees (under xdist, the controller's), and,
+under `MOXI_TEST_TIMED=hold`, the `held` tests' ids. It goes to the path in
+`MOXI_TEST_DURATIONS`, else to
+`moxi-dev/durations.json` in pytest's cache directory; with neither (the cache plugin
+off) nothing is written.
+
+A seam with two implementations: `Seam` parametrizes a fixture over every
+implementation for the contract suites and gives the rest the default one.
 """
 
 from __future__ import annotations
 
 import contextlib
 import dataclasses
+import functools
 import ipaddress
+import json
 import os
 import re
 import shutil
@@ -110,15 +160,51 @@ MARKERS = {
     "live": "reaches real services; deselected by a plain pytest run, and runs only "
             "with MOXI_TEST_LIVE=1",
     "slow": "takes long; deselected by a plain pytest run",
-    "build": "builds a distribution or an environment; deselected by a plain pytest run",
+    "build": "builds and installs distributions end to end, past what every run can "
+             "afford (minutes, uv's warm cache); a quick offline build stays in the "
+             "plain run; deselected by a plain pytest run",
     "touches(*globs)": "the repository paths whose change puts this test back in "
                        "moxi-dev check",
     "finding(tag)": "the finding this test holds",
+    "timed": "asserts a wall-clock budget; moxi-dev check runs it alone, in a serial "
+             "pass after the parallel one",
     "honest_fsync": "os.fsync is the real one in this test",
 }
 
 #: The variable a `live` test needs, set to 1.
 LIVE_ENV = "MOXI_TEST_LIVE"
+
+#: `all`: every tier but `live` runs (module doc, Selection).
+TIERS_ENV = "MOXI_TEST_TIERS"
+#: A file of the repository paths that changed, NUL-separated (module doc, Selection).
+CHANGED_ENV = "MOXI_TEST_CHANGED"
+#: `L<n>[,L<n>...]`: only the tests that carry one of these findings run.
+FINDING_ENV = "MOXI_TEST_FINDING"
+#: Where `durations.json` goes.
+DURATIONS_ENV = "MOXI_TEST_DURATIONS"
+#: `hold` or `only`: what a run does with the `timed` tests (module doc, Selection).
+TIMED_ENV = "MOXI_TEST_TIMED"
+TIMED_MODES = ("hold", "only")
+#: Tiers this run never puts back, comma-separated (module doc, Selection).
+LEAVE_OUT_ENV = "MOXI_TEST_LEAVE_OUT"
+
+#: The marker of a test that asserts a wall-clock budget (module doc, Timed tests).
+TIMED = "timed"
+#: The key under which an xdist worker hands the controller the tests it held.
+_HELD_KEY = "moxi_dev_held"
+
+#: Where every `touches` glob starts: the changed paths are the repository's, and each
+#: package is under it.
+TOUCHES_ROOT = "packages/"
+
+#: The marker the kit sets on a tier test it puts back; not for tests to use.
+LIFTED = "lifted"
+
+#: The shape of a finding's name, as `finding(...)` and `MOXI_TEST_FINDING` take it.
+FINDING_NAME = re.compile(r"L[0-9]+")
+
+#: The tiers a selection can put back: every tier but `live`.
+LIFTABLE = tuple(tier for tier in TIERS if tier != "live")
 
 #: The harness homes the fence points under the test's home, each relative to it.
 HARNESS_HOMES = {
@@ -446,6 +532,14 @@ def _quiet_fsync(fd: Any) -> None:
 def pytest_configure(config: pytest.Config) -> None:
     for name, line in MARKERS.items():
         config.addinivalue_line("markers", f"{name}: {line}")
+    config.addinivalue_line("markers", f"{LIFTED}: set by the kit on a tier test this "
+                                       "run puts back; not for tests to use")
+    # Per run, from the environment this pytest started with; a pytest run inside a
+    # fenced test sees the fenced one, so the outer run's selection never reaches it.
+    config.stash[_SELECTION] = selection(os.environ)
+    config.pluginmanager.register(_TimedSplit(), "moxi-dev-timed")
+    if not hasattr(config, "workerinput"):          # an xdist worker reports to the main
+        config.pluginmanager.register(_Durations(config), "moxi-dev-durations")
     # Read once, from the environment this process started with: a pytest run inside a
     # test (pytester's in-process run) already sees the fenced one.
     _SESSION.setdefault("live", os.environ.get(LIVE_ENV) == "1")
@@ -457,6 +551,286 @@ def pytest_configure(config: pytest.Config) -> None:
 def pytest_runtest_setup(item: pytest.Item) -> None:
     if item.get_closest_marker("live") and not _SESSION.get("live"):
         pytest.skip(f"a live test runs only with {LIVE_ENV}=1")
+
+
+# --- selection -------------------------------------------------------------------------
+
+@dataclasses.dataclass(frozen=True)
+class Selection:
+    """What a run puts back past the package's `-m`, and what it keeps (module doc)."""
+
+    all_tiers: bool = False
+    changed: tuple[str, ...] = ()
+    findings: frozenset[str] = frozenset()
+    timed: str = ""                     # "", "hold" or "only"
+    left_out: frozenset[str] = frozenset()   # tiers never put back
+
+    def lifts(self, item: pytest.Item) -> bool:
+        """Whether this run puts `item` back: a `browser`, `slow` or `build` test, never
+        a `live` one or one of a tier left out, that every tier, a changed path or a
+        finding asks for."""
+        if any(item.get_closest_marker(tier) for tier in ("live", *self.left_out)):
+            return False
+        if not any(item.get_closest_marker(tier) for tier in LIFTABLE):
+            return False
+        if self.all_tiers or (self.findings and findings_of(item) & self.findings):
+            return True
+        return any(touches_match(glob, path)
+                   for mark in item.iter_markers("touches") for glob in mark.args
+                   if isinstance(glob, str) for path in self.changed)
+
+
+_SELECTION = pytest.StashKey[Selection]()
+
+
+def selection(environ: Mapping[str, str]) -> Selection:
+    """The selection the environment asks for; `pytest.UsageError` for a bad value."""
+    tiers = environ.get(TIERS_ENV, "").strip()
+    if tiers not in ("", "all"):
+        raise pytest.UsageError(f"{TIERS_ENV} is 'all' or unset; it is {tiers!r}")
+    changed: tuple[str, ...] = ()
+    where = environ.get(CHANGED_ENV, "")
+    if where:
+        try:
+            text = Path(where).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise pytest.UsageError(f"{CHANGED_ENV}: can't read {where} ({exc})") from exc
+        changed = tuple(path for path in text.split("\0") if path)
+    names = [name.strip() for name in environ.get(FINDING_ENV, "").split(",")]
+    names = [name for name in names if name]
+    bad = [name for name in names if not FINDING_NAME.fullmatch(name)]
+    if bad:
+        raise pytest.UsageError(f"{FINDING_ENV} names findings as L<n>, comma-separated; "
+                                f"{', '.join(map(repr, bad))} is not one")
+    timed = environ.get(TIMED_ENV, "").strip()
+    if timed not in ("", *TIMED_MODES):
+        raise pytest.UsageError(f"{TIMED_ENV} is {' or '.join(map(repr, TIMED_MODES))} or "
+                                f"unset; it is {timed!r}")
+    left_out = [tier.strip() for tier in environ.get(LEAVE_OUT_ENV, "").split(",")]
+    left_out = [tier for tier in left_out if tier]
+    bad = [tier for tier in left_out if tier not in LIFTABLE]
+    if bad:
+        raise pytest.UsageError(f"{LEAVE_OUT_ENV} names tiers of {', '.join(LIFTABLE)}, "
+                                f"comma-separated; {', '.join(map(repr, bad))} is not one")
+    return Selection(all_tiers=tiers == "all", changed=changed, findings=frozenset(names),
+                     timed=timed, left_out=frozenset(left_out))
+
+
+def findings_of(item: pytest.Item) -> set[str]:
+    """The findings `item`'s `finding` marks name."""
+    return {arg for mark in item.iter_markers("finding") for arg in mark.args
+            if isinstance(arg, str)}
+
+
+@functools.lru_cache(maxsize=256)
+def _glob_regex(glob: str) -> re.Pattern[str]:
+    out, i, n = [], 0, len(glob)
+    while i < n:
+        if glob.startswith("**/", i):
+            out.append("(?:[^/]*/)*")
+            i += 3
+        elif glob.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif glob[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif glob[i] == "?":
+            out.append("[^/]")
+            i += 1
+        elif glob[i] == "[" and (end := glob.find("]", i + 2)) != -1:
+            body = glob[i + 1:end]
+            if body.startswith("!"):
+                body = "^" + body[1:]
+            out.append("[" + body.replace("\\", "\\\\") + "]")
+            i = end + 1
+        else:
+            out.append(re.escape(glob[i]))
+            i += 1
+    return re.compile("".join(out))
+
+
+def touches_match(glob: str, path: str) -> bool:
+    """Whether a repository path matches a `touches` glob, both relative to the
+    repository's root with `/` between parts. `*` and `?` stay within one part, `[...]`
+    is a set of characters, and `**` is any number of parts (`a/**` is everything
+    under `a`). A glob that matches a directory the path is under matches the path."""
+    glob = glob.strip().strip("/")
+    if not glob:
+        return False
+    regex = _glob_regex(glob)
+    parts = path.strip("/").split("/")
+    return any(regex.fullmatch("/".join(parts[:end])) for end in range(len(parts), 0, -1))
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Keep only a finding's tests when one is asked for, and put back the tier tests the
+    run asks for, before pytest's own `-m` deselects (module doc, Selection)."""
+    chosen = config.stash.get(_SELECTION, None)
+    if chosen is None:
+        return
+    bad = [f"{item.nodeid}: {glob!r}" for item in items
+           for mark in item.iter_markers("touches") for glob in mark.args
+           if not (isinstance(glob, str)
+                   and glob.strip().strip("/").startswith(TOUCHES_ROOT))]
+    if bad:
+        # A glob relative to the package would never match a changed path, and its test
+        # would quietly run only under every tier.
+        raise pytest.UsageError(
+            f"a touches glob is a path from the repository's root, under {TOUCHES_ROOT} "
+            f"(such as '{TOUCHES_ROOT}<package>/src/**'); these are not: " + "; ".join(bad))
+    if chosen.findings:
+        keep = [item for item in items if findings_of(item) & chosen.findings]
+        dropped = [item for item in items if not findings_of(item) & chosen.findings]
+        if dropped:
+            config.hook.pytest_deselected(items=dropped)
+            items[:] = keep
+    lifted = False
+    for item in items:
+        if chosen.lifts(item):
+            item.add_marker(getattr(pytest.mark, LIFTED))
+            lifted = True
+    if lifted and config.option.markexpr:
+        config.option.markexpr = f"({config.option.markexpr}) or {LIFTED}"
+
+
+_HELD = pytest.StashKey[list[str]]()
+
+
+class _TimedSplit:
+    """Holds the `timed` tests back, or keeps only them (module doc, Selection)."""
+
+    @pytest.hookimpl(trylast=True)
+    def pytest_collection_modifyitems(self, config: pytest.Config,
+                                      items: list[pytest.Item]) -> None:
+        # trylast: after the kit's own selection and after pytest's -m and -k, so what is
+        # held is what this run would otherwise have run.
+        chosen = config.stash.get(_SELECTION, None)
+        if chosen is None or not chosen.timed:
+            return
+        timed = [item for item in items if item.get_closest_marker(TIMED)]
+        rest = [item for item in items if not item.get_closest_marker(TIMED)]
+        keep, dropped = (rest, timed) if chosen.timed == "hold" else (timed, rest)
+        if dropped:
+            config.hook.pytest_deselected(items=dropped)
+            items[:] = keep
+        if chosen.timed == "hold":
+            held = [item.nodeid for item in timed]
+            config.stash[_HELD] = held
+            if hasattr(config, "workeroutput"):
+                config.workeroutput[_HELD_KEY] = held
+
+
+# --- durations -------------------------------------------------------------------------
+
+class _Durations:
+    """Collects each test's seconds by phase and writes `durations.json` at the end."""
+
+    def __init__(self, config: pytest.Config) -> None:
+        self.config = config
+        self.tests: dict[str, dict[str, Any]] = {}
+        self.held: set[str] = set()
+
+    @pytest.hookimpl(optionalhook=True)
+    def pytest_testnodedown(self, node: Any, error: Any) -> None:
+        """An xdist worker is done: keep the tests it held back."""
+        output = getattr(node, "workeroutput", None) or {}
+        self.held.update(output.get(_HELD_KEY) or ())
+
+    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        entry = self.tests.setdefault(report.nodeid, {})
+        entry[report.when] = round(entry.get(report.when, 0.0) + report.duration, 6)
+        if LIFTED in report.keywords:
+            entry["lifted"] = [tier for tier in LIFTABLE if tier in report.keywords]
+        if report.failed:
+            entry["outcome"] = "failed"
+        elif report.skipped and entry.get("outcome") != "failed":
+            entry["outcome"] = "skipped"
+        else:
+            entry.setdefault("outcome", "passed")
+
+    def path(self) -> Path | None:
+        given = os.environ.get(DURATIONS_ENV)
+        if given:
+            return Path(given)
+        cache = getattr(self.config, "cache", None)
+        return cache.mkdir("moxi-dev") / "durations.json" if cache is not None else None
+
+    def pytest_sessionfinish(self, session: pytest.Session) -> None:
+        path = self.path()
+        if path is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        part = path.with_name(path.name + ".part")
+        body: dict[str, Any] = {"format": 1, "tests": self.tests}
+        chosen = self.config.stash.get(_SELECTION, None)
+        if chosen is not None and chosen.timed == "hold":
+            body["held"] = sorted(self.held | set(self.config.stash.get(_HELD, [])))
+        part.write_text(json.dumps(body, indent=1, sort_keys=True) + "\n",
+                        encoding="utf-8")
+        os.replace(part, path)
+
+
+# --- a seam with two implementations -------------------------------------------------------
+
+class Seam:
+    """A seam with two or more implementations, behind one fixture.
+
+    The contract suites (`contract`, test file names such as `test_delivery.py`) run
+    each of their tests once on every implementation; every other test that asks for
+    the fixture gets `default`. In the package's `conftest.py`:
+
+        BACKEND = Seam("backend", ["mock", "local"], default="mock",
+                       contract=["test_delivery.py", "test_claims.py"])
+        backend = BACKEND.fixture
+
+        def pytest_generate_tests(metafunc):
+            BACKEND.parametrize(metafunc)
+
+    The fixture's value is the implementation (a name, usually), which the package's own
+    fixtures build from. Test ids are `param_id` of each implementation, the same on
+    every run. A test that parametrizes the fixture itself is left as it is."""
+
+    def __init__(self, name: str, implementations: Iterable[Any], *, default: Any,
+                 contract: Iterable[str]) -> None:
+        values = tuple(implementations)
+        if len(values) < 2:
+            raise ValueError(f"seam {name!r}: a seam has two implementations or more")
+        if len(set(map(param_id, values))) != len(values):
+            raise ValueError(f"seam {name!r}: two implementations have the same id")
+        if default not in values:
+            raise ValueError(f"seam {name!r}: the default {default!r} is not one of "
+                             f"its implementations")
+        self.name = name
+        self.implementations = values
+        self.default = default
+        self.contract = frozenset(contract)
+
+        @pytest.fixture(name=name)
+        def _fixture(request: pytest.FixtureRequest) -> Any:
+            return getattr(request, "param", default)
+
+        self.fixture = _fixture
+
+    def is_contract(self, metafunc: pytest.Metafunc) -> bool:
+        """Whether `metafunc`'s test is in one of the contract suites."""
+        module = getattr(metafunc, "module", None)
+        where = getattr(module, "__file__", None)
+        return where is not None and Path(where).name in self.contract
+
+    def parametrize(self, metafunc: pytest.Metafunc) -> None:
+        """Call from `pytest_generate_tests`: a contract test that asks for the fixture
+        runs on each implementation."""
+        if self.name not in metafunc.fixturenames or not self.is_contract(metafunc):
+            return
+        for mark in metafunc.definition.iter_markers("parametrize"):
+            names = mark.args[0] if mark.args else mark.kwargs.get("argnames", ())
+            if isinstance(names, str):
+                names = [part.strip() for part in names.split(",")]
+            if self.name in names:
+                return
+        metafunc.parametrize(self.name, self.implementations, indirect=True, ids=param_id)
 
 
 @pytest.hookimpl(wrapper=True)
@@ -671,6 +1045,8 @@ def _statements(script: str) -> Iterator[str]:
         yield pending
 
 
-__all__ = ["Fence", "FenceError", "HARNESS_HOMES", "KEPT_ENV", "LIVE_ENV", "MARKERS",
-           "SHUTDOWN_POLL", "TIERS", "fence", "param_id", "served", "short_dir",
+__all__ = ["CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV", "Fence", "FenceError",
+           "HARNESS_HOMES", "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS", "SHUTDOWN_POLL",
+           "Seam", "Selection", "TIERS", "TIERS_ENV", "TIMED", "TIMED_ENV", "fence",
+           "findings_of", "param_id", "selection", "served", "short_dir", "touches_match",
            "uv_env", "wait_for", "write_sqlite"]

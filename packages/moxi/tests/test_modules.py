@@ -127,11 +127,12 @@ def test_a_distribution_without_its_private_path_off_sys_path_is_not_seen(site, 
     assert not modules._seen_by_load(_Renamed(egg))
 
 
-def test_a_core_verb_is_broken_naming_the_clash(site):
-    site.module("check")
-    found = modules.load("check")
+@pytest.mark.parametrize("verb", ["config", "check"])
+def test_a_core_verb_is_broken_naming_the_clash(site, verb):
+    site.module(verb)
+    found = modules.load(verb)
     assert found.state == BROKEN
-    assert "verbs" in found.reason and "moxi check" in found.reason
+    assert "verbs" in found.reason and f"moxi {verb}" in found.reason
 
 
 def test_a_name_that_breaks_the_rule_is_broken_in_the_scan_and_absent_to_load(site):
