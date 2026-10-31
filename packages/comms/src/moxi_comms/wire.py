@@ -31,7 +31,7 @@ import concurrent.futures
 import logging
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from moxi import ipc
@@ -145,6 +145,9 @@ WORKERS = 32
 #: connection to end: the write deadline, and room for the releases that follow.
 START_WAIT = 10.0
 CLOSE_WAIT = WRITE_DEADLINE + 3.0
+#: How long `Host.close` waits for its stop hook, which has a bound of its own inside
+#: (the endpoint's graceful shutdown); this one is the backstop.
+STOP_HOOK_WAIT = 10.0
 
 
 class Then:
@@ -171,6 +174,11 @@ class Host:
     `closed(conn)` runs on a pool thread once a connection has closed. `start` serves the
     address and takes its lock, so a second daemon refuses at once; methods wait until
     `open`, so nothing is answered before the daemon has loaded what it routes from.
+
+    The daemon serves comms' tools on the same loop and pool: `loop`, `run_on_loop`,
+    `opened` and `pool` are that seam, and `stop_hook` closes the tools' endpoint before
+    the address. Nothing on the loop uses the loop's default executor, which has one
+    thread; work that blocks goes to `pool`.
     """
 
     def __init__(self, address: str, call: Callable[[ipc.Connection, str, object], object],
@@ -183,7 +191,9 @@ class Host:
         self._call = call
         self._closed_cb = closed
         self.max_connections = max_connections
-        self._pool = concurrent.futures.ThreadPoolExecutor(
+        #: The pool every comms method runs on, public so the endpoint of comms' tools
+        #: runs its synchronous work on the same threads (`WORKERS` of them).
+        self.pool = concurrent.futures.ThreadPoolExecutor(
             max_workers=workers, thread_name_prefix=f"{name}-wire")
         self._loop: asyncio.AbstractEventLoop | None = None
         self._server = None
@@ -199,6 +209,10 @@ class Host:
         #: daemon's stop.
         self._releases: set = set()
         self._releases_lock = threading.Lock()
+        #: The stop hook: a coroutine function `close` runs on the loop, and waits for,
+        #: before it stops serving the address. The endpoint of comms' tools sets it, so
+        #: its listener closes while the daemon still holds its lock. None: no hook.
+        self.stop_hook: Callable[[], Awaitable[object]] | None = None
 
     # -- life ---------------------------------------------------------------------------
 
@@ -220,9 +234,11 @@ class Host:
         self._soon(lambda: self._gate.set())
 
     def close(self, timeout: float = CLOSE_WAIT) -> bool:
-        """Stop serving: no new connections, every open one ended without waiting on a
-        peer past the write deadline, each one's `closed` run, the socket removed. True
-        when it finished within `timeout`."""
+        """Stop serving: the stop hook first, then no new connections, every open one
+        ended without waiting on a peer past the write deadline, each one's `closed` run,
+        the socket removed. True when it finished within `timeout` (the stop hook's time
+        is its own, bounded by `STOP_HOOK_WAIT`)."""
+        self._run_stop_hook()
         deadline = time.monotonic() + timeout
         if self._server is not None:
             self._soon(self._server.close)
@@ -236,8 +252,57 @@ class Host:
             _, waiting = concurrent.futures.wait(
                 releases, timeout=max(deadline - time.monotonic(), 0.0))
             done = done and not waiting
-        self._pool.shutdown(wait=False, cancel_futures=True)
+        self.pool.shutdown(wait=False, cancel_futures=True)
         return done
+
+    def _run_stop_hook(self) -> None:
+        """Run the stop hook on the loop and wait for it, at most `STOP_HOOK_WAIT`. It
+        finishes before `close` schedules the server's close. Skipped when there is no
+        hook, when the loop never started or has stopped, and when `close` runs on the
+        loop's own thread, which can't wait for work queued behind it. Once only."""
+        hook, self.stop_hook = self.stop_hook, None
+        loop = self._loop
+        if hook is None or loop is None or loop.is_closed():
+            return
+        if self._thread is threading.current_thread():
+            log.warning("the stop hook was skipped: the host closed from its own loop")
+            return
+        try:
+            future = asyncio.run_coroutine_threadsafe(hook(), loop)
+        except RuntimeError:
+            return  # the loop has closed
+        try:
+            future.result(timeout=STOP_HOOK_WAIT)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            log.warning("the stop hook didn't finish within %.0f s", STOP_HOOK_WAIT)
+        except Exception:  # noqa: BLE001 - the stop goes on
+            log.exception("the stop hook failed")
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop | None:
+        """The loop serving the address, once `start` has returned; None before."""
+        return self._loop
+
+    def run_on_loop(self, coro, timeout: float | None = None):
+        """Run coroutine `coro` on the host's loop from another thread and return its
+        result, waiting at most `timeout` seconds (None: no bound). Raises RuntimeError
+        when the loop isn't running, or when called on the loop's own thread."""
+        loop = self._loop
+        if loop is None or loop.is_closed() or self._thread is threading.current_thread():
+            coro.close()
+            raise RuntimeError("the host's loop isn't running, or this is its thread")
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            raise
+
+    async def opened(self) -> None:
+        """On the loop: wait until `open` has let methods through."""
+        if not self._gate.is_set():
+            await self._gate.wait()
 
     @property
     def connections(self) -> int:
@@ -295,10 +360,10 @@ class Host:
                                   "again in a moment")
             self._counted.add(conn)
         await self._settle_tail(conn)
-        answer = await asyncio.wrap_future(self._pool.submit(self._call, conn, method,
+        answer = await asyncio.wrap_future(self.pool.submit(self._call, conn, method,
                                                              params))
         if isinstance(answer, Then):
-            self._tails[conn] = self._pool.submit(answer.after)
+            self._tails[conn] = self.pool.submit(answer.after)
             return answer.answer
         return answer
 
@@ -326,7 +391,7 @@ class Host:
 
         # Handed to the pool before the first wait, so a cancelled close still releases.
         try:
-            future = self._pool.submit(release)
+            future = self.pool.submit(release)
         except RuntimeError:
             # The pool is already shut down: run it here rather than lose the release.
             release()

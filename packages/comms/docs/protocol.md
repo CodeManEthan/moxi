@@ -441,7 +441,7 @@ credential, and `content`, line zero and body; answers `message_id`), `delete` (
 `token`, `message_id`; answers `withdrawn` and `delivered`, each a list of names), and
 the reads `resolve`, `agents`, `session`, `owner`, `asks`, `owed`, `readable`,
 `explain`, `binding_window`, `attributed_message`, `rooms`, `message`, `history`,
-`max_id` and `last_digest`. A send's credential is the live binding's token for a bound
+`max_id`, `last_digest` and `mcp_endpoint`. A send's credential is the live binding's token for a bound
 identity, the operator's credential for `operator`, or a reserved name's token for a
 reserved name.
 
@@ -493,6 +493,16 @@ positive evidence: its session ended (its claim file gone, or every root process
 names gone or reused), its name bound under another claim, a newer token from its
 claim, the tools' port held by another process, or comms' uninstall. A release, and the
 boot fence, only clear the row's binding.
+
+`mcp_endpoint` (no params) answers whether the daemon serves comms' tools: `{served,
+url, why}`, with `url` the address it serves them on (`http://127.0.0.1:<port>/mcp`) and
+`why` the reason when it doesn't (`disabled`, `bind-failed`, `failed`). The daemon
+settles its endpoint before it answers any method, so an answered `bind` means the
+endpoint is up when the daemon serves it at all, and a launch reads this instead of
+trying the port. The endpoint speaks MCP over HTTP in stateless JSON mode and takes a
+session's token as its bearer: a token with no active row is answered 401 before any tool
+runs, a foreign `Host` 421, a foreign `Origin` 403, and a `GET` 405. When it fails after
+it started, the daemon exits nonzero for its supervisor to start it again.
 
 A Codex or OpenCode adapter's reports carry `session_id` (the thread or session id),
 `cache_source` (the Codex sessions root its host reports, or the path `opencode db path`

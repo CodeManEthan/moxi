@@ -29,6 +29,10 @@ line of doc and, for a few, the one variable that overrides it for one process:
     required = false                        # true: the daemon refuses to start
                                             # without the cache module
 
+    [mcp]
+    enabled = true                          # serve comms' tools over MCP
+    port    = 8450                          # on 127.0.0.1, always
+
     [codex.agents."planner@proj-a"]         # the Codex roster (adapters/codex_roster)
     [opencode.agents."planner@proj-a"]      # the OpenCode roster
 
@@ -183,6 +187,15 @@ class CacheConfig:
 
 
 @dataclass
+class McpConfig:
+    """`[mcp]`: whether the daemon serves comms' tools over MCP, and on which loopback
+    port. The address is always 127.0.0.1; it is not a setting."""
+
+    enabled: bool = _default("mcp.enabled")
+    port: int = _default("mcp.port")
+
+
+@dataclass
 class ReplayConfig:
     """`[replay]`: comms 0.2's catch-up bound, read only by the move of its files."""
 
@@ -201,6 +214,7 @@ class CommsConfig:
     cache: CacheConfig = field(default_factory=CacheConfig)
     delivery: DeliveryConfig = field(default_factory=DeliveryConfig)
     replay: ReplayConfig = field(default_factory=ReplayConfig)
+    mcp: McpConfig = field(default_factory=McpConfig)
     block: bool = _default("block")
     #: The rosters' tables, raw: `{"defaults": {...}, "agents": {...}}`.
     codex: dict = field(default_factory=dict)
@@ -406,6 +420,8 @@ def _typed(settings, path: Path | None) -> CommsConfig:
         raise bad("replay.messages", f"is {v['replay.messages']}", "set it to 1 or more")
     if v["replay.hours"] < 0:
         raise bad("replay.hours", f"is {v['replay.hours']}", "set it to 0 or more hours")
+    if not 1 <= v["mcp.port"] <= 65535:
+        raise bad("mcp.port", f"is {v['mcp.port']}", "set it to a port from 1 to 65535")
     operator = v["provision.operator"].strip()
     if not operator:
         raise bad("provision.operator", "is empty", "name the human's identity")
@@ -425,6 +441,7 @@ def _typed(settings, path: Path | None) -> CommsConfig:
         cache=CacheConfig(required=v["cache.required"]),
         delivery=DeliveryConfig(expiry=str(v["delivery.expiry"]).strip().lower()),
         replay=ReplayConfig(messages=v["replay.messages"], hours=v["replay.hours"]),
+        mcp=McpConfig(enabled=v["mcp.enabled"], port=v["mcp.port"]),
         block=v["block"],
         codex=_roster(bad, "codex", v),
         opencode=_roster(bad, "opencode", v),

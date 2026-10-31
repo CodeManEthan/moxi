@@ -371,7 +371,8 @@ class Daemon:
     def __init__(self, record, *, db_path=None, socket_path=None, clock=time.time,
                  start_trim_thread: bool = True, history_path=None,
                  first_start=None, kinds=None, settings=None,
-                 cache_store=cache.MISSING):
+                 cache_store=cache.MISSING, serve_tools: bool = False,
+                 mcp_port: int | None = None, on_fatal=None):
         self.record = record
         #: The adapter kinds a register may name: the built-in four and each kind the
         #: `moxi.comms.kinds` group declares (`kinds.load`), read once at construction.
@@ -416,6 +417,26 @@ class Daemon:
         #: Whether this daemon serves comms' tools over MCP now: what `mcp_token`
         #: answers as `served`. The endpoint sets it once it settles; until then False.
         self.mcp_served = False
+        #: Whether this daemon serves comms' tools at all when `[mcp] enabled` says so.
+        #: `main` passes True. A daemon a test or an embedding caller builds serves none
+        #: unless it asks, so it never binds the box's port.
+        self.serve_tools = serve_tools
+        #: The port in place of `[mcp] port`; a test passes 0 for any free port.
+        self._mcp_port = mcp_port
+        #: The endpoint's URL while it serves, and why it doesn't when it doesn't
+        #: (`disabled`, `bind-failed`, `failed`): what `mcp_endpoint` answers.
+        self.mcp_url: str | None = None
+        self.mcp_why: str | None = None
+        #: The endpoint (`mcp.server.Endpoint`) once it serves.
+        self.mcp_endpoint = None
+        #: What adds the tools to the endpoint's server, given the SDK's server; None
+        #: serves the endpoint with no tools.
+        self.mcp_tools = None
+        #: Called once, from the endpoint's loop, when something this daemon can't run
+        #: without has failed (the endpoint, after it started); `main` stops the daemon
+        #: and exits nonzero. `fatal` says what failed.
+        self._on_fatal = on_fatal
+        self.fatal: str | None = None
 
         self._lock = threading.RLock()
         self.bindings: dict[str, Binding] = {}
@@ -559,6 +580,7 @@ class Daemon:
             "activity": self._activity,
             "unanswered": self._note_unanswered,
             "mcp_token": self._mcp_token,
+            "mcp_endpoint": _read(self, "_mcp_endpoint_query"),
         }
 
     # ------------------------------------------------------------------ directory
@@ -656,6 +678,10 @@ class Daemon:
         self._rebuild_sent_logged()
         self._spawn(self._window_loop)
         self._spawn(self._expiry_loop)
+        # boot: the endpoint of comms' tools settles before any method is answered, so
+        # an adapter's answered `bind` means the endpoint is up when this daemon serves
+        # it, and `mcp_endpoint` never answers from a half-started one.
+        self._settle_endpoint()
         self.host.open()
 
         self._sub = self.record.subscribe()
@@ -675,6 +701,71 @@ class Daemon:
             self._hold_routed()
         if self._start_trim_thread:
             self._spawn(self._trim_loop)
+
+    def _settle_endpoint(self) -> None:
+        """Serve comms' tools, or settle why not: `[mcp] enabled` and `[mcp] port`, read
+        once here. The MCP libraries are imported only now, and only when enabled. The
+        endpoint runs on the daemon socket host's loop and pool, and the host's stop hook
+        shuts it down before the daemon socket closes."""
+        self.mcp_served, self.mcp_url, self.mcp_endpoint = False, None, None
+        if not self.serve_tools:
+            self.mcp_why = "disabled"
+            return
+        mcp = self.settings.use("mcp")
+        if not mcp.enabled:
+            self.mcp_why = "disabled"
+            log.info("comms' tools aren't served: [mcp] enabled is false")
+            return
+        port = mcp.port if self._mcp_port is None else self._mcp_port
+        try:
+            from .mcp import server as mcp_server
+        except Exception as e:                                   # noqa: BLE001
+            self.mcp_why = "failed"
+            log.error("comms' tools aren't served: the MCP libraries didn't load: %s: %s",
+                      type(e).__name__, e)
+            return
+        try:
+            sock = mcp_server.bind(port)
+        except OSError as e:
+            self.mcp_why = "bind-failed"
+            log.error("comms' tools aren't served: %s:%d can't be bound: %s",
+                      mcp_server.ADDRESS, port, e)
+            return
+        verifier = mcp_server.Verifier(self.mcp_tokens.verify, self.host.pool,
+                                       self.host.opened)
+        endpoint = mcp_server.Endpoint(sock, verifier, tools=self.mcp_tools,
+                                       on_failure=self._endpoint_failed)
+        # Set before the start, so a start that runs late is still stopped with the host.
+        self.host.stop_hook = endpoint.stop
+        try:
+            self.host.run_on_loop(endpoint.start(), timeout=wire.START_WAIT)
+        except Exception as e:                                   # noqa: BLE001
+            self.mcp_why = "failed"
+            log.error("comms' tools aren't served: the endpoint didn't start: %s", e)
+            return
+        self.mcp_endpoint = endpoint
+        self.mcp_url = endpoint.url
+        self.mcp_why = None
+        self.mcp_served = True
+        log.info("comms' tools served at %s", endpoint.url)
+
+    def _endpoint_failed(self, why: str) -> None:
+        """The endpoint stopped serving after it started (on the host's loop): it isn't
+        restarted here. The daemon stops and exits nonzero, and its supervisor starts it
+        again, which every adapter sees as a rebind."""
+        self.mcp_served, self.mcp_url, self.mcp_why = False, None, why
+        self.fatal = f"comms' tools endpoint {why}"
+        log.error("%s; the daemon stops so its supervisor can start it again",
+                  self.fatal)
+        if self._on_fatal is not None:
+            self._on_fatal(self.fatal)
+
+    def _mcp_endpoint_query(self, frame: dict) -> dict:
+        """`mcp_endpoint`: whether this daemon serves comms' tools, at which URL, and
+        why not when it doesn't. Settled before any method is answered."""
+        served = bool(self.mcp_served)
+        return {"served": served, "url": self.mcp_url if served else None,
+                "why": None if served else (self.mcp_why or "disabled")}
 
     def _reconcile_reserved(self) -> None:
         from . import reserved
@@ -706,10 +797,13 @@ class Daemon:
         with self._expiry_cond:
             self._expiry_cond.notify_all()
         if self.host is not None:
+            # The endpoint of comms' tools stops first, through the host's stop hook,
+            # while the daemon still holds its socket's lock.
             if not self.host.close():
                 log.warning("the daemon socket did not close within %.0f s",
                             wire.CLOSE_WAIT)
             self.host = None
+        self.mcp_served = False
         if self._sub is not None:
             self.record.unsubscribe(self._sub)
         for t in self._threads:
@@ -3564,7 +3658,8 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
     store = (tokens.TokenStore(None, env=os.environ)
              if (args.backend or resolved) == LOCAL else None)
     first_start = provision.first_start(store) if store is not None else None
-    daemon = Daemon(record, first_start=first_start, settings=settings)
+    daemon = Daemon(record, first_start=first_start, settings=settings, serve_tools=True,
+                    on_fatal=lambda why: stopping.set())
     try:
         daemon.start()
     except RuntimeError as e:
@@ -3583,7 +3678,9 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
         daemon.stop()
         with contextlib.suppress(Exception):
             record.close()          # the process owns the socket it opened
-    return 0
+    # Exits nonzero when something it can't run without failed, so its supervisor
+    # starts it again.
+    return 1 if daemon.fatal else 0
 
 
 __all__ = ["Daemon", "Refusal", "Author", "Binding", "TRIM_INTERVAL", "TRIM_TICK",

@@ -86,10 +86,12 @@ def test_the_public_identity_is_one_everywhere():
 # ------------------------------------------------------------------ the package
 
 def test_the_package_requires_the_core_and_turns_and_codex_is_an_extra():
-    """turns is required: it is the one way into a harness session."""
+    """turns is required: it is the one way into a harness session. The MCP SDK is too:
+    comms' tools are how a session's model sends, served on uvicorn."""
     project = PYPROJECT["project"]
     assert project["dependencies"] == ["moxi>=0.1,<0.2", "moxi-turns>=0.2,<0.3",
-                                       "keyring>=25", "psutil>=5.9"]
+                                       "keyring>=25", "psutil>=5.9", "mcp>=2.3,<3",
+                                       "uvicorn>=0.54,<1"]
     assert [d.split(">")[0] for d in project["optional-dependencies"]["codex"]] == \
         ["moxi-turns[codex]"]
     dev = PYPROJECT["dependency-groups"]["dev"]
