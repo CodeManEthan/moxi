@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
-dependencies = ["moxi>=0.1,<0.2"]
+dependencies = ["moxi>=0.1,<0.2", "psutil>=5.9"]
 
 [project.optional-dependencies]
 codex = ["websockets>=17.0.1"]
@@ -26,6 +26,13 @@ moxi-turns-codex-host = "moxi_turns.codex_host:main"
 # The module's one announcement, read by moxi.modules.
 [project.entry-points."moxi.modules"]
 turns = "moxi_turns.module"
+
+# turns' shipped guards, and question mode's prompt reminder.
+[project.entry-points."moxi.turns.guards"]
+turns = "moxi_turns.guards"
+
+[project.entry-points."moxi.turns.listeners"]
+turns = "moxi_turns.guards"
 
 [dependency-groups]
 dev = ["pytest", "websockets>=17.0.1"]

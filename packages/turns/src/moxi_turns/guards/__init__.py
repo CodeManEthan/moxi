@@ -38,6 +38,10 @@ guard case-blind. Both sides compile without Unicode classes (Python with `re.AS
 This module imports nothing beyond the standard library when it is imported, so a guard
 module that imports it pays for nothing else; the loader reaches the core only when it
 runs.
+
+It also holds turns' own `GUARDS`, the three it ships (removal, no-nested-agents and
+question mode, each off by default), and `LISTENERS`, question mode's prompt reminder.
+Their judges live in `removal` and `question` beside it, imported only when asked.
 """
 
 from __future__ import annotations
@@ -703,9 +707,47 @@ def judge_of(found: Found) -> Callable[[ToolCall], object]:
         return fn
 
 
+# -- turns' own guards -------------------------------------------------------------------
+
+#: The removal guard's pre-filter on `command`: an `rm` or `rmdir` word, any case, with any
+#: run of `\`, `'`, `"`, `{`, `}` and `$` between its letters, since the judge also reads
+#: the command with those deleted. It passes every command the judge could refuse.
+REMOVAL_MATCH = r"""\b(r[\\'"{}$]*m([\\'"{}$]*d[\\'"{}$]*i[\\'"{}$]*r)?)(?![A-Za-z_])"""
+#: The no-nested-agents guard's refusal.
+NO_NESTED_AGENTS_DENY = (
+    "Subagents may not start subagents. Finish what you can, then end your turn with a "
+    "report to your parent agent saying what else needs doing and why. Your parent decides "
+    "whether to start another worker."
+)
+
+#: turns' shipped guards, each off until its switch or `guards.on` turns it on. The group
+#: entry `turns = "moxi_turns.guards"` names this module.
+GUARDS = (
+    Guard(name="removal", calls={"claude": ("Bash",)}, match={"command": REMOVAL_MATCH},
+          match_flags="i", judge="moxi_turns.guards.removal:judge", on_error="allow",
+          switch="guards.removal",
+          doc="Refuse shell removals Claude Code would stop for the user's approval even in "
+              "bypass mode."),
+    Guard(name="no-nested-agents",
+          calls={"claude": ("Agent", "Task"), "codex": ("spawn_agent",)}, who="agents",
+          deny=NO_NESTED_AGENTS_DENY, switch="guards.no_nested_agents",
+          doc="Stop subagents from starting subagents of their own."),
+    Guard(name="question-mode", calls={"claude": ("AskUserQuestion",)},
+          judge="moxi_turns.guards.question:judge", wants=("prompts",), on_error="deny",
+          switch="guards.question_mode",
+          doc="Let agents ask the person questions only in a turn where they typed something "
+              "about a question."),
+)
+
+#: turns' listener rows (the group `moxi.turns.listeners`): question mode's reminder.
+LISTENERS = (
+    (("prompt",), "moxi_turns.guards.question:on_prompt"),
+)
+
+
 __all__ = ["GROUP", "ON_KEY", "MAX_WAIT_KEY", "HARNESSES", "WHO", "WANTS", "ON_ERROR",
            "MATCH_FLAGS", "DEADLINE_MS", "MAX_WAIT_MS", "CODEX_ALIASES",
            "CODEX_ALIASES_VERSION", "FILE_SUFFIXES", "SOURCES", "Prompt", "ToolCall",
            "Allow", "Deny", "Guard", "Found", "On", "Problem", "Loaded", "SwitchReader",
            "regex_problem", "compile_match", "is_file_entry", "load", "read_switch",
-           "judge_of"]
+           "judge_of", "REMOVAL_MATCH", "NO_NESTED_AGENTS_DENY", "GUARDS", "LISTENERS"]

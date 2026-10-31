@@ -761,6 +761,7 @@ version = "0.2.0"
 source = { editable = "packages/turns" }
 dependencies = [
     { name = "moxi" },
+    { name = "psutil" },
 ]
 
 [package.optional-dependencies]
@@ -777,6 +778,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
+    { name = "psutil", specifier = ">=5.9" },
     { name = "websockets", marker = "extra == 'codex'", specifier = ">=17.0.1" },
 ]
 provides-extras = ["codex"]
