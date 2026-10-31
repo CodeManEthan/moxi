@@ -39,6 +39,8 @@ class Scripted:
         self.address = ipc.address("turns", name)
         self.script = dict(script or {})
         self.refuse_session = refuse_session
+        #: Set to an unset `threading.Event` to hold every `session` answer until it is set.
+        self.session_gate: threading.Event | None = None
         self.calls: list[tuple[str, object]] = []
         self.connections = 0
         self._ready = concurrent.futures.Future()
@@ -56,6 +58,9 @@ class Scripted:
                 self.calls.append((method, params))
                 if method == "session":
                     self.connections += 1
+                    gate = self.session_gate
+                    if gate is not None:
+                        await asyncio.to_thread(gate.wait, 10)
                     if self.refuse_session:
                         conn.close()
                     return SESSION
@@ -77,6 +82,11 @@ class Scripted:
             with contextlib.suppress(RuntimeError):     # its loop has closed
                 self.loop.call_soon_threadsafe(self.server.close)
             self._thread.join(5)
+
+    def hold_loop(self, release: threading.Event):
+        """Stall the server's loop until `release` is set: its socket still accepts, and
+        nothing it serves answers, `rpc.hello` included."""
+        self.loop.call_soon_threadsafe(release.wait, 10)
 
     def methods(self):
         return [m for m, _ in self.calls if m != "session"]
@@ -127,7 +137,54 @@ def test_a_server_that_closes_during_the_hello_reads_as_never_written(scripted):
     assert s.command("clear") == Refused("gone")
     with pytest.raises(turns.TurnsError):
         s.facts()
+    # A wait names a delivery an earlier call recorded: an endpoint that still listens
+    # says nothing about it.
+    with pytest.raises(TimeoutError):
+        client.Delivery(s, "d-1", "r").wait_started(1)
     assert server.methods() == []
+
+
+@pytest.mark.parametrize("held", ["hello", "session"])
+def test_a_wait_whose_connect_stalls_raises_timeout_never_lost(scripted, monkeypatch, held):
+    monkeypatch.setattr(client, "CONNECT_S", 0.3)
+    monkeypatch.setattr(client, "READ_S", 0.3)
+    started = {"kind": "started", "turn_id": "t1", "delivery": "d-1", "ref": "r"}
+    server, s = scripted({"wait": lambda conn, params: {"result": started}})
+    d = client.Delivery(s, "d-1", "r")               # an earlier deliver recorded it
+    release = threading.Event()
+    try:
+        if held == "hello":
+            server.hold_loop(release)
+        else:
+            server.session_gate = release
+        with pytest.raises(TimeoutError):
+            d.wait_started(5)
+        with pytest.raises(TimeoutError):
+            d.wait_ended(None)
+    finally:
+        release.set()
+    assert server.methods() == []
+    # The hold clears: the same wait reads the delivery's value.
+    assert d.wait_started(2) == Started("t1", "d-1", "r")
+    server.stop()
+    # Nothing listens any more: that, and only that, reads lost.
+    assert d.wait_started(1) == Lost("unanswered", delivery="d-1", ref="r")
+
+
+def test_a_look_up_by_ref_with_no_deadline_raises_timeout_when_it_cannot_connect(scripted):
+    server, s = scripted({"deliver": _dropped({"delivery": "d-1", "ref": "r"})})
+    d = s.deliver("x", ref="r")
+    assert d.id is None
+    server.refuse_session = True                     # it listens, and fails each hello
+    with concurrent.futures.ThreadPoolExecutor(1) as pool:
+        waiting = pool.submit(d.wait_started, None)
+        try:
+            concurrent.futures.wait([waiting], 5)
+            assert waiting.done(), "the wait asks again forever"
+            assert isinstance(waiting.exception(), TimeoutError)
+        finally:
+            server.refuse_session = False
+    assert server.methods() == ["deliver"]
 
 
 def test_the_gone_error_reads_refused_and_lost(scripted):
