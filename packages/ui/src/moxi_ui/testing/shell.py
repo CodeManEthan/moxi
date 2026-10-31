@@ -77,19 +77,23 @@ class TestShell:
     `site` are directories put on the shell's `PYTHONPATH`, where a test installs modules
     of its own. `child_args` go to every page server the shell starts (for example
     `("--idle-s", "0.5")`), and `leave_out` names installed modules the shell's snapshot
-    leaves out. Both reach only this shell: no setting or variable carries them. `port`
-    is the port it binds on 127.0.0.1, 0 (the default) for one the system picks.
+    leaves out. `failed_for` shortens the seconds a page server's failed start answers
+    with its failure (10 by default), for a test that waits out several. These reach only
+    this shell: no setting or variable carries them. `port` is the port it binds on
+    127.0.0.1, 0 (the default) for one the system picks.
     """
 
     __test__ = False  # pytest: not a test class
 
     def __init__(self, home: str | os.PathLike, *, site: Sequence[str | os.PathLike] = (),
                  child_args: Sequence[str] = (), leave_out: Sequence[str] = (),
-                 port: int = 0, start_timeout: float = START_TIMEOUT):
+                 failed_for: float | None = None, port: int = 0,
+                 start_timeout: float = START_TIMEOUT):
         self.home = Path(home)
         self.site = tuple(Path(path) for path in site)
         self.child_args = tuple(str(arg) for arg in child_args)
         self.leave_out = tuple(leave_out)
+        self.failed_for = None if failed_for is None else float(failed_for)
         self.bind_port = int(port)
         self.start_timeout = start_timeout
         self.env = shell_env(self.home, self.site)
@@ -127,8 +131,11 @@ class TestShell:
             (self.home / sub).mkdir(parents=True, exist_ok=True)
         os.chmod(self.home / "run", 0o700)
         cwd = Layout("ui").runtime_dir(self.env, create=True)
-        options = json.dumps({"child_args": list(self.child_args),
-                              "leave_out": list(self.leave_out), "port": self.bind_port})
+        given: dict[str, Any] = {"child_args": list(self.child_args),
+                                 "leave_out": list(self.leave_out), "port": self.bind_port}
+        if self.failed_for is not None:
+            given["failed_for"] = self.failed_for
+        options = json.dumps(given)
         self._process = proc.spawn([python(), "-P", "-m", "moxi_ui.testing.run", options],
                                    lifeline="fd", env=self.env, cwd=cwd,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)

@@ -777,7 +777,7 @@ class Starter:
 
     def _failed(self, failure: StartFailed) -> None:
         self._failure = failure
-        self._failed_until = self._pool.clock() + FAILED_FOR
+        self._failed_until = self._pool.clock() + self._pool.failed_for
         self.record.failed_starts += 1
         self.record.failed_in_row += 1
         self.record.reason = failure.reason
@@ -846,12 +846,15 @@ class Starters:
     `runtime_dir` is the shell's own runtime dir, every child's working directory;
     `state_dir` holds `servers.json`; `log` names the log a child's stderr goes to, as
     `moxi ui status` prints it. `child_args` are added to every page server's arguments
-    (tests pass `("--idle-s", "0.5")` or `("--tcp",)`). `spawn`, `clock` and `wall` are
-    seams for tests.
+    (tests pass `("--idle-s", "0.5")` or `("--tcp",)`). `failed_for` is the seconds a
+    failed start answers with its failure, `FAILED_FOR` unless a test harness passes a
+    shorter one; no setting or variable reaches it. `spawn`, `clock` and `wall` are seams
+    for tests.
     """
 
     def __init__(self, *, runtime_dir: str | os.PathLike, state_dir: str | os.PathLike,
                  log: str | os.PathLike, child_args: Sequence[str] = (),
+                 failed_for: float = FAILED_FOR,
                  spawn: Callable[..., Any] = proc.spawn,
                  clock: Callable[[], float] = time.monotonic,
                  wall: Callable[[], float] = time.time):
@@ -859,6 +862,7 @@ class Starters:
         self.state_dir = Path(state_dir)
         self.log = str(log)
         self.child_args = tuple(child_args)
+        self.failed_for = float(failed_for)
         self.spawn = spawn
         self.clock = clock
         self.wall = wall

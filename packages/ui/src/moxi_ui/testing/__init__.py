@@ -18,8 +18,10 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     `conftest.py` to give `site` (directories put on the shell's `PYTHONPATH`, holding
     distributions a test installs), `child_args` (for every page server the shell starts,
     such as `["--idle-s", "0.5"]`), `leave_out` (installed modules the shell's snapshot
-    leaves out, such as `["cache"]`) or `port` (the port it binds, 0 for one the system
-    picks). No setting or variable reaches these.
+    leaves out, such as `["cache"]`), `failed_for` (the seconds a page server's failed
+    start answers with its failure, 10 unless given, for a test that waits out several)
+    or `port` (the port it binds, 0 for one the system picks). No setting or variable
+    reaches these.
 `ui_shells` (module scope)
     `ui_shells(**options)` starts one more test shell with those options; each is stopped
     when the test module ends.

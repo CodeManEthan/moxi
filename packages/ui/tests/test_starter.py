@@ -350,6 +350,28 @@ def test_a_refused_page_fails_for_ten_seconds_then_starts_again(shell_dirs):
     assert "exited 3" in saved["reason"]
 
 
+def test_a_harness_given_failed_window_replaces_the_ten_seconds(shell_dirs):
+    clock = Clock()
+    starters = make(shell_dirs, clock=clock, failed_for=0.5)
+
+    async def body(starters):
+        starter = starters.get("stbad")
+        with pytest.raises(StartFailed):
+            await starters.ensure("stbad")
+        assert 0 < starter.row()["failed_for_s"] <= 0.5
+        clock.offset = 0.4
+        with pytest.raises(StartFailed):
+            await starters.ensure("stbad")
+        assert starter.record.starts == 1
+        clock.offset = 0.6
+        assert starter.state == "idle"
+        with pytest.raises(StartFailed):
+            await starters.ensure("stbad")
+        assert starter.record.starts == 2
+
+    drive(starters, body)
+
+
 def test_no_ready_line_in_time_kills_the_child(shell_dirs, monkeypatch):
     monkeypatch.setattr(starter_mod, "READY_WITHIN", 1.0)
     starters = make(shell_dirs)

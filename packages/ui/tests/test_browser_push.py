@@ -244,24 +244,29 @@ def test_a_start_that_fails_shows_the_error_panel_and_a_second_look_starts_nothi
     assert again["starts"] == row["starts"]
 
 
-@pytest.mark.slow
-@pytest.mark.timeout(120)
+#: The failed window the three-failed-starts test gives its shell, so it waits out two
+#: windows in about a second rather than 20 s.
+SHORT_WINDOW = 0.5
+
+
 def test_three_failed_starts_in_a_row_turn_the_servers_row_to_fail(ui_shells, fixture_site,
                                                                   ui_contexts):
-    shell = ui_shells(site=[fixture_site])
+    shell = ui_shells(site=[fixture_site], failed_for=SHORT_WINDOW)
     fixture_kit.fail_start(shell)
     page = ui_contexts(shell).pages[0]
     row = _servers_row(page)
-    expect(row.locator(".state")).to_have_text("failed to start")
     session = shell.session()
-    for n in (2, 3):
-        # One start each 10 s at most: a request inside the window gets the same 502 at
+    # The row shows each failed start only for the short window, between samples of the
+    # servers topic, so the starts are counted at the shell; the block's "failed to start"
+    # is the servers block test's.
+    for n in (1, 2, 3):
+        # One start each window at most: a request inside the window gets the same 502 at
         # once, and the first one after it starts the server again.
         def failed_again(n=n) -> bool:
             session.get("/m/fixture/api/summary")
             return shell.server("fixture")["failed_in_row"] >= n
 
-        wait_for(failed_again, 15, interval=0.5, what=f"failed start {n}")
+        wait_for(failed_again, 5, interval=0.1, what=f"failed start {n}")
     expect(row).to_contain_text("the last 3 starts failed", timeout=5_000)
     expect(row).to_have_class("fail")
     expect(row).to_contain_text("log: ")
