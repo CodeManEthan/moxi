@@ -270,7 +270,8 @@ is in [adapters.md](adapters.md).
    row was acked or dropped.
 4. **Waiting mail is listed by name.** `moxi comms agents --seats` lists, for each name, the
    mail waiting for it in the queue: how many messages, and how long the oldest has
-   waited.
+   waited. Its row for an OpenCode name says `interrupt delivers at idle`, since that
+   adapter posts only into an idle session.
 5. **A stalled turn is looked up, not announced.** The adapter watches its own
    injection, and says so on its status line if no turn starts within
    `INJECT_STALL_WINDOW` (15 s). `moxi comms explain <identity>` prints which of four cases

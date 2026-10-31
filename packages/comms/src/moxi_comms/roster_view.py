@@ -25,6 +25,14 @@ SEND_ONLY = "send-only"
 #: A reserved name no module owns: one an older comms kept.
 UNOWNED_ROW = "send-only, no module holds it (kept from an older comms)"
 
+#: The adapter kind of an OpenCode binding (`adapters.opencode.ADAPTER_KIND`, spelled
+#: here so this module imports no adapter).
+OPENCODE = "opencode"
+
+#: What `--seats` adds to an OpenCode binding's row: its adapter posts only when the
+#: session reads idle, so mail sent `--interrupt` waits for idle there like any other.
+IDLE_INTERRUPT = "interrupt delivers at idle"
+
 #: The `--seats` waiting block's header: what one of its rows means.
 WAITING_HEADER = ("waiting (queued for each name until its next session start, /clear, "
                   "compaction, or a turn of its own on a warm cache):")
@@ -40,14 +48,17 @@ def render_agents(info, *, seats: bool = False, now: float | None = None) -> str
     each reserved send-only name (`standing` entries of kind `send-only`): a module
     sends under it and nobody mails it, and the row says which module. `seats=True` (the
     `--seats` flag, the operator's view) lists the same rows, then the mail waiting for
-    each name (`waiting`) and the unanswered rows. The snapshot never asks for `--seats`. `now`
+    each name (`waiting`) and the unanswered rows. On `--seats` an OpenCode binding's row
+    also says `interrupt delivers at idle`. The snapshot never asks for `--seats`. `now`
     (default: the wall clock) ages the waiting rows.
     """
     rows = info["bindings"]
     lines = [] if rows else [NO_BINDINGS]
     for b in rows:
-        lines.append(f"{b['qualified']:<24} {b['tier']:<10} "
-                     f"adapter {b['adapter']}")
+        row = f"{b['qualified']:<24} {b['tier']:<10} adapter {b['adapter']}"
+        if seats and b["adapter"] == OPENCODE:
+            row += f", {IDLE_INTERRUPT}"
+        lines.append(row)
     standing = info.get("standing")
     for s in standing if isinstance(standing, list) else ():
         if isinstance(s, dict) and s.get("kind") == SEND_ONLY:
