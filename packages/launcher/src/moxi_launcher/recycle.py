@@ -328,7 +328,26 @@ def cache_read(cache: Any, row: store.LaunchRow, session_id: str,
         return None
     if row.harness == "codex":
         return cache.read(row.harness, session_id, cache_source=codex_sessions(row, env))
+    if (root := claude_projects(cache, row)) is not None:
+        return cache.read(row.harness, session_id, projects_root=root)
     return cache.read(row.harness, session_id)
+
+
+def claude_projects(cache: Any, row: store.LaunchRow) -> str | None:
+    """The projects root a Claude launch writes its transcripts under, by cache's
+    `projects_root` over the launch's own `CLAUDE_CONFIG_DIR` (and `HOME`) as its row
+    records them; None when the row records no `CLAUDE_CONFIG_DIR`, so cache reads the
+    root it is configured with."""
+    recorded = {name: value for name, value in (row.base_env or {}).items()
+                if value is not None}
+    config = recorded.get("CLAUDE_CONFIG_DIR") or row.env.get("CLAUDE_CONFIG_DIR")
+    rule = getattr(cache, "projects_root", None)
+    if not config or rule is None:
+        return None
+    environ = {"CLAUDE_CONFIG_DIR": config}
+    if recorded.get("HOME"):
+        environ["HOME"] = recorded["HOME"]
+    return rule(environ)
 
 
 def codex_sessions(row: store.LaunchRow, env: Mapping[str, str]) -> str:
@@ -454,5 +473,5 @@ def _words(error: BaseException) -> str:
 
 __all__ = ["BLOCKED_REFUSALS", "BUSY_WORDS", "COMPACT_LINE", "CROSSING_BUSY_S", "EXPIRY",
            "FAILED_REFUSALS", "QUIET_REFUSALS", "RAN", "RELAUNCH_LINE", "SHELLS_IDLE_S",
-           "STOP_SHELLS", "UNCONFIRMED", "Verdict", "ask_expiry", "cache_read", "codex_sessions",
+           "STOP_SHELLS", "UNCONFIRMED", "Verdict", "ask_expiry", "cache_read", "claude_projects", "codex_sessions",
            "crossing_line", "end", "on_crossing", "start_compact", "verdict_of"]

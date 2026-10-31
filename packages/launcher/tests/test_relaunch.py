@@ -174,8 +174,9 @@ def conn(tmp_path):
 
 
 def launched(conn, *, request_id="r1", target_name="slot", session_id=SID, scope=None,
-             directors=("boss",), relaunch_of=None):
+             directors=("boss",), relaunch_of=None, base_env=None):
     store.insert(conn, request_id=request_id, actor="ann", harness="claude",
+                 base_env=base_env,
                  target=target_name, cwd="/work",
                  values={"model": "opus", "director": list(directors)}, argv=["claude"],
                  env={}, posture="operator", session_id=session_id,
@@ -684,6 +685,32 @@ def test_a_session_whose_cache_is_warm_is_refused_mail_it(conn, kind):
     assert caught.value.code == "warm" and caught.value.hint == "mail it"
     assert cache.asked == [("claude", SID)]
     nothing_written(conn, slots_api)
+
+
+def test_the_warm_check_reads_the_cache_under_the_launchs_own_config_dir(tmp_path):
+    class Rooted(FakeCache):
+        def __init__(self):
+            super().__init__("warm")
+            self.roots = []
+
+        def read(self, harness, session_id, **options):
+            self.roots.append(options)
+            return super().read(harness, session_id)
+
+        @staticmethod
+        def projects_root(environ):
+            return environ["CLAUDE_CONFIG_DIR"] + "/projects"
+
+    connection = store.connect(tmp_path / "rooted.db")
+    try:
+        launched(connection, base_env={"CLAUDE_CONFIG_DIR": "/seat"})
+        cache = Rooted()
+        with pytest.raises(relaunch.Refused) as caught:
+            call(connection, cache=cache, slots_api=FakeSlots())
+        assert caught.value.code == "warm"
+        assert cache.roots == [{"projects_root": "/seat/projects"}]
+    finally:
+        connection.close()
 
 
 @pytest.mark.parametrize("cache", [FakeCache("cold"), FakeCache(error=OSError("no store"))])

@@ -62,7 +62,7 @@ from moxi import modules, paths
 from moxi import store as core_store
 from moxi.paths import Layout
 
-from . import catalog, first, handoffs, job, notices, quiet, slots, store, target
+from . import catalog, first, handoffs, job, notices, quiet, recycle, slots, store, target
 from .compose import common
 
 #: The job script every relaunch run runs as.
@@ -363,19 +363,13 @@ def _check_director(comms: Any, caller: str, row: store.LaunchRow) -> None:
 
 def _not_warm(row: store.LaunchRow, session_id: str, cache: Any) -> None:
     """With cache installed, refuse `warm` for a session whose cache is warm or fresh."""
-    if cache is LOOK:
-        cache = None
-        if modules.available("cache"):
-            found = modules.load("cache", interface=1)
-            cache = found.api if found.ok else None
-    if cache is None:
-        return
     try:
-        kind = cache.read(row.harness, session_id).kind
+        clock = recycle.cache_read(recycle.LOOK if cache is LOOK else cache, row,
+                                   session_id, os.environ)
     except Exception:  # noqa: BLE001  (an unread cache leaves the director's call)
         return
-    if kind in REACHABLE:
-        raise Refused("warm", f"session {session_id}'s cache is {kind}: it can take a "
+    if clock is not None and clock.kind in REACHABLE:
+        raise Refused("warm", f"session {session_id}'s cache is {clock.kind}: it can take a "
                               "message", "mail it")
 
 

@@ -144,8 +144,9 @@ def conn(tmp_path):
 
 
 def launched(conn, *, request_id="r1", values=None, session_id=SID, claimed=True,
-             harness="claude", target="slot", relaunch_of=None, env=None):
+             harness="claude", target="slot", relaunch_of=None, env=None, base_env=None):
     store.insert(conn, request_id=request_id, actor="ann", harness=harness, target=target,
+                 base_env=base_env,
                  cwd="/work", values={"model": "opus", "recycle_on_expiry": "clear",
                                       **(values or {})},
                  argv=[harness], env=env or {}, posture="operator", session_id=session_id,
@@ -278,6 +279,34 @@ def test_a_codex_session_reads_its_cache_with_the_codex_sessions_directory(conn)
 
 def test_a_claude_cache_read_names_the_harness_and_newest_id(conn):
     cache = FakeCache()
+    ask(conn, cache=cache)
+    assert cache.reads == [("claude", SID, {})]
+
+
+class RootedCache(FakeCache):
+    """A cache that also says where Claude writes transcripts, by cache's rule."""
+
+    @staticmethod
+    def projects_root(environ):
+        home = environ.get("HOME", "/home/me")
+        return environ.get("CLAUDE_CONFIG_DIR", f"{home}/.claude").replace("~", home) \
+            + "/projects"
+
+
+def test_a_claude_launch_with_its_own_config_dir_reads_its_cache_under_it(tmp_path):
+    connection = store.connect(tmp_path / "rooted.db")
+    try:
+        launched(connection, base_env={"HOME": "/home/ann", "CLAUDE_CONFIG_DIR": "~/.seat",
+                                       "CLAUDE_CODE_OAUTH_TOKEN": None})
+        cache = RootedCache()
+        ask(connection, cache=cache)
+        assert cache.reads == [("claude", SID, {"projects_root": "/home/ann/.seat/projects"})]
+    finally:
+        connection.close()
+
+
+def test_a_claude_launch_without_its_own_config_dir_reads_caches_own_root(conn):
+    cache = RootedCache()
     ask(conn, cache=cache)
     assert cache.reads == [("claude", SID, {})]
 
