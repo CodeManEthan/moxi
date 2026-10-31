@@ -3,7 +3,8 @@
 `STATE/moxi/questions.json` holds `{"<module>": {"<key>": {"at": <UTC>}}}`, written with
 `moxi.files.update`, beside `units.json`. The settle step records a key after it has
 written the key's setting (or found the key already set in the config file), so an
-install cut short between the two asks again. A recorded key is never asked again and
+install cut short between the two leaves the answer in the file, and the next run finds
+the key set and records it with no question. A recorded key is never asked again and
 never reset by an install, so an upgrade asks only the keys it adds. `moxi uninstall`
 drops the module's record. Only the record is kept here, never the answer.
 """

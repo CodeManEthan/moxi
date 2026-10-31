@@ -1238,6 +1238,23 @@ def test_an_upgrade_asks_only_the_key_it_adds_and_never_resets_one(w, capsys, mo
     assert set(recorded_questions()["demo"]) == {"guard.push", "guard.force"}
 
 
+def test_a_recorded_key_the_user_unsets_by_hand_is_not_asked_again(w, capsys, monkeypatch):
+    """The record alone stops the question: the file no longer sets the key."""
+    qmodule(w, {"guard.push": "Guard pushes to main"})
+    at_terminal(monkeypatch, "y")
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert set(recorded_questions()["demo"]) == {"guard.push"}
+    config.unset("demo", "guard.push", by="test")             # the user unsets it later
+    assert value("guard.push")[1] != "file"
+    before = config_text()
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked again"))
+    code, out = settle(w, capsys, monkeypatch)
+    assert code == 0, out
+    assert "guard.push" not in out and config_text() == before
+    assert set(recorded_questions()["demo"]) == {"guard.push"}
+
+
 def test_a_key_the_config_file_already_sets_is_recorded_without_a_question_or_write(
         w, capsys, monkeypatch):
     qmodule(w, {"guard.push": "Guard pushes to main"})
