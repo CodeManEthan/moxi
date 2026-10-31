@@ -86,6 +86,8 @@ class Squatter:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._server: asyncio.Server | None = None
         self._thread: threading.Thread | None = None
+        #: Connections still open, closed by `stop()` (`Server.close_clients` is 3.13's).
+        self._writers: set[asyncio.StreamWriter] = set()
 
     @property
     def url(self) -> str:
@@ -123,7 +125,8 @@ class Squatter:
 
         async def close() -> None:
             server.close()
-            server.close_clients()
+            for writer in list(self._writers):
+                writer.close()
             await server.wait_closed()
 
         asyncio.run_coroutine_threadsafe(close(), loop).result(10)
@@ -133,6 +136,13 @@ class Squatter:
         self._loop = self._server = None
 
     async def _serve(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        self._writers.add(writer)
+        try:
+            await self._exchange(reader, writer)
+        finally:
+            self._writers.discard(writer)
+
+    async def _exchange(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             head = await reader.readuntil(b"\r\n\r\n")
         except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, ConnectionError):
