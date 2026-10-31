@@ -37,9 +37,11 @@ moxi repo git-hooks list                         # every repo repo has written t
   together give that key's whole list of values, replacing what the repo had; `--set KEY=`
   alone removes the key; keys you don't name are kept. The key is matched ignoring case.
 - `moxi repo git-hooks remove PATH [PIECE...]` removes pieces; with none, everything repo
-  wrote to that repo. On a path that no longer exists it drops the repo from the index, and
-  so it does where an indexed repo is gone and its path is now inside another repo, which
-  it leaves alone.
+  wrote to that repo. On a path that no longer exists it drops the repo from the index,
+  unless git still has that repo in another work tree: then it names the command to remove
+  it there, with the repo's main work tree, exits 1 and removes nothing. It drops the repo
+  too where an indexed repo is gone and its path is now inside another repo, which it
+  leaves alone.
 - `moxi repo git-hooks enable|disable PATH PIECE` turns one piece on or off in one repo. A
   disabled piece stays registered, with its settings. An event whose pieces are all
   disabled, or all removed, loses its hook entry or shim, and in shim mode the existing git
@@ -310,7 +312,9 @@ it pushes when the branch is ahead, and retries a failed push after `push_backof
 seconds.
 
 `moxi_repo.save_spec(spec)` saves a spec whose callables are `"pkg.mod:fn"` strings into
-the repo's git config, and `moxi_repo.commit_saved(root, name)` runs it.
+the repo's git config, and `moxi_repo.commit_saved(root, name)` runs it. A saved spec's
+`message` is kept as the summary line itself, not a target: `message="pkg.mod:fn"` makes
+that text the commit's subject, and a callable `message` can't be saved.
 
 - `moxi repo commit PATH [--spec NAME] [--wait SECONDS] [--json]` runs one saved spec, or
   every spec saved in that repo, and prints each pass's line. It exits 1 on an error or a
@@ -427,12 +431,19 @@ with a line.
 there, as `moxi repo git-hooks remove PATH` does: its git config sections, hook entries
 and shims, each existing git hook it moved to `<event>.local` moved back, the launcher, and
 `<git dir>/moxi-repo/`. It names each git hook file that still holds a chain line, which
-does nothing once the launcher is gone, for you to delete. An indexed path that is no
-longer a repo is dropped from the index with one line. Then every doctor record repo left
-is cleared. If one repo can't be cleaned, it stays indexed with its records and the
-uninstall stops with the reason, before repo's package is removed; fix it and run the
-uninstall again. With `--purge` the uninstall also asks whether to remove repo's index
-and its ledger of records.
+does nothing once the launcher is gone, for you to delete. A git hook it moved aside whose
+place another tool's hook has taken stays where it is, named, for you to merge or delete.
+An indexed path that is no longer a repo is dropped from the index with one line; when
+its git dir is still there with no work tree (a bare repo whose last worktree was
+removed), what repo wrote in that git dir goes too, and the line says so. Then every
+doctor record repo left is cleared.
+
+It reads every indexed repo before it removes anything. If one can't be read (a broken
+git config, say), it removes nothing and the uninstall stops with the reason, before
+repo's package is removed; fix it and run the uninstall again. If a step still fails once
+removing began, it stops there: that repo and the rest stay indexed with their records,
+and the last line names the repos already cleaned. With `--purge` the uninstall also asks
+whether to remove repo's index and its ledger of records.
 
 ## Install
 
