@@ -70,6 +70,7 @@ from moxi.paths import script
 from . import client as turns_client
 from . import codex_hooks
 from . import codex_protocol as proto
+from . import protocol
 from .doctor import MODULE
 from .endpoint import Endpoint
 from .harness import SHELL_STOP_S, CommandRequest, Delivery, Harness, Live
@@ -266,7 +267,8 @@ class CodexHarness(Harness):
 
     def attach(self, endpoint) -> None:
         super().attach(endpoint)
-        self.app_socket = endpoint.dir / "codex-app.sock"
+        self.app_socket = Path(protocol.endpoint_socket(endpoint.dir,
+                                                        protocol.CODEX_APP_SOCK))
         hook_socket = codex_hooks.hooks_socket(endpoint.dir)
         ping = self.ping
         if ping is None:

@@ -40,6 +40,11 @@ V2_ROOT = "v2"
 HELLO = "hello.json"
 #: A Claude endpoint's internal socket, its runner's leg; no caller uses it.
 MOD_SOCK = "mod.sock"
+#: A Codex endpoint's internal sockets: its app-server's, and its hooks'.
+CODEX_APP_SOCK = "codex-app.sock"
+CODEX_HOOKS_SOCK = "codex-hooks.sock"
+#: The internal sockets an endpoint may move to a short path (`endpoint_socket`).
+INTERNAL_SOCKS = (MOD_SOCK, CODEX_APP_SOCK, CODEX_HOOKS_SOCK)
 #: The temporary name `hello.json` is written under before it replaces the old one.
 HELLO_TMP = ".hello.json.tmp"
 #: The OpenCode host's `instructions` file.
@@ -127,6 +132,20 @@ def _is_dir(entry: os.DirEntry) -> bool:
         return entry.is_dir(follow_symlinks=False)
     except OSError:
         return False
+
+
+def endpoint_socket(directory: Path | str, filename: str) -> str:
+    """Where an endpoint's internal socket `filename` lives: in its directory, or, when
+    that path is too long for a socket address (a long `MOXI_HOME` or runtime directory),
+    `moxi.paths.socket_path`'s path for the name `<endpoint name>-<stem>`, which falls
+    back to a short hashed path as the endpoint's own address does."""
+    from moxi import paths
+
+    directory = Path(directory)
+    path = str(directory / filename)
+    if len(os.fsencode(path)) < paths.SOCKET_MAX or sys.platform == "win32":
+        return path
+    return paths.socket_path("turns", f"{directory.name}-{Path(filename).stem}")
 
 
 # -- sweeping a version 2 directory -------------------------------------------------------
@@ -324,7 +343,8 @@ class LineConn:
         self.close()
 
 
-__all__ = ["VERSION", "VERSIONS", "V2_ROOT", "HELLO", "MOD_SOCK", "HELLO_TMP",
+__all__ = ["VERSION", "VERSIONS", "V2_ROOT", "HELLO", "MOD_SOCK", "CODEX_APP_SOCK",
+           "CODEX_HOOKS_SOCK", "INTERNAL_SOCKS", "endpoint_socket", "HELLO_TMP",
            "INSTRUCTIONS", "ENDPOINT_FILES", "METHODS", "STOP_ASKED", "SOCK", "V1_HELLO",
            "MAX_LINE", "CONNECT_TIMEOUT", "LIVE", "STALE", "UNKNOWN", "SWEPT_LIVE",
            "SWEPT_REMOVED", "SWEPT_ABSENT", "endpoint_name", "address", "v2_root",
