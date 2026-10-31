@@ -122,10 +122,11 @@ and keep it warm. Every act finds its session the same way, through the launch l
 the turns endpoint that claimed the launch, so it acts only on a session the launcher
 started, and only on the one it started. turns does every act inside the session (the
 exit, a clear, a compact, a delivered turn); slots does what lies outside it (the pane,
-Claude Code's exit dialog, a job that outlives the session). Each act waits for the
-session to be quiet first: no turn open, no subagent at work, no draft in the prompt,
-and nobody using its pane or opening a turn in the last 2 minutes (`relaunch.person_s`).
-A background shell never holds an act.
+Claude Code's exit dialog, a job that outlives the session). Each act but keep-warm
+waits for the session to be quiet first: no turn open, no subagent at work, no draft in
+the prompt, and nobody using its pane or opening a turn in the last 2 minutes
+(`relaunch.person_s`). Keep-warm takes its own reads instead (below), since it nudges
+because subagents are at work. A background shell never holds an act.
 
 A launch has one act open at a time. A second one is refused (`run-open`, exit 3), naming
 the open run. Each act is a run in the launch log, with its events and its outcome.
