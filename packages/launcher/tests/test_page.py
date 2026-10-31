@@ -535,7 +535,7 @@ WITHOUT_UI = textwrap.dedent("""\
     import moxi_launcher.job
     import moxi_launcher.listeners
     import moxi_launcher.module
-    from moxi.contract import check
+    from moxi_dev.contract import check
 
     with contextlib.redirect_stdout(io.StringIO()) as printed:
         code = moxi_launcher.cli.main(["catalog", "--json"], prog="moxi launcher")
