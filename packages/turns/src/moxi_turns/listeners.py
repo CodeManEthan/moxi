@@ -11,8 +11,9 @@ named by the module, whose target is a stdlib-only module holding `LISTENERS`:
         (("start", "prompt"), "moxi_comms.context:answer"),
     )
 
-Each row is `(events, target)`: the events it wants and a function,
-`"package.module:function"`, called with one `SessionEvent`. The events:
+Each row is `(events, target)` or `(events, target, options)`: the events it wants, a
+function, `"package.module:function"`, called with one `SessionEvent`, and a table of
+named options. The events:
 
 - `start` adds start context, at each session start, resume, clear and compaction. It is
   asked only for a module on the start list (below), and returns text or None.
@@ -21,11 +22,19 @@ Each row is `(events, target)`: the events it wants and a function,
   needs no place on the list.
 - `prompt` adds context at each prompt: the texts, joined in module-name order.
 - `turn` (a main-loop turn ended) and `gone` (the endpoint is ending); answers ignored.
+- `after-tool`: a tool call ran; the text answer is added to what the model reads after
+  it.
+- `usage`: a usage reading from the harness, as given; answers ignored.
+- `codex_limits`: a Codex rate-limits reading, as given; answers ignored.
 
-The names `tool`, `after-tool`, `usage` and `codex_limits` are kept for a later turns:
-a registration naming one is refused whole, so no module ships one early. A row grows
-only by optional trailing items; this turns reads a longer row as its first two items and
-says so in the doctor.
+The name `tool` is kept for a later turns: a registration naming it is refused whole, so
+no module ships one early.
+
+The one option is `floor`, `{"floor": "package.module:function"}`: a function called with
+a `SessionEvent` that returns a token count, below which the main loop's events skip the
+row. An option this turns doesn't know is ignored and named in the doctor. A row grows
+only by optional trailing items; this turns reads a longer row as its first three items
+and says so in the doctor.
 
 The start list is turns' config key `start.order`: module names and file paths, in
 order. A module entry adds the answers of its `start` rows, joined in the order its
@@ -52,7 +61,7 @@ import os
 import re
 import threading
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -65,9 +74,11 @@ log = logging.getLogger("moxi.turns.listeners")
 #: The entry-point group.
 GROUP = "moxi.turns.listeners"
 #: The events a listener may name.
-EVENTS = ("ready", "start", "prompt", "turn", "gone")
+EVENTS = ("ready", "start", "prompt", "turn", "gone", "after-tool", "usage", "codex_limits")
 #: Event names kept for a later turns; a registration naming one is refused.
-RESERVED = ("tool", "after-tool", "usage", "codex_limits")
+RESERVED = ("tool",)
+#: The options a row's third item may name.
+OPTIONS = ("floor",)
 #: The events whose answers turns passes back.
 CONTEXT_EVENTS = ("start", "prompt")
 #: How listener texts are joined into one added context.
@@ -88,6 +99,8 @@ class Listener:
     module: str
     events: frozenset[str]
     target: str
+    #: The row's floor function, `"package.module:function"`, or None for no floor.
+    floor: str | None = None
     _fn: Callable[[SessionEvent], object] | None = field(default=None, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -183,16 +196,14 @@ def load(entries: Iterable | None = None, *, order: Iterable[str] | None = None,
             broken.append(Broken(name, f"{name!r} is not a Moxi module name"))
             continue
         try:
-            rows, longer = _rows(claims[0].load())
+            rows, said = _rows(claims[0].load())
         except Exception as exc:  # noqa: BLE001
             broken.append(Broken(name, f"its registration does not load: "
                                        f"{type(exc).__name__}: {exc}"))
             continue
-        listeners.extend(Listener(name, events, target) for events, target in rows)
-        if longer:
-            notices.append(Notice(name, f"{longer} of its rows carry more than (events, "
-                                        "target); this turns is older than the row and "
-                                        "reads only its first two items"))
+        listeners.extend(Listener(name, events, target, floor)
+                         for events, target, floor in rows)
+        notices.extend(Notice(name, reason) for reason in said)
     for b in broken:
         log.warning("listeners of %s are off: %s", b.module, b.reason)
     return Registry(tuple(listeners), tuple(broken), tuple(notices),
@@ -212,19 +223,25 @@ def _start_settings(env) -> tuple[tuple[str, ...] | None, int]:
     return tuple(settings["start.order"]), int(settings["start.limit"])
 
 
-def _rows(module) -> tuple[list[tuple[frozenset[str], str]], int]:
-    """The rows of a `LISTENERS`, and how many carried more than two items."""
+def _rows(module) -> tuple[list[tuple[frozenset[str], str, str | None]], list[str]]:
+    """The rows of a `LISTENERS` as `(events, target, floor)`, and what the doctor should
+    say of what was ignored: options this turns doesn't know, and rows longer than
+    three items."""
     rows = getattr(module, "LISTENERS", None)
     if not isinstance(rows, (tuple, list)):
         raise ValueError("it defines no LISTENERS tuple")
     out = []
+    said: list[str] = []
     longer = 0
     for row in rows:
         if not (isinstance(row, (tuple, list)) and len(row) >= 2):
             raise ValueError(f"the row {row!r} is not (events, target)")
-        if len(row) > 2:
+        if len(row) > 3:
             longer += 1
         events, target = row[0], row[1]
+        floor, unknown_options = _options(row, row[2] if len(row) > 2 else None)
+        said.extend(f"this turns doesn't know option {k!r} (row {target!r}); it is "
+                    "ignored" for k in unknown_options)
         if isinstance(events, str):
             events = (events,)
         events = frozenset(events)
@@ -239,8 +256,27 @@ def _rows(module) -> tuple[list[tuple[frozenset[str], str]], int]:
         if not isinstance(target, str) or not _TARGET.fullmatch(target):
             raise ValueError(f"the row {row!r} has target {target!r}; use "
                              '"package.module:function"')
-        out.append((events, target))
-    return out, longer
+        out.append((events, target, floor))
+    if longer:
+        said.append(f"{longer} of its rows carry more than (events, target, options); "
+                    "this turns is older than the row and reads only its first three "
+                    "items")
+    return out, said
+
+
+def _options(row, options) -> tuple[str | None, list[str]]:
+    """A row's floor from its options table, and the option names this turns doesn't
+    know. A table that isn't one, or a floor that isn't a target, refuses the row."""
+    if options is None:
+        return None, []
+    if not isinstance(options, Mapping):
+        raise ValueError(f"the row {row!r} has a third item that is not a table of "
+                         "options; use {\"floor\": \"package.module:function\"}")
+    floor = options.get("floor")
+    if floor is not None and (not isinstance(floor, str) or not _TARGET.fullmatch(floor)):
+        raise ValueError(f"the row {row!r} has floor {floor!r}; use "
+                         '"package.module:function"')
+    return floor, sorted(str(k) for k in options if k not in OPTIONS)
 
 
 # -- the start list ----------------------------------------------------------------------
@@ -487,7 +523,7 @@ def _call(listener: Listener, event: SessionEvent, answers: list, done: list,
     done[i] = True
 
 
-__all__ = ["GROUP", "EVENTS", "RESERVED", "CONTEXT_EVENTS", "JOIN", "START_CEILINGS",
+__all__ = ["GROUP", "EVENTS", "RESERVED", "OPTIONS", "CONTEXT_EVENTS", "JOIN", "START_CEILINGS",
            "DEFAULT_CEILING", "Listener", "Broken", "Notice", "Registry", "Entry", "Plan",
            "SessionEvent", "default_order", "start_ceiling", "load", "plan",
            "is_file_entry", "cut", "share_out", "ask"]

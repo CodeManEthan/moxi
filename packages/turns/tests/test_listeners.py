@@ -80,7 +80,10 @@ def test_turn_and_gone_answers_are_ignored_and_do_not_wait():
     (None, "LISTENERS"),
     ([("ready",)], "not (events, target)"),
     ([("tool", "x.y:z")], "kept for a later turns"),
-    ([(("start", "usage"), "x.y:z")], "kept for a later turns"),
+    ([(("start", "tool"), "x.y:z")], "kept for a later turns"),
+    ([("prompt", "x.y:z", ["floor"])], "not a table of options"),
+    ([("prompt", "x.y:z", {"floor": 1})], "has floor 1"),
+    ([("prompt", "x.y:z", {"floor": "no-colon"})], "has floor"),
     ([("finished", "x.y:z")], "names events"),
     ([("ready", "no-colon")], "has target"),
     (ImportError("gone"), "does not load"),
@@ -204,8 +207,63 @@ def test_the_limit_is_clamped_to_the_harness_ceiling():
     assert len(listeners.ask(reg, event("start"), 2.0)) <= 100
 
 
-def test_a_longer_row_loads_as_its_first_two_items_with_a_notice():
-    reg = registry(Entry("comms", [("start", "listener_targets:comms", {"floor": 1})]),
+def test_the_after_tool_usage_and_codex_limits_events_load():
+    reg = registry(Entry("usage", [(("after-tool", "usage", "codex_limits"),
+                                    "listener_targets:silent")]))
+    assert reg.broken == () and reg.notices == ()
+    assert [ls.module for ls in reg.naming("after-tool")] == ["usage"]
+    assert [ls.module for ls in reg.naming("codex_limits")] == ["usage"]
+    assert listeners.RESERVED == ("tool",)
+
+
+def test_a_two_item_row_has_no_floor_and_a_third_item_carries_one():
+    reg = registry(Entry("comms", [("start", "listener_targets:comms")]),
+                   Entry("usage", [("after-tool", "listener_targets:silent",
+                                    {"floor": "listener_targets:big"}),
+                                   ("usage", "listener_targets:silent", {}),
+                                   ("turn", "listener_targets:silent", None)]))
+    by = {(ls.module, ls.target, tuple(sorted(ls.events))): ls.floor
+          for ls in reg.listeners}
+    assert by == {("comms", "listener_targets:comms", ("start",)): None,
+                  ("usage", "listener_targets:silent", ("after-tool",)):
+                      "listener_targets:big",
+                  ("usage", "listener_targets:silent", ("usage",)): None,
+                  ("usage", "listener_targets:silent", ("turn",)): None}
+    assert reg.notices == () and reg.broken == ()
+
+
+def test_an_unknown_option_is_ignored_and_named():
+    reg = registry(Entry("usage", [("after-tool", "listener_targets:silent",
+                                    {"floor": "listener_targets:big", "switch": "x"})]))
+    assert [ls.floor for ls in reg.listeners] == ["listener_targets:big"]
+    assert [n.module for n in reg.notices] == ["usage"]
+    assert "doesn't know option 'switch'" in reg.notices[0].reason
+
+
+def test_a_row_longer_than_three_items_loads_its_first_three_with_a_notice():
+    reg = registry(Entry("comms", [("start", "listener_targets:comms",
+                                    {"floor": "listener_targets:big"}, "later")]),
                    order=("comms",))
-    assert [ls.target for ls in reg.listeners] == ["listener_targets:comms"]
+    assert [(ls.target, ls.floor) for ls in reg.listeners] == [
+        ("listener_targets:comms", "listener_targets:big")]
     assert reg.notices and "older than the row" in reg.notices[0].reason
+    assert "first three items" in reg.notices[0].reason
+
+
+def test_a_listener_written_for_the_first_events_reads_the_longer_event():
+    # Every field slot 8 adds trails with a default, so the old construction still works
+    # and the new fields read None.
+    ev = event("prompt")
+    assert (ev.cwd, ev.text, ev.origin, ev.agent_id, ev.record_path, ev.usage,
+            ev.received_at, ev.payload, ev.kind, ev.is_error, ev.point, ev.tool,
+            ev.tool_use_id) == (None,) * 13
+    names = [f.name for f in dataclasses.fields(turns.SessionEvent)]
+    assert names[:8] == ["event", "harness", "session_id", "env", "source", "turn_id",
+                         "outcome", "reason"]
+    assert names[8:] == ["cwd", "agent_id", "tool", "tool_use_id", "is_error", "point",
+                         "record_path", "text", "origin", "usage", "received_at",
+                         "payload", "kind"]
+    full = turns.SessionEvent("after-tool", "claude", "s-1", {}, None, None, None, None,
+                              "/w", "a-1", "Bash", "tu-1", False, "after", "/r.jsonl")
+    assert (full.cwd, full.agent_id, full.point, full.record_path) == (
+        "/w", "a-1", "after", "/r.jsonl")

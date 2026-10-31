@@ -98,7 +98,8 @@ def test_the_start_list_rows(turns_env, registry, tmp_path):
 
 def test_the_listener_rows(turns_env, registry):
     registry["entries"] = [Entry("early", [("tool", "x.y:z")]),
-                           Entry("later", [("start", "x.y:z", {"floor": 1})]),
+                           Entry("later", [("start", "x.y:z", {"floor": "x.y:f",
+                                                                 "later": 1})]),
                            Entry("fine", [(("ready", "prompt"), "x.y:z")])]
     rows = rows_by_name()
     assert rows["listener early"].state == "fail"

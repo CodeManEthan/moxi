@@ -26,6 +26,16 @@ SESSION_ENV = {
                            "launch",
 }
 SETTINGS = "settings.toml"
+#: The install questions: one per shipped guard, keyed by its switch, each a noun phrase
+#: the installer asks as "turns: <text>? [y/N]".
+QUESTIONS = {
+    "guards.removal": "the removal guard (refuse shell removals Claude Code would stop "
+                      "for your approval)",
+    "guards.no_nested_agents": "the no-nested-agents guard (stop subagents from starting "
+                               "subagents of their own)",
+    "guards.question_mode": "question mode (let agents ask you questions only in a turn "
+                            "where you typed something about a question)",
+}
 SETUP = "moxi_turns.claude_setup:setup"
 SEGMENT = None
 DOCTOR = "moxi_turns.doctor:check"
