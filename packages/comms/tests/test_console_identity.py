@@ -163,7 +163,7 @@ def test_a_send_as_console_is_verified_as_console(console):
     planner = console.shim(name="planner", scope="proj-a")
     mid = send_as([PLANNER])
     msg = console.record.get_message(mid)
-    assert (msg.author_kind, msg.author_id) == ("identity", CONSOLE)
+    assert (msg.author_kind, msg.author_id) == ("reserved", CONSOLE)
     assert machine_line.parse(msg.content).posture == "none"
     db = directory.connect(comms_db(), read_only=True)
     try:

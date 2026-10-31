@@ -210,7 +210,7 @@ def test_a_non_numeric_id_on_the_name_lane_is_still_harmless(rig):
     shrugged off. An id that is not a number is not one the record could ever answer
     with, so it is no boundary either."""
     chatter = Message(id="not-a-number", channel_id=rig.names_channel, author_id="900001",
-                      author_kind="user", author_display="operator",
+                      author_kind="operator", author_display="operator",
                       content="no machine line here", timestamp="2026-08-19T00:00:00Z")
     rig.daemon._route(chatter, backlog=False)      # unguarded, this raised ValueError
     assert rig.daemon._seen_max == "0", "and it did not become the catch-up boundary"

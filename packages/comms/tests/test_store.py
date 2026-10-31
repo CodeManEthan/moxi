@@ -63,7 +63,7 @@ def mark(target):
 
 # --------------------------------------------------------------------------- the tables
 
-def test_a_new_store_has_every_table_at_version_one():
+def test_a_new_store_has_every_table_at_the_current_version():
     conn = store.open_write()
     try:
         tables = {r[0] for r in conn.execute(
@@ -71,7 +71,7 @@ def test_a_new_store_has_every_table_at_version_one():
         assert tables == set(COLUMNS) == set(schema.TABLES)
         for table, columns in COLUMNS.items():
             assert [r[1] for r in conn.execute(f"PRAGMA table_info({table})")] == columns
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(schema.STEPS) == 1
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(schema.STEPS) == 2
         assert conn.execute("SELECT value FROM meta WHERE key = 'next_id'"
                             ).fetchone()[0] == str(2 ** 62)
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
@@ -79,6 +79,32 @@ def test_a_new_store_has_every_table_at_version_one():
         conn.close()
     assert store.path() == paths.state_dir() / "comms.db"
     assert oct(os.stat(store.path()).st_mode & 0o777) == "0o600"
+
+
+def test_a_version_one_store_renames_the_operators_kind_at_its_next_open():
+    """Version 1 wrote the operator's messages as `user`. The next writer's open steps the
+    store to version 2, which renames them `operator` and leaves every other row alone."""
+    target = store.path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(target)
+    try:
+        conn.executescript(schema.V1)
+        conn.executemany(
+            "INSERT INTO messages(id, room_id, author_id, author_kind, author_display, "
+            "content, timestamp) VALUES (?, 'r', ?, ?, ?, 'x', 't')",
+            [(1, "u-1", "user", "operator"), (2, "planner", "identity", "planner"),
+             (3, "w-1", "webhook", "a hook")])
+        conn.execute("PRAGMA user_version = 1")
+        conn.commit()
+    finally:
+        conn.close()
+    conn = store.open_write()
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("SELECT id, author_kind FROM messages ORDER BY id").fetchall() \
+            == [(1, "operator"), (2, "identity"), (3, "webhook")]
+    finally:
+        conn.close()
 
 
 @pytest.mark.parametrize("table, row", [
@@ -189,7 +215,7 @@ def test_with_no_0_2_files_the_opener_creates_then_reopens_the_store():
     assert store.state_of(store.path()) == store.UNMARKED
     conn = store.open_write()
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(schema.STEPS)
     finally:
         conn.close()
     assert (paths.state_dir() / store.MIGRATE_LOCK).exists()

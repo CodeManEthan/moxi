@@ -6,6 +6,7 @@ import pytest
 
 from conftest import wait_until
 
+from moxi import exit as moxi_exit
 from moxi_comms import api, reserved, secrets
 from moxi_comms.adapter import frame_line
 from moxi_comms.tokens import TokenStore
@@ -23,7 +24,7 @@ def test_send_as_sends_under_the_reserved_name_with_no_reply(console):
     result = api.send_as("launcher", "console", ["main@proj-a"], "relaunch failed")
     assert result.outcome == "sent", result.lines()
     msg = console.record.get_message(result.message_id)
-    assert msg.author_id == "console" and msg.author_kind == "identity"
+    assert msg.author_id == "console" and msg.author_kind == "reserved"
     assert "[no reply]" in msg.content.splitlines()[0]
 
 
@@ -71,6 +72,9 @@ def test_a_send_as_message_reads_send_only_in_its_frame_and_history(console):
 def test_the_mark_holds_after_the_free_and_a_later_holder_has_none(console):
     sent = api.send_as("launcher", "console", ["main@proj-a"], "while reserved")
     assert sent.outcome == "sent", sent.lines()
+    # An older comms wrote a module's post as `identity`: the reserved interval marks it.
+    older = console.record.post_as_identity(
+        "console", console.names_channel, "::to main@proj-a [no reply]\nan older post")
     console.clock.advance(5)
     reserved.reconcile(declared={}, chain=secrets.from_config(), clock=console.clock)
     console.clock.advance(5)
@@ -80,4 +84,17 @@ def test_the_mark_holds_after_the_free_and_a_later_holder_has_none(console):
     assert code == 0, out
     rows = {ln.split()[0]: ln for ln in out.splitlines() if ln[:1].isdigit()}
     assert "(send-only, verified)" in rows[sent.message_id]
+    assert "(send-only, verified)" in rows[older.id]
     assert "from console (chosen, verified)" in rows[later.id]
+
+
+def test_a_later_holder_of_a_freed_name_cant_delete_the_modules_post(console):
+    sent = api.send_as("launcher", "console", ["main@proj-a"], "while reserved")
+    assert sent.outcome == "sent", sent.lines()
+    console.clock.advance(5)
+    reserved.reconcile(declared={}, chain=secrets.from_config(), clock=console.clock)
+    console.shim(name="console")
+    assert wait_until(lambda: "console" in console.daemon.bindings)
+    code, out = console.cli(["delete", sent.message_id], name="console")
+    assert code == moxi_exit.REFUSED and "not yours" in out, out
+    assert console.record.get_message(sent.message_id).withdrawn_at is None

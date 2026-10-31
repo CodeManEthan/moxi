@@ -1,7 +1,8 @@
 """comms.db's schema: the steps `moxi.store.migrate` walks, one per `user_version`.
 
-Version 1 is the whole store. Each table names what it holds; the rules about who writes
-which table live in `store/__init__.py`.
+Version 1 is the whole store, and version 2 renames the operator's `author_kind`. Each
+table names what it holds; the rules about who writes which table live in
+`store/__init__.py`.
 
 Times are the record's own spelling, `%Y-%m-%dT%H:%M:%SZ` in UTC, which sorts as it
 reads, so a containment test is a string comparison. The one exception is
@@ -63,7 +64,7 @@ CREATE TABLE messages (
     id             INTEGER PRIMARY KEY,
     room_id        TEXT NOT NULL,
     author_id      TEXT NOT NULL,
-    author_kind    TEXT NOT NULL,      -- identity or user (the operator's lane)
+    author_kind    TEXT NOT NULL,      -- identity, operator, or reserved (a module's name)
     author_display TEXT NOT NULL,
     content        TEXT NOT NULL,
     timestamp      TEXT NOT NULL,
@@ -174,8 +175,14 @@ CREATE TABLE denied (
 );
 """
 
+#: Version 2: the operator's messages say `operator`, the name the rest of comms gives the
+#: operator, where version 1 wrote `user`. Nothing else changes.
+V2 = """
+UPDATE messages SET author_kind = 'operator' WHERE author_kind = 'user';
+"""
+
 #: The steps, oldest first; the store's `user_version` counts those run.
-STEPS = (V1,)
+STEPS = (V1, V2)
 
 #: The tables version 1 makes, in the order above.
 TABLES = ("meta", "rooms", "messages", "queue", "digests", "cursors", "bindings",
@@ -184,4 +191,4 @@ TABLES = ("meta", "rooms", "messages", "queue", "digests", "cursors", "bindings"
 __all__ = ["ID_BASE", "META_NEXT_ID", "META_MIGRATED_FROM", "META_AUTHOR_STAMPS",
            "META_QUEUE_MIGRATED", "QUEUE_STATES", "BINDING_KINDS",
            "IDENTITY_KINDS", "IDENTITY_STATUSES", "RESERVED_STATES", "DROP_REASONS",
-           "ROOM_KINDS", "STEPS", "TABLES", "V1"]
+           "ROOM_KINDS", "STEPS", "TABLES", "V1", "V2"]

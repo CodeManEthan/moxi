@@ -54,6 +54,9 @@ from moxi.store import transaction
 from .config import LOCAL_RETAIN_DAYS
 from .machine_line import parse as parse_machine_line
 from .record import (
+    AUTHOR_IDENTITY,
+    AUTHOR_OPERATOR,
+    AUTHOR_RESERVED,
     MAX_CONTENT_LENGTH,
     Forbidden,
     RecordError,
@@ -258,7 +261,8 @@ class LocalRecord:
             row = conn.execute("SELECT name FROM principals WHERE principal_id = ?",
                                (str(user_id),)).fetchone()
             msg = self._insert(conn, channel_id=str(channel_id), author_id=str(user_id),
-                               author_kind="user", author_display=row[0] if row else "operator",
+                               author_kind=AUTHOR_OPERATOR,
+                               author_display=row[0] if row else "operator",
                                content=content)
         self._fanout()
         self.nudge()
@@ -266,14 +270,21 @@ class LocalRecord:
 
     def post_as_identity(self, qualified: str, channel_id: str, content: str) -> Message:
         """Write an agent post after the daemon has checked its live binding."""
+        return self._post(AUTHOR_IDENTITY, str(qualified), channel_id, content)
+
+    def post_as_reserved(self, name: str, channel_id: str, content: str) -> Message:
+        """Write a module's post under a name it reserved, after the daemon has checked
+        the name's token."""
+        return self._post(AUTHOR_RESERVED, str(name), channel_id, content)
+
+    def _post(self, kind: str, author: str, channel_id: str, content: str) -> Message:
         if len(content) > self.max_content_length:
             raise RecordError(
                 f"content is {len(content)} characters, "
                 f"over the {self.max_content_length}-character cap on one message")
         with self._write() as conn:
-            msg = self._insert(conn, channel_id=str(channel_id), author_id=str(qualified),
-                               author_kind="identity", author_display=str(qualified),
-                               content=content)
+            msg = self._insert(conn, channel_id=str(channel_id), author_id=author,
+                               author_kind=kind, author_display=author, content=content)
         self._fanout()
         self.nudge()
         return msg

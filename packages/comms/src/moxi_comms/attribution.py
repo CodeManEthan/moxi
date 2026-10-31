@@ -2,10 +2,13 @@
 
 What the record alone can prove:
 
+  * a reserved row (a module's post under   -> that name, **verified**, `send-only`
+    a name it reserved)
   * an identity row stamped by the daemon   -> that qualified identity, **verified**
                                                at its current directory tier, or
                                                `send-only` when a module held the name
-                                               reserved as the message was posted
+                                               reserved as the message was posted (a
+                                               module's post from before reserved rows)
   * the operator's user id                -> the operator, **verified**
   * a webhook row an older release left   -> its display, **labeled**
   * anything else                         -> `unknown`, never guessed
@@ -17,6 +20,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from . import directory
+from .record import AUTHOR_IDENTITY, AUTHOR_OPERATOR, AUTHOR_OPERATOR_OLD, AUTHOR_RESERVED
 from .scoping import GLOBAL, is_auto_name, qualify, split_tag
 
 TIER_EPHEMERAL, TIER_CHOSEN, TIER_STANDING = "ephemeral", "chosen", "standing"
@@ -68,7 +72,11 @@ def from_display(display: str) -> Author:
 
 def from_record(db, msg) -> Author:
     """Everything the record + directory can prove about who authored `msg`."""
-    if msg.author_kind == "identity":
+    if msg.author_kind == AUTHOR_RESERVED:
+        name, scope = split_tag(msg.author_id)
+        scope = scope or GLOBAL
+        return Author(name, scope, qualify(name, scope), TIER_SEND_ONLY, VERIFIED)
+    if msg.author_kind == AUTHOR_IDENTITY:
         name, scope = split_tag(msg.author_id)
         scope = scope or GLOBAL
         if _reserved_at(db, qualify(name, scope), msg.timestamp):
@@ -80,7 +88,7 @@ def from_record(db, msg) -> Author:
         else:
             tier = TIER_CHOSEN
         return Author(name, scope, qualify(name, scope), tier, VERIFIED)
-    if msg.author_kind == "user":
+    if msg.author_kind in (AUTHOR_OPERATOR, AUTHOR_OPERATOR_OLD):
         row = directory.operator(db, msg.author_id)
         if row:
             return Author(row["name"], GLOBAL, row["name"], TIER_OPERATOR, VERIFIED)
@@ -96,9 +104,9 @@ def from_record(db, msg) -> Author:
 
 def _reserved_at(db, qualified: str, at) -> bool:
     """Was `qualified` reserved for a module at `at` (the record's timestamp spelling)?
-    Its `reserved` binding interval says: the interval is how attribution reads a
-    reserved name's messages, so one sent before the name was freed keeps its mark after.
-    The two spellings are one, so the comparison is a string's. A store that can't be
+    Its `reserved` binding interval says. A module's post now carries `author_kind`
+    `reserved`; the interval reads one an older comms wrote as `identity`, and one sent
+    before the name was freed keeps its mark after. The two spellings are one, so the comparison is a string's. A store that can't be
     read holds no interval."""
     if not at:
         return False

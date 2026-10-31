@@ -12,6 +12,8 @@ suites prove that every time they post as the operator.
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 from conftest import wait_for_queue, wait_until
 
@@ -118,9 +120,14 @@ def test_the_operator_posts_with_the_provisioned_token_and_lands_as_the_operator
     assert reviewer.queue[0]["author"] == {"name": "operator", "tier": "operator",
                                            "attribution": "verified"}
     posted = rig.record.history(rig.names_channel)
-    assert [m.author_kind for m in posted] == ["user"]
+    assert [m.author_kind for m in posted] == ["operator"]
     assert posted[0].author_id == rig.prov.operator_user_id
     assert f"sent {posted[0].id}" in out
+    # A row an older store wrote says `user`; it still reads as the operator, for a
+    # read-only open that finds the store before a writer has renamed it.
+    older = dataclasses.replace(posted[0], author_kind="user")
+    assert rig.daemon.attribute(older, live=False) == rig.daemon.attribute(posted[0],
+                                                                            live=False)
 
 
 def test_the_operator_obeys_the_same_cap(rig):
