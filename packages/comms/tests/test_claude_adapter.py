@@ -724,9 +724,9 @@ def test_an_unknown_whose_endpoint_no_longer_serves_is_unhandled_only_then(
 
 def test_a_steer_the_harness_takes_past_the_read_bound_is_acked_once(
         rig, adapter, endpoints, frames, monkeypatch):
-    """The race the build found: the harness confirms the steer a second past the
-    library's read bound. Nothing is requeued, the digest is acked once at that turn's
-    end, and no later turn carries it."""
+    """The harness confirms the steer a second past the library's read bound. Nothing
+    is requeued, the digest is acked once at that turn's end, and no later turn carries
+    it."""
     monkeypatch.setattr(moxi_turns.client, "READ_S", 0.3)
     ep = endpoints()
     a = adapter()
