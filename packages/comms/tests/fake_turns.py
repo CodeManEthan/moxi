@@ -22,10 +22,6 @@ next one), each one of:
     "hang"              answered with an id and no value ever (a wait times out)
 
 A steer while no turn runs is refused `idle` in its answer, as the endpoint does.
-
-Two spellings of turns' version 1 stay until the Codex adapter moves to version 2:
-`hold` (now `handle_stops`), `deliver(text, steer=True)` (now `steer`), and
-`TurnEnded.delivery_id` / `.steered` (now `deliveries`).
 """
 
 from __future__ import annotations
@@ -125,15 +121,6 @@ class TurnEnded:
     deliveries: tuple = ()
     command: str | None = None
 
-    # -- version 1's spelling, for the Codex adapter until it moves ----------------------
-    @property
-    def delivery_id(self) -> str | None:
-        return next((d.id for d in self.deliveries if d.how == "opened"), None)
-
-    @property
-    def steered(self) -> tuple:
-        return tuple(d.id for d in self.deliveries if d.how == "steered")
-
 
 @dataclass(frozen=True)
 class Gone:
@@ -150,8 +137,7 @@ class StopFacts:
 
 
 class Handed(NamedTuple):
-    """One hand-in, as the session recorded it. `steer` says it came by `steer` (or
-    version 1's `deliver(steer=True)`)."""
+    """One hand-in, as the session recorded it. `steer` says it came by `steer`."""
 
     id: str | None
     text: str
@@ -207,8 +193,6 @@ class FakeStops:
     def close(self):
         self.closed = True
 
-
-FakeHold = FakeStops
 
 
 class FakeWatch:
@@ -269,15 +253,11 @@ class FakeSession:
         self.holder = FakeStops(self, on_stop)
         return self.holder
 
-    hold = handle_stops
-
     def close(self):
         self.closed = True
 
-    def deliver(self, text, *, ref=None, steer=False, only_if_idle=False,
-                if_turn_number=None, refuse_draft=False, refuse_agents=False):
-        if steer:
-            return self._hand(text, ref, "compat-steer")
+    def deliver(self, text, *, ref=None, only_if_idle=False, if_turn_number=None,
+                refuse_draft=False, refuse_agents=False):
         return self._hand(text, ref, "deliver")
 
     def steer(self, text, *, ref=None):
@@ -321,15 +301,15 @@ class FakeSession:
             return d
 
     def _take(self, d, did, method):
-        """The harness takes a hand-in: a steer (or v1's steer-first) joins the running
-        turn; a delivery opens a turn when idle and waits for the turn's end otherwise."""
+        """The harness takes a hand-in: a steer joins the running turn; a delivery opens
+        a turn when idle and waits for the turn's end otherwise."""
         turn = self.open_turn
-        if method in ("steer", "compat-steer") and turn is not None:
+        if method == "steer" and turn is not None:
             ref = DeliveryRef(did, d.ref, "steered")
             self.turn_deliveries.setdefault(turn, []).append(ref)
             d.set(started=Started(turn, did, d.ref))
             self._events.put(TurnSteered(turn, self.session_id, DeliveryRef(did, d.ref)))
-        elif turn is None or method == "compat-steer":
+        elif turn is None:
             self.start_turn(did)
         else:
             self.waiting.append(did)
