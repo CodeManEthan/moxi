@@ -156,6 +156,24 @@ def test_a_port_another_program_holds_exits_1(capsys):
                     "with `moxi config set ui port N`"]
 
 
+def test_the_port_setting_is_read_only_when_the_shell_binds_its_own():
+    _write_port(0)
+
+    def own(port):
+        return listen.bind(port())
+
+    said = []
+    assert serve.run(bind=own, say=said.append) == 1
+    assert said and "ui's port is 0" in said[0]
+
+    def passed(port):
+        raise listen.NotLoopback("not the shell's sockets")
+
+    said = []
+    assert serve.run(bind=passed, say=said.append) == 1
+    assert said and "can't be served" in said[0]
+
+
 def test_another_shells_lock_exits_75(monkeypatch):
     lock = Layout("ui").runtime_dir(create=True) / "page.lock"
     holder = subprocess.Popen(

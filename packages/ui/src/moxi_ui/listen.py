@@ -85,9 +85,12 @@ def bind(port: int) -> Listeners:
     return Listeners(bound.sockets, bound.port, bound.names, inherited=False)
 
 
-def take(port: int, *, environ: MutableMapping[str, str] | None = None,
+def take(port: int | Callable[[], int], *, environ: MutableMapping[str, str] | None = None,
          activate: Activate | None = None, platform: str | None = None) -> Listeners:
     """The shell's listeners: the sockets a socket unit passed, else its own on `port`.
+
+    `port` may be a callable, called only when the shell binds its own, so a shell on
+    passed sockets never reads the port setting: a setting it can't read doesn't stop it.
 
     systemd's are taken when `LISTEN_PID` is this process and `LISTEN_FDS` names at
     least one; the three `LISTEN_*` variables are then removed from `environ`, so no
@@ -106,7 +109,7 @@ def take(port: int, *, environ: MutableMapping[str, str] | None = None,
     else:
         sockets = None
     if not sockets:
-        return bind(port)
+        return bind(port() if callable(port) else port)
     try:
         names = browser_names(sockets)
     except NotLoopback:

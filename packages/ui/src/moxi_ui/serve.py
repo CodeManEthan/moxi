@@ -387,11 +387,13 @@ def _needing(snapshot: ModuleSnapshot, inner: ASGIApp) -> ASGIApp:
     return layer
 
 
-def run(*, bind: Callable[[int], Listeners] = listen.take,
+def run(*, bind: Callable[[Callable[[], int]], Listeners] = listen.take,
         say: Callable[[str], Any] | None = None) -> int:
     """Run the shell to its end and return its exit code: 0 for a stop or an idle exit,
-    1 for an error (the port taken, or passed sockets it can't serve, included), 75 when
-    another shell holds the lock. `bind(port)` takes the listeners."""
+    1 for an error (the port taken, a port setting it can't read when it binds its own, or
+    passed sockets it can't serve, included), 75 when another shell holds the lock.
+    `bind(port)` takes the listeners, calling `port()` for the setting only when it binds
+    them itself."""
     say = say or (lambda text: print(text, file=sys.stderr, flush=True))
     layout = Layout(MODULE)
     try:
@@ -407,12 +409,14 @@ def run(*, bind: Callable[[int], Listeners] = listen.take,
         return files.LockTimeout.exit_code
 
 
-def _run_held(layout: Layout, bind: Callable[[int], Listeners], say: Callable[[str], Any]) -> int:
-    try:
-        port = config.port()
-    except Exception as err:  # noqa: BLE001 - a bad setting is said and ends the start
-        say(f"moxi ui: {err}")
-        return 1
+def _run_held(layout: Layout, bind: Callable[[Callable[[], int]], Listeners],
+              say: Callable[[str], Any]) -> int:
+    asked: list[int] = []
+
+    def port() -> int:
+        asked.append(config.port())
+        return asked[-1]
+
     try:
         listeners = bind(port)
     except listen.PortInUse as err:
@@ -423,7 +427,11 @@ def _run_held(layout: Layout, bind: Callable[[int], Listeners], say: Callable[[s
             "`moxi install ui` writes its socket units again")
         return 1
     except OSError as err:
-        say(f"moxi ui: the listener on port {port} could not be bound: {err}")
+        where = f" on port {asked[-1]}" if asked else ""
+        say(f"moxi ui: the listener{where} could not be bound: {err}")
+        return 1
+    except Exception as err:  # noqa: BLE001 - a bad port setting is said and ends the start
+        say(f"moxi ui: {err}")
         return 1
     idle_s = None
     if listeners.inherited:

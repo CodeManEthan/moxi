@@ -88,6 +88,22 @@ def test_only_the_ipv4_socket_passed_refuses_localhost_where_ipv6_loopback_exist
         got.close()
 
 
+def test_passed_sockets_never_read_the_port(passed):
+    def unread():
+        raise AssertionError("the port was read")
+
+    got = listen.take(unread, environ=passed.systemd(), platform="linux")
+    try:
+        assert got.inherited and got.port == passed.port
+    finally:
+        got.close()
+    got = listen.take(lambda: 0, environ={}, platform="linux")
+    try:
+        assert not got.inherited
+    finally:
+        got.close()
+
+
 def test_a_name_count_that_does_not_match_names_none(passed):
     got = listen.take(1, environ=passed.systemd(names="a:b:c"), platform="linux")
     try:
