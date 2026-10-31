@@ -22,7 +22,7 @@ def clamp(text: str, cap: int, *, marker: str) -> str:
     """`text` when it fits in `cap`; otherwise `text` cut to `cap` with `marker` appended.
 
     The result is at most `cap` characters and ends with `marker` whenever anything was
-    dropped (L6). Two corners, resolved the only way that keeps the first half of that
+    dropped (law 6). Two corners, resolved the only way that keeps the first half of that
     sentence true:
 
     - `cap` below `len(marker)` cannot both fit and carry the whole admission. The

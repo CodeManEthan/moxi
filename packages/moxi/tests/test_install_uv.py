@@ -15,7 +15,7 @@ import pytest
 
 
 @pytest.fixture
-def tool(tmp_path, uv_env, wheels):
+def tool(tmp_path, offline_uv_env, wheels):
     index = tmp_path / "index"      # what the tool's find-links reaches
     direct = tmp_path / "direct"    # reached only by --from
     log = tmp_path / "setup.log"
@@ -46,12 +46,12 @@ def tool(tmp_path, uv_env, wheels):
 
     done = subprocess.run(["uv", "tool", "install", "moxi", "--no-index",
                            "--find-links", str(index)],
-                          env=uv_env, capture_output=True, text=True, timeout=120)
+                          env=offline_uv_env, capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, done.stderr
 
     class Tool:
-        bin = Path(uv_env["UV_TOOL_BIN_DIR"])
-        prefix = Path(uv_env["UV_TOOL_DIR"]) / "moxi"
+        bin = Path(offline_uv_env["UV_TOOL_BIN_DIR"])
+        prefix = Path(offline_uv_env["UV_TOOL_DIR"]) / "moxi"
 
         def frm(self, name: str) -> str:
             wheel = next(direct.glob(f"moxi_{name}-*.whl"))
@@ -59,7 +59,7 @@ def tool(tmp_path, uv_env, wheels):
 
         def moxi(self, *args: str, code: int = 0) -> str:
             # The tool's own options must carry the re-runs: the environment sets none.
-            env = {k: v for k, v in uv_env.items()
+            env = {k: v for k, v in offline_uv_env.items()
                    if k not in ("UV_TOOL_DIR", "UV_TOOL_BIN_DIR")}
             done = subprocess.run([str(self.bin / "moxi"), *args], env=env,
                                   capture_output=True, text=True, timeout=300,
@@ -160,18 +160,18 @@ def test_install_names_the_closure_when_a_member_is_left_out(tool):
     assert tool.modules() == {}
 
 
-def test_install_in_a_plain_environment(tool, tmp_path, uv_env):
+def test_install_in_a_plain_environment(tool, tmp_path, offline_uv_env):
     venv = tmp_path / "venv"
     index = tmp_path / "index"
     for args in (["venv", str(venv)],
                  ["pip", "install", "--python", str(venv / "bin" / "python"),
                   "--no-index", "--find-links", str(index), "moxi"]):
-        done = subprocess.run(["uv", *args], env=uv_env, capture_output=True, text=True,
+        done = subprocess.run(["uv", *args], env=offline_uv_env, capture_output=True, text=True,
                               timeout=120)
         assert done.returncode == 0, done.stderr
     done = subprocess.run([str(venv / "bin" / "moxi"), "install", "comms", "--none",
                            "--from", tool.frm("comms"), "--from", tool.frm("turns")],
-                          env=uv_env, capture_output=True, text=True, timeout=300,
+                          env=offline_uv_env, capture_output=True, text=True, timeout=300,
                           stdin=subprocess.DEVNULL)
     assert done.returncode == 0, done.stdout + done.stderr
     assert "uv pip install --python" in done.stdout

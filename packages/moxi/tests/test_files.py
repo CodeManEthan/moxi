@@ -26,13 +26,13 @@ def mode_of(path: Path) -> int:
 
 # -- atomic_write ------------------------------------------------------------------------
 
-def test_atomic_write_writes_bytes_and_text(tmp_path):
-    target = tmp_path / "a.txt"
+def test_atomic_write_writes_bytes_and_text(work):
+    target = work / "a.txt"
     files.atomic_write(target, b"one")
     assert target.read_bytes() == b"one"
     files.atomic_write(target, "twó")
     assert target.read_bytes() == "twó".encode("utf-8")
-    assert [p.name for p in tmp_path.iterdir()] == ["a.txt"]
+    assert [p.name for p in work.iterdir()] == ["a.txt"]
 
 
 @POSIX
@@ -50,8 +50,8 @@ def test_atomic_write_makes_a_missing_parent(tmp_path):
     assert target.read_text() == "x"
 
 
-def test_a_failed_atomic_write_leaves_the_file_and_no_temp(tmp_path, monkeypatch):
-    target = tmp_path / "a"
+def test_a_failed_atomic_write_leaves_the_file_and_no_temp(work, monkeypatch):
+    target = work / "a"
     target.write_text("old")
 
     def broken(src, dst):
@@ -61,7 +61,7 @@ def test_a_failed_atomic_write_leaves_the_file_and_no_temp(tmp_path, monkeypatch
     with pytest.raises(OSError, match="disk full"):
         files.atomic_write(target, "new")
     assert target.read_text() == "old"
-    assert [p.name for p in tmp_path.iterdir()] == ["a"]
+    assert [p.name for p in work.iterdir()] == ["a"]
 
 
 def test_atomic_write_uses_a_dotted_temp_name(tmp_path, monkeypatch):
@@ -750,15 +750,15 @@ def test_edit_toml_keeps_comments_and_order(tmp_path):
         .replace("# where messages go\n", "# where messages go\nblock = true\n"))
 
 
-def test_edit_toml_writes_nothing_when_the_block_raises(tmp_path):
-    target = tmp_path / "config.toml"
+def test_edit_toml_writes_nothing_when_the_block_raises(work):
+    target = work / "config.toml"
     target.write_text(EDITED)
     with pytest.raises(KeyError):
         with files.edit_toml(target) as doc:
             doc["backend"] = "remote"
             raise KeyError("no")
     assert target.read_text() == EDITED
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["config.toml", "config.toml.lock"]
+    assert sorted(p.name for p in work.iterdir()) == ["config.toml", "config.toml.lock"]
 
 
 def test_edit_toml_of_a_missing_file_starts_empty_and_writes_0600(tmp_path):
@@ -833,16 +833,16 @@ def test_append_record_writes_one_compact_line(tmp_path):
     assert files.read_records(log) == [{"a": 1, "b": "é"}, {"a": 2}]
 
 
-def test_append_record_rolls_to_one_older_generation(tmp_path):
-    log = tmp_path / "r.jsonl"
+def test_append_record_rolls_to_one_older_generation(work):
+    log = work / "r.jsonl"
     line = len(json.dumps({"i": 0}, separators=(",", ":"))) + 1
     for i in range(10):
         files.append_record(log, {"i": i}, max_bytes=line * 4)
     assert [r["i"] for r in files.read_records(log)] == [4, 5, 6, 7, 8, 9]
-    assert [json.loads(x)["i"] for x in (tmp_path / "r.jsonl.1").read_text().splitlines()] \
+    assert [json.loads(x)["i"] for x in (work / "r.jsonl.1").read_text().splitlines()] \
         == [4, 5, 6, 7]
     assert [json.loads(x)["i"] for x in log.read_text().splitlines()] == [8, 9]
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["r.jsonl", "r.jsonl.1",
+    assert sorted(p.name for p in work.iterdir()) == ["r.jsonl", "r.jsonl.1",
                                                           "r.jsonl.lock"]
 
 

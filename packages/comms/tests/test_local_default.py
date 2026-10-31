@@ -364,9 +364,11 @@ def test_a_daemon_process_on_mock_never_provisions(tmp_path, runtime_dir):
 # --------------------------------------------------------------- moxi comms doctor
 
 def doctor(env):
+    """`moxi comms doctor` against a socket path where no daemon answers (inside the
+    fence's tmp, where a connect is allowed)."""
     out = io.StringIO()
     ctx = cli.Context(record=object(), env=env, out=out,
-                      socket_path=Path("/nonexistent/comms.sock"))
+                      socket_path=Path(env["MOXI_COMMS_RUNTIME_DIR"]) / "absent.sock")
     code = cli.main(["doctor"], ctx=ctx)
     return code, {line[:10].strip(): line[12:] for line in out.getvalue().splitlines()
                   if line[:1] != " "}

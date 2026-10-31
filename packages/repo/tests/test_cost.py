@@ -8,6 +8,8 @@ import subprocess
 import sys
 import time
 
+import pytest
+
 from moxi_repo import api
 from tests.conftest import POSIX_ONLY, git
 
@@ -39,6 +41,7 @@ def test_the_runner_imports_only_its_own_two_modules_and_the_standard_library(de
                                       "demo_pieces", "demo_pieces.hooks"}
 
 
+@pytest.mark.timed
 def test_the_runner_imports_in_under_10_ms(demo):
     python = str(demo.hook_env["python"])
     # The suite's other workers can load the machine (eight parallel committer passes, a
@@ -67,6 +70,7 @@ def _import_times(python: str) -> list[int]:
     return times
 
 
+@pytest.mark.timed
 def test_a_git_hook_costs_under_twice_a_bare_interpreter(demo):
     repo = demo.repo()
     api.add(repo, ["demo/lint"])

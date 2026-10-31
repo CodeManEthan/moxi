@@ -1,5 +1,5 @@
 # The places in src/ that write a file themselves rather than through moxi.files or
-# moxi.store. `moxi check` (check 8) fails on a write site not listed here, and on a line
+# moxi.store. `moxi-dev contract` (check 8) fails on a write site not listed here, and on a line
 # that no longer matches one, so this list only shrinks as the module moves onto the
 # helpers. One line per site: <path> <enclosing scope> <call>.
 src/moxi_sessions/opencode.py connect sqlite3.connect

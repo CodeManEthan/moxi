@@ -38,7 +38,7 @@ def test_json_on_stdin_becomes_the_envelope_on_stdout():
 
 
 def test_the_wire_is_one_line_with_exactly_one_trailing_newline():
-    """L8: one write, compact separators, no second newline and no trailing
+    """Law 8: one write, compact separators, no second newline and no trailing
     space. A test that decoded first could not see any of that."""
     code, out, err = drive(HOOK, json.dumps({"cwd": "/x"}))
     assert out.count(b"\n") == 1
@@ -78,7 +78,7 @@ def test_a_closed_stdin_exits_zero():
     'MemoryError("nothing left")',
 ])
 def test_a_body_that_raises_anything_at_all_exits_zero_with_an_empty_stdout(raise_what):
-    """L7's gauge, driven as a process: `Exception`, `SystemExit` and bare
+    """Law 7's gauge, driven as a process: `Exception`, `SystemExit` and bare
     `BaseException` subclasses all leave the hook at 0 with nothing on stdout."""
     code, out, err = drive(
         f"""
@@ -95,7 +95,7 @@ def test_a_body_that_raises_anything_at_all_exits_zero_with_an_empty_stdout(rais
 
 
 def test_an_unwritable_stdout_exits_zero():
-    """L7: `run` returns 0 on every path including a stdout that cannot be written."""
+    """Law 7: `run` returns 0 on every path including a stdout that cannot be written."""
     code, out, err = drive(
         """
         import sys
@@ -111,7 +111,7 @@ def test_an_unwritable_stdout_exits_zero():
 
 
 def test_the_deadline_bounds_the_whole_process():
-    """L5 as a process: a body past the bound writes nothing, reports once with
+    """Law 5 as a process: a body past the bound writes nothing, reports once with
     `where="deadline"`, and the hook still exits 0."""
     code, out, err = drive(
         """
@@ -239,7 +239,7 @@ def test_a_consumer_keeps_its_own_exit_code_over_the_kit():
 
 
 def test_the_package_needs_nothing_on_the_path_or_in_the_environment():
-    """L1 as a process: nothing here reads the environment, so nothing here needs one."""
+    """Law 1 as a process: nothing here reads the environment, so nothing here needs one."""
     code, out, err = drive(HOOK, json.dumps({"cwd": "/x"}), env={})
     assert code == 0
     assert out == WIRE + b'"/x"}}\n'

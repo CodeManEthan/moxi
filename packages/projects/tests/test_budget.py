@@ -71,6 +71,7 @@ def _fastest_ms(reads: str, floor: str, env: dict) -> tuple[float, float]:
 
 
 @pytest.mark.slow
+@pytest.mark.timed
 def test_projects_part_of_the_hook_path_stays_under_its_budget(golden_copy, tmp_path):
     site = tmp_path / "site"
     (site / "moxi_hookcost").mkdir(parents=True)

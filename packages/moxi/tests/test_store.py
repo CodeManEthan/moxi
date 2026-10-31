@@ -119,15 +119,27 @@ def test_a_store_in_a_directory_another_user_owns_but_lets_us_write_opens(tmp_pa
         pytest.skip("no writable directory owned by another user here")
     before = os.stat(found)
     path = found / f"moxi-store-test-{uuid.uuid4().hex}.db"
-    try:
-        store.connect(path).close()
-        assert mode_of(path) == 0o600
-        after = os.stat(found)
-        assert (after.st_mode, after.st_uid, after.st_gid) == (
-            before.st_mode, before.st_uid, before.st_gid)
-    finally:
-        for suffix in ("", "-wal", "-shm"):
-            Path(f"{path}{suffix}").unlink(missing_ok=True)
+    # The test fence refuses this process a write outside the test's tmp, and the point
+    # here is a directory outside it, so a child opens the store and reports its mode.
+    child = textwrap.dedent("""\
+        import os, stat, sys
+        from pathlib import Path
+        from moxi import store
+        path = Path(sys.argv[1])
+        try:
+            store.connect(path).close()
+            print(oct(stat.S_IMODE(os.stat(path).st_mode)))
+        finally:
+            for suffix in ("", "-wal", "-shm"):
+                Path(f"{path}{suffix}").unlink(missing_ok=True)
+        """)
+    done = subprocess.run([sys.executable, "-c", child, str(path)], capture_output=True,
+                          text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == oct(0o600)
+    after = os.stat(found)
+    assert (after.st_mode, after.st_uid, after.st_gid) == (
+        before.st_mode, before.st_uid, before.st_gid)
 
 
 @POSIX
@@ -249,11 +261,11 @@ def test_create_false_refuses_a_missing_store_and_makes_nothing(tmp_path):
 
 
 @pytest.mark.parametrize("name", [":memory:", Path(":memory:"), "./:memory:"])
-def test_the_in_memory_name_is_refused_and_makes_nothing(tmp_path, monkeypatch, name):
-    monkeypatch.chdir(tmp_path)
+def test_the_in_memory_name_is_refused_and_makes_nothing(work, monkeypatch, name):
+    monkeypatch.chdir(work)
     with pytest.raises(store.StoreError, match="in-memory"):
         store.connect(name)
-    assert list(tmp_path.iterdir()) == []
+    assert list(work.iterdir()) == []
 
 
 def test_an_existing_store_is_opened_as_it_is(tmp_path, caplog):
@@ -296,8 +308,8 @@ def test_an_empty_file_is_made_a_wal_store(tmp_path, caplog):
     assert not caplog.records
 
 
-def test_create_false_on_an_empty_file_writes_nothing(tmp_path):
-    path = tmp_path / "s.db"
+def test_create_false_on_an_empty_file_writes_nothing(work):
+    path = work / "s.db"
     path.touch()
     conn = store.connect(path, create=False)
     try:
@@ -305,7 +317,7 @@ def test_create_false_on_an_empty_file_writes_nothing(tmp_path):
     finally:
         conn.close()
     assert path.stat().st_size == 0
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["s.db"]
+    assert sorted(p.name for p in work.iterdir()) == ["s.db"]
 
 
 def test_check_same_thread_is_passed_through(tmp_path):

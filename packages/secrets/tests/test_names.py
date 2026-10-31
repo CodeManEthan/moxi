@@ -85,6 +85,7 @@ def test_allowed_text_and_the_author_never_hit(eng):
 
 @pytest.mark.parametrize("eng", [RE2, PY], ids=["re2", "re"])
 @pytest.mark.parametrize("entry", [" ", " b", "- b"])
+@pytest.mark.timed
 def test_separator_heavy_entries_run_in_linear_time(eng, entry):
     text = " " * 320_000 + "b"
     started = time.perf_counter()

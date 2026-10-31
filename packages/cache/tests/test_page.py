@@ -410,7 +410,7 @@ WITHOUT_UI = textwrap.dedent("""
     import moxi_cache.module
     import moxi_cache.segment
     import moxi_cache.watch
-    from moxi.contract import check
+    from moxi_dev.contract import check
 
     code = moxi_cache.cli.main(["read", "aaaaaaaa-1111-4111-8111-111111111111"],
                                prog="moxi cache")

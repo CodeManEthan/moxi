@@ -14,7 +14,7 @@ module is off and quiet.
 
 | module | what it does | requires | optional | issues |
 |---|---|---|---|---|
-| `moxi` | The core: names, paths, one config file per module, module discovery, the module contract check, and the `moxi` command | nothing (standard library only) | | [moxihq/moxi/issues](https://github.com/moxihq/moxi/issues) |
+| `moxi` | The core: names, paths, one config file per module, module discovery, and the `moxi` command | nothing (standard library only) | | [moxihq/moxi/issues](https://github.com/moxihq/moxi/issues) |
 | sessions | Where a harness keeps a session's record, and how its lines read | `moxi` | | [moxihq/sessions/issues](https://github.com/moxihq/sessions/issues) |
 | turns | The one interface to a harness's session: a turn, mail, `/clear` and `/exit` in, session events out. A library with no command of its own | `moxi` | `codex`: the Codex host | [moxihq/turns/issues](https://github.com/moxihq/turns/issues) |
 | cache | The prompt cache clock: when a session's cache goes cold, with a watcher and a status line segment | `moxi`, sessions | | [moxihq/cache/issues](https://github.com/moxihq/cache/issues) |
@@ -34,7 +34,6 @@ commands:
 - `moxi config <module>` shows a module's settings and its config file; `moxi config set
   <module> <key> <value>` changes one, keeping the file's comments, and `moxi config unset`
   removes one. `moxi config moxi` is the core's own.
-- `moxi check` checks a module's package against the module contract.
 
 ## Install
 

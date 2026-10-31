@@ -9,13 +9,14 @@ side. Each share of it is held by its own test. The core's two shares are held h
 
 - the hook path (`import moxi.paths`, `available()` and `load()`) under 9 ms, for an
   absent module and for a module whose announcement is one line;
-- `import moxi.config` with one `load()` of a small file under 7 ms.
+- `import moxi.config` with one `load()` of a small file under 7 ms, or under 12 ms on
+  Python 3.12.
 
 One more test runs both in one process and holds them under the 15 ms ceiling together.
 A module's own imports are held by that module's test. The hook path's own `sys.modules`
 check is in test_hook_path.py.
 
-How the timed tests (tier `slow`) measure: 51 pairs, each a `python -I -c pass` start (the
+How the timed tests (tier `slow`, marked `timed`) measure: 51 pairs, each a `python -I -c pass` start (the
 floor) followed at once by a `python -I` run of the code. Each pair gives the code's run
 minus the floor's, and the test takes the lower quartile of those 51 differences.
 
@@ -58,8 +59,9 @@ HEAVY = ("psutil", "tomlkit", "moxi._vendor.tomlkit", "packaging", "moxi._vendor
 HOOK_CEILING_MS = 15.0
 #: The core's share of it for the hook path.
 HOOK_PATH_MS = 9.0
-#: The core's share of it for `import moxi.config` with one `load()`.
-CONFIG_MS = 7.0
+#: The core's share of it for `import moxi.config` with one `load()`. 3.12's `tomllib`
+#: and `pathlib` import `typing`, `string` and `urllib.parse`; 3.14's don't.
+CONFIG_MS = 12.0 if sys.version_info < (3, 13) else 7.0
 #: Floor-then-code pairs per timed test.
 PAIRS = 51
 
@@ -130,6 +132,7 @@ def _record(name: str, ms: float) -> None:
 
 
 @pytest.mark.slow
+@pytest.mark.timed
 def test_the_hook_path_for_an_absent_module(tmp_path):
     ms = _over_floor(HOOK.format(root=str(tmp_path), name="nosuchmodule", there=False,
                                  state="absent"))
@@ -138,6 +141,7 @@ def test_the_hook_path_for_an_absent_module(tmp_path):
 
 
 @pytest.mark.slow
+@pytest.mark.timed
 def test_the_hook_path_for_a_one_line_module(one_line_module):
     ms = _over_floor(HOOK.format(root=str(one_line_module), name="hookcost", there=True,
                                  state="present"))
@@ -158,6 +162,7 @@ def config_file(tmp_path):
 
 
 @pytest.mark.slow
+@pytest.mark.timed
 def test_config_import_and_one_load(config_file):
     ms = _over_floor(CONFIG.format(schema=SCHEMA, path=str(config_file)))
     _record("import moxi.config + one load()", ms)
@@ -165,6 +170,7 @@ def test_config_import_and_one_load(config_file):
 
 
 @pytest.mark.slow
+@pytest.mark.timed
 def test_the_hook_path_and_config_together_stay_under_a_hooks_ceiling(one_line_module,
                                                                       config_file):
     code = "; ".join([

@@ -32,7 +32,7 @@ Repository = "https://github.com/moxihq/moxi"
 Issues = "https://github.com/moxihq/moxi/issues"
 
 [dependency-groups]
-dev = ["pytest"]
+dev = ["pytest", "moxi-dev"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -43,10 +43,12 @@ packages = ["src/moxi"]
 
 [tool.hatch.build.targets.sdist]
 # A source distribution built from any branch holds these paths and nothing else.
-only-include = ["LICENSE", "README.md", "src/moxi", "tests", "tools"]
+only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi", "tests", "tools"]
 
+# A plain `pytest` runs the units and contract seams: the tiers are deselected here.
+# `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a
+# changed path; `moxi-dev check --full` runs every tier but live. Run one by hand with
+# `pytest -m <tier>` (a live test also needs MOXI_TEST_LIVE=1).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# Timed tests are the slow tier: a plain run leaves them out; `-m slow` runs them.
-addopts = "-m 'not slow'"
-markers = ["slow: takes long or is timed; deselected by a plain pytest run"]
+addopts = "-m 'not browser and not slow and not build and not live'"

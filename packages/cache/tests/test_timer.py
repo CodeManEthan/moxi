@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import write_cache_config
+from conftest import claude_config, write_cache_config
 
 from moxi_cache import cli, timer, watch
 from moxi_cache.timer import Refusal, Subscription, Timer
@@ -893,7 +893,7 @@ run = ["{exe}", "clear-expired", "--session", "{{session}}"]
 def test_the_watcher_hands_its_records_to_the_timer(tmp_path):
     from test_watch import Fake, entry
 
-    root = tmp_path / "claude-config" / "projects"
+    root = claude_config() / "projects"
     root.mkdir(parents=True)
     fake = Fake([entry(11, A)])
     w = watch.Watcher(agents=fake.agents, read=fake.read, now=fake.now,

@@ -28,8 +28,9 @@ exit {code}
 
 @pytest.fixture
 def box(tmp_path, monkeypatch):
-    """A temp HOME, a fake systemctl, and the rig's standalone roots."""
-    home = tmp_path / "home"
+    """A temp HOME of the box's own (the fence's is `tmp_path / "home"`), a fake
+    systemctl, and the rig's standalone roots."""
+    home = tmp_path / "box-home"
     home.mkdir()
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

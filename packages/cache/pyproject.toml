@@ -41,11 +41,13 @@ packages = ["src/moxi_cache"]
 [tool.hatch.build.targets.sdist]
 # A source distribution built from any branch holds these public paths, and the
 # pyproject.toml and .gitignore hatchling adds itself.
-only-include = ["LICENSE", "README.md", "src/moxi_cache", "tests", "web"]
+only-include = ["LICENSE", "README.md", "conftest.py", "src/moxi_cache", "tests", "web"]
 
-# A plain `pytest` leaves out the browser tests, and so does `moxi-dev check` when
-# Playwright's Chromium can't start; `pytest -m browser` runs them.
+# A plain `pytest` runs the units and contract seams: the tiers are deselected here.
+# `moxi-dev check` runs the same, plus the browser tests when Playwright's Chromium
+# starts there, plus a tier test whose `touches` glob matches a changed path;
+# `moxi-dev check --full` runs every tier but live. Run one by hand with
+# `pytest -m <tier>` (a live test also needs MOXI_TEST_LIVE=1).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-m 'not browser'"
-markers = ["browser: drives a browser; deselected by a plain pytest run"]
+addopts = "-m 'not browser and not slow and not build and not live'"

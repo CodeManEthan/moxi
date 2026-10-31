@@ -36,7 +36,7 @@ def drive(code: str, stdin: bytes | str = b"", *, env=None, stdin_devnull=False,
 
 
 class Recorder:
-    """A stdout double that counts every `write` and every `flush` (the L8 gauge)."""
+    """A stdout double that counts every `write` and every `flush` (the law 8 gauge)."""
 
     def __init__(self, fail: BaseException | None = None):
         self.writes: list[str] = []

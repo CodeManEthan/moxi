@@ -92,12 +92,14 @@ packages = ["src/moxi_comms"]
 [tool.hatch.build.targets.sdist]
 # Only the published paths go into a source distribution, whatever branch it is built
 # from (hatchling adds pyproject.toml and .gitignore itself).
-only-include = ["CHANGELOG.md", "CONTRIBUTING.md", "LICENSE", "README.md", "docs", "scripts",
-                "src/moxi_comms", "tests", "web"]
+only-include = ["CHANGELOG.md", "CONTRIBUTING.md", "LICENSE", "README.md", "conftest.py",
+                "docs", "scripts", "src/moxi_comms", "tests", "web"]
 
-# A plain `pytest` leaves out the browser tests, and so does `moxi-dev check` when
-# Playwright's Chromium can't start; `pytest -m browser` runs them.
+# A plain `pytest` runs the units and contract seams: the tiers are deselected here.
+# `moxi-dev check` runs the same, plus the browser tests when Playwright's Chromium
+# starts there, plus a tier test whose `touches` glob matches a changed path;
+# `moxi-dev check --full` runs every tier but live. Run one by hand with
+# `pytest -m <tier>` (a live test also needs MOXI_TEST_LIVE=1).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-m 'not browser'"
-markers = ["browser: drives a browser; deselected by a plain pytest run"]
+addopts = "-m 'not browser and not slow and not build and not live'"
