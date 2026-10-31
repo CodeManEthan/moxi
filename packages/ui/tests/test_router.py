@@ -92,6 +92,20 @@ def test_the_shell_page_answers_its_health(shell):
     assert answer.status == 200 and answer.json()["module"] == "ui"
 
 
+@pytest.mark.parametrize("names", [("127.0.0.1",), ("127.0.0.1", "localhost")])
+def test_localhost_is_admitted_only_while_the_listeners_name_it(tmp_path, names):
+    """The listeners leave `localhost` out while another socket holds `[::1]` on the
+    port; a request naming it is then refused, though its cookie and key are good."""
+    from shell_kit import HOST
+
+    shell = Harness(tmp_path / "state", names=names)
+    cookie, key = shell.sign_in()
+    for host, admitted in ((b"localhost:4321", "localhost" in names), (HOST, True)):
+        answer = shell.send("GET", "/m/fixture/api/summary", headers=[cookie, key, *FETCH],
+                            host=host)
+        assert answer.status == (299 if admitted else 403), host
+
+
 def test_the_fallback_answers_navigations_only():
     from moxi_loopback.api import RequestView
 

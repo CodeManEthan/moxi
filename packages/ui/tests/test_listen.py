@@ -104,6 +104,47 @@ def test_passed_sockets_never_read_the_port(passed):
         got.close()
 
 
+def _has_ipv6_loopback():
+    try:
+        with socket.socket(socket.AF_INET6) as sock:
+            sock.bind(("::1", 0))
+    except OSError:
+        return False
+    return True
+
+
+@pytest.mark.skipif(not _has_ipv6_loopback(), reason="no IPv6 loopback here")
+def test_another_socket_on_ipv6_loopback_leaves_localhost_refused(tmp_path):
+    from shell_kit import FETCH, Harness
+
+    other = socket.socket(socket.AF_INET6)
+    other.bind(("::1", 0))
+    other.listen()
+    port = other.getsockname()[1]
+    try:
+        try:
+            got = listen.bind(port)
+        except listen.PortInUse:
+            pytest.skip("127.0.0.1 holds that port too")
+        try:
+            assert got.port == port and got.names == frozenset({"127.0.0.1"})
+        finally:
+            got.close()
+    finally:
+        other.close()
+    shell = Harness(tmp_path / "state", names=got.names)
+    cookie, key = shell.sign_in()
+    answer = shell.send("GET", "/m/fixture/api/summary", headers=[cookie, key, *FETCH],
+                        host=b"localhost:%d" % port)
+    assert answer.status == 403
+    # Holding both addresses itself, the shell admits localhost.
+    both = listen.bind(0)
+    try:
+        assert both.names == frozenset({"127.0.0.1", "localhost"})
+    finally:
+        both.close()
+
+
 def test_a_name_count_that_does_not_match_names_none(passed):
     got = listen.take(1, environ=passed.systemd(names="a:b:c"), platform="linux")
     try:
