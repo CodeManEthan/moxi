@@ -19,7 +19,8 @@ for a tag that is itself data (a pattern's test input, say); the repository's co
 reads the same file.
 
 `scan(root)` reads every tracked and untracked-but-not-ignored file that is UTF-8 text,
-and returns what it found.
+and returns what it found. A file under a `_vendor` directory is a released library
+kept as released (the core vendors two), so it is not read.
 """
 
 from __future__ import annotations
@@ -49,6 +50,8 @@ FINDING_MARK = re.compile(
 #: The file that declares allowed text, and files that are not prose or code.
 ALLOW_FILE = ".residue-allow"
 SKIPPED = frozenset({ALLOW_FILE, "uv.lock"})
+#: A directory of vendored copies of released libraries, whose text is not ours.
+VENDORED = "_vendor"
 
 
 @dataclass(frozen=True, order=True)
@@ -107,7 +110,8 @@ def scan(root: Path) -> list[Hit]:
     allow = allowed(root)
     hits = []
     for path in _files(root):
-        if path in SKIPPED or not (root / path).is_file():
+        if (path in SKIPPED or VENDORED in path.split("/")[:-1]
+                or not (root / path).is_file()):
             continue
         try:
             text = (root / path).read_text(encoding="utf-8")

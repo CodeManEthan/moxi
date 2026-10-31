@@ -89,6 +89,13 @@ def test_scan_skips_binary_files_the_lock_and_the_allow_file(repo):
     assert scan(repo) == []
 
 
+def test_scan_skips_vendored_copies(repo):
+    (repo / "src" / "_vendor" / "lib").mkdir(parents=True)
+    (repo / "src" / "_vendor" / "lib" / "a.py").write_text("# per D07\n")
+    (repo / "src" / "_vendor.py").write_text("# per D07\n")
+    assert scan(repo) == [Hit("src/_vendor.py", 1, "D07")]
+
+
 def test_the_allow_file_lets_exact_text_stand_in_one_file(repo):
     (repo / "a.py").write_text("PATTERN_INPUT = '[B5]'\nOTHER = '(R5)'\n")
     (repo / "b.py").write_text("PATTERN_INPUT = '[B5]'\n")

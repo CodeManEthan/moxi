@@ -20,7 +20,8 @@ declares in `dependencies` or an extra; `tests/` may import a dependency group's
 An import maps to its distribution by what the package declares, never by what is
 installed: `moxi_<name>` to `moxi-<name>`, any other to the declared distribution of the
 same normalized name, or else through the package's `[tool.moxi.imports]` table. A
-declared dependency nothing imports is not a finding.
+declared dependency nothing imports is not a finding. deptry does not read the core's
+vendored copies of released libraries, which are kept as released.
 
 What the two tools cannot see, the names an import takes, stays in `moxi_dev.contract`.
 A distribution that is neither the core nor `moxi-<name>` gets no commands. moxi-dev, the
@@ -32,13 +33,14 @@ from __future__ import annotations
 import importlib.util
 import json
 import pkgutil
+import re
 import tomllib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .contract import (CORE, CORE_MODULES, DEV, DEV_IMPORT, _MODULE_DIST, _REQUIREMENT,
-                       _api_from_checkout, _normalize, _Repo, _WorkTree)
+from .contract import (CORE, CORE_MODULES, DEV, DEV_IMPORT, VENDORED, _MODULE_DIST,
+                       _REQUIREMENT, _api_from_checkout, _normalize, _Repo, _WorkTree)
 
 #: The file import-linter reads, written into the work directory.
 IMPORTLINTER_CONFIG = "importlinter.toml"
@@ -220,8 +222,11 @@ def _deptry(repo: _Repo, data: dict, has_tests: bool) -> list[Command]:
     if mapping:
         base += ["--package-module-name-map", mapping]
     own = sorted(repo.own)
+    outside = _SKIPPED + r"|^tests(/|$)"
+    if repo.core:
+        outside += "|^" + re.escape(VENDORED.rstrip("/")) + "(/|$)"
     commands = [Command("undeclared dependencies outside tests/",
-                        [*base, "--exclude", _SKIPPED + r"|^tests(/|$)", *_first(own), "."])]
+                        [*base, "--exclude", outside, *_first(own), "."])]
     if has_tests:
         groups = sorted((data.get("dependency-groups") or {}))
         local = sorted(set(own) | repo.tests_local)

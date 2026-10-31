@@ -174,6 +174,19 @@ def test_the_core_imports_no_module(repo, tmp_path):
     assert "moxi_dev" not in out
 
 
+def test_deptry_does_not_read_the_core_s_vendored_copies(repo, tmp_path):
+    core = core_repo(tmp_path / "moxi")
+    core.src("_vendor/__init__.py")
+    core.src("_vendor/lib.py", "import typing_extensions\n")
+    core.src("names.py", "import typing_extensions\n")
+    dev = Repo(tmp_path / "moxi-dev", "dev")
+    dev.write("pyproject.toml", pyproject("moxi-dev", entry_points={}, scripts={}))
+    out = lint(core, members=[core.root, repo.beta.root, dev.root],
+               path=[core.root / "src", repo.beta.root / "src"])[OUTSIDE]
+    assert "src/moxi/names.py" in out
+    assert "_vendor" not in out
+
+
 # --- undeclared dependencies -----------------------------------------------------------------
 
 def test_an_undeclared_import_is_refused(repo):
