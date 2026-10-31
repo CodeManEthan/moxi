@@ -604,6 +604,74 @@ def _spawns(*kinds):
     return spawn
 
 
+def test_a_holder_of_another_version_is_not_used(shell_dirs):
+    """A drained server the shell didn't start can't be stopped: the next start finds it
+    holding the lock and does not use it while the snapshot says another version."""
+    holder, holder_id = _hand_run("stheld", shell_dirs[0])
+    clock = Clock()
+    starters = make(shell_dirs, clock=clock, spawn=_spawns(*["held"] * 4))
+
+    async def body(starters):
+        held = await starters.ensure("stheld")
+        assert held.info.server_id == holder_id and held.child is None
+        await asyncio.gather(*starters.set_versions({"stheld": "0.2.0"}))
+        assert held.gone
+        with pytest.raises(StartFailed) as failed:
+            await starters.ensure("stheld")
+        assert failed.value.exit == starter_mod.LOCK_HELD
+        assert "of version 0.1.0" in failed.value.reason
+        assert starters.get("stheld").record.starts == 3 and holder.poll() is None
+        starters.set_versions({"stheld": "0.1.0"})
+        clock.offset += FAILED_FOR
+        again = await starters.ensure("stheld")
+        assert again.info.server_id == holder_id
+
+    try:
+        drive(starters, body)
+    finally:
+        holder.lifeline.close()
+        holder.wait(5)
+
+
+def test_a_start_that_comes_up_on_the_version_before_a_new_snapshot_is_started_again(
+        shell_dirs, tmp_path, monkeypatch):
+    own = tmp_path / "own-site"
+    _module(own, "stver")
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([os.environ["PYTHONPATH"], str(own)]))
+    starters = make(shell_dirs)
+    snapshots, children = [], []
+    runtime = starter_mod.Starter._runtime
+
+    async def snapshot_meanwhile(self, server_id, deadline):
+        info = await runtime(self, server_id, deadline)
+        children.append(self._children[-1])
+        if snapshots:
+            version, install = snapshots.pop(0)
+            if install:
+                _dist(own, "stver", version)
+            starters.set_versions({"stver": version})
+        return info
+
+    monkeypatch.setattr(starter_mod.Starter, "_runtime", snapshot_meanwhile)
+
+    async def body(starters):
+        starter = starters.get("stver")
+        # The upgrade lands, and its snapshot is taken, while the old code starts.
+        snapshots.append(("0.2.0", True))
+        server = await starters.ensure("stver")
+        assert server.info.version == "0.2.0" and starter.record.starts == 2
+        old, new = children
+        assert old.code == 0 and new.alive and starter.record.crashes == 0
+        # A snapshot that names a version nothing installs drains once, not in a loop.
+        starter.lost(server)
+        await new.stop()
+        snapshots.append(("0.3.0", False))
+        server = await starters.ensure("stver")
+        assert server.info.version == "0.2.0" and starter.record.starts == 4
+
+    drive(starters, body)
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="SIGSTOP")
 def test_a_hung_child_of_its_own_that_holds_the_lock_is_stopped(shell_dirs, monkeypatch):
     import signal
