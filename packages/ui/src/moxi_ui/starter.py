@@ -49,6 +49,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -80,6 +81,10 @@ DRAIN_WAIT = 30.0
 STOP_WAIT = 3.0
 #: Seconds the `/servers` data waits for one child's health answer.
 HEALTH_WAIT = 2.0
+#: Threads that take the `/servers` data's samples and health calls. They are the
+#: starters' own, not the shell's shared pool: the doctor calls `/servers` back while the
+#: shell may be busy, and that call must not wait for the shell's other work.
+SAMPLE_THREADS = 4
 #: Seconds the export command may take.
 EXPORT_TIMEOUT = 10.0
 #: The page-server runner's exit code when another server holds the module's lock.
@@ -815,6 +820,7 @@ class Starters:
         self.clock = clock
         self.wall = wall
         self.closing = False
+        self._sampling: ThreadPoolExecutor | None = None
         self._starters: dict[str, Starter] = {}
         self._records = {name: Record.from_data(data)
                          for name, data in read_servers(self.path).items()}
@@ -905,11 +911,21 @@ class Starters:
             row["open"] = None
             if server is None:
                 return
-            row["sample"] = await asyncio.to_thread(sample, server.info.pid)
-            row["open"] = await asyncio.to_thread(_health_open, server.info)
+            row["sample"] = await self.sample(server.info.pid)
+            row["open"] = await self._offload(_health_open, server.info)
 
         await asyncio.gather(*(sampled(row) for row in rows))
         return {"servers": rows}
+
+    async def sample(self, pid: int) -> dict[str, Any] | None:
+        """`sample(pid)`, taken on the starters' own threads."""
+        return await self._offload(sample, pid)
+
+    def _offload(self, fn: Callable[..., Any], *args: Any) -> asyncio.Future[Any]:
+        if self._sampling is None:
+            self._sampling = ThreadPoolExecutor(SAMPLE_THREADS,
+                                                thread_name_prefix="moxi-ui-servers")
+        return asyncio.get_running_loop().run_in_executor(self._sampling, fn, *args)
 
     async def aclose(self, wait: float = STOP_WAIT) -> None:
         """The shell is stopping: close every child's lifeline and wait for each to exit,
@@ -922,6 +938,9 @@ class Starters:
             starter._drop()
             tasks.extend(child.stop(wait) for child in starter.children)
         await asyncio.gather(*tasks, return_exceptions=True)
+        if self._sampling is not None:
+            self._sampling.shutdown(wait=False, cancel_futures=True)
+            self._sampling = None
         self.save()
 
 
