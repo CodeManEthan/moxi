@@ -301,7 +301,8 @@ def test_a_live_endpoints_moved_sockets_are_never_swept(long_root, make_endpoint
         os.unlink(p)
 
 
-def test_a_short_root_keeps_every_internal_socket_in_the_directory(turns_env):
+def test_a_short_root_keeps_every_internal_socket_in_the_directory(
+        turns_env, short_runtime):
     dead, address = _dead_v2("fake-short")
     for name in protocol.INTERNAL_SOCKS:
         assert protocol.endpoint_socket(dead, name) == str(dead / name)

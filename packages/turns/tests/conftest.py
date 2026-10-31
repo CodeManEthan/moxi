@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import shutil
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -31,6 +33,17 @@ def turns_env(monkeypatch, tmp_path_factory):
     monkeypatch.delenv("MOXI_TURNS_COMMANDS", raising=False)
     monkeypatch.delenv("MOXI_TURNS_HOME", raising=False)
     yield root
+
+
+@pytest.fixture
+def short_runtime(turns_env, monkeypatch):
+    """A runtime root short enough that every internal socket fits in its endpoint's
+    directory. pytest's own root can be long enough under many workers to push the
+    longest of them past the core's limit, so a test that needs them in place uses this."""
+    root = Path(tempfile.mkdtemp(prefix="mt"))
+    monkeypatch.setenv("MOXI_TURNS_RUNTIME_DIR", str(root / "rt"))
+    yield root / "rt"
+    shutil.rmtree(root, ignore_errors=True)
 
 
 def bare(value):
