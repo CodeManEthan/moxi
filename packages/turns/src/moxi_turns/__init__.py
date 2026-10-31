@@ -37,6 +37,10 @@ out of the harness. This package is turns' whole public API, the announcement's
                               # launch about to start adds; modules contribute through the
                               # group moxi.turns.additions (a Contribution each;
                               # its mcp_servers McpServer(url, token_env) values)
+    p = turns.start_plan(harness, env=None)   # StartPlan(harness, total, limit, ceiling,
+                              # entries, skipped): the start list as a session would get
+                              # it, each StartEntry(name, kind, share, size) with its
+                              # nominal share; runs no listener
     s = turns.codex.launch(cwd, *, instructions=None, env=None, window=True, options=None,
                            verify=None, additions=None, resume=None)   # a Codex host
     kw = turns.codex.launch_args(argv)   # moxi-turns-codex-host's flags as launch()'s
@@ -79,6 +83,7 @@ _WHERE = {
                      "AdditionsRequest", "McpServer"), "additions"),
     "codex_host_available": "codex_host",
     **dict.fromkeys(("codex_rate_limits", "CodexLimits"), "codex_appserver"),
+    **dict.fromkeys(("start_plan", "StartPlan", "StartEntry"), "listeners"),
     "opencode": "opencode",     # a host's namespace (`turns.opencode.launch`): the module
     **dict.fromkeys(("Facts", "Agents", "Agent", "OpenTurn", "Started", "Refused", "Lost",
                      "Ended", "Ran", "Shells", "LeftShell", "Failed", "Ready",
@@ -91,7 +96,7 @@ _WHERE = {
 
 __all__ = [
     "find", "sessions", "wait_ready", "codex", "codex_host_available", "opencode",
-    "codex_rate_limits", "CodexLimits",
+    "codex_rate_limits", "CodexLimits", "start_plan", "StartPlan", "StartEntry",
     "launch_additions", "LaunchAdditions", "Contribution", "AdditionsRequest",
     "McpServer", "Session", "Delivery", "Watch", "StopHandler", "TurnsError", "VersionError",
     "Facts", "Agents", "Agent", "OpenTurn", "Started", "Refused", "Lost", "Ended", "Ran",

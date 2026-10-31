@@ -44,7 +44,8 @@ text, read at each start; a missing or unreadable file adds nothing and is logge
 per endpoint. The total is `start.limit`, at most the harness's ceiling. Each entry on the
 effective list gets an equal share; in list order, an answer shorter than what it holds
 passes the rest on to the entries after it, and one longer is cut on a line boundary,
-with a last line `[turns: <entry> cut at <n> characters]`.
+with a last line `[turns: <entry> cut at <n> characters]`. `start_plan` reads the list
+and its shares as a session of a harness would get them, running nothing.
 
 Asking: every function that names the event runs in its own thread; all start together
 and are bounded together by one `listen.wait_ms`. An exception or a late answer is logged
@@ -381,6 +382,84 @@ def plan(registry: Registry, *, present: Callable[[str], bool] | None = None) ->
     return Plan(tuple(entries), tuple(skipped), tuple(off))
 
 
+def start_total(registry: Registry, harness: str) -> int:
+    """The start context's effective total for `harness`: `start.limit`, at most the
+    harness's ceiling, 0 meaning the ceiling."""
+    total = start_ceiling(harness)
+    return registry.limit if 0 < registry.limit < total else total
+
+
+@dataclass(frozen=True)
+class StartEntry:
+    """One entry of a start plan.
+
+    `kind` is `"file"` or `"listener"` (a module's `start` rows). `share` is what the entry
+    holds when every entry before it fills its own: the total split equally as the start
+    does it, the first entry taking the remainder and each later one giving up the
+    two-character separator before it. It is a floor, not a promise: an earlier entry
+    that answers short passes its room on. `size` is a file's present length in
+    characters, read up to the total (a longer file reads as the total; one that cannot
+    be read now as 0), and None for a listener entry, whose length is known only by
+    running it.
+    """
+
+    name: str
+    kind: str
+    share: int
+    size: int | None = None
+
+
+@dataclass(frozen=True)
+class StartPlan:
+    """The start list as an endpoint of `harness` would order and limit it now.
+
+    `total` is the effective total (`limit`, the configured `start.limit` with 0 meaning
+    the ceiling, at most `ceiling`, the harness's). `entries` are asked in order;
+    `skipped` names each entry left out and each module whose `start` rows are off the
+    list, with why.
+    """
+
+    harness: str
+    total: int
+    limit: int
+    ceiling: int
+    entries: tuple[StartEntry, ...]
+    skipped: tuple[tuple[str, str], ...]
+
+
+def start_plan(harness: str, env=None) -> StartPlan:
+    """The start plan of a session of `harness` in the environment `env` (this process's
+    when None): the start list from turns' config there and the listener group installed
+    here, each entry's nominal share of the total, and a file entry's present size. A read
+    only: it runs no listener and opens no endpoint. Raises `ValueError` for a harness
+    turns does not know."""
+    from moxi import modules
+
+    if harness not in START_CEILINGS:
+        raise ValueError(f"harness {harness!r} is not one of {', '.join(START_CEILINGS)}")
+    registry = load(env=env)
+    the_plan = plan(registry, present=modules.present)
+    total = start_total(registry, harness)
+    count = len(the_plan.entries)
+    share = total // count if count else 0
+    entries: list[StartEntry] = []
+    for i, e in enumerate(the_plan.entries):
+        held = share + (total - share * count) if i == 0 else max(0, share - len(JOIN))
+        if e.path is None:
+            entries.append(StartEntry(e.entry, "listener", held))
+            continue
+        try:
+            size = min(len(_read_file(e.path, total)), total)
+        except (OSError, UnicodeError):
+            size = 0
+        entries.append(StartEntry(e.entry, "file", held, size))
+    skipped = the_plan.skipped + tuple(
+        (module, "registers a start row but is not on start.order")
+        for module in the_plan.off_list)
+    return StartPlan(harness, total, registry.limit, start_ceiling(harness), tuple(entries),
+                     skipped)
+
+
 def _file(entry: str) -> tuple[Path | None, str | None]:
     path = Path(entry).expanduser()
     if not path.is_absolute():
@@ -493,9 +572,7 @@ def _start(registry: Registry, event: SessionEvent, wait_s: float,
     start = replace(event, event="start")
     rows = [ls for e in the_plan.entries for ls in e.rows]
     answers, done, threads = _launch(rows, start, after) if rows else ([], [], [])
-    total = start_ceiling(event.harness)
-    if 0 < registry.limit < total:
-        total = registry.limit
+    total = start_total(registry, event.harness)
     files: dict[str, str | None] = {}
     for e in the_plan.entries:
         if e.path is not None:

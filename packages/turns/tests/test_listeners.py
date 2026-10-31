@@ -458,3 +458,86 @@ def test_a_harness_with_a_pre_tool_point_and_no_after_tool_point_fires_at_pre(
     assert fake.pre_tool("Bash") is None
     assert fake.post_tool("Bash") == "after Bash"
     assert [c[:5] for c in listener_targets.CALLS] == [("after", "Bash", None, None, "after")]
+
+
+# -- the start plan, read in public --------------------------------------------------------
+
+
+@pytest.fixture
+def installed(monkeypatch, turns_env):
+    """The listener group `start_plan` reads, set by the test, and turns' config home."""
+    from moxi import modules
+
+    held = {"entries": []}
+    monkeypatch.setattr(modules, "extensions", lambda group: list(held["entries"]))
+    monkeypatch.setattr(modules, "present",
+                        lambda name: name in {e.name for e in held["entries"]})
+    return held
+
+
+def test_the_start_plan_reads_the_list_shares_and_file_sizes_and_runs_nothing(
+        installed, turns_env, tmp_path):
+    from conftest import write_config
+
+    brief = tmp_path / "brief.md"
+    brief.write_text("b" * 1234)
+    installed["entries"] = [Entry("comms", [("start", "listener_targets:comms")]),
+                            Entry("launcher", [("start", "listener_targets:cache")]),
+                            Entry("cache", [("start", "listener_targets:cache")])]
+    write_config(turns_env, f'[start]\norder = ["launcher", "{brief}", "comms", "notes", '
+                            f'"comms", "{tmp_path / "gone.md"}"]\nlimit = 0\n')
+    got = turns.start_plan("claude")
+    assert isinstance(got, turns.StartPlan)
+    assert (got.harness, got.total, got.limit, got.ceiling) == ("claude", 9500, 0, 9500)
+    # 9500 over three: the first holds 3166 and the remainder 2; a later one 3166 less
+    # the separator before it.
+    assert got.entries == (turns.StartEntry("launcher", "listener", 3168),
+                           turns.StartEntry(str(brief), "file", 3164, 1234),
+                           turns.StartEntry("comms", "listener", 3164))
+    assert dict(got.skipped) == {
+        "notes": "not installed", "comms": "listed twice; the first counts",
+        str(tmp_path / "gone.md"): "does not exist",
+        "cache": "registers a start row but is not on start.order"}
+    assert listener_targets.CALLS == []                  # no listener ran
+    # Each share is what the start itself holds for the entry: filled to its share,
+    # every entry goes in whole, and one character more is cut.
+    full = [(e.name, "z" * e.share) for e in got.entries]
+    assert len(listeners.share_out(full, got.total)) == got.total
+    assert "[turns: " not in listeners.share_out(full, got.total)
+    full[1] = (full[1][0], full[1][1] + "z")
+    assert f"[turns: {brief} cut at" in listeners.share_out(full, got.total)
+
+
+def test_the_start_plan_limits_to_the_harness_and_reads_a_file_up_to_the_total(
+        installed, turns_env, tmp_path):
+    from conftest import write_config
+
+    brief = tmp_path / "brief.md"
+    brief.write_text("x" * 20_000)
+    write_config(turns_env, f'[start]\norder = ["{brief}"]\nlimit = 50000\n')
+    got = turns.start_plan("codex")
+    assert (got.total, got.limit, got.ceiling) == (9000, 50000, 9000)
+    assert got.entries == (turns.StartEntry(str(brief), "file", 9000, 9000),)
+    write_config(turns_env, f'[start]\norder = ["{brief}"]\nlimit = 100\n')
+    assert turns.start_plan("opencode").entries[0] == turns.StartEntry(str(brief), "file",
+                                                                       100, 100)
+
+
+def test_the_start_plan_reads_the_config_from_the_env_it_is_given(installed, turns_env,
+                                                                    tmp_path):
+    from conftest import write_config
+
+    other = tmp_path / "other-cfg"
+    (other / "turns").mkdir(parents=True)
+    (other / "turns" / "config.toml").write_text('[start]\norder = []\nlimit = 10\n')
+    write_config(turns_env, '[start]\norder = ["comms"]\n')
+    installed["entries"] = [Entry("comms", [("start", "listener_targets:comms")])]
+    assert [e.name for e in turns.start_plan("claude").entries] == ["comms"]
+    got = turns.start_plan("claude", env=dict(os.environ, MOXI_TURNS_CONFIG_HOME=str(other)))
+    assert got.entries == () and got.total == 10
+    assert dict(got.skipped) == {"comms": "registers a start row but is not on start.order"}
+
+
+def test_the_start_plan_refuses_a_harness_turns_does_not_know():
+    with pytest.raises(ValueError, match="harness"):
+        turns.start_plan("fake")
