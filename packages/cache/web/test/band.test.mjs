@@ -43,11 +43,6 @@ test("no row for the session is no reading, never dim", () => {
   assert.equal(reading(null, TABLE.now).shows, NO_READING);
 });
 
-test("a kind outside the table shows its own word", () => {
-  const row = asRow({ ...TABLE.cases[0].record, kind: "later" });
-  assert.equal(reading(row, TABLE.now).shows, "later");
-});
-
 test("lengths of time read in whole units", () => {
   assert.equal(span(0), "0s");
   assert.equal(span(-4), "0s");

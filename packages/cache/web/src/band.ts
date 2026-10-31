@@ -37,6 +37,9 @@ export interface Reading {
   ttl: number | null;
 }
 
+/** The kinds with no band to count, each shown as its own word. */
+const WORDS: readonly string[] = ["fresh", "no-cache", "unknown"];
+
 const finite = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
@@ -45,7 +48,8 @@ const none = (shows: string): Reading => ({ shows, band: null, dim: false, age: 
 /**
  * What `row` shows at `now` (the server's clock, epoch seconds):
  *
- * 1. a kind other than `warm` or `cold` has no band, and shows its own word;
+ * 1. a `fresh`, `no-cache` or `unknown` record has no band, and shows its kind's word; a
+ *    kind outside those and the two below is "no reading", as the segment shows nothing;
  * 2. a `warm` or `cold` record without a finite `warn_before`, `stale_after`,
  *    `last_request` or `ttl` has no band, and shows "no reading", as the segment shows
  *    nothing;
@@ -56,7 +60,8 @@ const none = (shows: string): Reading => ({ shows, band: null, dim: false, age: 
  */
 export function reading(row: ClockRow | null | undefined, now: number): Reading {
   if (row === null || row === undefined || typeof row.kind !== "string") return none(NO_READING);
-  if (row.kind !== "warm" && row.kind !== "cold") return none(row.kind);
+  if (WORDS.includes(row.kind)) return none(row.kind);
+  if (row.kind !== "warm" && row.kind !== "cold") return none(NO_READING);
   const { last_request: last, ttl, warn_before: warn, stale_after: stale } = row;
   if (!finite(warn) || !finite(stale) || !finite(last) || !finite(ttl)) return none(NO_READING);
   const age = Math.max(0, now - last);

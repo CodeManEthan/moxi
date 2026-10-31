@@ -9,7 +9,6 @@ handler that sends a key its route doesn't declare fails here.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import json
 import logging
 import os
@@ -41,11 +40,6 @@ def loopback():
     found = modules.load("loopback", interface=1)
     assert found.ok, found.reason
     return found.api
-
-
-#: The page's routes without its built web files, which come with the web build; the
-#: export test below holds the files.
-ROUTES_ONLY = dataclasses.replace(page.PAGE, assets=None)
 
 
 @pytest.fixture(autouse=True)
@@ -82,8 +76,8 @@ def row(rec: dict) -> dict:
 
 def served():
     lb = loopback()
-    inner = lb.app(ROUTES_ONLY, module="cache", server_id=SERVER_ID, strict=True)
-    profile = lb.upstream(lb.build_table(ROUTES_ONLY)[0], token=TOKEN, port=PORT)
+    inner = lb.app(page.PAGE, module="cache", server_id=SERVER_ID, strict=True)
+    profile = lb.upstream(lb.build_table(page.PAGE)[0], token=TOKEN, port=PORT)
     return lb.guard(inner, lambda: profile)
 
 
@@ -176,11 +170,11 @@ def run(coro):
 # --- the table ------------------------------------------------------------------------------
 
 def test_the_gate_matrix_passes():
-    assert loopback().gate_matrix(ROUTES_ONLY)
+    assert loopback().gate_matrix(page.PAGE)
 
 
 def test_the_page_declares_two_reads_none_for_the_gateway():
-    exported = loopback().export(ROUTES_ONLY)
+    exported = loopback().export(page.PAGE)
     routes = {route["path"]: route for route in exported["routes"]}
     assert list(routes) == ["/api/clocks", "/api/events"]
     assert all(r["kind"] == "read" and not r["gateway"] for r in routes.values())
@@ -246,10 +240,17 @@ def test_a_failed_listing_is_a_200_with_state_error_and_a_fixed_detail(monkeypat
     assert len(logged) == 1
 
 
-def test_a_number_json_cannot_carry_is_state_error():
-    put(record(), json.dumps(record(ttl=float("inf"))))
+@pytest.mark.parametrize("bad", [{"ttl": float("inf")}, {"warn_before": "900"},
+                                 {"warn_before": True}, {"stale_after": {}},
+                                 {"last_request": 10 ** 400}],
+                         ids=["infinite", "string", "bool", "object", "overflowing"])
+def test_a_value_its_declared_type_cannot_carry_is_state_error(bad):
+    """A hand-edited record, or one another writer of the format made, with one value of
+    the wrong type ends the read in `state` `error`, never a 500."""
+    put(record(), json.dumps(record(**bad)))
+    put(record(B))
     status, body = run(get(served(), "/api/clocks"))
-    assert status == 200 and body["state"] == "error"
+    assert status == 200 and body["state"] == "error" and body["clocks"] == []
     assert body["detail"] == UNEXPECTED.format("ValueError")
 
 

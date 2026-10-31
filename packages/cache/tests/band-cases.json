@@ -172,6 +172,25 @@
       "dim": false
     },
     {
+      "name": "a last_request after now is age 0, so warn_before past ttl is near",
+      "record": {
+        "v": 1,
+        "session": "band-22",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "warm",
+        "last_request": 1800000030.0,
+        "ttl": 300,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "near",
+      "dim": false
+    },
+    {
       "name": "warm up to ttl - warn_before",
       "record": {
         "v": 1,
@@ -392,6 +411,25 @@
         "ttl": 3600,
         "read_at": 1799999995.0,
         "seen_at": 1799999400.0,
+        "code": null,
+        "warn_before": 900,
+        "stale_after": 30
+      },
+      "shows": "no reading",
+      "dim": false
+    },
+    {
+      "name": "a kind outside the five has no reading",
+      "record": {
+        "v": 1,
+        "session": "band-23",
+        "harness": "claude",
+        "pid": 4242,
+        "kind": "later",
+        "last_request": 1799999940.0,
+        "ttl": 3600,
+        "read_at": 1799999995.0,
+        "seen_at": 1799999998.0,
         "code": null,
         "warn_before": 900,
         "stale_after": 30

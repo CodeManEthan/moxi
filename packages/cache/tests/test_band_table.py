@@ -29,6 +29,10 @@ def test_the_table_holds_every_branch():
     assert any(case["dim"] for case in CASES) and not all(case["dim"] for case in CASES)
     records = [case["record"] for case in CASES]
     assert any(r["last_request"] is not None and r["last_request"] > NOW for r in records)
+    # Only a case whose ttl is under its warn_before fails when the age isn't held at 0.
+    assert any(r["last_request"] is not None and r["last_request"] > NOW
+               and r["warn_before"] > r["ttl"] for r in records)
+    assert any(r["kind"] not in ("warm", "cold", *KINDS_WITH_NO_BAND) for r in records)
     assert any(r["last_request"] is None and r["kind"] in ("warm", "cold") for r in records)
     assert any(r["ttl"] is None and r["kind"] in ("warm", "cold") for r in records)
     for key in ("warn_before", "stale_after"):
