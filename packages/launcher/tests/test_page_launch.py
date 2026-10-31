@@ -202,6 +202,17 @@ def test_a_scratch_or_a_project_preset_is_a_place(work, harness):
     assert said["refused"] == []
 
 
+
+def test_a_posture_off_its_default_is_refused_naming_the_pages_control(work, harness):
+    said = previewed(headless(work, permission_mode="bypassPermissions"))
+    [refused] = said["refused"]
+    assert refused["code"] == "off-posture" and said["ticket"] is None
+    assert refused["hint"] == job.OFF_POSTURE_HINT
+    assert "--off-posture" not in refused["hint"]
+    allowed = previewed({**headless(work, permission_mode="bypassPermissions"),
+                         "off_posture": True})
+    assert allowed["refused"] == [] and allowed["ticket"] is not None
+
 def test_a_harness_not_on_the_servers_path_is_refused_naming_that_path(work, tmp_path,
                                                                        monkeypatch):
     empty = tmp_path / "empty"

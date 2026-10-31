@@ -1037,13 +1037,18 @@ def placed(request, env: Mapping[str, str] | None = None):
     return resolved
 
 
+#: What a page launch refused `off-posture` is told to do: the page has no
+#: `--off-posture` flag, only its checkbox.
+OFF_POSTURE_HINT = ('tick "Allow a permission posture off your default" to allow it, or '
+                    "set it in [defaults]")
 #: What a refusal record says for an error with no words of its own.
 UNEXPECTED_JOB = "the launch job hit an unexpected error ({}); its log has the details"
 
 
 def refused_detail(error: BaseException) -> dict[str, Any]:
     """`error`, a refusal from before a launch's row, as a `launch-refused` event's detail
-    and the page's refusal: `code`, `row`, `problem`, `hint`. A configuration file that
+    and the page's refusal: `code`, `row`, `problem`, `hint`. An `off-posture` refusal's
+    hint names the page's control, not the command line's flag. A configuration file that
     can't be read is `bad-config`; one of the launch log's own refusals has the code the
     command line gives it; an error that is no refusal names only its class."""
     from moxi.config import ConfigError
@@ -1052,8 +1057,9 @@ def refused_detail(error: BaseException) -> dict[str, Any]:
     from .cli import _OTHER_ERRORS
 
     if isinstance(error, catalog.Refused):
+        hint = OFF_POSTURE_HINT if error.code == "off-posture" else str(error.hint)
         return {"code": error.code, "row": error.row, "problem": str(error.problem),
-                "hint": str(error.hint)}
+                "hint": hint}
     if isinstance(error, ConfigError):
         return {"code": "bad-config", "row": error.key if isinstance(error.key, str) else None,
                 "problem": str(error.problem), "hint": str(error.fix or "")}
@@ -1198,9 +1204,9 @@ def _words(error: BaseException) -> str:
 
 
 __all__ = ["ACTED", "ACTS", "ASKS", "DONE", "GONE", "JOBS", "KINDS", "LAUNCHED", "LOOK",
-           "NOT_SETTLED", "PAGE", "POLL_S", "REPAIRABLE", "RETRY_S", "SETTLE_S", "TERMINAL",
-           "TRANSIENT", "UNEXPECTED_JOB", "Choice", "CompactJob", "Ended", "NoPlace",
-           "NotHere", "RelaunchJob", "RepairJob", "chain_of", "choose_slot", "gone",
+           "NOT_SETTLED", "OFF_POSTURE_HINT", "PAGE", "POLL_S", "REPAIRABLE", "RETRY_S",
+           "SETTLE_S", "TERMINAL", "TRANSIENT", "UNEXPECTED_JOB", "Choice", "CompactJob", "Ended",
+           "NoPlace", "NotHere", "RelaunchJob", "RepairJob", "chain_of", "choose_slot", "gone",
            "job_name", "launch_request", "main", "placed", "record_refused", "refused_detail",
            "repairable", "resume_request", "root_run", "run", "run_request", "write_request"]
 
