@@ -21,7 +21,7 @@ display, and that run passes no evidence.
 `clock_state` asks, in this order:
 
 1. the binding's kind (`kinds`): a `person` kind reads `no-cache` and an adapter with no
-   clock (`send-only`, a kind the registry does not know) reads `no-cache` too, without
+   clock (a kind the registry does not know) reads `no-cache` too, without
    asking for the module;
 2. `load("cache", interface=1)`: when cache is not `present`, every agent reads
    `no-cache`, code `module-absent`, so comms holds nothing for a cold cache and refuses
@@ -92,7 +92,7 @@ NOT_BOUND = "not bound right now, so there is no session to read"
 
 #: `no-cache`: cache is not installed (or does not load), so nothing is read.
 MODULE_ABSENT = "module-absent"
-#: `no-cache`: an adapter kind comms has no clock for (`send-only`, an unknown kind).
+#: `no-cache`: an adapter kind comms has no clock for (an unknown kind).
 NO_CLOCK = "no-clock"
 #: `no-cache`: a `person` kind.
 PERSON = "person"
@@ -301,7 +301,7 @@ def _clock_state(adapter, session_id, *, projects_root, turned, name, now, cache
                  new_session, agent_model, bound_at, store, kinds) -> Clock:
     kind = (kinds if kinds is not None else _BUILT_IN).get(adapter)
     # 1. what answers without the module
-    if kind is None or kind.cache == kinds_mod.CACHE_SEND_ONLY:
+    if kind is None:
         # No clock, so nothing to count: mail goes live, never blocked for lack of one.
         return Clock(NO_CACHE, reason=no_clock(adapter), code=NO_CLOCK)
     if kind.cache == kinds_mod.CACHE_PERSON:

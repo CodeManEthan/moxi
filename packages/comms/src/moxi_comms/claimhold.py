@@ -486,8 +486,8 @@ _SERVER_SOCKETS = itertools.count(1)
 
 
 class ClaimServer:
-    """A claim socket for a binding held by a module's own process (its own loop, a
-    send-only console). Its roots are the holder, reach `self`, and any child roots the
+    """A claim socket for a binding held by a module's own process (its own loop). Its
+    roots are the holder, reach `self`, and any child roots the
     holder adds for this binding. It answers `claim` inside its session and `state` to
     any local caller.
 

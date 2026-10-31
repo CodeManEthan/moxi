@@ -19,7 +19,9 @@ classifiers = [
 ]
 # turns is required: it is the one way into a harness session (a Claude session's
 # delivery, its Stop hold and its context all go through it).
-dependencies = ["moxi>=0.1,<0.2", "moxi-turns>=0.2,<0.3"]
+# keyring is the credential chain's keychain step (the macOS Keychain, Windows Credential
+# Manager, the Secret Service): required, since Windows is a target and has no other.
+dependencies = ["moxi>=0.1,<0.2", "moxi-turns>=0.2,<0.3", "keyring>=25", "psutil>=5.9"]
 
 [project.optional-dependencies]
 # `moxi-comms-codex` launches each Codex session through turns' Codex host, whose
@@ -49,6 +51,11 @@ moxi-comms-provision = "moxi_comms.provision:main"
 [project.entry-points."moxi.modules"]
 comms = "moxi_comms.module"
 
+# comms reserves the send-only names each module declares when it installs, and frees
+# them when it is uninstalled.
+[project.entry-points."moxi.installs"]
+comms = "moxi_comms.reserved"
+
 # comms' listener: turns asks it at a session's start and at each prompt for the context
 # comms adds (layer one, the roster and its deltas).
 [project.entry-points."moxi.turns.listeners"]
@@ -60,7 +67,6 @@ comms = "moxi_comms.listeners"
 claude-shim = "moxi_comms.kinds:CLAUDE_SHIM"
 codex = "moxi_comms.kinds:CODEX"
 opencode = "moxi_comms.kinds:OPENCODE"
-send-only = "moxi_comms.kinds:SEND_ONLY"
 
 [dependency-groups]
 # The suite runs the Codex adapter over turns' real Codex host against a stub app-server,

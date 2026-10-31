@@ -74,8 +74,8 @@ retain_days = 90                      # days of message bodies kept; 0 keeps the
 [threads]
 reply_cap = 8                         # replies an open thread takes before it closes
 
-[secrets]
-chain = ["env", "store"]              # resolver order
+[credentials]
+chain = ["env", "keychain", "store"]  # the credential chain, in order
 store = "/path/to/tokens"             # empty: STATE/comms/tokens
 roles = ["calendar"]                  # role holders this box adds
 
@@ -100,9 +100,9 @@ expiry = "24h"                        # how long a send waits before it is dropp
 | `[local] record` | `STATE/comms/record.db` | `MOXI_COMMS_LOCAL_RECORD` | where the local record lives |
 | `[local] retain_days` | `90` | `MOXI_COMMS_LOCAL_RETAIN_DAYS` | the daemon trims older message bodies at start and once a day; `0` turns trimming off |
 | `[threads] reply_cap` | `8` | | how many replies a thread opened with `moxi comms send --posture open` takes before it closes, unless its opener set its own with `--cap N` or `--no-cap`. A whole number, 1 or more. The send verb reads it at each reply. |
-| `[secrets] chain` | `["env", "store"]` | | the order the resolver chain tries. The steps are `env` and `store`; anything else, or an empty list, is refused. |
-| `[secrets] store` | `STATE/comms/tokens` | `MOXI_COMMS_TOKEN_STORE` | the token store's directory |
-| `[secrets] roles` | `[]` | | role holders this box adds to comms' own four (`reader`, `daemon`, `provisioner`, `operator`). Each keys the token store under its own name; a role not listed is unknown. |
+| `[credentials] chain` | `["env", "keychain", "store"]` | | the order the credential chain tries. The steps are `env`, `keychain` (the user's keychain through `keyring`; a box with no usable keychain backend misses here) and `store`; anything else, or an empty list, is refused. A write goes to the keychain when it has a backend, else the store. A file that still has the old `[secrets]` table is refused. |
+| `[credentials] store` | `STATE/comms/tokens` | `MOXI_COMMS_TOKEN_STORE` | the token store's directory |
+| `[credentials] roles` | `[]` | | role holders this box adds to comms' own four (`reader`, `daemon`, `provisioner`, `operator`). Each keys the token store under its own name; a role not listed is unknown. |
 | `[policy] cache_callers` | `["operator"]` | | the identities `moxi comms cache` answers, by qualified name. The list is whole: a box that adds a caller lists `operator` too. |
 | `[policy] labels` | `{}` | | send-only identities by qualified name, each mapped to the words the send and reply verbs use when they refuse it as a recipient. Without a label it is "a send-only identity". |
 | `[provision] operator` | `operator` | | the human's identity name, provisioned at first start |
@@ -164,7 +164,7 @@ is set on each row. The key lists are in `adapters/codex_roster.py` and
 | variable | | what it does |
 |---|---|---|
 | `MOXI_COMMS_OPERATOR` | public | set in your own terminal to send as the operator, the human. Its value is the operator's user id, which `moxi-comms-provision` and the daemon's first-start log line print. The lane also needs the operator token in the store. A shell that also carries `MOXI_COMMS_NAME`, or that runs inside an agent's session, is refused. |
-| `MOXI_COMMS_SECRET_<KEY>` | public | the `env` step of the secrets chain. `<KEY>` is the secret id upper-cased, with every run of non-alphanumerics folded to one underscore: `comms/operator/token` reads `MOXI_COMMS_SECRET_COMMS_OPERATOR_TOKEN`. |
+| `MOXI_COMMS_SECRET_<KEY>` | public | the `env` step of the credential chain. `<KEY>` is the secret id upper-cased, with every run of non-alphanumerics folded to one underscore: `comms/operator/token` reads `MOXI_COMMS_SECRET_COMMS_OPERATOR_TOKEN`. |
 | `MOXI_COMMS_MOCK_BACKEND` | test | the JSON store of the `mock` backend |
 | `CLAUDE_CONFIG_DIR` | Claude Code's | where a reader finds Claude Code's transcripts (`projects/` in it); default `~/.claude` |
 

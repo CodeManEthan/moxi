@@ -14,7 +14,7 @@ import pytest
 from conftest import cursor_of, queued, wait_for_queue, wait_until
 
 from moxi_comms import client as client_mod
-from moxi_comms import machine_line, provision, wire
+from moxi_comms import machine_line, wire
 from moxi_comms.claimhold import ClaimServer
 from moxi_comms.client import (ATTRIBUTED_FIELDS, DaemonClient, DaemonError,
                                DaemonOffline, attributed_message)
@@ -203,15 +203,12 @@ def test_the_read_changes_nothing(rig):
 def test_any_socket_caller_may_ask_and_every_caller_gets_the_same_answer(rig):
     """The caller rule: as for `record_message`, `session` and `owner`, any process that
     can open the daemon's 0600 socket. A connection holding no binding and one holding
-    a send-only binding (as such a program may) get the same answer."""
+    a module's own binding (as such a program may) get the same answer."""
     rig.shim(**PLANNER)
     reviewer = rig.shim(**REVIEWER)
     msg = send(rig, R, "same for everyone")
     wait_for_queue(reviewer, 1)
-    code = provision.send_only_main(["relay"], record=rig.record, store=rig.store,
-                                    out=lambda _l: None)
-    assert code == 0
-    srv = ClaimServer("relay", "global", kind="send-only", arm=True).start()
+    srv = ClaimServer("relay", "global", kind="claude-shim", arm=True).start()
     try:
         assert wait_until(lambda: "relay" in rig.daemon.bindings), srv.refusal
         held = srv._client.attributed_message(msg.id)

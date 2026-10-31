@@ -25,7 +25,7 @@ A file that does not parse as such a table holds no comms key: a read of it miss
 and a write refuses it. It is never guessed at and never overwritten.
 
 The store is device-keyed STATE (`paths.tokens_dir()`), because a stored credential is a
-DEVICE credential and DATA is the sync surface. config.toml's `[secrets] store` (or its
+DEVICE credential and DATA is the sync surface. config.toml's `[credentials] store` (or its
 override `MOXI_COMMS_TOKEN_STORE`) names another location, so an alternate-home recipe
 (one that sets `MOXI_COMMS_HOME`, which collapses every root) can still point at the real
 store instead of silently finding nothing.
@@ -35,7 +35,7 @@ One file per HOLDER:
     daemon            the daemon process    (holds no credential)
     operator          the operator's lane   (the local backend's `post_as_user` token)
 
-and each role holder the box names in config.toml's `[secrets] roles`, under its own
+and each role holder the box names in config.toml's `[credentials] roles`, under its own
 name. A role the config does not list is unknown, with no store path, like any role the
 store has never heard of.
 
@@ -48,13 +48,14 @@ import logging
 import os
 import re
 import stat
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
 log = logging.getLogger("comms.tokens")
 
-#: The variable that overrides config.toml's `[secrets] store` for one process
+#: The variable that overrides config.toml's `[credentials] store` for one process
 #: (settings.toml declares it; moxi.config reads it).
 STORE_ENV_VAR = "MOXI_COMMS_TOKEN_STORE"
 DIR_MODE = 0o700
@@ -98,6 +99,37 @@ LOOSE_PERMISSIONS = (
     "this process's comms log.)")
 
 
+#: The platform the store's privacy check is for; a test sets it.
+_PLATFORM = sys.platform
+
+OUTSIDE_PROFILE = (
+    "a stored posting credential is not where comms keeps credentials private: on "
+    "Windows the token store sits under the user's profile (%USERPROFILE% or "
+    "%LOCALAPPDATA%), whose access list grants only the user, and this file is outside "
+    "it. Nothing was attempted. The store is the operator's; ask them. (The path is named "
+    "in this process's comms log.)")
+
+
+def private_file(path, env=None) -> bool:
+    """On Windows, the store's privacy check: is `path` under the user's profile
+    (`%USERPROFILE%` or `%LOCALAPPDATA%`)? A file's mode bits mean nothing there, so the
+    POSIX check (0600 in 0700) would refuse every file; the profile's access list is what
+    keeps the file the user's own."""
+    env = env if env is not None else os.environ
+    target = os.path.normcase(os.path.abspath(os.fspath(path)))
+    for var in ("USERPROFILE", "LOCALAPPDATA"):
+        root = (env.get(var) or "").strip()
+        if not root:
+            continue
+        root = os.path.normcase(os.path.abspath(root))
+        try:
+            if os.path.commonpath([root, target]) == root:
+                return True
+        except ValueError:                  # another drive
+            continue
+    return False
+
+
 class TokenStoreError(Exception):
     """A refusal from the store. Never carries token material."""
 
@@ -126,10 +158,10 @@ class TokenOwner:
 
 
 def box_roles(env=None) -> tuple[str, ...]:
-    """The role holders this box adds, from config.toml's `[secrets] roles`."""
+    """The role holders this box adds, from config.toml's `[credentials] roles`."""
     from . import config
 
-    return tuple(config.load(env=env).secrets.roles)
+    return tuple(config.load(env=env).credentials.roles)
 
 
 def owner_for_role(role: str, *, env=None) -> TokenOwner:
@@ -139,7 +171,7 @@ def owner_for_role(role: str, *, env=None) -> TokenOwner:
     credential: comms provisions nothing for it. `operator` is the holder for the local
     backend's operator lane -- a holder like any other, which is the whole of what makes
     that lane credentialled. It keys under its own name, and so does each role the box
-    names in `[secrets] roles`.
+    names in `[credentials] roles`.
     `provisioner` returns an owner that can only ever be refused; every other role is
     unknown and gets no store access.
     """
@@ -252,7 +284,7 @@ class TokenStore:
 
     `root=None` resolves lazily: the injected env's `MOXI_COMMS_TOKEN_STORE` first (an
     explicit operator override that survives a `MOXI_COMMS_HOME` collapse), then this
-    process's config.toml `[secrets] store` (with the same override), then STATE/comms/
+    process's config.toml `[credentials] store` (with the same override), then STATE/comms/
     tokens under this process's roots. The injected env names no roots: a caller's
     session stamps are not where the box keeps its store.
     """
@@ -272,7 +304,7 @@ class TokenStore:
         from . import config
         from .paths import tokens_dir
 
-        store = config.load().secrets.store
+        store = config.load().credentials.store
         return Path(store) if store else tokens_dir()
 
     def path_for(self, owner: TokenOwner) -> Path:
@@ -336,6 +368,13 @@ class TokenStore:
         return entries
 
     def _check_mode(self, path: Path, mode: int, what: str) -> None:
+        if _PLATFORM == "win32":
+            if not private_file(path, None if not self.env else
+                                {**os.environ, **self.env}):
+                log.error("token store %s %s is outside the user's profile; comms keeps "
+                          "credentials only under it on Windows", what, path)
+                raise TokenStoreError(OUTSIDE_PROFILE)
+            return
         if stat.S_IMODE(mode) & LOOSE_MASK:
             log.error("token store %s %s is mode %04o; 0%o is the rule and comms refuses "
                       "to read a credential wider than that",
@@ -376,6 +415,25 @@ class TokenStore:
         log.info("token store: wrote %s [%s]", path, key)   # the PATH and the KEY; never
         return path                                         # the value
 
+    def delete_secret(self, owner: TokenOwner, secret_id: str) -> bool:
+        """Remove one key from one holder's file, leaving its other keys: True when the
+        holder had it. The file goes when it holds nothing else."""
+        key = _secret_id(secret_id)
+        path = self.path_for(owner)
+        entries = self._entries_for(owner, writing=True)
+        if not entries or key not in entries:
+            return False
+        entries = dict(entries)
+        del entries[key]
+        if not entries:
+            path.unlink(missing_ok=True)
+        else:
+            from moxi import files
+
+            files.atomic_write(path, _emit(entries), mode=FILE_MODE)
+        log.info("token store: removed [%s] from %s", key, path)
+        return True
+
     def _mkdirs(self, directory: Path) -> None:
         root = self.root
         root.mkdir(mode=DIR_MODE, parents=True, exist_ok=True)
@@ -392,7 +450,7 @@ class TokenStore:
         return sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
 
 
-__all__ = ["TokenOwner", "TokenStore", "TokenStoreError", "STORE_ENV_VAR", "DIR_MODE",
+__all__ = ["TokenOwner", "TokenStore", "TokenStoreError", "private_file", "OUTSIDE_PROFILE", "STORE_ENV_VAR", "DIR_MODE",
            "FILE_MODE", "PROVISIONER_FENCE", "LOOSE_PERMISSIONS", "NOT_A_MAP",
            "ROLE_READER", "ROLE_DAEMON", "ROLE_PROVISIONER", "ROLE_OPERATOR",
            "OPERATOR_SECRET_ID", "COMPONENT_RE", "box_roles", "owner_for_role", "holder_of_key",

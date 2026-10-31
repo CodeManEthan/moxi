@@ -16,24 +16,12 @@ from __future__ import annotations
 
 import time
 
-#: The adapter kind a send-only identity binds with (`daemon.SEND_ONLY_ADAPTER`, spelled
-#: here so this module imports nothing behind it). Such a name sends and is never a
-#: recipient, so no agent-facing roster lists it; only `--seats` does.
-SEND_ONLY_ADAPTER = "send-only"
-
 #: The empty roster: no binding anyone can message.
 NO_BINDINGS = "no live bindings — nothing is addressable right now."
 
 #: The `--seats` waiting block's header: what one of its rows means.
 WAITING_HEADER = ("waiting (queued for each name until its next session start, /clear, "
                   "compaction, or a turn of its own on a warm cache):")
-
-
-def messageable(bindings) -> list:
-    """The bindings an agent can message: every live binding whose adapter is not
-    `send-only`. `agent-N` is one while it is bound; so is a session the operator binds,
-    a row like any other."""
-    return [b for b in bindings if b.get("adapter") != SEND_ONLY_ADAPTER]
 
 
 def render_agents(info, *, seats: bool = False, now: float | None = None) -> str:
@@ -44,11 +32,11 @@ def render_agents(info, *, seats: bool = False, now: float | None = None) -> str
 
     The default view is the names an agent can message, one row each, and nothing else:
     it reads `bindings` alone. `seats=True` (the `--seats` flag, the operator's view)
-    lists every binding, send-only ones included, then the mail waiting for each name
+    lists every binding, then the mail waiting for each name
     (`waiting`) and the unanswered rows. The snapshot never asks for `--seats`. `now`
     (default: the wall clock) ages the waiting rows.
     """
-    rows = info["bindings"] if seats else messageable(info["bindings"])
+    rows = info["bindings"]
     lines = [] if rows else [NO_BINDINGS]
     for b in rows:
         lines.append(f"{b['qualified']:<24} {b['tier']:<10} "

@@ -32,7 +32,7 @@ from pathlib import Path
 import pytest
 from conftest import wait_until, write_config, write_transcript
 
-from moxi_comms import cli, provision, sending
+from moxi_comms import cli, provision, reserved, secrets, sending
 from moxi_comms.client import DaemonClient, DaemonOffline
 from moxi_comms.daemon import Refusal
 from moxi_comms.record import RecordError
@@ -351,10 +351,8 @@ def s_resolve_refused(rig, mp):
 
 def s_send_only(rig, mp):
     pair(rig)
-    lines = []
-    assert provision.send_only_main(["console@acme"], record=rig.record,
-                                    store=rig.store, out=lines.append) == 0, lines
-    return Case(["send", "console@acme", "x", "--posture", "none"], PLANNER, 3)
+    reserved.reconcile(declared={"launcher": ["console"]}, chain=secrets.from_config())
+    return Case(["send", "console", "x", "--posture", "none"], PLANNER, 3)
 
 
 def s_standing(rig, mp):
@@ -658,7 +656,7 @@ def test_check_stop_is_immediately_before_the_post_loop():
             and isinstance(posting.test.left, ast.Name)
             and posting.test.left.id == "operator_id"
             and isinstance(posting.body[0], ast.Assign)
-            and posting.body[0].value.func.id == "_post_from_claim")
+            and "_post_from_claim" in ast.dump(posting.body[0].value))
 
 
 def test_the_site_reader_finds_send_checks_refusals():

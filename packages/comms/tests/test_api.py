@@ -58,7 +58,8 @@ def test_interface_2_holds_its_names():
         "session", "roster", "owner", "Roster", "Agent", "Standing", "Owner",
         "record_dir", "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
         "replay", "DaemonError", "DaemonOffline", "delete", "DeleteResult",
-        "identity_state", "IdentityState", "Holder", "IDENTITY_STATES"}
+        "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "send_as",
+        "session_of", "caller_identity"}
     for name in api.__all__:
         assert hasattr(api, name), name
     assert api.ClaimServer is ClaimServer
@@ -140,7 +141,7 @@ def test_api_tokens_holds_the_store_calls():
 
 
 def test_a_box_role_keys_under_its_own_name(env):
-    write_config(None, '[secrets]\nroles = ["calendar"]\n')
+    write_config(None, '[credentials]\nroles = ["calendar"]\n')
     owner = api_tokens.owner_for_role("calendar")
     assert owner.key == "calendar"
     assert api_tokens.owner_for_role("not-listed").key == ""

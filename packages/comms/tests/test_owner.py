@@ -16,7 +16,7 @@ import pytest
 from conftest import wait_until
 
 from moxi import exit as moxi_exit
-from moxi_comms import cli, provision
+from moxi_comms import cli
 from moxi_comms.client import DaemonClient, DaemonError, DaemonTimeout
 from moxi_comms.paths import daemon_socket
 
@@ -141,24 +141,6 @@ def test_the_read_changes_nothing(rig):
         owner(reviewer.session_id)
         owner("not-a-session")
     assert state() == before
-
-
-def test_a_send_only_binding_owns_a_session_only_if_its_register_named_one(rig):
-    """No shipped send-only holder reports a session id (`ClaimServer._register`), so it
-    owns none; a register that does carry one is answered as any owner, by its kind."""
-    code = provision.send_only_main(["relay@proj-a"], record=rig.record,
-                                    store=rig.store, out=lambda _l: None)
-    assert code == 0
-    c = DaemonClient(daemon_socket()).connect()
-    try:
-        c.bind(name="relay", scope="proj-a",
-                   project="proj-a", adapter="send-only",
-                   session_id="5e5e5e5e-0000-4000-8000-000000000000")
-        answer = owner("5e5e5e5e-0000-4000-8000-000000000000")
-        assert (answer["owner"], answer["adapter"], answer["awaiting"]) == \
-            ("relay@proj-a", "send-only", [])
-    finally:
-        c.close()
 
 
 # --------------------------------------------------------------------------- the verb

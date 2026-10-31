@@ -6,8 +6,8 @@ or without a live claim file naming it, and the refusal names the identity the s
 claims. The operator's lane is unchanged. Every sender inside a live session
 sends exactly as on main: the Claude shim, codex and OpenCode; a module's own
 process holding several bindings (a `self` root, and a `tree` child
-root); a send-only console's binding, in-process and from its `comms send`
-child; and a session whose adapter died, by its claim file. Delivery, attribution and
+root); a module's own process holding a standing name, in-process and from its
+`comms send` child; and a session whose adapter died, by its claim file. Delivery, attribution and
 the sender's output are main's: `sent <id> to <name> in #names`, one line, and `replying
 to <name> (<tier>, verified) in #names` before it on a reply.
 
@@ -28,13 +28,14 @@ import pytest
 from claim_kit import World, wait_for
 from conftest import clock_reads_warm, wait_for_queue
 from moxi import exit as moxi_exit
-from moxi_comms import attribution, claimfile, claimhold, cli, codex_threads
+from moxi_comms import (attribution, claimfile, claimhold, cli, codex_threads, directory,
+                        provision)
 from moxi_comms.adapters.codex import CodexAdapter
 from moxi_comms.adapters.codex_roster import CodexAgent
 from moxi_comms.claimhold import CLAIM_SOCKET_ENV, NOT_INSIDE, ClaimServer
 from moxi_comms.client import DaemonClient
 from moxi_comms.membership import TREE, root_of
-from moxi_comms.paths import daemon_socket
+from moxi_comms.paths import comms_db, daemon_socket
 from fake_turns import FakeSession, fake_find
 
 BOB = "bob@proj-a"
@@ -365,9 +366,14 @@ def test_a_process_the_loop_did_not_spawn_is_refused(rig, loop):
 
 @pytest.fixture
 def console(rig):
-    from test_console_identity import provision_console
-    provision_console(rig)
-    srv = ClaimServer("relay", "proj-a", kind="send-only", arm=True).start()
+    """A module's own process holding the standing `relay@proj-a` through a
+    `ClaimServer` with its own daemon arm."""
+    conn = directory.init(comms_db())
+    try:
+        provision.add_standing(rig.record, conn, "relay", "proj-a")
+    finally:
+        conn.close()
+    srv = ClaimServer("relay", "proj-a", kind="claude-shim", arm=True).start()
     assert wait_for(lambda: "relay@proj-a" in rig.daemon.bindings), srv.refusal
     yield srv
     srv.stop()

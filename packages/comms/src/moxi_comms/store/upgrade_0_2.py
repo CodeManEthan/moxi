@@ -21,8 +21,8 @@ identity comms can't read. The refusal names the file and the reason.
 
 What it writes, in one transaction into `comms.db.new`: every row carried, ids and
 `next_id` kept; queue rows as `waiting`; open binding intervals closed as fenced;
-send-only identities also as unowned reserved names; and the marker, `migrated_from =
-"0.2"`, with the time, the fenced names and each moved file's fingerprint (size and
+send-only identities as unowned reserved names, never as standing rows; and the marker,
+`migrated_from = "0.2"`, with the time, the fenced names and each moved file's fingerprint (size and
 modification time). Mail that 0.2 would have replayed from the record becomes queue
 rows: for a name with a cursor, the messages above it that name it on line zero; for a
 name without one, 0.2's bounded set (`[replay]`). After this nothing is replayed from the
@@ -369,11 +369,13 @@ def _read_directory(plan: Plan, conn, path) -> None:
     if conn is None:
         return
     for row in _select(conn, "directory", "agents", "ORDER BY rowid"):
-        plan.identities.append((row["name"], row["scope"], row["status"], row["kind"],
-                                _record_time(row["created_at"])))
         plan.directory_rows[(row["name"], row["scope"])] = row
         if row["kind"] == "send-only":
+            # A send-only name is a reserved name now, never a standing row.
             plan.reserved.append(qualify(row["name"], row["scope"]))
+            continue
+        plan.identities.append((row["name"], row["scope"], row["status"], row["kind"],
+                                _record_time(row["created_at"])))
     plan.operators = [(r["user_id"], r["name"], _record_time(r["created_at"]))
                       for r in _select(conn, "directory", "operators", "ORDER BY rowid")]
     plan.directory_rooms = {r["channel_id"]: r for r in _select(conn, "directory", "rooms",

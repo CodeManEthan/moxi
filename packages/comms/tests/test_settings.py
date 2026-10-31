@@ -40,8 +40,8 @@ def test_the_defaults_with_no_file():
     assert cfg.backend == "local"
     assert (cfg.local.record, cfg.local.retain_days) == ("", 90)
     assert cfg.threads.reply_cap == constants.DEFAULT_REPLY_CAP
-    assert cfg.secrets.chain == ("env", "store") == secrets.DEFAULT_CHAIN
-    assert (cfg.secrets.store, cfg.secrets.roles) == ("", ())
+    assert cfg.credentials.chain == ("env", "keychain", "store") == secrets.DEFAULT_CHAIN
+    assert (cfg.credentials.store, cfg.credentials.roles) == ("", ())
     assert cfg.policy.cache_callers == ("operator",)
     assert cfg.policy.labels == {}
     assert cfg.provision.operator == "operator"
@@ -69,7 +69,7 @@ retain_days = 7
 [threads]
 reply_cap = 3
 
-[secrets]
+[credentials]
 chain = ["store"]
 roles = ["calendar", "pager"]
 
@@ -108,8 +108,8 @@ def test_the_file_sets_every_table(monkeypatch):
     assert cfg.backend == "mock" and cfg.block is True
     assert cfg.local.record == os.path.expanduser("~/rec.db")
     assert cfg.local.retain_days == 7 and cfg.threads.reply_cap == 3
-    assert cfg.secrets.chain == ("store",)
-    assert cfg.secrets.roles == ("calendar", "pager")
+    assert cfg.credentials.chain == ("store",)
+    assert cfg.credentials.roles == ("calendar", "pager")
     assert cfg.policy.cache_callers == ("operator", "herald")
     assert cfg.policy.labels == {"console@acme": "the build console's send-only identity"}
     assert cfg.provision.operator == "alice"
@@ -140,7 +140,7 @@ def test_an_env_override_wins_over_the_file(monkeypatch, tmp_path):
     assert cfg.backend == "local" and cfg.sources["backend"] == "env"
     assert cfg.local.retain_days == 0
     assert cfg.local.record == str(tmp_path / "r.db")
-    assert cfg.secrets.store == str(tmp_path / "store")
+    assert cfg.credentials.store == str(tmp_path / "store")
 
 
 def test_a_given_environment_is_read_instead_of_the_process(tmp_path):
@@ -157,10 +157,10 @@ BAD_FILES = [
     ("[threads]\nreply_cap = 0\n", "threads.reply_cap"),
     ("[threads]\nreply_cap = true\n", "threads.reply_cap"),
     ("[local]\nretain_days = -1\n", "local.retain_days"),
-    ('[secrets]\nchain = ["env", "vault"]\n', "secrets.chain"),
-    ("[secrets]\nchain = []\n", "secrets.chain"),
-    ('[secrets]\nroles = ["operator"]\n', "secrets.roles"),
-    ('[secrets]\nroles = ["../up"]\n', "secrets.roles"),
+    ('[credentials]\nchain = ["env", "vault"]\n', "credentials.chain"),
+    ("[credentials]\nchain = []\n", "credentials.chain"),
+    ('[credentials]\nroles = ["operator"]\n', "credentials.roles"),
+    ('[credentials]\nroles = ["../up"]\n', "credentials.roles"),
     ('[policy]\ncache_callers = [""]\n', "policy.cache_callers"),
     ('[policy]\nlabels = { "x" = 1 }\n', "policy.labels"),
     ("[provision]\nslots = 0\n", "provision.slots"),
@@ -242,7 +242,7 @@ def test_the_token_store_location_comes_from_the_config(monkeypatch, tmp_path):
     from moxi_comms import paths
 
     assert tokens.TokenStore().root == paths.tokens_dir()
-    write_config(None, f'[secrets]\nstore = "{tmp_path / "a"}"\n')
+    write_config(None, f'[credentials]\nstore = "{tmp_path / "a"}"\n')
     assert tokens.TokenStore().root == tmp_path / "a"
     monkeypatch.setenv(tokens.STORE_ENV_VAR, str(tmp_path / "b"))
     assert tokens.TokenStore().root == tmp_path / "b"
@@ -257,7 +257,7 @@ def test_the_token_store_location_comes_from_the_config(monkeypatch, tmp_path):
 def test_a_role_the_box_lists_keys_under_itself_and_an_unlisted_one_is_unknown():
     assert tokens.owner_for_role("calendar").parts == ()
     assert tokens.owner_of_holder("comms/calendar") is None
-    write_config(None, '[secrets]\nroles = ["calendar"]\n')
+    write_config(None, '[credentials]\nroles = ["calendar"]\n')
     owner = tokens.owner_for_role("calendar")
     assert owner.parts == ("calendar",) and owner.role == "calendar"
     assert tokens.owner_of_holder("comms/calendar") == owner
@@ -267,7 +267,7 @@ def test_a_role_the_box_lists_keys_under_itself_and_an_unlisted_one_is_unknown()
 
 def test_the_chain_reads_the_configured_store(tmp_path):
     store = tmp_path / "store"
-    write_config(None, f'[secrets]\nchain = ["store"]\nstore = "{store}"\n')
+    write_config(None, f'[credentials]\nchain = ["store"]\nstore = "{store}"\n')
     owner = tokens.owner_for_role(tokens.ROLE_OPERATOR)
     tokens.TokenStore(store).write_secret(owner, tokens.OPERATOR_SECRET_ID, "tok")
     chain = secrets.from_config()
@@ -477,7 +477,7 @@ def test_the_text_entry_leaves_no_cache_entry():
     checked, cached = dict(config._checked), dict(moxi_config._cache)
     config.check_text(EVERY_TABLE)
     with pytest.raises(config.ConfigError):
-        config.check_text('[secrets]\nchain = []\n')
+        config.check_text('[credentials]\nchain = []\n')
     assert (config._checked, moxi_config._cache) == (checked, cached)
 
 
@@ -491,10 +491,10 @@ def core_state(monkeypatch, tmp_path):
     (("codex.agents", '{"p@x" = {api_token = "sk-secret"}}'),
      {"p@x": {"api_token": "sk-secret"}}, "codex.agents.p@x.api_token",
      "looks like a secret"),
-    (("secrets.chain", '["env", "vault"]'), ["env", "vault"], "secrets.chain",
+    (("credentials.chain", '["env", "vault"]'), ["env", "vault"], "credentials.chain",
      "not a resolver"),
-    (("secrets.chain", "[]"), [], "secrets.chain", "is empty"),
-    (("secrets.roles", "--add", "reader"), None, "secrets.roles",
+    (("credentials.chain", "[]"), [], "credentials.chain", "is empty"),
+    (("credentials.roles", "--add", "reader"), None, "credentials.roles",
      "one of comms' own roles"),
 ])
 def test_config_set_refuses_what_comms_refuses(core_state, capsys, argv, value, key,
@@ -545,7 +545,7 @@ def test_config_set_and_check_pass_a_good_file_under_a_bad_variable(core_state, 
 
     path = write_config(None, "block = true\n")
     monkeypatch.setenv("MOXI_COMMS_BACKEND", "bogus")
-    assert cli.main(["config", "set", "comms", "secrets.roles", "--add", "pager"]) == 0
+    assert cli.main(["config", "set", "comms", "credentials.roles", "--add", "pager"]) == 0
     assert cli.main(["config", "unset", "comms", "block"]) == 0
     assert cli.main(["config", "comms", "check"]) == 0
     assert capsys.readouterr().err == ""

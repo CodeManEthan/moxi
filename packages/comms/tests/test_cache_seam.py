@@ -121,7 +121,7 @@ def test_a_person_kind_and_an_adapter_with_no_clock_answer_without_the_module(
     module_not_asked(monkeypatch)
     person = cache.clock_state("person-kind", None, kinds=registry())
     assert (person.kind, person.code) == (cache.NO_CACHE, cache.PERSON)
-    for adapter in ("send-only", "no-such-kind", None):
+    for adapter in ("no-such-kind", None):
         clock = cache.clock_state(adapter, "x", kinds=registry())
         assert (clock.kind, clock.code) == (cache.NO_CACHE, cache.NO_CLOCK)
         assert clock.reason == cache.no_clock(adapter)

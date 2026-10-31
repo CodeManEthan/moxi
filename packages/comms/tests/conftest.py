@@ -142,6 +142,14 @@ def env(monkeypatch, tmp_path):
                 "MOXI_COMMS_LOCAL_RETAIN_DAYS", "MOXI_COMMS_MOCK_BACKEND",
                 "CLAUDE_CODE_SESSION_ID", "MOXI_COMMS_CLAIM_SOCKET", "MOXI_COMMS_COMMAND"):
         monkeypatch.delenv(var, raising=False)
+    # The credential chain's keychain step: never the user's own keychain. keyring's null
+    # backend is "no usable keychain", so every chain falls to the store under tmp; a
+    # test that wants a keychain hands the chain a fake backend of its own. The variable
+    # covers a child process, the setting this one.
+    import keyring
+    import keyring.backends.null
+    monkeypatch.setenv("PYTHON_KEYRING_BACKEND", "keyring.backends.null.Keyring")
+    monkeypatch.setattr(keyring.core, "_keyring_backend", keyring.backends.null.Keyring())
     # The cache clock (cold-sends). Every reader's root and every shim's reported root
     # are under tmp: `CLAUDE_CONFIG_DIR` is what a shim reports its session's transcripts
     # under and where the reader finds them (`projects/` in it). Outside `tmp_path`,
@@ -214,7 +222,7 @@ BOTH_BACKENDS = (
     "test_claim_server.py",         # a binding held by a module's own process
     "test_claim_send.py",           # sending as the claim; ordinary sends unchanged
     "test_claim_adapters.py",       # the shim and codex as claim holders
-    "test_console_identity.py",     # send-only identities: console@acme
+    "test_console_identity.py",     # reserved send-only names: console
     "test_owner.py",                # the owner read: a session's binding and awaiting
     "test_send_rule.py",            # no env path: every kind sends through its claim
     "test_attributed_read.py",      # the attributed_message read: author and recipients

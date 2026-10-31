@@ -10,6 +10,8 @@ outside comms.
 * `send(sender, to, text, *, posture, ...)` sends one message and returns a
   `SendResult`. `check(...)`, with the same arguments, runs every check and posts
   nothing (`moxi comms send --check`).
+* `send_as(module, name, to, text, *, expires, interrupt)` sends under a send-only name
+  reserved for `module`, from that module's own code, outside every session.
 * `Sender`: who sends. `Sender.session()` (this process's stamps and its session's claim
   socket), `Sender.socket(path)`, `Sender.claim(server)` (a `ClaimServer` this process
   holds) or `Sender.operator(user_id)` (the operator's lane).
@@ -20,9 +22,10 @@ outside comms.
 
 **The other surfaces.**
 
-* `ClaimServer`, for send-only identities held by a process of their own.
-* Reads: `attributed(message_id)`, `session(identity)`, `roster()`, `owner(session_id)`,
-  `identity_state(name, scope=None)`, `record_dir()`, `daemon_socket()`.
+* `ClaimServer`, for a binding held by a module's own process.
+* Reads: `attributed(message_id)`, `session(identity)`, `session_of(identity)`,
+  `roster()`, `owner(session_id)`, `identity_state(name, scope=None)`,
+  `caller_identity(env=None)`, `record_dir()`, `daemon_socket()`.
 * Names: `GLOBAL`, `qualify`, `split_tag`, `NAME_RE`.
 * `replay()`: the reader catch-up bound in force, `(messages, seconds)`.
 * `DaemonError`, `DaemonOffline`: what a read raises when the daemon refuses or is down.
@@ -41,6 +44,7 @@ from .. import config as _config
 from .. import directory as _directory
 from .. import machine_line as _machine_line
 from .. import paths as _paths
+from .. import reserved as _reserved_mod
 from .. import sending as _sending
 from .. import wire as _wire
 from ..claimhold import ClaimServer
@@ -132,6 +136,28 @@ def _run(sender, to, text, *, posture, reply_to, new, audience, held, cap, no_ca
     return _sending.run(ctx, args, tags=tags)
 
 
+def send_as(module: str, name: str, to, text: str, *, expires=None,
+            interrupt: bool = False, deadline: float = 30.0) -> SendResult:
+    """Send `text` to `to` under `name`, a send-only name reserved for `module`, as that
+    module's own code: its token is read through this process's credential chain and
+    presented to the daemon, which refuses a sender inside a live session. The posture is
+    always `[no reply]`, since nobody can mail a reserved name. A refusal is the result's
+    `outcome` and `refusal` (`credential` when the token can't be read: run `moxi
+    doctor`), as for `send`; it raises only for arguments `send` would refuse."""
+    if expires is not None:
+        _sending.expiry_seconds(expires)          # a bad duration raises ValueError
+    names = to.split(",") if isinstance(to, str) else [str(t) for t in to]
+    tags = [t.strip() for t in names if t.strip()]
+    if not tags:
+        raise ValueError("send_as needs `to` to name at least one recipient")
+    args = SimpleNamespace(text=str(text), posture=_machine_line.POSTURE_NONE, cap=None,
+                           no_cap=False, audience=None, new=False, held=False,
+                           standing=False, new_name=False, interrupt=bool(interrupt),
+                           expires=expires, check=False, reply_to=None, message_id=None)
+    ctx = _sending.Context(env=dict(os.environ), deadline=deadline)
+    return _sending.run_reserved(ctx, args, module=str(module), name=str(name), tags=tags)
+
+
 def delete(sender: Sender, message_id, *, deadline: float = 30.0) -> DeleteResult:
     """Withdraw `message_id`, which `sender` sent, from every recipient that hasn't had
     it in a digest (`moxi comms delete`). The `DeleteResult` names who it was withdrawn
@@ -173,6 +199,46 @@ def session(identity: str, *, deadline: float = READ_DEADLINE) -> dict:
     return {k: v for k, v in answer.items() if k not in ("id", "ok")}
 
 
+def session_of(identity: str, *, deadline: float = READ_DEADLINE) -> str | None:
+    """The live session id behind the bound name `identity`, as its adapter reports it;
+    None when the name isn't bound (a reserved name never is) or its binding has
+    reported no session id yet. Raises what `session` raises."""
+    answer = session(identity, deadline=deadline)
+    sid = answer.get("session_id")
+    return sid if answer.get("bound") and isinstance(sid, str) and sid else None
+
+
+def caller_identity(env=None) -> str | None:
+    """The qualified identity the calling process's own session holds, or None.
+
+    It is proven by the claim holder, never read from a name variable: the claim socket
+    `env` names (else this process's environment) answers `claim` only to a process
+    inside its session, checked on the connecting process, so an environment copied from
+    another session proves nothing. None for no socket named, a path outside comms'
+    runtime directory, an adapter that doesn't answer, a caller outside the session, and
+    a claim that isn't bound or carries a refusal. It never returns the token, raises
+    nothing for those cases, and asks the daemon nothing."""
+    from ..claimfile import BOUND
+    from ..claimhold import AdapterMismatch, ClaimUnreachable, call, socket_from_env
+    from ..paths import OutsideRuntime
+
+    try:
+        path = socket_from_env(env)
+    except OutsideRuntime:
+        return None
+    if not path:
+        return None
+    try:
+        answer = call(path, "claim", timeout=READ_DEADLINE)
+    except (AdapterMismatch, ClaimUnreachable):
+        return None
+    if (not answer.get("ok") or answer.get("state") != BOUND
+            or answer.get("line") is not None):
+        return None
+    qualified = (answer.get("claim") or {}).get("qualified")
+    return qualified if isinstance(qualified, str) and qualified else None
+
+
 @dataclass(frozen=True)
 class Agent:
     """A bound name: its binding as the daemon holds it, and the directors its session
@@ -188,9 +254,10 @@ class Agent:
 
 @dataclass(frozen=True)
 class Standing:
-    """A standing identity's directory row. `kind` is `agent` or `send-only`; `module`
-    names the module the name is reserved for, when it is one (None for a name no module
-    owns)."""
+    """A standing identity: a directory row (`kind` `agent`), or a reserved name (`kind`
+    `send-only`: active, or kept from an older comms). `module` names the module the name
+    is reserved for, or declared by when it is in conflict; None for a name no module
+    owns."""
 
     qualified: str
     name: str
@@ -247,21 +314,29 @@ def roster(*, deadline: float = READ_DEADLINE) -> Roster:
     try:
         rows = _directory.standing_rows(conn)
         reserved = _reserved_rows(conn)
-        standing = tuple(Standing(qualified=q, name=r["name"], scope=r["scope"],
-                                  kind=_directory.kind_of(r),
-                                  module=reserved.get(q))
-                         for r in rows
-                         for q in (qualify(r["name"], r["scope"]),))
     finally:
         conn.close()
-    return Roster(bound=bound, standing=standing)
+    standing = [Standing(qualified=q, name=r["name"], scope=r["scope"],
+                         kind=_directory.KIND_AGENT, module=reserved.get(q, (None,))[0])
+                for r in rows for q in (qualify(r["name"], r["scope"]),)]
+    seen = {s.qualified for s in standing}
+    for q, (module, state) in reserved.items():
+        if q not in seen and state in (_reserved_mod.ACTIVE, _reserved_mod.UNOWNED):
+            name, scope = split_tag(q)
+            standing.append(Standing(qualified=q, name=name, scope=scope or GLOBAL,
+                                     kind=SEND_ONLY, module=module))
+    return Roster(bound=bound, standing=tuple(standing))
+
+
+#: The kind a reserved name reads as in `roster().standing`.
+SEND_ONLY = "send-only"
 
 
 def _reserved_rows(conn) -> dict:
-    """qualified -> the module each reserved name is reserved for (None when no module
-    owns it), for every row not freed."""
-    return {row["name"]: row["module"] for row in conn.execute(
-        "SELECT name, module FROM reserved WHERE freed_at IS NULL")}
+    """qualified -> (the module each reserved name is reserved for, or None when no
+    module owns it; its state), for every row not freed."""
+    return {row["name"]: (row["module"], row["state"]) for row in conn.execute(
+        "SELECT name, module, state FROM reserved WHERE freed_at IS NULL")}
 
 
 def _reserved(qualified: str) -> tuple[bool, str | None]:
@@ -282,7 +357,7 @@ def _reserved(qualified: str) -> tuple[bool, str | None]:
         return False, None
     finally:
         conn.close()
-    return (qualified in rows), rows.get(qualified)
+    return (qualified in rows), rows.get(qualified, (None,))[0]
 
 
 def owner(session_id: str, *, deadline: float = READ_DEADLINE) -> Owner:
@@ -408,10 +483,11 @@ def replay() -> tuple[int, int]:
 
 
 __all__ = [
-    "INTERFACE", "send", "check", "delete", "DeleteResult", "Sender", "SendResult",
+    "INTERFACE", "send", "send_as", "check", "delete", "DeleteResult", "Sender", "SendResult",
     "Recipient", "Refusal",
     "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
-    "session", "roster", "owner", "Roster", "Agent", "Standing", "Owner",
+    "session", "session_of", "caller_identity", "roster", "owner", "Roster", "Agent",
+    "Standing", "Owner",
     "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "record_dir",
     "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE", "replay",
     "DaemonError", "DaemonOffline",

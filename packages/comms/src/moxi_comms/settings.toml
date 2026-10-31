@@ -33,20 +33,20 @@ default = 8
 doc = "An open thread's reply cap when its opener set none; 1 or more."
 read = "start"
 
-[secrets.chain]
+[credentials.chain]
 type = "list"
-default = ["env", "store"]
-doc = "Where a credential is looked for, in order: env (MOXI_COMMS_SECRET_*), store."
+default = ["env", "keychain", "store"]
+doc = "The credential chain, in order: env (MOXI_COMMS_SECRET_*), keychain, store."
 read = "start"
 
-[secrets.store]
+[credentials.store]
 type = "path"
 default = ""
 doc = "The token store's directory; empty means tokens/ in comms' state directory."
 read = "start"
 env = "MOXI_COMMS_TOKEN_STORE"
 
-[secrets.roles]
+[credentials.roles]
 type = "list"
 default = []
 doc = "Role holders this box adds to comms' own; each keys the token store by its name."

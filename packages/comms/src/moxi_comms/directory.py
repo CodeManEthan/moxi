@@ -19,12 +19,9 @@ from .store import open_read, open_write
 # meta keys
 META_WRITER = "writer"
 
-#: A standing row's `kind`. `agent` is every row before send-only identities existed and
-#: every row since that is not one. A `send-only` row is a name that sends and is never a
-#: recipient: nothing is delivered to it, deferred for it or held for it, bound or not.
+#: A standing row's `kind`: always `agent`. A name that sends and is never a recipient
+#: is a reserved name (`reserved.py`), not a standing row.
 KIND_AGENT = "agent"
-KIND_SEND_ONLY = "send-only"
-ROW_KINDS = (KIND_AGENT, KIND_SEND_ONLY)
 
 
 def now() -> str:
@@ -59,19 +56,6 @@ def standing_row(conn, name: str, scope: str):
         "SELECT * FROM identities WHERE name = ? AND scope = ? AND status = 'active'",
         (name, scope),
     ).fetchone()
-
-
-def kind_of(row) -> str:
-    """A standing row's kind; `agent` for no row."""
-    if row is None:
-        return KIND_AGENT
-    return row["kind"] if "kind" in row.keys() else KIND_AGENT
-
-
-def is_send_only(conn, name: str, scope: str) -> bool:
-    """Is there an active standing row at exactly (name, scope) whose kind is send-only?
-    Read per call, like every directory fact the daemon uses."""
-    return kind_of(standing_row(conn, name, scope)) == KIND_SEND_ONLY
 
 
 def retired(conn, name: str, scope: str) -> bool:

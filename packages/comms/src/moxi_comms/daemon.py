@@ -83,13 +83,15 @@ from pathlib import Path
 
 from moxi import ipc
 
-from . import (attribution, bindings, cache, config, constants, directory, wire)
+from . import (attribution, bindings, cache, claimfile, config, constants, directory,
+               membership, wire)
 from .store import books as books_mod
 from .attribution import Author
 from .machine_line import (COLD_AT_LIVE, POSTURE_NONE,
                            POSTURE_ONCE, parse as parse_machine_line)
 from .record import Message
 from . import kinds as kinds_mod
+from . import reserved as reserved_mod
 from .paths import comms_db, daemon_socket
 from .record import Forbidden
 from .provision import NAMES
@@ -104,11 +106,6 @@ TIER_STANDING = attribution.TIER_STANDING
 #: comms' own adapter kinds (`kinds.BUILT_IN`). A module adds kinds through the
 #: `moxi.comms.kinds` group; the daemon accepts these and those (`Daemon.kinds`).
 ADAPTER_KINDS = tuple(kinds_mod.BUILT_IN)
-
-#: The kind a send-only identity binds with: a module's own process holding a name that
-#: sends and receives nothing. The daemon takes it only for a directory row of kind
-#: `send-only`, and takes such a row only with it.
-SEND_ONLY_ADAPTER = "send-only"
 
 #: The sent index is trimmed by age once per this many entries fed, so the cut is paid
 #: rarely rather than once per message.
@@ -352,8 +349,8 @@ class Resolution:
     resolvable: bool = True
     deferred: bool = False
     hint: str | None = None       # why it is unresolvable, in the sender's terms
-    #: the directory row at (name, scope) is a send-only identity: never a recipient,
-    #: bound or not
+    #: (name, scope) is a reserved name, active or kept from an older comms: never a
+    #: recipient
     send_only: bool = False
 
 
@@ -397,6 +394,9 @@ class Daemon:
         self._drift_said: set = set()
         self._drift_lock = threading.Lock()
         self._start_trim_thread = start_trim_thread
+        #: How the daemon reads a sender's process ancestry for a send under a reserved
+        #: name; a test hands in its own.
+        self.proc_view: membership.ProcView = membership.DEFAULT_PROC
         # custody, recorded: the daemon is the only writer, and the only witness
         self.binding_history = bindings.BindingHistory(history_path, clock=clock)
 
@@ -610,6 +610,10 @@ class Daemon:
             if fenced:
                 log.warning("boot fence: closed %d custody interval(s) left open by a "
                             "daemon that did not shut down cleanly", fenced)
+        # boot: the reserved names, brought in line with what the installed modules
+        # declare, which catches a module installed before comms and a store restored
+        # from a backup. A failure is logged; the names stay as they were.
+        self._reconcile_reserved()
         # boot: the delivery books, fenced BEFORE any method is answered: every row a
         # binding of the last daemon held (handed, or in a digest whose turn never
         # reported) waits again, and every digest it left open ends `fenced`. Then the
@@ -649,6 +653,17 @@ class Daemon:
             self._hold_routed()
         if self._start_trim_thread:
             self._spawn(self._trim_loop)
+
+    def _reconcile_reserved(self) -> None:
+        from . import reserved
+
+        try:
+            result = reserved.reconcile(target=Path(self.db_path))
+        except Exception:                                        # noqa: BLE001
+            log.exception("reserved names: the reconcile at start failed")
+            return
+        for line in result.lines:
+            log.info("reserved names: %s", line)
 
     def _spawn(self, target) -> None:
         t = threading.Thread(target=target, daemon=True)
@@ -933,20 +948,13 @@ class Daemon:
                                   code=wire.NAME_RETIRED, name=qualify(name, scope))
                 tier = TIER_STANDING if directory.standing_row(db, name, scope) else TIER_CHOSEN
             q = qualify(name, scope)
-            # A send-only identity binds only as what it is, and only it binds that way:
-            # an agent session that bound its name would be handed mail in its place,
-            # and a send-only binding of any other name would take mail nobody reads.
-            send_only_row = tier == TIER_STANDING and directory.is_send_only(db, name, scope)
-            if adapter == SEND_ONLY_ADAPTER and not send_only_row:
-                raise Refusal(
-                    f"{q} is not a send-only identity: the {SEND_ONLY_ADAPTER} adapter kind "
-                    "binds only a name whose directory row is send-only",
-                    code=wire.NAME_RESERVED, name=q)
-            if send_only_row and adapter != SEND_ONLY_ADAPTER:
-                raise Refusal(
-                    f"{q} is a send-only identity and receives no mail: it binds only "
-                    f"with the {SEND_ONLY_ADAPTER} adapter kind, never as {adapter}",
-                    code=wire.NAME_RESERVED, name=q)
+            held_for = reserved_mod.lookup(db, q)
+            if held_for is not None:
+                # No session binds a reserved name, of any adapter kind: one in conflict
+                # or kept from an older comms included, so it is still free to reserve
+                # once whatever stood in its way has gone.
+                raise Refusal(reserved_mod.bind_refusal(held_for), code=wire.NAME_RESERVED,
+                              name=q)
             if q in self.bindings:
                 held = self.bindings[q]
                 raise Refusal(
@@ -982,15 +990,6 @@ class Daemon:
             # binding's own connection by construction. With it, the shim's evidence for
             # `fresh`; an id another live binding holds is refused.
             self._take_session(binding, frame, at=binding.bound_at, register=True)
-            if adapter == SEND_ONLY_ADAPTER:
-                # Anything queued for the name from before its row was send-only is for
-                # nobody now: a send-only binding is never handed mail.
-                dropped = sorted(self.queue.get(q, {}), key=_as_id)
-                if dropped:
-                    self._queue_drop(q, dropped)
-                    log.info("bind %s: dropped %d message(s) queued for it from before its "
-                             "row was send-only, delivered to nobody: %s", q,
-                             len(dropped), ", ".join(dropped))
             token = secrets.token_urlsafe(32)
             binding.token_hash = hashlib.sha256(token.encode()).digest()
             self.bindings[q] = binding
@@ -1024,6 +1023,7 @@ class Daemon:
                 f"content is {len(content)} characters, over the "
                 f"{self.record.max_content_length}-character cap on one message",
                 code=wire.TOO_LONG)
+        self._refuse_unmailable(content)
         with self._lock:
             # Until the operator's name is reserved, an agent may hold a binding under
             # it: a live binding of that name sends as itself, with its binding's token.
@@ -1033,6 +1033,12 @@ class Daemon:
                                                  or who not in self.bindings)
         if operator:
             return self._send_as_operator(params, token, content)
+        with self._lock, self._db() as db:
+            if self._stopping:
+                raise DaemonStopping()
+            row = reserved_mod.lookup(db, who)
+        if row is not None:
+            return self._send_reserved(conn, row, token, content)
         with self._lock, self._db() as db:
             if self._stopping:
                 raise DaemonStopping()
@@ -1048,6 +1054,75 @@ class Daemon:
             qualified = binding.qualified
         message = self.record.post_as_identity(qualified, self._names_channel(), content)
         return {"message_id": str(message.id)}
+
+    def _refuse_unmailable(self, content: str) -> None:
+        """Refuse a `send` whose line zero names a name nobody mails: a reserved one,
+        active or kept from an older comms. The verbs refuse it first, in their own
+        words; this makes it hold for every sender."""
+        ml = parse_machine_line(content)
+        if ml is None:
+            return
+        for tag in ml.recipients:
+            r = self.resolve(tag)
+            if r.resolvable and r.send_only:
+                raise Refusal(f"{r.qualified} receives no mail: it is a send-only name",
+                              code=wire.NOT_MAILABLE, name=r.qualified)
+
+    def _send_reserved(self, conn, row, token, content: str) -> dict:
+        """A `send` under a reserved name: only its owning module's token sends under it,
+        and never from inside a session. A name an older comms kept, or one in conflict,
+        sends nothing."""
+        name = row["name"]
+        if row["state"] != reserved_mod.ACTIVE:
+            raise Refusal(f"{name} is a reserved name no module holds; nothing sends "
+                          "under it", code=wire.NAME_RESERVED, name=name)
+        given_raw = (hashlib.sha256(token.encode()).digest()
+                     if isinstance(token, str) else None)
+        if given_raw is not None:
+            with self._lock:
+                session_token = any(hmac.compare_digest(b.token_hash, given_raw)
+                                    for b in self.bindings.values() if b.token_hash)
+            if session_token:
+                raise Refusal(f"{name} is reserved for {row['module']}: a session's token "
+                              "never sends under it", code=wire.NAME_RESERVED, name=name)
+        self._refuse_session_peer(conn, name)
+        given = reserved_mod.token_hash(token) if isinstance(token, str) else ""
+        if not row["token_hash"] or not hmac.compare_digest(row["token_hash"], given):
+            raise Refusal("posting credential refused", code=wire.CREDENTIAL,
+                          credential=True)
+        message = self.record.post_as_identity(name, self._names_channel(), content)
+        log.info("send %s under %s, reserved for %s", message.id, name, row["module"])
+        return {"message_id": str(message.id)}
+
+    def _refuse_session_peer(self, conn, name: str) -> None:
+        """Refuse a send under the reserved `name` from any process inside a live session:
+        the connection's peer, walked up its ancestry against every live claim's roots.
+        A peer the daemon can't place is refused too, never read as outside."""
+        peer = getattr(conn, "peer", None)
+        pid = getattr(peer, "pid", None)
+        ident = getattr(peer, "proc", None)
+        unplaced = Refusal(f"comms can't tell whether this process is inside a session, so "
+                           f"it sends nothing under {name}", code=wire.NAME_RESERVED,
+                           name=name)
+        if not pid or ident is None:
+            raise unplaced
+        from moxi import proc as moxi_proc
+
+        if not moxi_proc.alive(ident):
+            raise unplaced
+        view = self.proc_view
+        try:
+            inside = membership.sessions_of(
+                pid, claimfile.membership_table(claimfile.live_records(view)), view,
+                strict=True)
+        except membership.Unplaceable as e:
+            log.info("send under %s refused: process %s's ancestry stops at %s, which "
+                     "can't be read", name, pid, e.pid)
+            raise unplaced from None
+        if inside:
+            raise Refusal(f"a send under a reserved name from inside a session: {name} "
+                          "sends only from a process outside every session",
+                          code=wire.NAME_RESERVED, name=name)
 
     def _delete(self, conn, params: dict) -> dict:
         """`delete`: the author withdraws `message_id` from every recipient that hasn't
@@ -1376,8 +1451,7 @@ class Daemon:
         live binding holds the id: a session this daemon never heard of and one whose
         binding has ended both answer the same, since the daemon keeps nothing for an
         id once its binding lets go.
-        `adapter` is that binding's kind, null with no owner; a `send-only` binding
-        answers here only if its own register carried a session id. `awaiting` is the
+        `adapter` is that binding's kind, null with no owner. `awaiting` is the
         owner's list as `owed` computes it (`_awaiting`, the same call under the same
         lock), empty with no owner.
 
@@ -1595,7 +1669,7 @@ class Daemon:
         with self._db() as db:
             return [qualify(name, sc) for sc in scopes
                     if not directory.retired(db, name, sc)
-                    and not directory.is_send_only(db, name, sc)]
+                    and not reserved_mod.unmailable(db, qualify(name, sc))]
 
     def has_standing_row(self, name: str, scope: str) -> bool:
         """Is there an active standing row at this exact (name, scope)? Read per call."""
@@ -1608,9 +1682,9 @@ class Daemon:
         send-only or retired."""
         with self._lock, self._db() as db:
             r = self._resolve(db, tag)
-            # The row decides, bound or not: a send-only identity is never a recipient.
-            if r.resolvable and r.tier == TIER_STANDING:
-                r.send_only = directory.is_send_only(db, r.name, r.scope)
+            # The row decides, bound or not: a reserved name is never a recipient.
+            if r.resolvable and reserved_mod.unmailable(db, r.qualified):
+                r.send_only = True
             return r
 
     def _resolve(self, db, tag: str) -> Resolution:
@@ -2973,15 +3047,6 @@ class Daemon:
             # "one-left" or "last", the thread mark the send verb wrote on a reply in an
             # open thread; absent otherwise.
             payload["thread_mark"] = ml.thread_mark
-        if binding.adapter == SEND_ONLY_ADAPTER:
-            # Never a deliver frame to a send-only binding, whatever path got here.
-            log.warning("not delivering msg=%s to %s: a send-only binding receives "
-                        "nothing", msg.id, binding.qualified)
-            with self._lock:
-                binding.delivered.discard(msg.id)
-            self._book("drop rows of", binding.qualified,
-                       lambda: self.books.drop(binding.qualified, [msg.id]))
-            return
         if held:
             # Handed from the queue: the recipient is told it waited, and how long.
             # Replay and live delivery send no `held`.
@@ -3123,9 +3188,6 @@ class Daemon:
         Catch-up is the name's rows, which `_on_register` releases before this; nothing
         is replayed from the record. Every routed message holds a row until it is acked
         or dropped, so a message with no row is not one to deliver again."""
-        if binding.adapter == SEND_ONLY_ADAPTER:
-            # Nothing was ever kept for it, so there is nothing to catch up on.
-            return
         q = binding.qualified
         cursor = None if binding.tier == TIER_EPHEMERAL else self._cursor(q)
         binding.conn.notify_threadsafe("replay_complete", {"identity": q, "cursor": cursor,

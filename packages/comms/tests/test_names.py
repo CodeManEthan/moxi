@@ -334,10 +334,11 @@ def test_a_recorded_tag_naming_a_retired_identity_is_held_for_nobody(rig):
 def test_the_provisioner_does_not_reactivate_a_retired_row(rig):
     from moxi_comms import provision
     retire("console2", "acme")
-    with pytest.raises(SystemExit) as e:
-        provision.send_only_main(["console2@acme", "--db", str(comms_db())],
-                                 record=rig.record, store=rig.store)
-    assert "retired" in str(e.value)
+    conn = directory.init(comms_db())
+    try:
+        provision.add_standing(rig.record, conn, "console2", "acme")
+    finally:
+        conn.close()
     conn = directory.connect(comms_db(), read_only=True)
     try:
         assert directory.retired(conn, "console2", "acme")
