@@ -41,7 +41,8 @@ TAG = re.compile(
     r"|\bL[0-9]+\b"
 )
 
-#: A finding mark with its arguments, one or more strings, which are data.
+#: A finding mark with its arguments, one or more strings, which are data. The call may
+#: run over several lines, as a formatter wraps it; each string stays on one line.
 FINDING_MARK = re.compile(
     r"""mark\.finding\(\s*(["'])[^"'\n]*\1(?:\s*,\s*(["'])[^"'\n]*\2)*\s*,?\s*\)""")
 
@@ -76,11 +77,20 @@ def allowed(root: Path) -> set[tuple[str, str]]:
     return pairs
 
 
+def _empty_mark(match: re.Match[str]) -> str:
+    """A finding mark with its arguments taken out and its line breaks kept."""
+    return "mark.finding(" + "\n" * match.group(0).count("\n") + ")"
+
+
 def tags_in(text: str) -> list[tuple[int, str]]:
-    """Each tag in `text`, with its line number; a finding mark's arguments excepted."""
+    """Each tag in `text`, with its line number; a finding mark's arguments excepted.
+
+    The marks are taken out of the whole text before it is split into lines, so a mark
+    wrapped over lines passes as a one-line mark does, and every line keeps its number.
+    """
+    text = FINDING_MARK.sub(_empty_mark, text)
     found = []
     for number, line in enumerate(text.splitlines(), 1):
-        line = FINDING_MARK.sub("mark.finding()", line)
         found += [(number, match.group(0)) for match in TAG.finditer(line)]
     return found
 

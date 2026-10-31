@@ -48,6 +48,14 @@ def test_only_the_mark_s_own_argument_is_let_through():
     assert tags_in('finding("L12")\n') == [(1, "L12")]
 
 
+def test_a_finding_mark_wrapped_over_lines_passes_as_a_one_line_mark_does():
+    wrapped = ('@pytest.mark.finding(\n    "L12",\n    "L13",\n)\n'
+               "def test_it():\n    pass  # see L50\n")
+    assert tags_in(wrapped) == [(6, "L50")]
+    assert tags_in("@pytest.mark.finding(\n    'L7'\n)\n") == []
+    assert tags_in('finding(\n    "L12",\n)\nD07\n') == [(2, "L12"), (4, "D07")]
+
+
 def test_line_numbers_count_from_one():
     assert tags_in("one\ntwo D07\nthree\n") == [(2, "D07")]
 
