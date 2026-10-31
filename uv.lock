@@ -359,6 +359,7 @@ dependencies = [
     { name = "keyring" },
     { name = "moxi" },
     { name = "moxi-turns" },
+    { name = "psutil" },
 ]
 
 [package.optional-dependencies]
@@ -383,6 +384,7 @@ requires-dist = [
     { name = "moxi-cache", marker = "extra == 'cache'", editable = "packages/cache" },
     { name = "moxi-turns", editable = "packages/turns" },
     { name = "moxi-turns", extras = ["codex"], marker = "extra == 'codex'", editable = "packages/turns" },
+    { name = "psutil", specifier = ">=5.9" },
 ]
 provides-extras = ["codex", "cache"]
 

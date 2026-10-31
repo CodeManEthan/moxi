@@ -21,7 +21,7 @@ classifiers = [
 # delivery, its Stop hold and its context all go through it).
 # keyring is the credential chain's keychain step (the macOS Keychain, Windows Credential
 # Manager, the Secret Service): required, since Windows is a target and has no other.
-dependencies = ["moxi>=0.1,<0.2", "moxi-turns>=0.2,<0.3", "keyring>=25"]
+dependencies = ["moxi>=0.1,<0.2", "moxi-turns>=0.2,<0.3", "keyring>=25", "psutil>=5.9"]
 
 [project.optional-dependencies]
 # `moxi-comms-codex` launches each Codex session through turns' Codex host, whose

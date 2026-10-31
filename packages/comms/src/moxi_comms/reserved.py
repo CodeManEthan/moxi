@@ -119,6 +119,26 @@ def lookup(conn, qualified: str):
                         "WHERE name = ? AND freed_at IS NULL", (qualified,)).fetchone()
 
 
+def unmailable(conn, qualified: str) -> bool:
+    """Does `qualified` name a reserved name nobody mails: an `active` or `unowned` row?
+    A `conflict` row isn't reserved, so it is mailed as the name it is."""
+    row = lookup(conn, qualified)
+    return row is not None and row["state"] in (ACTIVE, UNOWNED)
+
+
+def bind_refusal(row) -> str:
+    """The daemon's words refusing a bind of the reserved name in `row`."""
+    name = row["name"]
+    if row["state"] == ACTIVE:
+        return f"{name} is reserved for {row['module']}: no session binds it"
+    if row["state"] == UNOWNED:
+        return (f"{name} is a send-only name an older comms kept: no session binds it "
+                "until a module declares it")
+    return (f"{name} is declared as a reserved name and not yet reserved "
+            f"({row['note'] or 'in conflict'}): no session binds it until the conflict "
+            "is settled")
+
+
 def _bad_name(name: str) -> str | None:
     """Why `name` can't be reserved, or None when it can."""
     if "@" in name:

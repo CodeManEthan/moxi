@@ -21,7 +21,7 @@ import pytest
 from conftest import wait_until
 
 from moxi import exit as moxi_exit
-from moxi_comms import claimfile, cli
+from moxi_comms import api, claimfile, cli, reserved, secrets
 from moxi_comms.adapters import codex_wrapper
 from moxi_comms.adapters.codex_roster import record_write_root
 from moxi_comms.adapters.codex_wrapper import Refused, build_parser, plan
@@ -290,6 +290,19 @@ def test_a_held_name_is_refused_before_the_host_starts(rig, fake_host):
     assert proc.returncode == moxi_exit.REFUSED, err
     assert "taken was not launched" in err
     assert not fake_host.out.exists(), "the host never started"
+
+
+def test_a_reserved_name_reads_reserved_and_is_refused_before_the_host_starts(
+        rig, fake_host):
+    reserved.reconcile(declared={"launcher": ["console"]}, chain=secrets.from_config())
+    state = api.identity_state("console")
+    assert (state.state, state.module) == ("reserved", "launcher")
+    proc = run_wrapper(fake_host, "--name", "console", "--no-window")
+    _, err = proc.communicate(timeout=30)
+    assert proc.returncode == moxi_exit.REFUSED, err
+    assert "console was not launched" in err and "reserved for launcher" in err
+    assert not fake_host.out.exists(), "the host never started"
+    assert "console" not in rig.daemon.bindings
 
 
 def test_a_daemon_that_is_not_running_is_tempfail_before_the_host_starts(fake_host):

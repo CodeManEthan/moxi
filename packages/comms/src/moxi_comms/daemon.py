@@ -83,7 +83,8 @@ from pathlib import Path
 
 from moxi import ipc
 
-from . import (attribution, bindings, cache, config, constants, directory, wire)
+from . import (attribution, bindings, cache, claimfile, config, constants, directory,
+               membership, wire)
 from .store import books as books_mod
 from .attribution import Author
 from .machine_line import (COLD_AT_LIVE, POSTURE_NONE,
@@ -398,6 +399,9 @@ class Daemon:
         self._drift_said: set = set()
         self._drift_lock = threading.Lock()
         self._start_trim_thread = start_trim_thread
+        #: How the daemon reads a sender's process ancestry for a send under a reserved
+        #: name; a test hands in its own.
+        self.proc_view: membership.ProcView = membership.DEFAULT_PROC
         # custody, recorded: the daemon is the only writer, and the only witness
         self.binding_history = bindings.BindingHistory(history_path, clock=clock)
 
@@ -949,6 +953,13 @@ class Daemon:
                                   code=wire.NAME_RETIRED, name=qualify(name, scope))
                 tier = TIER_STANDING if directory.standing_row(db, name, scope) else TIER_CHOSEN
             q = qualify(name, scope)
+            held_for = reserved_mod.lookup(db, q)
+            if held_for is not None:
+                # No session binds a reserved name, of any adapter kind: one in conflict
+                # or kept from an older comms included, so it is still free to reserve
+                # once whatever stood in its way has gone.
+                raise Refusal(reserved_mod.bind_refusal(held_for), code=wire.NAME_RESERVED,
+                              name=q)
             # A send-only identity binds only as what it is, and only it binds that way:
             # an agent session that bound its name would be handed mail in its place,
             # and a send-only binding of any other name would take mail nobody reads.
@@ -1040,6 +1051,7 @@ class Daemon:
                 f"content is {len(content)} characters, over the "
                 f"{self.record.max_content_length}-character cap on one message",
                 code=wire.TOO_LONG)
+        self._refuse_unmailable(content)
         with self._lock:
             # Until the operator's name is reserved, an agent may hold a binding under
             # it: a live binding of that name sends as itself, with its binding's token.
@@ -1071,13 +1083,37 @@ class Daemon:
         message = self.record.post_as_identity(qualified, self._names_channel(), content)
         return {"message_id": str(message.id)}
 
+    def _refuse_unmailable(self, content: str) -> None:
+        """Refuse a `send` whose line zero names a name nobody mails: a reserved one, or
+        a send-only one. The verbs refuse it first, in their own words; this makes it
+        hold for every sender."""
+        ml = parse_machine_line(content)
+        if ml is None:
+            return
+        for tag in ml.recipients:
+            r = self.resolve(tag)
+            if r.resolvable and r.send_only:
+                raise Refusal(f"{r.qualified} receives no mail: it is a send-only name",
+                              code=wire.NOT_MAILABLE, name=r.qualified)
+
     def _send_reserved(self, conn, row, token, content: str) -> dict:
-        """A `send` under a reserved name: only its owning module's token sends under it.
-        A name an older comms kept, or one in conflict, sends nothing."""
+        """A `send` under a reserved name: only its owning module's token sends under it,
+        and never from inside a session. A name an older comms kept, or one in conflict,
+        sends nothing."""
         name = row["name"]
         if row["state"] != reserved_mod.ACTIVE:
             raise Refusal(f"{name} is a reserved name no module holds; nothing sends "
                           "under it", code=wire.NAME_RESERVED, name=name)
+        given_raw = (hashlib.sha256(token.encode()).digest()
+                     if isinstance(token, str) else None)
+        if given_raw is not None:
+            with self._lock:
+                session_token = any(hmac.compare_digest(b.token_hash, given_raw)
+                                    for b in self.bindings.values() if b.token_hash)
+            if session_token:
+                raise Refusal(f"{name} is reserved for {row['module']}: a session's token "
+                              "never sends under it", code=wire.NAME_RESERVED, name=name)
+        self._refuse_session_peer(conn, name)
         given = reserved_mod.token_hash(token) if isinstance(token, str) else ""
         if not row["token_hash"] or not hmac.compare_digest(row["token_hash"], given):
             raise Refusal("posting credential refused", code=wire.CREDENTIAL,
@@ -1085,6 +1121,36 @@ class Daemon:
         message = self.record.post_as_identity(name, self._names_channel(), content)
         log.info("send %s under %s, reserved for %s", message.id, name, row["module"])
         return {"message_id": str(message.id)}
+
+    def _refuse_session_peer(self, conn, name: str) -> None:
+        """Refuse a send under the reserved `name` from any process inside a live session:
+        the connection's peer, walked up its ancestry against every live claim's roots.
+        A peer the daemon can't place is refused too, never read as outside."""
+        peer = getattr(conn, "peer", None)
+        pid = getattr(peer, "pid", None)
+        ident = getattr(peer, "proc", None)
+        unplaced = Refusal(f"comms can't tell whether this process is inside a session, so "
+                           f"it sends nothing under {name}", code=wire.NAME_RESERVED,
+                           name=name)
+        if not pid or ident is None:
+            raise unplaced
+        from moxi import proc as moxi_proc
+
+        if not moxi_proc.alive(ident):
+            raise unplaced
+        view = self.proc_view
+        try:
+            inside = membership.sessions_of(
+                pid, claimfile.membership_table(claimfile.live_records(view)), view,
+                strict=True)
+        except membership.Unplaceable as e:
+            log.info("send under %s refused: process %s's ancestry stops at %s, which "
+                     "can't be read", name, pid, e.pid)
+            raise unplaced from None
+        if inside:
+            raise Refusal(f"a send under a reserved name from inside a session: {name} "
+                          "sends only from a process outside every session",
+                          code=wire.NAME_RESERVED, name=name)
 
     def _delete(self, conn, params: dict) -> dict:
         """`delete`: the author withdraws `message_id` from every recipient that hasn't
@@ -1645,9 +1711,11 @@ class Daemon:
         send-only or retired."""
         with self._lock, self._db() as db:
             r = self._resolve(db, tag)
-            # The row decides, bound or not: a send-only identity is never a recipient.
-            if r.resolvable and r.tier == TIER_STANDING:
-                r.send_only = directory.is_send_only(db, r.name, r.scope)
+            # The row decides, bound or not: a send-only identity is never a recipient,
+            # and nor is a reserved name.
+            if r.resolvable and (reserved_mod.unmailable(db, r.qualified) or (
+                    r.tier == TIER_STANDING and directory.is_send_only(db, r.name, r.scope))):
+                r.send_only = True
             return r
 
     def _resolve(self, db, tag: str) -> Resolution:
