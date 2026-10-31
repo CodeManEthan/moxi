@@ -766,7 +766,9 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     const hook = watch()
     try {
-      if (headless === true || ended) return behind(hook, performance.now(), await next(e))
+      // Only the main loop opens a turn: a subagent's or teammate's start (`agentId`)
+      // leaves the open turn as it is.
+      if (e.agentId !== undefined || headless === true || ended) return behind(hook, performance.now(), await next(e))
       turnOpen = e.turnId
       stopTimer(win)
       await reportAndWait($, 'turn.start', { turn_id: e.turnId })

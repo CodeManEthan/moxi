@@ -98,6 +98,35 @@ describe('the report queue', () => {
   })
 })
 
+describe('main-loop turns only', () => {
+  test('a subagent starting during an open main turn leaves it open and opens none; the main turn ends normally', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    await turnStart($, 't1')
+    await $.turn.start({ text: 'look around', turnId: 'a-t1', agentId: 'a1' })
+    // The main turn is still the open one when its Stop asks.
+    await $.classic.Stop({ stop_hook_active: false, background_tasks: [], session_crons: [] })
+    expect(w.got.find(g => g.path === '/ask/stop')?.body.turn_id).toBe('t1')
+    await turnEnd($, 't1')
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'a-t1', reason: 'answer', agentId: 'a1' })
+    expect(w.kinds()).toEqual(['session', 'turn.start', 'turn.complete'])
+    expect(w.reports().slice(1)).toEqual([
+      { seq: 2, kind: 'turn.start', turn_id: 't1' },
+      { seq: 3, kind: 'turn.complete', turn_id: 't1', reason: 'answer', is_aborted: false },
+    ])
+  })
+
+  test('a subagent starting while idle opens no turn and does not stop a pending submit\'s bound', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    w.settle = () => new Promise(() => {})
+    await w.line(submitLine('d1', 'hello'))
+    await $.turn.start({ text: '', turnId: 'a-t1', agentId: 'a1' })
+    await w.clock.advance(5_000)
+    expect(w.kinds()).toEqual(['session', 'submit.bound'])
+  })
+})
+
 describe('the context asks', () => {
   test('SessionStart waits for the first line, then hands back the listeners\' context', async ($: E, on) => {
     const w = world(on)
