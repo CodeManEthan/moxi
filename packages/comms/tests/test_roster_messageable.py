@@ -2,13 +2,13 @@
 
 Against the daemon's `agents` answer:
 `{"bindings": [...], "waiting": {name: {"count", "oldest"}}, "pending": {},
-"unanswered": [...]}`. The daemon's half of that answer is tested with
-the queue; these tests hand the renderers a fake answer of that shape, except the last
-section, which asks the daemon itself.
+"unanswered": [...], "standing": [...]}`. The daemon's half of that answer is tested
+with the queue; these tests hand the renderers a fake answer of that shape, except the
+tests that ask the daemon itself.
 
-The default view (the verb and the snapshot) is one row per live binding, and nothing
-else. `--seats` is the operator's view: every binding, one waiting block, and the
-unanswered rows. The operator is a row like any other.
+The default view (the verb and the snapshot) is one row per live binding, then one row
+per reserved send-only name, and nothing else. `--seats` is the operator's view: the same
+rows, one waiting block, and the unanswered rows. The operator is a row like any other.
 """
 
 from __future__ import annotations
