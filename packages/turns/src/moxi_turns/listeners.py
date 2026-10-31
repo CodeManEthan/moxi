@@ -51,13 +51,33 @@ and are bounded together by one `listen.wait_ms`. An exception or a late answer 
 once and counts as None, so a broken listener costs its own context and never the
 session's turn. A function is imported in its thread at its first ask, so a slow import
 costs that ask and not the endpoint's start.
+
+After-tool rows (`AfterTool`) are asked another way, since a tool call is frequent and
+calls run in parallel: each row runs on a lane of its own with at most `AFTER_WORKERS`
+threads, and the rows asked for one call are bounded together by `after_tool.wait_ms`
+from the ask's arrival. A call waits for a free thread inside that bound; a row is
+skipped for the call when the bound passes first, or at once when every busy thread of
+the row has passed its own call's bound (hung), since then none can free in time. A row
+that overruns, raises or answers something other than text adds nothing, and each kind
+of fault is logged once per endpoint. Texts are joined in module-name order.
+
+Floors (`Floors`): each after-tool row's floor function is read at each `ready` and after
+each call of its row's listener, on whatever event, bounded by `after_tool.wait_ms`. A
+floor that raises, overruns or answers something other than an int reads 0, logged once
+per endpoint. While one read of a row is still running inside its bound a second one
+shares it; one running past its bound reads 0 and starts no other thread. A row with no
+floor reads 0, which means "always call". A harness that gates the main loop's calls by
+the floors is told each time a value changes.
 """
 
 from __future__ import annotations
 
+import concurrent.futures
 import importlib
+import itertools
 import logging
 import os
+import queue
 import re
 import threading
 import time
@@ -83,6 +103,10 @@ OPTIONS = ("floor",)
 CONTEXT_EVENTS = ("start", "prompt")
 #: How listener texts are joined into one added context.
 JOIN = "\n\n"
+#: The most threads one after-tool row runs on.
+AFTER_WORKERS = 4
+#: The after-tool event's name.
+AFTER_TOOL = "after-tool"
 #: The most start context each harness takes, in characters: Claude's under Claude
 #: Code's 10,000-character preview, Codex's about its 2,500-token spill.
 START_CEILINGS = {"claude": 9500, "codex": 9000, "opencode": 9500}
@@ -102,14 +126,29 @@ class Listener:
     #: The row's floor function, `"package.module:function"`, or None for no floor.
     floor: str | None = None
     _fn: Callable[[SessionEvent], object] | None = field(default=None, repr=False)
+    _floor_fn: Callable[[SessionEvent], object] | None = field(default=None, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def function(self) -> Callable[[SessionEvent], object]:
         with self._lock:
             if self._fn is None:
-                module_name, _, attr = self.target.partition(":")
-                self._fn = getattr(importlib.import_module(module_name), attr)
+                self._fn = _import(self.target)
             return self._fn
+
+    def floor_function(self) -> Callable[[SessionEvent], object]:
+        """The row's floor function; raises when the row has none or it does not
+        import."""
+        if self.floor is None:
+            raise LookupError(f"the row {self.target!r} has no floor")
+        with self._lock:
+            if self._floor_fn is None:
+                self._floor_fn = _import(self.floor)
+            return self._floor_fn
+
+
+def _import(target: str) -> Callable[[SessionEvent], object]:
+    module_name, _, attr = target.partition(":")
+    return getattr(importlib.import_module(module_name), attr)
 
 
 @dataclass(frozen=True)
@@ -406,8 +445,12 @@ def share_out(answers: list[tuple[str, str | None]], total: int) -> str | None:
 
 # -- asking ------------------------------------------------------------------------------
 
+#: Called after each listener call, in its thread: `(listener, event) -> None`.
+After = Callable[[Listener, SessionEvent], None]
+
+
 def ask(registry: Registry, event: SessionEvent, wait_s: float, *,
-        wait: bool = False) -> str | None:
+        wait: bool = False, after: After | None = None) -> str | None:
     """Ask every listener that names `event.event`, bounded together by `wait_s`.
 
     A `ready` or `start` event is the start moment: every `ready` row is told, and the
@@ -415,14 +458,15 @@ def ask(registry: Registry, event: SessionEvent, wait_s: float, *,
     `prompt`, the texts joined in module-name order, or None. For `turn` and `gone` the
     answers are ignored and this returns None at once, the calls running on, unless
     `wait` asks it to wait for them up to `wait_s` too (the endpoint's own end, so a
-    `gone` call is not cut off by the process exiting).
+    `gone` call is not cut off by the process exiting). `after`, when given, is called in
+    each listener's thread once its call returned (the endpoint reads floors there).
     """
     if event.event in ("ready", "start"):
-        return _start(registry, event, wait_s)
+        return _start(registry, event, wait_s, after)
     chosen = registry.naming(event.event)
     if not chosen:
         return None
-    answers, done, threads = _launch(chosen, event)
+    answers, done, threads = _launch(chosen, event, after)
     context = event.event in CONTEXT_EVENTS
     if not (context or wait):
         return None
@@ -434,10 +478,11 @@ def ask(registry: Registry, event: SessionEvent, wait_s: float, *,
     return JOIN.join(texts) if texts else None
 
 
-def _start(registry: Registry, event: SessionEvent, wait_s: float) -> str | None:
+def _start(registry: Registry, event: SessionEvent, wait_s: float,
+           after: After | None = None) -> str | None:
     ready = registry.naming("ready")
     if ready:
-        _launch(ready, replace(event, event="ready"))
+        _launch(ready, replace(event, event="ready"), after)
     the_plan = plan(registry)
     for entry, why in the_plan.skipped:
         if is_file_entry(entry) and entry not in registry._logged:
@@ -447,7 +492,7 @@ def _start(registry: Registry, event: SessionEvent, wait_s: float) -> str | None
         return None
     start = replace(event, event="start")
     rows = [ls for e in the_plan.entries for ls in e.rows]
-    answers, done, threads = _launch(rows, start) if rows else ([], [], [])
+    answers, done, threads = _launch(rows, start, after) if rows else ([], [], [])
     total = start_ceiling(event.harness)
     if 0 < registry.limit < total:
         total = registry.limit
@@ -475,13 +520,13 @@ def _start(registry: Registry, event: SessionEvent, wait_s: float) -> str | None
     return share_out(per_entry, total)
 
 
-def _launch(chosen: list[Listener], event: SessionEvent):
+def _launch(chosen: list[Listener], event: SessionEvent, after: After | None = None):
     answers: list[object] = [None] * len(chosen)
     done = [False] * len(chosen)
     # Each call gets its own copy of the environment, so no listener changes another's.
     threads = [threading.Thread(target=_call,
                                 args=(ls, replace(event, env=dict(event.env)), answers,
-                                      done, i),
+                                      done, i, after),
                                 name=f"turns-listener-{ls.module}", daemon=True)
                for i, ls in enumerate(chosen)]
     for t in threads:
@@ -513,7 +558,7 @@ def _text(listener: Listener, event: SessionEvent, answer: object, done: bool,
 
 
 def _call(listener: Listener, event: SessionEvent, answers: list, done: list,
-          i: int) -> None:
+          i: int, after: After | None = None) -> None:
     try:
         answers[i] = listener.function()(event)
     except Exception as exc:  # noqa: BLE001 - a broken listener costs its own answer
@@ -521,9 +566,287 @@ def _call(listener: Listener, event: SessionEvent, answers: list, done: list,
                     listener.module, listener.target, event.event, type(exc).__name__, exc)
         answers[i] = None
     done[i] = True
+    _after(after, listener, event)
 
 
-__all__ = ["GROUP", "EVENTS", "RESERVED", "OPTIONS", "CONTEXT_EVENTS", "JOIN", "START_CEILINGS",
-           "DEFAULT_CEILING", "Listener", "Broken", "Notice", "Registry", "Entry", "Plan",
-           "SessionEvent", "default_order", "start_ceiling", "load", "plan",
-           "is_file_entry", "cut", "share_out", "ask"]
+def _after(after: After | None, listener: Listener, event: SessionEvent) -> None:
+    if after is None:
+        return
+    try:
+        after(listener, event)
+    except Exception:  # noqa: BLE001 - the hook's fault is never the listener's
+        log.exception("after the call of listener %s (%s)", listener.module, listener.target)
+
+
+# -- after-tool rows ----------------------------------------------------------------------
+
+def after_rows(registry: Registry) -> dict[str, Listener]:
+    """The rows naming `after-tool`, by id, in module-name order then each module's own.
+    A row's id is its target; a second row with the same target gets `#2`, and so on."""
+    rows: dict[str, Listener] = {}
+    for ls in registry.naming(AFTER_TOOL):
+        rid, n = ls.target, 1
+        while rid in rows:
+            n += 1
+            rid = f"{ls.target}#{n}"
+        rows[rid] = ls
+    return rows
+
+
+class _Lane:
+    """One after-tool row's threads: at most `AFTER_WORKERS`, each a daemon pulling
+    jobs. `running` holds each admitted job's bound until its call (and the row's floor
+    read after it) returns. Every field is guarded by the asker's condition."""
+
+    def __init__(self, row_id: str):
+        self.id = row_id
+        self.running: dict[int, float] = {}
+        self.threads = 0
+        self.idle = 0
+        self.jobs: queue.SimpleQueue = queue.SimpleQueue()
+
+    def free(self) -> bool:
+        return len(self.running) < AFTER_WORKERS
+
+    def hung(self, now: float) -> bool:
+        return not self.free() and all(d <= now for d in self.running.values())
+
+    def next_hang(self, now: float) -> float | None:
+        later = [d for d in self.running.values() if d > now]
+        return min(later) if later else None
+
+
+class AfterTool:
+    """One endpoint's after-tool rows, each on a lane of its own (the rule above).
+
+    `after` is called in the row's thread once its listener returned, before the thread
+    is free again; `clock` stands in for `time.monotonic` (tests)."""
+
+    def __init__(self, rows: Mapping[str, Listener], wait_s: float, *,
+                 after: After | None = None, clock: Callable[[], float] = time.monotonic):
+        self.rows = dict(rows)
+        self.wait_s = max(0.0, wait_s)
+        self._after = after
+        self._clock = clock
+        self._cond = threading.Condition()
+        self._lanes = {rid: _Lane(rid) for rid in self.rows}
+        self._jobs = itertools.count(1)
+        self._said: set[tuple[str, str]] = set()
+        self._closed = False
+
+    def ask(self, event: SessionEvent, ids: Iterable[str] | None = None) -> str | None:
+        """Ask the rows `ids` names (every row when None) about one tool call, bounded
+        together by `wait_s` from now. Returns their texts joined, or None. An id that
+        names no row is skipped. Never raises."""
+        t0 = self._clock()
+        deadline = t0 + self.wait_s
+        wanted = None if ids is None else set(i for i in ids if isinstance(i, str))
+        chosen = [rid for rid in self.rows if wanted is None or rid in wanted]
+        if not chosen:
+            return None
+        futures: dict[str, concurrent.futures.Future] = {}
+        with self._cond:
+            if self._closed:
+                return None
+            pending = list(chosen)
+            while pending:
+                now = self._clock()
+                for rid in list(pending):
+                    lane = self._lanes[rid]
+                    if lane.free():
+                        futures[rid] = self._start(lane, self.rows[rid], event, deadline)
+                        pending.remove(rid)
+                    elif deadline <= now or lane.hung(now):
+                        self._say(rid, "busy", f"every thread of after-tool row {rid} was "
+                                  "still busy with earlier calls; it was skipped for a call")
+                        pending.remove(rid)
+                if not pending:
+                    break
+                wake = [deadline]
+                for rid in pending:
+                    nxt = self._lanes[rid].next_hang(now)
+                    if nxt is not None:
+                        wake.append(nxt)
+                self._cond.wait(max(0.0, min(wake) - now) + 0.001)
+        texts: list[str] = []
+        for rid in chosen:
+            future = futures.get(rid)
+            if future is None:
+                continue
+            try:
+                text = future.result(timeout=max(0.0, deadline - self._clock()))
+            except concurrent.futures.TimeoutError:
+                self._say(rid, "late", f"after-tool row {rid} did not answer within "
+                          f"{int(self.wait_s * 1000)} ms; it adds nothing")
+                continue
+            if text:
+                texts.append(text)
+        return JOIN.join(texts) if texts else None
+
+    def _start(self, lane: _Lane, listener: Listener, event: SessionEvent,
+               deadline: float) -> concurrent.futures.Future:
+        """Under the condition: admit one job on `lane` and hand it to a thread."""
+        job = next(self._jobs)
+        lane.running[job] = deadline
+        future: concurrent.futures.Future = concurrent.futures.Future()
+        lane.jobs.put((job, listener, replace(event, env=dict(event.env)), future))
+        if lane.idle == 0 and lane.threads < AFTER_WORKERS:
+            lane.threads += 1
+            lane.idle += 1
+            threading.Thread(target=self._work, args=(lane,), daemon=True,
+                             name=f"turns-after-tool-{listener.module}").start()
+        lane.idle -= 1
+        return future
+
+    def _work(self, lane: _Lane) -> None:
+        while True:
+            item = lane.jobs.get()
+            if item is None:
+                return
+            job, listener, event, future = item
+            try:
+                answer = listener.function()(event)
+            except BaseException as exc:  # noqa: BLE001 - a row's fault adds nothing
+                self._say(lane.id, "raise", f"after-tool row {lane.id} raised "
+                          f"{type(exc).__name__}: {exc}; it adds nothing")
+                answer = None
+            if answer is not None and not isinstance(answer, str):
+                self._say(lane.id, "type", f"after-tool row {lane.id} answered a "
+                          f"{type(answer).__name__}, not text; it adds nothing")
+                answer = None
+            if not future.done():
+                future.set_result(answer or None)
+            _after(self._after, listener, event)
+            with self._cond:
+                lane.running.pop(job, None)
+                lane.idle += 1
+                self._cond.notify_all()
+
+    def _say(self, rid: str, kind: str, text: str) -> None:
+        with self._cond:
+            if (rid, kind) in self._said:
+                return
+            self._said.add((rid, kind))
+        log.warning("%s", text)
+
+    def close(self) -> None:
+        """Take no more asks; let idle threads go. A hung row's thread is a daemon."""
+        with self._cond:
+            if self._closed:
+                return
+            self._closed = True
+            for lane in self._lanes.values():
+                for _ in range(lane.threads):
+                    lane.jobs.put(None)
+            self._cond.notify_all()
+
+
+class _Read:
+    """One floor read in flight: its thread, its bound and, once done, its value."""
+
+    def __init__(self, deadline: float):
+        self.deadline = deadline
+        self.done = threading.Event()
+        self.value = 0
+
+
+class Floors:
+    """Each after-tool row's current floor, read as the rule above says. `send(values)`
+    is told the whole map, `{row id: tokens}`, each time a value changes, in the order
+    the changes were made."""
+
+    def __init__(self, rows: Mapping[str, Listener], wait_s: float, *,
+                 send: Callable[[dict[str, int]], None] | None = None,
+                 clock: Callable[[], float] = time.monotonic):
+        self.rows = dict(rows)
+        self.wait_s = max(0.0, wait_s)
+        self._send = send
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._values = {rid: 0 for rid in self.rows}
+        self._by_listener = {id(ls): rid for rid, ls in self.rows.items() if ls.floor}
+        self._reads: dict[str, _Read] = {}
+        self._said: set[tuple[str, str]] = set()
+
+    @property
+    def any(self) -> bool:
+        """Some row has a floor function."""
+        return bool(self._by_listener)
+
+    def values(self) -> dict[str, int]:
+        with self._lock:
+            return dict(self._values)
+
+    def after_call(self, listener: Listener, event: SessionEvent) -> None:
+        """A row's listener was called: read its floor again."""
+        rid = self._by_listener.get(id(listener))
+        if rid is None:
+            return
+        read = self._begin(rid, event)
+        self._set({rid: self._finish(rid, read)})
+
+    def refresh(self, event: SessionEvent) -> None:
+        """Read every floor again (a `ready`), together, under one bound."""
+        reads = {rid: self._begin(rid, event) for rid in self._by_listener.values()}
+        if reads:
+            self._set({rid: self._finish(rid, read) for rid, read in reads.items()})
+
+    def _begin(self, rid: str, event: SessionEvent) -> _Read | None:
+        """The read of `rid` to wait for: the one already running inside its bound, else
+        a new one; None when one runs past its bound (it reads 0)."""
+        now = self._clock()
+        with self._lock:
+            running = self._reads.get(rid)
+            if running is not None and not running.done.is_set():
+                return running if running.deadline > now else None
+            read = self._reads[rid] = _Read(now + self.wait_s)
+        listener = self.rows[rid]
+        threading.Thread(target=self._read, args=(rid, listener, replace(
+            event, env=dict(event.env)), read), daemon=True,
+            name=f"turns-floor-{listener.module}").start()
+        return read
+
+    def _read(self, rid: str, listener: Listener, event: SessionEvent, read: _Read) -> None:
+        try:
+            value = listener.floor_function()(event)
+            if isinstance(value, bool) or not isinstance(value, int):
+                self._say(rid, "type", f"answered a {type(value).__name__}, not a token count")
+                value = 0
+        except BaseException as exc:  # noqa: BLE001 - a floor's fault reads 0
+            self._say(rid, "raise", f"raised {type(exc).__name__}: {exc}")
+            value = 0
+        read.value = max(0, value)
+        read.done.set()
+
+    def _finish(self, rid: str, read: _Read | None) -> int:
+        if read is None:
+            self._say(rid, "late", "is still running from an earlier read")
+            return 0
+        if not read.done.wait(max(0.0, read.deadline - self._clock())):
+            self._say(rid, "late", f"took longer than {int(self.wait_s * 1000)} ms")
+            return 0
+        return read.value
+
+    def _set(self, new: dict[str, int]) -> None:
+        with self._lock:
+            changed = any(self._values.get(rid) != v for rid, v in new.items())
+            self._values.update(new)
+            if changed and self._send is not None:
+                try:
+                    self._send(dict(self._values))
+                except Exception:  # noqa: BLE001 - a send's fault costs the line
+                    log.exception("the floors could not be sent")
+
+    def _say(self, rid: str, kind: str, what: str) -> None:
+        with self._lock:
+            if (rid, kind) in self._said:
+                return
+            self._said.add((rid, kind))
+        log.warning("the floor of after-tool row %s %s; it reads 0", rid, what)
+
+
+__all__ = ["GROUP", "EVENTS", "RESERVED", "OPTIONS", "CONTEXT_EVENTS", "JOIN",
+           "AFTER_WORKERS", "AFTER_TOOL", "START_CEILINGS", "DEFAULT_CEILING", "Listener",
+           "Broken", "Notice", "Registry", "Entry", "Plan", "SessionEvent", "After",
+           "default_order", "start_ceiling", "load", "plan", "is_file_entry", "cut",
+           "share_out", "ask", "after_rows", "AfterTool", "Floors"]

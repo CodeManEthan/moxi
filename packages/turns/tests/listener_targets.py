@@ -38,3 +38,43 @@ BIG = ""
 
 def big(event):
     return BIG
+
+
+def after(event):
+    CALLS.append(("after", event.tool, event.agent_id, event.is_error, event.point,
+                  event.record_path, event.cwd))
+    return f"after {event.tool}"
+
+
+def seen(event):
+    CALLS.append((event.event, event.cwd, event.text, event.origin, event.usage,
+                  event.received_at))
+
+
+#: What `floor` answers; a test sets it.
+FLOOR = {"value": 0}
+#: Set while `hang` should hold its thread.
+HOLD = __import__("threading").Event()
+
+
+def floor(event):
+    CALLS.append(("floor", event.event))
+    return FLOOR["value"]
+
+
+def floor_raises(event):
+    raise RuntimeError("a bug in the floor")
+
+
+def floor_text(event):
+    return "12"
+
+
+def floor_slow(event):
+    time.sleep(1.0)
+    return 7
+
+
+def hang(event):
+    HOLD.wait(5.0)
+    return "too late"

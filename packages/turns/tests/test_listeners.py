@@ -267,3 +267,138 @@ def test_a_listener_written_for_the_first_events_reads_the_longer_event():
                               "/w", "a-1", "Bash", "tu-1", False, "after", "/r.jsonl")
     assert (full.cwd, full.agent_id, full.point, full.record_path) == (
         "/w", "a-1", "after", "/r.jsonl")
+
+
+# -- after-tool rows and floors ------------------------------------------------------------
+
+def _after_reg(*entries):
+    return listeners.load(entries, order=(), limit=0)
+
+
+def test_after_tool_rows_join_in_module_order_and_faults_add_nothing(caplog):
+    reg = _after_reg(Entry("zeta", [("after-tool", "listener_targets:after")]),
+                     Entry("alpha", [("after-tool", "listener_targets:after"),
+                                     ("after-tool", "listener_targets:broken"),
+                                     ("after-tool", "listener_targets:not_text"),
+                                     ("after-tool", "listener_targets:slow")]))
+    rows = listeners.after_rows(reg)
+    assert list(rows) == ["listener_targets:after", "listener_targets:broken",
+                          "listener_targets:not_text", "listener_targets:slow",
+                          "listener_targets:after#2"]
+    at = listeners.AfterTool(rows, 0.3)
+    ev = event("after-tool", tool="Bash", point="after")
+    t0 = time.monotonic()
+    assert at.ask(ev) == "after Bash\n\nafter Bash"
+    assert time.monotonic() - t0 < 0.6
+    assert at.ask(ev, ["listener_targets:after#2", "nobody"]) == "after Bash"
+    assert at.ask(ev, []) is None
+    # Each kind of fault is logged once per endpoint.
+    at.ask(ev, ["listener_targets:broken"])
+    assert sum("raised" in r.getMessage() for r in caplog.records) == 1
+    at.close()
+
+
+def test_four_hung_calls_then_a_new_call_skips_the_row_at_once():
+    listener_targets.HOLD.clear()
+    rows = listeners.after_rows(_after_reg(Entry("u", [("after-tool",
+                                                         "listener_targets:hang")])))
+    at = listeners.AfterTool(rows, 0.2)
+    ev = event("after-tool", tool="Bash")
+    import concurrent.futures as cf
+    with cf.ThreadPoolExecutor(8) as pool:
+        # Eight at once: four are taken, four wait for a thread inside the bound and skip.
+        results = list(pool.map(lambda _: at.ask(ev), range(8)))
+    assert results == [None] * 8
+    t0 = time.monotonic()
+    assert at.ask(ev) is None                       # every thread hung: no wait
+    assert time.monotonic() - t0 < 0.1
+    listener_targets.HOLD.set()
+    time.sleep(0.1)
+    at.close()
+
+
+def test_parallel_calls_each_reach_a_row():
+    rows = listeners.after_rows(_after_reg(Entry("u", [("after-tool",
+                                                         "listener_targets:after")])))
+    at = listeners.AfterTool(rows, 0.5)
+    import concurrent.futures as cf
+    with cf.ThreadPoolExecutor(4) as pool:
+        out = list(pool.map(lambda i: at.ask(event("after-tool", tool=f"T{i}",
+                                                   agent_id=f"a{i}")), range(4)))
+    assert out == [f"after T{i}" for i in range(4)]
+    at.close()
+
+
+def _floors(*rows, wait=0.3):
+    reg = _after_reg(Entry("u", [("after-tool", "listener_targets:after", {"floor": f})
+                                 if f else ("after-tool", "listener_targets:after")
+                                 for f in rows]))
+    sent = []
+    return listeners.Floors(listeners.after_rows(reg), wait, send=sent.append), sent
+
+
+def test_floors_read_at_refresh_and_after_a_call_and_are_sent_on_change_only():
+    listener_targets.FLOOR["value"] = 40_000
+    fl, sent = _floors("listener_targets:floor", None)
+    assert fl.values() == {"listener_targets:after": 0, "listener_targets:after#2": 0}
+    fl.refresh(event("ready"))
+    assert sent == [{"listener_targets:after": 40_000, "listener_targets:after#2": 0}]
+    fl.refresh(event("ready"))
+    assert len(sent) == 1                           # nothing changed: nothing sent
+    listener_targets.FLOOR["value"] = 0
+    fl.after_call(fl.rows["listener_targets:after"], event("after-tool", agent_id="a1"))
+    assert sent[-1]["listener_targets:after"] == 0
+    fl.after_call(fl.rows["listener_targets:after#2"], event("turn"))  # no floor: no read
+    assert len(sent) == 2
+
+
+@pytest.mark.parametrize("target", ["listener_targets:floor_raises",
+                                    "listener_targets:floor_text",
+                                    "listener_targets:floor_slow",
+                                    "listener_targets:missing"])
+def test_a_floor_that_raises_overruns_or_answers_no_int_reads_0(target):
+    listener_targets.FLOOR["value"] = 9
+    fl, sent = _floors("listener_targets:floor", wait=0.2)
+    fl.refresh(event("ready"))
+    assert fl.values() == {"listener_targets:after": 9}
+    bad = dataclasses.replace(fl.rows["listener_targets:after"], floor=target, _fn=None,
+                              _floor_fn=None)
+    fl2 = listeners.Floors({"r": bad}, 0.2, send=sent.append)
+    fl2._values["r"] = 9
+    t0 = time.monotonic()
+    fl2.refresh(event("ready"))
+    assert fl2.values() == {"r": 0}
+    assert time.monotonic() - t0 < 0.5
+
+
+def test_the_endpoint_asks_after_tool_rows_reads_floors_and_carries_cwd(make_endpoint):
+    listener_targets.FLOOR["value"] = 5
+    reg = _after_reg(Entry("usage", [("after-tool", "listener_targets:after",
+                                      {"floor": "listener_targets:floor"}),
+                                     (("prompt", "usage", "turn"), "listener_targets:seen")]))
+    told = []
+
+    class Fake(FakeHarness):
+        record_path = "/p/S-1.jsonl"
+
+        def floors_changed(self, values):
+            told.append(values)
+
+    ep, fake = make_endpoint(Fake(), registry=reg)
+    assert ep.floors.values() == {"listener_targets:after": 0}
+    ep.ready("startup", "s-1")
+    assert told == [{"listener_targets:after": 5}]
+    assert ep.after_tool("Bash", tool_use_id="u1", agent_id="a1", is_error=True) \
+        == "after Bash"
+    assert ("after", "Bash", "a1", True, "after", "/p/S-1.jsonl", fake.cwd) \
+        in listener_targets.CALLS
+    assert ep.after_tool("Bash", rows=[]) is None
+    ep.prompt("hello", "composer")
+    before = time.time()
+    ep.usage({"rateLimits": [], "context": {"tokens": 3}})
+    time.sleep(0.2)
+    prompts = [c for c in listener_targets.CALLS if c[0] == "prompt"]
+    assert prompts == [("prompt", fake.cwd, "hello", "composer", None, None)]
+    (u,) = [c for c in listener_targets.CALLS if c[0] == "usage"]
+    assert u[4] == {"rateLimits": [], "context": {"tokens": 3}} and u[5] >= before
+    assert fake.cwd

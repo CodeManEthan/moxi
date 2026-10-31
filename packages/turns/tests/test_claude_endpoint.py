@@ -789,3 +789,50 @@ def test_a_long_runtime_root_puts_mod_sock_on_the_short_path_and_the_endpoint_st
         w.close()
     assert not os.path.lexists(sock)
     assert not ep.dir.exists()
+
+
+def test_after_tool_floors_usage_and_the_prompt_through_the_leg(claude):
+    import listener_targets
+
+    listener_targets.CALLS.clear()
+    listener_targets.FLOOR["value"] = 30_000
+    registry = Registry((
+        Listener("usage", frozenset({"after-tool"}), "listener_targets:after",
+                 "listener_targets:floor"),
+        Listener("usage", frozenset({"prompt", "usage"}), "listener_targets:seen")))
+    ep, runner = claude(registry=registry)
+    first = runner.first
+    assert first["floors"] == {"listener_targets:after": 0}
+    assert first["after_tool_wait_ms"] == 300
+    runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "startup",
+                                   "session_id": "s-1", "transcript_path": "/p/s-1.jsonl"})
+    # The floors line went out before the ready's answer.
+    assert runner.next_line(timeout=0.1) == {"op": "floors",
+                                             "rows": {"listener_targets:after": 30_000}}
+    assert ep.harness.record_path == "/p/s-1.jsonl"
+    answer = runner.post(leg.PATH_AFTER_TOOL, {
+        "call": {"tool": "Bash", "tool_use_id": "u1", "agentId": None, "is_error": False},
+        "rows": ["listener_targets:after"]})
+    assert answer == {"ok": True, "context": "after Bash"}
+    assert ("after", "Bash", None, False, "after", "/p/s-1.jsonl", ep.harness.cwd) \
+        in listener_targets.CALLS
+    assert runner.post(leg.PATH_AFTER_TOOL, {"call": {"tool": "Bash"}, "rows": []}) \
+        == {"ok": True, "context": None}
+    # An agent's call: the floor read after it drops to 0, and the runner is told.
+    listener_targets.FLOOR["value"] = 0
+    runner.post(leg.PATH_AFTER_TOOL, {"call": {"tool": "Read", "agentId": "a1"}})
+    assert runner.next_line() == {"op": "floors", "rows": {"listener_targets:after": 0}}
+    for bad in ({"rows": []}, {"call": {"tool": "Bash"}, "rows": "x"},
+                {"call": {"tool": ""}}):
+        status, _ = post(runner.mod_sock, leg.PATH_AFTER_TOOL, bad)
+        assert status == 400
+    assert post(runner.mod_sock, leg.PATH_USAGE, {"usage": [1]})[0] == 400
+    reading = {"startedAt": 1, "context": {"tokens": 5, "window": 9}, "rateLimits": []}
+    assert runner.post(leg.PATH_USAGE, {"usage": reading}) == {"ok": True}
+    runner.post(leg.PATH_CONTEXT, {"event": "prompt", "session_id": "s-1",
+                                   "text": "hi there", "origin": "composer"})
+    time.sleep(0.2)
+    seen = [c for c in listener_targets.CALLS if c[0] in ("usage", "prompt")]
+    assert [(c[0], c[2], c[3], c[4]) for c in seen] == [
+        ("usage", None, None, reading), ("prompt", "hi there", "composer", None)]
+    assert all(c[1] == ep.harness.cwd for c in seen)

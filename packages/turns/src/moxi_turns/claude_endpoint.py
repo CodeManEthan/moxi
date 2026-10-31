@@ -62,6 +62,15 @@ process and asks `/ask/guard` only for calls judge guards cover; the endpoint ru
 judges (`moxi_turns.guards.run`). A guard on the list that did not load is named once in
 a `ready`'s start context.
 
+After-tool and usage: the hello carries each after-tool row's floor, and a `floors` line
+follows each change. The runner asks `/ask/after-tool` after a call ran, naming the rows
+the floors let through on the main loop (every row for an agent's call), and the
+endpoint asks those rows (`Endpoint.after_tool`), with the call's `record_path`: the
+`transcript_path` of the last `ready`. It posts `/report/usage` with each
+`session.measure` that moved the context or the rate limits and at each main turn's end;
+the endpoint hands the reading to the `usage` rows. A prompt's ask carries its text and
+its origin's kind, which go on the `prompt` event.
+
 A steer reads `Started`, and its turn names it, once the runner reports `append.done`
 (`$.session.append` resolved without a deny); `append.failed` refuses it `idle`.
 
@@ -191,7 +200,9 @@ class ClaudeHarness(Harness):
             "stop_wait_ms": int(ep.stop_wait_s * 1000),
             "listen_wait_ms": int(ep.listen_wait_s * 1000),
             "endpoint_version": ep.version, "pid": os.getpid(),
-            "stop_after_clear": leg.STOP_AFTER_CLEAR, "guards": self.guards.reload()})
+            "stop_after_clear": leg.STOP_AFTER_CLEAR, "guards": self.guards.reload(),
+            "after_tool_wait_ms": int(ep.after_tool_wait_s * 1000),
+            "floors": ep.floors.values()})
 
     def handle(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         if path == leg.PATH_REPORT:
@@ -206,6 +217,14 @@ class ClaudeHarness(Harness):
             return {"context": self._context(body)}
         if path == leg.PATH_GUARD:
             return self._guard(body)
+        if path == leg.PATH_AFTER_TOOL:
+            return {"context": self._after_tool(body)}
+        if path == leg.PATH_USAGE:
+            usage = body.get("usage")
+            if not isinstance(usage, dict):
+                raise leg.BadRequest('needs "usage", an object')
+            self.endpoint.usage(usage)
+            return {}
         if path == leg.PATH_GATE_ENTRY:
             return self._gate_entry(body)
         if path == leg.PATH_GATE_COMMAND:
@@ -242,6 +261,10 @@ class ClaudeHarness(Harness):
         list the runner could not read, or that came back malformed, is not complete."""
         answer = self._ask_runner(leg.LINE_AGENTS, "agents")
         return agents_from_runner(answer.get("entries"), time.time())
+
+    def floors_changed(self, values: dict[str, int]) -> None:
+        """The core read a floor that changed: the runner gets the whole map."""
+        self._lines.write({"op": leg.LINE_FLOORS, "rows": values})
 
     def _ask_runner(self, op: str, what: str) -> dict:
         """Send the runner a line that asks for a live read and wait `LIVE_WAIT_S` for its
@@ -445,6 +468,9 @@ class ClaudeHarness(Harness):
         session_id = _opt_str(body, "session_id")
         if event == "ready":
             source = _opt_str(body, "source")
+            record_path = _opt_str(body, "transcript_path")
+            if record_path is not None:
+                self.record_path = record_path
             self._learn(session_id)
             # The new table reaches the runner before the session's first call can.
             self._lines.write({"op": leg.LINE_GUARDS, "table": self.guards.reload()})
@@ -457,7 +483,9 @@ class ClaudeHarness(Harness):
                                                      "\n".join(notes)])
             return context
         if event == "prompt":
-            return self.endpoint.prompt()
+            text = body.get("text")
+            return self.endpoint.prompt(text if isinstance(text, str) else None,
+                                        _opt_str(body, "origin"))
         raise leg.BadRequest(f"unknown context event {event!r}")
 
     def _guard(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -477,6 +505,22 @@ class ClaudeHarness(Harness):
                       call["tool"], _opt_str(call, "tool_use_id"), dict(given or {}),
                       self.cwd, self.record_path, ep.env, prompts_of(call.get("prompts")))
         return self.guards.ask(tc, ids).to_leg()
+
+    def _after_tool(self, body: dict[str, Any]) -> str | None:
+        """`/ask/after-tool`: ask the rows the runner names about one call that ran.
+        Holds this request's thread for `after_tool.wait_ms` at most."""
+        call, rows = body.get("call"), body.get("rows")
+        if not isinstance(call, dict) or not isinstance(call.get("tool"), str) \
+                or not call["tool"]:
+            raise leg.BadRequest('needs "call" with a "tool"')
+        if rows is not None and (not isinstance(rows, list)
+                                 or not all(isinstance(i, str) for i in rows)):
+            raise leg.BadRequest('"rows" must be a list of row ids')
+        is_error = call.get("is_error")
+        return self.endpoint.after_tool(
+            call["tool"], tool_use_id=_opt_str(call, "tool_use_id"),
+            agent_id=_opt_str(call, "agentId"),
+            is_error=is_error if isinstance(is_error, bool) else None, rows=rows)
 
     def _gate_entry(self, body: dict[str, Any]) -> dict[str, Any]:
         """The gate asks for a runner prompt as it enters. Under the lock

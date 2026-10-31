@@ -17,12 +17,13 @@
 //
 // Endpoint to runner: one JSON object per line on the child's stdout, by `op`:
 //   hello    {op, leg: 3, mod_sock, stop_wait_ms, listen_wait_ms, endpoint_version, pid,
-//            stop_after_clear, guards}
+//            stop_after_clear, guards, after_tool_wait_ms, floors}
 //            the first line. Before it the runner sends nothing, and it sends nothing to an
 //            endpoint whose leg it does not speak. `stop_after_clear` false: after a clear
 //            the runner stops no shell (each listed one is left, `not-stopped-after-clear`).
-//            `guards` is the guard table (below).
+//            `guards` is the guard table (below); `floors` the after-tool rows (below).
 //   guards   {op, table}   the guard table again, at each ready; it replaces the one held
+//   floors   {op, rows}    every after-tool row's floor, at each change; replaces the map
 //   failed   {op, leg, error}   the endpoint could not start: its only line
 //   submit   {op, delivery, kind, text, nonce}
 //            opens the submit's window and calls $.prompt.submit with the line
@@ -52,6 +53,8 @@
 //                             shells?}  with stop_shells a `ran` carries
 //                             shells: {stopped: [id], left: [{id, why}], complete}
 //   /ask/context {event: ready|prompt, source, session_id}  -> {context: string | null}
+//                a ready adds `transcript_path` (the hook input's); a prompt adds `text` (the
+//                hook input's `prompt`) and `origin` (below)
 //   /ask/stop    {turn_id, session_id, stop_hook_active, task_types, crons}
 //                                                          -> {reason: string | null}
 //   /live        {ask, agents, draft}                      -> {}  (agents null: unreadable)
@@ -60,6 +63,9 @@
 //                endpoint maps the states (entries null: unreadable)
 //   /ask/guard   {call: {tool, tool_use_id, input, agentId, prompts?}, guards: [id]}
 //                -> {deny?, lines, broken}   a call judge entries cover (the guards, below)
+//   /ask/after-tool {call: {tool, tool_use_id, agentId, is_error}, rows: [id]}
+//                -> {context: string | null}   after a call ran (after-tool, below)
+//   /report/usage {usage}                                   -> {}  outside the queue (below)
 //   /hook-times  {samples: [{event, ms}]}                   -> {}  at most once a minute
 //   The gate asks on the same socket: /gate/entry {nonce, draft, agents} and
 //   /gate/command {request, agents, draft} -> {verdict: pass} | {verdict: drop, reason,
@@ -183,6 +189,30 @@
 //      waiting set is emptied;
 //   4. a subagent's or teammate's turn touches none of it.
 // The list is never cleared at a turn's end; the next main `turn.start` replaces it.
+//
+// After-tool: `floors` maps each after-tool row (a listener row naming `after-tool`) to
+// its floor in tokens; an empty map means no row, and the runner never asks. Once a call's
+// `next(e)` resolved with a result or an error (not a deny, and never for the runner's own
+// calls), the runner asks /ask/after-tool naming the rows the floors let through, bounded
+// by `after_tool_wait_ms` plus 1 s: on the main loop (no `agentId`) a row is skipped while
+// the context's tokens, from the last `session.measure` or turn-end reading since the last
+// SessionStart, are below its floor; an agent's call, or a context not known, skips none.
+// With every row skipped no trip is made. The answer's `context` goes into the result's
+// `context` after the guards' lines. The trip is timed as the hook-time event `after-tool`
+// and left out of the tool.call event's own time.
+//
+// Usage: on each `session.measure` whose `changed` names `context` or `rateLimits`, and
+// at each main-loop `turn.complete` from `$.session.usage()`, the runner posts the
+// reading, as Claude gave it less any `breakdown`, on /report/usage, outside the report
+// queue, and does not wait for the answer. A measure carries no `startedAt`; the
+// turn-end reading does. The context's `tokens` in either is what the floors are read
+// against.
+//
+// The prompt's origin: the /ask/context prompt ask (classic.UserPromptSubmit, which runs
+// inside a prompt's `next(e)`) carries the origin of the prompt the `prompt.submit` hook
+// has in flight: the one whose text equals the hook input's, else the only one in flight.
+// While one of the runner's own submits is in flight only a text match counts; none:
+// null.
 
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -217,12 +247,14 @@ const NOT_STOPPED_AFTER_CLEAR = 'not-stopped-after-clear'
 /** What TaskStop says of a task that has already ended. */
 const ENDED = /not running|no longer running|already (?:stopped|completed|finished|exited|ended|killed)|has (?:already )?(?:completed|finished|exited|ended)/i
 const HOOK_TIMES_MS = 60_000
+/** `after_tool.wait_ms`'s default, when the hello names none. */
+const AFTER_TOOL_WAIT_MS = 300
 const HOOK_TIMES_MAX = 1000
 
 const ENDPOINT = { plugin: 'moxi-turns', key: 'endpoint' } as const
 const COMMAND = { plugin: 'moxi-turns', key: 'command' } as const
 
-type Hello = { sock: string; stopWaitMs: number; listenWaitMs: number; stopAfterClear: boolean }
+type Hello = { sock: string; stopWaitMs: number; listenWaitMs: number; stopAfterClear: boolean; afterToolWaitMs: number }
 type Json = Record<string, unknown>
 type Report = { kind: string; fields: Json; seq: number; landed: Promise<void>; land: () => void }
 /** One entry of the guard table, ready to match. */
@@ -290,6 +322,10 @@ let waiting: Seen[] = []
 let turnPrompts: Seen[] = []
 /** The runner's own `$.prompt.submit` calls not yet settled. */
 let ownSubmits = 0
+/** Each after-tool row's floor in tokens, by row id; empty: no row. */
+let floors: Record<string, number> = {}
+/** The main loop's context in tokens, from the last reading since the last SessionStart. */
+let contextTokens: number | null = null
 
 const log = ($: Dollar, text: string): void => {
   try {
@@ -744,8 +780,9 @@ async function onLine($: Dollar, line: string): Promise<void> {
     let land: () => void = () => {}
     const landed = new Promise<void>(resolve => { land = resolve })
     queue.unshift({ kind: 'session', fields: { session_id: sessionId, mod_version: MOD_VERSION }, seq: 0, landed, land })
-    hello = { sock, stopWaitMs: num(m.stop_wait_ms, 2000), listenWaitMs: num(m.listen_wait_ms, 2000), stopAfterClear: m.stop_after_clear !== false }
+    hello = { sock, stopWaitMs: num(m.stop_wait_ms, 2000), listenWaitMs: num(m.listen_wait_ms, 2000), stopAfterClear: m.stop_after_clear !== false, afterToolWaitMs: num(m.after_tool_wait_ms, AFTER_TOOL_WAIT_MS) }
     if (m.guards !== undefined) takeTable($, m.guards)
+    if (m.floors !== undefined) takeFloors($, m.floors)
     helloSeen()
     void pump($)
     void writeSock($).catch(err => log($, `the mod.sock path was not written: ${String(err)}`))
@@ -754,6 +791,10 @@ async function onLine($: Dollar, line: string): Promise<void> {
   if (hello === undefined) return
   if (op === 'guards') {
     takeTable($, m.table)
+    return
+  }
+  if (op === 'floors') {
+    takeFloors($, m.rows)
     return
   }
   const delivery = str(m.delivery)
@@ -1049,6 +1090,78 @@ function withLines<R extends { deny?: unknown; context?: readonly string[] }>(r:
   return { ...r, context: [...(r.context ?? []), ...lines] }
 }
 
+// -- after-tool and usage ------------------------------------------------------------------
+
+/** The floors a `floors` field or line holds: each row id with a whole number of tokens. */
+export function parseFloors(v: unknown): Record<string, number> | null {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return null
+  const out: Record<string, number> = {}
+  for (const [id, n] of Object.entries(v as Json)) if (typeof n === 'number' && Number.isFinite(n)) out[id] = Math.max(0, n)
+  return out
+}
+
+function takeFloors($: Dollar, v: unknown): void {
+  const parsed = parseFloors(v)
+  if (parsed === null) {
+    log($, 'the endpoint sent floors that are not a map; the last ones stay')
+    return
+  }
+  floors = parsed
+}
+
+/** The after-tool rows a call reaches: every row for an agent's call or an unknown
+ *  context; on the main loop, the rows whose floor the context has reached. */
+export function afterRows(table: Readonly<Record<string, number>>, agentId: unknown, tokens: number | null): string[] {
+  const ids = Object.keys(table)
+  if (!isMain(agentId) || tokens === null) return ids
+  return ids.filter(id => tokens >= (table[id] ?? 0))
+}
+
+/** The after-tool rows' text for a call that ran, or none. Never throws. */
+async function afterTool($: Dollar, w: Watch, e: Json, r: unknown): Promise<string[]> {
+  try {
+    if (hello === undefined || ended || r === null || typeof r !== 'object' || (r as Json).deny !== undefined) return []
+    const rows = afterRows(floors, e.agentId, contextTokens)
+    if (rows.length === 0) return []
+    const call = { tool: e.tool, tool_use_id: e.tool_use_id, agentId: isMain(e.agentId) ? null : e.agentId, is_error: (r as Json).isError === true }
+    const t0 = performance.now()
+    const answer = await ask($, '/ask/after-tool', { call, rows }, hello.afterToolWaitMs + MARGIN_MS)
+    const ms = performance.now() - t0
+    w.away += ms
+    sample($, 'after-tool', ms)
+    const text = answer?.context
+    return typeof text === 'string' && text !== '' ? [text] : []
+  } catch (err) {
+    log($, `after-tool: ${String(err)}`)
+    return []
+  }
+}
+
+/** A usage reading as Claude gave it, less the context's `breakdown`. */
+export function usageOf(reading: Json): Json {
+  const out: Json = { ...reading }
+  delete out.changed
+  const context = out.context
+  if (context !== null && typeof context === 'object' && !Array.isArray(context)) {
+    const c = { ...(context as Json) }
+    delete c.breakdown
+    out.context = c
+  }
+  return out
+}
+
+/** Keeps the context's tokens from a reading; absent tokens leave what was known. */
+function noteContext(reading: Json): void {
+  const tokens = (reading.context as Json | undefined)?.tokens
+  if (typeof tokens === 'number' && Number.isFinite(tokens)) contextTokens = tokens
+}
+
+/** Posts a reading on /report/usage, not waited for. */
+function postUsage($: Dollar, reading: Json): void {
+  if (hello === undefined || ended) return
+  void ask($, '/report/usage', { usage: usageOf(reading) }, REPORT_WAIT_MS)
+}
+
 // -- the prompt list -----------------------------------------------------------------------
 
 /** A prompt leaves the waiting set (once its turn has started, or it entered none). */
@@ -1062,6 +1175,16 @@ function forget(p: Seen): void {
   unwait(p)
   const i = turnPrompts.indexOf(p)
   if (i >= 0) turnPrompts.splice(i, 1)
+}
+
+/** The origin of the prompt whose classic.UserPromptSubmit runs now, inside its
+ *  `prompt.submit` hook's `next(e)`: the prompt in flight with the same text, else the
+ *  only one in flight; while one of the runner's own submits is in flight, a text match
+ *  only. Null when none ties. */
+export function originOf(text: unknown): string | null {
+  const live = waiting.filter(p => p.inFlight)
+  const chosen = live.filter(p => p.text === text).at(-1) ?? (ownSubmits === 0 && live.length === 1 ? live[0] : undefined)
+  return chosen?.origin ?? null
 }
 
 /** A main turn starts: its list is the one waiting prompt the runner can tie to it. */
@@ -1097,7 +1220,9 @@ export const register: Register = on => {
       // A /clear empties $.state (and a resume or compaction may): the mod.sock path is
       // written again at every SessionStart, for the gate.
       await writeSock($).catch(err => log($, `the mod.sock path was not written: ${String(err)}`))
-      const answer = await ask($, '/ask/context', { event: 'ready', source: e.source ?? null, session_id: e.session_id }, hello.listenWaitMs + MARGIN_MS)
+      // A new session's context is not known until its first reading.
+      contextTokens = null
+      const answer = await ask($, '/ask/context', { event: 'ready', source: e.source ?? null, session_id: e.session_id, transcript_path: e.transcript_path || null }, hello.listenWaitMs + MARGIN_MS)
       return withContext(behind(hook, performance.now(), await next(e)), answer?.context)
     } finally {
       timeHook($, 'classic.SessionStart', hook)
@@ -1111,7 +1236,7 @@ export const register: Register = on => {
       const w = win
       // turns' own entry hook: the bound is raised by this ask's bound while it runs.
       if (w !== null && turnOpen === null) arm($, w, IDLE_FAIL_MS + hello.listenWaitMs + MARGIN_MS)
-      const answer = await ask($, '/ask/context', { event: 'prompt', source: null, session_id: e.session_id }, hello.listenWaitMs + MARGIN_MS)
+      const answer = await ask($, '/ask/context', { event: 'prompt', source: null, session_id: e.session_id, text: e.prompt ?? null, origin: originOf(e.prompt) }, hello.listenWaitMs + MARGIN_MS)
       if (w !== null && win === w && turnOpen === null) arm($, w, IDLE_FAIL_MS)
       return withContext(behind(hook, performance.now(), await next(e)), answer?.context)
     } finally {
@@ -1143,6 +1268,14 @@ export const register: Register = on => {
       turnOpen = null
       await reportAndWait($, 'turn.complete', { turn_id: e.turnId, reason: e.reason, is_aborted: e.isAborted })
       if (win !== null) arm($, win, IDLE_FAIL_MS)
+      // A reading at every turn's end, whatever the measures said (the plain call is free).
+      try {
+        const reading = (await $.session.usage()) as unknown as Json
+        noteContext(reading)
+        postUsage($, reading)
+      } catch (err) {
+        log($, `the turn's usage was not read: ${String(err)}`)
+      }
       return behind(hook, performance.now(), await next(e))
     } finally {
       timeHook($, 'turn.complete', hook)
@@ -1222,11 +1355,15 @@ export const register: Register = on => {
     }
     try {
       const d = own || headless === true || guards.length === 0 ? null : decide(guards, e.tool, e.agentId, inputOf(e as Json))
-      if (d === null || (d.covering.length === 0 && d.broken.length === 0)) return behind(hook, performance.now(), await next(e))
-      const verdict = await judge($, hook, e as Json, d)
-      if ('deny' in verdict) return { deny: verdict.deny }
-      const since = performance.now()
-      return withLines(behind(hook, since, await next(e)), verdict.lines)
+      let lines: string[] = []
+      if (d !== null && (d.covering.length > 0 || d.broken.length > 0)) {
+        const verdict = await judge($, hook, e as Json, d)
+        if ('deny' in verdict) return { deny: verdict.deny }
+        lines = verdict.lines
+      }
+      const r = behind(hook, performance.now(), await next(e))
+      if (own || headless === true) return r
+      return withLines(r, [...lines, ...(await afterTool($, hook, e as Json, r))])
     } finally {
       if (!own) {
         inflight.delete(id)
@@ -1241,6 +1378,22 @@ export const register: Register = on => {
     if (!own && catchRefuses(guards, e as Json)) return { deny: CANNOT_CHECK }
     if (!own) tasksMarked = true
     return next(e)
+  })
+
+  // The engine's measure of the session: the context's tokens for the floors, and the
+  // reading for the endpoint when the context or a rate limit moved.
+  on('session.measure', async ($, e, next) => {
+    const hook = watch()
+    try {
+      if (headless !== true) {
+        const reading = e as unknown as Json
+        noteContext(reading)
+        if (e.changed.includes('context') || e.changed.includes('rateLimits')) postUsage($, reading)
+      }
+      return behind(hook, performance.now(), await next(e))
+    } finally {
+      timeHook($, 'session.measure', hook)
+    }
   })
 
   // A command the person runs with `!` raises no tool call, even moved to the background:

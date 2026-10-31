@@ -72,6 +72,13 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     order: [] as string[],
     wake: () => {},
     childDone: false,
+    /** What `$.session.usage()` answers; a throw when null. */
+    usage: { startedAt: 500, context: { tokens: 1200, window: 200_000, percent: 1 }, rateLimits: [] } as Record<string, unknown> | null,
+    /** When set, a prompt's `next(e)` calls it beneath, as the engine runs the prompt's
+     *  classic.UserPromptSubmit there: a test passes its own `$.classic` call. */
+    classicInSubmit: undefined as undefined | ((text: string) => Promise<unknown>),
+    /** A hook beneath rewrites the prompt before its UserPromptSubmit, when set. */
+    rewrite: undefined as undefined | ((text: string) => string),
   }
   const endpointJson = options.endpointJson === undefined ? JSON.stringify({ argv: ROOT_ARGV }) : options.endpointJson
 
@@ -104,7 +111,13 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     w.stateWrites.push({ key: (e as { key: string }).key, value: (e as { value: unknown }).value })
     return next(e)
   })
+  on('session.usage', async () => {
+    if (w.usage === null) throw new Error('no usage')
+    return { value: w.usage as never }
+  })
+  on('session.measure', async ($, e) => ({ changed: e.changed }))
   on('prompt.submit', async ($, e) => {
+    if (w.classicInSubmit) await w.classicInSubmit(w.rewrite ? w.rewrite(e.text) : e.text)
     w.submits.push(e.text)
     if (w.settle) return (await w.settle(e.text)) as never
     return { text: e.text, origin: e.origin }
@@ -138,6 +151,9 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     while (performance.now() - t0 < (options.spinMs ?? 0)) { /* spin */ }
     const key = String((e as Record<string, unknown>).command ?? e.tool)
     if (key in w.holds || key.startsWith('hold:')) await new Promise<void>(resolve => { w.holds[key] = resolve })
+    // A call refused beneath the runner, or one whose tool reported an error.
+    if (key.startsWith('deny:')) return { deny: 'refused beneath' } as never
+    if (key.startsWith('error:')) return { isError: true, result: 'boom', text: 'boom' } as never
     return { result: {}, text: 'ok' } as never
   })
   on('http.fetch', async ($, e) => {

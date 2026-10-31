@@ -174,12 +174,12 @@ describe('the context asks', () => {
     const w = world(on)
     await start($)
     w.answers['/ask/context'] = { context: 'ROSTER' }
-    const r = $.classic.SessionStart({ source: 'startup' })
+    const r = $.classic.SessionStart({ source: 'startup', transcript_path: '/home/u/.claude/projects/p/S-1.jsonl' })
     await w.clock.advance(100)
     await w.hello()
     const out = await r
     expect(out.additionalContext).toEqual(['ROSTER'])
-    expect(w.got.find(g => g.path === '/ask/context')?.body).toEqual({ event: 'ready', source: 'startup', session_id: expect.any(String) })
+    expect(w.got.find(g => g.path === '/ask/context')?.body).toEqual({ event: 'ready', source: 'startup', session_id: expect.any(String), transcript_path: '/home/u/.claude/projects/p/S-1.jsonl' })
   })
 
   test('SessionStart gives up on the first line after 2 s', async ($: E, on) => {
