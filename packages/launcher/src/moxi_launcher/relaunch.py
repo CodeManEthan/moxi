@@ -321,19 +321,41 @@ def _qualified(comms: Any, row: store.LaunchRow) -> str | None:
         return f"{row.identity}@{row.scope}" if row.scope else row.identity
 
 
-def _bare(comms: Any, name: str) -> str:
+def _split(comms: Any, name: str) -> tuple[str, str | None]:
     try:
-        return comms.split_tag(name)[0]
-    except Exception:  # noqa: BLE001
-        return name.partition("@")[0]
+        return comms.split_tag(name)
+    except Exception:  # noqa: BLE001  (comms' own form unknown: the plain one)
+        bare, sep, scope = name.partition("@")
+        return bare, scope if sep else None
+
+
+def _bare(comms: Any, name: str) -> str:
+    return _split(comms, name)[0]
+
+
+def is_director(comms: Any, caller: str, named: list[str]) -> bool:
+    """Whether the qualified identity `caller` is one of the directors `named`: a director
+    named with a scope admits that qualified name only (the global scope spelled bare, as
+    comms spells it); a plain name admits the name in any scope."""
+    bare = _bare(comms, caller)
+    for director in named:
+        name, scope = _split(comms, director)
+        if scope is None:
+            if name == bare:
+                return True
+            continue
+        try:
+            qualified = comms.qualify(name, scope)
+        except Exception:  # noqa: BLE001
+            qualified = name if scope == getattr(comms, "GLOBAL", "global") else director
+        if qualified == caller:
+            return True
+    return False
 
 
 def _check_director(comms: Any, caller: str, row: store.LaunchRow) -> None:
-    """Refuse `not-director` unless the caller's name, without its scope, is one of the
-    directors the launch named."""
-    name = _bare(comms, caller)
-    named = notices.directors(row)
-    if name in named or name in {_bare(comms, d) for d in named}:
+    """Refuse `not-director` unless the caller is one of the directors the launch named."""
+    if is_director(comms, caller, notices.directors(row)):
         return
     raise Refused("not-director", f"{caller} is not a director of launch {row.request_id}",
                   "only a director the launch named may relaunch it; mail its session")
@@ -620,4 +642,5 @@ def _span(seconds: float) -> str:
 
 __all__ = ["ARMED", "HANDOFF_CAP", "JOB_SCRIPT", "LOOK", "REACHABLE", "Refused", "Result",
            "arm_self", "call_director", "check_handoff", "follow_run", "from_record",
-           "job_argv", "offered", "outcome_result", "run_line", "start_job", "status"]
+           "is_director", "job_argv", "offered", "outcome_result", "run_line", "start_job",
+           "status"]

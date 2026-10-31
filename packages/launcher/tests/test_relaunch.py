@@ -646,8 +646,16 @@ def test_the_caller_as_its_own_target_is_refused(tmp_path, scope, caller, code):
 @pytest.mark.parametrize("directors, caller, allowed", [
     (("boss",), "boss", True),
     (("boss",), "boss@work", True),
-    (("boss@work",), "boss", True),
+    (("boss",), "boss@home", True),
+    # A director named with a scope admits that qualified name only.
+    (("boss@work",), "boss@work", True),
+    (("boss@work",), "boss", False),
+    (("boss@work",), "boss@home", False),
+    (("boss@global",), "boss", True),
+    (("boss@global",), "boss@work", False),
+    (("boss@work", "boss"), "boss@home", True),
     (("boss",), "intruder", False),
+    (("boss",), "intruder@boss", False),
     ((), "boss", False),
 ])
 def test_only_a_director_the_launch_named_may_call(tmp_path, directors, caller, allowed):
@@ -660,7 +668,8 @@ def test_only_a_director_the_launch_named_may_call(tmp_path, directors, caller, 
                         follow=False).exit_code == 0
         else:
             with pytest.raises(relaunch.Refused) as caught:
-                call(connection, comms=FakeComms(caller=caller), slots_api=slots_api)
+                call(connection, comms=FakeComms(caller=caller), slots_api=slots_api,
+                     follow=False)
             assert caught.value.code == "not-director"
             nothing_written(connection, slots_api)
     finally:
