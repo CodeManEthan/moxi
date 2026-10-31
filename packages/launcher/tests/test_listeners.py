@@ -18,6 +18,7 @@ from moxi.paths import Layout
 
 from moxi_launcher import (handoffs, listen_codex, listen_handoff, listen_ready, listeners,
                            store)
+from moxi_launcher.compose import common
 
 CLAUDE_ID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
 CLEARED_ID = "9a8b7c6d-1111-4222-8333-444455556666"
@@ -462,7 +463,7 @@ def test_the_instructions_file_is_read_at_every_start(conn, endpoint, tmp_path, 
 def test_an_unreadable_instructions_file_still_gives_the_block(conn, endpoint, tmp_path):
     launch_codex(conn, values={"instructions_file": str(tmp_path / "missing.md")})
     text = listen_codex.answer(start("codex", THREAD_ID, "c1"))
-    assert text.startswith(listen_codex.HEADER) and text.endswith("start posture: go")
+    assert text.startswith(common.HEADER) and text.endswith("start posture: go")
 
 
 def test_a_codex_launch_without_a_key_names_no_handoff_dir(conn, endpoint):

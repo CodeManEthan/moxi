@@ -10,6 +10,12 @@ Claude and for an endpoint that did not claim.
 The instructions are the launch's `instructions` value, or the text of its
 `instructions_file`, read at each start. turns cuts start context at the launcher's share
 and marks the cut.
+
+turns imports this module in the endpoint process at its first `start` ask, inside that
+ask's share of the listeners' time, and asks it at every start of every session, Claude's
+included. So it imports only the claim's module at the top; the composer's text helpers,
+which load the composer and the presets with them, and the handoff folders are imported
+once a Codex launch is held.
 """
 
 from __future__ import annotations
@@ -17,10 +23,10 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from . import handoffs, listeners
-from .compose.common import HEADER, identity_block, seat_text
+from . import listeners
 
 log = logging.getLogger("moxi.launcher.listeners")
+
 
 def instructions(values) -> str | None:
     """The seat's instructions: inline, or read from its file now."""
@@ -51,6 +57,9 @@ def answer(event) -> str | None:
         conn.close()
     if row is None:
         return None
+    from . import handoffs
+    from .compose.common import identity_block, seat_text
+
     values = row.values
     key = handoffs.key_of_row(row)
     block = identity_block(
@@ -60,4 +69,4 @@ def answer(event) -> str | None:
     return seat_text(block, instructions(values))
 
 
-__all__ = ["HEADER", "answer", "identity_block", "instructions"]
+__all__ = ["answer", "instructions"]

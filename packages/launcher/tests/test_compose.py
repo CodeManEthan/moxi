@@ -504,11 +504,17 @@ def test_the_claude_prompt_file_holds_the_block_then_the_instructions():
     assert not any("You plan." in word or common.HEADER in word for word in got.argv)
 
 
-def test_the_codex_listener_renders_the_same_block():
-    from moxi_launcher import listen_codex
+def test_the_codex_listener_loads_no_composer_until_it_holds_a_launch():
+    # turns imports the listener at the first start of every session, Claude's too, so
+    # its import leaves the composer and the presets for the launch it holds.
+    import subprocess
+    import sys
 
-    assert listen_codex.identity_block is common.identity_block
-    assert listen_codex.HEADER == common.HEADER
+    code = ("import sys, moxi_launcher.listen_codex; "
+            "print(sorted(m for m in sys.modules if m.startswith('moxi_launcher.')))")
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                          check=True)
+    assert done.stdout.strip() == "['moxi_launcher.listen_codex', 'moxi_launcher.listeners']"
 
 
 def test_write_prompt_is_private(tmp_path):

@@ -500,7 +500,7 @@ def _check_deep(preset: Preset, values: Mapping[str, object],
 
 
 def _codex_start_size(values, defaults, root, text, avail, env) -> int:
-    from .listen_codex import identity_block
+    from .compose.common import identity_block
 
     posture = values.get("posture") or defaults.get("posture") or ""
     identity = values.get("identity") if avail("comms") else None
