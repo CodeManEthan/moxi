@@ -648,7 +648,7 @@ def test_a_steer_refused_idle_falls_back_to_one_deliver_with_the_same_ref(
 
 def test_an_unknown_steer_that_resolves_to_started_gets_no_fallback(
         rig, adapter, endpoints, frames, monkeypatch):
-    monkeypatch.setattr(moxi_turns.client, "READ_S", 0.3)
+    monkeypatch.setattr("moxi_turns.client.READ_S", 0.3)
     ep = endpoints()
     a = adapter()
     assert found(a, ep)
@@ -668,7 +668,7 @@ def test_an_unknown_steer_that_resolves_to_started_gets_no_fallback(
 
 def test_an_unknown_steer_that_resolves_to_refused_idle_falls_back_once(
         rig, adapter, endpoints, frames, monkeypatch):
-    monkeypatch.setattr(moxi_turns.client, "READ_S", 0.3)
+    monkeypatch.setattr("moxi_turns.client.READ_S", 0.3)
     ep = endpoints()
     a = adapter()
     assert found(a, ep)
@@ -706,7 +706,7 @@ def test_an_unknown_whose_connection_closed_resolves_on_a_new_one(
 
 def test_an_unknown_whose_endpoint_no_longer_serves_is_unhandled_only_then(
         rig, adapter, endpoints, frames, monkeypatch):
-    monkeypatch.setattr(moxi_turns.client, "READ_S", 0.3)
+    monkeypatch.setattr("moxi_turns.client.READ_S", 0.3)
     ep = endpoints()
     a = adapter()
     assert found(a, ep)
@@ -758,7 +758,7 @@ def test_a_steer_the_harness_takes_past_the_read_bound_is_acked_once(
     """The harness confirms the steer a second past the library's read bound. Nothing
     is requeued, the digest is acked once at that turn's end, and no later turn carries
     it."""
-    monkeypatch.setattr(moxi_turns.client, "READ_S", 0.3)
+    monkeypatch.setattr("moxi_turns.client.READ_S", 0.3)
     ep = endpoints()
     a = adapter()
     assert found(a, ep)
