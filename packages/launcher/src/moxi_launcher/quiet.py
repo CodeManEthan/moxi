@@ -1,8 +1,9 @@
 """The quiet read: whether a launched session may be acted on now, and if not, why.
 
-Every act on a launched session (a relaunch, an exit, a clear or compact, a keep-warm
-nudge) takes this one read before it acts, from turns and slots only. Each thing that
-holds the act is a word, and the words come in this order:
+Every act on a launched session (a relaunch, an exit, a clear or compact) takes this one
+read before it acts, from turns and slots only. A keep-warm nudge reads its own signals
+instead (`keepwarm`): it goes exactly while subagents work or holds are open. Each thing
+that holds the act is a word, and the words come in this order:
 
 | word | read | holds when |
 |---|---|---|

@@ -962,6 +962,14 @@ def runs(conn: sqlite3.Connection, *, request_id: str | None = None,
     return [Run(*values) for values in conn.execute(sql, params)]
 
 
+def made_by(conn: sqlite3.Connection, request_id: str) -> Run | None:
+    """The run that made the launch `request_id` (a relaunch, or a repair of one), or
+    None."""
+    return _run(conn.execute(f"{_SELECT_RUN} WHERE new_request_id = ? "
+                             "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                             (request_id,)).fetchone())
+
+
 def run_stale(run: Run, gone: Callable[[str], bool], now: datetime | None = None) -> bool:
     """Whether an open run is stale: past `RUN_GRACE_S` from its insert, with no job
     recorded or with `gone(job)` true. `gone` is given the run's `job` text (`slots:<name>`
@@ -1488,8 +1496,8 @@ __all__ = ["CAP", "COLUMNS", "DETAIL_CAP", "EXIT_COLUMNS", "FACTS", "FRESH_CONTE
            "add_exit", "add_pick", "add_run_event", "advance_run", "chain", "claim", "connect",
            "crossing_key", "crossing_known", "cut", "drop_run", "end_blocked", "end_run",
            "endpoint_gone", "events", "exits_log", "get", "get_run", "holds", "insert",
-           "insert_run", "learn_session", "log", "log_lines", "new_run_id", "now", "open_hold",
-           "open_holds", "open_run", "parse_endpoint", "parse_time", "path", "pend_compact",
-           "pending_compact", "picked", "prune", "release_hold", "resolve", "run_events",
-           "run_stale", "runs", "seen_at", "session_ids", "set_facts", "set_run_job", "set_state",
-           "stale_after_s", "stamp"]
+           "insert_run", "learn_session", "log", "log_lines", "made_by", "new_run_id", "now",
+           "open_hold", "open_holds", "open_run", "parse_endpoint", "parse_time", "path",
+           "pend_compact", "pending_compact", "picked", "prune", "release_hold", "resolve",
+           "run_events", "run_stale", "runs", "seen_at", "session_ids", "set_facts", "set_run_job",
+           "set_state", "stale_after_s", "stamp"]
