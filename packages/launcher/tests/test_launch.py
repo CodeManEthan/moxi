@@ -260,7 +260,9 @@ def test_an_exec_that_fails_ends_the_row_failed(work, harness, monkeypatch):
 def test_on_windows_the_terminal_waits_for_its_child(work, harness, monkeypatch,
                                                      deliverers, turns):
     class Child:
-        pid = os.getpid()
+        # Not the launcher's own pid, so a deliverer given that pid in place of the
+        # child's is told apart.
+        pid = os.getpid() + 7919
 
         def __init__(self, argv, env, cwd):
             Child.seen = {"argv": argv, "env": env, "cwd": cwd, "row": row()}

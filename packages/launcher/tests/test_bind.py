@@ -117,9 +117,14 @@ def test_a_name_held_before_its_holder_reports_an_id_is_bound(conn, monkeypatch)
 def test_a_name_held_by_another_session_is_not_this_launch_bind(conn, monkeypatch):
     launch_row(conn)
     ticks = iter(range(100))
-    got = settle(conn, comms(state("held", holder=Holder("someone-else"))), monkeypatch,
-                 wait_s=3, clock=lambda: next(ticks))
-    # The wait runs out with the process alive: the wrapper starts the harness anyway.
+    slept = []
+    fake_comms = comms(state("held", holder=Holder("someone-else")))
+    got = settle(conn, fake_comms, monkeypatch, wait_s=3, clock=lambda: next(ticks),
+                 sleep=slept.append)
+    # Another session's hold is no bind, so the wait runs to its bound, asking at each
+    # tick: the deadline is tick 3 and the clock is read at ticks 1, 2 and 3.
+    assert len(fake_comms.asked) == 3 and slept == [targets.BIND_POLL_S] * 2
+    # It runs out with the process alive: the wrapper starts the harness anyway.
     assert got is None and row(conn).state == "started"
 
 
