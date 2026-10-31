@@ -611,6 +611,28 @@ def test_the_client_alone_gives_a_stream_that_a_drain_ends():
     run(body)
 
 
+def test_a_stream_cancelled_while_its_connection_is_proved_is_not_counted():
+    async def body():
+        async with Upstream(_stream_upstream(asyncio.Event())) as up:
+            starters = FakeStarters(up)
+            server = await starters.ensure("pxfake")
+            connect = server.connect
+
+            async def slow(**kwargs):
+                await asyncio.sleep(0.5)
+                return await connect(**kwargs)
+
+            server.connect = slow
+            request = asyncio.ensure_future(Client(starters).request(
+                "pxfake", "GET", "/api/events?topics=tick", stream=True))
+            await until(lambda: server.streams == 1, what="the stream's count")
+            request.cancel()
+            await asyncio.gather(request, return_exceptions=True)
+            assert server.streams == 0 and server._quiet.is_set()
+
+    run(body)
+
+
 # --- through the shell to real page servers ---------------------------------------------
 
 
