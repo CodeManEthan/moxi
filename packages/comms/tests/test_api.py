@@ -59,7 +59,7 @@ def test_interface_2_holds_its_names():
         "record_dir", "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
         "DaemonError", "DaemonOffline", "delete", "DeleteResult",
         "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "send_as",
-        "session_of", "caller_identity"}
+        "session_of", "caller_identity", "roster_rows", "RosterRow"}
     for name in api.__all__:
         assert hasattr(api, name), name
     assert api.ClaimServer is ClaimServer
@@ -112,6 +112,7 @@ def test_the_reads_and_names_are_pinned():
     for name, params in {"attributed": ["message_id", "deadline"],
                          "session": ["identity", "deadline"],
                          "roster": ["deadline"], "owner": ["session_id", "deadline"],
+                         "roster_rows": ["deadline"],
                          "identity_state": ["name", "scope", "deadline"],
                          "record_dir": [], "daemon_socket": []}.items():
         assert list(inspect.signature(getattr(api, name)).parameters) == params, name
@@ -127,6 +128,11 @@ def test_the_reads_and_names_are_pinned():
     assert list(api.Roster.__dataclass_fields__) == ["bound", "standing"]
     assert list(api.Owner.__dataclass_fields__) == ["session_id", "identity", "adapter",
                                                     "directors", "awaiting"]
+    assert list(api.RosterRow.__dataclass_fields__) == [
+        "qualified", "name", "scope", "live", "kind", "module", "tier", "adapter",
+        "directors", "session_id", "bound_at", "awaiting"]
+    assert inspect.signature(api.roster_rows).parameters["deadline"].default == \
+        api.READ_DEADLINE
 
 
 def test_api_tokens_holds_the_store_calls():

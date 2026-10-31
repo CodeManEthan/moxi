@@ -24,7 +24,9 @@ outside comms.
 
 * `ClaimServer`, for a binding held by a module's own process.
 * Reads: `attributed(message_id)`, `session(identity)`, `session_of(identity)`,
-  `roster()`, `owner(session_id)`, `identity_state(name, scope=None)`,
+  `roster()`, `owner(session_id)`, `roster_rows()` (one `RosterRow` per address: the
+  roster joined with each live name's session and whom it awaits),
+  `identity_state(name, scope=None)`,
   `caller_identity(env=None)`, `record_dir()`, `daemon_socket()`.
 * Names: `GLOBAL`, `qualify`, `split_tag`, `NAME_RE`.
 * `DaemonError`, `DaemonOffline`: what a read raises when the daemon refuses or is down.
@@ -286,9 +288,14 @@ class Owner:
 
 
 def _declared_directors() -> dict:
-    """qualified -> the directors its live claim declares."""
+    """qualified -> the directors its live claim declares. Claim files that can't be
+    read declare none: the daemon's answer stands without them."""
     out = {}
-    for _key, record in _claimfile.live_records():
+    try:
+        records = _claimfile.live_records()
+    except OSError:
+        return out
+    for _key, record in records:
         qualified = _claimfile.held_identity(record)
         if qualified:
             claim = record.get("claim") or {}
@@ -362,6 +369,82 @@ def owner(session_id: str, *, deadline: float = READ_DEADLINE) -> Owner:
                  adapter=answer.get("adapter"),
                  directors=_declared_directors().get(identity, ()) if identity else (),
                  awaiting=tuple(answer.get("awaiting") or ()))
+
+
+@dataclass(frozen=True)
+class RosterRow:
+    """One address on the roster: a name a live session holds (`live`), or a standing
+    name nobody holds now.
+
+    `kind` and `module` are the name's standing row's (`agent`, or `send-only` with the
+    module it is reserved for), None with no standing row. `tier`, `adapter` and
+    `directors` are the binding's, so a standing row has none. `session_id`, `bound_at`
+    (the daemon's clock, epoch seconds) and `awaiting` (whom that session waits on) are a
+    live row's, empty when the daemon couldn't say."""
+
+    qualified: str
+    name: str
+    scope: str | None
+    live: bool
+    kind: str | None
+    module: str | None
+    tier: str | None
+    adapter: str | None
+    directors: tuple = ()
+    session_id: str | None = None
+    bound_at: float | None = None
+    awaiting: tuple = ()
+
+
+def roster_rows(*, deadline: float = READ_DEADLINE) -> tuple[RosterRow, ...]:
+    """Who can be messaged, one row per address: `roster()` joined with each bound
+    name's `session()` and its session's `owner()`. `moxi comms agents --json` prints
+    these rows, and comms' page shows them.
+
+    A bound name is a live row, carrying its standing row's `kind` and `module` when it
+    has one; a standing name nobody holds is a standing row. Live rows come first, then
+    each group by `qualified`. `deadline` goes to every daemon call.
+
+    Raises `DaemonOffline` the first time any call does, making no further call, and
+    `DaemonError` when `roster()` does. A `DaemonError` on one name's `session()` or
+    `owner()` leaves that row's `session_id`, `bound_at` and `awaiting` empty."""
+    got = roster(deadline=deadline)
+    standing: dict = {}
+    for row in got.standing:
+        standing.setdefault(row.qualified, row)
+    rows = []
+    for agent in got.bound:
+        kept = standing.pop(agent.qualified, None)
+        try:
+            session_id, bound_at, awaiting = _live_fields(agent.qualified, deadline)
+        except DaemonError:
+            session_id, bound_at, awaiting = None, None, ()
+        rows.append(RosterRow(
+            qualified=agent.qualified, name=agent.name, scope=agent.scope, live=True,
+            kind=kept.kind if kept else None,
+            module=getattr(kept, "module", None) if kept else None,
+            tier=agent.tier, adapter=agent.adapter, directors=tuple(agent.directors),
+            session_id=session_id, bound_at=bound_at, awaiting=awaiting))
+    for row in standing.values():
+        rows.append(RosterRow(
+            qualified=row.qualified, name=row.name, scope=row.scope, live=False,
+            kind=row.kind, module=getattr(row, "module", None), tier=None, adapter=None))
+    return tuple(sorted(rows, key=lambda r: (not r.live, r.qualified)))
+
+
+def _live_fields(qualified: str, deadline: float) -> tuple:
+    """(session_id, bound_at, awaiting) of one bound name, from `session()` and, when it
+    names a session, `owner()`."""
+    held = session(qualified, deadline=deadline)
+    if not held.get("bound"):
+        return None, None, ()
+    at = held.get("bound_at")
+    bound_at = float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) \
+        else None
+    sid = held.get("session_id")
+    if not (isinstance(sid, str) and sid):
+        return None, bound_at, ()
+    return sid, bound_at, tuple(owner(sid, deadline=deadline).awaiting)
 
 
 #: What `identity_state` says of a name.
@@ -469,7 +552,7 @@ __all__ = [
     "Recipient", "Refusal",
     "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
     "session", "session_of", "caller_identity", "roster", "owner", "Roster", "Agent",
-    "Standing", "Owner",
+    "Standing", "Owner", "roster_rows", "RosterRow",
     "identity_state", "IdentityState", "Holder", "IDENTITY_STATES", "record_dir",
     "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
     "DaemonError", "DaemonOffline",
