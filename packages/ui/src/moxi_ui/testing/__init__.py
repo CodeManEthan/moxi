@@ -31,9 +31,11 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
 `ui_contexts`
     `ui_contexts(shell=None, *, sign_in=True, **context_args)` opens a fresh browser
     context on `shell` (`ui_shell` by default), its waits 5 s, signed in with its first
-    page on the shell's document at `/m/ui/`. A trace is kept for a failed test, in
-    `--ui-traces` (`<pytest's temp root>/ui-traces` by default). Each context closes when
-    the test ends.
+    page on the shell's document at `/m/ui/`. A shell is signed in once, through its
+    sign-in page; each context after that starts from the cookie and key that sign-in
+    stored, and a fresh sign-in replaces them once the shell refuses them. A trace is kept
+    for a failed test, in `--ui-traces` (`<pytest's temp root>/ui-traces` by default).
+    Each context closes when the test ends.
 `ui_context`, `ui_page`
     One `ui_contexts()` context, and its first page, signed in on `ui_shell`.
 `ui_component_check`
@@ -66,6 +68,7 @@ from __future__ import annotations
 
 import os
 import re
+import weakref
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -76,6 +79,9 @@ import pytest
 WAIT_MS = 5000
 
 _REPORTS = pytest.StashKey[dict[str, Any]]()
+#: Each test shell's stored sign-in: the browser state (cookie and key) one sign-in left.
+_SIGNED_IN: weakref.WeakKeyDictionary[Any, dict[str, Any]] = weakref.WeakKeyDictionary()
+KEY_ITEM = "moxi-ui-key"
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -163,12 +169,16 @@ def ui_contexts(ui_browser: Any, request: pytest.FixtureRequest,
 
     def open_context(shell: Any = None, *, sign_in: bool = True, **context_args: Any) -> Any:
         shell = shell if shell is not None else request.getfixturevalue("ui_shell")
+        if sign_in:
+            context_args.setdefault("storage_state", _stored_sign_in(ui_browser, shell))
         context = ui_browser.new_context(base_url=shell.url, **context_args)
         context.set_default_timeout(WAIT_MS)
         context.tracing.start(screenshots=True, snapshots=True)
         opened.append(context)
         if sign_in:
-            shell.sign_in(context.new_page())
+            page = context.new_page()
+            page.goto("/m/ui/")
+            page.locator("#moxi-panel > moxi-ui-page").wait_for(state="attached")
         return context
 
     try:
@@ -188,6 +198,31 @@ def ui_contexts(ui_browser: Any, request: pytest.FixtureRequest,
                     context.tracing.stop()
             finally:
                 context.close()
+
+
+def _stored_sign_in(browser: Any, shell: Any) -> dict[str, Any]:
+    """The browser state `shell`'s one sign-in stored: signed in through the sign-in page
+    the first time, and again whenever the shell no longer takes the stored cookie and
+    key (a test signed out, or the session expired)."""
+    from .shell import Session
+
+    state = _SIGNED_IN.get(shell)
+    if state is not None:
+        cookie = "; ".join(f"{c['name']}={c['value']}" for c in state["cookies"])
+        key = next((item["value"] for origin in state["origins"]
+                    for item in origin["localStorage"] if item["name"] == KEY_ITEM), "")
+        status, _ = Session(shell.port, cookie, key).get("/m/ui/api/modules")
+        if status == 200:
+            return state
+    context = browser.new_context(base_url=shell.url)
+    try:
+        context.set_default_timeout(WAIT_MS)
+        shell.sign_in(context.new_page())
+        state = context.storage_state()
+    finally:
+        context.close()
+    _SIGNED_IN[shell] = state
+    return state
 
 
 @pytest.fixture

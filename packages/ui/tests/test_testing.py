@@ -8,6 +8,7 @@ import sys
 import textwrap
 
 import pytest
+from playwright.sync_api import expect
 
 import fixture_kit
 
@@ -94,3 +95,25 @@ def test_the_width_check_names_what_reaches_past_the_edge(ui_page, ui_width_chec
     }""")
     with pytest.raises(AssertionError, match="div#too-wide"):
         ui_width_check(ui_page)
+
+
+@pytest.mark.browser
+def test_each_context_is_fresh_from_one_stored_sign_in_and_a_refused_one_signs_in_again(
+        ui_shells, fixture_site, ui_contexts):
+    shell = ui_shells(site=[fixture_site])
+    first, second = ui_contexts(shell), ui_contexts(shell)
+    assert first is not second
+    cookie = {c["name"]: c["value"] for c in first.cookies()}
+    assert {c["name"]: c["value"] for c in second.cookies()} == cookie
+    # A context of its own: what one test leaves in its storage, the next doesn't see.
+    first.pages[0].evaluate("localStorage.setItem('left', '1')")
+    assert ui_contexts(shell).pages[0].evaluate("localStorage.getItem('left')") is None
+    status, _ = shell.call("POST", "/m/ui/api/signout", {})
+    assert status == 200
+    third = ui_contexts(shell)
+    assert {c["name"]: c["value"] for c in third.cookies()} != cookie
+    expect(third.pages[0].locator("#moxi-panel > moxi-ui-page")).to_be_attached()
+    status = third.pages[0].evaluate("async () => (await fetch('/m/ui/api/modules', "
+                                     "{headers: {'X-Moxi-Key': localStorage.getItem("
+                                     "'moxi-ui-key')}})).status")
+    assert status == 200
