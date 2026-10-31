@@ -19,7 +19,9 @@ uv run moxi-dev check
 A module with a web page commits the files `npm run build` makes beside its sources, with
 `build-stamp.txt`, a hash of the build's inputs. `moxi-dev stamp` recomputes that hash in
 Python, with no Node, and fails a page whose sources changed without a rebuild; `moxi-dev
-check` runs it on the packages a change picks. As a pre-commit hook it reads the index and
+check` runs it on the packages a change picks, then, where Node and the root's
+`node_modules` are present, `npm run check`, which compares the built files byte for byte
+with a fresh build, so a hand-edited built file fails too. As a pre-commit hook it reads the index and
 checks only the pages the commit touches, so a commit that touches no page is never
 stopped by one. To install it, put this in `.git/hooks/pre-commit` and make it executable:
 

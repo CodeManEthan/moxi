@@ -335,7 +335,7 @@ def test_a_stale_lock_stops_before_the_sync(repo):
     runs = Runs({lambda cmd, cwd: cmd[:2] == ["uv", "lock"]: 1})
     result = run_check(repo, runs)
     assert result.code == 1 and len(runs.calls) == 1
-    assert "lock fail | stamps not run | sync not run" in result.line()
+    assert "lock fail | stamps not run | web not run | sync not run" in result.line()
 
 
 def test_a_failed_sync_runs_no_suite(repo):
@@ -349,7 +349,8 @@ def test_nothing_picked_checks_the_lock_and_passes(repo):
     result = run_check(repo, runs)
     assert result.code == 0
     assert [cmd for cmd, _, _ in runs.calls] == [["uv", "lock", "--check"]]
-    assert ("packages: none | lock pass | stamps skipped | sync skipped | no suites run"
+    assert ("packages: none | lock pass | stamps skipped | web skipped | sync skipped | "
+            "no suites run"
             in result.line())
 
 
@@ -471,12 +472,77 @@ def test_the_real_workspace_runs_browser_tests_for_ui_only():
     assert [p.dir for p in check.load_workspace(REPO) if p.browser] == ["ui"]
 
 
+# --- the built web files ---------------------------------------------------------------
+
+def _with_page(repo, monkeypatch, stamps="pass"):
+    """Make the stamps step report `stamps` for the picked packages."""
+    def fake(root, chosen, result):
+        result.stamps = stamps
+        return stamps != "fail"
+    monkeypatch.setattr(check, "_stamps", fake)
+
+
+def _tools(tmp_path, *names):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    for name in names:
+        tool = bin_dir / name
+        tool.write_text("#!/bin/sh\nexit 0\n")
+        tool.chmod(0o755)
+    return str(bin_dir)
+
+
+def test_with_node_and_node_modules_the_built_files_are_compared(repo, monkeypatch, tmp_path):
+    _with_page(repo, monkeypatch)
+    (repo / "node_modules").mkdir()
+    runs = Runs()
+    result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, "node", "npm")})
+    assert result.code == 0 and "| web pass |" in result.line()
+    lock, web, sync, *_ = runs.calls
+    assert web[0] == ["npm", "run", "check"] and web[1] == repo
+
+
+def test_a_built_file_that_differs_fails_before_the_sync(repo, monkeypatch, tmp_path):
+    _with_page(repo, monkeypatch)
+    (repo / "node_modules").mkdir()
+    runs = Runs({lambda cmd, cwd: cmd[:2] == ["npm", "run"]: 1})
+    result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, "node", "npm")})
+    assert result.code == 1 and runs.suites() == []
+    assert "| web fail | sync not run |" in result.line()
+
+
+@pytest.mark.parametrize("tools, modules, why", [
+    (("npm",), True, "no node on PATH"),
+    (("node", "npm"), False, "no node_modules at the root (run `npm ci`)")])
+def test_without_node_the_compare_is_left_out_with_a_line(repo, monkeypatch, tmp_path, capsys,
+                                                        tools, modules, why):
+    _with_page(repo, monkeypatch)
+    if modules:
+        (repo / "node_modules").mkdir()
+    runs = Runs()
+    result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, *tools)})
+    assert result.code == 0 and "| web skipped |" in result.line()
+    assert not any(cmd[0] == "npm" for cmd, _, _ in runs.calls)
+    assert ("moxi-dev check: the built web files were not compared with their sources: "
+            + why) in capsys.readouterr().err
+
+
+def test_no_page_picked_runs_no_compare(repo, monkeypatch, tmp_path):
+    _with_page(repo, monkeypatch, stamps="none")
+    (repo / "node_modules").mkdir()
+    runs = Runs()
+    result = run_check(repo, runs, full=True, environ={"PATH": _tools(tmp_path, "node", "npm")})
+    assert "| web none |" in result.line()
+    assert not any(cmd[0] == "npm" for cmd, _, _ in runs.calls)
+
+
 # --- the summary line -------------------------------------------------------------------
 
 LINE = re.compile(
     r"moxi-dev check: commit (?P<commit>[0-9a-f]{12}(\+dirty)?) \| "
     r"packages: (?P<packages>[^|]+) \| lock (pass|fail|not run) \| "
     r"stamps (pass|fail|none|skipped|not run) \| "
+    r"web (pass|fail|none|skipped|not run) \| "
     r"sync (pass|fail|skipped|not run) \| (?P<suites>[^|]+) \| "
     r"total \d+\.\d+s \| exit (?P<code>\d)$")
 

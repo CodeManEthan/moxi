@@ -17,6 +17,10 @@ only once the ones before it have passed:
 3. Check the build stamps of the picked packages that have a web page
    (`moxi-dev stamp`, on the working tree): built files that lag their sources fail here,
    with no Node.
+   Then, when `node` and `npm` are on PATH and the root's `node_modules` exists,
+   `npm run check` compares the built files byte for byte with what the pinned
+   toolchain makes from their sources, so a built file edited by hand fails too; without
+   them a printed line says the compare was left out.
 4. Sync the check's own environment, `.moxi-dev/env-3.12` under the root, with every
    package, extra and group at the lowest Python the packages support. The root's own
    `.venv` is never touched.
@@ -45,6 +49,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -285,6 +290,7 @@ class Result:
     packages: list[str] | None = None
     lock: str = "not run"
     stamps: str = "not run"
+    web: str = "not run"
     sync: str = "not run"
     suites: list[tuple[str, bool, float]] = field(default_factory=list)
     #: The packages whose browser tests were left out, Chromium not starting.
@@ -298,7 +304,8 @@ class Result:
                            + (" without its browser tests" if name in self.no_browser else "")
                            for name, ok, secs in self.suites) or "no suites run"
         return (f"moxi-dev check: commit {self.commit} | packages: {names} | "
-                f"lock {self.lock} | stamps {self.stamps} | sync {self.sync} | {suites} | "
+                f"lock {self.lock} | stamps {self.stamps} | web {self.web} | "
+                f"sync {self.sync} | {suites} | "
                 f"total {self.seconds:.1f}s | exit {self.code}")
 
 
@@ -341,6 +348,8 @@ def _steps(root: Path, chosen: Sequence[Package], workers: Sequence[str],
     if ok and chosen:
         ok = _stamps(root, chosen, result)
     if ok and chosen:
+        ok = _web(root, env, run, result)
+    if ok and chosen:
         venv = root / ENV_DIR
         ok = run(["uv", "sync", "--locked", "--all-packages", "--all-extras",
                   "--all-groups", "--python", PYTHON],
@@ -370,7 +379,7 @@ def _steps(root: Path, chosen: Sequence[Package], workers: Sequence[str],
                 result.suites.append((package.dir, passed, time.monotonic() - began))
                 ok = ok and passed
     elif ok:
-        result.stamps = result.sync = "skipped"
+        result.stamps = result.web = result.sync = "skipped"
     return ok
 
 
@@ -383,6 +392,25 @@ def _stamps(root: Path, chosen: Sequence[Package], result: Result) -> bool:
         print(f"moxi-dev check: {problem}", file=sys.stderr, flush=True)
     result.stamps = "fail" if problems else "pass" if checked else "none"
     return not problems
+
+
+def _web(root: Path, env: Mapping[str, str], run: Run, result: Result) -> bool:
+    """`npm run check` when the stamps step found a page and Node can run it here."""
+    if result.stamps != "pass":
+        result.web = "none"
+        return True
+    path = env.get("PATH")
+    missing = [tool for tool in ("node", "npm") if shutil.which(tool, path=path) is None]
+    if missing or not (root / "node_modules").is_dir():
+        why = (f"no {' or '.join(missing)} on PATH" if missing
+               else "no node_modules at the root (run `npm ci`)")
+        print(f"moxi-dev check: the built web files were not compared with their "
+              f"sources: {why}", file=sys.stderr, flush=True)
+        result.web = "skipped"
+        return True
+    ok = run(["npm", "run", "check"], root, env) == 0
+    result.web = "pass" if ok else "fail"
+    return ok
 
 
 def _parser() -> argparse.ArgumentParser:
