@@ -734,6 +734,13 @@ def chain_holders(repo: Repo) -> list[tuple[str, Path]]:
     return out
 
 
+def _wrote_in(repo: Repo, state: gitconf.State) -> bool:
+    """True when anything of repo's is in the repo: a config key, a shim, a git hook it
+    moved aside, or `<common git dir>/moxi-repo/`."""
+    return bool(state.sections or state.entries or state.moved or repo.own_dir.exists()
+                or shim.our_shims(repo.hooks_dir))
+
+
 class Teardown(Report):
     """`teardown`'s report, which also names each repo it cleaned."""
 
@@ -751,7 +758,9 @@ def teardown() -> Teardown:
     sections, entries, shims with each `.local` moved back, the launcher and
     `<common git dir>/moxi-repo/`), naming each git hook file that still holds a chain line
     for the user to delete; an indexed path that is no longer a repo is dropped from the
-    index with one line. Then every doctor record repo has open is cleared.
+    index with one line. When that repo's common git dir is still there with no work tree,
+    what repo wrote in it goes too, through `git --git-dir`, and the line says so. Then
+    every doctor record repo has open is cleared.
 
     It first opens and reads every indexed repo, and when one can't be read (a config git
     can't read, say) it removes nothing and the report names that repo. A step that still
@@ -762,27 +771,42 @@ def teardown() -> Teardown:
     plan: list[tuple[str, dict, Repo | None, str | None, gitconf.State | None,
                      list[tuple[str, Path]]]] = []
     for key, entry, repo, why in indexed_repos():
+        left = None
         if repo is None:
             problem = _unreadable_repo(key, entry)
             if problem:
                 report.problems.append(f"{problem}, so repo can't clean it")
-            else:
-                plan.append((key, entry, None, why, None, []))
-            continue
+                continue
+            # A git dir still there with no work tree keeps repo's keys, which a work
+            # tree added later would run.
+            left = gitconf.git_dir_only(entry.get("common_dir") or key)
+        target = repo or left
         try:
-            plan.append((key, entry, repo, None, gitconf.read(repo), chain_holders(repo)))
+            state = gitconf.read(target) if target is not None else None
+            found = chain_holders(repo) if repo is not None else []
         except (gitconf.GitError, OSError) as exc:
-            report.problems.append(f"{repo.root}: {exc}, so repo can't clean it")
+            report.problems.append(f"{repo.root if repo is not None else left.common_dir}: "
+                                   f"{exc}, so repo can't clean it")
+            continue
+        if left is not None and not _wrote_in(left, state):
+            target = None
+        plan.append((key, entry, target, why, state, found))
     if not report.ok:
         return report
     held: list[tuple[str, Path]] = []
     for key, entry, repo, why, state, found in plan:
-        root = str(repo.root) if repo is not None else entry.get("root") or key
+        gone = why is not None
+        root = (entry.get("root") or key) if gone else str(repo.root)
         try:
-            if repo is None:
+            if gone:
+                line = f"dropped {root} from the index: {why}"
+                if repo is not None:
+                    report.lines += gitconf.remove_all(repo, state)
+                    line += (f"; removed repo's config keys and git hooks from "
+                             f"{repo.common_dir} too")
                 _records.close_repo(entry.get("common_dir") or key)
                 _index_drop(key)
-                report.lines.append(f"dropped {root} from the index: {why}")
+                report.lines.append(line)
                 continue
             report.lines += gitconf.remove_all(repo, state)
             _records.close_repo(repo.common_dir)

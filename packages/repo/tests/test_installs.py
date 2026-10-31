@@ -397,6 +397,53 @@ def test_teardown_with_nothing_indexed_clears_the_ledger(demo, capsys):
     assert _records.ledger() == {} and doctor_records() == {}
 
 
+@pytest.mark.parametrize("mode", ["config", "shim"])
+def test_teardown_cleans_a_git_dir_left_with_no_work_tree(demo, mode, capsys):
+    """A bare repo whose only worktree was removed keeps repo's keys in its config, and a
+    worktree added later would run them; the teardown takes them out through
+    `git --git-dir`. (Writing config entries needs no new git; only running them does.)"""
+    src = demo.repo("src")
+    bare, wt = demo.tmp / "proj.git", demo.tmp / "wt"
+    git(demo.tmp, "clone", "-q", "--bare", str(src), str(bare))
+    mine = "#!/bin/sh\necho the existing hook of proj\n"
+    hook = bare / "hooks" / "pre-commit"
+    hook.write_text(mine, encoding="utf-8")
+    hook.chmod(0o755)
+    git(bare, "worktree", "add", "-q", str(wt), "-b", "side")
+    api.add(wt, ["demo/gate"], mode=mode)
+    git(bare, "worktree", "remove", str(wt))
+    theirs = git(bare, "config", "--local", "--get-regexp", r"^(moxi-repo\.|hook\.moxi-repo-)",
+                 check=False).stdout
+    assert "moxi-repo.piece.demo/gate.event pre-commit" in theirs
+    capsys.readouterr()
+    assert repo_install.teardown() == 0
+    out, err = capsys.readouterr()
+    assert err == ""
+    assert (f"dropped {wt} from the index: {wt} is no longer a git work tree, and git lists "
+            f"no other work tree of its git dir {bare}; removed repo's config keys and git "
+            f"hooks from {bare} too") in out
+    assert git(bare, "config", "--local", "--get-regexp",
+               r"^(moxi-repo\.|hook\.moxi-repo-)", check=False).stdout == ""
+    assert hook.read_text() == mine and not (bare / "hooks" / "pre-commit.local").exists()
+    assert not (bare / "moxi-repo").exists()
+    assert api.indexed() == {}
+
+
+def test_teardown_drops_a_git_dir_left_with_nothing_of_repos_in_it(demo, capsys):
+    src = demo.repo("src")
+    bare, wt = demo.tmp / "proj.git", demo.tmp / "wt"
+    git(demo.tmp, "clone", "-q", "--bare", str(src), str(bare))
+    git(bare, "worktree", "add", "-q", str(wt), "-b", "side")
+    api.add(wt, ["demo/gate"])
+    gitconf.remove_all(gitconf.resolve(wt))
+    git(bare, "worktree", "remove", str(wt))
+    capsys.readouterr()
+    assert repo_install.teardown() == 0
+    out = capsys.readouterr().out
+    assert out == (f"dropped {wt} from the index: {wt} is no longer a git work tree, and git "
+                   f"lists no other work tree of its git dir {bare}\n")
+
+
 def _two_with_records(demo):
     alpha, beta = demo.repo("alpha-notes"), demo.repo("beta-code")
     for r in (alpha, beta):

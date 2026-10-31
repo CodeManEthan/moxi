@@ -107,8 +107,39 @@ class Repo:
         """`<common git dir>/moxi-repo/`: the launcher, the committer's lock and state."""
         return self.common_dir / SECTION
 
+    @property
+    def git_args(self) -> tuple[str, ...]:
+        """The options before the command in repo's `git config` calls on the repo."""
+        return ()
+
     def __repr__(self) -> str:
         return f"Repo({str(self.root)!r})"
+
+
+class GitDirOnly(Repo):
+    """A common git dir that no work tree uses any more (a bare repo whose last worktree
+    was removed, say), seen only to remove what repo left there: its config calls go
+    through `git --git-dir=<it>`, and its hooks dir is `<it>/hooks`."""
+
+    __slots__ = ()
+
+    @property
+    def git_args(self) -> tuple[str, ...]:
+        return (f"--git-dir={self.common_dir}",)
+
+    def __repr__(self) -> str:
+        return f"GitDirOnly({str(self.common_dir)!r})"
+
+
+def git_dir_only(common_dir: str | os.PathLike) -> GitDirOnly | None:
+    """`common_dir` as a `GitDirOnly`, or None when it is no longer a git dir."""
+    cgd = Path(common_dir)
+    if not cgd.is_dir():
+        return None
+    done = git(cgd, f"--git-dir={cgd}", "rev-parse", "--git-dir")
+    if done.returncode != 0:
+        return None
+    return GitDirOnly(cgd, cgd, cgd, cgd / "hooks")
 
 
 def key_of(common_dir: str | os.PathLike) -> str:
@@ -253,11 +284,11 @@ class State:
 
 def config(repo: Repo, *args: str):
     """`git config --local <args>` in the repo."""
-    return git(repo.root, "config", "--local", *args)
+    return git(repo.root, *repo.git_args, "config", "--local", *args)
 
 
 def _get_regexp(repo: Repo, pattern: str) -> list[tuple[str, str | None]]:
-    done = git(repo.root, "config", "--local", "-z", "--get-regexp", pattern)
+    done = git(repo.root, *repo.git_args, "config", "--local", "-z", "--get-regexp", pattern)
     if done.returncode == 1 and not done.stdout:
         return []
     if done.returncode != 0:
@@ -561,7 +592,7 @@ def remove_all(repo: Repo, state: State | None = None) -> list[str]:
     return lines
 
 
-__all__ = ["Repo", "State", "Sync", "NotARepo", "GitError", "FLOOR", "CONFIG_FROM",
+__all__ = ["Repo", "GitDirOnly", "git_dir_only", "State", "Sync", "NotARepo", "GitError", "FLOOR", "CONFIG_FROM",
            "resolve", "read", "register", "set_enabled", "clear_recorded", "apply_settings", "remove_piece",
            "set_mode", "sync", "remove_all", "pick_mode", "git_version", "parse_version",
            "interpreter", "runner_file", "chain_state", "check_shims", "key_of", "worktrees",
