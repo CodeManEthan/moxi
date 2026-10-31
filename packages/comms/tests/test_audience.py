@@ -299,7 +299,7 @@ def test_the_boot_rescan_rebuilds_the_index(rig, reboot):
     assert plain.id in daemon.audiences and daemon.audiences[plain.id] is None
 
 
-def test_rescan_deliveries_carry_the_fill_in(rig, reboot):
+def test_rescan_deliveries_carry_the_fill_in(rig, reboot, monkeypatch):
     """The boot rescan routes the backlog through `_deliver` like everything else: a
     bound identity handed a pre-boot reply by the rescan gets the same fields."""
     original = ask(rig, audience="operator")
@@ -311,8 +311,11 @@ def test_rescan_deliveries_carry_the_fill_in(rig, reboot):
     assert (payload["audience"], payload["audience_source"]) == ("operator", "inherited")
     # and the rescan pass itself, against a bound identity past nothing. The reply
     # went out from its row at the bind, and the row stays until the shim reports it
-    # handled; the shim takes an id it holds only once. With the row, the hand-over and
-    # the index all gone, the rescan is the one pass that can deliver it again.
+    # handled; the shim takes an id it holds only once. A rescan routes only what is
+    # above the routed mark, which the reply is not, so the pass reads as a home's
+    # first since its migration, with no mark. With the row, the hand-over, the index
+    # and the mark all gone, the rescan is the one pass that can deliver it again.
+    monkeypatch.setattr(daemon.books, "routed_through", lambda: None)
     with daemon._lock:
         daemon.audiences.clear()
         daemon.bindings["planner@proj-a"].delivered.clear()
