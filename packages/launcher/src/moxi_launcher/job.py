@@ -64,7 +64,9 @@ holder, so a hold the original left behind reads as its own. The recorded slot i
 when it is free or ended, or held by the original run; it is refused `occupied-by-chain`
 when it is occupied by the launch chain's own session (the original died after its
 respawn); otherwise (held or occupied by anyone outside the chain, or missing) the launch
-goes to the lowest launchable slot. Its posture and first turn are the original run's.
+goes to the lowest launchable slot. Slots that don't answer about the recorded slot's hold
+are asked again a few times, then the repair ends `relaunch-failed` (`slots-busy`) with
+nothing launched, so it can be repeated. Its posture and first turn are the original run's.
 
 Each run ends with its outcome and tells whom `notices` says. As it starts, each job
 deletes ended runs older than `records.keep_days`.
@@ -104,6 +106,9 @@ POLL_S = 2.0
 SETTLE_S = 0.5
 #: The word slots' answer leads its words with when its settle bound ran out.
 NOT_SETTLED = "not-settled"
+#: How many times a repair asks slots for its recorded slot's hold when slots don't
+#: answer, and how long it waits between, in seconds.
+HOLD_TRIES, HOLD_RETRY_S = 5, 1.0
 #: How often the name wait asks comms again, in seconds.
 NAME_POLL_S = 0.5
 #: How long a compact waits after a refusal of turns' before it reads the session again.
@@ -795,14 +800,7 @@ class RepairJob(RelaunchJob):
         if choice.chain:
             self.end("occupied-by-chain", "occupied-by-chain", choice.why)
         if choice.recorded:
-            try:
-                api.hold(choice.slot, holder=self.holder,
-                         seconds=float(self.setting("relaunch.wait_s")))
-            except api.SlotsError as error:
-                choice = Choice("", why=f"slot {choice.slot} could not be held: "
-                                        f"{_words(error)}")
-            else:
-                self.held = choice.slot
+            choice = self._hold_recorded(api, choice)
         self.event("slot", {"slot": choice.slot or None, "respawn": choice.respawn,
                             "holder": self.holder, "why": choice.why or None})
         self.name()
@@ -810,6 +808,28 @@ class RepairJob(RelaunchJob):
             mode=original.mode, handoff=original.handoff_path, actor=original.actor,
             slot=choice.slot, respawn=choice.respawn,
             hold=self.holder if choice.recorded else None))
+
+    def _hold_recorded(self, api: Any, choice: Choice) -> Choice:
+        """Hold the recorded slot under the original run's id. Slots that don't answer
+        are asked again a few times, then the run ends with nothing launched, so the
+        repair can be repeated; a hold refused sends the launch to the lowest slot."""
+        for attempt in range(HOLD_TRIES):
+            try:
+                api.hold(choice.slot, holder=self.holder,
+                         seconds=float(self.setting("relaunch.wait_s")))
+            except api.TryAgain as error:
+                if attempt + 1 == HOLD_TRIES:
+                    self.end("relaunch-failed", "slots-busy",
+                             f"slots did not answer about slot {choice.slot}: "
+                             f"{_words(error)}; nothing was launched")
+                self.sleep(HOLD_RETRY_S)
+            except api.SlotsError as error:
+                return Choice("", why=f"slot {choice.slot} could not be held: "
+                                      f"{_words(error)}")
+            else:
+                self.held = choice.slot
+                return choice
+        raise AssertionError("unreachable")
 
     def check_stop(self) -> None:
         if self.stop_asked is not None and not self._stop_noted:

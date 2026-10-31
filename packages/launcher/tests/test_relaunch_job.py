@@ -630,6 +630,34 @@ def test_a_repair_respawns_the_recorded_slot_under_the_original_holder(conn):
     assert ("hold", "3", original.run_id) in slots_api.calls
 
 
+def test_a_repair_asks_again_when_slots_dont_answer_about_the_hold(conn):
+    original = failed_run(conn)
+    slots_api = FakeSlots(shown=shown("ended", holder=original.run_id))
+    plain, tries = slots_api.hold, []
+
+    def hold(slot, **kw):
+        tries.append(slot)
+        if len(tries) < 3:
+            raise FakeSlots.TryAgain("locked")
+        return plain(slot, **kw)
+
+    slots_api.hold = hold
+    got = go(conn, repair_run(conn, original), slots_api=slots_api, cls=job.RepairJob)
+    assert got.outcome == "relaunched" and got.requests[0].slot == "3"
+    assert got.requests[0].hold == original.run_id and len(tries) == 3
+
+
+def test_a_repair_slots_never_answer_about_ends_with_nothing_launched(conn):
+    original = failed_run(conn)
+    slots_api = FakeSlots(shown=shown("ended", holder=original.run_id),
+                          hold=FakeSlots.TryAgain("locked"))
+    got = go(conn, repair_run(conn, original), slots_api=slots_api, cls=job.RepairJob)
+    assert (got.outcome, got.run.word) == ("relaunch-failed", "slots-busy")
+    assert got.requests == []
+    assert slots_api.names().count("hold") == job.HOLD_TRIES
+    assert job.repairable(got.run, store.run_events(conn, got.run.run_id))
+
+
 def test_a_repair_of_a_directors_run_replays_with_the_plain_pass_list(conn):
     original = failed_run(conn, mode="director")
     slots_api = FakeSlots(shown=shown("ended", holder=original.run_id))
