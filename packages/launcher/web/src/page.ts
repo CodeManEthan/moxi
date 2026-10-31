@@ -50,6 +50,7 @@ const STYLES = css`
   .block { display: block; padding: 6px 8px; border-radius: var(--moxi-radius); background: var(--moxi-bg-sunken);
            white-space: pre-wrap; word-break: break-all; }
   .help, .dim { color: var(--moxi-text-dim); font-size: var(--moxi-font-size-sm); }
+  .lede { padding-left: 8px; border-left: 3px solid var(--moxi-accent); }
   .warn { color: var(--moxi-warn); }
   .problem { color: var(--moxi-error); }
   .ok { color: var(--moxi-accent); }
@@ -463,7 +464,7 @@ export class LauncherPage extends LitElement {
     const fields = this.#formFields();
     return html`<section class="launch" data-part="launch">
       <h2>Launch</h2>
-      <p class="help">Start from a seat or a project preset, change what you want, and preview the launch before you start it. Only the fields you change are sent: the rest come from the preset and your defaults.</p>
+      <p class="help lede">Start from a seat or a project preset, change what you want, and preview the launch before you start it. Only the fields you change are sent: the rest come from the preset and your defaults.</p>
       ${status}
       ${this.#choosePart()}
       ${fields.length ? html`<moxi-ui-form mode="submit" submit-label="Preview" .fields=${fields}
@@ -673,8 +674,11 @@ export class LauncherPage extends LitElement {
   protected updated(changed: Map<PropertyKey, unknown>): void {
     super.updated(changed);
     const form = this.#form();
-    if (form !== null && form.fields !== this.#drawn) {
-      this.#drawn = form.fields;
+    // Lit sets `fields` again on every draw and the form keeps a copy, so the page's own
+    // array says when the fields really changed. A value the user just typed, not yet
+    // marked touched, must not be taken for what the form first showed.
+    if (form !== null && this.#fields !== this.#drawn) {
+      this.#drawn = this.#fields;
       this.#baseline = rebase(this.#baseline ?? {}, form.values(), this.#touched);
       this.#current = JSON.stringify(this.#body(form.values()));
     }
