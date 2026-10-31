@@ -653,34 +653,80 @@ def test_check_lists_the_live_refusals_and_writes_nothing(work):
     assert nothing_written()
 
 
-@pytest.mark.parametrize("state, holder, refused", [
-    ("free", None, False), ("offline", None, False),
-    ("held", "claude 1234", True), ("standing", None, True),
-    ("reserved", "launcher", True), ("retired", None, True)])
-def test_check_refuses_an_identity_that_is_not_free(work, monkeypatch, state, holder,
-                                                    refused):
+class DaemonError(Exception):
+    """Stands in for comms' DaemonError."""
+
+
+def fake_comms(monkeypatch, answer):
+    """A comms whose `identity_state` answers `answer` (a state, or an error it raises),
+    and the asks it was given."""
     if not modules.available("comms"):
         pytest.skip("comms is not installed")
     asked = []
 
     def identity_state(name, scope=None):
         asked.append((name, scope))
-        return SimpleNamespace(state=state, holder=holder, module=None)
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
 
-    monkeypatch.setattr(api, "_comms_api",
-                        lambda: SimpleNamespace(identity_state=identity_state))
-    got = api.check(request(work, identity="planner", scope="moxi"))
+    monkeypatch.setattr(api, "_comms_api", lambda: SimpleNamespace(
+        identity_state=identity_state, DaemonError=DaemonError))
+    return asked
+
+
+def state(name, **fields):
+    return SimpleNamespace(**{"qualified": "planner@moxi", "state": name, "holder": None,
+                              "module": None, "reason": None, **fields})
+
+
+@pytest.mark.parametrize("answer, words", [
+    (state("held", holder="claude session 1234"),
+     "identity planner@moxi is held by claude session 1234"),
+    (state("held"), "identity planner@moxi is held by a live session"),
+    (state("reserved", module="launcher"), "identity planner@moxi is reserved for launcher"),
+    (state("reserved"), "identity planner@moxi is reserved, and no module owns it"),
+    (state("retired", reason="planner@moxi is retired: use planner"),
+     "identity planner@moxi is retired; comms says: planner@moxi is retired: use planner")])
+def test_check_refuses_an_identity_that_is_held_reserved_or_retired(work, monkeypatch,
+                                                                    answer, words):
+    asked = fake_comms(monkeypatch, answer)
+    [taken] = api.check(request(work, identity="planner", scope="moxi"))
     assert asked == [("planner", "moxi")]
-    if not refused:
-        assert got == []
-        return
-    [taken] = got
     assert isinstance(taken, api.IdentityTaken) and taken.exit_code == exits.REFUSED
-    assert f"identity planner is {state}" in taken.problem
-    if holder:
-        assert holder in taken.problem
+    assert taken.problem == words and taken.state == answer.state
     with pytest.raises(api.IdentityTaken):
         api.launch(request(work, identity="planner", scope="moxi"))
+    assert nothing_written()
+
+
+@pytest.mark.parametrize("name", ["free", "standing", "offline"])
+def test_a_free_standing_or_offline_identity_goes_on(work, monkeypatch, name):
+    # A standing name is its standing identity's to bind, and an offline daemon is the
+    # wrapper's bind to decide.
+    fake_comms(monkeypatch, state(name))
+    assert api.check(request(work, identity="planner", scope="moxi")) == []
+
+
+def test_a_name_comms_refuses_is_refused_with_comms_words(work, monkeypatch):
+    fake_comms(monkeypatch, ValueError("'agent-3' is an agent-N name, which the daemon "
+                                       "mints and no launch claims"))
+    [refused] = api.check(request(work, identity="agent-3"))
+    assert isinstance(refused, api.IdentityRefused) and refused.exit_code == exits.REFUSED
+    assert refused.problem == ("comms refuses identity agent-3: 'agent-3' is an agent-N "
+                               "name, which the daemon mints and no launch claims")
+    with pytest.raises(api.IdentityRefused):
+        api.launch(request(work, identity="agent-3"))
+    assert nothing_written()
+
+
+def test_an_answer_comms_cant_read_is_a_try_again_naming_the_daemon(work, monkeypatch):
+    fake_comms(monkeypatch, DaemonError("a garbled answer"))
+    [refused] = api.check(request(work, identity="planner", scope="moxi"))
+    assert isinstance(refused, api.CommsUnanswered)
+    assert refused.exit_code == exits.TEMPFAIL and refused.code == "try-again"
+    assert "the comms daemon" in refused.problem and "a garbled answer" in refused.problem
+    assert refused.hint.startswith("try again")
     assert nothing_written()
 
 

@@ -45,7 +45,7 @@ from moxi import exit as exits
 from moxi import files
 from moxi import modules as moxi_modules
 
-from . import catalog, compose, first, handoffs, presets, store, targets
+from . import catalog, compose, first, handoffs, identity, presets, store, targets
 from .compose import Composition, common
 
 log = logging.getLogger("moxi.launcher.api")
@@ -53,28 +53,17 @@ log = logging.getLogger("moxi.launcher.api")
 #: A refusal: what `check` lists and `launch` raises, with `code`, `problem`, `hint` and
 #: `exit_code`.
 Refusal = catalog.Refused
-#: The comms identity states a launch is refused in: the name is someone else's, or not
-#: anyone's to take. `free` and `offline` (comms' daemon can't be asked) pass, and the
-#: wrapper's own bind decides.
-TAKEN = ("held", "standing", "reserved", "retired")
+#: The comms identity states a launch is refused in (`identity`).
+TAKEN = identity.TAKEN
+IdentityTaken = identity.IdentityTaken
+IdentityRefused = identity.IdentityRefused
+CommsUnanswered = identity.CommsUnanswered
 
 
 class NoDirectory(Refusal):
     """The directory a launch starts in does not exist."""
 
     code = "no-cwd"
-
-
-class IdentityTaken(Refusal):
-    """The comms name a launch asks for is held or not free to take."""
-
-    code = "identity-taken"
-
-    def __init__(self, name: str, state: str, holder: str | None):
-        self.name, self.state, self.holder = name, state, holder
-        by = f" by {holder}" if holder else ""
-        super().__init__("identity", f"identity {name} is {state}{by}",
-                         "pick another identity, or wait until it is free")
 
 
 @dataclass(frozen=True)
@@ -188,7 +177,8 @@ def check(request, *, environ: Mapping[str, str] | None = None) -> list[Refusal]
     """The refusals `launch` would meet in the live state, without composing or writing
     anything: the resolver's own (an unknown preset or project, projects unreadable or
     busy, a posture off its default), a directory that does not exist, a comms name that
-    is held or not free, and the target's (for a slot launch: slots not installed or not
+    is held, reserved or retired (or that comms refuses, or can't answer on), and the
+    target's (for a slot launch: slots not installed or not
     supported here, or a named slot that is held, occupied or missing)."""
     caller = dict(os.environ if environ is None else environ)
     try:
@@ -234,25 +224,13 @@ def _check(resolved, caller: Mapping[str, str]) -> list[Refusal]:
     return found
 
 
-def _identity_taken(name: str, scope: str | None) -> IdentityTaken | None:
-    """comms' word on whether `name` is free, or None when it is, or when comms can't be
-    asked (the wrapper's bind then decides)."""
-    api = _comms_api()
-    ask = getattr(api, "identity_state", None) if api is not None else None
-    if ask is None:
-        return None
-    state = ask(name, scope=scope)
-    if state.state not in TAKEN:
-        return None
-    holder = getattr(state, "holder", None) or getattr(state, "module", None)
-    return IdentityTaken(name, state.state, str(holder) if holder else None)
+def _identity_taken(name: str, scope: str | None) -> Refusal | None:
+    """comms' word on whether `name` is free for this launch (`identity.check`)."""
+    return identity.check(name, scope, _comms_api())
 
 
 def _comms_api():
-    if not moxi_modules.available("comms"):
-        return None
-    found = moxi_modules.load("comms")
-    return found.api if found.ok else None
+    return presets.comms_api()
 
 
 def _with_ids(request, harness: str) -> SimpleNamespace:
@@ -314,5 +292,6 @@ def _stored(row: store.LaunchRow) -> LaunchResult:
              "nothing was started again")
 
 
-__all__ = ["TAKEN", "IdentityTaken", "LaunchRequest", "LaunchResult", "NoDirectory",
-           "Refusal", "check", "exit_code", "launch", "preview"]
+__all__ = ["TAKEN", "CommsUnanswered", "IdentityRefused", "IdentityTaken", "LaunchRequest",
+           "LaunchResult", "NoDirectory", "Refusal", "check", "exit_code", "launch",
+           "preview"]
