@@ -8,6 +8,11 @@ license = "MIT"
 authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 dependencies = ["moxi>=0.1,<0.2", "moxi-sessions>=0.2,<0.3"]
 
+[project.optional-dependencies]
+# The browser UI shell: with it, cache's panel and its chip show there. Loopback, which
+# cache's page server runs on, comes with it.
+ui = ["moxi-ui>=0.1,<0.2"]
+
 [project.urls]
 Homepage = "https://github.com/moxihq/moxi"
 Repository = "https://github.com/moxihq/moxi"
@@ -22,7 +27,9 @@ moxi-cache-watch = "moxi_cache.watch:main"
 cache = "moxi_cache.module"
 
 [dependency-groups]
-dev = ["pytest"]
+# moxi-ui's pytest plugin runs cache's pages in a real shell; its testing extra brings
+# the browser.
+dev = ["pytest", "moxi-ui[testing]"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -34,7 +41,7 @@ packages = ["src/moxi_cache"]
 [tool.hatch.build.targets.sdist]
 # A source distribution built from any branch holds these public paths, and the
 # pyproject.toml and .gitignore hatchling adds itself.
-only-include = ["LICENSE", "README.md", "src/moxi_cache", "tests"]
+only-include = ["LICENSE", "README.md", "src/moxi_cache", "tests", "web"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

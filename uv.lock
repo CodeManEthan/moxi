@@ -228,8 +228,14 @@ dependencies = [
     { name = "moxi-sessions" },
 ]
 
+[package.optional-dependencies]
+ui = [
+    { name = "moxi-ui" },
+]
+
 [package.dev-dependencies]
 dev = [
+    { name = "moxi-ui", extra = ["testing"] },
     { name = "pytest" },
 ]
 
@@ -237,10 +243,15 @@ dev = [
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-sessions", editable = "packages/sessions" },
+    { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
 ]
+provides-extras = ["ui"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest" }]
+dev = [
+    { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
+    { name = "pytest" },
+]
 
 [[package]]
 name = "moxi-comms"
