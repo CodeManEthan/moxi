@@ -45,7 +45,8 @@ check sees every posture: the host's `--permissions PROFILE` (until a permission
 has a row of its own), Codex's `--dangerously-bypass-approvals-and-sandbox` and
 `--approve-for-me` with their hidden aliases `--yolo` and `--not-so-yolo`, and a config override keyed `sandbox_mode` or `approval_policy`,
 passed on (`-c`, `--config`, `--option`) or as a `config` item (`catalog.POSTURE_FLAGS`,
-`catalog.POSTURE_KEYS`).
+`catalog.POSTURE_KEYS`). The host's own `--resume`, `--no-window`, `--options-file` and
+`--instructions-file` are refused too (`catalog.HELD_FLAGS`).
 """
 
 from __future__ import annotations

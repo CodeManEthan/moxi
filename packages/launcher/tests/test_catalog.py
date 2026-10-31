@@ -429,6 +429,23 @@ def test_an_owned_refusal_names_the_row_and_a_posture_one_names_its_option():
     assert "--sandbox" in posture.value.hint
 
 
+@pytest.mark.parametrize("argv", [["--resume", "thread-1"], ["--", "--resume=thread-1"],
+                                  ["--no-window"], ["--", "--options-file", "/o.json"],
+                                  ["--", "--instructions-file", "/i.md"]])
+def test_a_host_flag_no_launch_passes_on_is_refused(argv):
+    with pytest.raises(catalog.HeldFlag) as raised:
+        catalog.parse(argv, "codex", available=everything)
+    token = next(t for t in argv if t != "--").partition("=")[0]
+    assert raised.value.token == token and raised.value.code == "owned"
+    assert raised.value.exit_code == 3
+    assert raised.value.hint == catalog.HELD_FLAGS["codex"][token]
+
+
+def test_the_launchers_own_instructions_file_is_still_taken_before_the_dashes():
+    got = catalog.parse(["--instructions-file", "/i.md"], "codex", available=everything)
+    assert got.values["instructions_file"] == "/i.md"
+
+
 def test_refusing_the_git_check_skip_says_how_to_run_outside_a_git_repository():
     with pytest.raises(Owned) as raised:
         catalog.refuse_passthrough("codex", ["--skip-git-repo-check"], "exec")

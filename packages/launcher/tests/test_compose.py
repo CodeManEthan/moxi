@@ -361,10 +361,19 @@ def test_a_config_key_that_only_starts_with_a_posture_key_is_another_key(mode):
 
 
 def test_a_codex_launch_under_the_host_passes_extra_flags_unchanged():
-    got = codex.compose(codex_values(extra_flags=["--no-window", "--option", "x=1"]),
+    got = codex.compose(codex_values(extra_flags=["--option", "y=2", "--option", "x=1"]),
                         ctx(session_id=None, modules=frozenset({"turns"}), host=HOST))
     assert list(got.argv) == [HOST, *HOST_HEAD, "--sandbox", "workspace-write",
-                              *UPDATE_OPTION, "--no-window", "--option", "x=1"]
+                              *UPDATE_OPTION, "--option", "y=2", "--option", "x=1"]
+
+
+@pytest.mark.parametrize("tail", [["--resume", "thread-1"], ["--no-window"],
+                                  ["--options-file", "/o.json"],
+                                  ["--instructions-file=/i.md"]])
+def test_a_host_flag_no_launch_passes_on_is_refused_under_the_host(tail):
+    with pytest.raises(catalog.HeldFlag):
+        codex.compose(codex_values(extra_flags=tail),
+                      ctx(session_id=None, modules=frozenset({"turns"}), host=HOST))
 
 
 @pytest.mark.parametrize("tail", [["--permissions", "dev"], ["--permissions=dev"]])

@@ -606,8 +606,8 @@ def test_a_codex_launch_with_an_identity_and_extra_flags_is_refused(monkeypatch)
     assert caught.value.exit_code == codes.REFUSED
     assert "takes no other flags" in caught.value.hint
     # Without an identity, or for Claude, the flags go on.
-    assert resolve(typed={"harness": "codex"}, extra=["--no-window"],
-                   available=only("turns")).values["extra_flags"] == ["--no-window"]
+    assert resolve(typed={"harness": "codex"}, extra=["--option", "x=1"],
+                   available=only("turns")).values["extra_flags"] == ["--option", "x=1"]
     assert resolve(typed={"harness": "claude", "identity": "x"}, extra=["--verbose"],
                    available=only("comms")).identity == "x"
 

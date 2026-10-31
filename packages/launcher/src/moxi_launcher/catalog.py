@@ -110,6 +110,21 @@ POSTURE_FLAGS = {
               "--approve-for-me": "approval",
               "--not-so-yolo": "approval"},
 }
+#: Flags of turns' Codex host that a launch never passes on, though the host takes them,
+#: each with what to do instead. Resuming a thread isn't offered yet; a launch always
+#: runs the Codex window; an options file can set the sandbox where the posture check
+#: can't see it; and the launcher gives the seat's instructions itself.
+HELD_FLAGS = {
+    "codex": {
+        "--resume": "resuming a thread is not offered yet; start a new session",
+        "--no-window": "a launch always runs the Codex window; leave --no-window out",
+        "--options-file": "an options file can set the sandbox where the posture check "
+                          "can't see it; give each setting with its own option, or with "
+                          "--config",
+        "--instructions-file": "give the seat's instructions with the launcher's own "
+                               "--instructions-file, before any --",
+    },
+}
 #: What to do instead, for an owned row whose plain "leave it out" would leave the user
 #: stuck: (harness, row) to the hint. `codex exec` runs outside a git repository only
 #: with its git check skipped, which the launcher does for a scratch launch alone (a
@@ -223,6 +238,15 @@ class PostureFlag(Owned):
         Refused.__init__(self, row, f"{token} sets what the posture row {row} sets, and "
                                     "has no row of its own for the posture check to see",
                          _posture_hint(harness, row, token, mode))
+
+
+class HeldFlag(Owned):
+    """A flag of turns' Codex host that a launch never passes on (`HELD_FLAGS`)."""
+
+    def __init__(self, token: str, hint: str):
+        self.token = token
+        Refused.__init__(self, None, f"{token} is a flag of turns' Codex host that a launch "
+                                     "does not pass on", hint)
 
 
 class PostureKey(Owned):
@@ -919,13 +943,15 @@ def refuse_passthrough(harness: str, tokens: Sequence[str],
                        mode: str | None = None) -> None:
     """Raise `Owned` when a token of `tokens`, flags passed on to `harness`, spells an
     owned or a posture row in any of its modes, `PostureFlag` when it is a flag with
-    no row that sets what a posture row sets (`POSTURE_FLAGS`), and `PostureKey` when it
+    no row that sets what a posture row sets (`POSTURE_FLAGS`), `HeldFlag` when it is a
+    host flag no launch passes on (`HELD_FLAGS`), and `PostureKey` when it
     is a config override or a settings string whose key does (`POSTURE_KEYS`,
     `POSTURE_SETTINGS`). A templated spelling (Codex's `-c
     check_for_update_on_startup=false`) matches only when the value's key does. `mode`
     is the launch's mode when it is known, for the refusal's hint."""
     rows = [r for r in load(harness) if r.owned or r.posture]
     standing_in = POSTURE_FLAGS.get(harness, {})
+    held = HELD_FLAGS.get(harness, {})
     key_flags, _ = POSTURE_KEYS.get(harness, ((), {}))
     tokens = list(tokens)
     for i, token in enumerate(tokens):
@@ -934,6 +960,8 @@ def refuse_passthrough(harness: str, tokens: Sequence[str],
             continue
         if flag in standing_in:
             raise PostureFlag(standing_in[flag], flag, harness, mode)
+        if flag in held:
+            raise HeldFlag(flag, held[flag])
         value = attached if attached is not None else (
             tokens[i + 1] if i + 1 < len(tokens) else None)
         for row_ in rows:
