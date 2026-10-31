@@ -27,8 +27,6 @@ KEY = re.compile(r"^[A-Za-z0-9_-]{43}$")
 NOT_SENT = "the module didn't get the act"
 MAY_HAVE_ACTED = "the module may have acted; check its page"
 ACT = "**/m/fixture/api/confirm"
-REACHES = {"host", "x-moxi-token", "accept", "accept-language", "content-type",
-           "content-length", "if-none-match", "last-event-id", "idempotency-key"}
 
 
 def _lines(shell, name: str) -> list[str]:
@@ -79,7 +77,6 @@ def test_the_sheet_shows_the_act_and_a_double_click_posts_once(ui_shell, ui_page
     panel = ui_page.locator("#moxi-panel > moxi-fixture-page")
     posts = _posts(ui_page)
     runs = len(_lines(ui_shell, "keys"))
-    seen = len(_lines(ui_shell, "confirm-headers"))
     panel.get_by_role("button", name="Confirmed add").click()
     sheet = ui_page.locator("moxi-ui-confirm")
     dialog = sheet.get_by_role("dialog", name="Fixture")
@@ -93,11 +90,8 @@ def test_the_sheet_shows_the_act_and_a_double_click_posts_once(ui_shell, ui_page
     assert len(posts) == 1
     key = posts[0].headers["idempotency-key"]
     assert KEY.match(key)
-    # The module ran once, with the key the browser sent.
+    # The module ran once, with the key the browser sent: it reached the page server.
     assert _lines(ui_shell, "keys")[runs:] == [key]
-    # The fixture sees the key, and no browser header past the shell's allowlist.
-    names, = [json.loads(line) for line in _lines(ui_shell, "confirm-headers")[seen:]]
-    assert "idempotency-key" in names and set(names) <= REACHES, names
     # The sheet runs under the shell's policy with no violation or error.
     assert errors == []
 

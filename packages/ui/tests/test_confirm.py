@@ -1,6 +1,7 @@
 """Confirmed acts through the shell, with no browser: the modules view names them, the
-shell passes `Idempotency-Key` to the page server and no other browser header past its
-allowlist, and the module's answers come back as it sent them.
+shell's allowlist passes `Idempotency-Key` and the page server's act gets it, and the
+module's answers come back as it sent them. That no other browser header reaches a page
+server is shown at the proxy (test_proxy.py), against a stand-in that records them all.
 
 The test shell serves `ui` and the `fixture` module (tests/conftest.py)."""
 
@@ -18,10 +19,6 @@ from moxi_ui.router import FORWARDED_HEADERS, forwarded
 from moxi_ui.snapshot import confirmed_paths, modules_value
 
 pytestmark = pytest.mark.timeout(60)
-
-#: What may reach a page server: the allowlist, and the Host and token the shell sets.
-REACHES = {name.decode() for name in FORWARDED_HEADERS} | {"host", "x-moxi-token"}
-
 
 def _post(shell, session, path: str, body: bytes, extra: dict[str, str]) -> tuple[int, dict]:
     conn = http.client.HTTPConnection("127.0.0.1", shell.port, timeout=10)
@@ -80,19 +77,15 @@ def test_the_shell_lists_the_fixtures_confirmed_act(ui_shell):
     assert rows["ui"]["confirmed"] == []
 
 
-def test_the_page_server_gets_the_key_and_no_browser_header_past_the_allowlist(ui_shell):
+def test_the_page_servers_act_gets_the_key_the_caller_sent(ui_shell):
     session = ui_shell.session()
     key = secrets.token_urlsafe(32)
-    before = len(_lines(ui_shell, "confirm-headers"))
     status, data = _post(ui_shell, session, "/m/fixture/api/confirm", b'{"by":1}', {
         "Idempotency-Key": key, "User-Agent": "Test/1", "Referer": ui_shell.url + "/m/fixture/",
         "Accept": "application/json", "Accept-Encoding": "gzip"})
     assert status == 202, data
     assert data["status"].startswith("/api/job?job=")
     assert _lines(ui_shell, "keys")[-1] == key
-    names, = [json.loads(line) for line in _lines(ui_shell, "confirm-headers")[before:]]
-    assert "idempotency-key" in names
-    assert set(names) <= REACHES, set(names) - REACHES
     # The status link the act gave is a read of the same page, through the shell.
     status, job = session.get("/m/fixture" + data["status"])
     assert status == 200 and job["state"] == "done"
