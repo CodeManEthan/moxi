@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import io
 import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 from moxi_comms import cli, config, paths
 
@@ -50,8 +53,8 @@ def test_a_box_with_its_daemon_up(rig):
     assert r["device"] == "testbox"
     home = Path(os.environ["MOXI_COMMS_HOME"])
     assert r["DATA"] == str(home / "data" / "comms") == str(paths.data_dir())
-    assert r["STATE"] == str(home / "state" / "testbox" / "comms")
-    assert r["CACHE"] == str(home / "cache" / "testbox" / "comms")
+    assert r["STATE"] == str(home / "state" / "comms")
+    assert r["CACHE"] == str(home / "cache" / "comms")
     assert r["CONFIG"] == str(home / "config" / "comms") == str(paths.config_dir())
     assert r["RUNTIME"] == str(paths.runtime_dir())
     assert r["backend"] == "local (the default)"
@@ -122,3 +125,44 @@ def test_a_real_doctor_process_runs_as_moxi_comms(tmp_path):
                            capture_output=True, text=True, timeout=60)
     assert usage.stdout.startswith("usage: moxi comms ")
     assert not (tmp_path / "u").exists()
+
+
+@pytest.fixture
+def no_device(tmp_path, monkeypatch):
+    """No device variable, and the core's roots under a tmp `MOXI_HOME`; returns the
+    core's state root."""
+    monkeypatch.delenv("MOXI_COMMS_DEVICE")
+    monkeypatch.delenv("MOXI_DEVICE", raising=False)
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path / "moxi"))
+    return tmp_path / "moxi" / "state"
+
+
+def test_with_no_device_id_yet_it_says_so_and_writes_none(no_device):
+    code, out = doctor(env={"PATH": ""})
+    assert code == 0, out
+    assert rows(out)["device"].startswith("none set yet (")
+    assert not no_device.exists()
+
+
+def test_it_shows_a_device_id_that_exists(no_device):
+    (no_device / "moxi").mkdir(parents=True)
+    (no_device / "moxi" / "device-id").write_text("0123abcd\n")
+    _, out = doctor(env={"PATH": ""})
+    assert rows(out)["device"] == "0123abcd"
+
+
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0,
+                    reason="POSIX modes, which root ignores")
+@pytest.mark.parametrize("mode", [stat.S_IRUSR | stat.S_IXUSR, 0])
+def test_a_state_root_it_cannot_write_or_read_is_a_row(no_device, mode):
+    (no_device / "moxi").mkdir(parents=True)
+    no_device.chmod(mode)
+    try:
+        code, out = doctor(env={"PATH": ""})
+    finally:
+        no_device.chmod(stat.S_IRWXU)
+    assert code == 0, out
+    device = rows(out)["device"]
+    assert device.startswith("none set yet (" if mode else "ERROR: "), device
+    assert sorted(p.name for p in no_device.iterdir()) == ["moxi"]
+    assert list((no_device / "moxi").iterdir()) == []

@@ -34,11 +34,10 @@ Homepage = "https://github.com/moxihq/moxi"
 Repository = "https://github.com/moxihq/moxi"
 Issues = "https://github.com/moxihq/comms/issues"
 
-# Every Moxi distribution declares the umbrella, so a plain install puts `moxi` on PATH.
-# The module's own commands run as `moxi comms <verb>`; there is no bare `comms` script.
-# The internal entry points below are each named moxi-comms-<part>.
+# Only the core declares the `moxi` script. The module's own commands run as
+# `moxi comms <verb>`; there is no bare `comms` script. The internal entry points below
+# are each named moxi-comms-<part>.
 [project.scripts]
-moxi = "moxi.cli:main"
 moxi-comms-daemon = "moxi_comms.daemon:main"
 moxi-comms-shim = "moxi_comms.adapters.claude_shim:main"
 moxi-comms-claude = "moxi_comms.adapters.session:main"

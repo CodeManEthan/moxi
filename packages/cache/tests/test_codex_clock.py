@@ -1,7 +1,8 @@
 """The Codex clock: a thread's rollout read by the evidence rule, the two pairs, `fresh`,
 and drift on a measured row.
 
-Fixture rollouts are built in Codex 0.153.0's shapes; every read is against tmp paths.
+Fixture rollouts are built in Codex 0.153.0's shapes through sessions' `CodexRollout`;
+every read is against tmp paths.
 The pure reads call `codex.read` with the drift view a test builds, as the store would
 hand it; `test_drift.py` covers the store itself, and `api.read` the store's seam.
 """
@@ -16,7 +17,9 @@ import pytest
 
 from moxi_cache import api, codex, drift, opencode, table
 from moxi_cache import clock as _clock
-from moxi_sessions.api import claude as transcripts
+from moxi_sessions.api import codex as rollouts
+from moxi_sessions.api import opencode as oc_reader
+from conftest import CodexRollout, token_usage
 
 NOW = 1_791_300_000.0                    # a fixed "now" for the pure reads
 TID = "0190c000-0000-7000-8000-00000000000a"
@@ -43,90 +46,119 @@ def iso(t: float) -> str:
     return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
-def meta_payload(tid=TID, **over) -> dict:
-    payload = {"session_id": tid, "id": tid, "timestamp": iso(NOW - 86400),
-               "cwd": "/tmp/work", "originator": "moxi-test", "cli_version": "0.153.0",
-               "source": "vscode", "thread_source": "user", "model_provider": "openai",
-               "base_instructions": {"text": "You are Codex."},
-               "history_mode": "paginated", "multi_agent_version": 1,
-               "context_window": 258400}
-    payload.update(over)
-    return {k: v for k, v in payload.items() if v is not ...}
+#: Line 1's keys these fixtures write where the builder's own differ; all are on
+#: `META_KEYS`.
+META = {"cwd": "/tmp/work", "originator": "moxi-test", "source": "vscode",
+        "thread_source": "user", "multi_agent_version": 1, "context_window": 258400}
 
 
 class Rollout:
-    """A rollout, line by line, in Codex 0.153.0's shapes."""
+    """A rollout in Codex 0.153.0's shapes, written through one `CodexRollout`. Each call
+    stamps its line with the time it names; `meta` sets line 1's keys (None leaves one
+    out)."""
 
     def __init__(self, tid=TID, **meta):
         self.tid = tid
-        self.lines = [{"timestamp": iso(NOW - 86400), "ordinal": 0, "type": "session_meta",
-                       "payload": meta_payload(tid, **meta)}]
-        self.raw_tail = None
+        version = meta.pop("cli_version", "0.153.0")
+        self.b = CodexRollout(Path(), thread_id=tid, cli_version=version,
+                              start=NOW - 86400, meta_fields={**META, **meta})
+
+    def at(self, t) -> CodexRollout:
+        """The builder, its clock set to `t` for the next line."""
+        self.b.clock = t
+        return self.b
 
     def add(self, kind, t, payload):
-        self.lines.append({"timestamp": iso(t), "ordinal": len(self.lines), "type": kind,
-                           "payload": payload})
+        self.at(t).line(kind, payload)
         return self
 
     def event(self, sub, t, **payload):
-        return self.add("event_msg", t, {"type": sub, **payload})
+        self.at(t).event(sub, **payload)
+        return self
 
     def item(self, sub, t, **payload):
-        return self.add("response_item", t, {"type": sub, **payload})
+        self.at(t).item(sub, **payload)
+        return self
+
+    def raw(self, text):
+        """`text` as one line, as it is."""
+        self.b.add_raw(text)
+        return self
 
     def start(self, turn, t):
-        return self.event("task_started", t, turn_id=turn, started_at=int(t))
+        self.at(t).turn(turn_id=turn, context=False)
+        return self
 
     def context(self, turn, t, model="gpt-5.6-terra"):
-        return self.add("turn_context", t, {"turn_id": turn, "model": model,
-                                            "cwd": "/tmp/work"})
+        self.b.turn_id = turn
+        self.at(t).turn_context(model)
+        return self
 
     def tsa(self, t, model="gpt-5.6-terra", provider="openai", thread=...):
         thread = self.tid if thread is ... else thread
-        payload = {"type": "thread_settings_applied",
-                   "thread_settings": {"model": model, "model_provider_id": provider}}
+        if thread == self.tid:
+            self.at(t).settings(model, provider)
+            return self
+        payload = {"thread_settings": {"model": model, "model_provider_id": provider}}
         if thread is not None:
             payload["thread_id"] = thread
-        return self.add("event_msg", t, payload)
+        self.at(t).event("thread_settings_applied", **payload)
+        return self
 
     def record(self, turn, t, *, inp=20_000, cached=19_500, session=..., thread=...,
                rid=None):
+        """A `token_usage_record` alone, with no `token_count` after it."""
         return self.add("token_usage_record", t, {
             "thread_id": self.tid if thread is ... else thread, "turn_id": turn,
             "session_id": self.tid if session is ... else session,
             "response_id": rid or f"resp_{turn}_{int(t)}",
-            "usage": {"input_tokens": inp, "cached_input_tokens": cached,
-                      "output_tokens": 5, "total_tokens": inp + 5}})
+            "usage": token_usage(input=inp, cached=cached, output=5, reasoning=0)})
 
     def turn(self, turn, t, *, model="gpt-5.6-terra", length=5.0, inp=20_000,
              cached=19_500, records=1):
         """A whole turn: start, context, the user message, `records` requests, done."""
         self.start(turn, t).context(turn, t + 0.01, model)
         self.event("item_completed", t + 0.02, item={"type": "UserMessage", "id": "u"})
-        self.item("message", t + 0.02, role="user", content=[])
+        self.at(t + 0.02).user("hello")
         for n in range(records):
             stamp = t + length * (n + 1) / records
-            self.item("reasoning", stamp - 0.01, summary=[])
+            self.at(stamp - 0.01).reasoning()
             self.record(turn, stamp, inp=inp, cached=cached if n == 0 else inp - 100)
-        self.item("message", t + length + 0.01, role="assistant", content=[])
-        return self.event("task_complete", t + length + 0.02, turn_id=turn)
+        self.at(t + length + 0.01).assistant()
+        self.b.turn_id = turn
+        self.at(t + length + 0.02).turn_end()
+        return self
 
-    def text(self) -> str:
-        body = "".join(json.dumps(line) + "\n" for line in self.lines)
-        if self.raw_tail is not None:
-            body += self.raw_tail
-        return body
+    def edit_last(self, kind, **keys):
+        """Set `keys` on the last line of top-level `kind`, as written."""
+        index = max(i for i, text in enumerate(self.b.lines)
+                    if json.loads(text).get("type") == kind)
+        line = json.loads(self.b.lines[index])
+        line.update(keys)
+        self.b.lines[index] = json.dumps(line)
+        return self
 
-    def write(self, root: Path, *, suffix="", name_tid=None, day="2026/10/05",
-              zst=False) -> Path:
-        directory = root / day
-        directory.mkdir(parents=True, exist_ok=True)
-        name = f"rollout-2026-10-05T15-55-21-{name_tid or self.tid}{suffix}.jsonl"
+    def end(self) -> float:
+        """The time of the last `token_usage_record`, as written."""
+        lines = [json.loads(text) for text in self.b.lines]
+        stamp = [ln for ln in lines if ln.get("type") == "token_usage_record"][-1]
+        return datetime.fromisoformat(stamp["timestamp"]).timestamp()
+
+    def write(self, root: Path, *, suffix="", day="2026/10/05", zst=False,
+              tail=None) -> Path:
+        """The file under `root`. `tail` is written after the last line, with no newline:
+        a line Codex is writing."""
+        name = f"rollout-2026-10-05T15-55-21-{self.tid}{suffix}.jsonl"
         if zst:
             name += ".zst"
-        path = directory / name
-        path.write_text(self.text())
-        return path
+        self.b.path = Path(root) / day / name
+        if tail is None:
+            return self.b.write()
+        self.b.add_raw(tail)
+        try:
+            return self.b.write(terminated=False)
+        finally:
+            self.b.lines.pop()
 
 
 def sessions_root(tmp_path) -> Path:
@@ -308,9 +340,9 @@ def test_an_older_codex_with_token_count_and_no_record_is_unknown(tmp_path):
     assert clock.kind == "unknown" and clock.reason == codex.OLDER_CODEX
 
 
-def fresh_rollout() -> Rollout:
+def fresh_rollout(**meta) -> Rollout:
     """Every kind a new thread writes before its first response."""
-    r = Rollout().start("t1", NOW - 10)
+    r = Rollout(**meta).start("t1", NOW - 10)
     r.item("message", NOW - 9.9, role="developer", content=[])
     r.item("message", NOW - 9.8, role="user", content=[])
     r.add("world_state", NOW - 9.7, {"full": True, "state": {}})
@@ -349,8 +381,7 @@ def test_one_line_off_the_fresh_whitelist_is_unknown(tmp_path, extra):
 
 def test_a_cli_version_the_reader_was_not_checked_against_is_unknown(tmp_path):
     root = sessions_root(tmp_path)
-    r = fresh_rollout()
-    r.lines[0]["payload"]["cli_version"] = "0.154.0"
+    r = fresh_rollout(cli_version="0.154.0")
     r.write(root)
     assert codex_read(root, turned=False).kind == "unknown"
     # ... but a record of the thread's own reads by its record, whatever the version.
@@ -374,50 +405,94 @@ def test_a_line_the_reader_does_not_recognise_is_unknown(tmp_path, bad, where):
     r = Rollout()
     if where == "before":
         r.turn("t1", NOW - 100)
-    path = r.write(root)
-    text = path.read_text() + bad + "\n"
+    r.raw(bad)
     if where == "after":
-        text = Rollout().turn("t1", NOW - 100).text() + bad + "\n"
-    path.write_text(text)
+        r = Rollout().turn("t1", NOW - 100).raw(bad)
+    r.write(root)
     for turned in (True, False):
         clock = codex_read(root, turned=turned)
         assert clock.kind == "unknown", (where, turned)
 
 
+@pytest.mark.parametrize("turned", [True, False])
+def test_a_message_between_threads_does_not_move_the_clock(tmp_path, turned):
+    """A thread that spawned another writes `inter_agent_communication_metadata` when a
+    message passes between them. The line is known and holds no request, so the clock
+    reads the thread as it reads one without the line."""
+    clocks = []
+    for name, metadata in (("without", False), ("with", True)):
+        root = sessions_root(tmp_path / name)
+        r = Rollout().turn("t1", NOW - 600)
+        if metadata:
+            r.add("inter_agent_communication_metadata", NOW - 590, {"trigger_turn": False})
+        r.turn("t2", NOW - 300)
+        if metadata:
+            r.add("inter_agent_communication_metadata", NOW - 60, {"trigger_turn": True})
+        r.write(root)
+        clocks.append(codex_read(root, turned=turned))
+    without, with_line = clocks
+    assert with_line.code != "unrecognised"
+    assert (with_line.kind, with_line.code, with_line.age_seconds) == (
+        without.kind, without.code, without.age_seconds)
+
+
+def test_a_token_usage_record_with_no_usage_is_unrecognised(tmp_path):
+    """A `token_usage_record` with no `usage` object is malformed to sessions, so the
+    clock cannot read it as a request with no counts: it is `unknown`, `unrecognised`,
+    as the newest line or behind a whole turn."""
+    for name, r in (("alone", Rollout()), ("behind-a-turn", one_turn(600))):
+        root = sessions_root(tmp_path / name)
+        r.record("t2", NOW - 60)
+        line = json.loads(r.b.lines[-1])
+        del line["payload"]["usage"]
+        r.b.lines[-1] = json.dumps(line)
+        r.write(root)
+        for turned in (True, False):
+            clock = codex_read(root, turned=turned)
+            assert (clock.kind, clock.code) == ("unknown", "unrecognised"), (name, clock)
+            assert clock.reason == codex.UNRECOGNISED
+
+
 def test_a_last_line_being_written_is_skipped_but_a_whole_one_is_judged(tmp_path):
     root = sessions_root(tmp_path)
     r = one_turn(60)
-    r.raw_tail = '{"timestamp": "2026-10-05T20:55:2'          # no newline, no parse
-    r.write(root)
+    r.write(root, tail='{"timestamp": "2026-10-05T20:55:2')   # no newline, no parse
     assert codex_read(root).kind == "warm"
-    r.raw_tail = json.dumps({"timestamp": iso(NOW - 1), "type": "realtime_item",
-                             "payload": {}})                # no newline, parses
-    r.write(root)
+    r.write(root, tail=json.dumps({"timestamp": iso(NOW - 1), "type": "realtime_item",
+                                   "payload": {}}))       # no newline, parses
     assert codex_read(root).kind == "unknown"
 
 
 def test_the_lists_are_pinned():
-    assert codex.TOP_KINDS == ("session_meta", "turn_context", "world_state",
-                                     "token_usage_record", "compacted", "event_msg",
-                                     "response_item")
-    assert set(codex.EVENT_KINDS) == {
+    """The lists the evidence rule reads by live in sessions' Codex mapping, and the
+    OpenCode versions and session-row totals the `fresh` check reads live in sessions'
+    OpenCode reader; cache's verdicts rest on them, so a change to any of them fails here
+    too."""
+    assert rollouts.TOP_KINDS == ("session_meta", "turn_context", "world_state",
+                                  "token_usage_record", "compacted", "event_msg",
+                                  "response_item", "inter_agent_communication_metadata")
+    assert set(rollouts.EVENT_KINDS) == {
         "item_completed", "token_count", "thread_goal_updated", "thread_rolled_back",
         "turn_aborted", "task_started", "task_complete", "thread_settings_applied",
         "user_message", "agent_message", "agent_reasoning", "agent_reasoning_raw_content",
         "entered_review_mode", "exited_review_mode", "patch_apply_end",
         "context_compacted", "mcp_tool_call_end", "web_search_end",
         "image_generation_end", "sub_agent_activity"}
-    assert set(codex.RESPONSE_KINDS) == {
+    assert set(rollouts.RESPONSE_KINDS) == {
         "message", "agent_message", "reasoning", "local_shell_call", "function_call",
         "tool_search_call", "function_call_output", "tool_search_output",
         "custom_tool_call", "custom_tool_call_output", "web_search_call",
         "image_generation_call", "compaction", "context_compaction"}
-    assert set(codex.META_KEYS) == {
+    assert set(rollouts.META_KEYS) == {
         "session_id", "id", "timestamp", "cwd", "originator", "cli_version", "source",
         "thread_source", "model_provider", "base_instructions", "history_mode",
         "multi_agent_version", "context_window", "git"}
-    assert codex.CHECKED_VERSIONS == ("0.153.0",)
-    assert opencode.CHECKED_VERSIONS == ("1.18.34",)
+    assert rollouts.HISTORY_MODES == ("legacy", "paginated")
+    assert rollouts.CHECKED_VERSIONS == ("0.153.0",)
+    assert oc_reader.CHECKED_VERSIONS == ("1.18.34",)
+    assert oc_reader.TOTALS == ("tokens_input", "tokens_output", "tokens_reasoning",
+                                "tokens_cache_read", "tokens_cache_write", "cost")
+    assert not hasattr(opencode, "CHECKED_VERSIONS") and not hasattr(opencode, "TOTALS")
 
 
 def test_no_rollout_file(tmp_path):
@@ -502,9 +577,7 @@ def test_unreadable_and_scan_limit_and_no_stamp(tmp_path, monkeypatch):
     clock = codex.read(TID, cache_source=str(root), turned=True, new_session=False, now=NOW, drift={})
     assert clock.kind == "unknown" and "no request found" in clock.reason
     monkeypatch.setattr(_clock, "CLOCK_SCAN_LIMIT", FULL_LIMIT)
-    r = one_turn(60)
-    record = [ln for ln in r.lines if ln["type"] == "token_usage_record"][-1]
-    record["timestamp"] = "not a time"
+    r = one_turn(60).edit_last("token_usage_record", timestamp="not a time")
     r.write(root)
     assert codex_read(root).reason == codex.NO_STAMP
 
@@ -537,21 +610,19 @@ def test_a_session_meta_that_is_not_the_whole_history_is_unknown(tmp_path, chang
     for turned in (True, False):
         clock = codex_read(root, turned=turned)
         assert clock.kind == "unknown" and clock.reason == codex.NOT_WHOLE
-    fresh = fresh_rollout()
-    fresh.lines[0]["payload"].update(change)
-    fresh.write(root)
+    fresh_rollout(**change).write(root)
     assert codex_read(root, turned=False).kind == "unknown"
 
 
 def test_a_second_session_meta_and_a_line_one_that_is_not_one(tmp_path):
     root = sessions_root(tmp_path)
     r = one_turn(60)
-    r.lines.insert(3, dict(r.lines[0]))
+    r.b.lines.insert(3, r.b.lines[0])
     r.write(root)
     assert codex_read(root).reason == codex.NOT_WHOLE
     r = one_turn(60)
-    r.lines.insert(0, {"timestamp": iso(NOW - 90000), "type": "world_state",
-                       "payload": {}})
+    r.b.lines.insert(0, json.dumps({"timestamp": iso(NOW - 90000), "type": "world_state",
+                                    "payload": {}}))
     r.write(root)
     for turned in (True, False):
         assert codex_read(root, turned=turned).reason == codex.NOT_WHOLE
@@ -598,8 +669,7 @@ BREAKERS = {
 def drift_read(tmp_path, rollout, *, drift=None, bound_at=0.0, judged=None, now=None):
     root = sessions_root(tmp_path)
     rollout.write(root)
-    stamp = [ln for ln in rollout.lines if ln["type"] == "token_usage_record"][-1]
-    end = transcripts.parse_timestamp(stamp["timestamp"])
+    end = rollout.end()
     return codex_read(root, now=end + 60 if now is None else now, drift=drift,
                       bound_at=bound_at, judged=judged)
 

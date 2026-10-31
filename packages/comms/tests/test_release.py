@@ -20,7 +20,6 @@ SOURCE = REPO / "src" / "moxi_comms"
 
 #: The internal entry points: one name per entry point, moxi-comms-<part>.
 SCRIPTS = {
-    "moxi": "moxi.cli:main",
     "moxi-comms-daemon": "moxi_comms.daemon:main",
     "moxi-comms-shim": "moxi_comms.adapters.claude_shim:main",
     "moxi-comms-claude": "moxi_comms.adapters.session:main",
@@ -98,11 +97,12 @@ def test_the_package_requires_the_core_and_turns_and_codex_is_an_extra():
         "members declare no sources: a clone of one member resolves its siblings"
 
 
-def test_the_scripts_are_the_umbrella_and_the_internal_entry_points():
-    """There is no bare `comms` script: the module runs as `moxi comms`."""
+def test_the_scripts_are_the_internal_entry_points_alone():
+    """No bare `comms` script: the module runs as `moxi comms`. No `moxi` script either:
+    only the core declares it."""
     scripts = PYPROJECT["project"]["scripts"]
     assert scripts == SCRIPTS
-    assert "comms" not in scripts
+    assert "comms" not in scripts and "moxi" not in scripts
 
 
 def test_comms_registers_its_listener_with_turns():

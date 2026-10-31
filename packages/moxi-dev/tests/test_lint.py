@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from moxi_dev.contract import CORE_MODULES
 from moxi_dev.lint import IMPORTLINTER_CONFIG, LintError, plan
 from test_contract_rules import Repo, announcement, pyproject
 
@@ -137,6 +138,17 @@ def test_a_workspace_member_s_announcement_is_read_from_its_directory(repo, tmp_
 def test_the_core_s_modules_outside_its_table_are_refused(repo, line):
     repo.src("core.py", line + "\n")
     assert "moxi_alpha.core -> moxi.install (l.1)" in run(repo)[INTERNALS]
+
+
+def test_the_core_s_shared_modules_pass(repo):
+    repo.src("core.py", "".join(f"import moxi.{m}\n" for m in sorted(CORE_MODULES)))
+    assert run(repo) == {}
+
+
+@pytest.mark.parametrize("module", ["uninstall", "catalogue", "_settle", "_vendor"])
+def test_the_core_s_own_modules_are_refused(repo, module):
+    repo.src("core.py", f"import moxi.{module}\n")
+    assert f"moxi_alpha.core -> moxi.{module} (l.1)" in run(repo)[INTERNALS]
 
 
 def core_repo(root: Path) -> Repo:

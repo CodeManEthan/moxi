@@ -16,9 +16,8 @@ Homepage = "https://github.com/moxihq/moxi"
 Repository = "https://github.com/moxihq/moxi"
 Issues = "https://github.com/moxihq/turns/issues"
 
-# Every Moxi distribution declares the umbrella, so a plain install puts `moxi` on PATH.
+# Only the core declares the `moxi` script.
 [project.scripts]
-moxi = "moxi.cli:main"
 # Internal entry points, spawned by the Claude runner or a Codex host, never typed.
 moxi-turns-endpoint = "moxi_turns.claude_endpoint:main"
 moxi-turns-ping = "moxi_turns.codex_hooks:main"

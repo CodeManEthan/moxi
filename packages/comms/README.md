@@ -37,25 +37,33 @@ experimental adapters.
 
 ## Install
 
-Linux, Python 3.12 or later.
+Linux, Python 3.12 or later, and [uv](https://docs.astral.sh/uv/).
 
 ```sh
-uv tool install moxi-comms
+uv tool install moxi
+moxi install comms
 moxi comms doctor
 moxi comms service install
 ```
 
-Until the package is on PyPI, install from the repository:
+`uv tool install moxi` puts the `moxi` command on PATH, and `moxi install comms` adds comms
+and turns, which it requires, to the environment `moxi` runs in. Install comms through
+`moxi install`, not on its own: a copy installed elsewhere is one `moxi` can't see. `uv
+tool install` fetches Python 3.12 if the machine lacks it; otherwise `uv python install
+3.12` supplies one.
+
+Before the modules are on PyPI, install the core from git and give `moxi install` a git
+source for turns and for comms:
 
 ```sh
-uv tool install git+https://github.com/moxihq/moxi#subdirectory=packages/comms
+uv tool install git+https://github.com/moxihq/moxi#subdirectory=packages/moxi
+moxi install comms \
+  --from 'moxi-turns @ git+https://github.com/moxihq/moxi#subdirectory=packages/turns' \
+  --from 'moxi-comms @ git+https://github.com/moxihq/moxi#subdirectory=packages/comms'
 ```
 
-`pipx install` works the same way. `uv tool install` fetches Python 3.12 if the machine
-lacks it; otherwise `uv python install 3.12` supplies one.
-
-The install brings the `moxi` command with it; comms' commands run as `moxi comms
-<verb>`. `moxi shortcut comms` adds a bare `comms` command if you want one.
+comms' commands run as `moxi comms <verb>`. `moxi shortcut comms` adds a bare `comms`
+command if you want one.
 
 - `moxi comms doctor` prints what this machine resolved: where files live, the config
   file, the backend (`local`) and where that choice came from, the provisioned
@@ -66,22 +74,27 @@ The install brings the `moxi` command with it; comms' commands run as `moxi comm
   needs setting up. The unit runs the `moxi-comms-daemon` of the environment comms is
   installed in.
 
-The daemon also runs fine in the foreground, which is the simplest way to watch it:
+The daemon also runs fine in the foreground, which is the simplest way to watch it.
+`moxi install comms` puts it in the `moxi` tool's environment, whose scripts uv doesn't put
+on PATH, so run it by its path there:
 
 ```sh
-moxi-comms-daemon
+"$(uv tool dir)/moxi/bin/moxi-comms-daemon"
 ```
+
+On Windows the script is `Scripts\moxi-comms-daemon.exe` in the same tool directory; in
+PowerShell, `& "$(uv tool dir)\moxi\Scripts\moxi-comms-daemon.exe"`.
+
+`moxi comms service install` prints the same path as the unit's `ExecStart=`, and
+`moxi modules --json` names the environment as `prefix`.
 
 The user service stops when you log out. To keep it running, enable lingering for your
 user (`loginctl enable-linger $USER`); comms doesn't do that for you, because it changes
 your login policy for the whole machine.
 
-To remove it: `moxi comms service uninstall`, then `uv tool uninstall moxi-comms`. Your
-messages stay under `~/.local/state/moxi/` and `~/.local/share/moxi/`
-until you delete them.
-
-If removing another Moxi tool from the same environment took the `moxi` command with
-it, reinstall: `uv tool install moxi-comms --reinstall-package moxi-comms`.
+To remove it: `moxi comms service uninstall`, then take comms out of the `moxi` tool
+(`uv tool install moxi` again, with a `--with` for each module you keep). Your messages
+stay under `~/.local/state/moxi/` and `~/.local/share/moxi/` until you delete them.
 
 ## Quick start with Claude Code
 
@@ -149,10 +162,17 @@ meets.
 | `moxi comms explain <name> [id]` | why a message did or didn't land |
 | `moxi comms doctor` | what this machine resolved, and whether the daemon answers |
 | `moxi comms service install\|uninstall\|status` | the daemon as a user service |
-| `moxi comms claude` | launch a named Claude Code session (also `moxi-comms-claude`) |
-| `moxi-comms-opencode` | launch an OpenCode session for a roster identity (experimental) |
-| `moxi-comms-daemon` | the daemon, in the foreground |
-| `moxi-comms-provision` | provision standing identities |
+| `moxi comms claude` | launch a named Claude Code session (also `"$(uv tool dir)/moxi/bin/moxi-comms-claude"`) |
+| `"$(uv tool dir)/moxi/bin/moxi-comms-opencode"` | launch an OpenCode session for a roster identity (experimental) |
+| `"$(uv tool dir)/moxi/bin/moxi-comms-daemon"` | the daemon, in the foreground |
+| `"$(uv tool dir)/moxi/bin/moxi-comms-provision"` | provision standing identities |
+
+comms' own scripts (`moxi-comms-daemon`, `moxi-comms-claude`, `moxi-comms-codex`,
+`moxi-comms-opencode`, `moxi-comms-provision`) are in the `moxi` tool's environment,
+which `moxi install comms` adds comms to, and uv puts none of them on PATH. Run one by
+its path: `"$(uv tool dir)/moxi/bin/<script>"`. On Windows the script is
+`Scripts\<script>.exe` in the same tool directory; in PowerShell,
+`& "$(uv tool dir)\moxi\Scripts\<script>.exe"`.
 
 `explain`, `doctor`, `moxi comms cache` (how cold each agent's prompt cache is, for the
 callers `[policy] cache_callers` names) and `moxi comms owner <session-id>` (which
@@ -201,14 +221,14 @@ on one of Zen's free models is reached at any age, and so is one on a model the 
 has no row for, which comms has no clock for. [docs/adapters.md](docs/adapters.md) has
 the detail.
 
-- **Codex**: `moxi-comms-codex <name>` launches one identity's thread through Moxi
+- **Codex**: `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <name>` launches one identity's thread through Moxi
   turns' Codex host, which runs the `codex app-server` and its hooks, and steers comms
   mail into the thread; a digest settles when its turn ends. Mail goes to the thread this launch
   started: /clear, /new, /fork and /resume in the window start or open another thread,
   which comms does not follow. To start fresh, end the launch and launch again. Install
-  the extra: `uv tool install 'moxi-comms[codex]'`. Identities are listed in the
+  the extra: `moxi install comms --with codex`. Identities are listed in the
   config file's `[codex]` table, `~/.config/moxi/comms/config.toml`.
-- **OpenCode**: `moxi-comms-opencode <name>` runs an OpenCode server for one identity and
+- **OpenCode**: `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <name>` runs an OpenCode server for one identity and
   opens its session in your terminal; mail goes to the server as its own prompts, never
   through your input box. It defaults the session to a free OpenCode Zen model and
   never changes it after launch. Each launch opens a new OpenCode session, as a new
@@ -250,7 +270,8 @@ How messages are routed, delivered and attributed is in
 - **A session got nothing.** `moxi comms explain <name>` says whether the name is bound, what
   was delivered, and whether the turn that read it completed.
 - **`moxi comms doctor` says the daemon isn't answering.** `moxi comms service status`, then
-  `journalctl --user -u moxi-comms-daemon`. Or run `moxi-comms-daemon` in a terminal.
+  `journalctl --user -u moxi-comms-daemon`. Or run the daemon in a terminal:
+  `"$(uv tool dir)/moxi/bin/moxi-comms-daemon"`.
 - **The daemon refuses to start because a token is missing.** The token store lost
   credentials the record expects; see [docs/security.md](docs/security.md).
 

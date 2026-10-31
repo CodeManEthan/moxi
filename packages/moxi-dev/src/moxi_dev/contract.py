@@ -30,9 +30,19 @@ finding names them:
    literal nor a module-level string constant, unless it falls under a prefix entry of
    `INTERNAL_ENV`; a key starting `MOXI_` that `INTERNAL_ENV` does not declare.
 6. A module's own console script looked up on PATH with `shutil.which` (in `src/`).
-7. The names: the `moxi.modules` entry point, the distribution and import names, the
-   console scripts, the announcement's ten names, the `CLI` target's `argv` and `prog`
-   parameters and the `SETTINGS` schema.
+7. The names: the `moxi.modules` entry point, the distribution and import names (no
+   module may take a core verb or a name the core keeps for itself), the console
+   scripts (a module never declares `moxi`, which the core alone declares; its others
+   are named `moxi-<name>-<part>`), the announcement, the `CLI` target's `argv` and
+   `prog` parameters and the `SETTINGS` schema. Each name of `moxi.modules.KNOWN` the
+   announcement defines is read as a literal and held to the checks `moxi.modules.load`
+   runs; a name it leaves out passes, as it takes its default.
+8. A write site not listed. In `src/`, every call that writes a file itself (`open`,
+   `io.open`, `os.fdopen` or a path's `.open` in a write mode, `os.open` with a write
+   flag, `.write_text`, `.write_bytes`, `os.replace`, `sqlite3.connect`) must have its
+   line in `tests/write-sites.txt`, and every line there must still match a site. The
+   list holds the sites a module has before it moves onto `moxi.files` and `moxi.store`,
+   so it only shrinks.
 
 `segment` findings hold a status line segment to showing only: the import-time closure of
 the announcement's `SEGMENT` module, within the module's package, may not import
@@ -41,16 +51,22 @@ nor call `os.system`, `os.exec*`, `os.spawn*`, `os.fork` or `os.kill`.
 
 The core's own package, known by its distribution name `moxi`, is held to checks 1 to 6
 with two exemptions: check 5 does not apply inside `moxi.paths` and `moxi.config`, which
-read every module's root locators and declared overrides by computed keys, and check 6
-does not apply to `shutil.which("moxi")` inside `moxi.cli`, where the shortcut verb looks
-up the umbrella's place. Check 7 is replaced: the core declares no `moxi.modules` entry
-point, its import package is `moxi`, and its one console script is
-`moxi = "moxi.cli:main"`. With no announcement, any extra the core declares fails check 4.
+read every module's root locators and declared overrides by computed keys, nor inside
+`moxi.log` and `moxi.proc`, which read the core's own logging and lifeline variables, nor
+inside `moxi.units._fence`, which reads the variable that lets a proof row reach a real
+supervisor under pytest; and check 6 does not apply to `shutil.which("moxi")` inside
+`moxi.cli`, where the shortcut verb looks up the umbrella's place. Check 7 is replaced:
+the core declares no `moxi.modules` entry point, its import package is `moxi`, and its
+one console script is `moxi = "moxi.cli:main"`. With no announcement, any extra the core
+declares fails check 4. Check 8 does not apply to the core, which holds the helpers
+modules write through. The core's vendored copies under `src/moxi/_vendor/` are released
+libraries kept as released, so no check reads them.
 
 moxi-dev, the distribution this module ships in, is the contributors' package and not a
-module: checks 1 and 7 do not apply to it, an import of `moxi_dev` is never another
-module's internals, and with no announcement to name its `INTERNAL_ENV`, check 5 lets it
-read the variables named `MOXI_TEST_<what>`, which are its own.
+module: checks 1, 7 and 8 do not apply to it (it installs nothing a user runs, so it
+has no move onto the core's write helpers to track), an import of `moxi_dev` is never
+another module's internals, and with no announcement to name its `INTERNAL_ENV`, check
+5 lets it read the variables named `MOXI_TEST_<what>`, which are its own.
 """
 
 from __future__ import annotations
@@ -63,10 +79,11 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from moxi import names
+from moxi.modules import KNOWN, _check, _TooNew
 
 #: The distribution and import name of the core.
 CORE = names.HARNESS
-#: The contributors' package: not a module, so checks 1 and 7 pass it by.
+#: The contributors' package: not a module, so checks 1, 7 and 8 pass it by.
 DEV = f"{names.HARNESS}-dev"
 #: Its import name, which another package's tests may import like any declared one.
 DEV_IMPORT = f"{names.HARNESS}_dev"
@@ -75,15 +92,20 @@ DEV_IMPORT = f"{names.HARNESS}_dev"
 DEV_ENV_PREFIX = "MOXI_TEST_"
 #: The entry-point group a module announces itself in (as `moxi.modules.GROUP`).
 GROUP = "moxi.modules"
-#: The core modules another module may import (the core's table of what it holds).
-CORE_MODULES = frozenset({"names", "paths", "config", "modules", "cli"})
-#: The names an announcement defines (as `moxi.modules.ANNOUNCEMENT`).
-ANNOUNCEMENT = ("INTERFACES", "API", "CLI", "SUMMARY", "OPTIONAL", "GATED", "INTERNAL_ENV",
-                "SETTINGS", "SETUP", "SEGMENT")
+#: The core modules another module may import (the core's table of what it holds). The
+#: core's other modules (install, uninstall, run, catalogue, strays, home and the
+#: underscored ones) are its own.
+CORE_MODULES = frozenset({"names", "paths", "config", "modules", "cli", "files", "store",
+                          "proc", "log", "exit", "aio", "ipc", "units", "doctor", "place"})
+#: Where the core keeps its vendored copies of released libraries, which no check reads.
+VENDORED = "src/moxi/_vendor/"
 #: The core's one console script.
 CORE_SCRIPT = ("moxi", "moxi.cli:main")
 #: Inside these core modules check 5 does not apply.
-CORE_ENV_READERS = frozenset({"moxi.paths", "moxi.config"})
+CORE_ENV_READERS = frozenset({"moxi.paths", "moxi.config", "moxi.log", "moxi.proc",
+                              "moxi.units._fence"})
+#: The core's own plumbing variables, which the core reads where check 5 applies.
+CORE_INTERNAL_ENV = frozenset({"MOXI_CORE_LOCK_FD"})
 #: What a segment's closure may not import (top-level package names), besides turns.
 SEGMENT_IMPORTS = frozenset({"subprocess", "socket", "multiprocessing", "ctypes", "http",
                              "urllib"})
@@ -448,6 +470,8 @@ class _Repo:
         elif not self.dev:
             self.check_names()         # check 7
         self.check_segment()
+        if not self.core and not self.dev:
+            self.check_write_sites()   # check 8
         return self.findings
 
     def _read_pyproject(self) -> bool:
@@ -525,6 +549,8 @@ class _Repo:
         for path in self.tree.files():
             if not path.endswith(".py"):
                 continue
+            if self.core and path.startswith(VENDORED):
+                continue
             raw = self.tree.read(path)
             try:
                 parsed = ast.parse(raw if raw is not None else b"", filename=path)
@@ -562,9 +588,8 @@ class _Repo:
         self.announcement_source = source
         bound = _assignments(source.tree)
         values: dict[str, object] = {}
-        for name in ANNOUNCEMENT:
+        for name in KNOWN:
             if name not in bound:
-                self.announcement_problems.append(f"does not define {name}")
                 continue
             try:
                 values[name] = _literal(bound[name])
@@ -771,6 +796,8 @@ class _Repo:
     def check_environment(self) -> None:
         internal = self.ann_map("INTERNAL_ENV")
         exact = {k for k in internal if not k.endswith("_")}
+        if self.core:
+            exact |= CORE_INTERNAL_ENV
         prefixes = tuple(k for k in internal if k.endswith("_"))
         if self.dev:
             prefixes += (DEV_ENV_PREFIX,)
@@ -819,6 +846,35 @@ class _Repo:
                          "another program's script of that name may stand; use "
                          "moxi.paths.script(name)")
 
+    # -- check 8 -----------------------------------------------------------------------------
+
+    def check_write_sites(self) -> None:
+        found: dict[str, list[tuple[str, int]]] = {}
+        for source in sorted(self.sources.values(), key=lambda s: s.path):
+            if not source.in_src:
+                continue
+            for site, line in write_sites(source.tree):
+                found.setdefault(f"{source.path} {site}", []).append((source.path, line))
+        raw = self.tree.read(WRITE_SITES)
+        listed: dict[str, int] = {}
+        for text in (raw or b"").decode("utf-8", "replace").splitlines():
+            text = text.strip()
+            if text and not text.startswith("#"):
+                key = " ".join(text.split())
+                listed[key] = listed.get(key, 0) + 1
+        for key, places in found.items():
+            for path, line in places[listed.get(key, 0):]:
+                self.add(path, line, "8",
+                         f"writes a file itself ({key.split(' ', 1)[1]}); write through "
+                         f"moxi.files or moxi.store, or, for a site this module had "
+                         f"before, list it in {WRITE_SITES}")
+        for key, count in sorted(listed.items()):
+            extra = count - len(found.get(key, ()))
+            if extra > 0:
+                self.add(WRITE_SITES, 0, "8",
+                         f"lists {key!r} {extra} more time(s) than src/ has it; remove "
+                         f"the line, so the list only shrinks")
+
     # -- check 7 -----------------------------------------------------------------------------
 
     def check_core_names(self) -> None:
@@ -852,6 +908,9 @@ class _Repo:
         elif name in names.VERBS:
             self.add(here, 0, "7", f"names the module {name!r}, one of the umbrella's own "
                                    "verbs; `moxi " + name + "` could never reach it")
+        elif name in names.RESERVED:
+            self.add(here, 0, "7", f"names the module {name!r}, a name the core keeps for "
+                                   "itself; the module needs another name")
         if name and self.own_import not in self.src_tops:
             self.add(here, 0, "7", f"has no src/{self.own_import}: module {name!r} is "
                                    f"imported as {self.own_import}")
@@ -884,13 +943,11 @@ class _Repo:
         # Console scripts.
         for script in sorted(self.scripts):
             if script == CORE_SCRIPT[0]:
-                # Every distribution's moxi script is the umbrella's, or a tool
-                # environment it heads would run something else as moxi.
-                if _target(self.scripts[script]) != CORE_SCRIPT[1]:
-                    self.add(here, 0, "7", f"declares the console script {script} = "
-                                           f"{self.scripts[script]!r}; every Moxi "
-                                           f"distribution declares {script} = "
-                                           f"{CORE_SCRIPT[1]!r}")
+                # Only the core declares it. A module that did would put a second moxi
+                # on PATH wherever it was installed on its own.
+                self.add(here, 0, "7", f"declares the console script {script}; only the "
+                                       f"core declares it, and a module is installed with "
+                                       f"`moxi install {name or '<module>'}`")
                 continue
             ok = (name is not None and script.startswith(f"moxi-{name}-")
                   and _SCRIPT_PART.fullmatch(script[len(f"moxi-{name}-"):]))
@@ -909,37 +966,13 @@ class _Repo:
         self._check_settings(source)
 
     def _check_announcement_values(self, source: _Source) -> None:
-        values = self.announcement or {}
-
-        def bad(field: str, what: str) -> None:
-            self.add(source.path, 0, "7",
-                     f"the announcement has {field} = {values[field]!r}; it must be {what}")
-
-        if "INTERFACES" in values:
-            v = values["INTERFACES"]
-            if not isinstance(v, frozenset) or not all(
-                    isinstance(i, int) and not isinstance(i, bool) for i in v):
-                bad("INTERFACES", "a frozenset of integers")
-        if "SUMMARY" in values:
-            v = values["SUMMARY"]
-            if not isinstance(v, str) or not v.strip() or "\n" in v:
-                bad("SUMMARY", "one non-empty line")
-        for field, pattern, what in (("API", _DOTTED, "a dotted module name"),
-                                     ("SEGMENT", _DOTTED, "a dotted module name"),
-                                     ("CLI", _TARGET, '"package.module:function"'),
-                                     ("SETUP", _TARGET, '"package.module:function"'),
-                                     ("SETTINGS", None, "a resource name")):
-            if field in values and values[field] is not None:
-                v = values[field]
-                if not isinstance(v, str) or not v or (pattern and not pattern.fullmatch(v)):
-                    bad(field, f"{what} or None")
-        for field in ("OPTIONAL", "GATED", "INTERNAL_ENV"):
-            if field in values:
-                v = values[field]
-                if not isinstance(v, Mapping) or not all(
-                        isinstance(k, str) and k and isinstance(x, str)
-                        for k, x in v.items()):
-                    bad(field, "a dict of names to strings")
+        """The checks `moxi.modules.load` runs, over the literals read from the source."""
+        try:
+            _, problems = _check(self.announcement or {}, self.name)
+        except _TooNew as exc:
+            problems = [str(exc)]
+        for problem in problems:
+            self.add(source.path, 0, "7", f"the announcement {problem}")
 
     def _check_cli_target(self, source: _Source) -> None:
         target = self.ann("CLI")
@@ -1019,6 +1052,105 @@ class _Repo:
                 self.add(source.path, line, "segment",
                          f"calls {call} inside the closure of the segment {segment}; a "
                          "status line segment shows status and triggers nothing")
+
+
+#: A module's list of the write sites it has before moving onto the helpers (check 8).
+WRITE_SITES = "tests/write-sites.txt"
+
+_WRITE_MODE = frozenset("wax+")
+_WRITE_FLAGS = frozenset({"O_WRONLY", "O_RDWR", "O_CREAT", "O_APPEND", "O_TRUNC"})
+
+
+def _mode_writes(node: ast.AST | None) -> bool | None:
+    """True when a mode argument writes, False when it only reads, None when it can't be
+    read (not a string literal)."""
+    if node is None:
+        return False
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return bool(_WRITE_MODE & set(node.value))
+    return None
+
+
+#: The letters of an `open` mode; a path's `.open` reads its first argument as a mode only
+#: when it is made of these alone.
+_MODE_LETTERS = frozenset("rwxab+t")
+
+
+def _path_mode_writes(node: ast.AST | None) -> bool:
+    """True when a path's `.open` argument is a mode that writes: a string literal of mode
+    letters alone with a writing letter among them. A URL or a member name is not a mode."""
+    if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+        return False
+    letters = set(node.value)
+    return bool(letters) and letters <= _MODE_LETTERS and bool(letters & _WRITE_MODE)
+
+
+def _flags_write(node: ast.AST | None) -> bool:
+    if node is None:
+        return False
+    named = {n.attr if isinstance(n, ast.Attribute) else n.id
+             for n in ast.walk(node) if isinstance(n, (ast.Attribute, ast.Name))}
+    if named & _WRITE_FLAGS:
+        return True
+    # A flags value the check can't read (a variable, a call) counts as a write.
+    return not (named and all(n in ("os", "O_RDONLY") or n.startswith("O_") for n in named))
+
+
+def _arg(call: ast.Call, index: int, keyword: str) -> ast.AST | None:
+    for kw in call.keywords:
+        if kw.arg == keyword:
+            return kw.value
+    return call.args[index] if len(call.args) > index else None
+
+
+def write_sites(tree: ast.Module) -> list[tuple[str, int]]:
+    """Each `("<scope> <call>", line)` of a call in `tree` that writes a file itself.
+
+    `<scope>` is the dotted name of the enclosing classes and functions, or `<module>`.
+    """
+    out: list[tuple[str, int]] = []
+
+    def visit(node: ast.AST, scope: list[str]) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                visit(child, [*scope, child.name])
+                continue
+            if isinstance(child, ast.Call):
+                call = _write_call(child)
+                if call is not None:
+                    out.append((f"{'.'.join(scope) or '<module>'} {call}", child.lineno))
+            visit(child, scope)
+
+    visit(tree, [])
+    return out
+
+
+def _write_call(call: ast.Call) -> str | None:
+    func = call.func
+    if isinstance(func, ast.Name):
+        if func.id == "open" and _mode_writes(_arg(call, 1, "mode")) is not False:
+            return "open"
+        return None
+    if not isinstance(func, ast.Attribute):
+        return None
+    owner = func.value.id if isinstance(func.value, ast.Name) else None
+    attr = func.attr
+    if attr in ("write_text", "write_bytes"):
+        return f".{attr}"
+    if owner == "os" and attr == "replace":
+        return "os.replace"
+    if owner == "sqlite3" and attr == "connect":
+        return "sqlite3.connect"
+    if owner == "os" and attr == "open":
+        return "os.open" if _flags_write(_arg(call, 1, "flags")) else None
+    if owner in ("io", "os") and attr in ("open", "fdopen"):
+        return f"{owner}.{attr}" if _mode_writes(_arg(call, 1, "mode")) is not False else None
+    if attr == "open":
+        # A path's open(mode): only a mode the check can read as writing counts, since
+        # many other objects have an `open` (a browser, an archive) taking other things,
+        # such as `webbrowser.open("https://...")` or `zf.open("data.txt")`.
+        return ".open" if _path_mode_writes(_arg(call, 0, "mode")) else None
+    return None
 
 
 def _target(text: str | None) -> str | None:

@@ -48,8 +48,16 @@ def alpha(site):
 
 # -- the verbs ---------------------------------------------------------------------------
 
-def test_the_verbs_are_the_reserved_names():
-    assert frozenset(cli._VERBS) == names.VERBS
+def test_every_verb_is_a_reserved_name():
+    assert frozenset(cli._VERBS) <= names.VERBS
+
+
+@pytest.mark.parametrize("verb", sorted(names.VERBS - set(cli._VERBS)))
+def test_a_verb_kept_for_later_says_so(capsys, verb):
+    code, out, err = run(capsys, verb)
+    assert code == 2 and out == ""
+    assert f"`moxi {verb}` is not in this version of moxi" in err
+    assert run(capsys, "help", verb)[0] == 2
 
 
 def test_no_arguments_prints_usage_and_exits_2(capsys):
@@ -153,10 +161,43 @@ def test_the_install_line_ignores_a_feature_extra_of_the_same_name(site):
     assert cli.install_hint("codex") == "install it: moxi install codex"
 
 
+def test_requirements_evaluate_every_marker_and_skip_a_line_that_does_not_parse(site):
+    """A requirement whose marker leaves this environment out is not one of its
+    requirements; a Requires-Dist line that is not a requirement is skipped."""
+    site.module("turns")
+    site.module("cache")
+    site.module("comms", requires=("moxi-turns>=0.1", 'moxi-cache; python_version < "3"',
+                                   "not a requirement !"),
+                extras={"cache": ['Moxi_Cache>=0.1; python_version < "3"']})
+    assert [r.name for r in cli.requirements("moxi-comms")] == ["moxi-turns"]
+    assert cli.required_modules("moxi-comms") == ["turns"]
+    assert cli.requirements("moxi-comms", "cache") == []
+    assert cli.users_of("cache") == []
+
+
+def test_a_user_through_an_extra_counts_only_when_that_extra_is_installed(site):
+    site.module("cache")
+    site.module("comms", extras={"cache": ["moxi-cache>=0.1", "websockets>=13"]})
+    assert not cli.extra_installed("moxi-comms", "cache")
+    assert cli.users_of("cache") == []
+    site.distribution("websockets", "13.1")
+    assert cli.extra_installed("moxi-comms", "cache")
+    assert cli.users_of("cache") == ["comms (through its extra cache)"]
+
+
+def test_a_requirement_is_shown_lower_bound_first_without_its_marker():
+    from moxi._vendor.packaging.requirements import Requirement
+
+    req = Requirement('Moxi_Cache[B,a] (<0.2, >=0.1) ; extra == "cache"')
+    assert cli.requirement_text(req) == "moxi-cache[a,b]>=0.1,<0.2"
+    assert cli.requirement_text(Requirement("moxi @ file:///w/m.whl")) == (
+        "moxi @ file:///w/m.whl")
+
+
 def test_broken_module_prints_reason_and_exits_2(site, capsys):
-    site.module("alpha", drop=("SUMMARY",))
+    site.module("alpha", SUMMARY="''")
     code, _, err = run(capsys, "alpha")
-    assert code == 2 and "does not define SUMMARY" in err
+    assert code == 2 and "SUMMARY = ''" in err
     assert "moxi install alpha" in err
 
 
@@ -214,6 +255,12 @@ def test_modules_json_describes_each_module(site, capsys):
         "state": "present", "reason": "", "summary": "Messages between sessions.",
         "cli": "moxi_comms.cli:main", "setup": "moxi_comms.cli:main",
         "shortcut": False, "requires": ["turns"],
+        "target": "moxi_comms.module", "package": "moxi_comms", "announces": 1,
+        "interfaces": [1], "api_name": None, "gated": {}, "internal_env": {},
+        "settings": None, "segment": None, "daemons": {}, "timers": {},
+        "units_from": None, "health": {}, "doctor": None, "stores": {}, "budgets": {},
+        "skills": None, "page": None, "components": {}, "reserved_names": [],
+        "teardown": None, "session_env": {}, "config_check": None, "questions": {},
         "optional": [
             {"extra": "cache", "sentence": "Holds a cold send.", "installed": False,
              "add": "moxi install comms --with cache"},
@@ -234,7 +281,8 @@ def test_modules_text_lists_state_shortcut_and_extras(site, capsys):
     site.write("moxi_comms/cli.py", CLI_SOURCE)
     site.module("comms", CLI="'moxi_comms.cli:main'", SUMMARY="'Messages.'",
                 extras={"cache": ["moxi-cache"]}, OPTIONAL="{'cache': 'Holds a send.'}")
-    site.module("broken", drop=("API",))
+    site.module("broken", API="'not a name'")
+    site.module("quiet", drop=("SUMMARY",))
     code, out, _ = run(capsys, "modules")
     assert code == 0
     assert "comms  moxi-comms 0.1.0  present  shortcut off" in out
@@ -242,7 +290,8 @@ def test_modules_text_lists_state_shortcut_and_extras(site, capsys):
     assert ("    [cache] not installed: Holds a send.  (moxi install comms --with cache)"
             in out)
     assert "broken  moxi-broken 0.1.0  broken" in out
-    assert "does not define API" in out
+    assert "API = 'not a name'" in out
+    assert "quiet  moxi-quiet 0.1.0  present\n    (no summary)\n" in out
 
 
 # -- moxi shortcut -----------------------------------------------------------------------
@@ -313,6 +362,40 @@ def test_shortcut_remove_removes_only_its_own_file(alpha, path_dirs, capsys):
     foreign.write_text(cli.shortcut_text("beta"))
     assert run(capsys, "shortcut", "alpha", "--remove")[0] == 1
     assert run(capsys, "shortcut", "nothere", "--remove")[0] == 1
+
+
+def test_the_windows_shortcut_is_a_cmd_file_with_its_marker(alpha, path_dirs, capsys,
+                                                           monkeypatch):
+    """On Windows the shortcut is `<module>.cmd`; read here with the platform faked."""
+    monkeypatch.setattr(cli, "_on_windows", lambda: True)
+    code, out, _ = run(capsys, "shortcut", "alpha")
+    assert code == 0 and "wrote the shortcut" in out
+    path = path_dirs.bin / "alpha.cmd"
+    assert path.read_bytes() == (b"@echo off\r\nrem moxi shortcut: alpha\r\n"
+                                 b"moxi alpha %*\r\n")
+    assert not (path_dirs.bin / "alpha").exists()
+    assert run(capsys, "shortcut")[1] == f"alpha  {path}\n"
+    info = json.loads(run(capsys, "modules", "--json")[1])
+    assert info["modules"][0]["shortcut"] is True
+    # --remove reads the .cmd marker, and leaves a .cmd that isn't moxi's.
+    code, out, _ = run(capsys, "shortcut", "alpha", "--remove")
+    assert code == 0 and not path.exists()
+    path.write_bytes(b"@echo off\r\necho mine\r\n")
+    code, _, err = run(capsys, "shortcut", "alpha", "--remove")
+    assert code == 1 and "not moxi's shortcut" in err and path.exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="runs the .cmd shortcut on Windows")
+def test_the_cmd_shortcut_runs_moxi_with_every_argument(alpha, tmp_path, monkeypatch,
+                                                        capsys):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "moxi.log"
+    (bin_dir / "moxi.cmd").write_text(f"@echo off\r\necho %* >> {log}\r\n")
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    assert run(capsys, "shortcut", "alpha")[0] == 0
+    subprocess.run([str(bin_dir / "alpha.cmd"), "send", "x"], check=True)
+    assert log.read_text().strip() == "alpha send x"
 
 
 def test_shortcut_listing_when_none_is_on(path_dirs, capsys):
@@ -431,6 +514,85 @@ def test_config_of_a_module_without_settings_or_absent(site, capsys):
     assert code == 0 and "beta has no settings" in out
     code, _, err = run(capsys, "config", "nothere")
     assert code == 2 and "moxi install nothere" in err
+
+
+# -- moxi paths --------------------------------------------------------------------------
+
+STORES = ("{'record': {'root': 'state', 'path': 'record.db', 'kind': 'sqlite'}, "
+          "'log': {'root': 'data', 'path': 'logs', 'kind': 'dir'}, "
+          "'later': {'root': 'cache', 'path': 'later.jsonl', 'kind': 'jsonl', 'lazy': True}}")
+
+
+@pytest.fixture
+def stored(site, tmp_path, monkeypatch):
+    site.module("alpha", STORES=STORES)
+    monkeypatch.setenv("MOXI_HOME", str(tmp_path / "home"))
+    for var in ("MOXI_ALPHA_HOME", "MOXI_ALPHA_STATE_HOME", "MOXI_ALPHA_DATA_HOME",
+                "MOXI_ALPHA_CACHE_HOME", "MOXI_ALPHA_CONFIG_HOME", "MOXI_ALPHA_RUNTIME_DIR"):
+        monkeypatch.delenv(var, raising=False)
+    return tmp_path / "home"
+
+
+def test_paths_gives_the_directories_and_each_store(stored, capsys):
+    db = stored / "state" / "alpha" / "record.db"
+    db.parent.mkdir(parents=True)
+    db.write_bytes(b"x" * 2048)
+    db.chmod(0o600)
+    (stored / "data" / "alpha" / "logs" / "a").mkdir(parents=True)
+    (stored / "data" / "alpha" / "logs" / "a" / "one").write_bytes(b"y" * 10)
+    code, out, _ = run(capsys, "paths", "alpha", "--json")
+    assert code == 0
+    info = json.loads(out)
+    assert info["directories"] == {kind: str(stored / kind / "alpha") for kind in
+                                   ("data", "state", "cache", "config", "runtime")}
+    assert info["config_file"] == str(stored / "config" / "alpha" / "config.toml")
+    assert info["notes"] == []
+    by_name = {store["name"]: store for store in info["stores"]}
+    assert by_name["record"] == {
+        "name": "record", "path": str(db), "root": "state", "kind": "sqlite",
+        "lazy": False, "exists": True, "size": 2048,
+        "mode": "0600" if sys.platform != "win32" else by_name["record"]["mode"]}
+    assert by_name["log"]["exists"] and by_name["log"]["size"] == 10
+    assert by_name["later"] == {
+        "name": "later", "path": str(stored / "cache" / "alpha" / "later.jsonl"),
+        "root": "cache", "kind": "jsonl", "lazy": True, "exists": False, "size": None,
+        "mode": None}
+    code, out, _ = run(capsys, "paths", "alpha")
+    assert code == 0
+    lines = out.splitlines()
+    assert lines[0] == "alpha"
+    assert f"  state       {stored / 'state' / 'alpha'}" in lines
+    assert f"  config file {stored / 'config' / 'alpha' / 'config.toml'}" in lines
+    assert "stores" in lines
+    assert any(line.startswith("  record ") and "sqlite  2.0 KB" in line for line in lines)
+    assert any(line.startswith("  later ") and "not created yet" in line for line in lines)
+
+
+def test_paths_names_a_directory_read_under_a_host_folder(stored, monkeypatch, capsys):
+    from moxi import paths
+
+    monkeypatch.setattr(paths, "_host_name", lambda: "thishost")
+    old = stored / "state" / "thishost" / "alpha"
+    old.mkdir(parents=True)
+    info = json.loads(run(capsys, "paths", "alpha", "--json")[1])
+    assert info["directories"]["state"] == str(old)
+    assert info["notes"] == ["state is read where it is, under a host folder; a later "
+                             "release of moxi moves it"]
+
+
+def test_paths_of_the_core(stored, capsys):
+    code, out, _ = run(capsys, "paths", "moxi", "--json")
+    assert code == 0
+    info = json.loads(out)
+    assert info["directories"]["state"] == str(stored / "state" / "moxi")
+    assert info["stores"] == []
+
+
+def test_paths_of_an_absent_module_or_a_bad_name(site, capsys):
+    code, _, err = run(capsys, "paths", "nothere")
+    assert code == 2 and "moxi install nothere" in err
+    code, _, err = run(capsys, "paths", "Not-A-Name")
+    assert code == 2 and "not a module name" in err
 
 
 # -- the console script ------------------------------------------------------------------

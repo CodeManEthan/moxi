@@ -124,3 +124,25 @@ def test_status_reads_and_changes_nothing(env):
 
 def test_the_unit_folder_without_xdg_config_home(tmp_path):
     assert service.unit_dir({"HOME": "/h"}) == Path("/h/.config/systemd/user")
+
+
+def test_the_writer_and_the_old_verb_name_the_same_unit():
+    """The announcement's daemon is the one this verb installs: the same console script,
+    the same stop (the watcher alone, never its asks), and the writer's unit name,
+    moxi-cache-<name>.service, is this verb's file. So a unit either one wrote is the file
+    the other finds, and the writer refuses this verb's unmarked text until `moxi install
+    cache --replace`."""
+    from moxi import units
+
+    from moxi_cache import module
+
+    assert module.DAEMONS == {"watch": {
+        "command": "moxi-cache-watch",
+        "doc": "the watcher that keeps clock records of live Claude sessions",
+        "stop": "process"}}
+    decl = units.declarations("cache")
+    assert decl.rejected == {} and decl.timers == {}
+    [(name, entry)] = decl.daemons.items()
+    assert entry["command"] == service.SCRIPT
+    assert entry["stop"] == "process" and "KillMode=process\n" in service.render_unit(WATCHER)
+    assert f"moxi-cache-{name}.service" == service.UNIT

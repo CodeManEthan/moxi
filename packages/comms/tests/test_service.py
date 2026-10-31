@@ -177,3 +177,43 @@ def test_status_reads_the_file_and_asks_systemd(box):
     assert "is-enabled  enabled" in out and "is-active   active" in out
     assert box.calls() == [f"--user is-enabled {release.UNIT}",
                            f"--user is-active {release.UNIT}"]
+
+
+def test_a_refusal_names_the_daemon_by_its_path(box, monkeypatch, tmp_path):
+    """The daemon's script is not on PATH after `moxi install comms`, so a refusal that
+    sends the person to the foreground gives the path to run."""
+    out = []
+    service.run("install", env=box.env, say=out.append, platform="darwin")
+    daemon = service.daemon_binary(box.env)
+    assert daemon is not None and f"in the foreground meanwhile: {daemon}" in out[0]
+
+    monkeypatch.setattr(sysconfig, "get_path", lambda name: str(tmp_path / "none"))
+    out = []
+    service.run("install", env=box.env, say=out.append, platform="darwin")
+    assert out[0].endswith(': "$(uv tool dir)/moxi/bin/moxi-comms-daemon"')
+
+
+def test_a_missing_daemon_is_reinstalled_into_the_moxi_tool(box, monkeypatch, tmp_path):
+    monkeypatch.setattr(sysconfig, "get_path", lambda name: str(tmp_path / "none"))
+    code, out = comms(box, "install")
+    assert code == service.EXIT_REFUSED
+    assert "uv tool upgrade moxi --reinstall-package moxi-comms" in out
+    assert "uv tool install moxi-comms" not in out
+
+
+def test_the_writer_and_the_old_verb_name_the_same_unit():
+    """The announcement's daemon is the one this verb installs: the same console script,
+    and the writer's unit name, moxi-comms-<name>.service, is this verb's file. So a unit
+    either one wrote is the file the other finds, and the writer refuses this verb's
+    unmarked text until `moxi install comms --replace`."""
+    from moxi import units
+
+    from moxi_comms import module
+
+    assert module.DAEMONS == {"daemon": {"command": "moxi-comms-daemon",
+                                         "doc": "the delivery daemon"}}
+    decl = units.declarations("comms")
+    assert decl.rejected == {} and decl.timers == {}
+    [(name, entry)] = decl.daemons.items()
+    assert entry["command"] == service.DAEMON_SCRIPT
+    assert f"moxi-comms-{name}.service" == release.UNIT

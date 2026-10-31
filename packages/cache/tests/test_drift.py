@@ -18,15 +18,12 @@ from test_codex_clock import (TID, drifting, measured_seconds, one_turn,
                               sessions_root)
 
 from moxi_cache import api, codex, drift, table
-from moxi_sessions.api import claude as transcripts
 
 
 def write_rollout(tmp_path, rollout):
     root = sessions_root(tmp_path)
     rollout.write(root)
-    stamp = [ln for ln in rollout.lines if ln["type"] == "token_usage_record"][-1]
-    end = transcripts.parse_timestamp(stamp["timestamp"])
-    return root, end + 60
+    return root, rollout.end() + 60
 
 
 def read(root, now, store, **kw):

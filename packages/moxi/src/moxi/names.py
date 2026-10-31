@@ -23,12 +23,19 @@ ORG = "moxihq"
 #: shared by every module, each under its own subdirectory.
 NAMESPACE = "moxi"
 
-#: The umbrella's own verbs (`moxi install`, `moxi config`, ...). A module named by one
-#: could never be reached as `moxi <module>`, so no module may take one. `check` only
-#: says where the contract check went, and stays reserved so no module takes the name a
-#: contributor still types.
-VERBS = frozenset({"modules", "install", "shortcut", "config", "check", "help",
-                   "version"})
+#: The umbrella's own verbs (`moxi install`, `moxi config`, ...), with the ones this
+#: version keeps for commands still to come. A module named by one could never be
+#: reached as `moxi <module>`, so no module may take one. `check` only says where the
+#: contract check went, and stays reserved so no module takes the name a contributor
+#: still types.
+VERBS = frozenset({"modules", "install", "shortcut", "config", "check", "help", "version",
+                   "doctor", "uninstall", "run", "paths"})
+
+#: Names the core uses for itself, so no module may take one: `moxi` is the core's own
+#: state directory, `set` and `unset` are the first words of `moxi config set` and
+#: `moxi config unset`, `runtime` holds every module's runtime directory where the system
+#: gives none, and `installs` is the core's entry-point group `moxi.installs`.
+RESERVED = frozenset({"moxi", "set", "unset", "runtime", "installs"})
 
 _NAME = re.compile(r"[a-z0-9]+")
 
@@ -36,6 +43,11 @@ _NAME = re.compile(r"[a-z0-9]+")
 def is_module_name(name: object) -> bool:
     """True when `name` is spelled as a module name: lower-case ASCII letters and digits."""
     return isinstance(name, str) and _NAME.fullmatch(name) is not None
+
+
+def is_reserved(name: object) -> bool:
+    """True when no module may take `name`: a verb, or a name the core keeps for itself."""
+    return isinstance(name, str) and (name in VERBS or name in RESERVED)
 
 
 def check_module_name(name: object) -> str:
@@ -68,5 +80,6 @@ def env_prefix(name: str) -> str:
     return f"{HARNESS.upper()}_{check_module_name(name).upper()}_"
 
 
-__all__ = ["HARNESS", "ORG", "NAMESPACE", "VERBS", "is_module_name", "check_module_name",
-           "distribution", "import_name", "repo", "env_prefix"]
+__all__ = ["HARNESS", "ORG", "NAMESPACE", "VERBS", "RESERVED", "is_module_name",
+           "is_reserved", "check_module_name", "distribution", "import_name", "repo",
+           "env_prefix"]

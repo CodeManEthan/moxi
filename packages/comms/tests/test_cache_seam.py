@@ -157,6 +157,8 @@ def test_the_5_minute_tier_is_read_from_the_transcript():
     cache_api()
     sid = str(uuid.uuid4())
     line = assistant_line(600)
+    # Claude Code writes the total beside its split, and the tier is read from both.
+    line["message"]["usage"]["cache_creation_input_tokens"] = 900
     line["message"]["usage"]["cache_creation"] = {"ephemeral_5m_input_tokens": 900,
                                                   "ephemeral_1h_input_tokens": 0}
     write_transcript(sid, lines=[line])

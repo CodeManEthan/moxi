@@ -102,6 +102,8 @@ def test_a_cold_turn_end_releases_at_the_windows_first_passing_read(
         peer.turn()
         assert peer.held() == [], "the frame's own read was cold"
         assert wait_until(lambda: peer.held() == [held], timeout=2.0)
+        # The daemon hands the row, flushes, and only then logs the release.
+        assert wait_until(lambda: released_lines(caplog), timeout=2.0)
     assert released_lines(caplog) == [f"released 1 queued message(s) to {REVIEWER_Q}"]
     assert rows(rig, REVIEWER_Q) == {held}, "a release deletes no row"
 

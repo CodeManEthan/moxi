@@ -31,7 +31,9 @@ commands:
   `--without`, `--all` and `--none` answer ahead.
 - `moxi shortcut <module>` puts a bare `<module>` command on PATH. It is off by default
   and refused when the name is already taken; `--remove` takes it off.
-- `moxi config <module>` shows a module's settings and its config file.
+- `moxi config <module>` shows a module's settings and its config file; `moxi config set
+  <module> <key> <value>` changes one, keeping the file's comments, and `moxi config unset`
+  removes one. `moxi config moxi` is the core's own.
 
 ## Install
 
@@ -42,8 +44,20 @@ uv tool install moxi
 moxi install comms
 ```
 
-A plain `uv tool install moxi-comms` also works and puts `moxi` on PATH, but runs no
-setup; `moxi install turns` then installs turns' Claude Code plugin.
+Only the core provides the `moxi` command. `moxi install <module>` adds the module to the
+`moxi` tool's environment and runs its setup. A module installed on its own, such as
+`uv tool install moxi-comms`, brings no `moxi` and lands where `moxi` can't see it; `moxi`
+says so once, with the commands that move it.
+
+uv puts only the core's own scripts on PATH. A module's other scripts stay in the `moxi`
+tool's environment, so run one by its path there, for example comms' daemon:
+
+```sh
+"$(uv tool dir)/moxi/bin/moxi-comms-daemon"
+```
+
+On Windows the script is `Scripts\moxi-comms-daemon.exe` in the same tool directory; in
+PowerShell, `& "$(uv tool dir)\moxi\Scripts\moxi-comms-daemon.exe"`.
 
 ### Before the modules are on PyPI
 
@@ -72,15 +86,24 @@ moxi install comms --with cache \
 
 ## Troubleshooting
 
-**`moxi` is gone after removing a module.** Every Moxi distribution provides the `moxi`
-command, so removing one from an environment can take `moxi` with it while other modules
-remain. Reinstall the tool (its name is in `uv tool list`):
+**`moxi: command not found` after installing a module.** Only the core provides the
+`moxi` command; a module installed on its own doesn't. Install the core, then add the
+module to it:
 
 ```sh
-uv tool install <tool> --reinstall-package <tool>
+uv tool install moxi
+moxi install <module>
 ```
 
-In a plain virtual environment, reinstalling any Moxi module brings `moxi` back.
+**A module's own command is not found.** `moxi install` adds a module to the `moxi` tool,
+and uv puts none of a module's scripts on PATH. Run the script by its path:
+`"$(uv tool dir)/moxi/bin/<script>"`. On Windows the script is `Scripts\<script>.exe` in
+the same tool directory; in PowerShell, `& "$(uv tool dir)\moxi\Scripts\<script>.exe"`.
+
+**`moxi` says a module is installed outside this moxi.** That copy is in another
+environment, where this `moxi` can't see it. Run the two commands the line names: `moxi
+install <module>` puts the module in this `moxi`'s environment, and the other removes the
+outside copy.
 
 **A shortcut fails with `moxi: not found`.** Its environment was removed. Delete the
 shortcut file, or reinstall.

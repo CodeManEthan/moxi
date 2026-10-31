@@ -1,0 +1,10 @@
+# The places in src/ that write a file themselves rather than through moxi.files or
+# moxi.store. `moxi-dev contract` (check 8) fails on a write site not listed here, and on a line
+# that no longer matches one, so this list only shrinks. One line per site:
+# <path> <enclosing scope> <call>.
+#
+# The trampoline opens its launch file read-write: it holds an flock on that very file
+# until execve, empties it in place as soon as it has read the launch, and writes its
+# verdict into it, so the caller reads the verdict only once it has seen that lock free.
+# A whole-file replace would move the path to a new file the lock is not on.
+src/moxi_slots/trampoline.py main os.open

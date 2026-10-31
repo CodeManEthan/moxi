@@ -3,11 +3,11 @@ and what a table that does not load holds."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
-from conftest import assistant_line, write_cache_config, write_transcript
+from conftest import (CodexRollout, assistant_line, token_usage, write_cache_config,
+                      write_transcript)
 
 from moxi_cache import api, table
 
@@ -166,29 +166,12 @@ def test_the_shipped_table_is_kept_while_the_file_is_unchanged(lifetime_table):
 
 def codex_rollout(root: Path, model="gpt-5.6-terra", age=60) -> None:
     """A one-turn rollout of TID, its request ending `age` seconds before NOW."""
-    from datetime import datetime, timezone
-
-    def iso(t):
-        return datetime.fromtimestamp(t, timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-
-    t = NOW - age - 5
-    lines = [
-        {"timestamp": iso(NOW - 86400), "type": "session_meta",
-         "payload": {"session_id": TID, "id": TID, "cli_version": "0.153.0",
-                     "model_provider": "openai", "history_mode": "paginated"}},
-        {"timestamp": iso(t), "type": "event_msg",
-         "payload": {"type": "task_started", "turn_id": "t1"}},
-        {"timestamp": iso(t + 0.01), "type": "turn_context",
-         "payload": {"turn_id": "t1", "model": model}},
-        {"timestamp": iso(t + 5), "type": "token_usage_record",
-         "payload": {"thread_id": TID, "session_id": TID, "turn_id": "t1",
-                     "usage": {"input_tokens": 100, "cached_input_tokens": 90}}},
-    ]
-    directory = root / "2026" / "10" / "05"
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / f"rollout-2026-10-05T15-55-21-{TID}.jsonl").write_text(
-        "".join(json.dumps(line) + "\n" for line in lines))
+    r = CodexRollout(root, thread_id=TID, start=NOW - 86400)
+    r.clock = NOW - age - 5
+    r.turn(model, turn_id="t1")
+    r.clock = NOW - age
+    r.request(token_usage(input=100, cached=90))
+    r.write()
 
 
 def test_a_table_that_does_not_load_holds_codex_and_opencode_only(tmp_path,
