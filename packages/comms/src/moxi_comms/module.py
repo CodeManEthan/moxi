@@ -31,9 +31,21 @@ INTERNAL_ENV = {
     "MOXI_COMMS_CLAIM_SOCKET": "wrapper stamp: the claim socket the session's adapter "
                                "answers",
     "MOXI_COMMS_PROJECT": "wrapper stamp and override: the session's project key",
+    "MOXI_COMMS_MCP_TOKEN": "wrapper stamp: this session's token for comms' tools",
+    "MOXI_COMMS_MCP_URL": "wrapper stamp: the address of comms' tools for this session",
+    "MOXI_COMMS_SHELL_REACH": "wrapper stamp: off when this session's shell can't reach "
+                              "comms",
     "MOXI_COMMS_OPERATOR": "wiring: the operator lane's user id for one send",
     "MOXI_COMMS_SECRET_": "the secrets chain's env step: one credential per variable",
     "MOXI_COMMS_MOCK_BACKEND": "test seam: the mock record's JSON store",
+}
+#: The variables comms' wrappers stamp per session for comms' tools, which a launcher
+#: scrubs before every launch so no session inherits another's. comms reads them too, so
+#: each is also in INTERNAL_ENV.
+SESSION_ENV = {
+    "MOXI_COMMS_MCP_TOKEN": "this session's token for comms' tools",
+    "MOXI_COMMS_MCP_URL": "the address of comms' tools for this session",
+    "MOXI_COMMS_SHELL_REACH": "off when this session's shell can't reach comms",
 }
 SETTINGS = "settings.toml"
 #: Provisioning at install, through the store's one opener: a comms 0.2 home whose files

@@ -19,15 +19,20 @@ What the wrapper does, in order:
   1. builds the host's line: `--cwd` (the current directory, or the row's), the settings
      flags, then what comms adds (below), and checks it whole with turns' own parser, so
      a flag the host would refuse refuses the launch before anything starts (exit 2);
-  2. makes the session's runtime directory (0700), which holds layer one; the claim
+  2. asks the daemon whether it serves comms' tools; when it does, mints the session's
+     token and stamps it with the URL the daemon answered (`MOXI_COMMS_MCP_TOKEN`,
+     `MOXI_COMMS_MCP_URL`) into the environment the adapter and the host get, so the
+     host's launch additions carry comms' MCP server, and layer one names the tools.
+     When it doesn't, the session starts without them, and the wrapper says so;
+  3. makes the session's runtime directory (0700), which holds layer one; the claim
      socket is beside it in comms' runtime directory (`paths.claim_socket`);
-  3. forks the session's adapter (`codex.CodexAdapter`). The adapter binds the name with
+  4. forks the session's adapter (`codex.CodexAdapter`). The adapter binds the name with
      the daemon and listens on the claim socket, `MOXI_COMMS_CLAIM_SOCKET`, with this
      process as the claim's root, then says so. The wrapper waits for its word, at most
      `READY_WAIT` seconds;
-  4. writes layer one, the thread's developer instructions, to a 0600 file in that
+  5. writes layer one, the thread's developer instructions, to a 0600 file in that
      directory;
-  5. execs `moxi-turns-codex-host` (found by `moxi.paths.script`, never on PATH) with
+  6. execs `moxi-turns-codex-host` (found by `moxi.paths.script`, never on PATH) with
      the line and `--instructions-file`. The host keeps this process's pid, so it is the
      session's process in the terminal, and the adapter finds its session with
      `turns.wait_ready(pid=<that pid>)`.
@@ -81,10 +86,12 @@ from .. import directors as directors_mod
 from ..claimhold import CLAIM_SOCKET_ENV
 from ..config import ConfigError
 from ..context import BARE_COMMS, own_comms
+from ..mcp.additions import TOKEN_ENV
 from ..paths import claim_socket, codex_threads_dir, log_dir
 from ..scoping import GLOBAL, NAME_RE, qualify
 from . import codex_roster
 from .harness import plan_comms, plan_head
+from .session import stamp_tools, tools_endpoint, tools_off
 from .word import BOUND, FAILED, await_word, exit_of, teller, word_for
 
 PROG = "moxi-comms-codex"
@@ -226,6 +233,10 @@ class Launch:
     write_root_reason: str = ""
     comms_path: str | None = None
     key: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    #: The URL comms' tools answer at, as the daemon said, or None when it serves none.
+    tools_url: str | None = None
+    #: Why the session gets no comms tools, when `tools_url` is None.
+    tools_why: str = ""
 
     @property
     def dir(self) -> Path:
@@ -384,6 +395,8 @@ def print_plan(launch: Launch, host_line: list, out=None) -> None:
     if options.get("model"):
         say(f"  model      {options['model']}")
     plan_comms(launch.comms_path, say)
+    if launch.tools_url is not None:
+        say(f"  tools      {launch.tools_url} (token in {TOKEN_ENV}, minted at launch)")
     say(f"  claim      {launch.claim_socket}")
     say(f"  adapter    log {launch.log_path()}")
     say("  launch     " + " ".join(host_line))
@@ -436,6 +449,7 @@ def main(argv=None, prog: str = PROG) -> int:
     except Refused as e:
         print(f"{prog}: {e}", file=sys.stderr)
         return e.code
+    launch.tools_url, launch.tools_why = tools_endpoint()
     from moxi import paths as moxi_paths
 
     try:
@@ -446,6 +460,8 @@ def main(argv=None, prog: str = PROG) -> int:
     if launch.comms_path is None:
         print(f"{prog}: this environment has no `moxi` script; layer one names a bare "
               f"`{BARE_COMMS}`, which the agent's PATH decides", file=sys.stderr)
+    if launch.tools_url is None:
+        print(f"{prog}: {tools_off(launch.tools_why)}", file=sys.stderr)
     if args.dry_run:
         return moxi_exit.OK
     refusal = _cannot_start(host, launch)
@@ -487,10 +503,14 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
     session of its own, so it is never the host's child. A refusal the adapter reports
     ends the launch here, with its exit code; past `ready_wait` the host starts anyway,
     and the wrapper says so. `roster` stands in for the daemon's roster in layer one."""
+    from ..listener import with_tools
     from .codex import fetch_roster, layer_one_text
     from .terminal import pidfd_open   # needs termios: not at the top
 
     env = launch.env()
+    # comms' tools: minted and stamped before the adapter forks, so the adapter and the
+    # host it execs (turns' one caller of the launch additions here) both see the pair.
+    stamp_tools(env, launch.tools_url)
     launch.write()
     harness_pid = os.getpid()
     handle = pidfd_open(harness_pid)
@@ -526,8 +546,9 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
         _remove(launch)
         return exit_of(code)
     info = roster if roster is not None else fetch_roster()
-    launch.write_instructions(layer_one_text(info, launch.comms_path or BARE_COMMS,
-                                             directors=launch.agent.directors))
+    launch.write_instructions(with_tools(
+        layer_one_text(info, launch.comms_path or BARE_COMMS,
+                       directors=launch.agent.directors), env))
     argv = launch.host_argv(host)
     return exec_(str(host), argv, env)
 

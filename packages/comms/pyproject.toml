@@ -68,6 +68,11 @@ comms = "moxi_comms.reserved"
 [project.entry-points."moxi.turns.listeners"]
 comms = "moxi_comms.listeners"
 
+# comms' MCP server in a launch: turns asks it what a launch adds, and it answers the
+# server only when comms' wrapper stamped the session's token and the server's URL.
+[project.entry-points."moxi.turns.additions"]
+comms = "moxi_comms.mcp.additions:additions"
+
 # The adapter kinds a binding may register as. comms declares its own here, as any module
 # declares one (see moxi_comms/kinds.py).
 [project.entry-points."moxi.comms.kinds"]
