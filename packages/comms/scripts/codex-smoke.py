@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-"""Smoke the Codex delivery path through turns' real host.
+"""Smoke the Codex delivery path through turns' Codex host.
+
+Every root (comms', turns' and the rest of Moxi's) goes under one temporary directory,
+and the comms daemon runs on the mock backend there. Keep TMPDIR short (``/tmp``): a
+session's claim socket sits under that root at its full path, and a Unix socket path
+has a length limit.
 
 ``--dry-run`` uses the repository's fake ``codex`` executable. It starts a real comms
-daemon and wrapper, lets turns spawn and verify the fake app-server, steers two texts
-into the open turn through turns' public API, completes the turn through the fake's
-control socket, and checks settlement. Then it sends mail with ``moxi comms send``
-from a sender's session, which goes through the daemon and the wrapper into the thread,
-checks that the turn's end advances the cursor, and checks child cleanup.
+daemon and the roster form of ``moxi-comms-codex``, which binds the name and execs
+``moxi-turns-codex-host``; the host spawns the fake app-server. It checks the thread's
+settings, waits for the launch's own priming turn to end, then sends mail with
+``moxi comms send`` from a sender that holds a binding of its own. The mail goes through
+the daemon and the wrapper's adapter into the thread; the script checks that the cursor
+moves only when the fake ends the turn, and that stopping the host ends the app-server.
 
 ``--live`` puts the requested real Codex binary on a private PATH, then runs the same
 daemon and wrapper and hands one delivery to the hosted session through turns' public
@@ -20,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import json
 import os
 import shutil
 import subprocess
@@ -72,9 +77,10 @@ def clean_environ() -> dict:
             if not key.startswith("MOXI_COMMS_")}
 
 
-def build_env(home: Path, runtime: Path, store: Path, binary_dir: Path) -> dict:
+def build_env(root: Path, home: Path, runtime: Path, store: Path, binary_dir: Path) -> dict:
     env = clean_environ()
     env.update({
+        "MOXI_HOME": str(root / "moxi"),
         "MOXI_COMMS_BACKEND": "mock",
         "MOXI_COMMS_HOME": str(home),
         "MOXI_COMMS_DEVICE": "codexsmoke",
@@ -96,24 +102,21 @@ def load_fake_codex():
 
 
 def provision_home(env, store: Path) -> None:
-    for key in [key for key in os.environ
-                if key.startswith(("MOXI_COMMS_", "MOXI_TURNS_"))]:
+    for key in [key for key in os.environ if key.startswith("MOXI_")]:
         del os.environ[key]
     os.environ.update({key: value for key, value in env.items()
-                       if key.startswith(("MOXI_COMMS_", "MOXI_TURNS_"))})
+                       if key.startswith("MOXI_")})
     from moxi_comms.mock_record import MockRecord
     from moxi_comms.paths import comms_db
     from moxi_comms.provision import provision
 
-    provision(MockRecord(store), comms_db(), slots=3,
-              operator=("900001", "operator"))
+    provision(MockRecord(store), comms_db(), operator=("900001", "operator"))
 
 
 def write_roster(path: Path, work: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         f'[codex.agents."{IDENTITY}"]\n'
-        'slot = 2\n'
         f'cwd = "{work}"\n'
         'sandbox = "workspace-write"\n'
         f'writable_roots = ["{work}"]\n'
@@ -124,14 +127,20 @@ def write_roster(path: Path, work: Path) -> Path:
     return path
 
 
-def start_daemon(env, runtime: Path, store: Path):
+def start_daemon(env, runtime: Path, store: Path, log: Path):
+    handle = log.open("ab")
     proc = subprocess.Popen(
         [str(BIN / "moxi-comms-daemon"), "--backend-store", str(store)],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env=env, stdout=handle, stderr=handle,
     )
-    socket = runtime / "comms" / "moxi-comms-daemon.sock"
+    proc.output_handle = handle
+    from moxi_comms.paths import daemon_socket
+
+    socket = daemon_socket()               # the address this process's roots give
     if not wait_until(socket.exists, 15):
-        raise RuntimeError("the daemon never opened its socket")
+        stop(proc)
+        tail = log.read_text(errors="replace").strip().splitlines()[-5:]
+        raise RuntimeError("the daemon never opened its socket:\n  " + "\n  ".join(tail))
     return proc
 
 
@@ -171,23 +180,43 @@ def thread_id_of(identity: str):
     return codex_threads.read(identity)
 
 
+def hosted_session(timeout: float):
+    """The turns session the Codex host published, or None."""
+    import moxi_turns as turns
+
+    return wait_until(lambda: next((item for item in turns.sessions()
+                                    if item.harness == "codex"), None), timeout)
+
+
+def primed(session) -> bool:
+    """The launch's own priming turn has ended: a turn ran and none is open."""
+    try:
+        facts = session.facts()
+    except Exception:                                          # noqa: BLE001
+        return False
+    return facts.turn_number >= 1 and not facts.turn_open
+
+
 def sender_session():
-    """Hold SENDER's claim in this process, `offline` on slot 1: only a live session
-    holding a name sends under it, and each `moxi comms send` runs as a root of it."""
+    """Hold SENDER's binding in this process, with the server's own daemon arm: a send
+    needs a live binding, and each `moxi comms send` runs as a root of it."""
     from moxi_comms.claimhold import ClaimServer
 
-    server = ClaimServer(SENDER, SCOPE, kind="claude-shim", slot=1)
-    server.holder.ever_held = True
-    server.set_offline()
+    server = ClaimServer(SENDER, SCOPE, kind="claude-shim", arm=True)
     return server.start()
+
+
+def bound(server) -> bool:
+    from moxi_comms.claimhold import BOUND
+
+    return server.holder.state == BOUND
 
 
 def send(env, sender, text) -> str:
     """One send to the Codex identity from `sender`'s session; returns its id."""
     proc = sender.spawn([str(BIN / "moxi"), "comms", "send", IDENTITY, text,
                          "--posture", "none"],
-                        env={**env, "MOXI_COMMS_SLOT": "1", "MOXI_COMMS_NAME": SENDER,
-                             "MOXI_COMMS_SCOPE": SCOPE},
+                        env={**env, "MOXI_COMMS_NAME": SENDER, "MOXI_COMMS_SCOPE": SCOPE},
                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     out, err = proc.communicate(timeout=60)
     if proc.returncode != 0:
@@ -196,12 +225,11 @@ def send(env, sender, text) -> str:
 
 
 def cursor_of(identity: str):
-    from moxi_comms.paths import cursors_dir
+    """The name's cursor in comms.db, which the daemon keeps."""
+    from moxi_comms.store import books
 
-    path = Path(cursors_dir()) / f"{identity}.json"
-    if not path.exists():
-        return None
-    return json.loads(path.read_text())["cursor"]
+    row = books.read_cursor(identity)
+    return None if row is None else row["cursor"]
 
 
 def write_rollout(sessions: Path, thread_id: str) -> None:
@@ -210,8 +238,7 @@ def write_rollout(sessions: Path, thread_id: str) -> None:
     the thread has ended."""
     load_fake_codex()                       # puts the tests on sys.path
     clock = importlib.import_module("test_cache_clock")
-    model = (clock.measured_models() or ["gpt-5.6-terra"])[0]
-    clock.Rollout(thread_id).turn("t1", time.time() - 8, model=model,
+    clock.Rollout(thread_id).turn("t1", time.time() - 8, model="gpt-5.6-terra",
                                   length=2.0).write(sessions)
 
 
@@ -239,7 +266,7 @@ def prepare(binary: str | None = None):
     binary_dir.mkdir()
     if binary is not None:
         (binary_dir / "codex").symlink_to(Path(binary).resolve())
-    env = build_env(home, runtime, store, binary_dir)
+    env = build_env(root, home, runtime, store, binary_dir)
     provision_home(env, store)
     from moxi_comms import config
 
@@ -255,68 +282,53 @@ def dry_run() -> int:
     records.mkdir()
     fake_codex.install(binary_dir)
     env["FAKE_CODEX_DIR"] = str(records)
-    env["FAKE_CODEX_PRIMING"] = "hang"
     env["CODEX_HOME"] = str(root / "codex-home")
+    env["HOME"] = str(root / "home-dir")
     daemon = adapter = sender = None
     try:
         unknown = subprocess.run(
             [str(BIN / "moxi-comms-codex"), "stranger@nowhere", "--dry-run",
              "--config", str(roster)], env=env, capture_output=True, text=True,
         )
-        check(unknown.returncode == 2 and "never register-triggered" in unknown.stderr,
-              "the roster refuses an identity it does not name")
+        check(unknown.returncode == 2 and "stranger@nowhere" in unknown.stderr,
+              "the roster form refuses an identity its roster does not name (exit 2)")
         plan = subprocess.run(
             [str(BIN / "moxi-comms-codex"), IDENTITY, "--dry-run", "--config",
              str(roster)], env=env, capture_output=True, text=True,
         )
-        check(plan.returncode == 0 and "slot 2, pinned by the roster" in plan.stdout
-              and "approvals never by turns" in plan.stdout,
-              "the dry plan names the pinned slot and turns' approval policy")
+        check(plan.returncode == 0 and "moxi-turns-codex-host" in plan.stdout
+              and "agents.enabled=false" in plan.stdout,
+              "the dry run prints the host line, multi-agent off")
 
-        daemon = start_daemon(env, runtime, store)
+        daemon = start_daemon(env, runtime, store, root / "daemon.log")
         adapter = launch(env, roster, root / "wrapper.log")
         check(bool(wait_until(lambda: IDENTITY in comms(env, ["agents"]).stdout, 20)),
-              "the wrapper registered on the daemon socket")
+              "the wrapper bound the name on the daemon socket")
         starts = wait_until(lambda: fake_codex.calls(records, "thread/start"), 20) or []
-        check(bool(starts), "turns spawned the fake app-server and started a thread")
+        check(bool(starts), "the host spawned the fake app-server and started a thread")
         params = starts[0]["params"] if starts else {}
         settings = params.get("config", {}).get("sandbox_workspace_write", {})
         check(params.get("approvalPolicy") == "never"
               and params.get("sandbox") == "workspace-write"
               and params.get("model") == "gpt-sample",
-              "the start carries turns' owned policy and the roster's model and sandbox")
+              "the start carries the host's approval policy and the roster's model and "
+              "sandbox")
         check(settings.get("network_access") is True
               and str(work) in settings.get("writable_roots", [])
               and params.get("config", {}).get("agents") == {"enabled": False},
               "the start carries network, writable roots and the disabled agents switch")
 
-        import moxi_turns as turns
-
-        session = wait_until(lambda: next((item for item in turns.sessions()
-                                           if item.harness == "codex"), None), 20)
+        session = hosted_session(20)
         check(session is not None, "turns published the hosted session through its API")
-        first = session.steer("codex smoke first", ref="smoke-first")
-        first_started = first.wait_started(20)
-        second = session.steer("codex smoke steer", ref="smoke-steer")
-        second_started = second.wait_started(20)
-        check(bool(wait_until(lambda: fake_codex.calls(records, "turn/steer"), 20)),
-              "the steers used Codex's steer path into the open priming turn")
-        check(isinstance(first_started, turns.Started)
-              and isinstance(second_started, turns.Started)
-              and first_started.turn_id == second_started.turn_id,
-              "both steers belong to the same live turn")
-        fake_codex.control_call(records, {"op": "complete"})
-        first_ended = first.wait_ended(20)
-        second_ended = second.wait_ended(20)
-        check(isinstance(first_ended, turns.Ended) and isinstance(second_ended, turns.Ended)
-              and first_ended.outcome == second_ended.outcome == "answer",
-              "one Stop settled both steers as answered")
-        check(bool(thread_id_of(IDENTITY)),
-              "the wrapper recorded the hosted thread id")
+        check(session is not None and bool(wait_until(lambda: primed(session), 20)),
+              "the launch's priming turn ended")
+        check(bool(wait_until(lambda: thread_id_of(IDENTITY), 10)),
+              "the adapter recorded the hosted thread id")
 
-        # comms' own path: moxi comms send -> daemon -> wrapper -> turns -> app-server.
+        # comms' own path: moxi comms send -> daemon -> adapter -> turns -> app-server.
         write_rollout(root / "codex-home" / "sessions", thread_id_of(IDENTITY))
         sender = sender_session()
+        check(bool(wait_until(lambda: bound(sender), 10)), "the sender holds its binding")
         mail = send(env, sender, "codex smoke through the daemon")
         check(bool(wait_until(lambda: digest_with(records, mail), 20)),
               f"the digest for msg {mail} reached the thread through the daemon")
@@ -330,7 +342,9 @@ def dry_run() -> int:
         adapter = None
         check(wait_until(lambda: any(row["event"] == "app-server-exit"
                                      for row in fake_codex.events(records)), 10),
-              f"wrapper exit reaped the app-server process {app_pid}")
+              f"stopping the host ended the app-server process {app_pid}")
+        check(bool(wait_until(lambda: IDENTITY not in comms(env, ["agents"]).stdout, 10)),
+              "the name is unbound once the host has gone")
         return report()
     finally:
         if sender is not None:
@@ -369,14 +383,17 @@ def live_run(binary: str) -> int:
     env["CODEX_HOME"] = str(codex_home())
     daemon = adapter = None
     try:
-        daemon = start_daemon(env, runtime, store)
+        daemon = start_daemon(env, runtime, store, root / "daemon.log")
         adapter = launch(env, roster, root / "wrapper.log")
         check(bool(wait_until(lambda: IDENTITY in comms(env, ["agents"]).stdout, 60)),
               "the live wrapper registered after turns loaded the real app-server")
         import moxi_turns as turns
 
-        session = wait_until(lambda: next((item for item in turns.sessions()
-                                           if item.harness == "codex"), None), 60)
+        session = hosted_session(60)
+        check(session is not None, "turns published the hosted session through its API")
+        if session is None:
+            return report()
+        wait_until(lambda: primed(session), 300)
         delivery = session.deliver("Reply with a short acknowledgement, then stop.",
                                    ref="smoke-live")
         started = delivery.wait_started(60)
