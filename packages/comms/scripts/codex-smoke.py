@@ -114,7 +114,9 @@ def provision_home(env, store: Path) -> None:
     provision(MockRecord(store), comms_db(), operator=("900001", "operator"))
 
 
-def write_roster(path: Path, work: Path) -> Path:
+def write_roster(path: Path, work: Path, model: str | None = "gpt-sample") -> Path:
+    """The smoke's roster. The fake codex checks its model; a live run leaves the model
+    out, since the real one refuses a name it doesn't serve."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         f'[codex.agents."{IDENTITY}"]\n'
@@ -122,8 +124,8 @@ def write_roster(path: Path, work: Path) -> Path:
         'sandbox = "workspace-write"\n'
         f'writable_roots = ["{work}"]\n'
         'network_access = true\n'
-        'model = "gpt-sample"\n'
-        f'directors = ["{SENDER}"]\n'
+        + (f'model = "{model}"\n' if model else '')
+        + f'directors = ["{SENDER}"]\n'
     )
     return path
 
@@ -254,7 +256,7 @@ def digest_with(records: Path, message_id: str) -> bool:
     return False
 
 
-def prepare(binary: str | None = None):
+def prepare(binary: str | None = None, model: str | None = "gpt-sample"):
     root = Path(tempfile.mkdtemp(prefix="moxi-codex-smoke-"))
     home = root / "home"
     runtime = root / "run"
@@ -271,7 +273,7 @@ def prepare(binary: str | None = None):
     provision_home(env, store)
     from moxi_comms import config
 
-    roster = write_roster(config.config_path(env), work)
+    roster = write_roster(config.config_path(env), work, model)
     note(f"root {root}")
     return root, runtime, store, work, binary_dir, env, roster
 
@@ -380,7 +382,7 @@ def live_run(binary: str) -> int:
     refusal = own_home_refusal(binary)
     if refusal:
         raise SystemExit(refusal)
-    root, runtime, store, _work, _binary_dir, env, roster = prepare(binary)
+    root, runtime, store, _work, _binary_dir, env, roster = prepare(binary, model=None)
     env["CODEX_HOME"] = str(codex_home())
     daemon = adapter = None
     try:
