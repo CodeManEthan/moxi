@@ -4,6 +4,7 @@
     moxi modules [--json]        what this environment holds
     moxi modules --available     the first-party modules `moxi install` knows by name
     moxi install <module> ...    installs a module, sets it up, offers its extras
+    moxi uninstall <module>      runs its teardown, removes its units, skills and package
     moxi shortcut [<module>]     the opt-in bare command for a module
     moxi config <module> ...     a module's settings and its config file
     moxi config set ...          changes one of them (`moxi config unset` removes one)
@@ -40,6 +41,9 @@ commands:
   modules [--json]                   list the Moxi modules this environment holds
   modules --available [--refresh]    list the first-party modules, installed or not
   install <module> [options]         install a module and offer its optional extras
+  uninstall <module> [--purge [--yes]] [--skip-teardown]
+                                     uninstall a module; its config is kept, and its
+                                     stores too unless --purge is given
   shortcut [<module>] [--remove]     put a bare <module> command on PATH, or take it off
   config <module> [show [--json]|path|check|init]
                                      a module's settings and its config file
@@ -1176,6 +1180,12 @@ def _install(argv: list[str]) -> int:
     return install.main(argv)
 
 
+def _uninstall(argv: list[str]) -> int:
+    from . import uninstall
+
+    return uninstall.main(argv)
+
+
 def _run(argv: list[str]) -> int:
     from . import run
 
@@ -1217,6 +1227,7 @@ def _version(argv: list[str]) -> int:
 _VERBS = {
     "modules": _modules,
     "install": _install,
+    "uninstall": _uninstall,
     "shortcut": _shortcut,
     "config": _config,
     "paths": _paths,

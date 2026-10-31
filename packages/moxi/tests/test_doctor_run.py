@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -15,8 +16,9 @@ from pathlib import Path
 
 import pytest
 
+import moxi.config
 import moxi.paths
-from moxi import cli, doctor, files, modules, strays, units
+from moxi import cli, doctor, files, modules, place, strays, units
 from moxi.doctor import Row, _run
 from moxi.units import _backend, _state
 from moxi.units._fake import FakeBackend, FakeSupervisor
@@ -981,6 +983,174 @@ def test_records_are_fail_rows_until_cleared(d):
     assert ("moxi", "record k") not in d.rows()
 
 
+# -- 10. placements ------------------------------------------------------------------------------
+
+@pytest.fixture
+def pl(d, tmp_path, monkeypatch):
+    """`d` with a home of its own, so the harness folders are under tmp, and module `demo`
+    shipping skill `demo-send` in its package."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # what `~` reads on Windows
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    d.module(settings=None, SKILLS="'skills'",
+             files_={"skills/demo-send/SKILL.md": "# send\n"})
+    d.home = home
+    d.source = d.site.root / "moxi_demo" / "skills" / "demo-send"
+    d.claude = home / ".claude" / "skills" / "demo-send"
+    return d
+
+
+def place_demo(pl, *, owner="demo", form=None, source=None):
+    source = source or pl.source
+    steps = place.plan(owner, [place.Item(source, "claude", "demo-send")], form=form)
+    place.apply(steps, say=lambda line: None)
+    return pl.home / ".claude" / "skills" / "demo-send"
+
+
+def placement_rows(rows):
+    return {key: row for key, row in rows.items()
+            if key[1].startswith("placement") or key[1] == "placements"}
+
+
+def test_placements_as_placed_are_one_ok_row_per_owner(pl):
+    place_demo(pl)
+    got = placement_rows(pl.rows())
+    assert got == {("demo", "placements"): Row("demo", "placements", "ok",
+                                                "1 placement, each as placed")}
+
+
+def test_a_gone_source_warns_source_missing_and_the_dangling_link_is_left(pl, capsys):
+    target = place_demo(pl)
+    shutil.rmtree(pl.source)
+    ledger = (moxi.paths.core().state_dir() / place.LEDGER).read_bytes()
+    row = pl.rows()[("demo", "placement claude demo-send")]
+    assert row.state == "warn"
+    assert row.detail == f"source missing: {pl.source} (placed at {target})"
+    assert row.fix == "moxi install demo"
+    assert ("demo", "placements") not in pl.rows()
+    # The doctor only reads: the link still dangles there and the ledger is as it was.
+    assert target.is_symlink() and not target.exists()
+    assert (moxi.paths.core().state_dir() / place.LEDGER).read_bytes() == ledger
+    assert cli.main(["doctor", "demo"]) == 0
+
+
+def test_a_missing_placement_warns(pl):
+    target = place_demo(pl)
+    target.unlink()
+    row = pl.rows()[("demo", "placement claude demo-send")]
+    assert (row.state, row.detail, row.fix) == ("warn", f"{target} is gone",
+                                                "moxi install demo")
+
+
+def test_an_edited_copy_warns_modified_with_the_replace_line(pl):
+    target = place_demo(pl, form="copy")
+    (target / "SKILL.md").write_text("# mine now\n")
+    row = pl.rows()[("demo", "placement claude demo-send")]
+    assert row.state == "warn"
+    assert row.detail == f"{target} was edited after it was copied"
+    displaced = moxi.paths.core().data_dir() / "displaced"
+    assert row.fix == f"moxi install demo --replace, which moves it to {displaced}"
+    assert (target / "SKILL.md").read_text() == "# mine now\n"
+
+
+def test_a_copy_whose_source_changed_is_stale(pl):
+    target = place_demo(pl, form="copy")
+    (pl.source / "SKILL.md").write_text("# send v2\n")
+    row = pl.rows()[("demo", "placement claude demo-send")]
+    assert row.state == "warn"
+    assert row.detail == (f"{target} is stale: its source {pl.source} changed after it "
+                          "was copied")
+    assert (target / "SKILL.md").read_text() == "# send\n"
+
+
+def test_a_link_pointed_elsewhere_warns_modified(pl, tmp_path):
+    target = place_demo(pl)
+    target.unlink()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    target.symlink_to(elsewhere)
+    row = pl.rows()[("demo", "placement claude demo-send")]
+    assert row.detail == f"{target} no longer points at its source {pl.source}"
+    assert row.fix.startswith("moxi install demo --replace")
+
+
+def test_another_owner_s_placement_has_no_install_fix(pl, tmp_path):
+    other = tmp_path / "project" / "skills" / "demo-send"
+    other.mkdir(parents=True)
+    (other / "SKILL.md").write_text("# project\n")
+    place_demo(pl, owner="loadout", source=other)
+    shutil.rmtree(other)
+    row = pl.rows()[("loadout", "placement claude demo-send")]
+    assert row.state == "warn" and row.detail.startswith(f"source missing: {other}")
+    assert row.fix is None
+
+
+def test_a_placement_whose_source_is_outside_its_owner_s_package_has_no_fix(pl, tmp_path):
+    other = tmp_path / "elsewhere" / "demo-send"
+    other.mkdir(parents=True)
+    (other / "SKILL.md").write_text("# x\n")
+    target = place_demo(pl, source=other)
+    target.unlink()
+    assert pl.rows()[("demo", "placement claude demo-send")].fix is None
+
+
+def test_module_names_restrict_the_placement_rows(pl):
+    target = place_demo(pl)
+    target.unlink()
+    assert ("demo", "placement claude demo-send") in pl.rows("demo")
+    assert not placement_rows(pl.rows("moxi"))
+
+
+def test_a_ledger_that_is_not_json_is_one_fail_row_and_the_rest_run(pl):
+    path = moxi.paths.core().state_dir() / place.LEDGER
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json")
+    got = pl.rows()
+    row = got[("moxi", "placements")]
+    assert row.state == "fail"
+    assert row.detail.startswith(f"{path} does not read as JSON (")
+    assert "move it aside" not in row.detail
+    assert row.fix.startswith(f"move {path} aside, then run moxi install <module> "
+                              "--replace")
+    assert "reads as unmarked without its ledger entry" in row.fix
+    assert ("moxi", "check placements") not in got
+    assert got[("demo", "module")].state == "ok"
+    assert path.read_text() == "{not json"
+    path.write_text("[]")
+    row = pl.rows()[("moxi", "placements")]
+    assert (row.state, row.detail) == ("fail", f"{path} is not a JSON object")
+    # a ledger that can't be opened at all fails the same way
+    path.unlink()
+    path.mkdir()
+    row = pl.rows()[("moxi", "placements")]
+    assert row.state == "fail" and str(path) in row.detail
+
+
+def test_a_harness_name_with_no_row_and_a_skipped_row_warn_on_moxi(pl, capsys):
+    moxi.config.set("moxi", "skills.harnesses", ["claude", "opencode"], by="test")
+    moxi.config.add_item("moxi", "harnesses", {"name": "Bad Name", "skills": "/x"},
+                         by="test")
+    got = pl.rows()
+    row = got[("moxi", "skills.harnesses opencode")]
+    assert row.state == "warn"
+    assert row.detail == "skills.harnesses names opencode, which has no row in harnesses"
+    assert row.fix.startswith("moxi config set moxi skills.harnesses --remove opencode")
+    assert "harnesses --add '{name = \"opencode\"" in row.fix
+    skipped = got[("moxi", "harnesses")]
+    assert skipped.state == "warn"
+    assert skipped.detail.startswith("harnesses row 3 is skipped: its name 'Bad Name'")
+    assert str(moxi.config.load("moxi", moxi.config._core_schema()).file) in skipped.fix
+    assert ("moxi", "harnesses") not in pl.rows("demo")
+    assert cli.main(["doctor"]) == 0
+
+
+def test_the_default_harness_table_gives_no_harness_rows(pl):
+    got = pl.rows()
+    assert not [key for key in got if key[1].startswith(("harnesses", "skills.harnesses"))]
+
+
 # -- 10, 11: moxi.doctor entries and DOCTOR --------------------------------------------------------
 
 CHECKS = """\
@@ -1154,3 +1324,24 @@ def test_a_supervisor_read_that_raises_is_a_fail_row_per_module(d, monkeypatch):
     row = got[("demo", "units")]
     assert row.state == "fail" and "RuntimeError: the bus is gone" in row.detail
     assert got[("demo", "daemon relay")] == Row("demo", "daemon relay", "ok", "up to date")
+
+
+def test_the_install_fix_follows_the_placer_s_own_package_test(pl, tmp_path):
+    """A project folder named like the owner's package is not its package, so no
+    `moxi install` fix; a source where an older install of the package lay is."""
+    project = tmp_path / "proj" / "moxi_demo" / "skills" / "demo-send"
+    project.mkdir(parents=True)
+    (project / "SKILL.md").write_text("# project\n")
+    target = place_demo(pl, source=project)
+    target.unlink()
+    assert pl.rows()[("demo", "placement claude demo-send")].fix is None
+    place.remove("demo", say=lambda line: None)
+    old = (tmp_path / "old" / "lib" / "python3.11" / "site-packages" / "moxi_demo"
+           / "skills" / "demo-send")
+    old.mkdir(parents=True)
+    (old / "SKILL.md").write_text("# send\n")
+    place_demo(pl, source=old)
+    shutil.rmtree(old)
+    row = pl.rows()[("demo", "placement claude demo-send")]
+    assert row.detail.startswith(f"source missing: {old}")
+    assert row.fix == "moxi install demo"

@@ -198,7 +198,8 @@ def socket_state(unit: UnitRef, backend: str,
     time and `invocation` its `InvocationID` (empty when it has none).
 
     `active` when every unit is active, with the epoch `<id>=<invocation>,...`; `failed`
-    when one has failed, naming each failed unit; else `inactive`, naming the units not
+    when one has failed, naming each failed unit and then any other unit not active, so a
+    reader can tell which of the rest still listen; else `inactive`, naming the units not
     active. The epoch is read from the state, never from an id being there, since a
     stopped unit can still show its last one; an active unit with no id leaves it None.
     `missing` when `unit` names no socket unit. A backend whose read failed gives
@@ -211,6 +212,8 @@ def socket_state(unit: UnitRef, backend: str,
     idle = [r[0] for r in reads if r[1] != "active"]
     if failed:
         state, detail = "failed", "failed: " + ", ".join(failed)
+        if rest := [i for i in idle if i not in failed]:
+            detail += "; not active: " + ", ".join(rest)
     elif idle:
         state, detail = "inactive", "not active: " + ", ".join(idle)
     else:

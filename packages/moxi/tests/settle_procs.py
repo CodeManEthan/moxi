@@ -2,7 +2,7 @@
 a settle (or teardown) child, all on the fake backend.
 
     python settle_procs.py shell ARGV...            the session leader on a terminal
-    python settle_procs.py parent MODULE... [--replace] [--teardown]
+    python settle_procs.py parent MODULE... [--replace] [--skills] [--teardown]
     python settle_procs.py child ARGS...            `python -m moxi._settle ARGS`
 
 The shell takes the terminal as its controlling terminal, starts ARGV in a process group
@@ -12,9 +12,12 @@ the job never hangs the terminal up.
 
 The parent runs `moxi install`'s settle loop (`Installer._setup`) under the install's own
 hold of the core lock, with each module's settle step in a child started by
-`moxi._settle.run_child`, as the install starts it. With `--teardown` it runs the
-teardown child of the first module instead and, as uninstall will, exits 1 when the
-child was interrupted.
+`moxi._settle.run_child`, as the install starts it. With `--teardown` it runs `moxi
+uninstall` of the first module instead (`Uninstaller._run`, under the same hold), its
+teardown in a child; the environment is a fake plain one whose package step only logs.
+
+The child runs steps 4 to 6 only when `MOXITEST_LATER` is set; otherwise it logs that it
+reached them.
 
 The child is `python -m moxi._settle` with the fake backend put in place first: its unit
 files under the box's `units` directory, its supervisor's state in a JSON file, so the
@@ -181,10 +184,11 @@ def parent(argv: list[str]) -> int:
 
     subprocess.Popen.send_signal = send_signal
 
-    def run_settle(python, module, *, replace=False, teardown=False):
+    def run_settle(python, module, *, replace=False, teardown=False, skills=None):
         child = [sys.executable, str(HERE), "child"]
         child += ["--teardown", module] if teardown else [module]
         child += ["--replace"] if replace else []
+        child += ["--skills"] if skills else []
         note("parent", settle=module)
         outcome = _settle.run_child(child)
         note("parent", outcome=outcome.code, signals=[int(s) for s in outcome.signals])
@@ -195,11 +199,25 @@ def parent(argv: list[str]) -> int:
     with install._core_lock():
         note("parent", locked=True)
         if teardown:
-            outcome = run_settle(sys.executable, names[0], teardown=True)
-            code = 1 if outcome.interrupted or outcome.code else 0
+            from moxi import uninstall
+            from moxi.units import _backend
+
+            _backend._override.append(backend())
+            install.environment = lambda: install.Environment(
+                install.PLAIN, Path(sys.prefix), sys.executable)
+            install.run = lambda argv, env=None: note("parent", ran=argv) or 0
+            uninstall.run_teardown = (
+                lambda python, module: run_settle(python, module, teardown=True))
+            args = uninstall._parser("moxi uninstall").parse_args([names[0]])
+            try:
+                code = uninstall.Uninstaller(args)._run(names[0])
+            except install.InstallError as exc:
+                print(f"moxi uninstall: {exc}", file=sys.stderr)
+                code = exc.exit_code
         else:
             args = install._parser("moxi install").parse_args(
-                [names[0], "--none"] + (["--replace"] if replace else []))
+                [names[0], "--none"] + (["--replace"] if replace else [])
+                + (["--skills"] if "--skills" in argv else []))
             installer = install.Installer(args)
             installer.env = SimpleNamespace(python=sys.executable)
             try:
@@ -221,7 +239,8 @@ def child(argv: list[str]) -> int:
     b = box()
     paths._scripts = lambda: Path(b["scripts"])
     _backend._override.append(backend())
-    _settle._later_steps = lambda step: note("child", later=step.module) or 0
+    if not os.environ.get("MOXITEST_LATER"):
+        _settle._later_steps = lambda step: note("child", later=step.module) or 0
     real = _settle._on_signal
 
     def logged(signum, frame):
