@@ -651,6 +651,34 @@ def test_purge_removes_a_store_that_is_a_link_as_a_link(stored, capsys, tmp_path
     assert f"turns: removed store index, a link; kept what it points at ({elsewhere})" in out
 
 
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="Windows only: --purge removes a store that is a directory "
+                           "symlink or a junction as a link (the rmdir fallback), and keeps "
+                           "what it points at")
+@pytest.mark.parametrize("made", ["junction", "symlink"])
+def test_purge_removes_a_directory_link_or_junction_store_on_windows(stored, capsys, tmp_path,
+                                                                     made):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "a").write_text("keep me")
+    index = stored.cache / "index"
+    shutil.rmtree(index)
+    if made == "junction":
+        import _winapi
+
+        _winapi.CreateJunction(str(elsewhere), str(index))
+        assert os.path.isjunction(index)
+    else:
+        try:
+            index.symlink_to(elsewhere, target_is_directory=True)
+        except OSError:
+            pytest.skip("this account can't make symlinks (Developer Mode off, not elevated)")
+    code, out, err = moxi_uninstall(capsys, "turns", "--purge")
+    assert code == 0, err
+    assert not os.path.lexists(index) and (elsewhere / "a").read_text() == "keep me"
+    assert "turns: removed store index, a link; kept what it points at (" in out
+
+
 def test_purge_of_a_broken_module_removes_only_the_core_s_stores(stored, capsys):
     stored.site.write("moxi_turns/module.py", "ANNOUNCES = 99\n")
     drop_modules({"moxi_turns"})
