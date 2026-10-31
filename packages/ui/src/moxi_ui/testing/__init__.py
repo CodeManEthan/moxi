@@ -27,7 +27,9 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     when the test module ends.
 `ui_browser` (session scope)
     The Playwright browser, headless: Chromium, or the one `--ui-browser` names
-    (`chromium`, `firefox` or `webkit`).
+    (`chromium`, `firefox` or `webkit`). One per pytest process, so under pytest-xdist
+    each worker has its own. Tests that use no browser fixture, `asyncio.run()` among
+    them, run beside browser tests in one run.
 `ui_contexts`
     `ui_contexts(shell=None, *, sign_in=True, **context_args)` opens a fresh browser
     context on `shell` (`ui_shell` by default), its waits 5 s, signed in with its first
@@ -66,6 +68,7 @@ Without a browser, `ui_shell.session()` is a signed-in session over plain HTTP, 
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import weakref
@@ -82,6 +85,11 @@ _REPORTS = pytest.StashKey[dict[str, Any]]()
 #: Each test shell's stored sign-in: the browser state (cookie and key) one sign-in left.
 _SIGNED_IN: weakref.WeakKeyDictionary[Any, dict[str, Any]] = weakref.WeakKeyDictionary()
 KEY_ITEM = "moxi-ui-key"
+#: Playwright's event loop while `ui_browser` holds a browser. Between its calls,
+#: Playwright's sync API marks that loop as this thread's running loop, and then
+#: `asyncio.run()` refuses to start; so a test that uses no browser fixture runs with the
+#: mark taken off, and a browser and asyncio tests can share one pytest run.
+_playwright_loop: asyncio.AbstractEventLoop | None = None
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -98,6 +106,33 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo) -> Itera
     report = yield
     item.stash.setdefault(_REPORTS, {})[report.when] = report
     return report
+
+
+def _without_playwright_loop(item: pytest.Item) -> Iterator[None]:
+    if _playwright_loop is None or "ui_browser" in item.fixturenames:
+        return (yield)
+    if asyncio._get_running_loop() is _playwright_loop:
+        asyncio._set_running_loop(None)
+    try:
+        return (yield)
+    finally:
+        if _playwright_loop is not None:
+            asyncio._set_running_loop(_playwright_loop)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_setup(item: pytest.Item) -> Iterator[None]:
+    return (yield from _without_playwright_loop(item))
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item: pytest.Item) -> Iterator[None]:
+    return (yield from _without_playwright_loop(item))
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None) -> Iterator[None]:
+    return (yield from _without_playwright_loop(item))
 
 
 @pytest.fixture(scope="module")
@@ -139,8 +174,10 @@ def ui_browser(request: pytest.FixtureRequest) -> Iterator[Any]:
     an error."""
     from playwright.sync_api import Error, sync_playwright
 
+    global _playwright_loop
     name = request.config.getoption("--ui-browser")
     playwright = sync_playwright().start()
+    _playwright_loop = asyncio._get_running_loop()
     try:
         try:
             browser = getattr(playwright, name).launch()
@@ -154,9 +191,16 @@ def ui_browser(request: pytest.FixtureRequest) -> Iterator[Any]:
         try:
             yield browser
         finally:
+            # The last test's teardown may be one that runs with the loop's mark off.
+            asyncio._set_running_loop(_playwright_loop)
             browser.close()
     finally:
-        playwright.stop()
+        asyncio._set_running_loop(_playwright_loop)
+        try:
+            playwright.stop()
+        finally:
+            _playwright_loop = None
+            asyncio._set_running_loop(None)
 
 
 @pytest.fixture

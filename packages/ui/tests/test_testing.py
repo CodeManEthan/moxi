@@ -3,9 +3,11 @@ contract and width checks in a browser."""
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import expect
@@ -27,6 +29,40 @@ def test_loading_the_plugin_imports_no_moxi_ui_submodule_and_no_playwright(tmp_p
                            str(tmp_path)], cwd=tmp_path, capture_output=True, text=True,
                           timeout=60)
     assert done.returncode == 0, done.stdout + done.stderr
+
+
+@pytest.mark.browser
+def test_browser_tests_and_asyncio_run_share_one_pytest_run(tmp_path, ui_browser):
+    # The last test uses no browser, so the browser closes in a teardown that runs with
+    # Playwright's loop hidden. The child finds the browsers this run uses: under the
+    # fence its home is a temporary one.
+    browsers = Path(ui_browser.browser_type.executable_path).parents[2]
+    (tmp_path / "test_mixed.py").write_text(textwrap.dedent("""
+        import asyncio
+
+        async def two():
+            return 2
+
+        def test_a_page(ui_browser):
+            page = ui_browser.new_page()
+            assert page.evaluate("1 + 1") == 2
+            page.close()
+
+        def test_asyncio_after_a_browser():
+            assert asyncio.run(two()) == 2
+
+        def test_a_page_again(ui_browser):
+            test_a_page(ui_browser)
+
+        def test_asyncio_last():
+            assert asyncio.run(two()) == 2
+    """))
+    done = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                           "--ui-browser", ui_browser.browser_type.name, str(tmp_path)],
+                          cwd=tmp_path, capture_output=True, text=True, timeout=60,
+                          env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(browsers)})
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "4 passed" in done.stdout, done.stdout
 
 
 def test_the_test_shell_serves_the_fixture_and_reaches_its_page_server(ui_shell):
