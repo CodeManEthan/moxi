@@ -40,14 +40,25 @@ test("an idle server, and one that crashed within the hour", () => {
   assert.equal(serverView(row({ crashes: 1, last_crash_at: "2026-10-30T10:30:00Z" }), NOW).tone, "off");
 });
 
-test("a failed start, and three in a row, as the doctor reads them", () => {
-  const once = serverView(row({ state: "failed", reason: "exited 3 before ready", failed_starts: 1, failed_in_row: 1, starts: 1 }), NOW);
-  assert.equal(once.tone, "fail");
-  assert.equal(once.state, "failed to start");
-  assert.equal(once.lines[0].text, "exited 3 before ready");
+test("one or two failed starts are no warning, and three in a row fail, as the doctor reads them", () => {
+  for (const n of [1, 2]) {
+    // Inside the 10 s wait before the next try, and after it.
+    const failed = serverView(row({ state: "failed", reason: "exited 3 before ready", failed_starts: n, failed_in_row: n, starts: n }), NOW);
+    assert.equal(failed.tone, "off");
+    assert.equal(failed.state, "not running");
+    assert.equal(failed.lines[0].text, "The last start failed: exited 3 before ready");
+    assert.ok(failed.lines.every((line) => line.tone === null));
+    const later = serverView(row({ failed_starts: n, failed_in_row: n, starts: n }), NOW);
+    assert.equal(later.tone, "off");
+    assert.equal(later.state, "not running");
+  }
+  assert.equal(serverView(row({ state: "failed", failed_starts: 1, failed_in_row: 1, starts: 1 }), NOW).lines[0].text,
+               "The last start failed.");
   const thrice = serverView(row({ failed_starts: 3, failed_in_row: 3, starts: 3 }), NOW);
   assert.equal(thrice.tone, "fail");
   assert.ok(thrice.lines.some((line) => line.text === "the last 3 starts failed"));
+  const failing = serverView(row({ state: "failed", reason: "exited 3 before ready", failed_starts: 3, failed_in_row: 3, starts: 3 }), NOW);
+  assert.equal(failing.tone, "fail");
 });
 
 test("a server draining for another version says it restarts", () => {
