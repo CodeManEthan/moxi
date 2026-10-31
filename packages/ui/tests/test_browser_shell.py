@@ -94,6 +94,9 @@ def test_the_menu_opens_the_fixture_panel_in_the_same_document_and_back_returns(
     expect(ui_page).to_have_url(ui_shell.url + "/m/ui/")
     expect(_modules(ui_page).locator(".card[data-module=fixture]")).to_be_visible()
     ui_page.go_forward()
+    # The URL first: a failure here is the browser not going forward, and one on the
+    # panel below is the shell not showing the entry it went forward to.
+    expect(ui_page).to_have_url(ui_shell.url + "/m/fixture/")
     expect(panel).to_be_attached()
     # The modules view's own link uses navigate(), with no reload either.
     panel.get_by_role("button", name="Modules").click()
