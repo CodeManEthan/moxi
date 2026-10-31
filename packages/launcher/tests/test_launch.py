@@ -747,6 +747,22 @@ def test_an_offline_comms_daemon_is_a_try_again_naming_the_daemon(work, monkeypa
     assert nothing_written()
 
 
+def test_a_retried_launch_whose_first_run_holds_the_name_gets_the_stored_outcome(
+        work, harness, no_exec, deliverers, monkeypatch):
+    first_asks = fake_comms(monkeypatch, state("free"))
+    req = request(work, identity="planner", scope="moxi", brief=BRIEF)
+    first_ = api.launch(req)
+    # The first run's session now holds the name the retry asks for.
+    again_asks = fake_comms(monkeypatch, state("held", holder=f"claude session {SID}"))
+    again = api.launch(req)
+    assert not first_.duplicate and again.duplicate
+    assert (again.state, again.exit_code) == (first_.state, first_.exit_code) == (
+        "started", exits.OK)
+    # Nothing is asked or started again.
+    assert first_asks == [("planner", "moxi")] and again_asks == []
+    assert len(no_exec) == 1 and len(deliverers) == 1
+
+
 def test_a_comms_without_the_identity_check_lets_the_wrapper_decide(work, monkeypatch):
     monkeypatch.setattr(api, "_comms_api", lambda: SimpleNamespace())
     assert api._identity_taken("planner", None) is None

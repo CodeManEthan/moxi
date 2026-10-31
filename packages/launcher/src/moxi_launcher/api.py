@@ -18,7 +18,10 @@ sender.
 `LaunchResult` whose `state`, `reason` and `exit_code` are the row's.
 
 **A request id is a launch's idempotency key.** A request whose id is already in the
-launch log starts nothing: `launch` returns the stored row's outcome, `duplicate` set.
+launch log starts nothing: `launch` returns the stored row's outcome, `duplicate` set. It
+looks the id up before it resolves or checks anything, so a retry is never refused by
+what its own first run holds, such as its comms name or its named slot; the insert's own
+uniqueness still catches two first runs that race.
 
 `preview` composes through the same `compose.build`, with the request's ids, so for one
 request it shows the argv the launch hands its target. Two limits: composing a Claude
@@ -128,6 +131,9 @@ def launch(request, *, environ: Mapping[str, str] | None = None,
     `warn` is called with each warning line just before the session starts, the last
     moment a launch in this terminal can show one; the result carries them too."""
     caller = dict(os.environ if environ is None else environ)
+    known = _known(getattr(request, "request_id", None), environ)
+    if known is not None:
+        return _stored(known)
     resolved = _resolve(request, environ)
     refusals = _check(resolved, caller)
     if refusals:
@@ -218,6 +224,21 @@ def exit_code(error: BaseException) -> int:
 
 def _resolve(request, environ: Mapping[str, str] | None = None):
     return presets.resolve(request, env=environ)
+
+
+def _known(request_id: str | None,
+           environ: Mapping[str, str] | None) -> store.LaunchRow | None:
+    """The row of a request id already in the launch log, read before anything else, so a
+    retried request gets its stored outcome and is not refused by what its own first run
+    holds (its comms name, its named slot). Reads only: a launch log not made yet is
+    left unmade."""
+    if not request_id or not store.path(environ).exists():
+        return None
+    conn = store.connect(env=environ, create=False)
+    try:
+        return store.get(conn, request_id)
+    finally:
+        conn.close()
 
 
 def _check(resolved, caller: Mapping[str, str]) -> list[Refusal]:

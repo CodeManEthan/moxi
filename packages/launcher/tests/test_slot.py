@@ -179,6 +179,20 @@ def test_a_launch_naming_a_slot_goes_only_there(work, harness, rig, given, asked
     assert got.state == "started" and got.exit_code == 0
 
 
+def test_a_retried_launch_into_the_slot_its_first_run_took_gets_the_stored_outcome(
+        work, harness, rig):
+    rig.plan(slots={"3": {"state": "free", "launchable": True}})
+    first_ = api.launch(request(work, slot="3"))
+    calls = len(rig.calls())
+    # The first run's session now occupies the slot the retry names.
+    rig.plan(slots={"3": OCCUPIED})
+    again = api.launch(request(work, slot="3"))
+    assert not first_.duplicate and again.duplicate
+    assert (again.state, again.exit_code, again.slot) == ("started", 0, "3")
+    # slots is not asked again, and nothing more is started.
+    assert len(rig.calls()) == calls and len(rig.calls("start")) == 1
+
+
 def test_the_named_slot_is_on_the_row_from_its_insert(work, harness, rig, monkeypatch):
     rig.plan(slots={"3": {"state": "ended", "launchable": True}})
     seen = []
