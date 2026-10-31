@@ -177,9 +177,9 @@ def env(monkeypatch, tmp_path):
 @pytest.fixture(autouse=True)
 def turns_plugins(monkeypatch, tmp_path_factory) -> Path:
     """turns' Claude plugins as a folder marketplace of the test's own. The Claude
-    wrapper asks turns for its launch additions, which write `endpoint.json` into the
-    plugins' folder; no test may rewrite the one in the package the suite runs from. A
-    test that runs the wrapper in a child process patches the child the same way
+    wrapper asks turns for its launch additions, which name these plugins' folders; a
+    launch writes nothing there, and no test may depend on the package the suite runs
+    from. A test that runs the wrapper in a child process patches the child the same way
     (`TURNS_PLUGINS_PATCH`)."""
     from moxi_turns import claude_setup
 

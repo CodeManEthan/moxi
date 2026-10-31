@@ -70,7 +70,7 @@ def test_the_launch_forks_a_bound_adapter_before_claude_and_it_ends_with_claude(
                    f"--plugin-dir {turns_plugins / 'moxi-turns-gate'}")
         assert lines[2] == f"args --session-id {SID} {plugins} --model haiku -n {NAME}", \
             "the launch names its id to claude, then turns' plugins, then the passthrough"
-        assert (turns_plugins / "moxi-turns" / "endpoint.json").exists()
+        assert not (turns_plugins / "moxi-turns" / "endpoint.json").exists()
         b = binding(rig)
         assert b is not None, "bound before claude started"
         assert b.endpoint is False, "the session has no turns endpoint"
@@ -476,6 +476,19 @@ def test_the_additions_env_goes_over_the_launchers(monkeypatch, launched):
     fake_additions(monkeypatch, env={"MOXI_TURNS_COMMANDS": "clear"})
     code, seen = launched()
     assert code == 0 and seen["env"]["MOXI_TURNS_COMMANDS"] == "clear"
+
+
+def test_turns_endpoint_command_reaches_the_environment_claude_starts_with(launched):
+    """turns' own additions, not a fake: the endpoint command turns' config names is in
+    `MOXI_TURNS_ENDPOINT` in the environment `claude` is started with."""
+    from pathlib import Path
+    config = Path(os.environ["MOXI_TURNS_CONFIG_HOME"]) / "turns"
+    config.mkdir(parents=True, exist_ok=True)
+    (config / "config.toml").write_text(
+        '[claude]\nendpoint = "/opt/elsewhere/moxi-turns-endpoint"\n')
+    code, seen = launched()
+    assert code == 0
+    assert seen["env"]["MOXI_TURNS_ENDPOINT"] == "/opt/elsewhere/moxi-turns-endpoint"
 
 
 @pytest.mark.parametrize("error", ["turns", "value"])

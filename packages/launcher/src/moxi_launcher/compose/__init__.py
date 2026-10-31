@@ -10,7 +10,7 @@ holds everything else a composer reads.
 `context(...)` gathers that `ctx` for one launch: the installed modules, the texts the
 launch names (its brief, handoff and instructions files are read here), the handoff
 folder, turns' Codex host, and, for a Claude launch without comms, turns' launch
-additions, the one call here that writes outside the launcher (turns' own endpoint file).
+additions, which write nothing.
 
 `build(request, resolved)` is the two together, and is what both `preview` and the launch
 call, so for one request, its ids given, `preview` shows the argv that runs.

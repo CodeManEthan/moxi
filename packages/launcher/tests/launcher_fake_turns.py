@@ -11,8 +11,8 @@ same record whether the sender ran in its own process or in a detached deliverer
 The script's keys, each with its default:
 
 - `codex_host`: true, or false when turns' Codex host can't start here.
-- `additions`: `ok`, `error` (raises `TurnsError`, as when turns can't write its own
-  file) or `value` (raises `ValueError`, as for a command turns does not know).
+- `additions`: `ok`, `error` (raises `TurnsError`, as when turns has no endpoint
+  command) or `value` (raises `ValueError`, as for a command turns does not know).
 - `ready`: `ok`, `timeout` (raises `TimeoutError`) or `error` (raises `TurnsError`).
 - `session_id`: the id the ready `Session` names (a Codex thread id), default the asked id.
 - `deliver`: `answered` (the endpoint answers with a delivery id), `unanswered` (the
@@ -119,6 +119,9 @@ def calls(directory: Path) -> list[dict]:
 
 #: The words `launch_additions` gives a Claude launch's command line.
 ADDITIONS = ("--plugin-dir", "/fake/turns/runner")
+#: The endpoint command `launch_additions` names in a Claude launch's environment, as
+#: turns names its own in `MOXI_TURNS_ENDPOINT`.
+ENDPOINT = "/fake/turns/moxi-turns-endpoint"
 
 
 @dataclass(frozen=True)
@@ -138,8 +141,8 @@ def launch_additions(harness, *, cwd, env, session_id=None, commands=()):
         raise TurnsError("the endpoint file can't be written")
     if additions == "value":
         raise ValueError("unknown command 'exit'")
-    return LaunchAdditions(harness, ADDITIONS, {"MOXI_TURNS_COMMANDS": ",".join(commands)},
-                           {}, ())
+    return LaunchAdditions(harness, ADDITIONS, {"MOXI_TURNS_COMMANDS": ",".join(commands),
+                                                "MOXI_TURNS_ENDPOINT": ENDPOINT}, {}, ())
 
 
 def codex_host_available():
