@@ -57,7 +57,8 @@ def test_interface_2_holds_its_names():
         "OUTCOMES", "DELIVERIES", "EXIT_CODES", "POSTURES", "ClaimServer", "attributed",
         "session", "roster", "owner", "Roster", "Agent", "Standing", "Owner",
         "record_dir", "daemon_socket", "GLOBAL", "qualify", "split_tag", "NAME_RE",
-        "replay", "DaemonError", "DaemonOffline", "delete", "DeleteResult"}
+        "replay", "DaemonError", "DaemonOffline", "delete", "DeleteResult",
+        "identity_state", "IdentityState", "Holder", "IDENTITY_STATES"}
     for name in api.__all__:
         assert hasattr(api, name), name
     assert api.ClaimServer is ClaimServer
@@ -110,12 +111,18 @@ def test_the_reads_and_names_are_pinned():
     for name, params in {"attributed": ["message_id", "deadline"],
                          "session": ["identity", "deadline"],
                          "roster": ["deadline"], "owner": ["session_id", "deadline"],
+                         "identity_state": ["name", "scope", "deadline"],
                          "record_dir": [], "daemon_socket": [], "replay": []}.items():
         assert list(inspect.signature(getattr(api, name)).parameters) == params, name
     assert list(api.Agent.__dataclass_fields__) == ["qualified", "name", "scope", "tier",
                                                     "adapter", "directors"]
     assert list(api.Standing.__dataclass_fields__) == ["qualified", "name", "scope",
-                                                       "kind"]
+                                                       "kind", "module"]
+    assert list(api.IdentityState.__dataclass_fields__) == ["qualified", "state", "holder",
+                                                            "module", "reason"]
+    assert list(api.Holder.__dataclass_fields__) == ["adapter", "session_id"]
+    assert api.IDENTITY_STATES == ("free", "held", "standing", "reserved", "retired",
+                                   "offline")
     assert list(api.Roster.__dataclass_fields__) == ["bound", "standing"]
     assert list(api.Owner.__dataclass_fields__) == ["session_id", "identity", "adapter",
                                                     "directors", "awaiting"]
@@ -402,6 +409,83 @@ def test_roster_and_owner_carry_declared_directors(rig):
     assert api.owner("no-such-session").identity is None
     with pytest.raises(api.DaemonError):
         api.owner("")
+
+
+def _store(sql: str, *params) -> None:
+    from moxi_comms import directory
+    from moxi_comms.paths import comms_db
+
+    conn = directory.connect(comms_db())
+    try:
+        with conn:
+            conn.execute(sql, params)
+    finally:
+        conn.close()
+
+
+def test_identity_state_free_held_and_standing(rig):
+    """The launcher's name check: a name nobody holds is free; a bound one is held,
+    with its adapter and session id; a standing row not bound now is standing."""
+    reviewer = rig.shim(name="reviewer")
+    free = api.identity_state("nobody")
+    assert (free.qualified, free.state, free.holder) == ("nobody", "free", None)
+    held = api.identity_state("reviewer")
+    assert held.state == "held"
+    assert held.holder == api.Holder("claude-shim", reviewer.session_id)
+    assert str(held.holder) == f"claude-shim session {reviewer.session_id}"
+    standing = api.identity_state("main", scope="proj-a")
+    assert (standing.qualified, standing.state) == ("main@proj-a", "standing")
+    assert api.identity_state("main@proj-b").state == "standing"
+    assert api.identity_state("main", scope="proj-c").state == "free"
+    assert api.identity_state("herald").state == "standing"
+
+
+def test_identity_state_retired(rig):
+    _store("INSERT INTO identities(name, scope, status, created_at, kind) "
+           "VALUES ('gone', 'proj-a', 'retired', '2026-01-01T00:00:00+00:00', 'agent')")
+    got = api.identity_state("gone", scope="proj-a")
+    assert (got.state, got.holder, got.module) == ("retired", None, None)
+    assert "retired" in got.reason
+
+
+def test_identity_state_reserved_names_its_module(rig):
+    """A reserved row not freed is reserved, whatever its state: the daemon's bind
+    refuses an active, a conflict and an unowned name alike. A freed one is ordinary."""
+    _store("INSERT INTO reserved(name, module, state, reserved_at) "
+           "VALUES ('console', 'launcher', 'active', '2026-01-01T00:00:00+00:00')")
+    _store("INSERT INTO reserved(name, state, note) VALUES ('relay', 'unowned', 'moved')")
+    _store("INSERT INTO reserved(name, module, state, freed_at) "
+           "VALUES ('old', 'gone-module', 'active', '2026-01-02T00:00:00+00:00')")
+    console = api.identity_state("console")
+    assert (console.state, console.module) == ("reserved", "launcher")
+    relay = api.identity_state("relay")
+    assert (relay.state, relay.module) == ("reserved", None)
+    assert api.identity_state("old").state == "free"
+    assert api.identity_state("console", scope="proj-a").state == "free", \
+        "a reserved name is the global identity"
+
+
+def test_a_standing_row_names_the_module_it_is_reserved_for(rig):
+    _store("INSERT INTO reserved(name, module, state, reserved_at) "
+           "VALUES ('herald', 'launcher', 'conflict', '2026-01-01T00:00:00+00:00')")
+    (herald,) = [s for s in api.roster().standing if s.qualified == "herald"]
+    assert herald.module == "launcher"
+    (main,) = [s for s in api.roster().standing if s.qualified == "main@proj-a"]
+    assert main.module is None
+
+
+def test_identity_state_is_offline_when_the_daemon_cannot_be_asked(env):
+    got = api.identity_state("anyone")
+    assert (got.qualified, got.state) == ("anyone", "offline")
+    assert got.reason
+
+
+@pytest.mark.parametrize(("name", "scope"), [
+    ("a b", None), ("lead@proj-a", "proj-b"), ("lead", "bad scope"), ("agent-7", None),
+])
+def test_identity_state_refuses_what_no_launch_can_claim(env, name, scope):
+    with pytest.raises(ValueError):
+        api.identity_state(name, scope=scope)
 
 
 def test_the_paths_and_the_replay_bound(env, tmp_path):

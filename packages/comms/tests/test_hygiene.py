@@ -81,6 +81,7 @@ def test_the_verbs_that_act_stay_four():
     `claude` is the WRAPPER: it starts a Claude Code session with a comms identity and
     forks the session's adapter, which binds the name as any session binds it. The verb
     itself posts nothing and reaches no credential, so the acting four are still four.
+    `codex` is the same wrapper for a Codex session, through turns' Codex host.
 
     `migrate` is the STORE verb: it moves comms 0.2's files into comms.db through the
     store's one opener, as the daemon's start does, or with `--dry-run` says what that
@@ -92,12 +93,12 @@ def test_the_verbs_that_act_stay_four():
            == "verb"][0]
     assert set(sub.choices) == {"send", "reply", "agents", "history", "help", "whois",
                                 "explain", "cache", "doctor", "owner", "service",
-                                "whoami", "claude", "migrate", "delete"}
+                                "whoami", "claude", "codex", "migrate", "delete"}
     acting = {"send", "reply", "agents", "history"}
     reading = {"help", "whois", "explain", "cache", "doctor", "owner"}
     machine = {"service"}
     claim = {"whoami"}
-    wrapper = {"claude"}
+    wrapper = {"claude", "codex"}
     store_verb = {"migrate"}
     # `delete` acts only on the sender's own message, taking back what it sent.
     withdraw = {"delete"}

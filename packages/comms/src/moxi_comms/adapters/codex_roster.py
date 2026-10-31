@@ -1,9 +1,11 @@
 """The codex roster: the `[codex]` table of comms' config file, NON-SECRET ids only.
 
 **Which app-servers exist is provisioner-configured, never register-triggered.**
-The `moxi-comms-codex` wrapper runs an app-server only for an identity named here; an
-inbound `register` on the daemon socket never causes a spawn. The file holds, per
-identity: the cwd, the sandbox/permission profile, and the thread-id file.
+A roster launch (`moxi-comms-codex IDENTITY`) starts Codex only for an identity named
+here; an inbound `register` on the daemon socket never causes a spawn. The file holds, per
+identity: the cwd, the sandbox/permission profile, and the thread-id file. The wrapper
+turns a row into turns' Codex host flags (`codex_wrapper.row_flags`), which give the
+thread parameters `launch_options()` gives.
 
     CONFIG/comms/config.toml
 
@@ -62,8 +64,6 @@ log = logging.getLogger("comms.codex.roster")
 
 DEFAULT_SANDBOX = "workspace-write"
 SANDBOX_MODES = ("read-only", "workspace-write", "danger-full-access")
-SANDBOX_POLICY_TYPES = {"read-only": "readOnly", "workspace-write": "workspaceWrite",
-                        "danger-full-access": "dangerFullAccess"}
 
 _ENTRY_KEYS = {"cwd", "thread_file", "sandbox", "permissions",
                "profile", "writable_roots", "network_access", "model", "directors"}
@@ -156,33 +156,6 @@ class CodexAgent:
         if self.model:
             params["model"] = self.model
         return params
-
-    def verify_load(self, options: dict, response: dict | None) -> str | None:
-        """Why a load answer does not report the roster's requested sandbox."""
-        mode = options.get("sandbox")
-        reported = (response or {}).get("sandbox")
-        if not mode or not isinstance(reported, dict):
-            return None
-        want = SANDBOX_POLICY_TYPES.get(mode)
-        if want and reported.get("type") != want:
-            return f"sandbox is {reported.get('type')!r}, not {want!r}"
-        if want != "workspaceWrite":
-            return None
-        settings = (options.get("config") or {}).get("sandbox_workspace_write") or {}
-        if bool(reported.get("networkAccess")) != bool(settings.get("network_access")):
-            return (f"network access is {'on' if reported.get('networkAccess') else 'off'}, "
-                    f"not {'on' if settings.get('network_access') else 'off'}")
-        # The app-server omits cwd from writableRoots because workspace-write grants it.
-        have = {os.path.realpath(str(root))
-                for root in reported.get("writableRoots") or []}
-        for cwd in ((response or {}).get("cwd"), self.cwd):
-            if cwd:
-                have.add(os.path.realpath(str(cwd)))
-        missing = [root for root in settings.get("writable_roots") or []
-                   if os.path.realpath(str(root)) not in have]
-        if missing:
-            return f"writable roots lack {', '.join(missing)}"
-        return None
 
 
 class Roster(roster_rows.Roster):

@@ -3,6 +3,9 @@
 # that no longer matches one, so this list only shrinks as the module moves onto the
 # helpers. One line per site: <path> <enclosing scope> <call>.
 src/moxi_comms/adapters/claude_shim.py _serve_inject_file.injector .open
+src/moxi_comms/adapters/codex_wrapper.py _adapter_process os.fdopen
+src/moxi_comms/adapters/codex_wrapper.py _adapter_process os.fdopen
+src/moxi_comms/adapters/codex_wrapper.py _adapter_process os.open
 src/moxi_comms/adapters/opencode.py OpenCodeAdapter.write_layer_one .write_text
 src/moxi_comms/adapters/opencode.py write_record os.fdopen
 src/moxi_comms/adapters/opencode.py write_record os.replace

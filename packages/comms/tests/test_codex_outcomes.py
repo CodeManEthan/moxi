@@ -65,11 +65,11 @@ def endpoints():
 
 @pytest.fixture
 def adapter(rig, tmp_path):
-    """A started wrapper whose launch finds the endpoint the test made."""
+    """A started adapter that finds the endpoint the test made."""
     made: list[CodexAdapter] = []
 
     def make(ep: FakeEndpoint) -> CodexAdapter:
-        def launch(cwd, **kw):
+        def find(pid, timeout):
             session = moxi_turns.find(session_id=ep.session_id)
             assert session is not None
             return session
@@ -77,7 +77,7 @@ def adapter(rig, tmp_path):
         row = CodexAgent(qualified=IDENTITY, name="planner", scope="proj-a",
                          cwd=str(tmp_path), thread_file=codex_threads.path(IDENTITY))
         exits: list = []
-        a = CodexAdapter(row, launch=launch, autoreconnect=False, clock=rig.clock,
+        a = CodexAdapter(row, find=find, autoreconnect=False, clock=rig.clock,
                          exit_hook=lambda: exits.append(True))
         a.exits = exits
         made.append(a)

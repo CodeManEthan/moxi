@@ -12,7 +12,7 @@ from moxi_comms import codex_threads
 from moxi_comms.adapters.codex import CodexAdapter
 from moxi_comms.adapters.codex_roster import CodexAgent
 
-from fake_turns import FakeSession, fake_launch
+from fake_turns import FakeSession, fake_find
 
 
 IDENTITY = "planner@proj-a"
@@ -22,7 +22,7 @@ def make_adapter(rig, tmp_path, session=None, **kwargs):
     row = CodexAgent(qualified=IDENTITY, name="planner", scope="proj-a",
                      cwd=str(tmp_path), thread_file=codex_threads.path(IDENTITY))
     fake = session or FakeSession()
-    adapter = CodexAdapter(row, launch=fake_launch(fake), clock=rig.clock, **kwargs)
+    adapter = CodexAdapter(row, find=fake_find(fake), clock=rig.clock, **kwargs)
     adapter.fake = fake
     return adapter
 
@@ -42,13 +42,14 @@ def test_the_adapters_own_stop_closes_the_daemon_quietly(rig, tmp_path):
     assert wait_until(lambda: IDENTITY not in rig.daemon.bindings)
 
 
-def test_a_launch_failure_escapes_before_any_service_thread_starts(rig, tmp_path):
+def test_a_failed_look_for_the_session_escapes_before_any_service_thread_starts(
+        rig, tmp_path):
     adapter = make_adapter(rig, tmp_path, autoreconnect=False)
 
     def fail(*args, **kwargs):
         raise RuntimeError("host did not load")
 
-    adapter._launch = fail
+    adapter._find = fail
     with pytest.raises(RuntimeError, match="host did not load"):
         adapter.start()
     assert adapter._threads == []

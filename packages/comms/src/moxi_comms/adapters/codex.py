@@ -1,20 +1,21 @@
-"""`moxi-comms-codex` -- comms' Codex adapter, one wrapper process per identity.
+"""comms' Codex adapter: one process per launched identity.
 
-This lives OUTSIDE the daemon: the wrapper is an **ordinary daemon-socket client**, and
+This lives OUTSIDE the daemon: the adapter is an **ordinary daemon-socket client**, and
 **its socket connection is the liveness anchor -- its death is its deregistration**. The
 daemon stays a pure router with no child supervision.
 
-The Codex session itself is turns': the wrapper calls `turns.codex.launch`, and turns'
-host spawns and supervises `codex app-server`, holds the WebSocket link, starts and
-resumes the thread, wires Codex's own hooks (`moxi-turns-ping`) with their per-launch
-trust, opens the window and reaps every child when the launch ends. comms reaches the
-session only through turns' public API. What this process owns:
+The Codex session itself is turns': comms' Codex wrapper (`codex_wrapper`, `moxi comms
+codex`) binds the name through this adapter, forks it, and execs turns' Codex host,
+`moxi-turns-codex-host`, which spawns and supervises `codex app-server`, holds the
+WebSocket link, starts the thread, wires Codex's own hooks, opens the window and reaps
+every child when the session ends. The exec keeps the wrapper's pid, so the adapter
+finds the session with `turns.wait_ready(pid=<that pid>)`, and that process is the root
+of the claim. comms reaches the session only through turns' public API. What this
+process owns:
 
   * one registration on the daemon socket for the roster identity, and the claim socket
     it stamps into that environment;
-  * what comms adds to the launch: the identity stamp in the environment, layer one as
-    the thread's developer instructions, and the roster's Codex thread options. turns
-    passes them on and reads none of them;
+  * the thread record (`codex_threads`), written once the session names its thread;
   * the queue, the digests and the owed ledger. Each digest is handed to turns named by
     its digest id as its `ref`;
   * the stop handler: at each Stop turns asks `on_stop`, which runs the shim's reply
@@ -62,25 +63,21 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
 
 from .. import codex_threads
-from ..client import DaemonClient, DaemonError, DaemonOffline
-from ..config import ConfigError
-from ..context import BARE_COMMS, MOXI_COMMS_PATH_LINE, own_comms
+from ..client import DaemonClient
+from ..context import BARE_COMMS, MOXI_COMMS_PATH_LINE
 from . import codex_roster
 from .claude_shim import render_digest
 from .harness import (SOURCE_COMPACT, SOURCE_RESUME, SOURCE_STARTUP, HarnessAdapter,
-                      launch_stamp, plan_comms, plan_head)
+                      launch_stamp)
 
 log = logging.getLogger("comms.codex")
 
 ADAPTER_KIND = "codex"
-BINARY = "codex"
 
 FLUSH_RETRY = 1.0
 #: How long a wait that timed out pauses before it asks again, in seconds. The digest
@@ -91,9 +88,9 @@ WAIT_RETRY = 0.5
 STEER_FALLBACK = ("idle", "loading")
 #: A turn outcome that settles its digests `handled`.
 ANSWER = "answer"
-#: The reason turns gives when the person closes a Codex window (its prefix).
-WINDOW_CLOSED = "the Codex window closed"
-EXIT_GAVE_UP = 3
+#: How long one look for the host's session waits before the adapter checks that the
+#: host still runs, in seconds.
+FIND_STEP = 2.0
 
 
 # --------------------------------------------------------------------------- layer one
@@ -146,38 +143,17 @@ def fetch_roster(socket_path=None, timeout: float = 2.0):
         return None
 
 
-# --------------------------------------------------------------------------- the install
-def binary_version(binary: str, env=None, timeout: float = 15.0) -> str:
-    """What `<binary> --version` prints, or why it printed nothing."""
-    try:
-        out = subprocess.run([binary, "--version"], capture_output=True, text=True,
-                             env=env, timeout=timeout, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError) as e:
-        return f"unknown ({e})"
-    text = (out.stdout or out.stderr).strip().splitlines()
-    return text[0] if text else f"unknown (exit {out.returncode})"
-
-
-def _turns_launch(cwd, *, instructions=None, env=None, window=True, options=None,
-                  verify=None):
-    """turns' Codex host. Imported at the call: `import moxi_turns` loads nothing."""
+# --------------------------------------------------------------------------- the session
+def _turns_find(pid: int, timeout: float):
+    """turns' session of the host process `pid`, once its first load is accepted.
+    Imported at the call: `import moxi_turns` loads nothing."""
     import moxi_turns as turns
 
-    return turns.codex.launch(cwd, instructions=instructions, env=env, window=window,
-                              options=options, verify=verify)
+    return turns.wait_ready(pid=pid, timeout=timeout)
 
 
-def scrub_own_environ(stamped: dict, environ=None) -> None:
-    """turns' host builds the session's environment as this process's own with the
-    launch's `env` over it, so a comms stamp the identity does not carry must not be
-    in this process's environment either: an agent that declared no directors would
-    otherwise inherit the wrapper's `MOXI_COMMS_DIRECTORS`."""
-    from .session import INHERITED_COMMS_ENV
-
-    environ = os.environ if environ is None else environ
-    for var in INHERITED_COMMS_ENV:
-        if var not in stamped:
-            environ.pop(var, None)
+class HostGone(RuntimeError):
+    """The host process ended before its session was ready."""
 
 
 class HandInFailed:
@@ -238,21 +214,32 @@ class CodexAdapter(HarnessAdapter):
     HOLDS_UNTIL_TURN_ENDS = True   # a digest's ids are held until its turn ends
     log = log
 
-    def __init__(self, agent: codex_roster.CodexAgent, *, socket_path=None, launch=None,
-                 window: bool = False, autoreconnect: bool = True, backoff=None,
-                 status_sink=None, clock=time.time, write_root=...,
-                 comms_path: str | None = None, layer_one: bool = True, exit_hook=None,
-                 wait_retry: float = WAIT_RETRY):
+    def __init__(self, agent: codex_roster.CodexAgent, *, socket_path=None, find=None,
+                 harness_pid: int | None = None, claim_socket=None, alive=None,
+                 on_bound=None, autoreconnect: bool = True, backoff=None,
+                 status_sink=None, clock=time.time, comms_path: str | None = None,
+                 layer_one: bool = True, exit_hook=None, wait_retry: float = WAIT_RETRY,
+                 find_step: float = FIND_STEP, wait_when_held: bool = True):
+        #: The host process: turns' Codex host, the wrapper's pid kept across its exec.
+        #: The claim's root. None in a test that hands in its own `find`.
+        self.harness_pid = harness_pid
+        self._claim_socket = claim_socket
+        self.WAIT_WHEN_HELD = wait_when_held
         super().__init__(agent, socket_path=socket_path, autoreconnect=autoreconnect,
                          backoff=backoff, status_sink=status_sink, clock=clock,
                          exit_hook=exit_hook)
-        #: `turns.codex.launch`, or what a test hands in its place.
-        self._launch = launch or _turns_launch
-        self.window = window
+        #: `find(pid, timeout)`: turns' `wait_ready(pid=)`, or what a test hands in.
+        self._find = find or _turns_find
+        #: Whether the host still runs; the look for its session stops when it does not.
+        self._alive = alive or (lambda: True)
+        #: Called once the bind has been tried and the claim socket listens, before the
+        #: look for the session: the wrapper execs the host then.
+        self._on_bound = on_bound
         self.wait_retry = wait_retry
-        self._write_root = write_root
-        self.write_root_reason = "given by the caller"
+        self.find_step = find_step
         self.comms_path = comms_path or BARE_COMMS
+        #: Whether the thread was given layer one (the wrapper's instructions file), so
+        #: the thread record carries its hash.
         self.layer_one = layer_one
 
         #: The turns session of this launch's thread, once launched.
@@ -318,46 +305,45 @@ class CodexAdapter(HarnessAdapter):
         return report
 
     # ------------------------------------------------------------------ the launch
-    @property
-    def write_root(self):
-        if self._write_root is ...:
-            self._write_root, self.write_root_reason = codex_roster.record_write_root(
-                self.agent.env(), self.agent.cwd)
-        return self._write_root
+    def _make_holder(self) -> None:
+        """The base's holder, with the wrapper's claim socket in the session's runtime
+        directory and the host process as the claim's root: the adapter is forked away
+        from the host, so its own process tree holds no part of the session."""
+        super()._make_holder()
+        from ..membership import TREE, root_of
 
-    @write_root.setter
-    def write_root(self, value) -> None:
-        self._write_root = value
-
-    def launch_options(self) -> dict:
-        """The roster-owned settings turns lays on every thread load."""
-        return self.agent.launch_options(self.write_root)
+        if self._claim_socket is not None:
+            self.claims.socket_path = Path(self._claim_socket)
+        if self.harness_pid is not None:
+            root = root_of(self.harness_pid, TREE)
+            self.claims.roots = [root] if root is not None else []
 
     def _directors(self) -> tuple:
         return tuple(getattr(self.agent, "directors", None) or ())
 
-    def developer_instructions(self) -> str | None:
-        """Layer one, the thread's developer instructions from its start."""
-        if not self.layer_one:
-            return None
-        return layer_one_text(fetch_roster(self.socket_path), self.comms_path,
-                              directors=self._directors())
-
-    def launch_env(self) -> dict:
-        """The session's environment: the identity stamp and the claim socket."""
-        return {**self.agent.env(), **self.claim_env()}
+    def find_session(self):
+        """turns' session of the host, once it is ready. Looks in steps of `find_step`
+        while the host runs and the adapter has not been stopped; raises `HostGone`
+        when the host ended first."""
+        while True:
+            if self._stop.is_set():
+                raise HostGone("the adapter was stopped before the session was ready")
+            if not self._alive():
+                raise HostGone("the Codex host ended before its session was ready")
+            try:
+                return self._find(self.harness_pid, self.find_step)
+            except TimeoutError:
+                continue
 
     def start_port(self) -> None:
-        """Launch the thread through turns, become its stop handler and watch it. A
+        """Say bound, find the host's session, become its stop handler and watch it. A
         failure here ends the launch: there is no session to deliver into."""
-        instructions = self.developer_instructions()
-        options = self.launch_options()
-        session = self._launch(str(self.agent.cwd), instructions=instructions,
-                               env=self.launch_env(), window=self.window, options=options,
-                               verify=lambda answer: self.agent.verify_load(options, answer))
+        if self._on_bound is not None:
+            self._on_bound()
+        session = self.find_session()
         thread_id = session.session_id
         born_with = {}
-        if instructions:
+        if self.layer_one:
             born_with["layer_one"] = layer_one_hash(self.comms_path,
                                                     directors=self._directors())
         self._born_with = born_with
@@ -377,7 +363,7 @@ class CodexAdapter(HarnessAdapter):
         self._watcher = threading.Thread(target=self._watch, args=(watch,),
                                          daemon=True, name="comms-codex-watch")
         self._watcher.start()
-        self.log.info("launched codex thread %s for %s through turns", thread_id,
+        self.log.info("found codex thread %s for %s through turns", thread_id,
                       self.agent.qualified)
         # The launch is the session start; a fresh session's mail goes as it comes up.
         self.report_ready(SOURCE_STARTUP)
@@ -729,158 +715,15 @@ class CodexAdapter(HarnessAdapter):
 
 # --------------------------------------------------------------------------- main
 
-def build_parser():
-    import argparse
+def main(argv=None) -> int:
+    """`moxi-comms-codex`: the Codex wrapper (`codex_wrapper.main`)."""
+    from .codex_wrapper import main as wrapper_main
 
-    ap = argparse.ArgumentParser(
-        prog="moxi-comms-codex",
-        description="comms' Codex adapter: one wrapper per identity, over turns' Codex "
-                    "host")
-    ap.add_argument("identity", help="qualified roster identity, e.g. planner@proj-a")
-    ap.add_argument("--window", action="store_true",
-                    help="also open the Codex window on this launch's thread, in this "
-                         "terminal; closing the window stops the wrapper and takes the "
-                         "identity offline")
-    ap.add_argument("--config", metavar="PATH",
-                    help="a comms config file, in config.toml's format, whose [codex] "
-                         "table is this launch's roster in place of the box's config "
-                         "file's; the file is checked whole, and every other setting "
-                         "still comes from the box's config file")
-    ap.add_argument("--dry-run", action="store_true",
-                    help="print the plan for this identity and exit; launch nothing")
-    ap.add_argument("--log-level", default="INFO")
-    return ap
+    return wrapper_main(argv)
 
 
-def window_log_path(qualified: str) -> Path:
-    """Where a `--window` run's wrapper log goes."""
-    from ..paths import codex_threads_dir
-
-    return codex_threads_dir() / f"{qualified}.log"
-
-
-def print_plan(agent, roster, args, *, version, comms_path, write_root,
-               write_root_reason, out=None) -> None:
-    out = out or sys.stdout
-
-    def say(text):
-        print(text, file=out)
-
-    plan_head(agent, roster, say,
-              record=f"  thread     {codex_threads.path(agent.qualified)} "
-                     "(a new thread at this launch)")
-    say(f"  sandbox    {agent.permissions or agent.sandbox} "
-        f"(network {'on' if agent.network_access else 'OFF'}, approvals never by turns)")
-    if not agent.permissions:
-        for root in agent.effective_writable_roots(write_root):
-            say(f"  writable   {root}")
-        if write_root is None:
-            say(f"  writable   (nothing added: {write_root_reason})")
-    say(f"  codex      {BINARY} on the session's PATH ({version})")
-    plan_comms(comms_path, say)
-    say("  host       turns' Codex host (app-server, hooks, delivery, window)")
-    if args.window:
-        say(f"  log        {window_log_path(agent.qualified)}")
-
-
-def main(argv=None) -> int:  # pragma: no cover - exercised end to end by the suite
-    import shutil
-    import signal
-
-    args = build_parser().parse_args(argv)
-    try:
-        roster = codex_roster.load(path=args.config)
-        agent = roster.require(args.identity)
-    except ConfigError as e:
-        print(f"moxi-comms-codex: {e}", file=sys.stderr)
-        return 2
-
-    comms_path = own_comms()
-    write_root, write_root_reason = codex_roster.record_write_root(agent.env(), agent.cwd)
-    env = agent.env()
-    binary = shutil.which(BINARY, path=env.get("PATH"))
-    version = binary_version(binary, env=env) if binary else "not found"
-    print_plan(agent, roster, args, version=version, comms_path=comms_path,
-               write_root=write_root, write_root_reason=write_root_reason)
-    sys.stdout.flush()             # a log reader sees the plan before anything else
-    if args.window and comms_path is None:
-        print("moxi-comms-codex: this environment has no `moxi` script, so the agent "
-              "could not be told which comms to run.", file=sys.stderr)
-        return 2
-    if args.dry_run:
-        return 0
-    if args.window:
-        from moxi_comms.adapters.terminal import in_terminal_foreground, terminal_fd
-
-        if not in_terminal_foreground(terminal_fd()):
-            print("moxi-comms-codex: --window needs to run in the foreground of a terminal, "
-                  "because the window takes that terminal.", file=sys.stderr)
-            return 2
-    log_path = window_log_path(agent.qualified) if args.window else None
-    if log_path is not None:
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        logging.basicConfig(level=args.log_level, filename=str(log_path),
-                            format="%(asctime)s %(levelname)s %(name)s %(message)s")
-        print(f"moxi-comms-codex: logging to {log_path}", file=sys.stderr, flush=True)
-    else:
-        logging.basicConfig(level=args.log_level, stream=sys.stderr,
-                            format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    if comms_path is None:
-        log.warning("this environment has no moxi script; layer one names a bare "
-                    "`moxi comms`, which the agent's PATH decides")
-
-    stopping = threading.Event()
-    adapter = CodexAdapter(agent, window=args.window, write_root=write_root,
-                           comms_path=comms_path, exit_hook=stopping.set)
-    adapter.write_root_reason = write_root_reason
-    scrub_own_environ(adapter.launch_env())
-
-    def _bye(signum, _frame):
-        log.info("signal %d: stopping", signum)
-        stopping.set()
-
-    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGQUIT, signal.SIGHUP):
-        signal.signal(sig, _bye)
-    if args.window:
-        from moxi_comms.adapters.terminal import JOB_CONTROL_SIGNALS
-
-        for sig in JOB_CONTROL_SIGNALS:
-            signal.signal(sig, signal.SIG_IGN)
-    # ONE finally for every road out; turns reaps the host when this process ends.
-    try:
-        try:
-            adapter.start()
-        except (DaemonOffline, DaemonError, ConfigError) as e:
-            print(f"moxi-comms-codex: {e}", file=sys.stderr)
-            return 4 if isinstance(e, DaemonOffline) else 2
-        except Exception as e:                              # noqa: BLE001
-            if args.window and type(e).__name__ != "HooksUntrusted":
-                # turns' window wait ran out, or the window failed before a load was
-                # accepted: the wrapper gives up, exit 3, with the log named.
-                print(f"moxi-comms-codex: gave up on {agent.qualified}: "
-                      f"{str(e).rstrip('. ')}. The log is {log_path}.",
-                      file=sys.stderr, flush=True)
-                return EXIT_GAVE_UP
-            # turns could not launch the session (no codex, untrusted hooks, a dead
-            # app-server): one line, never a traceback.
-            print(f"moxi-comms-codex: {agent.qualified} was not launched: {e}",
-                  file=sys.stderr)
-            return 2
-        log.info("moxi-comms-codex running for %s", agent.qualified)
-        while not stopping.wait(0.5):
-            pass
-        reason = adapter.gone_reason
-        if reason is None or reason.startswith(WINDOW_CLOSED):
-            return 0
-        print(f"moxi-comms-codex: {agent.qualified}'s session ended: {reason}"
-              + (f". The log is {log_path}." if log_path else ""), file=sys.stderr,
-              flush=True)
-        return EXIT_GAVE_UP
-    finally:
-        adapter.stop()
-
-
-__all__ = ["CodexAdapter", "ADAPTER_KIND", "build_parser", "main", "scrub_own_environ"]
+__all__ = ["ADAPTER_KIND", "CodexAdapter", "FIND_STEP", "HostGone", "layer_one_hash",
+           "layer_one_text", "main"]
 
 
 if __name__ == "__main__":  # pragma: no cover

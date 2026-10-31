@@ -20,7 +20,7 @@ from conftest import wait_until
 
 import moxi_turns
 from moxi_comms import context, listener
-from moxi_comms.adapters import codex, session, shim_roster
+from moxi_comms.adapters import codex, codex_wrapper, session, shim_roster
 from moxi_comms.adapters import opencode as oc
 from moxi_comms.context import CONTEXT_BLOCK
 
@@ -106,7 +106,7 @@ def test_the_line_and_own_comms_are_held_once_in_context():
     assert codex.MOXI_COMMS_PATH_LINE is context.MOXI_COMMS_PATH_LINE
     assert oc.MOXI_COMMS_PATH_LINE is context.MOXI_COMMS_PATH_LINE
     assert codex.BARE_COMMS == oc.BARE_COMMS == context.BARE_COMMS == "moxi comms"
-    assert codex.own_comms is oc.own_comms is context.own_comms
+    assert codex_wrapper.own_comms is oc.own_comms is context.own_comms
     assert context.MOXI_COMMS_PATH_LINE.format(comms=COMMAND) == LINE
 
 

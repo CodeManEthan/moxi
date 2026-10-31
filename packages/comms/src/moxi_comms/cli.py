@@ -932,12 +932,16 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
                          "MOXI_COMMS_BACKEND, then the config file, then local)")
     sub = ap.add_subparsers(dest="verb", required=True)
 
-    # `claude` is the wrapper (`adapters/session.py`), with a parser of its own; `main`
-    # hands it every argument after the verb, `--` and what follows included. Listed here
-    # so `--help` names it.
+    # `claude` and `codex` are the wrappers (`adapters/session.py`,
+    # `adapters/codex_wrapper.py`), each with a parser of its own; `main` hands it every
+    # argument after the verb. Listed here so `--help` names them.
     sub.add_parser("claude", add_help=False,
                    help="start a Claude Code session with a comms identity "
                         "(`claude --help` for its options). The options of "
+                        "`moxi comms` itself, such as --backend, do not apply to it")
+    sub.add_parser("codex", add_help=False,
+                   help="start a Codex session with a comms identity, through turns' "
+                        "Codex host (`codex --help` for its options). The options of "
                         "`moxi comms` itself, such as --backend, do not apply to it")
 
     s = sub.add_parser("send", help="message an identity by name")
@@ -1110,6 +1114,9 @@ def main(argv=None, ctx: Context | None = None, *, prog: str = PROG) -> int:
     if argv[:1] == ["claude"]:
         from .adapters import session
         return session.main(argv[1:], prog=f"{prog} claude")
+    if argv[:1] == ["codex"]:
+        from .adapters import codex_wrapper
+        return codex_wrapper.main(argv[1:], prog=f"{prog} codex")
     args = build_parser(prog).parse_args(argv)
     ctx = ctx or Context(backend=getattr(args, "backend", None))
     try:

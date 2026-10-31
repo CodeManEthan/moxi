@@ -375,16 +375,14 @@ class FakeSession:
         self._events.put(Gone(reason))
 
 
-def fake_launch(session: FakeSession):
-    """A `launch` stand-in that records its call and hands back `session`."""
+def fake_find(session: FakeSession):
+    """A `find` stand-in (turns' `wait_ready(pid=)`) that records its call and hands
+    back `session`."""
     calls: list = []
 
-    def launch(cwd, *, instructions=None, env=None, window=True, options=None,
-               verify=None):
-        calls.append({"cwd": cwd, "instructions": instructions, "env": dict(env or {}),
-                      "window": window, "options": dict(options or {}),
-                      "verify": verify})
+    def find(pid, timeout):
+        calls.append({"pid": pid, "timeout": timeout})
         return session
 
-    launch.calls = calls
-    return launch
+    find.calls = calls
+    return find
