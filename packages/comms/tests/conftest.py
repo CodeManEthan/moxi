@@ -130,33 +130,23 @@ def env(monkeypatch, tmp_path, fence):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_home))
 
 
-@pytest.fixture(autouse=True)
-def turns_plugins(monkeypatch, tmp_path_factory) -> Path:
-    """turns' Claude plugins as a folder marketplace of the test's own. The Claude
-    wrapper asks turns for its launch additions, which name these plugins' folders; a
-    launch writes nothing there, and no test may depend on the package the suite runs
-    from. A test that runs the wrapper in a child process patches the child the same way
-    (`TURNS_PLUGINS_PATCH`)."""
-    from moxi_turns import claude_setup
+@pytest.fixture
+def turns_plugins(tmp_path) -> Path:
+    """turns' Claude plugins' folder, as its launch additions name it through its API:
+    the folder that holds the runner's and the gate's. A launch reads it and writes
+    nothing there."""
+    import moxi_turns
 
-    root = tmp_path_factory.mktemp("turns-plugins")
-    (root / ".claude-plugin").mkdir()
-    (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps({
-        "name": "moxi-turns",
-        "plugins": [{"name": "moxi-turns", "source": "./moxi-turns"},
-                    {"name": "moxi-turns-gate", "source": "./moxi-turns-gate"}]}))
-    for name in ("moxi-turns", "moxi-turns-gate"):
-        (root / name / ".claude-plugin").mkdir(parents=True)
-        (root / name / ".claude-plugin" / "plugin.json").write_text(
-            json.dumps({"name": name, "version": "0.0.0"}))
-    monkeypatch.setattr(claude_setup, "claude_root", lambda: root)
-    return root
+    words = moxi_turns.launch_additions("claude", cwd=tmp_path, env=dict(os.environ)).argv
+    folders = [Path(words[i + 1]) for i, word in enumerate(words) if word == "--plugin-dir"]
+    assert len(folders) == 2 and folders[0].parent == folders[1].parent, words
+    return folders[0].parent
 
 
-#: Python a child process runs first, with the folder `turns_plugins` gave, so the
-#: wrapper's launch additions in the child write their files there too.
-TURNS_PLUGINS_PATCH = ("import pathlib, moxi_turns.claude_setup as _cs; "
-                       "_cs.claude_root = lambda: pathlib.Path({root!r}); ")
+def files_under(folder: Path) -> dict:
+    """Every file under `folder`, with its size and modification time."""
+    return {path: (path.stat().st_size, path.stat().st_mtime_ns)
+            for path in sorted(folder.rglob("*"))}
 
 
 #: The reserve step's own read of the modules installed, before `installs` scopes it.
