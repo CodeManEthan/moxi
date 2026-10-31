@@ -354,6 +354,29 @@ def test_an_unread_liveness_is_refused_with_exit_1(conn):
 # -- resume: the replay ---------------------------------------------------------------------
 
 
+def open_relaunch(conn, *, job=None, at=None):
+    mine = me()
+    return store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
+                            session_id=SID, actor="ann",
+                            job=job or f"proc:{mine.pid}@{mine.started:.6f}", at=at)
+
+
+def test_a_launch_with_a_run_under_way_is_refused_run_open_and_nothing_launched(conn):
+    launched(conn)
+    run = open_relaunch(conn)
+    with pytest.raises(store.RunOpen) as refused:
+        go(conn)
+    assert refused.value.run.run_id == run.run_id and refused.value.exit_code == 3
+    assert launches(conn) == 1
+
+
+def test_a_run_whose_job_is_gone_does_not_hold_a_resume(conn):
+    launched(conn)
+    open_relaunch(conn, job="proc:999999999@1.0", at="2020-01-01T00:00:00.000000Z")
+    result, launch = go(conn)
+    assert result.exit_code == 0 and len(launch.requests) == 1
+
+
 def test_a_resume_replays_the_row_with_resume_of_and_its_newest_id(conn):
     launched(conn)
     store.learn_session(conn, "r1", SID2, "clear")

@@ -188,7 +188,8 @@ the lowest that can (`--slot N` picks one), or in this terminal for a terminal l
 where it adds your terminal's names (`TERM`, `COLORTERM`, `TERM_PROGRAM`,
 `TERM_PROGRAM_VERSION`) and nothing else of your shell's. It sends no first turn. Liveness is checked again as the new launch is written: while
 another launch of the session is still starting or running, the resume is refused, so two
-resumes of one session at once launch it once.
+resumes of one session at once launch it once. While a relaunch, exit or recycle of the
+launch is under way, the resume is refused `run-open` (exit 3), naming the run.
 
 **Recycle.** Two launch options let a session be cleared or compacted on the launcher's
 own reads:

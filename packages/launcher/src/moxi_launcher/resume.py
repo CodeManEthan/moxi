@@ -226,7 +226,7 @@ def resume(session_id: str, *, slot: int | str | None = None,
            warn: Callable[[str], None] | None = None,
            conn: sqlite3.Connection | None = None) -> Result:
     """Launch the session `session_id` again, resumed. Raises a refusal with nothing
-    written; returns the new launch's outcome. A launch in this terminal does not return
+    written (`store.RunOpen` while a run on the launch is open and its job runs); returns the new launch's outcome. A launch in this terminal does not return
     on Linux and macOS.
 
     `slot` is the slot to use in place of the original's; `request_id` the new launch's
@@ -243,10 +243,14 @@ def resume(session_id: str, *, slot: int | str | None = None,
             refused = live_refusal(row, newest, *liveness(row, newest, _turns(turns)))
         if refused is not None:
             raise refused
+        # A relaunch, exit or recycle under way owns the session: between its exit and
+        # its respawn the session reads not live, and a resume then would run a second.
+        slots_found = _slots(slots_api)
+        relaunch._no_open_run(c, row, slots_found)
     # The store is closed before the launch: in this terminal the launch never returns.
     chosen = slot
     if row.target == "slot":
-        chosen = choose_slot(_slots(slots_api), row, slot)
+        chosen = choose_slot(slots_found, row, slot)
     from . import api
 
     request = api.ReplayRequest(row, resume_of=row.request_id,
