@@ -26,7 +26,8 @@ send-only identities as unowned reserved names, never as standing rows; and the 
 `migrated_from = "0.2"`, with the time, the fenced names and each moved file's fingerprint (size and
 modification time). Mail that 0.2 would have replayed from the record becomes queue
 rows: for a name with a cursor, the messages above it that name it on line zero; for a
-name without one, 0.2's bounded set at its defaults (the newest 50 within a day). After
+name without one, 0.2's bounded set: the config's `[replay] messages` and `hours` when
+set, else 0.2's defaults (the newest 50 within a day). After
 this nothing is replayed from the record. The new file is committed, checkpointed and
 closed, then renamed to comms.db, so a run that dies midway leaves no comms.db and the
 next open starts again.
@@ -113,11 +114,6 @@ OPTIONAL = {("directory", "agents", "kind"): "agent"}
 #: The `user_version` every comms 0.2 database has: 0.2 never set one.
 KNOWN_VERSIONS = (0,)
 
-#: comms 0.2's catch-up bound for a name with no cursor, at its defaults: at most this
-#: many messages, none older than this many seconds. The move gives such a name these
-#: as rows, and nothing is bounded after it.
-REPLAY_MESSAGES = 50
-REPLAY_SECONDS = 24 * 3600
 
 #: The line the report gives each fenced binding, and the doctor while its mail waits.
 FENCED_LINE = ("{name}: its session was launched before the upgrade; relaunch it to get "
@@ -534,6 +530,21 @@ def _recipient(plan: Plan, tag: str) -> str | None:
     return qualify(name, scope)
 
 
+def _replay_bound(env) -> tuple[int, int]:
+    """comms 0.2's catch-up bound for a name with no cursor, `(messages, seconds)`: the
+    config's `[replay]` keys, which default to 0.2's own (50 messages, 24 hours). A
+    config that can't be read is refused rather than guessed past."""
+    from ..config import ConfigError, config_path, load
+
+    try:
+        replay = load(env).replay
+    except ConfigError as e:
+        raise StoreRefused(e.file or config_path(env),
+                           f"can't be read for the move's catch-up bound ({e}); "
+                           "nothing was moved") from None
+    return replay.messages, replay.hours * 3600
+
+
 def _make_rows(plan: Plan, now: float, env) -> None:
     """The queue: 0.2's rows, then a row for each message 0.2 would have replayed."""
     names_room = next((r[0] for r in plan.rooms if r[1] == NAMES), None)
@@ -576,14 +587,15 @@ def _make_rows(plan: Plan, now: float, env) -> None:
             q = _recipient(plan, tag)
             if q is not None and mid not in mine.setdefault(q, []):
                 mine[q].append(mid)
+    messages, seconds = _replay_bound(env)
     for q in sorted(mine):
         ids = mine[q]
         cursor = plan.cursor_of.get(q)
         if cursor is not None:
             ids = [i for i in ids if i > cursor]
         else:
-            ids = [i for i in ids[-REPLAY_MESSAGES:]
-                   if now - _epoch(by_id[i][6]) <= REPLAY_SECONDS]
+            ids = [i for i in ids[-messages:]
+                   if now - _epoch(by_id[i][6]) <= seconds]
         for mid in ids:
             if (q, mid) in rows:
                 continue
@@ -782,7 +794,8 @@ def dry_run(target=None, env=None, *, now: float | None = None) -> list[str]:
 
 def doctor_rows(env=None) -> list:
     """The doctor's rows about the move: a move that waits or would refuse, the renamed
-    files left on disk, and each name fenced by the move while its mail waits."""
+    files left on disk, each name fenced by the move while its mail waits, and the
+    `[replay]` keys once there is nothing left to move."""
     from moxi.doctor import Row
 
     from . import open as _open
@@ -810,7 +823,34 @@ def doctor_rows(env=None) -> list:
                         + ", ".join(str(p) for p in left),
                         "remove them once you no longer need them"))
     rows.extend(Row(MODULE, "store", "warn", line) for line in waiting_fenced(env))
+    if not _open.zero_two_files(env):
+        rows.extend(_replay_rows(env))
     return rows
+
+
+def _replay_rows(env) -> list:
+    """One row when the config file still sets a `[replay]` key: only the move read
+    them, and nothing is left to move. A config that can't be read gives none; the
+    settings row shows it."""
+    from moxi.doctor import Row
+
+    from ..config import ConfigError, load
+    from ..release import MODULE
+
+    try:
+        sources = load(env).sources
+    except ConfigError:
+        return []
+    keys = [k for k in ("replay.messages", "replay.hours") if sources.get(k) == "file"]
+    if not keys:
+        return []
+    one = len(keys) == 1
+    return [Row(MODULE, "setting replay", "warn",
+                f"{' and '.join(keys)} {'is' if one else 'are'} set, and comms no longer "
+                f"uses {'it' if one else 'them'}: {'it' if one else 'they'} bounded "
+                "catch-up only when comms 0.2's files moved; remove "
+                f"{'it' if one else 'them'}",
+                "; ".join(f"moxi config unset comms {k}" for k in keys))]
 
 
 def waiting_fenced(env=None) -> list[str]:

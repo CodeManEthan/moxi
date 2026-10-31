@@ -183,6 +183,14 @@ class CacheConfig:
 
 
 @dataclass
+class ReplayConfig:
+    """`[replay]`: comms 0.2's catch-up bound, read only by the move of its files."""
+
+    messages: int = _default("replay.messages")
+    hours: int = _default("replay.hours")
+
+
+@dataclass
 class CommsConfig:
     backend: str = _default("backend")
     local: LocalConfig = field(default_factory=LocalConfig)
@@ -192,6 +200,7 @@ class CommsConfig:
     provision: ProvisionConfig = field(default_factory=ProvisionConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
     delivery: DeliveryConfig = field(default_factory=DeliveryConfig)
+    replay: ReplayConfig = field(default_factory=ReplayConfig)
     block: bool = _default("block")
     #: The rosters' tables, raw: `{"defaults": {...}, "agents": {...}}`.
     codex: dict = field(default_factory=dict)
@@ -393,6 +402,10 @@ def _typed(settings, path: Path | None) -> CommsConfig:
         raise bad("delivery.expiry", f"is {v['delivery.expiry']!r}",
                   "set it to a whole number with s, m, h or d (30m, 6h, 3d), or never") \
             from None
+    if v["replay.messages"] < 1:
+        raise bad("replay.messages", f"is {v['replay.messages']}", "set it to 1 or more")
+    if v["replay.hours"] < 0:
+        raise bad("replay.hours", f"is {v['replay.hours']}", "set it to 0 or more hours")
     operator = v["provision.operator"].strip()
     if not operator:
         raise bad("provision.operator", "is empty", "name the human's identity")
@@ -411,6 +424,7 @@ def _typed(settings, path: Path | None) -> CommsConfig:
         provision=ProvisionConfig(operator=operator),
         cache=CacheConfig(required=v["cache.required"]),
         delivery=DeliveryConfig(expiry=str(v["delivery.expiry"]).strip().lower()),
+        replay=ReplayConfig(messages=v["replay.messages"], hours=v["replay.hours"]),
         block=v["block"],
         codex=_roster(bad, "codex", v),
         opencode=_roster(bad, "opencode", v),
@@ -511,7 +525,7 @@ def refuse_secrets(path: Path | None, raw: dict) -> None:
 
 
 __all__ = ["Config", "ConfigError", "LocalConfig", "ThreadsConfig", "CredentialsConfig", "PolicyConfig",
-           "ProvisionConfig", "CommsConfig",
+           "ProvisionConfig", "ReplayConfig", "CommsConfig",
            "BUILTIN_ROLES", "check_text", "config_path", "load", "load_file",
            "refuse_secrets", "schema",
            "LOCAL_RETAIN_DAYS"]

@@ -185,6 +185,38 @@ def test_a_name_without_a_cursor_gets_only_the_bounded_set(monkeypatch):
         ("reviewer@proj-a", IDS["m3"])}
 
 
+def test_a_name_without_a_cursor_gets_the_users_replay_bound(monkeypatch):
+    """A 0.2 home whose config sets `[replay]` gets its own bound at the move: a day and
+    an hour after, with 48 hours, planner still gets mail, and with one message, only
+    the newest."""
+    from conftest import write_config
+    zero_two_home()
+    write_config(None, "[replay]\nmessages = 1\nhours = 48\n")
+    real = upgrade_0_2.move
+    late = MADE["made_at"] + 25 * 3600
+    monkeypatch.setattr(upgrade_0_2, "move", lambda t, e=None, **k: real(t, e, now=late))
+    store.open_write().close()
+    assert set(rows("SELECT name, message_id FROM queue")) == {
+        ("reviewer@proj-a", IDS["m2"]), ("planner", IDS["m2"]),
+        ("reviewer@proj-a", IDS["m3"]), ("planner", IDS["m7"])}
+
+
+def test_the_replay_keys_draw_one_doctor_row_once_the_files_have_moved(soon):
+    from conftest import write_config
+    from moxi_comms import checks
+    write_config(None, "[replay]\nhours = 48\n")
+    zero_two_home()
+    assert not [r for r in checks.doctor_rows() if r.name == "setting replay"], \
+        "the keys still matter while the 0.2 files wait to move"
+    store.open_write().close()
+    found = [r for r in checks.doctor_rows() if r.name == "setting replay"]
+    assert len(found) == 1 and found[0].state == "warn"
+    assert "replay.hours is set" in found[0].detail
+    assert found[0].fix == "moxi config unset comms replay.hours"
+    write_config(None, "")
+    assert not [r for r in checks.doctor_rows() if r.name == "setting replay"]
+
+
 def test_a_move_stopped_after_its_commit_finishes_its_renames(soon, monkeypatch):
     found = zero_two_home()
     real = upgrade_0_2._rename
