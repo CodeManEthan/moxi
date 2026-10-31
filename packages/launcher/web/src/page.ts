@@ -8,6 +8,8 @@
 //   stream's topic `launches`, and a refusal met before the row was written is read from
 //   the 202's status path. A launch in a terminal is never run by the page: the preview
 //   gives the `moxi launcher run` command to copy.
+// - Sessions: the launcher's `sessions` block, placed as any host places it: each running
+//   launched session's recycle and keep-warm state, and whether it needs a look.
 // - Launches: the launch log's newest rows from the topic `launches`, with a `state`
 //   component placed beside each live one (the topic `sessions` says which are live).
 // - Past sessions: `/api/sessions`, read again when either topic moves. A slot session
@@ -83,6 +85,8 @@ const STYLES = css`
          font-size: var(--moxi-font-size-sm); overflow-wrap: anywhere; }
   .cell { display: inline-block; max-width: 100%; min-width: 0; }
   .more { justify-self: start; }
+  .sessions { min-width: 0; margin-bottom: calc(var(--moxi-gap) * 3); }
+  .sessions:empty { display: none; }
 `;
 
 /** A launch or resume this panel started, followed until its row or a refusal shows. */
@@ -146,6 +150,9 @@ export class LauncherPage extends LitElement {
   #follows = new Map<string, Follow>();
   #resumes = new Map<string, Resumed>();
   #copied = "";
+  // The `sessions` block: placed once, and whether the shell could place it.
+  #sessionsPlaced = false;
+  #sessionsMissing = false;
 
   #shown = (): void => {
     if (document.visibilityState !== "visible") return;
@@ -449,6 +456,8 @@ export class LauncherPage extends LitElement {
   render() {
     return html`<h1>Launcher</h1>
       ${this.#launchPart()}
+      <div class="sessions" data-part="sessions"></div>
+      ${this.#sessionsMissing ? html`<p class="warn" data-line="sessions-missing">The running sessions' state could not be shown.</p>` : nothing}
       ${this.#launchesPart()}
       ${this.#pastPart()}`;
   }
@@ -668,10 +677,11 @@ export class LauncherPage extends LitElement {
     </li>`;
   }
 
-  /** After each draw: the form's first values once it has fields, and a `state` component
-   * placed in each new live row's cell. A cell holds the id its launch row was first known
-   * by, which a clear or a compact doesn't change; the component follows the launch through
-   * the session's later ids, so a cell is placed once. */
+  /** After each draw: the form's first values once it has fields, the `sessions` block
+   * placed once, and a `state` component placed in each new live row's cell. A cell holds
+   * the id its launch row was first known by, which a clear or a compact doesn't change;
+   * the component follows the launch through the session's later ids, so a cell is placed
+   * once. */
   protected updated(changed: Map<PropertyKey, unknown>): void {
     super.updated(changed);
     const form = this.#form();
@@ -682,6 +692,15 @@ export class LauncherPage extends LitElement {
       this.#drawn = this.#fields;
       this.#baseline = rebase(this.#baseline ?? {}, form.values(), this.#touched);
       this.#current = JSON.stringify(this.#body(form.values()));
+    }
+    const host = this.renderRoot.querySelector(".sessions");
+    if (host !== null && !this.#sessionsPlaced) {
+      this.#sessionsPlaced = true;
+      const missing = (): void => {
+        this.#sessionsMissing = true;
+        this.requestUpdate();
+      };
+      place(host, "launcher", "sessions").then((block) => { if (block === null) missing(); }, missing);
     }
     for (const cell of this.renderRoot.querySelectorAll<HTMLElement>(".cell")) {
       const session = cell.dataset.session ?? "";

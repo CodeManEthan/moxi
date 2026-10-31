@@ -1,8 +1,8 @@
 """The launcher's page and components in a browser, through a real shell that starts the
 launcher's real page server: the contract check on the panel and both components, a red
-session in the error colour, a session's state followed through a clear, the 360 px width
-check, a headless launch whose row arrives by push, a refusal met before a launch's row, and
-a past terminal session's command to resume.
+session in the error colour, a session's state followed through a clear, the sessions
+block on the panel, the 360 px width check, a headless launch whose row arrives by push, a
+refusal met before a launch's row, and a past terminal session's command to resume.
 
 The shell runs with a fake `claude` first on its `PATH`, which prints a line and exits, so
 a launch from the panel runs that and nothing else. Every test seeds rows of its own in
@@ -136,14 +136,23 @@ def test_a_live_session_given_a_new_id_by_a_clear_keeps_its_state(ui_shell, ui_p
 
 # --- 360 px ---------------------------------------------------------------------------------
 
-def test_the_panel_and_the_sessions_block_fit_a_phone(ui_shell, ui_page, ui_width_check,
-                                                      tmp_path):
-    red_session(ui_shell, "narrow-live")
+def test_the_panel_with_its_sessions_block_and_the_block_alone_fit_a_phone(
+        ui_shell, ui_page, ui_width_check, tmp_path):
+    sid = red_session(ui_shell, "narrow-live")
     kit.seed(ui_shell, "narrow-past", target="terminal", cwd=LONG_CWD)
     ui_width_check(ui_page, module="launcher")
     panel = ui_page.locator("#moxi-panel > moxi-launcher-page")
     expect(panel.locator('section.launches li[data-request="narrow-live"] '
                          'moxi-launcher-state span.state')).to_have_attribute("data-red", "true")
+    # The sessions block is on the panel too, with the session's recycle and keep-warm
+    # lines in view, and its heading marks the page it is on.
+    block = panel.locator('[data-part="sessions"] moxi-launcher-sessions')
+    session = block.locator(f'li[data-session="{sid}"]')
+    expect(session).to_be_visible()
+    expect(session).to_have_attribute("data-red", "true")
+    expect(session.locator(".lines")).to_contain_text("recycle: on expiry off")
+    expect(session.locator(".lines")).to_contain_text("keep warm: off")
+    expect(block.locator("h2 a")).to_have_attribute("aria-current", "page")
     ui_width_check(ui_page)
     # A terminal launch's preview, with its long command to copy.
     fill_launch(panel, cwd=str(tmp_path))

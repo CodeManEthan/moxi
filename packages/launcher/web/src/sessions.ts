@@ -6,7 +6,8 @@
 // It reads `/api/state` (every live launch's state) and follows the topic `sessions`; it
 // reads `/api/launches` and follows the topic `launches` for each row's harness, target
 // and directory. A launch log that can't be read leaves those out and nothing else. It
-// reads both routes again when its tab is shown.
+// reads both routes again when its tab is shown. Its heading links to the launcher's page;
+// on that page, where the panel places it, the link marks the current page and goes nowhere.
 
 import { css, html, LitElement, nothing } from "lit";
 import { repeat } from "lit/directives/repeat.js";
@@ -50,6 +51,11 @@ const STYLES = css`
   .lines li { display: block; padding: 0; border: 0; overflow-wrap: anywhere; }
   .placeholder { height: 2.6em; border-radius: var(--moxi-radius); background: var(--moxi-bg-sunken); border-top: 0; }
 `;
+
+/** Whether the shell is showing the launcher's own page. */
+function onPanel(): boolean {
+  return location.pathname.startsWith("/m/launcher/");
+}
 
 export class LauncherSessions extends LitElement {
   static styles = STYLES;
@@ -97,7 +103,7 @@ export class LauncherSessions extends LitElement {
     const view = sessionsView(states, launches);
     if (view.state === "gone") return nothing;
     return html`<div class="sessions" data-state=${view.state} data-red=${String(view.red)}>
-      <h2><a href="/m/launcher/" @click=${this.#open}>Sessions</a></h2>
+      <h2><a href="/m/launcher/" aria-current=${onPanel() ? "page" : nothing} @click=${this.#open}>Sessions</a></h2>
       <p class="help">Each launched session that is running, and whether it needs a look.</p>
       ${this.#status(view.state, view.detail)}
       ${view.state === "loading" ? html`<ul>${[0, 1].map(() => html`<li class="placeholder"></li>`)}</ul>` : nothing}
@@ -134,7 +140,8 @@ export class LauncherSessions extends LitElement {
   #open = (event: MouseEvent): void => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    navigate("launcher");
+    // Shown again, the panel would lose what its form holds.
+    if (!onPanel()) navigate("launcher");
   };
 }
 

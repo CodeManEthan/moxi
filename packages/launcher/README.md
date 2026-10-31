@@ -231,22 +231,25 @@ in the shell, and two small views other pages can show: a launched session's sta
 when it needs a look, and a block on the shell's home listing each running launched
 session with its state.
 
-The page has three parts.
+The page has four parts.
 
 - **Launch.** Pick a seat or a project preset, then change what you want in the form,
   which shows the same flag rows as `moxi launcher catalog`. Only the fields you change
   are sent, so the rest come from the preset and your defaults. "Preview" shows the
-  command, the environment stamps, the first turn and every warning, and every reason
-  the launch would be refused, each beside its field. A launch from the page needs a
+  command, the environment stamps, the first turn and every warning, and every reason the
+  launch would be refused, each beside its field. A launch from the page needs a
   directory, a project or scratch to start in. A launch in a slot or headless then starts
   with "Launch": the page server hands it to a detached job and the job runs it, so
   closing the page doesn't stop it. A preview can be launched once, within
-  `page.launch_wait_s` seconds (600), and only as it was previewed. The page never runs a launch in a terminal: it gives the
-  `moxi launcher run` command to copy into a terminal of your own.
-- **Launches.** The newest launches, updated as they happen. A running session shows
-  its state beside it. When a launch is refused after "Launch" but before its row is
-  written (its directory went away since the preview, say), the refusal shows under the
-  launch.
+  `page.launch_wait_s` seconds (600), and only as it was previewed. The page never runs a
+  launch in a terminal: it gives the `moxi launcher run` command to copy into a terminal
+  of your own.
+- **Sessions.** The block the shell's home shows: each running launched session, whether
+  it needs a look, and its relaunch, recycle and keep-warm lines.
+- **Launches.** The newest launches, updated as they happen. A running session shows its
+  state beside it, and keeps showing it when a clear or a compact gives the session a new
+  id. When a launch is refused after "Launch" but before its row is written (its
+  directory went away since the preview, say), the refusal shows under the launch.
 - **Past sessions.** Each launch's session, newest first. A session that ran in a slot
   resumes from here, in a detached job as a launch does; one that ran in a terminal gives
   the `moxi launcher resume` command to copy. The refusals `moxi launcher resume` gives
