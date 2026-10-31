@@ -801,14 +801,14 @@ def teardown() -> Teardown:
             if gone:
                 line = f"dropped {root} from the index: {why}"
                 if repo is not None:
-                    report.lines += gitconf.remove_all(repo, state)
+                    report.lines += gitconf.remove_all(repo, state, final=True)
                     line += (f"; removed repo's config keys and git hooks from "
                              f"{repo.common_dir} too")
                 _records.close_repo(entry.get("common_dir") or key)
                 _index_drop(key)
                 report.lines.append(line)
                 continue
-            report.lines += gitconf.remove_all(repo, state)
+            report.lines += gitconf.remove_all(repo, state, final=True)
             _records.close_repo(repo.common_dir)
             _index_drop(key)
         except (gitconf.GitError, OSError, IndexUnreadable) as exc:

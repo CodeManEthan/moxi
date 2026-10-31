@@ -467,19 +467,19 @@ def _present(path: Path) -> bool:
 
 
 def _settle(hooks_dir: Path, moved: set[str], keep: set[str], *,
-            say_left: bool = False) -> list[str]:
+            say_left: bool = False, final: bool = False) -> list[str]:
     """In `hooks_dir`, take away our shims for every event not in `keep`, and move back
     each git hook repo moved aside for such an event where its slot is free. With
-    `say_left`, also name each moved hook that stays because another hook took its slot."""
+    `say_left`, also name each moved hook that stays because another hook took its slot;
+    `final` words that line for repo's own uninstall."""
     lines = []
     ours = shim.our_shims(hooks_dir)
     for event in sorted((set(ours) | moved) - keep):
         hook, local = hooks_dir / event, hooks_dir / (event + shim.LOCAL)
         if event in ours or (event in moved and _present(local) and not _present(hook)):
-            lines += shim.take_away(hooks_dir, event, event in moved)
+            lines += shim.take_away(hooks_dir, event, event in moved, final=final)
         elif say_left and event in moved and _present(local):
-            lines.append(f"left {local}: {hook} is now another tool's git hook, so the one "
-                         "repo moved aside stays where it is")
+            lines.append(shim.left_line(local, hook, final=final))
     return lines
 
 
@@ -569,24 +569,26 @@ def sync(repo: Repo, state: State) -> Sync:
     return out
 
 
-def remove_all(repo: Repo, state: State | None = None) -> list[str]:
+def remove_all(repo: Repo, state: State | None = None, *, final: bool = False) -> list[str]:
     """Remove everything repo wrote to the repo: sections, entries, shims (moving each
-    `.local` back), the launcher and `<common git dir>/moxi-repo/`."""
+    `.local` back), the launcher and `<common git dir>/moxi-repo/`. `final` is repo's own
+    uninstall: a moved git hook that can't go back is no longer recorded either, and its
+    line says so."""
     state = state or read(repo)
     lines: list[str] = []
     for event in sorted(state.entries):
         _remove_section(repo, f"hook.{HOOK_PREFIX}{event}")
     moved = set(state.moved)
     lines += _settle(repo.hooks_dir, moved if repo.hooks_inside else set(), set(),
-                     say_left=True)
+                     say_left=True, final=final)
     if repo.stray_dir is not None:
-        lines += _settle(repo.stray_dir, moved, set(), say_left=True)
+        lines += _settle(repo.stray_dir, moved, set(), say_left=True, final=final)
     for name in sorted(state.sections, key=len, reverse=True):
         _remove_section(repo, name)
     state.moved = set()
     # A moved git hook that couldn't go back stays recorded, so a later `remove` (once
-    # its slot is free) still moves it back.
-    _write_moved(repo, state, _still_moved(repo, moved, set()))
+    # its slot is free) still moves it back; after repo's own uninstall nothing would.
+    _write_moved(repo, state, set() if final else _still_moved(repo, moved, set()))
     if repo.own_dir.exists():
         shutil.rmtree(repo.own_dir)
     return lines

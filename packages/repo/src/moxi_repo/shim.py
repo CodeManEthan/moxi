@@ -227,7 +227,19 @@ def place(hooks_dir: Path, event: str, text: str, moved: bool) -> list[str]:
     return done
 
 
-def take_away(hooks_dir: Path, event: str, moved: bool) -> list[str]:
+def left_line(local: Path, hook: Path, *, final: bool = False) -> str:
+    """The line for a git hook repo moved aside that stays at `local`, since another git
+    hook took its slot. `final` (repo's own uninstall) adds that repo no longer records
+    it, so it is the user's to merge or delete."""
+    text = (f"left {local}: {hook} is now another tool's git hook, so the one repo moved "
+            "aside stays where it is")
+    if final:
+        text += (f"; repo no longer records {local}, so merge it into {hook} or delete "
+                 "it")
+    return text
+
+
+def take_away(hooks_dir: Path, event: str, moved: bool, *, final: bool = False) -> list[str]:
     """Remove every shim of ours for `event` and move `<event>.local` back when repo moved
     it; return what was done, one line each."""
     done = []
@@ -236,8 +248,7 @@ def take_away(hooks_dir: Path, event: str, moved: bool) -> list[str]:
     hook, local = hooks_dir / event, hooks_dir / (event + LOCAL)
     if moved and (local.exists() or local.is_symlink()):
         if hook.exists() or hook.is_symlink():
-            done.append(f"left {local}: {hook} is now another tool's git hook, so the "
-                        "one repo moved aside stays where it is")
+            done.append(left_line(local, hook, final=final))
         else:
             os.rename(local, hook)
             done.append(f"moved {event}{LOCAL} back to {hook}")
@@ -245,5 +256,5 @@ def take_away(hooks_dir: Path, event: str, moved: bool) -> list[str]:
 
 
 __all__ = ["entry_command", "shim_text", "launcher_text", "chain_line", "has_chain_line",
-           "shim_event", "our_shims", "place", "take_away", "check_place", "ShimRefused",
+           "shim_event", "our_shims", "place", "take_away", "left_line", "check_place", "ShimRefused",
            "sh_quote", "sh_path"]

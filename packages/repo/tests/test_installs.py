@@ -444,6 +444,28 @@ def test_teardown_drops_a_git_dir_left_with_nothing_of_repos_in_it(demo, capsys)
                    f"lists no other work tree of its git dir {bare}\n")
 
 
+def test_teardown_leaves_a_moved_hook_whose_slot_was_taken_and_no_longer_records_it(
+        demo, capsys):
+    repo = demo.repo()
+    hooks = repo / ".git" / "hooks"
+    mine = "#!/bin/sh\necho the existing hook\n"
+    (hooks / "pre-commit").write_text(mine, encoding="utf-8")
+    (hooks / "pre-commit").chmod(0o755)
+    api.add(repo, ["demo/gate"], mode="shim")
+    theirs = "#!/bin/sh\necho another tool's hook\n"
+    (hooks / "pre-commit").write_text(theirs, encoding="utf-8")
+    assert "moxi-repo.moved pre-commit" in ours_in_config(repo)
+    capsys.readouterr()
+    assert repo_install.teardown() == 0
+    out = capsys.readouterr().out
+    local, hook = hooks / "pre-commit.local", hooks / "pre-commit"
+    assert (f"left {local}: {hook} is now another tool's git hook, so the one repo moved "
+            f"aside stays where it is; repo no longer records {local}, so merge it into "
+            f"{hook} or delete it") in out
+    assert ours_in_config(repo) == ""
+    assert local.read_text() == mine and hook.read_text() == theirs
+
+
 def _two_with_records(demo):
     alpha, beta = demo.repo("alpha-notes"), demo.repo("beta-code")
     for r in (alpha, beta):
@@ -481,10 +503,10 @@ def test_a_step_that_fails_once_removing_began_stops_there_and_names_the_repos_c
     alpha, beta = _two_with_records(demo)
     real = gitconf.remove_all
 
-    def remove_all(repo, state=None):
+    def remove_all(repo, state=None, **kw):
         if repo.root == beta:
             raise gitconf.GitError("git config could not remove section moxi-repo: locked")
-        return real(repo, state)
+        return real(repo, state, **kw)
 
     demo.mp.setattr(gitconf, "remove_all", remove_all)
     capsys.readouterr()
