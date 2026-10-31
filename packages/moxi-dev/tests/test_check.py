@@ -353,6 +353,124 @@ def test_nothing_picked_checks_the_lock_and_passes(repo):
             in result.line())
 
 
+# --- browser tests ---------------------------------------------------------------------
+
+# A page-shell package whose testing extra brings Playwright, a module whose dev group
+# asks for that extra, and a package with neither.
+BROWSER_LAYOUT = {
+    "ui": ("moxi-ui", [], {"testing": ["pytest>=8", "playwright>=1.50,<2"]},
+           {"dev": ["pytest", "moxi-ui[testing]"]}),
+    "mod": ("moxi-mod", [], {}, {"dev": ["pytest", "Moxi_UI[ Testing ]>=0.1"]}),
+    "plain": ("moxi-plain", [], {}, {"dev": ["pytest", "moxi-ui>=0.1"]}),
+}
+
+
+@pytest.fixture
+def browser_repo(tmp_path):
+    root = tmp_path / "b"
+    root.mkdir()
+    git(root, "init", "-q", "-b", "main")
+    write_workspace(root, BROWSER_LAYOUT)
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "start")
+    return root
+
+
+class Probe:
+    """The Chromium probe's stand-in: answers `why` (None: it starts), counting calls."""
+
+    def __init__(self, why=None):
+        self.why = why
+        self.calls = []
+
+    def __call__(self, python, env):
+        self.calls.append((Path(python), dict(env)))
+        return self.why
+
+
+def test_a_package_drives_a_browser_when_it_asks_for_playwright_or_ui_testing(browser_repo):
+    browser = {p.dir: p.browser for p in check.load_workspace(browser_repo)}
+    assert browser == {"ui": True, "mod": True, "plain": False}
+    assert check.requirement_extras("moxi-ui[testing, Other_X]>=1") == {"testing", "other-x"}
+    assert check.requirement_extras("moxi-ui>=1") == frozenset()
+
+
+def test_the_browser_tiers_are_the_plain_runs_less_the_browser():
+    from moxi_dev.testing import TIERS
+
+    assert check.WITH_BROWSER == " and ".join(f"not {t}" for t in TIERS if t != "browser")
+
+
+def test_with_chromium_a_browser_package_runs_its_browser_tests_in_its_suite(browser_repo,
+                                                                            monkeypatch):
+    monkeypatch.setattr(check, "cpu_count", lambda: 4)
+    runs, probe = Runs(), Probe()
+    result = run_check(browser_repo, runs, full=True, probe=probe)
+    assert result.code == 0
+    suites = dict(runs.suites())
+    assert suites["ui"][3:] == ["-n", "4", "-m", check.WITH_BROWSER]
+    assert suites["mod"][3:] == ["-n", "4", "-m", check.WITH_BROWSER]
+    assert suites["plain"][3:] == ["-n", "4"]
+    # One probe, with the check's own python and the suites' environment.
+    env_dir = browser_repo / ".moxi-dev" / "env-3.12"
+    assert [python for python, _ in probe.calls] == [env_dir / "bin" / "python"]
+    assert probe.calls[0][1]["VIRTUAL_ENV"] == str(env_dir)
+    assert "without its browser tests" not in result.line()
+
+
+def test_without_chromium_the_browser_tests_are_left_out_with_a_line_saying_why(
+        browser_repo, capsys):
+    runs, probe = Runs(), Probe("Executable doesn't exist at /x/chrome")
+    result = run_check(browser_repo, runs, full=True, probe=probe)
+    assert result.code == 0
+    for _, cmd in runs.suites():
+        assert "-m" not in cmd[3:]
+    err = capsys.readouterr().err
+    for name in ("ui", "mod"):
+        assert (f"moxi-dev check: {name}'s browser tests are left out: Playwright's "
+                f"Chromium can't start here (Executable doesn't exist at /x/chrome)") in err
+    assert "plain's browser" not in err
+    match = LINE.match(result.line())
+    assert match, result.line()
+    assert re.fullmatch(r"ui pass \d+\.\d+s without its browser tests, "
+                        r"mod pass \d+\.\d+s without its browser tests, "
+                        r"plain pass \d+\.\d+s", match["suites"])
+
+
+def test_no_browser_package_picked_means_no_probe(browser_repo):
+    git(browser_repo, "switch", "-q", "-c", "work")
+    commit_file(browser_repo, "packages/plain/x.py")
+    runs, probe = Runs(), Probe("not reached")
+    result = run_check(browser_repo, runs, probe=probe)
+    assert result.code == 0 and probe.calls == []
+    assert [name for name, _ in runs.suites()] == ["plain"]
+
+
+def test_a_failed_sync_runs_no_probe(browser_repo):
+    runs, probe = Runs({lambda cmd, cwd: cmd[:2] == ["uv", "sync"]: 1}), Probe()
+    run_check(browser_repo, runs, full=True, probe=probe)
+    assert probe.calls == []
+
+
+def test_the_probe_says_why_chromium_cant_start(tmp_path):
+    fake = tmp_path / "python"
+    fake.write_text("#!/bin/sh\necho 'Traceback (most recent call last):' >&2\n"
+                    "echo \"No module named 'playwright'\" >&2\nexit 1\n")
+    fake.chmod(0o755)
+    assert check.chromium_probe(fake, {"PATH": "/usr/bin:/bin"}) == "No module named 'playwright'"
+    good = tmp_path / "good"
+    good.write_text("#!/bin/sh\nexit 0\n")
+    good.chmod(0o755)
+    assert check.chromium_probe(good, {"PATH": "/usr/bin:/bin"}) is None
+    assert "could not run" in check.chromium_probe(tmp_path / "missing", {})
+
+
+def test_the_real_workspace_runs_browser_tests_for_ui_only():
+    if not (REPO / "packages" / "ui" / "pyproject.toml").is_file():
+        pytest.skip("not run from the repository (an sdist has no workspace)")
+    assert [p.dir for p in check.load_workspace(REPO) if p.browser] == ["ui"]
+
+
 # --- the summary line -------------------------------------------------------------------
 
 LINE = re.compile(

@@ -28,4 +28,12 @@ stopped by one. To install it, put this in `.git/hooks/pre-commit` and make it e
 exec uv run --locked moxi-dev stamp --staged
 ```
 
+## Browser tests
+
+A package whose tests drive a browser (its declarations name Playwright, or
+`moxi-ui[testing]`) runs them in `moxi-dev check` in the same session as its other tests,
+when Playwright's Chromium starts there. Install Chromium once with
+`uv run playwright install chromium`. When it can't start, the check prints why and leaves
+those tests out, and the summary line says so.
+
 MIT licensed; see `LICENSE`.

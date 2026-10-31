@@ -27,7 +27,10 @@ only once the ones before it have passed:
    pass, so N is passed explicitly: pytest-xdist's `PYTEST_XDIST_AUTO_NUM_WORKERS` (which
    can turn `-n auto` into a serial run) and the caller's `PYTEST_ADDOPTS` are dropped
    from the suites' environment, and an option that would undo the workers (`--pdb`)
-   makes pytest refuse the run.
+   makes pytest refuse the run. A package whose tests drive a browser (its declarations
+   name Playwright, or moxi-ui with its `testing` extra) runs its browser tests in the
+   same session, beside the rest, when Playwright's Chromium starts in the check's
+   environment; when it can't, a printed line says why and those tests are left out.
 6. Print one summary line, the last line of the output: the commit, the packages, each
    package's result and seconds, the total and the exit code.
 
@@ -70,6 +73,7 @@ class Package:
     dist: str                # its distribution name, normalized
     path: Path
     requires: frozenset[str] = frozenset()   # the workspace packages it depends on
+    browser: bool = False    # its tests drive a browser
 
 
 def normalize(name: str) -> str:
@@ -78,6 +82,7 @@ def normalize(name: str) -> str:
 
 
 _NAME = re.compile(r"\s*([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)")
+_EXTRAS = re.compile(r"\s*\[([^\]]*)\]")
 
 
 def requirement_name(requirement: str) -> str | None:
@@ -86,7 +91,17 @@ def requirement_name(requirement: str) -> str | None:
     return normalize(match.group(1)) if match else None
 
 
-def _requirements(data: dict) -> set[str]:
+def requirement_extras(requirement: str) -> frozenset[str]:
+    """The extras a requirement string asks for, normalized."""
+    match = _NAME.match(requirement)
+    extras = _EXTRAS.match(requirement, match.end()) if match else None
+    if not extras:
+        return frozenset()
+    return frozenset(normalize(name.strip()) for name in extras.group(1).split(",")
+                     if name.strip())
+
+
+def _requirement_strings(data: dict) -> list[str]:
     project = data.get("project", {})
     strings = list(project.get("dependencies", []))
     for extra in project.get("optional-dependencies", {}).values():
@@ -94,7 +109,23 @@ def _requirements(data: dict) -> set[str]:
     for group in data.get("dependency-groups", {}).values():
         # An {include-group = ...} entry names a group of the same file, read here anyway.
         strings += [entry for entry in group if isinstance(entry, str)]
-    return {name for name in map(requirement_name, strings) if name}
+    return strings
+
+
+def _requirements(data: dict) -> set[str]:
+    return {name for name in map(requirement_name, _requirement_strings(data)) if name}
+
+
+def drives_a_browser(data: dict) -> bool:
+    """Whether a package's tests drive a browser: its declarations name Playwright, or
+    moxi-ui with its `testing` extra, whose fixtures bring a browser."""
+    for requirement in _requirement_strings(data):
+        name = requirement_name(requirement)
+        if name in ("playwright", "pytest-playwright"):
+            return True
+        if name == "moxi-ui" and "testing" in requirement_extras(requirement):
+            return True
+    return False
 
 
 def load_workspace(root: Path) -> list[Package]:
@@ -116,11 +147,12 @@ def load_workspace(root: Path) -> list[Package]:
         except (KeyError, TypeError) as exc:
             raise CheckError(f"workspace member {member}: its pyproject.toml names no "
                              f"project") from exc
-        loaded.append((path, normalize(name), _requirements(package_data)))
-    dists = {dist for _, dist, _ in loaded}
+        loaded.append((path, normalize(name), _requirements(package_data),
+                       drives_a_browser(package_data)))
+    dists = {dist for _, dist, _, _ in loaded}
     return [Package(dir=path.name, dist=dist, path=path,
-                    requires=frozenset((requires & dists) - {dist}))
-            for path, dist, requires in loaded]
+                    requires=frozenset((requires & dists) - {dist}), browser=browser)
+            for path, dist, requires, browser in loaded]
 
 
 def pick(packages: Sequence[Package], paths: Sequence[str]) -> list[Package]:
@@ -208,6 +240,44 @@ def _base_env(environ: Mapping[str, str]) -> dict[str, str]:
 #: than the package's own configuration says.
 SUITE_DROPPED_ENV = ("PYTEST_XDIST_AUTO_NUM_WORKERS", "PYTEST_ADDOPTS")
 
+#: The marker expression a browser package's suite runs with when Chromium starts: what
+#: a plain run deselects (moxi_dev.testing's tiers), less the browser tier.
+WITH_BROWSER = "not slow and not build and not live"
+
+#: Run in the check's environment: exits 0 when Playwright's Chromium starts, else
+#: prints why on its last line of stderr.
+CHROMIUM_PROBE = """\
+import sys
+try:
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as playwright:
+        playwright.chromium.launch().close()
+except Exception as exc:
+    said = str(exc).strip()
+    print(said.splitlines()[0] if said else type(exc).__name__, file=sys.stderr)
+    sys.exit(1)
+"""
+
+# Why Chromium can't start in the check's environment, or None when it starts; given the
+# environment's python and the suites' environment. Tests replace it.
+Probe = Callable[[Path, Mapping[str, str]], str | None]
+
+
+def chromium_probe(python: Path, env: Mapping[str, str]) -> str | None:
+    """Start and close Playwright's Chromium with `python`: None when it starts, else
+    one line saying why it can't."""
+    try:
+        done = subprocess.run([str(python), "-c", CHROMIUM_PROBE], env=dict(env),
+                              capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return "it did not start within 120 s"
+    except OSError as exc:
+        return f"could not run {python} ({exc})"
+    if done.returncode == 0:
+        return None
+    lines = [line.strip() for line in done.stderr.splitlines() if line.strip()]
+    return lines[-1] if lines else f"the probe exited {done.returncode}"
+
 
 @dataclass
 class Result:
@@ -217,12 +287,15 @@ class Result:
     stamps: str = "not run"
     sync: str = "not run"
     suites: list[tuple[str, bool, float]] = field(default_factory=list)
+    #: The packages whose browser tests were left out, Chromium not starting.
+    no_browser: list[str] = field(default_factory=list)
     seconds: float = 0.0
     code: int = 0
 
     def line(self) -> str:
         names = "unknown" if self.packages is None else ", ".join(self.packages) or "none"
         suites = ", ".join(f"{name} {'pass' if ok else 'fail'} {secs:.1f}s"
+                           + (" without its browser tests" if name in self.no_browser else "")
                            for name, ok, secs in self.suites) or "no suites run"
         return (f"moxi-dev check: commit {self.commit} | packages: {names} | "
                 f"lock {self.lock} | stamps {self.stamps} | sync {self.sync} | {suites} | "
@@ -236,10 +309,12 @@ def _commit(root: Path) -> str:
 
 
 def check(root: Path, *, full: bool = False, base: str | None = None,
-          environ: Mapping[str, str] | None = None, run: Run | None = None) -> Result:
+          environ: Mapping[str, str] | None = None, run: Run | None = None,
+          probe: Probe | None = None) -> Result:
     """Run the check's steps on the workspace at `root`; the result holds the exit code."""
     environ = os.environ if environ is None else environ
     run = run or _run
+    probe = probe or chromium_probe
     started = time.monotonic()
     result = Result()
     try:
@@ -248,7 +323,7 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
         workers = worker_args(environ)
         chosen = list(packages) if full else pick(packages, changed_paths(root, base or "main"))
         result.packages = [package.dir for package in chosen]
-        result.code = 0 if _steps(root, chosen, workers, environ, run, result) else 1
+        result.code = 0 if _steps(root, chosen, workers, environ, run, probe, result) else 1
     except CheckError as exc:
         print(f"moxi-dev check: {exc}", file=sys.stderr, flush=True)
         result.code = 2
@@ -257,7 +332,7 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
 
 
 def _steps(root: Path, chosen: Sequence[Package], workers: Sequence[str],
-           environ: Mapping[str, str], run: Run, result: Result) -> bool:
+           environ: Mapping[str, str], run: Run, probe: Probe, result: Result) -> bool:
     """The lock, the stamps, the sync and the suites, recorded in `result`; True when all
     passed."""
     env = _base_env(environ)
@@ -277,9 +352,20 @@ def _steps(root: Path, chosen: Sequence[Package], workers: Sequence[str],
             suite_env = {**suite_env, "VIRTUAL_ENV": str(venv),
                          "PATH": os.pathsep.join(filter(None, [str(venv / "bin"),
                                                                env.get("PATH")]))}
+            python = venv / "bin" / "python"
+            why = probe(python, suite_env) if any(p.browser for p in chosen) else None
             for package in chosen:
+                tiers: list[str] = []
+                if package.browser and why is None:
+                    tiers = ["-m", WITH_BROWSER]
+                elif package.browser:
+                    result.no_browser.append(package.dir)
+                    print(f"moxi-dev check: {package.dir}'s browser tests are left out: "
+                          f"Playwright's Chromium can't start here ({why}); "
+                          f"`uv run playwright install chromium` installs it",
+                          file=sys.stderr, flush=True)
                 began = time.monotonic()
-                passed = run([str(venv / "bin" / "python"), "-m", "pytest", *workers],
+                passed = run([str(python), "-m", "pytest", *workers, *tiers],
                              package.path, suite_env) == 0
                 result.suites.append((package.dir, passed, time.monotonic() - began))
                 ok = ok and passed
