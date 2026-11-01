@@ -16,8 +16,9 @@ backend (`UnitState` says what each backend reads for it). Where the sockets are
 their own, the backend reads the daemon's marked set; where they are keys of the daemon's
 own file, it reads the daemon's job under kind `socket`; where the socket is skipped
 (Task Scheduler), it is `off` with no read. A daemon that is `off` or `nobackend` has its
-socket the same, and a socket with nothing written for it is `missing`. On a backend whose sockets are units of their own,
-such a daemon's service has no install section, so its own `enabled` is its socket's.
+socket the same, and a socket with nothing written for it is `missing`. On a backend whose
+sockets are units of their own, a daemon whose service has no install section (`start =
+"connection"`) reads `static`, and the backend gives it its socket's `enabled`.
 
 `last` is the newest run line the gate wrote for the unit (`STATE/<module>/runs.jsonl`),
 with the supervisor's own last result beside it under `"supervisor"`; with no run line it
@@ -69,7 +70,6 @@ def status(modules: Iterable[str] | str | None = None, *, foreign: Iterable[str]
     rows: list[UnitState | None] = []
     refs: list[UnitRef] = []
     slots: list[int] = []
-    socketed: set[tuple[str, str]] = set()
 
     def read(ref: UnitRef) -> None:
         slots.append(len(rows))
@@ -77,7 +77,7 @@ def status(modules: Iterable[str] | str | None = None, *, foreign: Iterable[str]
         refs.append(ref)
 
     for module in names:
-        for row in _module_rows(module, impl, socketed):
+        for row in _module_rows(module, impl):
             if isinstance(row, UnitRef):
                 read(row)
             else:
@@ -114,26 +114,7 @@ def status(modules: Iterable[str] | str | None = None, *, foreign: Iterable[str]
         runs = _Runs()
         for slot, ref, state in zip(slots, refs, read_states):
             rows[slot] = _with_last(state, ref, runs)
-    out = [row for row in rows if row is not None]
-    if socketed and not isinstance(impl, str) and impl.sockets == "units":
-        out = _enabled_by_socket(out, socketed)
-    return out
-
-
-def _enabled_by_socket(rows: list[UnitState], socketed: set[tuple[str, str]]
-                       ) -> list[UnitState]:
-    """A daemon whose sockets are units of their own takes its `enabled` from its socket
-    state: its service has no install section and reads `static`."""
-    sockets = {(r.module, r.name): r for r in rows
-               if r.kind == "socket" and (r.module, r.name) in socketed}
-    out = []
-    for row in rows:
-        socket = sockets.get((row.module, row.name)) if row.kind == "daemon" else None
-        if socket is not None and row.state not in ("missing", "unknown", "nobackend",
-                                                    "off"):
-            row = replace(row, enabled=socket.enabled)
-        out.append(row)
-    return out
+    return [row for row in rows if row is not None]
 
 
 def _refused(impl, unit: UnitRef) -> str | None:
@@ -173,11 +154,10 @@ def _implementation():
     return "no supervisor on this system (no systemd user manager)" if impl is None else impl
 
 
-def _module_rows(module: str, impl, socketed: set[tuple[str, str]]
-                 ) -> list[UnitState | UnitRef]:
+def _module_rows(module: str, impl) -> list[UnitState | UnitRef]:
     """One entry per unit of `module`: a `UnitState` decided without the supervisor, or
     the `UnitRef` the backend reads. Each daemon that declares a `socket` gets its socket
-    entry right after its own, and is added to `socketed`."""
+    entry right after its own."""
     from .. import modules as _modules
 
     found = _modules.load(module)
@@ -199,7 +179,6 @@ def _module_rows(module: str, impl, socketed: set[tuple[str, str]]
         for kind, name, entry in declared:
             out.append(UnitState(module, name, kind, None, "nobackend", detail=impl))
             if _has_socket(kind, entry):
-                socketed.add((module, name))
                 out.append(UnitState(module, name, "socket", None, "nobackend",
                                      detail=impl))
         return out
@@ -234,7 +213,6 @@ def _module_rows(module: str, impl, socketed: set[tuple[str, str]]
         if not _has_socket(kind, entry):
             out += sockets
             continue
-        socketed.add((module, name))
         out.append(_socket_row(impl, module, name, state, own, sockets))
     for refs in by_name.values():
         out += refs

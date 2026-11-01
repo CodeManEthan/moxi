@@ -1753,3 +1753,61 @@ def test_proof_a_keep_daemon_that_drops_its_socket_is_reloaded_and_runs(real_mac
     assert running.state == "active" and running.pid
     assert _until(m.started, bool) == [f"{running.pid} Listeners=0"]
     assert _refused(m.port)
+
+
+# -- a socket daemon that starts at login ----------------------------------------------------
+
+def login_shell(*addresses, upgrade="restart", start="login"):
+    """The relay with a socket on `addresses` and the given `start`."""
+    return ("{'relay': {'command': 'moxi-demo-relay', "
+            f"'upgrade': {upgrade!r}, 'socket': {{'setting': 'port', "
+            f"'addresses': {list(addresses)!r}, 'start': {start!r}}}}}}}")
+
+
+def test_a_login_socket_daemon_keeps_run_at_load_and_keep_alive_beside_its_sockets(mac):
+    def body(start):
+        [group] = mac.backend.render(spec(socket=Socket("port", ("127.0.0.1", "::1"), 8470,
+                                                        start=start)))
+        return plistlib.loads(group.files[0][1].encode())
+
+    login, connection = body("login"), body("connection")
+    assert login["RunAtLoad"] is True and login["KeepAlive"] == {"SuccessfulExit": False}
+    assert login["Sockets"] == connection["Sockets"] == {
+        "Listeners": listener("127.0.0.1"), "Listeners-1": listener("::1")}
+    assert {k: v for k, v in login.items() if k not in ("RunAtLoad", "KeepAlive")} == \
+        connection
+
+
+def test_a_new_login_socket_daemon_is_bootstrapped_and_runs_at_once(mac):
+    mac.script("moxi-demo-relay")
+    mac.module(DAEMONS=login_shell("127.0.0.1"))
+    assert all(a.ok for a in mac.apply(units.plan("demo")))
+    assert [c[0] for c in mac.ctl.verbs()] == ["enable", "bootstrap"]
+    assert mac.ctl.loaded[RELAY][0]                    # RunAtLoad started it
+
+
+@pytest.mark.parametrize("start", ["login", "connection"])
+def test_a_start_change_under_keep_with_its_sockets_unchanged_waits_for_the_next_load(
+        mac, start):
+    mac.script("moxi-demo-relay")
+    other = "connection" if start == "login" else "login"
+    mac.module(DAEMONS=login_shell("127.0.0.1", upgrade="keep", start=other))
+    mac.apply(units.plan("demo"))
+    mac.module(DAEMONS=login_shell("127.0.0.1", upgrade="keep", start=start))
+    mac.ctl.calls.clear()
+    [done] = mac.apply(units.plan("demo"))
+    assert done.ok and mac.ctl.calls == [("print", DOMAIN)]
+    assert done.lines == (f"{RELAY} rewritten; the new code runs from its next start",)
+    assert ("RunAtLoad" in mac.plist(RELAY)) is (start == "login")
+
+
+def test_a_start_change_under_restart_reloads_the_job(mac):
+    mac.script("moxi-demo-relay")
+    mac.module(DAEMONS=login_shell("127.0.0.1", start="connection"))
+    mac.apply(units.plan("demo"))
+    assert mac.ctl.loaded[RELAY][0] is None            # idle under its sockets
+    mac.module(DAEMONS=login_shell("127.0.0.1"))
+    mac.ctl.calls.clear()
+    [done] = mac.apply(units.plan("demo"))
+    assert done.ok and [c[0] for c in mac.ctl.verbs()] == RELOAD
+    assert mac.ctl.loaded[RELAY][0]                    # RunAtLoad started it

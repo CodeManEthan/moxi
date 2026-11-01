@@ -16,12 +16,17 @@ A daemon:
 A daemon with a `socket` adds Sockets, one key per address written: `Listeners` for the
 first address in `addresses` and `Listeners-<k>` for the k-th after it, each one
 {SockNodeName, SockServiceName (the port), SockType: stream} dict. The daemon takes each by
-its key with `launch_activate_socket`, so it can tell which addresses it holds. Such a
-daemon has no RunAtLoad and no KeepAlive: RunAtLoad would start it at every login, and
-KeepAlive's SuccessfulExit makes launchd run the job once at load to learn an exit status.
-With neither, launchd holds the sockets from the job's load and starts the job at a
-connection on any of them; after any exit, a crash included, the next connection starts it
-again, with ThrottleInterval still spacing those starts. Its sockets are the job's, so
+its key with `launch_activate_socket`, so it can tell which addresses it holds. Under
+`start = "connection"` (the default) such a daemon has no RunAtLoad and no KeepAlive:
+RunAtLoad would start it at every login, and KeepAlive's SuccessfulExit makes launchd run
+the job once at load to learn an exit status. With neither, launchd holds the sockets from
+the job's load and starts the job at a connection on any of them; after any exit, a crash
+included, the next connection starts it again, with ThrottleInterval still spacing those
+starts. Under `start = "login"` the daemon keeps RunAtLoad and KeepAlive {SuccessfulExit:
+false} beside Sockets: launchd runs it at load, holds its sockets from the load and
+restarts it after a crash, and it still takes each socket with `launch_activate_socket`.
+A change of `start` alone leaves Sockets as they were, so it is an ordinary change: under
+`upgrade = "keep"` it waits for the job's next load. Its sockets are the job's, so
 there is no `socket` change in a plan, and `status` reads the socket from the job (see
 `status`): launchd never reports a socket it could not bind, so the socket is never
 `failed` here.
@@ -137,7 +142,7 @@ class LaunchdBackend:
             body["ProgramArguments"] = list(spec.command)
             if spec.cwd:
                 body["WorkingDirectory"] = spec.cwd
-            if spec.socket is None:
+            if spec.socket is None or spec.socket.start == "login":
                 body["RunAtLoad"] = True
                 body["KeepAlive"] = {"SuccessfulExit": False}
             body["ThrottleInterval"] = 2

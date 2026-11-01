@@ -130,9 +130,11 @@ class UnitState:
     `active` when every one is active, `failed` when one has failed (each failed unit
     named in `detail`), else `inactive` (naming the units not active), and `missing` when
     none is written; `since` is the latest of their activation times, `pid` None, and
-    `enabled` True when every unit is enabled, False when one is disabled, else None. Such
-    a daemon's service has no install section and reads `static`, so its own `enabled`
-    is its socket's. On launchd the socket state is the daemon's job's: `active` while it
+    `enabled` True when every unit is enabled, False when one is disabled, else None. Under
+    `start = "connection"` such a daemon's service has no install section and reads
+    `static`, so its own `enabled` is its socket's; under `start = "login"` its service
+    keeps its install section, and its own `enabled` is the service's, as any daemon's.
+    On launchd the socket state is the daemon's job's: `active` while it
     is loaded (launchd then holds its sockets, with the daemon running or not), else
     `inactive` with its plist there and `missing` without; launchd says nothing of a
     socket it could not bind, so it is never `failed` there. On Task Scheduler it is
