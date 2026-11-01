@@ -269,7 +269,7 @@ def load(entries: Iterable | None = None) -> Group:
 
 def launch_additions(harness: str, *, cwd, env: Mapping[str, str],
                      session_id: str | None = None,
-                     commands: Iterable[str] = ()) -> LaunchAdditions:
+                     commands: Iterable[str] = (), refuse=None) -> LaunchAdditions:
     """What a launch of `harness` adds: argv words, environment variables, harness
     options and notes. `cwd` and `env` are the launch's as composed so far; `session_id`
     is the id the launcher minted and gives the harness, when it has one; `commands` the
@@ -286,6 +286,12 @@ def launch_additions(harness: str, *, cwd, env: Mapping[str, str],
     `moxi_turns.TurnsError` when Claude's plugin folder is missing, turns' config cannot
     be read, or there is no endpoint command. A contribution that fails is skipped with a
     note; it never fails the launch.
+
+    `refuse`, when given, is the caller's own check of one module's contribution:
+    `refuse(fragment) -> str | None`, `fragment` a `LaunchAdditions` holding only that
+    module's argv and options as this harness takes them. A reason, or a raise, skips that
+    module alone, with a note naming it, so a caller that can't take one module's keys
+    still gets the others'.
     """
     from .results import COMMANDS
 
@@ -327,6 +333,8 @@ def launch_additions(harness: str, *, cwd, env: Mapping[str, str],
     reserved = group.modules()
     for contributor in group.contributors:
         rendered = _ask(contributor, request)
+        if rendered.skipped is None and refuse is not None:
+            rendered = _checked(rendered, harness, refuse)
         if rendered.skipped:
             notes.append(f"additions of {contributor.module} skipped: {rendered.skipped}")
             continue
@@ -346,6 +354,19 @@ def launch_additions(harness: str, *, cwd, env: Mapping[str, str],
     argv += server_argv
     options = merge_options(options, server_options)
     return LaunchAdditions(harness, tuple(argv), out_env, options, tuple(notes))
+
+
+def _checked(rendered: _Rendered, harness: str, refuse) -> _Rendered:
+    """`rendered`, or a skip when the caller's `refuse` turns its fragment down."""
+    server_argv, server_options = _place(harness, rendered.servers)
+    options = {"permission": dict(rendered.permission)} if rendered.permission else {}
+    fragment = LaunchAdditions(harness, (*rendered.argv, *server_argv),
+                               options=merge_options(options, server_options))
+    try:
+        why = refuse(fragment)
+    except Exception as exc:  # noqa: BLE001 - the caller's check failing skips the module
+        why = f"the launcher's check raised {_describe(exc)}"
+    return rendered if why is None else _Rendered(skipped=f"the launcher refuses it: {why}")
 
 
 def _ask(contributor: Contributor, request: AdditionsRequest) -> _Rendered:

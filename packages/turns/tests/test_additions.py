@@ -224,6 +224,45 @@ def test_opencode_rules_become_one_permission_fragment(group):
         "webfetch": "allow", "edit": "allow"}}
 
 
+def test_a_refused_fragment_skips_that_module_alone_with_a_note_naming_it(group):
+    group["entries"] = [
+        Entry("alpha", contributes(Contribution(tool_permissions={
+            "opencode": ("bash git diff*", "question")}))),
+        Entry("comms", serves("comms", URL, TOKEN_ENV, tool_permissions={
+            "opencode": ("comms_*",)})),
+        Entry("zeta", contributes(Contribution(tool_permissions={"opencode": ("edit",)}))),
+    ]
+    seen = []
+
+    def refuse(fragment):
+        seen.append(fragment)
+        if "question" in (fragment.options.get("permission") or {}):
+            return "they set `permission.question`, which the launch sets"
+        if "edit" in (fragment.options.get("permission") or {}):
+            raise RuntimeError("boom")
+        return None
+
+    got = adds("opencode", env=with_token(), refuse=refuse)
+    # Each module's fragment is checked alone, in the harness's form.
+    assert [f.options for f in seen] == [
+        {"permission": {"bash": {"git diff*": "allow"}, "question": "allow"}},
+        {"permission": {"comms_*": "allow"},
+         "mcp": {"comms": {"type": "remote", "url": URL, "enabled": True,
+                           "headers": {"Authorization": f"Bearer {{env:{TOKEN_ENV}}}"}}}},
+        {"permission": {"edit": "allow"}}]
+    assert all(f.harness == "opencode" and f.env == {} and f.notes == () for f in seen)
+    # Only comms' fragment goes in; the notes name each module left out and why.
+    assert got.options == seen[1].options
+    assert got.notes == (
+        "additions of alpha skipped: the launcher refuses it: they set "
+        "`permission.question`, which the launch sets",
+        "additions of zeta skipped: the launcher refuses it: the launcher's check raised "
+        "RuntimeError: boom")
+    # Without a check, every module goes in.
+    assert set(adds("opencode", env=with_token()).options["permission"]) == {
+        "bash", "question", "comms_*", "edit"}
+
+
 def test_codex_rules_skip_the_contribution_with_a_note_and_a_doctor_row(group):
     group["entries"] = [Entry("mymod", contributes(Contribution(tool_permissions={
         "codex": ("git diff",), "claude": ("Bash(git diff:*)",)})))]

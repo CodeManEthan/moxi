@@ -32,11 +32,13 @@ out of the harness. This package is turns' whole public API, the announcement's
                               # TurnEnded, and one Gone; w.close()
     h = s.handle_stops(on_stop)   # one stop handler per session; h.close()
     s.close()                 # or `with turns.find(...) as s:`
-    adds = turns.launch_additions(harness, *, cwd, env, session_id=None, commands=())
+    adds = turns.launch_additions(harness, *, cwd, env, session_id=None, commands=(),
+                                  refuse=None)
                               # LaunchAdditions(harness, argv, env, options, notes): what a
                               # launch about to start adds; modules contribute through the
                               # group moxi.turns.additions (a Contribution each;
-                              # its mcp_servers McpServer(url, token_env) values)
+                              # its mcp_servers McpServer(url, token_env) values);
+                              # refuse(fragment) -> str | None skips one module's alone
     p = turns.start_plan(harness, env=None)   # StartPlan(harness, total, limit, ceiling,
                               # entries, skipped): the start list as a session would get
                               # it, each StartEntry(name, kind, share, size) with its
