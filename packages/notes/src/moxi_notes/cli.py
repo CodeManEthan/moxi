@@ -1,0 +1,151 @@
+"""`moxi notes`: where a session's notes live, from the command line.
+
+    moxi notes dir [PATH] [--json]
+    moxi notes handoffs dir [PATH]
+    moxi notes inbox list [--json]
+    moxi notes inbox add SLUG
+    moxi notes inbox rename SLUG NEW
+
+`dir` prints the notes directory for PATH (default: the working directory) and exits 1
+when there is none; a warning goes to stderr. `MOXI_NOTES_DIR` in this command's own
+environment is passed as the override, as the launcher sets it for a launch. A refusal
+prints its reason and the fix to stderr, and exits 1 (an error), 2 (usage or a bad
+setting) or 3 (refused).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from collections.abc import Sequence
+
+from moxi import exit as codes
+from moxi.config import ConfigError
+
+from . import api
+from .errors import NotesError
+
+#: The variable the launcher sets for one launch; read here, never by notes' API.
+OVERRIDE = "MOXI_NOTES_DIR"
+
+_PARSERS: dict[str, argparse.ArgumentParser] = {}
+
+
+def _parser(prog: str) -> argparse.ArgumentParser:
+    if prog in _PARSERS:
+        return _PARSERS[prog]
+    parser = argparse.ArgumentParser(
+        prog=prog, description="Where each session keeps its notes. With the projects "
+                               "module (moxi install projects), a project's own notes "
+                               "folder wins.")
+    verbs = parser.add_subparsers(dest="verb", metavar="VERB")
+    verbs.required = True
+
+    p = verbs.add_parser("dir", help="print the notes directory for a folder",
+                         description="Print the notes directory for a folder; exit 1 "
+                                     "when it has none.")
+    p.add_argument("path", nargs="?", metavar="PATH",
+                   help="the folder (default: the working directory)")
+    p.add_argument("--json", action="store_true", help="print JSON")
+
+    handoffs = verbs.add_parser("handoffs", help="the notes directory's handoffs folder",
+                                description="The notes directory's handoffs folder.")
+    actions = handoffs.add_subparsers(dest="action", metavar="ACTION")
+    actions.required = True
+    p = actions.add_parser("dir", help="print the handoffs folder for a folder",
+                           description="Print the handoffs folder for a folder; exit 1 "
+                                       "when it has no notes directory.")
+    p.add_argument("path", nargs="?", metavar="PATH",
+                   help="the folder (default: the working directory)")
+
+    inbox = verbs.add_parser("inbox", help="inbox one-offs: list, add, rename",
+                             description="Inbox one-offs: folders of notes for work that "
+                                         "has no project.")
+    actions = inbox.add_subparsers(dest="action", metavar="ACTION")
+    actions.required = True
+    p = actions.add_parser("list", help="list the one-offs, by slug",
+                           description="List the one-offs, by slug.")
+    p.add_argument("--json", action="store_true", help="print JSON")
+    p = actions.add_parser("add", help="make a one-off's folder",
+                           description="Make a one-off's folder and print it.")
+    p.add_argument("slug", metavar="SLUG")
+    p = actions.add_parser("rename", help="rename a one-off",
+                           description="Rename a one-off and print its new folder.")
+    p.add_argument("slug", metavar="SLUG")
+    p.add_argument("new", metavar="NEW")
+
+    _PARSERS[prog] = parser
+    return parser
+
+
+def _path(text: str | None) -> str:
+    if text is None:
+        return os.getcwd()
+    return os.path.abspath(os.path.expanduser(text))
+
+
+def _override() -> str | None:
+    return os.environ.get(OVERRIDE) or None
+
+
+def _dir(args, out) -> int:
+    found = api.notes_dir(_path(args.path), override=_override())
+    if args.json:
+        print(json.dumps(found.as_dict()), file=out)
+    elif found.dir is not None:
+        print(found.dir, file=out)
+    if found.warning:
+        print(f"warning: {found.warning}", file=sys.stderr)
+    return codes.OK if found.dir is not None else codes.ERROR
+
+
+def _handoffs(args, out) -> int:
+    folder = api.handoffs_dir(_path(args.path), override=_override())
+    if folder is None:
+        print("no notes directory for this folder, so no handoffs folder", file=sys.stderr)
+        return codes.ERROR
+    print(folder, file=out)
+    return codes.OK
+
+
+def _inbox(args, out) -> int:
+    if args.action == "list":
+        found = api.inbox_list()
+        if args.json:
+            print(json.dumps([one.as_dict() for one in found]), file=out)
+        else:
+            for one in found:
+                print(f"{one.slug}  {one.path}  {one.modified}", file=out)
+        return codes.OK
+    if args.action == "add":
+        print(api.make_inbox(args.slug), file=out)
+        return codes.OK
+    print(api.rename_inbox(args.slug, args.new), file=out)
+    return codes.OK
+
+
+_VERBS = {"dir": _dir, "handoffs": _handoffs, "inbox": _inbox}
+
+
+def main(argv: Sequence[str] | None = None, *, prog: str = "moxi notes") -> int:
+    try:
+        args = _parser(prog).parse_args(argv)
+    except SystemExit as exc:
+        return exc.code if isinstance(exc.code, int) else codes.USAGE
+    name = f"{prog} {args.verb}" + (f" {args.action}" if getattr(args, "action", None)
+                                    else "")
+    try:
+        return _VERBS[args.verb](args, sys.stdout)
+    except NotesError as exc:
+        print(f"{name}: {exc.reason}", file=sys.stderr)
+        if exc.fix:
+            print(f"  fix: {exc.fix}", file=sys.stderr)
+        return exc.exit_code
+    except ConfigError as exc:
+        print(f"{name}: {exc}", file=sys.stderr)
+        return exc.exit_code
+    except ValueError as exc:
+        print(f"{name}: {exc}", file=sys.stderr)
+        return codes.USAGE
