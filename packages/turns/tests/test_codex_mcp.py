@@ -115,8 +115,13 @@ def test_the_rendered_servers_are_the_thread_configs():
 def test_a_server_failed_at_the_ready_gets_one_reload_and_a_late_ready_ends_the_wait():
     app = App(comms="failed", other="connected")
     settle, records, _ = _settle(app, ["comms", "other"])
-    # Thread start's `failed`, still recorded, must not end the wait after the reload.
-    app.note("comms", "failed")
+
+    def on_list(app, timeout):
+        # Thread start's `failed`, arriving after the first read's clear, so it is still
+        # held when the reload goes out: it must not end the wait after the reload.
+        if app.lists == 1:
+            app.note("comms", "failed")
+    app.on_list = on_list
 
     def reload(app):
         app.status["comms"] = "starting"      # answered {} before the server settles
