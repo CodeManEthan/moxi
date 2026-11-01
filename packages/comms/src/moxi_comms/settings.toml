@@ -92,7 +92,7 @@ read = "start"
 [mcp.port]
 type = "int"
 default = 8450
-doc = "The loopback port comms' tools are served on, 1 to 65535. Read when the daemon starts; a launch uses the address the running daemon answers."
+doc = "The loopback port comms' tools are served on, 1 to 65535. The daemon's socket unit holds it, so a change takes effect at the next moxi install comms; a daemon with no unit reads it when it starts. A launch uses the address the running daemon answers."
 read = "start"
 
 [block]

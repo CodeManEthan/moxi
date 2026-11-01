@@ -75,7 +75,21 @@ STORES = {
 }
 #: The delivery daemon, which `moxi install comms` writes as a unit through the core's
 #: writer. `moxi comms service` still writes today's unmarked unit, as it always has.
-DAEMONS = {"daemon": {"command": "moxi-comms-daemon", "doc": "the delivery daemon"}}
+#: Its socket is the loopback port of comms' tools, `[mcp] port`: the supervisor holds it
+#: while the daemon restarts, so a session that calls in that gap waits instead of being
+#: refused, and no other local user can take the port meanwhile. The daemon still starts
+#: at login and after a crash (`start = "login"`): adapters, wrappers and the CLI reach it
+#: on its Unix socket, which nothing activates.
+DAEMONS = {"daemon": {"command": "moxi-comms-daemon", "doc": "the delivery daemon",
+                      "socket": {"setting": "mcp.port", "addresses": ["127.0.0.1"],
+                                 "start": "login"}}}
+#: The daemon's health: whether it answers on its socket, and its tools' endpoint.
+HEALTH = {"daemon": "moxi_comms.checks:health"}
+#: What the daemon may cost at idle, `moxi doctor --costs`: the HTTP app of comms' tools
+#: adds about 53 MB and one listening descriptor to a daemon of about 21 MB and 14, and
+#: no wakeups. Descriptors grow by one per live binding and by keep-alives that close
+#: after 5 s, so 64 holds about 45 live sessions.
+BUDGETS = {"idle_cpu": 0.01, "rss": "150M", "fds": 64}
 #: comms' page server, which the browser UI shell starts. Nothing here imports it.
 PAGE = "moxi_comms.page:PAGE"
 #: What comms offers the browser UI shell: its panel, and the roster any home view or
