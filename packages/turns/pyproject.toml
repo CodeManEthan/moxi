@@ -12,9 +12,9 @@ dependencies = ["moxi>=0.1,<0.2"]
 codex = ["websockets>=17.0.1"]
 
 [project.urls]
-Homepage = "https://github.com/moxihq/moxi"
-Repository = "https://github.com/moxihq/moxi"
-Issues = "https://github.com/moxihq/turns/issues"
+Homepage = "https://github.com/CodeManEthan/moxi"
+Repository = "https://github.com/CodeManEthan/moxi"
+Issues = "https://github.com/CodeManEthan/moxi/issues"
 
 # Only the core declares the `moxi` script.
 [project.scripts]

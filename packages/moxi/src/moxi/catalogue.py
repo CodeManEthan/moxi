@@ -22,7 +22,7 @@ from . import names
 #: The shipped copy, beside this module.
 SHIPPED = "catalogue.toml"
 #: Where `--refresh` fetches a newer copy.
-URL = (f"https://raw.githubusercontent.com/{names.ORG}/{names.HARNESS}/main/packages/"
+URL = (f"https://raw.githubusercontent.com/{names.OWNER}/{names.HARNESS}/main/packages/"
        f"{names.HARNESS}/src/{names.HARNESS}/{SHIPPED}")
 #: The fetch's timeout in seconds, and the most it reads.
 TIMEOUT = 10.0

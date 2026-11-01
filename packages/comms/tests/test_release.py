@@ -1,6 +1,6 @@
 """The public name on every surface, the package's declarations and the announcement.
 
-The module's name is `release.MODULE`; the harness and the org are the core's
+The module's name is `release.MODULE`; the harness and the owner are the core's
 (`moxi.names`). `pyproject.toml` cannot import either, so these tests hold it to them.
 """
 
@@ -36,8 +36,8 @@ def test_every_name_is_built_from_moxi_names():
     assert release.DISTRIBUTION == names.distribution("comms") == "moxi-comms"
     assert release.DISPLAY_NAME == "Moxi comms"
     assert release.UNIT == "moxi-comms-daemon.service"
-    assert release.REPO_URL == f"https://github.com/{names.ORG}/{names.HARNESS}" == \
-        "https://github.com/moxihq/moxi"
+    assert release.REPO_URL == f"https://github.com/{names.OWNER}/{names.HARNESS}" == \
+        "https://github.com/CodeManEthan/moxi"
 
 
 def _code_strings(path: Path) -> list[str]:
@@ -56,12 +56,13 @@ def _code_strings(path: Path) -> list[str]:
             and id(node) not in docstrings]
 
 
-def test_no_module_spells_the_org_or_the_repository():
-    """The org and the repository URL come from `moxi.names` through `release`, which
+def test_no_module_spells_the_owner_or_the_repository():
+    """The owner and the repository URL come from `moxi.names` through `release`, which
     alone builds the URL."""
     spelled = sorted(str(path.relative_to(SOURCE)) for path in SOURCE.rglob("*.py")
-                     if path != SOURCE / "release.py" and any(names.ORG in text or "github.com" in text
-                            for text in _code_strings(path)))
+                     if path != SOURCE / "release.py"
+                     and any(names.OWNER in text or "github.com" in text
+                             for text in _code_strings(path)))
     assert spelled == []
 
 
@@ -69,10 +70,11 @@ def test_pyproject_spells_it_the_same():
     project = PYPROJECT["project"]
     assert project["name"] == release.DISTRIBUTION
     assert project["entry-points"]["moxi.modules"] == {"comms": "moxi_comms.module"}
-    # The code lives in the one Moxi repository; issues stay at the module's own tracker.
+    # The code and the issues live in the one Moxi repository.
     urls = project["urls"]
     assert urls["Homepage"] == urls["Repository"] == release.REPO_URL
-    assert urls["Issues"] == f"https://github.com/{names.repo('comms')}/issues"
+    assert urls["Issues"] == f"https://github.com/{names.repo('comms')}/issues" == \
+        f"{release.REPO_URL}/issues"
 
 
 def test_the_public_identity_is_one_everywhere():

@@ -42,8 +42,8 @@ a read-only install and many can start at once.
 Install the core from git, then name turns' repo with `--from`:
 
 ```sh
-uv tool install git+https://github.com/moxihq/moxi#subdirectory=packages/moxi
-moxi install turns --from 'moxi-turns @ git+https://github.com/moxihq/moxi#subdirectory=packages/turns'
+uv tool install git+https://github.com/CodeManEthan/moxi#subdirectory=packages/moxi
+moxi install turns --from 'moxi-turns @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/turns'
 ```
 
 ## Requirements
