@@ -1110,10 +1110,12 @@ def _guard_problems(event: str, text: str, python: str, runner: str,
     return out
 
 
-#: Each name this module hands out for another module -> the module it comes from. Two
-#: are not package exports: `SpecError`, which `save_spec` raises, and `PATHSPEC_VARS`, the
-#: environment variables that change how git reads a pathspec.
+#: Each name this module hands out for another module -> the module it comes from. Four
+#: are not package exports: `SpecError`, which `save_spec` raises; `saved_spec`, the spec a
+#: name last saved; `last_commit_time`, when an author last committed; and `PATHSPEC_VARS`,
+#: the environment variables that change how git reads a pathspec.
 REEXPORTS = {**_PACKAGE_EXPORTS, "SpecError": "moxi_repo.committer",
+             "saved_spec": "moxi_repo.committer", "last_commit_time": "moxi_repo.committer",
              "PATHSPEC_VARS": "moxi_repo.gitrun"}
 
 
