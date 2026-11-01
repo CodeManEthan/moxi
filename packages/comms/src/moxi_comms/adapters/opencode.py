@@ -757,8 +757,10 @@ class OpenCodeAdapter(HarnessAdapter):
         a test's) and stamped with the URL into the environment turns is given, so comms'
         contribution adds its server, which turns renders naming the variable. The
         additions' `options` are merged into the launch config (`merge_additions`) and
-        their `env` added to the server's, whole; additions that clash with what the
-        wrapper sets (`additions_clash`), or a call that fails, are skipped whole, with
+        their `env` added to the server's, whole. turns checks each module's part with
+        `additions_clash` first, so a module whose part sets what the wrapper sets is
+        left out alone, with turns' note, and comms' tools still go in. Additions that
+        clash as a whole (turns' own `env`), or a call that fails, are skipped whole, with
         a note, and the session has no tools. When turns left comms' server out because
         this OpenCode does not substitute `{env:...}`, the wrapper writes the entry with
         the value into the config itself: the server's environment holds the token's
@@ -779,7 +781,10 @@ class OpenCodeAdapter(HarnessAdapter):
         try:
             import moxi_turns
 
-            additions = moxi_turns.launch_additions("opencode", cwd=self.agent.cwd, env=env)
+            # Each module's part is checked alone first: one that sets a key this
+            # launch sets is left out with a note, and every other module's still goes in.
+            additions = moxi_turns.launch_additions("opencode", cwd=self.agent.cwd, env=env,
+                                                    refuse=additions_clash)
         except Exception as e:                                  # noqa: BLE001
             skipped = f"turns could not give this launch its additions: {e}"
         else:

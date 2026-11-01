@@ -179,7 +179,9 @@ def test_turns_is_asked_once_with_the_server_env_and_the_pair(adapter, monkeypat
     a = adapter()
     a.prepare_launch(URL, token=VALUE)
     (harness, cwd, env, kwargs), = calls
-    assert harness == "opencode" and cwd == a.agent.cwd and kwargs == {}
+    assert harness == "opencode" and cwd == a.agent.cwd
+    # Each module's part is checked alone with the wrapper's own clash check.
+    assert kwargs == {"refuse": oc.additions_clash}
     assert env[TOKEN_ENV] == VALUE and env[URL_ENV] == URL
     assert env["OPENCODE_SERVER_PASSWORD"] == PASSWORD
     a.server_env(MODEL)
@@ -285,6 +287,33 @@ def test_additions_that_set_what_the_wrapper_sets_are_skipped_whole(
                for n in a.additions_notes), a.additions_notes
     assert a.additions_notes[-1].startswith("comms' tools are off for this session")
     assert "theirs" not in json.dumps(a.server_env(MODEL))
+
+
+@pytest.mark.parametrize("clash", oc.OWN_PERMISSIONS)
+def test_another_modules_clash_leaves_that_module_out_and_keeps_comms_tools(
+        adapter, monkeypatch, clash):
+    """Through turns' real renderer: a module whose part sets a permission the launch
+    config sets is left out alone, and comms' own server still goes in."""
+    from moxi_comms.mcp import additions as comms_additions
+
+    # turns' renderer, reached as the fallback test below reaches it.
+    renderer = sys.modules[moxi_turns.launch_additions.__module__]
+    group = renderer.Group((
+        renderer.Contributor("alpha", lambda request: moxi_turns.Contribution(
+            tool_permissions={"opencode": (clash, "bash alpha status*")})),
+        renderer.Contributor("comms", comms_additions.additions)))
+    monkeypatch.setattr(renderer, "load", lambda entries=None: group)
+    a = adapter()
+    assert a.prepare_launch(URL, token=VALUE) is True
+    config = content(a)
+    assert config["mcp"] == {"comms": RENDERED}
+    own = own_config(a)["permission"]
+    assert config["permission"][clash] == own[clash]
+    assert "alpha" not in json.dumps(config)
+    assert [n for n in a.additions_notes if n.startswith("additions of alpha")] == [
+        f"additions of alpha skipped: the launcher refuses it: they set "
+        f"`permission.{clash}`, which comms' launch config sets"]
+    assert a.tool_token.hash == tokens.digest(VALUE) and a.tools
 
 
 @pytest.mark.parametrize("error", [ValueError("harness 'opencode' is not one of x"),
