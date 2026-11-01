@@ -170,7 +170,10 @@ class McpSettle:
             else:
                 run = self._start()
         # Every wait and request in a settle is bounded by its deadline; this bound is
-        # only a guard against a fault in the host.
+        # only a guard against a fault in the host. It is 25 s at the default deadline,
+        # the same as comms' wait on `mcp.reload`, so in that fault case comms may give up
+        # at about the moment this answers unsettled. Either way the next ready settles
+        # again, so nothing is lost.
         if not run.done.wait(2 * self.deadline_s + 5.0):
             log.error("an MCP settle did not end within its deadlines")
             return self._unsettled()
