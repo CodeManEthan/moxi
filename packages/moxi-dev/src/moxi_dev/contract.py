@@ -34,9 +34,12 @@ finding names them:
    module may take a core verb or a name the core keeps for itself), the console
    scripts (a module never declares `moxi`, which the core alone declares; its others
    are named `moxi-<name>-<part>`), the announcement, the `CLI` target's `argv` and
-   `prog` parameters and the `SETTINGS` schema. Each name of `moxi.modules.KNOWN` the
-   announcement defines is read as a literal and held to the checks `moxi.modules.load`
-   runs; a name it leaves out passes, as it takes its default.
+   `prog` parameters, the `SETTINGS` schema and the skills in the `SKILLS` folder. Each
+   name of `moxi.modules.KNOWN` the announcement defines is read as a literal and held to
+   the checks `moxi.modules.load` runs; a name it leaves out passes, as it takes its
+   default. The `SKILLS` folder, beside the announcement in its package, must be there;
+   each skill in it (a subfolder `moxi.names.is_skill_folder` counts) is named
+   `moxi-<name>` and holds a `SKILL.md` whose frontmatter `name:` is the folder name.
 8. A write site not listed. In `src/`, every call that writes a file itself (`open`,
    `io.open`, `os.fdopen` or a path's `.open` in a write mode, `os.open` with a write
    flag, `.write_text`, `.write_bytes`, `os.replace`, `sqlite3.connect`) must have its
@@ -79,7 +82,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from moxi import names
-from moxi.modules import KNOWN, _check, _TooNew
+from moxi.modules import KNOWN, _check, _relative, _TooNew
 
 #: The distribution and import name of the core.
 CORE = names.HARNESS
@@ -248,6 +251,17 @@ class _WorkTree:
         except OSError:
             return None
 
+    def folder(self, path: str) -> list[str] | str:
+        """The names of the subfolders of folder `path`, as the file system has them;
+        else `missing` or `file`."""
+        here = self.root / path
+        if not here.is_dir():
+            return "file" if here.exists() else "missing"
+        try:
+            return sorted(entry.name for entry in here.iterdir() if entry.is_dir())
+        except OSError:
+            return "missing"
+
 
 class _IndexTree:
     """The files of git's index: what the next commit holds."""
@@ -277,6 +291,17 @@ class _IndexTree:
     def files(self) -> list[str]:
         return self.paths
 
+    def folder(self, path: str) -> list[str] | str:
+        """The names of the subfolders of folder `path`, each the first part of a path
+        under it that has a file below it; else `missing` or `file`."""
+        if path in self.blobs:
+            return "file"
+        prefix = f"{path}/"
+        under = [p[len(prefix):] for p in self.paths if p.startswith(prefix)]
+        if not under:
+            return "missing"
+        return sorted({p.split("/", 1)[0] for p in under if "/" in p})
+
     def read(self, path: str) -> bytes | None:
         if path not in self.blobs:
             return None
@@ -305,6 +330,40 @@ class _IndexTree:
 
 
 # --- requirements and names ----------------------------------------------------------------
+
+def _skill_md_name(raw: bytes) -> tuple[int, str | None, str | None]:
+    """The `name:` a skill's `SKILL.md` gives, as `(line, name, None)`, or `(line, None,
+    problem)` when it gives none the check can read.
+
+    The file opens with a `---` line (after a UTF-8 byte order mark, if any) and its
+    frontmatter runs to the next `---` line; lines may end in CRLF. The frontmatter holds
+    one `name:` line at column 0, whose value is stripped of spaces and of one pair of
+    matching quotes. The frontmatter is not read as YAML, so a name written another way
+    (with a comment after it, say, or as a block scalar) is not the folder name."""
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return 0, None, "is not UTF-8"
+    lines = text.replace("\r\n", "\n").split("\n")
+    if lines[0].rstrip(" \t") != "---":
+        return 1, None, "does not open with a --- line"
+    for end, line in enumerate(lines[1:], start=1):
+        if line.rstrip(" \t") == "---":
+            break
+    else:
+        return 1, None, "opens its frontmatter with --- and never closes it"
+    found = [(n + 1, line) for n, line in enumerate(lines[1:end], start=1)
+             if line.startswith("name:")]
+    if not found:
+        return 1, None, "has no name: line in its frontmatter"
+    if len(found) > 1:
+        return found[1][0], None, (f"has {len(found)} name: lines in its frontmatter "
+                                   f"(lines {', '.join(str(n) for n, _ in found)})")
+    line_no, line = found[0]
+    value = line[len("name:"):].strip(" \t")
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        value = value[1:-1]
+    return line_no, value, None
 
 def _normalize(name: str) -> str:
     """A distribution or extra name as packaging compares them."""
@@ -964,6 +1023,7 @@ class _Repo:
         self._check_announcement_values(source)
         self._check_cli_target(source)
         self._check_settings(source)
+        self._check_skills(source)
 
     def _check_announcement_values(self, source: _Source) -> None:
         """The checks `moxi.modules.load` runs, over the literals read from the source."""
@@ -1025,6 +1085,45 @@ class _Repo:
             self.add(path, 0, "7", f"the SETTINGS schema cannot be read ({exc})")
         except ConfigError as exc:
             self.add(path, 0, "7", f"the SETTINGS schema does not hold: {exc}")
+
+    def _check_skills(self, source: _Source) -> None:
+        """The skills in the `SKILLS` folder, read from the tree as the settle step lists
+        them once installed: the folder beside the announcement, in its package, as
+        `importlib.resources` finds it. A `SKILLS` the announcement check refuses is left
+        to that check."""
+        resource = self.ann("SKILLS")
+        if not isinstance(resource, str) or not _relative(resource):
+            return
+        parts = [p for p in re.split(r"[\\/]", resource) if p not in ("", ".")]
+        folder = str(PurePosixPath(source.path).parent.joinpath(*parts))
+        listed = self.tree.folder(folder)
+        if listed == "missing":
+            self.add(source.path, 0, "7", f"SKILLS names {resource!r}, and {folder} does "
+                                          "not exist")
+            return
+        if listed == "file":
+            self.add(source.path, 0, "7", f"SKILLS names {resource!r}, and {folder} is a "
+                                          "file, not a folder")
+            return
+        for name in listed:
+            if not names.is_skill_folder(name):
+                continue
+            where = f"{folder}/{name}"
+            try:
+                names.check_skill_name(name)
+            except ValueError as exc:
+                self.add(where, 0, "7", f"is a skill folder, and {exc}")
+            path = f"{where}/SKILL.md"
+            raw = self.tree.read(path)
+            if raw is None:
+                self.add(where, 0, "7", "is a skill folder with no SKILL.md")
+                continue
+            line, said, problem = _skill_md_name(raw)
+            if problem is not None:
+                self.add(path, line, "7", f"{problem}, so it can't name the skill {name}")
+            elif said != name:
+                self.add(path, line, "7", f"names the skill {said!r}; its name: is the "
+                                          f"folder's name, {name}")
 
     # -- the status line segment -------------------------------------------------------------
 

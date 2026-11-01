@@ -524,6 +524,7 @@ def test_every_new_name_that_keeps_the_contract_passes(repo):
         SESSION_ENV="{'MOXI_ALPHA_NAME': 'stamped'}",
         INTERNAL_ENV="{'MOXI_ALPHA_NAME': 'stamped'}",
         QUESTIONS="{'sweep.enabled': 'Sweep each morning?'}"))
+    repo.src("skills/moxi-alpha-sweep/SKILL.md", "---\nname: moxi-alpha-sweep\n---\n")
     assert repo.findings("7") == []
 
 
@@ -587,6 +588,189 @@ def test_the_core_is_held_to_its_own_names(tmp_path):
     r.write("pyproject.toml", pyproject("moxi", deps=(), entry_points={}, scripts={}))
     assert "does not declare the console script moxi" in r.findings("7")[0]
 
+
+# --- the skills ------------------------------------------------------------------------------
+
+SKILL_RULE = ("is not a Moxi skill name: a skill Moxi ships is named moxi-<name>, lower-case "
+              "ASCII letters and digits in words joined by single hyphens, 64 characters at "
+              "most")
+
+
+def skill(repo, name, text=None, *, folder="skills"):
+    body = f"---\nname: {name}\ndescription: A skill.\n---\n\n# {name}\n" if text is None \
+        else text
+    return repo.src(f"{folder}/{name}/SKILL.md", body)
+
+
+@pytest.fixture
+def skilled(repo):
+    """alpha declaring `SKILLS = 'skills'`, with one skill that keeps the rule."""
+    repo.src("module.py", announcement(SKILLS="'skills'"))
+    skill(repo, "moxi-handoff")
+    return repo
+
+
+def test_a_skill_named_moxi_name_with_its_name_line_passes(skilled):
+    assert skilled.findings() == []
+    skill(skilled, "moxi-handoff", "---\nname: 'moxi-handoff'\n---\n")
+    assert skilled.findings() == []
+    skill(skilled, "moxi-handoff", '---\nname:   "moxi-handoff"  \ndescription: x\n---\n')
+    assert skilled.findings() == []
+
+
+def test_dot_folders_pycache_and_plain_files_in_skills_are_not_skills(skilled):
+    skilled.src("skills/__pycache__/x.pyc", "")
+    skilled.src("skills/.x/notes.txt", "")
+    skilled.src("skills/README.md", "the skills\n")
+    skilled.src("skills/moxi-handoff/scripts/run.sh", "")
+    assert skilled.findings() == []
+
+
+def test_a_skill_whose_folder_is_not_a_skill_name_fails_naming_it(skilled):
+    skill(skilled, "handoff")
+    assert skilled.findings("7") == [
+        f"src/moxi_alpha/skills/handoff:0: is a skill folder, and 'handoff' {SKILL_RULE}"]
+
+
+def test_a_skill_with_no_skill_md_or_another_name_fails_naming_it(skilled):
+    skill(skilled, "moxi-handoff", "---\nname: handoff\n---\n")
+    assert skilled.findings("7") == [
+        "src/moxi_alpha/skills/moxi-handoff/SKILL.md:2: names the skill 'handoff'; its "
+        "name: is the folder's name, moxi-handoff"]
+    (skilled.root / "src/moxi_alpha/skills/moxi-handoff/SKILL.md").unlink()
+    skilled.src("skills/moxi-handoff/notes.md", "")
+    assert skilled.findings("7") == [
+        "src/moxi_alpha/skills/moxi-handoff:0: is a skill folder with no SKILL.md"]
+
+
+def test_a_skills_folder_declared_and_missing_or_a_file_fails(repo):
+    repo.src("module.py", announcement(SKILLS="'skills'"))
+    assert repo.findings("7") == [
+        "src/moxi_alpha/module.py:0: SKILLS names 'skills', and src/moxi_alpha/skills does "
+        "not exist"]
+    repo.src("skills", "not a folder\n")
+    assert repo.findings("7") == [
+        "src/moxi_alpha/module.py:0: SKILLS names 'skills', and src/moxi_alpha/skills is a "
+        "file, not a folder"]
+
+
+def test_no_skills_declared_reads_no_skills_folder(repo):
+    skill(repo, "handoff")
+    assert repo.findings() == []
+
+
+def test_a_skills_path_in_parts_resolves_beside_the_announcement(repo):
+    repo.src("module.py", announcement(SKILLS="'./data\\\\skills/'"))
+    skill(repo, "moxi-handoff", folder="data/skills")
+    assert repo.findings() == []
+    skill(repo, "bad", folder="data/skills")
+    assert [f.split(":")[0] for f in repo.findings("7")] == ["src/moxi_alpha/data/skills/bad"]
+
+
+def test_the_skills_folder_is_in_the_package_that_holds_the_announcement(repo):
+    """As `importlib.resources` reads it: beside an announcement module, in the package it
+    is part of, and inside an announcement that is a package itself."""
+    repo.write("pyproject.toml", pyproject(deps=("moxi>=0.1", "moxi-beta>=0.1"),
+                                           entry_points={"alpha": "moxi_alpha.ann.module"}))
+    repo.src("ann/__init__.py")
+    repo.src("ann/module.py", announcement(SKILLS="'skills'"))
+    skill(repo, "moxi-handoff")                  # src/moxi_alpha/skills: not the one read
+    assert repo.findings("7") == [
+        "src/moxi_alpha/ann/module.py:0: SKILLS names 'skills', and "
+        "src/moxi_alpha/ann/skills does not exist"]
+    skill(repo, "moxi-handoff", folder="ann/skills")
+    assert repo.findings() == []
+    repo.write("pyproject.toml", pyproject(deps=("moxi>=0.1", "moxi-beta>=0.1"),
+                                           entry_points={"alpha": "moxi_alpha.ann"}))
+    repo.src("ann/__init__.py", announcement(SKILLS="'skills'"))
+    assert repo.findings() == []
+    skill(repo, "handoff", folder="ann/skills")
+    assert [f.split(":")[0] for f in repo.findings("7")] == [
+        "src/moxi_alpha/ann/skills/handoff"]
+
+
+@pytest.mark.parametrize("text", [
+    "﻿---\nname: moxi-handoff\n---\n",
+    "---\r\nname: moxi-handoff\r\ndescription: x\r\n---\r\n# body\r\n",
+    "﻿---\r\nname: moxi-handoff\r\n---\r\n",
+    "---  \nmetadata:\n  name: other\nname: moxi-handoff\n---\nname: after\n",
+    "---\nname:moxi-handoff\n---",
+])
+def test_the_name_line_is_read_from_the_frontmatter_alone(skilled, text):
+    skill(skilled, "moxi-handoff", text)
+    assert skilled.findings() == []
+
+
+@pytest.mark.parametrize("text, line, problem", [
+    ("# no frontmatter\nname: moxi-handoff\n", 1, "does not open with a --- line"),
+    ("\n---\nname: moxi-handoff\n---\n", 1, "does not open with a --- line"),
+    ("---\nname: moxi-handoff\n", 1, "opens its frontmatter with --- and never closes it"),
+    ("---\ndescription: x\n---\nname: moxi-handoff\n", 1,
+     "has no name: line in its frontmatter"),
+    ("---\n  name: moxi-handoff\n---\n", 1, "has no name: line in its frontmatter"),
+    ("---\nname: moxi-handoff\nname: moxi-handoff\n---\n", 3,
+     "has 2 name: lines in its frontmatter (lines 2, 3)"),
+])
+def test_a_skill_md_the_name_cannot_be_read_from_fails(skilled, text, line, problem):
+    skill(skilled, "moxi-handoff", text)
+    assert skilled.findings("7") == [
+        f"src/moxi_alpha/skills/moxi-handoff/SKILL.md:{line}: {problem}, so it can't name "
+        "the skill moxi-handoff"]
+
+
+@pytest.mark.parametrize("value", ["'moxi-handoff\"", "moxi-handoff # the skill",
+                                   "\"'moxi-handoff'\"", "''", "Moxi-Handoff"])
+def test_a_name_written_otherwise_is_not_the_folder_name(skilled, value):
+    skill(skilled, "moxi-handoff", f"---\nname: {value}\n---\n")
+    found = skilled.findings("7")
+    assert len(found) == 1 and "its name: is the folder's name, moxi-handoff" in found[0]
+
+
+def test_a_skill_md_not_utf8_fails(skilled):
+    path = skilled.root / "src/moxi_alpha/skills/moxi-handoff/SKILL.md"
+    path.write_bytes(b"---\nname: moxi-\xff\n---\n")
+    assert skilled.findings("7") == [
+        "src/moxi_alpha/skills/moxi-handoff/SKILL.md:0: is not UTF-8, so it can't name the "
+        "skill moxi-handoff"]
+
+
+def test_staged_reads_the_skills_from_the_index(skilled):
+    skilled.git("init", "-q")
+    skilled.git("add", ".")
+    assert skilled.findings(staged=True) == []
+    # Folders the index has no file under are not skills there; on disk they are.
+    (skilled.root / "src/moxi_alpha/skills/handoff").mkdir()
+    (skilled.root / "src/moxi_alpha/skills/moxi-empty").mkdir()
+    assert skilled.findings(staged=True) == []
+    assert [f.split(":")[0] for f in skilled.findings("7")] == [
+        "src/moxi_alpha/skills/handoff", "src/moxi_alpha/skills/handoff",
+        "src/moxi_alpha/skills/moxi-empty"]
+    # A staged SKILL.md naming another skill fails staged, though the disk is fixed.
+    skill(skilled, "moxi-handoff", "---\nname: handoff\n---\n")
+    skilled.git("add", ".")
+    skill(skilled, "moxi-handoff")
+    (skilled.root / "src/moxi_alpha/skills/handoff").rmdir()
+    (skilled.root / "src/moxi_alpha/skills/moxi-empty").rmdir()
+    assert skilled.findings() == []
+    found = skilled.findings("7", staged=True)
+    assert len(found) == 1 and "names the skill 'handoff'" in found[0]
+    # A plain file staged in SKILLS is no skill; a misnamed skill staged is.
+    skill(skilled, "moxi-handoff")
+    skilled.src("skills/README.md", "the skills\n")
+    skill(skilled, "handoff")
+    skilled.git("add", ".")
+    assert skilled.findings("7", staged=True) == [
+        f"src/moxi_alpha/skills/handoff:0: is a skill folder, and 'handoff' {SKILL_RULE}"]
+
+
+def test_staged_a_skills_folder_missing_or_a_file_in_the_index_fails(repo):
+    repo.src("module.py", announcement(SKILLS="'skills'"))
+    repo.git("init", "-q")
+    repo.git("add", ".")
+    assert "src/moxi_alpha/skills does not exist" in repo.findings("7", staged=True)[0]
+    repo.src("skills", "not a folder\n")
+    repo.git("add", ".")
+    assert "is a file, not a folder" in repo.findings("7", staged=True)[0]
 
 # --- the status line segment -----------------------------------------------------------------
 
