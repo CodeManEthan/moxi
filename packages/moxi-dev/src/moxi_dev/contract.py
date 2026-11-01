@@ -37,7 +37,8 @@ finding names them:
    `prog` parameters, the `SETTINGS` schema and the skills in the `SKILLS` folder. Each
    name of `moxi.modules.KNOWN` the announcement defines is read as a literal and held to
    the checks `moxi.modules.load` runs; a name it leaves out passes, as it takes its
-   default. The `SKILLS` folder, beside the announcement in its package, must be there;
+   default. The `SKILLS` folder, beside the announcement in its package and written
+   with `/` (a backslash fails, as POSIX reads it as part of a name), must be there;
    each skill in it (a subfolder `moxi.names.is_skill_folder` counts) is named
    `moxi-<name>` and holds a `SKILL.md` whose frontmatter `name:` is the folder name.
 8. A write site not listed. In `src/`, every call that writes a file itself (`open`,
@@ -1094,7 +1095,14 @@ class _Repo:
         resource = self.ann("SKILLS")
         if not isinstance(resource, str) or not _relative(resource):
             return
-        parts = [p for p in re.split(r"[\\/]", resource) if p not in ("", ".")]
+        if "\\" in resource:
+            # The settle step hands the value to importlib.resources as it is, and on POSIX
+            # a backslash is part of a name there, not a separator.
+            self.add(source.path, 0, "7", f"SKILLS names {resource!r}, which has a "
+                                          "backslash; write the path with /, which "
+                                          "resolves the same on every platform")
+            return
+        parts = [p for p in resource.split("/") if p not in ("", ".")]
         folder = str(PurePosixPath(source.path).parent.joinpath(*parts))
         listed = self.tree.folder(folder)
         if listed == "missing":

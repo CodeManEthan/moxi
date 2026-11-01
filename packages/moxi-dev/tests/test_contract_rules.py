@@ -660,11 +660,21 @@ def test_no_skills_declared_reads_no_skills_folder(repo):
 
 
 def test_a_skills_path_in_parts_resolves_beside_the_announcement(repo):
-    repo.src("module.py", announcement(SKILLS="'./data\\\\skills/'"))
+    repo.src("module.py", announcement(SKILLS="'./data/skills/'"))
     skill(repo, "moxi-handoff", folder="data/skills")
     assert repo.findings() == []
     skill(repo, "bad", folder="data/skills")
     assert [f.split(":")[0] for f in repo.findings("7")] == ["src/moxi_alpha/data/skills/bad"]
+
+
+def test_a_skills_path_with_a_backslash_fails(repo):
+    # importlib.resources reads data\skills as one name on POSIX, so the install would
+    # look for a folder that isn't there.
+    repo.src("module.py", announcement(SKILLS="'./data\\\\skills/'"))
+    skill(repo, "moxi-handoff", folder="data/skills")
+    assert repo.findings("7") == [
+        "src/moxi_alpha/module.py:0: SKILLS names './data\\\\skills/', which has a "
+        "backslash; write the path with /, which resolves the same on every platform"]
 
 
 def test_the_skills_folder_is_in_the_package_that_holds_the_announcement(repo):
