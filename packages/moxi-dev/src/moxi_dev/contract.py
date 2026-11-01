@@ -41,6 +41,11 @@ finding names them:
    with `/` (a backslash fails, as POSIX reads it as part of a name), must be there;
    each skill in it (a subfolder `moxi.names.is_skill_folder` counts) is named
    `moxi-<name>` and holds a `SKILL.md` whose frontmatter `name:` is the folder name.
+   A symlink along the way (the folder, a skill, its `SKILL.md`) is followed. In a staged
+   run the link's target is read against the link's folder and looked up in the index,
+   so the check counts and reads what a checkout of the commit would; a link whose
+   target isn't committed, that points outside the package or that loops is a finding
+   naming the link.
 8. A write site not listed. In `src/`, every call that writes a file itself (`open`,
    `io.open`, `os.fdopen` or a path's `.open` in a write mode, `os.open` with a write
    flag, `.write_text`, `.write_bytes`, `os.replace`, `sqlite3.connect`) must have its
@@ -76,6 +81,7 @@ another module's internals, and with no announcement to name its `INTERNAL_ENV`,
 from __future__ import annotations
 
 import ast
+import posixpath
 import re
 import sys
 from collections.abc import Iterable, Mapping, Sequence
@@ -263,9 +269,19 @@ class _WorkTree:
         except OSError:
             return "missing"
 
+    def link_problem(self, path: str) -> tuple[str, str] | None:
+        """The file system follows every symlink itself, so none is reported here."""
+        return None
+
 
 class _IndexTree:
-    """The files of git's index: what the next commit holds."""
+    """The files of git's index: what the next commit holds.
+
+    A symlink is followed as the file system would follow it in a checkout of that
+    commit: its blob is the target, read against the link's folder and looked up in the
+    index, so a symlinked folder or file reads the same here as in the working tree."""
+
+    _HOPS = 40          # the most symlinks one path may pass through, as on Linux
 
     def __init__(self, root: Path):
         if not root.is_dir():
@@ -276,6 +292,7 @@ class _IndexTree:
         self.root = root
         out = _git(root, "ls-files", "-z", "--stage", staged=True)
         self.blobs: dict[str, str] = {}
+        self.links: dict[str, str] = {}
         self.unmerged: list[str] = []
         for entry in out.decode("utf-8", "surrogateescape").split("\0"):
             if not entry:
@@ -286,32 +303,93 @@ class _IndexTree:
                 self.unmerged.append(path)
             elif mode in ("100644", "100755"):
                 self.blobs[path] = sha
+            elif mode == "120000":
+                self.links[path] = sha
         self.paths = sorted(self.blobs)
+        self.dirs = {str(parent) for p in (*self.blobs, *self.links)
+                     for parent in PurePosixPath(p).parents if str(parent) != "."}
         self._cache: dict[str, bytes] = {}
+        self._targets: dict[str, str] = {}
 
     def files(self) -> list[str]:
         return self.paths
 
+    def _target(self, link: str) -> str:
+        if link not in self._targets:
+            raw = _git(self.root, "cat-file", "blob", self.links[link], staged=True)
+            self._targets[link] = raw.decode("utf-8", "surrogateescape")
+        return self._targets[link]
+
+    def _resolve(self, path: str) -> tuple[str | None, tuple[str, str] | None]:
+        """`path` with every symlink along it followed, as `(path, None)`; or `(None,
+        (link, why))` naming the link that can't be followed. A path that isn't in the
+        index comes back as it is, for the caller to find missing."""
+        parts = path.split("/")
+        hops = 0
+        at = 0
+        while at < len(parts):
+            here = "/".join(parts[:at + 1])
+            if here not in self.links:
+                at += 1
+                continue
+            target = self._target(here)
+            hops += 1
+            if hops > self._HOPS:
+                return None, (here, "is a symlink in a loop")
+            joined = posixpath.normpath(posixpath.join(posixpath.dirname(here), target))
+            if target.startswith("/") or joined == ".." or joined.startswith("../"):
+                return None, (here, f"is a symlink to {target}, outside the package, so "
+                                    "the commit doesn't carry what it points at")
+            if joined != "." and joined not in self.blobs and joined not in self.links \
+                    and joined not in self.dirs:
+                return None, (here, f"is a symlink whose target, {target}, isn't "
+                                    "committed")
+            parts = ([] if joined == "." else joined.split("/")) + parts[at + 1:]
+            at = 0
+        return "/".join(parts), None
+
+    def link_problem(self, path: str) -> tuple[str, str] | None:
+        """The symlink on the way to `path` that can't be followed in the index, as
+        `(link, why)`; else None."""
+        return self._resolve(path)[1]
+
+    def _entries(self, path: str) -> Iterable[str]:
+        prefix = f"{path}/" if path else ""
+        for p in (*self.blobs, *self.links):
+            if p.startswith(prefix):
+                yield p[len(prefix):]
+
     def folder(self, path: str) -> list[str] | str:
         """The names of the subfolders of folder `path`, each the first part of a path
-        under it that has a file below it; else `missing` or `file`."""
-        if path in self.blobs:
+        under it that has a file below it, or a symlink in it to such a folder (or one
+        that can't be followed, for the caller to report); else `missing` or `file`."""
+        found, _ = self._resolve(path)
+        if found is None:
+            return "missing"
+        if found in self.blobs:
             return "file"
-        prefix = f"{path}/"
-        under = [p[len(prefix):] for p in self.paths if p.startswith(prefix)]
+        under = list(self._entries(found))
         if not under:
             return "missing"
-        return sorted({p.split("/", 1)[0] for p in under if "/" in p})
+        names = {p.split("/", 1)[0] for p in under if "/" in p}
+        for name in under:
+            link = f"{found}/{name}" if found else name
+            if "/" not in name and link in self.links:
+                there, problem = self._resolve(link)
+                if problem is not None or there in self.dirs:
+                    names.add(name)
+        return sorted(names)
 
     def read(self, path: str) -> bytes | None:
-        if path not in self.blobs:
+        found, _ = self._resolve(path)
+        if found is None or found not in self.blobs:
             return None
         if not self._cache:
             self._load()
-        if path not in self._cache:
-            self._cache[path] = _git(self.root, "cat-file", "blob", self.blobs[path],
-                                     staged=True)
-        return self._cache[path]
+        if found not in self._cache:
+            self._cache[found] = _git(self.root, "cat-file", "blob", self.blobs[found],
+                                      staged=True)
+        return self._cache[found]
 
     def _load(self) -> None:
         # One `git cat-file --batch` for every blob the check may read.
@@ -1104,6 +1182,8 @@ class _Repo:
             return
         parts = [p for p in resource.split("/") if p not in ("", ".")]
         folder = str(PurePosixPath(source.path).parent.joinpath(*parts))
+        if self._link_problem(folder):
+            return
         listed = self.tree.folder(folder)
         if listed == "missing":
             self.add(source.path, 0, "7", f"SKILLS names {resource!r}, and {folder} does "
@@ -1117,11 +1197,15 @@ class _Repo:
             if not names.is_skill_folder(name):
                 continue
             where = f"{folder}/{name}"
+            if self._link_problem(where):
+                continue
             try:
                 names.check_skill_name(name)
             except ValueError as exc:
                 self.add(where, 0, "7", f"is a skill folder, and {exc}")
             path = f"{where}/SKILL.md"
+            if self._link_problem(path):
+                continue
             raw = self.tree.read(path)
             if raw is None:
                 self.add(where, 0, "7", "is a skill folder with no SKILL.md")
@@ -1132,6 +1216,15 @@ class _Repo:
             elif said != name:
                 self.add(path, line, "7", f"names the skill {said!r}; its name: is the "
                                           f"folder's name, {name}")
+
+    def _link_problem(self, path: str) -> bool:
+        """Report the symlink on the way to `path` that the tree can't follow, if any."""
+        problem = self.tree.link_problem(path)
+        if problem is None:
+            return False
+        link, why = problem
+        self.add(link, 0, "7", why)
+        return True
 
     # -- the status line segment -------------------------------------------------------------
 

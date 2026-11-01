@@ -782,6 +782,85 @@ def test_staged_a_skills_folder_missing_or_a_file_in_the_index_fails(repo):
     repo.git("add", ".")
     assert "is a file, not a folder" in repo.findings("7", staged=True)[0]
 
+def link(repo, rel, target):
+    """A symlink at src/<pkg>/<rel> whose target is `target`, as written."""
+    path = repo.root / f"src/{repo.pkg}/{rel}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.symlink_to(target)
+    return path
+
+
+def staged_and_disk(repo):
+    repo.git("init", "-q")
+    repo.git("add", ".")
+    return repo.findings("7", staged=True), repo.findings("7")
+
+
+def test_a_symlinked_skill_folder_is_counted_staged_as_on_disk(skilled):
+    # A misnamed link to a skill whose name: is its own folder's.
+    skill(skilled, "moxi-link", folder="extra")
+    link(skilled, "skills/badlink", "../extra/moxi-link")
+    staged, disk = staged_and_disk(skilled)
+    assert staged == disk == [
+        f"src/moxi_alpha/skills/badlink:0: is a skill folder, and 'badlink' {SKILL_RULE}",
+        "src/moxi_alpha/skills/badlink/SKILL.md:2: names the skill 'moxi-link'; its name: "
+        "is the folder's name, badlink"]
+
+
+def test_a_well_named_symlinked_skill_passes_staged_and_on_disk(skilled):
+    skill(skilled, "moxi-linked", folder="extra")
+    link(skilled, "skills/moxi-linked", "../extra/moxi-linked")
+    assert staged_and_disk(skilled) == ([], [])
+
+
+def test_a_symlinked_skill_md_is_read_staged_and_on_disk(skilled):
+    skilled.src("docs/handoff.md", "---\nname: handoff\n---\n")
+    (skilled.root / "src/moxi_alpha/skills/moxi-handoff/SKILL.md").unlink()
+    link(skilled, "skills/moxi-handoff/SKILL.md", "../../docs/handoff.md")
+    staged, disk = staged_and_disk(skilled)
+    assert staged == disk == [
+        "src/moxi_alpha/skills/moxi-handoff/SKILL.md:2: names the skill 'handoff'; its "
+        "name: is the folder's name, moxi-handoff"]
+    skilled.src("docs/handoff.md", "---\nname: moxi-handoff\n---\n")
+    skilled.git("add", ".")
+    assert skilled.findings(staged=True) == skilled.findings() == []
+
+
+def test_a_symlinked_skills_folder_is_read_staged_and_on_disk(repo):
+    repo.src("module.py", announcement(SKILLS="'skills'"))
+    skill(repo, "moxi-handoff", folder="data/skills")
+    skill(repo, "handoff", folder="data/skills")
+    link(repo, "skills", "data/skills")
+    staged, disk = staged_and_disk(repo)
+    assert staged == disk == [
+        f"src/moxi_alpha/skills/handoff:0: is a skill folder, and 'handoff' {SKILL_RULE}"]
+
+
+def test_a_symlink_the_index_cannot_follow_fails_staged(skilled):
+    skilled.git("init", "-q")
+    # The target is on disk but not staged, so the commit wouldn't carry it.
+    skill(skilled, "moxi-gone", folder="extra")
+    link(skilled, "skills/moxi-gone", "../extra/moxi-gone")
+    skilled.git("add", "src/moxi_alpha/skills", "src/moxi_alpha/module.py", "pyproject.toml")
+    assert skilled.findings() == []
+    assert skilled.findings("7", staged=True) == [
+        "src/moxi_alpha/skills/moxi-gone:0: is a symlink whose target, ../extra/moxi-gone, "
+        "isn't committed"]
+    (skilled.root / "src/moxi_alpha/skills/moxi-gone").unlink()
+    link(skilled, "skills/moxi-out", "../../../../elsewhere")
+    link(skilled, "skills/moxi-loop", "moxi-loop")
+    skilled.git("add", "-A", "src/moxi_alpha/skills")
+    assert skilled.findings("7", staged=True) == [
+        "src/moxi_alpha/skills/moxi-loop:0: is a symlink in a loop",
+        "src/moxi_alpha/skills/moxi-out:0: is a symlink to ../../../../elsewhere, outside "
+        "the package, so the commit doesn't carry what it points at"]
+    # A dangling SKILLS folder is named the same way.
+    (skilled.root / "src/moxi_alpha/skills").rename(skilled.root / "src/moxi_alpha/held")
+    link(skilled, "skills", "gone")
+    skilled.git("add", "-A", "src/moxi_alpha")
+    assert skilled.findings("7", staged=True) == [
+        "src/moxi_alpha/skills:0: is a symlink whose target, gone, isn't committed"]
+
 # --- the status line segment -----------------------------------------------------------------
 
 def test_a_segment_shows_and_triggers_nothing(repo):
