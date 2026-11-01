@@ -20,7 +20,8 @@ EVERY_NEW_NAME = {
                    "doc": "the relay", "stop": "process", "upgrade": "keep",
                    "memory_high": "512M", "memory_swap_max": "0",
                    "platforms": ["linux", "darwin"], "switch": "relay.enabled",
-                   "socket": {"setting": "port", "addresses": ["127.0.0.1", "::1"]}}}""",
+                   "socket": {"setting": "port", "addresses": ["127.0.0.1", "::1"],
+                              "start": "login"}}}""",
     "TIMERS": """{"sweep": {"command": "moxi-alpha-sweep", "doc": "the sweep",
                   "every": "5m", "switch": "sweep.enabled"},
                   "report": {"command": "moxi-alpha-report", "at": ["09:00", "17:30"],
@@ -104,6 +105,7 @@ def test_a_module_with_every_new_name_loads(site):
     assert found.announces == 1
     relay = found.daemons["relay"]
     assert relay["socket"]["addresses"] == ("127.0.0.1", "::1")
+    assert relay["socket"]["start"] == "login"
     assert relay["args"] == ("--quiet",)
     assert set(found.timers) == {"sweep", "report"}
     assert found.timers["report"]["days"] == ("mon", "fri")
@@ -200,6 +202,14 @@ TIMER = "'command': 'moxi-alpha-sweep', 'every': '5m', 'switch': 'sweep.on'"
                  "['localhost']}}}" % DAEMON}, "socket"),
     ({"DAEMONS": "{'relay': {%s, 'socket': {'setting': 'port', 'addresses': "
                  "['127.0.0.1'], 'backlog': 5}}}" % DAEMON}, "socket"),
+    # a socket's start is what starts the daemon: its sockets, or a login
+    ({"DAEMONS": "{'relay': {%s, 'socket': {'setting': 'port', 'addresses': "
+                 "['127.0.0.1'], 'start': 'boot'}}}" % DAEMON},
+     "optionally start ('connection', the default, or 'login')"),
+    ({"DAEMONS": "{'relay': {%s, 'socket': {'setting': 'port', 'addresses': "
+                 "['127.0.0.1'], 'start': None}}}" % DAEMON}, "socket"),
+    ({"DAEMONS": "{'relay': {%s, 'socket': {'setting': 'port', 'addresses': "
+                 "['127.0.0.1'], 'start': ['login']}}}" % DAEMON}, "socket"),
     ({"DAEMONS": "{'relay': {%s, 'socket': {'setting': 'port', 'addresses': "
                  "['::1', '127.0.0.1', '::1']}}}" % DAEMON}, "with ::1 given twice"),
     ({"DAEMONS": "{'relay': {%s, 'socket': {'setting': 'port', 'addresses': "

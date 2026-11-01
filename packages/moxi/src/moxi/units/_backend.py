@@ -34,10 +34,14 @@ backend holds them is its `sockets` attribute:
 
 - `"units"` (systemd): one socket unit per address, `<stem>.socket` for the first and
   `<stem>-<k>.socket` for the k-th after it, rendered as one `Rendered` of kind `socket`
-  and planned as one `socket` change over the set; the service names them all and has no
-  install section, so the sockets start it, never a login.
+  and planned as one `socket` change over the set. The service names them all. Under
+  `start = "connection"` it has no install section, so the sockets start it, never a
+  login; under `start = "login"` it keeps its install section and a login starts it too.
+  Wherever the writer asks whether such a service is static, the answer is whether its
+  text has an install section, never whether the daemon declares `socket`.
 - `"job"` (launchd): the sockets are keys of the daemon's own file, so there is no
-  `socket` change; `status` reads the socket from the daemon's job.
+  `socket` change; `status` reads the socket from the daemon's job. Under `start =
+  "login"` the file keeps what starts a daemon at load and after a crash.
 - `"none"` (Task Scheduler): the socket is skipped, the daemon binds its own, and
   `status` gives the socket `off`.
 
@@ -55,7 +59,7 @@ import shutil
 import sys
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -148,18 +152,24 @@ class Schedule:
 @dataclass(frozen=True)
 class Socket:
     """A daemon's listening sockets: the addresses as declared, the port read from its
-    setting when the unit is written, and the IPv6 addresses `plan` left out because the
-    system has no IPv6 loopback.
+    setting when the unit is written, the IPv6 addresses `plan` left out because the
+    system has no IPv6 loopback, and what starts the daemon.
 
     A backend writes `listens`, never `addresses` whole: each kept address with its place
     in `addresses`, which names its socket (`socket_name`). An address left out keeps its
     place, so the others keep their names.
+
+    `start` is `"connection"` (the default: the sockets start the daemon at the first
+    connection, and nothing starts it at login) or `"login"` (a login starts it as it
+    starts any daemon, and the supervisor still holds the sockets, so a connection made
+    while it restarts waits in the queue). The socket units' text is the same under both.
     """
 
     setting: str
     addresses: tuple[str, ...]
     port: int
     left_out: tuple[str, ...] = ()
+    start: str = "connection"
 
     @property
     def listens(self) -> tuple[tuple[int, str], ...]:
@@ -227,6 +237,25 @@ def socket_state(unit: UnitRef, backend: str,
     return UnitState(unit.module, unit.name, "socket", backend, state,
                      since=max(times) if times else None, detail=detail, log=log,
                      enabled=enabled, epoch=epoch)
+
+
+def enabled_by_socket(units: Sequence[UnitRef], states: Sequence[UnitState],
+                      static: Callable[[UnitRef], bool]) -> list[UnitState]:
+    """`states` (one per unit of `units`) with each marked daemon whose service is
+    `static` (its text has no install section, so it reads `static` and has nothing to
+    enable) given the `enabled` of its own `socket` state in the same read. A daemon
+    whose service has an install section keeps its own, as does one with no socket state
+    there, and one `missing` or `unknown`."""
+    sockets = {(u.module, u.name): s for u, s in zip(units, states)
+               if u.kind == "socket" and u.marked}
+    out = []
+    for unit, state in zip(units, states):
+        socket = sockets.get((unit.module, unit.name))
+        if (socket is not None and unit.kind == "daemon" and unit.marked
+                and state.state not in ("missing", "unknown") and static(unit)):
+            state = replace(state, enabled=socket.enabled)
+        out.append(state)
+    return out
 
 
 @dataclass(frozen=True)
@@ -421,9 +450,11 @@ class Backend(Protocol):
         it: a daemon's own, then its `socket` where the backend writes one apart (systemd:
         one socket unit per entry of `spec.socket.listens`, named by its place, in unit
         order, all in one group); a timer's (systemd's `.service` and `.timer` in one
-        group). A daemon's sockets are what start it: on systemd its service names every
-        socket unit and has no install section, on launchd its file has no `RunAtLoad` and
-        no `KeepAlive`. Paths are absolute and
+        group). Under `start = "connection"` a daemon's sockets are what start it: on
+        systemd its service names every socket unit and has no install section, on launchd
+        its file has no `RunAtLoad` and no `KeepAlive`. Under `start = "login"` the service
+        keeps its install section and the file its `RunAtLoad` and `KeepAlive`, beside the
+        sockets. Paths are absolute and
         fixed by the unit's module and name; the text uses absolute paths resolved now,
         copies no variable of this shell, and carries `# moxi: enabled = false` (or the
         backend's form of it) only when `spec.enabled` is False. Raises `RenderError` for a
@@ -466,15 +497,18 @@ class Backend(Protocol):
         unit order: a new socket unit `enable --now`, a changed one `enable` then
         `restart`, an unchanged one in a changed set left as it is, and each of `dropped`
         disabled with `--now` beside the removes and deleted with `io.drop` beside the
-        removed files. A daemon with a socket has a service with no install section, which
-        is never enabled or disabled: where another daemon's service gets `enable --now`
-        it gets `start`, `restart` alone where another gets `enable` then `restart`, and
-        nothing where another gets `enable` alone. The supervisor refuses to start a
-        socket while its service runs, so a set added to a running daemon, or changed in
-        any way (a unit added, changed or dropped), is applied between one `stop` and one
-        `start` of the service, whatever `upgrade` says; a new daemon with a new set gets
-        no stop. A service that had an install section before it gained a socket is
-        disabled, so its old login link goes."""
+        removed files. A service with no install section (a daemon with a socket under
+        `start = "connection"`) is never enabled or disabled: where another daemon's
+        service gets `enable --now` it gets `start`, `restart` alone where another gets
+        `enable` then `restart`, and nothing where another gets `enable` alone. One that
+        keeps its install section (`start = "login"`) gets the steps any daemon's service
+        gets, in the same places. The supervisor refuses to start a socket while its
+        service runs, so a set added to a running daemon, or changed in any way (a unit
+        added, changed or dropped), is applied between one `stop` and one start of the
+        service, whatever `upgrade` says; a new daemon with a new set gets no stop. The
+        login link follows the new text: a service whose old text had an install section
+        and whose new one has none is disabled (without `--now`), so its old login link
+        goes, and a changed daemon whose new text has one is always enabled."""
         ...
 
     # -- acting and reading ----------------------------------------------------------------
@@ -518,8 +552,9 @@ class Backend(Protocol):
         after `disable` both are off. Starting a running unit and stopping a stopped one
         are not failures. On systemd a daemon's socket units go with it, in unit order and
         before its service, for every act but `restart`, which restarts the service alone;
-        its service has no install section, so `enable` and `disable` give it `start` and
-        `stop`. On launchd a daemon with a socket counts as started once its job is
+        a service with no install section gets `start` and `stop` for `enable` and
+        `disable`, and one with an install section `enable --now` and `disable --now`. On
+        launchd a daemon with a socket counts as started once its job is
         loaded, with or without a process."""
         ...
 
@@ -558,7 +593,9 @@ class Backend(Protocol):
         daemon's own ids and paths under kind `socket`: `active` while the job is loaded,
         `inactive` with its file there and not loaded, `missing` without, `enabled` the
         job's, `epoch` None, and never `failed`. `epoch` is None on every other state.
-        The core sets a `"units"` daemon's own `enabled` from its socket's afterwards."""
+        On a `"units"` backend a daemon whose service text has no install section reads
+        `static`, so its own `enabled` is its socket's, from the same read; one whose text
+        has an install section reads its own."""
         ...
 
     def log(self, unit: UnitRef) -> str | None:
