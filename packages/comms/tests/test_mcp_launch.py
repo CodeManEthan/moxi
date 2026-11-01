@@ -22,7 +22,7 @@ import pytest
 from conftest import wait_until, write_config
 
 import moxi_turns
-from moxi_comms import listener
+from moxi_comms import context, listener
 from moxi_comms import module as announcement
 from moxi_comms.adapters import codex_wrapper, session, shim_roster
 from moxi_comms.mcp import additions as contributor
@@ -360,27 +360,75 @@ def session_env(**extra) -> dict:
     return dict(s.env(), **extra)
 
 
-def test_the_start_text_names_the_tools_when_the_launch_carries_them(capsys):
-    plain = session_env()
-    today = listener.answer(event("start", plain))
-    assert listener.TOOLS_LINE not in today and today.startswith(shim_roster.BLOCK)
-    with_pair = listener.answer(event("start", session_env(**pair())))
-    assert with_pair == f"{today}\n\n{listener.TOOLS_LINE}"
-    assert listener.TOOLS_LINE == ("Send with the comms tools (`send`, `reply`); "
-                                   "`moxi comms` does the same from a shell.")
+#: What no tools form may teach: the CLI's send and reply verbs.
+CLI_VERBS = ("moxi comms send", "moxi comms reply")
+
+
+def test_with_the_pair_the_start_text_teaches_the_tools_and_names_the_cli_last(capsys):
+    today = listener.answer(event("start", session_env()))
+    text = listener.answer(event("start", session_env(**pair())))
+    assert text.startswith(context.TOOLS_BLOCK)
+    block, _, rest = text.partition("\n\n")
+    assert not any(verb in block for verb in CLI_VERBS)
+    assert "`moxi comms help <term>`" in block
+    # The roster under the block is today's, and the CLI fallback with the path line
+    # comes after it, last.
+    roster = today.split("\n\n", 2)[2]
+    comms = shim_roster.comms_command(session_env())
+    assert text == (f"{context.TOOLS_BLOCK}\n\n{roster}\n\n{context.TOOLS_FALLBACK_LINE} "
+                    f"{context.MOXI_COMMS_PATH_LINE.format(comms=comms)}")
+    assert context.TOOLS_FALLBACK_LINE == ("If the comms tools are missing, run "
+                                           "`moxi comms send` from your shell instead.")
     capsys.readouterr()
 
 
-def test_a_shell_that_cant_reach_comms_changes_the_second_clause(capsys):
+def test_without_the_pair_the_start_text_is_todays_byte_for_byte(capsys):
+    env = session_env()
+    text = listener.answer(event("start", env))
+    comms = shim_roster.comms_command(env)
+    head = (f"{context.CONTEXT_BLOCK}\n\n"
+            f"{context.MOXI_COMMS_PATH_LINE.format(comms=comms)}\n\n")
+    assert text.startswith(head) and context.TOOLS_FALLBACK_LINE not in text
+    capsys.readouterr()
+
+
+def test_a_shell_that_cant_reach_comms_gets_no_cli_and_no_path_line(capsys):
     env = session_env(**pair(), MOXI_COMMS_SHELL_REACH="off")
     text = listener.answer(event("start", env))
-    assert text.endswith("\n\nSend with the comms tools (`send`, `reply`); this "
-                         "session's shell can't reach comms.")
-    assert listener.tools_line({**pair(), "MOXI_COMMS_SHELL_REACH": "on"}) == \
-        listener.TOOLS_LINE
-    assert listener.tools_line({"MOXI_COMMS_SHELL_REACH": "off"}) is None, \
-        "no pair, no line"
+    assert text.startswith(context.TOOLS_BLOCK)
+    assert text.endswith(f"\n\n{context.NO_SHELL_LINE}")
+    assert context.NO_SHELL_LINE == ("This session's shell can't reach comms; the tools are "
+                                     "the only way to send.")
+    assert not any(verb in text for verb in CLI_VERBS)
+    assert "Run every comms verb with" not in text
     capsys.readouterr()
+
+
+@pytest.mark.parametrize("env,form", [
+    ({}, None),
+    ({"MOXI_COMMS_SHELL_REACH": "off"}, None),
+    (pair(), context.TOOLS),
+    ({**pair(), "MOXI_COMMS_SHELL_REACH": "on"}, context.TOOLS),
+    ({**pair(), "MOXI_COMMS_SHELL_REACH": "off"}, context.TOOLS_ONLY),
+    (pair(token=""), None),
+])
+def test_the_pair_and_the_reach_stamp_pick_the_form(env, form):
+    assert context.layer_one_form(env) == form
+
+
+def test_the_three_harnesses_read_one_text_in_each_form():
+    from moxi_comms.adapters import codex as codex_adapter
+    from moxi_comms.adapters import opencode as opencode_adapter
+
+    env = {"MOXI_COMMS_COMMAND": "/opt/moxi comms", "MOXI_COMMS_DIRECTORS": "lead"}
+    for form_env in ({}, pair(), {**pair(), "MOXI_COMMS_SHELL_REACH": "off"}):
+        form = context.layer_one_form(form_env)
+        claude, _ = shim_roster.render_snapshot(None, env={**env, **form_env})
+        for module in (codex_adapter, opencode_adapter):
+            assert module.layer_one_text(None, "/opt/moxi comms", directors=("lead",),
+                                         form=form) == claude
+        assert claude.startswith(context.layer_one_block(("lead",), form))
+        assert context.DIRECTOR_LINE in claude.split("\n\n")[0]
 
 
 # ------------------------------------------------------------------- the Codex wrapper
@@ -448,8 +496,9 @@ def test_a_codex_launch_stamps_the_pair_for_the_host_and_names_the_tools(
         # comms: the instructions say the tools are the way to send.
         assert "sandbox_workspace_write.network_access=false" in lines["args"]
         assert lines["reach"] == "off"
-        assert fake_host.instructions.read_text().endswith(
-            f"\n\n{listener.TOOLS_ONLY_LINE}")
+        instructions = fake_host.instructions.read_text()
+        assert instructions.startswith(context.TOOLS_BLOCK)
+        assert instructions.endswith(f"\n\n{context.NO_SHELL_LINE}")
         # The adapter registered the token's hash for its binding before it said bound.
         row = serving.mcp_tokens.verify(token)
         assert row is not None and row.identity == "coder" and row.bound

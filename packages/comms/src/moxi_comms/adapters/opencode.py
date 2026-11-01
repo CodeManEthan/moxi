@@ -93,7 +93,7 @@ from pathlib import Path
 
 from ..client import DaemonError, DaemonClient, DaemonOffline, backoff_delays
 from ..config import ConfigError
-from ..context import BARE_COMMS, MOXI_COMMS_PATH_LINE, own_comms
+from ..context import BARE_COMMS, MOXI_COMMS_PATH_LINE, own_comms  # noqa: F401
 from . import opencode_roster
 from .harness import (REQUEUE, SOURCE_CLEAR, SOURCE_COMPACT, SOURCE_STARTUP, TURN_COMPLETED,
                       HarnessAdapter, TurnLedger, launch_stamp, plan_comms, plan_head)
@@ -469,17 +469,18 @@ def written_entry(url: str, token: str) -> dict:
             "headers": {"Authorization": f"Bearer {token}"}}
 
 
-def layer_one_text(roster_info, comms: str = BARE_COMMS, *, directors=()) -> str:
+def layer_one_text(roster_info, comms: str = BARE_COMMS, *, directors=(),
+                   form: str | None = None) -> str:
     """Layer one for an OpenCode session: the context block, the line naming the
     `comms` to use, then the labeled roster snapshot (or the offline line), the same
-    text a Codex thread gets."""
-    from ..context import layer_one_block
+    text a Codex thread gets; in a tools `form`, the tools block first and the CLI
+    fallback, with the path line, last (`context.layer_one`)."""
+    from ..context import layer_one
     from ..roster_view import render_agents
     from .shim_roster import LABEL, OFFLINE, usable
 
     roster = f"{LABEL}\n{render_agents(roster_info)}" if usable(roster_info) else OFFLINE
-    return (f"{layer_one_block(directors)}\n\n{MOXI_COMMS_PATH_LINE.format(comms=comms)}"
-            f"\n\n{roster}")
+    return layer_one(roster, directors=directors, comms=comms, form=form)
 
 
 def fetch_roster(socket_path=None, timeout: float = 2.0):
@@ -827,15 +828,17 @@ class OpenCodeAdapter(HarnessAdapter):
         return opencode_runtime_dir() / f"{self.agent.qualified}.md"
 
     def write_layer_one(self) -> None:
-        """Layer one, with the line naming comms' tools when this launch has them."""
-        from ..listener import with_tools
+        """Layer one, in its tools form when this launch carries comms' tools (the pair
+        is in `added_env` only when turns rendered comms' server)."""
+        from ..context import layer_one_form
 
         path = self.layer_one_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(path.parent, 0o700)
         text = layer_one_text(fetch_roster(self.socket_path), self.comms_path,
-                              directors=getattr(self.agent, "directors", ()))
-        path.write_text(with_tools(text, getattr(self, "added_env", {})))
+                              directors=getattr(self.agent, "directors", ()),
+                              form=layer_one_form(getattr(self, "added_env", {})))
+        path.write_text(text)
 
     def _new_server(self, model: str | None) -> Server:
         return Server(self.binary, env=self.server_env(model), cwd=self.agent.cwd,

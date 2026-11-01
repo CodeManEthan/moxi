@@ -81,7 +81,7 @@ from pathlib import Path
 
 from .. import codex_threads
 from ..client import DaemonClient
-from ..context import BARE_COMMS, MOXI_COMMS_PATH_LINE
+from ..context import BARE_COMMS, MOXI_COMMS_PATH_LINE, layer_one_form  # noqa: F401
 from . import codex_roster
 from .claude_shim import render_digest
 from .harness import (SOURCE_COMPACT, SOURCE_RESUME, SOURCE_STARTUP, HarnessAdapter,
@@ -118,14 +118,17 @@ RELOAD_JOIN = 2.0
 # (`BARE_COMMS`) and `own_comms` are `context`'s, one copy for every harness.
 
 
-def layer_one_text(roster_info, comms: str = BARE_COMMS, *, directors=()) -> str:
+def layer_one_text(roster_info, comms: str = BARE_COMMS, *, directors=(),
+                   form: str | None = None) -> str:
     """Layer one for a Codex thread: the context block, then the line naming the
-    `comms` to use, then the labeled roster snapshot (or the offline line).
+    `comms` to use, then the labeled roster snapshot (or the offline line). A tools
+    `form` (`context.layer_one_form` of the launch's environment) puts the tools block
+    first and the CLI fallback, with the path line, last.
 
     The block is `context.layer_one_block` for the agent's declared `directors`, and the
     roster is `roster_view`'s one rendering, as for a Claude session, so the two
     harnesses read the same text."""
-    from ..context import layer_one_block
+    from ..context import layer_one
     from ..roster_view import render_agents
     from .shim_roster import LABEL, OFFLINE, usable
 
@@ -133,20 +136,20 @@ def layer_one_text(roster_info, comms: str = BARE_COMMS, *, directors=()) -> str
         roster = f"{LABEL}\n{render_agents(roster_info)}"
     else:
         roster = OFFLINE
-    return (f"{layer_one_block(directors)}\n\n{MOXI_COMMS_PATH_LINE.format(comms=comms)}"
-            f"\n\n{roster}")
+    return layer_one(roster, directors=directors, comms=comms, form=form)
 
 
-def layer_one_hash(comms: str = BARE_COMMS, *, directors=()) -> str:
+def layer_one_hash(comms: str = BARE_COMMS, *, directors=(), form: str | None = None) -> str:
     """What the thread file records of the layer one a thread was given: a hash of its
-    fixed part, the context block (with the director sentence when the agent declares a
-    director) and the comms path line. The roster under them is a snapshot and changes
-    every launch, so it is not part of the hash."""
+    fixed part in the form it was given, the context block (with the director sentence
+    when the agent declares a director) and the comms path line, or the tools form's
+    block and last line. The roster is a snapshot and changes every launch, so it is not
+    part of the hash."""
     import hashlib
 
-    from ..context import layer_one_block
+    from ..context import layer_one_fixed
 
-    text = f"{layer_one_block(directors)}\n\n{MOXI_COMMS_PATH_LINE.format(comms=comms)}"
+    text = layer_one_fixed(directors=directors, comms=comms, form=form)
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
@@ -370,8 +373,11 @@ class CodexAdapter(HarnessAdapter):
         thread_id = session.session_id
         born_with = {}
         if self.layer_one:
+            # The wrapper wrote layer one from the launch's environment, which this
+            # adapter's process carries.
             born_with["layer_one"] = layer_one_hash(self.comms_path,
-                                                    directors=self._directors())
+                                                    directors=self._directors(),
+                                                    form=layer_one_form(os.environ))
         self._born_with = born_with
         if thread_id:
             codex_threads.write(self.agent.qualified, thread_id,

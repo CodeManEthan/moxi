@@ -12,10 +12,11 @@ printed when comms wrote its own hooks (`adapters/shim_roster`):
              ignored reminder naming this session as its author, once; or nothing
 
 **comms' tools.** A session whose launch carries comms' MCP entry (the wrapper stamped
-the token and the URL, `moxi_comms.mcp.additions.carries`) is told at `start`, after
-layer one, that its tools send (`tools_line`). The event's environment is the launch's,
-so the line follows only what the launch stamped. A Codex thread gets the same line in
-the layer one its wrapper writes.
+the token and the URL, `moxi_comms.mcp.additions.carries`) gets layer one's tools form at
+`start` (`context.layer_one_form`): the tools taught as the way to send and read, the CLI
+named last as the fallback, or, when its shell can't reach comms, not at all. The event's
+environment is the launch's, so the form follows only what the launch stamped. A Codex
+thread and an OpenCode session get the same form in the layer one their wrappers write.
 
 A session comms did not launch has no identity stamp, and comms binds no such session, so
 the listener answers None there. It answers only for Claude Code sessions: a Codex thread
@@ -46,28 +47,6 @@ HARNESSES = ("claude",)
 QUERY_TIMEOUT = 1.5
 #: The session's roster memory, beside its claim socket.
 MEMORY = "roster.json"
-#: What a session whose launch carries comms' tools is told about them.
-TOOLS_LINE = ("Send with the comms tools (`send`, `reply`); `moxi comms` does the same "
-              "from a shell.")
-#: The same, for a session whose shell can't reach comms (`MOXI_COMMS_SHELL_REACH=off`).
-TOOLS_ONLY_LINE = ("Send with the comms tools (`send`, `reply`); this session's shell "
-                   "can't reach comms.")
-
-
-def tools_line(env) -> str | None:
-    """The line naming comms' tools for a session with this environment, or None when
-    its launch carries no comms entry."""
-    from .mcp.additions import SHELL_REACH_ENV, SHELL_REACH_OFF, carries
-
-    if not carries(env):
-        return None
-    return TOOLS_ONLY_LINE if env.get(SHELL_REACH_ENV) == SHELL_REACH_OFF else TOOLS_LINE
-
-
-def with_tools(text: str, env) -> str:
-    """`text` (layer one) with the tools line after it, when the session has them."""
-    line = tools_line(env)
-    return text if line is None else f"{text}\n\n{line}"
 
 
 def memory_path(env) -> Path | None:
@@ -121,12 +100,11 @@ def answer(event) -> str | None:
         text, online = shim_roster.render_snapshot(info, env=env)
         if online and state is not None:
             shim_roster.write_state(state, shim_roster.roster_of(info))
-        return with_tools(text, env)
+        return text
     if state is None:
         return None
     text, _online = shim_roster.delta(socket_path, state, env=env, timeout=QUERY_TIMEOUT)
     return text
 
 
-__all__ = ["HARNESSES", "MEMORY", "QUERY_TIMEOUT", "TOOLS_LINE", "TOOLS_ONLY_LINE", "answer",
-           "memory_path", "tools_line", "with_tools"]
+__all__ = ["HARNESSES", "MEMORY", "QUERY_TIMEOUT", "answer", "memory_path"]

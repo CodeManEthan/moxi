@@ -560,7 +560,7 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
     session of its own, so it is never the host's child. A refusal the adapter reports
     ends the launch here, with its exit code; past `ready_wait` the host starts anyway,
     and the wrapper says so. `roster` stands in for the daemon's roster in layer one."""
-    from ..listener import with_tools
+    from ..context import layer_one_form
     from .codex import fetch_roster, layer_one_text
     from .terminal import pidfd_open   # needs termios: not at the top
 
@@ -603,9 +603,11 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
         _remove(launch)
         return exit_of(code)
     info = roster if roster is not None else fetch_roster()
-    launch.write_instructions(with_tools(
-        layer_one_text(info, launch.comms_path or BARE_COMMS,
-                       directors=launch.agent.directors), env))
+    # A launch carrying comms' tools gets layer one's tools form: the tools first, the
+    # CLI last as the fallback, or not at all when the shell can't reach comms.
+    launch.write_instructions(layer_one_text(info, launch.comms_path or BARE_COMMS,
+                                             directors=launch.agent.directors,
+                                             form=layer_one_form(env)))
     argv = launch.host_argv(host)
     return exec_(str(host), argv, env)
 

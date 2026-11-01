@@ -504,15 +504,31 @@ def test_the_shell_reach_stamp(tmp_path, more, url, off):
 
 
 def test_the_start_text_follows_the_stamp(tmp_path):
-    from moxi_comms import listener
+    from moxi_comms import context
 
     env = named(tmp_path, url=URL).env({})
     env.update({TOKEN_ENV: VALUE, URL_ENV: URL})
-    assert listener.tools_line(env) == listener.TOOLS_ONLY_LINE
+    assert context.layer_one_form(env) == context.TOOLS_ONLY
     env = named(tmp_path, "--option", "sandbox_workspace_write.network_access=true",
                 url=URL).env({})
     env.update({TOKEN_ENV: VALUE, URL_ENV: URL})
-    assert listener.tools_line(env) == listener.TOOLS_LINE
+    assert context.layer_one_form(env) == context.TOOLS
+
+
+@pytest.mark.parametrize("reach", [None, SHELL_REACH_OFF])
+def test_the_thread_record_hashes_the_form_of_layer_one_it_was_given(
+        rig, launch, monkeypatch, reach):
+    from moxi_comms import context
+
+    monkeypatch.setenv(TOKEN_ENV, VALUE)
+    monkeypatch.setenv(URL_ENV, URL)
+    if reach is not None:
+        monkeypatch.setenv(SHELL_REACH_ENV, reach)
+    adapter = launch()
+    form = context.TOOLS_ONLY if reach else context.TOOLS
+    record = codex_threads.read_meta(PLANNER)
+    assert record["layer_one"] == codex.layer_one_hash(adapter.comms_path, form=form)
+    assert record["layer_one"] != codex.layer_one_hash(adapter.comms_path)
 
 
 def test_a_launch_with_no_tools_and_no_shell_reach_says_what_it_costs(tmp_path):

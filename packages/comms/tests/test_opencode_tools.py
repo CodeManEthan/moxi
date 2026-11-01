@@ -27,7 +27,7 @@ from conftest import clock_reads_warm, wait_until
 
 import moxi_turns
 from fake_opencode import FakeOpenCode
-from moxi_comms import listener
+from moxi_comms import context
 from moxi_comms.adapters import opencode as oc
 from moxi_comms.adapters import opencode_roster
 from moxi_comms.adapters.opencode import OpenCodeAdapter
@@ -193,7 +193,8 @@ def test_a_started_launch_registers_the_token_and_names_the_tools(rig, adapter, 
     assert row is not None and row.bound and row.identity == IDENTITY
     assert row.claim_key == a.claims.key and row.adapter == "opencode"
     text = a.layer_one_path().read_text()
-    assert text.endswith(listener.TOOLS_LINE)
+    assert text.startswith(context.TOOLS_BLOCK)
+    assert f"\n\n{context.TOOLS_FALLBACK_LINE} " in text
     assert files_holding(VALUE, *roots(tmp_path)) == []
 
 

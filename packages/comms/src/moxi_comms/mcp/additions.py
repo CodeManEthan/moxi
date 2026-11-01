@@ -9,7 +9,7 @@ wrapper stamps, `MOXI_COMMS_MCP_TOKEN` and `MOXI_COMMS_MCP_URL`, both non-empty.
 wrapper that launches a session with an identity asks the daemon whether it serves
 comms' tools; only when it does, the wrapper mints the session's token and stamps it
 with the URL the daemon answered. Everything that depends on the entry reads that pair:
-this contributor, the start text (`moxi_comms.listener.tools_line`), and the Codex
+this contributor, the start text (`moxi_comms.context.layer_one_form`), and the Codex
 launch's network default. The contributor never reads comms' `[mcp]` settings, since
 the daemon read them at its start and its answer is what the wrapper stamped.
 

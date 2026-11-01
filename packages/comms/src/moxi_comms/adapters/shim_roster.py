@@ -19,7 +19,9 @@ LAYER ONE: what a session is given at start is EXACTLY the agent-facing context 
 (`context.layer_one_block`: the one canonical constant, with the director sentence for a
 session that declared a director), the line naming which comms to run
 (`context.MOXI_COMMS_PATH_LINE`, as a Codex or OpenCode session gets it), and then the
-current roster. Nothing else. Everything an agent meets only conditionally -- the tiers,
+current roster. Nothing else. A session whose launch carries comms' tools gets the tools
+form instead (`context.layer_one`): the tools block, the roster, then the CLI as the
+fallback with the path line, as a Codex or OpenCode session with the tools gets it. Everything an agent meets only conditionally -- the tiers,
 the marks, what an unmarked frame means, the catch-up digest -- is layer two, pulled
 through `moxi comms help <term>`. The block renders on the offline branch too: how to
 send and reply is true whether or not the daemon answered.
@@ -75,8 +77,8 @@ import tempfile
 from pathlib import Path
 
 from .. import directors as directors_mod
-from ..context import (BARE_COMMS, COMMAND_ENV, CONTEXT_BLOCK, MOXI_COMMS_PATH_LINE,
-                       layer_one_block, own_comms)
+from ..context import (BARE_COMMS, COMMAND_ENV, CONTEXT_BLOCK, layer_one, layer_one_form,
+                       own_comms)
 from ..roster_view import render_agents
 from ..client import DaemonClient
 from ..scoping import GLOBAL, qualify
@@ -179,13 +181,15 @@ def render_snapshot(info: dict | None, *, env=None) -> tuple[str, bool]:
     # with one gets the director sentence after the block.
     directors = directors_mod.from_env(env)
     comms = comms_command(env)
+    # A launch carrying comms' tools gets layer one's tools form.
+    form = layer_one_form(env)
     if not usable(info):
-        return with_block(OFFLINE, directors=directors, comms=comms), False
+        return with_block(OFFLINE, directors=directors, comms=comms, form=form), False
     lines = [LABEL, render_agents(info)]
     name = env.get("MOXI_COMMS_NAME")
     if name and not info["bindings"]:
         lines.append(OWN_BINDING_RACE.format(name=name))
-    return with_block("\n".join(lines), directors=directors, comms=comms), True
+    return with_block("\n".join(lines), directors=directors, comms=comms, form=form), True
 
 
 def comms_command(env) -> str:
@@ -194,16 +198,15 @@ def comms_command(env) -> str:
     return env.get(COMMAND_ENV) or own_comms() or BARE_COMMS
 
 
-def with_block(body: str, *, directors=(), comms=None) -> str:
+def with_block(body: str, *, directors=(), comms=None, form=None) -> str:
     """Layer one, in order: the block, one blank line, the line naming `comms` (when
     there is one) and one blank line, then the roster (or the offline line), as the
     Codex and OpenCode wrappers lay it out. The block is first because it is what the
     roster under it is FOR. A session with a declared director gets the director
-    sentence at the block's end."""
-    if comms:
-        return (f"{layer_one_block(directors)}\n\n{MOXI_COMMS_PATH_LINE.format(comms=comms)}"
-                f"\n\n{body}")
-    return f"{layer_one_block(directors)}\n\n{body}"
+    sentence at the block's end. A tools `form` (`context.layer_one_form`) puts the
+    tools block first and the CLI fallback, with the line naming `comms`, last
+    (`context.layer_one`)."""
+    return layer_one(body, directors=directors, comms=comms, form=form)
 
 
 # ---------------------------------------------------------------------- roster memory
