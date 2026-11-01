@@ -1,15 +1,15 @@
 # Contributing
 
-Thanks for looking. Issues are welcome at https://github.com/moxihq/comms/issues, and
-pull requests at https://github.com/moxihq/moxi, the repository that holds every Moxi
-package; comms is `packages/comms` there.
+Thanks for looking. Issues are welcome at https://github.com/CodeManEthan/moxi/issues,
+and pull requests at https://github.com/CodeManEthan/moxi, the repository that holds
+every Moxi package; comms is `packages/comms` there.
 
 ## Setting up
 
 You need Linux, Python 3.12 or later and [uv](https://docs.astral.sh/uv/).
 
 ```sh
-git clone https://github.com/moxihq/moxi
+git clone https://github.com/CodeManEthan/moxi
 cd moxi
 uv sync
 cd packages/comms
@@ -55,7 +55,7 @@ uv run python scripts/codex-smoke.py --dry-run
 
 ## The name
 
-comms is a module of Moxi. The harness and the org are spelled by the core
+comms is a module of Moxi. The harness and the owner are spelled by the core
 (`moxi.names`); `moxi_comms.release` builds the distribution, the unit and the repository
 from them and the module's name, and `tests/test_release.py` holds `pyproject.toml` to
 them. The import package is `moxi_comms`, the commands run as `moxi comms <verb>`, and

@@ -27,9 +27,9 @@ dependencies = ["psutil>=5.9", "platformdirs>=4; sys_platform == 'win32'"]
 moxi = "moxi.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/moxihq/moxi"
-Repository = "https://github.com/moxihq/moxi"
-Issues = "https://github.com/moxihq/moxi/issues"
+Homepage = "https://github.com/CodeManEthan/moxi"
+Repository = "https://github.com/CodeManEthan/moxi"
+Issues = "https://github.com/CodeManEthan/moxi/issues"
 
 [dependency-groups]
 dev = ["pytest", "moxi-dev"]
