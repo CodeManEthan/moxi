@@ -5,6 +5,7 @@
     moxi-launcher-job expiry SESSION      # an expiry ask, started by cache's timer
     moxi-launcher-job keep-warm SESSION   # a keep-warm ask, started by cache's timer
     moxi-launcher-job compact RUN         # a compact at the context limit
+    moxi-launcher-job launch REQUEST      # a launch the page asked for, by its request id
 
 Internal, never typed. A relaunch and a repair are spawned as slots jobs
 (`relaunch-<run>`, `repair-<run>`) by `moxi launcher relaunch`. A slots job is a child of
@@ -70,27 +71,58 @@ nothing launched, so it can be repeated. Its posture and first turn are the orig
 
 Each run ends with its outcome and tells whom `notices` says. As it starts, each job
 deletes ended runs older than `records.keep_days`.
+
+**The page's launch** is no run: its record is its launch row. The launcher's page
+server writes what the page asked for as a request file,
+`STATE/runs/<request id>.request.json` (0600, made only if it is not there, so a ticket
+starts one job), and spawns `moxi-launcher-job launch <request id>` detached. The file
+names its act, `launch` or `resume`. For `launch` the job runs `api.launch` with the
+request id as its idempotency key, bounded by `page.launch_wait_s`; a launch that names
+no directory, project or scratch is refused `no-cwd` (it would start in the job's own
+directory), and one whose target is `terminal` is refused, since there is no terminal to
+run it in. A refusal before the launch row is written is recorded as a `launch-refused`
+event under the request id, with its `code`, `row`, `problem` and `hint`, which the page
+reads back; after the row is written, the row says what happened. For `resume` the job
+runs `resume.resume` for the session the file names, with the request id as the new
+launch's, so a retry never launches twice, bounded the same way; it runs only a resume into
+a slot, and refuses one whose launch turns out to be in a terminal, since that would take
+the job's place. Its refusals before the row are recorded as a launch's are. The job
+deletes the request file when it ends, whatever the end; the run-file sweep takes one a
+job left behind.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import math
+import os
 import signal
 import sqlite3
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
-from . import notices, quiet, slots, store
+from moxi import files
+
+from . import catalog, notices, quiet, slots, store, targets
 
 log = logging.getLogger("moxi.launcher.job")
 
 #: The runs this script runs.
-KINDS = ("relaunch", "repair", "expiry", "compact", "keep-warm")
+KINDS = ("relaunch", "repair", "expiry", "compact", "keep-warm", "launch")
+#: The kind that runs a page's request file, by its request id.
+PAGE = "launch"
+#: The acts a page's request file names.
+ACTS = ("launch", "resume")
+#: The launch states a page launch's job exits 0 with: the session started.
+LAUNCHED = ("started", "ready", "sending", "first-sent")
 #: The kinds that are an ask of a session, by its id.
 ASKS = ("expiry", "keep-warm")
 #: Refusals of the exit that clear by themselves.
@@ -907,6 +939,221 @@ JOBS: dict[str, type[RelaunchJob]] = {"relaunch": RelaunchJob, "repair": RepairJ
 DONE = ("relaunched", "cleared", "compacted", "nudged")
 
 
+# -- the page's launch ---------------------------------------------------------------------
+
+
+class NoPlace(catalog.Refused):
+    """A launch from the page that names no directory, project or scratch."""
+
+    code = "no-cwd"
+
+
+class NotHere(catalog.Refused):
+    """A request the job can't run: a launch in a terminal, an act this version doesn't
+    run, or a request file it can't read."""
+
+    code = "not-run"
+
+
+def write_request(request_id: str, data: Mapping[str, Any],
+                  env: Mapping[str, str] | None = None) -> Path:
+    """Write a page launch's request file, 0600, and return its path. Raises
+    `FileExistsError` when one is there already: a ticket starts one job. The file is
+    written whole beside its name and then linked to it, which fails when the name is
+    taken, so it is made only if it is not there, and is never seen half written."""
+    path = targets.request_file(request_id, env)
+    files.private_dir(path.parent)
+    written = path.with_name(f".{request_id}.{uuid.uuid4().hex}.tmp")
+    files.atomic_write(written, json.dumps(dict(data), sort_keys=True, ensure_ascii=False),
+                       mode=0o600)
+    try:
+        os.link(written, path)
+    finally:
+        with suppress(OSError):
+            written.unlink()
+    return path
+
+
+def launch_request(request_id: str, data: Mapping[str, Any]):
+    """The `api.LaunchRequest` a request file holds: its preset, the values the page set,
+    typed as `catalog.parse` gives them, the flags passed on and `off_posture`, under
+    `request_id`. It names no caller's directory: a page launch names its own place."""
+    from . import api
+
+    def text(key: str) -> str | None:
+        value = data.get(key)
+        return value if isinstance(value, str) and value else None
+
+    typed = data.get("typed") or {}
+    extra = data.get("extra") or []
+    if not isinstance(typed, dict) or not isinstance(extra, list):
+        raise NotHere(None, f"the page's request for launch {request_id} is not one the "
+                            "launcher wrote", "preview the launch again and launch it")
+    return api.LaunchRequest(seat=text("seat"), project_preset=text("project_preset"),
+                             typed=typed, extra=tuple(str(word) for word in extra),
+                             off_posture=bool(data.get("off_posture")),
+                             request_id=request_id)
+
+
+def resume_request(request_id: str, data: Mapping[str, Any], *,
+                   launch: Callable[..., Any] | None = None):
+    """Resume the session a request file names, into a slot, as the launch `request_id`
+    (`resume.resume`), and return its `Result`. Raises `resume`'s refusals, and `not-run`
+    when the launch it resumes ran in a terminal or the file names no session. `launch`
+    stands in for `api.launch`."""
+    from . import api, resume
+
+    session = data.get("session")
+    if not isinstance(session, str) or not session.strip():
+        raise NotHere(None, f"the page's request for launch {request_id} names no session "
+                            "to resume", "resume the session from the page again")
+    slot = data.get("slot")
+    slot = slot.strip() if isinstance(slot, str) and slot.strip() else None
+    go = launch or api.launch
+
+    def in_slot(request, **kw: Any) -> Any:
+        # The launch replayed is the one checked: a terminal resume would become the job.
+        if request.row.target != "slot":
+            raise NotHere("target", f"launch {request.row.request_id} ran in its "
+                                    f"{request.row.target}, and the page resumes only a "
+                                    "slot launch",
+                          f"run moxi launcher resume {session} in a terminal of your own")
+        return go(request, **kw)
+
+    return resume.resume(session.strip(), slot=slot, request_id=request_id, launch=in_slot)
+
+
+def placed(request, env: Mapping[str, str] | None = None):
+    """`request`'s values resolved (`presets.resolve`), refused `no-cwd` when no layer of
+    them names where the session starts: a page launch has no caller's directory to fall
+    back on. Raises the resolver's own refusals too."""
+    from . import presets
+
+    resolved = presets.resolve(request, env=env)
+    if resolved.sources.get("cwd") == presets.SHIPPED:
+        raise NoPlace("cwd", "a launch from the page names no directory, project or scratch "
+                             "to start in", "choose a directory, a project or scratch, or a "
+                                            "preset that names one")
+    return resolved
+
+
+#: What a page launch refused `off-posture` is told to do: the page has no
+#: `--off-posture` flag, only its checkbox.
+OFF_POSTURE_HINT = ('tick "Allow a permission posture off your default" to allow it, or '
+                    "set it in [defaults]")
+#: What a refusal record says for an error with no words of its own.
+UNEXPECTED_JOB = "the launch job hit an unexpected error ({}); its log has the details"
+
+
+def refused_detail(error: BaseException) -> dict[str, Any]:
+    """`error`, a refusal from before a launch's row, as a `launch-refused` event's detail
+    and the page's refusal: `code`, `row`, `problem`, `hint`. An `off-posture` refusal's
+    hint names the page's control, not the command line's flag. A configuration file that
+    can't be read is `bad-config`; one of the launch log's own refusals has the code the
+    command line gives it; an error that is no refusal names only its class."""
+    from moxi.config import ConfigError
+    from moxi.store import StoreError
+
+    from .cli import _OTHER_ERRORS
+
+    if isinstance(error, catalog.Refused):
+        hint = OFF_POSTURE_HINT if error.code == "off-posture" else str(error.hint)
+        return {"code": error.code, "row": error.row, "problem": str(error.problem),
+                "hint": hint}
+    if isinstance(error, ConfigError):
+        return {"code": "bad-config", "row": error.key if isinstance(error.key, str) else None,
+                "problem": str(error.problem), "hint": str(error.fix or "")}
+    if isinstance(error, StoreError) and type(error).__name__ in _OTHER_ERRORS:
+        code, hint = _OTHER_ERRORS[type(error).__name__]
+        if "{run}" in hint:
+            hint = "that run must end first"
+        return {"code": code, "row": None, "problem": str(error), "hint": hint}
+    return {"code": "error", "row": None,
+            "problem": UNEXPECTED_JOB.format(type(error).__name__),
+            "hint": "try the launch again; if it fails the same way, read the log"}
+
+
+def record_refused(request_id: str, detail: Mapping[str, Any]) -> bool:
+    """Record a page launch refused before its row as a `launch-refused` event under its
+    request id, unless its row is written; say whether it was recorded."""
+    conn = store.connect()
+    try:
+        if store.get(conn, request_id) is not None:
+            return False
+        store.add_event(conn, store.LAUNCH_REFUSED, dict(detail), request_id=request_id)
+        return True
+    finally:
+        conn.close()
+
+
+def run_request(request_id: str, *, wait_s: float | None = None,
+                launch: Callable[..., Any] | None = None) -> str:
+    """Run the page's request file for `request_id` to its end, a launch or a resume, and
+    return its outcome: the launch row's state, `refused` (recorded before the row), or
+    `timed-out` (it passed `page.launch_wait_s`). The request file is deleted at the end.
+    `launch` stands in for `api.launch`."""
+    from . import api, settings
+
+    path = targets.request_file(request_id)
+    try:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            act = data.get("act")
+        except (OSError, ValueError, AttributeError) as error:
+            log.warning("the request file of launch %s could not be read: %s", request_id,
+                        _words(error))
+            record_refused(request_id, refused_detail(NotHere(
+                None, f"the page's request for launch {request_id} could not be read",
+                "preview the launch again and launch it")))
+            return "refused"
+        if act not in ACTS:
+            record_refused(request_id, refused_detail(NotHere(
+                None, f"the page's request names no act it runs ({act!r})",
+                "preview the launch again and launch it")))
+            return "refused"
+        if wait_s is None:
+            wait_s = float(settings.current()["page.launch_wait_s"])
+        go = launch or api.launch
+        done: dict[str, Any] = {}
+
+        def start() -> None:
+            try:
+                if act == "resume":
+                    done["state"] = resume_request(request_id, data,
+                                                   launch=launch).data["state"]
+                    return
+                request = launch_request(request_id, data)
+                resolved = placed(request)
+                if resolved.target == "terminal":
+                    raise NotHere("target", "a launch in a terminal is not run from the page",
+                                  "run its command in a terminal of your own")
+                done["state"] = go(request).state
+            except BaseException as error:  # noqa: BLE001  (each end is recorded)
+                done["error"] = error
+
+        worker = threading.Thread(target=start, name=f"{act} {request_id}", daemon=True)
+        worker.start()
+        worker.join(wait_s)
+        if worker.is_alive():
+            log.warning("%s %s passed page.launch_wait_s (%s s)", act, request_id, wait_s)
+            record_refused(request_id, {
+                "code": "timed-out", "row": None,
+                "problem": f"the {act} did not finish within page.launch_wait_s "
+                           f"({wait_s:g} s)",
+                "hint": "look at moxi launcher log, then try again"})
+            return "timed-out"
+        if "error" in done:
+            detail = refused_detail(done["error"])
+            if detail["code"] == "error":
+                log.error("%s %s failed", act, request_id, exc_info=done["error"])
+            record_refused(request_id, detail)
+            return "refused"
+        return str(done["state"])
+    finally:
+        with suppress(OSError):
+            path.unlink()
+
+
 def run(kind: str, run_id: str, *, signals: bool = False, **seams: Any) -> str:
     """Run one run of `kind` to its end, and return its outcome. With `signals`, a stop
     signal (SIGTERM, SIGINT, SIGHUP) is noted for the job to act on at its next step."""
@@ -928,12 +1175,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     bad arguments."""
     parser = argparse.ArgumentParser(
         prog="moxi-launcher-job",
-        description="Internal: run one of the launcher's detached runs to its end.")
+        description="Internal: run one of the launcher's detached runs, or a launch the "
+                    "page asked for, to its end.")
     parser.add_argument("kind", choices=KINDS, help="the run's kind")
     parser.add_argument("arg", metavar="ARG",
-                        help="the run's id; for expiry and keep-warm, the session's id")
+                        help="the run's id; for expiry and keep-warm, the session's id; "
+                             "for launch, the request id")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s")
+    if args.kind == PAGE:
+        outcome = run_request(args.arg)
+        print(f"launch {args.arg}: {outcome}", flush=True)
+        return 0 if outcome in LAUNCHED else 1
     if args.kind in ASKS:
         from . import keepwarm, recycle
 
@@ -950,11 +1203,12 @@ def _words(error: BaseException) -> str:
     return str(error) or type(error).__name__
 
 
-__all__ = ["ACTED", "ASKS", "DONE", "GONE", "JOBS", "KINDS", "LOOK", "NOT_SETTLED", "POLL_S",
-           "REPAIRABLE", "RETRY_S", "SETTLE_S", "TERMINAL", "TRANSIENT", "Choice",
-           "CompactJob", "Ended", "RelaunchJob", "RepairJob",
-           "chain_of", "choose_slot", "gone", "job_name", "main", "repairable", "root_run",
-           "run"]
+__all__ = ["ACTED", "ACTS", "ASKS", "DONE", "GONE", "JOBS", "KINDS", "LAUNCHED", "LOOK",
+           "NOT_SETTLED", "OFF_POSTURE_HINT", "PAGE", "POLL_S", "REPAIRABLE", "RETRY_S",
+           "SETTLE_S", "TERMINAL", "TRANSIENT", "UNEXPECTED_JOB", "Choice", "CompactJob", "Ended",
+           "NoPlace", "NotHere", "RelaunchJob", "RepairJob", "chain_of", "choose_slot", "gone",
+           "job_name", "launch_request", "main", "placed", "record_refused", "refused_detail",
+           "repairable", "resume_request", "root_run", "run", "run_request", "write_request"]
 
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())

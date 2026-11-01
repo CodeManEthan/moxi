@@ -1042,6 +1042,213 @@ def test_uninstall_removes_every_marked_unit_with_one_reload(w):
     assert list(w.root.glob("moxi-*")) == []
 
 
+# A socket daemon that starts at login: its service keeps its install section.
+
+LOGIN = ", 'socket': {'setting': 'port', 'addresses': %r, 'start': 'login'}"
+
+
+def login(*addresses, more=""):
+    """The `relay` daemon with a socket on `addresses` that a login starts."""
+    return ("{'relay': {'command': 'moxi-demo-relay'" + LOGIN % (list(addresses),)
+            + more + "}}")
+
+
+def test_a_login_socket_keeps_its_service_install_and_the_same_socket_units(unit_root):
+    def render(start):
+        return SystemdBackend().render(spec(
+            module="ui", name="shell", doc="the shell",
+            command=("/opt/ana/bin/moxi-ui-shell",),
+            socket=Socket("port", ("127.0.0.1", "::1"), 8470, start=start)))
+
+    (daemon, sockets), (plain, connection) = render("login"), render("connection")
+    assert sockets.files == connection.files
+    [(_, text)] = daemon.files
+    assert text == plain.files[0][1] + "\n[Install]\nWantedBy=default.target\n"
+    assert "\nSockets=moxi-ui-shell.socket moxi-ui-shell-1.socket\n" in text
+
+
+def test_a_new_login_daemon_enables_its_sockets_then_its_service_now(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=login("127.0.0.1", "::1"))
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    assert w.sup.calls[:4] == [("daemon-reload",), ("enable", "--now", SOCK),
+                               ("enable", "--now", SOCK_1), ("enable", "--now", SERVICE)]
+    assert w.sup.units[SERVICE] == {"active": True, "enabled": True}
+    [daemon] = [r for r in units.status(["demo"], runner=w.sup) if r.kind == "daemon"]
+    assert daemon.enabled is True
+    # Its own enabled is its service's, not its sockets'.
+    w.sup.units[SERVICE]["enabled"] = False
+    rows = {r.kind: r for r in units.status(["demo"], runner=w.sup)}
+    assert (rows["daemon"].enabled, rows["socket"].enabled) == (False, True)
+
+
+@pytest.mark.parametrize("running", [True, False])
+def test_a_changed_login_daemon_is_enabled_where_the_rule_starts_it(w, v6, running):
+    """Found running with its set unchanged: `enable` then `restart`; found down: its
+    units' starts, then `enable --now`."""
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=login("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    w.sup.units[SERVICE]["active"] = running
+    _rewrite_service(w)
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    tail = ([("enable", SERVICE), ("restart", SERVICE)] if running else
+            [("start", SOCK), ("start", SOCK_1), ("enable", "--now", SERVICE)])
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), *tail]
+
+
+def test_a_failed_read_under_login_stops_starts_the_units_then_enables_now(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=login("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    _rewrite_service(w)
+    w.sup.fail[("show", None)] = NO_BUS
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    assert w.sup.calls == [RUNNING, ("daemon-reload",), ("stop", SERVICE), ("start", SOCK),
+                           ("start", SOCK_1), ("enable", "--now", SERVICE)]
+
+
+def test_a_keep_login_daemon_with_its_set_unchanged_is_enabled_alone_and_keeps_its_link(
+        w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=login("127.0.0.1", more=", 'upgrade': 'keep'"))
+    w.apply(units.plan("demo"))
+    _rewrite_service(w)
+    w.sup.calls.clear()
+    done = w.apply(units.plan("demo"))
+    assert w.sup.calls == [("daemon-reload",), ("enable", SERVICE)]
+    assert w.sup.units[SERVICE]["enabled"]
+    [line] = [line for a in done for line in a.lines]
+    assert line == f"{SERVICE} rewritten; the new code runs from its next start"
+
+
+@pytest.mark.parametrize("upgrade", ["restart", "keep"])
+def test_a_reinstall_from_connection_to_login_enables_the_service(w, upgrade):
+    w.script("moxi-demo-relay")
+    more = f", 'upgrade': '{upgrade}'"
+    w.module(DAEMONS=shell("127.0.0.1", more=more))
+    w.apply(units.plan("demo"))
+    assert not w.sup.units[SERVICE]["enabled"]
+    w.module(DAEMONS=login("127.0.0.1", more=more))
+    assert {(c.kind, c.action) for c in units.plan("demo")} == {("daemon", "change"),
+                                                                 ("socket", "keep")}
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    assert w.sup.calls == {
+        "restart": [RUNNING, ("daemon-reload",), ("enable", SERVICE), ("restart", SERVICE)],
+        "keep": [("daemon-reload",), ("enable", SERVICE)]}[upgrade]
+    assert w.sup.units[SERVICE]["enabled"]
+
+
+def test_a_reinstall_from_login_to_connection_unlinks_the_service_and_keeps_its_units(w):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=login("127.0.0.1"))
+    w.apply(units.plan("demo"))
+    w.module(DAEMONS=shell("127.0.0.1"))
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    assert w.sup.calls == [("disable", SERVICE), RUNNING, ("daemon-reload",),
+                           ("restart", SERVICE)]
+    assert w.sup.units[SERVICE] == {"active": True, "enabled": False}
+    assert w.sup.units[SOCK]["enabled"]
+
+
+@pytest.mark.parametrize("start", ["login", "connection"])
+def test_a_plain_daemon_that_gains_a_socket_keeps_its_link_only_under_login(w, start):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=DAEMON)
+    w.apply(units.plan("demo"))
+    w.module(DAEMONS=(login if start == "login" else shell)("127.0.0.1"))
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo")))
+    steps = [RUNNING, ("daemon-reload",), ("stop", SERVICE), ("enable", "--now", SOCK)]
+    assert w.sup.calls == {
+        "login": steps + [("enable", "--now", SERVICE)],
+        "connection": [("disable", SERVICE), *steps, ("start", SERVICE)]}[start]
+    assert w.sup.units[SERVICE] == {"active": True, "enabled": start == "login"}
+
+
+def test_restart_after_an_upgrade_enables_then_restarts_a_running_login_daemon(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=login("127.0.0.1"))
+    w.apply(units.plan("demo"))
+    w.sup.calls.clear()
+    assert all(a.ok for a in w.apply(units.plan("demo"), restart=True))
+    assert w.sup.calls == [RUNNING, ("enable", SERVICE), ("restart", SERVICE)]
+
+
+def test_a_failed_stop_of_a_login_daemon_names_the_enable_left_undone(w, v6):
+    from moxi import config
+
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=login("127.0.0.1"))
+    w.apply(units.plan("demo"))
+    config.set("demo", "port", "9000", by="test")
+    w.sup.fail[("stop", SERVICE)] = "Access denied"
+    w.sup.calls.clear()
+    done = {a.change.kind: a for a in w.apply(units.plan("demo"))}
+    assert done["socket"].lines[1] == (
+        "the unit files are written, and `moxi install demo` again finds them up to date; "
+        f"fix the cause, then run `systemctl --user stop {SERVICE}`, "
+        f"`systemctl --user restart {SOCK}` and `systemctl --user enable --now {SERVICE}`; "
+        f"{SERVICE} was not enabled, so the login link its text asks for is not made "
+        "until that `enable` runs")
+    assert not any(c[:1] == ("enable",) and SERVICE in c for c in w.sup.calls)
+
+
+def test_a_login_daemon_declared_disabled_is_disabled_now_after_its_units(w, tmp_path, v6):
+    tool = _script(tmp_path / "tool")
+    source = """
+             def units():
+                 return {{"daemons": {{"row": {{"argv": [{tool!r}], "enabled": {flag},
+                     "socket": {{"setting": "port", "addresses": ["127.0.0.1", "::1"],
+                                 "start": "login"}}}}}}}}
+             """
+
+    def declare(flag):
+        w.site.write("moxi_demo/runtime.py",
+                     textwrap.dedent(source.format(tool=str(tool), flag=flag)))
+        __import__("sys").modules.pop("moxi_demo.runtime", None)
+
+    row0, row1, row = "moxi-demo-row.socket", "moxi-demo-row-1.socket", "moxi-demo-row.service"
+    declare(True)
+    w.module(UNITS_FROM="'moxi_demo.runtime:units'")
+    w.apply(units.plan("demo"))
+    assert w.sup.units[row] == {"active": True, "enabled": True}
+    declare(False)
+    w.sup.calls.clear()
+    w.apply(units.plan("demo"))
+    assert w.sup.calls == [("daemon-reload",), ("disable", "--now", row0),
+                           ("disable", "--now", row1), ("disable", "--now", row)]
+    assert w.sup.units[row] == {"active": False, "enabled": False}
+
+
+def test_uninstall_of_a_login_daemon_disables_its_units_then_its_service(w, v6):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=login("127.0.0.1", "::1"))
+    w.apply(units.plan("demo"))
+    w.sup.calls.clear()
+    assert all(a.ok for a in units.remove("demo", runner=w.sup, say=w.lines.append))
+    assert w.sup.calls == [("disable", "--now", SOCK), ("disable", "--now", SOCK_1),
+                           ("disable", "--now", SERVICE), ("daemon-reload",)]
+
+
+@pytest.mark.parametrize("act, calls", [
+    ("enable", [("enable", "--now", SOCK), ("enable", "--now", SERVICE)]),
+    ("disable", [("disable", "--now", SOCK), ("disable", "--now", SERVICE)]),
+    ("restart", [("restart", SERVICE)]),
+])
+def test_a_login_daemons_acts_reach_its_service_after_its_units(w, act, calls):
+    w.script("moxi-demo-relay")
+    w.module(DAEMONS=login("127.0.0.1"))
+    w.apply(units.plan("demo"))
+    w.sup.calls.clear()
+    [acted] = getattr(units, act)("demo", ["relay"], runner=w.sup)
+    assert acted.ok and w.sup.calls == calls
+
+
 # -- acts ---------------------------------------------------------------------------------------
 
 class Recorder:

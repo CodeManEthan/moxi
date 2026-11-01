@@ -112,7 +112,7 @@ the session's comms name without its scope, else the seat's name, else the proje
 is filed as `<YYYY-MM-DD>-<key>.md` (then `-2`, `-3`) in the handoff folder. With turns,
 a seat's next start is pointed to its newest waiting handoff. A handoff counts as used only
 when the launcher gave it to a launch of its seat or showed it to one, so a session started
-by hand never hides a seat's handoff. The launcher ships a `handoff` skill, which
+by hand never hides a seat's handoff. The launcher ships a `moxi-handoff` skill, which
 `moxi install launcher` offers to place for Claude Code and Codex.
 
 ## Acting on launched sessions
@@ -224,6 +224,41 @@ recycle and keep-warm state (this session's when none is named). It reads red, w
 `failed` or `blocked` and why, when the latest run on the launch failed or was blocked
 and nothing has gone well since; a session merely waiting is never red.
 
+## The page
+
+With the UI shell installed (`pip install "moxi-launcher[ui]"`), the launcher has a page
+in the shell, and two small views other pages can show: a launched session's state, red
+when it needs a look, and a block on the shell's home listing each running launched
+session with its state.
+
+The page has four parts.
+
+- **Launch.** Pick a seat or a project preset, then change what you want in the form,
+  which shows the same flag rows as `moxi launcher catalog`. Only the fields you change
+  are sent, so the rest come from the preset and your defaults. "Preview" shows the
+  command, the environment stamps, the first turn and every warning, and every reason the
+  launch would be refused, each beside its field. A launch from the page needs a
+  directory, a project or scratch to start in. A launch in a slot or headless then starts
+  with "Launch": the page server hands it to a detached job and the job runs it, so
+  closing the page doesn't stop it. A preview can be launched once, within
+  `page.launch_wait_s` seconds (600), and only as it was previewed. The page never runs a
+  launch in a terminal: it gives the `moxi launcher run` command to copy into a terminal
+  of your own.
+- **Sessions.** The block the shell's home shows: each running launched session, whether
+  it needs a look, and its relaunch, recycle and keep-warm lines.
+- **Launches.** The newest launches, updated as they happen. A running session shows its
+  state beside it, and keeps showing it when a clear or a compact gives the session a new
+  id. When a launch is refused after "Launch" but before its row is written (its
+  directory went away since the preview, say), the refusal shows under the launch.
+- **Past sessions.** Each launch's session, newest first. A session that ran in a slot
+  resumes from here, in a detached job as a launch does; one that ran in a terminal gives
+  the `moxi launcher resume` command to copy. The refusals `moxi launcher resume` gives
+  (headless, live, a relaunch or recycle still under way) come back at once.
+
+A launch from the page runs with the shell's environment, so its harness must be on the
+shell's `PATH`; the preview says which `PATH` it searched when it isn't. The page server
+starts when the page is first opened and stops once nothing has used it for a while.
+
 ## Commands
 
 | Command | Does |
@@ -272,6 +307,7 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 | projects | `project` keys, a project's agent listing, a directory's project key | `cwd` paths and scratch launches only |
 | notes | the `notes_dir` row, and notes' handoff folder | the launcher's own handoff folder |
 | usage | the `warn_at`, `recycle_at_limit` and `limit_at` rows | the rows are not offered |
+| ui | the launcher's page, and its state views on other pages | the command line only |
 
 An agent role a preset names is looked for in the harness's own agent folders, the user's
 and the project's.
@@ -294,6 +330,8 @@ check, say), its words show where it ran and the row ends `failed` with `comms-o
 
 Set with `moxi config set launcher <key> <value>`:
 
+- `page.launch_wait_s` (600): how long a launch made from the page may take, and how long
+  a preview stays good for launching.
 - `ready.wait_s` (60): how long the first-turn sender waits for the session to be ready.
 - `first.wait_s` (120): how long it then waits for the first turn to start.
 - `startup.trust_dialog` and `startup.dev_channels_dialog` (both off): whether a slot

@@ -404,3 +404,33 @@ def test_socket_state_reads_the_set_by_the_one_rule():
     assert (state.state, state.detail) == ("inactive", "not active: b.socket")
     assert socket_state(UnitRef("demo", "shell", "socket", ()), "systemd", [],
                         None).state == "missing"
+
+
+# -- a socket daemon that starts at login, on the fake -----------------------------------------
+
+def test_a_login_daemon_on_the_fake_is_enabled_acted_on_and_read_as_its_service(w):
+    w.module("'shell': {'command': 'moxi-demo-shell', 'socket': {'setting': 'port', "
+             "'addresses': ['127.0.0.1', '::1'], 'start': 'login'}}")
+    plan = w.plan()
+    assert "install = default.target" in plan[("shell", "daemon")].text
+    w.sup.calls.clear()
+    w.apply(plan.values())
+    assert w.sup.calls[-3:] == [("enable", "--now", f"{STEM}.socket"),
+                                ("enable", "--now", f"{STEM}-1.socket"),
+                                ("enable", "--now", f"{STEM}.service")]
+    w.sup.units[f"{STEM}.service"]["enabled"] = False
+    rows = {r.kind: r for r in units.status(["demo"])}
+    assert (rows["daemon"].enabled, rows["socket"].enabled) == (False, True)
+    w.sup.calls.clear()
+    [acted] = units.disable("demo", ["shell"])
+    assert acted.ok and w.sup.calls == [
+        ("disable", "--now", f"{STEM}.socket", f"{STEM}-1.socket"),
+        ("disable", "--now", f"{STEM}.service")]
+    # Back to "connection": the link goes, the sockets carry the enable again.
+    units.enable("demo", ["shell"])
+    w.module(shell("127.0.0.1", "::1"))
+    w.sup.calls.clear()
+    w.apply(units.plan("demo"))
+    assert w.sup.calls[0] == ("disable", f"{STEM}.service")
+    rows = {r.kind: r for r in units.status(["demo"])}
+    assert rows["daemon"].enabled is True and not w.sup.units[f"{STEM}.service"]["enabled"]

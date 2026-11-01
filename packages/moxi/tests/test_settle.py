@@ -1482,20 +1482,22 @@ def _step(skills=None):
 def test_the_skills_question_is_answered_ahead_by_a_flag(capsys, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
     monkeypatch.setattr(sys, "stdin", Tty())
-    assert _settle.skills_wanted(_step(True), ["comms-send"], ["claude"]) is True
-    assert _settle.skills_wanted(_step(False), ["comms-send"], ["claude"]) is False
+    assert _settle.skills_wanted(_step(True), ["moxi-comms-send"], ["claude"]) is True
+    assert _settle.skills_wanted(_step(False), ["moxi-comms-send"], ["claude"]) is False
     assert capsys.readouterr().out == ""
 
 
 def test_the_skills_question_at_a_terminal_and_with_nobody_there(capsys, monkeypatch):
     asked = at_terminal(monkeypatch, "y", "")
-    skills = ["comms-send", "comms-read"]
+    skills = ["moxi-comms-send", "moxi-comms-read"]
     assert _settle.skills_wanted(_step(), skills, ["claude", "codex"]) is True
-    assert _settle.skills_wanted(_step(), ["comms-send"], ["claude", "codex", "pi"]) is False
+    assert _settle.skills_wanted(_step(), ["moxi-comms-send"],
+                                 ["claude", "codex", "pi"]) is False
     assert asked == [
-        "comms ships 2 skills (comms-send, comms-read). Place them for claude and codex? "
-        "[y/N] ",
-        "comms ships 1 skill (comms-send). Place them for claude, codex and pi? [y/N] "]
+        "comms ships 2 skills (moxi-comms-send, moxi-comms-read). Place them for claude "
+        "and codex? [y/N] ",
+        "comms ships 1 skill (moxi-comms-send). Place them for claude, codex and pi? "
+        "[y/N] "]
     line = "comms: skills not placed; place them with: moxi install comms --skills"
     assert capsys.readouterr().out.count(line) == 1
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
@@ -1555,20 +1557,20 @@ def owned(w, owner="demo") -> dict:
 
 
 def test_skills_are_not_placed_with_nobody_at_the_keyboard(sk, capsys, monkeypatch):
-    sk.skills("demo-send")
+    sk.skills("moxi-demo-send")
     monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
     code, out = place_settle(sk, capsys)
     assert code == 0, out
     assert "demo: skills not placed; place them with: moxi install demo --skills" in out
-    assert not os.path.lexists(sk.claude("demo-send")) and sk.place.status("demo") == []
+    assert not os.path.lexists(sk.claude("moxi-demo-send")) and sk.place.status("demo") == []
 
 
 def test_skills_flag_places_each_skill_for_each_harness_as_links(sk, capsys):
-    sk.skills("demo-send", "demo-read")
+    sk.skills("moxi-demo-send", "moxi-demo-read")
     code, out = place_settle(sk, capsys, skills=True)
     assert code == 0, out
     src = sk.pkg / "skills"
-    for name in ("demo-read", "demo-send"):
+    for name in ("moxi-demo-read", "moxi-demo-send"):
         assert os.readlink(sk.claude(name)) == str(src / name)
         assert os.readlink(sk.codex(name)) == str(src / name)
         assert f"demo: placed skill {name} for claude ({sk.claude(name)})" in out
@@ -1576,11 +1578,11 @@ def test_skills_flag_places_each_skill_for_each_harness_as_links(sk, capsys):
 
 
 def test_a_yes_at_the_terminal_places_them_and_a_rerun_asks_nothing(sk, capsys, monkeypatch):
-    sk.skills("demo-send")
+    sk.skills("moxi-demo-send")
     asked = at_terminal(monkeypatch, "y")
     code, out = place_settle(sk, capsys)
     assert code == 0, out
-    assert asked == ["demo ships 1 skill (demo-send). Place them for claude and codex? "
+    assert asked == ["demo ships 1 skill (moxi-demo-send). Place them for claude and codex? "
                      "[y/N] "]
     monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
     code, out = place_settle(sk, capsys, skills=False)
@@ -1591,25 +1593,27 @@ def test_a_yes_at_the_terminal_places_them_and_a_rerun_asks_nothing(sk, capsys, 
 
 def test_an_upgrade_adds_and_removes_skills_as_the_package_says_without_asking(
         sk, capsys, monkeypatch):
-    sk.skills("demo-send", "demo-old")
+    sk.skills("moxi-demo-send", "moxi-demo-old")
     place_settle(sk, capsys, skills=True)
-    sk.skills("demo-send", "demo-new")
+    sk.skills("moxi-demo-send", "moxi-demo-new")
     monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
     code, out = place_settle(sk, capsys)
     assert code == 0, out
-    assert not os.path.lexists(sk.claude("demo-old"))
-    assert os.path.islink(sk.claude("demo-new")) and os.path.islink(sk.claude("demo-send"))
-    assert f"demo: removed skill demo-old for claude ({sk.claude('demo-old')})" in out
+    assert not os.path.lexists(sk.claude("moxi-demo-old"))
+    assert os.path.islink(sk.claude("moxi-demo-new"))
+    assert os.path.islink(sk.claude("moxi-demo-send"))
+    assert (f"demo: removed skill moxi-demo-old for claude "
+            f"({sk.claude('moxi-demo-old')})") in out
     # SKILLS dropped altogether: every placement of the package's goes.
     sk.module()
     code, out = place_settle(sk, capsys)
     assert code == 0, out
     assert sk.place.status("demo") == []
-    assert not os.path.lexists(sk.claude("demo-send"))
+    assert not os.path.lexists(sk.claude("moxi-demo-send"))
 
 
 def test_with_none_placed_an_upgrade_asks_again(sk, capsys, monkeypatch):
-    sk.skills("demo-send")
+    sk.skills("moxi-demo-send")
     place_settle(sk, capsys)                             # nobody there: not placed
     asked = at_terminal(monkeypatch, "n")
     code, out = place_settle(sk, capsys)
@@ -1618,40 +1622,41 @@ def test_with_none_placed_an_upgrade_asks_again(sk, capsys, monkeypatch):
 
 
 def test_a_skill_handed_over_is_skipped_and_counts_as_placed(sk, capsys, monkeypatch):
-    sk.skills("demo-send")
+    sk.skills("moxi-demo-send")
     place_settle(sk, capsys, skills=True)
     sk.place.adopt("demo", "loadout", sk.place.status("demo"), say=lambda line: None)
     monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
     code, out = place_settle(sk, capsys)
     assert code == 0, out
-    assert "demo: demo-send was handed to loadout; skipped" in out
+    assert "demo: moxi-demo-send was handed to loadout; skipped" in out
     assert sk.place.status("demo") == []
     assert len(sk.place.status("loadout")) == 2
-    assert os.path.islink(sk.claude("demo-send"))
+    assert os.path.islink(sk.claude("moxi-demo-send"))
 
 
 def test_a_skill_handed_to_an_owner_since_removed_is_placed_again(sk, capsys, monkeypatch):
-    sk.skills("demo-send")
+    sk.skills("moxi-demo-send")
     place_settle(sk, capsys, skills=True)
     sk.place.adopt("demo", "loadout", sk.place.status("demo"), say=lambda line: None)
     sk.place.remove("loadout", say=lambda line: None)
     monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
     code, out = place_settle(sk, capsys)
     assert code == 0, out
-    assert f"demo: placed skill demo-send for claude ({sk.claude('demo-send')})" in out
+    assert (f"demo: placed skill moxi-demo-send for claude "
+            f"({sk.claude('moxi-demo-send')})") in out
     assert [p.state for p in sk.place.status("demo")] == ["ok", "ok"]
     assert not owned(sk)["handed"]
 
 
 def test_a_skill_handed_on_is_skipped_until_no_owner_holds_it(sk, capsys, monkeypatch):
-    sk.skills("demo-send")
+    sk.skills("moxi-demo-send")
     place_settle(sk, capsys, skills=True)
     sk.place.adopt("demo", "loadout", sk.place.status("demo"), say=lambda line: None)
     sk.place.adopt("loadout", "tidy", sk.place.status("loadout"), say=lambda line: None)
     monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
     code, out = place_settle(sk, capsys)
     assert code == 0, out
-    assert "demo: demo-send was handed to loadout; skipped" in out
+    assert "demo: moxi-demo-send was handed to loadout; skipped" in out
     assert "not placed" not in out and sk.place.status("demo") == []
     sk.place.remove("tidy", say=lambda line: None)
     code, out = place_settle(sk, capsys)
@@ -1666,9 +1671,9 @@ def test_a_broken_harness_row_keeps_its_placements_and_says_why(sk, capsys, monk
     install says the line and goes on: the doctor warns about the row."""
     from moxi.doctor import _run
 
-    sk.skills("demo-send")
+    sk.skills("moxi-demo-send")
     place_settle(sk, capsys, skills=True)
-    claude = sk.claude("demo-send")
+    claude = sk.claude("moxi-demo-send")
     before = owned(sk)["placed"]
     assert str(claude) in before
     monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
@@ -1676,7 +1681,7 @@ def test_a_broken_harness_row_keeps_its_placements_and_says_why(sk, capsys, monk
                                      {"name": "codex"}], by="test")
     code, out = place_settle(sk, capsys)
     assert code == 0, out
-    assert ("demo: demo-send for claude not placed: harness claude has no row in "
+    assert ("demo: moxi-demo-send for claude not placed: harness claude has no row in "
             "harnesses (some rows are skipped: moxi config moxi shows the table)") in out
     assert "removed skill" not in out
     assert os.path.islink(claude) and owned(sk)["placed"] == before
@@ -1687,7 +1692,7 @@ def test_a_broken_harness_row_keeps_its_placements_and_says_why(sk, capsys, monk
     config.set("moxi", "skills.harnesses", ["claude", "codex", "cluade"], by="test")
     code, out = place_settle(sk, capsys)
     assert code == 0, out
-    assert ("demo: demo-send for cluade not placed: harness cluade has no row in "
+    assert ("demo: moxi-demo-send for cluade not placed: harness cluade has no row in "
             "harnesses") in out
     assert "removed skill" not in out and owned(sk)["placed"] == before
     assert [r.name for r in _run._harness_rows()] == ["skills.harnesses cluade"]
@@ -1695,27 +1700,27 @@ def test_a_broken_harness_row_keeps_its_placements_and_says_why(sk, capsys, monk
 
 def test_the_skills_question_names_only_harnesses_with_a_working_row(sk, capsys,
                                                                        monkeypatch):
-    sk.skills("demo-send")
+    sk.skills("moxi-demo-send")
     config.set("moxi", "skills.harnesses", ["claude", "cluade", "codex"], by="test")
     asked = at_terminal(monkeypatch, "y")
     code, out = place_settle(sk, capsys)
     assert code == 0, out
-    assert asked == ["demo ships 1 skill (demo-send). Place them for claude and codex? "
+    assert asked == ["demo ships 1 skill (moxi-demo-send). Place them for claude and codex? "
                      "[y/N] "]
-    assert "demo-send for cluade not placed: harness cluade has no row" in out
+    assert "moxi-demo-send for cluade not placed: harness cluade has no row" in out
 
 
 def test_a_name_taken_out_of_skills_harnesses_removes_its_placements(sk, capsys,
                                                                      monkeypatch):
-    sk.skills("demo-send")
+    sk.skills("moxi-demo-send")
     place_settle(sk, capsys, skills=True)
     monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
     config.set("moxi", "skills.harnesses", ["codex"], by="test")
     code, out = place_settle(sk, capsys)
     assert code == 0, out
-    assert (f"demo: removed skill demo-send for claude ({sk.claude('demo-send')})"
+    assert (f"demo: removed skill moxi-demo-send for claude ({sk.claude('moxi-demo-send')})"
             in out)
-    assert not os.path.lexists(sk.claude("demo-send"))
+    assert not os.path.lexists(sk.claude("moxi-demo-send"))
     assert [p.harness for p in sk.place.status("demo")] == ["codex"]
     # Its only placements on a broken row still count as its own: no question.
     config.set("moxi", "harnesses", [{"name": "codex", "skills": "relative"}], by="test")
@@ -1750,13 +1755,13 @@ def test_a_reinstall_keeps_placements_the_module_did_not_make_from_its_package(
     assert {str(p.path) for p in place.status("demo")} == keep
     before = dict(owned(sk)["placed"])
 
-    sk.skills("demo-send")
+    sk.skills("moxi-demo-send")
     asked = at_terminal(monkeypatch, "y")
     code, out = place_settle(sk, capsys)
     assert code == 0, out
     assert len(asked) == 1                    # none of its own yet: asked
     assert {str(p.path) for p in place.status("demo")} == keep | {
-        str(sk.claude("demo-send")), str(sk.codex("demo-send"))}
+        str(sk.claude("moxi-demo-send")), str(sk.codex("moxi-demo-send"))}
     monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
     for _ in range(2):                        # a re-run, then SKILLS dropped
         code, out = place_settle(sk, capsys)
@@ -1770,15 +1775,15 @@ def test_a_reinstall_keeps_placements_the_module_did_not_make_from_its_package(
 
 
 def test_an_occupant_is_refused_and_exits_1_and_replace_moves_it_aside(sk, capsys):
-    sk.skills("demo-send")
-    mine = sk.claude("demo-send")
+    sk.skills("moxi-demo-send")
+    mine = sk.claude("moxi-demo-send")
     mine.mkdir(parents=True)
     (mine / "SKILL.md").write_text("# mine\n")
     code, out = place_settle(sk, capsys, skills=True)
     assert code == 1
-    assert "demo: demo-send for claude not placed:" in out
+    assert "demo: moxi-demo-send for claude not placed:" in out
     assert (mine / "SKILL.md").read_text() == "# mine\n"
-    assert os.path.islink(sk.codex("demo-send"))
+    assert os.path.islink(sk.codex("moxi-demo-send"))
     code, out = place_settle(sk, capsys, replace=True)
     assert code == 0, out
     assert os.path.islink(mine) and f"demo: moved {mine} to " in out
@@ -1790,7 +1795,7 @@ def test_a_skills_folder_not_on_disk_or_a_broken_ledger_fails_the_step(sk, capsy
                                                                        monkeypatch):
     import importlib.resources
 
-    sk.skills("demo-send")
+    sk.skills("moxi-demo-send")
     real = importlib.resources.files
 
     class Zipped:
@@ -1809,13 +1814,69 @@ def test_a_skills_folder_not_on_disk_or_a_broken_ledger_fails_the_step(sk, capsy
     ledger.write_text("{not json")
     code, out = place_settle(sk, capsys, skills=True)
     assert code == 1 and "demo: skills not placed:" in out
-    assert not os.path.lexists(sk.claude("demo-send"))
+    assert not os.path.lexists(sk.claude("moxi-demo-send"))
+
+
+RULE = ("'b' is not a Moxi skill name: a skill Moxi ships is named moxi-<name>, lower-case "
+        "ASCII letters and digits in words joined by single hyphens, 64 characters at most")
+
+
+def test_a_skill_not_named_moxi_name_is_not_placed_and_the_step_exits_1(sk, capsys,
+                                                                       monkeypatch):
+    sk.skills("moxi-a", "b")
+    asked = at_terminal(monkeypatch, "y")
+    code, out = place_settle(sk, capsys)
+    assert code == 1, out
+    assert asked == ["demo ships 1 skill (moxi-a). Place them for claude and codex? [y/N] "]
+    assert out.count(f"demo: skill b not placed: {RULE}") == 1
+    assert os.path.islink(sk.claude("moxi-a")) and os.path.islink(sk.codex("moxi-a"))
+    assert not os.path.lexists(sk.claude("b")) and not os.path.lexists(sk.codex("b"))
+    assert sorted(p.name for p in sk.place.status("demo")) == ["moxi-a", "moxi-a"]
+    # Answered ahead, or with nothing else to place, the same.
+    code, out = place_settle(sk, capsys, skills=True)
+    assert code == 1 and f"demo: skill b not placed: {RULE}" in out
+    sk.skills("b")
+    code, out = place_settle(sk, capsys, skills=True)
+    assert code == 1 and f"demo: skill b not placed: {RULE}" in out
+    assert sk.place.status("demo") == []
+
+
+def test_a_misnamed_skill_an_earlier_install_placed_is_removed(sk, capsys, monkeypatch):
+    sk.skills("moxi-a", "b")
+    src = sk.pkg / "skills" / "b"
+    place = sk.place
+    place.apply(place.plan("demo", [place.Item(src, h, "b") for h in ("claude", "codex")]),
+                say=lambda line: None)
+    assert os.path.islink(sk.claude("b"))
+    monkeypatch.setattr("builtins.input", lambda q: pytest.fail("asked"))
+    code, out = place_settle(sk, capsys)
+    assert code == 1, out
+    assert f"demo: skill b not placed: {RULE}" in out
+    assert f"demo: removed skill b for claude ({sk.claude('b')})" in out
+    assert not os.path.lexists(sk.claude("b")) and not os.path.lexists(sk.codex("b"))
+    assert sorted(p.name for p in place.status("demo")) == ["moxi-a", "moxi-a"]
+
+
+def test_the_step_counts_folders_only_and_reads_no_skill_md(sk, capsys):
+    """Dot-named folders, `__pycache__` and plain files in `SKILLS` are not skills, and a
+    skill whose `SKILL.md` names it otherwise, or that has none, is still placed: the
+    contract check holds the file before release."""
+    sk.skills("moxi-a")
+    folder = sk.pkg / "skills"
+    for name in (".hidden", "__pycache__"):
+        (folder / name).mkdir()
+    (folder / "README.md").write_text("not a skill\n")
+    (folder / "moxi-b").mkdir()
+    (folder / "moxi-a" / "SKILL.md").write_text("---\nname: other\n---\n")
+    code, out = place_settle(sk, capsys, skills=True)
+    assert code == 0, out
+    assert sorted({p.name for p in sk.place.status("demo")}) == ["moxi-a", "moxi-b"]
 
 
 def test_the_placer_s_apply_is_a_held_span(sk, capsys, monkeypatch):
     """A signal while the placer applies only sets the request: every placement is made
     and recorded, then the step stops before the questions and listeners."""
-    sk.skills("demo-send")
+    sk.skills("moxi-demo-send")
     real = sk.place.apply
 
     def apply(steps, **k):

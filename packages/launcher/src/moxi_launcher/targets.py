@@ -78,8 +78,11 @@ RUNS = "runs"
 LOG_CAP = 8 * 1024 * 1024
 #: The line a cut run log starts with.
 CUT_LINE = "[the launcher cut {size} bytes from the front of this log]\n"
+#: The suffix of a page launch's request file, after its request id: what the page asked
+#: for, which the launch job reads, and deletes when it ends.
+REQUEST_FILE = ".request.json"
 #: The suffixes of a launch's run files, after its request id.
-RUN_FILES = (".log", ".prompt.md")
+RUN_FILES = (".log", ".prompt.md", REQUEST_FILE)
 #: Reasons a row ends `failed` with when a start fails outright (exit 1).
 SPAWN_FAILED = "spawn-failed"
 NO_DELIVERER = "no-deliverer"
@@ -544,6 +547,11 @@ def runs_dir(env: Mapping[str, str] | None = None) -> Path:
     return Layout(MODULE).state_dir(env) / RUNS
 
 
+def request_file(request_id: str, env: Mapping[str, str] | None = None) -> Path:
+    """A page launch's request file, `STATE/runs/<request id>.request.json`."""
+    return runs_dir(env) / f"{request_id}{REQUEST_FILE}"
+
+
 def exit_of(row: store.LaunchRow) -> int:
     """The code a launch exits with for its stored row: 0 unless it ended `failed`; then
     1 for a start or boot that failed, 75 for a lock held too long or comms' daemon not
@@ -875,10 +883,10 @@ def _cut(path: Path, size: int, cap: int) -> None:
 
 __all__ = ["BIND_POLL_S", "BIND_WAIT_S", "COMMS_FAILED", "COMMS_OFFLINE", "CUT_LINE",
            "FAILED_ERRORS", "IDENTITY_TAKEN", "LOG_CAP", "NO_DELIVERER", "OTHER_TARGETS",
-           "RUNS", "RUN_FILES", "SPAWN_FAILED", "TARGETS", "TRY_AGAIN",
+           "REQUEST_FILE", "RUNS", "RUN_FILES", "SPAWN_FAILED", "TARGETS", "TRY_AGAIN",
            "TRY_AGAIN_REASONS", "WRAPPER_EXITS", "Headless", "Launch",
            "NoCommand", "NoSlots", "Slot", "SlotMissing", "SlotTaken", "SlotsBusy",
            "STARTED", "SlotsFailed", "SlotsUnsupported", "Started", "Swept", "Target",
            "Terminal", "UNCONFIRMED",
            "exit_of", "fail", "failed_exit", "find", "get", "named_slot",
-           "run_log", "runs_dir", "settle_bind", "sweep"]
+           "request_file", "run_log", "runs_dir", "settle_bind", "sweep"]

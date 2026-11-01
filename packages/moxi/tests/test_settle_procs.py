@@ -763,7 +763,7 @@ def run():
 
 @pytest.fixture
 def placing(box, monkeypatch):
-    """`box` with module demo shipping skill `demo-send`, and the home the real processes
+    """`box` with module demo shipping skill `moxi-demo-send`, and the home the real processes
     run under also this process's, so the harness folders are one place under tmp."""
     from moxi import place
 
@@ -773,10 +773,10 @@ def placing(box, monkeypatch):
     monkeypatch.setenv("USERPROFILE", str(user))  # what `~` reads on Windows
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     box.env.pop("CLAUDE_CONFIG_DIR", None)
-    box.site.write("moxi_demo/skills/demo-send/SKILL.md", "# send\n")
+    box.site.write("moxi_demo/skills/moxi-demo-send/SKILL.md", "# send\n")
     box.site.write("moxi_demo/handback.py", HANDBACK)
     box.place = place
-    box.targets = sorted(str(user / folder / "skills" / "demo-send")
+    box.targets = sorted(str(user / folder / "skills" / "moxi-demo-send")
                          for folder in (".claude", ".agents"))
     return box
 
@@ -790,7 +790,7 @@ def test_the_settle_child_places_skills_and_a_listener_adopts_them_under_the_cla
     assert done.returncode == 0, done.stdout + done.stderr
     assert box.events(key="raised") == []
     assert box.value("listener", "adopted") == box.targets
-    src = box.site.root / "moxi_demo" / "skills" / "demo-send"
+    src = box.site.root / "moxi_demo" / "skills" / "moxi-demo-send"
     assert all(os.readlink(t) == str(src) for t in box.targets)
     assert box.place.status("demo") == []
     assert sorted(str(p.path) for p in box.place.status("loadout")) == box.targets
@@ -802,8 +802,8 @@ def test_uninstall_hands_back_in_the_teardown_child_and_removes_in_the_parent(pl
     box = placing
     box.installed(DAEMONS=ONE, SKILLS="'skills'", TEARDOWN="'moxi_demo.handback:run'")
     place = box.place
-    src = box.site.root / "moxi_demo" / "skills" / "demo-send"
-    items = [place.Item(src, h, "demo-send") for h in ("claude", "codex")]
+    src = box.site.root / "moxi_demo" / "skills" / "moxi-demo-send"
+    items = [place.Item(src, h, "moxi-demo-send") for h in ("claude", "codex")]
     place.apply(place.plan("demo", items), say=lambda line: None)
     place.adopt("demo", "loadout", place.status("demo"), say=lambda line: None)
     done = parent_run(box, "demo", "--teardown", timeout=30)
@@ -816,4 +816,4 @@ def test_uninstall_hands_back_in_the_teardown_child_and_removes_in_the_parent(pl
     assert not ledger.get("demo", {}).get("placed") and not ledger.get("demo", {}).get("handed")
     assert not ledger["loadout"].get("placed")
     assert sorted(ledger["loadout"]["handed"]) == box.targets
-    assert "removed skill demo-send for claude" in done.stdout
+    assert "removed skill moxi-demo-send for claude" in done.stdout

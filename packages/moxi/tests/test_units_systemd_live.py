@@ -20,6 +20,11 @@ connection on each and exits. One row also writes a hand-made socket unit,
 units with `units.remove`, then stops and deletes anything left under its names, takes any
 `.wants` link to them, resets the failure of every unit under its names, a dropped one
 included, and reloads, and it fails if the unit directory listing changed.
+
+The login row's daemon starts at login: it is enabled, linked from `default.target.wants`,
+and the row starts `default.target` itself, only when every other unit that target pulls in
+already runs (else it is skipped after its install half). It does its live work in a
+fixture of the module's scope, outside the test fence, and asserts on what that saw.
 """
 
 from __future__ import annotations
@@ -785,3 +790,153 @@ def test_a_failed_read_after_a_home_move_starts_the_sockets_then_the_service(
             print("\n" + "\n".join(f"  {line}" for line in report))
             print(f"  unit directory unchanged: {after == before}")
     assert after == before
+
+
+def _others_down(stems: list[str]) -> list[str]:
+    """The units `default.target` pulls in, not under `stems`, that are loaded and not
+    active, so a start of `default.target` would start them too. Read only."""
+    listed = subprocess.run(["systemctl", "--user", "list-dependencies", "default.target",
+                             "--all", "--plain", "--no-pager"],
+                            capture_output=True, text=True, timeout=30)
+    names = sorted({line.strip() for line in listed.stdout.splitlines() if line.strip()}
+                   - {"default.target"})
+    names = [n for n in names
+             if not any(n.startswith((stem + ".", stem + "-")) for stem in stems)]
+    if not names:
+        return []
+    shown = subprocess.run(["systemctl", "--user", "show", "--property=Id,LoadState,"
+                            "ActiveState", "--", *names],
+                           capture_output=True, text=True, timeout=30)
+    out = []
+    for block in shown.stdout.split("\n\n"):
+        props = dict(line.partition("=")[::2] for line in block.splitlines() if line)
+        if props.get("LoadState") == "loaded" and props.get("ActiveState") != "active":
+            out.append(props.get("Id", "?"))
+    return out
+
+
+@pytest.fixture(scope="module")
+def login_run(tmp_path_factory):
+    """The login row's run on the user manager, and what it saw.
+
+    The test fence is function-scoped and keeps a test's writes, `HOME` and the user
+    manager's bus out of reach, so this row does its live work here, in a fixture of the
+    module's scope, which runs outside the fence. It gives itself what the fence and the
+    `site` fixture would: the core's homes in tmp, a site whose fake module is the only
+    distribution discovery sees, and its scripts in tmp. It never raises: what it saw,
+    a failure's traceback included, goes in the dict it returns, and the test asserts on
+    that. Its cleanup is the other socket rows' own."""
+    import traceback
+
+    import moxi.strays
+    from moxi.units import _backend
+
+    from conftest import Site, see_only
+
+    tmp = tmp_path_factory.mktemp("login-row")
+    seen: dict = {"report": []}
+    report = seen["report"]
+    with pytest.MonkeyPatch.context() as mp:
+        home = tmp / "core-home"
+        mp.setenv("MOXI_HOME", str(home / "moxi"))
+        mp.setenv("UV_TOOL_DIR", str(home / "uv-tools"))
+        mp.setattr(moxi.strays, "_user_site", lambda: str(home / "user-site"))
+        (tmp / "site").mkdir()
+        site = Site(tmp / "site")
+        see_only(site.root, mp)
+        mp.syspath_prepend(str(site.root))
+        moxi.modules.reset()
+        row = SocketModule(site, tmp, mp)
+        record = tmp / "handed.jsonl"
+        row.script("shell", SHELL.format(python=sys.executable, record=str(record)))
+        stem = row.stem("shell")
+        service = f"{stem}.service"
+        held = [f"{stem}.socket", f"{stem}-1.socket"]
+        link = row.dir / "default.target.wants" / service
+        seen.update(service=service, held=held, before=_listing(row.dir))
+        try:
+            with _backend.use(SystemdBackend()):
+                row.declare({"shell": {"command": f"moxi-{row.module}-shell",
+                                       "doc": "the throwaway login shell",
+                                       "socket": {"setting": "port",
+                                                  "addresses": ["127.0.0.1", "127.0.0.2"],
+                                                  "start": "login"}}})
+                seen["applied"] = [a.ok for a in row.apply()]
+                seen["apply_lines"] = list(row.lines)
+                seen["link"] = link.is_symlink()
+                seen["installed"] = row.show(service, "UnitFileState", "ActiveState",
+                                             "Wants", "After")
+                daemon, sock = row.status("shell")
+                seen["status"] = (daemon.enabled, sock.state)
+                report.append(f"after install: link {seen['link']}, {seen['installed']}, "
+                              f"status enabled {daemon.enabled}, socket {sock.state}")
+
+                for unit in (service, *held):
+                    row.fence.run("stop", unit)
+                seen["stopped"] = [row.show(u, "ActiveState")["ActiveState"]
+                                   for u in (*held, service)]
+                count = len(_records(record))
+                seen["others"] = _others_down([stem])
+                report.append(f"stopped: {dict(zip((*held, service), seen['stopped']))}; "
+                              f"other units default.target would start: {seen['others']}")
+                if not seen["others"]:
+                    # What a login does, run by hand. The core's fence names only its
+                    # own units, so this start goes to systemctl directly.
+                    ran = subprocess.run(["systemctl", "--user", "start", "default.target"],
+                                         capture_output=True, text=True, timeout=60)
+                    seen["started"] = ran.returncode == 0
+                    report.append(f"start default.target: exit {ran.returncode} "
+                                  f"{ran.stderr.strip()!r}")
+                    seen["service_state"] = row.wait(service, "active")
+                    seen["entered"] = {u: int(row.show(u, "ActiveEnterTimestampMonotonic")[
+                        "ActiveEnterTimestampMonotonic"]) for u in (*held, service)}
+                    report.append(f"active from (monotonic us): {seen['entered']}")
+                    deadline = time.monotonic() + 15
+                    while len(_records(record)) == count and time.monotonic() < deadline:
+                        time.sleep(0.1)
+                    seen["handed"] = _records(record)[count:]
+                    report.append(f"handed to the service: {seen['handed']}")
+                    seen["answers"] = [_ask(a, row.port) for a in ("127.0.0.1", "127.0.0.2")]
+                seen["removed"] = [a.ok for a in row.remove()]
+                seen["link_after_remove"] = link.exists() or link.is_symlink()
+        except Exception:
+            seen["error"] = traceback.format_exc()
+        finally:
+            _scrub(row.dir, [row.stem("")[:-1]], row.fence)
+            seen["after"] = _listing(row.dir)
+            moxi.modules.reset()
+            drop_modules(site.packages)
+    return seen
+
+
+def test_a_login_socket_daemon_starts_with_default_target_on_this_boxs_user_manager(
+        login_run, capsys):
+    """A daemon of two addresses under `start = "login"`: after install its service is
+    enabled, linked from `default.target.wants`; with the service and its sockets
+    stopped, a start of `default.target` starts both sockets and then the service, which
+    is handed both (`LISTEN_FDS=2`). The start of `default.target` runs only when every
+    other unit it pulls in already runs, so it starts nothing but this row's units;
+    otherwise the row is skipped after its install half, naming the units."""
+    seen = login_run
+    with capsys.disabled():
+        print("\n" + "\n".join(f"  {line}" for line in seen["report"]))
+        print(f"  unit directory unchanged: {seen['after'] == seen['before']}")
+    assert "error" not in seen, seen["error"]
+    service, held = seen["service"], seen["held"]
+    assert all(seen["applied"]), seen["apply_lines"]
+    assert seen["link"] and seen["installed"]["UnitFileState"] == "enabled"
+    assert all(u in seen["installed"]["Wants"].split()
+               and u in seen["installed"]["After"].split() for u in held)
+    assert seen["status"] == (True, "active")
+    assert seen["stopped"] == ["inactive"] * 3
+    assert all(seen["removed"]) and not seen["link_after_remove"]
+    assert seen["after"] == seen["before"]
+    if seen["others"]:
+        pytest.skip(f"a start of default.target would also start {seen['others']}")
+    assert seen["started"] and seen["service_state"] == "active"
+    entered = seen["entered"]
+    assert all(0 < entered[u] <= entered[service] for u in held), entered
+    # Both sockets, in the order the manager gives them (not always `Sockets=`'s).
+    assert [(h["fds"], sorted(h["names"].split(":"))) for h in seen["handed"]] \
+        == [(2, sorted(held))]
+    assert seen["answers"] == [b"ok\n"] * 2

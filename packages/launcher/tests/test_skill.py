@@ -1,5 +1,5 @@
-"""The shipped handoff skill: where the announcement says, named as its folder, and saying
-what the handoff code does."""
+"""The shipped moxi-handoff skill: where the announcement says, named as its folder, and
+saying what the handoff code does."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from moxi_launcher import handoffs, module
 
 def skill_text() -> str:
     folder = resources.files("moxi_launcher").joinpath(module.SKILLS)
-    return folder.joinpath("handoff", "SKILL.md").read_text(encoding="utf-8")
+    return folder.joinpath("moxi-handoff", "SKILL.md").read_text(encoding="utf-8")
 
 
 def test_the_skill_ships_in_the_skills_folder_with_its_name_and_description():
@@ -19,7 +19,7 @@ def test_the_skill_ships_in_the_skills_folder_with_its_name_and_description():
     front = re.match(r"---\n(.*?)\n---\n", text, re.S)
     assert front, "the skill opens with its front matter"
     fields = dict(line.split(": ", 1) for line in front.group(1).splitlines())
-    assert fields["name"] == "handoff"
+    assert fields["name"] == "moxi-handoff"
     assert fields["description"]
 
 

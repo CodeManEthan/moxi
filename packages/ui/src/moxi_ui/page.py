@@ -124,6 +124,7 @@ _MODULE = Out("table", items={
     "name": Out("string"), "state": Out("string"), "reason": Out("string"),
     "version": Out("string"), "summary": Out("string"), "page": Out("bool"),
     "mounted": Out("bool"), "export_error": _STRING, "budget": _BUDGET,
+    "confirmed": Out("list", items=Out("string")),
     "components": Out("list", items=_COMPONENT),
     "refused": Out("list", items=Out("table", items={"name": Out("string"),
                                                       "reason": Out("string")})),
