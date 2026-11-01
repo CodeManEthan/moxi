@@ -121,7 +121,7 @@ PRIVATE_TMP = re.compile(r"^/private/tmp(/|$)", re.I)
 # Rule S's openers besides `$(`, `<(`, `>(` and the backtick.
 BRACE_OPENER = re.compile(r"\$\{[ \t\n|]")
 # Rule C's second text: a `$` right before a quote, then every quote and backslash, deleted.
-T3_DELETE = re.compile(r"\$(?=['\"])|['\"\\]")
+QUOTES_DELETED = re.compile(r"\$(?=['\"])|['\"\\]")
 # A shell name, any case, not preceded by a letter, digit, `_`, `.` or `-`, not followed
 # by a letter, digit or `_`.
 SHELL_NAME = re.compile(r"(?<![A-Za-z0-9_.-])(bash|sh|zsh|dash|ksh|mksh|ash|hush|rbash)"
@@ -260,7 +260,7 @@ def openers(raw: str) -> int:
 def shell_c(raw: str) -> bool:
     """Rule C's gate: a shell name in the raw text or the text with `$`-before-quote,
     quotes and backslashes deleted, and a -c word in either."""
-    texts = (raw, T3_DELETE.sub("", raw))
+    texts = (raw, QUOTES_DELETED.sub("", raw))
     return (any(SHELL_NAME.search(t) for t in texts)
             and any("c" in m.group(0) for t in texts for m in C_WORD.finditer(t)))
 
@@ -268,8 +268,9 @@ def shell_c(raw: str) -> bool:
 def c_removal(raw: str) -> bool:
     """Rule C's removal word, in either of the gate's texts or the second with braces
     deleted."""
-    t3 = T3_DELETE.sub("", raw)
-    return any(C_REMOVAL.search(t) for t in (raw, t3, t3.replace("{", "").replace("}", "")))
+    stripped = QUOTES_DELETED.sub("", raw)
+    unbraced = stripped.replace("{", "").replace("}", "")
+    return any(C_REMOVAL.search(t) for t in (raw, stripped, unbraced))
 
 
 def rules(raw: str, cwd: str | None, home: str | None) -> str:

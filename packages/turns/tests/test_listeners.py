@@ -251,8 +251,8 @@ def test_a_row_longer_than_three_items_loads_its_first_three_with_a_notice():
 
 
 def test_a_listener_written_for_the_first_events_reads_the_longer_event():
-    # Every field slot 8 adds trails with a default, so the old construction still works
-    # and the new fields read None.
+    # Every field the after-tool and usage events add trails with a default, so the old
+    # construction still works and the new fields read None.
     ev = event("prompt")
     assert (ev.cwd, ev.text, ev.origin, ev.agent_id, ev.record_path, ev.usage,
             ev.received_at, ev.payload, ev.kind, ev.is_error, ev.point, ev.tool,
