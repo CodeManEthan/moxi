@@ -90,7 +90,7 @@ CROSSING_BUSY_S = 0.1
 
 RELAUNCH_LINE = ("This launch recycles at its limit: at your next pause point, if you are "
                  "mid-work with more to do, write a handoff and run `moxi launcher relaunch "
-                 "--self --handoff <file>` (handoff skill, Recycling yourself).")
+                 "--self --handoff <file>` (moxi-handoff skill, Recycling yourself).")
 COMPACT_LINE = ("This launch compacts at its limit: the launcher compacts this session at "
                 "its next idle.")
 

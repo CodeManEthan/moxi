@@ -1,5 +1,5 @@
 ---
-name: handoff
+name: moxi-handoff
 description: Write a handoff, the short file the next session of your seat reads first. Use when you are asked to write a handoff or hand off, when you stop with work left for the next session of the same seat, when the context notice says this launch recycles at its limit, and when your posture reads relaunched.
 ---
 

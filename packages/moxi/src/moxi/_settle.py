@@ -34,7 +34,8 @@ Skills, install questions and the `moxi.installs` listeners come after the `fina
 (`_later_steps`), in that order, so a listener sees the run's units and placements.
 Skills are placed by `moxi.place` in this process, its `apply` in a held span; the
 module's skills are asked about only while it has no placement, and a placement refused
-or failed makes the step exit 1. They
+or failed makes the step exit 1, as does a skill whose folder name is not a skill name
+(`moxi-<name>`), which is not placed while the module's others are. They
 run unless the move refused (other than for an old directory that is a link to a
 relative path), `SETUP` failed, or steps 1 to 3 raised; a unit the plan refused, or a
 start the `finally` couldn't make, leaves them to run and the step exits 1. Each install
@@ -864,7 +865,8 @@ def _skills(step: Settle) -> bool:
     there, so a broken row never removes skills and never fails the step (the doctor
     warns about it); a name taken out of the setting removes them. `apply` runs in a
     held span. Returns False when the skills can't be read or a placement was refused
-    for another cause or failed."""
+    for another cause or failed, or when a skill's folder name is not a skill name
+    (`moxi.names.is_skill_name`): that skill alone is not placed, and its line says so."""
     from . import place
 
     module, found = step.module, step.found
@@ -876,6 +878,8 @@ def _skills(step: Settle) -> bool:
         if skills is None:
             say(f"{module}: skills not placed: {source}", err=True)
             return False
+        misnamed = _misnamed(module, skills)
+        skills = [name for name in skills if name not in misnamed]
         # Every name, with a row or not: see above.
         harnesses = list(dict.fromkeys(place._core_settings()["skills.harnesses"]))
         usable = place.chosen()[0] or harnesses  # the question names only working rows
@@ -896,21 +900,40 @@ def _skills(step: Settle) -> bool:
         or (s.cause == "harness" and (s.item.harness, s.item.kind, s.item.name) in labels)
         for s in steps)
     if not own and (not items or not skills_wanted(step, skills, usable)):
-        return True
+        return not misnamed
     with held():
         done = place.apply(steps, replace=step.replace,
                            say=lambda line: say(f"{module}: {line}"))
-    return _skills_report(module, steps, done, step.replace)
+    return _skills_report(module, steps, done, step.replace) and not misnamed
+
+
+def _misnamed(module: str, skills: list[str]) -> set[str]:
+    """The skills in `skills` whose folder name is not a skill name, each said in one
+    line. They are not placed and make no item, so a placement of one an earlier install
+    made is removed as that of a dropped skill is, and the step fails. Only the folder
+    name is read: the contract check holds a skill's `SKILL.md` before release."""
+    from . import names
+
+    misnamed = set()
+    for name in skills:
+        try:
+            names.check_skill_name(name)
+        except ValueError as exc:
+            say(f"{module}: skill {name} not placed: {exc}", err=True)
+            misnamed.add(name)
+    return misnamed
 
 
 def _skill_folders(found) -> tuple[list[str] | None, object]:
-    """The skill names in `found`'s `SKILLS` folder (its subfolders, sorted, without
-    `__pycache__` and names that start with a dot) and the folder, read through
+    """The skill names in `found`'s `SKILLS` folder (its subfolders `moxi.names.
+    is_skill_folder` counts, sorted) and the folder, read through
     `importlib.resources`; or None and the line that says why they can't be read. A
     package not on disk (in a zip, say) is refused, since a harness reads a skill from a
     folder."""
     import importlib.resources
     from pathlib import Path
+
+    from . import names
 
     if found.skills is None:
         return [], None
@@ -922,12 +945,11 @@ def _skill_folders(found) -> tuple[list[str] | None, object]:
         return None, (f"package {found.package} is not a folder on disk, so its skills "
                       f"can't be placed")
     try:
-        names = sorted(entry.name for entry in folder.iterdir()
-                       if entry.is_dir() and not entry.name.startswith(".")
-                       and entry.name != "__pycache__")
+        skills = sorted(entry.name for entry in folder.iterdir()
+                        if names.is_skill_folder(entry.name) and entry.is_dir())
     except OSError as exc:
         return None, f"SKILLS folder {folder} can't be read ({exc.strerror or exc})"
-    return names, folder
+    return skills, folder
 
 
 def _skills_report(module: str, steps, done, replace: bool) -> bool:

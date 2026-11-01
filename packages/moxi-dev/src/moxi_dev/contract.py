@@ -34,9 +34,18 @@ finding names them:
    module may take a core verb or a name the core keeps for itself), the console
    scripts (a module never declares `moxi`, which the core alone declares; its others
    are named `moxi-<name>-<part>`), the announcement, the `CLI` target's `argv` and
-   `prog` parameters and the `SETTINGS` schema. Each name of `moxi.modules.KNOWN` the
-   announcement defines is read as a literal and held to the checks `moxi.modules.load`
-   runs; a name it leaves out passes, as it takes its default.
+   `prog` parameters, the `SETTINGS` schema and the skills in the `SKILLS` folder. Each
+   name of `moxi.modules.KNOWN` the announcement defines is read as a literal and held to
+   the checks `moxi.modules.load` runs; a name it leaves out passes, as it takes its
+   default. The `SKILLS` folder, beside the announcement in its package and written
+   with `/` (a backslash fails, as POSIX reads it as part of a name), must be there;
+   each skill in it (a subfolder `moxi.names.is_skill_folder` counts) is named
+   `moxi-<name>` and holds a `SKILL.md` whose frontmatter `name:` is the folder name.
+   A symlink along the way (the folder, a skill, its `SKILL.md`) is followed. In a staged
+   run the link's target is read against the link's folder and looked up in the index,
+   so the check counts and reads what a checkout of the commit would; a link whose
+   target isn't committed, that points outside the package or that loops is a finding
+   naming the link.
 8. A write site not listed. In `src/`, every call that writes a file itself (`open`,
    `io.open`, `os.fdopen` or a path's `.open` in a write mode, `os.open` with a write
    flag, `.write_text`, `.write_bytes`, `os.replace`, `sqlite3.connect`) must have its
@@ -72,6 +81,7 @@ another module's internals, and with no announcement to name its `INTERNAL_ENV`,
 from __future__ import annotations
 
 import ast
+import posixpath
 import re
 import sys
 from collections.abc import Iterable, Mapping, Sequence
@@ -79,7 +89,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from moxi import names
-from moxi.modules import KNOWN, _check, _TooNew
+from moxi.modules import KNOWN, _check, _relative, _TooNew
 
 #: The distribution and import name of the core.
 CORE = names.HARNESS
@@ -248,9 +258,34 @@ class _WorkTree:
         except OSError:
             return None
 
+    def folder(self, path: str) -> list[str] | str:
+        """The names of the subfolders of folder `path`, as the file system has them;
+        else `missing` or `file`."""
+        here = self.root / path
+        if not here.is_dir():
+            return "file" if here.exists() else "missing"
+        try:
+            return sorted(entry.name for entry in here.iterdir() if entry.is_dir())
+        except OSError:
+            return "missing"
+
+    def link_problem(self, path: str) -> tuple[str, str] | None:
+        """The file system follows every symlink itself, so none is reported here."""
+        return None
+
 
 class _IndexTree:
-    """The files of git's index: what the next commit holds."""
+    """The files of git's index: what the next commit holds.
+
+    A symlink is followed as the file system would follow it in a checkout of that
+    commit: its blob is the target, read against the link's folder and looked up in the
+    index, so a symlinked folder or file reads the same here as in the working tree.
+
+    `files()` lists regular files only. A symlink to a file is followed when the skills
+    check reads it, but the other checks don't scan it here, while the working tree's
+    listing includes it."""
+
+    _HOPS = 40          # the most symlinks one path may pass through, as on Linux
 
     def __init__(self, root: Path):
         if not root.is_dir():
@@ -261,6 +296,7 @@ class _IndexTree:
         self.root = root
         out = _git(root, "ls-files", "-z", "--stage", staged=True)
         self.blobs: dict[str, str] = {}
+        self.links: dict[str, str] = {}
         self.unmerged: list[str] = []
         for entry in out.decode("utf-8", "surrogateescape").split("\0"):
             if not entry:
@@ -271,21 +307,93 @@ class _IndexTree:
                 self.unmerged.append(path)
             elif mode in ("100644", "100755"):
                 self.blobs[path] = sha
+            elif mode == "120000":
+                self.links[path] = sha
         self.paths = sorted(self.blobs)
+        self.dirs = {str(parent) for p in (*self.blobs, *self.links)
+                     for parent in PurePosixPath(p).parents if str(parent) != "."}
         self._cache: dict[str, bytes] = {}
+        self._targets: dict[str, str] = {}
 
     def files(self) -> list[str]:
         return self.paths
 
+    def _target(self, link: str) -> str:
+        if link not in self._targets:
+            raw = _git(self.root, "cat-file", "blob", self.links[link], staged=True)
+            self._targets[link] = raw.decode("utf-8", "surrogateescape")
+        return self._targets[link]
+
+    def _resolve(self, path: str) -> tuple[str | None, tuple[str, str] | None]:
+        """`path` with every symlink along it followed, as `(path, None)`; or `(None,
+        (link, why))` naming the link that can't be followed. A path that isn't in the
+        index comes back as it is, for the caller to find missing."""
+        parts = path.split("/")
+        hops = 0
+        at = 0
+        while at < len(parts):
+            here = "/".join(parts[:at + 1])
+            if here not in self.links:
+                at += 1
+                continue
+            target = self._target(here)
+            hops += 1
+            if hops > self._HOPS:
+                return None, (here, "is a symlink in a loop")
+            joined = posixpath.normpath(posixpath.join(posixpath.dirname(here), target))
+            if target.startswith("/") or joined == ".." or joined.startswith("../"):
+                return None, (here, f"is a symlink to {target}, outside the package, so "
+                                    "the commit doesn't carry what it points at")
+            if joined != "." and joined not in self.blobs and joined not in self.links \
+                    and joined not in self.dirs:
+                return None, (here, f"is a symlink whose target, {target}, isn't "
+                                    "committed")
+            parts = ([] if joined == "." else joined.split("/")) + parts[at + 1:]
+            at = 0
+        return "/".join(parts), None
+
+    def link_problem(self, path: str) -> tuple[str, str] | None:
+        """The symlink on the way to `path` that can't be followed in the index, as
+        `(link, why)`; else None."""
+        return self._resolve(path)[1]
+
+    def _entries(self, path: str) -> Iterable[str]:
+        prefix = f"{path}/" if path else ""
+        for p in (*self.blobs, *self.links):
+            if p.startswith(prefix):
+                yield p[len(prefix):]
+
+    def folder(self, path: str) -> list[str] | str:
+        """The names of the subfolders of folder `path`, each the first part of a path
+        under it that has a file below it, or a symlink in it to such a folder (or one
+        that can't be followed, for the caller to report); else `missing` or `file`."""
+        found, _ = self._resolve(path)
+        if found is None:
+            return "missing"
+        if found in self.blobs:
+            return "file"
+        under = list(self._entries(found))
+        if not under:
+            return "missing"
+        names = {p.split("/", 1)[0] for p in under if "/" in p}
+        for name in under:
+            link = f"{found}/{name}" if found else name
+            if "/" not in name and link in self.links:
+                there, problem = self._resolve(link)
+                if problem is not None or there in self.dirs:
+                    names.add(name)
+        return sorted(names)
+
     def read(self, path: str) -> bytes | None:
-        if path not in self.blobs:
+        found, _ = self._resolve(path)
+        if found is None or found not in self.blobs:
             return None
         if not self._cache:
             self._load()
-        if path not in self._cache:
-            self._cache[path] = _git(self.root, "cat-file", "blob", self.blobs[path],
-                                     staged=True)
-        return self._cache[path]
+        if found not in self._cache:
+            self._cache[found] = _git(self.root, "cat-file", "blob", self.blobs[found],
+                                      staged=True)
+        return self._cache[found]
 
     def _load(self) -> None:
         # One `git cat-file --batch` for every blob the check may read.
@@ -305,6 +413,40 @@ class _IndexTree:
 
 
 # --- requirements and names ----------------------------------------------------------------
+
+def _skill_md_name(raw: bytes) -> tuple[int, str | None, str | None]:
+    """The `name:` a skill's `SKILL.md` gives, as `(line, name, None)`, or `(line, None,
+    problem)` when it gives none the check can read.
+
+    The file opens with a `---` line (after a UTF-8 byte order mark, if any) and its
+    frontmatter runs to the next `---` line; lines may end in CRLF. The frontmatter holds
+    one `name:` line at column 0, whose value is stripped of spaces and of one pair of
+    matching quotes. The frontmatter is not read as YAML, so a name written another way
+    (with a comment after it, say, or as a block scalar) is not the folder name."""
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return 0, None, "is not UTF-8"
+    lines = text.replace("\r\n", "\n").split("\n")
+    if lines[0].rstrip(" \t") != "---":
+        return 1, None, "does not open with a --- line"
+    for end, line in enumerate(lines[1:], start=1):
+        if line.rstrip(" \t") == "---":
+            break
+    else:
+        return 1, None, "opens its frontmatter with --- and never closes it"
+    found = [(n + 1, line) for n, line in enumerate(lines[1:end], start=1)
+             if line.startswith("name:")]
+    if not found:
+        return 1, None, "has no name: line in its frontmatter"
+    if len(found) > 1:
+        return found[1][0], None, (f"has {len(found)} name: lines in its frontmatter "
+                                   f"(lines {', '.join(str(n) for n, _ in found)})")
+    line_no, line = found[0]
+    value = line[len("name:"):].strip(" \t")
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        value = value[1:-1]
+    return line_no, value, None
 
 def _normalize(name: str) -> str:
     """A distribution or extra name as packaging compares them."""
@@ -964,6 +1106,7 @@ class _Repo:
         self._check_announcement_values(source)
         self._check_cli_target(source)
         self._check_settings(source)
+        self._check_skills(source)
 
     def _check_announcement_values(self, source: _Source) -> None:
         """The checks `moxi.modules.load` runs, over the literals read from the source."""
@@ -1025,6 +1168,67 @@ class _Repo:
             self.add(path, 0, "7", f"the SETTINGS schema cannot be read ({exc})")
         except ConfigError as exc:
             self.add(path, 0, "7", f"the SETTINGS schema does not hold: {exc}")
+
+    def _check_skills(self, source: _Source) -> None:
+        """The skills in the `SKILLS` folder, read from the tree as the settle step lists
+        them once installed: the folder beside the announcement, in its package, as
+        `importlib.resources` finds it. A `SKILLS` the announcement check refuses is left
+        to that check."""
+        resource = self.ann("SKILLS")
+        if not isinstance(resource, str) or not _relative(resource):
+            return
+        if "\\" in resource:
+            # The settle step hands the value to importlib.resources as it is, and on POSIX
+            # a backslash is part of a name there, not a separator.
+            self.add(source.path, 0, "7", f"SKILLS names {resource!r}, which has a "
+                                          "backslash; write the path with /, which "
+                                          "resolves the same on every platform")
+            return
+        parts = [p for p in resource.split("/") if p not in ("", ".")]
+        folder = str(PurePosixPath(source.path).parent.joinpath(*parts))
+        if self._link_problem(folder):
+            return
+        listed = self.tree.folder(folder)
+        if listed == "missing":
+            self.add(source.path, 0, "7", f"SKILLS names {resource!r}, and {folder} does "
+                                          "not exist")
+            return
+        if listed == "file":
+            self.add(source.path, 0, "7", f"SKILLS names {resource!r}, and {folder} is a "
+                                          "file, not a folder")
+            return
+        for name in listed:
+            if not names.is_skill_folder(name):
+                continue
+            where = f"{folder}/{name}"
+            if self._link_problem(where):
+                continue
+            try:
+                names.check_skill_name(name)
+            except ValueError as exc:
+                self.add(where, 0, "7", f"is a skill folder, and {exc}")
+            path = f"{where}/SKILL.md"
+            if self._link_problem(path):
+                continue
+            raw = self.tree.read(path)
+            if raw is None:
+                self.add(where, 0, "7", "is a skill folder with no SKILL.md")
+                continue
+            line, said, problem = _skill_md_name(raw)
+            if problem is not None:
+                self.add(path, line, "7", f"{problem}, so it can't name the skill {name}")
+            elif said != name:
+                self.add(path, line, "7", f"names the skill {said!r}; its name: is the "
+                                          f"folder's name, {name}")
+
+    def _link_problem(self, path: str) -> bool:
+        """Report the symlink on the way to `path` that the tree can't follow, if any."""
+        problem = self.tree.link_problem(path)
+        if problem is None:
+            return False
+        link, why = problem
+        self.add(link, 0, "7", why)
+        return True
 
     # -- the status line segment -------------------------------------------------------------
 
