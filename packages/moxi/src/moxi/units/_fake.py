@@ -441,7 +441,8 @@ class FakeBackend:
         elif act in ("start", "stop", "enable", "disable"):
             sockets = self._socket_of(unit)
             if sockets and act in ("enable", "disable"):
-                # A service with no install section: the sockets carry the enable.
+                # The socket units first; then a service with no install section is
+                # started or stopped, and one with an install section enabled or disabled.
                 service = (("start" if act == "enable" else "stop",) if self._static(unit)
                            else (act, "--now"))
                 run(act, "--now", *sockets) and run(*service, *unit.ids[:1])

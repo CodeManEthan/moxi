@@ -508,7 +508,8 @@ class Backend(Protocol):
         service, whatever `upgrade` says; a new daemon with a new set gets no stop. The
         login link follows the new text: a service whose old text had an install section
         and whose new one has none is disabled (without `--now`), so its old login link
-        goes, and a changed daemon whose new text has one is always enabled."""
+        goes, and a changed daemon whose new text has one is enabled unless it is declared
+        `enabled = false`."""
         ...
 
     # -- acting and reading ----------------------------------------------------------------
