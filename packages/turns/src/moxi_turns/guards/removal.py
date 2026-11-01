@@ -1,6 +1,8 @@
 """turns' removal guard: refuse, before it runs, a shell command that Claude Code's own
 dangerous-removal check would stop for the user's approval even in bypass mode, where the
-agent would sit blocked until someone clicks.
+agent would sit blocked until someone clicks. Claude Code 2.1.316 refuses such a stop by
+itself after about two minutes (1:45 on its countdown) when nobody answers, so an
+unattended agent loses that long and then the command.
 
 Coarse text rules, no shell parsing. A command is refused when any rule matches, and the
 reasons are joined in the order T, W, S, C:
@@ -45,9 +47,10 @@ REASON_T = (
     "Refused before it ran (turns removal guard). This command's text mentions a directory "
     "change (cd, pushd, popd or chdir), a removal (rm or rmdir) and a `*`. After a cd, "
     "Claude Code can't tell which directory a relative `*` means, so it stops for the user's "
-    "approval even in bypass mode, and you would sit blocked until they click. This guard "
-    "checks text only, so it also refuses when those words are just in a string or in file "
-    "content. Two fixes:\n"
+    "approval even in bypass mode: you would sit blocked until they click, or, with nobody "
+    "there, about two minutes before Claude Code refuses it anyway. This guard checks text "
+    "only, so it also refuses when those words are just in a string or in file content. "
+    "Two fixes:\n"
     "(1) Drop the cd and use full paths, such as `rm -rf ~/tmp/x/*` for a scratch directory "
     "under your home, and `git -C DIR`, `tar -C DIR` or `make -C DIR` for the other steps. "
     "Don't point rm at your working directory or a directory above it: Claude Code stops on "
@@ -79,9 +82,10 @@ REASON_C = (
     "Refused before it ran (turns removal guard, shell -c rule). This command runs a shell "
     "with -c (bash, sh, zsh and the like), and its text also has rm or rmdir. Claude Code "
     "often can't check such a script for dangerous removals, and then it stops for the "
-    "user's approval even in bypass mode, and you would sit blocked until they click. This "
-    "guard checks text only, so it also refuses when the rm is outside the script or just in "
-    "a string. Fix: write the script to a file with the Write tool (for example "
+    "user's approval even in bypass mode: you would sit blocked until they click, or, with "
+    "nobody there, about two minutes before Claude Code refuses it anyway. This guard checks "
+    "text only, so it also refuses when the rm is outside the script or just in a string. "
+    "Fix: write the script to a file with the Write tool (for example "
     "`~/tmp/<your-task>/run.sh`, a scratch directory under your home) and run it with "
     "`bash ~/tmp/<your-task>/run.sh ARGS`. Keep any wrapper in front, as in `timeout 60 bash "
     "/full/path/run.sh` or `env -i PATH=/usr/bin:/bin bash /full/path/run.sh`, and pass "
