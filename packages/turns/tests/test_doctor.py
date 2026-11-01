@@ -390,8 +390,8 @@ def test_a_listed_module_not_installed_and_a_slow_import_warn(turns_env, registr
     assert slow.state == "warn" and "over 10 ms" in slow.detail
 
 
-@pytest.mark.parametrize("installed, warned", [("2.1.316 (Claude Code)", True),
-                                               ("2.1.289 (Claude Code)", False),
+@pytest.mark.parametrize("installed, warned", [("2.1.320 (Claude Code)", True),
+                                               ("2.1.316 (Claude Code)", False),
                                                ("2.0.99 (Claude Code)", False)])
 def test_the_removal_guard_warns_on_a_newer_claude_code(turns_env, registry, monkeypatch,
                                                         installed, warned):
@@ -400,7 +400,7 @@ def test_the_removal_guard_warns_on_a_newer_claude_code(turns_env, registry, mon
     from moxi_turns import claude_setup
     from moxi_turns.guards import removal
 
-    assert removal.CHECKED_CLAUDE == "2.1.289"
+    assert removal.CHECKED_CLAUDE == "2.1.316"
     monkeypatch.setattr(claude_setup, "_claude", lambda: "/x/claude")
     monkeypatch.setattr(claude_setup, "_run", lambda argv: subprocess.CompletedProcess(
         argv, 0, installed + "\n", ""))
@@ -410,7 +410,7 @@ def test_the_removal_guard_warns_on_a_newer_claude_code(turns_env, registry, mon
         in rows["guards"].detail
     row = rows.get("guard turns.removal")
     if warned:
-        assert row.state == "warn" and "2.1.316" in row.detail and "2.1.289" in row.detail
+        assert row.state == "warn" and "2.1.320" in row.detail and "2.1.316" in row.detail
         assert row.fix == "moxi config set turns guards.removal false"
     else:
         assert row is None

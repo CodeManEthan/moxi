@@ -230,7 +230,7 @@ def test_the_four_reasons_join_in_order_and_name_no_ones_paths():
 
 
 def test_the_checked_claude_code_version_is_a_constant():
-    assert removal.CHECKED_CLAUDE == "2.1.289"
+    assert removal.CHECKED_CLAUDE == "2.1.316"
 
 
 # -- no-nested-agents ----------------------------------------------------------------------
