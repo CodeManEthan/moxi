@@ -399,12 +399,17 @@ class HarnessAdapter:
         self._stop.set()
         self._wake.set()
         self.stop_before_unbind()
+        # The claim file goes before the daemon connection closes. This adapter is its
+        # claim's root and still alive at its own release, so only the file being gone
+        # tells the daemon the session ended: the release that the close starts then
+        # revokes the session's tool token. A daemon that is down here finds the file
+        # gone at its next boot instead.
+        self.claims.close()
         with self._lock:                   # after a bind that saw no stop, or none
             daemon = self._daemon
         if daemon is not None:
             daemon.close()                 # closing this IS the deregistration
         self.stop_after_unbind()
-        self.claims.close()
 
     # ------------------------------------------------------------------ daemon side
     def _on_push(self, method: str, params: dict) -> None:

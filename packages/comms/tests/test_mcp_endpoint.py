@@ -348,6 +348,68 @@ def test_a_get_is_405_and_holds_no_stream_open(serving, sessions):
     assert (status, headers.get("allow"), body) == (405, "POST", b"")
 
 
+MODERN = "2026-07-28"
+
+
+def modern(method: str, rid: int = 7, **params) -> tuple[dict, dict]:
+    """A request at the 2026-07-28 protocol, which carries its version in each request
+    (no initialize): its body and its routing headers."""
+    body = {"jsonrpc": "2.0", "id": rid, "method": method, "params": {**params, "_meta": {
+        "io.modelcontextprotocol/protocolVersion": MODERN,
+        "io.modelcontextprotocol/clientCapabilities": {},
+        "io.modelcontextprotocol/clientInfo": {"name": "test", "version": "0"}}}}
+    return body, {"MCP-Protocol-Version": MODERN, "Mcp-Method": method}
+
+
+def post_modern(daemon, method: str, *, token, timeout=10.0, **params):
+    body, extra = modern(method, **params)
+    conn = http.client.HTTPConnection("127.0.0.1", port_of(daemon), timeout=timeout)
+    headers = {"Content-Type": "application/json",
+               "Accept": "application/json, text/event-stream",
+               "Authorization": f"Bearer {token}", **extra}
+    try:
+        conn.request("POST", "/mcp", body=json.dumps(body).encode(), headers=headers)
+        resp = conn.getresponse()
+        return (resp.status, {k.lower(): v for k, v in resp.getheaders()}, resp.read(),
+                resp.will_close)
+    finally:
+        conn.close()
+
+
+@pytest.mark.timed
+def test_subscriptions_listen_is_refused_at_once_as_json_and_holds_nothing_open(
+        serving, sessions):
+    daemon = serving(tools=whoami_tool)
+    s = sessions()
+    s.bind()
+    started = time.monotonic()
+    # What Claude Code 2.1.316 asks for: the tool list's changes.
+    status, headers, body, _ = post_modern(daemon, "subscriptions/listen", token=s.token,
+                                           timeout=3,
+                                           notifications={"toolsListChanged": True})
+    assert time.monotonic() - started < 2
+    assert headers["content-type"].startswith("application/json")
+    error = json.loads(body)["error"]
+    assert (status, error["code"]) == (404, -32601), body
+    # The same protocol's other requests are served.
+    status, _, body, _ = post_modern(daemon, "tools/list", token=s.token)
+    assert status == 200
+    assert [t["name"] for t in json.loads(body)["result"]["tools"]] == ["whoami"]
+
+
+def test_the_capabilities_advertise_no_list_changed_and_no_subscribe(serving, sessions):
+    daemon = serving(tools=whoami_tool)
+    s = sessions()
+    s.bind()
+    status, _, body, _ = post_modern(daemon, "server/discover", token=s.token)
+    assert status == 200, body
+    capabilities = json.loads(body)["result"]["capabilities"]
+    for capability in capabilities.values():
+        if isinstance(capability, dict):
+            assert not capability.get("listChanged"), capabilities
+            assert not capability.get("subscribe"), capabilities
+
+
 def test_a_request_body_over_256_kb_is_refused(serving, sessions):
     daemon = serving()
     s = sessions()

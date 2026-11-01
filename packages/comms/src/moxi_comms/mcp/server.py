@@ -6,10 +6,15 @@ launch path ever pays that.
 
 What the endpoint is:
 
-  * the SDK's own app, `MCPServer("comms").streamable_http_app(...)`, in stateless JSON
-    mode: no MCP session lives between requests and no event stream is held open, so a
-    daemon restart loses nothing a client holds. A `GET` on the endpoint, which would
-    open a server-to-client stream, is answered 405; the tools send no notifications;
+  * the SDK's own app, `MCPServer("comms", subscriptions=False).streamable_http_app(...)`,
+    in stateless JSON mode: no MCP session lives between requests and no stream is held
+    open, so a daemon restart loses nothing a client holds. Two requests would open a
+    server-to-client stream, and the endpoint refuses both: a `GET` is answered 405, and
+    `subscriptions/listen`, the 2026-07-28 protocol's notification stream, is left
+    unserved, so the SDK answers it at once with a method-not-found error as JSON and
+    advertises no `listChanged` and no resource `subscribe`. The tools send no
+    notifications and their list never changes, so neither stream would carry anything;
+    served, each would hold a connection per session, and the stop would wait on them;
   * uvicorn without its main loop. `uvicorn.Server.serve()` wakes ten times a second for
     its housekeeping; the endpoint instead takes the two steps `serve()` would
     (`config.load()`, then `server.lifespan = config.lifespan_class(config)`), calls
@@ -145,10 +150,11 @@ class Verifier:
 def build_app(verifier: Verifier, url: str, *,
               tools: Callable[[MCPServer], object] | None = None):
     """The ASGI app: the SDK's server named `comms`, its tools added by `tools(server)`,
-    in stateless JSON mode behind comms' bearer check, with `GET` answered 405."""
+    in stateless JSON mode behind comms' bearer check, with `GET` answered 405 and
+    `subscriptions/listen` left unserved."""
     auth = AuthSettings(issuer_url=url, resource_server_url=url,
                         validate_token_resource=False)
-    server = MCPServer("comms", token_verifier=verifier, auth=auth)
+    server = MCPServer("comms", token_verifier=verifier, auth=auth, subscriptions=False)
     if tools is not None:
         tools(server)
     app = server.streamable_http_app(streamable_http_path=PATH, host=ADDRESS,

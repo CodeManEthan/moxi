@@ -227,6 +227,58 @@ def test_a_shim_started_while_the_daemon_is_down_registers_at_its_first_bind(rig
     assert row.identity == REVIEWER and row.bound
 
 
+# --------------------------------------------------------------------------- the end
+
+def revoked_why(value=VALUE):
+    """The stored row of `value`'s hash: its `revoked_why`, None while it is active."""
+    from moxi_comms import bindings
+
+    conn = bindings.connect(read_only=True)
+    try:
+        (why,) = conn.execute("SELECT revoked_why FROM mcp_tokens WHERE token_hash = ?",
+                              (tokens.digest(value),)).fetchone()
+    finally:
+        conn.close()
+    return why
+
+
+def test_an_adapter_that_ends_in_order_has_its_token_revoked_at_its_release(
+        rig, launch, monkeypatch):
+    from moxi_comms import claimfile
+
+    adapter = launch()
+    assert row_of(rig) is not None
+    order = []
+    remove, daemon = claimfile.remove, adapter._daemon
+    monkeypatch.setattr(claimfile, "remove",
+                        lambda key: (order.append("claim file"), remove(key))[1])
+    close = daemon.close
+    monkeypatch.setattr(daemon, "close",
+                        lambda: (order.append("daemon connection"), close())[1])
+    adapter.stop()
+    assert order == ["claim file", "daemon connection"]
+    # The adapter, its claim's root, is still alive: the file being gone is the
+    # evidence, read at the release, with no call and no boot after it.
+    assert wait_until(lambda: row_of(rig) is None)
+    assert revoked_why() == "session-ended"
+
+
+def test_an_adapter_that_ends_while_the_daemon_is_down_leaves_the_row_for_the_boot(
+        rig, launch):
+    from moxi_comms.daemon import Daemon
+
+    adapter = launch()
+    assert row_of(rig) is not None
+    rig.daemon.stop()
+    assert wait_until(lambda: adapter.offline)
+    adapter.stop()
+    assert revoked_why() is None
+    daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
+    rig.daemon = daemon
+    daemon.start()
+    assert revoked_why() == "session-ended"
+
+
 # --------------------------------------------------------------------------- mcp.reload
 
 def test_a_served_registration_reloads_the_hosts_servers_once_the_session_is_found(
