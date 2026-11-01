@@ -6,6 +6,12 @@ modules.
 `Failure` whose `code` is the exit code (`Usage` 2, `Refused` 3, else 1) and whose text
 says what to do.
 
+This module is the one other modules import from repo, so it also hands out the
+committer's and the git hook pieces' names: the package's exports (`git`, `Spec`,
+`commit_saved`, `HookContext`, `Outcome` and the rest), `SpecError` and `PATHSPEC_VARS`.
+Each is the same object as in its home module and is loaded only when first asked for, so
+importing this module loads nothing it didn't load before.
+
 A repo is named by a path inside any of its work trees; repo keeps an index of the repos it
 has written to (the `repos` store), which `refresh` and listings walk. An indexed repo is
 keyed by its common git dir, and its `root` is its main work tree; it is gone only when its
@@ -21,6 +27,7 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
+from moxi_repo import EXPORTS as _PACKAGE_EXPORTS
 from moxi_repo import _records, gitconf, pieces, shim
 from moxi_repo.gitconf import Repo, State
 from moxi_repo.run import (EVENTS, enabled, fail_policy, last, order_of, settings_of)
@@ -1103,8 +1110,28 @@ def _guard_problems(event: str, text: str, python: str, runner: str,
     return out
 
 
+#: Each name this module hands out for another module -> the module it comes from. Two
+#: are not package exports: `SpecError`, which `save_spec` raises, and `PATHSPEC_VARS`, the
+#: environment variables that change how git reads a pathspec.
+REEXPORTS = {**_PACKAGE_EXPORTS, "SpecError": "moxi_repo.committer",
+             "PATHSPEC_VARS": "moxi_repo.gitrun"}
+
+
+def __getattr__(name):
+    module = REEXPORTS.get(name)
+    if module is None:
+        raise AttributeError(f"module 'moxi_repo.api' has no attribute {name!r}")
+    from importlib import import_module
+
+    return getattr(import_module(module), name)
+
+
+def __dir__():
+    return sorted({*globals(), *REEXPORTS})
+
+
 __all__ = ["Failure", "Usage", "Refused", "Busy", "IndexUnreadable", "Report", "Problem", "SEEDS", "SETTING_CHECKS",
            "available", "add", "remove", "enable", "disable", "refresh", "status",
            "indexed", "indexed_repos", "open_indexed", "default_mode", "everywhere", "specs",
            "forget_spec", "module_of", "install_module", "uninstall_module",
-           "chain_holders", "teardown", "Teardown"]
+           "chain_holders", "teardown", "Teardown", *sorted(REEXPORTS)]
