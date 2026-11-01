@@ -18,6 +18,8 @@ ASK_WAIT = 2.0
 REVOKED_WINDOW = 24 * 3600
 #: The fix of a row that a restart of the daemon cures.
 RESTART = "moxi comms service restart"
+#: The fix of a live session that has lost its tool token.
+RELAUNCH = "relaunch that session to give it comms' tools"
 #: The fix when comms' socket unit holds the port and this daemon runs outside it.
 SUPERVISED = "stop this daemon and start it through its service"
 
@@ -55,7 +57,8 @@ def health():
 def mcp_rows(*, env=None, ask: Ask | None = None, configured=None,
              now: Callable[[], float] = time.time) -> list:
     """The rows of comms' tools: `mcp endpoint` and `mcp port` from the running daemon,
-    when one answers, and `mcp tokens` from comms.db.
+    when one answers, `mcp tokens` from comms.db, then an `mcp tokens: <identity>` row
+    for each live session the daemon names whose token was revoked.
 
     `configured` is `[mcp]` as the config file reads now (`config.load().mcp`), given by
     a test; `ask` the daemon's answer."""
@@ -71,7 +74,25 @@ def mcp_rows(*, env=None, ask: Ask | None = None, configured=None,
     tokens = tokens_row(env=env, now=now)
     if tokens is not None:
         rows.append(tokens)
+    if answer is not None:
+        rows.extend(revoked_rows(answer))
     return rows
+
+
+def revoked_rows(answer: Mapping) -> list:
+    """An `mcp tokens: <identity>` warn row for each live session the daemon names
+    whose tool token was revoked: it runs on without comms' tools until relaunched."""
+    from moxi.doctor import Row
+
+    out = []
+    for entry in answer.get("revoked") or ():
+        if not isinstance(entry, Mapping) or not entry.get("identity"):
+            continue
+        out.append(Row(MODULE, f"mcp tokens: {entry['identity']}", "warn",
+                       f"a live session whose tool token was revoked "
+                       f"({entry.get('why') or 'no reason recorded'}): it has no comms' "
+                       "tools", RELAUNCH))
+    return out
 
 
 def endpoint_row(answer: Mapping, configured=None):
@@ -203,5 +224,5 @@ def _port_of(url) -> int | None:
         return None
 
 
-__all__ = ["ASK_WAIT", "MODULE", "REVOKED_WINDOW", "SUPERVISED", "doctor_rows", "endpoint_row", "health",
-           "mcp_rows", "port_row", "tokens_row"]
+__all__ = ["ASK_WAIT", "MODULE", "RELAUNCH", "REVOKED_WINDOW", "SUPERVISED", "doctor_rows",
+           "endpoint_row", "health", "mcp_rows", "port_row", "revoked_rows", "tokens_row"]

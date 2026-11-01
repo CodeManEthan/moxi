@@ -709,6 +709,39 @@ def test_the_tokens_row_counts_live_sessions_and_the_days_revocations(serving, s
     assert later.detail == "1 session holds a live tool token"
 
 
+def test_a_live_session_whose_token_was_revoked_gets_its_own_warn_row(serving, sessions):
+    from moxi_comms.mcp import tokens
+
+    daemon = serving()
+    lost, kept = sessions(name="planner"), sessions(name="main")
+    lost.bind()
+    kept.bind()
+    # A session bound under its claim that never registered a token: no row of its own.
+    bare = sessions(name="reviewer")
+    bare.client = DaemonClient(daemon_socket()).connect()
+    bare.client.bind(name="reviewer", scope="proj-a", adapter="codex", claim=bare.key)
+    assert ask_daemon("mcp_endpoint")["revoked"] == []
+    daemon.mcp_tokens.revoke_all(tokens.PORT_TAKEN)
+    # `main` registers a new token, so only `planner` is left without one.
+    kept.token = tokens.mint()
+    kept.client.mcp_token(tokens.digest(kept.token))
+    answer = ask_daemon("mcp_endpoint")
+    assert [(e["identity"].split("@")[0], e["why"]) for e in answer["revoked"]] == [
+        ("planner", "port-taken")]
+    (row,) = checks.revoked_rows(answer)
+    assert row.name == f"mcp tokens: {answer['revoked'][0]['identity']}"
+    assert row.state == "warn" and "port-taken" in row.detail
+    assert row.fix == "relaunch that session to give it comms' tools"
+    listed = checks.mcp_rows(ask=lambda: answer, configured=None)
+    assert [r.name for r in listed][-1] == row.name
+    # Once the session's binding ends, it isn't listed.
+    lost.close()
+    deadline = time.monotonic() + 5
+    while ask_daemon("mcp_endpoint")["revoked"] and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert ask_daemon("mcp_endpoint")["revoked"] == []
+
+
 def test_doctor_rows_ask_the_running_daemon(serving):
     daemon = serving()
     names = {r.name: r for r in checks.mcp_rows()}

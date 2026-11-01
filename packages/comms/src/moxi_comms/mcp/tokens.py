@@ -255,6 +255,29 @@ class Registry:
             return None
         return row
 
+    def revoked_of(self, claims: Iterable[str]) -> dict[str, str]:
+        """Why each claim in `claims` lost its token: for a claim that holds no active
+        row and has a revoked one in the store, its newest revoked row's `revoked_why`.
+        A claim with an active row, or with no row at all, is left out, and so is every
+        claim when the store can't be read. Reads the store only for the claims left
+        once the active rows are set aside."""
+        with self._lock:
+            held = {r.claim_key for r in self._active.values()}
+        wanted = sorted({c for c in claims if c and c not in held})
+        if not wanted:
+            return {}
+        marks = ", ".join("?" for _ in wanted)
+        try:
+            found = self.history.write(lambda conn: conn.execute(
+                "SELECT claim_key, revoked_why FROM mcp_tokens "
+                f"WHERE claim_key IN ({marks}) AND revoked_at IS NOT NULL "
+                "ORDER BY revoked_at, created_at", wanted).fetchall())
+        except (sqlite3.Error, RuntimeError):
+            return {}
+        with self._lock:
+            held = {r.claim_key for r in self._active.values()}
+        return {claim: why for claim, why in found if claim not in held}
+
     # -- boot ----------------------------------------------------------------
     def load(self) -> int:
         """Read the active rows into memory (after the boot fence, so none is bound),

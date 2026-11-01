@@ -822,12 +822,29 @@ class Daemon:
     def _mcp_endpoint_query(self, frame: dict) -> dict:
         """`mcp_endpoint`: whether this daemon serves comms' tools, at which URL, and
         why not when it doesn't; `held`, whether the supervisor holds the port it serves
-        on, and `detail`, the plain line behind the answer, for the doctor. Settled
-        before any method is answered."""
+        on, `detail`, the plain line behind the answer, and `revoked`, the live bindings
+        whose session's token was revoked, for the doctor. Settled before any method is
+        answered."""
         served = bool(self.mcp_served)
         return {"served": served, "url": self.mcp_url if served else None,
                 "why": None if served else (self.mcp_why or "disabled"),
-                "held": served and self.mcp_held, "detail": self.mcp_detail}
+                "held": served and self.mcp_held, "detail": self.mcp_detail,
+                "revoked": self._revoked_bindings()}
+
+    def _revoked_bindings(self) -> list[dict]:
+        """Each live binding whose claim holds no active tool token and whose newest
+        token was revoked: `{identity, why}`, by identity. The claim key a binding's
+        `bind` named is kept only in memory, so only this daemon can tell. A binding
+        that named no claim, or whose claim never registered a token (a session launched
+        without comms' tools), isn't listed."""
+        with self._lock:
+            live = [(b.qualified, b.claim_key) for b in self.bindings.values()
+                    if b.claim_key]
+        if not live:
+            return []
+        whys = self.mcp_tokens.revoked_of(claim for _, claim in live)
+        return [{"identity": identity, "why": whys[claim]}
+                for identity, claim in sorted(live) if claim in whys]
 
     def _reconcile_reserved(self) -> None:
         from . import reserved
