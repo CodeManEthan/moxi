@@ -628,13 +628,17 @@ def serve(adapter, handle: int, *, say=None) -> int:
 
     A launch that carries comms' tools has the session's token in this process's
     environment: the adapter keeps its hash (the value leaves the environment) and
-    registers it after every bind, the first before `BOUND` is said."""
+    registers it after every bind, the first before `BOUND` is said. The form of layer
+    one the wrapper wrote is read first, while the token is still there to show it: the
+    thread record hashes that form."""
+    from ..context import layer_one_form
     from .binding import ToolToken
     from .claude_adapter import wait_for_exit
     from .codex import HostGone
 
     say = say or (lambda code, reason="": None)
     if adapter.tool_token is None:
+        adapter.layer_form = layer_one_form(os.environ)
         adapter.tool_token = ToolToken.from_environ()
     stopping = threading.Event()
     adapter.exit_hook = stopping.set

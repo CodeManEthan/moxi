@@ -374,10 +374,10 @@ class CodexAdapter(HarnessAdapter):
         born_with = {}
         if self.layer_one:
             # The wrapper wrote layer one from the launch's environment, which this
-            # adapter's process carries.
+            # adapter's process carries; `serve` read its form before the token left it.
             born_with["layer_one"] = layer_one_hash(self.comms_path,
                                                     directors=self._directors(),
-                                                    form=layer_one_form(os.environ))
+                                                    form=self.layer_form)
         self._born_with = born_with
         if thread_id:
             codex_threads.write(self.agent.qualified, thread_id,

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import itertools
 import os
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -524,8 +525,24 @@ def test_the_thread_record_hashes_the_form_of_layer_one_it_was_given(
     monkeypatch.setenv(URL_ENV, URL)
     if reach is not None:
         monkeypatch.setenv(SHELL_REACH_ENV, reach)
-    adapter = launch()
+    # Through `serve`, as the forked adapter runs: it takes the token out of the
+    # environment, so the form must be read before that.
+    adapter = launch(token=None, start=False)
+    r, w = os.pipe()
+    said = []
+    serving = threading.Thread(target=lambda: said.append(
+        codex_wrapper.serve(adapter, r, say=lambda code, reason="": None)))
+    serving.start()
+    try:
+        assert wait_until(lambda: (codex_threads.read_meta(PLANNER) or {}).get("layer_one"))
+    finally:
+        os.close(w)                                    # the host "ends": serve returns
+        serving.join(10)
+        os.close(r)
+    assert said == [0]
+    assert TOKEN_ENV not in os.environ, "the adapter keeps only the hash"
     form = context.TOOLS_ONLY if reach else context.TOOLS
+    assert adapter.layer_form == form
     record = codex_threads.read_meta(PLANNER)
     assert record["layer_one"] == codex.layer_one_hash(adapter.comms_path, form=form)
     assert record["layer_one"] != codex.layer_one_hash(adapter.comms_path)

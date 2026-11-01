@@ -197,6 +197,9 @@ class HarnessAdapter:
     #: The session's token for comms' tools (`binding.ToolToken`), registered after
     #: every bind; None when the launch carries none.
     tool_token: binding.ToolToken | None = None
+    #: The form of layer one this session was taught (`context.layer_one_form` of its
+    #: launch), read before the token leaves the environment; None is the CLI form.
+    layer_form: str | None = None
 
     def __init__(self, agent, *, socket_path=None, autoreconnect: bool = True,
                  backoff=None, status_sink=None, clock=time.time, exit_hook=None):
