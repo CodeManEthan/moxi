@@ -424,9 +424,16 @@ class Daemon:
         #: The port in place of `[mcp] port`; a test passes 0 for any free port.
         self._mcp_port = mcp_port
         #: The endpoint's URL while it serves, and why it doesn't when it doesn't
-        #: (`disabled`, `bind-failed`, `failed`): what `mcp_endpoint` answers.
+        #: (`disabled`, `port-taken`, `bind-failed`, `failed`): what `mcp_endpoint`
+        #: answers. `mcp_held` says whether the supervisor holds the port (an inherited
+        #: socket), and `mcp_detail` is the plain line behind either, for the doctor.
         self.mcp_url: str | None = None
         self.mcp_why: str | None = None
+        self.mcp_held = False
+        self.mcp_detail: str | None = None
+        #: What takes the endpoint's socket, given the port: `mcp.listen.take` when
+        #: None. A test hands in one with its own environment and launchd.
+        self.mcp_listen = None
         #: The endpoint (`mcp.server.Endpoint`) once it serves.
         self.mcp_endpoint = None
         #: What adds the tools to the endpoint's server, given the SDK's server; None
@@ -705,8 +712,15 @@ class Daemon:
         """Serve comms' tools, or settle why not: `[mcp] enabled` and `[mcp] port`, read
         once here. The MCP libraries are imported only now, and only when enabled. The
         endpoint runs on the daemon socket host's loop and pool, and the host's stop hook
-        shuts it down before the daemon socket closes."""
+        shuts it down before the daemon socket closes.
+
+        The socket is the one the supervisor holds, else the daemon's own on the port
+        (`mcp.listen.take`). A token is revoked only on positive evidence that its cause
+        holds: every live one is revoked `port-taken` when another process's listener
+        answers on the port, since sessions may have sent their tokens to it; a bind
+        that fails with nothing listening revokes none."""
         self.mcp_served, self.mcp_url, self.mcp_endpoint = False, None, None
+        self.mcp_held, self.mcp_detail = False, None
         if not self.serve_tools:
             self.mcp_why = "disabled"
             return
@@ -721,16 +735,28 @@ class Daemon:
             from .mcp import tools as mcp_tools
         except Exception as e:                                   # noqa: BLE001
             self.mcp_why = "failed"
-            log.error("comms' tools aren't served: the MCP libraries didn't load: %s: %s",
-                      type(e).__name__, e)
+            self.mcp_detail = f"the MCP libraries didn't load: {type(e).__name__}: {e}"
+            log.error("comms' tools aren't served: %s", self.mcp_detail)
             return
-        try:
-            sock = mcp_server.bind(port)
-        except OSError as e:
-            self.mcp_why = "bind-failed"
-            log.error("comms' tools aren't served: %s:%d can't be bound: %s",
-                      mcp_server.ADDRESS, port, e)
+        from .mcp import listen
+
+        taken = (self.mcp_listen or listen.take)(port)
+        self.mcp_detail = taken.detail
+        if taken.sock is None:
+            self.mcp_why = taken.why
+            if taken.why == "port-taken":
+                revoked = self.mcp_tokens.revoke_all("port-taken")
+                log.error("comms' tools aren't served: %s; %d live tool token(s) revoked",
+                          taken.detail, revoked)
+            else:
+                log.error("comms' tools aren't served: %s", taken.detail)
             return
+        sock = taken.sock
+        self.mcp_held = taken.inherited
+        if taken.inherited and sock.getsockname()[1] != port:
+            log.warning("comms' tools are served on the supervisor's port %d, not "
+                        "[mcp] port %d; launches get the port served", sock.getsockname()[1],
+                        port)
         verifier = mcp_server.Verifier(self.mcp_tokens.verify, self.host.pool,
                                        self.host.opened)
         from .mcp import inprocess
@@ -746,8 +772,9 @@ class Daemon:
         try:
             self.host.run_on_loop(endpoint.start(), timeout=wire.START_WAIT)
         except Exception as e:                                   # noqa: BLE001
-            self.mcp_why = "failed"
-            log.error("comms' tools aren't served: the endpoint didn't start: %s", e)
+            self.mcp_why, self.mcp_held = "failed", False
+            self.mcp_detail = f"the endpoint didn't start: {e}"
+            log.error("comms' tools aren't served: %s", self.mcp_detail)
             return
         self.mcp_endpoint = endpoint
         self.mcp_url = endpoint.url
@@ -791,10 +818,13 @@ class Daemon:
 
     def _mcp_endpoint_query(self, frame: dict) -> dict:
         """`mcp_endpoint`: whether this daemon serves comms' tools, at which URL, and
-        why not when it doesn't. Settled before any method is answered."""
+        why not when it doesn't; `held`, whether the supervisor holds the port it serves
+        on, and `detail`, the plain line behind the answer, for the doctor. Settled
+        before any method is answered."""
         served = bool(self.mcp_served)
         return {"served": served, "url": self.mcp_url if served else None,
-                "why": None if served else (self.mcp_why or "disabled")}
+                "why": None if served else (self.mcp_why or "disabled"),
+                "held": served and self.mcp_held, "detail": self.mcp_detail}
 
     def _reconcile_reserved(self) -> None:
         from . import reserved

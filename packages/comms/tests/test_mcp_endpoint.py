@@ -97,14 +97,16 @@ def view():
 @pytest.fixture
 def serving(rig, view):
     """Start the rig's daemon again, serving comms' tools on a free loopback port. Pass
-    `tools=` to add tools to the endpoint, `port=` for a given port."""
+    `tools=` to add tools to the endpoint, `port=` for a given port, `mcp_listen=` for
+    what takes the endpoint's socket."""
 
-    def start(*, port=0, tools=None, **kw) -> Daemon:
+    def start(*, port=0, tools=None, mcp_listen=None, **kw) -> Daemon:
         rig.daemon.stop()
         daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False,
                         serve_tools=True, mcp_port=port, **kw)
         daemon.proc_view = view
         daemon.mcp_tools = tools
+        daemon.mcp_listen = mcp_listen
         rig.daemon = daemon
         return daemon.start()
 
@@ -176,6 +178,12 @@ def ask_daemon(method: str, params=None):
         client.close()
 
 
+def endpoint() -> dict:
+    """`mcp_endpoint`'s answer without the doctor's fields (`held`, `detail`)."""
+    answer = ask_daemon("mcp_endpoint")
+    return {key: answer[key] for key in ("served", "url", "why")}
+
+
 def rows() -> list:
     conn = bindings.connect(read_only=True)
     try:
@@ -196,14 +204,17 @@ def test_a_daemon_that_serves_answers_its_url_and_the_registration_says_served(
         serving, sessions):
     daemon = serving()
     port = port_of(daemon)
-    assert ask_daemon("mcp_endpoint") == {
+    assert endpoint() == {
         "served": True, "url": f"http://127.0.0.1:{port}/mcp", "why": None}
+    answer = ask_daemon("mcp_endpoint")
+    assert answer["held"] is False
+    assert answer["detail"] == f"the daemon bound 127.0.0.1:{port} itself"
     assert daemon.mcp_served and daemon.mcp_url == mcp_server.url_for(port)
     assert sessions().bind() == {"served": True}
 
 
 def test_a_daemon_built_without_asking_serves_nothing_and_binds_no_port(rig):
-    assert ask_daemon("mcp_endpoint") == {"served": False, "url": None,
+    assert endpoint() == {"served": False, "url": None,
                                           "why": "disabled"}
     assert rig.daemon.mcp_endpoint is None
 
@@ -211,7 +222,7 @@ def test_a_daemon_built_without_asking_serves_nothing_and_binds_no_port(rig):
 def test_enabled_false_serves_nothing(serving, sessions):
     write_config(None, "[mcp]\nenabled = false\n")
     daemon = serving()
-    assert ask_daemon("mcp_endpoint") == {"served": False, "url": None,
+    assert endpoint() == {"served": False, "url": None,
                                           "why": "disabled"}
     assert daemon.mcp_endpoint is None
     assert sessions().bind() == {"served": False}
@@ -226,7 +237,7 @@ def test_the_port_comes_from_the_config_when_the_daemon_names_none(serving):
     assert ask_daemon("mcp_endpoint")["url"] == f"http://127.0.0.1:{free}/mcp"
 
 
-def test_a_port_another_socket_listens_on_is_bind_failed_and_revokes_nothing(
+def test_a_port_another_socket_listens_on_is_port_taken_and_revokes_every_token(
         serving, sessions):
     serving()
     s = sessions()
@@ -235,10 +246,10 @@ def test_a_port_another_socket_listens_on_is_bind_failed_and_revokes_nothing(
         holder.bind(("127.0.0.1", 0))
         holder.listen(1)
         daemon = serving(port=holder.getsockname()[1])
-        assert ask_daemon("mcp_endpoint") == {"served": False, "url": None,
-                                              "why": "bind-failed"}
+        assert endpoint() == {"served": False, "url": None, "why": "port-taken"}
     assert daemon.mcp_endpoint is None
-    assert [r["revoked_at"] for r in rows()] == [None]
+    assert [(r["revoked_why"]) for r in rows()] == ["port-taken"]
+    assert daemon.mcp_tokens.active() == []
 
 
 def test_an_app_that_cant_start_is_failed_and_its_port_is_left_free(serving,
@@ -251,7 +262,7 @@ def test_an_app_that_cant_start_is_failed_and_its_port_is_left_free(serving,
         probe.bind(("127.0.0.1", 0))
         free = probe.getsockname()[1]
     serving(port=free)
-    assert ask_daemon("mcp_endpoint") == {"served": False, "url": None, "why": "failed"}
+    assert endpoint() == {"served": False, "url": None, "why": "failed"}
     assert refused_connect(free)
 
 
@@ -727,7 +738,7 @@ def test_an_endpoint_that_fails_after_it_started_stops_the_daemon_nonzero(
     loops[0].call_soon_threadsafe(crash.set)
     assert wait_until(lambda: fatal, 10)
     assert fatal == ["comms' tools endpoint failed"] and daemon.fatal == fatal[0]
-    assert ask_daemon("mcp_endpoint") == {"served": False, "url": None, "why": "failed"}
+    assert endpoint() == {"served": False, "url": None, "why": "failed"}
     assert wait_until(lambda: refused_connect(port), 5)
 
 

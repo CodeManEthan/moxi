@@ -43,7 +43,6 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import logging
-import os
 import socket
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -53,11 +52,13 @@ from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
 
+from . import listen
+
 log = logging.getLogger("comms.mcp.server")
 
 #: The one address the endpoint serves on. Not a setting: the endpoint never faces
 #: anything but this machine.
-ADDRESS = "127.0.0.1"
+ADDRESS = listen.ADDRESS
 #: The path of the endpoint on that address.
 PATH = "/mcp"
 #: The largest request body accepted.
@@ -70,8 +71,6 @@ KEEP_ALIVE = 5
 GRACE = 3
 #: The backstop on the whole stop, uvicorn's grace and the app's own shutdown included.
 STOP_WAIT = GRACE + 2.0
-#: The listening socket's backlog.
-BACKLOG = 128
 #: Bearer checks run at once on the host's pool. A check is a hash and a lookup, plus
 #: file reads when its session may have ended; a flood of requests holds at most this
 #: many of the pool's threads.
@@ -85,28 +84,6 @@ _QUIET = ("mcp", "uvicorn", "uvicorn.error", "uvicorn.access", "sse_starlette", 
 def url_for(port: int) -> str:
     """The endpoint's URL on `port`: what the daemon answers and a launch stamps."""
     return f"http://{ADDRESS}:{port}{PATH}"
-
-
-def bind(port: int) -> socket.socket:
-    """A listening TCP socket on `127.0.0.1:port` (0: any free port), non-blocking.
-
-    With `SO_REUSEADDR` on POSIX, so the TIME_WAIT sockets an earlier daemon's
-    keep-alives left don't refuse the bind (on Linux it still refuses a port another
-    socket listens on), and `SO_EXCLUSIVEADDRUSE` on Windows, so no other process binds
-    the same address beside it. Raises OSError when the port can't be bound."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        if os.name == "nt":                                    # pragma: no cover - Windows
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-        else:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((ADDRESS, port))
-        sock.listen(BACKLOG)
-        sock.setblocking(False)
-    except BaseException:
-        sock.close()
-        raise
-    return sock
 
 
 class Verifier:
@@ -186,7 +163,7 @@ def _config(app) -> uvicorn.Config:
         app, http="h11", ws="none", lifespan="on", log_config=None, access_log=False,
         proxy_headers=False, server_header=False, date_header=False,
         limit_concurrency=LIMIT_CONCURRENCY, timeout_keep_alive=KEEP_ALIVE,
-        timeout_graceful_shutdown=GRACE, backlog=BACKLOG)
+        timeout_graceful_shutdown=GRACE, backlog=listen.BACKLOG)
 
 
 class StartFailed(Exception):
@@ -289,4 +266,4 @@ def _first_line(e: BaseException) -> str:
 
 
 __all__ = ["ADDRESS", "Endpoint", "GRACE", "LIMIT_CONCURRENCY", "MAX_BODY", "PATH",
-           "StartFailed", "Verifier", "bind", "build_app", "url_for"]
+           "StartFailed", "Verifier", "build_app", "url_for"]
