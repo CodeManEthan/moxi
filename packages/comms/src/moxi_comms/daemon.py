@@ -424,9 +424,10 @@ class Daemon:
         #: The port in place of `[mcp] port`; a test passes 0 for any free port.
         self._mcp_port = mcp_port
         #: The endpoint's URL while it serves, and why it doesn't when it doesn't
-        #: (`disabled`, `port-taken`, `bind-failed`, `failed`): what `mcp_endpoint`
-        #: answers. `mcp_held` says whether the supervisor holds the port (an inherited
-        #: socket), and `mcp_detail` is the plain line behind either, for the doctor.
+        #: (`disabled`, `supervised`, `port-taken`, `bind-failed`, `failed`): what
+        #: `mcp_endpoint` answers. `mcp_held` says whether the supervisor holds the port
+        #: (an inherited socket), and `mcp_detail` is the plain line behind either, for
+        #: the doctor.
         self.mcp_url: str | None = None
         self.mcp_why: str | None = None
         self.mcp_held = False
@@ -716,9 +717,11 @@ class Daemon:
 
         The socket is the one the supervisor holds, else the daemon's own on the port
         (`mcp.listen.take`). A token is revoked only on positive evidence that its cause
-        holds: every live one is revoked `port-taken` when another process's listener
-        answers on the port, since sessions may have sent their tokens to it; a bind
-        that fails with nothing listening revokes none."""
+        holds: every live one is revoked `port-taken` when a listener answers on the port
+        and is shown not to be comms' own socket unit, since sessions may have sent their
+        tokens to it. A failed bind beside comms' active socket unit (`supervised`: this
+        daemon runs outside its unit), a listener that may be that unit, and a bind that
+        fails with nothing listening revoke none."""
         self.mcp_served, self.mcp_url, self.mcp_endpoint = False, None, None
         self.mcp_held, self.mcp_detail = False, None
         if not self.serve_tools:

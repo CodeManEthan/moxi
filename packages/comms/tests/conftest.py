@@ -154,6 +154,26 @@ _DECLARED_NAMES = reserved.declared_names
 
 
 @pytest.fixture(autouse=True)
+def unit_read(monkeypatch):
+    """comms' socket unit as a failed bind reads it: `unknown`, never the real user
+    manager. A test that wants another state sets `unit_read.state`, or hands `take` its
+    own `unit_state`. `unit_read.asked` counts the reads."""
+    from moxi_comms.mcp import listen
+
+    class Read:
+        state = "unknown"
+        asked = 0
+
+        def __call__(self, *args, **kwargs) -> str:
+            self.asked += 1
+            return self.state
+
+    read = Read()
+    monkeypatch.setattr(listen, "socket_unit_state", read)
+    return read
+
+
+@pytest.fixture(autouse=True)
 def installs(monkeypatch) -> set:
     """The modules whose declared names comms' reserve step sees in this test: none,
     unless the test adds one.

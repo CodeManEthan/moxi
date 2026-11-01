@@ -238,7 +238,9 @@ def test_the_port_comes_from_the_config_when_the_daemon_names_none(serving):
 
 
 def test_a_port_another_socket_listens_on_is_port_taken_and_revokes_every_token(
-        serving, sessions):
+        serving, sessions, unit_read):
+    # comms' socket unit isn't written, so the listener is shown not to be it.
+    unit_read.state = "missing"
     serving()
     s = sessions()
     s.bind()

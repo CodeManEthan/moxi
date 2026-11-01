@@ -33,8 +33,8 @@ cause holds, never on a read that failed. The causes, each a `revoked_why`:
     at boot after the fence, and at every call; there is no timer;
   * `name-lost`: a bind of the same identity under another claim (or naming no claim);
   * `superseded`: the same claim registered a new hash;
-  * `port-taken`: a live listener of another process holds the endpoint's port
-    (`Registry.revoke_all`);
+  * `port-taken`: a live listener holds the endpoint's port and is shown not to be
+    comms' own socket unit (`Registry.revoke_all`);
   * `uninstall`: comms' own uninstall revokes every active row (`revoke_store`).
 
 Nothing here logs, stores or raises with a token's value. Standard library only, beside

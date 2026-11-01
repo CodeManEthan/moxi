@@ -18,6 +18,8 @@ ASK_WAIT = 2.0
 REVOKED_WINDOW = 24 * 3600
 #: The fix of a row that a restart of the daemon cures.
 RESTART = "moxi comms service restart"
+#: The fix when comms' socket unit holds the port and this daemon runs outside it.
+SUPERVISED = "stop this daemon and start it through its service"
 
 #: `ask()` gives the daemon's `mcp_endpoint` answer, or None when no daemon answers.
 Ask = Callable[[], Mapping | None]
@@ -97,6 +99,11 @@ def endpoint_row(answer: Mapping, configured=None):
                    "token was revoked, so sessions lose comms' tools until relaunched",
                    "free the port or moxi config set comms mcp.port N, then: "
                    f"{RESTART}, then relaunch the sessions")
+    if why == "supervised":
+        return Row(MODULE, name, "fail",
+                   (detail or "comms' socket unit holds the port")
+                   + "; no token was revoked",
+                   SUPERVISED)
     if why == "bind-failed":
         return Row(MODULE, name, "fail",
                    f"{detail or 'the port could not be bound'}; no token was revoked",
@@ -196,5 +203,5 @@ def _port_of(url) -> int | None:
         return None
 
 
-__all__ = ["ASK_WAIT", "MODULE", "REVOKED_WINDOW", "doctor_rows", "endpoint_row", "health",
+__all__ = ["ASK_WAIT", "MODULE", "REVOKED_WINDOW", "SUPERVISED", "doctor_rows", "endpoint_row", "health",
            "mcp_rows", "port_row", "tokens_row"]

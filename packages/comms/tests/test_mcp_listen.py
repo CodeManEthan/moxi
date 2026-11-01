@@ -18,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 from conftest import write_config
@@ -38,6 +39,8 @@ from moxi_comms.mcp import listen
 from moxi_comms.paths import daemon_socket
 
 LINUX = sys.platform.startswith("linux")
+#: The real read of comms' socket unit, kept before the rig's stub replaces it.
+REAL_UNIT_READ = listen.socket_unit_state
 #: Where the tests put a passed descriptor, as systemd puts its first at 3.
 FIRST = 200
 
@@ -166,13 +169,14 @@ def test_time_wait_sockets_left_by_an_earlier_listener_dont_refuse_the_bind():
 
 # ==================================================================== a failed bind
 
-def test_a_live_listener_on_the_port_is_port_taken_with_its_uid():
+def test_a_live_listener_on_the_port_is_port_taken_with_its_uid(unit_read):
+    unit_read.state = "missing"
     with listener() as holder:
         port = holder.getsockname()[1]
         clock = Clock()
         got = listen.take(port, environ={}, sleep=clock.sleep, clock=clock)
     assert got.sock is None and got.why == "port-taken"
-    assert clock.slept == []
+    assert clock.slept == [] and unit_read.asked == 1
     assert f"127.0.0.1:{port}" in got.detail
     if LINUX:
         assert got.holder_uid == os.getuid()
@@ -189,7 +193,8 @@ def test_a_port_bound_but_not_listening_retries_every_half_second_for_five_secon
     assert f"127.0.0.1:{port}" in got.detail and got.holder_uid is None
 
 
-def test_a_listener_that_appears_while_the_binds_retry_is_port_taken():
+def test_a_listener_that_appears_while_the_binds_retry_is_port_taken(unit_read):
+    unit_read.state = "inactive"
     held = blocker()
     port = held.getsockname()[1]
     clock = Clock()
@@ -210,6 +215,7 @@ def test_a_listener_that_appears_while_the_binds_retry_is_port_taken():
         for s in late:
             s.close()
     assert got.why == "port-taken" and len(clock.slept) == 2
+    assert unit_read.asked == 1                     # read once, before the first connect
 
 
 def test_a_port_freed_while_the_binds_retry_is_bound():
@@ -227,6 +233,99 @@ def test_a_port_freed_while_the_binds_retry_is_bound():
         assert not got.inherited and clock.slept == [0.5]
     finally:
         got.sock.close()
+
+
+def test_a_bind_that_succeeds_reads_no_unit(unit_read):
+    got = listen.take(0, environ={})
+    try:
+        assert got.why is None and unit_read.asked == 0
+    finally:
+        got.sock.close()
+
+
+def test_an_active_socket_unit_is_supervised_and_nothing_connects(unit_read, monkeypatch):
+    unit_read.state = "active"
+    probed = []
+    monkeypatch.setattr(listen, "answers", lambda *a, **k: probed.append(a) or True)
+    with listener() as unit:
+        unit.setblocking(False)
+        port = unit.getsockname()[1]
+        clock = Clock()
+        got = listen.take(port, environ={}, sleep=clock.sleep, clock=clock)
+        # Nothing connected to the unit's socket: a connect would start its service.
+        with pytest.raises(BlockingIOError):
+            unit.accept()
+    assert got.sock is None and got.why == "supervised" and got.holder_uid is None
+    assert probed == [] and clock.slept == [] and unit_read.asked == 1
+    assert f"127.0.0.1:{port}" in got.detail and "moxi install comms" in got.detail
+
+
+def test_a_listener_with_the_unit_unread_and_this_users_uid_is_bind_failed(unit_read):
+    unit_read.state = "unknown"
+    with listener() as holder:
+        port = holder.getsockname()[1]
+        clock = Clock()
+        got = listen.take(port, environ={}, sleep=clock.sleep, clock=clock)
+    assert got.sock is None and got.why == "bind-failed" and clock.slept == []
+    assert "whether it is comms' own socket unit couldn't be read" in got.detail
+    assert f"127.0.0.1:{port}" in got.detail
+
+
+def test_a_listener_of_another_user_is_port_taken_with_the_unit_unread(unit_read,
+                                                                        monkeypatch):
+    unit_read.state = "unknown"
+    other = (os.getuid() + 1) if hasattr(os, "getuid") else 1
+    monkeypatch.setattr(listen, "holder_uid", lambda port, *a: other)
+    monkeypatch.setattr(listen, "_another_user", lambda uid: uid == other)
+    with listener() as holder:
+        got = listen.take(holder.getsockname()[1], environ={})
+    assert got.why == "port-taken" and got.holder_uid == other
+    assert f"uid {other}" in got.detail
+
+
+@pytest.mark.parametrize("state", sorted(listen.NOT_HOLDING))
+def test_each_state_that_shows_the_unit_not_holding_lets_a_listener_be_port_taken(
+        unit_read, state):
+    unit_read.state = state
+    with listener() as holder:
+        got = listen.take(holder.getsockname()[1], environ={})
+    assert got.why == "port-taken"
+
+
+def row(name, kind, state):
+    return SimpleNamespace(module="comms", name=name, kind=kind, state=state)
+
+
+def test_the_unit_read_is_the_daemons_socket_row():
+    asked = []
+
+    def status(module):
+        asked.append(module)
+        return [row("daemon", "daemon", "inactive"), row("daemon", "socket", "active")]
+
+    assert REAL_UNIT_READ(status=status) == "active"
+    assert asked == ["comms"]
+    assert REAL_UNIT_READ(status=lambda m: [row("daemon", "daemon", "active")]) == "unknown"
+    assert REAL_UNIT_READ(status=lambda m: [row("daemon", "socket", "missing")]) == "missing"
+
+
+def test_a_unit_read_that_raises_or_hangs_is_unknown():
+    def raises(module):
+        raise RuntimeError("systemctl failed")
+
+    assert REAL_UNIT_READ(status=raises) == "unknown"
+    release = threading.Event()
+
+    def hangs(module):
+        release.wait(10)
+        return [row("daemon", "socket", "active")]
+
+    began = time.monotonic()
+    try:
+        assert REAL_UNIT_READ(0.2, status=hangs) == "unknown"
+        assert time.monotonic() - began < 2.0
+    finally:
+        release.set()
 
 
 def test_the_holders_uid_is_read_from_the_kernels_table(tmp_path):
@@ -405,7 +504,8 @@ def test_the_supervisors_socket_holds_the_port_across_a_restart(serving, session
 
 
 def test_port_taken_logs_one_line_naming_the_port_and_the_doctor_fails_it(
-        serving, sessions, caplog):
+        serving, sessions, caplog, unit_read):
+    unit_read.state = "missing"
     serving()
     first, second = sessions(), sessions(name="main")
     first.bind()
@@ -443,6 +543,47 @@ def test_bind_failed_revokes_nothing_and_the_doctor_fails_it(serving, sessions):
     row = checks.endpoint_row(answer)
     assert row.state == "fail" and "no token was revoked" in row.detail
     assert row.fix == checks.RESTART
+
+
+def test_a_daemon_beside_its_active_socket_unit_is_supervised_and_revokes_nothing(
+        serving, sessions, unit_read):
+    serving()
+    s = sessions()
+    s.bind()
+    unit_read.state = "active"
+    with listener() as unit:
+        unit.setblocking(False)
+        port = unit.getsockname()[1]
+        daemon = serving(port=port)
+        answer = ask_daemon("mcp_endpoint")
+        # The unit's service was not started: nothing connected to its socket.
+        with pytest.raises(BlockingIOError):
+            unit.accept()
+    assert {k: answer[k] for k in ("served", "url", "why")} == {
+        "served": False, "url": None, "why": "supervised"}
+    assert [r["revoked_at"] for r in rows()] == [None]
+    assert len(daemon.mcp_tokens.active()) == 1
+    row = checks.endpoint_row(answer)
+    assert row.state == "fail" and "no token was revoked" in row.detail
+    assert "socket unit" in row.detail
+    assert row.fix == checks.SUPERVISED
+
+
+def test_a_listener_that_may_be_the_unit_is_bind_failed_and_revokes_nothing(
+        serving, sessions, unit_read):
+    serving()
+    s = sessions()
+    s.bind()
+    unit_read.state = "unknown"
+    with listener() as holder:
+        daemon = serving(port=holder.getsockname()[1])
+        answer = ask_daemon("mcp_endpoint")
+    assert answer["served"] is False and answer["why"] == "bind-failed"
+    assert "couldn't be read" in answer["detail"]
+    assert [r["revoked_at"] for r in rows()] == [None]
+    assert len(daemon.mcp_tokens.active()) == 1
+    row = checks.endpoint_row(answer)
+    assert row.state == "fail" and "no token was revoked" in row.detail
 
 
 @pytest.mark.timed
@@ -550,7 +691,9 @@ def test_the_endpoint_rows_follow_the_daemons_answer():
     assert moved.state == "warn" and moved.fix == checks.RESTART
 
 
-def test_the_tokens_row_counts_live_sessions_and_the_days_revocations(serving, sessions):
+def test_the_tokens_row_counts_live_sessions_and_the_days_revocations(serving, sessions,
+                                                                      unit_read):
+    unit_read.state = "missing"
     serving()
     for name in ("planner", "main"):
         sessions(name=name).bind()

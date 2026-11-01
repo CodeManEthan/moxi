@@ -15,12 +15,29 @@ daemon's keep-alives left don't refuse the bind (on Linux it still refuses a por
 socket listens on), and `SO_EXCLUSIVEADDRUSE` on Windows, so no other process binds the
 same address beside it.
 
-A failed bind alone is no evidence that another process holds the port. So `take` then
-connects to `127.0.0.1:<port>`: a listener that answers is another process's (this daemon
-holds its socket's lock, and its predecessor closed its listener before it let the lock
-go), and the answer is `port-taken`. With no listener it binds again every half second
-for at most five seconds, then answers `bind-failed`. The caller decides what each answer
-means for the tokens.
+A failed bind alone is no evidence that another process holds the port, and neither is a
+listener that may be comms' own supervisor: tokens sent to comms' socket unit reach comms'
+own daemon. So after a failed bind, and before any connect, `take` reads comms' socket
+unit through the core's units status (`socket_unit_state`, bounded by `UNIT_READ_WAIT`; a
+read that raises or takes longer reads `unknown`). When the unit reads `active`, this
+daemon runs outside it, a hand run beside a stopped service: the answer is `supervised`,
+and nothing connects (a connect would start the service, which then refuses on the lock).
+
+That read is the socket row's state alone: the core's unit state names no port, so a port
+the unit holds is not compared with `[mcp] port`. When `[mcp] port` was edited by hand after
+the unit was written, the unit still reads `active` and the answer is `supervised`, though
+another process may hold the new port. That errs the safe way (nothing is revoked) with a
+wrong message, and the detail says so. `moxi config set` writes the unit again, so only a
+hand edit drifts.
+
+Otherwise `take` connects to `127.0.0.1:<port>`. A listener that answers is not this
+daemon's (it holds its socket's lock, and its predecessor closed its listener before it
+let the lock go). It is `port-taken` only when the unit read showed comms' unit not
+holding the port (`inactive`, `failed`, `missing`, `off`, `nobackend`) or the kernel's table
+names another user's uid as its holder. A listener with neither shown may be comms' own
+unit, so the answer is `bind-failed` with a detail that says so. With no listener it binds
+again every half second for at most five seconds, then answers `bind-failed`. The caller
+decides what each answer means for the tokens.
 
 The same way of taking inherited sockets lives in the UI shell's `listen` module; comms
 keeps its own small copy, since it must not import the UI.
@@ -32,12 +49,14 @@ import errno
 import os
 import socket
 import sys
+import threading
 import time
 from collections.abc import Callable, MutableMapping, Sequence
 from dataclasses import dataclass
 
-__all__ = ["ADDRESS", "BACKLOG", "LISTENERS", "PROBE_WAIT", "RETRY", "RETRY_FOR",
-           "Taken", "Unusable", "answers", "bind", "holder_uid", "inherited", "take"]
+__all__ = ["ADDRESS", "BACKLOG", "LISTENERS", "NOT_HOLDING", "PROBE_WAIT", "RETRY",
+           "RETRY_FOR", "Taken", "UNIT_READ_WAIT", "Unusable", "answers", "bind",
+           "holder_uid", "inherited", "socket_unit_state", "take"]
 
 #: The one address the endpoint serves on.
 ADDRESS = "127.0.0.1"
@@ -51,6 +70,13 @@ RETRY_FOR = 5.0
 PROBE_WAIT = 0.5
 #: launchd's `Sockets` key for the first (and only) address comms declares.
 LISTENERS = "Listeners"
+#: Seconds the read of comms' own socket unit may take after a failed bind.
+UNIT_READ_WAIT = 2.0
+#: The module and daemon whose socket unit holds the port when comms is installed.
+_MODULE, _DAEMON = "comms", "daemon"
+#: The socket row's states that show comms' unit does not hold the port: not running, not
+#: written, not on this platform (Windows skips the socket), or no supervisor at all.
+NOT_HOLDING = frozenset({"inactive", "failed", "missing", "off", "nobackend"})
 
 #: systemd's first passed descriptor (`SD_LISTEN_FDS_START`).
 _FIRST_FD = 3
@@ -78,11 +104,13 @@ class Unusable(Exception):
 class Taken:
     """What `take` found: a listening, non-blocking socket, or why there is none.
 
-    `why` is None with a socket, else `port-taken` (another process listens on the
-    port), `bind-failed` (the bind failed and nothing listens) or `failed` (an inherited
-    socket the endpoint can't use). `inherited` says whether the supervisor holds the
-    port. `detail` is a plain line for the log and the doctor; `holder_uid` the uid of
-    the port's other listener, where the kernel's table names one."""
+    `why` is None with a socket, else `supervised` (comms' socket unit reads active and
+    this daemon runs outside it), `port-taken` (a listener shown not to be comms' unit
+    answers on the port), `bind-failed` (the bind failed and nothing listens, or a
+    listener answers that may be comms' unit) or `failed` (an inherited socket the
+    endpoint can't use). `inherited` says whether the supervisor holds the port.
+    `detail` is a plain line for the log and the doctor; `holder_uid` the uid of the
+    port's other listener, where the kernel's table names one."""
 
     sock: socket.socket | None
     why: str | None
@@ -95,9 +123,13 @@ def take(port: int, *, environ: MutableMapping[str, str] | None = None,
          activate: Activate | None = None, platform: str | None = None,
          sleep: Callable[[float], None] = time.sleep,
          clock: Callable[[], float] = time.monotonic,
-         retry: float = RETRY, retry_for: float = RETRY_FOR) -> Taken:
+         retry: float = RETRY, retry_for: float = RETRY_FOR,
+         unit_state: Callable[[], str] | None = None) -> Taken:
     """The endpoint's socket: the inherited one, else its own bound on `port` (0: any
-    free port), else why not. Never raises for a port it can't have."""
+    free port), else why not. Never raises for a port it can't have.
+
+    `unit_state()` gives the state of comms' socket row (`socket_unit_state` when None),
+    read once, after the first failed bind and before any connect."""
     try:
         sock = inherited(environ=environ, activate=activate, platform=platform)
     except Unusable as e:
@@ -106,6 +138,7 @@ def take(port: int, *, environ: MutableMapping[str, str] | None = None,
         found = sock.getsockname()[1]
         return Taken(sock, None, f"the supervisor holds {ADDRESS}:{found}", inherited=True)
     deadline = clock() + retry_for
+    unit = None
     while True:
         try:
             sock = bind(port)
@@ -114,11 +147,20 @@ def take(port: int, *, environ: MutableMapping[str, str] | None = None,
         else:
             found = sock.getsockname()[1]
             return Taken(sock, None, f"the daemon bound {ADDRESS}:{found} itself")
+        if unit is None:
+            unit = (unit_state or socket_unit_state)()
+            if unit == "active":
+                return Taken(None, "supervised", _supervised(port))
         if answers(port):
             uid = holder_uid(port)
             whose = f"uid {uid}" if uid is not None else "a process whose uid isn't known"
-            return Taken(None, "port-taken",
-                         f"another process ({whose}) listens on {ADDRESS}:{port}",
+            if unit in NOT_HOLDING or _another_user(uid):
+                return Taken(None, "port-taken",
+                             f"another process ({whose}) listens on {ADDRESS}:{port}",
+                             holder_uid=uid)
+            return Taken(None, "bind-failed",
+                         f"a listener ({whose}) answers on {ADDRESS}:{port}; whether it "
+                         "is comms' own socket unit couldn't be read",
                          holder_uid=uid)
         left = deadline - clock()
         if left <= 0:
@@ -126,6 +168,49 @@ def take(port: int, *, environ: MutableMapping[str, str] | None = None,
                          f"{ADDRESS}:{port} can't be bound and nothing listens on it: "
                          f"{error.strerror or error}")
         sleep(min(retry, left))
+
+
+def socket_unit_state(wait: float = UNIT_READ_WAIT, *, status=None) -> str:
+    """The state of comms' daemon's socket row, as the core's `moxi.units.status` reads
+    it (`active`, `inactive`, `failed`, `missing`, `off`, `nobackend`), or `unknown` when
+    the read raises, takes longer than `wait` seconds, or gives no socket row. Only reads;
+    `status` stands in for `moxi.units.status` in tests.
+
+    The row says whether the unit is up, never which port it holds."""
+    found: list[str] = []
+
+    def read() -> None:
+        try:
+            read_status = status
+            if read_status is None:
+                from moxi import units
+
+                read_status = units.status
+            for row in read_status(_MODULE):
+                if row.name == _DAEMON and row.kind == "socket":
+                    found.append(row.state)
+                    return
+        except Exception:                                        # noqa: BLE001
+            return
+
+    reader = threading.Thread(target=read, name="comms-unit-read", daemon=True)
+    reader.start()
+    reader.join(wait)
+    if reader.is_alive() or not found:
+        return "unknown"
+    return found[0]
+
+
+def _supervised(port: int) -> str:
+    return (f"comms' socket unit reads active, so it is taken to hold {ADDRESS}:{port}, "
+            "and this daemon runs outside it (the unit's port isn't read: if [mcp] port "
+            "was edited by hand since the unit was written, run moxi install comms)")
+
+
+def _another_user(uid: int | None) -> bool:
+    """Whether `uid` is known and isn't this process's user."""
+    own = getattr(os, "getuid", None)
+    return uid is not None and own is not None and uid != own()
 
 
 def bind(port: int) -> socket.socket:
