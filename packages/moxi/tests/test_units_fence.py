@@ -205,8 +205,8 @@ def test_the_fake_backend_acts_and_reads_marked_and_foreign_units(tmp_path):
     socket = refs[("shell", "socket")]
     states = {(s.name, s.kind): s for s in fake.status([shell, socket, backup], fence)}
     assert states[("shell", "daemon")].state == "active"
-    # The service reads static; the core takes the daemon's enabled from its socket.
-    assert states[("shell", "daemon")].enabled is None
+    # The service reads static, so the daemon's enabled is its socket's, from one read.
+    assert states[("shell", "daemon")].enabled is True
     assert states[("shell", "socket")].state == "active"
     assert states[("shell", "socket")].enabled is True
     assert states[("shell", "socket")].epoch == (

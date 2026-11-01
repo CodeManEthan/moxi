@@ -5,7 +5,10 @@ does, one `.service` per daemon, one socket unit per address beside it for a dae
 a socket (`<stem>.socket`, then `<stem>-<k>.socket`), and a `.service` and `.timer` pair
 per timer, all under `root`, and it runs every verb through the systemd fence. A daemon
 with a socket is applied and acted on as on systemd: its socket units first, in unit
-order, and its service, which has no install section, only started and stopped. `FakeSupervisor` is a runner for that fence: it keeps each unit's
+order, then its service. A daemon's service carries `install = default.target` where the
+systemd backend's has an install section (every daemon but a socket daemon under `start =
+"connection"`), and one without it is only started and stopped, as a `static` service is.
+`FakeSupervisor` is a runner for that fence: it keeps each unit's
 state in memory, records every command in `calls`, and fails the commands a test names
 in `fail`. Like systemd it refuses to start a socket unit while its service runs, and gives
 a unit a new `InvocationID` each time it starts. Together they let a test drive `plan`, `apply`, `remove`, the acts, `status`
@@ -25,7 +28,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from ._backend import (
-    ApplyIO, ReadError, Rendered, Spec, UnitRef, socket_name, socket_place, socket_state)
+    ApplyIO, ReadError, Rendered, Spec, UnitRef, enabled_by_socket, socket_name,
+    socket_place, socket_state)
 from ._fence import Fence, Ran
 from ._systemd import SocketStarts
 from ._types import Acted, UnitChange, UnitState, Wrapped
@@ -134,15 +138,16 @@ class FakeSupervisor:
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     def _file_state(self, unit: str, state: dict) -> str:
-        """`static` for a socket daemon's service, which has no install section (the
-        fake's `sockets = ` line, or the systemd backend's `Sockets=`), else `enabled` or
-        `disabled`."""
+        """`static` for a socket daemon's service with no install section (the fake's
+        `sockets = ` line without `install = `, or the systemd backend's `Sockets=`
+        without `[Install]`), else `enabled` or `disabled`."""
         if unit.endswith(".service"):
             try:
                 text = (self.root / unit).read_text(encoding="utf-8")
             except OSError:
                 text = ""
-            if "\nsockets = " in text or "\nSockets=" in text:
+            if ("\nsockets = " in text or "\nSockets=" in text) and not _installs(text) \
+                    and "\n[Install]\n" not in text:
                 return "static"
         return "enabled" if state["enabled"] else "disabled"
 
@@ -217,6 +222,8 @@ class FakeBackend:
                         f"listen = {listen}:{spec.socket.port}",
                         f"service = {stem}.service"])))
                 body.append("sockets = " + " ".join(path.name for path, _ in sockets))
+            if not sockets or spec.socket.start == "login":
+                body.append("install = default.target")
             out = [Rendered("daemon", ((self.root / f"{stem}.service", _text(body)),))]
             if sockets:
                 out.append(Rendered("socket", tuple(sockets)))
@@ -281,7 +288,9 @@ class FakeBackend:
 
     def apply(self, changes: Sequence[UnitChange], *, restart: bool, io: ApplyIO) -> None:
         """The systemd backend's order, and its start rule for a daemon with a socket
-        (`SocketStarts`): its units start before its service and never while it runs."""
+        (`SocketStarts`): its units start before its service and never while it runs. A
+        changed daemon whose old service text has `install = ` and whose new one has
+        none is disabled without `--now` first, so its login link goes."""
         fence = io.fence
         removes = [c for c in changes if c.action == "remove"]
         writes = [c for c in changes if c.action in ("add", "change")]
@@ -297,7 +306,12 @@ class FakeBackend:
                 ran = fence.run("disable", "--now", path.name)
                 if not ran.ok:
                     io.fail(change, ran)
-        starts = SocketStarts(self, writes, keeps, restart=restart, socketed=_socketed)
+        for change in writes:
+            if (change.kind == "daemon" and change.action == "change" and change.paths
+                    and _installs(_read(change.paths[0])) and not _installs(change.text)):
+                self._run(io, change, "disable", self._enable_id(change))
+        starts = SocketStarts(self, writes, keeps, restart=restart, socketed=_socketed,
+                              installs=_installs)
         starts.read(fence)
         for change in removes:
             io.delete(change)
@@ -427,9 +441,10 @@ class FakeBackend:
         elif act in ("start", "stop", "enable", "disable"):
             sockets = self._socket_of(unit)
             if sockets and act in ("enable", "disable"):
-                # Its service has no install section: the sockets carry the enable.
-                run(act, "--now", *sockets) and run(
-                    "start" if act == "enable" else "stop", *unit.ids[:1])
+                # A service with no install section: the sockets carry the enable.
+                service = (("start" if act == "enable" else "stop",) if self._static(unit)
+                           else (act, "--now"))
+                run(act, "--now", *sockets) and run(*service, *unit.ids[:1])
             elif act in ("enable", "disable"):
                 run(act, "--now", *both)
             else:
@@ -437,6 +452,10 @@ class FakeBackend:
         elif act == "restart":
             run("restart", *unit.ids[:1])
         return Acted(unit.module, unit.name, act, ok, tuple(lines))
+
+    def _static(self, unit: UnitRef) -> bool:
+        """Whether a marked daemon's service has no `install = ` line."""
+        return not _installs(_read(unit.paths[0] if unit.paths else self.root / unit.ids[0]))
 
     def running(self, ids: Sequence[str], fence: Fence) -> frozenset[str]:
         if not ids:
@@ -504,7 +523,7 @@ class FakeBackend:
                                  log=None if state == "missing" else self.log(unit),
                                  enabled=enabled, wrapped=self._wrapped(service),
                                  triggers=named[0] if named else None))
-        return out
+        return enabled_by_socket(units, out, self._static)
 
     def log(self, unit: UnitRef) -> str | None:
         if unit.kind == "socket":
@@ -632,6 +651,19 @@ class FakeBackend:
 
 def _text(lines: list[str]) -> str:
     return "\n".join(lines) + "\n"
+
+
+def _installs(text: str | None) -> bool:
+    """Whether a fake service's text has its `install = ` line, where systemd's would have
+    an install section."""
+    return any(line.startswith("install = ") for line in (text or "").splitlines())
+
+
+def _read(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
 
 
 def _socketed(change: UnitChange) -> bool:
