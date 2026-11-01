@@ -56,8 +56,12 @@ point), so the host only observes: a tool part of the session's or a subagent's 
 session the stream announced) that reaches `completed` or `error` in the server's
 `message.part.updated` events asks the `after-tool` rows once per `callID`, with `point`
 `after`, the part's `callID` as `tool_use_id`, the child session's id as `agent_id` (None
-for the session's own call) and no `record_path`. The rows are asked on a thread of
-their own, so the event stream never waits on them, and their text reaches no model: it
+for the session's own call) and no `record_path`. The floor gates the session's own calls
+only: its context is the last `message.updated` of its own assistant messages that gave
+a positive `tokens.input + tokens.cache.read + tokens.cache.write` (a message being
+written reports zeros), and a row is skipped while that is below its floor; before the
+first reading no row is skipped. A subagent's call reaches every row. The rows are asked
+on a thread of their own, so the event stream never waits on them, and their text reaches no model: it
 is dropped and logged once per host, as the listeners' context at a `Ready` is.
 
 **Options**. `options` is OpenCode's config object. The host lays it, unread,
@@ -289,6 +293,9 @@ class OpenCodeHarness(Harness):
         self._children: set[str] = set()     # child sessions the stream announced
         self._tools_done: dict[str, None] = {}   # callIDs whose rows were asked, oldest first
         self._after_dropped = False
+        #: The session's context, in tokens, from its last assistant message that gave
+        #: one; None before the first.
+        self._context: int | None = None
 
     # -- life ----------------------------------------------------------------------------
 
@@ -549,11 +556,18 @@ class OpenCodeHarness(Harness):
             threading.Thread(target=self._after_tool, args=tool_call, daemon=True,
                              name="turns-opencode-after-tool").start()
 
+    def context_tokens(self) -> int | None:
+        """The session's context, in tokens, from its last assistant message that gave
+        one; None before the first."""
+        with self._lock:
+            return self._context
+
     def _tool_part(self, part, sid: str | None) -> tuple | None:
-        """A tool part that has just finished, as `(tool, call_id, agent_id, is_error)`,
-        once per call; None for any other part, for one seen finished before, for a
-        session that is neither this one nor a child it announced, and when no
-        `after-tool` row is installed. Called under the lock."""
+        """A tool part that has just finished, as `(tool, call_id, agent_id, is_error,
+        rows)`, once per call, `rows` the rows to ask (None for every one); None for any
+        other part, for one seen finished before, for a session that is neither this one
+        nor a child it announced, when no `after-tool` row is installed, and when the
+        floor skips every row. Called under the lock."""
         if not isinstance(part, dict) or part.get("type") != "tool" or sid is None:
             return None
         status = (part.get("state") or {}).get("status")
@@ -578,14 +592,20 @@ class OpenCodeHarness(Harness):
             del self._tools_done[next(iter(self._tools_done))]
         if not self.endpoint.floors.rows:
             return None
-        return tool, call_id, agent_id, status == "error"
+        rows = None
+        if agent_id is None and self._context is not None:
+            rows = [rid for rid, floor in self.endpoint.floors.values().items()
+                    if self._context >= floor]
+            if not rows:
+                return None
+        return tool, call_id, agent_id, status == "error", rows
 
     def _after_tool(self, tool: str, call_id: str, agent_id: str | None,
-                    is_error: bool) -> None:
+                    is_error: bool, rows: list[str] | None = None) -> None:
         """Tell the `after-tool` rows a call finished. Their text has nowhere to go."""
         try:
             text = self.endpoint.after_tool(tool, tool_use_id=call_id, agent_id=agent_id,
-                                            is_error=is_error, point="after")
+                                            is_error=is_error, point="after", rows=rows)
         except Exception:  # noqa: BLE001 - the rows' faults are the endpoint's to log
             log.exception("the after-tool rows could not be asked")
             return
@@ -614,6 +634,9 @@ class OpenCodeHarness(Harness):
             return
         if info.get("role") != "assistant":
             return
+        context = _context_of(info)
+        if context is not None:
+            self._context = context
         if self._turn_id is None:
             if (info.get("time") or {}).get("completed"):
                 # A finished reply's late update (the server sends the last one twice):
@@ -929,6 +952,21 @@ def _not_found_error(raw) -> bool:
     except ValueError:
         return False
     return isinstance(body, dict) and body.get("name") == "NotFoundError"
+
+
+def _context_of(info: dict) -> int | None:
+    """An assistant message's context in tokens: `tokens.input + cache.read +
+    cache.write`, or None when it gives no positive count."""
+    tokens = info.get("tokens")
+    if not isinstance(tokens, dict):
+        return None
+    cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+    total = 0
+    for value in (tokens.get("input"), cache.get("read"), cache.get("write")):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+            value = 0
+        total += int(value)
+    return total if total > 0 else None
 
 
 def _brief(info: dict) -> dict:

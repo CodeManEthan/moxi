@@ -700,6 +700,79 @@ def _after_calls(calls, tool):
     return [c for c in calls if c[0] == "after" and c[1] == tool]
 
 
+@pytest.fixture
+def floored_rows(monkeypatch):
+    """An installed `after-tool` row with a floor of 1000 tokens."""
+    import listener_targets
+    from moxi_turns import listeners
+
+    class Row:
+        name = "usage"
+
+        def load(self):
+            import types
+            return types.SimpleNamespace(LISTENERS=[
+                ("after-tool", "listener_targets:after",
+                 {"floor": "listener_targets:floor"})])
+
+    registry = listeners.load([Row()], order=(), limit=0)
+    monkeypatch.setattr(listeners, "load", lambda *a, **kw: registry)
+    monkeypatch.setitem(listener_targets.FLOOR, "value", 1000)
+    listener_targets.CALLS.clear()
+    return listener_targets.CALLS
+
+
+def _assistant(world, sid, tokens):
+    """A finished assistant message's update carrying `tokens`, opening no turn."""
+    now = int(time.time() * 1000)
+    world.fake.emit("message.updated", {"sessionID": sid, "info": {
+        "id": fake_opencode.mint("msg"), "role": "assistant", "sessionID": sid,
+        "tokens": tokens, "time": {"created": now, "completed": now}}})
+
+
+def test_the_floor_gates_only_the_sessions_own_calls_by_its_last_reading(
+        host, floored_rows):
+    s, h, world = host()
+    sid = h.session_id
+    assert until(lambda: list(h.endpoint.floors.values().values()) == [1000])
+    child = world.fake.create_session("look", parent=sid)["id"]
+    time.sleep(0.2)
+
+    def asked(tool):
+        world.fake.tool_part(owner[tool], tool, tool, "completed")
+        time.sleep(0.3)
+        return bool(_after_calls(floored_rows, tool))
+
+    owner = {}
+    for tool in ("oc_a", "oc_b", "oc_c", "oc_d", "oc_e"):
+        owner[tool] = sid
+    owner["oc_child"] = child
+    # No reading yet: an unknown context never skips.
+    assert h.context_tokens() is None
+    assert asked("oc_a")
+    _assistant(world, sid, {"input": 300, "output": 50, "reasoning": 0,
+                            "cache": {"read": 200, "write": 0}})
+    assert until(lambda: h.context_tokens() == 500)
+    assert not asked("oc_b")
+    # A subagent's call always reaches the row.
+    assert asked("oc_child")
+    _assistant(world, sid, {"input": 600, "output": 1, "reasoning": 0,
+                            "cache": {"read": 300, "write": 100}})
+    assert until(lambda: h.context_tokens() == 1000)
+    assert asked("oc_c")
+    # A message being written reports zeros, which is no reading.
+    _assistant(world, sid, {"input": 0, "output": 0, "reasoning": 0,
+                            "cache": {"read": 0, "write": 0}})
+    time.sleep(0.2)
+    assert h.context_tokens() == 1000
+    assert asked("oc_d")
+    # A child session's message is not the session's context.
+    _assistant(world, child, {"input": 10, "cache": {"read": 0, "write": 0}})
+    time.sleep(0.2)
+    assert h.context_tokens() == 1000
+    assert asked("oc_e")
+
+
 def test_the_host_has_no_tool_points():
     h = opencode.OpenCodeHarness
     assert h.tool_points() == {"pre": False, "after": False}
