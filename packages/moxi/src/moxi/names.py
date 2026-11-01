@@ -3,12 +3,14 @@
 A Moxi module has one name, lower-case ASCII letters and digits (`cache`, `comms`).
 Everything else a module is called is spelled from that name here:
 
-    distribution("cache")   moxi-cache      the package on PyPI
-    import_name("cache")    moxi_cache      the Python package
-    repo("cache")           moxihq/cache    the module's own repository, for its issues
-    env_prefix("cache")     MOXI_CACHE_     the prefix of every variable it reads
+    distribution("cache")   moxi-cache          the package on PyPI
+    import_name("cache")    moxi_cache          the Python package
+    repo("cache")           CodeManEthan/moxi   the repository that holds it and its issues
+    env_prefix("cache")     MOXI_CACHE_         the prefix of every variable it reads
 
-The core itself is `moxi` in all four places and is not a module.
+Every module lives in the one repository, so `repo` spells the same for each. The core
+itself is `moxi` as a distribution, an import package and a prefix, lives in that same
+repository, and is not a module.
 
 Every skill Moxi ships, each subfolder `is_skill_folder` counts in a module's `SKILLS`
 folder, is named `moxi-<name>` (`is_skill_name`), and its `SKILL.md` `name:` is that
@@ -21,8 +23,12 @@ import re
 
 #: The harness.
 HARNESS = "moxi"
-#: The GitHub organisation that holds the public repository and the modules' issues.
-ORG = "moxihq"
+#: The GitHub account that owns the public repository, which holds every module and its
+#: issues.
+OWNER = "CodeManEthan"
+#: The same account under its earlier name, kept so code that reads `ORG` still works.
+#: The owner is a user account, not an organisation: use `OWNER`.
+ORG = OWNER
 #: The directory namespace under the data, state, cache, config and runtime roots,
 #: shared by every module, each under its own subdirectory.
 NAMESPACE = "moxi"
@@ -103,10 +109,10 @@ def import_name(name: str) -> str:
 
 
 def repo(name: str) -> str:
-    """The module's own repository, which holds its issues: `moxihq/<name>`.
-
-    The code of every module lives in the one repository, `moxihq/moxi`."""
-    return f"{ORG}/{check_module_name(name)}"
+    """The repository that holds module `name`, its code and its issues: the one Moxi
+    repository, `CodeManEthan/moxi`, the same for every module."""
+    check_module_name(name)
+    return f"{OWNER}/{HARNESS}"
 
 
 def env_prefix(name: str) -> str:
@@ -114,7 +120,7 @@ def env_prefix(name: str) -> str:
     return f"{HARNESS.upper()}_{check_module_name(name).upper()}_"
 
 
-__all__ = ["HARNESS", "ORG", "NAMESPACE", "VERBS", "RESERVED", "SKILL_PREFIX",
+__all__ = ["HARNESS", "OWNER", "ORG", "NAMESPACE", "VERBS", "RESERVED", "SKILL_PREFIX",
            "SKILL_NAME_MAX", "is_module_name", "is_reserved", "check_module_name",
            "is_skill_folder", "is_skill_name", "check_skill_name", "distribution",
            "import_name", "repo", "env_prefix"]

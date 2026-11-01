@@ -251,8 +251,8 @@ socket; Windows serves on loopback TCP.
 
 loopback comes with a module that serves a page: that module requires `moxi-loopback`,
 so `moxi install <module>` brings it in. The front door's README, at
-[moxihq/moxi](https://github.com/moxihq/moxi), covers the `moxi` command and the other
-modules.
+[CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi` command and
+the other modules.
 
 ## Dependencies
 

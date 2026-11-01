@@ -8,9 +8,9 @@ authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 dependencies = ["moxi>=0.1,<0.2"]
 
 [project.urls]
-Homepage = "https://github.com/moxihq/moxi"
-Repository = "https://github.com/moxihq/moxi"
-Issues = "https://github.com/moxihq/moxi/issues"
+Homepage = "https://github.com/CodeManEthan/moxi"
+Repository = "https://github.com/CodeManEthan/moxi"
+Issues = "https://github.com/CodeManEthan/moxi/issues"
 
 # Only the core declares the `moxi` script; the module's commands run as `moxi slots <verb>`.
 # The server wrapper, which the core's writer installs as the module's daemon, and the

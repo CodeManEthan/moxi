@@ -14,9 +14,9 @@ dependencies = ["moxi>=0.1,<0.2", "moxi-sessions>=0.2,<0.3"]
 ui = ["moxi-ui>=0.1,<0.2"]
 
 [project.urls]
-Homepage = "https://github.com/moxihq/moxi"
-Repository = "https://github.com/moxihq/moxi"
-Issues = "https://github.com/moxihq/cache/issues"
+Homepage = "https://github.com/CodeManEthan/moxi"
+Repository = "https://github.com/CodeManEthan/moxi"
+Issues = "https://github.com/CodeManEthan/moxi/issues"
 
 # Only the core declares the `moxi` script; this is the watcher's own entry point.
 [project.scripts]

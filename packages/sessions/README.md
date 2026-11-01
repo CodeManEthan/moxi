@@ -110,12 +110,13 @@ Before the modules are on PyPI, install the core from git and give `moxi install
 module's git source:
 
 ```sh
-uv tool install git+https://github.com/moxihq/moxi#subdirectory=packages/moxi
-moxi install sessions --from 'moxi-sessions @ git+https://github.com/moxihq/moxi#subdirectory=packages/sessions'
+uv tool install git+https://github.com/CodeManEthan/moxi#subdirectory=packages/moxi
+moxi install sessions --from 'moxi-sessions @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/sessions'
 ```
 
-The front door's README, at [moxihq/moxi](https://github.com/moxihq/moxi), covers the
-`moxi` command and the other modules.
+The front door's README, at
+[CodeManEthan/moxi](https://github.com/CodeManEthan/moxi), covers the `moxi` command and
+the other modules.
 
 ## Dependencies
 

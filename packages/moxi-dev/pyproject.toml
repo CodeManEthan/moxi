@@ -25,9 +25,9 @@ dependencies = ["moxi", "pytest", "pytest-xdist", "pytest-timeout", "import-lint
 moxi-dev = "moxi_dev.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/moxihq/moxi"
-Repository = "https://github.com/moxihq/moxi"
-Issues = "https://github.com/moxihq/moxi/issues"
+Homepage = "https://github.com/CodeManEthan/moxi"
+Repository = "https://github.com/CodeManEthan/moxi"
+Issues = "https://github.com/CodeManEthan/moxi/issues"
 
 [dependency-groups]
 dev = ["pytest"]

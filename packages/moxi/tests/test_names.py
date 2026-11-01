@@ -4,15 +4,21 @@ from moxi import names
 
 
 def test_the_constants():
-    assert (names.HARNESS, names.ORG, names.NAMESPACE) == ("moxi", "moxihq", "moxi")
+    assert (names.HARNESS, names.OWNER, names.NAMESPACE) == ("moxi", "CodeManEthan", "moxi")
+    assert names.ORG == names.OWNER  # the earlier name, kept for its callers
 
 
 def test_every_spelling_is_built_from_the_module_name():
     assert names.distribution("cache") == "moxi-cache"
     assert names.import_name("cache") == "moxi_cache"
-    assert names.repo("cache") == "moxihq/cache"
+    assert names.repo("cache") == "CodeManEthan/moxi"
     assert names.env_prefix("cache") == "MOXI_CACHE_"
     assert names.env_prefix("comms") == "MOXI_COMMS_"
+
+
+@pytest.mark.parametrize("name", ["cache", "comms", "turns", "sessions", "moxi"])
+def test_every_module_lives_in_the_one_repository(name):
+    assert names.repo(name) == f"{names.OWNER}/{names.HARNESS}" == "CodeManEthan/moxi"
 
 
 @pytest.mark.parametrize("name", ["cache", "comms", "turns", "sessions", "s3", "2fa"])

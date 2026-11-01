@@ -39,9 +39,9 @@ cache = ["moxi-cache>=0.1,<0.2"]
 ui = ["moxi-ui>=0.1,<0.2"]
 
 [project.urls]
-Homepage = "https://github.com/moxihq/moxi"
-Repository = "https://github.com/moxihq/moxi"
-Issues = "https://github.com/moxihq/comms/issues"
+Homepage = "https://github.com/CodeManEthan/moxi"
+Repository = "https://github.com/CodeManEthan/moxi"
+Issues = "https://github.com/CodeManEthan/moxi/issues"
 
 # Only the core declares the `moxi` script. The module's own commands run as
 # `moxi comms <verb>`; there is no bare `comms` script. The internal entry points below

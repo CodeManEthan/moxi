@@ -55,10 +55,10 @@ Before the modules are on PyPI, install the core from git and give `moxi install
 source for turns and for comms:
 
 ```sh
-uv tool install git+https://github.com/moxihq/moxi#subdirectory=packages/moxi
+uv tool install git+https://github.com/CodeManEthan/moxi#subdirectory=packages/moxi
 moxi install comms \
-  --from 'moxi-turns @ git+https://github.com/moxihq/moxi#subdirectory=packages/turns' \
-  --from 'moxi-comms @ git+https://github.com/moxihq/moxi#subdirectory=packages/comms'
+  --from 'moxi-turns @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/turns' \
+  --from 'moxi-comms @ git+https://github.com/CodeManEthan/moxi#subdirectory=packages/comms'
 ```
 
 comms' commands run as `moxi comms <verb>`. `moxi shortcut comms` adds a bare `comms`
