@@ -9,6 +9,10 @@ Everything else a module is called is spelled from that name here:
     env_prefix("cache")     MOXI_CACHE_     the prefix of every variable it reads
 
 The core itself is `moxi` in all four places and is not a module.
+
+Every skill Moxi ships, each subfolder `is_skill_folder` counts in a module's `SKILLS`
+folder, is named `moxi-<name>` (`is_skill_name`), and its `SKILL.md` `name:` is that
+folder name. The prefix keeps a shipped skill from taking the name of a user's own.
 """
 
 from __future__ import annotations
@@ -39,6 +43,12 @@ RESERVED = frozenset({"moxi", "set", "unset", "runtime", "installs"})
 
 _NAME = re.compile(r"[a-z0-9]+")
 
+#: The prefix of every skill Moxi ships, so none takes the name of a skill the user has.
+SKILL_PREFIX = f"{HARNESS}-"
+#: The longest skill name, the cap the Agent Skills format sets on a skill's `name`.
+SKILL_NAME_MAX = 64
+_SKILL = re.compile(re.escape(SKILL_PREFIX) + r"[a-z0-9]+(-[a-z0-9]+)*")
+
 
 def is_module_name(name: object) -> bool:
     """True when `name` is spelled as a module name: lower-case ASCII letters and digits."""
@@ -55,6 +65,30 @@ def check_module_name(name: object) -> str:
     if not is_module_name(name):
         raise ValueError(f"{name!r} is not a Moxi module name: "
                          "use lower-case ASCII letters and digits only")
+    return name  # type: ignore[return-value]
+
+
+def is_skill_folder(name: str) -> bool:
+    """True when a subfolder named `name` of a module's `SKILLS` folder is a skill: any
+    name but one that starts with `.` and `__pycache__`."""
+    return not name.startswith(".") and name != "__pycache__"
+
+
+def is_skill_name(name: object) -> bool:
+    """True when `name` is spelled as the name of a skill Moxi ships: `moxi-`, then words
+    of lower-case ASCII letters and digits joined by single hyphens, 64 characters at
+    most."""
+    return (isinstance(name, str) and len(name) <= SKILL_NAME_MAX
+            and _SKILL.fullmatch(name) is not None)
+
+
+def check_skill_name(name: object) -> str:
+    """Return `name` when it is spelled as a skill name, else raise `ValueError`."""
+    if not is_skill_name(name):
+        raise ValueError(f"{name!r} is not a Moxi skill name: a skill Moxi ships is named "
+                         f"{SKILL_PREFIX}<name>, lower-case ASCII letters and digits in "
+                         f"words joined by single hyphens, {SKILL_NAME_MAX} characters at "
+                         "most")
     return name  # type: ignore[return-value]
 
 
@@ -80,6 +114,7 @@ def env_prefix(name: str) -> str:
     return f"{HARNESS.upper()}_{check_module_name(name).upper()}_"
 
 
-__all__ = ["HARNESS", "ORG", "NAMESPACE", "VERBS", "RESERVED", "is_module_name",
-           "is_reserved", "check_module_name", "distribution", "import_name", "repo",
-           "env_prefix"]
+__all__ = ["HARNESS", "ORG", "NAMESPACE", "VERBS", "RESERVED", "SKILL_PREFIX",
+           "SKILL_NAME_MAX", "is_module_name", "is_reserved", "check_module_name",
+           "is_skill_folder", "is_skill_name", "check_skill_name", "distribution",
+           "import_name", "repo", "env_prefix"]
