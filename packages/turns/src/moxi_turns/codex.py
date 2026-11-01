@@ -48,7 +48,9 @@ Guards and after-tool. The host loads the guards that are on at its attach and a
 only when some guard covers Codex, with a matcher built from their Codex patterns
 (``codex_hooks``). At each ``PreToolUse`` ping it matches the call against its table
 (``guards.run.decide``): a data-only guard refuses at once, judge guards are judged in this
-process, and the answer goes back in Codex's hook output form. The call's ``cwd`` is the
+process, and the answer goes back in Codex's hook output form. The command also carries
+the cover rule of the guards that declared ``on_error = "deny"``, so a ping the host can't
+answer refuses a call one of them covers (``codex_hooks``). The call's ``cwd`` is the
 hook input's when absolute, else the launch directory. ``PostToolUse`` is registered only
 when an installed listener row names ``after-tool``. The main loop's calls reach a row
 only while its floor lets them: the main thread's context is
@@ -340,6 +342,7 @@ class CodexHarness(Harness):
             list(ping), hook_socket, hold_wait_s=endpoint.stop_wait_s,
             listen_wait_s=endpoint.listen_wait_s,
             pre_matcher=pre_matcher, guard_wait_s=self._guard_wait_ms / 1000,
+            refuse=codex_hooks.refuse_table(self.guards.entries),
             after_tool=bool(endpoint.floors.rows), after_wait_s=endpoint.after_tool_wait_s,
         )
 

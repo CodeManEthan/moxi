@@ -24,6 +24,14 @@ a refusal as ``permissionDecision: "deny"`` with the reason, text for the model 
 ``additionalContext``. A tool hook is answered outside the lock the other hooks share,
 so parallel subagents' calls are judged together.
 
+A guard that declared ``on_error = "deny"`` holds when the host can't answer. The
+``PreToolUse`` command carries ``--refuse-unanswered``, the cover rule (patterns, ``who``,
+``match``) of every such guard at launch, fixed for the launch like the matcher. A ping
+that gets no answer (no host, a host fault, or its wait passed) refuses the call when one
+of those rows covers it, by the rule the host matches with, and prints nothing otherwise,
+so the call runs. A call or a table it can't read refuses. A deny guard turned off later
+still refuses through a dead host until the next launch, which fails closed.
+
 Trust. Each hook is trusted for the launch by its hash in ``-c hooks.state={...}``: sha256
 over the canonical JSON (sorted keys, no spaces) of ``{event_name, hooks: [handler]}``,
 plus ``matcher`` for a group that has one. Its key is
@@ -63,6 +71,9 @@ DEFAULT_TIMEOUT = 600
 INTERRUPT_TIMEOUT = 3
 PING_TIMEOUT = 3.0
 PRINTED = "printed"
+#: The refusal of a call a deny guard covers when the host gave no answer; it names no
+#: guard, since the ping can't tell which one would have broken.
+CANNOT_CHECK = "turns could not check this call"
 
 
 @dataclass(frozen=True)
@@ -113,9 +124,11 @@ def hooks_socket(directory) -> Path:
 
 
 def command(ping: list[str], socket_path, event: HookEvent,
-            wait_seconds: float = PING_TIMEOUT) -> str:
-    argv = [*ping, "--socket", str(socket_path), "--wait-seconds",
-            f"{wait_seconds:g}", event.event]
+            wait_seconds: float = PING_TIMEOUT, refuse: str | None = None) -> str:
+    argv = [*ping, "--socket", str(socket_path)]
+    if refuse is not None:
+        argv += ["--refuse-unanswered", refuse]
+    argv += ["--wait-seconds", f"{wait_seconds:g}", event.event]
     if event.source:
         argv += ["--source", event.source]
     return shlex.join(argv)
@@ -158,6 +171,40 @@ def matcher(patterns) -> str | None:
     return "^(?:" + "|".join(_glob(p) for p in names) + ")$"
 
 
+def refuse_table(entries) -> str | None:
+    """The `--refuse-unanswered` value: the cover rule of each guard in `entries` (a
+    host's table) that declared `on_error = "deny"`, as compact JSON, or None when none
+    did."""
+    rows = [{"calls": list(e.calls), "who": e.who,
+             "match": dict(e.match) if e.match else None, "match_flags": e.match_flags}
+            for e in entries if e.on_error == "deny" and e.calls]
+    if not rows:
+        return None
+    return json.dumps(rows, sort_keys=True, separators=(",", ":"))
+
+
+def refuses(table: str, data: dict) -> bool:
+    """Whether an unanswered `PreToolUse` ping refuses its call: when a row of `table`
+    covers it, by the host's own rule (`guards.run.Entry.covers`). A table that doesn't
+    read or compile, or a call with no tool name, refuses."""
+    try:
+        from .guards.run import Entry
+
+        tool = data.get("tool_name")
+        if not isinstance(tool, str) or not tool:
+            return True
+        agent_id = data.get("agent_id")
+        agent_id = agent_id if isinstance(agent_id, str) and agent_id else None
+        given = data.get("tool_input")
+        given = given if isinstance(given, dict) else {}
+        rows = json.loads(table)
+        if not isinstance(rows, list):
+            return True
+        return any(Entry.of("refuse", row).covers(tool, agent_id, given) for row in rows)
+    except Exception:  # noqa: BLE001 - a table it can't read fails closed
+        return True
+
+
 def _glob(pattern: str) -> str:
     return "".join(".*" if ch == "*" else "\\" + ch if ch in _REGEX_META else ch
                    for ch in pattern)
@@ -187,13 +234,15 @@ def _toml_key(key: str) -> str:
 def session_flags(ping: list[str], socket_path, *, hold_wait_s: float = PING_TIMEOUT - 1,
                   listen_wait_s: float = PING_TIMEOUT - 1,
                   pre_matcher: str | None = None, guard_wait_s: float = PING_TIMEOUT - 1,
+                  refuse: str | None = None,
                   after_tool: bool = False, after_wait_s: float = PING_TIMEOUT - 1) \
         -> tuple[list[str], dict[str, str]]:
     """The launch's `-c` hook flags and the trust key and hash of each hook.
 
     `PreToolUse` is added only with a `pre_matcher` (`matcher`), its ping waiting
-    `guard_wait_s` plus a margin; `PostToolUse` only with `after_tool`, for every tool,
-    its ping waiting `after_wait_s` plus the margin."""
+    `guard_wait_s` plus a margin, and carrying `refuse` (`refuse_table`) when given;
+    `PostToolUse` only with `after_tool`, for every tool, its ping waiting `after_wait_s`
+    plus the margin."""
     argv: list[str] = []
     keys: dict[str, str] = {}
     for event in EVENTS:
@@ -208,11 +257,12 @@ def session_flags(ping: list[str], socket_path, *, hold_wait_s: float = PING_TIM
         keys[hook_key(event.label)] = trusted_hash(event.label, one)
     tools = []
     if pre_matcher is not None:
-        tools.append((PRE_TOOL, pre_matcher, guard_wait_s))
+        tools.append((PRE_TOOL, pre_matcher, guard_wait_s, refuse))
     if after_tool:
-        tools.append((POST_TOOL, EVERY_TOOL, after_wait_s))
-    for event, match, wait_s in tools:
-        one = handler(command(ping, socket_path, event, _ping_wait(wait_s)), event.timeout)
+        tools.append((POST_TOOL, EVERY_TOOL, after_wait_s, None))
+    for event, match, wait_s, refusing in tools:
+        one = handler(command(ping, socket_path, event, _ping_wait(wait_s), refusing),
+                      event.timeout)
         argv += ["-c", f"hooks.{event.event}={_toml([{'matcher': match, 'hooks': [one]}])}"]
         keys[hook_key(event.label)] = trusted_hash(event.label, one, match)
     state = {key: {"trusted_hash": value} for key, value in keys.items()}
@@ -431,7 +481,9 @@ class HookServer:
 
     def _tool(self, frame: dict) -> dict:
         """A tool hook: the host's `pre_tool` or `post_tool` answers it. One from another
-        thread, or a host without the hook, passes the call with nothing to add."""
+        thread, or a host without the hook, passes the call with nothing to add. A host
+        fault answers not-ok, which the ping takes as no answer: it refuses a call a deny
+        guard covers and passes any other."""
         session_id = frame.get("session_id")
         if session_id != self.harness.session_id:
             self.harness.foreign_hook(frame.get("event"), session_id)
@@ -442,9 +494,9 @@ class HookServer:
             return {"ok": True}
         try:
             return {"ok": True, **answer(frame)}
-        except Exception:  # noqa: BLE001 - a host fault passes the call, as a dead ping would
-            log.exception("the Codex %s hook failed; the call runs", frame.get("event"))
-            return {"ok": True}
+        except Exception as exc:  # noqa: BLE001 - answered as no answer, like a dead host
+            log.exception("the Codex %s hook failed", frame.get("event"))
+            return {"ok": False, "error": f"the host's {name} failed: {type(exc).__name__}"}
 
     def _timed(self, frame: dict) -> None:
         """Record the hook's wait: from the ping's stamp to this answer. A frame with no
@@ -461,8 +513,15 @@ class HookServer:
 
 class _Ping:
     def __init__(self, path: Path, event: str, source: str | None,
-                 wait_seconds: float, stamp: float | None = None):
+                 wait_seconds: float, stamp: float | None = None,
+                 refuse: str | None = None):
         self.path = path
+        #: The deny guards' cover rule (`refuse_table`), on a `PreToolUse` ping only.
+        self.refuse = refuse
+        #: The hook's input, kept for the refusal of an unanswered call.
+        self.data: dict = {}
+        #: Whether the hook ran to its end: something printed, or silence chosen.
+        self.answered = False
         self.stamp = stamp
         self.event = event
         self.source = source
@@ -472,6 +531,7 @@ class _Ping:
         self.deny = False
 
     def body(self, data: dict) -> str | None:
+        self.data = data
         self.conn = protocol.connect(self.path, PING_TIMEOUT)
         ask = {"event": self.event, **hook_fields(data, source=self.source,
                                                   event=self.event)}
@@ -501,6 +561,7 @@ class _Ping:
         return envelope(event, text)
 
     def emitted(self, text) -> None:
+        self.answered = True
         try:
             if self.block and self.conn is not None:
                 self.conn.send({"op": PRINTED})
@@ -515,6 +576,13 @@ class _Ping:
         if self.conn is not None:
             self.conn.close()
             self.conn = None
+
+    def unanswered(self) -> str | None:
+        """The refusal to print once the hook has ended with no answer, or None: only a
+        `PreToolUse` ping carrying a table, for a call that table covers."""
+        if self.answered or self.event != "PreToolUse" or self.refuse is None:
+            return None
+        return _deny(self.event, CANNOT_CHECK) if refuses(self.refuse, self.data) else None
 
 
 def _block(event: str, reason: str) -> str:
@@ -537,23 +605,36 @@ def main(argv=None) -> int:
     parser.add_argument("--source")
     parser.add_argument("--wait-seconds", type=float, default=PING_TIMEOUT,
                         help=argparse.SUPPRESS)
+    parser.add_argument("--refuse-unanswered", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.wait_seconds <= 0:
         parser.error("--wait-seconds must be greater than zero")
 
     from .hooks.run import run
 
-    ping = _Ping(Path(args.socket), args.event, args.source, args.wait_seconds, _STARTED)
+    from .hooks.run import emit
+
+    ping = _Ping(Path(args.socket), args.event, args.source, args.wait_seconds, _STARTED,
+                 args.refuse_unanswered)
     render = _block if args.event == "Stop" else \
         ping.render if args.event == "PreToolUse" else None
     kwargs = {"render": render} if render is not None else {}
-    return run(args.event, ping.body, seconds=args.wait_seconds, on_error=ping.error,
-               on_emitted=ping.emitted, **kwargs)
+    run(args.event, ping.body, seconds=args.wait_seconds, on_error=ping.error,
+        on_emitted=ping.emitted, **kwargs)
+    # The wall is down and nothing was printed: a covered call is refused here.
+    refusal = ping.unanswered()
+    if refusal is not None:
+        try:
+            emit(refusal)
+        except OSError as exc:
+            log.warning("Codex hook %s could not print its refusal: %s", args.event, exc)
+    return 0
 
 
 __all__ = [
     "EVENTS", "EVENT_NAMES", "EVERY_TOOL", "HookEvent", "HookServer", "HooksUntrusted",
     "KEY_SOURCE", "PING_EVENTS", "POST_TOOL", "PRE_TOOL", "TOOL_EVENTS", "TOOL_EVENT_NAMES",
-    "TRUSTED", "command", "handler", "hook_fields", "hook_key", "hooks_socket", "main",
-    "matcher", "session_flags", "trust_problem", "trusted_hash",
+    "CANNOT_CHECK", "TRUSTED", "command", "handler", "hook_fields", "hook_key",
+    "hooks_socket", "main", "matcher", "refuse_table", "refuses", "session_flags",
+    "trust_problem", "trusted_hash",
 ]

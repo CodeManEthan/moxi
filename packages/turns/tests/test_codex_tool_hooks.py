@@ -473,6 +473,122 @@ def test_another_threads_tool_hook_is_passed_untouched(monkeypatch, turns_env):
         endpoint.stop("the test ended")
 
 
+# -- a host that can't answer ------------------------------------------------------------
+
+def registered_ping(harness) -> list[str]:
+    """The launch's `PreToolUse` command as words, less the ping's own path."""
+    import shlex
+
+    [group] = _registered(harness)["groups"]["PreToolUse"]
+    return shlex.split(group["hooks"][0]["command"])[1:]
+
+
+def run_ping(monkeypatch, words, data):
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(data)))
+    out = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+    assert codex_hooks.main(words) == 0
+    text = out.getvalue()
+    return json.loads(text) if text.strip() else None
+
+
+def strict_and_loose():
+    return runner(
+        found("t.strict", {"codex": ["apply_patch", "Bash"]}, judge="judge_allow",
+              match={"command": "^git push"}, on_error="deny"),
+        found("t.agents", {"codex": ["spawn_agent"]}, judge="judge_allow", who="agents",
+              on_error="deny"),
+        found("t.loose", {"codex": ["Bash", "read_file"]}, judge="judge_allow"))
+
+
+def test_the_refuse_table_holds_only_the_guards_that_declared_deny(turns_env):
+    endpoint, harness, _ = host(turns_env, guards=strict_and_loose())
+    try:
+        words = registered_ping(harness)
+        table = json.loads(words[words.index("--refuse-unanswered") + 1])
+        assert table == [
+            {"calls": ["apply_patch", "Bash"], "who": "any",
+             "match": {"command": "^git push"}, "match_flags": ""},
+            {"calls": ["spawn_agent"], "who": "agents", "match": None, "match_flags": ""}]
+        # The table is part of the trusted command, so the trust hash covers it.
+        [group] = _registered(harness)["groups"]["PreToolUse"]
+        assert harness.hook_keys[codex_hooks.hook_key("pre_tool_use")] == \
+            verified_hash("pre_tool_use", group["hooks"][0], group["matcher"])
+    finally:
+        endpoint.stop("the test ended")
+    # Allow guards alone carry no table.
+    endpoint, harness, _ = host(turns_env, guards=runner(
+        found("t.loose", {"codex": ["Bash"]}, judge="judge_allow")))
+    try:
+        assert "--refuse-unanswered" not in registered_ping(harness)
+    finally:
+        endpoint.stop("the test ended")
+
+
+def test_a_dead_host_refuses_a_call_a_deny_guard_covers_and_passes_the_rest(
+        monkeypatch, turns_env):
+    endpoint, harness, _ = host(turns_env, guards=strict_and_loose())
+    words = registered_ping(harness)
+    endpoint.stop("the test ended")
+    assert not harness.hook_server.socket_path.exists()      # nothing listens now
+    refused = {"hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "permissionDecision": "deny",
+        "permissionDecisionReason": codex_hooks.CANNOT_CHECK}}
+    # A deny guard covers these: by pattern and match, and by who.
+    assert run_ping(monkeypatch, words, pre("Bash", {"command": "git push"})) == refused
+    assert run_ping(monkeypatch, words, pre("spawn_agent", agent_id="sub-1")) == refused
+    # Only an allow guard covers these, or no guard's who or match takes them: they run.
+    assert run_ping(monkeypatch, words, pre("Bash", {"command": "ls"})) is None
+    assert run_ping(monkeypatch, words, pre("read_file", {"path": "a"})) is None
+    assert run_ping(monkeypatch, words, pre("spawn_agent")) is None
+    # A call the ping can't read refuses while a deny guard is in the table.
+    monkeypatch.setattr(sys, "stdin", io.StringIO("not json"))
+    out = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+    assert codex_hooks.main(words) == 0
+    assert json.loads(out.getvalue()) == refused
+
+
+def test_a_dead_host_with_only_allow_guards_passes_every_call(monkeypatch, turns_env):
+    endpoint, harness, _ = host(turns_env, guards=runner(
+        found("t.loose", {"codex": ["Bash"]}, judge="judge_allow")))
+    words = registered_ping(harness)
+    endpoint.stop("the test ended")
+    assert run_ping(monkeypatch, words, pre("Bash", {"command": "git push"})) is None
+
+
+def test_a_host_fault_refuses_a_covered_call_and_passes_the_rest(monkeypatch, turns_env):
+    endpoint, harness, _ = host(turns_env, guards=strict_and_loose())
+    try:
+        words = registered_ping(harness)
+
+        def broken(frame):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(harness, "pre_tool", broken)
+        assert denied(run_ping(monkeypatch, words, pre("Bash", {"command": "git push"}))) \
+            == codex_hooks.CANNOT_CHECK
+        assert run_ping(monkeypatch, words, pre("Bash", {"command": "ls"})) is None
+    finally:
+        endpoint.stop("the test ended")
+
+
+def test_an_answering_host_decides_and_the_table_adds_nothing(monkeypatch, turns_env):
+    endpoint, harness, _ = host(turns_env, guards=strict_and_loose())
+    try:
+        words = registered_ping(harness)
+        out = run_ping(monkeypatch, words, pre("Bash", {"command": "git push"}))
+        assert context_of(out) == "judged Bash\njudged Bash"
+    finally:
+        endpoint.stop("the test ended")
+
+
+@pytest.mark.parametrize("table", ["not json", '{"calls": ["Bash"]}',
+                                   '[{"calls": ["Bash"], "match": {"command": "("}}]'])
+def test_a_table_that_does_not_read_refuses(table):
+    assert codex_hooks.refuses(table, pre("read_file")) is True
+
+
 def test_a_guard_turned_off_at_a_ready_stops_covering(monkeypatch, turns_env):
     guards = runner(found("t.all", {"codex": ["Bash"]}, deny="refused"))
     endpoint, harness, _ = host(turns_env, guards=guards)
