@@ -542,6 +542,28 @@ def test_a_server_name_an_earlier_module_has_is_left_out(group):
     assert rows["additions beta: mcp_servers"].detail.startswith("claude, codex, opencode: ")
 
 
+def test_a_server_named_for_a_module_belongs_to_that_module(group):
+    # `beta` sorts before `comms` and contributes a server named `comms`.
+    group["entries"] = [Entry("comms", serves("comms", "http://localhost:3/mcp", None)),
+                        Entry("beta", serves("comms", "http://localhost:2/mcp", None))]
+    for harness in ("claude", "codex", "opencode"):
+        got = adds(harness)
+        (note,) = got.notes
+        assert note == ("additions of beta: MCP server 'comms' left out: the name belongs "
+                        "to the module comms")
+    assert mcp_config(adds("claude").argv)["comms"]["url"] == "http://localhost:3/mcp"
+    rows = {r.name: r for r in additions.rows()}
+    assert "additions comms: mcp_servers" not in rows
+    assert rows["additions beta: mcp_servers"].detail.startswith("claude, codex, opencode: ")
+    # The name stays the module's while its own additions don't load, so no other module
+    # takes it.
+    group["entries"] = [Entry("comms", RuntimeError("gone")),
+                        Entry("beta", serves("comms", "http://localhost:2/mcp", None))]
+    got = adds("claude")
+    assert not any(w.startswith("--mcp-config") for w in got.argv)
+    assert any("the name belongs to the module comms" in n for n in got.notes)
+
+
 @pytest.mark.parametrize("servers", [
     {"comms": URL},
     {"comms": {"url": URL, "token": TOKEN_ENV}},

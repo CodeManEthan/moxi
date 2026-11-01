@@ -97,7 +97,9 @@ contribution: a module that wants session events registers a listener.
   variable.** It checks only that `token_env` is a key of the launch's `env` and renders
   a reference to it. A server whose variable is absent is left out, never rendered with
   an empty token: Claude would send the reference itself and get a 401. So is a server
-  with a bad name or URL, and one whose name an earlier module's server already has.
+  with a bad name or URL, and one whose name an earlier module's server already has. A
+  server named for a module in the group belongs to that module: another module's server
+  of that name is left out wherever it sorts, so no module can take `comms`'s server.
 """
 
 from __future__ import annotations
@@ -191,6 +193,12 @@ class Broken:
 class Group:
     contributors: tuple[Contributor, ...] = ()
     broken: tuple[Broken, ...] = ()
+
+    def modules(self) -> frozenset[str]:
+        """Every module in the group, a broken entry's included: the server names no other
+        module may take."""
+        return frozenset([*(c.module for c in self.contributors),
+                          *(b.module for b in self.broken)])
 
 
 @dataclass(frozen=True)
@@ -316,18 +324,20 @@ def launch_additions(harness: str, *, cwd, env: Mapping[str, str],
     permission: dict[str, object] = {}
     servers: dict[str, Mapping[str, object]] = {}
     owner: dict[str, str] = {}
+    reserved = group.modules()
     for contributor in group.contributors:
         rendered = _ask(contributor, request)
         if rendered.skipped:
             notes.append(f"additions of {contributor.module} skipped: {rendered.skipped}")
             continue
         notes += [f"additions of {contributor.module}: {why}"
-                  for why in _left_out(rendered, harness, owner)]
+                  for why in _left_out(rendered, harness, owner, contributor.module,
+                                       reserved)]
         argv += rendered.argv
         if rendered.permission:
             _add_permission(permission, rendered.permission)
         for name, entry in rendered.servers.items():
-            if name not in owner:
+            if _taken(name, contributor.module, owner, reserved) is None:
                 owner[name] = contributor.module
                 servers[name] = entry
     if permission:
@@ -478,12 +488,23 @@ def _entry(harness: str, spec: McpServer) -> dict[str, object]:
     return entry
 
 
-def _left_out(rendered: _Rendered, harness: str, owner: Mapping[str, str]) -> list[str]:
-    """Why each of a contribution's servers stays out of this launch: its own reasons, and
-    a name an earlier module's server (`owner`) already has."""
-    return list(rendered.left_out) + [
-        f"MCP server {name!r} left out: {owner[name]} already adds a server of that name"
-        for name in rendered.servers if name in owner]
+def _left_out(rendered: _Rendered, harness: str, owner: Mapping[str, str], module: str,
+              reserved: frozenset[str]) -> list[str]:
+    """Why each of `module`'s servers stays out of this launch: its own reasons, and a name
+    that is taken (`_taken`)."""
+    taken = (_taken(name, module, owner, reserved) for name in rendered.servers)
+    return list(rendered.left_out) + [why for why in taken if why is not None]
+
+
+def _taken(name: str, module: str, owner: Mapping[str, str],
+           reserved: frozenset[str]) -> str | None:
+    """Why `module` can't have a server named `name`, or None: the name is another
+    module's own (one in `reserved`), or an earlier module's server (`owner`) has it."""
+    if name in reserved and name != module:
+        return f"MCP server {name!r} left out: the name belongs to the module {name}"
+    if name in owner:
+        return f"MCP server {name!r} left out: {owner[name]} already adds a server of that name"
+    return None
 
 
 def _place(harness: str, servers: Mapping[str, Mapping[str, object]]
@@ -615,6 +636,7 @@ def rows() -> list:
     cwd = os.getcwd()
     env = MappingProxyType(dict(os.environ))
     owners: dict[str, dict[str, str]] = {harness: {} for harness in HARNESSES}
+    reserved = group.modules()
     legacy = codex_legacy_policy(env)
     for contributor in group.contributors:
         adds, skips, serious = [], [], False
@@ -626,12 +648,13 @@ def rows() -> list:
                 serious = serious or rendered.serious
                 continue
             owner = owners[harness]
-            for why in _left_out(rendered, harness, owner):
+            for why in _left_out(rendered, harness, owner, contributor.module, reserved):
                 left_out.setdefault(why, []).append(harness)
             if harness == "codex" and legacy and rendered.tokened:
                 left_out.setdefault(_legacy_why(legacy), []).append(harness)
             for name in rendered.servers:
-                owner.setdefault(name, contributor.module)
+                if _taken(name, contributor.module, owner, reserved) is None:
+                    owner[name] = contributor.module
             if rendered.adds:
                 adds.append(harness)
         if skips:
