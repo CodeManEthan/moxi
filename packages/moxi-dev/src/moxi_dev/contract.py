@@ -279,7 +279,11 @@ class _IndexTree:
 
     A symlink is followed as the file system would follow it in a checkout of that
     commit: its blob is the target, read against the link's folder and looked up in the
-    index, so a symlinked folder or file reads the same here as in the working tree."""
+    index, so a symlinked folder or file reads the same here as in the working tree.
+
+    `files()` lists regular files only. A symlink to a file is followed when the skills
+    check reads it, but the other checks don't scan it here, while the working tree's
+    listing includes it."""
 
     _HOPS = 40          # the most symlinks one path may pass through, as on Linux
 
