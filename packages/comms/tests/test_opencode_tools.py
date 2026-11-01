@@ -169,6 +169,9 @@ def test_a_served_launch_merges_comms_server_naming_the_variable(adapter):
     assert [k for k, v in env.items() if VALUE in v] == [TOKEN_ENV]
     assert a.tool_token.hash == tokens.digest(VALUE)
     assert not [n for n in a.additions_notes if "comms" in n], a.additions_notes
+    # Layer one and the reply reminder take the tools form.
+    from moxi_comms import context
+    assert a.layer_form == context.TOOLS
 
 
 def test_turns_is_asked_once_with_the_server_env_and_the_pair(adapter, monkeypatch):
@@ -339,6 +342,7 @@ def test_turns_leaving_comms_server_out_for_another_reason_drops_the_pair(
     assert a.prepare_launch(URL, token=VALUE) is False
     assert_no_tools(a)
     assert a.tools_why == "turns left comms' server out of this launch"
+    assert a.layer_form is None                    # no tools: the CLI form
 
 
 def test_a_session_that_launches_this_wrapper_passes_no_token_on(adapter):

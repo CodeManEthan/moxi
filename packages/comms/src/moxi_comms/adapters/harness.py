@@ -198,7 +198,8 @@ class HarnessAdapter:
     #: every bind; None when the launch carries none.
     tool_token: binding.ToolToken | None = None
     #: The form of layer one this session was taught (`context.layer_one_form` of its
-    #: launch), read before the token leaves the environment; None is the CLI form.
+    #: launch), read before the token leaves the environment; None is the CLI form. The
+    #: reply reminder follows it.
     layer_form: str | None = None
 
     def __init__(self, agent, *, socket_path=None, autoreconnect: bool = True,
@@ -272,7 +273,8 @@ class HarnessAdapter:
             owed_query=lambda *args: self.owed_query(*args),
             connection=lambda: self._daemon,
             stop_facts=lambda fields: self.stop_facts(fields), log=self.log,
-            moment="turn end", check="reply check", start="")
+            moment="turn end", check="reply check", start="",
+            form=lambda: self.layer_form)
         self.exit_hook = exit_hook or (lambda: os.kill(os.getpid(), signal.SIGTERM))
         self._make_holder()
 

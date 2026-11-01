@@ -467,6 +467,10 @@ class ClaudeShim:
     #: The session's token for comms' tools (`binding.ToolToken`), registered after
     #: every bind; None when the launch carries none.
     tool_token: binding.ToolToken | None = None
+    #: The form of layer one this session was taught (`context.layer_one_form` of its
+    #: launch), read before the token leaves the environment; None is the CLI form. The
+    #: reply reminder follows it.
+    layer_form: str | None = None
 
     def __init__(self, *, name=None, scope=None, global_=False,
                  project=None, injector=None, socket_path=None, status_sink=None,
@@ -574,7 +578,7 @@ class ClaudeShim:
             self._lock, clock=lambda: self.clock(), identity=lambda: self.identity,
             queued=lambda: bool(self.queue),
             owed_query=lambda *args: self.owed_query(*args),
-            connection=lambda: self._client, log=log)
+            connection=lambda: self._client, log=log, form=lambda: self.layer_form)
         #: Why the supervisor ended, recorded on each of its two ways out: "stopped", or
         #: the has-held stop's reason. None while it runs.
         self.ended_because: str | None = None

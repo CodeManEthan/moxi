@@ -1144,6 +1144,32 @@ def test_the_reminder_lists_three_oldest_first_and_counts_the_rest():
     assert lines[6] == '  moxi comms reply <id> "the result, the blocker, or your question"'
 
 
+def test_the_tools_form_of_the_reminder_names_the_reply_tool_then_the_cli():
+    from moxi_comms import context, owed
+    d = owed.Debt("8", LEAD_Q, "director", None, "open", T0, None)
+    assert owed.reminder_text([d], T0 + 60, context.TOOLS) == (
+        "comms: you are ending this turn without answering lead's msg 8 (directive, 1m "
+        "ago). Answer it now with\n"
+        '  the reply tool: message_id 8, text "the result, the blocker, or your question"\n'
+        "If you need to ask your director or a peer before you can answer, give `reply` "
+        "the posture `once`: that keeps it open. If the comms tools are missing, run "
+        '`moxi comms reply 8 "the result, the blocker, or your question"` instead. If it '
+        "needs no answer, stop again.")
+
+
+def test_a_shell_that_cant_reach_comms_is_told_no_command():
+    from moxi_comms import context, owed
+    one = [owed.Debt("8", LEAD_Q, "director", None, "open", T0, None)]
+    many = one + [owed.Debt("9", "operator", "operator", None, "open", T0, None)]
+    for debts in (one, many):
+        text = owed.reminder_text(debts, T0 + 60, context.TOOLS_ONLY)
+        assert "moxi comms" not in text and "--posture" not in text
+        assert "the reply tool" in text and owed.TOOLS_ASK_BACK in text
+    lines = owed.reminder_text(many, T0 + 60, context.TOOLS).splitlines()
+    assert lines[-2] == '  the reply tool: its message_id, text "the result, the blocker, or your question"'
+    assert "`moxi comms reply <id> " in lines[-1]
+
+
 def test_the_reminder_never_asks_for_progress():
     from moxi_comms import owed
     d = owed.Debt("7", LEAD_Q, "director", None, "open", T0, None)

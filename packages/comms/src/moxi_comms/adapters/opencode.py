@@ -93,7 +93,7 @@ from pathlib import Path
 
 from ..client import DaemonError, DaemonClient, DaemonOffline, backoff_delays
 from ..config import ConfigError
-from ..context import BARE_COMMS, MOXI_COMMS_PATH_LINE, own_comms  # noqa: F401
+from ..context import BARE_COMMS, MOXI_COMMS_PATH_LINE, layer_one_form, own_comms  # noqa: F401
 from . import opencode_roster
 from .harness import (REQUEUE, SOURCE_CLEAR, SOURCE_COMPACT, SOURCE_STARTUP, TURN_COMPLETED,
                       HarnessAdapter, TurnLedger, launch_stamp, plan_comms, plan_head)
@@ -813,6 +813,8 @@ class OpenCodeAdapter(HarnessAdapter):
             notes.append(tools_off(self.tools_why))
         pair.clear()
         self.added_env, self.added_options = added_env, options
+        # The form layer one is written in, and the reply reminder follows.
+        self.layer_form = layer_one_form(added_env)
         self.additions_notes = notes
         for note in notes:
             log.warning("%s: %s", self.agent.qualified, note)
@@ -830,8 +832,6 @@ class OpenCodeAdapter(HarnessAdapter):
     def write_layer_one(self) -> None:
         """Layer one, in its tools form when this launch carries comms' tools (the pair
         is in `added_env` only when turns rendered comms' server)."""
-        from ..context import layer_one_form
-
         path = self.layer_one_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(path.parent, 0o700)

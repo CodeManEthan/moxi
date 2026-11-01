@@ -185,6 +185,9 @@ def test_the_claude_adapter_registers_before_it_says_bound(rig, monkeypatch):
     assert row is not None and row.bound and row.identity == REVIEWER
     assert row.claim_key == shim.claims.key
     assert TOKEN_ENV not in os.environ, "the adapter keeps only the hash"
+    # The form was read before the token left: the reply reminder names the tools.
+    from moxi_comms import context
+    assert shim.layer_form == context.TOOLS
 
 
 def test_the_codex_adapter_registers_before_it_says_bound(rig, launch):

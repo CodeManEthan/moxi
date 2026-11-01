@@ -254,8 +254,9 @@ class Ledger:
         return False
 
     def decide(self, *, stop_hook_active: bool, turn_blocks: int, work: bool,
-               floor, now: float) -> Decision:
-        """The rest of a Stop's decision, after the facts are read and settled."""
+               floor, now: float, form: str | None = None) -> Decision:
+        """The rest of a Stop's decision, after the facts are read and settled. `form`
+        is the session's form of layer one, which the reminder's text follows."""
         if stop_hook_active and turn_blocks == 0:
             return Decision()                       # step 5: another hook blocked
         for d in self.debts.values():               # step 6: settle pending marks
@@ -272,7 +273,7 @@ class Ledger:
                          if not d.counted and self.decidable(d, floor)),
                         key=lambda d: _as_id(d.message_id))
         if turn_blocks == 0 and remind:             # step 9
-            return Decision(block=reminder_text(remind, now),
+            return Decision(block=reminder_text(remind, now, form),
                             names=tuple(d.message_id for d in remind), dropped=recorded)
         return Decision(dropped=recorded)
 
@@ -308,13 +309,16 @@ class ReplyCheck:
     are read in the same hold of the lock as the expiry.
 
     `moment` names the turn end in the log ("Stop"), `check` the check itself, and
-    `start` the session change's log prefix.
+    `start` the session change's log prefix. `form()` gives the session's form of layer
+    one (`context.layer_one_form`), which the reminder's text follows; None, the CLI
+    form, when not given.
     """
 
     def __init__(self, lock, *, clock, identity, queued, owed_query, connection, log,
                  stop_facts=None, moment="Stop", check="Stop check",
-                 start="SessionStart "):
+                 start="SessionStart ", form=None):
         self.lock = lock
+        self.form = form or (lambda: None)
         self.clock = clock
         self.identity = identity
         self.queued = queued
@@ -379,7 +383,8 @@ class ReplyCheck:
                            awaiting=answer.get("awaiting"))
             return self.ledger.decide(stop_hook_active=active,    # steps 5 to 9
                                       turn_blocks=self.turn_blocks, work=work,
-                                      floor=answer.get("floor"), now=now)
+                                      floor=answer.get("floor"), now=now,
+                                      form=self.form())
 
     def _read_facts(self, fields: dict):
         """Step 2, under the lock: the turn end's facts and the query's arguments, or
@@ -459,34 +464,54 @@ ASK_BACK = ("If you need to ask your director or a peer before you can answer, a
             "--posture once: that keeps it open.")
 TERMINAL = "If you already answered the operator at the terminal, stop again."
 TAIL = "If it needs no answer, stop again."
+#: The tools form's ask-back sentence: the `reply` tool's `posture`, not a flag.
+TOOLS_ASK_BACK = ("If you need to ask your director or a peer before you can answer, give "
+                  "`reply` the posture `once`: that keeps it open.")
+#: The tools form's CLI fallback, for a session whose shell can reach comms.
+TOOLS_FALLBACK = "If the comms tools are missing, run `moxi comms reply {id} {hint}` instead."
 
 
-def reminder_text(debts, now: float) -> str:
+def reminder_text(debts, now: float, form: str | None = None) -> str:
     """The block's reason.
 
     Up to three owed messages, oldest first, then "and <k> more". The ask-back sentence
     stays when any listed debt is a director's or a peer's (for an operator-only block it
     has no work to do); a debt to the operator adds the terminal sentence. It never asks
     for progress.
+
+    `form` is the session's form of layer one (`context.layer_one_form`). The CLI form
+    (None) names `moxi comms reply`. A tools form names the `reply` tool and its
+    `posture`; `TOOLS` adds the CLI as the fallback, and `TOOLS_ONLY`, a session whose
+    shell can't reach comms, names no command at all.
     """
+    from .context import TOOLS_ONLY
+
     debts = sorted(debts, key=lambda d: _as_id(d.message_id))
     shown = debts[:REMINDER_LIST]
+    tools = form is not None
     if len(debts) == 1:
         d = debts[0]
         lines = [f"comms: you are ending this turn without answering {_named(d, now)}. "
-                 "Answer it now with",
-                 f"  moxi comms reply {d.message_id} {ANSWER_HINT}"]
+                 "Answer it now with"]
+        lines.append(f"  the reply tool: message_id {d.message_id}, text {ANSWER_HINT}"
+                     if tools else f"  moxi comms reply {d.message_id} {ANSWER_HINT}")
+        one = d.message_id
     else:
         lines = ["comms: you are ending this turn without answering:"]
         lines += [f"  {_named(d, now)}" for d in shown]
         if len(debts) > len(shown):
             lines.append(f"  and {len(debts) - len(shown)} more")
-        lines += ["Answer each now with", f"  moxi comms reply <id> {ANSWER_HINT}"]
+        lines += (["Answer each now with", f"  the reply tool: its message_id, text {ANSWER_HINT}"]
+                  if tools else
+                  ["Answer each now with", f"  moxi comms reply <id> {ANSWER_HINT}"])
+        one = "<id>"
     tail = []
     if any(d.branch in (BRANCH_DIRECTOR, BRANCH_PEER) for d in debts):
-        tail.append(ASK_BACK)
+        tail.append(TOOLS_ASK_BACK if tools else ASK_BACK)
     if any(d.branch == BRANCH_OPERATOR for d in debts):
         tail.append(TERMINAL)
+    if tools and form != TOOLS_ONLY:
+        tail.append(TOOLS_FALLBACK.format(id=one, hint=ANSWER_HINT))
     tail.append(TAIL)
     return "\n".join(lines + [" ".join(tail)])
 

@@ -624,12 +624,16 @@ def serve(shim: ClaudeShim, harness_pid: int, harness_fd: int, *, say=None,
 
     A launch that carries comms' tools has the session's token in this process's
     environment: the shim keeps its hash (the value leaves the environment) and registers
-    it after every bind, the first before `BOUND` is said, so `claude` starts after it."""
+    it after every bind, the first before `BOUND` is said, so `claude` starts after it.
+    The form of layer one the session was taught is read first, while the token is still
+    there to show it."""
+    from ..context import layer_one_form
     from .binding import ToolToken
     from .word import BOUND, exit_of, word_for
 
     say = say or (lambda code, reason="": None)
     if shim.tool_token is None:
+        shim.layer_form = layer_one_form(os.environ)
         shim.tool_token = ToolToken.from_environ()
     adapter = ClaudeAdapter(shim, harness_pid, turns=turns)
     try:

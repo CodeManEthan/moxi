@@ -630,7 +630,7 @@ def serve(adapter, handle: int, *, say=None) -> int:
     environment: the adapter keeps its hash (the value leaves the environment) and
     registers it after every bind, the first before `BOUND` is said. The form of layer
     one the wrapper wrote is read first, while the token is still there to show it: the
-    thread record hashes that form."""
+    thread record hashes that form, and the reply reminder follows it."""
     from ..context import layer_one_form
     from .binding import ToolToken
     from .claude_adapter import wait_for_exit
