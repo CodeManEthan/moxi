@@ -296,9 +296,91 @@ def test_codex_gets_the_server_in_the_thread_config(group):
         "claude": ("mcp__comms__send",)}))]
     got = adds("codex", env=with_token())
     assert got.argv == () and got.notes == ()
-    assert got.options == {"config": {"mcp_servers": {"comms": {
-        "url": URL, "bearer_token_env_var": TOKEN_ENV,
-        "default_tools_approval_mode": "approve"}}}}
+    assert got.options == {"config": {
+        "mcp_servers": {"comms": {"url": URL, "bearer_token_env_var": TOKEN_ENV,
+                                  "default_tools_approval_mode": "approve"}},
+        "shell_environment_policy": {"filters": {TOKEN_ENV: "exclude"}},
+        "features": {"shell_snapshot": False}}}
+
+
+def test_codex_keeps_every_token_variable_out_of_the_shell_with_one_snapshot_switch(
+        group):
+    group["entries"] = [
+        Entry("beta", serves("beta", "http://localhost:2/mcp", "BETA_TOKEN")),
+        Entry("alpha", contributes(Contribution(mcp_servers={
+            "alpha": McpServer("http://localhost:1/mcp", "ALPHA_TOKEN"),
+            "open": McpServer("http://localhost:3/mcp")}))),
+    ]
+    config = adds("codex", env=with_token(ALPHA_TOKEN="a", BETA_TOKEN="b")
+                  ).options["config"]
+    assert config["shell_environment_policy"] == {
+        "filters": {"ALPHA_TOKEN": "exclude", "BETA_TOKEN": "exclude"}}
+    assert config["features"] == {"shell_snapshot": False}
+
+
+def test_codex_adds_no_shell_setting_for_a_server_with_no_token_or_one_left_out(group):
+    group["entries"] = [Entry("open", serves("open", token_env=None)),
+                        Entry("comms", serves())]
+    config = adds("codex").options["config"]
+    assert set(config) == {"mcp_servers"} and list(config["mcp_servers"]) == ["open"]
+
+
+def test_claude_and_opencode_get_no_codex_shell_setting(group):
+    group["entries"] = [Entry("comms", serves())]
+    assert "shell_snapshot" not in " ".join(adds("claude", env=with_token()).argv)
+    assert set(adds("opencode", env=with_token()).options) == {"mcp"}
+
+
+def test_a_callers_codex_option_goes_over_the_shell_settings(group, tmp_path, built):
+    group["entries"] = [Entry("comms", serves())]
+    _launch("codex", tmp_path, env={TOKEN_ENV: SECRET}, options={"config": {
+        "features": {"shell_snapshot": True},
+        "shell_environment_policy": {"filters": {"PATH": "include"}}}})
+    config = built["harness"].options["config"]
+    assert config["features"] == {"shell_snapshot": True}
+    assert config["shell_environment_policy"] == {
+        "filters": {TOKEN_ENV: "exclude", "PATH": "include"}}
+
+
+@pytest.mark.parametrize("policy,keys", [
+    ('exclude = ["AWS_*"]', "shell_environment_policy.exclude"),
+    ('include_only = ["PATH"]', "shell_environment_policy.include_only"),
+    ('exclude = ["A"]\ninclude_only = ["PATH"]',
+     "shell_environment_policy.exclude and shell_environment_policy.include_only"),
+])
+def test_the_doctor_warns_for_a_codex_config_with_the_legacy_arrays(
+        group, monkeypatch, tmp_path, policy, keys):
+    (tmp_path / "config.toml").write_text(f"[shell_environment_policy]\n{policy}\n")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    monkeypatch.setenv(TOKEN_ENV, SECRET)
+    group["entries"] = [Entry("comms", serves())]
+    row = {r.name: r for r in additions.rows()}["additions comms: mcp_servers"]
+    assert row.state == "warn"
+    assert row.detail == (f"codex: the user's Codex config.toml sets {keys}, which the "
+                          "token server's filters replace in a session that carries it")
+    assert row.fix.endswith("write Codex's shell_environment_policy exclude and "
+                            "include_only as filters")
+
+
+@pytest.mark.parametrize("text", [
+    '[shell_environment_policy.filters]\nAWS_SECRET = "exclude"\n',
+    'model = "m"\n', "not toml [", None])
+def test_the_doctor_is_quiet_for_a_codex_config_without_the_legacy_arrays(
+        group, monkeypatch, tmp_path, text):
+    if text is not None:
+        (tmp_path / "config.toml").write_text(text)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    monkeypatch.setenv(TOKEN_ENV, SECRET)
+    group["entries"] = [Entry("comms", serves())]
+    assert "additions comms: mcp_servers" not in {r.name for r in additions.rows()}
+
+
+def test_the_doctor_is_quiet_on_the_legacy_arrays_without_a_token_server(
+        group, monkeypatch, tmp_path):
+    (tmp_path / "config.toml").write_text('[shell_environment_policy]\nexclude = ["A"]\n')
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    group["entries"] = [Entry("open", serves("open", token_env=None))]
+    assert "additions open: mcp_servers" not in {r.name for r in additions.rows()}
 
 
 def test_opencode_gets_the_server_in_its_config_beside_the_permissions(group):

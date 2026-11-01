@@ -123,6 +123,9 @@ def test_through_turns_renderer_codex_and_opencode_name_the_variable(tmp_path):
     assert codex.options["config"]["mcp_servers"]["comms"] == {
         "url": URL, "bearer_token_env_var": "MOXI_COMMS_MCP_TOKEN",
         "default_tools_approval_mode": "approve"}
+    assert codex.options["config"]["shell_environment_policy"] == {
+        "filters": {"MOXI_COMMS_MCP_TOKEN": "exclude"}}
+    assert codex.options["config"]["features"] == {"shell_snapshot": False}
     opencode = launch_additions("opencode", pair(), tmp_path)
     assert opencode.options["mcp"]["comms"] == {
         "type": "remote", "url": URL, "enabled": True,

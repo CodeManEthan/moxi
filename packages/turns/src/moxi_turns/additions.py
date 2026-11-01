@@ -75,10 +75,24 @@ contribution: a module that wants session events registers a listener.
     second config. No `--strict-mcp-config`: the user's own servers stay beside these.
   - Codex: `options["config"]["mcp_servers"][name] = {"url": ..., "bearer_token_env_var":
     VAR, "default_tools_approval_mode": "approve"}`, the thread config the host sends.
-    The host answers no approval request, so a tool held for one would hang.
+    The host answers no approval request, so a tool held for one would hang. For each
+    server with a `token_env`, also `options["config"]["shell_environment_policy"]
+    ["filters"][VAR] = "exclude"` and, once for the launch, `options["config"]
+    ["features"]["shell_snapshot"] = False`. The exclude keeps the variable out of the
+    environment of every shell the model runs; the snapshot goes off because Codex 0.153
+    writes a login shell's whole `export` list, taken from the app-server's environment
+    before any filter, to a file under `CODEX_HOME` and sources it before each command.
+    With both, the value is in the shell's environment and in no file Codex writes; the
+    app-server's own environment still holds it, since its MCP client reads it there, and
+    a process of the same user can read that environment. `filters` replaces a lower
+    layer's legacy `exclude` and `include_only` arrays, so a user `config.toml` that sets
+    those loses them in such a session; the doctor warns. A caller's option for either
+    key goes over the rendered one (`for_host`).
   - OpenCode: `options["mcp"][name] = {"type": "remote", "url": ..., "enabled": True,
     "headers": {"Authorization": "Bearer {env:VAR}"}}`, which OpenCode substitutes in the
     config it reads at start (`OPENCODE_CONFIG_CONTENT`).
+  On Claude and OpenCode turns knows no setting that keeps one variable out of the
+  model's shell, so their shells inherit it.
   **turns never reads a token's value and never writes one into argv, a file or another
   variable.** It checks only that `token_env` is a key of the launch's `env` and renders
   a reference to it. A server whose variable is absent is left out, never rendered with
@@ -186,12 +200,15 @@ class _Rendered:
 
     `servers` holds its MCP servers by name, each in the harness's own form, which the
     launch places once every contribution is in (`_place`): Claude's in one word, the
-    others' in `options`. `left_out` says why each server that could not go in did not."""
+    others' in `options`. `left_out` says why each server that could not go in did not.
+    `tokened` names the servers that send a token when they go in, whether or not this
+    launch's environment holds the variable (the doctor's Codex check)."""
 
     argv: tuple[str, ...] = ()
     permission: Mapping[str, object] | None = None
     servers: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
     left_out: tuple[str, ...] = ()
+    tokened: tuple[str, ...] = ()
     skipped: str | None = None
     serious: bool = False
 
@@ -358,17 +375,20 @@ def render(answer: object, harness: str, env: Mapping[str, str] | None = None
     if isinstance(specs, str):
         return _Rendered(skipped=specs, serious=True)
     rendered, left_out = _render_servers(specs, harness, env if env is not None else {})
+    tokened = tuple(name for name in sorted(specs) if specs[name].token_env is not None
+                    and _server_problem(name, specs[name], harness) is None)
     rules = tuple(permissions.get(harness) or ())
     if not rules:
-        return _Rendered(servers=rendered, left_out=left_out)
+        return _Rendered(servers=rendered, left_out=left_out, tokened=tokened)
     if harness == "claude":
         return _Rendered(argv=tuple(f"--allowedTools={rule}" for rule in rules),
-                         servers=rendered, left_out=left_out)
+                         servers=rendered, left_out=left_out, tokened=tokened)
     if harness == "opencode":
         fragment: dict[str, object] = {}
         for rule in rules:
             _add_permission(fragment, _opencode_rule(rule))
-        return _Rendered(permission=fragment, servers=rendered, left_out=left_out)
+        return _Rendered(permission=fragment, servers=rendered, left_out=left_out,
+                         tokened=tokened)
     return _Rendered(skipped=f"it names {len(rules)} Codex tool rule(s), and turns knows "
                              "no way to give Codex a tool rule for one launch")
 
@@ -476,7 +496,16 @@ def _place(harness: str, servers: Mapping[str, Mapping[str, object]]
         config = json.dumps({"mcpServers": dict(servers)}, separators=(",", ":"))
         return (f"--mcp-config={config}",), {}
     if harness == "codex":
-        return (), {"config": {"mcp_servers": dict(servers)}}
+        config: dict[str, object] = {"mcp_servers": dict(servers)}
+        tokens = sorted({entry["bearer_token_env_var"] for entry in servers.values()
+                         if "bearer_token_env_var" in entry})
+        if tokens:
+            # The token variable stays in the app-server, whose MCP client reads it, and
+            # out of every shell the model runs and of the snapshot file Codex writes.
+            config["shell_environment_policy"] = {
+                "filters": {var: "exclude" for var in tokens}}
+            config["features"] = {"shell_snapshot": False}
+        return (), {"config": config}
     return (), {"mcp": dict(servers)}
 
 
@@ -570,8 +599,10 @@ def rows() -> list:
     it adds to. A module with an MCP server left out on a harness (its token variable is
     not in this environment, a bad name or URL, a name an earlier module's server has,
     or a form this harness cannot take) also gets an `additions <module>: mcp_servers`
-    `warn` row. The doctor asks each contributor about a launch with its own directory
-    and environment."""
+    `warn` row, and so does one with a token server on Codex while the user's Codex
+    `config.toml` sets `shell_environment_policy.exclude` or `include_only`, which the
+    rendered `filters` replace in such a session. The doctor asks each contributor about
+    a launch with its own directory and environment."""
     from moxi import doctor as moxi_doctor
 
     from .doctor import MODULE
@@ -584,6 +615,7 @@ def rows() -> list:
     cwd = os.getcwd()
     env = MappingProxyType(dict(os.environ))
     owners: dict[str, dict[str, str]] = {harness: {} for harness in HARNESSES}
+    legacy = codex_legacy_policy(env)
     for contributor in group.contributors:
         adds, skips, serious = [], [], False
         left_out: dict[str, list[str]] = {}
@@ -596,6 +628,8 @@ def rows() -> list:
             owner = owners[harness]
             for why in _left_out(rendered, harness, owner):
                 left_out.setdefault(why, []).append(harness)
+            if harness == "codex" and legacy and rendered.tokened:
+                left_out.setdefault(_legacy_why(legacy), []).append(harness)
             for name in rendered.servers:
                 owner.setdefault(name, contributor.module)
             if rendered.adds:
@@ -614,8 +648,40 @@ def rows() -> list:
                 "; ".join(f"{', '.join(harnesses)}: {why}"
                           for why, harnesses in left_out.items()),
                 f"a launch through {contributor.module} stamps a server's token variable; "
-                f"a bad name or URL is {contributor.module}'s to fix"))
+                f"a bad name or URL is {contributor.module}'s to fix"
+                + ("; write Codex's shell_environment_policy exclude and include_only as "
+                   "filters" if legacy and _legacy_why(legacy) in left_out else "")))
     return out
+
+
+#: The legacy forms of Codex's `shell_environment_policy` that a layer's `filters`
+#: replaces in Codex 0.153's config merge.
+CODEX_LEGACY_POLICY = ("exclude", "include_only")
+
+
+def codex_legacy_policy(env: Mapping[str, str]) -> tuple[str, ...]:
+    """Which of `CODEX_LEGACY_POLICY` the user's Codex `config.toml` sets in its
+    `shell_environment_policy` table (`CODEX_HOME`, else `~/.codex`). A file that is
+    missing or does not read gives none: the doctor warns only on what it can see."""
+    import tomllib
+    from pathlib import Path
+
+    home = env.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
+    try:
+        with open(Path(home) / "config.toml", "rb") as fh:
+            data = tomllib.load(fh)
+    except (OSError, ValueError):
+        return ()
+    policy = data.get("shell_environment_policy")
+    if not isinstance(policy, Mapping):
+        return ()
+    return tuple(key for key in CODEX_LEGACY_POLICY if key in policy)
+
+
+def _legacy_why(legacy: tuple[str, ...]) -> str:
+    keys = " and ".join(f"shell_environment_policy.{key}" for key in legacy)
+    return (f"the user's Codex config.toml sets {keys}, which the token server's "
+            "filters replace in a session that carries it")
 
 
 def _describe(exc: BaseException) -> str:
