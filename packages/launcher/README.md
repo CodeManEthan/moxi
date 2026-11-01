@@ -112,7 +112,7 @@ the session's comms name without its scope, else the seat's name, else the proje
 is filed as `<YYYY-MM-DD>-<key>.md` (then `-2`, `-3`) in the handoff folder. With turns,
 a seat's next start is pointed to its newest waiting handoff. A handoff counts as used only
 when the launcher gave it to a launch of its seat or showed it to one, so a session started
-by hand never hides a seat's handoff. The launcher ships a `handoff` skill, which
+by hand never hides a seat's handoff. The launcher ships a `moxi-handoff` skill, which
 `moxi install launcher` offers to place for Claude Code and Codex.
 
 ## Acting on launched sessions
