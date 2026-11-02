@@ -3,6 +3,8 @@ tool-permission rendering, the doctor's rows, and the hosts' one call."""
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -12,7 +14,7 @@ from conftest import write_config
 from moxi import doctor as moxi_doctor
 from moxi import paths
 from moxi_turns import additions, codex, opencode
-from moxi_turns.additions import Contribution, LaunchAdditions
+from moxi_turns.additions import Contribution, LaunchAdditions, McpServer
 
 
 class Entry:
@@ -222,6 +224,45 @@ def test_opencode_rules_become_one_permission_fragment(group):
         "webfetch": "allow", "edit": "allow"}}
 
 
+def test_a_refused_fragment_skips_that_module_alone_with_a_note_naming_it(group):
+    group["entries"] = [
+        Entry("alpha", contributes(Contribution(tool_permissions={
+            "opencode": ("bash git diff*", "question")}))),
+        Entry("comms", serves("comms", URL, TOKEN_ENV, tool_permissions={
+            "opencode": ("comms_*",)})),
+        Entry("zeta", contributes(Contribution(tool_permissions={"opencode": ("edit",)}))),
+    ]
+    seen = []
+
+    def refuse(fragment):
+        seen.append(fragment)
+        if "question" in (fragment.options.get("permission") or {}):
+            return "they set `permission.question`, which the launch sets"
+        if "edit" in (fragment.options.get("permission") or {}):
+            raise RuntimeError("boom")
+        return None
+
+    got = adds("opencode", env=with_token(), refuse=refuse)
+    # Each module's fragment is checked alone, in the harness's form.
+    assert [f.options for f in seen] == [
+        {"permission": {"bash": {"git diff*": "allow"}, "question": "allow"}},
+        {"permission": {"comms_*": "allow"},
+         "mcp": {"comms": {"type": "remote", "url": URL, "enabled": True,
+                           "headers": {"Authorization": f"Bearer {{env:{TOKEN_ENV}}}"}}}},
+        {"permission": {"edit": "allow"}}]
+    assert all(f.harness == "opencode" and f.env == {} and f.notes == () for f in seen)
+    # Only comms' fragment goes in; the notes name each module left out and why.
+    assert got.options == seen[1].options
+    assert got.notes == (
+        "additions of alpha skipped: the launcher refuses it: they set "
+        "`permission.question`, which the launch sets",
+        "additions of zeta skipped: the launcher refuses it: the launcher's check raised "
+        "RuntimeError: boom")
+    # Without a check, every module goes in.
+    assert set(adds("opencode", env=with_token()).options["permission"]) == {
+        "bash", "question", "comms_*", "edit"}
+
+
 def test_codex_rules_skip_the_contribution_with_a_note_and_a_doctor_row(group):
     group["entries"] = [Entry("mymod", contributes(Contribution(tool_permissions={
         "codex": ("git diff",), "claude": ("Bash(git diff:*)",)})))]
@@ -235,15 +276,392 @@ def test_codex_rules_skip_the_contribution_with_a_note_and_a_doctor_row(group):
     assert row.state == "warn" and "codex:" in row.detail and "adds to claude" in row.detail
 
 
-def test_mcp_servers_skip_the_whole_contribution(group):
-    group["entries"] = [Entry("mymod", contributes(Contribution(
-        mcp_servers={"mymod": {"command": "x"}},
-        tool_permissions={"claude": ("Read",)})))]
-    got = adds("claude")
-    assert not any(word.startswith("--allowedTools") for word in got.argv)
+# -- MCP servers -----------------------------------------------------------------------
+
+#: A token's value: no test output may hold it but the launch's own environment.
+SECRET = "tok-s3cr3t-9f2a7c"
+URL = "http://127.0.0.1:8450/mcp"
+TOKEN_ENV = "MOXI_COMMS_MCP_TOKEN"
+
+
+def serves(name="comms", url=URL, token_env=TOKEN_ENV, **more):
+    """A contribution of one MCP server (and whatever else `more` names)."""
+    return contributes(Contribution(mcp_servers={name: McpServer(url, token_env)}, **more))
+
+
+def with_token(**more):
+    return {"HOME": "/home/someone", TOKEN_ENV: SECRET, **more}
+
+
+def mcp_config(argv):
+    """The servers of the one `--mcp-config=` word in `argv`."""
+    words = [w for w in argv if w.startswith("--mcp-config")]
+    assert len(words) == 1, words
+    word, = words
+    assert word.startswith("--mcp-config=")
+    return json.loads(word.removeprefix("--mcp-config="))["mcpServers"]
+
+
+def test_claude_gets_one_joined_mcp_config_word_naming_the_variable(group):
+    group["entries"] = [Entry("comms", serves(tool_permissions={
+        "claude": ("mcp__comms__send",)}))]
+    got = adds("claude", env=with_token())
+    assert got.notes == () and got.options == {}
+    assert got.argv[4] == "--allowedTools=mcp__comms__send"
+    assert got.argv[5].startswith("--mcp-config=") and len(got.argv) == 6
+    assert "--mcp-config" not in got.argv and "--strict-mcp-config" not in got.argv
+    assert mcp_config(got.argv) == {"comms": {
+        "type": "http", "url": URL,
+        "headers": {"Authorization": "Bearer ${MOXI_COMMS_MCP_TOKEN}"}}}
+
+
+def test_claude_takes_every_modules_servers_in_one_word(group):
+    group["entries"] = [
+        Entry("beta", serves("beta-two", "https://example.org/mcp", "BETA_TOKEN")),
+        Entry("alpha", contributes({"mcp_servers": {
+            "alpha": {"url": "http://localhost:9/mcp", "token_env": "ALPHA_TOKEN"},
+            "alpha-open": {"url": "http://localhost:10/mcp"}}})),
+    ]
+    got = adds("claude", env=with_token(ALPHA_TOKEN="a", BETA_TOKEN="b"))
+    assert got.notes == ()
+    servers = mcp_config(got.argv)
+    assert list(servers) == ["alpha", "alpha-open", "beta-two"]
+    assert servers["alpha-open"] == {"type": "http", "url": "http://localhost:10/mcp"}
+    assert servers["beta-two"]["headers"] == {"Authorization": "Bearer ${BETA_TOKEN}"}
+
+
+def test_codex_gets_the_server_in_the_thread_config(group):
+    group["entries"] = [Entry("comms", serves(tool_permissions={
+        "claude": ("mcp__comms__send",)}))]
+    got = adds("codex", env=with_token())
+    assert got.argv == () and got.notes == ()
+    assert got.options == {"config": {
+        "mcp_servers": {"comms": {"url": URL, "bearer_token_env_var": TOKEN_ENV,
+                                  "default_tools_approval_mode": "approve"}},
+        "shell_environment_policy": {"filters": {TOKEN_ENV: "exclude"}},
+        "features": {"shell_snapshot": False}}}
+
+
+def test_codex_keeps_every_token_variable_out_of_the_shell_with_one_snapshot_switch(
+        group):
+    group["entries"] = [
+        Entry("beta", serves("beta", "http://localhost:2/mcp", "BETA_TOKEN")),
+        Entry("alpha", contributes(Contribution(mcp_servers={
+            "alpha": McpServer("http://localhost:1/mcp", "ALPHA_TOKEN"),
+            "open": McpServer("http://localhost:3/mcp")}))),
+    ]
+    config = adds("codex", env=with_token(ALPHA_TOKEN="a", BETA_TOKEN="b")
+                  ).options["config"]
+    assert config["shell_environment_policy"] == {
+        "filters": {"ALPHA_TOKEN": "exclude", "BETA_TOKEN": "exclude"}}
+    assert config["features"] == {"shell_snapshot": False}
+
+
+def test_codex_adds_no_shell_setting_for_a_server_with_no_token_or_one_left_out(group):
+    group["entries"] = [Entry("open", serves("open", token_env=None)),
+                        Entry("comms", serves())]
+    config = adds("codex").options["config"]
+    assert set(config) == {"mcp_servers"} and list(config["mcp_servers"]) == ["open"]
+
+
+def test_claude_and_opencode_get_no_codex_shell_setting(group):
+    group["entries"] = [Entry("comms", serves())]
+    assert "shell_snapshot" not in " ".join(adds("claude", env=with_token()).argv)
+    assert set(adds("opencode", env=with_token()).options) == {"mcp"}
+
+
+def test_a_callers_codex_option_goes_over_the_shell_settings(group, tmp_path, built):
+    group["entries"] = [Entry("comms", serves())]
+    _launch("codex", tmp_path, env={TOKEN_ENV: SECRET}, options={"config": {
+        "features": {"shell_snapshot": True},
+        "shell_environment_policy": {"filters": {"PATH": "include"}}}})
+    config = built["harness"].options["config"]
+    assert config["features"] == {"shell_snapshot": True}
+    assert config["shell_environment_policy"] == {
+        "filters": {TOKEN_ENV: "exclude", "PATH": "include"}}
+
+
+@pytest.mark.parametrize("policy,keys", [
+    ('exclude = ["AWS_*"]', "shell_environment_policy.exclude"),
+    ('include_only = ["PATH"]', "shell_environment_policy.include_only"),
+    ('exclude = ["A"]\ninclude_only = ["PATH"]',
+     "shell_environment_policy.exclude and shell_environment_policy.include_only"),
+])
+def test_the_doctor_warns_for_a_codex_config_with_the_legacy_arrays(
+        group, monkeypatch, tmp_path, policy, keys):
+    (tmp_path / "config.toml").write_text(f"[shell_environment_policy]\n{policy}\n")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    monkeypatch.setenv(TOKEN_ENV, SECRET)
+    group["entries"] = [Entry("comms", serves())]
+    row = {r.name: r for r in additions.rows()}["additions comms: mcp_servers"]
+    assert row.state == "warn"
+    assert row.detail == (f"codex: the user's Codex config.toml sets {keys}, which the "
+                          "token server's filters replace in a session that carries it")
+    assert row.fix.endswith("write Codex's shell_environment_policy exclude and "
+                            "include_only as filters")
+
+
+@pytest.mark.parametrize("text", [
+    '[shell_environment_policy.filters]\nAWS_SECRET = "exclude"\n',
+    'model = "m"\n', "not toml [", None])
+def test_the_doctor_is_quiet_for_a_codex_config_without_the_legacy_arrays(
+        group, monkeypatch, tmp_path, text):
+    if text is not None:
+        (tmp_path / "config.toml").write_text(text)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    monkeypatch.setenv(TOKEN_ENV, SECRET)
+    group["entries"] = [Entry("comms", serves())]
+    assert "additions comms: mcp_servers" not in {r.name for r in additions.rows()}
+
+
+def test_the_doctor_is_quiet_on_the_legacy_arrays_without_a_token_server(
+        group, monkeypatch, tmp_path):
+    (tmp_path / "config.toml").write_text('[shell_environment_policy]\nexclude = ["A"]\n')
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    group["entries"] = [Entry("open", serves("open", token_env=None))]
+    assert "additions open: mcp_servers" not in {r.name for r in additions.rows()}
+
+
+def test_opencode_gets_the_server_in_its_config_beside_the_permissions(group):
+    group["entries"] = [Entry("comms", serves(tool_permissions={
+        "opencode": ("comms_send",)}))]
+    got = adds("opencode", env=with_token())
+    assert got.argv == () and got.notes == ()
+    assert got.options == {
+        "permission": {"comms_send": "allow"},
+        "mcp": {"comms": {"type": "remote", "url": URL, "enabled": True,
+                          "headers": {"Authorization": "Bearer {env:MOXI_COMMS_MCP_TOKEN}"}}}}
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex", "opencode"])
+def test_a_server_with_no_token_gets_no_header(group, harness):
+    group["entries"] = [Entry("open", serves("open", token_env=None))]
+    got = adds(harness)
+    assert got.notes == ()
+    if harness == "claude":
+        assert mcp_config(got.argv) == {"open": {"type": "http", "url": URL}}
+    elif harness == "codex":
+        assert got.options["config"]["mcp_servers"]["open"] == {
+            "url": URL, "default_tools_approval_mode": "approve"}
+    else:
+        assert got.options["mcp"]["open"] == {"type": "remote", "url": URL,
+                                              "enabled": True}
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex", "opencode"])
+def test_a_server_whose_variable_is_absent_is_left_out_and_the_rest_goes_in(
+        group, harness):
+    group["entries"] = [Entry("comms", serves(tool_permissions={
+        "claude": ("Read",), "opencode": ("read",)}))]
+    got = adds(harness, env={"HOME": "/home/someone"})
+    assert not any(w.startswith("--mcp-config") for w in got.argv)
+    assert "mcp" not in got.options and "config" not in got.options
     (note,) = got.notes
-    assert "MCP" in note and "mymod" in note
-    assert {r.name: r for r in additions.rows()}["additions mymod"].state == "warn"
+    assert note == ("additions of comms: MCP server 'comms' left out: "
+                    "MOXI_COMMS_MCP_TOKEN is not in the launch's environment")
+    if harness == "claude":
+        assert got.argv[-1] == "--allowedTools=Read"
+    elif harness == "opencode":
+        assert got.options == {"permission": {"read": "allow"}}
+
+
+def test_an_empty_variable_counts_as_there_since_turns_never_reads_it(group):
+    group["entries"] = [Entry("comms", serves())]
+    assert "comms" in mcp_config(adds("claude", env=with_token(**{TOKEN_ENV: ""})).argv)
+
+
+class PresenceOnly(Mapping):
+    """An environment that answers which names it holds and refuses every value read."""
+
+    def __init__(self, names):
+        self._names = frozenset(names)
+
+    def __contains__(self, name):
+        return name in self._names
+
+    def __getitem__(self, name):
+        raise AssertionError(f"the renderer read the value of {name}")
+
+    def __iter__(self):
+        return iter(self._names)
+
+    def __len__(self):
+        return len(self._names)
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex", "opencode"])
+def test_the_renderer_asks_only_whether_the_variable_is_there(harness):
+    contribution = Contribution(mcp_servers={"comms": McpServer(URL, TOKEN_ENV)})
+    rendered = additions.render(contribution, harness, PresenceOnly({TOKEN_ENV}))
+    assert list(rendered.servers) == ["comms"] and rendered.left_out == ()
+    rendered = additions.render(contribution, harness, PresenceOnly({"OTHER"}))
+    assert rendered.servers == {} and len(rendered.left_out) == 1
+
+
+def _files_holding(root, value):
+    return [p for p in Path(root).rglob("*")
+            if p.is_file() and value.encode() in p.read_bytes()]
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex", "opencode"])
+def test_the_value_is_in_no_argv_word_option_or_file(group, harness, turns_env,
+                                                     claude_root):
+    group["entries"] = [Entry("comms", serves(tool_permissions={
+        "claude": ("mcp__comms__send",)}))]
+    got = adds(harness, env=with_token(), session_id="s-1", commands=("exit",))
+    assert got.argv or got.options
+    assert not any(SECRET in word for word in got.argv)
+    assert not any(SECRET in value for value in got.env.values())
+    assert SECRET not in json.dumps(got.options)
+    assert SECRET not in "".join(got.notes)
+    assert TOKEN_ENV in (" ".join(got.argv) + json.dumps(got.options))
+    for root in (turns_env, claude_root):
+        assert _files_holding(root, SECRET) == []
+
+
+@pytest.mark.parametrize("harness", ["codex", "opencode"])
+def test_a_host_carries_the_variable_and_puts_its_value_in_no_option(
+        group, harness, tmp_path, built, turns_env):
+    group["entries"] = [Entry("comms", serves())]
+    _launch(harness, tmp_path, env={TOKEN_ENV: SECRET})
+    host = built["harness"]
+    assert host.env[TOKEN_ENV] == SECRET        # carried in the launch's environment
+    assert SECRET not in json.dumps(host.options)
+    if harness == "opencode":
+        server_env = host.server_env()
+        content = server_env["OPENCODE_CONFIG_CONTENT"]
+        assert SECRET not in content
+        assert json.loads(content)["mcp"]["comms"]["headers"] == {
+            "Authorization": "Bearer {env:MOXI_COMMS_MCP_TOKEN}"}
+        assert [k for k, v in server_env.items() if SECRET in v] == [TOKEN_ENV]
+    else:
+        assert host.options["config"]["mcp_servers"]["comms"][
+            "bearer_token_env_var"] == TOKEN_ENV
+    for root in (tmp_path, turns_env):
+        assert _files_holding(root, SECRET) == []
+
+
+@pytest.mark.parametrize("name,url,token_env,why", [
+    ("Comms", URL, TOKEN_ENV, "lowercase letters, digits and hyphens"),
+    ("comms_x", URL, TOKEN_ENV, "lowercase letters, digits and hyphens"),
+    ("", URL, TOKEN_ENV, "lowercase letters, digits and hyphens"),
+    ("comms", "ftp://127.0.0.1/mcp", TOKEN_ENV, "http or https"),
+    ("comms", "/mcp", TOKEN_ENV, "http or https"),
+    ("comms", "http:///mcp", TOKEN_ENV, "http or https"),
+    ("comms", "http://127.0.0.1/${HOME}", TOKEN_ENV, "'$'"),
+    ("comms", "http://127.0.0.1/{env:HOME}", TOKEN_ENV, "'$'"),
+    ("comms", "http://127.0.0.1/ mcp", TOKEN_ENV, "whitespace"),
+    ("comms", URL, "BAD-NAME", "not a variable name"),
+    ("comms", URL, "X}${HOME", "not a variable name"),
+])
+def test_a_bad_name_url_or_variable_leaves_the_server_out(group, name, url, token_env,
+                                                         why):
+    group["entries"] = [Entry("comms", serves(name, url, token_env)),
+                        Entry("other", serves("other"))]
+    env = with_token(**{"BAD-NAME": "x", "X}${HOME": "x"})
+    got = adds("claude", env=env)
+    assert list(mcp_config(got.argv)) == ["other"]
+    (note,) = got.notes
+    assert note.startswith("additions of comms: MCP server") and why in note
+    row = {r.name: r for r in additions.rows()}["additions comms: mcp_servers"]
+    assert row.state == "warn" and why in row.detail
+
+
+def test_a_server_name_an_earlier_module_has_is_left_out(group):
+    group["entries"] = [Entry("beta", serves("shared", "http://localhost:2/mcp", None)),
+                        Entry("alpha", serves("shared", "http://localhost:1/mcp", None))]
+    for harness in ("claude", "codex", "opencode"):
+        got = adds(harness)
+        (note,) = got.notes
+        assert note == ("additions of beta: MCP server 'shared' left out: alpha already "
+                        "adds a server of that name")
+    assert mcp_config(adds("claude").argv)["shared"]["url"] == "http://localhost:1/mcp"
+    rows = {r.name: r for r in additions.rows()}
+    assert "additions alpha: mcp_servers" not in rows
+    assert rows["additions beta: mcp_servers"].detail.startswith("claude, codex, opencode: ")
+
+
+def test_a_server_named_for_a_module_belongs_to_that_module(group):
+    # `beta` sorts before `comms` and contributes a server named `comms`.
+    group["entries"] = [Entry("comms", serves("comms", "http://localhost:3/mcp", None)),
+                        Entry("beta", serves("comms", "http://localhost:2/mcp", None))]
+    for harness in ("claude", "codex", "opencode"):
+        got = adds(harness)
+        (note,) = got.notes
+        assert note == ("additions of beta: MCP server 'comms' left out: the name belongs "
+                        "to the module comms")
+    assert mcp_config(adds("claude").argv)["comms"]["url"] == "http://localhost:3/mcp"
+    rows = {r.name: r for r in additions.rows()}
+    assert "additions comms: mcp_servers" not in rows
+    assert rows["additions beta: mcp_servers"].detail.startswith("claude, codex, opencode: ")
+    # The name stays the module's while its own additions don't load, so no other module
+    # takes it.
+    group["entries"] = [Entry("comms", RuntimeError("gone")),
+                        Entry("beta", serves("comms", "http://localhost:2/mcp", None))]
+    got = adds("claude")
+    assert not any(w.startswith("--mcp-config") for w in got.argv)
+    assert any("the name belongs to the module comms" in n for n in got.notes)
+
+
+@pytest.mark.parametrize("servers", [
+    {"comms": URL},
+    {"comms": {"url": URL, "token": TOKEN_ENV}},
+    {"comms": {"token_env": TOKEN_ENV}},
+    {"comms": McpServer(8450)},
+    {"comms": McpServer(URL, 3)},
+])
+def test_a_malformed_server_refuses_the_contribution(group, servers):
+    group["entries"] = [Entry("comms", contributes({"mcp_servers": servers,
+                                                    "tool_permissions": {
+                                                        "claude": ("Read",)}}))]
+    got = adds("claude", env=with_token())
+    assert not any(w.startswith(("--mcp-config", "--allowedTools")) for w in got.argv)
+    (note,) = got.notes
+    assert note.startswith("additions of comms skipped: its MCP server 'comms'")
+    assert {r.name: r for r in additions.rows()}["additions comms"].state == "fail"
+
+
+def test_codex_rules_still_skip_a_contribution_with_servers_on_codex(group):
+    group["entries"] = [Entry("mymod", serves(tool_permissions={"codex": ("x",)}))]
+    got = adds("codex", env=with_token())
+    assert got.options == {}
+    (note,) = got.notes
+    assert note.startswith("additions of mymod skipped:") and "Codex" in note
+
+
+def test_opencode_that_does_not_substitute_leaves_the_tokened_server_out(group,
+                                                                        monkeypatch):
+    monkeypatch.setattr(additions, "OPENCODE_SUBSTITUTES_ENV", False)
+    group["entries"] = [Entry("comms", contributes(Contribution(mcp_servers={
+        "comms": McpServer(URL, TOKEN_ENV), "open": McpServer(URL)})))]
+    got = adds("opencode", env=with_token())
+    assert list(got.options["mcp"]) == ["open"]
+    (note,) = got.notes
+    assert "{env:...}" in note and SECRET not in note
+    # Claude and Codex are unaffected.
+    assert list(mcp_config(adds("claude", env=with_token()).argv)) == ["comms", "open"]
+
+
+def test_the_doctor_shows_a_server_left_out_and_none_when_all_go_in(group, monkeypatch):
+    group["entries"] = [Entry("comms", serves(tool_permissions={"claude": ("Read",)}))]
+    monkeypatch.delenv(TOKEN_ENV, raising=False)
+    rows = {r.name: r for r in additions.rows()}
+    assert rows["additions comms"].state == "ok"
+    assert rows["additions comms"].detail == "adds to claude"
+    row = rows["additions comms: mcp_servers"]
+    assert row.state == "warn" and row.module == "turns"
+    assert row.detail == ("claude, codex, opencode: MCP server 'comms' left out: "
+                          "MOXI_COMMS_MCP_TOKEN is not in the launch's environment")
+    assert row.fix
+    monkeypatch.setenv(TOKEN_ENV, SECRET)
+    rows = {r.name: r for r in additions.rows()}
+    assert "additions comms: mcp_servers" not in rows
+    assert rows["additions comms"].detail == "adds to claude, codex, opencode"
+    assert all(SECRET not in (r.detail or "") for r in rows.values())
+
+
+def test_the_package_exports_mcp_server():
+    assert turns.McpServer is McpServer and "McpServer" in turns.__all__
 
 
 @pytest.mark.parametrize("permissions", [

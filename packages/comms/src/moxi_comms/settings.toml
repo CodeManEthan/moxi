@@ -83,6 +83,18 @@ doc = "How long a sent message may wait before it is dropped undelivered, when t
 read = "use"
 env = "MOXI_COMMS_DELIVERY_EXPIRY"
 
+[mcp.enabled]
+type = "bool"
+default = true
+doc = "Serve comms' tools to sessions over MCP from the daemon, on 127.0.0.1. Read when the daemon starts; launches follow what the running daemon serves."
+read = "start"
+
+[mcp.port]
+type = "int"
+default = 8450
+doc = "The loopback port comms' tools are served on, 1 to 65535. The daemon's socket unit holds it, so a change takes effect at the next moxi install comms; a daemon with no unit reads it when it starts. A launch uses the address the running daemon answers."
+read = "start"
+
 [block]
 type = "bool"
 default = false

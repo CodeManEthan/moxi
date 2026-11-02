@@ -19,9 +19,21 @@ from dataclasses import dataclass, field, fields
 from typing import Any, ClassVar
 
 #: What a session offers, as its hello's `capabilities` lists them. `session`, `facts`,
-#: `watch` and `wait` are always there and carry no capability.
+#: `watch` and `wait` are always there and carry no capability. `guards`: the session runs
+#: the guard list at its tool calls. `after-tool`: an `after-tool` row's text reaches the
+#: model after the tool. `usage`: the session reports usage (Claude's readings, Codex's
+#: limits). `mcp-token`: the Codex host's `mcp.reload`. `environ`: the `environ` method.
 CAPABILITIES = ("deliver", "only-if-idle", "steer", "stop-handler", "clear", "exit",
-                "compact", "agents", "stop-shells")
+                "compact", "agents", "stop-shells", "guards", "after-tool", "usage",
+                "mcp-token", "environ")
+
+#: The most names one `environ` call may ask.
+ENVIRON_MAX_NAMES = 64
+
+#: The deadline over one settle of a Codex host's MCP servers (`mcp.reload`, and at each
+#: ready), in seconds. An `mcp.reload` answers within it, or within twice it when the call
+#: waits behind a settle already past its first read.
+MCP_SETTLE_S = 10.0
 
 #: How a turn ended (`Ended.outcome`, `TurnEnded.outcome`).
 OUTCOMES = ("answer", "aborted", "error", "refusal")
@@ -525,10 +537,27 @@ class StopFacts(_Value):
 class SessionEvent:
     """What a listener is called with: the event and the session's facts.
 
-    `event` is `ready` (observe only), `start` (adds start context), `prompt`, `turn` or
-    `gone`; `source` is a `ready`'s or a `start`'s source; `turn_id` and `outcome` are a
-    `turn`'s; `reason` is a `gone`'s. `env` is the session's environment, which the
-    endpoint inherited from the session.
+    `event` is `ready` (observe only), `start` (adds start context), `prompt`, `turn`,
+    `gone`, `after-tool`, `usage` or `codex_limits`; `source` is a `ready`'s or a
+    `start`'s source; `turn_id` and `outcome` are a `turn`'s; `reason` is a `gone`'s.
+    `env` is the session's environment, which the endpoint inherited from the session.
+
+    The fields after `reason` are optional and None where they don't apply, so a
+    listener written for the first five events reads this unchanged:
+
+    - `cwd`, on every event, `after-tool` included: the session's launch directory. A
+      shell `cd` does not move it, so after one an `after-tool` event's `cwd` is not the
+      directory the call ran in; only a guard's `ToolCall.cwd` is that.
+    - On `after-tool`: `agent_id` (None on the main loop), `tool`, `tool_use_id`,
+      `is_error`, `point` (`after`, or `pre` where the harness has only a pre-tool point)
+      and `record_path`, the file the harness writes this session's records to (None
+      where it has none).
+    - On `prompt`: `text`, the prompt as the harness gave it, and `origin`, its origin
+      kind (`composer`, `plugin`, ...), None where the harness gives none.
+    - On `usage`: `usage`, the harness's usage reading as given, unparsed, and
+      `received_at`, when it arrived (Unix seconds).
+    - On `codex_limits`: `payload`, the limits reading as given, unparsed, `received_at`,
+      and `kind`, `read` (asked for) or `updated` (pushed).
     """
 
     event: str
@@ -539,6 +568,19 @@ class SessionEvent:
     turn_id: str | None = None
     outcome: str | None = None
     reason: str | None = None
+    cwd: str | None = None
+    agent_id: str | None = None
+    tool: str | None = None
+    tool_use_id: str | None = None
+    is_error: bool | None = None
+    point: str | None = None
+    record_path: str | None = None
+    text: str | None = None
+    origin: str | None = None
+    usage: dict[str, Any] | None = None
+    received_at: float | None = None
+    payload: dict[str, Any] | None = None
+    kind: str | None = None
 
 
 _KINDS: dict[str, type[_Value]] = {
@@ -574,7 +616,8 @@ def from_notification(method: str, params: Any):
         raise ValueError(f"malformed {method} notification: {exc}") from None
 
 
-__all__ = ["CAPABILITIES", "OUTCOMES", "DELIVERY_REFUSALS", "COMMAND_REFUSALS",
+__all__ = ["CAPABILITIES", "ENVIRON_MAX_NAMES", "MCP_SETTLE_S", "OUTCOMES",
+           "DELIVERY_REFUSALS", "COMMAND_REFUSALS",
            "READY_SOURCES", "COMMANDS", "COMMAND_WAIT_S", "STOP_SHELLS_WAIT_S",
            "DELIVERY_HOW", "AGENT_KINDS", "AGENT_STATES",
            "BUSY_STATES", "REF_MAX_BYTES", "ERROR_GONE", "ERROR_CAPABILITY",

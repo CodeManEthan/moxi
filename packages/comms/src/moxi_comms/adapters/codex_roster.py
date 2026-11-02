@@ -37,16 +37,18 @@ nothing about how anyone else sees main (the global main: a bare name is the glo
 identity). Names are qualified once at load, one spelling per identity, and a malformed entry is refused like every other bad
 key here.
 
-**EXPLICITLY INTERIM:** `network_access`
-defaults to **true**, i.e. full outbound network for the codex agent. This is not a
-preference. On Linux/codex 0.146.0 an AF_UNIX `connect()` out of the codex sandbox is
-gated solely by `networkAccess` -- `network.unix_sockets` is inert without it and
-unenforced with it -- so there is no least-privilege configuration that grants the
-daemon socket, and the reply path (the agent runs `moxi comms reply` itself) needs
-that socket. Truth in labeling: this makes agent and daemon mutually un-isolated, and
-`thread/shellCommand` on the control socket already ran unsandboxed on the host. Never
-describe a codex comms agent as contained. Destination: syscall-level `unix_sockets`
-enforcement upstream; revisit when codex ships it.
+**Network access.** A row that names `network_access` gets it. A row that doesn't leaves
+it to the launch, which decides from one fact, whether it carries comms' tools (the
+wrapper stamped the session's token and the tools' URL): with them, network access is
+off, since Codex's MCP client runs in the app-server's process, outside the shell's
+sandbox, and the agent sends through the tools; without them it is on, because the
+agent's shell is then its only way to send, and an AF_UNIX `connect()` to the daemon
+socket out of Codex's sandbox is gated solely by network access (`network.unix_sockets`
+is inert without it). A launch's own `--option sandbox_workspace_write.network_access=…`
+wins over both. `moxi comms` from the shell stays for people; a seat whose agent needs
+its CLI-only send flags (`--held`, `--audience`, `--cap`, `--standing`, `--check`) names
+`network_access = true`. With the network on, agent and daemon are not isolated from
+each other: never describe such an agent as contained.
 """
 
 from __future__ import annotations
@@ -89,7 +91,8 @@ class CodexAgent:
     permissions: str | None = None
     profile: dict = field(default_factory=dict)
     writable_roots: list = field(default_factory=list)
-    network_access: bool = True
+    #: The row's own `network_access`, or None when it names none (the launch decides).
+    network_access: bool | None = None
     model: str | None = None
     directors: list = field(default_factory=list)   # qualified at load, one spelling
 
@@ -120,8 +123,11 @@ class CodexAgent:
                 roots.append(added)
         return roots
 
-    def launch_options(self, added_root=None) -> dict:
+    def launch_options(self, added_root=None, *, network: bool = True) -> dict:
         """The roster-owned options for every `thread/start` and `thread/resume`.
+
+        `network` is the launch's network access for a row that names none (on, unless
+        the launch carries comms' tools); the row's own value wins over it.
 
         The first resume that loads a thread into an app-server process fixes the
         thread's sandbox for that process, and a resume that carries only the thread id
@@ -150,7 +156,8 @@ class CodexAgent:
             config["sandbox_workspace_write"] = {
                 "writable_roots": self.effective_writable_roots(added_root),
                 # The one switch that lets the agent's shell reach the daemon socket.
-                "network_access": bool(self.network_access),
+                "network_access": (network if self.network_access is None
+                                   else bool(self.network_access)),
             }
         params["config"] = config
         if self.model:
@@ -275,7 +282,7 @@ def _entry(path, qualified: str, section, *, check: bool = False) -> CodexAgent:
 
     declared = roster_rows.parse_directors(where, section)
 
-    network_access = section.get("network_access", True)
+    network_access = section.get("network_access")
     agent = CodexAgent(
         qualified=qualified, name=head.name, scope=head.scope,
         cwd=head.cwd, thread_file=(Path(section["thread_file"]) if section.get("thread_file")
@@ -284,15 +291,13 @@ def _entry(path, qualified: str, section, *, check: bool = False) -> CodexAgent:
         permissions=permissions,
         profile=dict(profile),
         writable_roots=list(section.get("writable_roots") or []),
-        network_access=bool(network_access),
+        network_access=None if network_access is None else bool(network_access),
         model=section.get("model"),
         directors=declared,
     )
-    if not permissions and not agent.network_access and not check:
-        # Honored, but said out loud: with networkAccess off the agent cannot reach the
-        # daemon socket at all, so `moxi comms reply` inside the thread fails (verified).
-        log.warning("%s: network_access is off, so this agent cannot reach the daemon "
-                    "socket and cannot run `moxi comms reply`", where)
+    # A row with the network off is honored, and its launch says what that costs when
+    # the launch carries no comms tools (`codex_wrapper.reach_note`): the roster can't
+    # tell, since that is the daemon's answer at launch.
     return agent
 
 

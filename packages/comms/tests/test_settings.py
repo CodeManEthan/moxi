@@ -417,7 +417,7 @@ def test_the_text_entry_reads_no_environment(monkeypatch):
         config.check_text('backend = "remote"\n')
 
 
-#: A codex row the roster takes but warns about at launch, and an opencode row: neither
+#: A codex row whose launch may warn about it, and an opencode row: neither
 #: names its own state file, so a launch builds both defaults from the environment.
 WARNED_ROWS = ('[codex.agents."p@x"]\ncwd = "/src"\nnetwork_access = false\n'
                '[opencode.agents."q@x"]\ncwd = "/src"\n')
@@ -451,8 +451,9 @@ def test_the_text_entry_logs_no_roster_warning(caplog, capsys):
     write_config(None, WARNED_ROWS)
     with caplog.at_level("WARNING"):
         roster = codex_roster.load()
-    assert [r.name for r in caplog.records] == ["comms.codex.roster"]
-    assert "network_access is off" in caplog.records[0].getMessage()
+    # A launch says what a row with the network off costs, when it carries no comms
+    # tools (`codex_wrapper.reach_note`); the load says nothing.
+    assert caplog.records == []
     assert roster.agents["p@x"].thread_file.name == "p@x.json"
 
 

@@ -154,6 +154,26 @@ _DECLARED_NAMES = reserved.declared_names
 
 
 @pytest.fixture(autouse=True)
+def unit_read(monkeypatch):
+    """comms' socket unit as a failed bind reads it: `unknown`, never the real user
+    manager. A test that wants another state sets `unit_read.state`, or hands `take` its
+    own `unit_state`. `unit_read.asked` counts the reads."""
+    from moxi_comms.mcp import listen
+
+    class Read:
+        state = "unknown"
+        asked = 0
+
+        def __call__(self, *args, **kwargs) -> str:
+            self.asked += 1
+            return self.state
+
+    read = Read()
+    monkeypatch.setattr(listen, "socket_unit_state", read)
+    return read
+
+
+@pytest.fixture(autouse=True)
 def installs(monkeypatch) -> set:
     """The modules whose declared names comms' reserve step sees in this test: none,
     unless the test adds one.
@@ -466,8 +486,53 @@ class Rig:
         return code, out.getvalue()
 
 
+def _others(before: set) -> list:
+    """The threads alive now that were not alive in `before`, this one aside."""
+    me = threading.current_thread()
+    return [t for t in threading.enumerate() if t not in before and t is not me]
+
+
+def join_threads(before: set, timeout: float | None = None) -> None:
+    """Wait, `timeout` in all, for every thread started since `before` was taken to end,
+    and fail the test naming each one that has not.
+
+    A thread that outlives its test runs on into the next one on its worker: it reads
+    that test's environment, or none at all once the fixtures have put the real one
+    back, and writes there (a shim's reader marking its claim file offline after the
+    test's tmp is gone, or under the real runtime directory). So whatever a test
+    started ends inside it, while its roots still point into its tmp. `timeout` None
+    is `WAIT`."""
+    timeout = WAIT if timeout is None else timeout
+    deadline = time.monotonic() + timeout
+    while True:
+        left = [t for t in _others(before) if t.is_alive()]
+        if not left or time.monotonic() >= deadline:
+            break
+        for t in left:
+            t.join(max(0.0, deadline - time.monotonic()))
+    if left:
+        pytest.fail("threads this test started are still running after its teardown "
+                    f"({timeout:.0f} s): " + ", ".join(sorted(t.name for t in left)),
+                    pytrace=False)
+
+
+@pytest.fixture(autouse=True)
+def threads_end():
+    """Every thread a test starts has ended when the test comes down (`join_threads`).
+
+    It is up around every test in the suite, inside the `env` roots and outside the
+    rig and each test's own fixtures: by the time it waits, the rig's shims, claim
+    servers, daemon and record, and whatever a test stopped itself, have been told to
+    stop, and their threads get the time to finish. A stop that leaves a thread running
+    (a connection nothing closes, a wait nothing settles) fails the test it belongs to,
+    by the thread's name, instead of a later test on the same worker."""
+    before = set(threading.enumerate())
+    yield
+    join_threads(before)
+
+
 @pytest.fixture
-def rig(backend):
+def rig(backend, threads_end):
     clock = FakeClock()
     record = build_record(backend, clock)
     store = build_store(backend)

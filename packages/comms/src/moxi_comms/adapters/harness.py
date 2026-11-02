@@ -194,6 +194,13 @@ class HarnessAdapter:
     WAIT_WHEN_HELD: bool = True
     #: The port's own logger.
     log: logging.Logger = logging.getLogger("comms.harness")
+    #: The session's token for comms' tools (`binding.ToolToken`), registered after
+    #: every bind; None when the launch carries none.
+    tool_token: binding.ToolToken | None = None
+    #: The form of layer one this session was taught (`context.layer_one_form` of its
+    #: launch), read before the token leaves the environment; None is the CLI form. The
+    #: reply reminder follows it.
+    layer_form: str | None = None
 
     def __init__(self, agent, *, socket_path=None, autoreconnect: bool = True,
                  backoff=None, status_sink=None, clock=time.time, exit_hook=None):
@@ -266,7 +273,8 @@ class HarnessAdapter:
             owed_query=lambda *args: self.owed_query(*args),
             connection=lambda: self._daemon,
             stop_facts=lambda fields: self.stop_facts(fields), log=self.log,
-            moment="turn end", check="reply check", start="")
+            moment="turn end", check="reply check", start="",
+            form=lambda: self.layer_form)
         self.exit_hook = exit_hook or (lambda: os.kill(os.getpid(), signal.SIGTERM))
         self._make_holder()
 
@@ -356,7 +364,8 @@ class HarnessAdapter:
             return client.bind(name=self.agent.name, scope=self.agent.scope,
                                global_=self.agent.scope == "global",
                                project=self.agent.scope, adapter=self.KIND,
-                               report=self.session_report(register=True))
+                               report=self.session_report(register=True),
+                               claim=self.claims.key)
 
         def accept(resp):
             qualified = resp["identity"]["qualified"]
@@ -375,7 +384,7 @@ class HarnessAdapter:
         resp = binding.register_and_install(
             self, client_type=DaemonClient, on_close=self._on_daemon_close,
             register=register, accept=accept, install=install, ledger=self.reply_ledger,
-            disarm=False)
+            disarm=False, token=self.tool_token, registered=self.tool_token_registered)
         if resp == binding.STOPPED:
             raise DroppedAfterAnswer("comms offline: the adapter stopped while the "
                                      "daemon answered register")
@@ -395,12 +404,17 @@ class HarnessAdapter:
         self._stop.set()
         self._wake.set()
         self.stop_before_unbind()
+        # The claim file goes before the daemon connection closes. This adapter is its
+        # claim's root and still alive at its own release, so only the file being gone
+        # tells the daemon the session ended: the release that the close starts then
+        # revokes the session's tool token. A daemon that is down here finds the file
+        # gone at its next boot instead.
+        self.claims.close()
         with self._lock:                   # after a bind that saw no stop, or none
             daemon = self._daemon
         if daemon is not None:
             daemon.close()                 # closing this IS the deregistration
         self.stop_after_unbind()
-        self.claims.close()
 
     # ------------------------------------------------------------------ daemon side
     def _on_push(self, method: str, params: dict) -> None:
@@ -540,6 +554,10 @@ class HarnessAdapter:
                 if "already bound" not in str(e) or time.monotonic() > deadline:
                     raise
                 time.sleep(0.05)
+
+    def tool_token_registered(self, served: bool) -> None:
+        """The daemon answered this bind's registration of the tool token: `served`
+        says whether it serves comms' tools now. A port that acts on it overrides this."""
 
     # ------------------------------------------------------------------ start attempts
     def record_read(self) -> tuple:

@@ -350,3 +350,25 @@ def test_the_token_rests_in_the_keychain_when_there_is_one(store):
     assert token_of(store, "launcher", "console") is None
     reserved.reconcile(declared={}, chain=chain)
     assert fake.kept == {}
+
+
+def test_comms_own_uninstall_revokes_every_tool_token(chain, monkeypatch):
+    """A session's token for comms' tools never outlives comms: the uninstall revokes
+    every active row in the same store, and leaves a revoked one as it was."""
+    reserved.reconcile(declared=LAUNCHER, chain=chain)
+    for token_hash, why in (("a" * 64, None), ("b" * 64, None), ("c" * 64, "superseded")):
+        write("INSERT INTO mcp_tokens (token_hash, claim_key, identity, adapter, "
+              "created_at, revoked_at, revoked_why) VALUES (?, ?, ?, 'codex', "
+              "'2026-10-31T00:00:00Z', ?, ?)",
+              (token_hash, f"1-{token_hash[0]}", f"{token_hash[0]}@proj-a",
+               "2026-10-31T00:00:00Z" if why else None, why))
+    monkeypatch.setattr(reserved, "_chain", lambda c, env: chain)
+    result = reserved.release_all()
+    conn = sqlite3.connect(comms_db())
+    try:
+        whys = dict(conn.execute("SELECT token_hash, revoked_why FROM mcp_tokens"))
+    finally:
+        conn.close()
+    assert whys == {"a" * 64: "uninstall", "b" * 64: "uninstall", "c" * 64: "superseded"}
+    assert "comms: 2 session token(s) for comms' tools revoked" in result.lines
+    assert not [line for line in reserved.release_all().lines if "comms' tools" in line]

@@ -17,7 +17,14 @@ directory, forks the session's adapter, and execs `claude`:
     to the session: its plugins are the ones a session loads, and comms' context (layer
     one, the roster and its deltas) reaches the session through comms' listener, which
     turns asks (`moxi_comms.listener`). This wrapper writes no `--settings` file and
-    passes no `--mcp-config`.
+    no MCP config of its own: comms' tools reach the session through turns' additions.
+  * **comms' tools.** Before it asks turns and before it forks the adapter, the wrapper
+    asks the daemon whether it serves comms' tools (`tools_endpoint`). When it does, the
+    wrapper mints the session's token and stamps it, `MOXI_COMMS_MCP_TOKEN`, with the
+    URL the daemon answered, `MOXI_COMMS_MCP_URL` (`stamp_tools`); comms' contribution
+    to turns' additions (`moxi_comms.mcp.additions`) then adds the server, which turns
+    renders naming the variable, never its value. When it doesn't, nothing is stamped,
+    the session starts without the tools, and the wrapper says so in one line.
   * **turns' launch additions.** The wrapper is the one caller of
     `moxi_turns.launch_additions("claude", ...)` on this launch path: a launcher that
     goes through it adds none itself. Their words (turns' plugins as `--plugin-dir DIR`,
@@ -35,8 +42,10 @@ and is whoever launches the session's to pass, `-n` carries the label and is com
 render, because only this process knows both halves of the identity. See
 `Session.claude_argv`. Everything after `--` reaches `claude` exactly as given.
 
-`stamped_env` scrubs only comms' own variables, so whatever else the caller's environment
-carries reaches the session: a `MOXI_TURNS_COMMANDS` grant a launcher stamps, for one.
+`stamped_env` scrubs only comms' own variables (`INHERITED_COMMS_ENV`, a fixed list), so
+whatever else the caller's environment carries reaches the session: a
+`MOXI_TURNS_COMMANDS` grant a launcher stamps, for one, which the wrapper binds to the
+session id it names to `claude` (`additions_for`).
 
 The identity is stamped into the session's environment at launch (`MOXI_COMMS_NAME` /
 `MOXI_COMMS_SCOPE` / `MOXI_COMMS_GLOBAL`, and `MOXI_COMMS_PROJECT`),
@@ -68,6 +77,7 @@ from moxi import exit as moxi_exit
 
 from .. import directors as directors_mod
 from ..context import COMMAND_ENV, own_comms
+from ..mcp import additions as mcp_additions
 from ..paths import claim_socket, log_dir, runtime_root
 from ..scoping import GLOBAL, NAME_RE, project_key, qualify
 from .word import BOUND, FAILED, await_word, exit_of, teller
@@ -132,9 +142,13 @@ def sessions_dir(env=None) -> Path:
 #: The claim socket: a session never inherits its wrapper's.
 CLAIM_SOCKET_ENV = "MOXI_COMMS_CLAIM_SOCKET"
 
+#: comms' tools' stamps are among them: a wrapper run inside a session that mints nothing
+#: must never pass the outer session's token or URL on, or the inner session would send
+#: as the outer identity.
 INHERITED_COMMS_ENV = ("MOXI_COMMS_NAME", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL",
                        "MOXI_COMMS_DIRECTORS", SOCKET_ENV, "MOXI_COMMS_SOCKET",
-                       "MOXI_COMMS_PROJECT", CLAIM_SOCKET_ENV, COMMAND_ENV)
+                       "MOXI_COMMS_PROJECT", CLAIM_SOCKET_ENV, COMMAND_ENV,
+                       *mcp_additions.STAMPS)
 
 
 def stamped_env(base=None, **claim) -> dict:
@@ -388,16 +402,109 @@ def launch_session_id(passthrough, own=None):
     return named, ["--session-id", named]
 
 
+#: turns' grant of session commands, which a launcher stamps and this wrapper binds.
+GRANT_ENV = "MOXI_TURNS_COMMANDS"
+
+
 def additions_for(session: Session, env: dict, cwd=None):
     """turns' launch additions for this Claude launch: `moxi_turns.launch_additions` with
     the stamped environment, the launch's working directory and the id it names to
-    `claude` (None for an unnamed resume). It grants no session command: a launcher
-    that grants one stamps `MOXI_TURNS_COMMANDS` in the wrapper's environment, which
-    reaches the session. Raises what that call raises (`moxi_turns.TurnsError`,
-    `ValueError`)."""
+    `claude` (None for an unnamed resume). Raises what that call raises
+    (`moxi_turns.TurnsError`, `ValueError`).
+
+    **The grant is bound to the id this wrapper passes to `claude`.** A launcher that
+    grants session commands stamps `MOXI_TURNS_COMMANDS` in the wrapper's environment as
+    the bare list, since it is not the one that names the session to `claude`; this
+    wrapper is. So the commands that list grants (`granted_commands`) go to turns with
+    the id, and turns' bound grant, `<session id>:<commands>`, replaces the stamp. A
+    `claude` started by hand inside the session then gets nothing from it. With no id
+    (an unnamed resume) the grant stays bare. A grant that is already bound passes
+    whole."""
     import moxi_turns
     return moxi_turns.launch_additions("claude", cwd=os.getcwd() if cwd is None else cwd,
-                                       env=env, session_id=session.stated_id)
+                                       env=env, session_id=session.stated_id,
+                                       commands=granted_commands(env))
+
+
+def granted_commands(env) -> tuple[str, ...]:
+    """The session commands a bare `MOXI_TURNS_COMMANDS` in `env` grants, in turns'
+    order; a name that is not a session command is dropped, as turns drops it. A bound
+    grant (`<id>:<commands>`), or none, gives none: it is left as it is."""
+    import moxi_turns
+
+    stamp = env.get(GRANT_ENV) or ""
+    if ":" in stamp:
+        return ()
+    names = {part.strip() for part in stamp.split(",")}
+    return tuple(c for c in moxi_turns.COMMANDS if c in names)
+
+
+# ------------------------------------------------------------------- comms' tools
+
+#: How long a wrapper waits for the daemon's answer about comms' tools. It never waits
+#: for a daemon that isn't there: a socket nobody listens on refuses at once.
+ENDPOINT_WAIT = 2.0
+#: What a launch shows for the token's value where it would show one: a dry run mints
+#: nothing.
+MINTED_AT_LAUNCH = "<minted at launch>"
+#: The daemon's reasons for not serving the tools, said the way a launch says them.
+_NOT_SERVED = {
+    "disabled": "comms' daemon doesn't serve them ([mcp] enabled is false, or it started "
+                "without them)",
+    "bind-failed": "comms' daemon couldn't take its port for them",
+    "failed": "comms' daemon couldn't start them",
+}
+
+
+def tools_endpoint(socket_path=None, timeout: float = ENDPOINT_WAIT
+                   ) -> tuple[str | None, str]:
+    """(the URL comms' tools answer at, why not): the daemon's `mcp_endpoint` read. The
+    URL is None, with the reason, when the daemon doesn't serve them, is a comms that
+    has no such read, or doesn't answer."""
+    from ..client import DaemonClient
+
+    try:
+        client = DaemonClient(socket_path, timeout=timeout).connect()
+    except Exception:                                            # noqa: BLE001
+        return None, "comms' daemon isn't running"
+    try:
+        if "mcp" not in client.capabilities:
+            return None, "comms' daemon is a comms without them"
+        answer = client.call("mcp_endpoint")
+    except Exception as e:                                       # noqa: BLE001
+        return None, f"comms' daemon didn't say whether it serves them: {e}"
+    finally:
+        client.close()
+    url = answer.get("url") if isinstance(answer, dict) else None
+    if isinstance(answer, dict) and answer.get("served") and isinstance(url, str) and url:
+        return url, ""
+    why = answer.get("why") if isinstance(answer, dict) else None
+    return None, _NOT_SERVED.get(why, f"comms' daemon doesn't serve them ({why})")
+
+
+def tools_off(why: str) -> str:
+    """The one line a launch says when its session gets no comms tools."""
+    return f"comms' tools are off for this session: {why}; `moxi comms send` still works"
+
+
+def stamp_tools(env: dict, url: str | None, *, token: str | None = None) -> bool:
+    """Stamp comms' tools into a launch's environment when the daemon answered `url`:
+    the session's token, freshly minted unless `token` is given (a dry run's
+    placeholder), and the URL. With no URL nothing is stamped, and whatever was
+    inherited was scrubbed already (`stamped_env`). True when the pair is stamped.
+
+    The token's value goes into this environment and nowhere else: never into argv,
+    which every local user can read, and never into a file. turns renders the server
+    with the variable's name."""
+    if not url:
+        return False
+    if token is None:
+        from ..mcp import tokens
+
+        token = tokens.mint()
+    env[mcp_additions.TOKEN_ENV] = token
+    env[mcp_additions.URL_ENV] = url
+    return True
 
 
 def not_given(additions, passthrough) -> list[str]:
@@ -528,6 +635,11 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
               "its claim socket answers", file=sys.stderr)
         return 2
     env = session.env()
+    # comms' tools: the token is minted and stamped with the URL the daemon answered
+    # before turns is asked and before the adapter forks, so both see the pair. A dry
+    # run mints nothing; it stamps a placeholder, so its line shows the entry.
+    tools_url, tools_why = tools_endpoint()
+    stamp_tools(env, tools_url, token=MINTED_AT_LAUNCH if args.dry_run else None)
     import moxi_turns
     try:
         additions = additions_for(session, env)
@@ -536,6 +648,8 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
         print(f"{prog}: turns cannot give this launch its additions, so claude was not "
               f"started: {e}", file=sys.stderr)
         return moxi_exit.ERROR
+    if tools_url is None:
+        print(f"{prog}: {tools_off(tools_why)}", file=sys.stderr)
     for note in additions.notes:
         print(f"{prog}: {note}", file=sys.stderr)
     env.update(additions.env)
@@ -555,6 +669,9 @@ def main(argv=None, prog: str = "moxi-comms-claude") -> int:
               "(verified messages from these render as directives)")
     print(f"  claim      {session.claim_socket}")
     print(f"  adapter    log {session.log_path()}")
+    if tools_url is not None:
+        print(f"  tools      {tools_url} (token in {mcp_additions.TOKEN_ENV}, minted at "
+              "launch)")
     print("  launch     " + " ".join(cmd))
     if args.dry_run:
         return 0

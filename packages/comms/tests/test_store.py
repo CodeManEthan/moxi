@@ -37,6 +37,8 @@ COLUMNS = {
     "dropped": ["message_id", "name", "reason", "at"],
     "principals": ["principal_id", "name"],
     "denied": ["principal_id", "channel_id"],
+    "mcp_tokens": ["token_hash", "claim_key", "identity", "adapter", "binding_id",
+                   "created_at", "revoked_at", "revoked_why"],
 }
 
 
@@ -71,7 +73,7 @@ def test_a_new_store_has_every_table_at_the_current_version():
         assert tables == set(COLUMNS) == set(schema.TABLES)
         for table, columns in COLUMNS.items():
             assert [r[1] for r in conn.execute(f"PRAGMA table_info({table})")] == columns
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(schema.STEPS) == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(schema.STEPS) == 3
         assert conn.execute("SELECT value FROM meta WHERE key = 'next_id'"
                             ).fetchone()[0] == str(2 ** 62)
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
@@ -100,9 +102,36 @@ def test_a_version_one_store_renames_the_operators_kind_at_its_next_open():
         conn.close()
     conn = store.open_write()
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
         assert conn.execute("SELECT id, author_kind FROM messages ORDER BY id").fetchall() \
             == [(1, "operator"), (2, "identity"), (3, "webhook")]
+    finally:
+        conn.close()
+
+
+def test_a_version_two_store_gains_the_tool_tokens_table_at_its_next_open():
+    """Version 3 adds `mcp_tokens`, empty, and leaves every older row as it was."""
+    target = store.path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(target)
+    try:
+        conn.executescript(schema.V1)
+        conn.executescript(schema.V2)
+        conn.execute("INSERT INTO bindings(qualified, name, scope, tier, adapter, "
+                     "bound_at) VALUES ('planner@proj-a', 'planner', 'proj-a', 'chosen', "
+                     "'codex', 't')")
+        conn.execute("PRAGMA user_version = 2")
+        conn.commit()
+    finally:
+        conn.close()
+    conn = store.open_write()
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert [r[1] for r in conn.execute("PRAGMA table_info(mcp_tokens)")] \
+            == COLUMNS["mcp_tokens"]
+        assert conn.execute("SELECT COUNT(*) FROM mcp_tokens").fetchone()[0] == 0
+        assert conn.execute("SELECT qualified, released_at FROM bindings").fetchall() \
+            == [("planner@proj-a", None)]
     finally:
         conn.close()
 
@@ -115,6 +144,11 @@ def test_a_version_one_store_renames_the_operators_kind_at_its_next_open():
     ("reserved", "INSERT INTO reserved(name, state) VALUES ('console', 'held')"),
     ("dropped", "INSERT INTO dropped(message_id, name, reason, at) "
                 "VALUES (1, 'a', 'lost', 't')"),
+    ("mcp_tokens", "INSERT INTO mcp_tokens(token_hash, claim_key, identity, adapter, "
+                   "created_at, revoked_at, revoked_why) "
+                   "VALUES ('h', 'k', 'a', 'codex', 't', 't', 'expired')"),
+    ("mcp_tokens", "INSERT INTO mcp_tokens(token_hash, claim_key, identity, adapter, "
+                   "created_at, revoked_at) VALUES ('h', 'k', 'a', 'codex', 't', 't')"),
     ("messages", "INSERT INTO messages(id, room_id, author_id, author_kind, "
                  "author_display, content, timestamp, interrupt) "
                  "VALUES (1, 'r', 'a', 'identity', 'a', 'x', 't', 2)"),

@@ -51,6 +51,19 @@ handed delivery waits in the host and goes in once it is; the core's `PENDING_TT
 bounds the wait. A post the server refuses in a way a retry cannot fix (a 4xx) refuses
 that delivery `gone` and ends the endpoint with the server's answer.
 
+**After a tool.** OpenCode lets turns act at no tool call (`tool_points` has neither
+point), so the host only observes: a tool part of the session's or a subagent's (a child
+session the stream announced) that reaches `completed` or `error` in the server's
+`message.part.updated` events asks the `after-tool` rows once per `callID`, with `point`
+`after`, the part's `callID` as `tool_use_id`, the child session's id as `agent_id` (None
+for the session's own call) and no `record_path`. The floor gates the session's own calls
+only: its context is the last `message.updated` of its own assistant messages that gave
+a positive `tokens.input + tokens.cache.read + tokens.cache.write` (a message being
+written reports zeros), and a row is skipped while that is below its floor; before the
+first reading no row is skipped. A subagent's call reaches every row. The rows are asked
+on a thread of their own, so the event stream never waits on them, and their text reaches no model: it
+is dropped and logged once per host, as the listeners' context at a `Ready` is.
+
 **Options**. `options` is OpenCode's config object. The host lays it, unread,
 into the server's `OPENCODE_CONFIG_CONTENT` at every server start, a restart's included.
 turns owns `instructions`: the host writes the `instructions` text to a file in the
@@ -111,6 +124,9 @@ RECONNECT_WAIT = 0.5
 BACKOFF_MAX = 30.0
 BACKOFF_FACTOR = 2.0
 BACKOFF_JITTER = 0.2
+#: How many finished tool calls the host remembers, so each asks the after-tool rows
+#: once though OpenCode sends a part's last update more than once.
+TOOLS_REMEMBERED = 1024
 #: The longest a waiting delivery sleeps before it looks at the host again.
 WAIT_STEP = 1.0
 #: How long the host waits for `summarize` to answer, in seconds: the server may answer
@@ -217,7 +233,7 @@ class _Post:
 
 class OpenCodeHarness(Harness):
     name = "opencode"
-    can = frozenset({"deliver", "only-if-idle", "compact", "agents"})
+    can = frozenset({"deliver", "only-if-idle", "compact", "agents", "environ"})
     mod_version = None
 
     def __init__(self, cwd, *, instructions: str | None = None, env=None, options=None,
@@ -274,6 +290,12 @@ class OpenCodeHarness(Harness):
         self._seen_users: set[str] = set()  # OpenCode sends a user message again in its turn
         self._turns = 0
         self._post: _Post | None = None
+        self._children: set[str] = set()     # child sessions the stream announced
+        self._tools_done: dict[str, None] = {}   # callIDs whose rows were asked, oldest first
+        self._after_dropped = False
+        #: The session's context, in tokens, from its last assistant message that gave
+        #: one; None before the first.
+        self._context: int | None = None
 
     # -- life ----------------------------------------------------------------------------
 
@@ -488,13 +510,28 @@ class OpenCodeHarness(Harness):
 
     # -- events --------------------------------------------------------------------------
 
+    @staticmethod
+    def tool_points() -> dict[str, bool]:
+        """None: OpenCode runs no turns code at a tool call, and has no channel for text
+        after one. The host observes a finished call (`_tool_part`)."""
+        return {"pre": False, "after": False}
+
     def on_event(self, event: dict) -> None:
         kind = event.get("type")
         props = event.get("properties") or {}
         compacted = False
+        tool_call = None
         with self._lock:
             sid = self.session_id
-            if kind == "message.updated":
+            if kind == "message.part.updated":
+                tool_call = self._tool_part(props.get("part"), sid)
+            elif kind in ("session.created", "session.updated"):
+                info = props.get("info") or {}
+                parent, child = info.get("parentID"), info.get("id")
+                if isinstance(child, str) and child and parent is not None and (
+                        parent == sid or parent in self._children):
+                    self._children.add(child)
+            elif kind == "message.updated":
                 info = props.get("info") or {}
                 if info.get("sessionID") == sid:
                     self._on_message(info)
@@ -515,6 +552,67 @@ class OpenCodeHarness(Harness):
             # Manual or automatic: `Ready(compact)`. An automatic compaction runs inside
             # the busy loop, so the open turn stays open.
             self._ready_event("compact", sid)
+        if tool_call is not None:
+            threading.Thread(target=self._after_tool, args=tool_call, daemon=True,
+                             name="turns-opencode-after-tool").start()
+
+    def context_tokens(self) -> int | None:
+        """The session's context, in tokens, from its last assistant message that gave
+        one; None before the first."""
+        with self._lock:
+            return self._context
+
+    def _tool_part(self, part, sid: str | None) -> tuple | None:
+        """A tool part that has just finished, as `(tool, call_id, agent_id, is_error,
+        rows)`, once per call, `rows` the rows to ask (None for every one); None for any
+        other part, for one seen finished before, for a session that is neither this one
+        nor a child it announced, when no `after-tool` row is installed, and when the
+        floor skips every row. Called under the lock."""
+        if not isinstance(part, dict) or part.get("type") != "tool" or sid is None:
+            return None
+        status = (part.get("state") or {}).get("status")
+        if status not in ("completed", "error"):
+            return None                    # pending and running come first
+        owner = part.get("sessionID")
+        if owner == sid:
+            agent_id = None
+        elif owner in self._children:
+            agent_id = owner
+        else:
+            return None
+        call_id = part.get("callID") or part.get("id")
+        tool = part.get("tool")
+        if not isinstance(call_id, str) or not call_id or not isinstance(tool, str):
+            return None
+        key = f"{owner}/{call_id}"
+        if key in self._tools_done:
+            return None
+        self._tools_done[key] = None
+        while len(self._tools_done) > TOOLS_REMEMBERED:
+            del self._tools_done[next(iter(self._tools_done))]
+        if not self.endpoint.floors.rows:
+            return None
+        rows = None
+        if agent_id is None and self._context is not None:
+            rows = [rid for rid, floor in self.endpoint.floors.values().items()
+                    if self._context >= floor]
+            if not rows:
+                return None
+        return tool, call_id, agent_id, status == "error", rows
+
+    def _after_tool(self, tool: str, call_id: str, agent_id: str | None,
+                    is_error: bool, rows: list[str] | None = None) -> None:
+        """Tell the `after-tool` rows a call finished. Their text has nowhere to go."""
+        try:
+            text = self.endpoint.after_tool(tool, tool_use_id=call_id, agent_id=agent_id,
+                                            is_error=is_error, point="after", rows=rows)
+        except Exception:  # noqa: BLE001 - the rows' faults are the endpoint's to log
+            log.exception("the after-tool rows could not be asked")
+            return
+        if text and not self._after_dropped:
+            self._after_dropped = True
+            log.info("the after-tool rows' text (%d characters) was dropped: the OpenCode "
+                     "host has no channel for it; later drops are not logged", len(text))
 
     def _ready_event(self, source: str, sid: str | None) -> None:
         """`Ready`. OpenCode has no channel for the listeners' added context, so the
@@ -536,6 +634,9 @@ class OpenCodeHarness(Harness):
             return
         if info.get("role") != "assistant":
             return
+        context = _context_of(info)
+        if context is not None:
+            self._context = context
         if self._turn_id is None:
             if (info.get("time") or {}).get("completed"):
                 # A finished reply's late update (the server sends the last one twice):
@@ -851,6 +952,21 @@ def _not_found_error(raw) -> bool:
     except ValueError:
         return False
     return isinstance(body, dict) and body.get("name") == "NotFoundError"
+
+
+def _context_of(info: dict) -> int | None:
+    """An assistant message's context in tokens: `tokens.input + cache.read +
+    cache.write`, or None when it gives no positive count."""
+    tokens = info.get("tokens")
+    if not isinstance(tokens, dict):
+        return None
+    cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+    total = 0
+    for value in (tokens.get("input"), cache.get("read"), cache.get("write")):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+            value = 0
+        total += int(value)
+    return total if total > 0 else None
 
 
 def _brief(info: dict) -> dict:
