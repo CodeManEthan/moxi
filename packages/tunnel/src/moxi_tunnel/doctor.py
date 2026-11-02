@@ -18,7 +18,8 @@ deadline, `BUDGET` seconds from its start, and every wait in it is cut to what i
 After the deadline only rows are built, so every row, with its detail, comes back inside
 the core's ten seconds. The rows about Tailscale are `off` while no Tailscale target is
 recorded, and run no `tailscale` command then; `moxi tunnel add` checks Tailscale's
-readiness itself before it records the first one.
+readiness itself before it records the first one. While the record can't be read, those
+rows and the Cloudflare ones are `warn`, not checked, beside the record's `fail`.
 
 The waits and the clock are arguments, so a test can make them short.
 """
@@ -57,6 +58,7 @@ TAILSCALE_ROWS = ("tailscale CLI", "certificate renewal", "logged in", "HTTPS ce
 
 _NO_ANSWER = "tailscale did not answer"
 _TRY = "tailscale status"
+_NO_RECORD = "not checked: the record can't be read"
 
 
 def _ran_out(budget: float) -> str:
@@ -143,6 +145,12 @@ def rows(*, budget: float = BUDGET, read_wait: float = READ_WAIT,
     entries = dict(rec.entries) if rec is not None else {}
     answers = _answer_rows(entries, connect_wait=connect_wait, deadline=deadline,
                            budget=budget, clock=clock)
+    if rec is None:
+        # With no record, "nothing recorded" would be a guess: the rows that hang on what
+        # is recorded say they were not checked, beside the record's own `fail`.
+        return [*record_rows, *decl_rows, *answers,
+                *(Row(MODULE, name, "warn", _NO_RECORD)
+                  for name in (*TAILSCALE_ROWS, "cloudflare", "cloudflare in step"))]
     cloudflare = _guard("cloudflare", lambda: [_setup_row(entries)])
     in_step = _guard("cloudflare in step",
                      lambda: [_in_step_row(wait=read_wait, deadline=deadline, budget=budget,
@@ -161,7 +169,7 @@ def rows(*, budget: float = BUDGET, read_wait: float = READ_WAIT,
     else:
         tailscale = [Row(MODULE, name, "off", "no Tailscale target is recorded")
                      for name in TAILSCALE_ROWS]
-    entry_rows = _entry_rows(rec, decls, tailscale_keys, reads) if rec is not None else []
+    entry_rows = _entry_rows(rec, decls, tailscale_keys, reads)
 
     return [*record_rows, *decl_rows, *tailscale, *entry_rows, *answers, *cloudflare,
             *in_step]

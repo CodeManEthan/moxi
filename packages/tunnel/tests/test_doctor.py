@@ -173,7 +173,9 @@ def test_a_record_that_is_not_one_is_a_failure_and_the_rest_still_runs(alpha, ta
     record.record_path().write_text("not json")
     got = by_name(quick())
     assert got["record"].state == "fail" and "not JSON" in got["record"].detail
-    assert got["cloudflare in step"].state in ("ok", "warn", "fail")
+    for name in (*TAILSCALE_ROWS, "cloudflare", "cloudflare in step"):
+        assert got[name].state == "warn", name
+        assert got[name].detail == "not checked: the record can't be read"
 
 
 def test_an_entry_a_newer_tunnel_wrote_is_a_failure(alpha, tailscale, yes):
