@@ -319,8 +319,9 @@ snapshot `DATA/usage/models-snapshot.json`, and the fired warn-at marks
 - `marks`: deletes fired-mark files older than `marks.max_age_days` (7) and the worker
   ceiling's agent markers older than `ceiling.max_age_days` (7), and counts them; a
   warning when the worker ceiling is on but a threshold is 0, so it allows every call.
-- `turns`: off when turns is not installed, since Claude limits, the warn-at mark and the
-  worker ceiling need it; else the events usage registers with turns.
+- `turns`: off when turns is not installed, since Claude limits, Codex limits from the
+  app-server, the warn-at mark and the worker ceiling need it; else the events usage
+  registers with turns, and its worker-ceiling guard.
 
 ## From Python
 

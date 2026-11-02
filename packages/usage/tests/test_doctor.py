@@ -325,7 +325,8 @@ def test_without_turns_the_row_is_off_and_says_what_needs_it(monkeypatch):
     assert not modules.available("turns")
     found = row("turns")
     assert found.state == "off"
-    assert "Claude limits, the warn-at mark and the worker ceiling need turns" in found.detail
+    assert found.detail == ("turns is not installed: Claude limits, Codex limits from the "
+                            "app-server, the warn-at mark and the worker ceiling need turns")
 
 
 def test_with_turns_the_row_is_ok_and_names_what_usage_registers(monkeypatch):
@@ -335,7 +336,8 @@ def test_with_turns_the_row_is_ok_and_names_what_usage_registers(monkeypatch):
     assert found.detail == (
         "turns is installed; usage registers after-tool (the warn-at mark, with its "
         "floor), gone (forgetting a session's fired marks), usage (Claude limits), "
-        "codex_limits (Codex limits from the app-server)")
+        "codex_limits (Codex limits from the app-server), and the guard usage.ceiling "
+        "(the worker ceiling, off until turned on)")
 
 
 # --- marks -------------------------------------------------------------------------------
@@ -399,3 +401,16 @@ def test_the_cores_doctor_runs_usages_rows_and_its_stores(capsys):
     assert {"models.snapshot", "models.unpriced", "index", "codex.imports",
             "restart_point", "marks", "turns"} <= set(names)
     assert names["store index"] == names["store readings"] == "ok"
+
+
+def test_the_index_status_is_worked_out_once_per_doctor_run(monkeypatch):
+    from moxi_usage import reports
+
+    transcript(sessions.root("claude"))
+    run_pass()
+    calls = []
+    real = reports.status
+    monkeypatch.setattr(reports, "status", lambda conn: calls.append(1) or real(conn))
+    names = [r.name for r in doctor.rows(now=NOW)]
+    assert "index" in names and "codex.imports" in names
+    assert len(calls) == 1

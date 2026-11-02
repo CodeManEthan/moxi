@@ -24,7 +24,8 @@ at what usage's answers rest on:
   ceiling runs (by `ceiling.on`, or by turns' `guards.on` as turns' guard loader reports
   it) while `ceiling.warn_tokens` or `ceiling.hard_tokens` is 0, so it allows every call.
 * `turns`: `off` when turns is not installed, saying what needs it; else `ok`, naming
-  the events usage registers with turns and what each is for.
+  the events usage registers with turns and what each is for, and the worker ceiling's
+  guard.
 
 Every other check only reads: the index is opened as it is, and no pass runs.
 """
@@ -177,6 +178,8 @@ class IndexOpen:
     def __init__(self, conn: sqlite3.Connection | None = None, problem: str | None = None,
                  fix: str | None = None):
         self.conn, self.problem, self.fix = conn, problem, fix
+        #: The index's `status` report and why it could not be read, once worked out.
+        self.status: tuple[Any, str | None] | None = None
 
     def close(self) -> None:
         if self.conn is not None:
@@ -218,15 +221,18 @@ def open_index(env: Mapping[str, str] | None = None) -> IndexOpen:
 
 
 def _status(found: IndexOpen) -> tuple[Any, str | None]:
-    """The index's `status` report, or None and why it could not be read."""
+    """The index's `status` report, or None and why it could not be read. Worked out
+    once per open index, so the rows that read it share one."""
     import sqlite3
 
     from . import reports
 
-    try:
-        return reports.status(found.conn), None
-    except sqlite3.Error as exc:
-        return None, f"the token index cannot be read: {exc}"
+    if found.status is None:
+        try:
+            found.status = (reports.status(found.conn), None)
+        except sqlite3.Error as exc:
+            found.status = (None, f"the token index cannot be read: {exc}")
+    return found.status
 
 
 def index_row(found: IndexOpen, *, now: float) -> Row:
@@ -446,7 +452,12 @@ def ceiling_unset(settings: Any, *, env: Mapping[str, str] | None = None) -> str
 def ceiling_on_in_turns(env: Mapping[str, str] | None = None) -> str | None:
     """What turned `usage.ceiling` on, as turns' guard loader reports it (`guards.on`,
     `ceiling.on` or both), or None when it is off, turns is absent or the loader can't
-    be read."""
+    be read.
+
+    This reaches past turns' API: turns' public names (`moxi_turns`) offer no read of
+    which guards are on, so it imports turns' guard loader, `moxi_turns.guards`, and
+    reads `load(env=).get(id).by`. A failure there leaves `ceiling.on` as the only
+    answer; the ceiling's tests run the real loader, so a rename fails them."""
     import importlib
 
     import moxi.modules
@@ -482,9 +493,11 @@ def turns_row() -> Row:
     import moxi.modules
 
     if not moxi.modules.available("turns"):
+        from .module import OPTIONAL
+
         return Row(MODULE, "turns", "off",
-                   "turns is not installed: Claude limits, the warn-at mark and the worker "
-                   "ceiling need turns")
+                   f"turns is not installed: {OPTIONAL['turns']} need turns")
+    from .ceiling import GUARD_ID
     from .listeners import LISTENERS
 
     said = []
@@ -492,7 +505,8 @@ def turns_row() -> Row:
         for event in row[0]:
             said.append(f"{event} ({TURNS_EVENTS.get(event, row[1])})")
     return Row(MODULE, "turns", "ok", "turns is installed; usage registers "
-               + ", ".join(said))
+               + ", ".join(said) + f", and the guard {GUARD_ID} (the worker ceiling, "
+               "off until turned on)")
 
 
 # --- text -------------------------------------------------------------------------------
