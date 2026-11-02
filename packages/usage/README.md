@@ -212,7 +212,10 @@ main session past that mark calls every handler registered on the entry-point gr
 `moxi.usage.crossings` with a `Crossing(harness, session_id, mark, tokens, threshold,
 model, at)`. Handlers run one after another, each waited on for at most
 `marks.handler_wait_ms` (200); a line a handler returns follows the notice. usage itself
-does nothing on a crossing.
+does nothing on a crossing. The wait is per handler, and turns bounds the whole listener
+call by its own `after_tool.wait_ms` (300): two handlers that each take most of their
+200 ms outlast it, and turns then drops the call's answer, the notice with it. A handler
+should return at once and start any slow work on its own.
 
 Fired marks are kept in `STATE/usage/marks/`, so a restarted endpoint doesn't say one
 twice; a session's file goes when its endpoint ends. `moxi usage marks SESSION` prints a

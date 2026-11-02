@@ -702,7 +702,13 @@ def run_handlers(crossing: Crossing, *, wait: float | None = None) -> list[str]:
     """Call each crossing handler with `crossing`, one after another, each on a thread of
     its own waited on for at most `wait` seconds (`marks.handler_wait_ms`). Returns the
     lines they gave, in order. A handler that raises, overruns or answers something other
-    than text costs only its own line, and is logged."""
+    than text costs only its own line, and is logged.
+
+    The bound is per handler, not over them all, and turns keeps its own bound over the
+    whole listener call (`after_tool.wait_ms`, 300 ms by default). So two handlers that
+    each run near their bound can outlast turns' bound; turns then drops the listener's
+    whole answer, the notice included, while the crossing stays fired. A handler is
+    meant to return at once and start slow work detached."""
     import threading
 
     try:
