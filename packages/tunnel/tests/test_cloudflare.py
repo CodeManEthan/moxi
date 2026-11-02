@@ -89,11 +89,11 @@ def test_a_path_with_a_control_character_is_refused(tmp_path):
         cloudflare.render([], tunnel_id=ID, credentials=None, metrics_port=1)
 
 
-def test_credentials_that_are_missing_another_users_or_not_a_file_are_refused(tmp_path):
-    with pytest.raises(Refused, match="can't be found"):
-        _render(tmp_path, [], tmp_path / "nope.json")
-    with pytest.raises(Refused, match="not a regular file"):
-        _render(tmp_path, [], tmp_path)
+def test_credentials_that_are_missing_or_not_a_file_are_a_problem_the_writer_skips(tmp_path):
+    assert "can't be found" in cloudflare.credentials_problem(str(tmp_path / "nope.json"))
+    assert "not a regular file" in cloudflare.credentials_problem(str(tmp_path))
+    # The writer checks only the path's form: taking a rule out needs no credentials file.
+    assert str(tmp_path / "nope.json") in _render(tmp_path, [], tmp_path / "nope.json")
 
 
 def test_the_credential_is_never_opened(tmp_path, monkeypatch, cf, units):

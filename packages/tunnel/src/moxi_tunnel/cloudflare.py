@@ -174,12 +174,11 @@ def rules(rec: Record) -> list[tuple[str, int]]:
 def render(pairs: Iterable[tuple[str, int]], *, tunnel_id: object, credentials: object,
            metrics_port: int) -> str:
     """The whole `cloudflared.yml` for `pairs`, its digest line first. Refuses (exit 3) a
-    bad tunnel id, hostname or path, and a credentials file that isn't the user's."""
+    bad tunnel id, hostname or path. The credentials path is checked for its form only:
+    whether the file is there and the user's is for `ready` and the doctor, so a remove
+    still takes a rule out of the file after the credentials file is gone."""
     tid = check_tunnel_id(tunnel_id)
     cred = check_path(credentials, "the Cloudflare credentials path")
-    problem = credentials_problem(cred)
-    if problem:
-        raise Refused(problem, "moxi config set tunnel cloudflare.credentials <path>")
     if not 0 < int(metrics_port) < 65536:
         raise Refused(f"the metrics port {metrics_port} is not a port",
                       "moxi config set tunnel cloudflare.metrics_port <port>")

@@ -346,6 +346,31 @@ def test_a_file_tunnel_cant_write_rolls_the_remove_back_with_the_entry_kept(setu
     assert_agree(setup)
 
 
+def test_a_remove_or_forget_needs_no_credentials_file(setup, cf, yes):
+    add("alpha/gateway", A, yes)
+    add("alpha/connector", B, yes)
+    cf.chmod(0o600)
+    cf.unlink()
+    assert acts.remove("alpha/gateway", ask=yes).code == 0
+    assert acts.remove("alpha/connector", forget=True, ask=yes).code == 0
+    assert record.read().entries == {}
+    assert cloudflare.read_file().text is None and not cloudflare.switch_on()
+
+
+def test_a_rollback_whose_own_step_fails_on_the_file_says_so(setup, yes, monkeypatch):
+    add("alpha/gateway", A, yes)
+    old = record.read().entries["alpha/gateway"]
+    failure = cloudflare.StepFailed("tunnel can't write the file", "chmod 600 it", file=True)
+    monkeypatch.setattr(acts, "_restore", lambda act, key, old: failure)
+    with pytest.raises(ApplyError) as caught:
+        acts._rollback(acts._Act(record.read()), "alpha/gateway", old,
+                       ApplyError("it failed"), kind="remove", provider_name="cloudflare",
+                       port=443)
+    assert caught.value.reason == ("it failed; going back, cloudflared.yml could not be "
+                                   "written either: tunnel can't write the file")
+    assert "unit" not in caught.value.reason
+
+
 # -- moved and repair ----------------------------------------------------------------------
 
 def test_a_moved_target_is_repaired_on_the_same_hostname(setup, yes, config_file):

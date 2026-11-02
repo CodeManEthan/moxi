@@ -606,24 +606,24 @@ def _plan_switch(rec: Record, key: str, target: declare.Target, old: Entry,
     return _Plan(lines, signature, core=True, data=data)
 
 
-def _restore(act: _Act, key: str, old: Entry | None) -> str | None:
+def _restore(act: _Act, key: str, old: Entry | None) -> StepFailed | None:
     """Commit `old` back for `key`, a rollback, with a new generation. A Cloudflare entry
-    goes back `applying` and is committed `on` only once the step has started the unit on a
-    file that holds its rule; when a unit act fails it stays `applying` with the core's
-    text in `detail`, which is returned."""
+    goes back `applying` and is committed `on` only once the step has put its rule in the
+    file and started the unit on it; when the step fails it stays `applying` with the
+    step's text in `detail`, and the step's failure is returned."""
     if old is not None and old.provider == "cloudflare" and old.state == State.ON:
         going = replace(old, state=State.APPLYING)
         try:
             act.commit({key: going})
         except StepFailed as exc:
             act.commit({key: replace(going, detail=exc.reason)})
-            return exc.reason
+            return exc
         act.commit({key: old})
         return None
     try:
         act.commit({key: old})
     except StepFailed as exc:
-        return exc.reason
+        return exc
     return None
 
 
@@ -633,10 +633,13 @@ def _rollback(act: _Act, key: str, old: Entry | None, exc: BaseException, *, kin
     more = _restore(act, key, old)
     record.event("rollback", key, provider=provider_name, port=port, act=kind)
     text = _reason(exc)
-    if more:
-        text += f"; going back, the cloudflared unit did not follow either: {more}"
-    fix = exc.fix if isinstance(exc, TunnelError) else None
-    raise ApplyError(text, fix or ("moxi tunnel repair" if more else None)) from exc
+    if more is not None:
+        what = ("cloudflared.yml could not be written either" if more.file
+                else "the cloudflared unit did not follow either")
+        text += f"; going back, {what}: {more.reason}"
+    fix = (exc.fix if isinstance(exc, TunnelError) else None) or (
+        "moxi tunnel repair" if more is not None else None)
+    raise ApplyError(text, fix) from exc
 
 
 def _do_add_cloudflare(plan: _Plan, act: _Act) -> Outcome:
