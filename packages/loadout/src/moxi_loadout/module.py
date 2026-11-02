@@ -9,8 +9,8 @@ the core's one placer, `moxi.place`. It offers no API to other modules.
 ANNOUNCES = 1
 INTERFACES = frozenset()
 API = None
-#: The verb `moxi loadout` comes with the planner and the verbs.
-CLI = None
+#: The verb `moxi loadout`: install, status, add, remove, enable, disable, list.
+CLI = "moxi_loadout.cli:main"
 SUMMARY = 'Your own skills, agents and settings, placed for each harness: Claude Code, Codex and OpenCode.'
 OPTIONAL = {
     "projects": "Name a project section by its project key, not only by its path.",

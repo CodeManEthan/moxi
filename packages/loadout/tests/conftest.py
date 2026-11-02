@@ -11,7 +11,7 @@ write outside it. Here, for every test:
 - every harness home is asserted to be under the test's tmp before the test runs.
 
 `site` is a fresh site of fake distributions on `sys.path` (a fake projects or repo, say).
-While it is active only the site's distributions and `moxi` itself are seen.
+While it is active only the site's distributions, `moxi` itself and loadout are seen.
 """
 
 from __future__ import annotations
@@ -143,13 +143,13 @@ class Site:
 
 def see_only(root: Path, monkeypatch) -> None:
     """Let `importlib.metadata` and `moxi.modules.load` find only the distributions under
-    `root`, and `moxi` itself."""
+    `root`, `moxi` itself and loadout, whose own config the tests read."""
     from importlib.metadata import Distribution
 
     discover = Distribution.discover
 
     def seen(dist) -> bool:
-        return dist.name == "moxi" or Path(dist.locate_file("")) == root
+        return dist.name in ("moxi", "moxi-loadout") or Path(dist.locate_file("")) == root
 
     def filtered(cls, **kwargs):
         return (d for d in discover(**kwargs) if seen(d))
@@ -162,6 +162,8 @@ def see_only(root: Path, monkeypatch) -> None:
 
     def find_seen(cls, module):
         dist = find(cls, module)
+        if dist is not None and module == "loadout":
+            return dist
         return dist if dist is not None and Path(dist.path).parent == root else None
 
     monkeypatch.setattr(moxi.modules._DistInfo, "find", classmethod(find_seen))
@@ -170,7 +172,7 @@ def see_only(root: Path, monkeypatch) -> None:
 @pytest.fixture
 def site(tmp_path, monkeypatch):
     """A fresh site on `sys.path` for the test's fake distributions; while it is active
-    every other real distribution is hidden."""
+    every other real distribution but moxi and loadout is hidden."""
     root = tmp_path / "site"
     root.mkdir()
     see_only(root, monkeypatch)

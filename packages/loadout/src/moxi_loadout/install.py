@@ -1,0 +1,347 @@
+"""`install` and `status`: the manifest planned whole, the steps in scope applied.
+
+`install` runs, under `install.lock` (60 s, else exit 75) and then the core lock:
+
+1. take every module's own skill placements over (`moxi_loadout.adoption.take`), writing
+   them into the manifest, and record them in loadout's ledger;
+2. read the manifest, the settings and the ledger, and build the whole plan
+   (`moxi_loadout.planner`);
+3. write the generated agent files of the wants in scope;
+4. plan through the core placer and apply the steps in scope: each `add`, `update` and
+   `keep`; each `remove` whose record names a section in scope (a `remove` with no record
+   only in an unscoped run in which every section resolved); a refusal `--replace` names,
+   or a link of loadout's own under the folder the last install read; a module skill
+   nobody has placed, as its module, then taken over seeded;
+5. write loadout's ledger: a record per placement made or kept, none for one removed.
+
+Locks are always taken in one order: `install.lock`, the core lock, the manifest's.
+
+`status` builds the same plan and applies nothing; it takes no lock. `install --dry-run`
+is `status` over the run's scope.
+
+Exit codes: `status` 0 when every item is `ok` or `off`, else 1. `install` 0 when every
+item in scope is `ok` or `off` afterwards; 1 an error (a bad source, a failed write, a
+state still missing after the write); 3 refused (`blocked`, `modified` or `would-commit`
+left, a `--replace` that names nothing refused, a project section refused); 75 a lock held
+past its wait, or projects busy. 1 wins over 3, 3 over 75. A refusal outside the scope is
+a line, not a code.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
+
+from moxi.exit import ERROR, REFUSED, TEMPFAIL
+
+from moxi_loadout import adoption, ledger, planner
+from moxi_loadout.manifest import USER, ManifestError, parse_id
+from moxi_loadout.planner import FINE, Row, Scope
+
+#: How long install waits for another loadout install, in seconds.
+INSTALL_WAIT = 60.0
+#: How long install waits for a `moxi install` or `moxi uninstall` that holds the core
+#: lock (it may be installing packages), in seconds.
+CORE_WAIT = 600.0
+
+
+@dataclass
+class Outcome:
+    """What a run came to: its `rows` (every want for `status`, those in scope for
+    `install`), the `lines` said on the way, `notes`, and the exit `code`."""
+
+    rows: list[Row] = field(default_factory=list)
+    lines: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    code: int = 0
+
+    def as_json(self) -> dict:
+        counts: dict[str, int] = {}
+        for r in self.rows:
+            counts[r.state] = counts.get(r.state, 0) + 1
+        return {"rows": [r.as_json() for r in self.rows], "lines": self.lines,
+                "notes": self.notes, "counts": counts, "exit": self.code}
+
+    def text(self) -> list[str]:
+        out = list(self.lines)
+        out += [r.line() for r in self.rows if r.state != "ok"]
+        out += [f"note: {n}" for n in self.notes]
+        counts: dict[str, int] = {}
+        for r in self.rows:
+            counts[r.state] = counts.get(r.state, 0) + 1
+        out.append("loadout: " + (", ".join(f"{counts[s]} {s}" for s in planner.STATES
+                                            if counts.get(s)) or "nothing listed"))
+        return out
+
+
+# -- status ---------------------------------------------------------------------------------
+
+def status(scope: Scope = Scope(), *, folder=None, resolver=planner.resolve_key) -> Outcome:
+    """Every item's state; the scope filters the rows. Takes no lock, writes nothing."""
+    plan = _plan(folder, resolver)
+    rows = [r for r in planner.rows(plan) if _shown(scope, r)]
+    code = 0 if all(r.state in FINE for r in rows) else ERROR
+    return Outcome(rows, list(plan.lines), list(dict.fromkeys(plan.notes)), code)
+
+
+def _shown(scope: Scope, r: Row) -> bool:
+    return scope.covers(r.scope, r.kind, r.name) if r.scope is not None else scope.whole
+
+
+def _plan(folder, resolver) -> planner.Plan:
+    from moxi_loadout import manifest as manifest_mod
+    from moxi_loadout import settings
+
+    machine = settings.read()
+    if folder is not None:
+        machine.source = os.path.abspath(folder)
+    found = manifest_mod.load(machine.source)
+    plan = planner.build(found, machine, ledger.read(), resolver=resolver)
+    return planner.run(plan)
+
+
+# -- install --------------------------------------------------------------------------------
+
+def install(scope: Scope = Scope(), *, replace: Iterable[str] = (), dry_run: bool = False,
+            folder=None, resolver=planner.resolve_key,
+            say: Callable[[str], object] | None = None) -> Outcome:
+    """Adopt, plan the whole manifest, apply the steps in scope. See the module's docs."""
+    if dry_run:
+        out = status(scope, folder=folder, resolver=resolver)
+        out.code = planner.exit_code(r.code for r in out.rows
+                                     if r.state not in ("missing", "stale"))
+        return out
+    from moxi import files, paths
+
+    from moxi_loadout import stores
+
+    lines: list[str] = []
+    try:
+        with files.lock(stores.install_lock(), timeout=INSTALL_WAIT):
+            with _core_lock(files, paths):
+                return _install(scope, list(replace), folder, resolver, lines)
+    except files.LockTimeout as exc:
+        lines.append(f"{exc}; another install is running, so try again later")
+        return Outcome(lines=lines, code=TEMPFAIL)
+
+
+def _core_lock(files, paths):
+    from contextlib import ExitStack, contextmanager
+
+    @contextmanager
+    def held():
+        with ExitStack() as stack:
+            try:
+                stack.enter_context(files.lock(paths.core_lock(), nested=True, timeout=0))
+            except files.LockTimeout as exc:
+                who = f"pid {exc.holder}" if exc.holder else "another process"
+                print(f"loadout: waiting for an install or uninstall ({who}) to finish",
+                      file=sys.stderr, flush=True)
+                stack.enter_context(files.lock(paths.core_lock(), nested=True,
+                                               timeout=CORE_WAIT))
+            yield
+    return held()
+
+
+def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str]) -> Outcome:
+    from moxi import place
+
+    from moxi_loadout import manifest as manifest_mod
+    from moxi_loadout import settings
+
+    say = lines.append
+    machine = settings.read()
+    if folder is not None:
+        machine.source = os.path.abspath(folder)
+    data = ledger.read()
+    old_source = data.get("source")
+    for t in adoption.take(folder=machine.source, say=say):
+        say(f"adopted skill {t.module}/{t.placed.name} for {t.placed.harness}")
+        data["placed"][str(t.placed.path)] = {
+            "section": USER, "kind": "skill", "item": f"{t.module}/{t.placed.name}",
+            "harness": t.placed.harness, "module": t.module, "seeded": False}
+    found = manifest_mod.load(machine.source)
+    plan = planner.build(found, machine, data, resolver=resolver)
+    claims = _claims(replace)
+    in_scope = [w for w in plan.wants if scope.covers(w.scope, w.kind, w.name)]
+    for want in in_scope:
+        _write_generated(want, claims, say)
+    planner.run(plan)
+
+    mine = {str(p.path) for p in place.status(planner.OWNER)}
+    rows: list[Row] = []
+    plain, forced, seeded = [], [], []
+    for want in in_scope:
+        step = want.step
+        state, _, _ = planner.state_of(want)
+        if want.state is not None or step is None:
+            rows.append(planner.row(want))
+            continue
+        if want.module and step.action == "add":
+            seeded.append(want)
+        elif step.action in ("add", "update", "keep") and state != "modified":
+            plain.append(step)
+        elif step.action == "refuse" and step.cause in ("occupant", "tracked") and (
+                _claimed(claims, want) or _moved(step, mine, old_source)):
+            forced.append(step)
+        else:
+            rows.append(planner.row(want))
+    removes = [s for s in plan.removals if _remove_in_scope(plan, s, scope)]
+    done = {str(p.path): p for p in place.apply(plain + removes, say=say)}
+    done.update({str(p.path): p for p in place.apply(forced, replace=True, say=say)})
+    now = {str(p.path) for p in place.status(planner.OWNER)}
+
+    seeded_done: dict[str, object] = {}
+    for want in seeded:
+        result = adoption.place_seeded(want.module, want.item, say=say)
+        if result.placed is not None:
+            seeded_done[str(result.placed.path)] = result.placed
+            say(f"placed skill {want.name} for {want.harness} ({result.placed.path})")
+        elif result.step is not None:
+            want.step = result.step
+            rows.append(planner.row(want))
+            continue
+        else:
+            rows.append(planner.row(want, "missing", result.line, ERROR))
+            continue
+        rows.append(planner.row(want, "ok", ""))
+
+    for want in in_scope:
+        step = want.step
+        if step is None or want.state is not None or (want.module and want in seeded):
+            continue
+        if step in plain or step in forced:
+            target = str(step.target)
+            if target in done:
+                if step.action != "keep":
+                    verb = "updated" if step.action == "update" else "placed"
+                    say(f"{verb} {want.label()} ({target})")
+                rows.append(planner.row(want, "ok", ""))
+            else:
+                rows.append(planner.row(want, "missing", f"not placed at {target}", ERROR))
+    for step in removes:
+        target = str(step.target)
+        r = planner.removal_row(plan, step)
+        if target in now:
+            rows.append(Row(r.scope, r.kind, r.name, r.harness, "stale",
+                            f"could not remove {target}", target, ERROR))
+        else:
+            say(f"removed {r.kind} {r.name} for {r.harness} ({target})")
+
+    unclaimed = [c for c in claims if not claims[c]]
+    for text in unclaimed:
+        lines.append(f"--replace {text}: nothing of loadout's is refused there")
+    _write_ledger(plan, data, machine.source, done, seeded_done, removes, now)
+    for name, res in plan.refused.items():
+        if scope.sections() is not None and name not in scope.sections():
+            continue
+        if scope.item is not None and not any(
+                w.scope == name and (w.kind, w.name) == scope.item for w in plan.wants):
+            continue
+        rows.append(Row(name, "section", name, "*", "blocked", res.line, None, res.code))
+    codes = [r.code for r in rows if r.state not in FINE] + [REFUSED] * bool(unclaimed)
+    return Outcome(rows, lines, list(dict.fromkeys(plan.notes)), planner.exit_code(codes))
+
+
+def _claims(replace: list[str]) -> dict[str, bool]:
+    """Each `--replace` value, not yet matched: a target path or an id."""
+    out = {}
+    for text in replace:
+        if not _is_path(text):
+            try:
+                parse_id(text)
+            except ValueError as exc:
+                raise ManifestError(None, [f"--replace {exc}"]) from None
+        out[text] = False
+    return out
+
+
+def _is_path(text: str) -> bool:
+    return "/" in text or "\\" in text or text[:1] in ("~", ".")
+
+
+def _claimed(claims: dict[str, bool], want) -> bool:
+    """Whether a `--replace` value names `want`'s target or its id; marks it matched."""
+    from moxi.place import target_key
+
+    hit = False
+    target = planner.target_of(want)
+    for text in claims:
+        if _is_path(text):
+            ok = target is not None and target_key(text) == target
+        else:
+            ident = parse_id(text)
+            ok = ident.covers(want.kind, want.name, want.harness)
+        if ok:
+            claims[text] = hit = True
+    return hit
+
+
+def _moved(step, mine: set[str], old_source) -> bool:
+    """Whether a refused occupant is a link loadout made from the folder an earlier
+    install read, before the folder moved."""
+    from moxi.place import target_key
+
+    if not old_source or str(step.target) not in mine or step.occupant is None:
+        return False
+    path = os.fspath(step.occupant)
+    if not os.path.islink(path):
+        return False
+    pointed = os.path.normpath(os.path.join(os.path.dirname(path), os.readlink(path)))
+    old = os.path.normpath(os.path.abspath(old_source))
+    return target_key(pointed).startswith(old.rstrip(os.sep) + os.sep)
+
+
+def _write_generated(want, claims: dict[str, bool], say) -> None:
+    """Write `want`'s generated agent file when it needs writing: missing, out of date
+    with its header intact, or edited by hand and named by `--replace`."""
+    from moxi.files import atomic_write
+
+    if want.generated is None or want.state is not None:
+        return
+    path, data, current = want.generated
+    if current == "same":
+        return
+    if current == "modified" and not _claimed(claims, want):
+        return
+    atomic_write(path, data, mode=0o644)
+    want.generated = (path, data, "same")
+    if current == "modified":
+        say(f"rewrote {path}, which was edited by hand")
+
+
+def _remove_in_scope(plan: planner.Plan, step, scope: Scope) -> bool:
+    record = plan.record(step)
+    if record is None:
+        return scope.whole and plan.resolved_all
+    return scope.covers(record.get("section"), record.get("kind"), record.get("item"))
+
+
+def _write_ledger(plan, data, source, done, seeded_done, removes, now) -> None:
+    placed = data["placed"]
+    for want in plan.wants:
+        step = want.step
+        if step is None or want.item is None:
+            continue
+        target = str(step.target)
+        if target not in done and target not in seeded_done:
+            continue
+        record = {"section": want.scope, "kind": want.kind, "item": want.name,
+                  "harness": want.harness, "place": ledger.item_record(want.item)}
+        if want.module:
+            old = placed.get(target, {})
+            record["module"] = want.module
+            record["seeded"] = target in seeded_done or bool(old.get("seeded"))
+        placed[target] = record
+    for step in removes:
+        if str(step.target) not in now:
+            placed.pop(str(step.target), None)
+    for target in [t for t in placed if t not in now and t not in seeded_done]:
+        del placed[target]
+    data["source"] = os.fspath(source)
+    ledger.write(data)
+
+
+__all__ = ["INSTALL_WAIT", "CORE_WAIT", "Outcome", "status", "install"]
