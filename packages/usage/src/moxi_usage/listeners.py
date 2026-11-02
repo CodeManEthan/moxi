@@ -1,4 +1,8 @@
-"""usage's listeners on turns' session events.
+"""usage's listeners on turns' session events, and its registration with turns.
+
+`LISTENERS` is what turns reads from the `moxi.turns.listeners` entry `usage`: the
+warn-at mark on `after-tool`, with its floor (`moxi_usage.mark`), which forgets its
+sessions at `gone`, and the two limits readings below.
 
 Each is a plain function of one event object, the `SessionEvent` turns hands its listener
 rows. turns ignores what they return, and each one fails open: a problem is logged and
@@ -22,6 +26,14 @@ problem to log.
 from __future__ import annotations
 
 from typing import Any
+
+#: usage's rows for turns: (events, function[, options]).
+LISTENERS = (
+    (("after-tool",), "moxi_usage.mark:on_tool", {"floor": "moxi_usage.mark:floor"}),
+    (("gone",), "moxi_usage.mark:gone"),
+    (("usage",), "moxi_usage.listeners:usage"),
+    (("codex_limits",), "moxi_usage.listeners:codex_limits"),
+)
 
 #: The logger a listener's problem goes to.
 LOGGER = "moxi.usage"
@@ -78,4 +90,4 @@ def _seconds(value: Any) -> float | None:
     return float(value)
 
 
-__all__ = ["usage", "codex_limits"]
+__all__ = ["LISTENERS", "usage", "codex_limits"]

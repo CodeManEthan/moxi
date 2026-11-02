@@ -9,7 +9,7 @@ authors = [{ name = "CodeManEthan", email = "codemanethan@gmail.com" }]
 dependencies = ["moxi>=0.1,<0.2", "moxi-sessions>=0.2,<0.3"]
 
 [project.optional-dependencies]
-turns = ["moxi-turns>=0.1,<0.2"]
+turns = ["moxi-turns>=0.2,<0.3"]
 projects = ["moxi-projects>=0.1,<0.2"]
 
 [project.urls]
@@ -24,6 +24,10 @@ moxi-usage-measure = "moxi_usage.measure:main"
 # The module's one announcement, read by moxi.modules.
 [project.entry-points."moxi.modules"]
 usage = "moxi_usage.module"
+
+# usage's rows for turns' session events: the warn-at mark and the limits readings.
+[project.entry-points."moxi.turns.listeners"]
+usage = "moxi_usage.listeners"
 
 [dependency-groups]
 dev = ["pytest", "moxi-dev"]

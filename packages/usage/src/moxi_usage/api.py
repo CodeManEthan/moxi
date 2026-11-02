@@ -39,6 +39,14 @@ The restart point (`moxi_usage.measure`, `moxi_usage.thresholds`):
 * `threshold(model, mark, population="main")`: one mark's `Threshold`; `stamp()`, which
   changes whenever the measure or the model table does.
 
+The warn-at mark (`moxi_usage.marks`; the listener is `moxi_usage.mark`):
+
+* `mark(session_id, *, harness=None)`: the marks in force for the session's notice (a
+  line to the model) and its crossing (a call of each `moxi.usage.crossings` handler
+  with a `Crossing`), each mark's threshold for the session's model, its current
+  context and each purpose's state, `armed`, `fired` with when, or `off`, as a
+  `MarkState`; its agents' fired notices in `agents`.
+
 Reports (`moxi_usage.reports`):
 
 * `report(kind, *, since=None, until=None, harness=None, project=None, model=None,
@@ -72,6 +80,8 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("context", "Context"), "context"),
     **dict.fromkeys(("restart_point", "RestartPoint"), "measure"),
     **dict.fromkeys(("threshold", "Threshold", "stamp", "MARKS"), "thresholds"),
+    **dict.fromkeys(("mark", "MarkState", "PurposeState"), "marks"),
+    "Crossing": "mark",
 }
 
 __all__ = [*_HOMES, "UNKNOWN"]

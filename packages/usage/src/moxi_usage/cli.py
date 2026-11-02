@@ -5,6 +5,7 @@
     moxi usage limits [--harness H] [--no-pull] [--json]
     moxi usage context SESSION [--harness H] [--agent ID] [--json]
     moxi usage restart-point [--measure] [--json]
+    moxi usage marks [SESSION] [--harness H] [--json]
     moxi usage daily|monthly|sessions|models|projects [--since DATE] [--until DATE]
         [--harness H] [--project P] [--model M] [--utc] [--no-pass] [--json]
     moxi usage index [--rebuild] [--force] [--no-wait] [--check] [--json]
@@ -28,6 +29,11 @@ SESSION.
 warn-at mark's threshold in tokens, or why a mark is unavailable; it exits 1 when there
 is no measure to read. `--measure` runs the index's pass and the measure first and writes
 it (`moxi_usage.measure`).
+
+`marks SESSION` prints the session's warn-at marks: its context, the notice's and the
+crossing's mark with its threshold and state (armed, or fired and when), and its agents'
+fired notices; it exits 1 when the session's context cannot be read. `marks` alone prints
+each session's fired marks kept on disk.
 
 The report verbs run the index's pass first, unless `--no-pass`, and print tokens and cost
 from the index (`moxi_usage.reports`). Days are local time, or UTC with `--utc`; `--since`
@@ -85,6 +91,7 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi usage") -> int:
     limits.add_argument("--json", action="store_true", help="print one JSON object")
     _context_parser(verbs)
     _restart_parser(verbs)
+    _marks_parser(verbs)
     _report_verbs(verbs)
     _index_parser(verbs)
     parsed = parser.parse_args(args)
@@ -95,6 +102,8 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi usage") -> int:
             return _context(parsed, prog)
         if parsed.verb == "restart-point":
             return _restart_point(parsed, prog)
+        if parsed.verb == "marks":
+            return _marks_verb(parsed)
         if parsed.verb in REPORT_VERBS:
             return _report(parsed, prog)
         if parsed.verb == "index":
@@ -403,6 +412,49 @@ def _context(args: argparse.Namespace, prog: str) -> int:
         if found.known and found.reason:
             print(f"note: {found.reason}")
     return codes.OK if found.known else codes.ERROR
+
+
+# --- marks ------------------------------------------------------------------------------
+
+def _marks_parser(verbs: Any) -> None:
+    marks = verbs.add_parser(
+        "marks", help="print a session's warn-at marks, or every session's fired marks",
+        description="Print a session's warn-at marks: its context, each mark in force "
+                    "with its threshold and state, and its agents' fired notices. With "
+                    "no SESSION, print the fired marks kept on disk.")
+    marks.add_argument("session", nargs="?", metavar="SESSION",
+                       help="the session id (a Codex thread id, an OpenCode session id)")
+    marks.add_argument("--harness", choices=("claude", "codex", "opencode"),
+                       help="the harness that holds the session; else each is asked")
+    marks.add_argument("--json", action="store_true", help="print one JSON object")
+
+
+def _marks_verb(args: argparse.Namespace) -> int:
+    from . import marks
+
+    if args.session:
+        found = marks.mark(args.session, harness=args.harness)
+        if args.json:
+            print(json.dumps(found.as_dict(), indent=2))
+        else:
+            for line in found.lines():
+                print(line)
+        return codes.OK if found.tokens is not marks.UNKNOWN else codes.ERROR
+    files = marks.fired()
+    if args.json:
+        print(json.dumps({"fired": [f.as_dict() for f in files]}, indent=2))
+        return codes.OK
+    if not files:
+        print("no fired marks kept")
+    for item in files:
+        for reader, purposes in sorted(item.readers.items()):
+            for name, rec in sorted(purposes.items()):
+                at = rec.get("fired_at") if isinstance(rec, dict) else None
+                when = _local(at) if isinstance(at, (int, float)) else "?"
+                who = "" if reader == "main" else f" agent {reader}"
+                print(f"{item.harness} {item.session_id}{who}: {name} {rec.get('mark')} "
+                      f"fired {when}")
+    return codes.OK
 
 
 # --- the restart point ------------------------------------------------------------------

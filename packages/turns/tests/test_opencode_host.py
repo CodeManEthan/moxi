@@ -822,10 +822,13 @@ def test_a_subagents_tool_part_carries_its_session_and_a_strangers_is_not_told(
 
 
 def test_with_no_after_tool_row_a_finished_part_asks_nothing(host, monkeypatch):
+    from moxi_turns import listeners
     from moxi_turns.endpoint import Endpoint
 
     asked = []
     monkeypatch.setattr(Endpoint, "after_tool", lambda self, *a, **kw: asked.append(a))
+    empty = listeners.load([], order=(), limit=0)   # whatever the workspace installs
+    monkeypatch.setattr(listeners, "load", lambda *a, **kw: empty)
     s, h, world = host()
     world.fake.tool_part(h.session_id, "call_1", "oc_echo", "completed")
     time.sleep(0.3)

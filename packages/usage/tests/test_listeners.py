@@ -108,3 +108,18 @@ def test_importing_the_listeners_loads_neither_sessions_nor_sqlite_nor_logging(f
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                          env=dict(fence.env), check=True).stdout
     assert json.loads(out.replace("'", '"')) == []
+
+
+
+def test_usages_rows_for_turns_name_each_event_and_the_marks_floor():
+    import importlib
+
+    assert listeners.LISTENERS == (
+        (("after-tool",), "moxi_usage.mark:on_tool", {"floor": "moxi_usage.mark:floor"}),
+        (("gone",), "moxi_usage.mark:gone"),
+        (("usage",), "moxi_usage.listeners:usage"),
+        (("codex_limits",), "moxi_usage.listeners:codex_limits"))
+    for row in listeners.LISTENERS:
+        for target in (row[1], *(row[2].values() if len(row) > 2 else ())):
+            name, _, attr = target.partition(":")
+            assert callable(getattr(importlib.import_module(name), attr))
