@@ -33,12 +33,34 @@ moxi doctor notes
 | `moxi notes dir [PATH] [--json]` | print the notes directory for PATH (default: here); exit 1 when it has none |
 | `moxi notes handoffs dir [PATH]` | print that notes directory's `handoffs/` folder |
 | `moxi notes snapshot` | run one snapshot pass now and print repo's line |
+| `moxi notes scan [--json]` | what a snapshot would leave out now, with rules and lines; changes nothing; exit 1 when any file would be left out |
 | `moxi notes inbox list [--json]`, `add SLUG`, `rename SLUG NEW` | inbox one-offs: folders of notes for work with no project |
 | `moxi notes setup` | ask setup's questions again and write what they change |
 
 `MOXI_NOTES_DIR`, set by the launcher for one launch, overrides the computed folder for
-that session and for `moxi notes` run in it. Exit codes: 0 done, 1 an error or no notes
-directory, 2 bad arguments or a bad setting, 3 refused.
+that session and for `moxi notes` run in it. Exit codes: 0 done, 1 an error, no notes
+directory, or a scan that finds a file a snapshot would leave out, 2 bad arguments or a
+bad setting, 3 refused.
+
+`moxi notes scan` judges the notes folder's files the way the setup preview does, which
+is the way a snapshot does. Under `leave-out` it lists every file with a finding. Under
+`redact` it asks the clean filter about each one: a file the filter redacts is listed as
+committed with its hits blanked, and one it can't redact is listed as left out. A file
+already committed stays as committed until it changes. `--json` prints one object, the
+same shape whatever the exit code, and other tools read it, so the shape stays stable:
+
+```text
+{"root": str, "action": "leave-out" | "redact", "judged": int,
+ "left_out": [{"path": str, "reason": str,
+               "findings": [{"rule": str, "line": int | null, "note": str}]}],
+ "redacted": [{"path": str, "findings": [...]}],
+ "authors": int, "allowlist_problem": str | null, "error": str | null}
+```
+
+Lists are sorted by path. `rule` is `<set>/<rule id>`. `line` is 1-based, or null for a
+whole-file finding such as `notes/too-large`. No finding carries the text that matched.
+`authors` counts the commit identities the push gate would refuse for a private name.
+`error` says why nothing could be judged, and the lists are then empty.
 
 ## What setup costs, and what it asks
 

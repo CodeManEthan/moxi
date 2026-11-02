@@ -3,6 +3,7 @@
     moxi notes dir [PATH] [--json]
     moxi notes handoffs dir [PATH]
     moxi notes snapshot
+    moxi notes scan [--json]
     moxi notes setup
     moxi notes inbox list [--json]
     moxi notes inbox add SLUG
@@ -10,9 +11,11 @@
 
 `dir` prints the notes directory for PATH (default: the working directory) and exits 1
 when there is none; a warning goes to stderr. `snapshot` runs one pass of notes'
-snapshot spec now and prints repo's line. `setup` asks setup's questions again and
-writes what they change, as `moxi install notes` does. `MOXI_NOTES_DIR` in this command's own
-environment is passed as the override, as the launcher sets it for a launch. A refusal
+snapshot spec now and prints repo's line. `scan` prints what a snapshot would leave out
+now and changes nothing; it exits 1 when that is any file, and its `--json` shape is
+`moxi_notes.scan.JSON_SHAPE`, which its help prints. `setup` asks setup's questions
+again and writes what they change, as `moxi install notes` does. `MOXI_NOTES_DIR` in this
+command's own environment is passed as the override, as the launcher sets it for a launch. A refusal
 prints its reason and the fix to stderr, and exits 1 (an error), 2 (usage or a bad
 setting) or 3 (refused).
 """
@@ -40,6 +43,8 @@ _PARSERS: dict[str, argparse.ArgumentParser] = {}
 def _parser(prog: str) -> argparse.ArgumentParser:
     if prog in _PARSERS:
         return _PARSERS[prog]
+    from .scan import JSON_SHAPE
+
     parser = argparse.ArgumentParser(
         prog=prog, description="Where each session keeps its notes. With the projects "
                                "module (moxi install projects), a project's own notes "
@@ -68,6 +73,16 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                      description="Run one pass of notes' snapshot spec through repo's "
                                  "committer now and print its line. It takes no settle "
                                  "duty: an unpushed commit waits for the next pass.")
+
+    p = verbs.add_parser(
+        "scan", help="what a snapshot would leave out now, with rules and lines",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Judge the notes root's files as a snapshot would and print each one\n"
+                    "it would leave out, with its rules and lines, and each one it would\n"
+                    "commit redacted. Changes nothing. Exits 0 when no file would be left\n"
+                    "out, 1 when one would or nothing could be judged, 2 on a bad setting.",
+        epilog=JSON_SHAPE)
+    p.add_argument("--json", action="store_true", help="print JSON (shape below)")
 
     verbs.add_parser("setup", help="ask setup's questions again and write the answers",
                      description="Ask where the notes are, what a commit does with a "
@@ -151,14 +166,28 @@ def _snapshot(args, out) -> int:
     return result.exit_code
 
 
+def _scan(args, out) -> int:
+    from .scan import print_scan, scan
+
+    found = scan()
+    if args.json:
+        print(json.dumps(found.as_dict()), file=out)
+    elif not found.error:
+        print_scan(found, out)
+    if found.error:
+        print(f"notes: nothing could be judged: {found.error}", file=sys.stderr)
+        return codes.ERROR
+    return codes.ERROR if found.left_out else codes.OK
+
+
 def _setup(args, out) -> int:
     from .setup import setup
 
     return setup(out=out)
 
 
-_VERBS = {"dir": _dir, "handoffs": _handoffs, "snapshot": _snapshot, "setup": _setup,
-          "inbox": _inbox}
+_VERBS = {"dir": _dir, "handoffs": _handoffs, "snapshot": _snapshot, "scan": _scan,
+          "setup": _setup, "inbox": _inbox}
 
 
 def main(argv: Sequence[str] | None = None, *, prog: str = "moxi notes") -> int:
