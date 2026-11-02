@@ -169,6 +169,11 @@ def test_the_page_declares_its_reads_and_acts_none_the_gateways():
     assert not any(r["gateway"] or r["stream"] for r in routes.values())
 
 
+def test_the_export_carries_the_measured_budget():
+    exported = LB.export(page.PAGE)
+    assert exported["budget"] == {"rss": "80M", "fds": 40} == page.BUDGET
+
+
 def _marks(shape: dict, at: str = "") -> dict[str, str]:
     """Each marked value of an exported shape, by its dotted place (`[]` a list's item)."""
     found = {at: shape["mark"]} if shape.get("mark") else {}

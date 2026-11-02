@@ -191,8 +191,16 @@ def _act(path: str, handler: str, body: dict) -> lb.Route:
     return lb.Route(path, "act", _target(handler), body=body, returns={})
 
 
+#: What the page server may hold before ui's doctor warns. Measured in a test shell on
+#: Linux (Python 3.12), with the page loaded, then reloaded five times, then left idle:
+#: RSS 37-40 MB with 2 to 40 skills and 45 MB with 200, and 8 open fds idle, 12 to 20
+#: just after the page's reads. A job is a process of its own and isn't counted here.
+#: The budget is about twice the most that was seen.
+BUDGET = {"rss": "80M", "fds": 40}
+
 PAGE = lb.Page(
     assets="web",
+    budget=BUDGET,
     routes=(
         lb.Route("/api/status", "read", _target("status"), returns=STATUS),
         lb.Route("/api/list", "read", _target("listing"), returns=LIST),
@@ -218,5 +226,5 @@ PAGE = lb.Page(
     ),
 )
 
-__all__ = ["COUNTS", "DRIFT", "GLOBAL", "GLOBAL_FILE", "ITEM", "JOB", "JOB_ROUTE", "LIST",
-           "OUTCOME", "PAGE", "PROJECT", "PROJECTS", "ROW", "SECTION", "STATUS"]
+__all__ = ["BUDGET", "COUNTS", "DRIFT", "GLOBAL", "GLOBAL_FILE", "ITEM", "JOB", "JOB_ROUTE",
+           "LIST", "OUTCOME", "PAGE", "PROJECT", "PROJECTS", "ROW", "SECTION", "STATUS"]
