@@ -118,8 +118,7 @@ def endpoint_row(answer: Mapping, configured=None):
         return Row(MODULE, name, "fail",
                    f"{detail or 'another process listens on the port'}; every live tool "
                    "token was revoked, so sessions lose comms' tools until relaunched",
-                   "free the port or moxi config set comms mcp.port N, then: "
-                   f"{RESTART}, then relaunch the sessions")
+                   port_taken_fix(answer.get("unit")))
     if why == "supervised":
         return Row(MODULE, name, "fail",
                    (detail or "comms' socket unit holds the port")
@@ -131,6 +130,21 @@ def endpoint_row(answer: Mapping, configured=None):
                    RESTART)
     first = detail.splitlines()[0] if detail else "the endpoint didn't start"
     return Row(MODULE, name, "fail", first, RESTART)
+
+
+def port_taken_fix(unit: str | None) -> str:
+    """The `port-taken` row's fix, by the state comms' socket unit read after the failed
+    bind. `moxi config set` leaves an installed socket unit on its old port, so a new
+    port needs `moxi install comms` beside it; with no unit written, it needs none."""
+    if unit in ("inactive", "failed"):
+        move = ("free the port, or moxi config set comms mcp.port N and moxi install "
+                "comms, which moves the socket unit to that port")
+    elif unit in ("missing", "off"):
+        move = "free the port or moxi config set comms mcp.port N"
+    else:
+        move = ("free the port, or moxi config set comms mcp.port N (and moxi install "
+                "comms, if comms' socket unit is installed)")
+    return f"{move}; then: {RESTART}, then relaunch the sessions"
 
 
 def port_row(answer: Mapping, configured):
@@ -225,4 +239,5 @@ def _port_of(url) -> int | None:
 
 
 __all__ = ["ASK_WAIT", "MODULE", "RELAUNCH", "REVOKED_WINDOW", "SUPERVISED", "doctor_rows",
-           "endpoint_row", "health", "mcp_rows", "port_row", "revoked_rows", "tokens_row"]
+           "endpoint_row", "health", "mcp_rows", "port_row", "port_taken_fix", "revoked_rows",
+           "tokens_row"]

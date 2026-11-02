@@ -427,11 +427,13 @@ class Daemon:
         #: (`disabled`, `supervised`, `port-taken`, `bind-failed`, `failed`): what
         #: `mcp_endpoint` answers. `mcp_held` says whether the supervisor holds the port
         #: (an inherited socket), and `mcp_detail` is the plain line behind either, for
-        #: the doctor.
+        #: the doctor. `mcp_unit` is the state comms' socket unit read after a failed
+        #: bind, None when none was read.
         self.mcp_url: str | None = None
         self.mcp_why: str | None = None
         self.mcp_held = False
         self.mcp_detail: str | None = None
+        self.mcp_unit: str | None = None
         #: What takes the endpoint's socket, given the port: `mcp.listen.take` when
         #: None. A test hands in one with its own environment and launchd.
         self.mcp_listen = None
@@ -723,7 +725,7 @@ class Daemon:
         daemon runs outside its unit), a listener that may be that unit, and a bind that
         fails with nothing listening revoke none."""
         self.mcp_served, self.mcp_url, self.mcp_endpoint = False, None, None
-        self.mcp_held, self.mcp_detail = False, None
+        self.mcp_held, self.mcp_detail, self.mcp_unit = False, None, None
         if not self.serve_tools:
             self.mcp_why = "disabled"
             return
@@ -744,7 +746,7 @@ class Daemon:
         from .mcp import listen
 
         taken = (self.mcp_listen or listen.take)(port)
-        self.mcp_detail = taken.detail
+        self.mcp_detail, self.mcp_unit = taken.detail, taken.unit
         if taken.sock is None:
             self.mcp_why = taken.why
             if taken.why == "port-taken":
@@ -822,13 +824,15 @@ class Daemon:
     def _mcp_endpoint_query(self, frame: dict) -> dict:
         """`mcp_endpoint`: whether this daemon serves comms' tools, at which URL, and
         why not when it doesn't; `held`, whether the supervisor holds the port it serves
-        on, `detail`, the plain line behind the answer, and `revoked`, the live bindings
-        whose session's token was revoked, for the doctor. Settled before any method is
-        answered."""
+        on, `detail`, the plain line behind the answer, `unit`, the state comms' socket
+        unit read after a failed bind (None when none was read), and `revoked`, the live
+        bindings whose session's token was revoked, for the doctor. Settled before any
+        method is answered."""
         served = bool(self.mcp_served)
         return {"served": served, "url": self.mcp_url if served else None,
                 "why": None if served else (self.mcp_why or "disabled"),
                 "held": served and self.mcp_held, "detail": self.mcp_detail,
+                "unit": None if served else self.mcp_unit,
                 "revoked": self._revoked_bindings()}
 
     def _revoked_bindings(self) -> list[dict]:

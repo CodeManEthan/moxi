@@ -258,6 +258,9 @@ def test_an_active_socket_unit_is_supervised_and_nothing_connects(unit_read, mon
     assert got.sock is None and got.why == "supervised" and got.holder_uid is None
     assert probed == [] and clock.slept == [] and unit_read.asked == 1
     assert f"127.0.0.1:{port}" in got.detail and "moxi install comms" in got.detail
+    # The port may have moved by an ordinary `moxi config set`, not only by hand.
+    assert "changed since the unit was written" in got.detail
+    assert "config set doesn't move the unit" in got.detail and got.unit == "active"
 
 
 def test_a_listener_with_the_unit_unread_and_this_users_uid_is_bind_failed(unit_read):
@@ -541,11 +544,12 @@ def test_port_taken_logs_one_line_naming_the_port_and_the_doctor_fails_it(
     lines = [r.getMessage() for r in caplog.records if r.name == "comms.daemon"
              and r.levelno >= logging.ERROR]
     assert len(lines) == 1 and f"127.0.0.1:{port}" in lines[0] and "2 live" in lines[0]
+    assert answer["unit"] == "missing"
     row = checks.endpoint_row(answer)
     assert row.state == "fail" and "revoked" in row.detail
     if LINUX:
         assert f"uid {os.getuid()}" in row.detail
-    assert "mcp.port" in row.fix
+    assert "mcp.port" in row.fix and "moxi install comms" not in row.fix
 
 
 def test_bind_failed_revokes_nothing_and_the_doctor_fails_it(serving, sessions):
@@ -580,8 +584,8 @@ def test_a_daemon_beside_its_active_socket_unit_is_supervised_and_revokes_nothin
         # The unit's service was not started: nothing connected to its socket.
         with pytest.raises(BlockingIOError):
             unit.accept()
-    assert {k: answer[k] for k in ("served", "url", "why")} == {
-        "served": False, "url": None, "why": "supervised"}
+    assert {k: answer[k] for k in ("served", "url", "why", "unit")} == {
+        "served": False, "url": None, "why": "supervised", "unit": "active"}
     assert [r["revoked_at"] for r in rows()] == [None]
     assert len(daemon.mcp_tokens.active()) == 1
     row = checks.endpoint_row(answer)
@@ -713,6 +717,39 @@ def test_the_endpoint_rows_follow_the_daemons_answer():
     moved = checks.port_row({"served": True, "url": url, "held": False},
                             type("Mcp", (), {"enabled": True, "port": 8451})())
     assert moved.state == "warn" and moved.fix == checks.RESTART
+
+
+@pytest.mark.parametrize(("unit", "install"), [
+    ("inactive", "names"), ("failed", "names"), ("missing", "omits"), ("off", "omits"),
+    ("unknown", "if"), ("nobackend", "if"), (None, "if")])
+def test_the_port_taken_fix_names_moxi_install_comms_when_a_socket_unit_is_installed(
+        unit, install):
+    # `moxi config set comms mcp.port N` leaves an installed socket unit on its old port.
+    answer = {"served": False, "why": "port-taken", "unit": unit,
+              "detail": "another process (uid 1) listens on 127.0.0.1:8450"}
+    if unit is None:
+        del answer["unit"]                      # an older daemon's answer
+    fix = checks.endpoint_row(answer).fix
+    assert fix.startswith("free the port") and "moxi config set comms mcp.port N" in fix
+    assert fix.endswith(f"then: {checks.RESTART}, then relaunch the sessions")
+    if install == "names":
+        assert ("mcp.port N and moxi install comms, which moves the socket unit to that "
+                "port") in fix
+    elif install == "omits":
+        assert "moxi install" not in fix
+    else:
+        assert "moxi install comms, if comms' socket unit is installed" in fix
+
+
+def test_take_carries_the_unit_read_and_none_when_no_read_was_asked(unit_read):
+    unit_read.state = "inactive"
+    with listener() as holder:
+        assert listen.take(holder.getsockname()[1], environ={}).unit == "inactive"
+    got = listen.take(0, environ={})
+    try:
+        assert got.unit is None and unit_read.asked == 1
+    finally:
+        got.sock.close()
 
 
 def test_the_tokens_row_counts_live_sessions_and_the_days_revocations(serving, sessions,

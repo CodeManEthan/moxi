@@ -495,11 +495,13 @@ claim, the tools' port held by another process, or comms' uninstall. A release, 
 boot fence, only clear the row's binding.
 
 `mcp_endpoint` (no params) answers whether the daemon serves comms' tools: `{served,
-url, why, held, detail, revoked}`, with `url` the address it serves them on
+url, why, held, detail, unit, revoked}`, with `url` the address it serves them on
 (`http://127.0.0.1:<port>/mcp`), `why` the reason when it doesn't (`disabled`,
 `supervised`, `port-taken`, `bind-failed`, `failed`), `held` whether the supervisor holds
 the port it serves on (a socket unit's, which the daemon inherited), and `detail` the
-plain line behind the answer, for the doctor; `revoked` lists `{identity, why}` for each
+plain line behind the answer, for the doctor; `unit` is the state comms' socket unit read
+after a failed bind (the core's socket row: `active`, `inactive`, `missing` and the
+rest), null when it serves or no read was asked for; `revoked` lists `{identity, why}` for each
 live binding whose claim holds no active tool token and whose newest one was revoked, so
 the session runs on without comms' tools until it is relaunched. The daemon serves on the supervisor's socket
 when it was handed one, on whatever port that is, else binds `[mcp] port` itself. When the

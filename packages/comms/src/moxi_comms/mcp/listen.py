@@ -24,11 +24,13 @@ daemon runs outside it, a hand run beside a stopped service: the answer is `supe
 and nothing connects (a connect would start the service, which then refuses on the lock).
 
 That read is the socket row's state alone: the core's unit state names no port, so a port
-the unit holds is not compared with `[mcp] port`. When `[mcp] port` was edited by hand after
-the unit was written, the unit still reads `active` and the answer is `supervised`, though
-another process may hold the new port. That errs the safe way (nothing is revoked) with a
-wrong message, and the detail says so. `moxi config set` writes the unit again, so only a
-hand edit drifts.
+the unit holds is not compared with `[mcp] port`. When `[mcp] port` changed since the unit
+was written, the unit still reads `active` and the answer is `supervised`, though another
+process may hold the new port. That errs the safe way (nothing is revoked) with a wrong
+message, and the detail says so. An ordinary `moxi config set comms mcp.port N` gets there:
+the core reads the port into the socket unit when it writes the units, and after a `set` it
+writes again only the units of a daemon whose switch the key is, so the unit keeps the old
+port until `moxi install comms`.
 
 Otherwise `take` connects to `127.0.0.1:<port>`. A listener that answers is not this
 daemon's (it holds its socket's lock, and its predecessor closed its listener before it
@@ -116,13 +118,15 @@ class Taken:
     listener answers that may be comms' unit) or `failed` (an inherited socket the
     endpoint can't use). `inherited` says whether the supervisor holds the port.
     `detail` is a plain line for the log and the doctor; `holder_uid` the uid of the
-    port's other listener, where the kernel's table names one."""
+    port's other listener, where the kernel's table names one; `unit` the state comms'
+    socket unit read after a failed bind, None when no read was asked for."""
 
     sock: socket.socket | None
     why: str | None
     detail: str
     inherited: bool = False
     holder_uid: int | None = None
+    unit: str | None = None
 
 
 def take(port: int, *, environ: MutableMapping[str, str] | None = None,
@@ -156,23 +160,23 @@ def take(port: int, *, environ: MutableMapping[str, str] | None = None,
         if unit is None:
             unit = (unit_state or socket_unit_state)()
             if unit == "active":
-                return Taken(None, "supervised", _supervised(port))
+                return Taken(None, "supervised", _supervised(port), unit=unit)
         if answers(port):
             uid = holder_uid(port)
             whose = f"uid {uid}" if uid is not None else "a process whose uid isn't known"
             if unit in NOT_HOLDING or _another_user(uid):
                 return Taken(None, "port-taken",
                              f"another process ({whose}) listens on {ADDRESS}:{port}",
-                             holder_uid=uid)
+                             holder_uid=uid, unit=unit)
             return Taken(None, "bind-failed",
                          f"a listener ({whose}) answers on {ADDRESS}:{port}; whether it "
                          "is comms' own socket unit couldn't be read",
-                         holder_uid=uid)
+                         holder_uid=uid, unit=unit)
         left = deadline - clock()
         if left <= 0:
             return Taken(None, "bind-failed",
                          f"{ADDRESS}:{port} can't be bound and nothing listens on it: "
-                         f"{error.strerror or error}")
+                         f"{error.strerror or error}", unit=unit)
         sleep(min(retry, left))
 
 
@@ -209,8 +213,9 @@ def socket_unit_state(wait: float = UNIT_READ_WAIT, *, status=None) -> str:
 
 def _supervised(port: int) -> str:
     return (f"comms' socket unit reads active, so it is taken to hold {ADDRESS}:{port}, "
-            "and this daemon runs outside it (the unit's port isn't read: if [mcp] port "
-            "was edited by hand since the unit was written, run moxi install comms)")
+            "and this daemon runs outside it (the unit's port isn't read, and moxi "
+            "config set doesn't move the unit: if [mcp] port changed since the unit was "
+            "written, run moxi install comms)")
 
 
 def _another_user(uid: int | None) -> bool:
