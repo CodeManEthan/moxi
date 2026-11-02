@@ -423,7 +423,8 @@ def test_listeners_hear_a_switch_once(setup, tailscale, yes, alpha):
     moxi.modules.reset()
     acts.add("alpha/gateway", ask=yes)
     add("alpha/gateway", A, yes)
-    from moxi_alpha import listen
+    import importlib
 
+    listen = importlib.import_module("moxi_alpha.listen")  # the site's fixture module
     assert listen.HEARD == [("alpha/gateway", None, "tailscale"),
                             ("alpha/gateway", "tailscale", "cloudflare")]
