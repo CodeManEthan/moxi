@@ -30,9 +30,8 @@ const STYLES = css`
            white-space: pre-wrap; word-break: break-all; }
   .lede { margin-bottom: var(--moxi-gap); padding-left: 8px; border-left: 3px solid var(--moxi-accent); color: var(--moxi-text-dim); }
   .dim { color: var(--moxi-text-dim); font-size: var(--moxi-font-size-sm); }
-  .warn { color: var(--moxi-warn); }
-  .fail, .problem-line { color: var(--moxi-error); }
-  .ok { color: var(--moxi-ok); }
+  p.warn, span.warn { color: var(--moxi-warn); }
+  p.fail { color: var(--moxi-error); }
   .problem { padding: 8px 12px; border-radius: var(--moxi-radius); background: var(--moxi-error-soft); color: var(--moxi-error); }
   .bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--moxi-gap); margin-bottom: var(--moxi-gap); }
   section { display: grid; gap: var(--moxi-gap); min-width: 0; margin-top: calc(var(--moxi-gap) * 2); padding: 12px;
