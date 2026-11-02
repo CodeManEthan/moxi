@@ -334,9 +334,23 @@ def _applied_failure(applied: Iterable) -> str | None:
 
 def _set_switch(value: bool) -> list:
     """Set the switch through `moxi.config.set`, which applies the unit. What it prints
-    goes into each `Applied`'s lines, not to this process's stdout."""
-    with contextlib.redirect_stdout(io.StringIO()):
-        return config.set(MODULE, SWITCH, value, by=MODULE)
+    goes into each `Applied`'s lines, not to this process's stdout. A config file the
+    core refuses to change (a hand edit its check refuses) is a `StepFailed` with
+    `file=True`: the switch was not touched."""
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            return config.set(MODULE, SWITCH, value, by=MODULE)
+    except config.ConfigError as exc:
+        raise StepFailed(f"tunnel can't set {SWITCH}: {exc.problem}",
+                         f"{exc.fix}, then {_REPAIR}", file=True) from None
+
+
+def _with_record(fn, value, rec: Record):
+    try:
+        return fn(value)
+    except StepFailed as exc:
+        exc.record = rec
+        raise
 
 
 def _apply_unit() -> list:
@@ -377,7 +391,7 @@ def _step_on(rec: Record, on_disk: OnDisk) -> Record:
             raise
     started = False
     if not switch_on():
-        applied = _set_switch(True)
+        applied = _with_record(_set_switch, True, rec)
         failed = _applied_failure(applied)
         if failed is None and not applied:
             failed = "switching it on applied no unit"
@@ -409,7 +423,7 @@ def _step_off(rec: Record, on_disk: OnDisk) -> Record:
     failed = None
     state = unit_state()
     if switch_on() or state in INSTALLED:
-        applied = _set_switch(False)
+        applied = _with_record(_set_switch, False, rec)
         failed = _applied_failure(applied)
         if failed is None and unit_state() in INSTALLED:
             failed = "the unit is still installed after the switch went off"

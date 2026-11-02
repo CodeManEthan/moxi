@@ -371,6 +371,17 @@ def test_a_rollback_whose_own_step_fails_on_the_file_says_so(setup, yes, monkeyp
     assert "unit" not in caught.value.reason
 
 
+def test_a_config_file_the_core_refuses_to_change_rolls_the_remove_back(setup, yes,
+                                                                         config_file):
+    add("alpha/gateway", A, yes)
+    config_file("tunnel", '[cloudflare]\nenabled = true\ntunnel_id = "not-a-uuid"\n')
+    with pytest.raises(ApplyError) as caught:
+        acts.remove("alpha/gateway", ask=yes)
+    assert "can't set cloudflare.enabled" in caught.value.reason
+    assert "alpha/gateway" in record.read().entries
+    assert events()[-1] == "rollback"
+
+
 # -- moved and repair ----------------------------------------------------------------------
 
 def test_a_moved_target_is_repaired_on_the_same_hostname(setup, yes, config_file):
