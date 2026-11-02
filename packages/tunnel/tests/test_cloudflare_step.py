@@ -296,14 +296,27 @@ def test_a_crash_inside_the_step_is_finished_by_repair_with_no_overwrite(
 def test_a_hand_edited_file_reads_changed_and_repair_overwrites_it_logged(setup, yes):
     add("alpha/gateway", A, yes)
     path = cloudflare.config_path()
-    path.write_text(path.read_text().replace("8461", "9999"))
+    path.write_text(path.read_text() + "# a note by hand\n")
     assert states() == {"alpha/gateway": "changed"}
     assert cloudflare.agreement() == ("fail", "cloudflared.yml was edited by hand")
     assert acts.repair(ask=yes).code == 0
     assert "overwrite" in events()
     line = [json.loads(x) for x in record.events_path().read_text().splitlines()
             if '"overwrite"' in x][0]
-    assert "9999" in line["replaced"]
+    assert "a note by hand" in line["replaced"]
+    assert states() == {"alpha/gateway": "ok"}
+    assert_agree(setup)
+
+
+@pytest.mark.parametrize("edit", [("8461", "9999"), ("a.example.com", "c.example.com")])
+def test_a_hand_edit_that_takes_out_an_entrys_rule_reads_missing(setup, yes, edit):
+    add("alpha/gateway", A, yes)
+    path = cloudflare.config_path()
+    path.write_text(path.read_text().replace(*edit))
+    assert states() == {"alpha/gateway": "missing"}
+    assert cloudflare.agreement() == ("fail", "cloudflared.yml was edited by hand")
+    assert acts.repair(ask=yes).code == 0
+    assert "overwrite" in events()
     assert states() == {"alpha/gateway": "ok"}
     assert_agree(setup)
 

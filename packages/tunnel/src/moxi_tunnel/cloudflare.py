@@ -592,14 +592,15 @@ class Cloudflare:
         return read_file().rules() if switch_on() else {}
 
     def live_state(self, entry: Entry) -> str | None:
-        """`changed` when the file was edited by hand; `missing` when its rule is absent or
-        not the entry's, or the switch is off; None when it matches."""
+        """`missing` when its rule is absent or not the entry's, or the switch is off,
+        whoever changed the file; else `changed` when the file was edited by hand; None
+        when it matches."""
         on_disk = read_file()
-        if on_disk.text is not None and on_disk.by_hand:
-            return "cloudflared.yml was edited by hand"
         want = f"http://127.0.0.1:{entry.target}"
         if on_disk.rules().get(normal_host(entry.host)) != want or not switch_on():
             return "missing"
+        if on_disk.text is not None and on_disk.by_hand:
+            return "cloudflared.yml was edited by hand"
         return None
 
 
