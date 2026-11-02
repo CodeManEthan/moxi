@@ -1,6 +1,7 @@
 """`moxi usage prices update`: a new snapshot layer from LiteLLM's current price file.
 
-Opt in: nothing else in usage reaches the network. `update` fetches the file from config
+Opt in: nothing else in usage fetches from the web (with turns, `limits` may ask Codex's
+app-server for a reading, which is turns' call, not a fetch). `update` fetches the file from config
 `prices.url`, runs the converter (`moxi_usage.convert`) with the shipped supplement,
 refuses a result with fewer than half the shipped table's rows, works out which models
 the change adds and reprices in the table in effect, which models LiteLLM no longer lists

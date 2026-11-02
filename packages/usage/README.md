@@ -251,16 +251,18 @@ file, but can update one only from what it still holds in its context.
 it resets, when it fills at the recent rate, and the age of the oldest reading on the line.
 `--no-pull` never asks Codex for a new reading.
 
-`prices` with a model prints its facts and where each came from; without one, it prints
-the layers in effect. `prices update` is the only thing in usage that reaches the network,
-and only when you run it: it fetches LiteLLM's file from `prices.url`, converts it, refuses
-a result with under half the shipped table's rows, prints which models were added or
-repriced, which models LiteLLM no longer lists (against the snapshot it replaces, or the
-shipped table when there is none; the table may still price them from a lower layer), any
-supplement row it left out because its model is gone from LiteLLM, and which of the models in your token index it reprices, prices for the first
-time or leaves unpriced, and writes the snapshot layer. `--dry-run` prints and writes nothing.
-`--revert` removes the snapshot layer, so the shipped table rules again. A fetch that fails
-exits 75.
+`prices` with a model prints its facts and where each came from; without one, it prints the
+layers in effect. `prices update` is the only thing in usage that fetches from the web, and
+only when you run it. (With turns installed, `limits` and the API's `limits()` may also ask
+Codex for a new limits reading through its app-server, which asks OpenAI; `--no-pull` stops
+that.) `prices update` fetches LiteLLM's file from `prices.url`, converts it, refuses a
+result with under half the shipped table's rows, prints which models were added or repriced,
+which models LiteLLM no longer lists (against the snapshot it replaces, or the shipped table
+when there is none; the table may still price them from a lower layer), any supplement row
+it left out because its model is gone from LiteLLM, and which of the models in your token
+index it reprices, prices for the first time or leaves unpriced, and writes the snapshot
+layer. `--dry-run` prints and writes nothing. `--revert` removes the snapshot layer, so the
+shipped table rules again. A fetch that fails exits 75.
 
 `index` runs a pass, prints what it did in one line, then the index's status: each lane's
 state, its files, the requests it holds and how many are copies counted once, the rollouts
