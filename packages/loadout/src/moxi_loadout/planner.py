@@ -588,16 +588,14 @@ def removal_row(plan: Plan, step) -> Row:
 
 
 def _removal_reason(record: dict) -> str:
-    """Why a placement is going: its module is gone or broken, else it is no longer wanted."""
+    """Why a placement is going: its module is gone, else it is no longer wanted. A module
+    that is installed but broken keeps its skills, so it is never the reason."""
     module, slash, _ = str(record.get("item") or "").partition("/")
     if slash and record.get("kind") == "skill":
         from moxi import modules
 
-        found = modules.load(module)
-        if found.state == "absent":
+        if modules.load(module).state == "absent":
             return f"{module} is not installed; install removes the placement"
-        if not found.ok:
-            return f"{module} is broken; install removes the placement"
     return "no longer wanted; install removes it"
 
 
