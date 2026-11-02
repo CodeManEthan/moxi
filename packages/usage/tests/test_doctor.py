@@ -1,5 +1,5 @@
 """usage's doctor rows: the model table's age and gaps, the token index, Codex's import
-marks and turns. Every root is in the test's tmp; `now` is an argument."""
+marks, the restart-point measure and turns. Every root is in the test's tmp; `now` is an argument."""
 
 import calendar
 import datetime as dt
@@ -66,7 +66,7 @@ def rollout(thread, **kw):
 def test_the_rows_come_in_order_and_each_is_usages():
     found = list(doctor.rows(now=NOW))
     assert [r.name for r in found] == ["models.snapshot", "models.unpriced", "index",
-                                       "codex.imports", "turns"]
+                                       "codex.imports", "restart_point", "turns"]
     assert {r.module for r in found} == {"usage"}
 
 
@@ -265,6 +265,59 @@ def test_rollouts_with_the_desktop_originator_alone_are_counted_and_named():
     assert "counted 2 rollouts whose only import mark is the desktop app's" in found.detail
 
 
+# --- restart_point -----------------------------------------------------------------------
+
+def write_measure(*, measured_at="2026-10-28T00:00:00+00:00", models=None):
+    from moxi_usage import thresholds
+
+    path = thresholds.params_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = {"claude-model-x": {"main": {"n": 20, "S": 1.0, "P": 1.0, "g": 1.0},
+                               "subagent": {"n": 20, "S": 1.0, "P": 1.0, "g": 1.0,
+                                            "fallback": "main"}}}
+    path.write_text(json.dumps({"schema": 1, "measured_at": measured_at, "w": 2.0,
+                                "models": rows if models is None else models}))
+    return path
+
+
+def test_restart_point_with_nothing_measured_or_seen_is_ok():
+    found = row("restart_point")
+    assert found.state == "ok" and "not measured yet" in found.detail
+
+
+def test_restart_point_with_a_model_seen_and_no_measure_warns_naming_it():
+    transcript(sessions.root("claude"))
+    run_pass()
+    found = row("restart_point")
+    assert found.state == "warn" and found.fix == "moxi usage restart-point --measure"
+    assert "has not been measured" in found.detail and "claude-model-x (main)" in found.detail
+
+
+def test_restart_point_with_a_row_for_every_model_seen_is_ok():
+    transcript(sessions.root("claude"))
+    run_pass()
+    write_measure()
+    found = row("restart_point")
+    assert found.state == "ok", found.detail
+    assert "2 days ago: 1 population row for 1 model" in found.detail
+
+
+def test_restart_point_warns_on_a_model_with_no_row_and_on_an_old_measure():
+    transcript(sessions.root("claude"))
+    run_pass()
+    write_measure(measured_at="2026-10-01T00:00:00+00:00", models={})
+    found = row("restart_point")
+    assert found.state == "warn"
+    assert "past 14 days" in found.detail
+    assert "no measured row, so no warn-at mark, for claude-model-x (main)" in found.detail
+
+
+def test_restart_point_warns_on_a_file_it_cannot_read():
+    write_measure().write_text("{")
+    found = row("restart_point")
+    assert found.state == "warn" and "is not JSON" in found.detail
+
+
 # --- turns -------------------------------------------------------------------------------
 
 def test_without_turns_the_row_is_off_and_says_what_needs_it(monkeypatch):
@@ -292,6 +345,7 @@ def test_the_announcement_loads_with_its_stores_doctor_and_stamps():
     assert set(found.session_env) == {"MOXI_USAGE_WARN_AT", "MOXI_USAGE_CROSSING_AT"}
     assert set(found.optional) == {"turns", "projects"}
     assert dict(found.budgets) == {"hook_ms": 2.0}
+    assert set(found.timers) == {"measure"}
     # each store's path is the one the code writes
     from moxi.paths import Layout
 
@@ -313,5 +367,5 @@ def test_the_cores_doctor_runs_usages_rows_and_its_stores(capsys):
     names = {r["name"]: r["state"] for r in out if r["module"] == "usage"}
     assert code == 0, out
     assert {"models.snapshot", "models.unpriced", "index", "codex.imports",
-            "turns"} <= set(names)
+            "restart_point", "turns"} <= set(names)
     assert names["store index"] == names["store readings"] == "ok"

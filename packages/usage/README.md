@@ -158,9 +158,36 @@ fast input price). Two marks keep a total honest:
   for a missing count (OpenAI bills cache writes as input, and Codex does not report
   them), the rule is named instead.
 
+## Context and the restart point
+
+`moxi usage context SESSION` prints how full a session's context is, from its newest
+request: `context 412,330 / 1,000,000 (41%)`. The tokens are the whole prompt; the window
+is the one the harness wrote on the request (Codex does), else the model table's, and when
+neither is known the line says `window unknown`. `--agent ID` reads one of the session's
+agents from its own file, `--harness` names the harness (else Claude Code, Codex and
+OpenCode are asked in turn). It reads through sessions alone, so it needs no turns.
+
+The restart point is where carrying on with a session costs more than restarting it. It
+is Wilson's economic order quantity: a restart costs one cache write of the settled
+context, and each call costs a cache read of a context that keeps growing. `moxi usage
+restart-point --measure` measures it from the token index (no transcript is read again):
+the last `restart_point.days` (21) of sessions with 5 requests or more, per model and per
+population (main sessions; subagents and workflow agents). Main sessions count only when
+the harness marked a person at the keyboard: Claude Code's `cli` entrypoint, Codex's `cli`
+source or an originator in `restart_point.interactive_originators`; set
+`restart_point.interactive_only = false` to take every main session. A population needs
+20 files for a row; a model's subagents with no row of their own use its main row, and say
+so. The result goes to `STATE/usage/restart-point.json`. `moxi usage restart-point` prints
+the rows and each warn-at mark (1x, 1.5x, 2x) in tokens. A mark the measure or the model
+table can't support (no row, no cache-read price) is shown as unavailable with the reason,
+never guessed. Turn on `restart_point.measure_weekly` to measure once a week on a timer
+(`moxi-usage-measure`, Mondays at 04:30).
+
 ## Commands
 
     moxi usage limits [--harness claude|codex] [--no-pull] [--json]
+    moxi usage context SESSION [--harness H] [--agent ID] [--json]
+    moxi usage restart-point [--measure] [--json]
     moxi usage prices [MODEL] [--provider P] [--json]
     moxi usage prices update [--dry-run] [--revert] [--json]
     moxi usage index [--rebuild] [--force] [--no-wait] [--check] [--json]
@@ -193,10 +220,10 @@ the keys that differ.
 
 usage keeps its files in Moxi's roots, each made by its first write and readable only by
 you: the token index `STATE/usage/index.db`, the limits readings `STATE/usage/readings.db`
-(kept 8 days) and the model snapshot `DATA/usage/models-snapshot.json`. `marks/`,
-`ceiling/` and `restart-point.json` under `STATE/usage` are declared for the context marks,
-the worker ceiling and the restart-point measure, which are still to come. `moxi paths
-usage` lists them all.
+(kept 8 days), the restart-point measure `STATE/usage/restart-point.json` and the model
+snapshot `DATA/usage/models-snapshot.json`. `marks/` and `ceiling/` under `STATE/usage`
+are declared for the context marks and the worker ceiling, which are still to come.
+`moxi paths usage` lists them all.
 
 `moxi doctor usage` checks each store and adds usage's own rows, none of which writes:
 
@@ -207,6 +234,9 @@ usage` lists them all.
   (each lane's reasons) or a last pass more than 7 days old.
 - `codex.imports`: a warning when the last pass couldn't read Codex's imports file, or
   counted rollouts whose only import mark is the desktop app's originator.
+- `restart_point`: a warning naming each model and population seen in the last 30 days
+  with no measured row (so no warn-at mark), or when the measure is over 14 days old; the
+  fix is `moxi usage restart-point --measure`.
 - `turns`: off when turns is not installed, since Claude limits need it.
 
 ## From Python
@@ -228,6 +258,11 @@ report = api.report("daily", since="2026-10-01", tz="UTC")
 for row in report.rows:
     row["day"], row["model"], row["tokens"], row["cost"]   # cost may be api.UNKNOWN
 report.unpriced_models, report.total["unknown_rows"]
+
+ctx = api.context(session_id)                  # api.context(sid, agent_id="a...")
+ctx.tokens, ctx.window, ctx.percent, ctx.text()
+point = api.restart_point()                    # rows per model and population, marks
+api.threshold("claude-opus-5-5", "1.5x", "main").tokens   # None when unavailable
 status = api.report("status", fresh=False)    # the index itself, one row per lane
 ```
 

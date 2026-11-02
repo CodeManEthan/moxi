@@ -15,6 +15,9 @@ at what usage's answers rest on:
   `warn` when the last pass could not read it, so a rollout imported from elsewhere may
   be counted twice, or when rollouts carrying only the desktop app's `originator` mark
   were counted, naming how many.
+* `restart_point`: `warn` naming each model and population the index saw in the last 30
+  days that the restart-point measure has no row for (so it has no warn-at mark), when
+  the measure is older than 14 days, or when its file cannot be read.
 * `turns`: `off` when turns is not installed, saying what needs it.
 
 Every check only reads: the index is opened as it is, and no pass runs.
@@ -44,10 +47,13 @@ INDEX_STALE_DAYS = 7
 REASONS_SHOWN = 3
 #: The most models `models.unpriced` names.
 MODELS_SHOWN = 12
+#: A restart-point measure older than this many days is stale.
+MEASURE_STALE_DAYS = 14
 
 _PRICES_UPDATE = "moxi usage prices update"
 _INDEX = "moxi usage index"
 _CONFIG = "moxi config usage"
+_MEASURE = "moxi usage restart-point --measure"
 _DAY = 86400.0
 
 
@@ -61,6 +67,7 @@ def rows(*, now: float | None = None,
         yield from model_rows(found, now=when, env=env)
         yield index_row(found, now=when)
         yield imports_row(found)
+        yield restart_point_row(found, now=when, env=env)
     finally:
         found.close()
     yield turns_row()
@@ -297,6 +304,86 @@ def imports_row(found: IndexOpen) -> Row:
                "by their turn ids or the imports file")
 
 
+# --- the restart point ------------------------------------------------------------------
+
+_SEEN_SQL = """
+SELECT DISTINCT f.kind, COALESCE(r.model, r.response_model) AS model
+FROM requests r JOIN files f ON f.id = r.file_id
+WHERE r.won = 1 AND r.synthetic = 0 AND r.ts >= ? AND f.excluded IS NULL
+"""
+
+
+def seen_populations(found: IndexOpen, *, now: float) -> list[tuple[str, str]]:
+    """Each `(base model, population)` the index saw in the last `SEEN_DAYS` days."""
+    import sqlite3
+
+    from . import thresholds
+
+    if found.conn is None:
+        return []
+    seen: set[tuple[str, str]] = set()
+    try:
+        for row in found.conn.execute(_SEEN_SQL, (now - SEEN_DAYS * _DAY,)):
+            model = thresholds.base_model(row["model"])
+            if model is not None:
+                seen.add((model, thresholds.population_of(row["kind"])))
+    except sqlite3.Error:
+        return []                        # the index row says the index cannot be read
+    return sorted(seen)
+
+
+def restart_point_row(found: IndexOpen, *, now: float,
+                      env: Mapping[str, str] | None = None) -> Row:
+    """`warn` naming the models seen in the last `SEEN_DAYS` days with no measured row,
+    and when the measure is older than `MEASURE_STALE_DAYS` days or cannot be read."""
+    from . import measure, thresholds
+
+    path = thresholds.params_path(env)
+    try:
+        doc = thresholds.load_params(path)
+    except thresholds.ParamsError as exc:
+        return Row(MODULE, "restart_point", "warn",
+                   f"{exc}; no warn-at mark is available until it is measured again",
+                   _MEASURE)
+    seen = seen_populations(found, now=now)
+    if doc is None:
+        if not seen:
+            return Row(MODULE, "restart_point", "ok",
+                       f"not measured yet, and the token index saw no model in the last "
+                       f"{_days(SEEN_DAYS)}")
+        return Row(MODULE, "restart_point", "warn",
+                   "the restart point has not been measured, so no warn-at mark is "
+                   f"available for {_named(seen)}", _MEASURE)
+    problems = []
+    when = measure.measured_epoch(doc)
+    if when is None:
+        problems.append("the measure carries no date")
+        said = "measured at an unknown time"
+    else:
+        days = int(max(now - when, 0) // _DAY)
+        said = f"measured {_utc(when)}, {_days(days)} ago"
+        if days > MEASURE_STALE_DAYS:
+            problems.append(f"{said}, past {MEASURE_STALE_DAYS} days")
+    models = doc.get("models") if isinstance(doc.get("models"), Mapping) else {}
+    missing = [(model, population) for model, population in seen
+               if not isinstance((models.get(model) or {}).get(population), Mapping)]
+    if missing:
+        problems.append(f"no measured row, so no warn-at mark, for {_named(missing)}")
+    if problems:
+        return Row(MODULE, "restart_point", "warn", "; ".join(problems), _MEASURE)
+    rows = sum(1 for populations in models.values() for row in populations.values()
+               if isinstance(row, Mapping) and "fallback" not in row)
+    return Row(MODULE, "restart_point", "ok",
+               f"{said}: {_n(rows, 'population row')} for {_n(len(models), 'model')}; "
+               f"every model seen in the last {_days(SEEN_DAYS)} has one")
+
+
+def _named(pairs: list[tuple[str, str]]) -> str:
+    shown = ", ".join(f"{model} ({population})" for model, population in pairs[:MODELS_SHOWN])
+    more = len(pairs) - MODELS_SHOWN
+    return shown + (f" and {more} more" if more > 0 else "")
+
+
 # --- turns ------------------------------------------------------------------------------
 
 def turns_row() -> Row:
@@ -344,4 +431,4 @@ def _utc(epoch: float) -> str:
 
 
 __all__ = ["rows", "model_rows", "snapshot_row", "unpriced_row", "index_row",
-           "imports_row", "turns_row", "open_index", "IndexOpen", "MODULE"]
+           "imports_row", "restart_point_row", "seen_populations", "turns_row", "open_index", "IndexOpen", "MODULE"]
