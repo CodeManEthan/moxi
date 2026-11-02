@@ -63,7 +63,7 @@ import json
 import os
 import time
 from collections.abc import Callable, Iterable, Mapping
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -757,11 +757,12 @@ def _read_in_one(run: _Pass, tasks: list) -> None:
 
     touched: set[int] = set()
     with moxi.store.transaction(run.conn):
-        for lane, entry, row, cursor in tasks:
-            if run.cancelled():
-                break
-            got = read_source(_task(lane, entry, cursor))
-            _write_read(run, lane, entry, row, cursor, got, touched)
+        with store.bulk_load(run.conn):
+            for lane, entry, row, cursor in tasks:
+                if run.cancelled():
+                    break
+                got = read_source(_task(lane, entry, cursor))
+                _write_read(run, lane, entry, row, cursor, got, touched)
         store.claim_all(run.conn)
 
 
@@ -781,13 +782,14 @@ def _read_pooled(run: _Pass, tasks: list, count: int) -> None:
             moxi.store.transaction(run.conn):
         futures = {pool.submit(read_source, _task(lane, entry, cursor)):
                    (lane, entry, row, cursor) for lane, entry, row, cursor in tasks}
-        for future in as_completed(futures):
-            lane, entry, row, cursor = futures[future]
-            _write_read(run, lane, entry, row, cursor, future.result(), touched)
-            if run.cancelled():
-                for pending in futures:
-                    pending.cancel()
-                break
+        with store.bulk_load(run.conn) if run.rebuild else nullcontext():
+            for future in as_completed(futures):
+                lane, entry, row, cursor = futures[future]
+                _write_read(run, lane, entry, row, cursor, future.result(), touched)
+                if run.cancelled():
+                    for pending in futures:
+                        pending.cancel()
+                    break
         if run.rebuild:
             store.claim_all(run.conn)
         else:

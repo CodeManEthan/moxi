@@ -30,7 +30,8 @@ one raises `StoreError`.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -615,6 +616,23 @@ def duplicates(conn: sqlite3.Connection, *, lanes: Iterable[str] | None = None,
     return [dict(zip(("lane", "path", "part", "session_id", "requests", "of_lane",
                       "of_path", "of_part"), row))
             for row in conn.execute(sql, args)]
+
+
+@contextmanager
+def bulk_load(conn: sqlite3.Connection) -> Iterator[None]:
+    """Drop the `requests` table's secondary indexes for a load inside the caller's
+    transaction, and make them again, from the same SQL, when it ends without an error.
+    A rebuild writes every row, and loading them with the indexes off and building each
+    index once is faster than keeping them up to date row by row. On an error the
+    caller's rollback brings the indexes back with everything else."""
+    _require_transaction(conn)
+    found = conn.execute("SELECT name, sql FROM sqlite_master WHERE type = 'index' "
+                         "AND tbl_name = 'requests' AND sql IS NOT NULL").fetchall()
+    for name, _sql in found:
+        conn.execute(f'DROP INDEX "{name}"')
+    yield
+    for _name, sql in found:
+        conn.execute(sql)
 
 
 def check(conn: sqlite3.Connection) -> list[int]:
