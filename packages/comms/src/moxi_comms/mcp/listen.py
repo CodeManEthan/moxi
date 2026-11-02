@@ -39,7 +39,11 @@ holding the port (`inactive`, `failed`, `missing`, `off`) or the kernel's table 
 another user's uid as its holder. A listener with neither shown may be comms' own unit, so
 the answer is `bind-failed` with a detail that says so. That covers `nobackend` as well as
 `unknown`: a process with no reach to the user manager (cron, `env -i`, a system service)
-reads `nobackend` though the manager may hold comms' socket. With no listener it binds
+reads `nobackend` though the manager may hold comms' socket. Finding out costs one connect:
+when comms' socket unit does hold the port, that connect starts the unit's service, which
+then refuses on this daemon's lock. Nothing is revoked, but the user manager logs a failed
+start and the answer reads `bind-failed`. Reading the kernel's listener table before
+connecting would avoid the start on Linux; it isn't done. With no listener it binds
 again every half second for at most five seconds, then answers `bind-failed`. The caller
 decides what each answer means for the tokens.
 
