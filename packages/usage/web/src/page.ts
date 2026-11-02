@@ -39,7 +39,7 @@ import type {
 import { BASE, flag, meterList, SERIES } from "./parts.ts";
 import {
   agents, agentTreemap, CLASSES, cellLabel, costText, dailyChart, filterKeys, flags,
-  fmtMoment, fmtTokens, HARNESSES, labelEvery, localDay, MARGIN, menuPaths, meters,
+  fmtMoment, fmtTokens, HARNESSES, heldLine, labelEvery, localDay, MARGIN, menuPaths, meters,
   NO_FILTERS, parseRoute, PRESETS, provenanceLine, reportState, seriesClass, sessionRoute,
   shouldPass, strip, tickText, UNKNOWN_MODEL, viewPath, VIEWS,
 } from "./views.ts";
@@ -271,7 +271,7 @@ export class UsagePage extends LitElement {
       <button type="button" class="primary" ?disabled=${view.running} @click=${() => { void this.#pass(); }}>Read new sessions</button>
       ${view.lanes.length || view.held || unpriced.length || view.note || this.#passNote ? html`<ul>
         ${view.lanes.map((lane) => html`<li data-lane=${lane.lane}>${lane.lane}: ${lane.state}${lane.reason ? html`, ${lane.reason}` : nothing}</li>`)}
-        ${view.held ? html`<li>${view.held} file${view.held === 1 ? "" : "s"} held back: <code>moxi usage status</code> says why</li>` : nothing}
+        ${view.held ? html`<li data-part="held">${heldLine(view)}</li>` : nothing}
         ${unpriced.length ? html`<li>No price for ${unpriced.join(", ")}: their tokens count, their cost doesn't</li>` : nothing}
         ${view.note ? html`<li>${view.note}${view.command ? html` <code>${view.command}</code>` : nothing}</li>` : nothing}
         ${this.#passNote ? html`<li class="problem" data-state="refused">${this.#passNote}</li>` : nothing}

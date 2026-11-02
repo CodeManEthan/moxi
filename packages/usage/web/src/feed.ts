@@ -124,6 +124,8 @@ export interface Lane {
   root: string | null;
   files: number;
   held: number;
+  /** Each reason files were held back for, with how many. */
+  held_reasons: { name: string; value: number }[];
   requests: number;
 }
 

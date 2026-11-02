@@ -547,6 +547,8 @@ export interface Strip {
   /** Lanes a pass didn't find online, with why. */
   lanes: { lane: string; state: string; reason: string | null }[];
   held: number;
+  /** Why files were held back, each reason with how many, the most first. */
+  heldReasons: { reason: string; count: number }[];
   note: string | null;
   /** The command to run when the page can't, or null. */
   command: string | null;
@@ -554,7 +556,8 @@ export interface Strip {
 
 /** The strip from `/api/status` and the last `index` event, at `now`. */
 export function strip(status: FeedState<Status>, event: IndexEvent | null, now: number): Strip {
-  const base = { lastPass: "", running: event?.running ?? false, lanes: [], held: 0, note: null, command: null };
+  const base = { lastPass: "", running: event?.running ?? false, lanes: [], held: 0, heldReasons: [], note: null,
+                 command: null };
   if (status.value === null) {
     if (status.failure !== null || status.refused !== null || status.gone) {
       return { ...base, state: "failed", note: status.refused ?? status.failure?.why ?? null };
@@ -575,9 +578,33 @@ export function strip(status: FeedState<Status>, event: IndexEvent | null, now: 
     lanes: lanes.filter((lane) => lane.state !== "online")
       .map((lane) => ({ lane: lane.lane, state: lane.state ?? "not read yet", reason: lane.reason })),
     held: total.held,
+    heldReasons: heldReasons(status.value),
     note: note && !/^no pass ran first/.test(note) ? note : null,
     command: /run `moxi usage index`/.test(index.note ?? "") ? INDEX_COMMAND : null,
   };
+}
+
+/** Why files were held back: each lane's reasons summed, or, when no lane gives any, the
+ * reasons of the held files `/api/status` names; the most files first. */
+export function heldReasons(status: Status): { reason: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const lane of status.lanes) {
+    for (const { name, value } of lane.held_reasons ?? []) counts.set(name, (counts.get(name) ?? 0) + value);
+  }
+  if (counts.size === 0) {
+    for (const row of status.total.held_rows) counts.set(row.reason, (counts.get(row.reason) ?? 0) + 1);
+  }
+  return [...counts].map(([reason, count]) => ({ reason, count }))
+    .sort((a, b) => b.count - a.count || (a.reason < b.reason ? -1 : a.reason > b.reason ? 1 : 0));
+}
+
+/** The strip's line about held files, or null when none are held. */
+export function heldLine(view: Strip): string | null {
+  if (view.held === 0) return null;
+  const files = `${view.held} file${view.held === 1 ? "" : "s"} held back`;
+  if (view.heldReasons.length === 0) return files;
+  if (view.heldReasons.length === 1 && view.heldReasons[0].count === view.held) return `${files}: ${view.heldReasons[0].reason}`;
+  return `${files}: ${view.heldReasons.map(({ reason, count }) => `${reason} (${count})`).join("; ")}`;
 }
 
 /** Whether the page starts a pass as it opens: there is an index, and its last pass is

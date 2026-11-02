@@ -13,6 +13,7 @@ import asyncio
 import datetime as dt
 import json
 import logging
+import re
 import sqlite3
 import subprocess
 import sys
@@ -278,6 +279,29 @@ def test_the_announcement_offers_the_page_its_blocks_and_the_ui_extra():
     found = modules.load("usage", interface=1)
     assert found.ok and found.page == module.PAGE
     assert set(found.components) == {"page", "limits", "cost"}
+
+
+#: A `moxi usage` command as the page's sources and the README name one: the verb (or
+#: verbs, as `daily|monthly`), and `update` after `prices`.
+NAMED = re.compile(r"moxi\s+usage\s+([a-z][a-z|-]*)(?:\s+(update)\b)?")
+
+
+def test_every_command_the_page_or_readme_names_is_a_verb_of_the_cli(capsys):
+    from moxi_usage import cli
+
+    sources = [*sorted((ROOT / "web" / "src").glob("*.ts")), ROOT / "README.md",
+               *(ROOT / "src" / "moxi_usage" / name
+                 for name in ("page.py", "pagehandlers.py", "reports.py"))]
+    named = {(verb, update) for path in sources
+             for first, update in NAMED.findall(path.read_text(encoding="utf-8"))
+             for verb in first.split("|")}
+    assert ("index", "") in named and ("prices", "update") in named
+    for verb, update in sorted(named):
+        argv = [verb, *([update] if update else []), "--help"]
+        with pytest.raises(SystemExit) as done:
+            cli.main(argv)
+        assert done.value.code == 0, (argv, capsys.readouterr().err)
+    capsys.readouterr()
 
 
 def test_the_export_command_reads_the_page(tmp_path):

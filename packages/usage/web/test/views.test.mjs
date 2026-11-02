@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   agents, agentTreemap, cellLabel, costDays, costText, dailyChart, filterKeys, flags, fmtAgo,
-  fmtCost, fmtPercent, fmtSpan, fmtTokens, labelEvery, MARGIN, menuPaths, meter, NO_FILTERS,
+  fmtCost, fmtPercent, fmtSpan, fmtTokens, heldLine, heldReasons, labelEvery, MARGIN, menuPaths, meter, NO_FILTERS,
   parseRoute, provenanceLine, rangeFor, reportState, sessionRoute, shiftDay, shouldPass, strip,
   tickText, viewPath,
 } from "../src/views.ts";
@@ -298,6 +298,24 @@ test("the strip's last pass, lanes not online, held files and note", () => {
   const older = strip(up(status({}, [], "the index is at version 2, before 3; run `moxi usage index` to bring it up")), null, 1600);
   assert.match(older.note, /version 2/);
   assert.equal(older.command, "moxi usage index");
+});
+
+test("the strip says why files are held back, from each lane's reasons or the held rows", () => {
+  const lanes = [
+    { lane: "claude", state: "online", reason: null, held_reasons: [{ name: "too large", value: 2 }, { name: "unreadable", value: 1 }] },
+    { lane: "codex", state: "online", reason: null, held_reasons: [{ name: "unreadable", value: 2 }] },
+  ];
+  const view = strip(up(status({ held: 5 }, lanes)), null, 1600);
+  assert.deepEqual(view.heldReasons, [{ reason: "unreadable", count: 3 }, { reason: "too large", count: 2 }]);
+  assert.equal(heldLine(view), "5 files held back: unreadable (3); too large (2)");
+  const rows = [{ lane: "claude", path: "/x/a", part: "", reason: "too large" },
+                { lane: "claude", path: "/x/b", part: "", reason: "too large" }];
+  const fromRows = strip(up(status({ held: 2, held_rows: rows }, [])), null, 1600);
+  assert.deepEqual(heldReasons(status({ held: 2, held_rows: rows }, [])), [{ reason: "too large", count: 2 }]);
+  assert.equal(heldLine(fromRows), "2 files held back: too large");
+  assert.equal(heldLine(strip(up(status({ held: 1 }, [])), null, 1600)), "1 file held back");
+  assert.equal(heldLine(strip(up(status()), null, 1600)), null);
+  assert.doesNotMatch(heldLine(view), /moxi usage/);
 });
 
 test("an index event moves the strip's last pass and says when a pass runs", () => {
