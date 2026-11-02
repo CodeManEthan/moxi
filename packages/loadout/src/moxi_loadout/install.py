@@ -48,7 +48,6 @@ a line, not a code.
 from __future__ import annotations
 
 import os
-import sys
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
@@ -164,12 +163,43 @@ def _plan(folder, resolver, git_seconds=None) -> tuple[planner.Plan, entries.Run
             entries.plan(found, machine.source, data))
 
 
+# -- the global file's preview -----------------------------------------------------------
+
+def global_preview(folder=None, *, resolver=planner.resolve_key,
+                   git_seconds: float | None = None) -> dict:
+    """What the next install makes of each global file, for `global show`:
+    `{"mode": <the manifest's mode>, "files": [...]}`. Each file the managed part edits is
+    `{"file", "changes", "diff"}`, `diff` a unified diff from the file as it is to the file
+    after install (empty when unchanged). Each global file `if-absent` places is
+    `{"file", "changes", "placed": True, "state", "diff"}`, `diff` then the reason its
+    state isn't `ok`. Takes no lock, writes nothing; `git_seconds` as for `status`."""
+    import difflib
+
+    plan, run = _plan(folder, resolver, git_seconds)
+    shown = entries.preview(run)
+    out = []
+    for path, (now, then) in sorted(shown.items()):
+        a, b = now.decode("utf-8", "replace"), then.decode("utf-8", "replace")
+        diff = "".join(difflib.unified_diff(a.splitlines(True), b.splitlines(True),
+                                            path, f"{path} after install"))
+        out.append({"file": path, "changes": a != b, "diff": diff})
+    for w in plan.wants:
+        if w.kind == planner.GLOBAL_KIND:
+            state, reason, _ = planner.state_of(w)
+            out.append({"file": str(w.item.dest if w.item else w.harness),
+                        "changes": state != "ok", "placed": True, "state": state,
+                        "diff": reason})
+    return {"mode": plan.manifest.global_mode, "files": out}
+
+
 # -- install --------------------------------------------------------------------------------
 
 def install(scope: Scope = Scope(), *, replace: Iterable[str] = (), dry_run: bool = False,
             folder=None, resolver=planner.resolve_key,
             say: Callable[[str], object] | None = None) -> Outcome:
-    """Adopt, plan the whole manifest, apply the steps in scope. See the module's docs."""
+    """Adopt, plan the whole manifest, apply the steps in scope. See the module's docs.
+    Every line the run says lands in the outcome's `lines`; `say`, when given, is also
+    told the line that it waits for the core lock, as it waits."""
     if dry_run:
         out = status(scope, folder=folder, resolver=resolver)
         out.code = planner.exit_code(r.code for r in out.rows
@@ -180,9 +210,15 @@ def install(scope: Scope = Scope(), *, replace: Iterable[str] = (), dry_run: boo
     from moxi_loadout import stores
 
     lines: list[str] = []
+
+    def tell(line: str) -> None:
+        lines.append(line)
+        if say is not None:
+            say(line)
+
     try:
         with files.lock(stores.install_lock(), timeout=INSTALL_WAIT):
-            with _core_lock(files, paths):
+            with _core_lock(files, paths, tell):
                 out = _install(scope, list(replace), folder, resolver, lines)
     except files.LockTimeout as exc:
         lines.append(f"{exc}; another install is running, so try again later")
@@ -206,7 +242,9 @@ def _clear_reinstall_record(out: Outcome) -> None:
                          f"cleared: {exc}; moxi doctor --clear clears it")
 
 
-def _core_lock(files, paths):
+def _core_lock(files, paths, say: Callable[[str], object]):
+    """The core lock, held for the span. When another process holds it, the waiting line
+    goes through `say`, so it lands in the run's outcome, not on stderr."""
     from contextlib import ExitStack, contextmanager
 
     @contextmanager
@@ -216,8 +254,7 @@ def _core_lock(files, paths):
                 stack.enter_context(files.lock(paths.core_lock(), nested=True, timeout=0))
             except files.LockTimeout as exc:
                 who = f"pid {exc.holder}" if exc.holder else "another process"
-                print(f"loadout: waiting for an install or uninstall ({who}) to finish",
-                      file=sys.stderr, flush=True)
+                say(f"loadout: waiting for an install or uninstall ({who}) to finish")
                 stack.enter_context(files.lock(paths.core_lock(), nested=True,
                                                timeout=CORE_WAIT))
             yield
@@ -570,5 +607,5 @@ def _write_ledger(plan, data, source, done, seeded_done, removes, now) -> None:
     ledger.write(data)
 
 
-__all__ = ["INSTALL_WAIT", "CORE_WAIT", "SKIPPED", "Outcome", "status", "install",
-           "generated_in_use", "orphans"]
+__all__ = ["INSTALL_WAIT", "CORE_WAIT", "SKIPPED", "Outcome", "status", "global_preview",
+           "install", "generated_in_use", "orphans"]
