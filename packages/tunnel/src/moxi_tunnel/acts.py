@@ -212,14 +212,18 @@ class _Live:
 
 def check(module: str | None = None, name: str | None = None, *,
           deadline: float | None = None) -> list[EntryState]:
-    """Compare each recorded entry (or the one `<module>/<name>`) with the live config
-    and its settings now, taking no lock. Each provider is read once for all the
-    entries, within `deadline` (a `time.monotonic()` value) when one is given."""
+    """Compare each recorded entry (or the one `<module>/<name>`, or a module's when no
+    name is given) with the live config and its settings now, taking no lock. Each
+    provider is read once for all the entries, within `deadline` (a `time.monotonic()`
+    value) when one is given. A name with no module is a usage error."""
+    if module is None and name is not None:
+        raise UsageError(f"check of {name!r} needs its module too")
     rec = record.read()
     decls = declare.read()
     keys = list(rec.entries)
     if module is not None:
-        keys = [k for k in keys if k == f"{module}/{name}"]
+        keys = [k for k in keys if (k == f"{module}/{name}" if name is not None
+                                    else k.partition("/")[0] == module)]
     return _states(rec, decls, keys, _Live(deadline))
 
 

@@ -127,7 +127,7 @@ def _done(outcome):
 
 def check(module: str | None = None, name: str | None = None, *,
           deadline: float | None = None):
-    """The live comparison of one recorded target, or of all: a list of
+    """The live comparison of one recorded target, of one module's, or of all: a list of
     `moxi_tunnel.acts.EntryState`. `deadline` is a `time.monotonic()` value every read
     is cut to."""
     from . import acts

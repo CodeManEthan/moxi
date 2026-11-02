@@ -505,3 +505,14 @@ def test_two_concurrent_adds_of_one_port_one_wins_and_the_other_is_refused(alpha
     assert list(record.read().entries) == won
     assert len(tailscale.changes()) == 1
     assert states() == {won[0]: "ok"}
+
+
+def test_check_takes_one_target_one_module_or_all(alpha, tailscale, yes):
+    acts.add("alpha/gateway", ask=yes)
+    acts.add("alpha/connector", ask=yes)
+    assert [s.target for s in acts.check()] == ["alpha/connector", "alpha/gateway"]
+    assert [s.target for s in acts.check("alpha")] == ["alpha/connector", "alpha/gateway"]
+    assert [s.target for s in acts.check("alpha", "gateway")] == ["alpha/gateway"]
+    assert acts.check("beta") == []
+    with pytest.raises(UsageError):
+        acts.check(name="gateway")
