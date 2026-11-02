@@ -109,9 +109,9 @@ def common_dir(git) -> str:
 def scan(text: str, path: str, allow) -> list[Finding]:
     """The findings in one text at `path` that `allow` doesn't keep. Raises
     `moxi_secrets.SetUnavailable`."""
-    from moxi_secrets import scan as _scan
+    import moxi_secrets
 
-    return [of_hit(h) for h in _scan(text, SETS, path=path, allow=allow)]
+    return [of_hit(h) for h in moxi_secrets.scan(text, SETS, path=path, allow=allow)]
 
 
 def judge(entries, git, *, cap: int, allow) -> dict[str, list[Finding]]:
@@ -136,9 +136,10 @@ def judge(entries, git, *, cap: int, allow) -> dict[str, list[Finding]]:
 
 def scan_names(text: str, allow) -> list[Finding]:
     """Private-names findings in an author or committer line, at the path `@author`."""
-    from moxi_secrets import scan as _scan
+    import moxi_secrets
 
-    return [of_hit(h) for h in _scan(text, ("private-names",), path="@author", allow=allow)]
+    return [of_hit(h) for h in moxi_secrets.scan(text, ("private-names",), path="@author",
+                                                 allow=allow)]
 
 
 __all__ = ["SETS", "PUBLIC", "PRIVATE", "TOO_LARGE", "Finding", "too_large", "words",
