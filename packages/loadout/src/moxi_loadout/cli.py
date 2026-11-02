@@ -5,6 +5,7 @@
     moxi loadout add|remove KIND NAME [--user | --project P] [--json]
     moxi loadout enable|disable ID [--user | --project P] [--json]
     moxi loadout list [--json]
+    moxi loadout global show [--diff] | global mode MODE | global off
 
 `install` takes over the module skills you said yes to, plans the whole manifest and
 applies the steps in scope (all of them without a flag). `--replace` takes a path or an id,
@@ -12,7 +13,10 @@ applies the steps in scope (all of them without a flag). `--replace` takes a pat
 `status` prints one line per item that is not `ok`, then notes, then a count. `add` and
 `remove` write a section's list, `enable` and `disable` its `disabled` ids, then each
 installs with that item's steps as the scope. `list` prints every item with its kind,
-scope, harnesses and source.
+scope, harnesses and source. `global show` prints, for each harness, its global file and
+what the next install makes of it (`--diff` as a diff); `global mode MODE` writes the mode
+(off, managed or if-absent) and installs the global file alone; `global off` sets `off`
+and takes loadout's part out, leaving the user's own text.
 
 KIND is skill, agent, hook, permissions or mcp. Exit codes: 0 done (every item `ok` or
 `off`); 1 an error, or for `status` any item in another state; 2 usage, an unknown
@@ -35,7 +39,7 @@ EXTRA_VERBS: list = []
 
 
 def _parser(prog: str) -> argparse.ArgumentParser:
-    from moxi_loadout.manifest import KINDS
+    from moxi_loadout.manifest import KINDS, MODES
 
     parser = argparse.ArgumentParser(
         prog=prog, description="Your skills, agents and settings, placed for each harness.")
@@ -79,6 +83,17 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                                                     "for every one")
         scopes(p, many=False)
     verb("list", "every item, with its kind, scope, harnesses and source")
+    p = verbs.add_parser("global", help="the global instruction file",
+                         description="The global instruction file.")
+    parts = p.add_subparsers(dest="part", metavar="PART")
+    parts.required = True
+    show = parts.add_parser("show", help="what the next install makes of each global file")
+    show.add_argument("--diff", action="store_true", help="print it as a diff")
+    mode = parts.add_parser("mode", help="set the global mode, then install it")
+    mode.add_argument("mode", metavar="MODE", choices=MODES)
+    parts.add_parser("off", help="take loadout's part out of every global file")
+    for sub in (show, mode, parts.choices["off"]):
+        sub.add_argument("--json", action="store_true", help="print JSON")
     for extra in EXTRA_VERBS:
         extra(verbs, verb)
     return parser
@@ -225,7 +240,57 @@ def _list(args) -> int:
     return codes.OK
 
 
-VERBS.update({"install": _install, "status": _status, "add": _add, "remove": _remove,
+def _global(args) -> int:
+    from moxi_loadout import install, writes
+    from moxi_loadout.planner import GLOBAL_KIND, Scope
+
+    if args.part == "show":
+        return _global_show(args)
+    mode = "off" if args.part == "off" else args.mode
+    changed = writes.set_mode(mode)
+    line = f"global mode {mode}" + ("" if changed else " already")
+    outcome = install.install(Scope(item=(GLOBAL_KIND, GLOBAL_KIND)))
+    outcome.lines[:0] = [line]
+    return _emit(outcome, args)
+
+
+def _global_show(args) -> int:
+    import difflib
+
+    from moxi_loadout import entries, install
+    from moxi_loadout.planner import GLOBAL_KIND, state_of
+
+    plan, run = install._plan(None, install.planner.resolve_key)
+    shown = entries.preview(run)
+    out = []
+    for path, (now, then) in sorted(shown.items()):
+        a, b = now.decode("utf-8", "replace"), then.decode("utf-8", "replace")
+        diff = "".join(difflib.unified_diff(a.splitlines(True), b.splitlines(True),
+                                            path, f"{path} after install"))
+        out.append({"file": path, "changes": a != b, "diff": diff})
+    for w in plan.wants:
+        if w.kind == GLOBAL_KIND:
+            state, reason, _ = state_of(w)
+            out.append({"file": str(w.item.dest if w.item else w.harness),
+                        "changes": state != "ok", "placed": True, "state": state,
+                        "diff": reason})
+    if args.json:
+        print(json.dumps({"mode": plan.manifest.global_mode, "files": out}, indent=1))
+        return codes.OK
+    print(f"global mode {plan.manifest.global_mode}")
+    for f in out:
+        if f.get("placed"):
+            print(f"{f['file']}: {f['state']}" + (f" ({f['diff']})" if f["diff"] else ""))
+        elif not f["changes"]:
+            print(f"{f['file']}: unchanged")
+        elif args.diff:
+            print(f["diff"], end="")
+        else:
+            print(f"{f['file']}: install changes it (--diff shows how)")
+    return codes.OK
+
+
+VERBS.update({"global": _global, "install": _install, "status": _status, "add": _add, "remove": _remove,
               "enable": _enable, "disable": _disable, "list": _list})
 
 

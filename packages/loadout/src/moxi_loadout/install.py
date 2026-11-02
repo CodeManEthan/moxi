@@ -12,7 +12,11 @@
    only in an unscoped run in which every section resolved); a refusal `--replace` names,
    or a link of loadout's own under the folder the last install read; a module skill
    nobody has placed, as its module, then taken over seeded;
-5. write loadout's ledger: a record per placement made or kept, none for one removed.
+5. write the harness entries (`moxi_loadout.entries`): hooks, permission rules, MCP
+   servers and the managed global file, CLI-backed MCP servers first, then each harness
+   file once;
+6. write loadout's ledger: a record per placement made or kept and per entry written or
+   kept, none for one removed.
 
 Locks are always taken in one order: `install.lock`, the core lock, the manifest's.
 
@@ -36,7 +40,7 @@ from dataclasses import dataclass, field
 
 from moxi.exit import ERROR, REFUSED, TEMPFAIL
 
-from moxi_loadout import adoption, ledger, planner
+from moxi_loadout import adoption, entries, ledger, planner
 from moxi_loadout.manifest import USER, ManifestError, parse_id
 from moxi_loadout.planner import FINE, Row, Scope
 
@@ -80,17 +84,18 @@ class Outcome:
 
 def status(scope: Scope = Scope(), *, folder=None, resolver=planner.resolve_key) -> Outcome:
     """Every item's state; the scope filters the rows. Takes no lock, writes nothing."""
-    plan = _plan(folder, resolver)
-    rows = [r for r in planner.rows(plan) if _shown(scope, r)]
+    plan, run = _plan(folder, resolver)
+    rows = [r for r in planner.rows(plan) + entries.rows(run) if _shown(scope, r)]
     code = 0 if all(r.state in FINE for r in rows) else ERROR
-    return Outcome(rows, list(plan.lines), list(dict.fromkeys(plan.notes)), code)
+    return Outcome(rows, list(plan.lines) + run.lines,
+                   list(dict.fromkeys(plan.notes + run.notes)), code)
 
 
 def _shown(scope: Scope, r: Row) -> bool:
     return scope.covers(r.scope, r.kind, r.name) if r.scope is not None else scope.whole
 
 
-def _plan(folder, resolver) -> planner.Plan:
+def _plan(folder, resolver) -> tuple[planner.Plan, entries.Run]:
     from moxi_loadout import manifest as manifest_mod
     from moxi_loadout import settings
 
@@ -98,8 +103,9 @@ def _plan(folder, resolver) -> planner.Plan:
     if folder is not None:
         machine.source = os.path.abspath(folder)
     found = manifest_mod.load(machine.source)
-    plan = planner.build(found, machine, ledger.read(), resolver=resolver)
-    return planner.run(plan)
+    data = ledger.read()
+    plan = planner.build(found, machine, data, resolver=resolver)
+    return planner.run(plan), entries.plan(found, machine.source, data)
 
 
 # -- install --------------------------------------------------------------------------------
@@ -163,8 +169,22 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
             "section": USER, "kind": "skill", "item": f"{t.module}/{t.placed.name}",
             "harness": t.placed.harness, "module": t.module, "seeded": False}
     found = manifest_mod.load(machine.source)
-    plan = planner.build(found, machine, data, resolver=resolver)
     claims = _claims(replace)
+    written: list[Row] = []
+    notes: list[str] = []
+
+    def harness_entries() -> None:
+        run = entries.plan(found, machine.source, data, claims=claims)
+        written.extend(entries.apply(run, scope, data, keep=machine.backups_keep, say=say))
+        lines.extend(run.lines)
+        notes.extend(run.notes)
+
+    # A mode change removes the old mode's part first: the managed parts go before the
+    # placer places a global file, and a placed one goes before the managed parts are
+    # written, so neither is ever written through the other.
+    if found.global_mode != "managed":
+        harness_entries()
+    plan = planner.build(found, machine, data, resolver=resolver)
     in_scope = [w for w in plan.wants if scope.covers(w.scope, w.kind, w.name)]
     for want in in_scope:
         _write_generated(want, claims, say)
@@ -230,6 +250,9 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
         else:
             say(f"removed {r.kind} {r.name} for {r.harness} ({target})")
 
+    if found.global_mode == "managed":
+        harness_entries()
+    rows += written
     unclaimed = [c for c in claims if not claims[c]]
     for text in unclaimed:
         lines.append(f"--replace {text}: nothing of loadout's is refused there")
@@ -242,14 +265,15 @@ def _install(scope: Scope, replace: list[str], folder, resolver, lines: list[str
             continue
         rows.append(Row(name, "section", name, "*", "blocked", res.line, None, res.code))
     codes = [r.code for r in rows if r.state not in FINE] + [REFUSED] * bool(unclaimed)
-    return Outcome(rows, lines, list(dict.fromkeys(plan.notes)), planner.exit_code(codes))
+    return Outcome(rows, lines, list(dict.fromkeys(plan.notes + notes)),
+                   planner.exit_code(codes))
 
 
 def _claims(replace: list[str]) -> dict[str, bool]:
     """Each `--replace` value, not yet matched: a target path or an id."""
     out = {}
     for text in replace:
-        if not _is_path(text):
+        if not _is_path(text) and not text.startswith("global:"):
             try:
                 parse_id(text)
             except ValueError as exc:
@@ -269,7 +293,9 @@ def _claimed(claims: dict[str, bool], want) -> bool:
     hit = False
     target = planner.target_of(want)
     for text in claims:
-        if _is_path(text):
+        if text.startswith("global:"):
+            ok = want.kind == "global" and text.rsplit("@", 1)[-1] in ("*", want.harness)
+        elif _is_path(text):
             ok = target is not None and target_key(text) == target
         else:
             ident = parse_id(text)

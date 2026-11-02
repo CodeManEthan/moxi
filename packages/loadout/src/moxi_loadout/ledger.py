@@ -13,7 +13,10 @@
   same `Item` and the placer keeps the placement. An adopted module skill also records
   its `module` and whether the hand-over was `seeded` (placed from the manifest) or not
   (the module's own yes). A placement with no record reads unseeded.
-- `entries` belongs to the harness writers; this module keeps whatever is there.
+- `entries` holds one record per harness entry loadout wrote or found already there
+  (`moxi_loadout.entries`): `{item, harness, file, kind, key, written, prior}`, and `sent`
+  for an MCP server written through its CLI. `prior` marks an entry the user had first,
+  which loadout never removes.
 
 The file is written only under `install.lock`, whole, through `moxi.files.atomic_write`
 (0600). A missing file reads empty; a file that doesn't read as a JSON object raises

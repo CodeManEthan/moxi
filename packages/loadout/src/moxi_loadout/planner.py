@@ -58,6 +58,8 @@ FINE = ("ok", "off")
 STATE_CODES = {"bad-source": ERROR, "missing": ERROR, "stale": ERROR, "blocked": REFUSED,
                "modified": REFUSED, "would-commit": REFUSED}
 _FOLDERS = {"skill": "skills", "agent": "agents"}
+#: The kind and name a want of the global file carries, in `if-absent` mode.
+GLOBAL_KIND = "global"
 
 
 @dataclass(frozen=True)
@@ -112,6 +114,8 @@ class Want:
         return USER if self.section.is_user else self.section.name
 
     def label(self) -> str:
+        if self.kind == GLOBAL_KIND:
+            return f"the global file for {self.harness}"
         where = "" if self.section.is_user else f" in {self.section.label()}"
         return f"{self.kind} {self.name} for {self.harness}{where}"
 
@@ -184,6 +188,9 @@ class Scope:
         return ({USER} if self.user else set()) | set(self.projects)
 
     def covers(self, scope: str | None, kind: str | None, name: str | None) -> bool:
+        if kind == GLOBAL_KIND:
+            # The global file is touched only by a whole run and by the global verbs.
+            return self.whole or self.item == (GLOBAL_KIND, GLOBAL_KIND)
         named = self.sections()
         if named is not None and scope not in named:
             return False
@@ -218,7 +225,39 @@ def build(manifest: Manifest, machine, data: dict, *,
                 for harness in (every if harnesses is None else harnesses):
                     plan.wants.append(_want(plan, machine, section, root, kind, name,
                                             harness, user_skills))
+    if manifest.global_mode == "if-absent":
+        plan.wants += _global_wants(plan, manifest, every)
     return plan
+
+
+def _global_wants(plan: Plan, manifest: Manifest, every) -> list[Want]:
+    """In `if-absent` mode, each harness's global file placed from the folder's global
+    text where the harness has none; an existing file is left alone."""
+    from moxi.place import Item
+
+    from moxi_loadout import harness as hz
+    from moxi_loadout import stores
+
+    out = []
+    source = Path(manifest.global_file)
+    for h in every:
+        if h not in hz.HARNESSES:
+            continue
+        dest = hz.global_file(h)
+        want = Want(manifest.user, GLOBAL_KIND, GLOBAL_KIND, h)
+        if not source.is_file() or source.is_symlink():
+            want.state, want.reason, want.code = ("bad-source", f"no global text at "
+                                                  f"{source}", ERROR)
+            items = [ledger.item_of(r) for r in plan.ledger["placed"].values()
+                     if (r.get("kind"), r.get("harness")) == (GLOBAL_KIND, h)]
+            items = [i for i in items if i is not None] or [
+                Item(stores.state_dir() / ".carried" / dest.name, h, dest.name, "agent",
+                     dest=dest)]
+            want.carried = tuple(items)
+        else:
+            want.item = Item(source, h, dest.name, "agent", dest=dest)
+        out.append(want)
+    return out
 
 
 def _want(plan: Plan, machine, section: Section, root, kind, name, harness,
@@ -447,6 +486,9 @@ def state_of(want: Want) -> tuple[str, str, int]:
         return "off", "", 0
     if want.adoptable:
         return "ok", f"{want.module} placed it; install takes it over", 0
+    if want.kind == GLOBAL_KIND and step.action == "refuse" \
+            and step.cause in ("occupant", "tracked"):
+        return "ok", f"{step.target} is there already; if-absent leaves it", 0
     if want.generated is not None and want.generated[2] == "modified":
         return ("modified", f"{want.generated[0]} was edited by hand; edit the source, "
                 f"or install --replace {want.kind}:{want.name}@{want.harness}", REFUSED)
