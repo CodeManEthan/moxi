@@ -580,7 +580,7 @@ def test_the_poller_publishes_limits_only_when_they_change(monkeypatch):
     asyncio.run(go())
 
 
-def test_the_poller_starts_with_the_first_limits_stream_and_stops_with_the_last(monkeypatch):
+def test_the_poller_starts_with_the_first_stream_and_runs_for_the_servers_life(monkeypatch):
     monkeypatch.setattr(pagehandlers, "PERIOD", 0.1)
     gathered = []
     real = pagehandlers.gather_limits
@@ -593,29 +593,26 @@ def test_the_poller_starts_with_the_first_limits_stream_and_stops_with_the_last(
 
     async def go():
         app = served()
-        index_only = Stream(app, "index")
-        assert await index_only.none_within(0.3)
-        feed = pagehandlers._current
-        assert feed.poller is None and gathered == []
-        one, two = Stream(app, "limits"), Stream(app, "limits,index")
+        await ask(app, "/api/pass", method="POST")        # a pass alone starts no poller
+        assert pagehandlers._current.poller is None and gathered == []
+        one, two = Stream(app, "limits"), Stream(app, "index")
         await one.next(5)
-        await two.next(5)
+        feed = pagehandlers._current
         poller = feed.poller
         assert poller is not None and not poller.done()
+        await asyncio.sleep(0.2)
+        assert feed.poller is poller
         await one.close()
-        await asyncio.sleep(0.3)
-        assert feed.poller is poller and not poller.done()
         await two.close()
-        await until(poller.done)
         count = len(gathered)
-        await asyncio.sleep(0.3)
-        assert len(gathered) == count and feed.poller is None
+        await asyncio.sleep(0.4)
+        assert feed.poller is poller and not poller.done()
+        assert len(gathered) > count
         again = Stream(app, "limits")
         assert (await again.next(5))[0] == "limits"
-        assert feed.poller is not None and not feed.poller.done()
+        assert feed.poller is poller
         await again.close()
-        await until(lambda: feed.poller is None)
-        await index_only.close()
+        poller.cancel()
 
     asyncio.run(go())
 

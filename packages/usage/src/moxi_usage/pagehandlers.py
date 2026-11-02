@@ -23,11 +23,13 @@ stopped the pass.
 
 **The stream.** One stream route carries two topics, `limits` (`/api/limits`'s value
 without `now`) and `index`. The `limits` topic is fed by one poller, an asyncio task
-started when the first stream that carries `limits` opens and stopped when the last one
-closes. It gathers at once and then every `PERIOD` seconds, and its `Snapshot` publishes
-only when the windows changed; a window's age is left to the page, worked out from
-`observed_at`, so time passing alone changes nothing. The poller survives every
-exception: a failed gather is logged once per class and the next period gathers again.
+started by the first call to the stream route and run for the page server's life; loopback
+stops an idle server once nothing is open, and a Codex pull stays bounded by
+`limits.codex_pull_after`. It gathers at once and then every `PERIOD` seconds, and its
+`Snapshot` publishes only when the windows changed; a window's age is left to the page,
+worked out from `observed_at`, so time passing alone changes nothing. The poller survives
+every exception: a failed gather is logged once per class and the next period gathers
+again.
 
 Like `page`, this module reaches loopback only through `moxi.modules.load`.
 """
@@ -371,62 +373,21 @@ def limits(call: Any) -> dict[str, Any]:
 
 # --- the pass, the topics and the poller ---------------------------------------------------
 
-class _Topics(lb.Topics):
-    """The page's topics, telling the feed when a stream opens and closes, so the
-    limits poller runs only while a stream carries its topic."""
-
-    def __init__(self, feed: _Feed):
-        super().__init__(*TOPICS)
-        self._feed = feed
-
-    def _open(self, sub: Any, names: Any) -> Any:
-        names = tuple(names)
-        found = super()._open(sub, names)
-        self._feed.opened(sub, names)
-        return found
-
-    def _close(self, sub: Any) -> None:
-        super()._close(sub)
-        self._feed.closed(sub)
-
-
 class _Feed:
     """The topics, the limits Snapshot and poller, and the pass, on one event loop."""
 
     def __init__(self, loop: asyncio.AbstractEventLoop):
         self.loop = loop
-        self.topics = _Topics(self)
+        self.topics = lb.Topics(*TOPICS)
         self.snapshot = lb.Snapshot(gather_limits, self.topics, "limits")
         self.poller: asyncio.Task[None] | None = None
         self.pass_task: asyncio.Task[None] | None = None
-        self._streams: set[Any] = set()
 
     # The poller.
 
-    def opened(self, sub: Any, names: tuple[str, ...]) -> None:
-        if "limits" in names:
-            self._streams.add(sub)
-            if self.poller is None or self.poller.done():
-                self.poller = self.loop.create_task(self._poll(), name="usage limits poller")
-
-    def closed(self, sub: Any) -> None:
-        self._streams.discard(sub)
-        if self._streams:
-            return
-        try:
-            running = asyncio.get_running_loop()
-        except RuntimeError:
-            running = None
-        if running is self.loop:
-            self._stop()
-        else:
-            with contextlib.suppress(RuntimeError):       # that loop has closed
-                self.loop.call_soon_threadsafe(self._stop)
-
-    def _stop(self) -> None:
-        if not self._streams and self.poller is not None:
-            self.poller.cancel()
-            self.poller = None
+    def start_poller(self) -> None:
+        if self.poller is None:
+            self.poller = self.loop.create_task(self._poll(), name="usage limits poller")
 
     async def _poll(self) -> None:
         while True:
@@ -435,8 +396,6 @@ class _Feed:
             except Exception as err:
                 _log_once(err, "the limits poller's gather failed")
             await asyncio.sleep(PERIOD)
-            if not self._streams:
-                return
 
     # The pass.
 
@@ -505,9 +464,11 @@ async def start_pass(call: Any) -> dict[str, Any]:
 
 
 async def events(call: Any) -> Any:
-    """`GET /api/events`: the stream over `limits` and `index`. A stream that carries
-    `limits` starts the poller when it is the first."""
-    return call.stream(_feed().topics)
+    """`GET /api/events`: the stream over `limits` and `index`. The first call starts
+    the limits poller, which then runs for the page server's life."""
+    feed = _feed()
+    feed.start_poller()
+    return call.stream(feed.topics)
 
 
 __all__ = ["COST_DAYS", "PERIOD", "TOPICS", "cost", "daily", "events", "gather_limits",
