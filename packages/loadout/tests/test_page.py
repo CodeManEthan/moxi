@@ -449,11 +449,12 @@ def test_an_act_the_verb_would_misread_is_refused_before_anything_is_written(
     assert (lo / "loadout.toml").read_bytes() == before
 
 
-def test_a_relative_section_the_manifest_names_exactly_is_taken(lo, spawned):
+def test_a_relative_section_the_manifest_names_exactly_goes_as_its_root(lo, spawned):
     kit.manifest(lo, '[user]\n[project."../proj"]\nskills = ["review"]\n')
     status, answer = post("/api/install", {"projects": ["../proj"]})
     assert status == 202, answer
-    assert verb_of(spawned[0]) == ["install", "--project=../proj"]
+    root = os.path.normpath(lo / ".." / "proj")
+    assert verb_of(spawned[0]) == ["install", f"--project={root}"]
 
 
 def test_global_mode_off_is_only_the_confirmed_act(lo, spawned):

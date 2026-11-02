@@ -20,7 +20,8 @@ starts an act refuses (422, nothing written):
 - a project section named by a path relative to a directory, unless the manifest has a
   section of exactly that name: the job runs from loadout's state directory, so such a
   path would name another place than the page meant. A section is named exactly as the
-  manifest names it, by its project key, or by an absolute path;
+  manifest names it, by its project key, or by an absolute path, and one the manifest
+  names by a relative path goes to the job as its absolute root;
 - a `--replace` path that isn't absolute, for the same reason;
 - `enable` or `disable` naming both the user section and a project section;
 - a job that didn't start (its record is removed), or a confirmed act's key that names a
@@ -212,7 +213,9 @@ def _start(argv: Sequence[str], *, key: str | None = None) -> Any:
 
 def _section(name: str) -> str:
     """Project section `name` as the verb's flag, or a refusal: a path relative to a
-    directory is taken only when the manifest has a section of exactly that name."""
+    directory is taken only when the manifest has a section of exactly that name, and
+    goes to the job as that section's absolute root, so the job never reads it relative
+    to a directory."""
     from moxi_loadout import manifest, settings
 
     if not name.strip():
@@ -222,9 +225,11 @@ def _section(name: str) -> str:
             found = manifest.load(settings.read().source)
         except Exception as err:  # noqa: BLE001 - the job would refuse it the same way
             raise lb.Refused(_problem(err, "the manifest")) from None
-        if not any(s.name == name for s in found.projects):
+        named = next((s for s in found.projects if s.name == name and s.root), None)
+        if named is None:
             raise lb.Refused(f"loadout: project section {name}: name it as the manifest "
                              "does, by its project key, or by an absolute path")
+        return f"--project={named.root}"
     return f"--project={name}"
 
 

@@ -39,8 +39,9 @@ shell, a kill or a restart each end a job this way; the CLI's deferred signals k
 harness files and the ledger consistent with each other.
 
 The job runs from `STATE/loadout`, with stdin closed and the page server's environment
-unchanged, so the homes check sees what the install will use. The page sends exact
-section names and absolute paths, never a path relative to a directory.
+unchanged, so the homes check sees what the install will use. The page server sends
+exact section names and absolute paths, a section named by a path as its absolute root,
+never a path relative to a directory.
 """
 
 from __future__ import annotations
