@@ -54,7 +54,8 @@ STORES = {
                  "private": True, "retention": "keep", "rebuildable": True, "lazy": True},
 }
 #: usage's own checks: the model table's age and gaps, the token index, Codex's imports,
-#: the restart-point measure and whether turns is installed.
+#: the restart-point measure, the sweep of fired marks and ceiling markers, and what usage
+#: registers with turns.
 DOCTOR = "moxi_usage.doctor:rows"
 #: The weekly restart-point measure, off until `restart_point.measure_weekly` is turned
 #: on. A timer runs every few minutes or hours, or at set times on set days; this one

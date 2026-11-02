@@ -66,7 +66,7 @@ def rollout(thread, **kw):
 def test_the_rows_come_in_order_and_each_is_usages():
     found = list(doctor.rows(now=NOW))
     assert [r.name for r in found] == ["models.snapshot", "models.unpriced", "index",
-                                       "codex.imports", "restart_point", "turns"]
+                                       "codex.imports", "restart_point", "marks", "turns"]
     assert {r.module for r in found} == {"usage"}
 
 
@@ -328,9 +328,39 @@ def test_without_turns_the_row_is_off_and_says_what_needs_it(monkeypatch):
     assert "Claude limits, the warn-at mark and the worker ceiling need turns" in found.detail
 
 
-def test_with_turns_the_row_is_ok(monkeypatch):
+def test_with_turns_the_row_is_ok_and_names_what_usage_registers(monkeypatch):
     monkeypatch.setattr(modules, "available", lambda name: name == "turns")
-    assert row("turns").state == "ok"
+    found = row("turns")
+    assert found.state == "ok"
+    assert found.detail == (
+        "turns is installed; usage registers after-tool (the warn-at mark, with its "
+        "floor), gone (forgetting a session's fired marks), usage (Claude limits), "
+        "codex_limits (Codex limits from the app-server)")
+
+
+# --- marks -------------------------------------------------------------------------------
+
+def test_the_marks_row_sweeps_old_files_and_counts():
+    import os
+
+    from moxi_usage import mark
+
+    directory = mark.state_dir()
+    directory.mkdir(parents=True)
+    for name, age in (("claude-old.json", 8), ("claude-old.json.lock", 8),
+                      ("claude-new.json", 1)):
+        (directory / name).write_text('{"schema": 1}')
+        os.utime(directory / name, (NOW - age * 86400, NOW - age * 86400))
+    found = row("marks")
+    assert found.state == "ok"
+    assert found.detail == ("1 session with fired marks kept; deleted 1 fired-mark file "
+                            "older than 7 days and the ceiling markers of 0 agents older "
+                            "than 7 days")
+    assert sorted(p.name for p in directory.iterdir()) == ["claude-new.json"]
+
+
+def test_the_marks_row_with_nothing_kept_is_ok():
+    assert row("marks").state == "ok"
 
 
 # --- the announcement --------------------------------------------------------------------
@@ -367,5 +397,5 @@ def test_the_cores_doctor_runs_usages_rows_and_its_stores(capsys):
     names = {r["name"]: r["state"] for r in out if r["module"] == "usage"}
     assert code == 0, out
     assert {"models.snapshot", "models.unpriced", "index", "codex.imports",
-            "restart_point", "turns"} <= set(names)
+            "restart_point", "marks", "turns"} <= set(names)
     assert names["store index"] == names["store readings"] == "ok"

@@ -183,11 +183,34 @@ table can't support (no row, no cache-read price) is shown as unavailable with t
 never guessed. Turn on `restart_point.measure_weekly` to measure once a week on a timer
 (`moxi-usage-measure`, Mondays at 04:30).
 
+## The warn-at mark
+
+With turns installed, usage's after-tool listener tells the model, once, when a context
+passes its mark: `context 120,000 passed the 1x restart point (100,808) for <model>`. The
+mark is the launch's `MOXI_USAGE_WARN_AT` (`1x`, `1.5x`, `2x`, `off`), else
+`marks.default` (`off`). The main session and each of its agents are measured against
+their own context; an agent's line also reaches its parent at the parent's next tool
+call. A mark fires once per rise past it: after a compaction brings the context below it,
+it can fire again. A floor tells turns the context below which the main session's calls
+have nothing for usage to do, so they skip the listener.
+
+A launcher that recycles at a limit stamps `MOXI_USAGE_CROSSING_AT`; each rise of the
+main session past that mark calls every handler registered on the entry-point group
+`moxi.usage.crossings` with a `Crossing(harness, session_id, mark, tokens, threshold,
+model, at)`. Handlers run one after another, each waited on for at most
+`marks.handler_wait_ms` (200); a line a handler returns follows the notice. usage itself
+does nothing on a crossing.
+
+Fired marks are kept in `STATE/usage/marks/`, so a restarted endpoint doesn't say one
+twice; a session's file goes when its endpoint ends. `moxi usage marks SESSION` prints a
+session's marks, thresholds and states; `moxi usage marks` lists the fired marks on disk.
+
 ## Commands
 
     moxi usage limits [--harness claude|codex] [--no-pull] [--json]
     moxi usage context SESSION [--harness H] [--agent ID] [--json]
     moxi usage restart-point [--measure] [--json]
+    moxi usage marks [SESSION] [--harness H] [--json]
     moxi usage prices [MODEL] [--provider P] [--json]
     moxi usage prices update [--dry-run] [--revert] [--json]
     moxi usage index [--rebuild] [--force] [--no-wait] [--check] [--json]
@@ -221,11 +244,11 @@ the keys that differ.
 usage keeps its files in Moxi's roots, each made by its first write and readable only by
 you: the token index `STATE/usage/index.db`, the limits readings `STATE/usage/readings.db`
 (kept 8 days), the restart-point measure `STATE/usage/restart-point.json` and the model
-snapshot `DATA/usage/models-snapshot.json`. `marks/` and `ceiling/` under `STATE/usage`
-are declared for the context marks and the worker ceiling, which are still to come.
-`moxi paths usage` lists them all.
+snapshot `DATA/usage/models-snapshot.json`, and the fired warn-at marks
+`STATE/usage/marks/`. `ceiling/` under `STATE/usage` is declared for the worker ceiling,
+which is still to come. `moxi paths usage` lists them all.
 
-`moxi doctor usage` checks each store and adds usage's own rows, none of which writes:
+`moxi doctor usage` checks each store and adds usage's own rows; only `marks` deletes:
 
 - `models.snapshot`: the model table in effect is older than `prices.max_age_days` (120),
   or a snapshot on disk can't be read; the fix is `moxi usage prices update`.
@@ -237,7 +260,10 @@ are declared for the context marks and the worker ceiling, which are still to co
 - `restart_point`: a warning naming each model and population seen in the last 30 days
   with no measured row (so no warn-at mark), or when the measure is over 14 days old; the
   fix is `moxi usage restart-point --measure`.
-- `turns`: off when turns is not installed, since Claude limits need it.
+- `marks`: deletes fired-mark files older than `marks.max_age_days` (7) and the worker
+  ceiling's agent markers older than `ceiling.max_age_days` (7), and counts them.
+- `turns`: off when turns is not installed, since Claude limits and the warn-at mark need
+  it; else the events usage registers with turns.
 
 ## From Python
 
@@ -260,6 +286,7 @@ for row in report.rows:
 report.unpriced_models, report.total["unknown_rows"]
 
 ctx = api.context(session_id)                  # api.context(sid, agent_id="a...")
+state = api.mark(session_id)                   # MarkState: purposes, tokens, agents
 ctx.tokens, ctx.window, ctx.percent, ctx.text()
 point = api.restart_point()                    # rows per model and population, marks
 api.threshold("claude-opus-5-5", "1.5x", "main").tokens   # None when unavailable

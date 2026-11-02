@@ -18,9 +18,13 @@ at what usage's answers rest on:
 * `restart_point`: `warn` naming each model and population the index saw in the last 30
   days that the restart-point measure has no row for (so it has no warn-at mark), when
   the measure is older than 14 days, or when its file cannot be read.
-* `turns`: `off` when turns is not installed, saying what needs it.
+* `marks`: deletes the warn-at mark's fired-mark files older than `marks.max_age_days`
+  and the worker ceiling's agent markers older than `ceiling.max_age_days`, and says how
+  many it deleted and kept; `warn` when one could not be deleted.
+* `turns`: `off` when turns is not installed, saying what needs it; else `ok`, naming
+  the events usage registers with turns and what each is for.
 
-Every check only reads: the index is opened as it is, and no pass runs.
+Every other check only reads: the index is opened as it is, and no pass runs.
 """
 
 from __future__ import annotations
@@ -70,6 +74,7 @@ def rows(*, now: float | None = None,
         yield restart_point_row(found, now=when, env=env)
     finally:
         found.close()
+    yield marks_row(now=when, env=env)
     yield turns_row()
 
 
@@ -384,17 +389,58 @@ def _named(pairs: list[tuple[str, str]]) -> str:
     return shown + (f" and {more} more" if more > 0 else "")
 
 
+# --- marks ------------------------------------------------------------------------------
+
+def marks_row(*, now: float, env: Mapping[str, str] | None = None) -> Row:
+    """Sweep the fired-mark files and the ceiling's markers past their ages, and count."""
+    from . import marks
+    from .settings import current
+
+    try:
+        settings = current(env)
+        marks_days = float(settings["marks.max_age_days"])
+        ceiling_days = float(settings["ceiling.max_age_days"])
+    except ConfigError as exc:
+        return Row(MODULE, "marks", "warn", f"usage's config cannot be read, so nothing "
+                   f"was swept: {exc}", _CONFIG)
+    swept = marks.sweep(now=now, marks_days=marks_days, ceiling_days=ceiling_days, env=env)
+    detail = (f"{_n(swept.kept, 'session')} with fired marks kept; deleted "
+              f"{_n(swept.marks, 'fired-mark file')} older than {_days(int(marks_days))} "
+              f"and the ceiling markers of {_n(swept.ceiling, 'agent')} older than "
+              f"{_days(int(ceiling_days))}")
+    if swept.problems:
+        shown = "; ".join(swept.problems[:REASONS_SHOWN])
+        return Row(MODULE, "marks", "warn", f"{detail}; could not delete: {shown}")
+    return Row(MODULE, "marks", "ok", detail)
+
+
 # --- turns ------------------------------------------------------------------------------
 
+#: What each event usage registers with turns is for.
+TURNS_EVENTS = {
+    "after-tool": "the warn-at mark, with its floor",
+    "gone": "forgetting a session's fired marks",
+    "usage": "Claude limits",
+    "codex_limits": "Codex limits from the app-server",
+}
+
+
 def turns_row() -> Row:
-    """`off` when turns is not installed."""
+    """`off` when turns is not installed; else `ok`, naming what usage registers."""
     import moxi.modules
 
     if not moxi.modules.available("turns"):
         return Row(MODULE, "turns", "off",
                    "turns is not installed: Claude limits, the warn-at mark and the worker "
                    "ceiling need turns")
-    return Row(MODULE, "turns", "ok", "turns is installed")
+    from .listeners import LISTENERS
+
+    said = []
+    for row in LISTENERS:
+        for event in row[0]:
+            said.append(f"{event} ({TURNS_EVENTS.get(event, row[1])})")
+    return Row(MODULE, "turns", "ok", "turns is installed; usage registers "
+               + ", ".join(said))
 
 
 # --- text -------------------------------------------------------------------------------
