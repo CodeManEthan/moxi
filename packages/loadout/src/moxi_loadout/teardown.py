@@ -185,7 +185,7 @@ def _unreadable(run) -> list[str]:
                        "in it")
         else:
             out.append(f"{_label(r)}: {a.reason}; the file's shape is not what loadout "
-                       "expects, so put the key it names back to that shape, or "
+                       "expects, so give it back the shape loadout wrote, or "
                        "moxi uninstall loadout --skip-teardown leaves loadout's entries "
                        "in it")
     return list(dict.fromkeys(out))
